@@ -25,6 +25,7 @@ from core.persistence.models import (
     AuditEvent,
     Conversation,
     Message,
+    Node,
     TaskEmbedding,
     TokenUsageDaily,
     User,
@@ -634,6 +635,51 @@ def add_app_version(
             },
         )
         s.execute(stmt)
+
+
+# ─── Nodos del cluster ─────────────────────────────────────────────────────
+
+def _node_to_dict(n: Node, mask_token: bool = True) -> dict[str, Any]:
+    return {
+        "id": n.id,
+        "name": n.name,
+        "agent_url": n.agent_url,
+        "token": (n.token[:6] + "..." if n.token else None) if mask_token else n.token,
+        "enabled": bool(n.enabled),
+        "created_at": n.created_at,
+    }
+
+
+def list_nodes(enabled_only: bool = False, mask_token: bool = True) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = select(Node).order_by(Node.id)
+        if enabled_only:
+            stmt = stmt.where(Node.enabled == 1)
+        return [_node_to_dict(n, mask_token) for n in s.scalars(stmt).all()]
+
+
+def upsert_node(node_id: str, name: str, agent_url: str, token: str, enabled: bool = True) -> dict[str, Any]:
+    with get_session() as s:
+        node = s.get(Node, node_id)
+        if node:
+            node.name = name
+            node.agent_url = agent_url
+            node.token = token
+            node.enabled = 1 if enabled else 0
+        else:
+            node = Node(
+                id=node_id, name=name, agent_url=agent_url,
+                token=token, enabled=1 if enabled else 0, created_at=now_iso(),
+            )
+            s.add(node)
+        s.flush()
+        return _node_to_dict(node, mask_token=False)
+
+
+def delete_node(node_id: str) -> bool:
+    with get_session() as s:
+        result = s.execute(delete(Node).where(Node.id == node_id))
+        return result.rowcount > 0
 
 
 # ─── Métricas diarias ──────────────────────────────────────────────────────

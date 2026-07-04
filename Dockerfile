@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY core/ core/
 COPY BD/ BD/
-COPY alembic.ini nodes.json ./
+COPY alembic.ini ./
 COPY apps/cli/client_cli.py apps/cli/client_cli.py
 COPY --from=web-build /build/dist apps/web/dist
 

@@ -1,8 +1,0 @@
-[
-  {
-    "id": "node-local",
-    "name": "Local Node (Windows)",
-    "agent_url": "http://127.0.0.1:8765",
-    "ollama_url": "http://127.0.0.1:11434"
-  }
-]

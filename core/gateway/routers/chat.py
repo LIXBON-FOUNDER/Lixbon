@@ -1,16 +1,19 @@
 """
 chat.py — Endpoints de chat y completions (compatibles con OpenAI API).
 Cubre: /v1/models, /v1/chat/completions, /v1/completions, /api/chat, /api/delegate
+
+F2: TODA la inferencia se enruta por el orquestador (ollama_target), que elige
+el mejor nodo GPU y cae al Ollama local del gateway solo si no hay nodos.
+El streaming persiste el mensaje del asistente y los tokens al terminar.
 """
 from __future__ import annotations
-import json
 import logging
 import time
 import uuid
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -18,6 +21,7 @@ from core.gateway import deps
 from core.config import OLLAMA_BASE_URL
 from core.persistence.queries import ensure_conversation, find_similar_tasks, save_message, save_task_embedding
 from core.delegation.embeddings import classify_request, get_embedding, pick_classifier_model, route_request
+from core.inference.ollama import chat as ollama_chat, stream_chat_openai
 from core.security.auth import api_key_required, cookie_auth_required, validate_model_access
 from core.gateway.utils import fetch_models
 
@@ -62,63 +66,42 @@ class DelegateRequest(BaseModel):
     conversation_id: str | None = None
 
 
-# ── Helpers internos de Ollama ─────────────────────────────────────────────
+# ── Helper: chat no-streaming con fallback local ───────────────────────────
 
-async def _ollama_chat(model: str, messages: list[dict]) -> dict[str, Any]:
-    url = f"{OLLAMA_BASE_URL}/api/chat"
-    payload = {"model": model, "messages": messages, "stream": False}
+async def _routed_chat(model: str, messages: list[dict]) -> tuple[dict[str, Any], str]:
+    """
+    Ejecuta un chat por el mejor nodo; si el nodo falla, fallback al Ollama local.
+    Retorna (respuesta_ollama, origen).
+    """
+    base, headers, origen = deps.orquestador.ollama_target(model)
     try:
-        client = deps.http_client_chat or httpx.AsyncClient(timeout=120.0)
-        resp = await client.post(url, json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        resp = await ollama_chat(base, model, messages, headers=headers, client=deps.http_client_chat)
+        return resp, origen
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=502, detail=f"Error de Ollama: {exc.response.text}") from exc
+        if origen == "local":
+            raise HTTPException(status_code=502, detail=f"Error de Ollama: {exc.response.text}") from exc
+        logger.warning(f"[chat] Nodo '{origen}' respondió error ({exc}); fallback local")
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo conectar con Ollama: {exc}") from exc
+        if origen == "local":
+            raise HTTPException(status_code=502, detail=f"No se pudo conectar con Ollama: {exc}") from exc
+        logger.warning(f"[chat] Nodo '{origen}' inaccesible ({exc}); fallback local")
+
+    try:
+        resp = await ollama_chat(OLLAMA_BASE_URL, model, messages, client=deps.http_client_chat)
+        return resp, "local-fallback"
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Sin nodos disponibles y sin Ollama local: {exc}") from exc
 
 
-async def _ollama_chat_stream(model: str, messages: list[dict]):
-    """Generador SSE para streaming de respuestas de Ollama."""
-    url = f"{OLLAMA_BASE_URL}/api/chat"
-    payload = {"model": model, "messages": messages, "stream": True}
-    chat_id = f"chatcmpl-{uuid.uuid4()}"
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
-        async with client.stream("POST", url, json=payload) as response:
-            response.raise_for_status()
-            last_keepalive = time.time()
-
-            async for chunk in response.aiter_lines():
-                now = time.time()
-                # Keep-alive cada 5s para evitar timeouts de proxies (Cloudflare)
-                if now - last_keepalive >= 5:
-                    yield ": keep-alive\n\n"
-                    last_keepalive = now
-                if not chunk:
-                    continue
-                try:
-                    data = json.loads(chunk)
-                    content = data.get("message", {}).get("content", "")
-                    done = data.get("done", False)
-                    openai_chunk = {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": content} if not done else {},
-                                "finish_reason": "stop" if done else None,
-                            }
-                        ],
-                    }
-                    last_keepalive = time.time()
-                    yield f"data: {json.dumps(openai_chunk)}\n\n"
-                except Exception:
-                    pass
-        yield "data: [DONE]\n\n"
+def _persist_assistant(conv_id: str, model: str, text: str,
+                       prompt_tokens: int, completion_tokens: int, latency_ms: int) -> None:
+    save_message(
+        conv_id, "assistant", text,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        latency_ms=latency_ms,
+    )
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -133,28 +116,24 @@ async def api_chat(
     payload: UIChatRequest,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
-    """Chat desde el dashboard web (sin Bearer token)."""
+    """Chat desde el dashboard web. Enrutado por el orquestador (F2)."""
     conv_id = payload.conversation_id or str(uuid.uuid4())
     ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard")
     save_message(conv_id, "user", payload.message, model=payload.model)
 
     started_at = time.perf_counter()
-    ollama_resp = await _ollama_chat(payload.model, [{"role": "user", "content": payload.message}])
+    ollama_resp, origen = await _routed_chat(payload.model, [{"role": "user", "content": payload.message}])
     latency_ms = int((time.perf_counter() - started_at) * 1000)
 
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    save_message(
-        conv_id, "assistant", assistant_text,
-        model=payload.model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        latency_ms=latency_ms,
-    )
+    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens, latency_ms)
+
     return {
         "conversation_id": conv_id,
         "model": payload.model,
+        "node": origen,
         "message": assistant_text,
         "usage": {
             "prompt_tokens": prompt_tokens,
@@ -170,7 +149,7 @@ async def chat_completions(
     payload: ChatCompletionRequest,
     user_data: dict[str, Any] = Depends(api_key_required),
 ):
-    """Endpoint compatible con OpenAI — chat con modelos Ollama."""
+    """Endpoint compatible con OpenAI — chat con modelos del cluster."""
     validate_model_access(user_data, payload.model)
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
@@ -179,55 +158,52 @@ async def chat_completions(
     if payload.messages and payload.messages[-1].role == "user":
         save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
 
-    nodo = deps.orquestador.best_node_for_model(payload.model)
+    messages = [m.model_dump() for m in payload.messages]
+    base, headers, origen = deps.orquestador.ollama_target(payload.model)
     started_at = time.perf_counter()
-    logger.info(f"[chat] model='{payload.model}' stream={payload.stream} node={nodo.get('id') if nodo else 'local'}")
+    logger.info(f"[chat] model='{payload.model}' stream={payload.stream} target={origen}")
 
     if payload.stream:
-        async def _stream_with_fallback():
+        async def _stream_and_persist():
+            collector: dict[str, Any] = {}
+            streamed_something = False
             try:
-                if nodo:
-                    async for chunk in deps.orquestador.proxy_chat_stream(
-                        nodo["ollama_url"], payload.model,
-                        [m.model_dump() for m in payload.messages],
-                        deps.http_client_chat,
-                    ):
+                try:
+                    async for chunk in stream_chat_openai(base, payload.model, messages,
+                                                          headers=headers, collector=collector):
+                        streamed_something = True
                         yield chunk
-                    return
-            except Exception as exc:
-                logger.warning(f"[stream] Nodo '{nodo.get('id')}' falló ({exc}), usando fallback local")
-            async for chunk in _ollama_chat_stream(payload.model, [m.model_dump() for m in payload.messages]):
-                yield chunk
+                except Exception as exc:
+                    # Fallback local solo si el nodo falló ANTES de emitir contenido
+                    # (reintentar a mitad de stream duplicaría texto en el cliente)
+                    if origen != "local" and not streamed_something:
+                        logger.warning(f"[stream] Nodo '{origen}' falló ({exc}); fallback local")
+                        async for chunk in stream_chat_openai(OLLAMA_BASE_URL, payload.model, messages,
+                                                              collector=collector):
+                            yield chunk
+                    else:
+                        logger.error(f"[stream] Falló el streaming ({exc})")
+                        raise
+            finally:
+                text = collector.get("content", "")
+                if text:
+                    latency_ms = int((time.perf_counter() - started_at) * 1000)
+                    _persist_assistant(
+                        conv_id, payload.model, text,
+                        collector.get("prompt_tokens", 0),
+                        collector.get("completion_tokens", 0),
+                        latency_ms,
+                    )
 
-        return StreamingResponse(_stream_with_fallback(), media_type="text/event-stream")
+        return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
 
     # Modo sin streaming
-    if nodo:
-        try:
-            ollama_resp = await deps.orquestador.proxy_chat(
-                nodo["ollama_url"], payload.model,
-                [m.model_dump() for m in payload.messages],
-                deps.http_client_chat,
-            )
-            origen = nodo["id"]
-        except Exception:
-            ollama_resp = await _ollama_chat(payload.model, [m.model_dump() for m in payload.messages])
-            origen = "local-fallback"
-    else:
-        ollama_resp = await _ollama_chat(payload.model, [m.model_dump() for m in payload.messages])
-        origen = "local"
-
+    ollama_resp, origen = await _routed_chat(payload.model, messages)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    save_message(
-        conv_id, "assistant", assistant_text,
-        model=payload.model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        latency_ms=latency_ms,
-    )
+    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens, latency_ms)
 
     return JSONResponse({
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
@@ -264,35 +240,15 @@ async def completions(
     ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id)
     save_message(conv_id, "user", payload.prompt, model=payload.model)
 
-    nodo = deps.orquestador.best_node()
     started_at = time.perf_counter()
-
-    if nodo:
-        try:
-            ollama_resp = await deps.orquestador.proxy_chat(
-                nodo["ollama_url"], payload.model,
-                [{"role": "user", "content": payload.prompt}],
-                deps.http_client_chat,
-            )
-            origen = nodo["id"]
-        except Exception:
-            ollama_resp = await _ollama_chat(payload.model, [{"role": "user", "content": payload.prompt}])
-            origen = "local-fallback"
-    else:
-        ollama_resp = await _ollama_chat(payload.model, [{"role": "user", "content": payload.prompt}])
-        origen = "local"
-
+    ollama_resp, origen = await _routed_chat(
+        payload.model, [{"role": "user", "content": payload.prompt}]
+    )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    save_message(
-        conv_id, "assistant", assistant_text,
-        model=payload.model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        latency_ms=latency_ms,
-    )
+    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens, latency_ms)
 
     return JSONResponse({
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
@@ -314,22 +270,20 @@ async def completions(
 @router.post("/api/delegate")
 async def delegate_request(
     payload: DelegateRequest,
-    request: Request,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
     """
-    Flujo de delegación inteligente:
-    1. Genera embedding de la solicitud
-    2. Busca tareas similares en historial del usuario
-    3. Clasifica: intent, complexity, domain, riskLevel
-    4. Enruta al modelo más adecuado (determinístico)
-    5. Ejecuta y guarda resultado con embedding
+    Delegación inteligente. Todo el pipeline (embedding, clasificación y ejecución)
+    se enruta por el orquestador hacia el mejor nodo GPU (F2).
     """
     user_id = user_data["id"]
     started_at = time.perf_counter()
 
+    # Destino para las tareas auxiliares (embedding + clasificación): el mejor nodo disponible
+    aux_base, aux_headers, _ = deps.orquestador.ollama_target()
+
     try:
-        embedding = await get_embedding(payload.user_input, OLLAMA_BASE_URL)
+        embedding = await get_embedding(payload.user_input, aux_base, headers=aux_headers)
     except Exception:
         embedding = []
 
@@ -339,9 +293,15 @@ async def delegate_request(
         if not str(m.get("id", "")).startswith("error:")
     ]
     classifier_model = pick_classifier_model(available_models)
-    classification = await classify_request(
-        payload.user_input, similar_tasks, OLLAMA_BASE_URL, classifier_model
-    )
+    try:
+        classification = await classify_request(
+            payload.user_input, similar_tasks, aux_base, classifier_model, headers=aux_headers
+        )
+    except Exception:
+        classification = {
+            "intent": "learn", "complexity": 0.5, "domain": "backend",
+            "riskLevel": "low", "requiresApproval": False,
+        }
     routing = route_request(classification, available_models)
 
     response_text = ""
@@ -355,7 +315,7 @@ async def delegate_request(
             {"role": "user", "content": payload.user_input},
         ]
         try:
-            resp = await _ollama_chat(routing["model"], messages)
+            resp, _ = await _routed_chat(routing["model"], messages)
             response_text = resp.get("message", {}).get("content", "")
             success = True
         except Exception as exc:

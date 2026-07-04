@@ -109,6 +109,18 @@ def validate_model_access(user_data: dict[str, Any], requested_model: str) -> No
         )
 
 
+# ── Dependencia de admin (token compartido hasta que lleguen los roles en F3) ──
+
+def require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
+    """Valida X-Admin-Token contra ADMIN_TOKEN. Sin token configurado ⇒ 503 (deshabilitado)."""
+    import secrets as _secrets
+    from core.config import ADMIN_TOKEN
+    if not ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="Acción administrativa deshabilitada: ADMIN_TOKEN no configurado")
+    if not x_admin_token or not _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Token de administrador inválido")
+
+
 # ── Middleware de headers de seguridad HTTP ────────────────────────────────
 
 SECURITY_HEADERS = {

@@ -35,18 +35,15 @@ y responde ÚNICAMENTE con un JSON válido con este formato exacto (sin texto ad
 
 # ─── Embedding ─────────────────────────────────────────────────────────────
 
-async def get_embedding(text: str, base_url: str, model: str = EMBED_MODEL) -> list[float]:
-    """Llama a POST /api/embed de Ollama y retorna el vector."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{base_url}/api/embed",
-            json={"model": model, "input": text},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # Ollama retorna {"embeddings": [[float, ...]]}
-        embeddings = data.get("embeddings", [])
-        return embeddings[0] if embeddings else []
+async def get_embedding(
+    text: str,
+    base_url: str,
+    model: str = EMBED_MODEL,
+    headers: dict | None = None,
+) -> list[float]:
+    """Genera el embedding vía core.inference (Ollama directo o proxy del nodo)."""
+    from core.inference.ollama import embed
+    return await embed(base_url, text, model, headers=headers)
 
 
 # ─── Clasificación ─────────────────────────────────────────────────────────
@@ -56,8 +53,11 @@ async def classify_request(
     similar_tasks: list[dict],
     base_url: str,
     model: str,
+    headers: dict | None = None,
 ) -> dict[str, Any]:
     """Clasifica la solicitud llamando a un modelo chat de Ollama como clasificador."""
+    from core.inference.ollama import chat as inference_chat
+
     context = ""
     if similar_tasks:
         examples = "\n".join(
@@ -68,20 +68,15 @@ async def classify_request(
 
     prompt = f"Solicitud: {user_input}{context}"
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{base_url}/api/chat",
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _CLASSIFIER_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-            },
-        )
-        resp.raise_for_status()
-        content = resp.json().get("message", {}).get("content", "{}").strip()
+    resp = await inference_chat(
+        base_url, model,
+        [
+            {"role": "system", "content": _CLASSIFIER_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        headers=headers,
+    )
+    content = resp.get("message", {}).get("content", "{}").strip()
 
     # Extraer JSON aunque el modelo lo envuelva en markdown
     if "```" in content:

@@ -2,12 +2,12 @@ import json
 import time
 import shutil
 from pathlib import Path
-import secrets as _secrets
-from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Header, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from packaging.version import InvalidVersion, Version
 from core.persistence import queries as db
-from core.config import ADMIN_TOKEN, APP_VERSION
-from core.security.auth import cookie_auth_required
+from core.config import APP_VERSION
+from core.security.auth import cookie_auth_required, require_admin_token
 
 router = APIRouter()
 
@@ -59,10 +59,12 @@ async def check_update(v: str = Query(..., description="Versión instalada en el
         return {"update_available": False, "latest_version": v}
         
     latest_v = latest_release["version"]
-    
-    # Comparación de versión simple (versión de texto simple)
-    # En producción se recomienda packaging.version, pero aquí hacemos comparación básica
-    update_available = (latest_v != v)
+
+    # Comparación semántica real: solo hay update si la del servidor es MAYOR
+    try:
+        update_available = Version(latest_v) > Version(v)
+    except InvalidVersion:
+        update_available = latest_v != v
     
     return {
         "update_available": update_available,
@@ -118,14 +120,6 @@ async def get_tauri_manifest(channel: str, request: Request):
     }
 
 
-def _require_admin_token(x_admin_token: str | None) -> None:
-    """Valida el header X-Admin-Token contra ADMIN_TOKEN. Si no hay token configurado, el endpoint queda deshabilitado."""
-    if not ADMIN_TOKEN:
-        raise HTTPException(status_code=503, detail="Subida de versiones deshabilitada: ADMIN_TOKEN no configurado")
-    if not x_admin_token or not _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
-        raise HTTPException(status_code=401, detail="Token de administrador inválido")
-
-
 @router.post("/api/versions/upload")
 async def api_upload_version(
     version: str = Form(...),
@@ -134,11 +128,9 @@ async def api_upload_version(
     changelog: str = Form(...),
     checksum_sha256: str = Form(None),
     file: UploadFile = File(...),
-    x_admin_token: str | None = Header(default=None),
+    _: None = Depends(require_admin_token),
 ):
     """Sube un archivo de instalador de la app y registra la version en la base de datos. Solo admin."""
-    _require_admin_token(x_admin_token)
-
     import re as _re
     if not _re.fullmatch(r"[A-Za-z0-9._-]+", version) or channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Versión o canal inválidos")

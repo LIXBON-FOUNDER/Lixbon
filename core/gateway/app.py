@@ -21,7 +21,7 @@ from core.gateway.logging_setup import setup_logging
 from core.config import ALLOWED_ORIGINS, APP_DESCRIPTION, APP_TITLE, APP_VERSION, LOGS_DIR, WEB_DIST_DIR
 from core.persistence.queries import archive_old_inactive_keys, init_db
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, auth, chat, installer, keys, versions, ws_status, monitor
+from core.gateway.routers import admin, auth, chat, installer, keys, nodes_admin, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -82,6 +82,7 @@ app.include_router(installer.router)
 app.include_router(versions.router)
 app.include_router(ws_status.router)
 app.include_router(monitor.router)
+app.include_router(nodes_admin.router)
 app.include_router(admin.router)
 
 

@@ -128,6 +128,20 @@ class AppVersion(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class Node(Base):
+    """PC con GPU registrada en el cluster. Reemplaza al antiguo nodes.json."""
+    __tablename__ = "nodes"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # slug: "gpu-01"
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_url: Mapped[str] = mapped_column(Text, nullable=False)     # https://gpu-01.datacentgbx.online
+    # Token que el gateway envía al node_agent (X-Node-Token). Credencial del gateway,
+    # se guarda en claro porque el gateway necesita enviarla, como cualquier client secret.
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[int] = mapped_column(nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class TokenUsageDaily(Base):
     __tablename__ = "token_usage_daily"
     __table_args__ = (

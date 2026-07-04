@@ -1,84 +1,82 @@
 """
-node_agent.py — Agente de métricas para nodos FOLAX DTC
-=======================================================
-Corre en cada equipo worker. Expone métricas de CPU/RAM/GPU y lista de modelos.
+agent.py — Node Agent de FOLAX (corre en cada PC con GPU).
+Expone métricas y hace de proxy autenticado hacia el Ollama local.
+Ollama NUNCA se expone directo a internet: todo pasa por este agente.
 
-Mejoras v2.0:
-- GET /info     — info estática del nodo (hostname, OS, versiones)
-- GET /metrics  — incluye 'models' para evitar request extra al orquestador
-- Watchdog de Ollama: lo reinicia si detecta que cayó
+Seguridad:
+- Toda ruta (excepto /health) exige el header X-Node-Token == NODE_SHARED_SECRET.
+- Sin NODE_SHARED_SECRET configurado, el agente arranca pero responde 503
+  en las rutas protegidas (evita exponer la GPU por accidente).
 
 Uso:
-  python app/node_agent.py                # Iniciar el agente
-  python app/node_agent.py --install      # Registrar inicio automático en Windows
-  python app/node_agent.py --uninstall    # Eliminar inicio automático
+  python -m core.node_agent.agent               # Iniciar
+  python -m core.node_agent.agent --install     # Autoarranque en Windows (Task Scheduler)
+  python -m core.node_agent.agent --uninstall
 
 Variables de entorno:
-  AGENT_PORT   Puerto HTTP  (default: 8765)
-  OLLAMA_URL   URL de Ollama local (default: http://127.0.0.1:11434)
-  OLLAMA_WATCHDOG  '1' para habilitar watchdog (default: 1)
+  NODE_SHARED_SECRET  Token que debe enviar el gateway (obligatorio en producción)
+  AGENT_PORT          Puerto HTTP (default: 8765)
+  OLLAMA_URL          Ollama local (default: http://127.0.0.1:11434)
+  OLLAMA_WATCHDOG     '1' para reiniciar Ollama si cae (default: 1)
 """
+from __future__ import annotations
 
-import json
 import os
 import platform
+import secrets as _secrets
 import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# ──────────────────────────────────────────────
-# Auto-instalación de psutil si no está presente
-# ──────────────────────────────────────────────
-try:
-    import psutil
-except ImportError:
-    print("[node_agent] psutil no encontrado. Instalando...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "psutil", "--quiet"])
-    import psutil
+import httpx
+import psutil
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 PORT = int(os.getenv("AGENT_PORT", "8765"))
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_WATCHDOG = os.getenv("OLLAMA_WATCHDOG", "1") == "1"
+NODE_SHARED_SECRET = os.getenv("NODE_SHARED_SECRET", "")
 TASK_NAME = "FOLAX_NodeAgent"
-AGENT_VERSION = "2.0.0"
+AGENT_VERSION = "3.0.0"
+
+app = FastAPI(title="FOLAX Node Agent", version=AGENT_VERSION)
 
 
-# ──────────────────────────────────────────────
-# Recolección de métricas
-# ──────────────────────────────────────────────
+# ── Autenticación ──────────────────────────────────────────────────────────
+
+def require_node_token(x_node_token: str | None = Header(default=None)) -> None:
+    if not NODE_SHARED_SECRET:
+        raise HTTPException(status_code=503, detail="Agente sin NODE_SHARED_SECRET configurado")
+    if not x_node_token or not _secrets.compare_digest(x_node_token, NODE_SHARED_SECRET):
+        raise HTTPException(status_code=401, detail="Token de nodo inválido")
+
+
+# ── Métricas ───────────────────────────────────────────────────────────────
 
 def _gpu_metrics() -> dict:
-    """Lee GPU via nvidia-smi. Devuelve valores neutrales si no hay GPU."""
+    """Lee GPU via nvidia-smi. Valores neutrales si no hay GPU."""
     try:
         resultado = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=utilization.gpu,memory.used,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
+            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
         )
         if resultado.returncode != 0:
             raise RuntimeError("nvidia-smi falló")
-
-        linea = resultado.stdout.strip().split("\n")[0]  # Primera GPU
+        linea = resultado.stdout.strip().split("\n")[0]
         partes = [p.strip() for p in linea.split(",")]
         uso_gpu = float(partes[0])
         mem_usada_mb = float(partes[1])
         mem_total_mb = float(partes[2])
         mem_libre_mb = mem_total_mb - mem_usada_mb
-        gpu_libre_pct = (mem_libre_mb / mem_total_mb) * 100.0
-
         return {
             "gpu_available": True,
             "gpu_used_percent": round(uso_gpu, 1),
             "gpu_free_mb": round(mem_libre_mb, 1),
             "gpu_total_mb": round(mem_total_mb, 1),
-            "gpu_free_percent": round(gpu_libre_pct, 1),
+            "gpu_free_percent": round((mem_libre_mb / mem_total_mb) * 100.0, 1),
         }
     except Exception:
         return {
@@ -86,210 +84,179 @@ def _gpu_metrics() -> dict:
             "gpu_used_percent": 0.0,
             "gpu_free_mb": 0.0,
             "gpu_total_mb": 0.0,
-            "gpu_free_percent": 50.0,  # Valor neutral para el scoring
+            "gpu_free_percent": 50.0,
         }
 
 
-def _fetch_ollama_models() -> list[str]:
-    """Obtiene la lista de modelos instalados en Ollama local."""
+def _ollama_models() -> list[str]:
     try:
-        import urllib.request as _url_req
-        with _url_req.urlopen(f"{OLLAMA_URL}/api/tags", timeout=4) as resp:
-            data = json.loads(resp.read().decode())
-        return [m["name"] for m in data.get("models", [])]
+        resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=4.0)
+        resp.raise_for_status()
+        return [m["name"] for m in resp.json().get("models", [])]
     except Exception:
         return []
 
 
-def obtener_metricas() -> dict:
-    """Recopila CPU, RAM, GPU y modelos disponibles del equipo local."""
-    cpu = psutil.cpu_percent(interval=0.5)
+@app.get("/health")
+async def health():
+    """Público: solo confirma que el agente vive (sin datos del sistema)."""
+    return {"status": "ok", "service": "FOLAX Node Agent", "version": AGENT_VERSION}
+
+
+@app.get("/metrics")
+async def metrics(_: None = Depends(require_node_token)):
+    cpu = psutil.cpu_percent(interval=0.3)
     mem = psutil.virtual_memory()
-    ram_libre_gb = round(mem.available / (1024 ** 3), 2)
-    ram_total_gb = round(mem.total / (1024 ** 3), 2)
-
-    gpu = _gpu_metrics()
-
     return {
         "cpu_percent": round(cpu, 1),
         "ram_percent": round(mem.percent, 1),
-        "ram_free_gb": ram_libre_gb,
-        "ram_total_gb": ram_total_gb,
-        "ollama_url": OLLAMA_URL,
+        "ram_free_gb": round(mem.available / (1024 ** 3), 2),
+        "ram_total_gb": round(mem.total / (1024 ** 3), 2),
         "hostname": os.environ.get("COMPUTERNAME", platform.node()),
-        "models": _fetch_ollama_models(),  # Incluido para evitar request extra del orquestador
-        **gpu,
+        "models": _ollama_models(),
+        **_gpu_metrics(),
     }
 
 
-def obtener_info() -> dict:
-    """Devuelve información estática del nodo (no cambia entre polls)."""
+@app.get("/info")
+async def info(_: None = Depends(require_node_token)):
     return {
         "hostname": os.environ.get("COMPUTERNAME", platform.node()),
         "os": f"{platform.system()} {platform.release()}",
         "python_version": platform.python_version(),
         "agent_version": AGENT_VERSION,
-        "ollama_url": OLLAMA_URL,
         "port": PORT,
     }
 
 
-# ──────────────────────────────────────────────
-# Servidor HTTP mínimo (solo stdlib)
-# ──────────────────────────────────────────────
+# ── Proxy autenticado hacia Ollama ─────────────────────────────────────────
+# Allowlist explícita: solo los endpoints que el gateway necesita.
 
-class AgentHandler(BaseHTTPRequestHandler):
-    """Maneja las peticiones HTTP del agente."""
-
-    def log_message(self, format, *args):
-        # Silenciar logs de acceso en consola (opcional)
-        pass
-
-    def do_GET(self):
-        if self.path == "/metrics":
-            try:
-                datos = obtener_metricas()
-                cuerpo = json.dumps(datos, ensure_ascii=False).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(cuerpo)))
-                self.end_headers()
-                self.wfile.write(cuerpo)
-            except Exception as exc:
-                error = json.dumps({"error": str(exc)}).encode("utf-8")
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(error)
-
-        elif self.path == "/info":
-            try:
-                datos = obtener_info()
-                cuerpo = json.dumps(datos, ensure_ascii=False).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(cuerpo)))
-                self.end_headers()
-                self.wfile.write(cuerpo)
-            except Exception as exc:
-                error = json.dumps({"error": str(exc)}).encode("utf-8")
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(error)
-
-        elif self.path == "/health":
-            cuerpo = b'{"status":"ok","service":"FOLAX Node Agent"}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(cuerpo)
-
-        else:
-            self.send_response(404)
-            self.end_headers()
+@app.get("/ollama/api/tags")
+async def proxy_tags(_: None = Depends(require_node_token)):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(f"{OLLAMA_URL}/api/tags")
+        resp.raise_for_status()
+        return resp.json()
 
 
-def iniciar_servidor():
-    """Arranca el servidor HTTP en un hilo separado."""
-    servidor = HTTPServer(("0.0.0.0", PORT), AgentHandler)
-    hilo = threading.Thread(target=servidor.serve_forever, daemon=True)
-    hilo.start()
-    print(f"[FOLAX Agent] Escuchando en http://0.0.0.0:{PORT}/metrics")
-    print(f"[FOLAX Agent] Ollama local:    {OLLAMA_URL}")
-    print(f"[FOLAX Agent] Versión:         {AGENT_VERSION}")
-    return servidor
+@app.post("/ollama/api/embed")
+async def proxy_embed(request: Request, _: None = Depends(require_node_token)):
+    payload = await request.json()
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/embed", json=payload)
+        resp.raise_for_status()
+        return resp.json()
 
 
-def _watchdog_ollama():
-    """
-    Watchdog: verifica cada 30s si Ollama responde.
-    Si detecta que cayó, intenta reiniciarlo con 'ollama serve'.
-    """
-    import urllib.request as _url_req
+@app.post("/ollama/api/chat")
+async def proxy_chat(request: Request, _: None = Depends(require_node_token)):
+    payload = await request.json()
+    timeout = httpx.Timeout(300.0, connect=10.0)
+
+    if payload.get("stream", False):
+        async def _relay():
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as resp:
+                    resp.raise_for_status()
+                    async for chunk in resp.aiter_raw():
+                        yield chunk
+        return StreamingResponse(_relay(), media_type="application/x-ndjson")
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+
+# ── Watchdog de Ollama (sin procesos duplicados) ───────────────────────────
+
+_ollama_proc: subprocess.Popen | None = None
+
+
+def _watchdog_ollama() -> None:
+    """Cada 30s verifica Ollama; si cayó lo relanza — solo si no hay uno ya lanzado por nosotros vivo."""
+    global _ollama_proc
     while True:
         time.sleep(30)
         try:
-            with _url_req.urlopen(f"{OLLAMA_URL}/api/tags", timeout=4):
-                pass  # Ollama OK
+            httpx.get(f"{OLLAMA_URL}/api/tags", timeout=4.0).raise_for_status()
+            continue  # Ollama OK
         except Exception:
-            print("[FOLAX Watchdog] Ollama no responde. Intentando reiniciar...")
-            try:
-                subprocess.Popen(
-                    ["ollama", "serve"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                time.sleep(5)
-                print("[FOLAX Watchdog] Ollama reiniciado.")
-            except Exception as exc:
-                print(f"[FOLAX Watchdog] No se pudo reiniciar Ollama: {exc}")
+            pass
+
+        if _ollama_proc is not None and _ollama_proc.poll() is None:
+            # Ya lanzamos uno y sigue vivo (posiblemente cargando); no duplicar
+            continue
+
+        print("[FOLAX Watchdog] Ollama no responde. Intentando reiniciar...")
+        try:
+            _ollama_proc = subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            time.sleep(5)
+            print("[FOLAX Watchdog] Ollama relanzado.")
+        except Exception as exc:
+            print(f"[FOLAX Watchdog] No se pudo reiniciar Ollama: {exc}")
 
 
-# ──────────────────────────────────────────────
-# Registro en Task Scheduler de Windows
-# ──────────────────────────────────────────────
+# ── Registro en Task Scheduler de Windows ──────────────────────────────────
 
-def _ruta_python() -> str:
-    return sys.executable
-
-
-def _ruta_script() -> str:
-    return os.path.abspath(__file__)
-
-
-def instalar_tarea():
-    """Registra el agente como tarea de inicio en Windows Task Scheduler."""
-    python = _ruta_python()
-    script = _ruta_script()
+def instalar_tarea() -> bool:
+    python = sys.executable
     cmd = (
         f'schtasks /Create /F /SC ONSTART /DELAY 0000:30 '
         f'/TN "{TASK_NAME}" '
-        f'/TR "\\"{python}\\" \\"{script}\\"" '
+        f'/TR "\\"{python}\\" -m core.node_agent.agent" '
         f'/RU SYSTEM /RL HIGHEST'
     )
     resultado = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if resultado.returncode == 0:
-        print(f"[node_agent] Tarea '{TASK_NAME}' registrada. Se iniciará automáticamente con Windows.")
+        print(f"[node_agent] Tarea '{TASK_NAME}' registrada.")
     else:
         print(f"[node_agent] Error al registrar tarea:\n{resultado.stderr}")
-        print("[node_agent] Intenta ejecutar este script como Administrador.")
+        print("[node_agent] Ejecuta como Administrador.")
     return resultado.returncode == 0
 
 
-def desinstalar_tarea():
-    """Elimina la tarea del Task Scheduler."""
-    cmd = f'schtasks /Delete /F /TN "{TASK_NAME}"'
-    resultado = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+def desinstalar_tarea() -> None:
+    resultado = subprocess.run(
+        f'schtasks /Delete /F /TN "{TASK_NAME}"',
+        shell=True, capture_output=True, text=True,
+    )
     if resultado.returncode == 0:
         print(f"[node_agent] Tarea '{TASK_NAME}' eliminada.")
     else:
-        print(f"[node_agent] No se encontró la tarea o error al eliminarla:\n{resultado.stderr}")
+        print(f"[node_agent] No se encontró la tarea:\n{resultado.stderr}")
 
 
-# ──────────────────────────────────────────────
-# Punto de entrada
-# ──────────────────────────────────────────────
+# ── Punto de entrada ───────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main() -> None:
     if "--install" in sys.argv:
         instalar_tarea()
         sys.exit(0)
-
     if "--uninstall" in sys.argv:
         desinstalar_tarea()
         sys.exit(0)
 
-    servidor = iniciar_servidor()
+    if not NODE_SHARED_SECRET:
+        print("=" * 60)
+        print("ADVERTENCIA: NODE_SHARED_SECRET no está configurado.")
+        print("Las rutas protegidas responderán 503 hasta definirlo.")
+        print('Genera uno: python -c "import secrets; print(secrets.token_urlsafe(32))"')
+        print("=" * 60)
 
-    # Iniciar watchdog de Ollama si está habilitado
     if OLLAMA_WATCHDOG:
         threading.Thread(target=_watchdog_ollama, daemon=True, name="ollama-watchdog").start()
         print("[FOLAX Watchdog] Monitoreando Ollama cada 30s.")
 
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[FOLAX Agent] Deteniendo agente...")
-        servidor.shutdown()
+    import uvicorn
+    print(f"[FOLAX Agent v{AGENT_VERSION}] Escuchando en http://0.0.0.0:{PORT}")
+    print(f"[FOLAX Agent] Ollama local: {OLLAMA_URL}")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()

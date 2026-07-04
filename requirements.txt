@@ -7,3 +7,4 @@ psycopg[binary]
 redis
 python-multipart
 psutil
+packaging

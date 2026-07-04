@@ -88,7 +88,7 @@ async def api_mejor_nodo(user_data: dict[str, Any] = Depends(cookie_auth_require
 
 @router.post("/api/nodes/reload")
 async def api_reload_nodes(user_data: dict[str, Any] = Depends(cookie_auth_required)):
-    """Recarga nodes.json en caliente sin reiniciar el servidor."""
+    """Recarga los nodos desde la BD en caliente, sin reiniciar el servidor."""
     deps.orquestador.cargar_nodos()
     return {"reloaded": True, "nodos": len(deps.orquestador._nodos)}
 
