@@ -126,7 +126,7 @@ export function Sidebar() {
           color: var(--text-primary);
         }
         .brand-sub {
-          font-size: 0.7rem;
+          font-size: 3.25rem;
           color: var(--text-secondary);
           font-family: var(--font-mono);
           margin-top: 4px;
