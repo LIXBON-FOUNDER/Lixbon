@@ -2,10 +2,11 @@ import json
 import time
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Request
+import secrets as _secrets
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from app import db
-from app.config import APP_VERSION
+from app.config import ADMIN_TOKEN, APP_VERSION
 from app.security import cookie_auth_required
 
 router = APIRouter()
@@ -117,6 +118,14 @@ async def get_tauri_manifest(channel: str, request: Request):
     }
 
 
+def _require_admin_token(x_admin_token: str | None) -> None:
+    """Valida el header X-Admin-Token contra ADMIN_TOKEN. Si no hay token configurado, el endpoint queda deshabilitado."""
+    if not ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="Subida de versiones deshabilitada: ADMIN_TOKEN no configurado")
+    if not x_admin_token or not _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Token de administrador inválido")
+
+
 @router.post("/api/versions/upload")
 async def api_upload_version(
     version: str = Form(...),
@@ -125,8 +134,15 @@ async def api_upload_version(
     changelog: str = Form(...),
     checksum_sha256: str = Form(None),
     file: UploadFile = File(...),
+    x_admin_token: str | None = Header(default=None),
 ):
-    """Sube un archivo de instalador de la app y registra la version en la base de datos."""
+    """Sube un archivo de instalador de la app y registra la version en la base de datos. Solo admin."""
+    _require_admin_token(x_admin_token)
+
+    import re as _re
+    if not _re.fullmatch(r"[A-Za-z0-9._-]+", version) or channel not in ("stable", "beta"):
+        raise HTTPException(status_code=400, detail="Versión o canal inválidos")
+
     try:
         changelog_list = json.loads(changelog)
     except Exception:

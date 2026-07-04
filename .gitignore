@@ -1,0 +1,37 @@
+# ── Secretos y configuración local ─────────────────────────────
+.env
+*.env.local
+*.key
+*.pem
+
+# ── Python ──────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Bases de datos locales ──────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node / frontend ─────────────────────────────────────────────
+node_modules/
+dist/
+*.local
+
+# ── Rust / Tauri ────────────────────────────────────────────────
+target/
+
+# ── Binarios y artefactos que no van en git ─────────────────────
+cloudflared.exe
+*.msi
+*.msi.sig
+app/static/releases/
+
+# ── Logs y temporales ───────────────────────────────────────────
+logs/
+*.log
+.DS_Store
+Thumbs.db

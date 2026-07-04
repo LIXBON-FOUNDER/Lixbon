@@ -46,7 +46,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: "***REMOVED-OLD-TAURI-KEY***"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: app-folax-v__VERSION__
           releaseName: 'App Folax v__VERSION__'
@@ -88,6 +89,7 @@ jobs:
             
             # Petición multipart form para subir el instalador a la API del servidor
             curl.exe -X POST `
+              -H "X-Admin-Token: ${{ secrets.FOLAX_ADMIN_TOKEN }}" `
               -F "version=$Version" `
               -F "channel=stable" `
               -F "title=App Folax v$Version" `

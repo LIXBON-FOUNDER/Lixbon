@@ -34,7 +34,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM4RjMxQTQ5NDU0QzgxQzYKUldUR2dVeEZTUnJ6T0JiMzBaelFmbHJoL0hrSkgzaWRUWTdoaWhjODhZMU1LaFhEeGVOMEZpQTQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQTAzQjU0RjM1NkUxMTYKUldRVzRWYnpWRHVna3FzZHVxR1gzck5KeGRLTThPSjdvN21wS1pQZTVVNktaZGU2aVhncmkzZTcK",
       "endpoints": [
         "https://remote.datacentgbx.online/api/updates/manifest/stable"
       ]
