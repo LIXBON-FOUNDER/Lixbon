@@ -122,7 +122,13 @@
 
 **E2E verificado**: user normal recibe 403 en todo `/api/admin` y la SPA lo expulsa de `/admin`; admin ve dashboard, bloquea (login del bloqueado → 401) y desbloquea, cambia plan, edita `allowed_models` (se refleja en `/api/plans` público y se revierte), gestiona nodos, ve modelos y filtra auditoría. Usuarios de prueba en staging: `f6admin_*`, `f6user_*`, `f6uiadmin_*`, `f6uiuser_*@test.local`.
 
-**Pendiente F6.5 (releases privado)** 🔴 requiere que el usuario cree el bucket: subir instaladores Desktop/CLI a **Cloudflare R2** (disco de Railway efímero), canales stable/beta, quitar la página pública de releases, endpoints de update de solo lectura `/api/updates/desktop/{channel}` y `/api/updates/cli/{channel}`. Necesita bucket R2 + access keys.
+**F6.5 — Releases privado en R2 (implementado 2026-07-04, verificado en modo LOCAL 12/12; falta verificación contra R2 real)**:
+- `core/storage/r2.py` (NUEVO): cliente boto3 S3 apuntando a R2 (endpoint `https://<account>.r2.cloudflarestorage.com`, firma v4), perezoso y thread-safe. `upload_release()`, `presigned_get_url()` (URLs de descarga temporales), `object_exists`, `delete_object`. `boto3` añadido a `requirements.txt`.
+- Config (`core/config.py`): `R2_ACCOUNT_ID/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_PRESIGN_TTL_MIN`, helpers `r2_configured()`/`r2_endpoint()`. **Las credenciales viven solo en `.env` local (gitignored) y deben definirse en Railway.**
+- `versions.py` reescrito: la subida (`POST /api/versions/upload`, sigue con `X-Admin-Token`) sube a R2 con key `releases/<archivo>` y guarda en la BD `download_url = "r2:<key>"` (sin cambiar el esquema). **Si R2 no está configurado, cae al disco local** (efímero, solo dev). Toda descarga pasa por `GET /api/updates/download/{version}/{channel}`, que genera una URL prefirmada al vuelo y redirige (302) — el binario nunca se expone y la URL pública es estable. Los manifests (`/api/updates/manifest/{channel}` Tauri, `/api/updates/cli/{channel}` nuevo, `/api/updates/check`) devuelven esa URL del gateway, nunca la key ni el binario. Audit log `release_uploaded`.
+- **Eliminada la página pública `/releases-info`** (era dark-theme viejo con fuentes de Google externas).
+- Bucket **privado**: R2 nunca queda expuesto; el gateway es el único que firma URLs. El CLI se auto-actualiza descargando su fuente desde `/install/client_cli.py` (mecanismo aparte, sin cambios); el nuevo `/api/updates/cli/{channel}` queda para consultar versión.
+- **PENDIENTE para cerrar F6.5** 🔴: (a) definir en `.env` local y en Railway `R2_ACCOUNT_ID` y `R2_BUCKET` (las access keys ya están en `.env`); (b) verificar E2E contra R2 real con `scratchpad/verify_f65.py` (detecta el modo automáticamente).
 
 ---
 
@@ -143,6 +149,7 @@
 | Cuotas por plan | `core/billing/quota.py` (límites en tabla `plans`; seed en `BD/seeds/plans.sql`) |
 | Panel admin (API) | `core/gateway/routers/admin_panel.py` (`/api/admin/*`, rol) + `nodes_admin.py` |
 | Panel admin (web) | `apps/web/src/pages/AdminPage.jsx` + `styles/admin.css` (ruta `/admin`) |
+| Releases / updates | `core/gateway/routers/versions.py` + `core/storage/r2.py` (R2 privado; descargas prefirmadas) |
 | BD (modelos/queries) | `core/persistence/models.py` · `queries.py` (staging vía `DATABASE_URL` del `.env`) |
 | Inferencia/streaming | `core/inference/ollama.py` (única implementación) |
 | Orquestador | `core/orchestration/orchestrator.py` (`ollama_target()` decide nodo vs local) |

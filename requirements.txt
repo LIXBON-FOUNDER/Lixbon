@@ -8,3 +8,4 @@ redis
 python-multipart
 psutil
 packaging
+boto3
