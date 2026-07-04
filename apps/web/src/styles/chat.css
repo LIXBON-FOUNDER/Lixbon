@@ -13,7 +13,7 @@
   width: var(--sidebar-w);
   flex-shrink: 0;
   overflow: hidden;
-  border-right: 1px solid var(--ink);
+  border-right: 1px solid var(--border-soft);
   background: var(--bg);
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }

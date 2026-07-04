@@ -104,7 +104,7 @@ export function Sidebar({
       {/* Contenido completo */}
       <div className="sidebar__body" aria-hidden={collapsed}>
         <div className="sidebar__header">
-          <Link to="/" className="sidebar__logo"><Logo size={17} /></Link>
+          <Link to="/" className="sidebar__logo"><Logo size={30} /></Link>
           <div className="sidebar__header-actions">
             <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
               {searchOpen ? <IconX /> : <IconSearch />}
