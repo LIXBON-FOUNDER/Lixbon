@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-          cache-dependency-path: './App Folax/package-lock.json'
+          cache-dependency-path: './apps/desktop/package-lock.json'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -35,11 +35,11 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./App Folax/src-tauri -> target"
+          workspaces: "./apps/desktop/src-tauri -> target"
 
       - name: Install dependencies
         run: |
-          cd "App Folax"
+          cd "apps/desktop"
           npm install
 
       - name: Build Tauri App
@@ -55,20 +55,20 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-          projectPath: './App Folax'
+          projectPath: './apps/desktop'
 
       - name: Upload compiled MSI to server
         shell: pwsh
         run: |
-          $MSI_PATH = Get-ChildItem -Path "App Folax/src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          $MSI_PATH = Get-ChildItem -Path "apps/desktop/src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
           if ($MSI_PATH) {
             Write-Host "Uploading $($MSI_PATH.Name) to remote server..."
             # Determinar la versión dinámicamente desde el package.json
-            $PackageJson = Get-Content -Raw -Path "App Folax/package.json" | ConvertFrom-Json
+            $PackageJson = Get-Content -Raw -Path "apps/desktop/package.json" | ConvertFrom-Json
             $Version = $PackageJson.version
             
             # Intentar obtener la firma de Tauri (.msi.sig)
-            $SIG_PATH = Get-ChildItem -Path "App Folax/src-tauri/target/release/bundle/msi/*.msi.sig" | Select-Object -First 1
+            $SIG_PATH = Get-ChildItem -Path "apps/desktop/src-tauri/target/release/bundle/msi/*.msi.sig" | Select-Object -First 1
             $Signature = ""
             if ($SIG_PATH) {
               Write-Host "Found signature file $($SIG_PATH.Name)"
