@@ -28,11 +28,22 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
 import psutil
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
+
+# Cargar .env de la raíz del repo (mismo formato que core/config.py, sin dependencias)
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+if _ENV_FILE.exists():
+    for _line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _key, _, _val = _line.partition("=")
+            if _key.strip():
+                os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
 
 PORT = int(os.getenv("AGENT_PORT", "8765"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
