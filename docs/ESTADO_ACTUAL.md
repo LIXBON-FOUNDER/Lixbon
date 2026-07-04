@@ -51,10 +51,13 @@
 ### Variables de Railway que faltan definir (servicio gateway) 🔴
 | Variable | Valor | Por qué |
 |---|---|---|
-| `ADMIN_EMAILS` | tu email real | Tu cuenta será admin al registrarte |
+| `ADMIN_EMAILS` | `durangogabriel8@gmail.com` | Tu cuenta será admin (necesario para el panel admin F6). El seed te promueve en cada arranque |
 | `COOKIE_SECURE` | `1` | Cookies solo por HTTPS |
 | `PUBLIC_BASE_URL` | `https://llm-datacent-production.up.railway.app` (o el dominio final) | Links de los emails |
 | `RESEND_API_KEY` | (opcional) crear cuenta en resend.com | Sin ella, los emails solo se loguean |
+| `R2_ACCOUNT_ID` | `071d1172730bf91c22924d149b67f95d` | Releases privados (F6.5); sin las 4 vars R2, prod cae al disco efímero |
+| `R2_BUCKET` | `releases-folax` | Bucket de instaladores |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | (están en el `.env` local) | Credenciales R2 |
 
 ### Operativos (tu PC)
 - [x] **node_agent y tunnel al iniciar sesión** (2026-07-04): tareas programadas de usuario "FOLAX Node Agent (usuario)" y "FOLAX Tunnel (usuario)" (ONLOGON, sin límite de tiempo, PowerShell oculto — el alias pythonw de la Store no funciona en Task Scheduler). Arrancan al iniciar sesión de Windows; no requieren admin.
@@ -122,13 +125,14 @@
 
 **E2E verificado**: user normal recibe 403 en todo `/api/admin` y la SPA lo expulsa de `/admin`; admin ve dashboard, bloquea (login del bloqueado → 401) y desbloquea, cambia plan, edita `allowed_models` (se refleja en `/api/plans` público y se revierte), gestiona nodos, ve modelos y filtra auditoría. Usuarios de prueba en staging: `f6admin_*`, `f6user_*`, `f6uiadmin_*`, `f6uiuser_*@test.local`.
 
-**F6.5 — Releases privado en R2 (implementado 2026-07-04, verificado en modo LOCAL 12/12; falta verificación contra R2 real)**:
+**F6.5 — Releases privado en R2 (completada 2026-07-04, verificada E2E contra R2 real 12/12)**:
 - `core/storage/r2.py` (NUEVO): cliente boto3 S3 apuntando a R2 (endpoint `https://<account>.r2.cloudflarestorage.com`, firma v4), perezoso y thread-safe. `upload_release()`, `presigned_get_url()` (URLs de descarga temporales), `object_exists`, `delete_object`. `boto3` añadido a `requirements.txt`.
 - Config (`core/config.py`): `R2_ACCOUNT_ID/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_PRESIGN_TTL_MIN`, helpers `r2_configured()`/`r2_endpoint()`. **Las credenciales viven solo en `.env` local (gitignored) y deben definirse en Railway.**
 - `versions.py` reescrito: la subida (`POST /api/versions/upload`, sigue con `X-Admin-Token`) sube a R2 con key `releases/<archivo>` y guarda en la BD `download_url = "r2:<key>"` (sin cambiar el esquema). **Si R2 no está configurado, cae al disco local** (efímero, solo dev). Toda descarga pasa por `GET /api/updates/download/{version}/{channel}`, que genera una URL prefirmada al vuelo y redirige (302) — el binario nunca se expone y la URL pública es estable. Los manifests (`/api/updates/manifest/{channel}` Tauri, `/api/updates/cli/{channel}` nuevo, `/api/updates/check`) devuelven esa URL del gateway, nunca la key ni el binario. Audit log `release_uploaded`.
 - **Eliminada la página pública `/releases-info`** (era dark-theme viejo con fuentes de Google externas).
 - Bucket **privado**: R2 nunca queda expuesto; el gateway es el único que firma URLs. El CLI se auto-actualiza descargando su fuente desde `/install/client_cli.py` (mecanismo aparte, sin cambios); el nuevo `/api/updates/cli/{channel}` queda para consultar versión.
-- **PENDIENTE para cerrar F6.5** 🔴: (a) definir en `.env` local y en Railway `R2_ACCOUNT_ID` y `R2_BUCKET` (las access keys ya están en `.env`); (b) verificar E2E contra R2 real con `scratchpad/verify_f65.py` (detecta el modo automáticamente).
+- Verificado E2E contra R2 real (bucket `releases-folax`, account `071d1172…`): subida a R2, metadata pública apunta al gateway, descarga redirige a URL prefirmada de `r2.cloudflarestorage.com` que entrega el binario exacto, `/releases-info` eliminada.
+- **PENDIENTE OPERATIVO (Railway)** 🔴: definir en el servicio gateway las 4 vars R2 (`R2_ACCOUNT_ID=071d1172730bf91c22924d149b67f95d`, `R2_BUCKET=releases-folax`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — están en el `.env` local). Sin ellas, prod cae al disco efímero. `boto3` ya está en requirements (Docker lo instala).
 
 ---
 
