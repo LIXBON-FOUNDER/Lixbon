@@ -1,6 +1,8 @@
 // Sidebar.jsx — panel izquierdo del chat (mockup 2.1): logo + buscar + colapsar,
 // navegación, Historial colapsable y footer de perfil con plan.
-import { useState } from 'react';
+// El colapso anima el ancho: el contenido completo vive en __body y el modo
+// colapsado en __rail; ambos se funden con opacidad durante la transición.
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
 import {
@@ -76,119 +78,129 @@ export function Sidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [profileMenu, setProfileMenu] = useState(false);
+  const searchRef = useRef(null);
   const navigate = useNavigate();
 
-  if (collapsed) {
-    return (
-      <div className="sidebar sidebar--collapsed">
-        <button className="icon-btn" onClick={onToggleCollapse} aria-label="Abrir panel">
-          <IconPanel />
-        </button>
-        <button className="icon-btn" onClick={() => navigate('/')} aria-label="Nueva conversación">
-          <IconPlus />
-        </button>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
 
   const visible = query
     ? conversations.filter((c) => (c.title || '').toLowerCase().includes(query.toLowerCase()))
     : conversations;
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar__header">
-        <Link to="/" className="sidebar__logo"><Logo size={16} /></Link>
-        <div className="sidebar__header-actions">
-          <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
-            {searchOpen ? <IconX /> : <IconSearch />}
-          </button>
-          <button className="icon-btn" onClick={onToggleCollapse} aria-label="Colapsar panel">
-            <IconPanel />
-          </button>
-        </div>
+    <aside className={`sidebar ${collapsed ? 'is-collapsed' : ''}`}>
+      {/* Modo colapsado: columna de iconos */}
+      <div className="sidebar__rail" aria-hidden={!collapsed}>
+        <button className="icon-btn" onClick={onToggleCollapse} aria-label="Abrir panel" tabIndex={collapsed ? 0 : -1}>
+          <IconPanel />
+        </button>
+        <button className="icon-btn" onClick={() => navigate('/')} aria-label="Nueva conversación" tabIndex={collapsed ? 0 : -1}>
+          <IconPlus />
+        </button>
       </div>
 
-      {searchOpen && (
-        <input
-          className="sidebar__search"
-          placeholder="Buscar…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoFocus
-        />
-      )}
-
-      <nav className="sidebar__nav">
-        <button className="sb-nav" onClick={() => navigate('/')}>
-          <IconPlus /> <span>Nueva conversación</span>
-        </button>
-        <button className="sb-nav" onClick={() => setHistoryOpen(true)}>
-          <IconChat /> <span>Conversaciones</span>
-        </button>
-        <button className="sb-nav sb-nav--soon" title="Próximamente">
-          <IconGrid /> <span>Aplicaciones</span>
-        </button>
-        <button className="sb-nav sb-nav--soon" title="Próximamente">
-          <IconDots /> <span>Más</span>
-        </button>
-      </nav>
-
-      <div className="sidebar__history">
-        <button className="sidebar__history-head" onClick={() => setHistoryOpen((v) => !v)}>
-          <span>Historial</span>
-          <IconChevron size={14} open={historyOpen} />
-        </button>
-        {historyOpen && (
-          <div className="sidebar__history-list">
-            {visible.map((c) => (
-              <HistoryItem
-                key={c.id}
-                conv={c}
-                active={c.id === activeId}
-                onRename={onRename}
-                onDelete={onDelete}
-              />
-            ))}
-            {visible.length === 0 && (
-              <p className="sidebar__empty">
-                {user ? 'Aún no hay conversaciones' : 'Inicia sesión para guardar tu historial'}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="sidebar__profile">
-        {user ? (
-          <>
-            <span className="sidebar__avatar">
-              {(user.first_name || user.username || '?')[0].toUpperCase()}
-            </span>
-            <div className="sidebar__profile-info">
-              <span className="sidebar__profile-name">
-                {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
-              </span>
-              <span className="sidebar__plan">Plan Gratuito</span>
-            </div>
-            <button className="icon-btn" onClick={() => setProfileMenu((v) => !v)} aria-label="Ajustes">
-              <IconGear />
+      {/* Contenido completo */}
+      <div className="sidebar__body" aria-hidden={collapsed}>
+        <div className="sidebar__header">
+          <Link to="/" className="sidebar__logo"><Logo size={17} /></Link>
+          <div className="sidebar__header-actions">
+            <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
+              {searchOpen ? <IconX /> : <IconSearch />}
             </button>
-            {profileMenu && (
-              <div className="sb-menu sb-menu--profile" onMouseLeave={() => setProfileMenu(false)}>
-                <button onClick={onLogout}><IconLogout size={14} /> Cerrar sesión</button>
+            <button className="icon-btn" onClick={onToggleCollapse} aria-label="Colapsar panel">
+              <IconPanel />
+            </button>
+          </div>
+        </div>
+
+        <div className={`reveal ${searchOpen ? 'is-open' : ''}`}>
+          <div className="reveal__inner">
+            <input
+              ref={searchRef}
+              className="sidebar__search"
+              placeholder="Buscar…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              tabIndex={searchOpen ? 0 : -1}
+            />
+          </div>
+        </div>
+
+        <nav className="sidebar__nav">
+          <button className="sb-nav" onClick={() => navigate('/')}>
+            <IconPlus /> <span>Nueva conversación</span>
+          </button>
+          <button className="sb-nav" onClick={() => setHistoryOpen(true)}>
+            <IconChat /> <span>Conversaciones</span>
+          </button>
+          <button className="sb-nav sb-nav--soon" title="Próximamente">
+            <IconGrid /> <span>Aplicaciones</span>
+          </button>
+          <button className="sb-nav sb-nav--soon" title="Próximamente">
+            <IconDots /> <span>Más</span>
+          </button>
+        </nav>
+
+        <div className="sidebar__history">
+          <button className="sidebar__history-head" onClick={() => setHistoryOpen((v) => !v)}>
+            <span>Historial</span>
+            <IconChevron size={14} open={historyOpen} />
+          </button>
+          <div className={`reveal ${historyOpen ? 'is-open' : ''}`}>
+            <div className="reveal__inner">
+              <div className="sidebar__history-list">
+                {visible.map((c) => (
+                  <HistoryItem
+                    key={c.id}
+                    conv={c}
+                    active={c.id === activeId}
+                    onRename={onRename}
+                    onDelete={onDelete}
+                  />
+                ))}
+                {visible.length === 0 && (
+                  <p className="sidebar__empty">
+                    {user ? 'Aún no hay conversaciones' : 'Inicia sesión para guardar tu historial'}
+                  </p>
+                )}
               </div>
-            )}
-          </>
-        ) : (
-          <>
-            <span className="sidebar__avatar">?</span>
-            <div className="sidebar__profile-info">
-              <Link to="/auth" className="sidebar__profile-name">Iniciar sesion</Link>
-              <span className="sidebar__plan">Plan Gratuito</span>
             </div>
-          </>
-        )}
+          </div>
+        </div>
+
+        <div className="sidebar__profile">
+          {user ? (
+            <>
+              <span className="sidebar__avatar">
+                {(user.first_name || user.username || '?')[0].toUpperCase()}
+              </span>
+              <div className="sidebar__profile-info">
+                <span className="sidebar__profile-name">
+                  {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
+                </span>
+                <span className="sidebar__plan">Plan Gratuito</span>
+              </div>
+              <button className="icon-btn" onClick={() => setProfileMenu((v) => !v)} aria-label="Ajustes">
+                <IconGear />
+              </button>
+              {profileMenu && (
+                <div className="sb-menu sb-menu--profile" onMouseLeave={() => setProfileMenu(false)}>
+                  <button onClick={onLogout}><IconLogout size={14} /> Cerrar sesión</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="sidebar__avatar">?</span>
+              <div className="sidebar__profile-info">
+                <Link to="/auth" className="sidebar__profile-name">Iniciar sesion</Link>
+                <span className="sidebar__plan">Plan Gratuito</span>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </aside>
   );

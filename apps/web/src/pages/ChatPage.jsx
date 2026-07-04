@@ -25,16 +25,21 @@ export default function ChatPage() {
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState(null); // { text, leaving }
   const [showJump, setShowJump] = useState(false);
 
   const scrollRef = useRef(null);
   const loadedConvRef = useRef(null); // conversación ya cargada (evita refetch tras navigate)
   const stickToBottomRef = useRef(true);
+  const toastTimers = useRef([]);
 
   const showToast = (text) => {
-    setToast(text);
-    setTimeout(() => setToast(''), 2500);
+    toastTimers.current.forEach(clearTimeout);
+    setToast({ text, leaving: false });
+    toastTimers.current = [
+      setTimeout(() => setToast((t) => (t ? { ...t, leaving: true } : t)), 2400),
+      setTimeout(() => setToast(null), 2800),
+    ];
   };
 
   // ── Datos iniciales (usuario con sesión) ─────────────────────────────
@@ -199,7 +204,14 @@ export default function ChatPage() {
     navigate('/');
   };
 
-  if (loading) return <div className="chat-loading" />;
+  if (loading) {
+    return (
+      <div className="app-loading">
+        <span className="brand app-loading__logo">FOLAX</span>
+        <span className="app-loading__bar"><span /></span>
+      </div>
+    );
+  }
 
   const empty = messages.length === 0;
 
@@ -271,7 +283,9 @@ export default function ChatPage() {
           </>
         )}
 
-        {toast && <div className="chat-toast">{toast}</div>}
+        {toast && (
+          <div className={`chat-toast ${toast.leaving ? 'is-leaving' : ''}`}>{toast.text}</div>
+        )}
       </main>
     </div>
   );

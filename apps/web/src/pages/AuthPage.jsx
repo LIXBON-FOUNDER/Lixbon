@@ -1,12 +1,31 @@
-// AuthPage.jsx — login/registro con toggle segmentado (mockups 2.3 y 2.4).
+// AuthPage.jsx — login/registro con toggle segmentado animado (mockups 2.3 y 2.4).
 // Incluye el modo "olvidé mi contraseña" (request-password-reset).
-// Botones OAuth Google/Apple: OCULTOS por decisión de producto (post-F4).
+// Botones OAuth Google/Apple: SOLO visuales por ahora (sin funcionalidad).
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
 import { api } from '../lib/api';
+
+function GoogleLogo() {
+  return (
+    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+      <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z" />
+      <path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z" />
+      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z" />
+    </svg>
+  );
+}
+
+function AppleLogo() {
+  return (
+    <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true">
+      <path d="M16.36 12.79c-.03-2.53 2.07-3.74 2.16-3.8-1.18-1.72-3.01-1.96-3.66-1.99-1.56-.16-3.04.92-3.83.92-.79 0-2.01-.9-3.3-.87-1.7.02-3.27.99-4.14 2.5-1.77 3.07-.45 7.61 1.27 10.1.84 1.22 1.84 2.59 3.16 2.54 1.27-.05 1.75-.82 3.28-.82 1.53 0 1.96.82 3.3.79 1.36-.02 2.22-1.24 3.05-2.46.96-1.41 1.36-2.78 1.38-2.85-.03-.01-2.64-1.01-2.67-4.02zM13.84 5.35c.7-.85 1.17-2.03 1.04-3.21-1.01.04-2.23.67-2.95 1.52-.65.75-1.22 1.95-1.06 3.1 1.12.09 2.27-.57 2.97-1.41z" />
+    </svg>
+  );
+}
 
 export default function AuthPage() {
   const [params] = useSearchParams();
@@ -59,12 +78,13 @@ export default function AuthPage() {
   return (
     <div className="auth">
       <Link to="/" className="auth__logo" aria-label="Volver al chat">
-        <Logo size={26} />
+        <Logo size={28} />
       </Link>
 
       <form className="auth__card" onSubmit={handleSubmit}>
         {mode !== 'forgot' && (
-          <div className="auth__toggle" role="tablist">
+          <div className="auth__toggle" role="tablist" data-mode={mode}>
+            <span className="auth__toggle-thumb" aria-hidden="true" />
             <button
               type="button"
               role="tab"
@@ -86,62 +106,80 @@ export default function AuthPage() {
           </div>
         )}
 
-        {mode === 'forgot' && (
-          <h1 className="auth__title">Restablecer contraseña</h1>
-        )}
+        {/* key={mode}: remonta el bloque para animar la entrada al cambiar de modo */}
+        <div className="auth__fields" key={mode}>
+          {mode === 'forgot' && (
+            <h1 className="auth__title">Restablecer contraseña</h1>
+          )}
 
-        {mode === 'register' && (
-          <div className="auth__row">
-            <FloatingField label="Nombre" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
-            <FloatingField label="Apellido" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
-          </div>
-        )}
+          {mode === 'register' && (
+            <div className="auth__row">
+              <FloatingField label="Nombre" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+              <FloatingField label="Apellido" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+            </div>
+          )}
 
-        <FloatingField label="Correo Electronico" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+          <FloatingField label="Correo Electronico" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
 
-        {mode !== 'forgot' && (
-          <FloatingField
-            label="Contraseña"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            minLength={8}
-          />
-        )}
+          {mode !== 'forgot' && (
+            <FloatingField
+              label="Contraseña"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              minLength={8}
+            />
+          )}
 
-        {mode === 'register' && (
-          <FloatingField
-            label="Confirmar Contraseña"
-            type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-          />
-        )}
+          {mode === 'register' && (
+            <FloatingField
+              label="Confirmar Contraseña"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+            />
+          )}
 
-        {error && <p className="auth__error" role="alert">{error}</p>}
-        {notice && <p className="auth__notice">{notice}</p>}
+          {error && <p className="auth__error" role="alert">{error}</p>}
+          {notice && <p className="auth__notice">{notice}</p>}
 
-        <button className="pill-btn pill-btn--primary auth__cta" type="submit" disabled={busy}>
-          {mode === 'login' && (busy ? 'Iniciando…' : 'Iniciar Sesion')}
-          {mode === 'register' && (busy ? 'Creando cuenta…' : 'Crear Cuenta')}
-          {mode === 'forgot' && (busy ? 'Enviando…' : 'Enviar enlace')}
-        </button>
-
-        {mode === 'login' && (
-          <button type="button" className="auth__link" onClick={() => switchMode('forgot')}>
-            ¿Olvidaste tú contraseña?
+          <button className="pill-btn pill-btn--primary auth__cta" type="submit" disabled={busy}>
+            {mode === 'login' && (busy ? 'Iniciando…' : 'Iniciar Sesion')}
+            {mode === 'register' && (busy ? 'Creando cuenta…' : 'Crear Cuenta')}
+            {mode === 'forgot' && (busy ? 'Enviando…' : 'Enviar enlace')}
           </button>
-        )}
-        {mode === 'forgot' && (
-          <button type="button" className="auth__link" onClick={() => switchMode('login')}>
-            Volver a iniciar sesión
-          </button>
-        )}
 
-        {/* OAuth Google/Apple: pendiente de decisión de producto — oculto en v1 */}
+          {mode === 'login' && (
+            <button type="button" className="auth__link" onClick={() => switchMode('forgot')}>
+              ¿Olvidaste tú contraseña?
+            </button>
+          )}
+          {mode === 'forgot' && (
+            <button type="button" className="auth__link" onClick={() => switchMode('login')}>
+              Volver a iniciar sesión
+            </button>
+          )}
+
+          {/* OAuth: solo visual por ahora (sin funcionalidad) */}
+          {mode !== 'forgot' && (
+            <>
+              <div className="auth__divider">
+                <span>{mode === 'login' ? 'O inicia sesion con' : 'O registrate con'}</span>
+              </div>
+              <div className="auth__social">
+                <button type="button" className="auth__social-btn auth__social-btn--google">
+                  <GoogleLogo /> Google
+                </button>
+                <button type="button" className="auth__social-btn auth__social-btn--apple">
+                  <AppleLogo /> Apple
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </form>
     </div>
   );

@@ -6,54 +6,97 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 34px;
+  gap: 36px;
   background: var(--bg-secondary);
   padding: 32px 16px;
 }
 
 .auth__logo {
   text-decoration: none;
+  animation: auth-in 0.4s ease;
 }
 
 .auth__card {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
+  animation: auth-in 0.4s ease 0.06s backwards;
+}
+
+@keyframes auth-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+.auth__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: fields-in 0.28s ease;
+}
+
+@keyframes fields-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 .auth__title {
-  font-size: 21px;
+  font-size: 23px;
   font-weight: 500;
   text-align: center;
 }
 
-/* Toggle segmentado pill */
+/* Toggle segmentado pill con pastilla deslizante */
+
 .auth__toggle {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 4px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+.auth__toggle-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  height: calc(100% - 8px);
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auth__toggle[data-mode='register'] .auth__toggle-thumb {
+  transform: translateX(100%);
 }
 
 .auth__toggle button {
-  padding: 9px 0;
+  position: relative;
+  z-index: 1;
+  padding: 10px 0;
   border-radius: var(--radius-pill);
+  font-size: 15.5px;
   font-weight: 500;
   color: var(--ink);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: color 0.22s ease;
 }
 
 .auth__toggle button.is-active {
-  background: var(--ink);
   color: #fff;
 }
 
 /* Campos outlined con label flotante */
+
 .auth__row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -66,11 +109,12 @@
 
 .ffield__input {
   width: 100%;
-  padding: 14px 18px;
+  padding: 15px 19px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   outline: none;
+  transition: box-shadow 0.15s ease;
 }
 
 .ffield__input:focus {
@@ -84,31 +128,33 @@
   transform: translateY(-50%);
   background: var(--bg);
   padding: 0 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink);
   pointer-events: none;
-  transition: all 0.12s ease;
+  transition: all 0.15s ease;
 }
 
 /* Sin contenido y sin foco: el label cae dentro del campo */
 .ffield__input:placeholder-shown:not(:focus) + .ffield__label {
   top: 50%;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--ink-soft);
   background: transparent;
 }
 
 .auth__cta {
-  margin-top: 4px;
-  padding: 13px 22px;
+  margin-top: 2px;
+  padding: 14px 22px;
+  font-size: 16px;
   text-decoration: none;
 }
 
 .auth__link {
   align-self: center;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-soft);
   text-decoration: underline;
+  transition: color 0.15s ease;
 }
 
 .auth__link:hover {
@@ -117,12 +163,67 @@
 
 .auth__error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
+  animation: fields-in 0.25s ease;
 }
 
 .auth__notice {
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
+  animation: fields-in 0.25s ease;
+}
+
+/* Divisor "O inicia sesion con" */
+
+.auth__divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+}
+
+.auth__divider::before,
+.auth__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-soft);
+}
+
+/* Botones sociales (solo visuales por ahora) */
+
+.auth__social {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.auth__social-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: var(--radius-pill);
+  font-size: 15px;
+  font-weight: 500;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.auth__social-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(23, 23, 23, 0.12);
+}
+
+.auth__social-btn--google {
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.auth__social-btn--apple {
+  background: var(--ink);
+  color: #fff;
 }
