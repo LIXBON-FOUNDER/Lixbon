@@ -57,12 +57,13 @@
 | `RESEND_API_KEY` | (opcional) crear cuenta en resend.com | Sin ella, los emails solo se loguean |
 
 ### Operativos (tu PC)
-- [ ] **Servicio cloudflared sin config**: corre en modo usuario (se cae al reiniciar el PC). Fix en PowerShell admin: `Copy-Item "$env:USERPROFILE\.cloudflared\*" "C:\Windows\System32\config\systemprofile\.cloudflared\" -Force; Restart-Service Cloudflared`
-- [ ] **node_agent como tarea de inicio**: `python -m core.node_agent.agent --install` (como admin).
+- [x] **node_agent y tunnel al iniciar sesión** (2026-07-04): tareas programadas de usuario "FOLAX Node Agent (usuario)" y "FOLAX Tunnel (usuario)" (ONLOGON, sin límite de tiempo, PowerShell oculto — el alias pythonw de la Store no funciona en Task Scheduler). Arrancan al iniciar sesión de Windows; no requieren admin.
+- [ ] (Opcional, más robusto) **Servicio cloudflared sin config**: el servicio Windows corre pero sin config → no conecta (fue la causa del "No hay modelos" del 2026-07-04). Fix en PowerShell **admin** para que el tunnel viva sin sesión iniciada: `Copy-Item "$env:USERPROFILE\.cloudflared\*" "C:\Windows\System32\config\systemprofile\.cloudflared\" -Force; Restart-Service Cloudflared` (luego se puede borrar la tarea de usuario del tunnel).
+- [ ] (Opcional) `python -m core.node_agent.agent --install` como admin (corre como SYSTEM sin sesión) — reemplazaría la tarea de usuario.
 - [ ] Dominio final: apuntar `datacentgbx.online` al gateway de Railway (custom domain en Railway + CNAME en Cloudflare).
 
 ### Datos de prueba a limpiar (cuando exista el panel admin)
-- Prod: usuario `smoke_e2e`. Staging: `smoke_test_f1`, `f3admin@test.local`, usuarios `f4smoke_*`/`f4idor_*`/`f4ui_*`/`f4dbg_*@test.local` (E2E de F4), nodo `gpu-01` apuntando a `http://127.0.0.1:8765` (localhost — coherente para dev).
+- Prod: usuarios `smoke_e2e`, `f4tunnel_*@test.local`. Staging: `smoke_test_f1`, `f3admin@test.local`, usuarios `f4smoke_*`/`f4idor_*`/`f4ui_*`/`f4dbg_*@test.local` (E2E de F4), nodo `gpu-01` apuntando a `http://127.0.0.1:8765` (localhost — coherente para dev).
 
 ---
 
