@@ -1,13 +1,13 @@
 # FOLAX — Estado actual del proyecto
 
-> Actualizado: 2026-07-04 (madrugada). Documento para retomar el trabajo.
+> Actualizado: 2026-07-04 (F4 completada). Documento para retomar el trabajo.
 > Referencias: `docs/PLAN_MAESTRO.md` (plan por fases) · `docs/DISENO_WEB.md` (diseño de la web) · `docs/INFORME_Y_PLAN.md` (diagnóstico original).
 
 ---
 
 ## 1. Resumen en una línea
 
-**Backend completo y en producción (F0–F3 ✅). Falta construir la interfaz nueva (F4) y todo lo de producto: planes, panel admin, pagos (F5–F8).**
+**Backend y web nueva completos (F0–F4 ✅). Falta todo lo de producto: planes, panel admin, pagos (F5–F8).**
 
 ---
 
@@ -62,36 +62,27 @@
 - [ ] Dominio final: apuntar `datacentgbx.online` al gateway de Railway (custom domain en Railway + CNAME en Cloudflare).
 
 ### Datos de prueba a limpiar (cuando exista el panel admin)
-- Prod: usuario `smoke_e2e`. Staging: `smoke_test_f1`, `f3admin@test.local`, nodo `gpu-01` apuntando a `http://127.0.0.1:8765` (localhost — corregir o borrar).
+- Prod: usuario `smoke_e2e`. Staging: `smoke_test_f1`, `f3admin@test.local`, usuarios `f4smoke_*`/`f4idor_*`/`f4ui_*`/`f4dbg_*@test.local` (E2E de F4), nodo `gpu-01` apuntando a `http://127.0.0.1:8765` (localhost — coherente para dev).
 
 ---
 
-## 4. SIGUIENTE: F4 — La web nueva (NO iniciada)
+## 4. ✅ F4 — La web nueva (completada 2026-07-04, verificada E2E con Playwright)
 
-**El frontend actual (`apps/web`) sigue siendo el dashboard oscuro viejo** — el diseño nuevo (docs/DISENO_WEB.md) aún no se construye. Además el login viejo envía `username`; funciona solo por compatibilidad legacy.
+**El dashboard oscuro viejo fue reemplazado** por la web del diseño nuevo (docs/DISENO_WEB.md): chat tipo Claude/GPT con streaming.
 
-Orden de trabajo sugerido para F4:
+**Frontend (`apps/web/src` reescrito)** — estructura `components/ pages/ styles/ lib/ hooks/`:
+- Fuentes self-hosted en `public/fonts/` (Bruno Ace SC + Bricolage Grotesque variable, woff2 latin y latin-ext); tokens CSS en `styles/base.css` (`--bg`, `--bg-secondary #F6F7ED`, `--ink #171717`, `--accent` verde-amarillo, todo pill).
+- Iconos SVG inline de trazo fino en `components/Icons.jsx`.
+- **Auth** (`pages/AuthPage.jsx`): crema, toggle segmentado, labels flotantes outlined, modo "olvidé mi contraseña" + `pages/ResetPasswordPage.jsx` (`/reset-password?token=`). OAuth oculto (decisión).
+- **Chat** (`pages/ChatPage.jsx` + `components/{Sidebar,ChatInput,Markdown}.jsx`): sidebar colapsable con búsqueda (filtro cliente), historial con renombrar/eliminar (updates optimistas — la BD remota es lenta), footer de perfil con inicial + "Plan Gratuito" (real en F5); streaming SSE vía fetch a `/v1/chat/completions` con cookie; memoria = ventana de 20 mensajes enviada por el cliente; markdown con react-markdown (títulos Semibold); botón "más ↓"; selector de modelos (`/v1/models`); auto-título tras el primer intercambio; visitante anónimo ve "¿Qué investigaremos hoy?" y al enviar → `/auth?mode=register`.
+- Rutas: `/` y `/c/:id` (chat), `/auth`, `/reset-password`; `/login`→`/auth` legacy. Dev: proxy Vite `/api` y `/v1` → :8000.
 
-1. **Fundaciones de UI**: fuentes self-hosted (Bruno Ace SC + Bricolage Grotesque), tokens CSS (`#FFFFFF`, `#F6F7ED`, `#171717`, borde 1px, todo pill), iconos (7000 FREE UI ICONS → SVGs en `apps/web/src/assets/icons/`), reset + layout base.
-2. **Auth UI** (pantallas ya diseñadas): página crema con toggle segmentado Iniciar Sesion/Registrarse, labels flotantes, "¿Olvidaste tú contraseña?" (backend listo: `/api/auth/request-password-reset` + `/reset-password?token=`), botones Google/Apple **ocultos** (decisión: OAuth después).
-3. **Layout del chat**: sidebar (logo, buscar, colapsar, Nueva conversación/Conversaciones/Aplicaciones/Más, Historial, footer perfil con inicial + plan), área principal con header (título conversación + botón Compartir).
-4. **Chat funcional**: streaming SSE en la UI (`POST /v1/chat/completions` con `stream:true` — el backend ya persiste), render markdown con títulos Semibold según diseño, botón "más ↓".
-5. **Memoria de conversación**: enviar historial con ventana de contexto (el bug "chat sin memoria" se resuelve aquí, en el cliente, enviando los mensajes previos), y crear endpoint `GET /api/conversations/{id}/messages` para retomar conversaciones (falta en backend).
-6. **Visitante sin sesión**: pantalla "¿Qué investigaremos hoy?" con input visible; al enviar → modal/redirect a registro (decisión tomada).
-7. **Pulido**: títulos autogenerados con modelo pequeño, renombrar/eliminar conversaciones, búsqueda, selector de modelos.
+**Backend añadido en F4**:
+- `core/gateway/routers/conversations.py`: `GET /api/conversations` (paginado + `?q=` búsqueda), `GET /api/conversations/{id}/messages`, `PATCH/DELETE /api/conversations/{id}`, `POST /api/conversations/{id}/generate-title` (modelo pequeño vía orquestador; limpia markdown residual). Todo con check de pertenencia.
+- `web_or_api_key_auth` en `core/security/auth.py`: `/v1/models` y `/v1/chat/completions` aceptan cookie de sesión **o** API key (el rate limit por token se mantiene para keys).
+- Fix IDOR: `ensure_conversation` ahora rechaza escribir en conversaciones de otro usuario (404 en `/api/chat`, `/v1/chat/completions`, `/v1/completions`).
 
-**Decisiones ya tomadas para F4** (no re-preguntar):
-- Chat anónimo: se VE la interfaz, al enviar se pide registro.
-- OAuth Google/Apple: pospuesto, botones ocultos.
-- "Aplicaciones" en sidebar: placeholder.
-- Micrófono del input: ocultar/deshabilitar en v1.
-- "Compartir" conversación: puede quedar para después de F4 si estorba (link público de solo lectura).
-
-**Backend que F4 necesitará crear** (no existe aún):
-- `GET /api/conversations` (listar las del usuario — existe `list_recent_conversations` en queries, falta endpoint dedicado con paginación).
-- `GET /api/conversations/{id}/messages` (cargar historial de una conversación).
-- `PATCH/DELETE /api/conversations/{id}` (renombrar/borrar, con check de pertenencia).
-- Auto-título de conversación (llamada al modelo pequeño tras el primer intercambio).
+**Pendiente que quedó fuera de F4** (decidido): botón "Compartir" visible pero muestra "disponible pronto" (link público = feature posterior); micrófono oculto; adjuntar/web deshabilitados; "Aplicaciones" placeholder.
 
 ---
 

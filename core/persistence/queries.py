@@ -554,11 +554,14 @@ def find_similar_tasks(
 
 def ensure_conversation(
     conversation_id: str, user_id: int, title: str | None, client_id: str | None
-) -> None:
+) -> bool:
+    """Crea (o toca) la conversación. False si existe pero pertenece a OTRO usuario."""
     ts = now_iso()
     with get_session() as s:
         conv = s.get(Conversation, conversation_id)
         if conv:
+            if conv.user_id != user_id:
+                return False
             conv.updated_at = ts
             if title:
                 conv.title = title
@@ -573,6 +576,7 @@ def ensure_conversation(
                 created_at=ts,
                 updated_at=ts,
             ))
+    return True
 
 
 def save_message(
@@ -623,6 +627,89 @@ def save_message(
                 },
             )
             s.execute(stmt)
+
+
+def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
+    return {
+        "id": c.id,
+        "title": c.title,
+        "client_id": c.client_id,
+        "created_at": c.created_at,
+        "updated_at": c.updated_at,
+    }
+
+
+def list_conversations(
+    user_id: int, limit: int = 50, offset: int = 0, q: str | None = None
+) -> list[dict[str, Any]]:
+    """Conversaciones del usuario, más recientes primero. `q` busca en el título."""
+    with get_session() as s:
+        stmt = (
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .order_by(desc(Conversation.updated_at))
+            .limit(limit)
+            .offset(offset)
+        )
+        if q:
+            stmt = stmt.where(Conversation.title.ilike(f"%{q}%"))
+        return [_conversation_to_dict(c) for c in s.scalars(stmt).all()]
+
+
+def get_conversation(conversation_id: str, user_id: int) -> dict[str, Any] | None:
+    """Conversación por id SOLO si pertenece al usuario (evita IDOR)."""
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return None
+        return _conversation_to_dict(conv)
+
+
+def list_messages(conversation_id: str, user_id: int) -> list[dict[str, Any]] | None:
+    """Mensajes de una conversación del usuario (None si no existe o es ajena)."""
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return None
+        stmt = (
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at, Message.id)
+        )
+        return [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "model": m.model,
+                "created_at": m.created_at,
+            }
+            for m in s.scalars(stmt).all()
+        ]
+
+
+def rename_conversation(
+    conversation_id: str, user_id: int, title: str, only_if_untitled: bool = False
+) -> bool:
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        if only_if_untitled and conv.title:
+            return False
+        conv.title = title
+        conv.updated_at = now_iso()
+        return True
+
+
+def delete_conversation(conversation_id: str, user_id: int) -> bool:
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        s.execute(delete(Message).where(Message.conversation_id == conversation_id))
+        s.delete(conv)
+        return True
 
 
 def get_usage_summary(user_id: int | None = None) -> dict[str, int]:

@@ -22,7 +22,12 @@ from core.config import OLLAMA_BASE_URL
 from core.persistence.queries import ensure_conversation, find_similar_tasks, save_message, save_task_embedding
 from core.delegation.embeddings import classify_request, get_embedding, pick_classifier_model, route_request
 from core.inference.ollama import chat as ollama_chat, stream_chat_openai
-from core.security.auth import api_key_required, cookie_auth_required, validate_model_access
+from core.security.auth import (
+    api_key_required,
+    cookie_auth_required,
+    validate_model_access,
+    web_or_api_key_auth,
+)
 from core.gateway.utils import fetch_models
 
 logger = logging.getLogger("folax.chat")
@@ -107,7 +112,7 @@ def _persist_assistant(conv_id: str, model: str, text: str,
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.get("/v1/models")
-async def models(user_data: dict[str, Any] = Depends(api_key_required)):
+async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     return {"object": "list", "data": await fetch_models()}
 
 
@@ -118,7 +123,8 @@ async def api_chat(
 ):
     """Chat desde el dashboard web. Enrutado por el orquestador (F2)."""
     conv_id = payload.conversation_id or str(uuid.uuid4())
-    ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard")
+    if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard"):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
     save_message(conv_id, "user", payload.message, model=payload.model)
 
     started_at = time.perf_counter()
@@ -147,13 +153,14 @@ async def api_chat(
 @router.post("/v1/chat/completions")
 async def chat_completions(
     payload: ChatCompletionRequest,
-    user_data: dict[str, Any] = Depends(api_key_required),
+    user_data: dict[str, Any] = Depends(web_or_api_key_auth),
 ):
     """Endpoint compatible con OpenAI — chat con modelos del cluster."""
     validate_model_access(user_data, payload.model)
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
-    ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id)
+    if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
     if payload.messages and payload.messages[-1].role == "user":
         save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
@@ -237,7 +244,8 @@ async def completions(
     validate_model_access(user_data, payload.model)
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
-    ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id)
+    if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
     save_message(conv_id, "user", payload.prompt, model=payload.model)
 
     started_at = time.perf_counter()

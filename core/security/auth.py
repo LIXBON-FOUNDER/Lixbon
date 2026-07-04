@@ -110,6 +110,35 @@ def cookie_auth_required(
     raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
 
 
+def web_or_api_key_auth(
+    request: Request,
+    folax_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """
+    Dependencia para endpoints de inferencia (/v1/*): acepta la cookie de sesión
+    web (F4: el chat de la web hace streaming directo a /v1/chat/completions)
+    o un Bearer API key. A diferencia de cookie_auth_required, mantiene el
+    rate limit por token cuando la auth viene por API key.
+    """
+    from core.persistence.queries import validate_web_session
+
+    if folax_session:
+        user_data = validate_web_session(folax_session)
+        if user_data:
+            return user_data
+
+    token = get_bearer_token(authorization)
+    if token:
+        ip = request.client.host if request.client else None
+        user_data = validate_api_key(token, ip_address=ip)
+        if user_data:
+            enforce_rate_limit(token)
+            return user_data
+
+    raise HTTPException(status_code=401, detail="Autenticación requerida (sesión o API key)")
+
+
 def admin_required(
     folax_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
