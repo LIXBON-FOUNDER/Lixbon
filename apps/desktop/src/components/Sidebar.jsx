@@ -117,7 +117,7 @@ export function Sidebar() {
           padding-left: 8px;
         }
         .brand-title {
-          font-size: 1.25rem;
+          font-size: 3.25rem;
           font-weight: 800;
           color: #ffffff;
           letter-spacing: 0.05em;
