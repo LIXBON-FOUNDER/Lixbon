@@ -217,12 +217,14 @@ Conectar Railway con tu GPU de forma segura y arreglar la lógica rota detectada
 
 Prerrequisito de suscripciones, panel admin y releases privado.
 
+Decisiones de producto (2026-07-04): visitante sin cuenta VE el chat pero al enviar se le pide registro; OAuth Google/Apple pospuesto (botones ocultos) — email/contraseña primero. El diseño de la web (docs/DISENO_WEB.md) fija: login por email, registro con Nombre+Apellido.
+
 | # | Tarea |
 |---|---|
 | 3.1 | Tabla `sessions` — cookie de sesión separada de API keys, expiración y renovación |
 | 3.2 | API keys: solo hash en BD, prefijo visible (`folax_sk_abc...`), se muestra completa una única vez |
-| 3.3 | Roles `user`/`admin`; dependencia `admin_required`; tu cuenta marcada como admin por seed |
-| 3.4 | Registro con **email** + verificación (necesario para pagos y recuperación) |
+| 3.3 | Roles `user`/`admin`; dependencia `admin_required`; tu cuenta marcada como admin por seed (ADMIN_EMAILS) |
+| 3.4 | **Login por email** + registro con Nombre/Apellido + verificación de email (necesario para pagos y recuperación) |
 | 3.5 | Recuperación de contraseña por email (Resend/SES — proveedor sencillo) |
 | 3.6 | CORS con lista blanca real; cookies `Secure`; rate limits desde Redis |
 | 3.7 | **IDOR fixes**: toda operación sobre keys/conversaciones verifica pertenencia al usuario |

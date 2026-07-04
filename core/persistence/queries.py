@@ -24,8 +24,10 @@ from core.persistence.models import (
     AppVersion,
     AuditEvent,
     Conversation,
+    EmailToken,
     Message,
     Node,
+    Session,
     TaskEmbedding,
     TokenUsageDaily,
     User,
@@ -88,38 +90,166 @@ def cosine_similarity(v1: Any, v2: Any) -> float:
 
 # ─── Usuarios ──────────────────────────────────────────────────────────────
 
-def create_user(username: str, password: str) -> dict[str, Any] | None:
+def _user_to_dict(user: User) -> dict[str, Any]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "role": user.role or "user",
+        "email_verified": bool(user.email_verified),
+    }
+
+
+def create_user(
+    email: str,
+    password: str,
+    first_name: str | None = None,
+    last_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Crea un usuario nuevo (login por email). Retorna None si el email ya existe."""
+    email = email.strip().lower()
+    admin_emails = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
     try:
         with get_session() as s:
             user = User(
-                username=username,
+                username=email,           # legacy: username = email para usuarios nuevos
+                email=email,
+                first_name=(first_name or "").strip() or None,
+                last_name=(last_name or "").strip() or None,
+                role="admin" if email in admin_emails else "user",
+                email_verified=0,
                 password_hash=hash_password(password),
                 created_at=now_iso(),
             )
             s.add(user)
             s.flush()
-            return {"id": user.id, "username": user.username}
+            return _user_to_dict(user)
     except IntegrityError:
         return None
 
 
-def verify_user(username: str, password: str) -> dict[str, Any] | None:
-    """Verifica credenciales. Migra hashes legacy SHA-256 → scrypt al validar."""
+def verify_user(identifier: str, password: str) -> dict[str, Any] | None:
+    """
+    Verifica credenciales por email (o username legacy para cuentas pre-F3).
+    Migra hashes legacy SHA-256 → scrypt al validar.
+    """
+    ident = identifier.strip().lower()
     with get_session() as s:
-        user = s.scalar(select(User).where(User.username == username))
+        user = s.scalar(select(User).where(func.lower(User.email) == ident))
+        if not user:
+            user = s.scalar(select(User).where(User.username == identifier.strip()))
         if not user:
             return None
         if not _verify_password_internal(password, user.password_hash):
             return None
         if not user.password_hash.startswith("scrypt$"):
             user.password_hash = hash_password(password)
-        return {"id": user.id, "username": user.username}
+        return _user_to_dict(user)
 
 
 def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     with get_session() as s:
         user = s.get(User, user_id)
-        return {"id": user.id, "username": user.username} if user else None
+        return _user_to_dict(user) if user else None
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    with get_session() as s:
+        user = s.scalar(select(User).where(func.lower(User.email) == email.strip().lower()))
+        return _user_to_dict(user) if user else None
+
+
+def set_user_password(user_id: int, new_password: str) -> None:
+    with get_session() as s:
+        s.execute(
+            update(User).where(User.id == user_id)
+            .values(password_hash=hash_password(new_password))
+        )
+
+
+def mark_email_verified(user_id: int) -> None:
+    with get_session() as s:
+        s.execute(update(User).where(User.id == user_id).values(email_verified=1))
+
+
+# ─── Sesiones web (cookie) ─────────────────────────────────────────────────
+
+SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "168"))  # 7 días por defecto
+
+
+def create_web_session(user_id: int, ip_address: str | None = None,
+                       user_agent: str | None = None) -> str:
+    """Crea una sesión web y retorna el token en claro (solo se almacena el hash)."""
+    raw_token = f"folax_ses_{secrets.token_urlsafe(32)}"
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=SESSION_EXPIRY_HOURS)).isoformat()
+    with get_session() as s:
+        s.add(Session(
+            user_id=user_id,
+            token_hash=hash_api_key(raw_token),
+            expires_at=expires_at,
+            ip_address=ip_address,
+            user_agent=(user_agent or "")[:300] or None,
+            created_at=now_iso(),
+        ))
+    return raw_token
+
+
+def validate_web_session(raw_token: str) -> dict[str, Any] | None:
+    """Valida el token de sesión y retorna el usuario, o None si no existe/expiró."""
+    if not raw_token:
+        return None
+    with get_session() as s:
+        ses = s.scalar(select(Session).where(Session.token_hash == hash_api_key(raw_token)))
+        if not ses or ses.expires_at < now_iso():
+            return None
+        user = s.get(User, ses.user_id)
+        return _user_to_dict(user) if user else None
+
+
+def delete_web_session(raw_token: str) -> None:
+    with get_session() as s:
+        s.execute(delete(Session).where(Session.token_hash == hash_api_key(raw_token)))
+
+
+def purge_expired_sessions() -> int:
+    with get_session() as s:
+        result = s.execute(delete(Session).where(Session.expires_at < now_iso()))
+        return result.rowcount
+
+
+# ─── Tokens de email (verificación / reset de contraseña) ──────────────────
+
+def create_email_token(user_id: int, purpose: str, hours: int = 24) -> str:
+    """Crea un token de un solo uso. purpose: 'verify_email' | 'reset_password'."""
+    raw = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+    with get_session() as s:
+        s.add(EmailToken(
+            user_id=user_id,
+            token_hash=hash_api_key(raw),
+            purpose=purpose,
+            expires_at=expires_at,
+            created_at=now_iso(),
+        ))
+    return raw
+
+
+def consume_email_token(raw_token: str, purpose: str) -> int | None:
+    """Valida y quema el token. Retorna el user_id o None."""
+    if not raw_token:
+        return None
+    with get_session() as s:
+        tok = s.scalar(select(EmailToken).where(
+            EmailToken.token_hash == hash_api_key(raw_token),
+            EmailToken.purpose == purpose,
+            EmailToken.used == 0,
+        ))
+        if not tok or tok.expires_at < now_iso():
+            return None
+        tok.used = 1
+        return tok.user_id
 
 
 # ─── API Keys ──────────────────────────────────────────────────────────────
@@ -145,7 +275,6 @@ def get_active_key_for_user(user_id: int) -> dict[str, Any] | None:
             return None
         return {
             "id": row.id,
-            "raw_key": row.raw_key,
             "expires_at": row.expires_at,
             "scopes": row.scopes,
             "model": row.model,
@@ -160,7 +289,7 @@ def create_api_key(
     model: str | None = None,
     scopes: str = "read,write",
 ) -> tuple[str, dict[str, Any]]:
-    raw_key = f"lan_{secrets.token_urlsafe(24)}"
+    raw_key = f"folax_sk_{secrets.token_urlsafe(28)}"
     created_at = now_iso()
     expires_at = _key_expires_at()
     with get_session() as s:
@@ -168,8 +297,8 @@ def create_api_key(
             user_id=user_id,
             name=name,
             key_hash=hash_api_key(raw_key),
-            raw_key=raw_key,
-            key_prefix=raw_key[:12],
+            raw_key=None,               # F3: la key en claro nunca se persiste
+            key_prefix=raw_key[:14],
             is_active=1,
             status="active",
             scopes=scopes,
@@ -194,14 +323,19 @@ def create_api_key(
     return raw_key, key_data
 
 
-def deactivate_key(key_id: int) -> bool:
+def deactivate_key(key_id: int, user_id: int | None = None) -> bool:
+    """
+    Soft delete de una key. Con user_id solo desactiva keys de ESE usuario
+    (protección IDOR). Retorna False si no encontró nada.
+    """
+    stmt = update(ApiKey).where(ApiKey.id == key_id)
+    if user_id is not None:
+        stmt = stmt.where(ApiKey.user_id == user_id)
     with get_session() as s:
-        s.execute(
-            update(ApiKey)
-            .where(ApiKey.id == key_id)
-            .values(is_active=0, status="inactive", deactivated_at=now_iso())
+        result = s.execute(
+            stmt.values(is_active=0, status="inactive", deactivated_at=now_iso())
         )
-    return True
+        return result.rowcount > 0
 
 
 def deactivate_all_user_keys(user_id: int) -> None:
@@ -260,8 +394,7 @@ def list_api_keys(user_id: int | None = None) -> list[dict[str, Any]]:
 
         result = []
         for row in rows:
-            raw = row.raw_key or ""
-            prefix = row.key_prefix or (raw[:12] if raw else "lan_")
+            prefix = row.key_prefix or "folax_sk_"
             suffix = row.key_hash[-6:] if row.key_hash else "??????"
             result.append({
                 "id": row.id,
@@ -271,7 +404,6 @@ def list_api_keys(user_id: int | None = None) -> list[dict[str, Any]]:
                 "status": row.status or ("active" if row.is_active else "inactive"),
                 "is_active": bool(row.is_active),
                 "masked_key": f"{prefix}...{suffix}",
-                "raw_key": raw,
                 "expires_at": row.expires_at,
                 "last_accessed": row.last_accessed,
                 "last_used_ip": row.last_used_ip,
@@ -301,7 +433,7 @@ def validate_api_key(raw_key: str, ip_address: str | None = None) -> dict[str, A
         user = s.get(User, row.user_id)
         if not user:
             return None
-        result = {"id": user.id, "username": user.username, "key_model": row.model}
+        result = {**_user_to_dict(user), "key_model": row.model}
         row.last_accessed = now
         row.last_used_ip = ip_address
         return result

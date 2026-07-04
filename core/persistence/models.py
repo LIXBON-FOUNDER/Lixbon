@@ -15,8 +15,45 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # legacy; nuevos usuarios: = email
+    email: Mapped[str | None] = mapped_column(Text, unique=True)              # identificador de login (F3)
+    first_name: Mapped[str | None] = mapped_column(Text)
+    last_name: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="user")   # user | admin
+    email_verified: Mapped[int] = mapped_column(nullable=False, default=0)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Session(Base):
+    """Sesión web (cookie). Separada de las API keys: revocable e independiente."""
+    __tablename__ = "sessions"
+    __table_args__ = (
+        Index("idx_sessions_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class EmailToken(Base):
+    """Tokens de un solo uso para verificación de email y reset de contraseña."""
+    __tablename__ = "email_tokens"
+    __table_args__ = (
+        Index("idx_email_tokens_user", "user_id", "purpose"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)  # verify_email | reset_password
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    used: Mapped[int] = mapped_column(nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 

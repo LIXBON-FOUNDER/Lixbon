@@ -86,16 +86,38 @@ def api_key_required(
 
 
 def cookie_auth_required(
-    session_token: str | None = Cookie(default=None),
+    folax_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Dependencia: valida sesión cookie o Bearer token (dual auth)."""
-    token = session_token or get_bearer_token(authorization)
-    if not token:
-        raise HTTPException(status_code=401, detail="No estás logueado")
-    user_data = validate_api_key(token)
-    if not user_data:
-        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+    """
+    Dependencia: valida la cookie de sesión web (folax_session) o, como
+    alternativa para apps (desktop/CLI), un Bearer API key.
+    F3: la sesión web es un token propio en la tabla sessions — ya no es la API key.
+    """
+    from core.persistence.queries import validate_web_session
+
+    if folax_session:
+        user_data = validate_web_session(folax_session)
+        if user_data:
+            return user_data
+
+    bearer = get_bearer_token(authorization)
+    if bearer:
+        user_data = validate_api_key(bearer)
+        if user_data:
+            return user_data
+
+    raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+
+
+def admin_required(
+    folax_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Dependencia: usuario autenticado con role=admin."""
+    user_data = cookie_auth_required(folax_session, authorization)
+    if user_data.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Requiere rol de administrador")
     return user_data
 
 

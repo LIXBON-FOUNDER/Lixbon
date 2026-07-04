@@ -64,6 +64,38 @@ def get_session() -> Session:
 
 
 def init_db() -> None:
-    """Crea las tablas que falten. Idempotente. Las migraciones de cambios van por Alembic (BD/migrations)."""
+    """
+    Crea las tablas que falten y aplica migraciones de columnas idempotentes.
+    Se ejecuta en cada arranque (también en Railway), por eso todo usa IF NOT EXISTS.
+    """
+    from sqlalchemy import text
+
     from core.persistence import models  # noqa: F401 — registra los modelos en Base.metadata
-    Base.metadata.create_all(get_engine())
+
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+
+    # ── Migraciones de columnas sobre tablas preexistentes (Postgres) ──
+    _column_migrations = [
+        # F3: login por email, nombres, roles y verificación
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email)",
+    ]
+    with engine.begin() as conn:
+        for stmt in _column_migrations:
+            conn.execute(text(stmt))
+
+    # ── Seed: promover admins definidos por entorno ──
+    import os
+    admin_emails = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
+    if admin_emails:
+        with engine.begin() as conn:
+            for email in admin_emails:
+                conn.execute(
+                    text("UPDATE users SET role = 'admin' WHERE lower(email) = :email"),
+                    {"email": email},
+                )

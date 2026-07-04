@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from core.gateway import deps
 from core.gateway.logging_setup import setup_logging
 from core.config import ALLOWED_ORIGINS, APP_DESCRIPTION, APP_TITLE, APP_VERSION, LOGS_DIR, WEB_DIST_DIR
-from core.persistence.queries import archive_old_inactive_keys, init_db
+from core.persistence.queries import archive_old_inactive_keys, init_db, purge_expired_sessions
 from core.security.auth import security_headers_middleware
 from core.gateway.routers import admin, auth, chat, installer, keys, nodes_admin, versions, ws_status, monitor
 
@@ -99,8 +99,11 @@ def _start_archiver_cron() -> None:
                 n = archive_old_inactive_keys()
                 if n:
                     _log.getLogger("folax").info(f"[cron] {n} API keys archivadas.")
+                m = purge_expired_sessions()
+                if m:
+                    _log.getLogger("folax").info(f"[cron] {m} sesiones expiradas purgadas.")
             except Exception as exc:
-                _log.getLogger("folax").warning(f"[cron] Error al archivar keys: {exc}")
+                _log.getLogger("folax").warning(f"[cron] Error en tareas de mantenimiento: {exc}")
 
     threading.Thread(target=_run, daemon=True, name="key-archiver").start()
 

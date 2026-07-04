@@ -28,13 +28,29 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX idx_audit_user_type ON audit_events (user_id, event_type, created_at);
 
+CREATE TABLE nodes (
+	id TEXT NOT NULL, 
+	name TEXT NOT NULL, 
+	agent_url TEXT NOT NULL, 
+	token TEXT NOT NULL, 
+	enabled INTEGER NOT NULL, 
+	created_at TEXT NOT NULL, 
+	PRIMARY KEY (id)
+);
+
 CREATE TABLE users (
 	id SERIAL NOT NULL, 
 	username TEXT NOT NULL, 
+	email TEXT, 
+	first_name TEXT, 
+	last_name TEXT, 
+	role TEXT NOT NULL, 
+	email_verified INTEGER NOT NULL, 
 	password_hash TEXT NOT NULL, 
 	created_at TEXT NOT NULL, 
 	PRIMARY KEY (id), 
-	UNIQUE (username)
+	UNIQUE (username), 
+	UNIQUE (email)
 );
 
 CREATE TABLE api_keys (
@@ -71,6 +87,34 @@ CREATE TABLE conversations (
 	FOREIGN KEY(user_id) REFERENCES users (id)
 );
 CREATE INDEX idx_conversations_user ON conversations (user_id, updated_at);
+
+CREATE TABLE email_tokens (
+	id SERIAL NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	token_hash TEXT NOT NULL, 
+	purpose TEXT NOT NULL, 
+	expires_at TEXT NOT NULL, 
+	used INTEGER NOT NULL, 
+	created_at TEXT NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+	UNIQUE (token_hash)
+);
+CREATE INDEX idx_email_tokens_user ON email_tokens (user_id, purpose);
+
+CREATE TABLE sessions (
+	id SERIAL NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	token_hash TEXT NOT NULL, 
+	expires_at TEXT NOT NULL, 
+	ip_address TEXT, 
+	user_agent TEXT, 
+	created_at TEXT NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+	UNIQUE (token_hash)
+);
+CREATE INDEX idx_sessions_user ON sessions (user_id);
 
 CREATE TABLE task_embeddings (
 	id SERIAL NOT NULL, 

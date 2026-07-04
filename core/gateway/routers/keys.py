@@ -40,9 +40,11 @@ async def delete_api_key(
     request: Request,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
-    """Soft-delete de una API key específica del usuario."""
+    """Soft-delete de una API key. Solo keys del propio usuario (anti-IDOR)."""
+    from fastapi import HTTPException
     ip = request.client.host if request.client else None
-    deactivate_key(key_id)
+    if not deactivate_key(key_id, user_id=user_data["id"]):
+        raise HTTPException(status_code=404, detail="La key no existe o no te pertenece")
     log_audit_event(
         "api_key_deleted",
         user_id=user_data["id"],
