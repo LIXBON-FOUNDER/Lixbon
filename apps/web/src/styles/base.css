@@ -111,6 +111,7 @@ p {
 .brand {
   font-family: var(--font-brand);
   letter-spacing: 0.04em;
+  font-size: 30px;
 }
 
 .pill-btn {
