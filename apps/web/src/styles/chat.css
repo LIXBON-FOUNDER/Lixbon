@@ -293,6 +293,12 @@
   background: var(--accent);
   font-size: 12px;
   font-weight: 500;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar__plan:hover {
+  opacity: 0.75;
 }
 
 /* ── Área principal ──────────────────────────────────────────────────── */
@@ -400,10 +406,11 @@
   align-self: flex-end;
   max-width: 75%;
   padding: 11px 19px;
-  background: var(--bg-secondary);
+  background: var(--ink);
   border-radius: var(--radius-box);
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  color: var(--bg);
 }
 
 .msg--assistant {

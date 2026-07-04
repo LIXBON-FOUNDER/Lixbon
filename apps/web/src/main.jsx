@@ -5,6 +5,7 @@ import App from './App.jsx';
 import './styles/base.css';
 import './styles/auth.css';
 import './styles/chat.css';
+import './styles/account.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

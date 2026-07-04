@@ -89,6 +89,28 @@ def init_db() -> None:
         for stmt in _column_migrations:
             conn.execute(text(stmt))
 
+    # ── Seed: los 3 planes (F5). ON CONFLICT DO NOTHING: los límites se editan
+    #    en la BD y ningún redeploy los pisa. -1 = ilimitado. ──
+    _plans_seed = """
+        INSERT INTO plans (id, name, description, price_monthly_cents, currency,
+                           messages_per_day, tokens_per_month, max_api_keys,
+                           rate_limit_per_min, allowed_models, priority, sort_order,
+                           is_active, created_at, updated_at)
+        VALUES
+          ('free', 'Gratuito', 'Para probar el producto', 0, 'USD',
+           30, 150000, 1, 10,
+           '["llama3.2", "phi", "gemma", "qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b"]',
+           0, 0, 1, :ts, :ts),
+          ('pro', 'Pro', 'Para uso habitual', 990, 'USD',
+           500, 5000000, 5, 60, NULL, 1, 1, 1, :ts, :ts),
+          ('advance', 'Advance', 'Power users e integraciones', 2490, 'USD',
+           -1, 20000000, 20, 120, NULL, 2, 2, 1, :ts, :ts)
+        ON CONFLICT (id) DO NOTHING
+    """
+    from datetime import datetime, timezone
+    with engine.begin() as conn:
+        conn.execute(text(_plans_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+
     # ── Seed: promover admins definidos por entorno ──
     import os
     admin_emails = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]

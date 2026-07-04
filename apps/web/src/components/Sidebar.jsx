@@ -180,13 +180,16 @@ export function Sidebar({
                 <span className="sidebar__profile-name">
                   {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
                 </span>
-                <span className="sidebar__plan">Plan Gratuito</span>
+                <Link to="/planes" className="sidebar__plan">Plan {user.plan_name || 'Gratuito'}</Link>
               </div>
               <button className="icon-btn" onClick={() => setProfileMenu((v) => !v)} aria-label="Ajustes">
                 <IconGear />
               </button>
               {profileMenu && (
                 <div className="sb-menu sb-menu--profile" onMouseLeave={() => setProfileMenu(false)}>
+                  <button onClick={() => { setProfileMenu(false); navigate('/account'); }}>
+                    <IconGear size={14} /> Mi cuenta
+                  </button>
                   <button onClick={onLogout}><IconLogout size={14} /> Cerrar sesión</button>
                 </div>
               )}
@@ -196,7 +199,7 @@ export function Sidebar({
               <span className="sidebar__avatar">?</span>
               <div className="sidebar__profile-info">
                 <Link to="/auth" className="sidebar__profile-name">Iniciar sesion</Link>
-                <span className="sidebar__plan">Plan Gratuito</span>
+                <Link to="/planes" className="sidebar__plan">Ver planes</Link>
               </div>
             </>
           )}

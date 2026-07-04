@@ -179,6 +179,64 @@ class Node(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class Plan(Base):
+    """Planes del producto (F5). Los límites viven AQUÍ, no en el código:
+    ajustar un plan = UPDATE en esta tabla. -1 significa ilimitado."""
+    __tablename__ = "plans"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)            # slug: free | pro | advance
+    name: Mapped[str] = mapped_column(Text, nullable=False)            # Gratuito | Pro | Advance
+    description: Mapped[str | None] = mapped_column(Text)
+    price_monthly_cents: Mapped[int] = mapped_column(nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, default="USD")
+    messages_per_day: Mapped[int] = mapped_column(nullable=False, default=30)
+    tokens_per_month: Mapped[int] = mapped_column(nullable=False, default=150_000)
+    max_api_keys: Mapped[int] = mapped_column(nullable=False, default=1)
+    rate_limit_per_min: Mapped[int] = mapped_column(nullable=False, default=10)
+    # JSON con lista de prefijos de modelos permitidos; NULL = todos los modelos
+    allowed_models: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[int] = mapped_column(nullable=False, default=0)   # prioridad en cola (futuro)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Subscription(Base):
+    """Suscripción vigente de un usuario (una por usuario; el historial queda
+    en audit_events). El cobro real llega en F7 — por ahora asignación manual."""
+    __tablename__ = "subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_subscriptions_user"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+    started_at: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str | None] = mapped_column(Text)               # NULL = sin vencimiento
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UsageQuota(Base):
+    """Contadores de uso por período para enforcement (F5). Redis es el contador
+    caliente; esta tabla es la persistencia y la semilla cuando Redis se reinicia."""
+    __tablename__ = "usage_quotas"
+    __table_args__ = (
+        UniqueConstraint("user_id", "period_type", "period_start", name="uq_usage_quotas_period"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    period_type: Mapped[str] = mapped_column(Text, nullable=False)     # day | month
+    period_start: Mapped[str] = mapped_column(Text, nullable=False)    # YYYY-MM-DD | YYYY-MM
+    messages: Mapped[int] = mapped_column(nullable=False, default=0)
+    tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class TokenUsageDaily(Base):
     __tablename__ = "token_usage_daily"
     __table_args__ = (

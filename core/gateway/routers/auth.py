@@ -28,6 +28,7 @@ from core.persistence.queries import (
     log_audit_event,
     mark_email_verified,
     set_user_password,
+    set_user_plan,
     verify_user,
 )
 from core.security.auth import (
@@ -98,6 +99,7 @@ async def api_register(payload: RegisterRequest, request: Request):
         record_failed_auth(ip)
         raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese correo")
 
+    set_user_plan(user["id"], "free")  # F5: plan Gratuito por defecto
     session_token = create_web_session(user["id"], ip, request.headers.get("user-agent"))
     log_audit_event("user_registered", user_id=user["id"], ip_address=ip)
 
@@ -157,8 +159,10 @@ async def api_logout(folax_session: str | None = Cookie(default=None)):
 
 @router.get("/api/auth/me")
 async def api_me(user_data: dict[str, Any] = Depends(cookie_auth_required)):
-    """Usuario actual (para hidratar la web al cargar)."""
-    return {"user": user_data}
+    """Usuario actual + plan vigente (para hidratar la web al cargar)."""
+    from core.persistence.queries import get_plan_for_user
+    plan = get_plan_for_user(user_data["id"])
+    return {"user": {**user_data, "plan_id": plan["id"], "plan_name": plan["name"]}}
 
 
 # ── Verificación de email ──────────────────────────────────────────────────

@@ -20,7 +20,9 @@ export async function streamChatCompletion({ model, messages, conversationId, si
     let detail = `Error del servidor (${res.status})`;
     try {
       const body = await res.json();
-      if (body.detail) detail = body.detail;
+      // F5: los 429/403 de cuota traen detail estructurado {code, message, ...}
+      if (typeof body.detail === 'string') detail = body.detail;
+      else if (body.detail?.message) detail = body.detail.message;
     } catch { /* cuerpo no-JSON */ }
     throw new Error(detail);
   }

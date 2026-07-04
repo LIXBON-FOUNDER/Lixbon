@@ -27,9 +27,12 @@ from core.persistence.models import (
     EmailToken,
     Message,
     Node,
+    Plan,
     Session,
+    Subscription,
     TaskEmbedding,
     TokenUsageDaily,
+    UsageQuota,
     User,
 )
 
@@ -548,6 +551,138 @@ def find_similar_tasks(
 
     results.sort(key=lambda x: x["similarity"], reverse=True)
     return results[:top_k]
+
+
+# ─── Planes, suscripciones y cuotas (F5) ───────────────────────────────────
+
+DEFAULT_PLAN_ID = "free"
+
+
+def _plan_to_dict(p: Plan) -> dict[str, Any]:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "description": p.description,
+        "price_monthly_cents": p.price_monthly_cents,
+        "currency": p.currency,
+        "messages_per_day": p.messages_per_day,
+        "tokens_per_month": p.tokens_per_month,
+        "max_api_keys": p.max_api_keys,
+        "rate_limit_per_min": p.rate_limit_per_min,
+        "allowed_models": _json.loads(p.allowed_models) if p.allowed_models else None,
+        "priority": p.priority,
+        "sort_order": p.sort_order,
+        "is_active": bool(p.is_active),
+    }
+
+
+def list_plans(active_only: bool = True) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = select(Plan).order_by(Plan.sort_order)
+        if active_only:
+            stmt = stmt.where(Plan.is_active == 1)
+        return [_plan_to_dict(p) for p in s.scalars(stmt).all()]
+
+
+def get_plan(plan_id: str) -> dict[str, Any] | None:
+    with get_session() as s:
+        p = s.get(Plan, plan_id)
+        return _plan_to_dict(p) if p else None
+
+
+def get_plan_for_user(user_id: int) -> dict[str, Any]:
+    """Plan vigente del usuario. Sin suscripción (o expirada) ⇒ plan por defecto."""
+    with get_session() as s:
+        sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
+        plan_id = DEFAULT_PLAN_ID
+        if sub and sub.status == "active":
+            if not sub.expires_at or sub.expires_at > now_iso():
+                plan_id = sub.plan_id
+        p = s.get(Plan, plan_id) or s.get(Plan, DEFAULT_PLAN_ID)
+        if not p:
+            # BD sin seed (no debería pasar: init_db lo garantiza)
+            raise RuntimeError("La tabla plans está vacía — falta el seed de planes")
+        return _plan_to_dict(p)
+
+
+def set_user_plan(user_id: int, plan_id: str, expires_at: str | None = None) -> bool:
+    """Asigna (o cambia) el plan de un usuario. False si el plan no existe."""
+    ts = now_iso()
+    with get_session() as s:
+        if not s.get(Plan, plan_id):
+            return False
+        sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
+        if sub:
+            sub.plan_id = plan_id
+            sub.status = "active"
+            sub.expires_at = expires_at
+            sub.updated_at = ts
+        else:
+            s.add(Subscription(
+                user_id=user_id, plan_id=plan_id, status="active",
+                started_at=ts, expires_at=expires_at, created_at=ts, updated_at=ts,
+            ))
+        return True
+
+
+def bump_usage_quota(user_id: int, period_type: str, period_start: str,
+                     messages_inc: int = 0, tokens_inc: int = 0) -> dict[str, int]:
+    """Incrementa (atómico, upsert) el contador del período. Retorna totales."""
+    ts = now_iso()
+    with get_session() as s:
+        stmt = pg_insert(UsageQuota).values(
+            user_id=user_id, period_type=period_type, period_start=period_start,
+            messages=messages_inc, tokens=tokens_inc, updated_at=ts,
+        ).on_conflict_do_update(
+            constraint="uq_usage_quotas_period",
+            set_={
+                "messages": UsageQuota.messages + messages_inc,
+                "tokens": UsageQuota.tokens + tokens_inc,
+                "updated_at": ts,
+            },
+        ).returning(UsageQuota.messages, UsageQuota.tokens)
+        row = s.execute(stmt).one()
+        return {"messages": int(row.messages), "tokens": int(row.tokens)}
+
+
+def get_usage_quota(user_id: int, period_type: str, period_start: str) -> dict[str, int]:
+    with get_session() as s:
+        row = s.scalars(
+            select(UsageQuota).where(
+                UsageQuota.user_id == user_id,
+                UsageQuota.period_type == period_type,
+                UsageQuota.period_start == period_start,
+            )
+        ).first()
+        return {"messages": row.messages if row else 0, "tokens": row.tokens if row else 0}
+
+
+def count_active_keys(user_id: int) -> int:
+    with get_session() as s:
+        return int(s.execute(
+            select(func.count(ApiKey.id)).where(ApiKey.user_id == user_id, ApiKey.is_active == 1)
+        ).scalar_one())
+
+
+def list_users_admin(q: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Listado para el admin: usuario + plan vigente (asignación manual, F5.7)."""
+    with get_session() as s:
+        stmt = (
+            select(User, Subscription.plan_id)
+            .outerjoin(Subscription, Subscription.user_id == User.id)
+            .order_by(desc(User.created_at))
+            .limit(limit)
+        )
+        if q:
+            like = f"%{q}%"
+            stmt = stmt.where(
+                User.email.ilike(like) | User.username.ilike(like)
+                | User.first_name.ilike(like) | User.last_name.ilike(like)
+            )
+        return [
+            {**_user_to_dict(u), "plan_id": plan_id or DEFAULT_PLAN_ID}
+            for u, plan_id in s.execute(stmt).all()
+        ]
 
 
 # ─── Conversaciones y mensajes ─────────────────────────────────────────────

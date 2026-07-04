@@ -1,0 +1,411 @@
+/* account.css — páginas "Mi cuenta" y "Planes" (F5): layout de página
+   con barra superior, tarjetas, barras de cuota, gestión de keys,
+   gráfica de uso y grid de precios. */
+
+/* ── Layout de página ────────────────────────────────────────────────── */
+
+.page {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.page--cream {
+  background: var(--bg-secondary);
+}
+
+.page__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px;
+}
+
+.page__logo {
+  text-decoration: none;
+}
+
+.page__back {
+  font-size: 14.5px;
+  padding: 8px 18px;
+  text-decoration: none;
+}
+
+.page__body {
+  width: min(720px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 12px 0 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: page-in 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.page__body--wide {
+  width: min(1040px, calc(100% - 40px));
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(10px); }
+}
+
+.page__title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.page__title--center {
+  text-align: center;
+}
+
+.page__error {
+  padding: 12px 18px;
+  border-radius: var(--radius-box);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 15px;
+}
+
+/* ── Tarjetas ────────────────────────────────────────────────────────── */
+
+.card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-box);
+  background: var(--bg);
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.card__title {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.card__muted {
+  color: var(--ink-soft);
+  font-size: 14.5px;
+}
+
+.card__cta {
+  align-self: flex-start;
+  font-size: 14.5px;
+  text-decoration: none;
+}
+
+.card__small-cta {
+  font-size: 14px;
+  padding: 7px 16px;
+}
+
+.plan-pill {
+  padding: 7px 18px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  font-weight: 600;
+  font-size: 14.5px;
+  white-space: nowrap;
+}
+
+/* ── Barras de cuota ─────────────────────────────────────────────────── */
+
+.quota {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.quota__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.quota__count {
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quota__count.is-full {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.quota__track {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(23, 23, 23, 0.08);
+  overflow: hidden;
+}
+
+.quota__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.quota__fill.is-full {
+  background: var(--danger);
+}
+
+.quota__reset {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* ── API keys ────────────────────────────────────────────────────────── */
+
+.key-reveal {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: var(--radius-box);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  font-size: 14.5px;
+  animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.key-reveal code {
+  display: block;
+  margin-top: 6px;
+  word-break: break-all;
+  font-size: 13.5px;
+}
+
+.keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.keys__item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 4px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.keys__item.is-inactive {
+  opacity: 0.45;
+}
+
+.keys__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.keys__name {
+  font-weight: 550;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keys__masked {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.keys__meta {
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+/* ── Gráfica de uso ──────────────────────────────────────────────────── */
+
+.uchart {
+  position: relative;
+}
+
+.uchart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.uchart__grid {
+  stroke: rgba(23, 23, 23, 0.09);
+  stroke-width: 1;
+}
+
+.uchart__axis {
+  stroke: rgba(23, 23, 23, 0.35);
+  stroke-width: 1;
+}
+
+.uchart__tick {
+  fill: var(--ink-soft);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+
+.uchart__bar {
+  fill: var(--ink);
+  transition: opacity 0.12s ease;
+}
+
+.uchart__bar.is-hover {
+  opacity: 0.65;
+}
+
+.uchart__label {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+}
+
+.uchart__tooltip {
+  position: absolute;
+  top: -6px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  color: #fff;
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ── Página de planes ────────────────────────────────────────────────── */
+
+.plans__sub {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 16px;
+  margin-bottom: 22px;
+}
+
+.plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+  align-items: stretch;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px 26px;
+  border-radius: var(--radius-box);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease;
+}
+
+.plan-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(23, 23, 23, 0.08);
+}
+
+.plan-card--featured {
+  border: 2px solid var(--ink);
+  position: relative;
+}
+
+.plan-card__name {
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.plan-card__price {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.plan-card__price span {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.plan-card__desc {
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  min-height: 44px;
+}
+
+.plan-card__features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 14.5px;
+  flex: 1;
+}
+
+.plan-card__features li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.plan-card__features li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  outline: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.plan-card__cta {
+  margin-top: 10px;
+  text-decoration: none;
+}
+
+.plan-card__cta.is-current {
+  background: var(--bg-secondary);
+  cursor: default;
+}
+
+.plan-card__cta.is-soon {
+  cursor: default;
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  .page__title {
+    font-size: 25px;
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .card__row {
+    flex-wrap: wrap;
+  }
+}

@@ -57,21 +57,24 @@ _auth_blocked: dict[str, float] = {}
 
 # ── Rate limiting general (por API key) ────────────────────────────────────
 
-def enforce_rate_limit(api_key: str) -> None:
-    """Lanza 429 si la API key supera RATE_LIMIT_PER_MIN req/min."""
+def enforce_rate_limit(identifier: str, limit: int | None = None) -> None:
+    """
+    Lanza 429 si `identifier` (API key o "user:{id}") supera `limit` req/min.
+    Sin `limit` explícito usa RATE_LIMIT_PER_MIN. F5: el límite viene del plan.
+    """
+    max_per_min = limit if limit and limit > 0 else RATE_LIMIT_PER_MIN
+    detail = f"Rate limit excedido: máx {max_per_min} solicitudes por minuto."
+
     r = _get_redis()
     if r is not None:
         try:
             window = int(time.time() // 60)
-            key = f"rl:{_key_id(api_key)}:{window}"
+            key = f"rl:{_key_id(identifier)}:{window}"
             count = r.incr(key)
             if count == 1:
                 r.expire(key, 90)
-            if count > RATE_LIMIT_PER_MIN:
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Rate limit excedido: máx {RATE_LIMIT_PER_MIN} req/min por API key.",
-                )
+            if count > max_per_min:
+                raise HTTPException(status_code=429, detail=detail)
             return
         except HTTPException:
             raise
@@ -80,14 +83,11 @@ def enforce_rate_limit(api_key: str) -> None:
 
     now_ts = time.time()
     with _rate_lock:
-        bucket = _rate_hits[api_key]
+        bucket = _rate_hits[identifier]
         while bucket and (now_ts - bucket[0]) > 60:
             bucket.popleft()
-        if len(bucket) >= RATE_LIMIT_PER_MIN:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Rate limit excedido: máx {RATE_LIMIT_PER_MIN} req/min por API key.",
-            )
+        if len(bucket) >= max_per_min:
+            raise HTTPException(status_code=429, detail=detail)
         bucket.append(now_ts)
 
 

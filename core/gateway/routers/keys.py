@@ -4,12 +4,25 @@ keys.py — Endpoints de gestión de API keys en FOLAX DTC.
 from __future__ import annotations
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from core.persistence.queries import create_api_key, deactivate_key, log_audit_event
+from core.persistence.queries import (
+    count_active_keys,
+    create_api_key,
+    deactivate_key,
+    get_plan_for_user,
+    list_api_keys,
+    log_audit_event,
+)
 from core.security.auth import api_key_required, cookie_auth_required
 
 router = APIRouter()
+
+
+@router.get("/api/keys")
+async def list_keys_endpoint(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+    """API keys del usuario (sin exponer la key: solo prefijo y metadatos)."""
+    return {"keys": list_api_keys(user_id=user_data["id"])}
 
 
 @router.post("/api/keys")
@@ -19,6 +32,17 @@ async def create_api_key_endpoint(
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
     """Crea una nueva API key (opcionalmente restringida a un modelo)."""
+    # F5: tope de keys activas según el plan
+    plan = get_plan_for_user(user_data["id"])
+    max_keys = int(plan.get("max_api_keys", 1))
+    if max_keys != -1 and count_active_keys(user_data["id"]) >= max_keys:
+        raise HTTPException(status_code=403, detail={
+            "code": "keys_quota",
+            "scope": "api_keys",
+            "message": f"El plan {plan['name']} permite máximo {max_keys} API key(s) activa(s). "
+                       "Desactiva una o mejora tu plan.",
+        })
+
     name = (payload.get("name") or "").strip()
     model = (payload.get("model") or "").strip() or None
     if not name:
@@ -41,7 +65,6 @@ async def delete_api_key(
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
     """Soft-delete de una API key. Solo keys del propio usuario (anti-IDOR)."""
-    from fastapi import HTTPException
     ip = request.client.host if request.client else None
     if not deactivate_key(key_id, user_id=user_data["id"]):
         raise HTTPException(status_code=404, detail="La key no existe o no te pertenece")

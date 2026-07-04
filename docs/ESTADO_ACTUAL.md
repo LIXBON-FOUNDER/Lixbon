@@ -1,13 +1,13 @@
 # FOLAX — Estado actual del proyecto
 
-> Actualizado: 2026-07-04 (F4 completada). Documento para retomar el trabajo.
+> Actualizado: 2026-07-04 (F5 completada). Documento para retomar el trabajo.
 > Referencias: `docs/PLAN_MAESTRO.md` (plan por fases) · `docs/DISENO_WEB.md` (diseño de la web) · `docs/INFORME_Y_PLAN.md` (diagnóstico original).
 
 ---
 
 ## 1. Resumen en una línea
 
-**Backend y web nueva completos (F0–F4 ✅). Falta todo lo de producto: planes, panel admin, pagos (F5–F8).**
+**Backend, web nueva y planes con límites completos (F0–F5 ✅). Falta: panel admin, pagos, calidad (F6–F8).**
 
 ---
 
@@ -87,21 +87,40 @@
 
 ---
 
-## 5. Fases posteriores (sin iniciar)
+## 5. ✅ F5 — Planes y límites (completada 2026-07-04, verificada E2E: 20/20 API + 14/14 UI)
 
-- **F5 — Planes y límites**: tablas `plans`/`subscriptions`/`usage_quotas`, 3 planes **Gratuito/Pro/Advance** (límites en BD, no hardcodeados), middleware de cuotas con Redis, página "Mi cuenta" con stats (backend de métricas ya existe: `token_usage_daily`).
+**Los límites viven en la BD (tabla `plans`), no en el código.** Postgres es la fuente de verdad de los contadores; Redis es pre-check barato.
+
+**BD y backend**:
+- Tablas `plans` / `subscriptions` (única por usuario) / `usage_quotas` (contador atómico por período, `pg_insert ON CONFLICT ... RETURNING`). Seed idempotente en `init_db()` + `BD/seeds/plans.sql`: **Gratuito** (30 msg/día, 150k tokens/mes, 1 key, 10 rpm, solo modelos pequeños por prefijo), **Pro** ($9.90: 500/día, 5M/mes, 5 keys, 60 rpm, todos), **Advance** ($24.90: ilimitados/día, 20M/mes, 20 keys, 120 rpm).
+- `core/billing/quota.py`: `ensure_can_chat()` antes de toda inferencia — modelo permitido (403 `model_not_allowed`), rate limit por plan, mensajes/día y tokens/mes (429 con detail estructurado `{code, scope, message, reset_at}` en español con tiempo de reinicio humano); `record_tokens()` al terminar; `usage_snapshot()` para Mi cuenta. Contar ANTES de inferir evita pasarse en paralelo.
+- Endpoints (`core/gateway/routers/billing.py`): `GET /api/plans` (público), `GET /api/account/usage` (plan + uso + serie 30 días), `GET /api/admin/users?q=` y `POST /api/admin/users/{id}/plan` (por ROL admin, con audit log) — **asignación manual de planes hasta que lleguen los pagos (F7)**.
+- `GET /api/keys` nuevo; `POST /api/keys` respeta `max_api_keys` (403 `keys_quota`). Registro asigna plan free; `/api/auth/me` devuelve `plan_id`/`plan_name`.
+
+**Web**:
+- **Mi cuenta** (`/account`): plan actual, barras de cuota (mensajes hoy / tokens mes, roja al llenarse), gráfica SVG de tokens 30 días con tooltip, gestión de API keys (crear con reveal único, desactivar). `pages/AccountPage.jsx` + `components/UsageChart.jsx` + `styles/account.css`.
+- **Planes** (`/planes`): 3 tarjetas, Pro destacada; CTA "Próximamente" (pagos F7). Sidebar: pill del plan real (`user.plan_name`) → `/planes`; menú del perfil con "Mi cuenta".
+- 429/403 de cuota se ven amigables en el chat (burbuja `⚠️ Alcanzaste los N mensajes diarios... Se reinicia en X h`).
+
+**E2E verificado** (scripts efímeros, gateway local + BD staging): free choca modelo vetado, límite diario y límite de keys; admin busca usuario y asigna Pro; límites se levantan al instante; UI refleja todo. Usuarios de prueba en staging: `f5user_*`, `f5admin_*`, `f5ui_*`, `f5uiadmin_*`, `f5models_*@test.local`.
+
+---
+
+## 6. Fases posteriores (sin iniciar)
+
 - **F6 — Panel admin**: releases privado (subida a **Cloudflare R2** — el disco de Railway es efímero, pendiente de F1.8), nodos con UI, modelos por plan, usuarios, audit log. **Deuda anotada**: `nodes_admin` usa `X-Admin-Token`; migrar a `admin_required` (rol) aquí. Endpoints de update: `/api/updates/manifest/{channel}` ya existe para Tauri; falta el del CLI.
 - **F7 — Pagos**: Stripe o Mercado Pago (decisión pendiente del usuario), checkout hosted + webhooks.
 - **F8 — Calidad**: tests automatizados (no hay ninguno aún), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.
 
 ---
 
-## 6. Mapa rápido de dónde está cada cosa
+## 7. Mapa rápido de dónde está cada cosa
 
 | Cosa | Dónde |
 |---|---|
 | Gateway (entry) | `core/gateway/app.py` → `uvicorn core.gateway.app:app` |
-| Rutas API | `core/gateway/routers/` (auth, chat, keys, versions, nodes_admin, admin, monitor, ws_status, installer) |
+| Rutas API | `core/gateway/routers/` (auth, chat, conversations, billing, keys, versions, nodes_admin, admin, monitor, ws_status, installer) |
+| Cuotas por plan | `core/billing/quota.py` (límites en tabla `plans`; seed en `BD/seeds/plans.sql`) |
 | BD (modelos/queries) | `core/persistence/models.py` · `queries.py` (staging vía `DATABASE_URL` del `.env`) |
 | Inferencia/streaming | `core/inference/ollama.py` (única implementación) |
 | Orquestador | `core/orchestration/orchestrator.py` (`ollama_target()` decide nodo vs local) |
@@ -116,7 +135,7 @@
 | Clave firma Tauri | `C:\Users\Usuario\.tauri\folax_update.key` (+ GitHub Secrets) |
 | Config tunnel | `C:\Users\Usuario\.cloudflared\config.yml` (tunnel `folax-gpu-01`) |
 
-## 7. Cómo arrancar el entorno de desarrollo
+## 8. Cómo arrancar el entorno de desarrollo
 
 ```powershell
 # 1. Gateway local (usa la BD de staging de Railway automáticamente por .env)

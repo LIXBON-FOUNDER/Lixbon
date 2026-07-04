@@ -27,6 +27,8 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (email, password) => {
     const res = await api.post('/api/auth/login', { email, password });
     setUser(res.data.user);
+    // /me añade plan_id/plan_name (login no los trae)
+    api.get('/api/auth/me').then((me) => setUser(me.data.user)).catch(() => {});
     return res.data;
   }, []);
 

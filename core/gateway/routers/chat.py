@@ -19,7 +19,14 @@ from pydantic import BaseModel, Field
 
 from core.gateway import deps
 from core.config import OLLAMA_BASE_URL
-from core.persistence.queries import ensure_conversation, find_similar_tasks, save_message, save_task_embedding
+from core.billing.quota import ensure_can_chat, record_tokens
+from core.persistence.queries import (
+    ensure_conversation,
+    find_similar_tasks,
+    get_plan_for_user,
+    save_message,
+    save_task_embedding,
+)
 from core.delegation.embeddings import classify_request, get_embedding, pick_classifier_model, route_request
 from core.inference.ollama import chat as ollama_chat, stream_chat_openai
 from core.security.auth import (
@@ -99,7 +106,8 @@ async def _routed_chat(model: str, messages: list[dict]) -> tuple[dict[str, Any]
 
 
 def _persist_assistant(conv_id: str, model: str, text: str,
-                       prompt_tokens: int, completion_tokens: int, latency_ms: int) -> None:
+                       prompt_tokens: int, completion_tokens: int, latency_ms: int,
+                       user_id: int | None = None) -> None:
     save_message(
         conv_id, "assistant", text,
         model=model,
@@ -107,6 +115,8 @@ def _persist_assistant(conv_id: str, model: str, text: str,
         completion_tokens=completion_tokens,
         latency_ms=latency_ms,
     )
+    if user_id is not None:
+        record_tokens(user_id, prompt_tokens + completion_tokens)  # cuota mensual (F5)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -122,6 +132,9 @@ async def api_chat(
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
     """Chat desde el dashboard web. Enrutado por el orquestador (F2)."""
+    plan = get_plan_for_user(user_data["id"])
+    ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard"):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
@@ -134,7 +147,8 @@ async def api_chat(
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens, latency_ms)
+    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
+                       latency_ms, user_id=user_data["id"])
 
     return {
         "conversation_id": conv_id,
@@ -157,6 +171,8 @@ async def chat_completions(
 ):
     """Endpoint compatible con OpenAI — chat con modelos del cluster."""
     validate_model_access(user_data, payload.model)
+    plan = get_plan_for_user(user_data["id"])
+    ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
@@ -200,6 +216,7 @@ async def chat_completions(
                         collector.get("prompt_tokens", 0),
                         collector.get("completion_tokens", 0),
                         latency_ms,
+                        user_id=user_data["id"],
                     )
 
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
@@ -210,7 +227,8 @@ async def chat_completions(
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens, latency_ms)
+    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
+                       latency_ms, user_id=user_data["id"])
 
     return JSONResponse({
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
@@ -242,6 +260,8 @@ async def completions(
 ):
     """Endpoint compatible con OpenAI — text completions."""
     validate_model_access(user_data, payload.model)
+    plan = get_plan_for_user(user_data["id"])
+    ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
@@ -256,7 +276,8 @@ async def completions(
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens, latency_ms)
+    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
+                       latency_ms, user_id=user_data["id"])
 
     return JSONResponse({
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
@@ -285,6 +306,9 @@ async def delegate_request(
     se enruta por el orquestador hacia el mejor nodo GPU (F2).
     """
     user_id = user_data["id"]
+    plan = get_plan_for_user(user_id)
+    ensure_can_chat(user_id, plan)  # F5: cuenta el mensaje; el modelo se decide después
+
     started_at = time.perf_counter()
 
     # Destino para las tareas auxiliares (embedding + clasificación): el mejor nodo disponible
