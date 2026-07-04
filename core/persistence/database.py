@@ -84,6 +84,8 @@ def init_db() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email)",
+        # F6: bloqueo de usuarios desde el panel admin
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

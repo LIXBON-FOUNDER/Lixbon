@@ -102,6 +102,8 @@ def _user_to_dict(user: User) -> dict[str, Any]:
         "last_name": user.last_name,
         "role": user.role or "user",
         "email_verified": bool(user.email_verified),
+        "is_active": bool(user.is_active),
+        "created_at": user.created_at,
     }
 
 
@@ -147,6 +149,8 @@ def verify_user(identifier: str, password: str) -> dict[str, Any] | None:
             return None
         if not _verify_password_internal(password, user.password_hash):
             return None
+        if not user.is_active:
+            return None  # bloqueado por admin (F6)
         if not user.password_hash.startswith("scrypt$"):
             user.password_hash = hash_password(password)
         return _user_to_dict(user)
@@ -208,7 +212,9 @@ def validate_web_session(raw_token: str) -> dict[str, Any] | None:
         if not ses or ses.expires_at < now_iso():
             return None
         user = s.get(User, ses.user_id)
-        return _user_to_dict(user) if user else None
+        if not user or not user.is_active:
+            return None  # usuario bloqueado: la sesión deja de valer al instante
+        return _user_to_dict(user)
 
 
 def delete_web_session(raw_token: str) -> None:
@@ -434,8 +440,8 @@ def validate_api_key(raw_key: str, ip_address: str | None = None) -> dict[str, A
         if row.expires_at and row.expires_at < now:
             return None
         user = s.get(User, row.user_id)
-        if not user:
-            return None
+        if not user or not user.is_active:
+            return None  # usuario bloqueado: sus keys dejan de funcionar
         result = {**_user_to_dict(user), "key_model": row.model}
         row.last_accessed = now
         row.last_used_ip = ip_address
@@ -464,11 +470,23 @@ def log_audit_event(
         ))
 
 
-def list_audit_events(user_id: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
+def list_audit_events(
+    user_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    event_type: str | None = None,
+) -> list[dict[str, Any]]:
     with get_session() as s:
-        stmt = select(AuditEvent).order_by(desc(AuditEvent.created_at)).limit(limit)
+        stmt = (
+            select(AuditEvent)
+            .order_by(desc(AuditEvent.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
         if user_id is not None:
             stmt = stmt.where(AuditEvent.user_id == user_id)
+        if event_type:
+            stmt = stmt.where(AuditEvent.event_type == event_type)
         rows = s.scalars(stmt).all()
 
         result = []
@@ -683,6 +701,82 @@ def list_users_admin(q: str | None = None, limit: int = 100) -> list[dict[str, A
             {**_user_to_dict(u), "plan_id": plan_id or DEFAULT_PLAN_ID}
             for u, plan_id in s.execute(stmt).all()
         ]
+
+
+def set_user_active(user_id: int, active: bool) -> bool:
+    """Bloquea o desbloquea a un usuario (F6). Retorna False si no existe."""
+    with get_session() as s:
+        result = s.execute(
+            update(User).where(User.id == user_id).values(is_active=1 if active else 0)
+        )
+        return result.rowcount > 0
+
+
+def update_plan(plan_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    """Actualiza campos editables de un plan (F6). Retorna el plan o None si no existe."""
+    editable = {
+        "name", "description", "price_monthly_cents", "messages_per_day",
+        "tokens_per_month", "max_api_keys", "rate_limit_per_min",
+        "allowed_models", "is_active",
+    }
+    values = {k: v for k, v in fields.items() if k in editable}
+    if not values:
+        return None
+    values["updated_at"] = now_iso()
+    with get_session() as s:
+        plan = s.get(Plan, plan_id)
+        if not plan:
+            return None
+        for k, v in values.items():
+            setattr(plan, k, v)
+        s.flush()
+        return _plan_to_dict(plan)
+
+
+def get_global_stats(days: int = 30) -> dict[str, Any]:
+    """Dashboard global del panel admin (F6): totales + serie diaria del período."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    with get_session() as s:
+        totals = {
+            "users": int(s.execute(select(func.count(User.id))).scalar_one()),
+            "users_blocked": int(s.execute(
+                select(func.count(User.id)).where(User.is_active == 0)
+            ).scalar_one()),
+            "conversations": int(s.execute(select(func.count(Conversation.id))).scalar_one()),
+            "messages": int(s.execute(select(func.count(Message.id))).scalar_one()),
+            "active_users_period": int(s.execute(
+                select(func.count(func.distinct(TokenUsageDaily.user_id)))
+                .where(TokenUsageDaily.usage_date >= since)
+            ).scalar_one()),
+        }
+        by_plan = s.execute(
+            select(Subscription.plan_id, func.count(Subscription.id))
+            .where(Subscription.status == "active")
+            .group_by(Subscription.plan_id)
+        ).all()
+        totals["by_plan"] = {plan_id: count for plan_id, count in by_plan}
+
+        daily_rows = s.execute(
+            select(
+                TokenUsageDaily.usage_date,
+                func.coalesce(func.sum(TokenUsageDaily.request_count), 0).label("requests"),
+                func.coalesce(func.sum(TokenUsageDaily.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(TokenUsageDaily.latency_sum_ms), 0).label("latency_sum_ms"),
+            )
+            .where(TokenUsageDaily.usage_date >= since)
+            .group_by(TokenUsageDaily.usage_date)
+            .order_by(TokenUsageDaily.usage_date)
+        ).all()
+        daily = [
+            {
+                "usage_date": r.usage_date,
+                "requests": int(r.requests),
+                "total_tokens": int(r.total_tokens),
+                "avg_latency_ms": int(r.latency_sum_ms / r.requests) if r.requests else 0,
+            }
+            for r in daily_rows
+        ]
+        return {"totals": totals, "daily": daily}
 
 
 # ─── Conversaciones y mensajes ─────────────────────────────────────────────

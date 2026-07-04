@@ -1,13 +1,13 @@
 # FOLAX — Estado actual del proyecto
 
-> Actualizado: 2026-07-04 (F5 completada). Documento para retomar el trabajo.
+> Actualizado: 2026-07-04 (F6 completada, salvo releases R2). Documento para retomar el trabajo.
 > Referencias: `docs/PLAN_MAESTRO.md` (plan por fases) · `docs/DISENO_WEB.md` (diseño de la web) · `docs/INFORME_Y_PLAN.md` (diagnóstico original).
 
 ---
 
 ## 1. Resumen en una línea
 
-**Backend, web nueva y planes con límites completos (F0–F5 ✅). Falta: panel admin, pagos, calidad (F6–F8).**
+**Backend, web nueva, planes con límites y panel admin completos (F0–F6 ✅, salvo releases R2). Falta: pagos, calidad (F7–F8).**
 
 ---
 
@@ -106,10 +106,30 @@
 
 ---
 
-## 6. Fases posteriores (sin iniciar)
+## 6. ✅ F6 — Panel de administración (completada 2026-07-04, verificada E2E: 31/31 API + 15/15 UI)
 
-- **F6 — Panel admin**: releases privado (subida a **Cloudflare R2** — el disco de Railway es efímero, pendiente de F1.8), nodos con UI, modelos por plan, usuarios, audit log. **Deuda anotada**: `nodes_admin` usa `X-Admin-Token`; migrar a `admin_required` (rol) aquí. Endpoints de update: `/api/updates/manifest/{channel}` ya existe para Tauri; falta el del CLI.
-- **F7 — Pagos**: Stripe o Mercado Pago (decisión pendiente del usuario), checkout hosted + webhooks.
+**Todo lo del dueño, protegido por ROL admin (backend valida cada endpoint).** Falta solo releases en R2 (F6.5, bloqueado por credenciales).
+
+**BD y backend**:
+- Columna `users.is_active` (migración idempotente en `init_db`): bloquear a un usuario invalida su sesión y sus API keys **al instante** (`verify_user`, `validate_web_session`, `validate_api_key` lo checan). Bloquear = 403/401 inmediato, sin esperar expiración.
+- `core/gateway/routers/admin_panel.py` (NUEVO, prefijo `/api/admin`, `admin_required`): `GET /metrics` (dashboard global: usuarios/activos/bloqueados/conversaciones/mensajes/nodos + serie diaria + suscripciones por plan), `GET /users` + `GET /users/{id}` (detalle con plan/uso/keys/eventos), `POST /users/{id}/plan`, `POST /users/{id}/active` (bloqueo; no puedes bloquearte a ti mismo), `GET /plans` + `PATCH /plans/{id}` (editar límites/allowed_models sin tocar la BD), `GET /models` (modelos del cluster: en qué nodos, en qué planes), `GET /audit` (log global paginado con filtro por `event_type`/`user_id`).
+- `nodes_admin.py`: **migrado de `X-Admin-Token` a `admin_required`** (salda la deuda de F3) + audit log de `node_upserted`/`node_deleted`. `/api/nodes*` de `admin.py` ahora exige rol admin (eran métricas internas expuestas a cualquier usuario).
+- Queries nuevas: `set_user_active`, `update_plan`, `get_global_stats`; `list_audit_events` con offset/event_type; `list_users_admin` y `_user_to_dict` exponen `is_active`/`created_at`.
+
+**Web** (`pages/AdminPage.jsx` + `styles/admin.css`, ruta `/admin`):
+- Tabs: **Resumen** (stat tiles + gráfica global reusando `UsageChart` + suscripciones por plan), **Usuarios** (buscar, cambiar plan por `<select>`, bloquear/desbloquear con badge, detalle expandible con uso y eventos), **Nodos** (CRUD + estado en vivo del orquestador: online/circuit-breaker, score, CPU/RAM, modelos como chips; alta muestra el token una vez), **Modelos** (tabla del cluster + editor de `allowed_models` por plan), **Auditoría** (log paginado "cargar más" + filtro por tipo).
+- Acceso: entrada "Panel admin" en el menú del perfil (solo `role=admin`); `/admin` redirige al chat si no eres admin. `/api/auth/me` ya exponía `role`.
+
+**E2E verificado**: user normal recibe 403 en todo `/api/admin` y la SPA lo expulsa de `/admin`; admin ve dashboard, bloquea (login del bloqueado → 401) y desbloquea, cambia plan, edita `allowed_models` (se refleja en `/api/plans` público y se revierte), gestiona nodos, ve modelos y filtra auditoría. Usuarios de prueba en staging: `f6admin_*`, `f6user_*`, `f6uiadmin_*`, `f6uiuser_*@test.local`.
+
+**Pendiente F6.5 (releases privado)** 🔴 requiere que el usuario cree el bucket: subir instaladores Desktop/CLI a **Cloudflare R2** (disco de Railway efímero), canales stable/beta, quitar la página pública de releases, endpoints de update de solo lectura `/api/updates/desktop/{channel}` y `/api/updates/cli/{channel}`. Necesita bucket R2 + access keys.
+
+---
+
+## 7. Fases posteriores (sin iniciar)
+
+- **F6.5 — Releases en R2** (bloqueado): ver arriba. Necesito que crees el bucket R2 y me pases las credenciales.
+- **F7 — Pagos**: Stripe o Mercado Pago (decisión pendiente del usuario), checkout hosted + webhooks. El backend ya tiene planes/suscripciones; falta el cobro y el CTA "Próximamente" de `/planes`.
 - **F8 — Calidad**: tests automatizados (no hay ninguno aún), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.
 
 ---
@@ -121,6 +141,8 @@
 | Gateway (entry) | `core/gateway/app.py` → `uvicorn core.gateway.app:app` |
 | Rutas API | `core/gateway/routers/` (auth, chat, conversations, billing, keys, versions, nodes_admin, admin, monitor, ws_status, installer) |
 | Cuotas por plan | `core/billing/quota.py` (límites en tabla `plans`; seed en `BD/seeds/plans.sql`) |
+| Panel admin (API) | `core/gateway/routers/admin_panel.py` (`/api/admin/*`, rol) + `nodes_admin.py` |
+| Panel admin (web) | `apps/web/src/pages/AdminPage.jsx` + `styles/admin.css` (ruta `/admin`) |
 | BD (modelos/queries) | `core/persistence/models.py` · `queries.py` (staging vía `DATABASE_URL` del `.env`) |
 | Inferencia/streaming | `core/inference/ollama.py` (única implementación) |
 | Orquestador | `core/orchestration/orchestrator.py` (`ollama_target()` decide nodo vs local) |

@@ -1,7 +1,6 @@
 """
-nodes_admin.py — CRUD de nodos GPU del cluster (solo admin).
+nodes_admin.py — CRUD de nodos GPU del cluster (rol admin, F6).
 Los nodos viven en la tabla `nodes`; el orquestador se recarga tras cada cambio.
-El panel visual llega en F6; estos endpoints son su API.
 """
 from __future__ import annotations
 
@@ -13,8 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from core.gateway import deps
-from core.persistence.queries import delete_node, list_nodes, upsert_node
-from core.security.auth import require_admin_token
+from core.persistence.queries import delete_node, list_nodes, log_audit_event, upsert_node
+from core.security.auth import admin_required
 
 router = APIRouter(prefix="/api/admin/nodes", tags=["admin-nodes"])
 
@@ -30,7 +29,7 @@ class NodePayload(BaseModel):
 
 
 @router.get("")
-async def get_nodes(_: None = Depends(require_admin_token)) -> dict[str, Any]:
+async def get_nodes(_admin: dict[str, Any] = Depends(admin_required)) -> dict[str, Any]:
     """Lista los nodos registrados (token enmascarado) + estado en vivo del orquestador."""
     return {
         "nodes": list_nodes(mask_token=True),
@@ -41,7 +40,7 @@ async def get_nodes(_: None = Depends(require_admin_token)) -> dict[str, Any]:
 @router.post("")
 async def create_or_update_node(
     payload: NodePayload,
-    _: None = Depends(require_admin_token),
+    admin: dict[str, Any] = Depends(admin_required),
 ) -> dict[str, Any]:
     """
     Registra o actualiza un nodo. Si no se envía token, se genera uno nuevo y se
@@ -61,6 +60,7 @@ async def create_or_update_node(
         enabled=payload.enabled,
     )
     deps.orquestador.cargar_nodos()
+    log_audit_event("node_upserted", user_id=admin["id"], node_id=payload.id)
     return {
         "node": {**node, "token": None},
         "token": token,
@@ -69,9 +69,10 @@ async def create_or_update_node(
 
 
 @router.delete("/{node_id}")
-async def remove_node(node_id: str, _: None = Depends(require_admin_token)) -> dict[str, Any]:
+async def remove_node(node_id: str, admin: dict[str, Any] = Depends(admin_required)) -> dict[str, Any]:
     deleted = delete_node(node_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Nodo '{node_id}' no existe")
     deps.orquestador.cargar_nodos()
+    log_audit_event("node_deleted", user_id=admin["id"], node_id=node_id)
     return {"deleted": True, "node_id": node_id}

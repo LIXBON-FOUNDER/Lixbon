@@ -18,7 +18,7 @@ from core.persistence.queries import (
     list_recent_conversations,
     validate_api_key,
 )
-from core.security.auth import cookie_auth_required
+from core.security.auth import admin_required, cookie_auth_required
 from core.gateway.utils import fetch_models
 
 router = APIRouter()
@@ -69,16 +69,16 @@ async def api_usage(user_data: dict[str, Any] = Depends(cookie_auth_required)):
     return get_usage_summary(user_data["id"])
 
 
-# ── API de nodos ───────────────────────────────────────────────────────────
+# ── API de nodos (F6: métricas internas del cluster ⇒ solo admin) ─────────
 
 @router.get("/api/nodes")
-async def api_nodos(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_nodos(user_data: dict[str, Any] = Depends(admin_required)):
     """Lista todos los nodos con su estado y métricas actuales."""
     return {"nodos": deps.orquestador.estado_nodos()}
 
 
 @router.get("/api/nodes/best")
-async def api_mejor_nodo(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_mejor_nodo(user_data: dict[str, Any] = Depends(admin_required)):
     """Muestra cuál sería el nodo elegido en este momento."""
     nodo = deps.orquestador.best_node()
     if not nodo:
@@ -87,7 +87,7 @@ async def api_mejor_nodo(user_data: dict[str, Any] = Depends(cookie_auth_require
 
 
 @router.post("/api/nodes/reload")
-async def api_reload_nodes(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_reload_nodes(user_data: dict[str, Any] = Depends(admin_required)):
     """Recarga los nodos desde la BD en caliente, sin reiniciar el servidor."""
     deps.orquestador.cargar_nodos()
     return {"reloaded": True, "nodos": len(deps.orquestador._nodos)}

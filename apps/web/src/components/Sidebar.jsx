@@ -190,6 +190,11 @@ export function Sidebar({
                   <button onClick={() => { setProfileMenu(false); navigate('/account'); }}>
                     <IconGear size={14} /> Mi cuenta
                   </button>
+                  {user.role === 'admin' && (
+                    <button onClick={() => { setProfileMenu(false); navigate('/admin'); }}>
+                      <IconGrid size={14} /> Panel admin
+                    </button>
+                  )}
                   <button onClick={onLogout}><IconLogout size={14} /> Cerrar sesión</button>
                 </div>
               )}

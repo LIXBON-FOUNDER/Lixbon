@@ -21,6 +21,7 @@ class User(Base):
     last_name: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text, nullable=False, default="user")   # user | admin
     email_verified: Mapped[int] = mapped_column(nullable=False, default=0)
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)         # 0 = bloqueado por admin (F6)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
