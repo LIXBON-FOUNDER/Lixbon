@@ -1,7 +1,7 @@
 // AdminPage.jsx — panel de administración (F6). Solo role=admin (el backend
 // valida igualmente cada endpoint). Tabs: Resumen, Usuarios, Nodos, Modelos
 // y Auditoría.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
@@ -661,12 +661,20 @@ export default function AdminPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState('resumen');
+  const tabsRef = useRef({});
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
 
   useEffect(() => {
     if (loading) return;
     if (!user) navigate('/auth', { replace: true });
     else if (user.role !== 'admin') navigate('/', { replace: true });
   }, [user, loading, navigate]);
+
+  // Posiciona el indicador deslizante bajo la tab activa (anima left/width).
+  useEffect(() => {
+    const el = tabsRef.current[tab];
+    if (el) setIndicator({ left: el.offsetLeft, width: el.offsetWidth, ready: true });
+  }, [tab, loading, user]);
 
   if (loading || !user || user.role !== 'admin') {
     return (
@@ -680,7 +688,7 @@ export default function AdminPage() {
   return (
     <div className="page">
       <header className="page__bar">
-        <Link to="/" className="page__logo"><Logo size={17} /></Link>
+        <Link to="/" className="page__logo"><Logo size={30} /></Link>
         <Link to="/" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
       </header>
 
@@ -688,9 +696,14 @@ export default function AdminPage() {
         <h1 className="page__title">Panel de administración</h1>
 
         <nav className="admin-tabs" role="tablist">
+          <span
+            className="admin-tabs__indicator"
+            style={{ left: indicator.left, width: indicator.width, opacity: indicator.ready ? 1 : 0 }}
+          />
           {TABS.map((t) => (
             <button
               key={t.id}
+              ref={(el) => { tabsRef.current[t.id] = el; }}
               role="tab"
               aria-selected={tab === t.id}
               className={`admin-tab ${tab === t.id ? 'is-active' : ''}`}

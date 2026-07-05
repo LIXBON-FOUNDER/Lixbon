@@ -224,6 +224,68 @@ p {
   to { transform: translateX(360%); }
 }
 
+/* ── Skeleton loading (shimmer) ──────────────────────────────────────── */
+
+.skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background: rgba(23, 23, 23, 0.07);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(23, 23, 23, 0.06),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+.sk-history {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  animation: fade-in 0.2s ease;
+}
+
+.sk-thread {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 8px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: fade-in 0.2s ease;
+}
+
+.sk-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sk-msg--user {
+  align-items: flex-end;
+}
+
+.sk-docs {
+  animation: fade-in 0.2s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
 /* ── Accesibilidad: sin animaciones si el SO lo pide ─────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

@@ -367,7 +367,7 @@ export default function AccountPage() {
   return (
     <div className="page">
       <header className="page__bar">
-        <Link to="/" className="page__logo"><Logo size={22} /></Link>
+        <Link to="/" className="page__logo"><Logo size={30} /></Link>
         <Link to="/" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
       </header>
 

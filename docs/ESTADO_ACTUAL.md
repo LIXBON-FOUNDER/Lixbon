@@ -147,6 +147,11 @@
 - **Ajustes** (`/account` y `/account/:section`, `pages/AccountPage.jsx` reescrito): la vista plana de "Mi cuenta" se convirtió en una sección con **sidebar interno** (estilo settings de Claude, con nuestro diseño crema/ink) y 5 secciones: **General** (perfil editable: nombre/apellido vía `PATCH /api/account/profile`; correo readonly; apariencia/idioma "Próximamente"), **Cuenta** (correo+verificación, cambiar contraseña por enlace usando `request-password-reset`, gestión de API keys movida aquí, cerrar sesión, eliminar cuenta "Próximamente"), **Privacidad** (texto + toggles y exportar "Próximamente"), **Facturación** (plan actual + "Ajustar plan"→/planes; método de pago/facturas/cancelar "Próximamente", F7), **Uso** (barras de cuota + gráfica 30 días). Estilos `.settings*`/`.set-*` en `account.css`.
 - Backend: `PATCH /api/account/profile` (billing.py) + query `update_user_profile`.
 
+**F6.9 — Pulido de UI: tabs animadas, logo, skeleton loading (2026-07-04, E2E 8/8)**:
+- **Indicador deslizante** en las tabs del panel admin (`admin-tabs__indicator`): mide `offsetLeft/offsetWidth` de la tab activa con refs y anima `left/width`; el texto activo pasa a blanco con transición (ya no hay salto de fondo).
+- **Logo a 30px** en los headers de página (AdminPage, AccountPage) y en `PublicNav`.
+- **Skeleton loading** (`components/Skeleton.jsx` + shimmer en `base.css`, respeta `prefers-reduced-motion`) en las cargas reales: **historial del sidebar** (`HistorySkeleton`, mientras carga `/api/conversations`), **hilo de mensajes** al abrir `/c/:id` (`ThreadSkeleton`, mientras carga `/api/conversations/:id/messages`) y **contenido de Docs** (`DocsSkeleton`, transición breve al montar/cambiar sección). El resto sigue con la pantalla `app-loading`.
+
 **F6.8 — Identidad de planes + header público + "Aplicaciones" (2026-07-04, E2E 11/11)**:
 - **Color por plan** (`lib/planColors.js`): Gratuito `#676767`, Pro `#CE7F25`, Advance `#98A61F`. Aplicado al nombre del plan en `/planes` y al badge/pill del plan (fondo del color + texto blanco) en Ajustes y en el footer del sidebar.
 - **"Descargas" renombrado a "Aplicaciones"**: ruta `/aplicaciones` (con redirect de `/descargas`), título de la página, enlaces del nav, botón del sidebar y textos de Docs.

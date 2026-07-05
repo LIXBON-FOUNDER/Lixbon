@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PublicNav } from '../components/PublicNav';
 import { SECTIONS } from './docsContent';
+import { DocsSkeleton } from '../components/Skeleton';
 import { IconChevron } from '../components/Icons';
 
 export default function DocsPage() {
   const { section } = useParams();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [contentReady, setContentReady] = useState(false);
   const base = useMemo(() => window.location.origin, []);
 
   const current = SECTIONS.find((s) => s.id === section) || SECTIONS[0];
@@ -25,9 +27,13 @@ export default function DocsPage() {
     return acc;
   }, []);
 
+  // Skeleton breve al montar y al cambiar de sección, para una transición suave.
   useEffect(() => {
     window.scrollTo(0, 0);
     setMenuOpen(false);
+    setContentReady(false);
+    const t = setTimeout(() => setContentReady(true), 220);
+    return () => clearTimeout(t);
   }, [section]);
 
   const Body = current.Body;
@@ -63,8 +69,14 @@ export default function DocsPage() {
         </aside>
 
         <article className="docs__content">
-          <Body base={base} />
-          <DocsFooter current={current} />
+          {contentReady ? (
+            <>
+              <Body base={base} />
+              <DocsFooter current={current} />
+            </>
+          ) : (
+            <DocsSkeleton />
+          )}
         </article>
       </div>
     </div>

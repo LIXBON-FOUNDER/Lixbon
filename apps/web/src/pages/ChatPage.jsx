@@ -9,6 +9,7 @@ import { streamChatCompletion } from '../lib/stream';
 import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
+import { ThreadSkeleton } from '../components/Skeleton';
 import { IconShare, IconArrowDown } from '../components/Icons';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
@@ -19,7 +20,9 @@ export default function ChatPage() {
   const navigate = useNavigate();
 
   const [conversations, setConversations] = useState([]);
+  const [convsLoading, setConvsLoading] = useState(true);
   const [messages, setMessages] = useState([]);
+  const [msgsLoading, setMsgsLoading] = useState(false);
   const [title, setTitle] = useState(null);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
@@ -47,7 +50,9 @@ export default function ChatPage() {
     try {
       const res = await api.get('/api/conversations');
       setConversations(res.data.conversations);
-    } catch { /* sin sesión o error transitorio */ }
+    } catch { /* sin sesión o error transitorio */ } finally {
+      setConvsLoading(false);
+    }
   }, []);
 
   const loadModels = useCallback(async () => {
@@ -61,7 +66,8 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setConvsLoading(false); return; }
+    setConvsLoading(true);
     loadConversations();
     loadModels().catch(() => setModels([]));
   }, [user, loadConversations, loadModels]);
@@ -76,12 +82,14 @@ export default function ChatPage() {
     }
     if (!user || loadedConvRef.current === routeConvId) return;
     loadedConvRef.current = routeConvId;
+    setMsgsLoading(true);
     api.get(`/api/conversations/${routeConvId}/messages`)
       .then((res) => {
         setMessages(res.data.messages.map((m) => ({ role: m.role, content: m.content })));
         setTitle(res.data.conversation?.title || null);
       })
-      .catch(() => navigate('/', { replace: true }));
+      .catch(() => navigate('/', { replace: true }))
+      .finally(() => setMsgsLoading(false));
   }, [routeConvId, user, navigate]);
 
   // ── Scroll: auto-follow durante el stream + botón "más ↓" ───────────
@@ -220,6 +228,7 @@ export default function ChatPage() {
       <Sidebar
         user={user}
         conversations={conversations}
+        loadingConversations={convsLoading}
         activeId={routeConvId}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}
@@ -248,7 +257,16 @@ export default function ChatPage() {
           )}
         </header>
 
-        {empty ? (
+        {msgsLoading && empty ? (
+          <>
+            <div className="chat-scroll">
+              <ThreadSkeleton />
+            </div>
+            <div className="chat-composer">
+              <ChatInput onSend={send} busy models={models} model={model} onModelChange={setModel} />
+            </div>
+          </>
+        ) : empty ? (
           <div className="chat-hero">
             <h2 className="chat-hero__title">¿Qué investigaremos hoy?</h2>
             <div className="chat-hero__input">

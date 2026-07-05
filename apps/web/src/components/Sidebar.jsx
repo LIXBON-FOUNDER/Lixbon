@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
 import { planColor } from '../lib/planColors';
+import { HistorySkeleton } from './Skeleton';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
@@ -73,7 +74,7 @@ function HistoryItem({ conv, active, onRename, onDelete }) {
 }
 
 export function Sidebar({
-  user, conversations, activeId, collapsed, onToggleCollapse,
+  user, conversations, loadingConversations, activeId, collapsed, onToggleCollapse,
   onRename, onDelete, onLogout,
 }) {
   const [historyOpen, setHistoryOpen] = useState(true);
@@ -153,19 +154,25 @@ export function Sidebar({
           <div className={`reveal ${historyOpen ? 'is-open' : ''}`}>
             <div className="reveal__inner">
               <div className="sidebar__history-list">
-                {visible.map((c) => (
-                  <HistoryItem
-                    key={c.id}
-                    conv={c}
-                    active={c.id === activeId}
-                    onRename={onRename}
-                    onDelete={onDelete}
-                  />
-                ))}
-                {visible.length === 0 && (
-                  <p className="sidebar__empty">
-                    {user ? 'Aún no hay conversaciones' : 'Inicia sesión para guardar tu historial'}
-                  </p>
+                {user && loadingConversations ? (
+                  <HistorySkeleton />
+                ) : (
+                  <>
+                    {visible.map((c) => (
+                      <HistoryItem
+                        key={c.id}
+                        conv={c}
+                        active={c.id === activeId}
+                        onRename={onRename}
+                        onDelete={onDelete}
+                      />
+                    ))}
+                    {visible.length === 0 && (
+                      <p className="sidebar__empty">
+                        {user ? 'Aún no hay conversaciones' : 'Inicia sesión para guardar tu historial'}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </div>

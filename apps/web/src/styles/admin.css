@@ -4,6 +4,7 @@
 /* ── Tabs ────────────────────────────────────────────────────────────── */
 
 .admin-tabs {
+  position: relative;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -14,13 +15,29 @@
   background: var(--bg);
 }
 
+/* Indicador deslizante bajo la tab activa */
+.admin-tabs__indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  z-index: 0;
+  transition:
+    left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s ease;
+}
+
 .admin-tab {
+  position: relative;
+  z-index: 1;
   padding: 8px 20px;
   border-radius: var(--radius-pill);
   font-size: 14.5px;
   font-weight: 500;
   color: var(--ink-soft);
-  transition: background 0.18s ease, color 0.18s ease;
+  transition: color 0.25s ease;
 }
 
 .admin-tab:hover {
@@ -28,7 +45,6 @@
 }
 
 .admin-tab.is-active {
-  background: var(--ink);
   color: #fff;
 }
 

@@ -19,7 +19,7 @@ export function PublicNav() {
 
   return (
     <header className="pubnav">
-      <Link to="/" className="pubnav__logo"><Logo size={22} /></Link>
+      <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
 
       <nav className="pubnav__links">
         {LINKS.map((l) => (
