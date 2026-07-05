@@ -565,6 +565,57 @@
   box-shadow: 0 0 0 1px rgba(23, 23, 23, 0.18);
 }
 
+.chat-input__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 5px 8px 5px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  font-size: 12.5px;
+}
+
+.attach-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-chip__trunc {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.attach-chip__x {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.attach-chip__x:hover {
+  color: var(--ink);
+}
+
+.chat-input__error {
+  margin-bottom: 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(192, 57, 43, 0.1);
+  color: var(--danger);
+  font-size: 13px;
+}
+
 .chat-input__text {
   width: 100%;
   border: none;
@@ -595,6 +646,11 @@
 .chat-input__left .icon-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.chat-input__left .icon-btn.is-active {
+  background: var(--ink);
+  color: #fff;
 }
 
 .chat-input__model {

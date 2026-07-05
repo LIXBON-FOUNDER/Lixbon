@@ -10,3 +10,4 @@ psutil
 packaging
 boto3
 stripe
+pypdf
