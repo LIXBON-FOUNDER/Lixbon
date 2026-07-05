@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import RedirectResponse
 from packaging.version import InvalidVersion, Version
 
-from core.config import APP_VERSION, r2_configured
+from core.config import APP_VERSION, PUBLIC_BASE_URL, r2_configured
 from core.persistence import queries as db
 from core.security.auth import admin_or_token
 from core.storage import r2
@@ -57,8 +57,17 @@ def sync_versions_to_db():
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _public_download_url(request: Request, version: str, channel: str) -> str:
-    """URL estable del gateway que resuelve la descarga (redirige a R2 o local)."""
-    base = str(request.base_url).rstrip("/")
+    """URL estable del gateway que resuelve la descarga (redirige a R2 o local).
+
+    Detrás de Railway/Cloudflare el TLS se termina fuera y la petición llega al
+    gateway por http, así que `request.base_url` sería http://… — un enlace que
+    el navegador bloquea en silencio por mixed content en una página https.
+    Preferimos PUBLIC_BASE_URL; si no, respetamos el esquema real que anuncia el
+    proxy en X-Forwarded-Proto."""
+    base = (PUBLIC_BASE_URL or str(request.base_url)).rstrip("/")
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    if proto == "https" and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
     return f"{base}/api/updates/download/{version}/{channel}"
 
 

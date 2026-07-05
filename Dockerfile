@@ -23,4 +23,7 @@ COPY --from=web-build /build/dist apps/web/dist
 ENV PORT=8000
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn core.gateway.app:app --host 0.0.0.0 --port ${PORT}"]
+# --proxy-headers + --forwarded-allow-ips=*: Railway/Cloudflare terminan el TLS
+# fuera y reenvían por http; sin esto request.url_for/base_url generan enlaces
+# http:// que el navegador bloquea por mixed content (descargas, redirects).
+CMD ["sh", "-c", "uvicorn core.gateway.app:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips=*"]
