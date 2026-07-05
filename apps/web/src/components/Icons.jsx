@@ -143,3 +143,23 @@ export const IconWindow = (p) => (
 export const IconCheck = (p) => (
   <Svg {...p}><path d="M4 12l5 5L20 6" /></Svg>
 );
+
+export const IconBolt = (p) => (
+  <Svg {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></Svg>
+);
+
+export const IconUser = (p) => (
+  <Svg {...p}><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></Svg>
+);
+
+export const IconShield = (p) => (
+  <Svg {...p}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z" /></Svg>
+);
+
+export const IconCard = (p) => (
+  <Svg {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /></Svg>
+);
+
+export const IconChart = (p) => (
+  <Svg {...p}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></Svg>
+);

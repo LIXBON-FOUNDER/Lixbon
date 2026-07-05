@@ -8,7 +8,7 @@ import { Logo } from './Logo';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
-  IconDownload, IconBook,
+  IconDownload, IconBook, IconBolt, IconGlobe,
 } from './Icons';
 
 function HistoryItem({ conv, active, onRename, onDelete }) {
@@ -136,7 +136,7 @@ export function Sidebar({
           <button className="sb-nav" onClick={() => setHistoryOpen(true)}>
             <IconChat /> <span>Conversaciones</span>
           </button>
-          <button className="sb-nav sb-nav--soon" title="Próximamente">
+          <button className="sb-nav" onClick={() => navigate('/descargas')}>
             <IconGrid /> <span>Aplicaciones</span>
           </button>
           <button className="sb-nav sb-nav--soon" title="Próximamente">
@@ -171,6 +171,12 @@ export function Sidebar({
           </div>
         </div>
 
+        {user && user.plan_id !== 'advance' && (
+          <button className="sidebar__upgrade" onClick={() => navigate('/planes')}>
+            <IconBolt size={16} /> <span>Mejorar plan</span>
+          </button>
+        )}
+
         <div className="sidebar__profile">
           {user ? (
             <>
@@ -188,14 +194,17 @@ export function Sidebar({
               </button>
               {profileMenu && (
                 <div className="sb-menu sb-menu--profile" onMouseLeave={() => setProfileMenu(false)}>
+                  <button onClick={() => { setProfileMenu(false); navigate('/planes'); }}>
+                    <IconBolt size={14} /> Planes
+                  </button>
+                  <button className="sb-menu__soon" disabled title="Próximamente">
+                    <IconGlobe size={14} /> Lenguaje <span className="sb-menu__tag">Pronto</span>
+                  </button>
                   <button onClick={() => { setProfileMenu(false); navigate('/account'); }}>
-                    <IconGear size={14} /> Mi cuenta
+                    <IconGear size={14} /> Ajustes
                   </button>
                   <button onClick={() => { setProfileMenu(false); navigate('/docs'); }}>
                     <IconBook size={14} /> Documentación
-                  </button>
-                  <button onClick={() => { setProfileMenu(false); navigate('/descargas'); }}>
-                    <IconDownload size={14} /> Descargas
                   </button>
                   {user.role === 'admin' && (
                     <button onClick={() => { setProfileMenu(false); navigate('/admin'); }}>

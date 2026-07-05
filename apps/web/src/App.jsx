@@ -20,6 +20,7 @@ export default function App() {
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/account" element={<AccountPage />} />
+          <Route path="/account/:section" element={<AccountPage />} />
           <Route path="/planes" element={<PlansPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/descargas" element={<DownloadsPage />} />

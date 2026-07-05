@@ -63,10 +63,19 @@ jobs:
           $MSI_PATH = Get-ChildItem -Path "apps/desktop/src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
           if ($MSI_PATH) {
             Write-Host "Uploading $($MSI_PATH.Name) to remote server..."
-            # Determinar la versión dinámicamente desde el package.json
-            $PackageJson = Get-Content -Raw -Path "apps/desktop/package.json" | ConvertFrom-Json
-            $Version = $PackageJson.version
-            
+            # Versión: preferir el tag de git (vX.Y.Z) para que coincida con el release;
+            # si no hay tag (ej. workflow_dispatch), caer al package.json.
+            $Ref = "${{ github.ref_name }}"
+            if ($Ref -match '^v?(\d+\.\d+\.\d+.*)$') {
+              $Version = $Matches[1]
+            } else {
+              $PackageJson = Get-Content -Raw -Path "apps/desktop/package.json" | ConvertFrom-Json
+              $Version = $PackageJson.version
+            }
+            # Canal: beta si el tag lo indica (v1.2.3-beta / -rc), si no stable.
+            if ($Version -match '(?i)beta|rc') { $Channel = "beta" } else { $Channel = "stable" }
+            Write-Host "Version=$Version Channel=$Channel"
+
             # Intentar obtener la firma de Tauri (.msi.sig)
             $SIG_PATH = Get-ChildItem -Path "apps/desktop/src-tauri/target/release/bundle/msi/*.msi.sig" | Select-Object -First 1
             $Signature = ""
@@ -91,12 +100,12 @@ jobs:
             curl.exe -X POST `
               -H "X-Admin-Token: ${{ secrets.FOLAX_ADMIN_TOKEN }}" `
               -F "version=$Version" `
-              -F "channel=stable" `
+              -F "channel=$Channel" `
               -F "title=App Folax v$Version" `
               -F "changelog=$ChangelogJson" `
               -F "checksum_sha256=$Signature" `
               -F "file=@$($MSI_PATH.FullName)" `
-              https://remote.datacentgbx.online/api/versions/upload
+              "${{ vars.FOLAX_SERVER_URL || 'https://remote.datacentgbx.online' }}/api/versions/upload"
           } else {
             Write-Warning "No MSI installer found to upload."
           }

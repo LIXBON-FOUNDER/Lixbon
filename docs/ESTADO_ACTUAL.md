@@ -142,12 +142,18 @@
 - **Conflicto de ruta resuelto**: `/docs` colisionaba con la Swagger UI de FastAPI → Swagger movida a `/api/docs`, ReDoc a `/api/redoc`, OpenAPI a `/api/openapi.json` (en `app.py`), liberando `/docs` para la web.
 - E2E: admin publica una versión desde el panel y aparece en la tabla; Descargas muestra el Desktop y los comandos del CLI (Windows/Unix); Docs navega entre secciones (SPA) con el código visible; enlaces del sidebar funcionan.
 
+**F6.7 — Navegación del sidebar + rediseño de Ajustes (completada 2026-07-04, E2E 14/14)**:
+- **Sidebar**: "Aplicaciones" ahora navega a `/descargas` (ya no es placeholder); botón destacado **"Mejorar plan"** (accent) → `/planes`, visible salvo plan advance; menú del engranaje reorganizado: **Planes** (→/planes), **Lenguaje** (deshabilitado, "Pronto"), **Ajustes** (→/account), Documentación, Panel admin (si admin), Cerrar sesión.
+- **Ajustes** (`/account` y `/account/:section`, `pages/AccountPage.jsx` reescrito): la vista plana de "Mi cuenta" se convirtió en una sección con **sidebar interno** (estilo settings de Claude, con nuestro diseño crema/ink) y 5 secciones: **General** (perfil editable: nombre/apellido vía `PATCH /api/account/profile`; correo readonly; apariencia/idioma "Próximamente"), **Cuenta** (correo+verificación, cambiar contraseña por enlace usando `request-password-reset`, gestión de API keys movida aquí, cerrar sesión, eliminar cuenta "Próximamente"), **Privacidad** (texto + toggles y exportar "Próximamente"), **Facturación** (plan actual + "Ajustar plan"→/planes; método de pago/facturas/cancelar "Próximamente", F7), **Uso** (barras de cuota + gráfica 30 días). Estilos `.settings*`/`.set-*` en `account.css`.
+- Backend: `PATCH /api/account/profile` (billing.py) + query `update_user_profile`.
+
+**Releases automáticos por CI — YA EXISTÍA** (`.github/workflows/tauri.yml`): al pushear un tag `v*`, compila el `.msi` de Tauri firmado (`tauri-action`, `TAURI_SIGNING_PRIVATE_KEY`) y lo sube solo a `POST /api/versions/upload` con `X-Admin-Token: FOLAX_ADMIN_TOKEN`; el gateway lo guarda en R2. Compatible con el backend reescrito. **Mejorado 2026-07-04**: deriva versión y canal del tag (`v1.2.3` → stable, `v1.2.3-beta`/`-rc` → beta), y la URL del server sale de la variable de repo `FOLAX_SERVER_URL` (default `remote.datacentgbx.online`). Requisitos operativos: que `ADMIN_TOKEN` del gateway de prod == secret `FOLAX_ADMIN_TOKEN`, y las vars R2 en Railway (si no, el .msi cae al disco efímero). Para publicar: `git tag v0.3.0 && git push --tags`.
+
 ---
 
 ## 7. Fases posteriores (sin iniciar)
 
-- **F6.5 — Releases en R2** (bloqueado): ver arriba. Necesito que crees el bucket R2 y me pases las credenciales.
-- **F7 — Pagos**: Stripe o Mercado Pago (decisión pendiente del usuario), checkout hosted + webhooks. El backend ya tiene planes/suscripciones; falta el cobro y el CTA "Próximamente" de `/planes`.
+- **F7 — Pagos**: Stripe o Mercado Pago (decisión pendiente del usuario), checkout hosted + webhooks. El backend ya tiene planes/suscripciones; falta el cobro, activar Facturación real en Ajustes y el CTA "Próximamente" de `/planes`.
 - **F8 — Calidad**: tests automatizados (no hay ninguno aún), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.
 
 ---

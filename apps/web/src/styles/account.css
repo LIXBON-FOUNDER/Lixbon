@@ -396,6 +396,219 @@
   opacity: 0.75;
 }
 
+/* ── Ajustes (sección con sidebar interno) ───────────────────────────── */
+
+.settings {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 40px;
+  width: min(980px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 8px 0 80px;
+  align-items: start;
+}
+
+.settings__nav {
+  position: sticky;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings__nav-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  padding: 4px 12px 8px;
+}
+
+.settings__nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  text-align: left;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.settings__nav-link:hover {
+  color: var(--ink);
+  background: rgba(23, 23, 23, 0.05);
+}
+
+.settings__nav-link.is-active {
+  color: var(--ink);
+  background: var(--bg-secondary);
+}
+
+.settings__content {
+  min-width: 0;
+  max-width: 640px;
+  animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.set-title {
+  font-size: 17px;
+  font-weight: 650;
+  margin: 26px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.set-title:first-child {
+  margin-top: 0;
+}
+
+.set-plan-tag {
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.set-lead {
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  line-height: 1.6;
+  margin-bottom: 6px;
+}
+
+.set-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-box);
+  background: var(--bg);
+  padding: 6px 20px;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.set-row:last-child {
+  border-bottom: none;
+}
+
+.set-row--head {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.set-row__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.set-row__label > span:first-child {
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.set-row__hint {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.set-row__control {
+  flex-shrink: 0;
+}
+
+.set-input {
+  width: 260px;
+  max-width: 46vw;
+  padding: 9px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  outline: none;
+  font-size: 14.5px;
+}
+
+.set-input:focus {
+  border-color: var(--ink);
+}
+
+.set-static {
+  font-size: 14.5px;
+  color: var(--ink-soft);
+}
+
+.set-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.set-btn {
+  font-size: 14px;
+  padding: 8px 16px;
+  text-decoration: none;
+}
+
+.set-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.set-ok {
+  color: #4a7c1a;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.set-soon {
+  padding: 3px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.set-plan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+}
+
+.set-plan__info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.set-plan__price {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
 @media (max-width: 640px) {
   .page__title {
     font-size: 25px;
@@ -407,5 +620,26 @@
 
   .card__row {
     flex-wrap: wrap;
+  }
+
+  .settings {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .settings__nav {
+    position: static;
+    display: none;
+    padding: 8px;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-box);
+  }
+
+  .settings__nav.is-open {
+    display: flex;
+  }
+
+  .set-input {
+    width: 180px;
   }
 }

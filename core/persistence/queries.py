@@ -168,6 +168,14 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
         return _user_to_dict(user) if user else None
 
 
+def update_user_profile(user_id: int, first_name: str, last_name: str) -> None:
+    with get_session() as s:
+        s.execute(
+            update(User).where(User.id == user_id)
+            .values(first_name=first_name or None, last_name=last_name or None)
+        )
+
+
 def set_user_password(user_id: int, new_password: str) -> None:
     with get_session() as s:
         s.execute(
