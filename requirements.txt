@@ -9,3 +9,4 @@ python-multipart
 psutil
 packaging
 boto3
+stripe

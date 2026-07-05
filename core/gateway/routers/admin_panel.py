@@ -51,6 +51,7 @@ class PlanUpdatePayload(BaseModel):
     rate_limit_per_min: int | None = None
     allowed_models: list[str] | None = None   # [] o null explícito ⇒ todos
     is_active: bool | None = None
+    stripe_price_id: str | None = None         # F7: price_ de Stripe (null = desconectar)
 
 
 # ── Dashboard global ────────────────────────────────────────────────────────

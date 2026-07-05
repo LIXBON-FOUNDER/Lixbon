@@ -1,13 +1,27 @@
 # FOLAX — Estado actual del proyecto
 
-> Actualizado: 2026-07-04 (F6 completada, salvo releases R2). Documento para retomar el trabajo.
+> Actualizado: 2026-07-04 (F7 pagos: integración lista, falta conectar credenciales). Documento para retomar el trabajo.
 > Referencias: `docs/PLAN_MAESTRO.md` (plan por fases) · `docs/DISENO_WEB.md` (diseño de la web) · `docs/INFORME_Y_PLAN.md` (diagnóstico original).
 
 ---
 
 ## 1. Resumen en una línea
 
-**Backend, web nueva, planes con límites y panel admin completos (F0–F6 ✅, salvo releases R2). Falta: pagos, calidad (F7–F8).**
+**F0–F7 implementadas (backend, web, planes/límites, panel admin, releases R2, pagos Stripe). Pendiente: conectar credenciales de Stripe en Railway, y F8 (calidad/tests).**
+
+---
+
+## 0. Cómo ACTIVAR Stripe (F7 — pagos) 🔴
+
+La integración está completa y verificada en modo degradado + lógica de webhook (20 checks). Para encender los pagos reales:
+1. **Cuenta Stripe** (modo test primero): crea 2 **Productos** con precio recurrente mensual — Pro ($9.90) y Advance ($24.90). Copia sus `price_...`.
+2. **Conecta los precios**: en el panel admin → tab **Modelos** → "Precios de Stripe", pega cada `price_...` en su plan. (O `PATCH /api/admin/plans/{id}` con `{"stripe_price_id": "price_..."}`.)
+3. **Variables de entorno** (`.env` local y Railway): `STRIPE_SECRET_KEY=sk_test_...`, `STRIPE_PUBLISHABLE_KEY=pk_test_...`, `STRIPE_WEBHOOK_SECRET=whsec_...`, y `PUBLIC_BASE_URL=https://tu-dominio` (para las URLs de retorno del checkout).
+4. **Webhook en Stripe**: apunta un endpoint a `https://tu-dominio/api/billing/webhook` y suscríbelo a `customer.subscription.created/updated/deleted` e `invoice.payment_failed`. Copia el signing secret a `STRIPE_WEBHOOK_SECRET`.
+5. **Probar**: en modo test, tarjeta `4242 4242 4242 4242`. Suscríbete desde `/planes` → checkout → vuelve a `/account/facturacion`. El webhook activa el plan solo.
+6. Cuando funcione en test, repite con las claves **live**.
+
+Con `STRIPE_SECRET_KEY` vacío, todo degrada: `/planes` y Facturación muestran "Próximamente"; `/api/billing/*` responde 503.
 
 ---
 
@@ -58,6 +72,7 @@
 | `R2_ACCOUNT_ID` | `071d1172730bf91c22924d149b67f95d` | Releases privados (F6.5); sin las 4 vars R2, prod cae al disco efímero |
 | `R2_BUCKET` | `releases-folax` | Bucket de instaladores |
 | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | (están en el `.env` local) | Credenciales R2 |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | (de tu cuenta Stripe) | Pagos F7; sin ellas todo degrada a "Próximamente" |
 
 ### Operativos (tu PC)
 - [x] **node_agent y tunnel al iniciar sesión** (2026-07-04): tareas programadas de usuario "FOLAX Node Agent (usuario)" y "FOLAX Tunnel (usuario)" (ONLOGON, sin límite de tiempo, PowerShell oculto — el alias pythonw de la Store no funciona en Task Scheduler). Arrancan al iniciar sesión de Windows; no requieren admin.
@@ -161,10 +176,23 @@
 
 ---
 
+## 6.10 ✅ F7 — Pagos con Stripe (implementada 2026-07-04; falta conectar credenciales)
+
+**Proveedor: Stripe** (elegido por el usuario). Integración completa lista por variables de entorno (como R2). Verificada en modo degradado (10/10) + lógica de webhook con eventos simulados (10/10).
+
+**BD**: `plans.stripe_price_id`; `subscriptions.{stripe_customer_id, stripe_subscription_id, current_period_end, cancel_at_period_end}` (migración idempotente en `init_db`). Queries nuevas en `queries.py`: `get_plan_by_stripe_price`, `get_subscription`, `get_user_by_stripe_customer`, `set_stripe_customer`, `apply_stripe_subscription`, `downgrade_to_free`; `update_plan` admite `stripe_price_id`.
+
+**Backend**: `core/billing/stripe_gateway.py` (checkout session modo subscription con Customer reusable, customer portal, `list_invoices`, `payment_method_summary`, verificación de firma y `handle_event`: `subscription.created/updated` → `apply_stripe_subscription`/activa plan, `subscription.deleted` → `downgrade_to_free`, `invoice.payment_failed` → audit; resuelve usuario por metadata o `stripe_customer_id`, plan por `stripe_price_id` o metadata). Router `payments.py` (`/api/billing`): `GET /config` (público, `{enabled, publishable_key}`), `POST /checkout`, `POST /portal`, `GET /status` (plan+renovación+método+facturas), `POST /webhook` (público, firma). `stripe` en requirements; `stripe_configured()`/`STRIPE_*`/`PUBLIC_BASE_URL` en `config.py`. Sin `STRIPE_SECRET_KEY` → `enabled:false` y 503.
+
+**Web**: `PlansPage` consulta `/api/billing/config`; si habilitado, CTA "Suscribirme a X" → `POST /checkout` → redirige al checkout de Stripe; si no, "Próximamente". `AccountPage` sección Facturación con `/api/billing/status`: plan real, fecha de renovación/cancelación, método de pago, historial de facturas (enlace a Stripe), botón "Ajustar plan"/"Gestionar" → portal; retorno `?checkout=success` muestra aviso. Panel admin → tab Modelos → "Precios de Stripe" para pegar los `price_...` por plan.
+
+**Cómo activarlo**: ver sección 0 arriba. **Pendiente**: crear productos/precios en Stripe, conectar `price_...`, poner `STRIPE_*` + `PUBLIC_BASE_URL` en Railway, configurar el webhook, probar en modo test (`4242...`).
+
+---
+
 ## 7. Fases posteriores (sin iniciar)
 
-- **F7 — Pagos**: Stripe o Mercado Pago (decisión pendiente del usuario), checkout hosted + webhooks. El backend ya tiene planes/suscripciones; falta el cobro, activar Facturación real en Ajustes y el CTA "Próximamente" de `/planes`.
-- **F8 — Calidad**: tests automatizados (no hay ninguno aún), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.
+- **F8 — Calidad**: tests automatizados (no hay ninguno aún; los scripts E2E de verificación viven en scratchpad, no versionados), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.
 
 ---
 

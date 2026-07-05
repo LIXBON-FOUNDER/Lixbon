@@ -86,6 +86,12 @@ def init_db() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email)",
         # F6: bloqueo de usuarios desde el panel admin
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1",
+        # F7: enlace con Stripe (pagos)
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS stripe_price_id TEXT",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS current_period_end TEXT",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS cancel_at_period_end INTEGER NOT NULL DEFAULT 0",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

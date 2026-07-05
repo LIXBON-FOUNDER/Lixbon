@@ -386,8 +386,10 @@ function NodosTab() {
 function ModelosTab() {
   const [data, setData] = useState(null);
   const [drafts, setDrafts] = useState({});
+  const [priceDrafts, setPriceDrafts] = useState({});
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
+  const [priceSaved, setPriceSaved] = useState('');
 
   useEffect(() => {
     api.get('/api/admin/models')
@@ -395,6 +397,9 @@ function ModelosTab() {
         setData(res.data);
         setDrafts(Object.fromEntries(
           res.data.plans.map((p) => [p.id, (p.allowed_models || []).join(', ')]),
+        ));
+        setPriceDrafts(Object.fromEntries(
+          res.data.plans.map((p) => [p.id, p.stripe_price_id || '']),
         ));
       })
       .catch((err) => setError(errMsg(err, 'No se pudieron cargar los modelos')));
@@ -410,6 +415,18 @@ function ModelosTab() {
       setTimeout(() => setSaved(''), 2500);
     } catch (err) {
       setError(errMsg(err, 'No se pudo guardar'));
+    }
+  };
+
+  const savePrice = async (planId) => {
+    setError('');
+    setPriceSaved('');
+    try {
+      await api.patch(`/api/admin/plans/${planId}`, { stripe_price_id: priceDrafts[planId].trim() || null });
+      setPriceSaved(planId);
+      setTimeout(() => setPriceSaved(''), 2500);
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo guardar el precio'));
     }
   };
 
@@ -460,6 +477,28 @@ function ModelosTab() {
             />
             <button className="pill-btn pill-btn--primary table__action" onClick={() => savePlan(p.id)}>
               {saved === p.id ? 'Guardado ✓' : 'Guardar'}
+            </button>
+          </div>
+        ))}
+      </section>
+
+      <section className="card">
+        <h2 className="card__title">Precios de Stripe (pagos)</h2>
+        <p className="card__muted">
+          Pega el <code>price_...</code> de cada plan de pago (creado en Stripe → Productos).
+          Conecta el plan con el checkout. Déjalo vacío en el plan gratuito.
+        </p>
+        {data.plans.filter((p) => p.price_monthly_cents > 0).map((p) => (
+          <div key={p.id} className="plan-models">
+            <span className="plan-models__name">{p.name}</span>
+            <input
+              className="plan-models__input"
+              value={priceDrafts[p.id] ?? ''}
+              onChange={(e) => setPriceDrafts({ ...priceDrafts, [p.id]: e.target.value })}
+              placeholder="price_..."
+            />
+            <button className="pill-btn pill-btn--primary table__action" onClick={() => savePrice(p.id)}>
+              {priceSaved === p.id ? 'Guardado ✓' : 'Guardar'}
             </button>
           </div>
         ))}

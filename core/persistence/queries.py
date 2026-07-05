@@ -599,6 +599,7 @@ def _plan_to_dict(p: Plan) -> dict[str, Any]:
         "priority": p.priority,
         "sort_order": p.sort_order,
         "is_active": bool(p.is_active),
+        "stripe_price_id": p.stripe_price_id,
     }
 
 
@@ -649,6 +650,115 @@ def set_user_plan(user_id: int, plan_id: str, expires_at: str | None = None) -> 
                 started_at=ts, expires_at=expires_at, created_at=ts, updated_at=ts,
             ))
         return True
+
+
+def get_plan_by_stripe_price(price_id: str) -> dict[str, Any] | None:
+    """Mapea un price_... de Stripe al plan correspondiente (para el webhook)."""
+    if not price_id:
+        return None
+    with get_session() as s:
+        p = s.scalars(select(Plan).where(Plan.stripe_price_id == price_id)).first()
+        return _plan_to_dict(p) if p else None
+
+
+def _subscription_to_dict(sub: Subscription) -> dict[str, Any]:
+    return {
+        "user_id": sub.user_id,
+        "plan_id": sub.plan_id,
+        "status": sub.status,
+        "started_at": sub.started_at,
+        "expires_at": sub.expires_at,
+        "stripe_customer_id": sub.stripe_customer_id,
+        "stripe_subscription_id": sub.stripe_subscription_id,
+        "current_period_end": sub.current_period_end,
+        "cancel_at_period_end": bool(sub.cancel_at_period_end),
+    }
+
+
+def get_subscription(user_id: int) -> dict[str, Any] | None:
+    """Suscripción cruda del usuario (con campos de Stripe), o None."""
+    with get_session() as s:
+        sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
+        return _subscription_to_dict(sub) if sub else None
+
+
+def get_user_by_stripe_customer(customer_id: str) -> dict[str, Any] | None:
+    """Usuario dueño de un customer de Stripe (para el webhook)."""
+    if not customer_id:
+        return None
+    with get_session() as s:
+        sub = s.scalars(
+            select(Subscription).where(Subscription.stripe_customer_id == customer_id)
+        ).first()
+        if not sub:
+            return None
+        user = s.get(User, sub.user_id)
+        return _user_to_dict(user) if user else None
+
+
+def set_stripe_customer(user_id: int, customer_id: str) -> None:
+    """Guarda (o crea) el customer de Stripe del usuario sin cambiar su plan."""
+    ts = now_iso()
+    with get_session() as s:
+        sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
+        if sub:
+            sub.stripe_customer_id = customer_id
+            sub.updated_at = ts
+        else:
+            s.add(Subscription(
+                user_id=user_id, plan_id=DEFAULT_PLAN_ID, status="active",
+                started_at=ts, stripe_customer_id=customer_id,
+                created_at=ts, updated_at=ts,
+            ))
+
+
+def apply_stripe_subscription(
+    user_id: int,
+    plan_id: str,
+    *,
+    customer_id: str | None = None,
+    subscription_id: str | None = None,
+    current_period_end: str | None = None,
+    cancel_at_period_end: bool = False,
+    status: str = "active",
+) -> bool:
+    """Refleja en la BD el estado de una suscripción de Stripe (idempotente)."""
+    ts = now_iso()
+    with get_session() as s:
+        if not s.get(Plan, plan_id):
+            return False
+        sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
+        if not sub:
+            sub = Subscription(user_id=user_id, plan_id=plan_id, started_at=ts,
+                               created_at=ts, updated_at=ts)
+            s.add(sub)
+        sub.plan_id = plan_id
+        sub.status = status
+        if customer_id:
+            sub.stripe_customer_id = customer_id
+        sub.stripe_subscription_id = subscription_id
+        sub.current_period_end = current_period_end
+        sub.cancel_at_period_end = 1 if cancel_at_period_end else 0
+        # expires_at = fin del ciclo pagado, para que get_plan_for_user degrade solo
+        sub.expires_at = current_period_end if cancel_at_period_end else None
+        sub.updated_at = ts
+        return True
+
+
+def downgrade_to_free(user_id: int) -> None:
+    """Degrada al plan gratuito (cancelación/impago) limpiando el enlace de Stripe."""
+    ts = now_iso()
+    with get_session() as s:
+        sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
+        if not sub:
+            return
+        sub.plan_id = DEFAULT_PLAN_ID
+        sub.status = "canceled"
+        sub.stripe_subscription_id = None
+        sub.current_period_end = None
+        sub.cancel_at_period_end = 0
+        sub.expires_at = None
+        sub.updated_at = ts
 
 
 def bump_usage_quota(user_id: int, period_type: str, period_start: str,
@@ -725,7 +835,7 @@ def update_plan(plan_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
     editable = {
         "name", "description", "price_monthly_cents", "messages_per_day",
         "tokens_per_month", "max_api_keys", "rate_limit_per_min",
-        "allowed_models", "is_active",
+        "allowed_models", "is_active", "stripe_price_id",
     }
     values = {k: v for k, v in fields.items() if k in editable}
     if not values:

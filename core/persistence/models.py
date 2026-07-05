@@ -199,6 +199,8 @@ class Plan(Base):
     priority: Mapped[int] = mapped_column(nullable=False, default=0)   # prioridad en cola (futuro)
     sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
     is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    # F7: id del precio recurrente en Stripe (price_...) que corresponde a este plan
+    stripe_price_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -217,6 +219,11 @@ class Subscription(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     started_at: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[str | None] = mapped_column(Text)               # NULL = sin vencimiento
+    # F7: enlace con Stripe (NULL en asignaciones manuales por admin)
+    stripe_customer_id: Mapped[str | None] = mapped_column(Text)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(Text)
+    current_period_end: Mapped[str | None] = mapped_column(Text)       # ISO; fin del ciclo pagado
+    cancel_at_period_end: Mapped[int] = mapped_column(nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 

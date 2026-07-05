@@ -251,37 +251,120 @@ function PrivacidadSection() {
 
 // ── Facturación ─────────────────────────────────────────────────────────
 
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString() : '—');
+
 function FacturacionSection({ plan }) {
+  const [billing, setBilling] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/billing/status')
+      .then((res) => setBilling(res.data))
+      .catch(() => setError('No se pudo cargar tu facturación.'));
+    // aviso de retorno del checkout
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') === 'success') {
+      setError('');
+    }
+  }, []);
+
+  const openPortal = async () => {
+    setBusy(true);
+    try {
+      const res = await api.post('/api/billing/portal');
+      window.location.href = res.data.url;
+    } catch {
+      setError('No se pudo abrir el portal de facturación.');
+      setBusy(false);
+    }
+  };
+
   const price = plan.price_monthly_cents === 0
     ? 'Gratis'
     : `$${(plan.price_monthly_cents / 100).toFixed(2)} / mes`;
+  const paid = billing?.is_paid;
+  const renews = new URLSearchParams(window.location.search).get('checkout') === 'success';
+
   return (
     <>
+      {renews && (
+        <p className="admin-ok" role="status">¡Listo! Tu suscripción se está activando. Puede tardar unos segundos en reflejarse.</p>
+      )}
+      {error && <p className="page__error" role="alert">{error}</p>}
+
       <h2 className="set-title">Plan</h2>
       <div className="set-card set-plan">
         <div className="set-plan__info">
           <span className="plan-pill" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span>
           <p className="card__muted">{plan.description}</p>
           <span className="set-plan__price">{price}</span>
+          {paid && billing.current_period_end && (
+            <span className="card__muted">
+              {billing.cancel_at_period_end
+                ? `Se cancela el ${fmtDate(billing.current_period_end)}`
+                : `Se renueva el ${fmtDate(billing.current_period_end)}`}
+            </span>
+          )}
         </div>
-        <Link to="/planes" className="pill-btn pill-btn--primary set-btn">
-          <IconBolt size={15} /> Ajustar plan
-        </Link>
+        {paid ? (
+          <button className="pill-btn pill-btn--primary set-btn" onClick={openPortal} disabled={busy}>
+            {busy ? 'Abriendo…' : 'Ajustar plan'}
+          </button>
+        ) : (
+          <Link to="/planes" className="pill-btn pill-btn--primary set-btn">
+            <IconBolt size={15} /> {billing?.enabled ? 'Mejorar plan' : 'Ver planes'}
+          </Link>
+        )}
       </div>
 
       <h2 className="set-title">Pago</h2>
       <div className="set-card">
-        <Row label="Método de pago" hint="Los pagos en línea llegan pronto"><SoonTag /></Row>
+        {paid && billing.payment_method ? (
+          <Row label="Método de pago" hint="Gestiónalo desde el portal">
+            <span className="set-static">
+              {billing.payment_method.brand?.toUpperCase()} ···· {billing.payment_method.last4}
+            </span>
+          </Row>
+        ) : (
+          <Row label="Método de pago" hint={billing?.enabled ? 'Se añade al suscribirte' : 'Los pagos en línea llegan pronto'}>
+            <SoonTag />
+          </Row>
+        )}
       </div>
 
       <h2 className="set-title">Facturas</h2>
       <div className="set-card">
-        <p className="card__muted">Aún no tienes facturas. Aparecerán aquí cuando actives un plan de pago.</p>
+        {paid && billing.invoices?.length > 0 ? (
+          <ul className="keys">
+            {billing.invoices.map((inv) => (
+              <li key={inv.id} className="keys__item">
+                <div className="keys__info">
+                  <span className="keys__name">{fmtDate(inv.date)}</span>
+                  <span className="keys__masked">{inv.currency} {inv.amount.toFixed(2)} · {inv.status}</span>
+                </div>
+                {inv.hosted_url && (
+                  <a className="keys__meta" href={inv.hosted_url} target="_blank" rel="noreferrer">Ver</a>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="card__muted">Aún no tienes facturas. Aparecerán aquí cuando actives un plan de pago.</p>
+        )}
       </div>
 
       <h2 className="set-title">Cancelación</h2>
       <div className="set-card">
-        <Row label="Cancelar plan" hint="Disponible con los planes de pago"><SoonTag /></Row>
+        {paid ? (
+          <Row label="Cancelar plan" hint="Gestiona la cancelación desde el portal de facturación">
+            <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={openPortal} disabled={busy}>
+              Gestionar
+            </button>
+          </Row>
+        ) : (
+          <Row label="Cancelar plan" hint="Disponible con los planes de pago"><SoonTag /></Row>
+        )}
       </div>
     </>
   );

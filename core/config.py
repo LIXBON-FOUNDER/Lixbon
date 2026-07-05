@@ -51,6 +51,18 @@ def r2_configured() -> bool:
 def r2_endpoint() -> str:
     return f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
+
+# ── Stripe (pagos — F7) ────────────────────────────────────────────────────
+STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# URL base pública para las páginas de retorno del checkout (success/cancel)
+PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+
+
+def stripe_configured() -> bool:
+    return bool(STRIPE_SECRET_KEY)
+
 # ── Identidad de la app ─────────────────────────────────────────────────────
 APP_TITLE: str = "FOLAX DTC"
 APP_VERSION: str = "2.4.0" # Actualizado a la versión del diseño del CLI
