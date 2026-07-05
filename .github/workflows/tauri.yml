@@ -96,8 +96,10 @@ jobs:
               $ChangelogJson = "[`"Compilación automática desde GitHub Actions`"]"
             }
             
-            # Petición multipart form para subir el instalador a la API del servidor
-            curl.exe -X POST `
+            # Petición multipart form para subir el instalador a la API del servidor.
+            # --fail-with-body: sin esto, un 4xx/5xx (o el 530 de un tunnel caído)
+            # deja el job en verde y el instalador nunca llega al servidor.
+            curl.exe --fail-with-body --show-error -X POST `
               -H "X-Admin-Token: ${{ secrets.FOLAX_ADMIN_TOKEN }}" `
               -F "version=$Version" `
               -F "channel=$Channel" `
@@ -105,7 +107,11 @@ jobs:
               -F "changelog=$ChangelogJson" `
               -F "checksum_sha256=$Signature" `
               -F "file=@$($MSI_PATH.FullName)" `
-              "${{ vars.FOLAX_SERVER_URL || 'https://remote.datacentgbx.online' }}/api/versions/upload"
+              "${{ vars.FOLAX_SERVER_URL || 'https://llm-datacent-production.up.railway.app' }}/api/versions/upload"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "La subida del instalador al servidor falló (exit $LASTEXITCODE)."
+              exit 1
+            }
           } else {
             Write-Warning "No MSI installer found to upload."
           }
