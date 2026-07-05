@@ -2,7 +2,7 @@
 // El backend emite chunks en formato OpenAI, comentarios ": keep-alive" y
 // termina con "data: [DONE]". La cookie de sesión autentica (F4).
 
-export async function streamChatCompletion({ model, messages, conversationId, signal, onDelta }) {
+export async function streamChatCompletion({ model, messages, conversationId, signal, onDelta, onSources, webSearch = false }) {
   const res = await fetch('/v1/chat/completions', {
     method: 'POST',
     credentials: 'include',
@@ -12,6 +12,7 @@ export async function streamChatCompletion({ model, messages, conversationId, si
       messages,
       conversation_id: conversationId,
       stream: true,
+      web_search: webSearch,
     }),
     signal,
   });
@@ -46,6 +47,7 @@ export async function streamChatCompletion({ model, messages, conversationId, si
       if (data === '[DONE]') return;
       try {
         const chunk = JSON.parse(data);
+        if (chunk.folax_sources && onSources) { onSources(chunk.folax_sources); continue; }
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) onDelta(delta);
       } catch { /* chunk malformado: se ignora */ }

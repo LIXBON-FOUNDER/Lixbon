@@ -190,6 +190,18 @@ Con `STRIPE_SECRET_KEY` vacío, todo degrada: `/planes` y Facturación muestran 
 
 ---
 
+## 6.11 ✅ Funciones de chat: compartir, adjuntar documentos, búsqueda web (2026-07-04)
+
+Tres features de producto sobre el chat, verificadas E2E (12/9/9).
+
+- **Compartir chat** (`conversations.share_token`): enlace público de solo lectura. Endpoints GET/POST/DELETE `/api/conversations/:id/share` (ownership) + `GET /api/shared/:token` (público, sin datos del dueño). Web: botón "Compartir" abre `ShareDialog` (crear/copiar/revocar); página `/s/:token` (`SharedPage`) con branding + CTA de registro.
+- **Adjuntar documentos** (`POST /api/attachments`, `routers/attachments.py`): extrae texto de PDF (pypdf) / texto / código, trunca a 12k chars, rechaza binarios e imágenes (415), límite 5 MB. Web: botón de clip en `ChatInput` sube el archivo, muestra chips (con marca "recortado") y antepone el texto del documento al mensaje. `pypdf` en requirements.
+- **Búsqueda en internet** ("modo investigar"): toggle del globo en `ChatInput`. Enfoque robusto (no tool-calling nativo, poco fiable en modelos pequeños): el gateway ejecuta la búsqueda e **inyecta los resultados como contexto** antes de responder, pidiendo citar fuentes. `core/inference/websearch.py` con proveedor configurable por env `WEBSEARCH_PROVIDER`: **duckduckgo** (default, sin key, `ddgs` en requirements), tavily (`TAVILY_API_KEY`), brave (`BRAVE_API_KEY`). El request `/v1/chat/completions` gana `web_search: bool`; el stream emite primero un chunk `{"folax_sources": [...]}` que el cliente muestra como cajita de "Fuentes". `apps/web/src/lib/stream.js` pasa el flag y captura las fuentes; `ChatPage` muestra el indicador "Buscando en internet…" y el componente `Sources`.
+
+**Multimodal pendiente** (imágenes/audio/vídeo): imágenes requieren un modelo de visión en Ollama (VRAM); audio requiere Whisper aparte; vídeo se pospone. El endpoint de adjuntos ya rechaza esos tipos con un mensaje claro.
+
+---
+
 ## 7. Fases posteriores (sin iniciar)
 
 - **F8 — Calidad**: tests automatizados (no hay ninguno aún; los scripts E2E de verificación viven en scratchpad, no versionados), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.

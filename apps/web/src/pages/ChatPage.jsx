@@ -11,9 +11,24 @@ import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
-import { IconShare, IconArrowDown } from '../components/Icons';
+import { IconShare, IconArrowDown, IconGlobe } from '../components/Icons';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
+
+function Sources({ sources }) {
+  return (
+    <div className="msg-sources">
+      <span className="msg-sources__title"><IconGlobe size={13} /> Fuentes</span>
+      <ol className="msg-sources__list">
+        {sources.map((s, i) => (
+          <li key={i}>
+            <a href={s.url} target="_blank" rel="noreferrer" title={s.snippet}>{s.title || s.url}</a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const { user, loading, logout } = useAuth();
@@ -32,6 +47,8 @@ export default function ChatPage() {
   const [toast, setToast] = useState(null); // { text, leaving }
   const [showJump, setShowJump] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [webSearch, setWebSearch] = useState(false);
+  const [searching, setSearching] = useState(false);
 
   const scrollRef = useRef(null);
   const loadedConvRef = useRef(null); // conversación ya cargada (evita refetch tras navigate)
@@ -144,13 +161,25 @@ export default function ChatPage() {
     stickToBottomRef.current = true;
     setMessages([...history, { role: 'assistant', content: '' }]);
     setBusy(true);
+    if (webSearch) setSearching(true);
 
     try {
       await streamChatCompletion({
         model: chosenModel,
         messages: history,
         conversationId: convId,
+        webSearch,
+        onSources: (sources) => {
+          setSearching(false);
+          setMessages((prev) => {
+            const next = prev.slice();
+            const last = next[next.length - 1];
+            next[next.length - 1] = { ...last, sources };
+            return next;
+          });
+        },
         onDelta: (delta) => {
+          setSearching(false);
           setMessages((prev) => {
             const next = prev.slice();
             const last = next[next.length - 1];
@@ -179,6 +208,7 @@ export default function ChatPage() {
         return next;
       });
     } finally {
+      setSearching(false);
       setBusy(false);
     }
   };
@@ -272,7 +302,8 @@ export default function ChatPage() {
           <div className="chat-hero">
             <h2 className="chat-hero__title">¿Qué investigaremos hoy?</h2>
             <div className="chat-hero__input">
-              <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel} />
+              <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
+                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
             </div>
           </div>
         ) : (
@@ -284,9 +315,15 @@ export default function ChatPage() {
                     <div key={i} className="msg msg--user">{m.content}</div>
                   ) : (
                     <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
+                      {m.sources?.length > 0 && <Sources sources={m.sources} />}
+                      {searching && i === messages.length - 1 && !m.content && (
+                        <span className="msg__searching">
+                          <IconGlobe size={14} /> Buscando en internet…
+                        </span>
+                      )}
                       {m.content
                         ? <Markdown>{m.content}</Markdown>
-                        : <span className="msg__thinking">Pensando…</span>}
+                        : (!searching && <span className="msg__thinking">Pensando…</span>)}
                     </div>
                   )
                 ))}
@@ -298,7 +335,8 @@ export default function ChatPage() {
               </button>
             )}
             <div className="chat-composer">
-              <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel} />
+              <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
+                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
             </div>
           </>
         )}

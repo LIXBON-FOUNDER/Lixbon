@@ -29,6 +29,7 @@ from core.persistence.queries import (
 )
 from core.delegation.embeddings import classify_request, get_embedding, pick_classifier_model, route_request
 from core.inference.ollama import chat as ollama_chat, stream_chat_openai
+from core.inference import websearch
 from core.security.auth import (
     api_key_required,
     cookie_auth_required,
@@ -55,6 +56,7 @@ class ChatCompletionRequest(BaseModel):
     title: str | None = None
     client_id: str | None = None
     stream: bool = False
+    web_search: bool = False  # "modo investigar": busca en internet e inyecta contexto
 
 
 class UIChatRequest(BaseModel):
@@ -182,14 +184,26 @@ async def chat_completions(
         save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
 
     messages = [m.model_dump() for m in payload.messages]
+
+    # "Modo investigar": busca en internet e inyecta el contexto antes de responder.
+    web_sources: list[dict] = []
+    if payload.web_search and messages and messages[-1]["role"] == "user":
+        web_sources = await websearch.search(messages[-1]["content"])
+        context = websearch.build_context(messages[-1]["content"], web_sources)
+        messages.insert(len(messages) - 1, {"role": "system", "content": context})
+
     base, headers, origen = deps.orquestador.ollama_target(payload.model)
     started_at = time.perf_counter()
-    logger.info(f"[chat] model='{payload.model}' stream={payload.stream} target={origen}")
+    logger.info(f"[chat] model='{payload.model}' stream={payload.stream} target={origen} web={payload.web_search}")
 
     if payload.stream:
         async def _stream_and_persist():
             collector: dict[str, Any] = {}
             streamed_something = False
+            # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
+            if web_sources:
+                import json as _json
+                yield f"data: {_json.dumps({'folax_sources': web_sources})}\n\n"
             try:
                 try:
                     async for chunk in stream_chat_openai(base, payload.model, messages,
