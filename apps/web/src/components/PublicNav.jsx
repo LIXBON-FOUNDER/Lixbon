@@ -1,19 +1,26 @@
 // PublicNav.jsx — barra superior común de las páginas públicas
-// (Descargas, Documentación, Planes). Marca el enlace activo.
+// (Aplicaciones, Documentación, Planes). Marca el enlace activo y adapta los
+// botones de la derecha según haya sesión.
 import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { Logo } from './Logo';
 
 const LINKS = [
   { to: '/docs', label: 'Documentación' },
-  { to: '/descargas', label: 'Descargas' },
+  { to: '/aplicaciones', label: 'Aplicaciones' },
   { to: '/planes', label: 'Planes' },
 ];
 
+const SUPPORT_EMAIL = 'soporte@datacentgbx.online';
+
 export function PublicNav() {
   const { pathname } = useLocation();
+  const { user } = useAuth();
+
   return (
     <header className="pubnav">
       <Link to="/" className="pubnav__logo"><Logo size={22} /></Link>
+
       <nav className="pubnav__links">
         {LINKS.map((l) => (
           <Link
@@ -25,7 +32,16 @@ export function PublicNav() {
           </Link>
         ))}
       </nav>
-      <Link to="/" className="pill-btn pill-btn--primary pubnav__cta">Abrir el chat</Link>
+
+      <div className="pubnav__actions">
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="pill-btn pill-btn--outline pubnav__btn">
+          Soporte
+        </a>
+        {!user && (
+          <Link to="/auth" className="pubnav__login">Iniciar sesión</Link>
+        )}
+        <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar FOLAX</Link>
+      </div>
     </header>
   );
 }

@@ -30,7 +30,7 @@ export default function DownloadsPage() {
     <div className="page page--cream">
       <PublicNav />
       <main className="page__body page__body--wide">
-        <h1 className="page__title page__title--center">Descargas</h1>
+        <h1 className="page__title page__title--center">Aplicaciones</h1>
         <p className="plans__sub">Lleva FOLAX a tu escritorio y a tu terminal.</p>
 
         <div className="downloads">

@@ -23,7 +23,8 @@ export default function App() {
           <Route path="/account/:section" element={<AccountPage />} />
           <Route path="/planes" element={<PlansPage />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="/descargas" element={<DownloadsPage />} />
+          <Route path="/aplicaciones" element={<DownloadsPage />} />
+          <Route path="/descargas" element={<Navigate to="/aplicaciones" replace />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:section" element={<DocsPage />} />
           {/* Rutas legacy del dashboard viejo */}

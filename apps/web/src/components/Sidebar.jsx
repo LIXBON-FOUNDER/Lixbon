@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
+import { planColor } from '../lib/planColors';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
@@ -136,7 +137,7 @@ export function Sidebar({
           <button className="sb-nav" onClick={() => setHistoryOpen(true)}>
             <IconChat /> <span>Conversaciones</span>
           </button>
-          <button className="sb-nav" onClick={() => navigate('/descargas')}>
+          <button className="sb-nav" onClick={() => navigate('/aplicaciones')}>
             <IconGrid /> <span>Aplicaciones</span>
           </button>
           <button className="sb-nav sb-nav--soon" title="Próximamente">
@@ -187,7 +188,13 @@ export function Sidebar({
                 <span className="sidebar__profile-name">
                   {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
                 </span>
-                <Link to="/planes" className="sidebar__plan">Plan {user.plan_name || 'Gratuito'}</Link>
+                <Link
+                  to="/planes"
+                  className="sidebar__plan"
+                  style={{ background: planColor(user.plan_id), color: '#fff' }}
+                >
+                  Plan {user.plan_name || 'Gratuito'}
+                </Link>
               </div>
               <button className="icon-btn" onClick={() => setProfileMenu((v) => !v)} aria-label="Ajustes">
                 <IconGear />

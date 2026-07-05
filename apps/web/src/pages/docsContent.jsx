@@ -183,7 +183,7 @@ function Desktop() {
       <h2>Instalación</h2>
       <p>
         Descarga el instalador desde la página de{' '}
-        <a href="/descargas">Descargas</a> y ejecútalo. La app se actualiza sola
+        <a href="/aplicaciones">Aplicaciones</a> y ejecútalo. La app se actualiza sola
         cuando publicamos una versión nueva: te avisa y aplica la actualización
         firmada sin que tengas que reinstalar.
       </p>
@@ -196,7 +196,7 @@ function Desktop() {
       </p>
 
       <div className="docs__callout">
-        Si aún no ves un instalador en Descargas, es que todavía no se ha publicado
+        Si aún no ves un instalador en Aplicaciones, es que todavía no se ha publicado
         una versión — mientras tanto puedes usar el <a href="/docs/cli">CLI</a> o el
         <a href="/"> chat web</a>.
       </div>

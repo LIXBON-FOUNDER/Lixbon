@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
-import { Logo } from '../components/Logo';
+import { PublicNav } from '../components/PublicNav';
+import { planColor } from '../lib/planColors';
 
 const fmtLimit = (v, suffix, noun) => (v === -1 ? `${noun} ilimitados` : `${v.toLocaleString()} ${suffix}`);
 
@@ -18,10 +19,7 @@ export default function PlansPage() {
 
   return (
     <div className="page page--cream">
-      <header className="page__bar">
-        <Link to="/" className="page__logo"><Logo size={17} /></Link>
-        <Link to="/" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
-      </header>
+      <PublicNav />
 
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">Planes</h1>
@@ -32,7 +30,7 @@ export default function PlansPage() {
             const current = user && (user.plan_id === p.id || (!user.plan_id && p.id === 'free'));
             return (
               <article key={p.id} className={`plan-card ${p.id === 'pro' ? 'plan-card--featured' : ''}`}>
-                <h2 className="plan-card__name">{p.name}</h2>
+                <h2 className="plan-card__name" style={{ color: planColor(p.id) }}>{p.name}</h2>
                 <p className="plan-card__price">
                   {p.price_monthly_cents === 0
                     ? 'Gratis'

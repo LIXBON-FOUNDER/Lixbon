@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
+import { planColor } from '../lib/planColors';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconBolt, IconLogout,
@@ -259,7 +260,7 @@ function FacturacionSection({ plan }) {
       <h2 className="set-title">Plan</h2>
       <div className="set-card set-plan">
         <div className="set-plan__info">
-          <span className="plan-pill">Plan {plan.name}</span>
+          <span className="plan-pill" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span>
           <p className="card__muted">{plan.description}</p>
           <span className="set-plan__price">{price}</span>
         </div>
@@ -291,7 +292,7 @@ function FacturacionSection({ plan }) {
 function UsoSection({ usage, daily, plan }) {
   return (
     <>
-      <h2 className="set-title">Uso del período <span className="set-plan-tag">Plan {plan.name}</span></h2>
+      <h2 className="set-title">Uso del período <span className="set-plan-tag" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span></h2>
       <div className="set-card">
         <QuotaBar
           label="Mensajes hoy"
