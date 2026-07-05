@@ -7,6 +7,8 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import AccountPage from './pages/AccountPage';
 import PlansPage from './pages/PlansPage';
 import AdminPage from './pages/AdminPage';
+import DownloadsPage from './pages/DownloadsPage';
+import DocsPage from './pages/DocsPage';
 
 export default function App() {
   return (
@@ -20,6 +22,9 @@ export default function App() {
           <Route path="/account" element={<AccountPage />} />
           <Route path="/planes" element={<PlansPage />} />
           <Route path="/admin" element={<AdminPage />} />
+          <Route path="/descargas" element={<DownloadsPage />} />
+          <Route path="/docs" element={<DocsPage />} />
+          <Route path="/docs/:section" element={<DocsPage />} />
           {/* Rutas legacy del dashboard viejo */}
           <Route path="/login" element={<Navigate to="/auth" replace />} />
           <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />

@@ -57,6 +57,10 @@ app = FastAPI(
     version=APP_VERSION,
     description=APP_DESCRIPTION,
     lifespan=lifespan,
+    # Swagger/OpenAPI bajo /api/* para dejar libre /docs a la web (Folax Docs)
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
 
 # ── Middleware: CORS ───────────────────────────────────────────────────────
@@ -122,7 +126,8 @@ if WEB_DIST_DIR.exists():
 
     @app.get("/{path_name:path}")
     async def serve_frontend(path_name: str):
-        if path_name.startswith(("api/", "v1/", "docs", "openapi.json", "ws/")):
+        # /docs y /openapi.json ahora viven bajo /api/*, así que /docs es la SPA
+        if path_name.startswith(("api/", "v1/", "ws/")):
             raise HTTPException(status_code=404, detail="Not Found")
         candidate = (WEB_DIST_DIR / path_name).resolve()
         if path_name and candidate.is_file() and candidate.is_relative_to(WEB_DIST_DIR):

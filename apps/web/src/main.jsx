@@ -7,6 +7,7 @@ import './styles/auth.css';
 import './styles/chat.css';
 import './styles/account.css';
 import './styles/admin.css';
+import './styles/public.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

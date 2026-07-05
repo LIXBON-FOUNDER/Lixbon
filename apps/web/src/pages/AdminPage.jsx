@@ -14,6 +14,7 @@ const TABS = [
   { id: 'usuarios', label: 'Usuarios' },
   { id: 'nodos', label: 'Nodos' },
   { id: 'modelos', label: 'Modelos' },
+  { id: 'releases', label: 'Releases' },
   { id: 'auditoria', label: 'Auditoría' },
 ];
 
@@ -467,6 +468,126 @@ function ModelosTab() {
   );
 }
 
+// ── Releases ────────────────────────────────────────────────────────────
+
+const EMPTY_RELEASE = { version: '', channel: 'stable', title: '', changelog: '', checksum_sha256: '' };
+
+function ReleasesTab() {
+  const [versions, setVersions] = useState([]);
+  const [form, setForm] = useState(EMPTY_RELEASE);
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
+
+  const load = useCallback(() => {
+    api.get('/api/versions')
+      .then((res) => setVersions(res.data))
+      .catch((err) => setError(errMsg(err, 'No se pudieron cargar las versiones')));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setOk('');
+    if (!file) { setError('Selecciona el archivo del instalador'); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('version', form.version.trim());
+      fd.append('channel', form.channel);
+      fd.append('title', form.title.trim());
+      // el changelog viaja como JSON (una línea por viñeta)
+      const items = form.changelog.split('\n').map((s) => s.trim()).filter(Boolean);
+      fd.append('changelog', JSON.stringify(items.length ? items : [form.title.trim()]));
+      if (form.checksum_sha256.trim()) fd.append('checksum_sha256', form.checksum_sha256.trim());
+      fd.append('file', file);
+
+      const res = await api.post('/api/versions/upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setOk(`Versión ${res.data.version} publicada (${res.data.storage}).`);
+      setForm(EMPTY_RELEASE);
+      setFile(null);
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo publicar la versión'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {error && <p className="page__error" role="alert">{error}</p>}
+      {ok && <p className="admin-ok" role="status">{ok}</p>}
+
+      <form className="card release-form" onSubmit={submit}>
+        <h2 className="card__title">Publicar una versión</h2>
+        <p className="card__muted">
+          Sube el instalador (Desktop <code>.msi</code> o el paquete del CLI). Se guarda
+          en el almacenamiento privado y la descarga se sirve por URL firmada.
+        </p>
+        <div className="release-form__grid">
+          <label>Versión
+            <input required placeholder="2.5.0" value={form.version}
+              onChange={(e) => setForm({ ...form, version: e.target.value })} />
+          </label>
+          <label>Canal
+            <select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
+              <option value="stable">stable</option>
+              <option value="beta">beta</option>
+            </select>
+          </label>
+          <label>Título
+            <input required placeholder="Mejoras de rendimiento" value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </label>
+          <label>Checksum SHA-256 (opcional)
+            <input placeholder="para firmar la actualización" value={form.checksum_sha256}
+              onChange={(e) => setForm({ ...form, checksum_sha256: e.target.value })} />
+          </label>
+        </div>
+        <label className="release-form__full">Changelog (una línea por punto)
+          <textarea rows={3} placeholder={"Corrige el streaming\nNuevo selector de modelos"}
+            value={form.changelog} onChange={(e) => setForm({ ...form, changelog: e.target.value })} />
+        </label>
+        <label className="release-form__full">Instalador
+          <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </label>
+        <div className="admin-actions">
+          <button className="pill-btn pill-btn--primary" type="submit" disabled={busy}>
+            {busy ? 'Publicando…' : 'Publicar versión'}
+          </button>
+        </div>
+      </form>
+
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr><th>Versión</th><th>Canal</th><th>Título</th><th>Fecha</th></tr>
+          </thead>
+          <tbody>
+            {versions.map((v) => (
+              <tr key={`${v.version}-${v.channel}`}>
+                <td><code>{v.version}</code></td>
+                <td><span className={`badge ${v.channel === 'stable' ? 'badge--ok' : 'chip'}`}>{v.channel}</span></td>
+                <td>{v.title}</td>
+                <td className="table__muted">{v.release_date}</td>
+              </tr>
+            ))}
+            {versions.length === 0 && (
+              <tr><td colSpan={4} className="card__muted">Aún no hay versiones publicadas</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 // ── Auditoría ───────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
@@ -584,6 +705,7 @@ export default function AdminPage() {
         {tab === 'usuarios' && <UsuariosTab />}
         {tab === 'nodos' && <NodosTab />}
         {tab === 'modelos' && <ModelosTab />}
+        {tab === 'releases' && <ReleasesTab />}
         {tab === 'auditoria' && <AuditoriaTab />}
       </main>
     </div>

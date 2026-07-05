@@ -150,6 +150,27 @@ def admin_required(
     return user_data
 
 
+def admin_or_token(
+    folax_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None),
+) -> None:
+    """Acepta sesión con rol admin (panel web) O X-Admin-Token (scripts/CI).
+    Permite subir releases desde el panel sin exponer el token en el navegador."""
+    import secrets as _secrets
+    from core.config import ADMIN_TOKEN
+
+    if ADMIN_TOKEN and x_admin_token and _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        return
+    try:
+        user_data = cookie_auth_required(folax_session, authorization)
+        if user_data.get("role") == "admin":
+            return
+    except HTTPException:
+        pass
+    raise HTTPException(status_code=403, detail="Requiere administrador (sesión admin o X-Admin-Token)")
+
+
 def validate_model_access(user_data: dict[str, Any], requested_model: str) -> None:
     """Lanza 403 si la key tiene modelo asignado y no coincide con el solicitado."""
     key_model = user_data.get("key_model")

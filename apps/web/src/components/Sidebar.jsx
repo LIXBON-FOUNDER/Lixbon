@@ -8,6 +8,7 @@ import { Logo } from './Logo';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
+  IconDownload, IconBook,
 } from './Icons';
 
 function HistoryItem({ conv, active, onRename, onDelete }) {
@@ -189,6 +190,12 @@ export function Sidebar({
                 <div className="sb-menu sb-menu--profile" onMouseLeave={() => setProfileMenu(false)}>
                   <button onClick={() => { setProfileMenu(false); navigate('/account'); }}>
                     <IconGear size={14} /> Mi cuenta
+                  </button>
+                  <button onClick={() => { setProfileMenu(false); navigate('/docs'); }}>
+                    <IconBook size={14} /> Documentación
+                  </button>
+                  <button onClick={() => { setProfileMenu(false); navigate('/descargas'); }}>
+                    <IconDownload size={14} /> Descargas
                   </button>
                   {user.role === 'admin' && (
                     <button onClick={() => { setProfileMenu(false); navigate('/admin'); }}>

@@ -113,3 +113,33 @@ export const IconLogout = (p) => (
 export const IconX = (p) => (
   <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>
 );
+
+export const IconDownload = (p) => (
+  <Svg {...p}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Svg>
+);
+
+export const IconCopy = (p) => (
+  <Svg {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+  </Svg>
+);
+
+export const IconTerminal = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></Svg>
+);
+
+export const IconBook = (p) => (
+  <Svg {...p}>
+    <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5Z" />
+    <path d="M4 19a2 2 0 0 1 2-2h13" />
+  </Svg>
+);
+
+export const IconWindow = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></Svg>
+);
+
+export const IconCheck = (p) => (
+  <Svg {...p}><path d="M4 12l5 5L20 6" /></Svg>
+);

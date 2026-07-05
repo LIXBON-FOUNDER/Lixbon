@@ -298,6 +298,64 @@ tr.is-blocked {
   border-color: var(--ink);
 }
 
+/* ── Releases (subida) ───────────────────────────────────────────────── */
+
+.admin-ok {
+  padding: 12px 18px;
+  border-radius: var(--radius-box);
+  border: 1px solid var(--accent);
+  background: rgba(217, 230, 74, 0.16);
+  font-size: 14.5px;
+}
+
+.release-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.release-form label,
+.release-form__full {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--ink-soft);
+}
+
+.release-form__full {
+  margin-top: 4px;
+}
+
+.release-form input,
+.release-form select,
+.release-form textarea {
+  padding: 9px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  outline: none;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.release-form input:focus,
+.release-form select:focus,
+.release-form textarea:focus {
+  border-color: var(--ink);
+}
+
+.release-form textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.release-form input[type="file"] {
+  padding: 8px;
+  background: var(--bg-secondary);
+}
+
 @media (max-width: 640px) {
   .plan-models {
     flex-wrap: wrap;

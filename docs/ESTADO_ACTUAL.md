@@ -134,6 +134,14 @@
 - Verificado E2E contra R2 real (bucket `releases-folax`, account `071d1172…`): subida a R2, metadata pública apunta al gateway, descarga redirige a URL prefirmada de `r2.cloudflarestorage.com` que entrega el binario exacto, `/releases-info` eliminada.
 - **PENDIENTE OPERATIVO (Railway)** 🔴: definir en el servicio gateway las 4 vars R2 (`R2_ACCOUNT_ID=071d1172730bf91c22924d149b67f95d`, `R2_BUCKET=releases-folax`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — están en el `.env` local). Sin ellas, prod cae al disco efímero. `boto3` ya está en requirements (Docker lo instala).
 
+**F6.6 — UI de releases + Descargas + Folax Docs (completada 2026-07-04, verificada E2E 13/13)**:
+- **Tab "Releases" en el panel admin** (`AdminPage.jsx`): formulario de publicación (versión, canal, título, changelog, checksum, archivo) + tabla de versiones. Sube con la **cookie de sesión** (nueva dependencia `admin_or_token` en `core/security/auth.py`: acepta sesión con rol admin O `X-Admin-Token`, para que el panel funcione sin exponer el token y el CI siga con token). Endpoint `POST /api/versions/upload` migrado a `admin_or_token`.
+- **Página pública de Descargas** (`/descargas`, `pages/DownloadsPage.jsx`): card de la app de escritorio (botón a la última stable vía `GET /api/updates/latest/{channel}`, endpoint nuevo que nunca da 404) y card del CLI con comandos copiables por SO — Windows `irm <base>/install.ps1 | iex`, Linux/macOS `curl -fsSL <base>/install.sh | bash` — más instalación manual del fuente. Los scripts ya los generaba `installer.py`.
+- **Folax Docs** (`/docs` y `/docs/:section`, `pages/DocsPage.jsx` + `pages/docsContent.jsx`): estilo code.claude.com, índice lateral por grupos + contenido central redactado (Introducción, Primeros pasos, CLI, App de escritorio, API, Planes y límites), pager anterior/siguiente. Pública.
+- **Componentes**: `components/PublicNav.jsx` (barra común Docs/Descargas/Planes), `components/CodeBlock.jsx` (bloque con botón copiar), iconos nuevos en `Icons.jsx`. Estilos en `styles/public.css`. Enlaces "Documentación" y "Descargas" en el menú del perfil del sidebar.
+- **Conflicto de ruta resuelto**: `/docs` colisionaba con la Swagger UI de FastAPI → Swagger movida a `/api/docs`, ReDoc a `/api/redoc`, OpenAPI a `/api/openapi.json` (en `app.py`), liberando `/docs` para la web.
+- E2E: admin publica una versión desde el panel y aparece en la tabla; Descargas muestra el Desktop y los comandos del CLI (Windows/Unix); Docs navega entre secciones (SPA) con el código visible; enlaces del sidebar funcionan.
+
 ---
 
 ## 7. Fases posteriores (sin iniciar)
@@ -154,6 +162,8 @@
 | Panel admin (API) | `core/gateway/routers/admin_panel.py` (`/api/admin/*`, rol) + `nodes_admin.py` |
 | Panel admin (web) | `apps/web/src/pages/AdminPage.jsx` + `styles/admin.css` (ruta `/admin`) |
 | Releases / updates | `core/gateway/routers/versions.py` + `core/storage/r2.py` (R2 privado; descargas prefirmadas) |
+| Descargas / Docs (web) | `apps/web/src/pages/{DownloadsPage,DocsPage,docsContent}.jsx` (rutas `/descargas`, `/docs`) |
+| Swagger / OpenAPI | `/api/docs`, `/api/redoc`, `/api/openapi.json` (movidos para liberar `/docs`) |
 | BD (modelos/queries) | `core/persistence/models.py` · `queries.py` (staging vía `DATABASE_URL` del `.env`) |
 | Inferencia/streaming | `core/inference/ollama.py` (única implementación) |
 | Orquestador | `core/orchestration/orchestrator.py` (`ollama_target()` decide nodo vs local) |

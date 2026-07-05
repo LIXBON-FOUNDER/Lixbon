@@ -23,7 +23,7 @@ from packaging.version import InvalidVersion, Version
 
 from core.config import APP_VERSION, r2_configured
 from core.persistence import queries as db
-from core.security.auth import require_admin_token
+from core.security.auth import admin_or_token
 from core.storage import r2
 
 logger = logging.getLogger("folax.versions")
@@ -109,6 +109,26 @@ async def check_update(request: Request, v: str = Query(..., description="Versi�
     }
 
 
+@router.get("/api/updates/latest/{channel}")
+async def get_latest(channel: str, request: Request):
+    """Última versión de un canal para la página de descargas. Nunca 404: si no
+    hay releases devuelve {available: false} para que el front lo maneje limpio."""
+    if channel not in ("stable", "beta"):
+        raise HTTPException(status_code=400, detail="Canal de actualización inválido")
+    latest = db.get_latest_version(channel=channel)
+    if not latest:
+        return {"available": False, "channel": channel}
+    return {
+        "available": True,
+        "channel": channel,
+        "version": latest["version"],
+        "title": latest["title"],
+        "release_date": latest["release_date"],
+        "changelog": latest["changelog"],
+        "download_url": _public_download_url(request, latest["version"], channel),
+    }
+
+
 @router.get("/api/updates/manifest/{channel}")
 async def get_tauri_manifest(channel: str, request: Request):
     """Manifest en el formato del auto-updater de Tauri 2."""
@@ -185,7 +205,7 @@ async def api_upload_version(
     changelog: str = Form(...),
     checksum_sha256: str = Form(None),
     file: UploadFile = File(...),
-    _: None = Depends(require_admin_token),
+    _: None = Depends(admin_or_token),
 ):
     """Sube un instalador a R2 (o al disco local en dev) y registra la versión."""
     import re as _re
