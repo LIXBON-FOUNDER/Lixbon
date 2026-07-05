@@ -1,7 +1,7 @@
 {
   "name": "Folax",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,16 +10,24 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/lang-rust": "^6.0.2",
+    "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.4.3",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "codemirror": "^6.0.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-icons": "^5.7.0",
-    "recharts": "^3.9.1",
+    "react-markdown": "^10.1.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

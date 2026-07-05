@@ -1,124 +1,105 @@
-import React, { useState, useEffect } from 'react';
+// Metrics.jsx — consumo del plan: cuotas del período y tokens por día.
+// Datos de GET /api/account/usage: { plan, usage, daily }.
+import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import { StatsCards } from './StatsCards';
+import { planColor } from '../../lib/planColors';
 import { UsageChart } from './UsageChart';
-import { ModelBreakdown } from './ModelBreakdown';
-import { LuRefreshCw } from 'react-icons/lu';
+
+const fmtInt = (n) => Number(n || 0).toLocaleString('es');
+
+function QuotaTile({ label, used, limit, resetsAt }) {
+  const unlimited = limit === -1 || limit == null;
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  const nearLimit = !unlimited && pct >= 90;
+
+  const resetText = resetsAt
+    ? new Date(resetsAt).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : null;
+
+  return (
+    <div className="quota-tile">
+      <span className="quota-tile__label">{label}</span>
+      <span className="quota-tile__value">
+        {fmtInt(used)}
+        <span className="quota-tile__limit">
+          {unlimited ? ' · sin límite' : ` / ${fmtInt(limit)}`}
+        </span>
+      </span>
+      {!unlimited && (
+        <span className="quota-tile__meter" role="meter" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <span
+            className={`quota-tile__fill ${nearLimit ? 'is-warning' : ''}`}
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+      )}
+      {resetText && <span className="quota-tile__reset">Se restablece el {resetText}</span>}
+    </div>
+  );
+}
 
 export function Metrics() {
-  const [summary, setSummary] = useState({});
-  const [chartData, setChartData] = useState([]);
-  const [limit, setLimit] = useState(30); // 7 | 14 | 30 días
-  const [isLoading, setIsLoading] = useState(true);
+  const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
-  const fetchMetrics = async () => {
-    setIsLoading(true);
-    setError('');
-    try {
-      const summaryRes = await api.get('/api/monitor/usage');
-      const dailyRes = await api.get(`/api/monitor/usage/daily?limit=${limit}`);
-      
-      if (summaryRes) setSummary(summaryRes);
-      if (dailyRes) setChartData(dailyRes);
-    } catch (e) {
-      setError('Error al obtener métricas de consumo: ' + e.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchMetrics();
-  }, [limit]);
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col flex-1 align-center justify-center font-mono" style={{ color: 'var(--text-secondary)' }}>
-        <LuRefreshCw size={24} className="spin-icon" style={{ marginBottom: '12px' }} />
-        <span>Cargando análisis de uso...</span>
-      </div>
-    );
-  }
+    api.get('/api/account/usage')
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, []);
 
   if (error) {
     return (
-      <div className="flex flex-col flex-1 align-center justify-center font-mono" style={{ color: 'var(--text-error)' }}>
-        <span>⚠️ {error}</span>
-        <button onClick={fetchMetrics} className="btn-retry" style={{ marginTop: '16px' }}>Reintentar</button>
+      <div className="metrics">
+        <h2 className="center-view__title">Consumo</h2>
+        <p className="metrics__error">No se pudo cargar el consumo: {error}</p>
       </div>
     );
   }
 
-  return (
-    <div className="metrics-page flex-col flex-1">
-      <div className="metrics-header flex justify-between align-center">
-        <h2 className="section-title" style={{ marginBottom: 0 }}>Rendimiento y Consumo</h2>
-        
-        <div className="toggle-group flex">
-          {[7, 14, 30].map(days => (
-            <button
-              key={days}
-              onClick={() => setLimit(days)}
-              className={`toggle-btn ${limit === days ? 'active' : ''}`}
-            >
-              {days === 30 ? 'Mensual' : days === 14 ? 'Semanal' : '7 días'}
-            </button>
-          ))}
+  if (!data) {
+    return (
+      <div className="metrics">
+        <h2 className="center-view__title">Consumo</h2>
+        <div className="metrics__tiles">
+          <span className="skeleton metrics__skeleton-tile" />
+          <span className="skeleton metrics__skeleton-tile" />
         </div>
+        <span className="skeleton metrics__skeleton-chart" />
+      </div>
+    );
+  }
+
+  const { plan, usage, daily } = data;
+
+  return (
+    <div className="metrics">
+      <div className="metrics__head">
+        <h2 className="center-view__title">Consumo</h2>
+        {plan && (
+          <span className="metrics__plan" style={{ color: planColor(plan.id) }}>
+            Plan {plan.name}
+          </span>
+        )}
       </div>
 
-      <StatsCards summary={summary} chartData={chartData} />
-      <UsageChart data={chartData} />
-      <ModelBreakdown chartData={chartData} />
+      <div className="metrics__tiles">
+        <QuotaTile
+          label="Mensajes hoy"
+          used={usage.messages_today}
+          limit={usage.messages_per_day}
+          resetsAt={usage.day_resets_at}
+        />
+        <QuotaTile
+          label="Tokens este mes"
+          used={usage.tokens_month}
+          limit={usage.tokens_per_month}
+          resetsAt={usage.month_resets_at}
+        />
+      </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
-        .metrics-page {
-          overflow-y: auto;
-          height: 100%;
-        }
-        .metrics-header {
-          margin-bottom: 24px;
-        }
-        .toggle-group {
-          background-color: var(--bg-secondary);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          padding: 3px;
-        }
-        .toggle-btn {
-          font-size: 0.8rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-          padding: 6px 12px;
-          border-radius: 4px;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .toggle-btn.active {
-          background-color: var(--accent);
-          color: #ffffff;
-        }
-        .spin-icon {
-          animation: spin 1s linear infinite;
-        }
-        .btn-retry {
-          background-color: var(--bg-surface);
-          border: 1px solid var(--border);
-          padding: 8px 16px;
-          border-radius: 6px;
-          cursor: pointer;
-          color: #fff;
-        }
-        .btn-retry:hover {
-          border-color: var(--accent);
-        }
-
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}} />
+      <h3 className="metrics__subtitle">Tokens por día · últimos 30 días</h3>
+      <UsageChart daily={daily || []} />
     </div>
   );
 }

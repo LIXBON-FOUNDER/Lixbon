@@ -1,0 +1,298 @@
+/* base.css — fuentes self-hosted, design tokens y reset.
+   Copia sincronizada de apps/web/src/styles/base.css — fuente de verdad: docs/DISENO_WEB.md.
+   Los tokens de la sección "Tokens IDE" son exclusivos de la app desktop. */
+
+/* ── Fuentes ─────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Bruno Ace SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/bruno-ace-sc-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Bruno Ace SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/bruno-ace-sc-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/bricolage-grotesque-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ── Tokens ──────────────────────────────────────────────────────────── */
+
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f6f7ed;
+  --ink: #171717;
+  --ink-soft: rgba(23, 23, 23, 0.62);
+  --border: rgba(23, 23, 23, 0.9);
+  --border-soft: rgba(23, 23, 23, 0.16);
+  --accent: #d9e64a; /* verde-amarillo: etiqueta de plan */
+  --danger: #c0392b;
+
+  --font-brand: 'Bruno Ace SC', sans-serif;
+  --font-ui: 'Bricolage Grotesque', system-ui, sans-serif;
+
+  --radius-pill: 999px;
+  --radius-box: 22px;
+  --sidebar-w: 280px;
+
+  /* ── Tokens IDE (solo desktop) ── */
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --activitybar-w: 48px;
+  --statusbar-h: 26px;
+  --panel-w: 260px;
+  --editor-font-size: 14px;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* ventana de app: el scroll vive en los paneles */
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+/* ── Utilidades compartidas ──────────────────────────────────────────── */
+
+.brand {
+  font-family: var(--font-brand);
+  letter-spacing: 0.04em;
+  font-size: 30px;
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.pill-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pill-btn--primary {
+  background: var(--ink);
+  color: #fff;
+}
+
+.pill-btn--primary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.pill-btn--outline {
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.pill-btn--outline:hover:not(:disabled) {
+  background: var(--bg-secondary);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--ink);
+  transition: background 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: rgba(23, 23, 23, 0.07);
+}
+
+/* ── Colapso animado ─────────────────────────────────────────────────── */
+
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.reveal.is-open {
+  grid-template-rows: 1fr;
+}
+
+.reveal__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Pantalla de carga ───────────────────────────────────────────────── */
+
+.app-loading {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  background: var(--bg-secondary);
+}
+
+.app-loading__logo {
+  font-size: 30px;
+  animation: loading-pulse 1.6s ease-in-out infinite;
+}
+
+.app-loading__bar {
+  width: 150px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: rgba(23, 23, 23, 0.12);
+  overflow: hidden;
+}
+
+.app-loading__bar span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  animation: loading-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes loading-pulse {
+  50% { opacity: 0.45; }
+}
+
+@keyframes loading-slide {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(360%); }
+}
+
+/* ── Skeleton loading (shimmer) ──────────────────────────────────────── */
+
+.skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background: rgba(23, 23, 23, 0.07);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(23, 23, 23, 0.06),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+/* ── Scrollbars (WebView2) ───────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-soft);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-soft);
+}
+
+/* ── Accesibilidad: sin animaciones si el SO lo pide ─────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

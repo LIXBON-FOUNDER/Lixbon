@@ -9,6 +9,7 @@
     "store:default",
     "http:default",
     "updater:default",
-    "notification:default"
+    "notification:default",
+    "dialog:default"
   ]
 }

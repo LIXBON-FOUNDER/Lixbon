@@ -66,6 +66,9 @@ app = FastAPI(
 # ── Middleware: CORS ───────────────────────────────────────────────────────
 _cors_origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 _cors_origins.append("http://localhost:5173")  # Vite dev server
+_cors_origins.append("http://localhost:1420")  # Tauri dev (app desktop)
+_cors_origins.append("http://tauri.localhost")  # App desktop en Windows (WebView2)
+_cors_origins.append("tauri://localhost")  # App desktop en macOS/Linux
 
 app.add_middleware(
     CORSMiddleware,

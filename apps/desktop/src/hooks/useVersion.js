@@ -1,43 +1,25 @@
 import { useState, useEffect } from 'react';
+import { check as checkUpdater } from '@tauri-apps/plugin-updater';
 import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
-// Importación dinámica de Tauri para evitar errores fuera de Tauri (por ejemplo, en navegador)
-let tauriUpdater = null;
-import('@tauri-apps/plugin-updater')
-  .then(m => {
-    tauriUpdater = m;
-  })
-  .catch(err => {
-    console.warn('Tauri updater plugin not loaded:', err);
-  });
-
-let invoke = null;
-import('@tauri-apps/api/core')
-  .then(m => {
-    invoke = m.invoke;
-  })
-  .catch(err => {
-    console.warn('Tauri core plugin invoke not loaded:', err);
-  });
+import { getAppVersion } from '../lib/tauri';
 
 export function useVersion() {
   const { serverUrl, connectionStatus } = useAppStore();
-  const [currentVersion, setCurrentVersion] = useState('0.1.0');
+  const [currentVersion, setCurrentVersion] = useState('');
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
   const fetchTauriVersion = async () => {
-    if (invoke) {
-      try {
-        const v = await invoke('get_app_version');
-        setCurrentVersion(v);
-        return v;
-      } catch (e) {
-        console.error('[updater] Error obteniendo versión de Rust:', e);
-      }
+    try {
+      const v = await getAppVersion();
+      setCurrentVersion(v);
+      return v;
+    } catch (e) {
+      console.error('[updater] Error obteniendo versión de Rust:', e);
+      return currentVersion;
     }
-    return currentVersion;
   };
 
   const checkForUpdates = async () => {
@@ -60,14 +42,9 @@ export function useVersion() {
   };
 
   const installUpdate = async () => {
-    if (!tauriUpdater) {
-      alert('Tauri updater plugin not loaded or not running inside desktop container.');
-      return;
-    }
-
     try {
       setIsDownloading(true);
-      const update = await tauriUpdater.check();
+      const update = await checkUpdater();
       if (update) {
         let downloaded = 0;
         let contentLength = 0;
@@ -101,7 +78,7 @@ export function useVersion() {
 
   useEffect(() => {
     fetchTauriVersion();
-  }, [invoke]);
+  }, []);
 
   useEffect(() => {
     checkForUpdates();

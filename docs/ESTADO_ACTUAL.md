@@ -202,6 +202,21 @@ Tres features de producto sobre el chat, verificadas E2E (12/9/9).
 
 ---
 
+## 6.12 ✅ Rediseño completo de la app desktop → IDE FOLAX (2026-07-05)
+
+`apps/desktop` (Tauri v2 + React 19) reescrita como **IDE ligero** con la identidad de la web (copia sincronizada de `base.css` + fuentes woff2 self-hosted en `apps/desktop/public/fonts/`; solo tema claro). Versión unificada **0.3.0** (package.json, Cargo.toml, tauri.conf.json). `productName`/`identifier` NO se tocaron (cadena del updater intacta).
+
+- **Layout IDE**: ActivityBar 48px + explorador (FileTree) + editor central + chat derecho (paneles colapsables/redimensionables, persistidos) + StatusBar (conexión/modelo/plan con `planColors`/versión). `src/layout/`.
+- **Auth dual** (`sections/Auth/AuthScreen.jsx`): login por email (endpoint nuevo; si el usuario ya tiene keys, crea una "FOLAX Desktop" vía `POST /api/keys` con la cookie de sesión) **o** pegar `folax_sk_` (validada con `GET /api/auth/me` Bearer). Config en **plugin-store** (`folax.settings.json`), ya no en localStorage; URL default `https://remote.datacentgbx.online` con opciones avanzadas.
+- **Editor CodeMirror 6** (`src/editor/`, `src/store/editorStore.js`): tabs múltiples (un EditorState por pestaña, una sola EditorView), tema FOLAX claro, 7 lenguajes, Ctrl+S/W/Tab, confirmación al cerrar con cambios.
+- **Chat SSE** (`src/chat/`, `src/store/chatStore.js`, `src/lib/stream.js` adaptado con Bearer): streaming token a token, detener, historial del backend (buscar/renombrar/borrar), markdown con bloques "Copiar"/"Insertar en editor", chip de contexto (archivo activo o selección), errores de cuota 429/403 en español con fecha de reset.
+- **Seguridad Rust** (`src-tauri/src/lib.rs`): comandos fs confinados a la carpeta de trabajo (`set_workspace_root` + `ensure_inside_root` con canonicalize), sin fallback hardcodeado, límite 5 MB, CSP no nula en `tauri.conf.json`. Capability `dialog:default` añadida (faltaba).
+- **Eliminado**: Terminal/Commands/Services/Workspace.jsx/Onboarding/Sidebar/TopBar legacy, CSS embebido (`dangerouslySetInnerHTML` → 0), CustomEvents, `react-icons` y `recharts` (Metrics ahora usa la gráfica SVG portada de la web + tiles de cuota de `GET /api/account/usage`).
+- **Backend**: `core/gateway/app.py` añade orígenes CORS de Tauri (`http://tauri.localhost`, `tauri://localhost`, `localhost:1420`).
+- **Pendiente de verificar**: build del MSI (no hay toolchain Rust en esta máquina; compila en CI `tauri.yml`) y prueba E2E de upgrade 0.2.x → 0.3.0 con el updater.
+
+---
+
 ## 7. Fases posteriores (sin iniciar)
 
 - **F8 — Calidad**: tests automatizados (no hay ninguno aún; los scripts E2E de verificación viven en scratchpad, no versionados), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.

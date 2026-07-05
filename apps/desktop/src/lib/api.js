@@ -21,6 +21,8 @@ async function request(endpoint, options = {}) {
   const fetchOptions = {
     ...options,
     headers,
+    // Timeout real (la opción { timeout } no existe en fetch)
+    signal: options.signal || AbortSignal.timeout(options.timeout || 15000),
   };
 
   if (options.body && typeof options.body === 'object') {
@@ -58,5 +60,6 @@ export const api = {
   get: (endpoint, options = {}) => request(endpoint, { ...options, method: 'GET' }),
   post: (endpoint, body, options = {}) => request(endpoint, { ...options, method: 'POST', body }),
   put: (endpoint, body, options = {}) => request(endpoint, { ...options, method: 'PUT', body }),
+  patch: (endpoint, body, options = {}) => request(endpoint, { ...options, method: 'PATCH', body }),
   delete: (endpoint, options = {}) => request(endpoint, { ...options, method: 'DELETE' }),
 };

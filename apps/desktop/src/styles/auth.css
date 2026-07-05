@@ -1,0 +1,209 @@
+/* auth.css — pantalla de entrada de la app desktop (fondo crema, mockups 2.3).
+   Basado en apps/web/src/styles/auth.css; añade el modo "API key" y las
+   opciones avanzadas de servidor propias del cliente de escritorio. */
+
+.auth {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 36px;
+  background: var(--bg-secondary);
+  padding: 32px 16px;
+  overflow-y: auto;
+}
+
+.auth__logo {
+  animation: auth-in 0.4s ease;
+}
+
+.auth__card {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: auth-in 0.4s ease 0.06s backwards;
+}
+
+@keyframes auth-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+.auth__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: fields-in 0.28s ease;
+}
+
+@keyframes fields-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Toggle segmentado pill con pastilla deslizante */
+
+.auth__toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 4px;
+  margin-bottom: 4px;
+}
+
+.auth__toggle-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  height: calc(100% - 8px);
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auth__toggle[data-mode='key'] .auth__toggle-thumb {
+  transform: translateX(100%);
+}
+
+.auth__toggle button {
+  position: relative;
+  z-index: 1;
+  padding: 10px 0;
+  border-radius: var(--radius-pill);
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--ink);
+  transition: color 0.22s ease;
+}
+
+.auth__toggle button.is-active {
+  color: #fff;
+}
+
+/* Campos outlined con label flotante */
+
+.ffield {
+  position: relative;
+}
+
+.ffield__input {
+  width: 100%;
+  padding: 15px 19px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  outline: none;
+  transition: box-shadow 0.15s ease;
+}
+
+.ffield__input:focus {
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.ffield__label {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  transform: translateY(-50%);
+  background: var(--bg);
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--ink);
+  pointer-events: none;
+  transition: all 0.15s ease;
+}
+
+.ffield__input:placeholder-shown:not(:focus) + .ffield__label {
+  top: 50%;
+  font-size: 16px;
+  color: var(--ink-soft);
+  background: transparent;
+}
+
+.auth__cta {
+  margin-top: 2px;
+  padding: 14px 22px;
+  font-size: 16px;
+}
+
+.auth__link {
+  align-self: center;
+  font-size: 14px;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  transition: color 0.15s ease;
+}
+
+.auth__link:hover {
+  color: var(--ink);
+}
+
+.auth__error {
+  color: var(--danger);
+  font-size: 14px;
+  text-align: center;
+  animation: fields-in 0.25s ease;
+}
+
+.auth__hint {
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Opciones avanzadas (URL del servidor) */
+
+.auth__advanced-toggle {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  transition: color 0.15s ease;
+}
+
+.auth__advanced-toggle:hover {
+  color: var(--ink);
+}
+
+.auth__advanced-toggle svg {
+  transition: transform 0.2s ease;
+}
+
+.auth__advanced-toggle.is-open svg {
+  transform: rotate(180deg);
+}
+
+.auth__advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 18px;
+}
+
+.auth__advanced-status {
+  font-size: 13px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.auth__advanced-status.is-ok {
+  color: var(--ink);
+}
+
+.auth__advanced-status.is-error {
+  color: var(--danger);
+}
