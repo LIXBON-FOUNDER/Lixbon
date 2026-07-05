@@ -93,6 +93,8 @@ class Conversation(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str | None] = mapped_column(Text)
     client_id: Mapped[str | None] = mapped_column(Text)
+    # F-compartir: token público de solo lectura (NULL = no compartida)
+    share_token: Mapped[str | None] = mapped_column(Text, unique=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 

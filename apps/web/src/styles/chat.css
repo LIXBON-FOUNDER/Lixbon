@@ -446,6 +446,7 @@
   padding: 11px 19px;
   background: var(--ink);
   border-radius: var(--radius-box);
+  border-bottom-right-radius: 15px;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   color: var(--bg);

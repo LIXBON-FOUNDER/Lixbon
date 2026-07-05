@@ -92,6 +92,9 @@ def init_db() -> None:
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS current_period_end TEXT",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS cancel_at_period_end INTEGER NOT NULL DEFAULT 0",
+        # Compartir conversaciones por enlace público
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS share_token TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_share ON conversations (share_token)",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

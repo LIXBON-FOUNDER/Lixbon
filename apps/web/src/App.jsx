@@ -9,6 +9,7 @@ import PlansPage from './pages/PlansPage';
 import AdminPage from './pages/AdminPage';
 import DownloadsPage from './pages/DownloadsPage';
 import DocsPage from './pages/DocsPage';
+import SharedPage from './pages/SharedPage';
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/descargas" element={<Navigate to="/aplicaciones" replace />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:section" element={<DocsPage />} />
+          <Route path="/s/:token" element={<SharedPage />} />
           {/* Rutas legacy del dashboard viejo */}
           <Route path="/login" element={<Navigate to="/auth" replace />} />
           <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />

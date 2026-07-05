@@ -17,9 +17,13 @@ from core.delegation.embeddings import pick_classifier_model
 from core.persistence.queries import (
     delete_conversation,
     get_conversation,
+    get_conversation_share,
+    get_shared_conversation,
     list_conversations,
     list_messages,
+    log_audit_event,
     rename_conversation,
+    set_conversation_share,
 )
 from core.security.auth import cookie_auth_required
 
@@ -78,6 +82,52 @@ async def api_delete_conversation(
     if not delete_conversation(conversation_id, user_data["id"]):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
     return {"deleted": conversation_id}
+
+
+@router.get("/api/conversations/{conversation_id}/share")
+async def api_get_share(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Estado de compartir de la conversación (token actual, si lo hay)."""
+    if not get_conversation(conversation_id, user_data["id"]):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    token = get_conversation_share(conversation_id, user_data["id"])
+    return {"shared": bool(token), "token": token}
+
+
+@router.post("/api/conversations/{conversation_id}/share")
+async def api_enable_share(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Genera (o reutiliza) el enlace público de solo lectura."""
+    token = set_conversation_share(conversation_id, user_data["id"], enabled=True)
+    if not token:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    log_audit_event("conversation_shared", user_id=user_data["id"])
+    return {"shared": True, "token": token}
+
+
+@router.delete("/api/conversations/{conversation_id}/share")
+async def api_disable_share(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Revoca el enlace público."""
+    if not get_conversation(conversation_id, user_data["id"]):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    set_conversation_share(conversation_id, user_data["id"], enabled=False)
+    return {"shared": False}
+
+
+@router.get("/api/shared/{token}")
+async def api_shared_conversation(token: str):
+    """Vista pública de una conversación compartida (sin autenticación)."""
+    data = get_shared_conversation(token)
+    if not data:
+        raise HTTPException(status_code=404, detail="Este enlace no existe o fue revocado")
+    return data
 
 
 @router.post("/api/conversations/{conversation_id}/generate-title")

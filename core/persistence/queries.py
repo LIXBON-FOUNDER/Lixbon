@@ -1059,6 +1059,52 @@ def delete_conversation(conversation_id: str, user_id: int) -> bool:
         return True
 
 
+def set_conversation_share(conversation_id: str, user_id: int, enabled: bool) -> str | None:
+    """Activa/desactiva el enlace público de una conversación (ownership-checked).
+    Devuelve el token si queda compartida, None si se revoca o no existe/es ajena."""
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return None
+        if enabled:
+            if not conv.share_token:
+                conv.share_token = f"sh_{secrets.token_urlsafe(16)}"
+            conv.updated_at = now_iso()
+            return conv.share_token
+        conv.share_token = None
+        conv.updated_at = now_iso()
+        return None
+
+
+def get_conversation_share(conversation_id: str, user_id: int) -> str | None:
+    """Token de compartir actual (None si no está compartida o es ajena)."""
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return None
+        return conv.share_token
+
+
+def get_shared_conversation(token: str) -> dict[str, Any] | None:
+    """Vista pública de solo lectura de una conversación compartida (sin datos del dueño)."""
+    if not token:
+        return None
+    with get_session() as s:
+        conv = s.scalars(select(Conversation).where(Conversation.share_token == token)).first()
+        if not conv:
+            return None
+        msgs = s.scalars(
+            select(Message)
+            .where(Message.conversation_id == conv.id)
+            .order_by(Message.created_at, Message.id)
+        ).all()
+        return {
+            "title": conv.title or "Conversación",
+            "created_at": conv.created_at,
+            "messages": [{"role": m.role, "content": m.content} for m in msgs],
+        }
+
+
 def get_usage_summary(user_id: int | None = None) -> dict[str, int]:
     with get_session() as s:
         stmt = (

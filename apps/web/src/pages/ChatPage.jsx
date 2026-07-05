@@ -10,6 +10,7 @@ import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
+import { ShareDialog } from '../components/ShareDialog';
 import { IconShare, IconArrowDown } from '../components/Icons';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
@@ -30,6 +31,7 @@ export default function ChatPage() {
   const [collapsed, setCollapsed] = useState(false);
   const [toast, setToast] = useState(null); // { text, leaving }
   const [showJump, setShowJump] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const scrollRef = useRef(null);
   const loadedConvRef = useRef(null); // conversación ya cargada (evita refetch tras navigate)
@@ -241,10 +243,10 @@ export default function ChatPage() {
         <header className="chat-header">
           <h1 className="chat-header__title">{title || (empty ? '' : 'Sin título')}</h1>
           {user ? (
-            !empty && (
+            !empty && routeConvId && (
               <button
                 className="pill-btn pill-btn--primary chat-header__share"
-                onClick={() => showToast('Compartir estará disponible pronto')}
+                onClick={() => setShareOpen(true)}
               >
                 <IconShare size={15} /> Compartir
               </button>
@@ -305,6 +307,10 @@ export default function ChatPage() {
           <div className={`chat-toast ${toast.leaving ? 'is-leaving' : ''}`}>{toast.text}</div>
         )}
       </main>
+
+      {shareOpen && routeConvId && (
+        <ShareDialog conversationId={routeConvId} onClose={() => setShareOpen(false)} />
+      )}
     </div>
   );
 }
