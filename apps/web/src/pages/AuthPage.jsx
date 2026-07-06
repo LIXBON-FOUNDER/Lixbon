@@ -27,6 +27,97 @@ function AppleLogo() {
   );
 }
 
+// Estrella de 4 puntas (motivo "sparkle" de la ilustración animada)
+function Spark({ size = 18, color = '#6C7A46', style, delay }) {
+  return (
+    <span className="spark" style={{ color, animationDelay: delay, ...style }} aria-hidden="true">
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z" />
+      </svg>
+    </span>
+  );
+}
+
+function CoreSpark() {
+  return (
+    <svg width="52%" height="52%" viewBox="0 0 24 24" fill="#F2F1E3" aria-hidden="true">
+      <path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z" />
+    </svg>
+  );
+}
+
+// Ilustración de fondo (motion) del rediseño Claude Design "Folax Login".
+// Decorativa: se anima con CSS y se oculta en pantallas estrechas.
+function AuthIllustration() {
+  return (
+    <div className="auth-illu" aria-hidden="true">
+      {/* Destellos ambientales */}
+      <Spark size={22} color="#6C7A46" style={{ left: '14%', top: '20%' }} />
+      <Spark size={16} color="#C7BE9F" style={{ left: '9%', bottom: '16%' }} delay="0.6s" />
+      <Spark size={18} color="#6C7A46" style={{ right: '13%', top: '24%' }} delay="1.1s" />
+      <Spark size={14} color="#1B1A17" style={{ right: '17%', bottom: '22%' }} delay="1.6s" />
+
+      {/* Cluster izquierdo: núcleo de IA */}
+      <div className="auth-illu__cluster auth-illu__cluster--left">
+        <div className="auth-illu__stage auth-illu__stage--left">
+          <div className="auth-illu__glow" />
+
+          <div className="auth-illu__ring" style={{ width: '100%', height: '100%', border: '1.5px dashed rgba(75,83,39,.28)', '--dur': '52s' }}>
+            <span className="auth-illu__ring-dot" style={{ width: 9, height: 9, background: '#6C7A46', top: -5 }} />
+          </div>
+          <div className="auth-illu__ring is-reverse" style={{ width: '74%', height: '74%', border: '1.5px solid rgba(75,83,39,.22)', '--dur': '38s' }}>
+            <span className="auth-illu__ring-dot" style={{ width: 8, height: 8, background: '#1B1A17' }} />
+          </div>
+          <div className="auth-illu__ring" style={{ width: '50%', height: '50%', border: '1.5px dashed rgba(75,83,39,.32)', '--dur': '26s' }}>
+            <span className="auth-illu__ring-dot" style={{ width: 7, height: 7, background: '#C7BE9F' }} />
+          </div>
+
+          <div className="auth-illu__core">
+            <CoreSpark />
+          </div>
+
+          <div className="auth-illu__bubble auth-illu__bubble--dark" style={{ top: '6%', right: '10%' }}>
+            <span className="auth-illu__dot" />
+            <span className="auth-illu__dot" />
+            <span className="auth-illu__dot" />
+          </div>
+          <div className="auth-illu__bubble auth-illu__bubble--light" style={{ bottom: '8%', left: '-4%' }}>
+            <span className="auth-illu__bar" style={{ width: 56, background: 'rgba(27,26,23,.16)' }} />
+            <span className="auth-illu__bar" style={{ width: 36, background: 'rgba(108,122,70,.45)' }} />
+          </div>
+
+          <Spark size={20} color="#6C7A46" style={{ left: '2%', top: '0%' }} delay="0.3s" />
+          <Spark size={15} color="#1B1A17" style={{ right: '6%', bottom: '16%' }} delay="1.4s" />
+        </div>
+      </div>
+
+      {/* Cluster derecho: conversación flotante */}
+      <div className="auth-illu__cluster auth-illu__cluster--right">
+        <div className="auth-illu__stage auth-illu__stage--right">
+          <div style={{ position: 'absolute', top: '6%', left: '52%', transform: 'translateX(-50%)', width: '60%', aspectRatio: '1 / 1' }}>
+            <div className="auth-illu__ring is-reverse" style={{ width: '100%', height: '100%', border: '1.5px dashed rgba(75,83,39,.24)', '--dur': '30s' }}>
+              <span className="auth-illu__ring-dot" style={{ width: 7, height: 7, background: '#6C7A46' }} />
+            </div>
+          </div>
+
+          <div className="auth-illu__bubble auth-illu__bubble--dark" style={{ top: '16%', right: '6%' }}>
+            <span className="auth-illu__dot" />
+            <span className="auth-illu__dot" />
+            <span className="auth-illu__dot" />
+          </div>
+          <div className="auth-illu__bubble auth-illu__bubble--light" style={{ bottom: '20%', left: '16%' }}>
+            <span className="auth-illu__bar" style={{ width: 60, background: 'rgba(27,26,23,.16)' }} />
+            <span className="auth-illu__bar" style={{ width: 40, background: 'rgba(108,122,70,.45)' }} />
+          </div>
+
+          <Spark size={18} color="#6C7A46" style={{ right: '2%', top: '52%' }} delay="0.9s" />
+          <Spark size={14} color="#C7BE9F" style={{ left: '8%', bottom: '2%' }} delay="1.9s" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AuthPage() {
   const [params] = useSearchParams();
   const initialMode = params.get('mode') === 'register' ? 'register' : 'login';
@@ -77,6 +168,8 @@ export default function AuthPage() {
 
   return (
     <div className="auth">
+      <AuthIllustration />
+
       <Link to="/" className="auth__logo" aria-label="Volver al chat">
         <Logo size={28} />
       </Link>
