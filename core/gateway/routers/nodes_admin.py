@@ -23,7 +23,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 class NodePayload(BaseModel):
     id: str = Field(..., description="Slug del nodo, ej: gpu-01")
     name: str = Field(..., description="Nombre visible, ej: PC Gabriel RTX")
-    agent_url: str = Field(..., description="URL del node_agent, ej: https://gpu-01.datacentgbx.online")
+    agent_url: str = Field(..., description="URL del node_agent, ej: https://gpu-01.lixbon.com")
     token: str | None = Field(None, description="Token del nodo; si se omite se genera uno nuevo")
     enabled: bool = True
 

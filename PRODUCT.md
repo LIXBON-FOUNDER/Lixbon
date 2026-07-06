@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Desarrolladores y usuarios técnicos de lixbon (plataforma SaaS de LLMs auto-hospedados sobre un clúster GPU distribuido). Dos superficies: la **web** (`apps/web`, chat tipo Claude/GPT en `datacentgbx.online`) y la **app desktop** (`apps/desktop`, IDE ligero Tauri para trabajar con código asistido por los modelos del clúster). El usuario desktop está dentro de una tarea de programación: abre una carpeta, edita archivos y consulta a la IA con contexto de su código. Se autentica con su cuenta de la web (email) o con una API key `lixbon_sk_` creada allí.
+Desarrolladores y usuarios técnicos de lixbon (plataforma SaaS de LLMs auto-hospedados sobre un clúster GPU distribuido). Dos superficies: la **web** (`apps/web`, chat tipo Claude/GPT en `lixbon.com`) y la **app desktop** (`apps/desktop`, IDE ligero Tauri para trabajar con código asistido por los modelos del clúster). El usuario desktop está dentro de una tarea de programación: abre una carpeta, edita archivos y consulta a la IA con contexto de su código. Se autentica con su cuenta de la web (email) o con una API key `lixbon_sk_` creada allí.
 
 ## Product Purpose
 

@@ -39,7 +39,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQTAzQjU0RjM1NkUxMTYKUldRVzRWYnpWRHVna3FzZHVxR1gzck5KeGRLTThPSjdvN21wS1pQZTVVNktaZGU2aVhncmkzZTcK",
       "endpoints": [
-        "https://remote.datacentgbx.online/api/updates/manifest/stable"
+        "https://lixbon.com/api/updates/manifest/stable"
       ]
     }
   }

@@ -13,7 +13,7 @@ import httpx
 logger = logging.getLogger("lixbon.email")
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-EMAIL_FROM = os.getenv("EMAIL_FROM", "lixbon <no-reply@datacentgbx.online>")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "lixbon <no-reply@lixbon.com>")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
 

@@ -1,4 +1,4 @@
-# lixbon — Especificación de diseño de la web (datacentgbx.online)
+# lixbon — Especificación de diseño de la web (lixbon.com)
 
 > Fuente: mockups del 2026-07-04 (login, registro, chat con y sin sesión).
 > Este documento es la referencia de implementación para `apps/web`.

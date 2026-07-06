@@ -4,7 +4,7 @@
 
 import { load } from '@tauri-apps/plugin-store';
 
-export const DEFAULT_SERVER_URL = 'https://remote.datacentgbx.online';
+export const DEFAULT_SERVER_URL = 'https://lixbon.com';
 
 let storePromise = null;
 

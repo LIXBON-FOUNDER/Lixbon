@@ -11,7 +11,7 @@ const LINKS = [
   { to: '/planes', label: 'Planes' },
 ];
 
-const SUPPORT_EMAIL = 'soporte@datacentgbx.online';
+const SUPPORT_EMAIL = 'soporte@lixbon.com';
 
 export function PublicNav() {
   const { pathname } = useLocation();

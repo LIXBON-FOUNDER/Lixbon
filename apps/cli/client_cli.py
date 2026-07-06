@@ -62,7 +62,7 @@ MODEL_COMPLETIONS: list[str] = []
 
 def default_config() -> dict:
     return {
-        "base_url": "https://remote.datacentgbx.online/v1",
+        "base_url": "https://lixbon.com/v1",
         "api_key": "",
         "model": "",
         "key_model": "",  # Si está definido, la key es de modelo especifico (no se puede cambiar)
@@ -629,7 +629,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 def cmd_setup(_: argparse.Namespace) -> None:
     import getpass
 
-    FIXED_BASE_URL = "https://remote.datacentgbx.online/v1"
+    FIXED_BASE_URL = "https://lixbon.com/v1"
     SERVER_BASE = FIXED_BASE_URL.rsplit("/v1", 1)[0]
 
     cfg = load_config()
@@ -892,7 +892,7 @@ def cmd_chat_fallback(args: argparse.Namespace) -> None:
     enable_windows_colors()
     setup_slash_completer()
     cfg = load_config()
-    base_url = cfg.get("base_url") or "https://datacentgbx.online/v1"
+    base_url = cfg.get("base_url") or "https://lixbon.com/v1"
     api_key = cfg.get("api_key") or ""
     key_model_locked = cfg.get("key_model", "")  # Si tiene valor, el modelo es fijo
     selected_model = getattr(args, "model", None)

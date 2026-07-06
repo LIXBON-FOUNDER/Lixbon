@@ -174,7 +174,7 @@ class Node(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)          # slug: "gpu-01"
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    agent_url: Mapped[str] = mapped_column(Text, nullable=False)     # https://gpu-01.datacentgbx.online
+    agent_url: Mapped[str] = mapped_column(Text, nullable=False)     # https://gpu-01.lixbon.com
     # Token que el gateway envía al node_agent (X-Node-Token). Credencial del gateway,
     # se guarda en claro porque el gateway necesita enviarla, como cualquier client secret.
     token: Mapped[str] = mapped_column(Text, nullable=False)

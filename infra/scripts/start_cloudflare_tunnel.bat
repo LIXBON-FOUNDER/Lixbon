@@ -20,7 +20,7 @@ echo ==============================================================
 echo Iniciando Tunel de Cloudflare hacia tu API LAN (Puerto 8000)
 echo ==============================================================
 echo.
-echo Tu API estara disponible de forma fija en: https://datacentgbx.online
+echo Tu API estara disponible de forma fija en: https://lixbon.com
 echo.
 echo Presiona CTRL+C en esta ventana cuando quieras cerrar el tunel.
 echo ==============================================================

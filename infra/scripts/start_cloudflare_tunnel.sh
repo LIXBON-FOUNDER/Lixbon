@@ -27,7 +27,7 @@ echo
 echo "=============================================================="
 echo " Iniciando Túnel de Cloudflare hacia la API LAN (Puerto 8000)"
 echo "=============================================================="
-echo " Tu API estará disponible en: https://datacentgbx.online"
+echo " Tu API estará disponible en: https://lixbon.com"
 echo " Presiona CTRL+C para cerrar el túnel."
 echo "=============================================================="
 echo
