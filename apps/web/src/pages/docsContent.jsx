@@ -147,16 +147,16 @@ function Cli({ base }) {
         La primera vez, ejecuta <code>setup</code> para guardar tu servidor y tu API
         key (la generas en <a href="/account">Mi cuenta</a>):
       </p>
-      <CodeBlock code={`LIXBON setup`} />
+      <CodeBlock code={`lixbon setup`} />
 
       <h2>Comandos principales</h2>
       <table className="docs__table">
         <thead><tr><th>Comando</th><th>Qué hace</th></tr></thead>
         <tbody>
-          <tr><td><code>LIXBON setup</code></td><td>Configuración inicial (servidor y API key)</td></tr>
-          <tr><td><code>LIXBON chat</code></td><td>Chat interactivo en la terminal</td></tr>
-          <tr><td><code>LIXBON status</code></td><td>Estado del gateway y del clúster</td></tr>
-          <tr><td><code>LIXBON update</code></td><td>Actualiza el CLI a la última versión</td></tr>
+          <tr><td><code>lixbon setup</code></td><td>Configuración inicial (servidor y API key)</td></tr>
+          <tr><td><code>lixbon chat</code></td><td>Chat interactivo en la terminal</td></tr>
+          <tr><td><code>lixbon status</code></td><td>Estado del gateway y del clúster</td></tr>
+          <tr><td><code>lixbon update</code></td><td>Actualiza el CLI a la última versión</td></tr>
         </tbody>
       </table>
 

@@ -105,8 +105,8 @@ export default function DownloadsPage() {
             )}
 
             <p className="dl-card__step">2. Configura y empieza a chatear:</p>
-            <CodeBlock code={`LIXBON setup`} />
-            <CodeBlock code={`LIXBON chat`} />
+            <CodeBlock code={`lixbon setup`} />
+            <CodeBlock code={`lixbon chat`} />
 
             <details className="dl-details">
               <summary>Instalación manual (sin script)</summary>

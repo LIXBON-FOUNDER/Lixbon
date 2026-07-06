@@ -66,15 +66,15 @@ Abre una nueva terminal y ejecuta:
 
 1. **Configuración inicial**:
    ```bash
-   LIXBON setup
+   lixbon setup
    ```
 2. **Iniciar chat interactivo**:
    ```bash
-   LIXBON chat
+   lixbon chat
    ```
 3. **Ver estado del cluster**:
    ```bash
-   LIXBON status
+   lixbon status
    ```
 
 #### Slash Commands dentro del Chat del CLI
