@@ -1,4 +1,4 @@
--- plans.sql — Seed de los 3 planes de LIXBON (F5).
+-- plans.sql — Seed de los 3 planes de lixbon (F5).
 -- NOTA: init_db() aplica este mismo seed automáticamente al arrancar el gateway
 -- (ON CONFLICT DO NOTHING). Este archivo documenta los valores iniciales y sirve
 -- para re-sembrar a mano. Los límites REALES viven en la tabla y se ajustan con

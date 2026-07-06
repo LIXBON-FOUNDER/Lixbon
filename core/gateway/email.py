@@ -10,10 +10,10 @@ import os
 
 import httpx
 
-logger = logging.getLogger("LIXBON.email")
+logger = logging.getLogger("lixbon.email")
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-EMAIL_FROM = os.getenv("EMAIL_FROM", "LIXBON <no-reply@datacentgbx.online>")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "lixbon <no-reply@datacentgbx.online>")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
@@ -42,7 +42,7 @@ def _layout(title: str, body: str, cta_text: str, cta_url: str) -> str:
     return f"""
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;
                 background: #F6F7ED; border: 1px solid #171717; border-radius: 16px;">
-      <h1 style="font-size: 22px; letter-spacing: 4px; color: #171717;">LIXBON</h1>
+      <h1 style="font-size: 22px; letter-spacing: 4px; color: #171717;">lixbon</h1>
       <h2 style="color: #171717;">{title}</h2>
       <p style="color: #171717; line-height: 1.6;">{body}</p>
       <a href="{cta_url}" style="display: inline-block; background: #171717; color: #ffffff;
@@ -57,8 +57,8 @@ def _layout(title: str, body: str, cta_text: str, cta_url: str) -> str:
 async def send_verification_email(to: str, token: str) -> bool:
     url = f"{PUBLIC_BASE_URL}/api/auth/verify-email?token={token}"
     return await send_email(
-        to, "Verifica tu correo — LIXBON",
-        _layout("Verifica tu correo", "Confirma tu dirección para completar tu registro en LIXBON.",
+        to, "Verifica tu correo — lixbon",
+        _layout("Verifica tu correo", "Confirma tu dirección para completar tu registro en lixbon.",
                 "Verificar correo", url),
     )
 
@@ -66,7 +66,7 @@ async def send_verification_email(to: str, token: str) -> bool:
 async def send_password_reset_email(to: str, token: str) -> bool:
     url = f"{PUBLIC_BASE_URL}/reset-password?token={token}"
     return await send_email(
-        to, "Restablece tu contraseña — LIXBON",
+        to, "Restablece tu contraseña — lixbon",
         _layout("Restablecer contraseña", "Recibimos una solicitud para cambiar tu contraseña. El enlace expira en 2 horas.",
                 "Cambiar contraseña", url),
     )

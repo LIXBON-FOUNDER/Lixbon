@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from core.persistence.queries import bump_usage_quota, get_usage_quota
 from core.security.ratelimit import _get_redis, enforce_rate_limit
 
-logger = logging.getLogger("LIXBON.quota")
+logger = logging.getLogger("lixbon.quota")
 
 UNLIMITED = -1
 

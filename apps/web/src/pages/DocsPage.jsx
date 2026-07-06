@@ -1,4 +1,4 @@
-// DocsPage.jsx — LIXBON Docs (/docs y /docs/:section). Índice lateral por grupos +
+// DocsPage.jsx — lixbon Docs (/docs y /docs/:section). Índice lateral por grupos +
 // contenido central. Pública. Estilo tipo code.claude.com.
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    app_LIXBON_lib::run()
+    app_lixbon_lib::run()
 }

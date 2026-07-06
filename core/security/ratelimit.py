@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 from core.config import AUTH_BLOCK_MINUTES, AUTH_RATE_LIMIT, RATE_LIMIT_PER_MIN, REDIS_URL
 
-logger = logging.getLogger("LIXBON.ratelimit")
+logger = logging.getLogger("lixbon.ratelimit")
 
 # ── Cliente Redis (perezoso) ───────────────────────────────────────────────
 

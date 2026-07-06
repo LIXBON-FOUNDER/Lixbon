@@ -1,4 +1,4 @@
-// docsContent.jsx — contenido de LIXBON Docs. Cada sección es un componente que
+// docsContent.jsx — contenido de lixbon Docs. Cada sección es un componente que
 // recibe `base` (origen del gateway) para los ejemplos. El índice de la izquierda
 // se genera desde SECTIONS.
 import { CodeBlock } from '../components/CodeBlock';
@@ -45,9 +45,9 @@ export const SECTIONS = [
 function Introduccion() {
   return (
     <>
-      <h1>¿Qué es LIXBON?</h1>
+      <h1>¿Qué es lixbon?</h1>
       <p className="docs__lead">
-        LIXBON es una plataforma de chat con modelos de lenguaje que corre sobre un
+        lixbon es una plataforma de chat con modelos de lenguaje que corre sobre un
         clúster de GPUs propio. Puedes usarla desde la web, desde tu terminal con el
         CLI, desde la app de escritorio o integrarla en tu código con una API
         compatible con OpenAI.
@@ -61,7 +61,7 @@ function Introduccion() {
         propio, y el orquestador reparte la carga y evita los nodos caídos.
       </p>
 
-      <h2>Formas de usar LIXBON</h2>
+      <h2>Formas de usar lixbon</h2>
       <ul>
         <li><strong>Chat web</strong> — la forma más rápida de empezar, sin instalar nada.</li>
         <li><strong>CLI</strong> — chatea desde la terminal, con modo agente y contexto de tu carpeta de trabajo.</li>
@@ -105,7 +105,7 @@ function PrimerosPasos() {
         planes de pago habilitan todos los del clúster.
       </p>
 
-      <h2>4. Lleva LIXBON a tu terminal</h2>
+      <h2>4. Lleva lixbon a tu terminal</h2>
       <p>
         Cuando quieras usarlo mientras programas, instala el{' '}
         <a href="/docs/cli">CLI</a> o la <a href="/docs/desktop">app de escritorio</a>.
@@ -119,7 +119,7 @@ function Cli({ base }) {
     <>
       <h1>CLI</h1>
       <p className="docs__lead">
-        El CLI de LIXBON te deja chatear con el clúster desde la terminal, con modo
+        El CLI de lixbon te deja chatear con el clúster desde la terminal, con modo
         agente y contexto de tu carpeta de trabajo. Requiere Python 3.10 o superior.
       </p>
 
@@ -127,8 +127,8 @@ function Cli({ base }) {
       <p>Abre <strong>PowerShell</strong> y ejecuta:</p>
       <CodeBlock code={`irm ${base}/install.ps1 | iex`} />
       <p>
-        Esto descarga el CLI en <code>%USERPROFILE%\\.LIXBON</code> y agrega el comando{' '}
-        <code>LIXBON</code> a tu PATH de usuario. Abre una terminal nueva para que el
+        Esto descarga el CLI en <code>%USERPROFILE%\\.lixbon</code> y agrega el comando{' '}
+        <code>lixbon</code> a tu PATH de usuario. Abre una terminal nueva para que el
         comando quede disponible.
       </p>
 
@@ -136,8 +136,8 @@ function Cli({ base }) {
       <p>Abre tu <strong>terminal</strong> y ejecuta:</p>
       <CodeBlock code={`curl -fsSL ${base}/install.sh | bash`} />
       <p>
-        Instala el CLI en <code>~/.LIXBON</code> y crea el comando <code>LIXBON</code>{' '}
-        en <code>~/.local/bin</code>. Si <code>LIXBON</code> no se reconoce, añade esa
+        Instala el CLI en <code>~/.lixbon</code> y crea el comando <code>lixbon</code>{' '}
+        en <code>~/.local/bin</code>. Si <code>lixbon</code> no se reconoce, añade esa
         carpeta a tu PATH:
       </p>
       <CodeBlock code={`export PATH="$HOME/.local/bin:$PATH"`} />
@@ -176,7 +176,7 @@ function Desktop() {
     <>
       <h1>App de escritorio</h1>
       <p className="docs__lead">
-        La app de escritorio ofrece la experiencia completa de LIXBON como aplicación
+        La app de escritorio ofrece la experiencia completa de lixbon como aplicación
         nativa para Windows, con actualizaciones automáticas.
       </p>
 
@@ -209,7 +209,7 @@ function ApiDocs({ base }) {
     <>
       <h1>API</h1>
       <p className="docs__lead">
-        LIXBON expone una API <strong>compatible con OpenAI</strong>. Si ya usas el SDK
+        lixbon expone una API <strong>compatible con OpenAI</strong>. Si ya usas el SDK
         de OpenAI o cualquier cliente compatible, solo cambia la URL base y la API key.
       </p>
 
@@ -218,19 +218,19 @@ function ApiDocs({ base }) {
         Genera una API key en <a href="/account">Mi cuenta</a>. Se muestra una única
         vez al crearla — guárdala. Envíala en la cabecera <code>Authorization</code>:
       </p>
-      <CodeBlock code={`Authorization: Bearer LIXBON_sk_tu_clave`} />
+      <CodeBlock code={`Authorization: Bearer lixbon_sk_tu_clave`} />
 
       <h2>Endpoint base</h2>
       <CodeBlock code={`${base}/v1`} />
 
       <h2>Listar modelos</h2>
-      <CodeBlock label="cURL" code={`curl ${base}/v1/models -H "Authorization: Bearer LIXBON_sk_tu_clave"`} />
+      <CodeBlock label="cURL" code={`curl ${base}/v1/models -H "Authorization: Bearer lixbon_sk_tu_clave"`} />
 
       <h2>Chat completions (streaming)</h2>
       <CodeBlock
         label="cURL"
         code={`curl ${base}/v1/chat/completions \\
-  -H "Authorization: Bearer LIXBON_sk_tu_clave" \\
+  -H "Authorization: Bearer lixbon_sk_tu_clave" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"llama3.2","messages":[{"role":"user","content":"Hola"}],"stream":true}'`}
       />
@@ -245,7 +245,7 @@ function ApiDocs({ base }) {
         label="Python"
         code={`from openai import OpenAI
 
-client = OpenAI(base_url="${base}/v1", api_key="LIXBON_sk_tu_clave")
+client = OpenAI(base_url="${base}/v1", api_key="lixbon_sk_tu_clave")
 
 stream = client.chat.completions.create(
     model="llama3.2",

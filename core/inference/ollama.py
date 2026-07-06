@@ -19,7 +19,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-logger = logging.getLogger("LIXBON.inference")
+logger = logging.getLogger("lixbon.inference")
 
 KEEPALIVE_SECONDS = 5
 STREAM_TIMEOUT = httpx.Timeout(300.0, connect=15.0)

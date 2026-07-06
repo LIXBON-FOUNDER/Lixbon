@@ -1,4 +1,4 @@
-# LIXBON — Plan Maestro: de proyecto LAN a servicio SaaS en producción
+# lixbon — Plan Maestro: de proyecto LAN a servicio SaaS en producción
 
 > Fecha: 2026-07-03
 > Complementa a `INFORME_Y_PLAN.md` (diagnóstico y bugs). Este documento es el plan de ejecución definitivo con la topología ya decidida y el alcance nuevo incluido.
@@ -59,7 +59,7 @@ Puntos clave de esta topología:
 ### 2.1 Monorepo con Screaming Architecture
 
 ```
-LIXBON/
+lixbon/
 ├── core/                          # El motor request ↔ response
 │   ├── gateway/                   # FastAPI: app, routers, middleware, lifespan
 │   │   ├── routers/
@@ -82,7 +82,7 @@ LIXBON/
 │   │       ├── styles/            # CSS por página/componente como hasta ahora
 │   │       ├── lib/               # cliente API único, helpers
 │   │       └── hooks/ store/      # lógica separada de la presentación
-│   ├── desktop/                   # Tauri (hoy "App LIXBON")
+│   ├── desktop/                   # Tauri (hoy "App lixbon")
 │   └── cli/                       # CLI modularizado (hoy client_cli.py)
 ├── BD/                            # Scripts de base de datos (esquema, migraciones, seeds)
 │   ├── schema.sql
@@ -101,8 +101,8 @@ LIXBON/
 Hoy mantienes `db_sqlite.py` y `db_mysql.py` **duplicados a mano (1.800 líneas)**. Eso muere. **SQLite se abandona por completo**, también en desarrollo:
 
 - **SQLAlchemy** (modelos declarativos) + **Alembic** (migraciones versionadas) → un solo código de persistencia.
-- **Producción**: Postgres gestionado de Railway (BD `LIXBON-prod`).
-- **Desarrollo local**: el gateway corriendo en tu PC se conecta a una **BD de staging en Railway** (`LIXBON-staging`). **No corre ninguna base de datos en tu PC** — ni Postgres local, ni Docker, ni SQLite.
+- **Producción**: Postgres gestionado de Railway (BD `lixbon-prod`).
+- **Desarrollo local**: el gateway corriendo en tu PC se conecta a una **BD de staging en Railway** (`lixbon-staging`). **No corre ninguna base de datos en tu PC** — ni Postgres local, ni Docker, ni SQLite.
 - Dos bases separadas en Railway, mismo esquema: staging para depurar, prod para usuarios. Cambiar entre ellas = cambiar `DATABASE_URL` en tu `.env` local. **Nunca apuntar el entorno de desarrollo a prod.**
 - Consideración honesta: depurar contra staging requiere internet y añade ~50–150 ms de latencia por query respecto a una BD local. Para este proyecto es un trade-off aceptable a cambio de no tener nada corriendo en tu PC; si algún día molesta, levantar un Postgres local es trivial porque el código solo conoce `DATABASE_URL`.
 - Ventaja clave: los bugs de concurrencia/SQL se ven en desarrollo igual que en producción — con SQLite se ocultaban.
@@ -141,7 +141,7 @@ BD/
 | Credencial | Uso | Vida | Almacenamiento |
 |---|---|---|---|
 | **Sesión web** | Navegador (cookie `Secure`, `HttpOnly`, `SameSite=Lax`) | Horas/días, renovable | Hash en tabla `sessions` |
-| **API key** (`LIXBON_sk_...`) | CLI, desktop, integraciones | Larga, revocable | **Solo hash** — se muestra una única vez |
+| **API key** (`lixbon_sk_...`) | CLI, desktop, integraciones | Larga, revocable | **Solo hash** — se muestra una única vez |
 | **Token interno de nodo** | Gateway → node_agent por el tunnel | Rotable | Env var en ambos lados |
 | **Rol admin** | Panel admin | — | Columna `role`; tu usuario se marca por seed/env |
 
@@ -179,7 +179,7 @@ El esqueleto sobre el que se construye todo lo demás.
 |---|---|
 | 1.1 | Reorganizar a la estructura `core/ apps/ infra/ docs/` (mover código, arreglar imports — sin cambiar lógica) |
 | 1.2 | Migrar persistencia a **SQLAlchemy + Alembic sobre Postgres**; eliminar `db_sqlite.py`/`db_mysql.py` y todo rastro de SQLite |
-| 1.2b | Crear en Railway **dos Postgres**: `LIXBON-staging` (para depurar desde tu PC) y `LIXBON-prod`. El `.env` local apunta a staging vía `DATABASE_URL`; **nada de BD corriendo en tu PC** |
+| 1.2b | Crear en Railway **dos Postgres**: `lixbon-staging` (para depurar desde tu PC) y `lixbon-prod`. El `.env` local apunta a staging vía `DATABASE_URL`; **nada de BD corriendo en tu PC** |
 | 1.2c | Crear la carpeta **`BD/`** con `schema.sql`, `migrations/` (Alembic), `seeds/` (planes + admin) y `scripts/` (migración de datos legacy, reset de staging, guía de backups) |
 | 1.3 | **Redis** para rate limiting, bloqueos de IP y sesiones (adiós dicts en memoria). Igual que la BD: el Redis vive en Railway; en desarrollo te conectas al de staging |
 | 1.4 | `Dockerfile` del gateway + `railway.toml`; respetar `PORT` de Railway; healthcheck `/health` |
@@ -222,7 +222,7 @@ Decisiones de producto (2026-07-04): visitante sin cuenta VE el chat pero al env
 | # | Tarea |
 |---|---|
 | 3.1 | Tabla `sessions` — cookie de sesión separada de API keys, expiración y renovación |
-| 3.2 | API keys: solo hash en BD, prefijo visible (`LIXBON_sk_abc...`), se muestra completa una única vez |
+| 3.2 | API keys: solo hash en BD, prefijo visible (`lixbon_sk_abc...`), se muestra completa una única vez |
 | 3.3 | Roles `user`/`admin`; dependencia `admin_required`; tu cuenta marcada como admin por seed (ADMIN_EMAILS) |
 | 3.4 | **Login por email** + registro con Nombre/Apellido + verificación de email (necesario para pagos y recuperación) |
 | 3.5 | Recuperación de contraseña por email (Resend/SES — proveedor sencillo) |
@@ -349,7 +349,7 @@ F4, F5 y F6 pueden intercalarse según lo que quieras ver funcionando primero. M
 | Tunnel caído = servicio sin IA | Alto | El gateway detecta nodo offline y muestra estado claro; alerta (F8.3); el circuit breaker ya existe |
 | Tu PC GPU apagada mientras hay usuarios | Alto | Al inicio solo tú usas — aceptable. Antes de abrir a usuarios: horario definido o el servidor GPU dedicado |
 | Costos Railway crecen con uso | Medio | Gateway es liviano (la inferencia va afuera); monitorear; los límites por plan controlan el consumo |
-| Migración de BD rompe datos | Medio | Alembic + backup previo + toda migración se prueba primero en `LIXBON-staging` antes de aplicarse a prod |
+| Migración de BD rompe datos | Medio | Alembic + backup previo + toda migración se prueba primero en `lixbon-staging` antes de aplicarse a prod |
 | Depurar contra staging requiere internet / añade latencia | Bajo | Trade-off aceptado (nada corre en tu PC); si molesta, `DATABASE_URL` permite apuntar a un Postgres local sin cambiar código |
 | Confundir staging con prod al depurar | Medio | `.env` local solo conoce staging; la URL de prod no se guarda en tu PC — vive únicamente en las variables de Railway |
 | Reescritura de historia git | Medio | Hacerla en F0 con el repo respaldado; avisar si hay otros clones |

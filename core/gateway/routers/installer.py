@@ -1,5 +1,5 @@
 """
-installer.py — Endpoints para distribución del CLI de LIXBON DTC.
+installer.py — Endpoints para distribución del CLI de lixbon DTC.
 Sirve scripts de instalación para Linux/macOS y Windows,
 y el archivo client_cli.py descargable.
 """
@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/install/client_cli.py")
 async def download_cli() -> FileResponse:
-    """Descarga el archivo client_cli.py (CLI de LIXBON DTC)."""
+    """Descarga el archivo client_cli.py (CLI de lixbon DTC)."""
     if not CLI_SOURCE_PATH.exists():
         raise HTTPException(status_code=404, detail="client_cli.py no encontrado en el servidor")
     return FileResponse(
@@ -33,13 +33,13 @@ async def install_script(request: Request) -> PlainTextResponse:
 set -euo pipefail
 
 SERVER_URL="${{1:-{server_base}}}"
-INSTALL_DIR="${{HOME}}/.LIXBON"
+INSTALL_DIR="${{HOME}}/.lixbon"
 BIN_DIR="${{HOME}}/.local/bin"
 CLI_FILE="${{INSTALL_DIR}}/client_cli.py"
-LAUNCHER_FILE="${{BIN_DIR}}/LIXBON"
+LAUNCHER_FILE="${{BIN_DIR}}/lixbon"
 
 echo "╔══════════════════════════════════════╗"
-echo "║   Instalando LIXBON DTC CLI...        ║"
+echo "║   Instalando lixbon DTC CLI...        ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 
@@ -50,7 +50,7 @@ python3 "${{CLI_FILE}}" init --base-url "${{SERVER_URL}}/v1" >/dev/null 2>&1 || 
 
 cat > "${{LAUNCHER_FILE}}" <<'LAUNCHER'
 #!/usr/bin/env bash
-python3 "${{HOME}}/.LIXBON/client_cli.py" "$@"
+python3 "${{HOME}}/.lixbon/client_cli.py" "$@"
 LAUNCHER
 chmod +x "${{LAUNCHER_FILE}}"
 
@@ -69,7 +69,7 @@ echo "  lixbon setup   — Configuración inicial"
 echo "  lixbon chat    — Chat interactivo"
 echo "  lixbon status  — Estado del gateway"
 echo ""
-echo "Si 'LIXBON' no se reconoce en la sesión actual, ejecuta:"
+echo "Si 'lixbon' no se reconoce en la sesión actual, ejecuta:"
 echo "  export PATH=\\"\\$HOME/.local/bin:\\$PATH\\""
 """
     return PlainTextResponse(content=script)
@@ -82,13 +82,13 @@ async def install_script_windows(request: Request) -> PlainTextResponse:
     script = f"""$ErrorActionPreference = "Stop"
 
 $ServerUrl = if ($args.Count -gt 0 -and $args[0]) {{ $args[0] }} else {{ "{server_base}" }}
-$InstallDir = Join-Path $env:USERPROFILE ".LIXBON"
+$InstallDir = Join-Path $env:USERPROFILE ".lixbon"
 $CliFile = Join-Path $InstallDir "client_cli.py"
-$LauncherFile = Join-Path $InstallDir "LIXBON.cmd"
+$LauncherFile = Join-Path $InstallDir "lixbon.cmd"
 
 Write-Host ""
 Write-Host "╔══════════════════════════════════════╗"
-Write-Host "║   Instalando LIXBON DTC CLI...        ║"
+Write-Host "║   Instalando lixbon DTC CLI...        ║"
 Write-Host "╚══════════════════════════════════════╝"
 Write-Host ""
 
@@ -98,7 +98,7 @@ python $CliFile init --base-url "$ServerUrl/v1" | Out-Null
 
 @"
 @echo off
-python "%USERPROFILE%\\.LIXBON\\client_cli.py" %*
+python "%USERPROFILE%\\.lixbon\\client_cli.py" %*
 "@ | Set-Content -Path $LauncherFile -Encoding Ascii
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -113,11 +113,11 @@ if ($userPath -notlike "*$InstallDir*") {{
 
 Write-Host ""
 Write-Host "✓ CLI instalado en: $CliFile"
-Write-Host "✓ Comando creado:   LIXBON"
+Write-Host "✓ Comando creado:   lixbon"
 Write-Host ""
 Write-Host "Uso (abre una nueva terminal):"
-Write-Host "  LIXBON setup"
-Write-Host "  LIXBON chat"
-Write-Host "  LIXBON status"
+Write-Host "  lixbon setup"
+Write-Host "  lixbon chat"
+Write-Host "  lixbon status"
 """
     return PlainTextResponse(content=script)

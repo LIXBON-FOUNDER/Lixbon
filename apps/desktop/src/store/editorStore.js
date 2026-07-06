@@ -11,7 +11,7 @@ import { indentWithTab } from '@codemirror/commands';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 import { readFileContent, writeFileContent } from '../lib/tauri';
-import { LIXBONTheme, LIXBONSyntax } from '../editor/LIXBONTheme';
+import { lixbonTheme, lixbonSyntax } from '../editor/lixbonTheme';
 import { languageFor } from '../editor/languages';
 
 // ── Registro fuera de React ────────────────────────────────────────────
@@ -56,8 +56,8 @@ export const useEditorStore = create((set, get) => ({
           indentWithTab,
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },
         ]),
-        LIXBONTheme,
-        LIXBONSyntax,
+        lixbonTheme,
+        lixbonSyntax,
         ...languageFor(name),
         markDirty,
       ],
@@ -96,7 +96,7 @@ export const useEditorStore = create((set, get) => ({
     if (tab.dirty) {
       const discard = await ask(
         `${tab.name} tiene cambios sin guardar. ¿Cerrar de todos modos?`,
-        { title: 'LIXBON', kind: 'warning', okLabel: 'Cerrar sin guardar', cancelLabel: 'Cancelar' }
+        { title: 'lixbon', kind: 'warning', okLabel: 'Cerrar sin guardar', cancelLabel: 'Cancelar' }
       );
       if (!discard) return;
     }

@@ -1,4 +1,4 @@
-// useAuth.jsx — contexto de sesión. Hidrata con /api/auth/me (cookie LIXBON_session).
+// useAuth.jsx — contexto de sesión. Hidrata con /api/auth/me (cookie lixbon_session).
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 

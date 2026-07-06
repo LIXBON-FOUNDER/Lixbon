@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════
-#   LIXBON DTC v2.0 — Lanzador Unificado Linux/macOS
+#   lixbon DTC v2.0 — Lanzador Unificado Linux/macOS
 #   Reemplaza start_all.sh y scripts individuales
 # ═══════════════════════════════════════════════════════
 set -euo pipefail
@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 LOG_DIR="$SCRIPT_DIR/logs"
-PID_FILE="$SCRIPT_DIR/.LIXBON.pids"
+PID_FILE="$SCRIPT_DIR/.lixbon.pids"
 
 # ── Colores ANSI ───────────────────────────────────────────────────────────
 GREEN="\e[32m"; YELLOW="\e[33m"; RED="\e[31m"; CYAN="\e[36m"; BOLD="\e[1m"; RESET="\e[0m"
@@ -34,7 +34,7 @@ mkdir -p "$LOG_DIR"
 banner() {
     echo ""
     echo -e "${CYAN}${BOLD} ╔═══════════════════════════════════════════╗${RESET}"
-    echo -e "${CYAN}${BOLD} ║    F O L A X   D T C   v2.0              ║${RESET}"
+    echo -e "${CYAN}${BOLD} ║    L I X B O N   D T C   v2.0            ║${RESET}"
     echo -e "${CYAN}${BOLD} ║    Data & Task Center — Launcher          ║${RESET}"
     echo -e "${CYAN}${BOLD} ╚═══════════════════════════════════════════╝${RESET}"
     echo ""
@@ -102,7 +102,7 @@ status() {
 }
 
 stop_all() {
-    echo -e " ${YELLOW}[>>]${RESET} Deteniendo servicios LIXBON DTC..."
+    echo -e " ${YELLOW}[>>]${RESET} Deteniendo servicios lixbon DTC..."
     if [ -f "$PID_FILE" ]; then
         while IFS= read -r pid; do
             [ -n "$pid" ] && kill "$pid" 2>/dev/null && echo -e "    Detenido PID $pid" || true
@@ -118,7 +118,7 @@ logs_stream() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────
-# Modo CLI: ./LIXBON.sh [start|stop|restart|status|logs|gateway|agent]
+# Modo CLI: ./lixbon.sh [start|stop|restart|status|logs|gateway|agent]
 # ─────────────────────────────────────────────────────────────────────────
 CMD="${1:-menu}"
 
@@ -133,7 +133,7 @@ case "$CMD" in
         launch_agent
         launch_tunnel
         echo ""
-        echo -e " ${BOLD}Stack LIXBON DTC iniciado.${RESET}"
+        echo -e " ${BOLD}Stack lixbon DTC iniciado.${RESET}"
         echo -e " Dashboard:  ${CYAN}http://localhost:8000${RESET}"
         echo -e " Node Agent: ${CYAN}http://localhost:8765/metrics${RESET}"
         echo ""
@@ -195,7 +195,7 @@ case "$CMD" in
                 6) status; read -r -p "  Presiona ENTER para continuar..." ;;
                 7) stop_all; read -r -p "  Presiona ENTER para continuar..." ;;
                 8) logs_stream ;;
-                0) echo -e "\n Hasta pronto, LIXBON DTC.\n"; exit 0 ;;
+                0) echo -e "\n Hasta pronto, lixbon DTC.\n"; exit 0 ;;
                 *) echo -e " ${YELLOW}Opción no válida.${RESET}" ;;
             esac
         done

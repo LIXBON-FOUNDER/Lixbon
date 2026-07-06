@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from core.security.auth import cookie_auth_required
 
-logger = logging.getLogger("LIXBON.attachments")
+logger = logging.getLogger("lixbon.attachments")
 router = APIRouter()
 
 MAX_FILE_BYTES = 5 * 1024 * 1024        # 5 MB

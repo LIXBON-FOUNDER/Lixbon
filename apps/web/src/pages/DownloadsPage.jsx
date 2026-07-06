@@ -1,6 +1,6 @@
 // DownloadsPage.jsx — descargas públicas (/descargas): app de escritorio y CLI.
 // El CLI se instala con un comando (PowerShell en Windows, bash en Linux/macOS)
-// que baja e instala client_cli.py y crea el lanzador `LIXBON`.
+// que baja e instala client_cli.py y crea el lanzador `lixbon`.
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
@@ -31,7 +31,7 @@ export default function DownloadsPage() {
       <PublicNav />
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">Aplicaciones</h1>
-        <p className="plans__sub">Lleva LIXBON a tu escritorio y a tu terminal.</p>
+        <p className="plans__sub">Lleva lixbon a tu escritorio y a tu terminal.</p>
 
         <div className="downloads">
           {/* ── App de escritorio ── */}
@@ -39,7 +39,7 @@ export default function DownloadsPage() {
             <div className="dl-card__icon"><IconWindow size={26} /></div>
             <h2 className="dl-card__title">App de escritorio</h2>
             <p className="dl-card__desc">
-              La experiencia completa de LIXBON en una app nativa para Windows, con
+              La experiencia completa de lixbon en una app nativa para Windows, con
               actualizaciones automáticas.
             </p>
             {desktop?.available ? (
@@ -89,8 +89,8 @@ export default function DownloadsPage() {
                 <p className="dl-card__step">1. Abre <strong>PowerShell</strong> y ejecuta:</p>
                 <CodeBlock code={winCmd} />
                 <p className="dl-card__note">
-                  Instala el CLI en <code>%USERPROFILE%\.LIXBON</code> y agrega el comando{' '}
-                  <code>LIXBON</code> a tu PATH. Abre una terminal nueva después de instalar.
+                  Instala el CLI en <code>%USERPROFILE%\.lixbon</code> y agrega el comando{' '}
+                  <code>lixbon</code> a tu PATH. Abre una terminal nueva después de instalar.
                 </p>
               </>
             ) : (
@@ -98,8 +98,8 @@ export default function DownloadsPage() {
                 <p className="dl-card__step">1. Abre tu <strong>terminal</strong> y ejecuta:</p>
                 <CodeBlock code={unixCmd} />
                 <p className="dl-card__note">
-                  Instala el CLI en <code>~/.LIXBON</code> y crea el comando{' '}
-                  <code>LIXBON</code> en <code>~/.local/bin</code>.
+                  Instala el CLI en <code>~/.lixbon</code> y crea el comando{' '}
+                  <code>lixbon</code> en <code>~/.local/bin</code>.
                 </p>
               </>
             )}

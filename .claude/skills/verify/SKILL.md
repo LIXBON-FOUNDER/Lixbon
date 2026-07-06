@@ -1,9 +1,9 @@
 ---
 name: verify
-description: Cómo verificar cambios de FOLAX end-to-end (gateway FastAPI + web React). Receta de arranque, superficies y flujos que vale la pena conducir.
+description: Cómo verificar cambios de lixbon end-to-end (gateway FastAPI + web React). Receta de arranque, superficies y flujos que vale la pena conducir.
 ---
 
-# Verificación E2E de FOLAX
+# Verificación E2E de lixbon
 
 ## Arranque (dev, BD de staging en Railway vía `.env`)
 

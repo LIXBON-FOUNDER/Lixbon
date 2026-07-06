@@ -26,6 +26,6 @@ Antes de cualquier migración de Alembic en prod: backup manual primero.
 
 ## Regla de oro
 
-1. Toda migración se aplica primero en `LIXBON-staging`.
+1. Toda migración se aplica primero en `lixbon-staging`.
 2. Backup manual de prod ANTES de aplicar la misma migración en prod.
-3. Nunca ejecutar `reset_staging.py` con la URL de prod (el script se niega si `LIXBON_ENV=production`, pero no te confíes solo de eso).
+3. Nunca ejecutar `reset_staging.py` con la URL de prod (el script se niega si `lixbon_ENV=production`, pero no te confíes solo de eso).

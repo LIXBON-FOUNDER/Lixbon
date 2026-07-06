@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "app-LIXBON",
+  "productName": "app-lixbon",
   "version": "0.3.0",
-  "identifier": "com.usuario.app-LIXBON",
+  "identifier": "com.usuario.app-lixbon",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "LIXBON",
+        "title": "lixbon",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

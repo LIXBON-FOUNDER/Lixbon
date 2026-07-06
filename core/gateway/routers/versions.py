@@ -26,7 +26,7 @@ from core.persistence import queries as db
 from core.security.auth import admin_or_token
 from core.storage import r2
 
-logger = logging.getLogger("LIXBON.versions")
+logger = logging.getLogger("lixbon.versions")
 router = APIRouter()
 
 VERSIONS_JSON_PATH = Path(__file__).resolve().parent.parent / "versions.json"
@@ -227,7 +227,7 @@ async def api_upload_version(
         changelog_list = [changelog]
 
     suffix = Path(file.filename or "").suffix or ".bin"
-    filename = f"app-LIXBON-{version}-{channel}{suffix}"
+    filename = f"app-lixbon-{version}-{channel}{suffix}"
 
     if r2_configured():
         key = f"releases/{filename}"

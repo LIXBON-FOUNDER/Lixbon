@@ -1,8 +1,8 @@
-# LIXBON DTC — Informe honesto de estado y Plan de refactor a producción
+# lixbon DTC — Informe honesto de estado y Plan de refactor a producción
 
 > Fecha: 2026-07-03
 > Autor del análisis: revisión técnica completa del repositorio
-> Alcance: backend (`app/`), CLI (`scripts/`), web (`frontend/`), app desktop (`App LIXBON/`), CI/CD e infraestructura.
+> Alcance: backend (`app/`), CLI (`scripts/`), web (`frontend/`), app desktop (`App lixbon/`), CI/CD e infraestructura.
 
 ---
 
@@ -33,7 +33,7 @@ Pero para **publicarlo en la web como un servicio real**, hoy **no está listo**
 
 ### 2.2 Cómo has trabajado (la parte honesta) 🪞
 
-- **Trabajaste por acumulación, no por diseño.** Se nota que el proyecto creció "capa sobre capa": hay dos apps frontend (`frontend/` y `App LIXBON/`) con **dos clientes API distintos** (axios con cookies vs fetch con Bearer), tres `.msi` de releases viejos versionados en git, un `cloudflared.exe` de 64 MB commiteado, y **el `.venv` completo (2.100+ archivos, incluidos binarios `.so` de Linux) está en el repo**. Esto es deuda de higiene, no de lógica, pero pesa.
+- **Trabajaste por acumulación, no por diseño.** Se nota que el proyecto creció "capa sobre capa": hay dos apps frontend (`frontend/` y `App lixbon/`) con **dos clientes API distintos** (axios con cookies vs fetch con Bearer), tres `.msi` de releases viejos versionados en git, un `cloudflared.exe` de 64 MB commiteado, y **el `.venv` completo (2.100+ archivos, incluidos binarios `.so` de Linux) está en el repo**. Esto es deuda de higiene, no de lógica, pero pesa.
 - **La seguridad se trató como "feature", no como "base".** Hay buenas piezas (scrypt, rate limit) al lado de agujeros graves (clave privada de firma commiteada, endpoint de subida de instaladores sin auth, `.env` con contraseña en git). Es el patrón típico de "lo hice funcionar y seguí".
 - **Faltan tests por completo.** No hay un solo test automatizado. Para un servicio web esto es un riesgo permanente.
 - **La nomenclatura mezcla español e inglés** (variables, endpoints, comentarios). No es un error, pero para una "screaming architecture" comprensible conviene unificar.
@@ -138,7 +138,7 @@ Así el usuario y la IA se comunican por HTTPS directo contra tu máquina, sin C
 La idea de "screaming architecture" es que al abrir el repo, la estructura **grite qué hace el sistema**, no qué framework usa. Propuesta de reorganización en 4 dominios claros + núcleo compartido:
 
 ```
-LIXBON/
+lixbon/
 ├── core/                      # ⚙️ EL MOTOR: request ↔ response entre Usuario e IA
 │   ├── gateway/               #    FastAPI: la API pública (OpenAI-compatible + interna)
 │   │   ├── routers/           #    chat, auth, keys, versions, monitor, admin, ws
@@ -156,11 +156,11 @@ LIXBON/
 │   │   ├── src/features/      #    dashboard, chat, nodes, keys, delegation, releases
 │   │   ├── src/shared/        #    ui, lib/api (UN cliente API), hooks
 │   │   └── ...
-│   ├── desktop/               # 🖥️ APP DESKTOP: Tauri (mover "App LIXBON" aquí)
+│   ├── desktop/               # 🖥️ APP DESKTOP: Tauri (mover "App lixbon" aquí)
 │   │   ├── src/               #    React del desktop
 │   │   └── src-tauri/         #    Rust + updater
 │   └── cli/                   # ⌨️ CLI: cliente terminal estilo Claude Code
-│       └── LIXBON_cli/         #    dividir client_cli.py (1.900 líneas) en módulos
+│       └── lixbon_cli/         #    dividir client_cli.py (1.900 líneas) en módulos
 │
 ├── infra/                     # 🚀 INFRAESTRUCTURA
 │   ├── docker/                #    Dockerfile del gateway, docker-compose
@@ -221,7 +221,7 @@ Antes de tocar arquitectura. No se publica nada hasta cerrar esto.
 - [ ] Crear la estructura `core/ apps/ infra/ docs/`.
 - [ ] Mover backend a `core/` con los submódulos por dominio (sin cambiar lógica, solo ubicación + imports).
 - [ ] **Unificar los dos frontends**: quedarte con uno (recomiendo `frontend/` como base web) y **un solo cliente API**. El desktop reusa componentes compartidos.
-- [ ] Partir `client_cli.py` (1.900 líneas) en módulos dentro de `apps/cli/LIXBON_cli/`.
+- [ ] Partir `client_cli.py` (1.900 líneas) en módulos dentro de `apps/cli/lixbon_cli/`.
 - [ ] Mover CI a `infra/ci/` con secretos correctos.
 
 ### FASE 5 — Calidad y preparación de lanzamiento (3–5 días)

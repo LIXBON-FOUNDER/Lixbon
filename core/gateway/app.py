@@ -1,5 +1,5 @@
 """
-app.py — Punto de entrada del Gateway LIXBON.
+app.py — Punto de entrada del Gateway lixbon.
 Configura FastAPI, middlewares, ciclo de vida (lifespan) y registra los routers.
 Entry point de uvicorn: `uvicorn core.gateway.app:app`
 """
@@ -57,7 +57,7 @@ app = FastAPI(
     version=APP_VERSION,
     description=APP_DESCRIPTION,
     lifespan=lifespan,
-    # Swagger/OpenAPI bajo /api/* para dejar libre /docs a la web (LIXBON Docs)
+    # Swagger/OpenAPI bajo /api/* para dejar libre /docs a la web (lixbon Docs)
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -110,12 +110,12 @@ def _start_archiver_cron() -> None:
             try:
                 n = archive_old_inactive_keys()
                 if n:
-                    _log.getLogger("LIXBON").info(f"[cron] {n} API keys archivadas.")
+                    _log.getLogger("lixbon").info(f"[cron] {n} API keys archivadas.")
                 m = purge_expired_sessions()
                 if m:
-                    _log.getLogger("LIXBON").info(f"[cron] {m} sesiones expiradas purgadas.")
+                    _log.getLogger("lixbon").info(f"[cron] {m} sesiones expiradas purgadas.")
             except Exception as exc:
-                _log.getLogger("LIXBON").warning(f"[cron] Error en tareas de mantenimiento: {exc}")
+                _log.getLogger("lixbon").warning(f"[cron] Error en tareas de mantenimiento: {exc}")
 
     threading.Thread(target=_run, daemon=True, name="key-archiver").start()
 

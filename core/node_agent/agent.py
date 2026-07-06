@@ -1,5 +1,5 @@
 """
-agent.py — Node Agent de LIXBON (corre en cada PC con GPU).
+agent.py — Node Agent de lixbon (corre en cada PC con GPU).
 Expone métricas y hace de proxy autenticado hacia el Ollama local.
 Ollama NUNCA se expone directo a internet: todo pasa por este agente.
 
@@ -49,10 +49,10 @@ PORT = int(os.getenv("AGENT_PORT", "8765"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_WATCHDOG = os.getenv("OLLAMA_WATCHDOG", "1") == "1"
 NODE_SHARED_SECRET = os.getenv("NODE_SHARED_SECRET", "")
-TASK_NAME = "LIXBON_NodeAgent"
+TASK_NAME = "lixbon_NodeAgent"
 AGENT_VERSION = "3.0.0"
 
-app = FastAPI(title="LIXBON Node Agent", version=AGENT_VERSION)
+app = FastAPI(title="lixbon Node Agent", version=AGENT_VERSION)
 
 
 # ── Autenticación ──────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ def _ollama_models() -> list[str]:
 @app.get("/health")
 async def health():
     """Público: solo confirma que el agente vive (sin datos del sistema)."""
-    return {"status": "ok", "service": "LIXBON Node Agent", "version": AGENT_VERSION}
+    return {"status": "ok", "service": "lixbon Node Agent", "version": AGENT_VERSION}
 
 
 @app.get("/metrics")
@@ -200,16 +200,16 @@ def _watchdog_ollama() -> None:
             # Ya lanzamos uno y sigue vivo (posiblemente cargando); no duplicar
             continue
 
-        print("[LIXBON Watchdog] Ollama no responde. Intentando reiniciar...")
+        print("[lixbon Watchdog] Ollama no responde. Intentando reiniciar...")
         try:
             _ollama_proc = subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             time.sleep(5)
-            print("[LIXBON Watchdog] Ollama relanzado.")
+            print("[lixbon Watchdog] Ollama relanzado.")
         except Exception as exc:
-            print(f"[LIXBON Watchdog] No se pudo reiniciar Ollama: {exc}")
+            print(f"[lixbon Watchdog] No se pudo reiniciar Ollama: {exc}")
 
 
 # ── Registro en Task Scheduler de Windows ──────────────────────────────────
@@ -261,11 +261,11 @@ def main() -> None:
 
     if OLLAMA_WATCHDOG:
         threading.Thread(target=_watchdog_ollama, daemon=True, name="ollama-watchdog").start()
-        print("[LIXBON Watchdog] Monitoreando Ollama cada 30s.")
+        print("[lixbon Watchdog] Monitoreando Ollama cada 30s.")
 
     import uvicorn
-    print(f"[LIXBON Agent v{AGENT_VERSION}] Escuchando en http://0.0.0.0:{PORT}")
-    print(f"[LIXBON Agent] Ollama local: {OLLAMA_URL}")
+    print(f"[lixbon Agent v{AGENT_VERSION}] Escuchando en http://0.0.0.0:{PORT}")
+    print(f"[lixbon Agent] Ollama local: {OLLAMA_URL}")
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
 
 

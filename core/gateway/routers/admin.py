@@ -1,5 +1,5 @@
 """
-admin.py — Endpoints de administración de LIXBON DTC.
+admin.py — Endpoints de administración de lixbon DTC.
 Incluye: dashboard, health, estado del sistema, nodos y uso.
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ async def dashboard_init(
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "LIXBON DTC"}
+    return {"status": "ok", "service": "lixbon DTC"}
 
 
 @router.get("/api/status")

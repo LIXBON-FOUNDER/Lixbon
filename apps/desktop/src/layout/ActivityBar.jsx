@@ -12,7 +12,7 @@ export function ActivityBar() {
 
   return (
     <nav className="activitybar">
-      <span className="activitybar__brand" title="LIXBON">F</span>
+      <span className="activitybar__brand" title="LIXBON">L</span>
 
       <button
         className={`activitybar__btn ${panels.explorer ? 'is-active' : ''}`}

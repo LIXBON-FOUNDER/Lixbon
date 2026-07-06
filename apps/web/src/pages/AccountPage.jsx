@@ -232,7 +232,7 @@ function PrivacidadSection() {
     <>
       <h2 className="set-title">Privacidad</h2>
       <p className="set-lead">
-        En LIXBON tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
+        En lixbon tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
         clúster y no compartimos tus datos con terceros.
       </p>
       <div className="set-card">

@@ -26,7 +26,7 @@ import os
 import re
 from datetime import date
 
-logger = logging.getLogger("LIXBON.websearch")
+logger = logging.getLogger("lixbon.websearch")
 
 PROVIDER = os.getenv("WEBSEARCH_PROVIDER", "duckduckgo").lower()
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
@@ -121,7 +121,7 @@ def _fetch_page_text(url: str) -> str:
             url,
             timeout=8,
             follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; LIXBONBot/1.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; lixbonBot/1.0)"},
         )
         ctype = resp.headers.get("content-type", "")
         if "html" not in ctype and "text" not in ctype:

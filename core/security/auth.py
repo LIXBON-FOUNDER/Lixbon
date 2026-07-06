@@ -86,18 +86,18 @@ def api_key_required(
 
 
 def cookie_auth_required(
-    LIXBON_session: str | None = Cookie(default=None),
+    lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """
-    Dependencia: valida la cookie de sesión web (LIXBON_session) o, como
+    Dependencia: valida la cookie de sesión web (lixbon_session) o, como
     alternativa para apps (desktop/CLI), un Bearer API key.
     F3: la sesión web es un token propio en la tabla sessions — ya no es la API key.
     """
     from core.persistence.queries import validate_web_session
 
-    if LIXBON_session:
-        user_data = validate_web_session(LIXBON_session)
+    if lixbon_session:
+        user_data = validate_web_session(lixbon_session)
         if user_data:
             return user_data
 
@@ -112,7 +112,7 @@ def cookie_auth_required(
 
 def web_or_api_key_auth(
     request: Request,
-    LIXBON_session: str | None = Cookie(default=None),
+    lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """
@@ -123,8 +123,8 @@ def web_or_api_key_auth(
     """
     from core.persistence.queries import validate_web_session
 
-    if LIXBON_session:
-        user_data = validate_web_session(LIXBON_session)
+    if lixbon_session:
+        user_data = validate_web_session(lixbon_session)
         if user_data:
             return user_data
 
@@ -140,18 +140,18 @@ def web_or_api_key_auth(
 
 
 def admin_required(
-    LIXBON_session: str | None = Cookie(default=None),
+    lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Dependencia: usuario autenticado con role=admin."""
-    user_data = cookie_auth_required(LIXBON_session, authorization)
+    user_data = cookie_auth_required(lixbon_session, authorization)
     if user_data.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Requiere rol de administrador")
     return user_data
 
 
 def admin_or_token(
-    LIXBON_session: str | None = Cookie(default=None),
+    lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
     x_admin_token: str | None = Header(default=None),
 ) -> None:
@@ -163,7 +163,7 @@ def admin_or_token(
     if ADMIN_TOKEN and x_admin_token and _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
         return
     try:
-        user_data = cookie_auth_required(LIXBON_session, authorization)
+        user_data = cookie_auth_required(lixbon_session, authorization)
         if user_data.get("role") == "admin":
             return
     except HTTPException:

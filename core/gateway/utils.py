@@ -1,5 +1,5 @@
 """
-utils.py — Utilidades compartidas entre routers de LIXBON DTC.
+utils.py — Utilidades compartidas entre routers de lixbon DTC.
 """
 from __future__ import annotations
 from typing import Any
