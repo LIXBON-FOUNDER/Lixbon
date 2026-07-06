@@ -17,7 +17,7 @@ export default function App() {
   if (!hydrated) {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">FOLAX</span>
+        <span className="brand app-loading__logo">LIXBON</span>
         <div className="app-loading__bar"><span /></div>
       </div>
     );

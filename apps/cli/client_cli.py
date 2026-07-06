@@ -20,7 +20,7 @@ except Exception:
 
 import socket as _socket
 DEFAULT_BASE_URL = f"http://{_socket.gethostname()}:8000/v1"
-CONFIG_DIR = Path.home() / ".folax"
+CONFIG_DIR = Path.home() / ".LIXBON"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 IS_WINDOWS = os.name == "nt"
 
@@ -118,7 +118,7 @@ def print_cli_header(base_url: str, model: str, client_id: str) -> None:
     print(paint(hr("="), COLOR_BLUE))
     for row in logo:
         print(paint(row, COLOR_BOLD + COLOR_BLUE))
-    print(paint(" FOLAX DTC CLI ", COLOR_BOLD + COLOR_CYAN))
+    print(paint(" LIXBON DTC CLI ", COLOR_BOLD + COLOR_CYAN))
     print(f"{paint('Base URL:', COLOR_DIM)} {base_url}")
     print(f"{paint('Modelo:', COLOR_DIM)} {model}")
     print(f"{paint('Cliente:', COLOR_DIM)} {client_id}")
@@ -637,7 +637,7 @@ def cmd_setup(_: argparse.Namespace) -> None:
 
     # ---- Cabecera ----
     print(paint(hr("="), COLOR_BLUE))
-    print(paint("  FOLAX DTC CLI — Configuracion", COLOR_BOLD + COLOR_CYAN))
+    print(paint("  LIXBON DTC CLI — Configuracion", COLOR_BOLD + COLOR_CYAN))
     print(paint(hr("="), COLOR_BLUE))
     print()
 
@@ -745,7 +745,7 @@ def cmd_setup(_: argparse.Namespace) -> None:
         del cfg["admin_token"]
     save_config(cfg)
     print()
-    print(paint("  ✓ Configuracion guardada. Ejecuta 'folax chat' para iniciar.", COLOR_GREEN))
+    print(paint("  ✓ Configuracion guardada. Ejecuta 'LIXBON chat' para iniciar.", COLOR_GREEN))
     print(paint(hr("="), COLOR_BLUE))
 
 
@@ -756,7 +756,7 @@ def cmd_status(_: argparse.Namespace) -> None:
     if cfg.get("api_key"):
         k = cfg["api_key"]
         masked = f"{k[:6]}...{k[-4:]}" if len(k) > 10 else "***"
-    print(paint(" FOLAX DTC CLI — Estado", COLOR_BOLD + COLOR_CYAN))
+    print(paint(" LIXBON DTC CLI — Estado", COLOR_BOLD + COLOR_CYAN))
     print(f"- Config:             {CONFIG_FILE}")
     print(f"- Base URL:           {cfg.get('base_url') or DEFAULT_BASE_URL}")
     print(f"- API key:            {masked or 'no configurada'}")
@@ -1097,7 +1097,7 @@ def cmd_chat_fallback(args: argparse.Namespace) -> None:
                 nodos_data = api_call("GET", f"{server_base}/api/nodes", api_key)
                 nodos = nodos_data.get("nodos", [])
                 print(paint(hr(), COLOR_DIM))
-                print(paint("Nodos del cluster FOLAX DTC:", COLOR_BOLD + COLOR_CYAN))
+                print(paint("Nodos del cluster LIXBON DTC:", COLOR_BOLD + COLOR_CYAN))
                 if not nodos:
                     print(paint("  Sin nodos registrados. Se usa Ollama local.", COLOR_YELLOW))
                 else:
@@ -1872,8 +1872,8 @@ def cmd_chat(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="folax",
-        description="Cliente CLI para el orquestador FOLAX DTC",
+        prog="LIXBON",
+        description="Cliente CLI para el orquestador LIXBON DTC",
     )
     sub = parser.add_subparsers(dest="command")
 

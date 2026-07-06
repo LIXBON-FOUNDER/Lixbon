@@ -1,4 +1,4 @@
-# FOLAX DTC — Data & Task Center v2.0
+# LIXBON DTC — Data & Task Center v2.0
 
 Orquestador corporativo y pasarela API para exponer y coordinar modelos de `Ollama` en una red LAN, con balanceo de carga, circuit breaker y delegación inteligente.
 
@@ -6,7 +6,7 @@ Orquestador corporativo y pasarela API para exponer y coordinar modelos de `Olla
 - **Circuit Breaker Inteligente**: Aislamiento temporal de nodos caídos con backoff exponencial.
 - **Seguridad Robusta**: Hashing de contraseñas con `scrypt` y rate limiting configurable.
 - **Delegación Inteligente**: Enrutamiento automático de solicitudes usando embeddings de historial.
-- **Lanzador Unificado**: Control del stack completo desde un único menú interactivo (`folax.bat` / `folax.sh`).
+- **Lanzador Unificado**: Control del stack completo desde un único menú interactivo (`LIXBON.bat` / `LIXBON.sh`).
 - **Dashboard Web**: Panel de administración premium para monitorizar el estado del cluster, audit logs y API keys.
 
 ---
@@ -32,8 +32,8 @@ cp .env.example .env
 ### 3. Iniciar con el Lanzador Unificado
 En lugar de abrir múltiples terminales, usa el script maestro:
 
-- **Windows**: Ejecuta `folax.bat`
-- **Linux / macOS**: Ejecuta `./folax.sh`
+- **Windows**: Ejecuta `LIXBON.bat`
+- **Linux / macOS**: Ejecuta `./LIXBON.sh`
 
 El menú interactivo te permitirá arrancar el Gateway, el Node Agent local, Ollama en modo LAN y el túnel de Cloudflare de forma unificada.
 
@@ -42,7 +42,7 @@ El menú interactivo te permitirá arrancar el Gateway, el Node Agent local, Oll
 
 ---
 
-## 💻 Cliente CLI de FOLAX DTC
+## 💻 Cliente CLI de LIXBON DTC
 
 Se incluye un potente cliente CLI en `client_cli.py` para chatear y ejecutar comandos de agente desde cualquier máquina de la red.
 
@@ -66,15 +66,15 @@ Abre una nueva terminal y ejecuta:
 
 1. **Configuración inicial**:
    ```bash
-   folax setup
+   LIXBON setup
    ```
 2. **Iniciar chat interactivo**:
    ```bash
-   folax chat
+   LIXBON chat
    ```
 3. **Ver estado del cluster**:
    ```bash
-   folax status
+   LIXBON status
    ```
 
 #### Slash Commands dentro del Chat del CLI

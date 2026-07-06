@@ -22,7 +22,7 @@ from core.config import (
     r2_endpoint,
 )
 
-logger = logging.getLogger("folax.r2")
+logger = logging.getLogger("LIXBON.r2")
 
 _client = None
 _lock = threading.Lock()

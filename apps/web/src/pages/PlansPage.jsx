@@ -43,7 +43,7 @@ export default function PlansPage() {
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">Planes</h1>
         <p className="plans__sub">
-          Elige cómo quieres usar FOLAX.{!billingEnabled && ' Los pagos en línea llegan pronto.'}
+          Elige cómo quieres usar LIXBON.{!billingEnabled && ' Los pagos en línea llegan pronto.'}
         </p>
         {error && <p className="page__error" role="alert">{error}</p>}
 

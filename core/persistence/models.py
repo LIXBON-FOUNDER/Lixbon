@@ -1,5 +1,5 @@
 """
-models.py — Modelos SQLAlchemy de FOLAX (Postgres).
+models.py — Modelos SQLAlchemy de LIXBON (Postgres).
 Los timestamps se guardan como TEXT ISO-8601 UTC (comparables lexicográficamente),
 igual que el esquema legacy, para no cambiar la lógica de los routers en esta fase.
 """

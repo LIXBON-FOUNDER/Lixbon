@@ -36,7 +36,7 @@ def get_engine() -> Engine:
         if not DATABASE_URL:
             raise RuntimeError(
                 "DATABASE_URL no está configurada. En desarrollo apunta a la BD de staging "
-                "de Railway (folax-staging); en producción Railway la inyecta automáticamente."
+                "de Railway (LIXBON-staging); en producción Railway la inyecta automáticamente."
             )
         _engine = create_engine(
             _normalize_url(DATABASE_URL),

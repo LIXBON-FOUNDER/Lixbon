@@ -232,7 +232,7 @@ function PrivacidadSection() {
     <>
       <h2 className="set-title">Privacidad</h2>
       <p className="set-lead">
-        En FOLAX tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
+        En LIXBON tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
         clúster y no compartimos tus datos con terceros.
       </p>
       <div className="set-card">
@@ -441,7 +441,7 @@ export default function AccountPage() {
   if (loading || (!account && !error)) {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">FOLAX</span>
+        <span className="brand app-loading__logo">LIXBON</span>
         <span className="app-loading__bar"><span /></span>
       </div>
     );

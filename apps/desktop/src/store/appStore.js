@@ -9,18 +9,18 @@ export const useAppStore = create((set, get) => ({
   user: null,
 
   editorFontSize: parseInt(
-    localStorage.getItem('folax_editor_font_size') ||
-    localStorage.getItem('folax_terminal_font_size') || '14',
+    localStorage.getItem('LIXBON_editor_font_size') ||
+    localStorage.getItem('LIXBON_terminal_font_size') || '14',
     10
   ),
   connectionStatus: 'disconnected', // 'connected' | 'disconnected' | 'connecting'
 
   // Layout del IDE
   centerView: 'editor', // 'editor' | 'metrics' | 'settings'
-  panels: JSON.parse(localStorage.getItem('folax_panels') || '{"explorer":true,"chat":true}'),
-  panelWidths: JSON.parse(localStorage.getItem('folax_panel_widths') || '{"explorer":260,"chat":360}'),
+  panels: JSON.parse(localStorage.getItem('LIXBON_panels') || '{"explorer":true,"chat":true}'),
+  panelWidths: JSON.parse(localStorage.getItem('LIXBON_panel_widths') || '{"explorer":260,"chat":360}'),
 
-  currentModel: localStorage.getItem('folax_current_model') || '',
+  currentModel: localStorage.getItem('LIXBON_current_model') || '',
   availableModels: [],
   latency: 0,
 
@@ -41,13 +41,13 @@ export const useAppStore = create((set, get) => ({
 
   togglePanel: (name) => {
     const panels = { ...get().panels, [name]: !get().panels[name] };
-    localStorage.setItem('folax_panels', JSON.stringify(panels));
+    localStorage.setItem('LIXBON_panels', JSON.stringify(panels));
     set({ panels });
   },
 
   setPanelWidth: (name, width) => {
     const panelWidths = { ...get().panelWidths, [name]: width };
-    localStorage.setItem('folax_panel_widths', JSON.stringify(panelWidths));
+    localStorage.setItem('LIXBON_panel_widths', JSON.stringify(panelWidths));
     set({ panelWidths });
   },
 
@@ -59,7 +59,7 @@ export const useAppStore = create((set, get) => ({
   },
 
   setEditorFontSize: (size) => {
-    localStorage.setItem('folax_editor_font_size', size.toString());
+    localStorage.setItem('LIXBON_editor_font_size', size.toString());
     set({ editorFontSize: size });
   },
 
@@ -76,7 +76,7 @@ export const useAppStore = create((set, get) => ({
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
 
   setCurrentModel: (model) => {
-    localStorage.setItem('folax_current_model', model);
+    localStorage.setItem('LIXBON_current_model', model);
     set({ currentModel: model });
   },
 

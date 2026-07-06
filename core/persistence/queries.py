@@ -1,5 +1,5 @@
 """
-queries.py — Operaciones de persistencia de FOLAX sobre Postgres (SQLAlchemy).
+queries.py — Operaciones de persistencia de LIXBON sobre Postgres (SQLAlchemy).
 Expone la misma API de funciones que la capa legacy (db_sqlite/db_mysql) para
 que los routers no cambien; la implementación es única y sin ramas por backend.
 """
@@ -197,7 +197,7 @@ SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "168"))  # 7 días 
 def create_web_session(user_id: int, ip_address: str | None = None,
                        user_agent: str | None = None) -> str:
     """Crea una sesión web y retorna el token en claro (solo se almacena el hash)."""
-    raw_token = f"folax_ses_{secrets.token_urlsafe(32)}"
+    raw_token = f"LIXBON_ses_{secrets.token_urlsafe(32)}"
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=SESSION_EXPIRY_HOURS)).isoformat()
     with get_session() as s:
         s.add(Session(
@@ -306,7 +306,7 @@ def create_api_key(
     model: str | None = None,
     scopes: str = "read,write",
 ) -> tuple[str, dict[str, Any]]:
-    raw_key = f"folax_sk_{secrets.token_urlsafe(28)}"
+    raw_key = f"LIXBON_sk_{secrets.token_urlsafe(28)}"
     created_at = now_iso()
     expires_at = _key_expires_at()
     with get_session() as s:
@@ -411,7 +411,7 @@ def list_api_keys(user_id: int | None = None) -> list[dict[str, Any]]:
 
         result = []
         for row in rows:
-            prefix = row.key_prefix or "folax_sk_"
+            prefix = row.key_prefix or "LIXBON_sk_"
             suffix = row.key_hash[-6:] if row.key_hash else "??????"
             result.append({
                 "id": row.id,

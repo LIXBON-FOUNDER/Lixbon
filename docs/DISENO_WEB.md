@@ -1,4 +1,4 @@
-# FOLAX — Especificación de diseño de la web (datacentgbx.online)
+# LIXBON — Especificación de diseño de la web (datacentgbx.online)
 
 > Fuente: mockups del 2026-07-04 (login, registro, chat con y sin sesión).
 > Este documento es la referencia de implementación para `apps/web`.
@@ -9,7 +9,7 @@
 
 | Uso | Fuente | Peso/Tamaño |
 |---|---|---|
-| Wordmark "FOLAX" | **Bruno Ace SC** | — |
+| Wordmark "LIXBON" | **Bruno Ace SC** | — |
 | Títulos | **Bricolage Grotesque** | Medium |
 | Nombres de secciones (sidebar) | Bricolage Grotesque | Regular 12 |
 | Títulos en respuestas de la IA | Bricolage Grotesque | Semibold |
@@ -41,7 +41,7 @@ Exportar a SVG los necesarios en `apps/web/src/assets/icons/`.
 
 ### 2.1 Chat (usuario con sesión) — pantalla principal
 - **Sidebar izquierda** (borde 1px, fondo blanco):
-  - Header: logo FOLAX + icono buscar + icono colapsar sidebar.
+  - Header: logo LIXBON + icono buscar + icono colapsar sidebar.
   - Navegación: `Nueva conversación` (icono +), `Conversaciones`, `Aplicaciones`, `Más` (…).
   - Sección **Historial** (colapsable, chevron) con lista de conversaciones (título truncado con "…").
   - **Footer de perfil** (fondo crema): avatar circular `#171717` con inicial en blanco, nombre completo, etiqueta del plan en acento ("Plan Advance"), icono de ajustes.
@@ -59,7 +59,7 @@ Exportar a SVG los necesarios en `apps/web/src/assets/icons/`.
 - Footer de perfil: "Iniciar sesion / Plan Gratuito".
 
 ### 2.3 Login
-- Fondo crema `#F6F7ED`, logo FOLAX centrado (Bruno Ace SC).
+- Fondo crema `#F6F7ED`, logo LIXBON centrado (Bruno Ace SC).
 - **Toggle segmentado** pill: `Iniciar Sesion` / `Registrarse` (activo = fondo negro, texto blanco).
 - Campos: **Correo Electronico**, **Contraseña** (outlined, label en el borde).
 - CTA pill negra "Iniciar Sesion".

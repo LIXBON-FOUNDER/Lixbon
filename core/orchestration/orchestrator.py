@@ -1,5 +1,5 @@
 """
-orchestrator.py — Orquestador de nodos GPU de FOLAX.
+orchestrator.py — Orquestador de nodos GPU de LIXBON.
 Gestiona el estado de los nodos registrados en BD, elige el mejor según
 recursos disponibles y expone el destino Ollama (proxy del node_agent).
 
@@ -19,7 +19,7 @@ import httpx
 
 from core.config import OLLAMA_BASE_URL
 
-logger = logging.getLogger("folax.orchestrator")
+logger = logging.getLogger("LIXBON.orchestrator")
 
 # Intervalo de polling de métricas (segundos)
 POLL_INTERVAL = 15

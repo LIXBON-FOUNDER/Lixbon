@@ -6,11 +6,11 @@ product
 
 ## Users
 
-Desarrolladores y usuarios técnicos de FOLAX (plataforma SaaS de LLMs auto-hospedados sobre un clúster GPU distribuido). Dos superficies: la **web** (`apps/web`, chat tipo Claude/GPT en `datacentgbx.online`) y la **app desktop** (`apps/desktop`, IDE ligero Tauri para trabajar con código asistido por los modelos del clúster). El usuario desktop está dentro de una tarea de programación: abre una carpeta, edita archivos y consulta a la IA con contexto de su código. Se autentica con su cuenta de la web (email) o con una API key `folax_sk_` creada allí.
+Desarrolladores y usuarios técnicos de LIXBON (plataforma SaaS de LLMs auto-hospedados sobre un clúster GPU distribuido). Dos superficies: la **web** (`apps/web`, chat tipo Claude/GPT en `datacentgbx.online`) y la **app desktop** (`apps/desktop`, IDE ligero Tauri para trabajar con código asistido por los modelos del clúster). El usuario desktop está dentro de una tarea de programación: abre una carpeta, edita archivos y consulta a la IA con contexto de su código. Se autentica con su cuenta de la web (email) o con una API key `LIXBON_sk_` creada allí.
 
 ## Product Purpose
 
-Dar acceso a los modelos LLM del clúster FOLAX con límites por plan (Gratuito/Pro/Advance). La web es el chat generalista; la desktop es el IDE: explorador de archivos, editor con resaltado y chat con streaming que entiende el archivo activo. Éxito = el usuario confía en la herramienta para su flujo diario y la identidad FOLAX se percibe idéntica en web y desktop.
+Dar acceso a los modelos LLM del clúster LIXBON con límites por plan (Gratuito/Pro/Advance). La web es el chat generalista; la desktop es el IDE: explorador de archivos, editor con resaltado y chat con streaming que entiende el archivo activo. Éxito = el usuario confía en la herramienta para su flujo diario y la identidad LIXBON se percibe idéntica en web y desktop.
 
 ## Brand Personality
 
@@ -20,7 +20,7 @@ Nítida, técnica, serena. Minimalismo editorial claro: crema (`#F6F7ED`) y tint
 
 - El propio desktop legacy: dashboard oscuro violeta con gradientes `rgba(124,58,237,…)`, acentos configurables y estética "terminal hacker". Eso es exactamente lo que se está eliminando.
 - SaaS oscuro genérico con glassmorphism, glows y gradient text.
-- IDE recargado tipo cockpit (paneles infinitos, docenas de toggles). FOLAX desktop es deliberadamente pequeño: explorador + editor + chat.
+- IDE recargado tipo cockpit (paneles infinitos, docenas de toggles). LIXBON desktop es deliberadamente pequeño: explorador + editor + chat.
 
 ## Design Principles
 

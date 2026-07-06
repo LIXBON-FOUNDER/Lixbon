@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title FOLAX DTC — Launcher v2.0
+title LIXBON DTC — Launcher v2.0
 cd /d "%~dp0"
 
 :: ── Activar entorno virtual si existe ─────────────────────────────────────
@@ -52,7 +52,7 @@ goto :MENU
 
 :START_ALL
 echo.
-echo  [FOLAX] Iniciando stack completo...
+echo  [LIXBON] Iniciando stack completo...
 echo.
 call :LAUNCH_OLLAMA
 timeout /t 3 /nobreak >nul
@@ -101,9 +101,9 @@ goto :MENU
 echo  [>>] Iniciando Gateway (FastAPI)...
 if not exist "logs" mkdir logs
 if exist ".venv\Scripts\python.exe" (
-    start "FOLAX-Gateway" /min cmd /k "cd /d "%~dp0" && .venv\Scripts\python.exe -m uvicorn core.gateway.app:app --host 0.0.0.0 --port 8000 2>&1 | tee logs\gateway.log"
+    start "LIXBON-Gateway" /min cmd /k "cd /d "%~dp0" && .venv\Scripts\python.exe -m uvicorn core.gateway.app:app --host 0.0.0.0 --port 8000 2>&1 | tee logs\gateway.log"
 ) else (
-    start "FOLAX-Gateway" /min cmd /k "cd /d "%~dp0" && uvicorn core.gateway.app:app --host 0.0.0.0 --port 8000 2>&1 | tee logs\gateway.log"
+    start "LIXBON-Gateway" /min cmd /k "cd /d "%~dp0" && uvicorn core.gateway.app:app --host 0.0.0.0 --port 8000 2>&1 | tee logs\gateway.log"
 )
 goto :EOF
 
@@ -111,22 +111,22 @@ goto :EOF
 echo  [>>] Iniciando Node Agent...
 if not exist "logs" mkdir logs
 if exist ".venv\Scripts\python.exe" (
-    start "FOLAX-Agent" /min cmd /k "cd /d "%~dp0" && .venv\Scripts\python.exe app\node_agent.py 2>&1 | tee logs\agent.log"
+    start "LIXBON-Agent" /min cmd /k "cd /d "%~dp0" && .venv\Scripts\python.exe app\node_agent.py 2>&1 | tee logs\agent.log"
 ) else (
-    start "FOLAX-Agent" /min cmd /k "cd /d "%~dp0" && python app\node_agent.py 2>&1 | tee logs\agent.log"
+    start "LIXBON-Agent" /min cmd /k "cd /d "%~dp0" && python app\node_agent.py 2>&1 | tee logs\agent.log"
 )
 goto :EOF
 
 :LAUNCH_OLLAMA
 echo  [>>] Iniciando Ollama (modo LAN)...
 set OLLAMA_HOST=0.0.0.0
-start "FOLAX-Ollama" /min cmd /k "set OLLAMA_HOST=0.0.0.0 && ollama serve"
+start "LIXBON-Ollama" /min cmd /k "set OLLAMA_HOST=0.0.0.0 && ollama serve"
 goto :EOF
 
 :LAUNCH_TUNNEL
 echo  [>>] Iniciando Cloudflare Tunnel...
 if exist "cloudflared.exe" (
-    start "FOLAX-Tunnel" /min cmd /k "cd /d "%~dp0" && cloudflared.exe tunnel run 2>&1 | tee logs\tunnel.log"
+    start "LIXBON-Tunnel" /min cmd /k "cd /d "%~dp0" && cloudflared.exe tunnel run 2>&1 | tee logs\tunnel.log"
 ) else (
     echo  [!] cloudflared.exe no encontrado. Saltando tunel.
 )
@@ -138,7 +138,7 @@ goto :EOF
 :STATUS
 cls
 echo.
-echo  [FOLAX] Estado de servicios (basado en puertos):
+echo  [LIXBON] Estado de servicios (basado en puertos):
 echo.
 
 :: Gateway — puerto 8000
@@ -182,11 +182,11 @@ goto :MENU
 
 :STOP_ALL
 echo.
-echo  [FOLAX] Deteniendo servicios...
-taskkill /FI "WINDOWTITLE eq FOLAX-Gateway*" /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq FOLAX-Agent*"   /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq FOLAX-Ollama*"  /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq FOLAX-Tunnel*"  /F >nul 2>&1
+echo  [LIXBON] Deteniendo servicios...
+taskkill /FI "WINDOWTITLE eq LIXBON-Gateway*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq LIXBON-Agent*"   /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq LIXBON-Ollama*"  /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq LIXBON-Tunnel*"  /F >nul 2>&1
 echo  [OK] Señal de detención enviada.
 echo.
 pause
@@ -242,7 +242,7 @@ goto :MENU
 
 :EXIT
 echo.
-echo  Hasta pronto, FOLAX DTC.
+echo  Hasta pronto, LIXBON DTC.
 echo.
 timeout /t 2 /nobreak >nul
 endlocal

@@ -1,4 +1,4 @@
-# Registra FOLAX Node Agent como tarea de inicio de sesión en Windows
+# Registra LIXBON Node Agent como tarea de inicio de sesión en Windows
 # Resuelve las rutas dinámicamente usando el directorio actual.
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -13,7 +13,7 @@ if (-not $pythonPath) {
 }
 
 $scriptPath = Join-Path $ScriptDir "app\node_agent.py"
-$taskName   = "FOLAX_NodeAgent"
+$taskName   = "LIXBON_NodeAgent"
 
 Write-Host "Instalando tarea para:"
 Write-Host "  Python: $pythonPath"

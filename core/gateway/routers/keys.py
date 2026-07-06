@@ -1,5 +1,5 @@
 """
-keys.py — Endpoints de gestión de API keys en FOLAX DTC.
+keys.py — Endpoints de gestión de API keys en LIXBON DTC.
 """
 from __future__ import annotations
 from typing import Any

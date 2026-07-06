@@ -73,7 +73,7 @@ export function AppShell() {
           <CodeMirrorHost />
         ) : (
           <div className="editor-empty">
-            <span className="brand">FOLAX</span>
+            <span className="brand">LIXBON</span>
             <p>Abre un archivo desde el explorador para empezar a editar.</p>
             <p>
               <kbd>Ctrl</kbd> + <kbd>S</kbd> guarda · <kbd>Ctrl</kbd> + <kbd>W</kbd> cierra la pestaña

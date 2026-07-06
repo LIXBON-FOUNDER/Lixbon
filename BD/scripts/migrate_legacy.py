@@ -1,6 +1,6 @@
 """
 migrate_legacy.py — Migración one-shot de la BD SQLite legacy (BD/legacy/data.db)
-a Postgres (la BD que indique DATABASE_URL — normalmente folax-staging primero).
+a Postgres (la BD que indique DATABASE_URL — normalmente LIXBON-staging primero).
 
 Uso:
   1. Asegúrate de que DATABASE_URL apunta a la BD destino (staging para probar).

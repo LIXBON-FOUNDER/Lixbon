@@ -1,5 +1,5 @@
 """
-config.py — Configuración centralizada de FOLAX DTC
+config.py — Configuración centralizada de LIXBON DTC
 Carga variables de entorno y soporta archivo .env opcional sin dependencias externas.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ AUTH_BLOCK_MINUTES: int = int(os.getenv("AUTH_BLOCK_MINUTES", "15"))
 ADMIN_TOKEN: Optional[str] = os.getenv("ADMIN_TOKEN") or None
 
 # ── Base de datos (Postgres — Railway staging/prod) ────────────────────────
-# postgresql://user:pass@host:port/db  (Railway la provee; en local apunta a folax-staging)
+# postgresql://user:pass@host:port/db  (Railway la provee; en local apunta a LIXBON-staging)
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
 # ── Redis (rate limiting, sesiones) ─────────────────────────────────────────
@@ -64,7 +64,7 @@ def stripe_configured() -> bool:
     return bool(STRIPE_SECRET_KEY)
 
 # ── Identidad de la app ─────────────────────────────────────────────────────
-APP_TITLE: str = "FOLAX DTC"
+APP_TITLE: str = "LIXBON DTC"
 APP_VERSION: str = "2.4.0" # Actualizado a la versión del diseño del CLI
 APP_DESCRIPTION: str = "Data & Task Center — Distributed LLM Gateway"
 

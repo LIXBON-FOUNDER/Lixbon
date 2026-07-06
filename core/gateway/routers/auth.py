@@ -1,5 +1,5 @@
 """
-auth.py — Autenticación de FOLAX (F3).
+auth.py — Autenticación de LIXBON (F3).
 Login por EMAIL, sesiones web separadas de API keys, verificación de correo
 y reset de contraseña. Registro con nombre y apellido (según diseño web).
 """
@@ -40,7 +40,7 @@ from core.security.auth import (
 
 router = APIRouter()
 
-SESSION_COOKIE = "folax_session"
+SESSION_COOKIE = "LIXBON_session"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"   # "1" en Railway (HTTPS)
 SESSION_MAX_AGE = int(os.getenv("SESSION_EXPIRY_HOURS", "168")) * 3600
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -149,9 +149,9 @@ async def api_login(payload: LoginRequest, request: Request):
 
 
 @router.post("/api/auth/logout")
-async def api_logout(folax_session: str | None = Cookie(default=None)):
-    if folax_session:
-        delete_web_session(folax_session)
+async def api_logout(LIXBON_session: str | None = Cookie(default=None)):
+    if LIXBON_session:
+        delete_web_session(LIXBON_session)
     response = JSONResponse({"message": "Logout correcto"})
     response.delete_cookie(SESSION_COOKIE)
     return response

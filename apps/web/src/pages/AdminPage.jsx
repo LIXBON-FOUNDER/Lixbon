@@ -718,7 +718,7 @@ export default function AdminPage() {
   if (loading || !user || user.role !== 'admin') {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">FOLAX</span>
+        <span className="brand app-loading__logo">LIXBON</span>
         <span className="app-loading__bar"><span /></span>
       </div>
     );

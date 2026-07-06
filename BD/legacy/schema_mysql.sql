@@ -1,8 +1,8 @@
--- FOLAX DTC v2.0 MySQL Schema
+-- LIXBON DTC v2.0 MySQL Schema
 -- Script para migrar la base de datos de SQLite a MySQL
 
-CREATE DATABASE IF NOT EXISTS folax_dtc DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE folax_dtc;
+CREATE DATABASE IF NOT EXISTS LIXBON_dtc DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE LIXBON_dtc;
 
 -- Tabla de Usuarios
 CREATE TABLE IF NOT EXISTS users (

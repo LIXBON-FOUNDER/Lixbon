@@ -27,7 +27,7 @@ from core.persistence.queries import (
 )
 from core.security.auth import cookie_auth_required
 
-logger = logging.getLogger("folax.conversations")
+logger = logging.getLogger("LIXBON.conversations")
 router = APIRouter()
 
 TITLE_PROMPT = (

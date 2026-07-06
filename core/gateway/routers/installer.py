@@ -1,5 +1,5 @@
 """
-installer.py — Endpoints para distribución del CLI de FOLAX DTC.
+installer.py — Endpoints para distribución del CLI de LIXBON DTC.
 Sirve scripts de instalación para Linux/macOS y Windows,
 y el archivo client_cli.py descargable.
 """
@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/install/client_cli.py")
 async def download_cli() -> FileResponse:
-    """Descarga el archivo client_cli.py (CLI de FOLAX DTC)."""
+    """Descarga el archivo client_cli.py (CLI de LIXBON DTC)."""
     if not CLI_SOURCE_PATH.exists():
         raise HTTPException(status_code=404, detail="client_cli.py no encontrado en el servidor")
     return FileResponse(
@@ -33,13 +33,13 @@ async def install_script(request: Request) -> PlainTextResponse:
 set -euo pipefail
 
 SERVER_URL="${{1:-{server_base}}}"
-INSTALL_DIR="${{HOME}}/.folax"
+INSTALL_DIR="${{HOME}}/.LIXBON"
 BIN_DIR="${{HOME}}/.local/bin"
 CLI_FILE="${{INSTALL_DIR}}/client_cli.py"
-LAUNCHER_FILE="${{BIN_DIR}}/folax"
+LAUNCHER_FILE="${{BIN_DIR}}/LIXBON"
 
 echo "╔══════════════════════════════════════╗"
-echo "║   Instalando FOLAX DTC CLI...        ║"
+echo "║   Instalando LIXBON DTC CLI...        ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 
@@ -50,7 +50,7 @@ python3 "${{CLI_FILE}}" init --base-url "${{SERVER_URL}}/v1" >/dev/null 2>&1 || 
 
 cat > "${{LAUNCHER_FILE}}" <<'LAUNCHER'
 #!/usr/bin/env bash
-python3 "${{HOME}}/.folax/client_cli.py" "$@"
+python3 "${{HOME}}/.LIXBON/client_cli.py" "$@"
 LAUNCHER
 chmod +x "${{LAUNCHER_FILE}}"
 
@@ -65,11 +65,11 @@ echo "✓ CLI instalado en: ${{CLI_FILE}}"
 echo "✓ Comando creado:   ${{LAUNCHER_FILE}}"
 echo ""
 echo "Uso:"
-echo "  folax setup   — Configuración inicial"
-echo "  folax chat    — Chat interactivo"
-echo "  folax status  — Estado del gateway"
+echo "  LIXBON setup   — Configuración inicial"
+echo "  LIXBON chat    — Chat interactivo"
+echo "  LIXBON status  — Estado del gateway"
 echo ""
-echo "Si 'folax' no se reconoce en la sesión actual, ejecuta:"
+echo "Si 'LIXBON' no se reconoce en la sesión actual, ejecuta:"
 echo "  export PATH=\\"\\$HOME/.local/bin:\\$PATH\\""
 """
     return PlainTextResponse(content=script)
@@ -82,13 +82,13 @@ async def install_script_windows(request: Request) -> PlainTextResponse:
     script = f"""$ErrorActionPreference = "Stop"
 
 $ServerUrl = if ($args.Count -gt 0 -and $args[0]) {{ $args[0] }} else {{ "{server_base}" }}
-$InstallDir = Join-Path $env:USERPROFILE ".folax"
+$InstallDir = Join-Path $env:USERPROFILE ".LIXBON"
 $CliFile = Join-Path $InstallDir "client_cli.py"
-$LauncherFile = Join-Path $InstallDir "folax.cmd"
+$LauncherFile = Join-Path $InstallDir "LIXBON.cmd"
 
 Write-Host ""
 Write-Host "╔══════════════════════════════════════╗"
-Write-Host "║   Instalando FOLAX DTC CLI...        ║"
+Write-Host "║   Instalando LIXBON DTC CLI...        ║"
 Write-Host "╚══════════════════════════════════════╝"
 Write-Host ""
 
@@ -98,7 +98,7 @@ python $CliFile init --base-url "$ServerUrl/v1" | Out-Null
 
 @"
 @echo off
-python "%USERPROFILE%\\.folax\\client_cli.py" %*
+python "%USERPROFILE%\\.LIXBON\\client_cli.py" %*
 "@ | Set-Content -Path $LauncherFile -Encoding Ascii
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -113,11 +113,11 @@ if ($userPath -notlike "*$InstallDir*") {{
 
 Write-Host ""
 Write-Host "✓ CLI instalado en: $CliFile"
-Write-Host "✓ Comando creado:   folax"
+Write-Host "✓ Comando creado:   LIXBON"
 Write-Host ""
 Write-Host "Uso (abre una nueva terminal):"
-Write-Host "  folax setup"
-Write-Host "  folax chat"
-Write-Host "  folax status"
+Write-Host "  LIXBON setup"
+Write-Host "  LIXBON chat"
+Write-Host "  LIXBON status"
 """
     return PlainTextResponse(content=script)

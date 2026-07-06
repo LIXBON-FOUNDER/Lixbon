@@ -1,5 +1,5 @@
 // SharedPage.jsx — vista pública de solo lectura de una conversación compartida
-// (/s/:token). Sin sesión; muestra el hilo y un CTA para probar FOLAX.
+// (/s/:token). Sin sesión; muestra el hilo y un CTA para probar LIXBON.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -23,7 +23,7 @@ export default function SharedPage() {
         <header className="pubnav">
           <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
           <div className="pubnav__actions">
-            <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar FOLAX</Link>
+            <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar LIXBON</Link>
           </div>
         </header>
         <main className="page__body">
@@ -36,7 +36,7 @@ export default function SharedPage() {
   if (!data) {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">FOLAX</span>
+        <span className="brand app-loading__logo">LIXBON</span>
         <span className="app-loading__bar"><span /></span>
       </div>
     );
@@ -48,7 +48,7 @@ export default function SharedPage() {
         <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
         <span className="shared__badge">Conversación compartida</span>
         <div className="pubnav__actions">
-          <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar FOLAX</Link>
+          <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar LIXBON</Link>
         </div>
       </header>
 
@@ -64,7 +64,7 @@ export default function SharedPage() {
           ))}
         </div>
         <div className="shared__cta">
-          <p>Creado con FOLAX — chat con IA sobre un clúster de GPUs propio.</p>
+          <p>Creado con LIXBON — chat con IA sobre un clúster de GPUs propio.</p>
           <Link to="/auth?mode=register" className="pill-btn pill-btn--primary">Crea tu cuenta gratis</Link>
         </div>
       </main>

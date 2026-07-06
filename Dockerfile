@@ -8,7 +8,7 @@ RUN npm run build
 
 # ── Stage 2: gateway (FastAPI) ──────────────────────────────────────────────
 FROM python:3.12-slim
-WORKDIR /srv/folax
+WORKDIR /srv/LIXBON
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

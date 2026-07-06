@@ -47,7 +47,7 @@ export async function streamChatCompletion({ model, messages, conversationId, si
       if (data === '[DONE]') return;
       try {
         const chunk = JSON.parse(data);
-        if (chunk.folax_sources && onSources) { onSources(chunk.folax_sources); continue; }
+        if (chunk.LIXBON_sources && onSources) { onSources(chunk.LIXBON_sources); continue; }
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) onDelta(delta);
       } catch { /* chunk malformado: se ignora */ }

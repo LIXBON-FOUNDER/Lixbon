@@ -1,5 +1,5 @@
 // AuthScreen.jsx — entrada única de la app: iniciar sesión con la cuenta
-// de la web (email) o pegar una API key folax_sk_ creada allí.
+// de la web (email) o pegar una API key LIXBON_sk_ creada allí.
 import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { DEFAULT_SERVER_URL } from '../../lib/settings';
@@ -20,7 +20,7 @@ async function loginWithEmail(serverUrl, email, password) {
   try {
     res = await fetch(`${serverUrl}/api/auth/login`, {
       method: 'POST',
-      credentials: 'include', // conserva la cookie folax_session para crear la key
+      credentials: 'include', // conserva la cookie LIXBON_session para crear la key
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
       signal: AbortSignal.timeout(15000),
@@ -42,7 +42,7 @@ async function loginWithEmail(serverUrl, email, password) {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'FOLAX Desktop' }),
+      body: JSON.stringify({ name: 'LIXBON Desktop' }),
       signal: AbortSignal.timeout(15000),
     });
     if (keyRes.status === 403) {
@@ -104,8 +104,8 @@ export function AuthScreen() {
         session = await loginWithEmail(url, email.trim(), password);
       } else {
         const key = keyInput.trim();
-        if (!key.startsWith('folax_sk_')) {
-          throw new Error('Las API keys de FOLAX empiezan por folax_sk_. Cópiala completa desde la web.');
+        if (!key.startsWith('LIXBON_sk_')) {
+          throw new Error('Las API keys de LIXBON empiezan por LIXBON_sk_. Cópiala completa desde la web.');
         }
         session = { apiKey: key, user: await fetchProfile(url, key) };
       }
@@ -185,7 +185,7 @@ export function AuthScreen() {
         ) : (
           <div className="auth__fields" key="key">
             <FloatingField
-              label="API key (folax_sk_…)"
+              label="API key (LIXBON_sk_…)"
               type="password"
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}

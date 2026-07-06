@@ -1,6 +1,6 @@
 """
 reset_staging.py — Borra y recrea todas las tablas de la BD apuntada por DATABASE_URL.
-SOLO para staging. Pide confirmación explícita y se niega si FOLAX_ENV=production.
+SOLO para staging. Pide confirmación explícita y se niega si LIXBON_ENV=production.
 
 Uso:  python BD/scripts/reset_staging.py
 """
@@ -16,8 +16,8 @@ from core.persistence import models  # noqa: F401
 
 
 def main() -> None:
-    if os.getenv("FOLAX_ENV", "").lower() == "production":
-        print("ABORTADO: FOLAX_ENV=production. Este script no toca producción.")
+    if os.getenv("LIXBON_ENV", "").lower() == "production":
+        print("ABORTADO: LIXBON_ENV=production. Este script no toca producción.")
         sys.exit(1)
     if not DATABASE_URL:
         print("ABORTADO: DATABASE_URL no configurada.")

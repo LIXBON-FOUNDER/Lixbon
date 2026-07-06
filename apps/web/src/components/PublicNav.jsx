@@ -40,7 +40,7 @@ export function PublicNav() {
         {!user && (
           <Link to="/auth" className="pubnav__login">Iniciar sesión</Link>
         )}
-        <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar FOLAX</Link>
+        <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar LIXBON</Link>
       </div>
     </header>
   );

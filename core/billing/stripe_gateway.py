@@ -34,7 +34,7 @@ from core.persistence.queries import (
     set_stripe_customer,
 )
 
-logger = logging.getLogger("folax.stripe")
+logger = logging.getLogger("LIXBON.stripe")
 
 
 class StripeNotConfigured(RuntimeError):
@@ -74,7 +74,7 @@ def _ensure_customer(stripe, user: dict[str, Any]) -> str:
     customer = stripe.Customer.create(
         email=user.get("email") or None,
         name=" ".join(filter(None, [user.get("first_name"), user.get("last_name")])) or None,
-        metadata={"folax_user_id": str(user["id"])},
+        metadata={"LIXBON_user_id": str(user["id"])},
     )
     set_stripe_customer(user["id"], customer.id)
     return customer.id
@@ -98,8 +98,8 @@ def create_checkout_session(user: dict[str, Any], plan_id: str, request_base: st
         success_url=f"{base}/account/facturacion?checkout=success",
         cancel_url=f"{base}/planes?checkout=cancel",
         allow_promotion_codes=True,
-        metadata={"folax_user_id": str(user["id"]), "plan_id": plan_id},
-        subscription_data={"metadata": {"folax_user_id": str(user["id"]), "plan_id": plan_id}},
+        metadata={"LIXBON_user_id": str(user["id"]), "plan_id": plan_id},
+        subscription_data={"metadata": {"LIXBON_user_id": str(user["id"]), "plan_id": plan_id}},
     )
     log_audit_event("checkout_started", user_id=user["id"], plan_id=plan_id)
     return session.url
@@ -178,7 +178,7 @@ def verify_and_parse(payload: bytes, sig_header: str | None) -> dict[str, Any]:
 
 def _user_id_from_subscription(stripe, subscription: dict[str, Any]) -> int | None:
     """Resuelve el usuario a partir de la suscripción de Stripe."""
-    meta_uid = (subscription.get("metadata") or {}).get("folax_user_id")
+    meta_uid = (subscription.get("metadata") or {}).get("LIXBON_user_id")
     if meta_uid and str(meta_uid).isdigit() and get_user_by_id(int(meta_uid)):
         return int(meta_uid)
     user = get_user_by_stripe_customer(subscription.get("customer"))

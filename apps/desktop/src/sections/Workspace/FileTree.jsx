@@ -32,7 +32,7 @@ function baseName(path) {
 export function FileTree() {
   const { openFile, activePath } = useEditorStore();
 
-  const [rootPath, setRootPath] = useState(() => localStorage.getItem('folax_workspace_root') || '');
+  const [rootPath, setRootPath] = useState(() => localStorage.getItem('LIXBON_workspace_root') || '');
   const [treeData, setTreeData] = useState([]);
   const [expandedDirs, setExpandedDirs] = useState({});
   const [dirChildren, setDirChildren] = useState({});
@@ -52,7 +52,7 @@ export function FileTree() {
       const entries = await readDir(canonical);
       setTreeData(entries);
       setRootPath(canonical);
-      localStorage.setItem('folax_workspace_root', canonical);
+      localStorage.setItem('LIXBON_workspace_root', canonical);
     } catch (e) {
       setError(String(e));
     }

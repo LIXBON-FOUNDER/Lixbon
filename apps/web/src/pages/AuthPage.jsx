@@ -46,7 +46,7 @@ function CoreSpark() {
   );
 }
 
-// Ilustración de fondo (motion) del rediseño Claude Design "Folax Login".
+// Ilustración de fondo (motion) del rediseño Claude Design "LIXBON Login".
 // Decorativa: se anima con CSS y se oculta en pantallas estrechas.
 function AuthIllustration() {
   return (

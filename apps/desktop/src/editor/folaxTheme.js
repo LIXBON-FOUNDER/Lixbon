@@ -1,4 +1,4 @@
-// folaxTheme.js — tema claro de CodeMirror 6 con los tokens FOLAX.
+// LIXBONTheme.js — tema claro de CodeMirror 6 con los tokens LIXBON.
 // Paleta contenida: tinta + acentos tierra/oliva derivados de la identidad
 // (nada de arcoíris de sintaxis; jerarquía por peso y pocos matices).
 
@@ -13,7 +13,7 @@ const earth = '#a8551a';   // números y constantes — pariente del Pro #CE7F25
 const pine = '#2f6b5e';    // tipos y clases
 const danger = '#c0392b';
 
-export const folaxTheme = EditorView.theme(
+export const LIXBONTheme = EditorView.theme(
   {
     '&': {
       height: '100%',
@@ -73,7 +73,7 @@ export const folaxTheme = EditorView.theme(
   { dark: false }
 );
 
-const folaxHighlight = HighlightStyle.define([
+const LIXBONHighlight = HighlightStyle.define([
   { tag: t.comment, color: inkSoft, fontStyle: 'italic' },
   { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword], color: ink, fontWeight: '600' },
   { tag: [t.string, t.special(t.string), t.regexp], color: olive },
@@ -92,4 +92,4 @@ const folaxHighlight = HighlightStyle.define([
   { tag: t.invalid, color: danger },
 ]);
 
-export const folaxSyntax = syntaxHighlighting(folaxHighlight);
+export const LIXBONSyntax = syntaxHighlighting(LIXBONHighlight);

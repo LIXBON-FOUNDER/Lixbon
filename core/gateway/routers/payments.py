@@ -16,7 +16,7 @@ from core.config import STRIPE_PUBLISHABLE_KEY
 from core.persistence.queries import get_plan_for_user, get_subscription
 from core.security.auth import cookie_auth_required
 
-logger = logging.getLogger("folax.payments")
+logger = logging.getLogger("LIXBON.payments")
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 

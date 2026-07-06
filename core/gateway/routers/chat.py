@@ -38,7 +38,7 @@ from core.security.auth import (
 )
 from core.gateway.utils import fetch_models
 
-logger = logging.getLogger("folax.chat")
+logger = logging.getLogger("LIXBON.chat")
 router = APIRouter()
 
 
@@ -203,7 +203,7 @@ async def chat_completions(
             # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
             if web_sources:
                 import json as _json
-                yield f"data: {_json.dumps({'folax_sources': web_sources})}\n\n"
+                yield f"data: {_json.dumps({'LIXBON_sources': web_sources})}\n\n"
             try:
                 try:
                     async for chunk in stream_chat_openai(base, payload.model, messages,

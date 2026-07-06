@@ -169,7 +169,7 @@ export function Settings() {
       <section className="settings__panel">
         <h3 className="settings__panel-title">Servidor</h3>
         <p className="settings__hint">
-          URL del gateway de FOLAX. Solo cámbiala si usas un túnel o despliegue propio.
+          URL del gateway de LIXBON. Solo cámbiala si usas un túnel o despliegue propio.
         </p>
         <div className="settings__inline">
           <input

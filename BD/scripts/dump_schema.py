@@ -18,7 +18,7 @@ OUT = Path(__file__).resolve().parents[1] / "schema.sql"
 
 def main() -> None:
     statements: list[str] = [
-        "-- FOLAX — Esquema de referencia (generado desde core/persistence/models.py)",
+        "-- LIXBON — Esquema de referencia (generado desde core/persistence/models.py)",
         "-- NO editar a mano: regenerar con `python BD/scripts/dump_schema.py`",
         "",
     ]
