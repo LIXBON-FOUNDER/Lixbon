@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "lixbon",
+        "title": "LIXBON",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -26,6 +26,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
