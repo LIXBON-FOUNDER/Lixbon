@@ -317,35 +317,129 @@
 
 /* ── Aviso de actualización (banner superior) ────────────────────────── */
 
-.update-banner {
+/* ── Modal de actualización (baja desde el centro-superior) ── */
+.update-modal__anchor {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(440px, calc(100% - 32px));
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 16px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-soft);
-  font-size: 13.5px;
-  flex-shrink: 0;
+  justify-content: center;
+  pointer-events: none;
 }
 
-.update-banner__text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.update-modal {
+  pointer-events: auto;
+  width: 100%;
+  margin-top: 14px;
+  padding: 18px 20px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(23, 23, 23, 0.18);
+  animation: update-modal-drop 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes update-modal-drop {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.update-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-modal__eyebrow {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.update-modal__title {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.update-modal__badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
   white-space: nowrap;
 }
 
-.update-banner__text strong {
-  font-weight: 600;
-}
-
-.update-banner .pill-btn {
+.update-modal__changelog {
+  margin: 14px 0 0;
+  padding-left: 18px;
   font-size: 13px;
-  padding: 6px 16px;
+  color: var(--ink-soft);
+  line-height: 1.55;
 }
 
-.update-banner__progress {
+.update-modal__link {
+  display: inline-block;
+  margin-top: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.update-modal__question {
+  margin: 16px 0 12px;
+  font-size: 13.5px;
+}
+
+.update-modal__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.update-modal__actions .pill-btn {
+  font-size: 13px;
+  padding: 7px 16px;
+}
+
+.update-modal__progress {
+  margin-top: 16px;
+}
+
+.update-modal__bar {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+.update-modal__bar-fill {
+  height: 100%;
+  background: var(--ink);
+  border-radius: var(--radius-pill);
+  transition: width 0.2s ease;
+}
+
+.update-modal__progress-text {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
 }

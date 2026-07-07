@@ -8,6 +8,7 @@ import AccountPage from './pages/AccountPage';
 import PlansPage from './pages/PlansPage';
 import AdminPage from './pages/AdminPage';
 import DownloadsPage from './pages/DownloadsPage';
+import ReleasesPage from './pages/ReleasesPage';
 import DocsPage from './pages/DocsPage';
 import SharedPage from './pages/SharedPage';
 
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/aplicaciones" element={<DownloadsPage />} />
           <Route path="/descargas" element={<Navigate to="/aplicaciones" replace />} />
+          <Route path="/novedades" element={<ReleasesPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:section" element={<DocsPage />} />
           <Route path="/s/:token" element={<SharedPage />} />

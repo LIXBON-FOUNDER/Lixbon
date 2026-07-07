@@ -20,9 +20,11 @@ async function loginWithEmail(serverUrl, email, password) {
   try {
     res = await fetch(`${serverUrl}/api/auth/login`, {
       method: 'POST',
-      credentials: 'include', // conserva la cookie lixbon_session para crear la key
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      // issue_api_key: el servidor entrega una API key propia de la app en la
+      // respuesta. La cookie de sesión no sirve aquí: es SameSite=Lax y no se
+      // envía en peticiones cross-origin desde tauri://localhost.
+      body: JSON.stringify({ email, password, issue_api_key: true }),
       signal: AbortSignal.timeout(15000),
     });
   } catch {
@@ -33,28 +35,8 @@ async function loginWithEmail(serverUrl, email, password) {
   if (!res.ok) throw new Error(`El servidor respondió con un error (${res.status}).`);
 
   const body = await res.json();
-  let apiKey = body.api_key || '';
-
-  // Si el usuario ya tenía keys activas, el login no devuelve ninguna:
-  // se crea una key propia de la app usando la sesión recién abierta.
-  if (!apiKey) {
-    const keyRes = await fetch(`${serverUrl}/api/keys`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'lixbon Desktop' }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (keyRes.status === 403) {
-      const err = await keyRes.json().catch(() => ({}));
-      throw new Error(
-        err?.detail?.message ||
-        'Tu plan no permite más API keys. Elimina una en la web o pega aquí una existente.'
-      );
-    }
-    if (!keyRes.ok) throw new Error('No se pudo crear una API key para esta app.');
-    apiKey = (await keyRes.json()).api_key;
-  }
+  const apiKey = body.api_key || '';
+  if (!apiKey) throw new Error('El servidor no entregó una API key para esta app. Inténtalo de nuevo.');
 
   const user = await fetchProfile(serverUrl, apiKey);
   return { apiKey, user: user || body.user };

@@ -632,3 +632,92 @@
     display: none;
   }
 }
+
+/* ── Novedades (/novedades) ──────────────────────────────────────────── */
+
+.releases {
+  list-style: none;
+  margin: 34px auto 0;
+  padding: 0;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.release {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-box);
+  padding: 22px 26px;
+  scroll-margin-top: 90px;
+}
+
+.release:target {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+.release__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.release__title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.release__version {
+  font-weight: 700;
+  font-size: 15px;
+  padding: 3px 11px;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+}
+
+.release__channel {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+}
+
+.release__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.release__date {
+  color: var(--ink-soft);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.release__changelog {
+  margin: 16px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+
+.release__changelog li {
+  margin-bottom: 4px;
+}
+
+.releases__empty {
+  text-align: center;
+  margin-top: 40px;
+  color: var(--ink-soft);
+}

@@ -22,9 +22,11 @@ from core.persistence.queries import (
     create_user,
     create_web_session,
     deactivate_all_user_keys,
+    deactivate_key,
     delete_web_session,
     get_active_key_for_user,
     get_user_by_email,
+    list_api_keys,
     log_audit_event,
     mark_email_verified,
     set_user_password,
@@ -41,6 +43,7 @@ from core.security.auth import (
 router = APIRouter()
 
 SESSION_COOKIE = "lixbon_session"
+DESKTOP_KEY_NAME = "lixbon Desktop"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"   # "1" en Railway (HTTPS)
 SESSION_MAX_AGE = int(os.getenv("SESSION_EXPIRY_HOURS", "168")) * 3600
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -57,6 +60,7 @@ class LoginRequest(BaseModel):
     email: str | None = None
     username: str | None = None   # compat con clientes pre-F3
     password: str
+    issue_api_key: bool = False   # la app de escritorio pide una key propia al entrar
 
 
 class ResetRequestPayload(BaseModel):
@@ -136,9 +140,21 @@ async def api_login(payload: LoginRequest, request: Request):
 
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
 
+    if payload.issue_api_key:
+        # La app de escritorio no puede reusar la cookie de sesión en peticiones
+        # cross-origin (SameSite=Lax desde tauri://localhost), así que el login le
+        # entrega directamente una API key propia y rotable. Desactivamos la key
+        # previa de la app para no acumular una por cada inicio de sesión.
+        for k in list_api_keys(user["id"]):
+            if k["name"] == DESKTOP_KEY_NAME and k["is_active"]:
+                deactivate_key(k["id"], user["id"])
+        raw_key, key_data = create_api_key(DESKTOP_KEY_NAME, user["id"])
+        body["api_key"] = raw_key
+        body["api_key_notice"] = "Guárdala: no se volverá a mostrar"
+        log_audit_event("desktop_key_issued", user_id=user["id"], key_id=key_data["id"], ip_address=ip)
     # Compat CLI/desktop pre-F3: si el usuario no tiene ninguna API key activa,
     # se crea una y se muestra UNA única vez.
-    if not get_active_key_for_user(user["id"]):
+    elif not get_active_key_for_user(user["id"]):
         raw_key, _key = create_api_key(f"Default Key - {user['email'] or user['username']}", user["id"])
         body["api_key"] = raw_key
         body["api_key_notice"] = "Guárdala: no se volverá a mostrar"

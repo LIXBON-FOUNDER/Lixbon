@@ -7,7 +7,7 @@ import { useVersion } from '../hooks/useVersion';
 import { ActivityBar } from './ActivityBar';
 import { SidePanel } from './SidePanel';
 import { StatusBar } from './StatusBar';
-import { UpdateBanner } from '../components/UpdateBanner';
+import { UpdateModal } from '../components/UpdateModal';
 
 import { FileTree } from '../sections/Workspace/FileTree';
 import { EditorTabs } from '../editor/EditorTabs';
@@ -17,8 +17,8 @@ import { Metrics } from '../sections/Metrics/Metrics';
 import { Settings } from '../sections/Settings/Settings';
 
 export function AppShell() {
-  const { panels, panelWidths, setPanelWidth, centerView, editorFontSize } = useAppStore();
-  const { updateInfo, installUpdate, isDownloading, downloadProgress } = useVersion();
+  const { panels, panelWidths, setPanelWidth, centerView, editorFontSize, serverUrl } = useAppStore();
+  const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate } = useVersion();
 
   const hasTabs = useEditorStore((s) => s.tabs.length > 0);
 
@@ -86,6 +86,18 @@ export function AppShell() {
 
   return (
     <div className="shell">
+      {updateInfo && !dismissed && (
+        <div className="update-modal__anchor">
+          <UpdateModal
+            updateInfo={updateInfo}
+            serverUrl={serverUrl}
+            onInstall={installUpdate}
+            onDismiss={dismissUpdate}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+          />
+        </div>
+      )}
       <div className="shell__body">
         <ActivityBar />
 
@@ -100,12 +112,6 @@ export function AppShell() {
         )}
 
         <main className="shell__center">
-          <UpdateBanner
-            updateInfo={updateInfo}
-            onInstall={installUpdate}
-            isDownloading={isDownloading}
-            downloadProgress={downloadProgress}
-          />
           {renderCenter()}
         </main>
 

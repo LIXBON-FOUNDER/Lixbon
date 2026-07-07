@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { check as checkUpdater } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
 import { getAppVersion } from '../lib/tauri';
@@ -10,6 +11,9 @@ export function useVersion() {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+
+  const dismissUpdate = () => setDismissed(true);
 
   const fetchTauriVersion = async () => {
     try {
@@ -33,6 +37,7 @@ export function useVersion() {
       const res = await api.get(`/api/updates/check?v=${current}`);
       if (res && res.update_available) {
         setUpdateInfo(res);
+        setDismissed(false); // una versión nueva vuelve a mostrar el aviso
       } else {
         setUpdateInfo(null);
       }
@@ -61,10 +66,11 @@ export function useVersion() {
               }
               break;
             case 'Finished':
-              setIsDownloading(false);
               break;
           }
         });
+        // Instalado: reiniciar la app para arrancar en la versión nueva.
+        await relaunch();
       } else {
         setIsDownloading(false);
         alert('No se detectó la actualización al intentar instalar. Verifica que la versión sea superior a la actual.');
@@ -91,6 +97,8 @@ export function useVersion() {
     updateInfo,
     isDownloading,
     downloadProgress,
+    dismissed,
+    dismissUpdate,
     checkForUpdates,
     installUpdate
   };
