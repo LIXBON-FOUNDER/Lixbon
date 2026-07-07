@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
+import { setIndentConfig } from './editorStore';
+
+// Aplica los ajustes de indentación persistidos al arrancar (antes de abrir archivos).
+setIndentConfig(
+  parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
+  (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
+);
 
 export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
@@ -13,12 +20,15 @@ export const useAppStore = create((set, get) => ({
     localStorage.getItem('lixbon_terminal_font_size') || '14',
     10
   ),
+  tabSize: parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
+  insertSpaces: (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
   connectionStatus: 'disconnected', // 'connected' | 'disconnected' | 'connecting'
 
   // Layout del IDE
-  centerView: 'editor', // 'editor' | 'metrics' | 'settings'
-  panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"explorer":true,"chat":true}'),
+  centerView: 'editor', // 'editor' | 'metrics' | 'settings' | 'git'
+  panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"explorer":true,"chat":true,"terminal":false}'),
   panelWidths: JSON.parse(localStorage.getItem('lixbon_panel_widths') || '{"explorer":260,"chat":360}'),
+  panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
 
   currentModel: localStorage.getItem('lixbon_current_model') || '',
   availableModels: [],
@@ -51,6 +61,12 @@ export const useAppStore = create((set, get) => ({
     set({ panelWidths });
   },
 
+  setPanelHeight: (name, height) => {
+    const panelHeights = { ...get().panelHeights, [name]: height };
+    localStorage.setItem('lixbon_panel_heights', JSON.stringify(panelHeights));
+    set({ panelHeights });
+  },
+
 
   setServerUrl: (url) => {
     const normalized = url.trim().replace(/\/+$/, '');
@@ -61,6 +77,18 @@ export const useAppStore = create((set, get) => ({
   setEditorFontSize: (size) => {
     localStorage.setItem('lixbon_editor_font_size', size.toString());
     set({ editorFontSize: size });
+  },
+
+  setTabSize: (tabSize) => {
+    localStorage.setItem('lixbon_tab_size', tabSize.toString());
+    setIndentConfig(tabSize, get().insertSpaces);
+    set({ tabSize });
+  },
+
+  setInsertSpaces: (insertSpaces) => {
+    localStorage.setItem('lixbon_insert_spaces', insertSpaces ? 'true' : 'false');
+    setIndentConfig(get().tabSize, insertSpaces);
+    set({ insertSpaces });
   },
 
   setUser: (user) => {

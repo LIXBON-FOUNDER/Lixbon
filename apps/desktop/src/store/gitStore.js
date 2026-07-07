@@ -1,0 +1,84 @@
+// gitStore.js — estado del control de código. Las operaciones locales/lectura
+// (status, branch, add, commit) usan gitRun y capturan salida; las de red
+// (pull/push/fetch/clone) se lanzan en el terminal integrado para ver los prompts.
+
+import { create } from 'zustand';
+import { gitRun } from '../lib/tauri';
+import { useTerminalStore } from './terminalStore';
+
+/** Parsea `git status --porcelain=v1` a una lista de cambios. */
+function parseStatus(stdout) {
+  const changes = [];
+  for (const raw of stdout.split('\n')) {
+    if (!raw.trim()) continue;
+    const index = raw[0];
+    const wt = raw[1];
+    let path = raw.slice(3);
+    if (path.includes(' -> ')) path = path.split(' -> ')[1]; // renombrado
+    const untracked = index === '?' && wt === '?';
+    const staged = !untracked && index !== ' ';
+    changes.push({ path, index, wt, staged, untracked });
+  }
+  return changes;
+}
+
+export const useGitStore = create((set, get) => ({
+  isRepo: null, // null = sin comprobar
+  branch: '',
+  changes: [],
+  loading: false,
+  error: '',
+  message: '',
+
+  setMessage: (message) => set({ message }),
+
+  refresh: async () => {
+    set({ loading: true, error: '' });
+    try {
+      const status = await gitRun(['status', '--porcelain=v1']);
+      if (status.code !== 0) {
+        const notRepo = /not a git repository/i.test(status.stderr);
+        set({ isRepo: !notRepo, changes: [], branch: '', loading: false,
+              error: notRepo ? '' : status.stderr.trim() });
+        return;
+      }
+      const branch = await gitRun(['rev-parse', '--abbrev-ref', 'HEAD']);
+      set({
+        isRepo: true,
+        branch: branch.code === 0 ? branch.stdout.trim() : '(sin commits)',
+        changes: parseStatus(status.stdout),
+        loading: false,
+      });
+    } catch (e) {
+      set({ loading: false, error: String(e), isRepo: false });
+    }
+  },
+
+  stage: async (path) => { await gitRun(['add', '--', path]); await get().refresh(); },
+  unstage: async (path) => { await gitRun(['reset', '-q', 'HEAD', '--', path]); await get().refresh(); },
+  stageAll: async () => { await gitRun(['add', '-A']); await get().refresh(); },
+  unstageAll: async () => { await gitRun(['reset', '-q']); await get().refresh(); },
+
+  commit: async () => {
+    const msg = get().message.trim();
+    if (!msg) return { ok: false, error: 'Escribe un mensaje de commit.' };
+    const res = await gitRun(['commit', '-m', msg]);
+    if (res.code === 0) {
+      set({ message: '' });
+      await get().refresh();
+      return { ok: true };
+    }
+    return { ok: false, error: (res.stderr || res.stdout).trim() };
+  },
+
+  init: async () => { await gitRun(['init']); await get().refresh(); },
+
+  // ── Operaciones de red: van al terminal integrado ──────────────────
+  pull: () => useTerminalStore.getState().runCommand('git pull'),
+  push: () => useTerminalStore.getState().runCommand('git push'),
+  fetch: () => useTerminalStore.getState().runCommand('git fetch --all --prune'),
+  clone: (url, dest) => {
+    const target = dest ? ` "${dest}"` : '';
+    useTerminalStore.getState().runCommand(`git clone ${url}${target}`);
+  },
+}));

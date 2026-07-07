@@ -4,9 +4,10 @@
 // sobreviven al cambio de pestaña sin re-crear el DOM del editor).
 
 import { create } from 'zustand';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
+import { indentUnit } from '@codemirror/language';
 import { indentWithTab } from '@codemirror/commands';
 import { ask } from '@tauri-apps/plugin-dialog';
 
@@ -17,6 +18,24 @@ import { languageFor } from '../editor/languages';
 // ── Registro fuera de React ────────────────────────────────────────────
 const stateCache = new Map(); // path -> EditorState
 let liveView = null;
+
+// Ajustes de indentación (los fija appStore vía setIndentConfig). Un compartment
+// por EditorState permite reconfigurar el tabulador en vivo sin recrear la vista.
+let indentConfig = { tabSize: 2, insertSpaces: true };
+const indentCompartment = new Compartment();
+
+function indentExtension() {
+  const unit = indentConfig.insertSpaces ? ' '.repeat(indentConfig.tabSize) : '\t';
+  return [EditorState.tabSize.of(indentConfig.tabSize), indentUnit.of(unit)];
+}
+
+/** appStore llama a esto al cambiar tamaño de tab / espacios; reconfigura la vista viva. */
+export function setIndentConfig(tabSize, insertSpaces) {
+  indentConfig = { tabSize, insertSpaces };
+  if (liveView) {
+    liveView.dispatch({ effects: indentCompartment.reconfigure(indentExtension()) });
+  }
+}
 
 export function registerEditorView(view) {
   liveView = view;
@@ -52,6 +71,7 @@ export const useEditorStore = create((set, get) => ({
       doc: content,
       extensions: [
         basicSetup,
+        indentCompartment.of(indentExtension()),
         keymap.of([
           indentWithTab,
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },

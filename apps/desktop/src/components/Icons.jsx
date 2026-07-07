@@ -172,3 +172,31 @@ export const IconFolderPlus = (p) => (
 export const IconRefresh = (p) => (
   <Svg {...p}><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6" /></Svg>
 );
+
+export const IconChevronDown = (p) => (
+  <Svg {...p}><path d="m6 9 6 6 6-6" /></Svg>
+);
+
+export const IconTerminal = (p) => (
+  <Svg {...p}><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" /><path d="m7 9 3 3-3 3M13 15h4" /></Svg>
+);
+
+export const IconPlay = (p) => (
+  <Svg {...p}><path d="M7 5v14l12-7L7 5Z" fill="currentColor" stroke="none" /></Svg>
+);
+
+export const IconHammer = (p) => (
+  <Svg {...p}><path d="M14 6l4 4M10.5 9.5 3 17a2 2 0 0 0 3 3l7.5-7.5M12 8l4-4 4 4-4 4-4-4Z" /></Svg>
+);
+
+export const IconGitBranch = (p) => (
+  <Svg {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 4-4 4.5-7 4.5" /></Svg>
+);
+
+export const IconGitCommit = (p) => (
+  <Svg {...p}><circle cx="12" cy="12" r="3.5" /><path d="M3 12h5.5M15.5 12H21" /></Svg>
+);
+
+export const IconArrowUp = (p) => (
+  <Svg {...p}><path d="M12 19V5M6 11l6-6 6 6" /></Svg>
+);

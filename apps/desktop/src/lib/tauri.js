@@ -37,6 +37,32 @@ export function createNewEntry(parentPath, name, isDir) {
   return invoke('create_new_entry', { parentPath, name, isDir });
 }
 
+// ── Terminales PTY ────────────────────────────────────────────────────
+
+/** Abre una sesión de terminal (shell: 'powershell' | 'cmd' | 'bash'). Devuelve el id. */
+export function termOpen(shell, cwd) {
+  return invoke('term_open', { shell, cwd: cwd ?? null });
+}
+
+export function termWrite(id, data) {
+  return invoke('term_write', { id, data });
+}
+
+export function termResize(id, cols, rows) {
+  return invoke('term_resize', { id, cols, rows });
+}
+
+export function termClose(id) {
+  return invoke('term_close', { id });
+}
+
+// ── Git (CLI del sistema) ─────────────────────────────────────────────
+
+/** Ejecuta `git args...` en cwd (o la carpeta de trabajo). Devuelve {stdout, stderr, code}. */
+export function gitRun(args, cwd) {
+  return invoke('git_run', { args, cwd: cwd ?? null });
+}
+
 // ── Plugins ───────────────────────────────────────────────────────────
 
 /** Abre el selector nativo de carpetas. Devuelve la ruta o null si se cancela. */

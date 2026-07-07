@@ -11,6 +11,8 @@ const inkSoft = 'rgba(23, 23, 23, 0.55)';
 const olive = '#5f7a1f';   // strings — pariente oscuro del accent #d9e64a
 const earth = '#a8551a';   // números y constantes — pariente del Pro #CE7F25
 const pine = '#2f6b5e';    // tipos y clases
+const slate = '#3a4a63';   // variables — pariente frío/tinta, contenido
+const prop = '#4a6b62';    // propiedades — variante clara del pino
 const danger = '#c0392b';
 
 export const lixbonTheme = EditorView.theme(
@@ -80,7 +82,9 @@ const lixbonHighlight = HighlightStyle.define([
   { tag: [t.number, t.bool, t.null, t.atom, t.constant(t.variableName)], color: earth },
   { tag: [t.typeName, t.className, t.namespace], color: pine },
   { tag: [t.function(t.variableName), t.function(t.propertyName)], color: ink, fontWeight: '500' },
-  { tag: [t.definition(t.variableName), t.propertyName], color: ink },
+  { tag: [t.variableName, t.definition(t.variableName), t.local(t.variableName)], color: slate },
+  { tag: [t.propertyName, t.definition(t.propertyName)], color: prop },
+  { tag: [t.labelName, t.macroName], color: slate },
   { tag: [t.operator, t.punctuation, t.bracket], color: 'rgba(23, 23, 23, 0.7)' },
   { tag: [t.meta, t.processingInstruction], color: inkSoft },
   { tag: t.tagName, color: pine },

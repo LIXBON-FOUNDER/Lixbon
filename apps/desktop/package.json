@@ -1,7 +1,7 @@
 {
   "name": "lixbon",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,14 +10,24 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-go": "^6.0.1",
     "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-java": "^6.0.2",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-php": "^6.0.2",
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/lang-rust": "^6.0.2",
+    "@codemirror/lang-sql": "^6.9.1",
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/legacy-modes": "^6.5.1",
     "@lezer/highlight": "^1.2.3",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.3.3",

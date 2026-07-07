@@ -1,5 +1,70 @@
 /* editor.css — pestañas del editor, host de CodeMirror y explorador de archivos */
 
+/* ── Barra superior del editor (pestañas + Run/Build) ────────────────── */
+
+.editor-toolbar {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+
+.editor-toolbar .editor-tabs {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.run-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border-soft);
+}
+
+.run-controls__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.run-controls__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.run-controls__btn:hover {
+  border-color: var(--border);
+  background: rgba(23, 23, 23, 0.05);
+}
+
+.run-controls__btn--run {
+  color: #3f5410;
+  border-color: rgba(95, 122, 31, 0.4);
+  background: rgba(217, 230, 74, 0.16);
+}
+
+.run-controls__btn--run:hover {
+  background: rgba(217, 230, 74, 0.28);
+  border-color: rgba(95, 122, 31, 0.6);
+}
+
 /* ── Pestañas ────────────────────────────────────────────────────────── */
 
 .editor-tabs {

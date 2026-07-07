@@ -1,4 +1,185 @@
-/* views.css — vistas centrales: Consumo (métricas) y Ajustes */
+/* views.css — vistas centrales: Consumo (métricas), Ajustes y Git */
+
+/* ── Control de código (Git) ─────────────────────────────────────────── */
+
+.scm {
+  max-width: 640px;
+}
+
+.scm__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.scm__branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+.scm__branch-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scm__net {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.scm__net-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.scm__net-btn:hover {
+  color: var(--ink);
+  border-color: var(--border);
+  background: rgba(23, 23, 23, 0.04);
+}
+
+.scm__commit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.scm__message {
+  width: 100%;
+  resize: vertical;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 13.5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  outline: none;
+  background: var(--bg);
+}
+
+.scm__message:focus {
+  border-color: var(--border);
+}
+
+.scm__commit-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scm__group {
+  margin-bottom: 16px;
+}
+
+.scm__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: 0 4px 6px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+}
+
+.scm__link {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.scm__link:hover { color: var(--ink); text-decoration: underline; }
+
+.scm__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.scm__file:hover { background: rgba(23, 23, 23, 0.04); }
+
+.scm__badge {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 5px;
+  color: var(--ink-soft);
+  background: rgba(23, 23, 23, 0.06);
+}
+
+.scm__badge--M { color: #a8551a; background: rgba(168, 85, 26, 0.12); }
+.scm__badge--A { color: #5f7a1f; background: rgba(95, 122, 31, 0.14); }
+.scm__badge--D { color: #c0392b; background: rgba(192, 57, 43, 0.12); }
+.scm__badge--new { color: #2f6b5e; background: rgba(47, 107, 94, 0.14); }
+
+.scm__file-name {
+  font-size: 13px;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+.scm__file-path {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.scm__file-action {
+  opacity: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.scm__file:hover .scm__file-action { opacity: 1; }
+.scm__file-action:hover { color: var(--ink); background: rgba(23, 23, 23, 0.08); }
+
+.scm__clone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
 
 /* ── Métricas ────────────────────────────────────────────────────────── */
 
@@ -313,6 +494,78 @@
   font-size: 13px;
   min-width: 40px;
   text-align: right;
+}
+
+/* Filas apiladas dentro de un mismo panel (p.ej. Editor) */
+.settings__inline + .settings__inline {
+  margin-top: 14px;
+}
+
+/* Control segmentado (tamaño de tabulador) */
+.settings__segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.settings__segment {
+  min-width: 40px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.settings__segment:last-child {
+  border-right: none;
+}
+
+.settings__segment:hover {
+  color: var(--ink);
+  background: rgba(23, 23, 23, 0.04);
+}
+
+.settings__segment.is-active {
+  color: var(--bg);
+  background: var(--ink);
+}
+
+/* Toggle (insertar espacios) */
+.settings__toggle {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(23, 23, 23, 0.2);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.settings__toggle.is-on {
+  background: var(--ink);
+}
+
+.settings__toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg);
+  transition: transform 0.15s ease;
+}
+
+.settings__toggle.is-on .settings__toggle-knob {
+  transform: translateX(18px);
 }
 
 /* ── Aviso de actualización (banner superior) ────────────────────────── */

@@ -18,6 +18,7 @@ export function Settings() {
     serverUrl, setServerUrl,
     apiKey, user, setUser, logout,
     editorFontSize, setEditorFontSize,
+    tabSize, setTabSize, insertSpaces, setInsertSpaces,
   } = useAppStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
 
@@ -228,6 +229,34 @@ export function Settings() {
             />
             <span className="settings__slider-value">{editorFontSize}px</span>
           </span>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">Tamaño del tabulador</span>
+          <span className="settings__segmented">
+            {[2, 4, 8].map((n) => (
+              <button
+                key={n}
+                className={`settings__segment ${tabSize === n ? 'is-active' : ''}`}
+                onClick={() => setTabSize(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </span>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">Insertar espacios al tabular</span>
+          <button
+            className={`settings__toggle ${insertSpaces ? 'is-on' : ''}`}
+            onClick={() => setInsertSpaces(!insertSpaces)}
+            role="switch"
+            aria-checked={insertSpaces}
+            title={insertSpaces ? 'Se insertan espacios' : 'Se insertan tabulaciones'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
         </div>
       </section>
     </div>

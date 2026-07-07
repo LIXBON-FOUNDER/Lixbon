@@ -1,6 +1,6 @@
 // ActivityBar.jsx — barra fina de navegación del IDE (izquierda).
 import { useAppStore } from '../store/appStore';
-import { IconPanel, IconChat, IconChart, IconGear } from '../components/Icons';
+import { IconPanel, IconChat, IconChart, IconGear, IconTerminal, IconGitBranch } from '../components/Icons';
 
 export function ActivityBar() {
   const { panels, togglePanel, centerView, setCenterView } = useAppStore();
@@ -28,6 +28,22 @@ export function ActivityBar() {
         title="Chat"
       >
         <IconChat size={19} />
+      </button>
+
+      <button
+        className={`activitybar__btn ${centerView === 'git' ? 'is-active' : ''}`}
+        onClick={() => toggleCenter('git')}
+        title="Control de código (Git)"
+      >
+        <IconGitBranch size={19} />
+      </button>
+
+      <button
+        className={`activitybar__btn ${panels.terminal ? 'is-active' : ''}`}
+        onClick={() => togglePanel('terminal')}
+        title="Terminal (Ctrl+`)"
+      >
+        <IconTerminal size={19} />
       </button>
 
       <div className="activitybar__spacer" />

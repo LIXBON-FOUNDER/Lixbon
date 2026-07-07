@@ -1,12 +1,33 @@
+use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::thread;
 
-use tauri::State;
+use portable_pty::{
+    native_pty_system, Child, CommandBuilder, MasterPty, PtySize, PtySystem, SlavePty,
+};
+use tauri::{AppHandle, Emitter, State};
 
 /// Carpeta de trabajo elegida por el usuario. Todos los comandos de
 /// archivos están confinados a ella: sin raíz no hay acceso al disco.
 struct WorkspaceRoot(Mutex<Option<PathBuf>>);
+
+/// Sesión de terminal viva: el master (para redimensionar), su writer (stdin del
+/// shell) y el proceso hijo (para matarlo al cerrar). El hilo lector emite la
+/// salida por eventos `term:out:{id}` y no toca este estado.
+struct TermHandle {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send + Sync>,
+}
+
+struct Terminals(Mutex<HashMap<String, TermHandle>>);
+
+static TERM_SEQ: AtomicU64 = AtomicU64::new(1);
 
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024; // 5 MB
 
@@ -152,10 +173,175 @@ fn is_simple_name(name: &str) -> bool {
     !(name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\'))
 }
 
+// ── Terminales PTY (bash / PowerShell / cmd) ─────────────────────────────
+
+/// Traduce el shell pedido por el frontend a (programa, argumentos) según el SO.
+fn resolve_shell(shell: &str) -> (String, Vec<String>) {
+    #[cfg(windows)]
+    {
+        match shell {
+            "cmd" => ("cmd.exe".into(), vec![]),
+            "bash" => ("bash.exe".into(), vec!["-l".into()]),
+            "" | "powershell" => ("powershell.exe".into(), vec!["-NoLogo".into()]),
+            other => (other.into(), vec![]),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        match shell {
+            "" | "bash" => ("bash".into(), vec!["-l".into()]),
+            "zsh" => ("zsh".into(), vec!["-l".into()]),
+            other => {
+                let sh = std::env::var("SHELL").unwrap_or_else(|_| "bash".into());
+                if other.is_empty() { (sh, vec![]) } else { (other.into(), vec![]) }
+            }
+        }
+    }
+}
+
+/// Abre una sesión de terminal. `cwd` por defecto = carpeta de trabajo.
+/// Devuelve el id de la sesión; la salida llega por eventos `term:out:{id}`.
+#[tauri::command]
+fn term_open(
+    app: AppHandle,
+    shell: String,
+    cwd: Option<String>,
+    root: State<WorkspaceRoot>,
+    terms: State<Terminals>,
+) -> Result<String, String> {
+    let workdir = cwd.or_else(|| {
+        root.0
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|p| display_path(p)))
+    });
+
+    let pair = native_pty_system()
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .map_err(|e| e.to_string())?;
+
+    let (program, args) = resolve_shell(&shell);
+    let mut cmd = CommandBuilder::new(program);
+    for a in args {
+        cmd.arg(a);
+    }
+    if let Some(dir) = workdir {
+        cmd.cwd(dir);
+    }
+
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    // El slave ya no hace falta en el padre: soltarlo evita colgar el cierre.
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+
+    let id = format!("t{}", TERM_SEQ.fetch_add(1, Ordering::Relaxed));
+
+    // Hilo lector: bombea la salida del PTY hacia el frontend.
+    let out_event = format!("term:out:{id}");
+    let exit_event = format!("term:exit:{id}");
+    let app_reader = app.clone();
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    if app_reader.emit(&out_event, chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = app_reader.emit(&exit_event, ());
+    });
+
+    terms.0.lock().map_err(|_| "Estado interno corrupto".to_string())?.insert(
+        id.clone(),
+        TermHandle { master: pair.master, writer, child },
+    );
+
+    Ok(id)
+}
+
+#[tauri::command]
+fn term_write(id: String, data: String, terms: State<Terminals>) -> Result<(), String> {
+    let mut map = terms.0.lock().map_err(|_| "Estado interno corrupto".to_string())?;
+    let handle = map.get_mut(&id).ok_or_else(|| "Terminal no encontrado".to_string())?;
+    handle.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+    handle.writer.flush().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn term_resize(id: String, cols: u16, rows: u16, terms: State<Terminals>) -> Result<(), String> {
+    let map = terms.0.lock().map_err(|_| "Estado interno corrupto".to_string())?;
+    let handle = map.get(&id).ok_or_else(|| "Terminal no encontrado".to_string())?;
+    handle
+        .master
+        .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn term_close(id: String, terms: State<Terminals>) -> Result<(), String> {
+    let mut map = terms.0.lock().map_err(|_| "Estado interno corrupto".to_string())?;
+    if let Some(mut handle) = map.remove(&id) {
+        let _ = handle.child.kill();
+    }
+    Ok(())
+}
+
+// ── Git (CLI del sistema) ────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct GitOutput {
+    stdout: String,
+    stderr: String,
+    code: i32,
+}
+
+/// Ejecuta `git` con los argumentos dados y captura la salida. Solo para
+/// operaciones de lectura/local (status, branch, log, add, commit); las de red
+/// (clone/push/pull/fetch) se lanzan desde el terminal integrado para que los
+/// prompts de credenciales sean visibles. cwd por defecto = carpeta de trabajo.
+#[tauri::command]
+fn git_run(
+    args: Vec<String>,
+    cwd: Option<String>,
+    root: State<WorkspaceRoot>,
+) -> Result<GitOutput, String> {
+    let dir = match cwd {
+        Some(c) => ensure_inside_root(&root, &c)?,
+        None => root
+            .0
+            .lock()
+            .map_err(|_| "Estado interno corrupto".to_string())?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "No hay carpeta de trabajo abierta".to_string())?,
+    };
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(&dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| format!("No se pudo ejecutar git: {e}"))?;
+
+    Ok(GitOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: output.status.code().unwrap_or(-1),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(WorkspaceRoot(Mutex::new(None)))
+        .manage(Terminals(Mutex::new(HashMap::new())))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
@@ -170,7 +356,12 @@ pub fn run() {
             read_dir,
             read_file_content,
             write_file_content,
-            create_new_entry
+            create_new_entry,
+            term_open,
+            term_write,
+            term_resize,
+            term_close,
+            git_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
