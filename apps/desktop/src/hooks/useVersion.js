@@ -15,6 +15,22 @@ export function useVersion() {
 
   const dismissUpdate = () => setDismissed(true);
 
+  // Compara "x.y.z[-pre]" numéricamente. Devuelve >0 si a > b, 0 si iguales,
+  // <0 si a < b, o null si alguna no es parseable (en ese caso no se decide aquí).
+  const compareVersions = (a, b) => {
+    const parse = (v) => {
+      const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || '').trim());
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    };
+    const pa = parse(a);
+    const pb = parse(b);
+    if (!pa || !pb) return null;
+    for (let i = 0; i < 3; i++) {
+      if (pa[i] !== pb[i]) return pa[i] - pb[i];
+    }
+    return 0;
+  };
+
   const fetchTauriVersion = async () => {
     try {
       const v = await getAppVersion();
@@ -33,9 +49,13 @@ export function useVersion() {
       // 1. Preguntar al backend de Rust la versión instalada real
       const current = await fetchTauriVersion();
 
-      // 2. Comprobar contra el endpoint del servidor si hay actualización
+      // 2. Comprobar contra el endpoint del servidor si hay actualización.
+      //    Además del veredicto del servidor se re-verifica aquí que la versión
+      //    ofrecida sea realmente mayor que la instalada: un release mal
+      //    registrado en el servidor no debe provocar un bucle de aviso.
       const res = await api.get(`/api/updates/check?v=${current}`);
-      if (res && res.update_available) {
+      const cmp = res ? compareVersions(res.latest_version, current) : null;
+      if (res && res.update_available && (cmp === null || cmp > 0)) {
         setUpdateInfo(res);
         setDismissed(false); // una versión nueva vuelve a mostrar el aviso
       } else {

@@ -63,14 +63,19 @@ jobs:
           $MSI_PATH = Get-ChildItem -Path "apps/desktop/src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
           if ($MSI_PATH) {
             Write-Host "Uploading $($MSI_PATH.Name) to remote server..."
-            # Versión: preferir el tag de git (vX.Y.Z) para que coincida con el release;
-            # si no hay tag (ej. workflow_dispatch), caer al package.json.
+            # Versión: SIEMPRE la de tauri.conf.json — es la que Tauri estampa en el
+            # MSI y la que reporta la app instalada. Usar otra fuente (tag o
+            # package.json) puede registrar en el servidor una versión que no
+            # coincide con el binario y provoca un bucle de "actualización
+            # disponible" imposible de satisfacer.
+            $TauriConf = Get-Content -Raw -Path "apps/desktop/src-tauri/tauri.conf.json" | ConvertFrom-Json
+            $Version = $TauriConf.version
+            # Si hay tag, exigir que coincida con tauri.conf.json para no publicar
+            # un release cuyo nombre no corresponde al binario.
             $Ref = "${{ github.ref_name }}"
-            if ($Ref -match '^v?(\d+\.\d+\.\d+.*)$') {
-              $Version = $Matches[1]
-            } else {
-              $PackageJson = Get-Content -Raw -Path "apps/desktop/package.json" | ConvertFrom-Json
-              $Version = $PackageJson.version
+            if ($Ref -match '^v(\d+\.\d+\.\d+.*)$' -and $Matches[1] -ne $Version) {
+              Write-Error "El tag ($Ref) no coincide con la version de tauri.conf.json ($Version). Alinea ambos antes de publicar."
+              exit 1
             }
             # Canal: beta si el tag lo indica (v1.2.3-beta / -rc), si no stable.
             if ($Version -match '(?i)beta|rc') { $Channel = "beta" } else { $Channel = "stable" }

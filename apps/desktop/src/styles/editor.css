@@ -426,6 +426,19 @@
   flex-shrink: 0;
 }
 
+.extpanel__error {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.28);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin: 0 10px 8px;
+  flex-shrink: 0;
+  word-break: break-word;
+}
+
 .extpanel__body {
   flex: 1;
   min-height: 0;

@@ -85,7 +85,7 @@ export function SourceControl() {
   return (
     <div className="scm">
       <div className="scm__head">
-        <h2 className="center-view__title" style={{ margin: 0 }}>Control de código</h2>
+        <span className="scm__title">Control de código</span>
         <button className="icon-btn" onClick={refresh} title="Refrescar" disabled={loading}>
           <IconRefresh size={16} />
         </button>

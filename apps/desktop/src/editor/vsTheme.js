@@ -114,3 +114,54 @@ export function buildVsCodeTheme(themeJson, darkHint = true) {
     ? [editorTheme, syntaxHighlighting(HighlightStyle.define(styles))]
     : [editorTheme];
 }
+
+// ── Tema para TODA la app (workbench) ────────────────────────────────────
+// El shell del IDE está construido sobre unos pocos tokens CSS (base.css).
+// Al aplicar un tema de VSCode se sobreescriben esos tokens con los colores
+// de workbench del tema (colors.*), con derivaciones cuando falten.
+
+/** '#rgb' | '#rrggbb' | '#rrggbbaa' → [r,g,b] o null. */
+function hexToRgb(hex) {
+  if (typeof hex !== 'string') return null;
+  const h = hex.trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(h)) {
+    return [parseInt(h[0] + h[0], 16), parseInt(h[1] + h[1], 16), parseInt(h[2] + h[2], 16)];
+  }
+  if (/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(h)) {
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  return null;
+}
+
+const rgba = ([r, g, b], a) => `rgba(${r}, ${g}, ${b}, ${a})`;
+
+/** Mezcla lineal de dos colores rgb (t = peso del segundo). */
+const mix = (c1, c2, t) => c1.map((v, i) => Math.round(v + (c2[i] - v) * t));
+
+/**
+ * Variables CSS para el shell del IDE a partir de los colores de workbench
+ * del tema. Devuelve un mapa { '--token': valor } listo para aplicar a :root.
+ */
+export function appColorsFromTheme(themeJson, darkHint = true) {
+  const colors = themeJson.colors || {};
+  const dark = themeJson.type
+    ? themeJson.type === 'dark' || themeJson.type === 'hcDark'
+    : !!darkHint;
+
+  const bgHex = colors['editor.background'] || (dark ? '#1e1e1e' : '#ffffff');
+  const fgHex = colors['editor.foreground'] || (dark ? '#d4d4d4' : '#333333');
+  const bg = hexToRgb(bgHex) || (dark ? [30, 30, 30] : [255, 255, 255]);
+  const fg = hexToRgb(fgHex) || (dark ? [212, 212, 212] : [51, 51, 51]);
+
+  const sideHex = colors['sideBar.background'] || colors['activityBar.background'];
+  const side = hexToRgb(sideHex) || mix(bg, fg, 0.045); // panel apenas distinto del editor
+
+  return {
+    '--bg': rgba(bg, 1),
+    '--bg-secondary': rgba(side, 1),
+    '--ink': rgba(fg, 1),
+    '--ink-soft': rgba(fg, 0.62),
+    '--border': rgba(fg, 0.9),
+    '--border-soft': rgba(fg, 0.16),
+  };
+}

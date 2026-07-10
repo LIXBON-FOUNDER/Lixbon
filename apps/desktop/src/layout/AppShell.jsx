@@ -119,13 +119,6 @@ export function AppShell() {
         </div>
       );
     }
-    if (centerView === 'git') {
-      return (
-        <div className="center-view">
-          <SourceControl />
-        </div>
-      );
-    }
     // Editor con pestañas
     return (
       <div className="editor-area">
@@ -173,6 +166,8 @@ export function AppShell() {
           >
             {leftView === 'search' ? (
               <SearchPanel />
+            ) : leftView === 'git' ? (
+              <SourceControl />
             ) : leftView === 'extensions' ? (
               <ExtensionsPanel />
             ) : (

@@ -45,7 +45,7 @@ export function ExtensionsPanel() {
         extensiones con código no son ejecutables fuera de VSCode.
       </p>
 
-      {error && <p className="filetree__hint">{error}</p>}
+      {error && <p className="extpanel__error">{error}</p>}
 
       <div className="extpanel__body">
         {/* Instaladas */}

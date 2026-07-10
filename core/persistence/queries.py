@@ -1211,14 +1211,37 @@ def get_all_versions() -> list[dict[str, Any]]:
 
 
 def get_latest_version(channel: str = "stable") -> dict[str, Any] | None:
+    """Mayor versión SEMÁNTICA del canal. Ordenar por id (orden de inserción)
+    es frágil: un re-upload de una versión vieja (upsert conserva el id) o un
+    registro fuera de orden harían que "la última" no fuese la mayor."""
+    from packaging.version import InvalidVersion, Version
+
+    def sort_key(row: dict[str, Any]):
+        try:
+            return (1, Version(row["version"]), row["id"])
+        except InvalidVersion:
+            return (0, Version("0"), row["id"])
+
     with get_session() as s:
-        row = s.scalar(
-            select(AppVersion)
-            .where(AppVersion.channel == channel)
-            .order_by(desc(AppVersion.id))
-            .limit(1)
-        )
-        return _version_to_dict(row) if row else None
+        rows = s.scalars(select(AppVersion).where(AppVersion.channel == channel)).all()
+        if not rows:
+            return None
+        return max((_version_to_dict(r) for r in rows), key=sort_key)
+
+
+def delete_app_version(version: str, channel: str | None = None) -> dict[str, Any] | None:
+    """Elimina un release registrado. Devuelve la fila borrada (para limpiar
+    también el objeto de R2) o None si no existía."""
+    with get_session() as s:
+        stmt = select(AppVersion).where(AppVersion.version == version)
+        if channel:
+            stmt = stmt.where(AppVersion.channel == channel)
+        row = s.scalar(stmt.limit(1))
+        if not row:
+            return None
+        data = _version_to_dict(row)
+        s.delete(row)
+        return data
 
 
 def add_app_version(

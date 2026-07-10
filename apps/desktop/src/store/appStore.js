@@ -32,8 +32,8 @@ export const useAppStore = create((set, get) => ({
   workspaceRoot: '',
 
   // Layout del IDE
-  centerView: 'editor', // 'editor' | 'metrics' | 'settings' | 'git'
-  leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'extensions'
+  centerView: 'editor', // 'editor' | 'metrics' | 'settings'
+  leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'git' | 'extensions'
   quickOpen: false, // overlay Ctrl+P
   panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"explorer":true,"chat":true,"terminal":false}'),
   panelWidths: JSON.parse(localStorage.getItem('lixbon_panel_widths') || '{"explorer":260,"chat":360}'),

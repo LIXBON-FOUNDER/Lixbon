@@ -5,10 +5,28 @@
 import { create } from 'zustand';
 import { extSearch, extInstall, extUninstall, extReadTheme } from '../lib/tauri';
 import { setEditorThemeExts } from './editorStore';
-import { buildVsCodeTheme } from '../editor/vsTheme';
+import { buildVsCodeTheme, appColorsFromTheme } from '../editor/vsTheme';
 
 const INSTALLED_KEY = 'lixbon_extensions';
 const THEME_KEY = 'lixbon_editor_theme';
+
+// Tokens del shell que un tema puede sobreescribir (base.css los define).
+const APP_COLOR_KEYS = ['--bg', '--bg-secondary', '--ink', '--ink-soft', '--border', '--border-soft'];
+
+/** Aplica (o retira, con null) los colores de workbench del tema a toda la app. */
+function setAppColors(map) {
+  const root = document.documentElement.style;
+  for (const key of APP_COLOR_KEYS) {
+    if (map && map[key]) root.setProperty(key, map[key]);
+    else root.removeProperty(key);
+  }
+}
+
+/** Convierte y aplica un tema completo (editor + shell). */
+function applyThemeJson(themeJson, dark) {
+  setEditorThemeExts(buildVsCodeTheme(themeJson, dark));
+  setAppColors(appColorsFromTheme(themeJson, dark));
+}
 
 function readJson(key, fallback) {
   try {
@@ -74,7 +92,7 @@ export const useExtStore = create((set, get) => ({
   applyTheme: async (extId, theme) => {
     try {
       const raw = await extReadTheme(extId, theme.file);
-      setEditorThemeExts(buildVsCodeTheme(JSON.parse(raw), theme.dark));
+      applyThemeJson(JSON.parse(raw), theme.dark);
       const sel = { extId, label: theme.label, file: theme.file, dark: theme.dark };
       localStorage.setItem(THEME_KEY, JSON.stringify(sel));
       set({ activeTheme: sel, error: '' });
@@ -85,6 +103,7 @@ export const useExtStore = create((set, get) => ({
 
   resetTheme: () => {
     setEditorThemeExts(null);
+    setAppColors(null);
     localStorage.removeItem(THEME_KEY);
     set({ activeTheme: null });
   },
@@ -95,7 +114,7 @@ export const useExtStore = create((set, get) => ({
     if (!sel) return;
     try {
       const raw = await extReadTheme(sel.extId, sel.file);
-      setEditorThemeExts(buildVsCodeTheme(JSON.parse(raw), sel.dark));
+      applyThemeJson(JSON.parse(raw), sel.dark);
     } catch {
       get().resetTheme();
     }

@@ -726,6 +726,8 @@ fn git_clone_blocking(app: AppHandle, url: String, dest_parent: String) -> Resul
 
 /// Los JSON de temas de VSCode suelen ser JSONC: comentarios y comas finales.
 fn clean_jsonc(src: &str) -> String {
+    // Algunos archivos vienen con BOM UTF-8, que serde_json rechaza.
+    let src = src.trim_start_matches('\u{feff}');
     // 1) quitar comentarios // y /* */ (respetando strings)
     let mut no_comments = String::with_capacity(src.len());
     let mut chars = src.chars().peekable();

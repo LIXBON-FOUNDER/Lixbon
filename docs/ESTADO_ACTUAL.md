@@ -240,6 +240,22 @@ Versión unificada **0.6.0**. Se apila sobre 6.13 (sin taggear aún).
 
 ---
 
+## 6.15 ✅ IDE desktop v0.5.2: fix del bucle de actualización, temas a toda la app y secciones exclusivas (2026-07-10)
+
+Corrige los 3 bugs reportados sobre la 0.5.1. Versión unificada **0.5.2** (package.json + tauri.conf.json + Cargo.toml — estaban desincronizados: package.json decía 0.6.0).
+
+- **Bug del modal de actualización (causa raíz)**: con `workflow_dispatch` (sin tag), el paso de subida del CI tomaba la versión de `package.json` (0.6.0) mientras el MSI se compila con la de `tauri.conf.json` (0.5.1) → el servidor registró un release "0.6.0" cuyo binario real es 0.5.1 → bucle infinito de "actualización disponible". Arreglos:
+  - `.github/workflows/tauri.yml`: la versión que se registra sale SIEMPRE de `tauri.conf.json`; si hay tag y no coincide, el job falla.
+  - `core/persistence/queries.py` `get_latest_version`: la "última" es la mayor por **semver** (`packaging.Version`), no la última insertada (`id`), porque el upsert de `add_app_version` conserva el id original.
+  - `DELETE /api/versions/{version}` (admin, `versions.py`): borra fila + objeto R2; imprescindible para eliminar el release fantasma 0.6.0 de producción.
+  - `useVersion.js`: guard cliente — el modal solo aparece si `latest_version` es realmente mayor que la instalada.
+  - **Remediación en prod**: tras el deploy, `curl -X DELETE -H "X-Admin-Token: …" https://lixbon.com/api/versions/0.6.0`.
+- **"Las extensiones no se instalan"**: la instalación Rust funciona (verificado: `app_data/extensions/mskelton.one-dark-theme/` existe y el tema quedó activo en localStorage; la lógica pasa contra los 12 temas top de Open VSX). El problema era de percepción: el tema solo re-coloreaba el área CodeMirror. Ahora `vsTheme.js#appColorsFromTheme` mapea los colores de workbench (`editor.background/foreground`, `sideBar.background`…) a los tokens del shell (`--bg`, `--bg-secondary`, `--ink`, `--ink-soft`, `--border`, `--border-soft`) y `extStore` los aplica/retira a `:root` — el tema viste TODA la app. Además: errores del panel en caja visible (`.extpanel__error`) y `clean_jsonc` tolera BOM UTF-8.
+- **Secciones exclusivas**: Control de código dejó de ser vista central y pasó al panel izquierdo (`leftView: 'explorer'|'search'|'git'|'extensions'`), como VSCode — ya no puede convivir con Extensiones/Explorador. `.scm` re-estilado para la barra lateral (título uppercase, branch con wrap).
+- **Pendiente**: CI valida el Rust (BOM strip) al taggear `v0.5.2`; tras el deploy del gateway ejecutar el DELETE del 0.6.0 fantasma.
+
+---
+
 ## 7. Fases posteriores (sin iniciar)
 
 - **F8 — Calidad**: tests automatizados (no hay ninguno aún; los scripts E2E de verificación viven en scratchpad, no versionados), ruff/mypy, Sentry, backups verificados, docs de API, ToS/privacidad.

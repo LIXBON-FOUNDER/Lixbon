@@ -34,8 +34,8 @@ export function ActivityBar() {
       </button>
 
       <button
-        className={`activitybar__btn ${centerView === 'git' ? 'is-active' : ''}`}
-        onClick={() => toggleCenter('git')}
+        className={`activitybar__btn ${leftActive('git') ? 'is-active' : ''}`}
+        onClick={() => openLeftPanel('git')}
         title="Control de código (Git)"
       >
         <IconGitBranch size={19} />

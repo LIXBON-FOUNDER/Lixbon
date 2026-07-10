@@ -259,3 +259,29 @@ async def api_upload_version(
     db.log_audit_event("release_uploaded", version=version, channel=channel, storage=storage)
 
     return {"success": True, "version": version, "channel": channel, "storage": storage}
+
+
+@router.delete("/api/versions/{version}")
+async def api_delete_version(
+    version: str,
+    channel: str | None = Query(None, description="Canal (opcional; si se omite borra la versión en cualquier canal)"),
+    _: None = Depends(admin_or_token),
+):
+    """Elimina un release registrado (fila en BD + instalador en R2 si aplica).
+
+    Necesario cuando se registra una versión errónea (p. ej. una versión que no
+    corresponde al binario subido): mientras exista, el updater la ofrecerá en
+    bucle a clientes que nunca podrán alcanzarla."""
+    row = db.delete_app_version(version, channel)
+    if not row:
+        raise HTTPException(status_code=404, detail="Versión no encontrada")
+
+    url = row["download_url"] or ""
+    if url.startswith("r2:"):
+        try:
+            r2.delete_object(url[len("r2:"):])
+        except Exception as exc:  # el binario huérfano no bloquea el borrado lógico
+            logger.warning(f"[versions] no se pudo borrar de R2 {url}: {exc}")
+
+    db.log_audit_event("release_deleted", version=version, channel=row["channel"])
+    return {"success": True, "version": version, "channel": row["channel"]}
