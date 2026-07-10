@@ -21,7 +21,7 @@
   top: 4px;
   bottom: 4px;
   border-radius: var(--radius-pill);
-  background: var(--ink);
+  background: var(--primary);
   z-index: 0;
   transition:
     left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
@@ -45,7 +45,7 @@
 }
 
 .admin-tab.is-active {
-  color: #fff;
+  color: var(--on-primary);
 }
 
 /* ── Stat tiles ──────────────────────────────────────────────────────── */
@@ -115,7 +115,7 @@
 }
 
 .table tbody tr:hover {
-  background: rgba(23, 23, 23, 0.02);
+  background: rgba(var(--ink-rgb), 0.02);
 }
 
 tr.is-blocked {
@@ -200,10 +200,11 @@ tr.is-blocked {
 
 .badge--ok {
   background: var(--accent);
+  color: var(--on-accent);
 }
 
 .badge--bad {
-  background: rgba(192, 57, 43, 0.12);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
@@ -320,7 +321,7 @@ tr.is-blocked {
   padding: 12px 18px;
   border-radius: var(--radius-box);
   border: 1px solid var(--accent);
-  background: rgba(217, 230, 74, 0.16);
+  background: var(--accent-soft);
   font-size: 14.5px;
 }
 

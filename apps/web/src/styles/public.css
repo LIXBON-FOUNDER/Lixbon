@@ -34,7 +34,7 @@
 
 .pubnav__link:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.05);
+  background: rgba(var(--ink-rgb), 0.05);
 }
 
 .pubnav__link.is-active {
@@ -94,7 +94,7 @@
   display: flex;
   align-items: stretch;
   gap: 8px;
-  background: var(--ink);
+  background: var(--code-bg);
   border-radius: 14px;
   padding: 4px 4px 4px 16px;
 }
@@ -104,7 +104,7 @@
   min-width: 0;
   align-self: center;
   padding: 8px 0;
-  color: #f6f7ed;
+  color: var(--code-ink);
   font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 13.5px;
   line-height: 1.5;
@@ -121,7 +121,7 @@
   padding: 8px 14px;
   border-radius: 10px;
   background: rgba(246, 247, 237, 0.12);
-  color: #f6f7ed;
+  color: var(--code-ink);
   font-size: 13px;
   font-weight: 500;
   transition: background 0.15s ease;
@@ -274,8 +274,8 @@
 }
 
 .os-tab.is-active {
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .dl-details {
@@ -312,7 +312,7 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(23, 23, 23, 0.42);
+  background: var(--scrim);
   animation: fade-in 0.18s ease;
 }
 
@@ -321,7 +321,7 @@
   background: var(--bg);
   border-radius: var(--radius-box);
   padding: 22px 24px;
-  box-shadow: 0 20px 60px rgba(23, 23, 23, 0.28);
+  box-shadow: 0 20px 60px rgba(var(--shadow-rgb), 0.28);
   animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -485,7 +485,7 @@
 
 .docs__nav-link:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.05);
+  background: rgba(var(--ink-rgb), 0.05);
 }
 
 .docs__nav-link.is-active {
@@ -567,7 +567,7 @@
    oscuro (la regla de código en línea de arriba, más específica, lo pisaba). */
 .docs__content .codeblock__code {
   background: none;
-  color: #f6f7ed;
+  color: var(--code-ink);
   padding: 0;
 }
 
@@ -722,7 +722,7 @@
   padding: 3px 11px;
   background: var(--accent);
   border-radius: var(--radius-pill);
-  color: var(--ink);
+  color: var(--on-accent);
 }
 
 .release__channel {

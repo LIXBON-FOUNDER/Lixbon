@@ -4,13 +4,24 @@
 
 .auth {
   /* Tokens locales del rediseño (no afectan al resto de la app) */
+  --auth-bg: #f2f1e3;
   --auth-ink: #1b1a17;
+  --auth-on-ink: #f2f1e3; /* texto sobre elementos rellenos de tinta */
+  --auth-ink-hover: #000;
   --auth-surface: #ffffff;
+  --auth-surface-hover: #fbfaf4;
   --auth-border: #e4dfce;
   --auth-accent: #6c7a46;
   --auth-accent-ring: rgba(108, 122, 70, 0.15);
   --auth-muted: #a79e86;
   --auth-placeholder: #9a927c;
+  --auth-selection: #dde3c5;
+  /* Ilustración (anillos, chispas y barras de las burbujas) */
+  --auth-illu-ring: rgba(75, 83, 39, 0.28);
+  --auth-illu-ink: #1B1A17;
+  --auth-illu-soft: #C7BE9F;
+  --auth-illu-bar: rgba(27, 26, 23, 0.16);
+  --auth-illu-bar-accent: rgba(108, 122, 70, 0.45);
 
   position: relative;
   min-height: 100%;
@@ -19,14 +30,35 @@
   align-items: center;
   justify-content: center;
   gap: 30px;
-  background: #f2f1e3;
+  background: var(--auth-bg);
   color: var(--auth-ink);
   padding: 40px 16px;
   overflow: hidden;
 }
 
+/* Modo oscuro: misma paleta olivo sobre superficies oscuras */
+[data-theme='dark'] .auth {
+  --auth-bg: #1A1913;
+  --auth-ink: #F3F0E2;
+  --auth-on-ink: #1A1913;
+  --auth-ink-hover: #fffdf0;
+  --auth-surface: #211F17;
+  --auth-surface-hover: #2A2820;
+  --auth-border: #33301F;
+  --auth-accent: #A9B86E;
+  --auth-accent-ring: rgba(169, 184, 110, 0.15);
+  --auth-muted: #8E876F;
+  --auth-placeholder: #8E876F;
+  --auth-selection: #3a4028;
+  --auth-illu-ring: rgba(169, 184, 110, 0.28);
+  --auth-illu-ink: #F0EBD9;
+  --auth-illu-soft: #8E876F;
+  --auth-illu-bar: rgba(243, 240, 226, 0.18);
+  --auth-illu-bar-accent: rgba(169, 184, 110, 0.45);
+}
+
 .auth ::selection {
-  background: #dde3c5;
+  background: var(--auth-selection);
 }
 
 .auth__logo {
@@ -83,7 +115,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   background: var(--auth-surface);
-  border: 1px solid rgba(27, 26, 23, 0.1);
+  border: 1px solid var(--auth-border);
   border-radius: var(--radius-pill);
   padding: 5px;
   margin-bottom: 8px;
@@ -117,7 +149,7 @@
 }
 
 .auth__toggle button.is-active {
-  color: #f2f1e3;
+  color: var(--auth-on-ink);
 }
 
 /* ── Campos (pastilla, borde crema, foco oliva) ──────────────────────── */
@@ -179,7 +211,7 @@
   padding: 17px 22px;
   border-radius: var(--radius-pill);
   background: var(--auth-ink);
-  color: #f2f1e3;
+  color: var(--auth-on-ink);
   font-size: 15px;
   font-weight: 600;
   text-decoration: none;
@@ -188,7 +220,7 @@
 }
 
 .auth .auth__cta:hover:not(:disabled) {
-  background: #000;
+  background: var(--auth-ink-hover);
   transform: translateY(-1px);
   box-shadow: 0 10px 24px rgba(27, 26, 23, 0.2);
   opacity: 1;
@@ -237,7 +269,7 @@
   content: '';
   flex: 1;
   height: 1px;
-  background: rgba(27, 26, 23, 0.12);
+  background: var(--auth-border);
 }
 
 /* ── Botones sociales (solo visuales por ahora) ──────────────────────── */
@@ -269,16 +301,16 @@
 
 .auth__social-btn--google:hover {
   border-color: var(--auth-accent);
-  background: #fbfaf4;
+  background: var(--auth-surface-hover);
 }
 
 .auth__social-btn--apple {
   background: var(--auth-ink);
-  color: #f2f1e3;
+  color: var(--auth-on-ink);
 }
 
 .auth__social-btn--apple:hover {
-  background: #000;
+  background: var(--auth-ink-hover);
 }
 
 /* ════════════════════════════════════════════════════════════════════ */
@@ -433,7 +465,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px 15px;
-  background: #fff;
+  background: var(--auth-surface);
   border: 1px solid var(--auth-border);
   border-radius: 15px 15px 4px 15px;
   box-shadow: 0 12px 26px rgba(27, 26, 23, 0.08);
@@ -455,7 +487,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #f2f1e3;
+  background: var(--auth-on-ink);
   animation: illu-dot 0.9s ease-in-out infinite;
 }
 

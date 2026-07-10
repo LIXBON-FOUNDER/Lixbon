@@ -6,11 +6,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
 import { planColor } from '../lib/planColors';
+import { useTheme } from '../lib/theme';
 import { HistorySkeleton } from './Skeleton';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
-  IconDownload, IconBook, IconBolt, IconGlobe,
+  IconDownload, IconBook, IconBolt, IconGlobe, IconSun, IconMoon,
 } from './Icons';
 
 function HistoryItem({ conv, active, onRename, onDelete }) {
@@ -81,6 +82,7 @@ export function Sidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [profileMenu, setProfileMenu] = useState(false);
+  const [theme, toggleTheme] = useTheme();
   const searchRef = useRef(null);
   const navigate = useNavigate();
 
@@ -109,6 +111,13 @@ export function Sidebar({
         <div className="sidebar__header">
           <Link to="/" className="sidebar__logo"><Logo size={30} /></Link>
           <div className="sidebar__header-actions">
+            <button
+              className="icon-btn"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            >
+              {theme === 'dark' ? <IconSun /> : <IconMoon />}
+            </button>
             <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
               {searchOpen ? <IconX /> : <IconSearch />}
             </button>

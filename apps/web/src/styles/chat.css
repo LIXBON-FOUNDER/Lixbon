@@ -14,7 +14,7 @@
   flex-shrink: 0;
   overflow: hidden;
   border-right: 1px solid var(--border-soft);
-  background: var(--bg);
+  background: var(--bg-sidebar);
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -100,7 +100,7 @@
 }
 
 .sb-nav:hover {
-  background: rgba(23, 23, 23, 0.05);
+  background: rgba(var(--ink-rgb), 0.05);
 }
 
 .sb-nav--soon {
@@ -147,7 +147,7 @@
 
 .sb-item:hover,
 .sb-item.is-active {
-  background: rgba(23, 23, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .sb-item__title {
@@ -198,7 +198,7 @@
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
-  box-shadow: 0 6px 24px rgba(23, 23, 23, 0.12);
+  box-shadow: 0 6px 24px rgba(var(--shadow-rgb), 0.12);
   transform-origin: top right;
   animation: menu-in 0.16s ease;
 }
@@ -222,7 +222,7 @@
 }
 
 .sb-menu button:hover {
-  background: rgba(23, 23, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .sb-menu__danger {
@@ -255,7 +255,7 @@
   padding: 11px 16px;
   border-radius: var(--radius-pill);
   background: var(--accent);
-  color: var(--ink);
+  color: var(--on-accent);
   font-size: 14.5px;
   font-weight: 600;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -263,7 +263,7 @@
 
 .sidebar__upgrade:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(217, 230, 74, 0.5);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 /* Item "próximamente" en el menú del perfil */
@@ -301,8 +301,8 @@
   height: 38px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
   font-weight: 500;
 }
 
@@ -329,6 +329,7 @@
   padding: 2px 11px;
   border-radius: var(--radius-pill);
   background: var(--accent);
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 500;
   text-decoration: none;
@@ -444,12 +445,12 @@
   align-self: flex-end;
   max-width: 75%;
   padding: 11px 19px;
-  background: var(--ink);
+  background: var(--primary);
   border-radius: var(--radius-box);
   border-bottom-right-radius: 15px;
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  color: var(--bg);
+  color: var(--on-primary);
 }
 
 .msg--assistant {
@@ -580,10 +581,10 @@
   gap: 6px;
   padding: 8px 19px;
   border-radius: var(--radius-pill);
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
   font-size: 14px;
-  box-shadow: 0 4px 16px rgba(23, 23, 23, 0.25);
+  box-shadow: 0 4px 16px rgba(var(--shadow-rgb), 0.25);
   animation: jump-in 0.25s ease;
 }
 
@@ -604,14 +605,14 @@
 }
 
 .chat-input {
-  background: var(--bg-secondary);
+  background: var(--bg-input);
   border-radius: var(--radius-box);
   padding: 13px 15px 11px;
   transition: box-shadow 0.2s ease;
 }
 
 .chat-input:focus-within {
-  box-shadow: 0 0 0 1px rgba(23, 23, 23, 0.18);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.18);
 }
 
 .chat-input__chips {
@@ -660,7 +661,7 @@
   margin-bottom: 8px;
   padding: 6px 12px;
   border-radius: 10px;
-  background: rgba(192, 57, 43, 0.1);
+  background: var(--danger-soft);
   color: var(--danger);
   font-size: 13px;
 }
@@ -698,8 +699,8 @@
 }
 
 .chat-input__left .icon-btn.is-active {
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .chat-input__model {
@@ -721,8 +722,8 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
@@ -744,8 +745,8 @@
   left: 50%;
   padding: 10px 22px;
   border-radius: var(--radius-pill);
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
   font-size: 14px;
   z-index: 50;
   animation: toast-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);

@@ -10,6 +10,18 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png" />
     <link rel="preload" href="/fonts/bruno-ace-sc-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+      // Aplica el tema antes del primer render para evitar el destello (FOUC).
+      (function () {
+        try {
+          var t = localStorage.getItem('lixbon-theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.dataset.theme = t;
+        } catch (e) { /* sin localStorage: se queda el tema claro */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
