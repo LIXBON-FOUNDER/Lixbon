@@ -27,6 +27,7 @@ export function TitleBar({ minimal = false }) {
   const {
     panels, togglePanel, centerView, setCenterView,
     autoSave, setAutoSave, openWorkspace,
+    leftView, openLeftPanel, setQuickOpen,
   } = useAppStore();
   const hasActiveTab = useEditorStore((s) => !!s.activePath);
 
@@ -113,7 +114,11 @@ export function TitleBar({ minimal = false }) {
     {
       label: 'Ver',
       items: [
-        { label: 'Explorador', check: panels.explorer, run: () => togglePanel('explorer') },
+        { label: 'Ir a archivo…', shortcut: 'Ctrl+P', run: () => setQuickOpen(true) },
+        { label: 'Buscar en archivos', shortcut: 'Ctrl+Mayús+F', run: () => openLeftPanel('search') },
+        { sep: true },
+        { label: 'Explorador', check: panels.explorer && leftView === 'explorer', run: () => openLeftPanel('explorer') },
+        { label: 'Extensiones', check: panels.explorer && leftView === 'extensions', run: () => openLeftPanel('extensions') },
         { label: 'Chat', check: panels.chat, run: () => togglePanel('chat') },
         { label: 'Terminal', shortcut: 'Ctrl+`', check: panels.terminal, run: () => togglePanel('terminal') },
         { sep: true },

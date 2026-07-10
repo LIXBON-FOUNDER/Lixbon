@@ -132,11 +132,19 @@
 
 /* ── Descargas ───────────────────────────────────────────────────────── */
 
+/* Dos columnas a la misma altura: app (estrecha) + CLI (ancha).
+   En pantallas angostas se apilan. */
 .downloads {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: minmax(300px, 2fr) 3fr;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+}
+
+@media (max-width: 880px) {
+  .downloads {
+    grid-template-columns: 1fr;
+  }
 }
 
 .dl-card {
@@ -149,8 +157,42 @@
   border: 1px solid var(--border-soft);
 }
 
-.dl-card--wide {
-  grid-column: 1 / -1;
+.dl-card__logo {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.dl-card__features {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.dl-card__features li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dl-card__features svg {
+  flex-shrink: 0;
+  color: var(--ink);
+}
+
+/* Empuja la descarga al borde inferior: las dos cards quedan alineadas */
+.dl-card__bottom {
+  margin-top: auto;
+  padding-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .dl-card__icon {

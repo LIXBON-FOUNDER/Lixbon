@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
 import { CodeBlock } from '../components/CodeBlock';
-import { IconDownload, IconTerminal, IconWindow } from '../components/Icons';
+import { IconDownload, IconTerminal, IconCheck } from '../components/Icons';
 
 export default function DownloadsPage() {
   const [desktop, setDesktop] = useState(null);
@@ -35,31 +35,37 @@ export default function DownloadsPage() {
 
         <div className="downloads">
           {/* ── App de escritorio ── */}
-          <section className="dl-card">
-            <div className="dl-card__icon"><IconWindow size={26} /></div>
+          <section className="dl-card dl-card--app">
+            <img src="/favicon.svg" alt="Icono de lixbon" className="dl-card__logo" draggable={false} />
             <h2 className="dl-card__title">App de escritorio</h2>
             <p className="dl-card__desc">
-              La experiencia completa de lixbon en una app nativa para Windows, con
-              actualizaciones automáticas.
+              La experiencia completa de lixbon en una app nativa para Windows.
             </p>
-            {desktop?.available ? (
-              <>
-                <a href={desktop.download_url} className="pill-btn pill-btn--primary dl-card__cta">
-                  <IconDownload size={16} /> Descargar v{desktop.version}
-                </a>
-                <span className="dl-card__meta">
-                  {desktop.title} · {desktop.release_date}
+            <ul className="dl-card__features">
+              <li><IconCheck size={15} /> Editor de código con chat integrado</li>
+              <li><IconCheck size={15} /> Terminales, Git y explorador de archivos</li>
+              <li><IconCheck size={15} /> Actualizaciones automáticas</li>
+            </ul>
+            <div className="dl-card__bottom">
+              {desktop?.available ? (
+                <>
+                  <a href={desktop.download_url} className="pill-btn pill-btn--primary dl-card__cta">
+                    <IconDownload size={16} /> Descargar v{desktop.version}
+                  </a>
+                  <span className="dl-card__meta">
+                    {desktop.title} · {desktop.release_date} · Windows 10/11 (64 bits)
+                  </span>
+                </>
+              ) : (
+                <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
+                  Próximamente
                 </span>
-              </>
-            ) : (
-              <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
-                Próximamente
-              </span>
-            )}
+              )}
+            </div>
           </section>
 
           {/* ── CLI ── */}
-          <section className="dl-card dl-card--wide">
+          <section className="dl-card dl-card--cli">
             <div className="dl-card__icon"><IconTerminal size={26} /></div>
             <h2 className="dl-card__title">Interfaz de línea de comandos (CLI)</h2>
             <p className="dl-card__desc">

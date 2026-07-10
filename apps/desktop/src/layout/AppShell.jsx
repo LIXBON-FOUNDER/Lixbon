@@ -10,6 +10,8 @@ import { StatusBar } from './StatusBar';
 import { UpdateModal } from '../components/UpdateModal';
 
 import { FileTree } from '../sections/Workspace/FileTree';
+import { SearchPanel } from '../sections/Search/SearchPanel';
+import { ExtensionsPanel } from '../sections/Extensions/ExtensionsPanel';
 import { EditorTabs } from '../editor/EditorTabs';
 import { RunControls } from '../editor/RunControls';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
@@ -18,6 +20,8 @@ import { ChatPanel } from '../chat/ChatPanel';
 import { Metrics } from '../sections/Metrics/Metrics';
 import { Settings } from '../sections/Settings/Settings';
 import { SourceControl } from '../sections/SourceControl/SourceControl';
+import { QuickOpen } from '../components/QuickOpen';
+import { useExtStore } from '../store/extStore';
 import { IconX } from '../components/Icons';
 
 const TERM_MIN_H = 120;
@@ -28,6 +32,7 @@ export function AppShell() {
     panels, panelWidths, setPanelWidth,
     panelHeights, setPanelHeight, togglePanel,
     centerView, editorFontSize, serverUrl,
+    leftView, quickOpen,
   } = useAppStore();
   const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate } = useVersion();
 
@@ -35,8 +40,10 @@ export function AppShell() {
   const termFrame = useRef(null);
 
   // Reabrir la última carpeta de trabajo (el sandbox Rust no persiste)
+  // y re-aplicar el tema de editor persistido (extensiones)
   useEffect(() => {
     useAppStore.getState().restoreWorkspace();
+    useExtStore.getState().hydrateTheme();
   }, []);
 
   // Tamaño de letra del editor (ajustable en Ajustes)
@@ -62,6 +69,12 @@ export function AppShell() {
       } else if (e.key === 'Tab') {
         e.preventDefault();
         store.cycleTab(e.shiftKey ? -1 : 1);
+      } else if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        useAppStore.getState().setQuickOpen(true);
+      } else if (e.key === 'F' || (e.shiftKey && e.key === 'f')) {
+        e.preventDefault();
+        useAppStore.getState().openLeftPanel('search');
       } else if (e.key === '`' || e.key === 'ñ') {
         e.preventDefault();
         useAppStore.getState().togglePanel('terminal');
@@ -158,7 +171,13 @@ export function AppShell() {
             width={panelWidths.explorer}
             onWidthChange={(w) => setPanelWidth('explorer', w)}
           >
-            <FileTree />
+            {leftView === 'search' ? (
+              <SearchPanel />
+            ) : leftView === 'extensions' ? (
+              <ExtensionsPanel />
+            ) : (
+              <FileTree />
+            )}
           </SidePanel>
         )}
 
@@ -198,6 +217,8 @@ export function AppShell() {
           </SidePanel>
         )}
       </div>
+
+      {quickOpen && <QuickOpen />}
 
       <StatusBar />
     </div>

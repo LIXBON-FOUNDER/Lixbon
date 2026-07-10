@@ -24,6 +24,26 @@ let liveView = null;
 let indentConfig = { tabSize: 2, insertSpaces: true };
 const indentCompartment = new Compartment();
 
+// Tema del editor: lixbon por defecto o un tema de VSCode instalado
+// (extStore lo cambia vía setEditorThemeExts).
+const themeCompartment = new Compartment();
+let themeExts = [lixbonTheme, lixbonSyntax];
+
+/** exts = null vuelve al tema lixbon. Reconfigura la vista viva y las cacheadas. */
+export function setEditorThemeExts(exts) {
+  themeExts = exts && exts.length ? exts : [lixbonTheme, lixbonSyntax];
+  if (liveView) {
+    liveView.dispatch({ effects: themeCompartment.reconfigure(themeExts) });
+  }
+  for (const [path, state] of stateCache) {
+    if (liveView && state === liveView.state) continue; // la viva ya está
+    stateCache.set(
+      path,
+      state.update({ effects: themeCompartment.reconfigure(themeExts) }).state,
+    );
+  }
+}
+
 function indentExtension() {
   const unit = indentConfig.insertSpaces ? ' '.repeat(indentConfig.tabSize) : '\t';
   return [EditorState.tabSize.of(indentConfig.tabSize), indentUnit.of(unit)];
@@ -98,8 +118,7 @@ export const useEditorStore = create((set, get) => ({
           indentWithTab,
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },
         ]),
-        lixbonTheme,
-        lixbonSyntax,
+        themeCompartment.of(themeExts),
         ...languageFor(name),
         markDirty,
       ],
@@ -121,6 +140,23 @@ export const useEditorStore = create((set, get) => ({
   },
 
   setActive: (path) => set({ activePath: path }),
+
+  /** Abre un archivo y coloca el cursor en `line` (búsqueda global / Quick Open). */
+  openFileAtLine: async (path, name, line) => {
+    await get().openFile(path, name);
+    // La vista monta el estado en el próximo frame (CodeMirrorHost)
+    requestAnimationFrame(() => {
+      if (!liveView || get().activePath !== path) return;
+      const doc = liveView.state.doc;
+      const ln = Math.min(Math.max(1, line), doc.lines);
+      const pos = doc.line(ln).from;
+      liveView.dispatch({
+        selection: { anchor: pos },
+        effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+      });
+      liveView.focus();
+    });
+  },
 
   /** Guarda una pestaña (la activa desde la vista viva; el resto desde el caché).
       Con silent=true (autoguardado) los errores van a consola, no a un alert. */

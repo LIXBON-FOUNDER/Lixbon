@@ -228,6 +228,16 @@ Versión unificada **0.5.0** (package.json, Cargo.toml, tauri.conf.json). `produ
 - **Iconos**: `lixbon-icon/` integrada — `tauri icon icon-1024.png` regeneró `src-tauri/icons/`; favicon.svg en desktop (`public/` + titlebar + index.html con título LIXBON) y favicons completos en `apps/web` (svg + png 16/32 + apple-touch).
 - **Pendiente de verificar**: compilación Rust en CI (sin cargo local) y MSI 0.5.0 + upgrade del updater.
 
+## 6.14 ✅ IDE desktop v0.6.0: búsqueda global, Quick Open y temas de VSCode (2026-07-09)
+
+Versión unificada **0.6.0**. Se apila sobre 6.13 (sin taggear aún).
+
+- **Búsqueda global** (`Ctrl+Mayús+F`, `sections/Search/SearchPanel.jsx`): comando Rust `search_in_files` (walk del workspace en `spawn_blocking`, case-insensitive, salta `SKIP_DIRS`, límites 500 hits / 1 MB por archivo, filtra binarios); resultados agrupados por archivo, clic abre en la línea (`editorStore.openFileAtLine` con `scrollIntoView`).
+- **Quick Open** (`Ctrl+P`, `components/QuickOpen.jsx`): comando Rust `list_files` (lista plana, tope 5000) + fuzzy match por subsecuencia en JS; overlay con teclado (↑↓/Enter/Esc).
+- **Panel izquierdo conmutable**: `appStore.leftView` ('explorer'|'search'|'extensions') + `openLeftPanel`; ActivityBar ganó botones de búsqueda y extensiones (puzzle); entradas nuevas en menú Ver.
+- **Extensiones de VSCode (SOLO temas de color)**: no se puede ejecutar el extension host de VSCode en CodeMirror, así que se soporta lo declarativo: `ext_search` (API de Open VSX vía reqwest de tauri-plugin-http, sin CORS), `ext_install` (descarga el `.vsix` ≤60 MB, lo abre con el crate `zip` **nuevo en Cargo.toml**, parsea `contributes.themes` de package.json con limpiador JSONC propio `clean_jsonc`, guarda los JSON en `app_data_dir/extensions/<id>/`), `ext_read_theme`, `ext_uninstall`. Frontend: `store/extStore.js` (instaladas en localStorage `lixbon_extensions`, tema activo `lixbon_editor_theme`), `editor/vsTheme.js` (mapa scopes TextMate → tags lezer + `colors.editor.*` → `EditorView.theme`), `editorStore` con `themeCompartment` que reconfigura la vista viva y los estados cacheados (`setEditorThemeExts`); panel `sections/Extensions/ExtensionsPanel.jsx` (buscar/instalar/aplicar/quitar, "Volver al tema lixbon"). CSP: `img-src` ahora permite `https:` (iconos de Open VSX).
+- **Pendiente de verificar en CI**: crate `zip` y reqwest re-exportado compilan; probar instalar p. ej. "One Dark Pro" o "Dracula" desde Open VSX y aplicar el tema.
+
 ---
 
 ## 7. Fases posteriores (sin iniciar)

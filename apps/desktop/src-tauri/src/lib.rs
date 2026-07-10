@@ -23,7 +23,7 @@ fn hide_console(cmd: &mut Command) -> &mut Command {
 use portable_pty::{
     native_pty_system, Child, CommandBuilder, MasterPty, PtySize, PtySystem, SlavePty,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Carpeta de trabajo elegida por el usuario. Todos los comandos de
 /// archivos están confinados a ella: sin raíz no hay acceso al disco.
@@ -297,6 +297,169 @@ fn reveal_in_os(path: String, root: State<WorkspaceRoot>) -> Result<(), String> 
     Ok(())
 }
 
+// ── Búsqueda en el workspace ─────────────────────────────────────────────
+
+/// Carpetas que no aportan al buscar/listar (dependencias, builds, VCS).
+const SKIP_DIRS: [&str; 9] = [
+    ".git", "node_modules", ".venv", "venv", "__pycache__", "target", "dist", "build", ".next",
+];
+
+fn skip_dir(name: &str) -> bool {
+    SKIP_DIRS.contains(&name)
+}
+
+fn workspace_path(root: &State<WorkspaceRoot>) -> Result<PathBuf, String> {
+    root.0
+        .lock()
+        .map_err(|_| "Estado interno corrupto".to_string())?
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "No hay carpeta de trabajo abierta".to_string())
+}
+
+#[derive(serde::Serialize)]
+struct SearchHit {
+    path: String,
+    name: String,
+    line: u32,
+    text: String,
+}
+
+const SEARCH_MAX_HITS: usize = 500;
+const SEARCH_MAX_FILE_BYTES: u64 = 1024 * 1024; // 1 MB por archivo
+
+fn search_walk(dir: &Path, needle: &str, hits: &mut Vec<SearchHit>) {
+    if hits.len() >= SEARCH_MAX_HITS {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        if hits.len() >= SEARCH_MAX_HITS {
+            return;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if path.is_dir() {
+            if !skip_dir(&name) {
+                subdirs.push(path);
+            }
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() > SEARCH_MAX_FILE_BYTES {
+            continue;
+        }
+        // read_to_string falla en binarios no-UTF8; el NUL cubre el resto
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if content.contains('\0') {
+            continue;
+        }
+        for (i, line) in content.lines().enumerate() {
+            if line.to_lowercase().contains(needle) {
+                hits.push(SearchHit {
+                    path: display_path(&path),
+                    name: name.clone(),
+                    line: (i + 1) as u32,
+                    text: line.trim().chars().take(240).collect(),
+                });
+                if hits.len() >= SEARCH_MAX_HITS {
+                    return;
+                }
+            }
+        }
+    }
+    for d in subdirs {
+        search_walk(&d, needle, hits);
+        if hits.len() >= SEARCH_MAX_HITS {
+            return;
+        }
+    }
+}
+
+/// Busca texto (sin distinguir mayúsculas) en todos los archivos del workspace.
+#[tauri::command]
+async fn search_in_files(query: String, root: State<'_, WorkspaceRoot>) -> Result<Vec<SearchHit>, String> {
+    let base = workspace_path(&root)?;
+    let needle = query.trim().to_lowercase();
+    if needle.len() < 2 {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut hits = Vec::new();
+        search_walk(&base, &needle, &mut hits);
+        hits
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct QuickFile {
+    name: String,
+    path: String,
+    rel: String,
+}
+
+const LIST_MAX_FILES: usize = 5000;
+
+fn files_walk(base: &Path, dir: &Path, out: &mut Vec<QuickFile>) {
+    if out.len() >= LIST_MAX_FILES {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        if out.len() >= LIST_MAX_FILES {
+            return;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if path.is_dir() {
+            if !skip_dir(&name) {
+                subdirs.push(path);
+            }
+            continue;
+        }
+        let rel = path
+            .strip_prefix(base)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| name.clone());
+        out.push(QuickFile { name, path: display_path(&path), rel });
+    }
+    for d in subdirs {
+        files_walk(base, &d, out);
+        if out.len() >= LIST_MAX_FILES {
+            return;
+        }
+    }
+}
+
+/// Lista (plana) de archivos del workspace para el buscador rápido Ctrl+P.
+#[tauri::command]
+async fn list_files(root: State<'_, WorkspaceRoot>) -> Result<Vec<QuickFile>, String> {
+    let base = workspace_path(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = Vec::new();
+        files_walk(&base, &base, &mut out);
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 // ── Terminales PTY (bash / PowerShell / cmd) ─────────────────────────────
 
 /// Traduce el shell pedido por el frontend a (programa, argumentos) según el SO.
@@ -557,6 +720,284 @@ fn git_clone_blocking(app: AppHandle, url: String, dest_parent: String) -> Resul
     }
 }
 
+// ── Extensiones: temas de color de VSCode vía Open VSX ──────────────────
+// Un IDE CodeMirror no puede ejecutar el extension host de VSCode, así que
+// solo se extrae lo declarativo: `contributes.themes` (JSON de tema de color).
+
+/// Los JSON de temas de VSCode suelen ser JSONC: comentarios y comas finales.
+fn clean_jsonc(src: &str) -> String {
+    // 1) quitar comentarios // y /* */ (respetando strings)
+    let mut no_comments = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    let mut in_str = false;
+    let mut esc = false;
+    while let Some(c) = chars.next() {
+        if in_str {
+            no_comments.push(c);
+            if esc {
+                esc = false;
+            } else if c == '\\' {
+                esc = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_str = true;
+                no_comments.push(c);
+            }
+            '/' => match chars.peek() {
+                Some('/') => {
+                    while let Some(&n) = chars.peek() {
+                        if n == '\n' {
+                            break;
+                        }
+                        chars.next();
+                    }
+                }
+                Some('*') => {
+                    chars.next();
+                    let mut prev = ' ';
+                    for n in chars.by_ref() {
+                        if prev == '*' && n == '/' {
+                            break;
+                        }
+                        prev = n;
+                    }
+                }
+                _ => no_comments.push(c),
+            },
+            _ => no_comments.push(c),
+        }
+    }
+
+    // 2) quitar comas finales antes de } o ] (respetando strings)
+    let bytes: Vec<char> = no_comments.chars().collect();
+    let mut out = String::with_capacity(no_comments.len());
+    let mut in_str = false;
+    let mut esc = false;
+    for (i, &c) in bytes.iter().enumerate() {
+        if in_str {
+            out.push(c);
+            if esc {
+                esc = false;
+            } else if c == '\\' {
+                esc = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        if c == '"' {
+            in_str = true;
+            out.push(c);
+            continue;
+        }
+        if c == ',' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && (bytes[j] == '}' || bytes[j] == ']') {
+                continue; // coma final: fuera
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Nombre seguro para carpeta/archivo (id de extensión, label de tema).
+fn sanitize_component(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .collect();
+    let trimmed = cleaned.trim_matches(['-', '.']).to_string();
+    if trimmed.is_empty() { "ext".to_string() } else { trimmed }
+}
+
+fn extensions_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("extensions");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+#[derive(serde::Serialize)]
+struct ThemeInfo {
+    label: String,
+    file: String,
+    dark: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ExtInstalled {
+    id: String,
+    display_name: String,
+    themes: Vec<ThemeInfo>,
+}
+
+/// Busca extensiones en el registro público Open VSX (se hace desde Rust
+/// para evitar CORS). Devuelve el JSON crudo de la API.
+#[tauri::command]
+async fn ext_search(query: String) -> Result<String, String> {
+    let client = tauri_plugin_http::reqwest::Client::new();
+    let resp = client
+        .get("https://open-vsx.org/api/-/search")
+        .query(&[("query", query.as_str()), ("size", "24"), ("sortBy", "relevance")])
+        .send()
+        .await
+        .map_err(|e| format!("No se pudo contactar Open VSX: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Open VSX respondió {}", resp.status()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+/// Descarga un .vsix de Open VSX y extrae sus temas de color al app-data.
+#[tauri::command]
+async fn ext_install(app: AppHandle, url: String, id: String) -> Result<ExtInstalled, String> {
+    if !url.starts_with("https://open-vsx.org/") {
+        return Err("Solo se instalan extensiones desde open-vsx.org".to_string());
+    }
+    let id = sanitize_component(&id);
+
+    let resp = tauri_plugin_http::reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Descarga fallida: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Descarga fallida ({})", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > 60 * 1024 * 1024 {
+        return Err("La extensión supera los 60 MB".to_string());
+    }
+
+    let dir = extensions_dir(&app)?.join(&id);
+    let data = bytes.to_vec();
+    tauri::async_runtime::spawn_blocking(move || install_vsix(data, dir, id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn install_vsix(data: Vec<u8>, dir: PathBuf, id: String) -> Result<ExtInstalled, String> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(data))
+        .map_err(|_| "El archivo .vsix no es válido".to_string())?;
+
+    let mut pkg_raw = String::new();
+    zip.by_name("extension/package.json")
+        .map_err(|_| "El .vsix no contiene package.json".to_string())?
+        .read_to_string(&mut pkg_raw)
+        .map_err(|e| e.to_string())?;
+    let pkg: serde_json::Value = serde_json::from_str(&clean_jsonc(&pkg_raw))
+        .map_err(|_| "package.json inválido".to_string())?;
+
+    // displayName puede ser una clave de localización "%x%": no sirve
+    let display_name = pkg
+        .get("displayName")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.starts_with('%'))
+        .unwrap_or(&id)
+        .to_string();
+
+    let theme_defs = pkg
+        .pointer("/contributes/themes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if theme_defs.is_empty() {
+        return Err(
+            "Esta extensión no aporta temas de color. lixbon solo soporta temas de VSCode \
+             (las extensiones con código necesitan el extension host de VSCode)."
+                .to_string(),
+        );
+    }
+
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut themes = Vec::new();
+    for def in &theme_defs {
+        let label = def
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tema")
+            .to_string();
+        let rel = match def.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => continue,
+        };
+        if !rel.ends_with(".json") {
+            continue; // .tmTheme (XML) no soportado
+        }
+        let entry = format!("extension/{}", rel.trim_start_matches("./"));
+        let mut raw = String::new();
+        {
+            let mut file = match zip.by_name(&entry) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            if file.read_to_string(&mut raw).is_err() {
+                continue;
+            }
+        }
+        // Se re-serializa para garantizar JSON estricto del lado JS
+        let value: serde_json::Value = match serde_json::from_str(&clean_jsonc(&raw)) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let dark = def
+            .get("uiTheme")
+            .and_then(|v| v.as_str())
+            .map(|u| u != "vs")
+            .unwrap_or(true);
+        let file_name = format!("{}.json", sanitize_component(&label));
+        let serialized = match serde_json::to_string(&value) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if fs::write(dir.join(&file_name), serialized).is_err() {
+            continue;
+        }
+        themes.push(ThemeInfo { label, file: file_name, dark });
+    }
+
+    if themes.is_empty() {
+        let _ = fs::remove_dir_all(&dir);
+        return Err("No se pudo extraer ningún tema compatible de la extensión".to_string());
+    }
+
+    Ok(ExtInstalled { id, display_name, themes })
+}
+
+/// Lee el JSON de un tema ya instalado (confinado a la carpeta de extensiones).
+#[tauri::command]
+fn ext_read_theme(app: AppHandle, id: String, file: String) -> Result<String, String> {
+    if !is_simple_name(&id) || !is_simple_name(&file) {
+        return Err("Nombre inválido".to_string());
+    }
+    let path = extensions_dir(&app)?
+        .join(sanitize_component(&id))
+        .join(sanitize_component(&file));
+    fs::read_to_string(&path).map_err(|_| "Tema no encontrado".to_string())
+}
+
+#[tauri::command]
+fn ext_uninstall(app: AppHandle, id: String) -> Result<(), String> {
+    if !is_simple_name(&id) {
+        return Err("Nombre inválido".to_string());
+    }
+    let dir = extensions_dir(&app)?.join(sanitize_component(&id));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -581,12 +1022,18 @@ pub fn run() {
             delete_entry,
             duplicate_entry,
             reveal_in_os,
+            search_in_files,
+            list_files,
             term_open,
             term_write,
             term_resize,
             term_close,
             git_run,
-            git_clone
+            git_clone,
+            ext_search,
+            ext_install,
+            ext_read_theme,
+            ext_uninstall
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -604,6 +1051,30 @@ mod tests {
         assert!(!is_simple_name("a\\b"));
         assert!(!is_simple_name(""));
         assert!(is_simple_name("archivo.rs"));
+    }
+
+    #[test]
+    fn limpia_jsonc() {
+        use super::clean_jsonc;
+        let src = r#"{
+  // comentario
+  "a": 1, /* otro */
+  "b": "con // barras y /* no comentario */ dentro",
+  "c": [1, 2,],
+}"#;
+        let cleaned = clean_jsonc(src);
+        let v: serde_json::Value = serde_json::from_str(&cleaned).expect("JSON válido");
+        assert_eq!(v["a"], 1);
+        assert_eq!(v["c"][1], 2);
+        assert!(v["b"].as_str().unwrap().contains("no comentario"));
+    }
+
+    #[test]
+    fn sanitiza_componentes() {
+        use super::sanitize_component;
+        assert_eq!(sanitize_component("pub.ext-name"), "pub.ext-name");
+        assert_eq!(sanitize_component("a/b\\c"), "a-b-c");
+        assert_eq!(sanitize_component("../.."), "ext");
     }
 
     #[test]

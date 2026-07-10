@@ -306,3 +306,244 @@
   color: var(--ink-soft);
   padding: 4px 14px 8px;
 }
+
+/* ── Búsqueda global (panel izquierdo) ───────────────────────────────── */
+
+.searchpanel,
+.extpanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.searchpanel__box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.searchpanel__box:focus-within {
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.searchpanel__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+}
+
+.searchpanel__results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.searchpanel__file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ink);
+}
+
+.searchpanel__file:hover {
+  background: rgba(23, 23, 23, 0.045);
+}
+
+.searchpanel__file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchpanel__count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
+
+.searchpanel__hit {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 10px 3px 30px;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.searchpanel__hit:hover {
+  background: var(--bg-secondary);
+  color: var(--ink);
+}
+
+.searchpanel__line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  min-width: 26px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.searchpanel__text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Extensiones (temas de VSCode) ───────────────────────────────────── */
+
+.extpanel__note {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+  padding: 2px 14px 6px;
+  flex-shrink: 0;
+}
+
+.extpanel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 14px;
+}
+
+.extpanel__section {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: 12px 2px 6px;
+}
+
+.extpanel__card {
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.extpanel__card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extpanel__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.extpanel__name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extpanel__remove {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  color: var(--ink-soft);
+}
+
+.extpanel__remove:hover {
+  color: var(--danger);
+}
+
+.extpanel__desc {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.extpanel__meta {
+  display: flex;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+}
+
+.extpanel__install {
+  margin-top: 8px;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  gap: 6px;
+}
+
+.extpanel__themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.extpanel__theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  color: var(--ink-soft);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.extpanel__theme:hover {
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.extpanel__theme.is-active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.extpanel__reset {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  margin: 2px 2px 10px;
+  align-self: flex-start;
+}
+
+.extpanel__reset:hover {
+  color: var(--ink);
+}

@@ -33,6 +33,8 @@ export const useAppStore = create((set, get) => ({
 
   // Layout del IDE
   centerView: 'editor', // 'editor' | 'metrics' | 'settings' | 'git'
+  leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'extensions'
+  quickOpen: false, // overlay Ctrl+P
   panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"explorer":true,"chat":true,"terminal":false}'),
   panelWidths: JSON.parse(localStorage.getItem('lixbon_panel_widths') || '{"explorer":260,"chat":360}'),
   panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
@@ -55,6 +57,21 @@ export const useAppStore = create((set, get) => ({
   },
 
   setCenterView: (centerView) => set({ centerView }),
+
+  /** Muestra `view` en el panel izquierdo; clic sobre la vista ya activa lo pliega.
+      (panels.explorer sigue siendo el flag de "panel izquierdo visible".) */
+  openLeftPanel: (view) => {
+    const { panels, leftView } = get();
+    if (panels.explorer && leftView === view) {
+      get().togglePanel('explorer');
+      return;
+    }
+    localStorage.setItem('lixbon_left_view', view);
+    set({ leftView: view });
+    if (!panels.explorer) get().togglePanel('explorer');
+  },
+
+  setQuickOpen: (quickOpen) => set({ quickOpen }),
 
   /** Fija la carpeta de trabajo (sandbox Rust incluido) y refresca Git.
       Devuelve la ruta canónica. */

@@ -56,6 +56,37 @@ export function revealInOs(path) {
   return invoke('reveal_in_os', { path });
 }
 
+/** Busca texto en todos los archivos del workspace. [{path,name,line,text}] */
+export function searchInFiles(query) {
+  return invoke('search_in_files', { query });
+}
+
+/** Lista plana de archivos del workspace (Quick Open). [{name,path,rel}] */
+export function listFiles() {
+  return invoke('list_files');
+}
+
+// ── Extensiones (temas de VSCode vía Open VSX) ────────────────────────
+
+/** Busca en el registro Open VSX. Devuelve el JSON crudo de la API. */
+export function extSearch(query) {
+  return invoke('ext_search', { query });
+}
+
+/** Descarga el .vsix e instala sus temas. Devuelve {id, display_name, themes}. */
+export function extInstall(url, id) {
+  return invoke('ext_install', { url, id });
+}
+
+/** Contenido JSON de un tema instalado. */
+export function extReadTheme(id, file) {
+  return invoke('ext_read_theme', { id, file });
+}
+
+export function extUninstall(id) {
+  return invoke('ext_uninstall', { id });
+}
+
 // ── Terminales PTY ────────────────────────────────────────────────────
 
 /** Abre una sesión de terminal (shell: 'powershell' | 'cmd' | 'bash'). Devuelve el id. */

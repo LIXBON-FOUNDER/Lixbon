@@ -222,3 +222,14 @@ export const IconWinRestore = (p) => (
 export const IconPanelRight = (p) => (
   <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M14.5 4v16" /></Svg>
 );
+
+export const IconDownload = (p) => (
+  <Svg {...p}><path d="M12 3v12M7 11l5 5 5-5M4 21h16" /></Svg>
+);
+
+/* Pieza de puzzle (extensiones) */
+export const IconPuzzle = (p) => (
+  <Svg {...p}>
+    <path d="M10 4a2 2 0 1 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 1 1 0 4h-1v3a1 1 0 0 1-1 1h-3v1a2 2 0 1 1-4 0v-1H7a1 1 0 0 1-1-1v-3H5a2 2 0 1 1 0-4h1V6a1 1 0 0 1 1-1h3V4Z" />
+  </Svg>
+);
