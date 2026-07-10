@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
-import { setIndentConfig } from './editorStore';
+import { setIndentConfig, setAutoSaveConfig } from './editorStore';
+import { setWorkspaceRoot } from '../lib/tauri';
+import { useGitStore } from './gitStore';
 
 // Aplica los ajustes de indentación persistidos al arrancar (antes de abrir archivos).
 setIndentConfig(
   parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
   (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
 );
+setAutoSaveConfig((localStorage.getItem('lixbon_auto_save') ?? 'true') === 'true');
 
 export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
@@ -22,7 +25,11 @@ export const useAppStore = create((set, get) => ({
   ),
   tabSize: parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
   insertSpaces: (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
+  autoSave: (localStorage.getItem('lixbon_auto_save') ?? 'true') === 'true',
   connectionStatus: 'disconnected', // 'connected' | 'disconnected' | 'connecting'
+
+  // Carpeta de trabajo (canónica). '' = sin carpeta abierta.
+  workspaceRoot: '',
 
   // Layout del IDE
   centerView: 'editor', // 'editor' | 'metrics' | 'settings' | 'git'
@@ -48,6 +55,33 @@ export const useAppStore = create((set, get) => ({
   },
 
   setCenterView: (centerView) => set({ centerView }),
+
+  /** Fija la carpeta de trabajo (sandbox Rust incluido) y refresca Git.
+      Devuelve la ruta canónica. */
+  openWorkspace: async (path) => {
+    const canonical = await setWorkspaceRoot(path);
+    localStorage.setItem('lixbon_workspace_root', canonical);
+    set({ workspaceRoot: canonical });
+    useGitStore.getState().refresh();
+    return canonical;
+  },
+
+  /** Al arrancar: reabre la última carpeta usada (el estado Rust no persiste). */
+  restoreWorkspace: async () => {
+    const saved = localStorage.getItem('lixbon_workspace_root');
+    if (!saved || get().workspaceRoot) return;
+    try {
+      await get().openWorkspace(saved);
+    } catch {
+      localStorage.removeItem('lixbon_workspace_root'); // la carpeta ya no existe
+    }
+  },
+
+  setAutoSave: (autoSave) => {
+    localStorage.setItem('lixbon_auto_save', autoSave ? 'true' : 'false');
+    setAutoSaveConfig(autoSave);
+    set({ autoSave });
+  },
 
   togglePanel: (name) => {
     const panels = { ...get().panels, [name]: !get().panels[name] };

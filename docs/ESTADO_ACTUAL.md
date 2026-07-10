@@ -216,6 +216,18 @@ Tres features de producto sobre el chat, verificadas E2E (12/9/9).
 - **Backend**: `core/gateway/app.py` añade orígenes CORS de Tauri (`http://tauri.localhost`, `tauri://localhost`, `localhost:1420`).
 - **Pendiente de verificar**: build del MSI (no hay toolchain Rust en esta máquina; compila en CI `tauri.yml`) y prueba E2E de upgrade 0.2.x → 0.3.0 con el updater.
 
+## 6.13 ✅ IDE desktop v0.5.0: titlebar propia, autoguardado, clone Git, herramientas de archivos, iconos (2026-07-09)
+
+Versión unificada **0.5.0** (package.json, Cargo.toml, tauri.conf.json). `productName`/`identifier` intactos.
+
+- **Barra de título personalizada** (`src/layout/TitleBar.jsx`): `decorations: false` + barra propia con logo, menús estilo VSCode (Archivo/Editar/Ver/Terminal), zona de arrastre (`data-tauri-drag-region`), **toggle del chat a la derecha** (salió de la ActivityBar) y controles min/max/cerrar (permisos `core:window:allow-*` añadidos a capabilities). Se muestra en modo `minimal` (solo logo+controles) en carga y login (`App.jsx` envuelve todo en `.app-frame`).
+- **Autoguardado** (`editorStore.js`): debounce 1 s tras el último cambio (`markDirty` → `saveAll`), activado por defecto; toggle en Ajustes → Editor y en menú Archivo (`lixbon_auto_save`). Nuevos `saveTab/saveAll` (Ctrl+Mayús+S) con protección contra escrituras durante el tecleo.
+- **Clonación Git arreglada**: comando Rust dedicado `git_clone` (async + `spawn_blocking`, progreso de stderr por evento `git:clone:out`, `GIT_TERMINAL_PROMPT=0`, deriva el nombre del repo de la URL y clona en `destino/nombre`); al terminar abre la carpeta clonada como workspace. El flujo anterior por terminal fallaba (dest era una carpeta existente → git rehusaba; cancelar el diálogo abortaba).
+- **Workspace compartido**: la carpeta raíz vive en `appStore.workspaceRoot` (`openWorkspace`/`restoreWorkspace`); FileTree y SourceControl reaccionan a los cambios (antes era estado local del FileTree).
+- **Herramientas de archivos** (menú contextual del explorador): renombrar (F2-style inline, remapea pestañas abiertas), eliminar (con confirmación; cierra pestañas afectadas), duplicar, copiar ruta/ruta relativa, revelar en el explorador del SO, nuevo archivo/carpeta. Comandos Rust nuevos: `rename_entry`, `delete_entry`, `duplicate_entry`, `reveal_in_os` (todos confinados al workspace; la raíz protegida). `hide_console` (CREATE_NO_WINDOW) aplicado a git/explorer para no parpadear consolas.
+- **Iconos**: `lixbon-icon/` integrada — `tauri icon icon-1024.png` regeneró `src-tauri/icons/`; favicon.svg en desktop (`public/` + titlebar + index.html con título LIXBON) y favicons completos en `apps/web` (svg + png 16/32 + apple-touch).
+- **Pendiente de verificar**: compilación Rust en CI (sin cargo local) y MSI 0.5.0 + upgrade del updater.
+
 ---
 
 ## 7. Fases posteriores (sin iniciar)

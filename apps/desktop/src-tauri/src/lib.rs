@@ -2,10 +2,23 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Evita que los procesos de consola (git, explorer) abran una ventana propia.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn hide_console(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
 
 use portable_pty::{
     native_pty_system, Child, CommandBuilder, MasterPty, PtySize, PtySystem, SlavePty,
@@ -173,6 +186,117 @@ fn is_simple_name(name: &str) -> bool {
     !(name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\'))
 }
 
+/// ¿Es `p` exactamente la raíz del workspace? (la raíz no se renombra/borra)
+fn is_workspace_root(root: &State<WorkspaceRoot>, p: &Path) -> bool {
+    root.0
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|r| r.as_path() == p))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn rename_entry(path: String, new_name: String, root: State<WorkspaceRoot>) -> Result<String, String> {
+    if !is_simple_name(&new_name) {
+        return Err("Nombre inválido".to_string());
+    }
+    let target = ensure_inside_root(&root, &path)?;
+    if is_workspace_root(&root, &target) {
+        return Err("No se puede renombrar la carpeta de trabajo".to_string());
+    }
+    let parent = target.parent().ok_or_else(|| "Sin carpeta padre".to_string())?;
+    let dest = parent.join(&new_name);
+    if dest.exists() {
+        return Err("Ya existe una entrada con ese nombre".to_string());
+    }
+    fs::rename(&target, &dest).map_err(|e| e.to_string())?;
+    Ok(display_path(&dest))
+}
+
+#[tauri::command]
+fn delete_entry(path: String, root: State<WorkspaceRoot>) -> Result<(), String> {
+    let target = ensure_inside_root(&root, &path)?;
+    if is_workspace_root(&root, &target) {
+        return Err("No se puede eliminar la carpeta de trabajo".to_string());
+    }
+    if target.is_dir() {
+        fs::remove_dir_all(&target).map_err(|e| e.to_string())
+    } else {
+        fs::remove_file(&target).map_err(|e| e.to_string())
+    }
+}
+
+fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            copy_recursive(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        fs::copy(src, dst).map(|_| ())
+    }
+}
+
+/// Crea "nombre copia.ext" (o "nombre copia 2.ext", …) junto al original.
+#[tauri::command]
+fn duplicate_entry(path: String, root: State<WorkspaceRoot>) -> Result<String, String> {
+    let target = ensure_inside_root(&root, &path)?;
+    if is_workspace_root(&root, &target) {
+        return Err("No se puede duplicar la carpeta de trabajo".to_string());
+    }
+    let parent = target.parent().ok_or_else(|| "Sin carpeta padre".to_string())?;
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| "Nombre inválido".to_string())?
+        .to_string_lossy()
+        .into_owned();
+
+    // Extensión solo para archivos y sin contar los que empiezan por punto (.env)
+    let (stem, ext) = match file_name.rsplit_once('.') {
+        Some((s, e)) if target.is_file() && !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (file_name.clone(), String::new()),
+    };
+
+    let mut dest = parent.join(format!("{stem} copia{ext}"));
+    let mut n = 2u32;
+    while dest.exists() {
+        dest = parent.join(format!("{stem} copia {n}{ext}"));
+        n += 1;
+        if n > 500 {
+            return Err("Demasiadas copias".to_string());
+        }
+    }
+
+    copy_recursive(&target, &dest).map_err(|e| e.to_string())?;
+    Ok(display_path(&dest))
+}
+
+/// Abre el explorador del SO con la entrada seleccionada.
+#[tauri::command]
+fn reveal_in_os(path: String, root: State<WorkspaceRoot>) -> Result<(), String> {
+    let target = ensure_inside_root(&root, &path)?;
+    let shown = display_path(&target);
+
+    #[cfg(target_os = "windows")]
+    {
+        hide_console(Command::new("explorer").arg(format!("/select,{shown}")))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg("-R").arg(&shown).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let dir = target.parent().map(display_path).unwrap_or(shown);
+        Command::new("xdg-open").arg(dir).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ── Terminales PTY (bash / PowerShell / cmd) ─────────────────────────────
 
 /// Traduce el shell pedido por el frontend a (programa, argumentos) según el SO.
@@ -323,18 +447,114 @@ fn git_run(
             .ok_or_else(|| "No hay carpeta de trabajo abierta".to_string())?,
     };
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(&dir)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|e| format!("No se pudo ejecutar git: {e}"))?;
+    let output = hide_console(
+        Command::new("git")
+            .args(&args)
+            .current_dir(&dir)
+            .env("GIT_TERMINAL_PROMPT", "0"),
+    )
+    .output()
+    .map_err(|e| format!("No se pudo ejecutar git: {e}"))?;
 
     Ok(GitOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code().unwrap_or(-1),
     })
+}
+
+/// Extrae "repo" de URLs tipo https://github.com/u/repo.git o git@host:u/repo.git
+fn repo_name_from_url(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let last = trimmed.rsplit(['/', ':']).next()?;
+    let name = last.trim_end_matches(".git").trim();
+    if name.is_empty() || !is_simple_name(name) {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Clona `url` dentro de `dest_parent` (elegido con el diálogo nativo, por eso
+/// no pasa por el sandbox del workspace). El progreso de git (stderr) se
+/// retransmite por el evento `git:clone:out`. Devuelve la ruta del repo clonado.
+/// Async + spawn_blocking: un clon tarda minutos y no debe congelar la UI.
+#[tauri::command]
+async fn git_clone(app: AppHandle, url: String, dest_parent: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || git_clone_blocking(app, url, dest_parent))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn git_clone_blocking(app: AppHandle, url: String, dest_parent: String) -> Result<String, String> {
+    let parent = fs::canonicalize(&dest_parent).map_err(|_| "La carpeta destino no existe".to_string())?;
+    if !parent.is_dir() {
+        return Err("El destino no es una carpeta".to_string());
+    }
+    let name = repo_name_from_url(&url).ok_or_else(|| "URL de repositorio no válida".to_string())?;
+
+    // Ruta legible (sin \\?\) para git y para el frontend
+    let target = PathBuf::from(display_path(&parent)).join(&name);
+    if target.exists() {
+        return Err(format!("Ya existe una carpeta \"{name}\" en el destino"));
+    }
+
+    let mut cmd = Command::new("git");
+    cmd.arg("clone")
+        .arg("--progress")
+        .arg(url.trim())
+        .arg(&target)
+        // Sin terminal no hay dónde escribir credenciales: falla rápido en vez de
+        // colgarse (el credential manager gráfico de Windows sí puede aparecer).
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+
+    let mut child = cmd.spawn().map_err(|e| format!("No se pudo ejecutar git: {e}"))?;
+    let mut stderr = child.stderr.take().ok_or_else(|| "Sin salida de git".to_string())?;
+
+    // git escribe el progreso por stderr; se retransmite y se guarda la cola
+    // para poder mostrar el motivo real si el clon falla.
+    let app_reader = app.clone();
+    let reader = thread::spawn(move || {
+        let mut buf = [0u8; 2048];
+        let mut tail = String::new();
+        loop {
+            match stderr.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    tail.push_str(&chunk);
+                    if tail.len() > 4000 {
+                        let mut cut = tail.len() - 2000;
+                        while !tail.is_char_boundary(cut) {
+                            cut += 1;
+                        }
+                        tail.drain(..cut);
+                    }
+                    let _ = app_reader.emit("git:clone:out", chunk);
+                }
+            }
+        }
+        tail
+    });
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let tail = reader.join().unwrap_or_default();
+
+    if status.success() {
+        Ok(display_path(&target))
+    } else {
+        let reason = tail
+            .split(['\n', '\r'])
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("git clone falló")
+            .to_string();
+        Err(reason)
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -357,11 +577,16 @@ pub fn run() {
             read_file_content,
             write_file_content,
             create_new_entry,
+            rename_entry,
+            delete_entry,
+            duplicate_entry,
+            reveal_in_os,
             term_open,
             term_write,
             term_resize,
             term_close,
-            git_run
+            git_run,
+            git_clone
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -369,7 +594,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::is_simple_name;
+    use super::{is_simple_name, repo_name_from_url};
 
     #[test]
     fn rechaza_nombres_con_traversal() {
@@ -379,5 +604,14 @@ mod tests {
         assert!(!is_simple_name("a\\b"));
         assert!(!is_simple_name(""));
         assert!(is_simple_name("archivo.rs"));
+    }
+
+    #[test]
+    fn extrae_nombre_de_repo() {
+        assert_eq!(repo_name_from_url("https://github.com/u/repo.git").as_deref(), Some("repo"));
+        assert_eq!(repo_name_from_url("https://github.com/u/repo/").as_deref(), Some("repo"));
+        assert_eq!(repo_name_from_url("git@github.com:u/otro.git").as_deref(), Some("otro"));
+        assert_eq!(repo_name_from_url(""), None);
+        assert_eq!(repo_name_from_url("https://"), None);
     }
 }

@@ -41,6 +41,28 @@ export function registerEditorView(view) {
   liveView = view;
 }
 
+export function getLiveView() {
+  return liveView;
+}
+
+// ── Autoguardado ───────────────────────────────────────────────────────
+// Debounce único: 1 s después del último cambio se guardan todas las
+// pestañas sucias (solo la activa puede ensuciarse, pero saveAll es barato).
+const AUTOSAVE_MS = 1000;
+let autoSaveEnabled = true;
+let autoSaveTimer = null;
+
+/** appStore fija esto al arrancar y cuando el usuario cambia el ajuste. */
+export function setAutoSaveConfig(enabled) {
+  autoSaveEnabled = enabled;
+  if (enabled) {
+    useEditorStore.getState().saveAll(true);
+  } else if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+}
+
 export function getCachedState(path) {
   return stateCache.get(path);
 }
@@ -92,20 +114,89 @@ export const useEditorStore = create((set, get) => ({
     if (tabs.find((t) => t.path === path && !t.dirty)) {
       set({ tabs: tabs.map((t) => (t.path === path ? { ...t, dirty: true } : t)) });
     }
+    if (autoSaveEnabled) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(() => get().saveAll(true), AUTOSAVE_MS);
+    }
   },
 
   setActive: (path) => set({ activePath: path }),
 
-  saveActive: async () => {
-    const { activePath, tabs } = get();
-    if (!activePath || !liveView) return;
+  /** Guarda una pestaña (la activa desde la vista viva; el resto desde el caché).
+      Con silent=true (autoguardado) los errores van a consola, no a un alert. */
+  saveTab: async (path, silent = false) => {
+    const { activePath } = get();
+    const tab = get().tabs.find((t) => t.path === path);
+    if (!tab || !tab.dirty) return;
+
+    const isActive = path === activePath && liveView;
+    const state = isActive ? liveView.state : stateCache.get(path);
+    if (!state) return;
+
+    const savedDoc = state.doc;
     try {
-      await writeFileContent(activePath, liveView.state.doc.toString());
-      stateCache.set(activePath, liveView.state);
-      set({ tabs: tabs.map((t) => (t.path === activePath ? { ...t, dirty: false } : t)) });
+      await writeFileContent(path, savedDoc.toString());
+      if (isActive) stateCache.set(path, liveView.state);
+      // Si el usuario siguió tecleando durante la escritura, sigue sucia.
+      const unchanged = !isActive || liveView.state.doc === savedDoc || liveView.state.doc.eq(savedDoc);
+      if (unchanged) {
+        set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false } : t)) });
+      }
     } catch (e) {
-      alert('Error guardando el archivo: ' + e);
+      if (silent) console.error('[editor] Autoguardado falló:', path, e);
+      else alert('Error guardando el archivo: ' + e);
     }
+  },
+
+  saveActive: async () => {
+    const { activePath } = get();
+    if (activePath) await get().saveTab(activePath);
+  },
+
+  saveAll: async (silent = false) => {
+    const dirty = get().tabs.filter((t) => t.dirty);
+    for (const t of dirty) await get().saveTab(t.path, silent);
+  },
+
+  /** Tras renombrar en disco (archivo o carpeta): remapea pestañas y caché. */
+  remapPaths: (oldPath, newPath) => {
+    const mapPath = (p) => {
+      if (p === oldPath) return newPath;
+      if (p.startsWith(oldPath + '\\') || p.startsWith(oldPath + '/')) {
+        return newPath + p.slice(oldPath.length);
+      }
+      return null;
+    };
+    const { tabs, activePath } = get();
+    for (const t of tabs) {
+      const next = mapPath(t.path);
+      if (next && stateCache.has(t.path)) {
+        stateCache.set(next, stateCache.get(t.path));
+        stateCache.delete(t.path);
+      }
+    }
+    set({
+      tabs: tabs.map((t) => {
+        const next = mapPath(t.path);
+        if (!next) return t;
+        return { ...t, path: next, name: next.split(/[\\/]/).pop() || t.name };
+      }),
+      activePath: activePath ? (mapPath(activePath) || activePath) : activePath,
+    });
+  },
+
+  /** Cierra sin preguntar las pestañas en `path` o debajo (tras eliminar en disco). */
+  closeUnder: (path) => {
+    const isUnder = (p) =>
+      p === path || p.startsWith(path + '\\') || p.startsWith(path + '/');
+    const { tabs, activePath } = get();
+    const remaining = tabs.filter((t) => !isUnder(t.path));
+    if (remaining.length === tabs.length) return;
+    for (const t of tabs) if (isUnder(t.path)) stateCache.delete(t.path);
+    const nextActive = remaining.some((t) => t.path === activePath)
+      ? activePath
+      : (remaining[remaining.length - 1]?.path ?? null);
+    set({ tabs: remaining, activePath: nextActive });
   },
 
   closeTab: async (path) => {

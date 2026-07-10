@@ -1,8 +1,15 @@
 // FileTree.jsx — explorador de archivos del workspace (panel izquierdo).
-// Clic en un archivo → abre pestaña en el editor (editorStore.openFile).
-import { useState, useEffect, useCallback } from 'react';
-import { readDir, createNewEntry, pickDirectory, setWorkspaceRoot } from '../../lib/tauri';
+// Clic en un archivo → abre pestaña en el editor. Clic derecho → menú
+// contextual (nuevo, renombrar, duplicar, copiar ruta, revelar, eliminar).
+// La carpeta raíz vive en appStore.workspaceRoot (la fija openWorkspace).
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ask } from '@tauri-apps/plugin-dialog';
+import {
+  readDir, createNewEntry, renameEntry, deleteEntry, duplicateEntry,
+  revealInOs, pickDirectory,
+} from '../../lib/tauri';
 import { useEditorStore } from '../../store/editorStore';
+import { useAppStore } from '../../store/appStore';
 import {
   IconFolder,
   IconFolderOpen,
@@ -31,8 +38,9 @@ function baseName(path) {
 
 export function FileTree() {
   const { openFile, activePath } = useEditorStore();
+  const rootPath = useAppStore((s) => s.workspaceRoot);
+  const openWorkspace = useAppStore((s) => s.openWorkspace);
 
-  const [rootPath, setRootPath] = useState(() => localStorage.getItem('lixbon_workspace_root') || '');
   const [treeData, setTreeData] = useState([]);
   const [expandedDirs, setExpandedDirs] = useState({});
   const [dirChildren, setDirChildren] = useState({});
@@ -43,35 +51,53 @@ export function FileTree() {
   const [newItemType, setNewItemType] = useState(null); // 'file' | 'dir'
   const [newItemName, setNewItemName] = useState('');
 
-  const loadRoot = useCallback(async (root) => {
-    if (!root) return;
-    setError('');
+  // Renombrado inline: { path, parent, name }
+  const [renaming, setRenaming] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  // Menú contextual: { x, y, entry, parent } (entry=null → área raíz)
+  const [ctxMenu, setCtxMenu] = useState(null);
+  const menuRef = useRef(null);
+
+  const loadRoot = useCallback(async () => {
+    if (!rootPath) return;
     try {
-      // Fija el sandbox en Rust y devuelve la ruta canónica
-      const canonical = await setWorkspaceRoot(root);
-      const entries = await readDir(canonical);
-      setTreeData(entries);
-      setRootPath(canonical);
-      localStorage.setItem('lixbon_workspace_root', canonical);
+      setTreeData(await readDir(rootPath));
+      setError('');
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [rootPath]);
 
+  // Cambio de carpeta de trabajo (o arranque): recargar el árbol desde cero
   useEffect(() => {
-    if (rootPath) loadRoot(rootPath);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setExpandedDirs({});
+    setDirChildren({});
+    setTreeData([]);
+    loadRoot();
+  }, [rootPath, loadRoot]);
+
+  // Cerrar el menú contextual con clic fuera o Escape
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', close);
+    };
+  }, [ctxMenu]);
 
   const handleOpenFolder = async () => {
     try {
       const selected = await pickDirectory({ title: 'Abrir carpeta de trabajo' });
-      if (selected) {
-        setExpandedDirs({});
-        setDirChildren({});
-        await loadRoot(selected);
-      }
+      if (selected) await openWorkspace(selected);
     } catch (e) {
-      console.error('[filetree] Error abriendo diálogo:', e);
+      setError(String(e));
     }
   };
 
@@ -82,6 +108,11 @@ export function FileTree() {
     } catch (e) {
       console.error('[filetree] Error leyendo carpeta:', e);
     }
+  };
+
+  const refreshParent = async (parent) => {
+    if (!parent || parent === rootPath) await loadRoot();
+    else await refreshDirectory(parent);
   };
 
   const toggleDirectory = async (path) => {
@@ -104,8 +135,7 @@ export function FileTree() {
     const parent = newItemParent || rootPath;
     try {
       await createNewEntry(parent, newItemName.trim(), newItemType === 'dir');
-      if (parent === rootPath) await loadRoot(rootPath);
-      else await refreshDirectory(parent);
+      await refreshParent(parent);
     } catch (err) {
       alert('Error creando entrada: ' + err);
     } finally {
@@ -114,6 +144,112 @@ export function FileTree() {
       setNewItemName('');
     }
   };
+
+  // ── Acciones del menú contextual ─────────────────────────────────────
+
+  const startRename = (entry, parent) => {
+    setRenaming({ path: entry.path, parent, name: entry.name });
+    setRenameValue(entry.name);
+  };
+
+  const handleRenameSubmit = async (e) => {
+    e.preventDefault();
+    const next = renameValue.trim();
+    const current = renaming;
+    setRenaming(null);
+    if (!current || !next || next === current.name) return;
+    try {
+      const newPath = await renameEntry(current.path, next);
+      useEditorStore.getState().remapPaths(current.path, newPath);
+      await refreshParent(current.parent);
+    } catch (err) {
+      alert('Error renombrando: ' + err);
+    }
+  };
+
+  const handleDelete = async (entry, parent) => {
+    const confirmed = await ask(
+      `¿Eliminar ${entry.is_dir ? 'la carpeta' : 'el archivo'} "${entry.name}"? Esta acción no se puede deshacer.`,
+      { title: 'lixbon', kind: 'warning', okLabel: 'Eliminar', cancelLabel: 'Cancelar' }
+    );
+    if (!confirmed) return;
+    try {
+      await deleteEntry(entry.path);
+      useEditorStore.getState().closeUnder(entry.path);
+      await refreshParent(parent);
+    } catch (err) {
+      alert('Error eliminando: ' + err);
+    }
+  };
+
+  const handleDuplicate = async (entry, parent) => {
+    try {
+      await duplicateEntry(entry.path);
+      await refreshParent(parent);
+    } catch (err) {
+      alert('Error duplicando: ' + err);
+    }
+  };
+
+  const copyToClipboard = (text) => navigator.clipboard.writeText(text).catch(() => {});
+
+  const relativePath = (path) => {
+    if (path.startsWith(rootPath)) {
+      return path.slice(rootPath.length).replace(/^[\\/]+/, '');
+    }
+    return path;
+  };
+
+  const openCtxMenu = (e, entry, parent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({
+      x: Math.min(e.clientX, window.innerWidth - 240),
+      y: Math.min(e.clientY, window.innerHeight - 320),
+      entry,
+      parent,
+    });
+  };
+
+  const ctxItems = () => {
+    if (!ctxMenu) return [];
+    const { entry, parent } = ctxMenu;
+
+    if (!entry) {
+      // Área vacía / raíz
+      return [
+        { label: 'Nuevo archivo', run: () => { setNewItemParent(rootPath); setNewItemType('file'); } },
+        { label: 'Nueva carpeta', run: () => { setNewItemParent(rootPath); setNewItemType('dir'); } },
+        { sep: true },
+        { label: 'Refrescar', run: loadRoot },
+        { label: 'Revelar en el explorador', run: () => revealInOs(rootPath).catch(() => {}) },
+      ];
+    }
+
+    const items = [];
+    if (entry.is_dir) {
+      items.push(
+        { label: 'Nuevo archivo', run: () => { setNewItemParent(entry.path); setNewItemType('file'); setExpandedDirs((p) => ({ ...p, [entry.path]: true })); } },
+        { label: 'Nueva carpeta', run: () => { setNewItemParent(entry.path); setNewItemType('dir'); setExpandedDirs((p) => ({ ...p, [entry.path]: true })); } },
+        { sep: true },
+      );
+    } else {
+      items.push({ label: 'Abrir', run: () => handleSelectFile(entry.path, entry.name) }, { sep: true });
+    }
+    items.push(
+      { label: 'Renombrar', run: () => startRename(entry, parent) },
+      { label: 'Duplicar', run: () => handleDuplicate(entry, parent) },
+      { sep: true },
+      { label: 'Copiar ruta', run: () => copyToClipboard(entry.path) },
+      { label: 'Copiar ruta relativa', run: () => copyToClipboard(relativePath(entry.path)) },
+      { label: 'Revelar en el explorador', run: () => revealInOs(entry.path).catch(() => {}) },
+      { sep: true },
+      { label: 'Eliminar', danger: true, run: () => handleDelete(entry, parent) },
+    );
+    return items;
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────
 
   const inlineForm = (parentPath, indent) => (
     newItemParent === parentPath && (
@@ -133,9 +269,33 @@ export function FileTree() {
     )
   );
 
-  const renderEntries = (entries, depth = 0) =>
+  const renameForm = (indent) => (
+    <form onSubmit={handleRenameSubmit} className="filetree__inline-form" style={{ paddingLeft: indent }}>
+      <input
+        className="filetree__inline-input"
+        type="text"
+        value={renameValue}
+        onChange={(e) => setRenameValue(e.target.value)}
+        autoFocus
+        onFocus={(e) => {
+          // Selecciona el nombre sin la extensión (como VSCode)
+          const dot = e.target.value.lastIndexOf('.');
+          e.target.setSelectionRange(0, dot > 0 ? dot : e.target.value.length);
+        }}
+        onBlur={() => setRenaming(null)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setRenaming(null); }}
+        spellCheck={false}
+      />
+    </form>
+  );
+
+  const renderEntries = (entries, depth = 0, parentPath = rootPath) =>
     entries.map((entry) => {
       const indent = depth * 14 + 10;
+
+      if (renaming?.path === entry.path) {
+        return <div key={entry.path}>{renameForm(indent)}</div>;
+      }
 
       if (entry.is_dir) {
         const isExpanded = !!expandedDirs[entry.path];
@@ -146,6 +306,7 @@ export function FileTree() {
               className="filetree__node"
               style={{ paddingLeft: indent }}
               onClick={() => toggleDirectory(entry.path)}
+              onContextMenu={(e) => openCtxMenu(e, entry, parentPath)}
             >
               {isExpanded ? <IconChevron size={13} open /> : <IconChevronRight size={13} />}
               {isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />}
@@ -166,7 +327,7 @@ export function FileTree() {
               </span>
             </div>
             {inlineForm(entry.path, indent + 18)}
-            {isExpanded && children.length > 0 && renderEntries(children, depth + 1)}
+            {isExpanded && children.length > 0 && renderEntries(children, depth + 1, entry.path)}
           </div>
         );
       }
@@ -177,6 +338,7 @@ export function FileTree() {
           className={`filetree__node ${activePath === entry.path ? 'is-active' : ''}`}
           style={{ paddingLeft: indent + 17 }}
           onClick={() => handleSelectFile(entry.path, entry.name)}
+          onContextMenu={(e) => openCtxMenu(e, entry, parentPath)}
         >
           {fileIcon(entry.name)}
           <span className="filetree__label">{entry.name}</span>
@@ -216,7 +378,7 @@ export function FileTree() {
           >
             <IconFolderPlus size={15} />
           </button>
-          <button className="icon-btn" title="Refrescar" onClick={() => loadRoot(rootPath)}>
+          <button className="icon-btn" title="Refrescar" onClick={loadRoot}>
             <IconRefresh size={15} />
           </button>
           <button className="icon-btn" title="Cambiar carpeta" onClick={handleOpenFolder}>
@@ -228,13 +390,39 @@ export function FileTree() {
       {inlineForm(rootPath, 10)}
       {error && <p className="filetree__hint">{error}</p>}
 
-      <div className="filetree__body">
+      <div
+        className="filetree__body"
+        onContextMenu={(e) => openCtxMenu(e, null, rootPath)}
+      >
         {treeData.length === 0 && !error ? (
           <p className="filetree__hint">Carpeta vacía.</p>
         ) : (
           renderEntries(treeData)
         )}
       </div>
+
+      {ctxMenu && (
+        <div
+          ref={menuRef}
+          className="ctx-menu"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {ctxItems().map((item, i) =>
+            item.sep ? (
+              <div key={i} className="ctx-menu__sep" />
+            ) : (
+              <button
+                key={i}
+                className={`ctx-menu__item ${item.danger ? 'is-danger' : ''}`}
+                onClick={() => { setCtxMenu(null); item.run(); }}
+              >
+                {item.label}
+              </button>
+            )
+          )}
+        </div>
+      )}
     </div>
   );
 }

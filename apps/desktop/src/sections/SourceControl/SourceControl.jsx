@@ -12,16 +12,20 @@ export function SourceControl() {
   const {
     isRepo, branch, changes, loading, error, message,
     setMessage, refresh, stage, unstage, stageAll, commit,
-    init, pull, push, fetch, clone,
+    init, pull, push, fetch, cloneRepo, cloning, cloneProgress,
   } = useGitStore();
   const panels = useAppStore((s) => s.panels);
   const togglePanel = useAppStore((s) => s.togglePanel);
+  const openWorkspace = useAppStore((s) => s.openWorkspace);
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot);
 
   const [commitStatus, setCommitStatus] = useState('');
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneUrl, setCloneUrl] = useState('');
+  const [cloneStatus, setCloneStatus] = useState(null); // { ok, text }
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // Refrescar al entrar y cuando cambia la carpeta de trabajo
+  useEffect(() => { refresh(); }, [refresh, workspaceRoot]);
 
   const withTerminal = (fn) => {
     if (!panels.terminal) togglePanel('terminal');
@@ -35,12 +39,25 @@ export function SourceControl() {
   };
 
   const handleClone = async () => {
-    if (!cloneUrl.trim()) return;
-    const dest = await pickDirectory({ title: 'Carpeta destino del clon' });
-    if (dest === null) return; // cancelado: git clona en cwd
-    withTerminal(() => clone(cloneUrl.trim(), dest));
-    setCloneOpen(false);
-    setCloneUrl('');
+    const url = cloneUrl.trim();
+    if (!url) return;
+    const dest = await pickDirectory({ title: 'Carpeta donde crear el clon' });
+    if (dest === null) return; // cancelado
+
+    setCloneStatus(null);
+    const res = await cloneRepo(url, dest);
+    if (res.ok) {
+      setCloneOpen(false);
+      setCloneUrl('');
+      setCloneStatus({ ok: true, text: `Repositorio clonado en ${res.target}. Abriendo carpeta…` });
+      try {
+        await openWorkspace(res.target); // refresca explorador y estado Git
+      } catch (e) {
+        setCloneStatus({ ok: false, text: `Clonado, pero no se pudo abrir la carpeta: ${e}` });
+      }
+    } else {
+      setCloneStatus({ ok: false, text: res.error || 'No se pudo clonar el repositorio.' });
+    }
   };
 
   const staged = changes.filter((c) => c.staged);
@@ -93,13 +110,27 @@ export function SourceControl() {
                 className="settings__input"
                 placeholder="https://github.com/usuario/repo.git"
                 value={cloneUrl}
-                onChange={(e) => setCloneUrl(e.target.value)}
+                onChange={(e) => { setCloneUrl(e.target.value); setCloneStatus(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleClone(); }}
                 spellCheck={false}
+                disabled={cloning}
               />
-              <button className="pill-btn pill-btn--primary" onClick={handleClone}>
-                Elegir carpeta y clonar
+              <button
+                className="pill-btn pill-btn--primary"
+                onClick={handleClone}
+                disabled={cloning || !cloneUrl.trim()}
+              >
+                {cloning ? 'Clonando…' : 'Elegir carpeta y clonar'}
               </button>
             </div>
+          )}
+          {cloning && cloneProgress && (
+            <p className="settings__status scm__clone-progress">{cloneProgress}</p>
+          )}
+          {cloneStatus && (
+            <p className={`settings__status ${cloneStatus.ok ? '' : 'is-error'}`}>
+              {cloneStatus.text}
+            </p>
           )}
         </section>
       ) : (

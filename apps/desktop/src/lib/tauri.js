@@ -37,6 +37,25 @@ export function createNewEntry(parentPath, name, isDir) {
   return invoke('create_new_entry', { parentPath, name, isDir });
 }
 
+/** Renombra un archivo/carpeta. Devuelve la ruta nueva. */
+export function renameEntry(path, newName) {
+  return invoke('rename_entry', { path, newName });
+}
+
+export function deleteEntry(path) {
+  return invoke('delete_entry', { path });
+}
+
+/** Crea "nombre copia.ext" junto al original. Devuelve la ruta de la copia. */
+export function duplicateEntry(path) {
+  return invoke('duplicate_entry', { path });
+}
+
+/** Muestra la entrada en el explorador de archivos del sistema. */
+export function revealInOs(path) {
+  return invoke('reveal_in_os', { path });
+}
+
 // ── Terminales PTY ────────────────────────────────────────────────────
 
 /** Abre una sesión de terminal (shell: 'powershell' | 'cmd' | 'bash'). Devuelve el id. */
@@ -61,6 +80,12 @@ export function termClose(id) {
 /** Ejecuta `git args...` en cwd (o la carpeta de trabajo). Devuelve {stdout, stderr, code}. */
 export function gitRun(args, cwd) {
   return invoke('git_run', { args, cwd: cwd ?? null });
+}
+
+/** Clona `url` dentro de destParent. Progreso por el evento `git:clone:out`.
+    Devuelve la ruta del repositorio clonado. */
+export function gitClone(url, destParent) {
+  return invoke('git_clone', { url, destParent });
 }
 
 // ── Plugins ───────────────────────────────────────────────────────────

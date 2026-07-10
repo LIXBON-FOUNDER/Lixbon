@@ -200,3 +200,25 @@ export const IconGitCommit = (p) => (
 export const IconArrowUp = (p) => (
   <Svg {...p}><path d="M12 19V5M6 11l6-6 6 6" /></Svg>
 );
+
+/* ── Barra de título (ventana sin decoraciones) ──────────────────────── */
+
+export const IconWinMin = (p) => (
+  <Svg {...p} strokeWidth="1.3"><path d="M5 12h14" /></Svg>
+);
+
+export const IconWinMax = (p) => (
+  <Svg {...p} strokeWidth="1.3"><rect x="6" y="6" width="12" height="12" rx="1" /></Svg>
+);
+
+export const IconWinRestore = (p) => (
+  <Svg {...p} strokeWidth="1.3">
+    <rect x="5" y="8" width="11" height="11" rx="1" />
+    <path d="M9 8V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-3" />
+  </Svg>
+);
+
+/* Panel con la franja derecha (toggle del chat, estilo VSCode) */
+export const IconPanelRight = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M14.5 4v16" /></Svg>
+);

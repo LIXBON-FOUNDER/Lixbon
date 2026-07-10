@@ -3,7 +3,8 @@
 // (pull/push/fetch/clone) se lanzan en el terminal integrado para ver los prompts.
 
 import { create } from 'zustand';
-import { gitRun } from '../lib/tauri';
+import { listen } from '@tauri-apps/api/event';
+import { gitRun, gitClone } from '../lib/tauri';
 import { useTerminalStore } from './terminalStore';
 
 /** Parsea `git status --porcelain=v1` a una lista de cambios. */
@@ -77,8 +78,33 @@ export const useGitStore = create((set, get) => ({
   pull: () => useTerminalStore.getState().runCommand('git pull'),
   push: () => useTerminalStore.getState().runCommand('git push'),
   fetch: () => useTerminalStore.getState().runCommand('git fetch --all --prune'),
-  clone: (url, dest) => {
-    const target = dest ? ` "${dest}"` : '';
-    useTerminalStore.getState().runCommand(`git clone ${url}${target}`);
+
+  // ── Clonación: comando Rust dedicado con progreso en vivo ──────────
+  cloning: false,
+  cloneProgress: '',
+
+  /** Clona `url` dentro de destParent. Devuelve { ok, target | error }. */
+  cloneRepo: async (url, destParent) => {
+    if (get().cloning) return { ok: false, error: 'Ya hay una clonación en curso.' };
+    set({ cloning: true, cloneProgress: 'Iniciando clonación…' });
+
+    const unlisten = await listen('git:clone:out', (e) => {
+      // git separa el progreso con \r; nos quedamos con la última línea útil
+      const line = String(e.payload)
+        .split(/[\r\n]/)
+        .reverse()
+        .find((l) => l.trim());
+      if (line) set({ cloneProgress: line.trim() });
+    });
+
+    try {
+      const target = await gitClone(url, destParent);
+      return { ok: true, target };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    } finally {
+      unlisten();
+      set({ cloning: false, cloneProgress: '' });
+    }
   },
 }));

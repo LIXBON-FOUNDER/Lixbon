@@ -19,6 +19,7 @@ export function Settings() {
     apiKey, user, setUser, logout,
     editorFontSize, setEditorFontSize,
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
+    autoSave, setAutoSave,
   } = useAppStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
 
@@ -217,6 +218,20 @@ export function Settings() {
       {/* Editor */}
       <section className="settings__panel">
         <h3 className="settings__panel-title">Editor</h3>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">Autoguardado</span>
+          <button
+            className={`settings__toggle ${autoSave ? 'is-on' : ''}`}
+            onClick={() => setAutoSave(!autoSave)}
+            role="switch"
+            aria-checked={autoSave}
+            title={autoSave ? 'Se guarda 1 s después de dejar de escribir' : 'Guardado manual (Ctrl+S)'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
         <div className="settings__inline settings__inline--spread">
           <span className="settings__row-label">Tamaño de letra</span>
           <span className="settings__slider">

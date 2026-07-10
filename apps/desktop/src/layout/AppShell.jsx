@@ -34,6 +34,11 @@ export function AppShell() {
   const hasTabs = useEditorStore((s) => s.tabs.length > 0);
   const termFrame = useRef(null);
 
+  // Reabrir la última carpeta de trabajo (el sandbox Rust no persiste)
+  useEffect(() => {
+    useAppStore.getState().restoreWorkspace();
+  }, []);
+
   // Tamaño de letra del editor (ajustable en Ajustes)
   useEffect(() => {
     document.documentElement.style.setProperty('--editor-font-size', `${editorFontSize}px`);
@@ -47,9 +52,10 @@ export function AppShell() {
       if (!mod) return;
       const store = useEditorStore.getState();
 
-      if (e.key === 's') {
+      if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
-        store.saveActive();
+        if (e.shiftKey) store.saveAll();
+        else store.saveActive();
       } else if (e.key === 'w') {
         e.preventDefault();
         if (store.activePath) store.closeTab(store.activePath);

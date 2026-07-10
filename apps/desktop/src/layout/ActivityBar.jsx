@@ -1,6 +1,7 @@
 // ActivityBar.jsx — barra fina de navegación del IDE (izquierda).
+// El toggle del chat vive en la TitleBar (a la derecha, junto al panel que abre).
 import { useAppStore } from '../store/appStore';
-import { IconPanel, IconChat, IconChart, IconGear, IconTerminal, IconGitBranch } from '../components/Icons';
+import { IconPanel, IconChart, IconGear, IconTerminal, IconGitBranch } from '../components/Icons';
 
 export function ActivityBar() {
   const { panels, togglePanel, centerView, setCenterView } = useAppStore();
@@ -12,22 +13,12 @@ export function ActivityBar() {
 
   return (
     <nav className="activitybar">
-      <span className="activitybar__brand" title="LIXBON">L</span>
-
       <button
         className={`activitybar__btn ${panels.explorer ? 'is-active' : ''}`}
         onClick={() => togglePanel('explorer')}
         title="Explorador"
       >
         <IconPanel size={19} />
-      </button>
-
-      <button
-        className={`activitybar__btn ${panels.chat ? 'is-active' : ''}`}
-        onClick={() => togglePanel('chat')}
-        title="Chat"
-      >
-        <IconChat size={19} />
       </button>
 
       <button
