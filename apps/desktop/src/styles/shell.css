@@ -91,7 +91,7 @@
 
 .titlebar__chat:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .titlebar__chat.is-active {
@@ -114,7 +114,7 @@
 }
 
 .titlebar__win-btn:hover {
-  background: rgba(23, 23, 23, 0.07);
+  background: rgba(var(--ink-rgb), 0.07);
   color: var(--ink);
 }
 
@@ -149,7 +149,7 @@
 .menubar__btn:hover,
 .menubar__btn.is-open {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.07);
+  background: rgba(var(--ink-rgb), 0.07);
 }
 
 .menubar__dropdown {
@@ -161,7 +161,7 @@
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(23, 23, 23, 0.16);
+  box-shadow: 0 12px 32px rgba(var(--shadow-rgb), 0.16);
   padding: 6px;
 }
 
@@ -196,7 +196,7 @@
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(23, 23, 23, 0.16);
+  box-shadow: 0 12px 32px rgba(var(--shadow-rgb), 0.16);
   padding: 6px;
 }
 
@@ -238,7 +238,7 @@
   position: absolute;
   inset: 0;
   z-index: 500;
-  background: rgba(23, 23, 23, 0.18);
+  background: var(--scrim);
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -250,7 +250,7 @@
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 14px;
-  box-shadow: 0 18px 48px rgba(23, 23, 23, 0.22);
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), 0.22);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -357,7 +357,7 @@
 
 .activitybar__btn:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .activitybar__btn.is-active {
@@ -403,7 +403,7 @@
 
 .sidepanel__resizer:hover,
 .sidepanel__resizer.is-dragging {
-  background: rgba(23, 23, 23, 0.14);
+  background: rgba(var(--ink-rgb), 0.14);
 }
 
 .sidepanel__header {
@@ -481,7 +481,7 @@
 
 .editor-empty .brand {
   font-size: 22px;
-  color: rgba(23, 23, 23, 0.2);
+  color: rgba(var(--ink-rgb), 0.2);
 }
 
 .editor-empty p {
@@ -551,5 +551,5 @@ button.statusbar__item {
 
 button.statusbar__item:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }

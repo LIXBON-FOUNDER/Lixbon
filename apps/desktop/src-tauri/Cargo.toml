@@ -1,8 +1,8 @@
 [package]
 name = "lixbon"
-version = "0.5.2"
-description = "A Tauri App"
-authors = ["you"]
+version = "0.5.3"
+description = "Lixbon"
+authors = ["Lixbon by GBX"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

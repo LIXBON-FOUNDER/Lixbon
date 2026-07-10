@@ -51,18 +51,18 @@
 
 .run-controls__btn:hover {
   border-color: var(--border);
-  background: rgba(23, 23, 23, 0.05);
+  background: rgba(var(--ink-rgb), 0.05);
 }
 
 .run-controls__btn--run {
-  color: #3f5410;
-  border-color: rgba(95, 122, 31, 0.4);
-  background: rgba(217, 230, 74, 0.16);
+  color: var(--run-ink);
+  border-color: color-mix(in srgb, var(--accent-deep) 55%, transparent);
+  background: var(--accent-soft);
 }
 
 .run-controls__btn--run:hover {
-  background: rgba(217, 230, 74, 0.28);
-  border-color: rgba(95, 122, 31, 0.6);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent-deep) 80%, transparent);
 }
 
 /* ── Pestañas ────────────────────────────────────────────────────────── */
@@ -95,7 +95,7 @@
 
 .editor-tab:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.03);
+  background: rgba(var(--ink-rgb), 0.03);
 }
 
 .editor-tab.is-active {
@@ -139,7 +139,7 @@
 }
 
 .editor-tab__close:hover {
-  background: rgba(23, 23, 23, 0.1);
+  background: rgba(var(--ink-rgb), 0.1);
   color: var(--ink);
 }
 
@@ -230,7 +230,7 @@
 }
 
 .filetree__node:hover {
-  background: rgba(23, 23, 23, 0.045);
+  background: rgba(var(--ink-rgb), 0.045);
   color: var(--ink);
 }
 
@@ -270,7 +270,7 @@
 
 .filetree__node-actions button:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.08);
+  background: rgba(var(--ink-rgb), 0.08);
 }
 
 .filetree__inline-form {
@@ -364,7 +364,7 @@
 }
 
 .searchpanel__file:hover {
-  background: rgba(23, 23, 23, 0.045);
+  background: rgba(var(--ink-rgb), 0.045);
 }
 
 .searchpanel__file-name {
@@ -430,8 +430,8 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--danger);
-  background: rgba(192, 57, 43, 0.08);
-  border: 1px solid rgba(192, 57, 43, 0.28);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   border-radius: 8px;
   padding: 7px 10px;
   margin: 0 10px 8px;
@@ -544,9 +544,9 @@
 }
 
 .extpanel__theme.is-active {
-  background: var(--ink);
-  color: #fff;
-  border-color: var(--ink);
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
 }
 
 .extpanel__reset {

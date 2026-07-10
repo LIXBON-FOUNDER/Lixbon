@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { useVersion } from '../../hooks/useVersion';
 import { planColor } from '../../lib/planColors';
+import { useTheme } from '../../lib/theme';
 import { openExternal } from '../../lib/tauri';
 import { IconEye, IconEyeOff, IconCopy, IconCheck } from '../../components/Icons';
 
@@ -22,6 +23,7 @@ export function Settings() {
     autoSave, setAutoSave,
   } = useAppStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
+  const [theme, setThemeMode] = useTheme();
 
   const [urlInput, setUrlInput] = useState(serverUrl);
   const [urlStatus, setUrlStatus] = useState(null); // { ok, text }
@@ -213,6 +215,29 @@ export function Settings() {
               : 'Estás en la última versión.'}
           </p>
         )}
+      </section>
+
+      {/* Apariencia */}
+      <section className="settings__panel">
+        <h3 className="settings__panel-title">Apariencia</h3>
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">Tema de la aplicación</span>
+          <span className="settings__segmented">
+            {[['light', 'Claro'], ['dark', 'Oscuro']].map(([mode, label]) => (
+              <button
+                key={mode}
+                className={`settings__segment ${theme === mode ? 'is-active' : ''}`}
+                onClick={() => setThemeMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+        </div>
+        <p className="settings__hint">
+          Un tema de VSCode activo (panel de extensiones) tiene prioridad sobre
+          este modo mientras esté aplicado.
+        </p>
       </section>
 
       {/* Editor */}

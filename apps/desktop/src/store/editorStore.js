@@ -12,7 +12,7 @@ import { indentWithTab } from '@codemirror/commands';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 import { readFileContent, writeFileContent } from '../lib/tauri';
-import { lixbonTheme, lixbonSyntax } from '../editor/lixbonTheme';
+import { lixbonTheme, lixbonSyntax, lixbonThemeDark, lixbonSyntaxDark } from '../editor/lixbonTheme';
 import { languageFor } from '../editor/languages';
 
 // ── Registro fuera de React ────────────────────────────────────────────
@@ -24,14 +24,23 @@ let liveView = null;
 let indentConfig = { tabSize: 2, insertSpaces: true };
 const indentCompartment = new Compartment();
 
-// Tema del editor: lixbon por defecto o un tema de VSCode instalado
-// (extStore lo cambia vía setEditorThemeExts).
+// Tema del editor: lixbon (claro u oscuro según el modo de la app) por
+// defecto, o un tema de VSCode instalado (extStore lo cambia vía
+// setEditorThemeExts). El modo vive en <html data-theme> (lib/theme.js).
 const themeCompartment = new Compartment();
-let themeExts = [lixbonTheme, lixbonSyntax];
 
-/** exts = null vuelve al tema lixbon. Reconfigura la vista viva y las cacheadas. */
+function defaultThemeExts() {
+  return document.documentElement.dataset.theme === 'dark'
+    ? [lixbonThemeDark, lixbonSyntaxDark]
+    : [lixbonTheme, lixbonSyntax];
+}
+
+let themeExts = defaultThemeExts();
+
+/** exts = null vuelve al tema lixbon del modo actual. Reconfigura la vista
+    viva y las cacheadas. */
 export function setEditorThemeExts(exts) {
-  themeExts = exts && exts.length ? exts : [lixbonTheme, lixbonSyntax];
+  themeExts = exts && exts.length ? exts : defaultThemeExts();
   if (liveView) {
     liveView.dispatch({ effects: themeCompartment.reconfigure(themeExts) });
   }

@@ -40,14 +40,26 @@
 /* ── Tokens ──────────────────────────────────────────────────────────── */
 
 :root {
+  color-scheme: light;
+
   --bg: #ffffff;
   --bg-secondary: #f6f7ed;
   --ink: #171717;
+  --ink-rgb: 23, 23, 23; /* para alphas: hover, tracks, rejillas… */
   --ink-soft: rgba(23, 23, 23, 0.62);
   --border: rgba(23, 23, 23, 0.9);
   --border-soft: rgba(23, 23, 23, 0.16);
   --accent: #d9e64a; /* verde-amarillo: etiqueta de plan */
+  --accent-deep: #6c7a46;
+  --accent-soft: rgba(217, 230, 74, 0.16);
+  --on-accent: #171717;
+  --primary: #171717; /* elementos invertidos: CTA, burbujas, toggles */
+  --on-primary: #ffffff;
+  --run-ink: #3f5410; /* botón Run (pariente oscuro del accent) */
+  --scrim: rgba(23, 23, 23, 0.18);
+  --shadow-rgb: 23, 23, 23;
   --danger: #c0392b;
+  --danger-soft: rgba(192, 57, 43, 0.1);
 
   --font-brand: 'Bruno Ace SC', sans-serif;
   --font-ui: 'Bricolage Grotesque', system-ui, sans-serif;
@@ -62,6 +74,32 @@
   --statusbar-h: 26px;
   --panel-w: 260px;
   --editor-font-size: 14px;
+}
+
+/* Modo oscuro (docs/DISENO_WEB.md · paleta "Modo oscuro"):
+   cremas cálidas + olivo trasladados a superficies oscuras. Un tema de VSCode
+   activo pisa estos tokens con estilos inline (extStore.setAppColors). */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #1A1913;          /* canvas: editor / paneles */
+  --bg-secondary: #211F17;/* surface: tabs activas, statusbar, chips */
+  --ink: #F3F0E2;         /* text-primary */
+  --ink-rgb: 243, 240, 226;
+  --ink-soft: #C3BCA6;    /* text-secondary */
+  --border: #33301F;      /* border-strong */
+  --border-soft: #2A2820; /* border-subtle */
+  --accent: #A9B86E;      /* olivo */
+  --accent-deep: #6C7A46;
+  --accent-soft: rgba(169, 184, 110, 0.12);
+  --on-accent: #1A1913;
+  --primary: #F0EBD9;     /* CTA invertido */
+  --on-primary: #1A1913;
+  --run-ink: #C9D69B;
+  --scrim: rgba(0, 0, 0, 0.35);
+  --shadow-rgb: 0, 0, 0;
+  --danger: #e0685a;
+  --danger-soft: rgba(224, 104, 90, 0.14);
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────── */
@@ -142,8 +180,8 @@ p {
 }
 
 .pill-btn--primary {
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .pill-btn--primary:hover:not(:disabled) {
@@ -171,7 +209,7 @@ p {
 }
 
 .icon-btn:hover {
-  background: rgba(23, 23, 23, 0.07);
+  background: rgba(var(--ink-rgb), 0.07);
 }
 
 /* ── Colapso animado ─────────────────────────────────────────────────── */
@@ -212,7 +250,7 @@ p {
   width: 150px;
   height: 3px;
   border-radius: var(--radius-pill);
-  background: rgba(23, 23, 23, 0.12);
+  background: rgba(var(--ink-rgb), 0.12);
   overflow: hidden;
 }
 
@@ -240,7 +278,7 @@ p {
   display: block;
   position: relative;
   overflow: hidden;
-  background: rgba(23, 23, 23, 0.07);
+  background: rgba(var(--ink-rgb), 0.07);
 }
 
 .skeleton::after {
@@ -251,7 +289,7 @@ p {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(23, 23, 23, 0.06),
+    rgba(var(--ink-rgb), 0.06),
     transparent
   );
   animation: skeleton-shimmer 1.4s ease-in-out infinite;

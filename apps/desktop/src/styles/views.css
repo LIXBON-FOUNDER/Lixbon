@@ -63,7 +63,7 @@
 .scm__net-btn:hover {
   color: var(--ink);
   border-color: var(--border);
-  background: rgba(23, 23, 23, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
 }
 
 .scm__commit {
@@ -135,7 +135,7 @@
   cursor: default;
 }
 
-.scm__file:hover { background: rgba(23, 23, 23, 0.04); }
+.scm__file:hover { background: rgba(var(--ink-rgb), 0.04); }
 
 .scm__badge {
   flex-shrink: 0;
@@ -149,13 +149,19 @@
   font-weight: 700;
   border-radius: 5px;
   color: var(--ink-soft);
-  background: rgba(23, 23, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .scm__badge--M { color: #a8551a; background: rgba(168, 85, 26, 0.12); }
 .scm__badge--A { color: #5f7a1f; background: rgba(95, 122, 31, 0.14); }
 .scm__badge--D { color: #c0392b; background: rgba(192, 57, 43, 0.12); }
 .scm__badge--new { color: #2f6b5e; background: rgba(47, 107, 94, 0.14); }
+
+/* Variantes claras de los badges Git sobre superficies oscuras */
+[data-theme='dark'] .scm__badge--M { color: #d89b62; background: rgba(216, 155, 98, 0.14); }
+[data-theme='dark'] .scm__badge--A { color: #a9b86e; background: rgba(169, 184, 110, 0.16); }
+[data-theme='dark'] .scm__badge--D { color: #e0685a; background: rgba(224, 104, 90, 0.14); }
+[data-theme='dark'] .scm__badge--new { color: #7fb8a4; background: rgba(127, 184, 164, 0.16); }
 
 .scm__file-name {
   font-size: 13px;
@@ -183,7 +189,7 @@
 }
 
 .scm__file:hover .scm__file-action { opacity: 1; }
-.scm__file-action:hover { color: var(--ink); background: rgba(23, 23, 23, 0.08); }
+.scm__file-action:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.08); }
 
 .scm__clone {
   display: flex;
@@ -246,7 +252,7 @@
 .quota-tile__meter {
   height: 5px;
   border-radius: var(--radius-pill);
-  background: rgba(23, 23, 23, 0.1);
+  background: rgba(var(--ink-rgb), 0.1);
   overflow: hidden;
   margin-top: 4px;
 }
@@ -303,12 +309,12 @@
 }
 
 .uchart__grid {
-  stroke: rgba(23, 23, 23, 0.09);
+  stroke: rgba(var(--ink-rgb), 0.09);
   stroke-width: 1;
 }
 
 .uchart__axis {
-  stroke: rgba(23, 23, 23, 0.35);
+  stroke: rgba(var(--ink-rgb), 0.35);
   stroke-width: 1;
 }
 
@@ -340,8 +346,8 @@
   transform: translateX(-50%);
   padding: 6px 12px;
   border-radius: var(--radius-pill);
-  background: var(--ink);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
   font-size: 12.5px;
   white-space: nowrap;
   pointer-events: none;
@@ -381,7 +387,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(23, 23, 23, 0.07);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
   font-size: 14px;
 }
 
@@ -412,11 +418,11 @@
 
 .settings__danger {
   color: var(--danger);
-  border-color: rgba(192, 57, 43, 0.5);
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
 }
 
 .settings__danger:hover:not(:disabled) {
-  background: rgba(192, 57, 43, 0.06);
+  background: var(--danger-soft);
 }
 
 .settings__key {
@@ -539,12 +545,12 @@
 
 .settings__segment:hover {
   color: var(--ink);
-  background: rgba(23, 23, 23, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
 }
 
 .settings__segment.is-active {
-  color: var(--bg);
-  background: var(--ink);
+  color: var(--on-primary);
+  background: var(--primary);
 }
 
 /* Toggle (insertar espacios) */
@@ -554,14 +560,14 @@
   height: 24px;
   border-radius: 999px;
   border: none;
-  background: rgba(23, 23, 23, 0.2);
+  background: rgba(var(--ink-rgb), 0.2);
   cursor: pointer;
   transition: background 0.15s ease;
   flex-shrink: 0;
 }
 
 .settings__toggle.is-on {
-  background: var(--ink);
+  background: var(--primary);
 }
 
 .settings__toggle-knob {
@@ -602,7 +608,7 @@
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 18px;
-  box-shadow: 0 18px 48px rgba(23, 23, 23, 0.18);
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), 0.18);
   animation: update-modal-drop 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -640,7 +646,7 @@
   border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--on-accent);
   white-space: nowrap;
 }
 
