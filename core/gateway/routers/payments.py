@@ -216,6 +216,7 @@ async def stripe_webhook(request: Request):
     try:
         sg.handle_event(event)
     except Exception as exc:
-        logger.error(f"error procesando webhook {event.get('type')}: {exc}")
+        etype = event.get("type", "?") if isinstance(event, dict) else "?"
+        logger.error(f"error procesando webhook {etype}: {exc}")
         # 200 igualmente: Stripe reintenta ante 5xx; evitamos bucles por errores no transitorios
     return {"received": True}

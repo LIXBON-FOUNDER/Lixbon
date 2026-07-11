@@ -160,9 +160,12 @@ def payment_method_summary(user: dict[str, Any]) -> dict[str, Any] | None:
         cust = stripe.Customer.retrieve(
             sub["stripe_customer_id"], expand=["invoice_settings.default_payment_method"]
         )
-        pm = cust.get("invoice_settings", {}).get("default_payment_method")
-        if pm and pm.get("card"):
-            return {"brand": pm["card"]["brand"], "last4": pm["card"]["last4"]}
+        # Acceso por atributo: los StripeObject nuevos no son dicts (.get falla)
+        inv = getattr(cust, "invoice_settings", None)
+        pm = getattr(inv, "default_payment_method", None) if inv else None
+        card = getattr(pm, "card", None) if pm else None
+        if card:
+            return {"brand": card.brand, "last4": card.last4}
     except Exception as exc:
         logger.warning(f"No se pudo leer el método de pago: {exc}")
     return None
@@ -214,11 +217,18 @@ def cancel_subscription_immediately(user_id: int) -> None:
 # ── Webhooks ────────────────────────────────────────────────────────────────
 
 def verify_and_parse(payload: bytes, sig_header: str | None) -> dict[str, Any]:
-    """Verifica la firma del webhook y devuelve el evento. Lanza si es inválido."""
+    """Verifica la firma del webhook y devuelve el evento como DICT PLANO.
+    Importante: no devolver el StripeObject de construct_event — en las
+    versiones nuevas de stripe-python ya no es un dict y los .get() de
+    handle_event lanzan AttributeError. La firma se valida igual; el payload
+    ya verificado se parsea con json."""
+    import json
+
     stripe = _client()
     if not STRIPE_WEBHOOK_SECRET:
         raise StripeNotConfigured("STRIPE_WEBHOOK_SECRET no está configurada")
-    return stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)  # lanza si es inválida
+    return json.loads(payload)
 
 
 def _user_id_from_subscription(stripe, subscription: dict[str, Any]) -> int | None:
@@ -243,6 +253,18 @@ def _plan_from_subscription(subscription: dict[str, Any]) -> dict[str, Any] | No
     return get_plan(plan_id) if plan_id else None
 
 
+def _period_end_from_subscription(subscription: dict[str, Any]) -> str | None:
+    """Fin del ciclo pagado. En las versiones nuevas de la API de Stripe
+    current_period_end ya no vive en la raíz de la suscripción sino en sus
+    items — se aceptan ambas formas."""
+    ts = subscription.get("current_period_end")
+    if not ts:
+        items = (subscription.get("items") or {}).get("data") or []
+        if items:
+            ts = items[0].get("current_period_end")
+    return _iso(ts)
+
+
 def handle_event(event: dict[str, Any]) -> None:
     """Procesa un evento de Stripe ya verificado (idempotente)."""
     etype = event["type"]
@@ -264,7 +286,7 @@ def handle_event(event: dict[str, Any]) -> None:
                 user_id, plan["id"],
                 customer_id=obj.get("customer"),
                 subscription_id=obj.get("id"),
-                current_period_end=_iso(obj.get("current_period_end")),
+                current_period_end=_period_end_from_subscription(obj),
                 cancel_at_period_end=bool(obj.get("cancel_at_period_end")),
                 status=status,
             )
