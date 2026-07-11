@@ -157,12 +157,21 @@ def payment_method_summary(user: dict[str, Any]) -> dict[str, Any] | None:
         return None
     stripe = _client()
     try:
+        # Acceso por atributo: los StripeObject nuevos no son dicts (.get falla)
         cust = stripe.Customer.retrieve(
             sub["stripe_customer_id"], expand=["invoice_settings.default_payment_method"]
         )
-        # Acceso por atributo: los StripeObject nuevos no son dicts (.get falla)
         inv = getattr(cust, "invoice_settings", None)
         pm = getattr(inv, "default_payment_method", None) if inv else None
+        # Checkout guarda la tarjeta como default de la SUSCRIPCIÓN, no del
+        # customer — si el customer no tiene, se mira ahí.
+        if not pm and sub.get("stripe_subscription_id"):
+            s = stripe.Subscription.retrieve(
+                sub["stripe_subscription_id"], expand=["default_payment_method"]
+            )
+            pm = getattr(s, "default_payment_method", None)
+        if isinstance(pm, str):  # id sin expandir
+            pm = stripe.PaymentMethod.retrieve(pm)
         card = getattr(pm, "card", None) if pm else None
         if card:
             return {"brand": card.brand, "last4": card.last4}
