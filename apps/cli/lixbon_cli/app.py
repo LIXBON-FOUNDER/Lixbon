@@ -83,9 +83,12 @@ class ChatApp:
         self.status.ctx_pct = pct
 
     def _estimate_context(self) -> tuple[int, float]:
-        chars = sum(len(m.get("content", "")) for m in self.history)
+        # Mide lo que se ENVIARÁ al modelo (últimos max_context_messages),
+        # no todo el historial: es lo que de verdad ocupa la ventana.
+        sent = self._context_messages()
+        chars = sum(len(m.get("content", "")) for m in sent)
         tokens = int(chars / max(self.chars_per_token, 1.0))
-        tokens += TOKENS_PER_IMAGE * sum(len(m.get("images") or []) for m in self.history)
+        tokens += TOKENS_PER_IMAGE * sum(len(m.get("images") or []) for m in sent)
         window = max(int(self.cfg.get("context_window", 8192)), 1)
         return tokens, min(100.0, tokens * 100.0 / window)
 
