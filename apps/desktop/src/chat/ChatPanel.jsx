@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInputBar } from './ChatInputBar';
+import { ApprovalCard } from './ApprovalCard';
 import { HistoryList } from './HistoryList';
 import { IconPlus, IconChevron, IconDots } from '../components/Icons';
 
@@ -52,7 +53,9 @@ export function ChatPanel() {
               <div className="chatpanel__empty">
                 <p>¿En qué trabajamos hoy?</p>
                 <p className="chatpanel__empty-hint">
-                  El archivo abierto en el editor se adjunta como contexto automáticamente.
+                  Con el agente activo, el modelo puede crear y editar archivos de tu
+                  carpeta de trabajo (cada cambio te pide aprobación). El archivo abierto
+                  se adjunta como contexto automáticamente.
                 </p>
               </div>
             ) : (
@@ -65,6 +68,7 @@ export function ChatPanel() {
               ))
             )}
           </div>
+          <ApprovalCard />
           <ChatInputBar />
         </>
       )}

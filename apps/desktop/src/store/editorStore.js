@@ -208,6 +208,38 @@ export const useEditorStore = create((set, get) => ({
     for (const t of dirty) await get().saveTab(t.path, silent);
   },
 
+  /** Recarga desde disco una pestaña abierta (tras una edición externa,
+      p. ej. el agente del chat). No toca pestañas cerradas ni las sucias
+      que difieren solo por teclear (el contenido igual se ignora). */
+  reloadFromDisk: async (path) => {
+    const { tabs, activePath } = get();
+    const tab = tabs.find((t) => t.path === path);
+    if (!tab) return;
+    let content;
+    try {
+      content = await readFileContent(path);
+    } catch {
+      return; // binario o ilegible: se deja como está
+    }
+    const isActive = path === activePath && liveView;
+    if (isActive) {
+      if (liveView.state.doc.toString() === content) return;
+      liveView.dispatch({
+        changes: { from: 0, to: liveView.state.doc.length, insert: content },
+      });
+      stateCache.set(path, liveView.state);
+    } else {
+      const state = stateCache.get(path);
+      if (!state || state.doc.toString() === content) return;
+      stateCache.set(
+        path,
+        state.update({ changes: { from: 0, to: state.doc.length, insert: content } }).state,
+      );
+    }
+    // El dispatch de arriba dispara markDirty; el contenido ya está en disco
+    set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false } : t)) });
+  },
+
   /** Tras renombrar en disco (archivo o carpeta): remapea pestañas y caché. */
   remapPaths: (oldPath, newPath) => {
     const mapPath = (p) => {

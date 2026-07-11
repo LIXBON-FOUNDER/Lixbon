@@ -279,7 +279,7 @@ def default_config() -> dict:
         "key_model": "",  # Si está definido, la key es de modelo específico (no se puede cambiar)
         "max_context_messages": 12,
         "context_window": 8192,  # tokens estimados de la ventana del modelo (para la barra de contexto)
-        "mode": "ask",
+        "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
         "auto_approve_tools": False,
     }
@@ -1028,28 +1028,85 @@ MAX_AGENT_STEPS = 12
 
 READ_ONLY_TOOLS = {"list_files", "read_file", "search"}
 
-AGENT_SYSTEM_PROMPT = (
-    "Eres un agente de codigo experto. Ejecutas acciones sobre archivos usando herramientas JSON.\n"
-    "Workspace: {workspace}\n"
-    "Rutas siempre RELATIVAS al workspace.\n\n"
-    "=== HERRAMIENTAS DISPONIBLES ===\n"
-    '{{"tool":"list_files","args":{{"path":"."}}}}\n'
-    '{{"tool":"read_file","args":{{"path":"archivo.txt"}}}}\n'
-    '{{"tool":"write_file","args":{{"path":"archivo.txt","content":"contenido completo"}}}}\n'
-    '{{"tool":"append_file","args":{{"path":"archivo.txt","content":"texto nuevo al final"}}}}\n'
-    '{{"tool":"mkdir","args":{{"path":"carpeta/subcarpeta"}}}}\n'
-    '{{"tool":"search","args":{{"pattern":"texto a buscar","path":"."}}}}\n'
-    '{{"tool":"delete_file","args":{{"path":"archivo.txt"}}}}\n'
-    '{{"tool":"rename_file","args":{{"src":"viejo.txt","dst":"nuevo.txt"}}}}\n'
-    '{{"tool":"run_command","args":{{"command":"npm install","timeout":60}}}}\n\n'
-    "=== REGLAS OBLIGATORIAS ===\n"
-    "1. Responde SIEMPRE con JSON puro para herramientas. NUNCA uses markdown (```) alrededor del JSON.\n"
-    "2. Para EDITAR un archivo existente: primero read_file para leer, luego write_file con el contenido COMPLETO modificado.\n"
-    "3. Puedes encadenar varias herramientas en una misma respuesta.\n"
-    "4. Cuando termines todas las acciones, responde con texto normal resumiendo lo que hiciste.\n"
-    "5. Los resultados de herramientas te llegan como TOOL_RESULT. Usalos para continuar.\n"
-    "6. Si la tarea involucra ejecutar comandos del sistema, usa run_command."
-)
+IGNORED_TREE_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
+    "target", ".next", ".idea", ".vscode", ".mypy_cache", ".pytest_cache",
+}
+MAX_TREE_ENTRIES = 150
+
+
+def workspace_tree(workspace: Path, max_entries: int = MAX_TREE_ENTRIES) -> str:
+    """Listado compacto del workspace para el system prompt del agente.
+
+    Da al modelo visión inmediata del proyecto sin que tenga que llamar
+    list_files; se trunca para no comerse la ventana de contexto.
+    """
+    entries: list[str] = []
+    truncated = False
+
+    def walk(directory: Path, depth: int) -> None:
+        nonlocal truncated
+        if truncated or depth > 4:
+            return
+        try:
+            items = sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except OSError:
+            return
+        for item in items:
+            if len(entries) >= max_entries:
+                truncated = True
+                return
+            rel = item.relative_to(workspace).as_posix()
+            if item.is_dir():
+                if item.name in IGNORED_TREE_DIRS:
+                    continue
+                entries.append(f"{rel}/")
+                walk(item, depth + 1)
+            else:
+                entries.append(rel)
+
+    walk(workspace, 1)
+    if not entries:
+        return "(workspace vacío)"
+    tree = "\n".join(entries)
+    if truncated:
+        tree += "\n… (hay más archivos; usa list_files para explorar)"
+    return tree
+
+
+def build_agent_system_prompt(workspace: Path) -> str:
+    return (
+        "Eres un agente de código experto que trabaja DIRECTAMENTE sobre los archivos del usuario.\n"
+        f"Workspace: {workspace}\n"
+        "Rutas siempre RELATIVAS al workspace.\n\n"
+        "=== HERRAMIENTAS DISPONIBLES ===\n"
+        "Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n"
+        '{"tool":"list_files","args":{"path":"."}}\n'
+        '{"tool":"read_file","args":{"path":"archivo.txt"}}\n'
+        '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n'
+        '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n'
+        '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n'
+        '{"tool":"search","args":{"pattern":"texto a buscar","path":"."}}\n'
+        '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n'
+        '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n'
+        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}\n\n'
+        "=== REGLAS OBLIGATORIAS ===\n"
+        "1. Si el usuario pide crear, modificar, eliminar o ejecutar algo, DEBES usar herramientas. "
+        "No describas el cambio ni muestres el código en un bloque: APLÍCALO con la herramienta.\n"
+        "2. Responde con el JSON puro de la herramienta. NUNCA lo envuelvas en markdown (```).\n"
+        "3. Para EDITAR un archivo existente: primero read_file, luego write_file con el contenido COMPLETO ya modificado.\n"
+        "4. Puedes encadenar varias herramientas en una misma respuesta.\n"
+        "5. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar.\n"
+        "6. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON) resumiendo lo que hiciste.\n"
+        "7. Si la tarea involucra comandos del sistema, usa run_command.\n\n"
+        "=== EJEMPLO ===\n"
+        "Usuario: crea un script que imprima hola\n"
+        'Asistente: {"tool":"write_file","args":{"path":"hola.py","content":"print(\'hola\')\\n"}}\n'
+        "Usuario: TOOL_RESULT write_file: Archivo creado: hola.py (14 chars)\n"
+        "Asistente: Listo: creé hola.py, que imprime «hola» al ejecutarlo.\n\n"
+        "=== ARCHIVOS DEL WORKSPACE ===\n"
+        f"{workspace_tree(workspace)}"
+    )
 
 
 # ── Sandbox de rutas y herramientas ─────────────────────────────────────────
@@ -1209,8 +1266,8 @@ def _validate_tool_dict(data: dict) -> dict | None:
     return None
 
 
-def extract_all_tool_calls(text: str) -> list[dict]:
-    """Extrae todos los JSON `{"tool":...}` embebidos en texto mixto.
+def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
+    """Localiza los JSON `{"tool":...}` embebidos: (call, inicio, fin_exclusivo).
 
     Cuenta llaves para soportar JSON anidado (write_file con content largo).
     """
@@ -1246,7 +1303,7 @@ def extract_all_tool_calls(text: str) -> list[dict]:
                             # de strings (JSON inválido pero frecuente en LLMs)
                             data = _validate_tool_dict(json.loads(candidate, strict=False))
                             if data:
-                                results.append(data)
+                                results.append((data, start, j + 1))
                         except Exception:
                             pass
                         i = j + 1
@@ -1257,11 +1314,19 @@ def extract_all_tool_calls(text: str) -> list[dict]:
     return results
 
 
+def extract_all_tool_calls(text: str) -> list[dict]:
+    """Extrae todos los JSON `{"tool":...}` embebidos en texto mixto."""
+    return [call for call, _, _ in _iter_tool_call_spans(text)]
+
+
 def strip_tool_calls(text: str) -> str:
-    """Quita los JSON de herramientas del texto para mostrar solo la prosa."""
-    for call in extract_all_tool_calls(text):
-        raw = json.dumps(call)
-        text = text.replace(raw, "")
+    """Quita los JSON de herramientas del texto para mostrar solo la prosa.
+
+    Corta por posición (no por re-serialización): el JSON del modelo rara vez
+    coincide byte a byte con json.dumps.
+    """
+    for _, start, end in reversed(_iter_tool_call_spans(text)):
+        text = text[:start] + text[end:]
     return text
 
 
@@ -1277,7 +1342,7 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     Devuelve (respuesta_final, history_actualizado).
     """
     console = make_console()
-    system_msg = {"role": "system", "content": AGENT_SYSTEM_PROMPT.format(workspace=workspace)}
+    system_msg = {"role": "system", "content": build_agent_system_prompt(workspace)}
     working = history[:]
 
     for _ in range(MAX_AGENT_STEPS):
@@ -1568,6 +1633,8 @@ class ChatApp:
             return 1
 
         print_note(f"Escribe un mensaje, o / para ver los comandos. Modo: {self.mode} {g('sep')} {self.workspace}")
+        if self.mode == "ask":
+            print_note("En modo ask el modelo solo conversa; usa /mode agent para que cree y edite archivos.")
         self.console.print()
         return self._prompt_loop()
 

@@ -108,6 +108,19 @@ export function FileTree() {
     loadRoot();
   }, [rootPath, loadRoot]);
 
+  // Cambios en disco hechos por el agente del chat: recargar raíz y
+  // carpetas expandidas (lib/agent.js emite 'lixbon:fs-changed')
+  useEffect(() => {
+    const onFsChanged = () => {
+      loadRoot();
+      for (const path of Object.keys(expandedDirs)) {
+        if (expandedDirs[path]) refreshDirectory(path);
+      }
+    };
+    window.addEventListener('lixbon:fs-changed', onFsChanged);
+    return () => window.removeEventListener('lixbon:fs-changed', onFsChanged);
+  }, [loadRoot, expandedDirs]);
+
   // Cerrar el menú contextual con clic fuera o Escape
   useEffect(() => {
     if (!ctxMenu) return;

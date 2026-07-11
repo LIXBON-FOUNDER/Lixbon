@@ -22,6 +22,14 @@
 - Paleta del ícono: acento `#B4C13A`, crema `#F6F7ED`, beige `#CBC7A9`, oliva, grises `#8A8A80`/`#5C5C55`; glifos con fallback ASCII para conhost legacy.
 - Verificado: build/frescura, selector y confirm3 con input simulado, SSE completo (sources/reasoning/content/usage) contra server fake, turno agent E2E (aprobar/rechazar/always), `/compact`, login real contra gateway local (usuario de prueba `cli_test_*@test.local` quedó en staging), self-update E2E. **Pendiente manual**: probar mouse/colores en Windows Terminal real y chat con inferencia real (requiere Ollama local o túnel GPU).
 
+### 0.b.1 Agente por defecto + workspace automático + agente en el IDE (2026-07-11, misma tarde)
+
+Feedback del usuario: "llama3.2 no crea archivos y no tiene en cuenta el workspace". Causas: el modo por defecto del CLI era `ask` (sin herramientas), el system prompt del agente no incluía los archivos del proyecto, y el chat del IDE no tenía soporte de agente en absoluto.
+
+- **CLI**: modo por defecto ahora `agent` (instalaciones viejas con `"mode":"ask"` persistido ven un aviso al arrancar sugiriendo `/mode agent`). `build_agent_system_prompt()` incluye el **árbol del workspace** (máx. 150 entradas, ignora `.git/node_modules/…`) + ejemplo few-shot para modelos pequeños. Fix: `strip_tool_calls` ahora corta por spans (antes re-serializaba con `json.dumps` y el `replace` casi nunca coincidía → el JSON quedaba visible en el transcript).
+- **IDE desktop**: el chat ganó **modo agente completo** (toggle "Agente" junto al selector de modelo, activo por defecto con carpeta abierta). Mismo protocolo JSON del CLI: `apps/desktop/src/lib/agentProtocol.js` (parte pura: parseo de tool calls tolerante a saltos de línea de LLMs, diff barato — testeada con Node) + `agent.js` (herramientas sobre los comandos Rust existentes: list/read/write/append/mkdir/search/delete/rename; **sin run_command** — no hay primitivo de exec con captura). Loop en `chatStore.send` (máx. 8 pasos) con **tarjeta de aprobación** (Aplicar / Aplicar todo / Rechazar + mini-diff), filas de herramienta `● write_file ruta +N −M` en el feed, árbol del workspace en el system prompt, refresco del FileTree (evento `lixbon:fs-changed`) y `editorStore.reloadFromDisk` para pestañas abiertas. Rust NO se tocó (compila solo en CI).
+- **Pendiente manual**: probar con Ollama real (llama3.2) en CLI e IDE; los modelos de 1-3B pueden fallar el formato JSON a veces — el prompt con ejemplo lo mitiga pero no lo garantiza.
+
 ---
 
 ## 0. Cómo ACTIVAR Stripe (F7 — pagos) 🔴
@@ -289,6 +297,7 @@ Implementa todos los "Próximamente" de Ajustes (menos Idioma, pospuesto) y el c
 - Endpoints: `GET /api/pricing` y `GET /api/credits/packs` (públicos), `POST /api/credits/checkout`, `GET /api/credits` (saldo+ledger), `GET /api/credits/usage` (por día/modelo con costo, del ledger). Sin Stripe: packs visibles, checkout 503.
 - **Web**: Facturación con bloque "Créditos de API" (saldo, packs, recargas, banner `?credits=success`); Uso con tabla "Consumo de API" (tokens in/out, peticiones, costo por día/modelo). **Admin**: tabs **Tarifas** (CRUD `/api/admin/pricing` en $/Mtok, la fila `*` no se borra, cache invalidada al editar) e **Ingresos** (`/api/admin/credits/summary`: revenue mes, recargas, consumo por modelo, top consumidores).
 - **Docs**: secciones nuevas "Usar tu API key" (curl, Python/JS SDK OpenAI, continue.dev, IDE lixbon) y "Precios de la API" (tabla dinámica de `GET /api/pricing`, cálculo del costo, 402); "API" y "Planes y límites" actualizadas al modelo de créditos.
+- **Grant manual de créditos (2026-07-11, tarde)**: `POST /api/admin/credits/grant` `{email, amount_usd (±1000, ≠0), note?}` — acredita saldo sin Stripe (reutiliza `credit_purchase` con `kind='grant'`, audit `credits_granted`); formulario "Acreditar saldo de API" en el tab Ingresos del admin. Motivación: sin Stripe conectado ni grant, NADIE (ni el owner) podía usar la API con key — el 402 `insufficient_credits` se manifestaba en clientes externos (VS Code Copilot BYOK lo muestra como "Quota Exceeded"). Requiere role=admin (⇒ `ADMIN_EMAILS` en Railway, aún pendiente).
 
 **Pendiente operativo**: añadir `checkout.session.completed` al webhook de Stripe cuando se activen los pagos (sección 0).
 

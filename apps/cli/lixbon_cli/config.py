@@ -18,7 +18,7 @@ def default_config() -> dict:
         "key_model": "",  # Si está definido, la key es de modelo específico (no se puede cambiar)
         "max_context_messages": 12,
         "context_window": 8192,  # tokens estimados de la ventana del modelo (para la barra de contexto)
-        "mode": "ask",
+        "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
         "auto_approve_tools": False,
     }

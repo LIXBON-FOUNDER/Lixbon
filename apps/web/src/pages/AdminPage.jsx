@@ -696,6 +696,80 @@ function TarifasTab() {
 
 // ── Ingresos (créditos de API) ──────────────────────────────────────────
 
+function GrantCreditsCard() {
+  const [email, setEmail] = useState('');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState('');
+  const [error, setError] = useState('');
+
+  const grant = async () => {
+    const parsed = parseFloat(amount);
+    if (!email.trim() || !Number.isFinite(parsed) || parsed === 0) {
+      setError('Indica un correo y un monto distinto de 0.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setResult('');
+    try {
+      const res = await api.post('/api/admin/credits/grant', {
+        email: email.trim(),
+        amount_usd: parsed,
+        note: note.trim() || null,
+      });
+      setResult(`Acreditado $${res.data.granted_usd.toFixed(2)} — saldo nuevo: $${res.data.balance_usd.toFixed(4)}`);
+      setAmount('');
+      setNote('');
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo acreditar el saldo'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="card">
+      <h2 className="card__title">Acreditar saldo de API</h2>
+      <p className="card__muted">
+        Añade créditos a un usuario sin pasar por Stripe (pruebas, promociones, soporte).
+        Queda en el ledger como <code>grant</code>; un monto negativo corrige un abono erróneo.
+      </p>
+      <div className="plan-models">
+        <input
+          className="plan-models__input"
+          type="email"
+          placeholder="correo del usuario"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          className="plan-models__input table-num"
+          placeholder="monto USD (ej: 5)"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <input
+          className="plan-models__input"
+          placeholder="nota (opcional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <button
+          className="pill-btn pill-btn--primary table__action"
+          disabled={busy || !email.trim() || !amount.trim()}
+          onClick={grant}
+        >
+          {busy ? 'Acreditando…' : 'Acreditar'}
+        </button>
+      </div>
+      {result && <p className="card__muted" role="status">{result}</p>}
+      {error && <p className="page__error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
 function IngresosTab() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -715,6 +789,8 @@ function IngresosTab() {
         <StatTile label={`Ingresos ${data.month}`} value={`$${data.revenue_usd.toFixed(2)}`} />
         <StatTile label="Recargas del mes" value={data.purchases} />
       </div>
+
+      <GrantCreditsCard />
 
       <section className="card">
         <h2 className="card__title">Consumo por modelo — {data.month}</h2>

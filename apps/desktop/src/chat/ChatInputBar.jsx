@@ -3,9 +3,10 @@
 import { useRef, useState, useEffect } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useEditorStore } from '../store/editorStore';
+import { useAppStore } from '../store/appStore';
 import { languageLabel } from '../editor/languages';
 import { ModelPicker } from './ModelPicker';
-import { IconSend, IconStop, IconX, IconFileCode } from '../components/Icons';
+import { IconSend, IconStop, IconX, IconFileCode, IconHammer } from '../components/Icons';
 
 const MAX_CONTEXT_CHARS = 24000; // evita reventar la ventana del modelo
 
@@ -14,8 +15,10 @@ export function ChatInputBar() {
   const [includeContext, setIncludeContext] = useState(true);
   const textareaRef = useRef(null);
 
-  const { send, stop, streaming } = useChatStore();
+  const { send, stop, streaming, agentMode, setAgentMode } = useChatStore();
   const activeTab = useEditorStore((s) => s.tabs.find((t) => t.path === s.activePath));
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot);
+  const agentActive = agentMode && !!workspaceRoot;
 
   // Autocrecer el textarea hasta 6 líneas
   useEffect(() => {
@@ -75,7 +78,7 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder="Pregunta sobre tu código…"
+        placeholder={agentActive ? 'Pide un cambio en tu código…' : 'Pregunta sobre tu código…'}
         rows={1}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -84,7 +87,24 @@ export function ChatInputBar() {
       />
 
       <div className="chat-inputbar__row">
-        <ModelPicker />
+        <div className="chat-inputbar__left">
+          <button
+            className={`agent-toggle ${agentActive ? 'is-on' : ''}`}
+            disabled={!workspaceRoot}
+            onClick={() => setAgentMode(!agentMode)}
+            title={
+              workspaceRoot
+                ? agentActive
+                  ? 'Agente activo: el modelo puede crear y editar archivos (con tu aprobación). Clic para desactivar.'
+                  : 'Activar el agente: el modelo podrá crear y editar archivos del workspace.'
+                : 'Abre una carpeta de trabajo para usar el agente'
+            }
+          >
+            <IconHammer size={12} />
+            Agente
+          </button>
+          <ModelPicker />
+        </div>
         {streaming ? (
           <button className="chat-inputbar__send" onClick={stop} title="Detener">
             <IconStop size={15} />

@@ -22,6 +22,26 @@ export function ChatMessage({ message, streaming }) {
     return <div className="msg msg--error">{message.content}</div>;
   }
 
+  if (message.role === 'tool') {
+    const a = message.args || {};
+    const target = a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
+    const failed = message.ok === false;
+    return (
+      <div className={`msg msg--toolrow ${failed ? 'is-err' : ''}`} title={message.content}>
+        <span className="toolrow__dot" aria-hidden>●</span>
+        <span className="toolrow__name">{message.tool}</span>
+        {target && <span className="toolrow__target">{target}</span>}
+        {message.change && (message.change.added > 0 || message.change.removed > 0) && (
+          <span className="toolrow__counts">
+            {message.change.added > 0 && <em className="toolrow__add">+{message.change.added}</em>}
+            {message.change.removed > 0 && <em className="toolrow__del">−{message.change.removed}</em>}
+          </span>
+        )}
+        {failed && <span className="toolrow__err">{message.content}</span>}
+      </div>
+    );
+  }
+
   return (
     <div className="msg msg--assistant">
       {message.sources?.length > 0 && (

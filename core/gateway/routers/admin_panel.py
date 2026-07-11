@@ -18,10 +18,13 @@ from core.persistence.queries import (
     admin_credits_summary,
     count_active_keys,
     create_model_pricing,
+    credit_purchase,
     delete_model_pricing,
+    get_credit_balance,
     get_daily_metrics,
     get_global_stats,
     get_plan_for_user,
+    get_user_by_email,
     get_user_by_id,
     list_audit_events,
     list_model_pricing,
@@ -279,6 +282,37 @@ async def api_admin_pricing_delete(
     invalidate_pricing_cache()
     log_audit_event("pricing_deleted", user_id=admin["id"], pricing_id=pricing_id)
     return {"deleted": True}
+
+
+class GrantCreditsPayload(BaseModel):
+    email: str
+    amount_usd: float  # positivo acredita; negativo corrige (ajuste manual)
+    note: str | None = None
+
+
+@router.post("/credits/grant")
+async def api_admin_credits_grant(
+    payload: GrantCreditsPayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    """Acredita saldo de API a un usuario sin pasar por Stripe (pruebas,
+    promociones, soporte). Queda en el ledger con kind='grant'."""
+    if not (-1000.0 <= payload.amount_usd <= 1000.0) or payload.amount_usd == 0:
+        raise HTTPException(status_code=400, detail="Monto fuera de rango (±1000 USD, distinto de 0)")
+    user = get_user_by_email(payload.email.strip().lower())
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    amount_microusd = round(payload.amount_usd * 1_000_000)
+    note = payload.note or f"grant admin ({admin.get('email', admin['id'])})"
+    credit_purchase(user["id"], amount_microusd, note=note, kind="grant")
+    log_audit_event(
+        "credits_granted", user_id=admin["id"],
+        target_user=user["id"], amount_usd=payload.amount_usd,
+    )
+    return {
+        "granted_usd": payload.amount_usd,
+        "balance_usd": microusd_to_usd(get_credit_balance(user["id"])),
+    }
 
 
 @router.get("/credits/summary")

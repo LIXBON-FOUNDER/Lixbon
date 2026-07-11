@@ -133,6 +133,8 @@ class ChatApp:
             return 1
 
         print_note(f"Escribe un mensaje, o / para ver los comandos. Modo: {self.mode} {g('sep')} {self.workspace}")
+        if self.mode == "ask":
+            print_note("En modo ask el modelo solo conversa; usa /mode agent para que cree y edite archivos.")
         self.console.print()
         return self._prompt_loop()
 
