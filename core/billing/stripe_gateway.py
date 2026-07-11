@@ -107,6 +107,55 @@ def create_checkout_session(user: dict[str, Any], plan_id: str, request_base: st
     return session.url
 
 
+def upgrade_subscription(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
+    """Upgrade in-place de la suscripción existente (ej. Pro → Advance) con
+    PRORRATEO: Stripe acredita lo no usado del plan actual y cobra la
+    diferencia al instante (always_invoice). Recién pagado Pro, la diferencia
+    es ~$15.00; a mitad de ciclo, menos (ya se pagó medio Pro). La renovación
+    siguiente ya va al precio nuevo. Solo hacia un plan MÁS CARO — los
+    downgrades se gestionan desde el customer portal."""
+    stripe = _client()
+    plan = get_plan(new_plan_id)
+    if not plan:
+        raise ValueError("plan_inexistente")
+    if not plan.get("stripe_price_id"):
+        raise ValueError("plan_sin_precio")
+    sub = get_subscription(user["id"])
+    if not sub or not sub.get("stripe_subscription_id"):
+        raise ValueError("sin_suscripcion")
+
+    current_plan = get_plan(sub["plan_id"]) if sub.get("plan_id") else None
+    if current_plan and plan["price_monthly_cents"] <= current_plan["price_monthly_cents"]:
+        raise ValueError("downgrade_por_portal")
+
+    sub_id = sub["stripe_subscription_id"]
+    current = stripe.Subscription.retrieve(sub_id)
+    # Acceso por atributo (StripeObject nuevos no son dicts)
+    items = getattr(getattr(current, "items", None), "data", None) or []
+    if not items:
+        raise ValueError("sin_suscripcion")
+
+    stripe.Subscription.modify(
+        sub_id,
+        items=[{"id": items[0].id, "price": plan["stripe_price_id"]}],
+        proration_behavior="always_invoice",     # factura y cobra la diferencia YA
+        payment_behavior="error_if_incomplete",  # si el cobro falla, no queda a medias
+        metadata={"lixbon_user_id": str(user["id"]), "plan_id": new_plan_id},
+    )
+    # Reflejo inmediato en BD; el webhook subscription.updated llega igual y es idempotente
+    apply_stripe_subscription(
+        user["id"], new_plan_id,
+        customer_id=sub.get("stripe_customer_id"),
+        subscription_id=sub_id,
+        current_period_end=sub.get("current_period_end"),
+        cancel_at_period_end=False,
+        status="active",
+    )
+    log_audit_event("subscription_upgraded", user_id=user["id"],
+                    from_plan=sub.get("plan_id"), to_plan=new_plan_id)
+    return {"upgraded": True, "plan_name": plan["name"]}
+
+
 def create_portal_session(user: dict[str, Any], request_base: str | None = None) -> str:
     """Portal de cliente de Stripe (cambiar método de pago, cancelar, facturas)."""
     stripe = _client()

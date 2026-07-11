@@ -28,6 +28,11 @@ export default function PlansPage() {
     setBusy(planId);
     try {
       const res = await api.post('/api/billing/checkout', { plan_id: planId });
+      if (res.data.upgraded) {
+        // Upgrade in-place (ya tenía suscripción): sin checkout, cobro prorrateado hecho
+        navigate('/account/facturacion?upgrade=success');
+        return;
+      }
       window.location.href = res.data.url; // redirige al checkout de Stripe
     } catch (err) {
       const d = err.response?.data?.detail;
@@ -35,6 +40,11 @@ export default function PlansPage() {
       setBusy(null);
     }
   };
+
+  // Precio del plan actual del usuario (para distinguir upgrade de alta nueva)
+  const currentPrice = user
+    ? (plans.find((p) => p.id === user.plan_id)?.price_monthly_cents ?? 0)
+    : 0;
 
   return (
     <div className="page page--cream">
@@ -78,8 +88,15 @@ export default function PlansPage() {
                     className="pill-btn pill-btn--primary plan-card__cta"
                     onClick={() => subscribe(p.id)}
                     disabled={busy === p.id}
+                    title={currentPrice > 0 && p.price_monthly_cents > currentPrice
+                      ? 'Se cobra solo la diferencia prorrateada del mes'
+                      : undefined}
                   >
-                    {busy === p.id ? 'Redirigiendo…' : `Suscribirme a ${p.name}`}
+                    {busy === p.id
+                      ? 'Procesando…'
+                      : currentPrice > 0 && p.price_monthly_cents > currentPrice
+                        ? `Mejorar a ${p.name} · solo la diferencia`
+                        : `Suscribirme a ${p.name}`}
                   </button>
                 ) : (
                   <span className="pill-btn pill-btn--primary plan-card__cta is-soon" title="Pagos disponibles pronto">

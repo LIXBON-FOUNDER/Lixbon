@@ -447,6 +447,7 @@ function FacturacionSection({ plan }) {
   const [packBusy, setPackBusy] = useState(null);
 
   const creditsOk = new URLSearchParams(window.location.search).get('credits') === 'success';
+  const upgradeOk = new URLSearchParams(window.location.search).get('upgrade') === 'success';
 
   useEffect(() => {
     api.get('/api/billing/status')
@@ -496,6 +497,11 @@ function FacturacionSection({ plan }) {
     <>
       {renews && (
         <p className="admin-ok" role="status">¡Listo! Tu suscripción se está activando. Puede tardar unos segundos en reflejarse.</p>
+      )}
+      {upgradeOk && (
+        <p className="admin-ok" role="status">
+          ¡Plan mejorado! Se cobró solo la diferencia prorrateada del mes — la verás en tus facturas.
+        </p>
       )}
       {error && <p className="page__error" role="alert">{error}</p>}
 

@@ -52,22 +52,44 @@ async def billing_config():
     return {"enabled": sg.enabled(), "publishable_key": STRIPE_PUBLISHABLE_KEY or None}
 
 
+_CHECKOUT_ERRORS = {
+    "plan_inexistente": "Ese plan no existe.",
+    "plan_sin_precio": "Ese plan aún no tiene un precio configurado.",
+    "sin_suscripcion": "No se encontró tu suscripción. Intenta desde Ajustes → Facturación.",
+    "downgrade_por_portal": "Para bajar de plan usa «Gestionar» en Ajustes → Facturación.",
+}
+
+
 @router.post("/checkout")
 async def create_checkout(
     payload: CheckoutPayload,
     request: Request,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
+    """Sin suscripción → Checkout de Stripe. Con suscripción activa de Stripe →
+    upgrade in-place con prorrateo (se cobra solo la diferencia)."""
     _require_enabled()
+    sub = get_subscription(user_data["id"])
+    is_upgrade = bool(sub and sub.get("stripe_subscription_id"))
     try:
+        if is_upgrade:
+            result = sg.upgrade_subscription(user_data, payload.plan_id)
+            return {
+                "upgraded": True,
+                "message": f"Tu plan ahora es {result['plan_name']}. "
+                           "Se cobró solo la diferencia prorrateada del mes.",
+            }
         url = sg.create_checkout_session(user_data, payload.plan_id, str(request.base_url))
     except ValueError as exc:
-        msg = {
-            "plan_inexistente": "Ese plan no existe.",
-            "plan_sin_precio": "Ese plan aún no tiene un precio configurado.",
-        }.get(str(exc), "No se pudo iniciar el pago.")
+        msg = _CHECKOUT_ERRORS.get(str(exc), "No se pudo iniciar el pago.")
         raise HTTPException(status_code=400, detail={"code": str(exc), "message": msg})
     except Exception as exc:
+        if "CardError" in type(exc).__name__:
+            raise HTTPException(status_code=402, detail={
+                "code": "card_declined",
+                "message": "Tu tarjeta rechazó el cobro de la diferencia. "
+                           "Actualiza el método de pago desde Ajustes → Facturación.",
+            })
         logger.error(f"checkout falló: {exc}")
         raise HTTPException(status_code=502, detail="No se pudo contactar con la pasarela de pago")
     return {"url": url}
