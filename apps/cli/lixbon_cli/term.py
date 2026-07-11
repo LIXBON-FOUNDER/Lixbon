@@ -89,5 +89,38 @@ def g(name: str) -> str:
     return table.get(name, "?")
 
 
+def is_mintty() -> bool:
+    """Git Bash / MSYS (mintty): la stdio son pipes, no una consola Windows."""
+    return bool(os.environ.get("MSYSTEM") or os.environ.get("TERM_PROGRAM") == "mintty")
+
+
 def is_interactive() -> bool:
-    return bool(sys.stdout.isatty() and sys.stdin.isatty())
+    """¿Hay un humano al otro lado? (aunque la terminal sea limitada)."""
+    if sys.stdout.isatty() and sys.stdin.isatty():
+        return True
+    # mintty expone la stdio como pipes: isatty() miente, pero es interactivo.
+    return is_mintty()
+
+
+_UI_CAPABLE: bool | None = None
+
+
+def ui_capable() -> bool:
+    """¿Soporta esta terminal la interfaz completa de prompt_toolkit?
+
+    Falso en Git Bash/mintty (sin consola Win32) y en pipes: ahí el CLI usa
+    el modo simplificado basado en input().
+    """
+    global _UI_CAPABLE
+    if _UI_CAPABLE is None:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            _UI_CAPABLE = False
+        else:
+            try:
+                from prompt_toolkit.output.defaults import create_output
+
+                create_output()
+                _UI_CAPABLE = True
+            except Exception:
+                _UI_CAPABLE = False
+    return _UI_CAPABLE

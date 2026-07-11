@@ -50,9 +50,9 @@ class ChatApp:
         self.client_id = client_id or os.getenv("HOSTNAME", "cli-client")
         self.title = title or "Sesión CLI"
         self.mode = self.cfg.get("mode", "ask")
-        self.workspace = Path(self.cfg.get("workspace") or Path.cwd()).resolve()
-        if not self.workspace.is_dir():
-            self.workspace = Path.cwd().resolve()
+        # El workspace es SIEMPRE la carpeta desde la que se lanzó el CLI
+        # (como Claude Code); /workspace lo cambia solo para la sesión.
+        self.workspace = Path.cwd().resolve()
         self.session = {"auto_approve": bool(self.cfg.get("auto_approve_tools", False))}
         self.history: list[dict] = []
         self.conversation_id = str(uuid.uuid4())
@@ -154,10 +154,22 @@ class ChatApp:
         return self._login_with_credentials(register=(method == "register"))
 
     def _prompt_text(self, label: str, password: bool = False) -> str | None:
-        from prompt_toolkit import prompt as pt_prompt
+        from lixbon_cli.term import ui_capable
 
         try:
-            value = pt_prompt([("class:prompt", f"{label}: ")], is_password=password, style=pt_style())
+            if not ui_capable():
+                if password:
+                    import getpass
+
+                    return getpass.getpass(f"  {label}: ").strip()
+                return input(f"  {label}: ").strip()
+            from prompt_toolkit import prompt as pt_prompt
+
+            value = pt_prompt(
+                [("", "  "), ("class:prompt", f"{label}: ")],
+                is_password=password,
+                style=pt_style(),
+            )
             return value.strip()
         except (KeyboardInterrupt, EOFError):
             return None
@@ -247,18 +259,64 @@ class ChatApp:
 
     # ── loop de entrada ──────────────────────────────────────────────────
 
+    def _completion_bindings(self):
+        """Enter/Tab aplican la sugerencia del menú de comandos (como Claude Code)."""
+        from prompt_toolkit.filters import has_completions
+        from prompt_toolkit.key_binding import KeyBindings
+
+        kb = KeyBindings()
+
+        def _apply(event) -> bool:
+            buff = event.current_buffer
+            state = buff.complete_state
+            if not state or not state.completions:
+                return False
+            completion = state.current_completion
+            if completion is None:
+                # Sin navegar: autocompletar solo el NOMBRE del comando;
+                # en menús de argumentos Enter debe enviar, no elegir por ti.
+                if " " in buff.text:
+                    return False
+                completion = state.completions[0]
+            # Si lo escrito ya ES la sugerencia, no hay nada que completar
+            if buff.text.strip() == completion.text.strip():
+                buff.cancel_completion()
+                return False
+            buff.apply_completion(completion)
+            return True
+
+        @kb.add("enter", filter=has_completions)
+        def _enter(event):
+            if not _apply(event):
+                event.current_buffer.validate_and_handle()
+
+        @kb.add("tab", filter=has_completions)
+        def _tab(event):
+            _apply(event)
+
+        return kb
+
     def _prompt_loop(self) -> int:
+        from lixbon_cli.term import ui_capable
+
+        if not ui_capable():
+            print_note("Interfaz simplificada: esta terminal no soporta la interfaz completa.")
+            print_note("Para la experiencia completa usa Windows Terminal (o `winpty lixbon` en Git Bash).")
+            return self._prompt_loop_plain()
+
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         session = PromptSession(
-            message=[("class:prompt", f"{g('prompt')} ")],
+            message=[("", "  "), ("class:prompt", f"{g('prompt')} ")],
             style=pt_style(),
             completer=make_completer(self),
             complete_while_typing=True,
+            key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
             bottom_toolbar=lambda: self.status.pt_toolbar(),
+            reserve_space_for_menu=6,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
 
@@ -278,16 +336,35 @@ class ChatApp:
                 print_note("Hasta pronto.")
                 return 0
 
-            if not text:
-                continue
-            if text.startswith("/"):
-                if self._dispatch_command(text) is False:
-                    return 0
-                continue
+            if self._handle_input(text) is False:
+                return 0
+
+    def _prompt_loop_plain(self) -> int:
+        """Loop sin prompt_toolkit (Git Bash/mintty): input() plano."""
+        while True:
+            self._refresh_status()
             try:
-                self.send_message(text)
-            except ApiError as exc:
-                print_error(str(exc))
+                text = input(f"  {g('prompt')} ").strip()
+            except KeyboardInterrupt:
+                print()
+                print_note("Hasta pronto.")
+                return 0
+            except EOFError:
+                print_note("Hasta pronto.")
+                return 0
+            if self._handle_input(text) is False:
+                return 0
+
+    def _handle_input(self, text: str):
+        if not text:
+            return True
+        if text.startswith("/"):
+            return self._dispatch_command(text)
+        try:
+            self.send_message(text)
+        except ApiError as exc:
+            print_error(str(exc))
+        return True
 
     def _dispatch_command(self, text: str):
         parts = text[1:].split(" ", 1)
@@ -370,6 +447,8 @@ class ChatApp:
         reasoning_seconds = 0.0
         interrupted = False
 
+        from lixbon_cli.theme import pad
+
         def _live_view():
             blocks = []
             if reasoning_parts:
@@ -383,7 +462,7 @@ class ChatApp:
             if not blocks:
                 blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
             blocks.append(self.status.rich_line())
-            return Group(*blocks)
+            return pad(Group(*blocks))
 
         def _final_view():
             blocks = []
@@ -659,9 +738,7 @@ class ChatApp:
         if not new_ws.is_dir():
             print_error("Ruta inválida o no es una carpeta.")
             return True
-        self.workspace = new_ws
-        self.cfg["workspace"] = str(new_ws)
-        save_config(self.cfg)
+        self.workspace = new_ws  # solo para esta sesión; al relanzar vuelve a cwd
         print_ok(f"Workspace: {new_ws}")
         return True
 

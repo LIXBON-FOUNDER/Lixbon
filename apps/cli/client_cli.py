@@ -98,8 +98,41 @@ def g(name: str) -> str:
     return table.get(name, "?")
 
 
+def is_mintty() -> bool:
+    """Git Bash / MSYS (mintty): la stdio son pipes, no una consola Windows."""
+    return bool(os.environ.get("MSYSTEM") or os.environ.get("TERM_PROGRAM") == "mintty")
+
+
 def is_interactive() -> bool:
-    return bool(sys.stdout.isatty() and sys.stdin.isatty())
+    """¿Hay un humano al otro lado? (aunque la terminal sea limitada)."""
+    if sys.stdout.isatty() and sys.stdin.isatty():
+        return True
+    # mintty expone la stdio como pipes: isatty() miente, pero es interactivo.
+    return is_mintty()
+
+
+_UI_CAPABLE: bool | None = None
+
+
+def ui_capable() -> bool:
+    """¿Soporta esta terminal la interfaz completa de prompt_toolkit?
+
+    Falso en Git Bash/mintty (sin consola Win32) y en pipes: ahí el CLI usa
+    el modo simplificado basado en input().
+    """
+    global _UI_CAPABLE
+    if _UI_CAPABLE is None:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            _UI_CAPABLE = False
+        else:
+            try:
+                from prompt_toolkit.output.defaults import create_output
+
+                create_output()
+                _UI_CAPABLE = True
+            except Exception:
+                _UI_CAPABLE = False
+    return _UI_CAPABLE
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/theme.py
@@ -147,15 +180,51 @@ RICH_STYLES = {
 
 _console = None
 
+# Respiro visual: margen izquierdo/derecho y ancho máximo de línea (leer texto
+# de borde a borde en una terminal ancha cansa).
+PAD_LEFT = 2
+PAD_RIGHT = 2
+MAX_WIDTH = 100
+
+
+def pad(renderable):
+    """Envuelve un renderable con el margen izquierdo estándar del CLI."""
+    from rich.padding import Padding
+
+    return Padding(renderable, (0, PAD_RIGHT, 0, PAD_LEFT))
+
 
 def make_console():
-    """Console rich compartida, con el tema Lixbon registrado."""
+    """Console rich compartida, con el tema Lixbon y márgenes registrados."""
     global _console
     if _console is None:
+        import shutil
+
         from rich.console import Console
         from rich.theme import Theme
 
-        _console = Console(theme=Theme(RICH_STYLES), highlight=False)
+
+        class LixbonConsole(Console):
+            """Console con margen izquierdo automático en cada print."""
+
+            def print(self, *objects, **kwargs):
+                if objects and not kwargs.pop("no_pad", False):
+                    from rich.padding import Padding
+
+                    objects = tuple(
+                        Padding(obj, (0, PAD_RIGHT, 0, PAD_LEFT)) if obj != "" else obj
+                        for obj in objects
+                    )
+                super().print(*objects, **kwargs)
+
+        cols = shutil.get_terminal_size((MAX_WIDTH, 24)).columns
+        _console = LixbonConsole(
+            theme=Theme(RICH_STYLES),
+            highlight=False,
+            width=min(cols, MAX_WIDTH),
+            # mintty (Git Bash) es una terminal real aunque la stdio sean pipes
+            force_terminal=True if is_mintty() else None,
+        )
     return _console
 
 
@@ -557,14 +626,26 @@ def select(title: str, options: list, default: int = 0, hint: str = "clic o flec
 
     Navegación: ↑/↓ (también j/k), Enter confirma, Esc/Ctrl+C cancela.
     Mouse: hover mueve la selección, clic confirma.
+    En terminales sin soporte (Git Bash/mintty) degrada a texto plano.
     """
+
+    options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
+    if not ui_capable():
+        return _select_plain(title, options, default)
+    try:
+        return _select_app(title, options, default, hint)
+    except Exception:
+        # La terminal mintió sobre sus capacidades: degradar en caliente
+        return _select_plain(title, options, default)
+
+
+def _select_app(title: str, options: list, default: int, hint: str):
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import HSplit, Layout, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.mouse_events import MouseEventType
 
-    options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
     state = {"index": max(0, min(default, len(options) - 1)), "result": None, "accepted": False}
     pointer = g("prompt")
 
@@ -582,12 +663,14 @@ def select(title: str, options: list, default: int = 0, hint: str = "clic o flec
 
     def fragments():
         out = [
+            ("", "  "),
             ("class:sel.title", f"? {title} "),
             ("class:sel.hint", f"({hint})\n"),
         ]
         for i, opt in enumerate(options):
             handler = _mouse_handler_for(i)
             active = i == state["index"]
+            out.append(("", "  "))
             if active:
                 out.append(("class:sel.pointer", f"{pointer} ", handler))
                 out.append(("class:sel.active", opt.label, handler))
@@ -642,6 +725,33 @@ def select(title: str, options: list, default: int = 0, hint: str = "clic o flec
         return chosen.value
     console.print(f"[lx.dim]? {esc(title)} {g('sep')} cancelado[/]")
     return None
+
+
+def _select_plain(title: str, options: list, default: int):
+    """Fallback sin prompt_toolkit: elegir escribiendo (Git Bash, pipes)."""
+    console = make_console()
+    default = max(0, min(default, len(options) - 1))
+    console.print(f"[lx.primary]? {esc(title)}[/] [lx.dim2](escribe parte del nombre; Enter = opción marcada; 'x' cancela)[/]")
+    for i, opt in enumerate(options):
+        marker = f"[lx.accent2]{g('prompt')}[/]" if i == default else " "
+        desc = f"  [lx.dim2]{g('sep')} {esc(opt.description)}[/]" if opt.description else ""
+        console.print(f"{marker} [lx.primary]{esc(opt.label)}[/]{desc}")
+    while True:
+        try:
+            raw = input("  > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return None
+        if not raw:
+            console.print(f"[lx.dim]? {esc(title)} {g('sep')}[/] [lx.accent2]{esc(options[default].label)}[/]")
+            return options[default].value
+        if raw.lower() in ("x", "q", "cancel", "cancelar"):
+            return None
+        matches = [o for o in options if raw.lower() in o.label.lower()]
+        if len(matches) == 1:
+            console.print(f"[lx.dim]? {esc(title)} {g('sep')}[/] [lx.accent2]{esc(matches[0].label)}[/]")
+            return matches[0].value
+        console.print(f"[lx.warn]{'Varias coincidencias' if matches else 'Sin coincidencias'}; sé más específico.[/]")
 
 
 def confirm3(question: str):
@@ -1286,8 +1396,11 @@ def make_completer(app):
             for name, args, desc in COMMAND_SPECS:
                 if name.startswith(prefix):
                     display = f"/{name} {args}".strip()
+                    # Con argumento: dejar espacio final para encadenar el
+                    # autocompletado del argumento (ej. /model → modelos)
+                    completion_text = f"/{name} " if args else f"/{name}"
                     yield Completion(
-                        f"/{name}",
+                        completion_text,
                         start_position=-len(text),
                         display=display,
                         display_meta=desc,
@@ -1372,9 +1485,9 @@ class ChatApp:
         self.client_id = client_id or os.getenv("HOSTNAME", "cli-client")
         self.title = title or "Sesión CLI"
         self.mode = self.cfg.get("mode", "ask")
-        self.workspace = Path(self.cfg.get("workspace") or Path.cwd()).resolve()
-        if not self.workspace.is_dir():
-            self.workspace = Path.cwd().resolve()
+        # El workspace es SIEMPRE la carpeta desde la que se lanzó el CLI
+        # (como Claude Code); /workspace lo cambia solo para la sesión.
+        self.workspace = Path.cwd().resolve()
         self.session = {"auto_approve": bool(self.cfg.get("auto_approve_tools", False))}
         self.history: list[dict] = []
         self.conversation_id = str(uuid.uuid4())
@@ -1476,10 +1589,21 @@ class ChatApp:
         return self._login_with_credentials(register=(method == "register"))
 
     def _prompt_text(self, label: str, password: bool = False) -> str | None:
-        from prompt_toolkit import prompt as pt_prompt
 
         try:
-            value = pt_prompt([("class:prompt", f"{label}: ")], is_password=password, style=pt_style())
+            if not ui_capable():
+                if password:
+                    import getpass
+
+                    return getpass.getpass(f"  {label}: ").strip()
+                return input(f"  {label}: ").strip()
+            from prompt_toolkit import prompt as pt_prompt
+
+            value = pt_prompt(
+                [("", "  "), ("class:prompt", f"{label}: ")],
+                is_password=password,
+                style=pt_style(),
+            )
             return value.strip()
         except (KeyboardInterrupt, EOFError):
             return None
@@ -1569,18 +1693,63 @@ class ChatApp:
 
     # ── loop de entrada ──────────────────────────────────────────────────
 
+    def _completion_bindings(self):
+        """Enter/Tab aplican la sugerencia del menú de comandos (como Claude Code)."""
+        from prompt_toolkit.filters import has_completions
+        from prompt_toolkit.key_binding import KeyBindings
+
+        kb = KeyBindings()
+
+        def _apply(event) -> bool:
+            buff = event.current_buffer
+            state = buff.complete_state
+            if not state or not state.completions:
+                return False
+            completion = state.current_completion
+            if completion is None:
+                # Sin navegar: autocompletar solo el NOMBRE del comando;
+                # en menús de argumentos Enter debe enviar, no elegir por ti.
+                if " " in buff.text:
+                    return False
+                completion = state.completions[0]
+            # Si lo escrito ya ES la sugerencia, no hay nada que completar
+            if buff.text.strip() == completion.text.strip():
+                buff.cancel_completion()
+                return False
+            buff.apply_completion(completion)
+            return True
+
+        @kb.add("enter", filter=has_completions)
+        def _enter(event):
+            if not _apply(event):
+                event.current_buffer.validate_and_handle()
+
+        @kb.add("tab", filter=has_completions)
+        def _tab(event):
+            _apply(event)
+
+        return kb
+
     def _prompt_loop(self) -> int:
+
+        if not ui_capable():
+            print_note("Interfaz simplificada: esta terminal no soporta la interfaz completa.")
+            print_note("Para la experiencia completa usa Windows Terminal (o `winpty lixbon` en Git Bash).")
+            return self._prompt_loop_plain()
+
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         session = PromptSession(
-            message=[("class:prompt", f"{g('prompt')} ")],
+            message=[("", "  "), ("class:prompt", f"{g('prompt')} ")],
             style=pt_style(),
             completer=make_completer(self),
             complete_while_typing=True,
+            key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
             bottom_toolbar=lambda: self.status.pt_toolbar(),
+            reserve_space_for_menu=6,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
 
@@ -1600,16 +1769,35 @@ class ChatApp:
                 print_note("Hasta pronto.")
                 return 0
 
-            if not text:
-                continue
-            if text.startswith("/"):
-                if self._dispatch_command(text) is False:
-                    return 0
-                continue
+            if self._handle_input(text) is False:
+                return 0
+
+    def _prompt_loop_plain(self) -> int:
+        """Loop sin prompt_toolkit (Git Bash/mintty): input() plano."""
+        while True:
+            self._refresh_status()
             try:
-                self.send_message(text)
-            except ApiError as exc:
-                print_error(str(exc))
+                text = input(f"  {g('prompt')} ").strip()
+            except KeyboardInterrupt:
+                print()
+                print_note("Hasta pronto.")
+                return 0
+            except EOFError:
+                print_note("Hasta pronto.")
+                return 0
+            if self._handle_input(text) is False:
+                return 0
+
+    def _handle_input(self, text: str):
+        if not text:
+            return True
+        if text.startswith("/"):
+            return self._dispatch_command(text)
+        try:
+            self.send_message(text)
+        except ApiError as exc:
+            print_error(str(exc))
+        return True
 
     def _dispatch_command(self, text: str):
         parts = text[1:].split(" ", 1)
@@ -1692,6 +1880,7 @@ class ChatApp:
         reasoning_seconds = 0.0
         interrupted = False
 
+
         def _live_view():
             blocks = []
             if reasoning_parts:
@@ -1705,7 +1894,7 @@ class ChatApp:
             if not blocks:
                 blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
             blocks.append(self.status.rich_line())
-            return Group(*blocks)
+            return pad(Group(*blocks))
 
         def _final_view():
             blocks = []
@@ -1981,9 +2170,7 @@ class ChatApp:
         if not new_ws.is_dir():
             print_error("Ruta inválida o no es una carpeta.")
             return True
-        self.workspace = new_ws
-        self.cfg["workspace"] = str(new_ws)
-        save_config(self.cfg)
+        self.workspace = new_ws  # solo para esta sesión; al relanzar vuelve a cwd
         print_ok(f"Workspace: {new_ws}")
         return True
 

@@ -51,8 +51,11 @@ def make_completer(app):
             for name, args, desc in COMMAND_SPECS:
                 if name.startswith(prefix):
                     display = f"/{name} {args}".strip()
+                    # Con argumento: dejar espacio final para encadenar el
+                    # autocompletado del argumento (ej. /model → modelos)
+                    completion_text = f"/{name} " if args else f"/{name}"
                     yield Completion(
-                        f"/{name}",
+                        completion_text,
                         start_position=-len(text),
                         display=display,
                         display_meta=desc,

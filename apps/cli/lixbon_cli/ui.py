@@ -57,14 +57,27 @@ def select(title: str, options: list, default: int = 0, hint: str = "clic o flec
 
     Navegación: ↑/↓ (también j/k), Enter confirma, Esc/Ctrl+C cancela.
     Mouse: hover mueve la selección, clic confirma.
+    En terminales sin soporte (Git Bash/mintty) degrada a texto plano.
     """
+    from lixbon_cli.term import ui_capable
+
+    options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
+    if not ui_capable():
+        return _select_plain(title, options, default)
+    try:
+        return _select_app(title, options, default, hint)
+    except Exception:
+        # La terminal mintió sobre sus capacidades: degradar en caliente
+        return _select_plain(title, options, default)
+
+
+def _select_app(title: str, options: list, default: int, hint: str):
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import HSplit, Layout, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.mouse_events import MouseEventType
 
-    options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
     state = {"index": max(0, min(default, len(options) - 1)), "result": None, "accepted": False}
     pointer = g("prompt")
 
@@ -82,12 +95,14 @@ def select(title: str, options: list, default: int = 0, hint: str = "clic o flec
 
     def fragments():
         out = [
+            ("", "  "),
             ("class:sel.title", f"? {title} "),
             ("class:sel.hint", f"({hint})\n"),
         ]
         for i, opt in enumerate(options):
             handler = _mouse_handler_for(i)
             active = i == state["index"]
+            out.append(("", "  "))
             if active:
                 out.append(("class:sel.pointer", f"{pointer} ", handler))
                 out.append(("class:sel.active", opt.label, handler))
@@ -142,6 +157,33 @@ def select(title: str, options: list, default: int = 0, hint: str = "clic o flec
         return chosen.value
     console.print(f"[lx.dim]? {esc(title)} {g('sep')} cancelado[/]")
     return None
+
+
+def _select_plain(title: str, options: list, default: int):
+    """Fallback sin prompt_toolkit: elegir escribiendo (Git Bash, pipes)."""
+    console = make_console()
+    default = max(0, min(default, len(options) - 1))
+    console.print(f"[lx.primary]? {esc(title)}[/] [lx.dim2](escribe parte del nombre; Enter = opción marcada; 'x' cancela)[/]")
+    for i, opt in enumerate(options):
+        marker = f"[lx.accent2]{g('prompt')}[/]" if i == default else " "
+        desc = f"  [lx.dim2]{g('sep')} {esc(opt.description)}[/]" if opt.description else ""
+        console.print(f"{marker} [lx.primary]{esc(opt.label)}[/]{desc}")
+    while True:
+        try:
+            raw = input("  > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return None
+        if not raw:
+            console.print(f"[lx.dim]? {esc(title)} {g('sep')}[/] [lx.accent2]{esc(options[default].label)}[/]")
+            return options[default].value
+        if raw.lower() in ("x", "q", "cancel", "cancelar"):
+            return None
+        matches = [o for o in options if raw.lower() in o.label.lower()]
+        if len(matches) == 1:
+            console.print(f"[lx.dim]? {esc(title)} {g('sep')}[/] [lx.accent2]{esc(matches[0].label)}[/]")
+            return matches[0].value
+        console.print(f"[lx.warn]{'Varias coincidencias' if matches else 'Sin coincidencias'}; sé más específico.[/]")
 
 
 def confirm3(question: str):

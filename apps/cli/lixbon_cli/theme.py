@@ -41,15 +41,52 @@ RICH_STYLES = {
 
 _console = None
 
+# Respiro visual: margen izquierdo/derecho y ancho máximo de línea (leer texto
+# de borde a borde en una terminal ancha cansa).
+PAD_LEFT = 2
+PAD_RIGHT = 2
+MAX_WIDTH = 100
+
+
+def pad(renderable):
+    """Envuelve un renderable con el margen izquierdo estándar del CLI."""
+    from rich.padding import Padding
+
+    return Padding(renderable, (0, PAD_RIGHT, 0, PAD_LEFT))
+
 
 def make_console():
-    """Console rich compartida, con el tema Lixbon registrado."""
+    """Console rich compartida, con el tema Lixbon y márgenes registrados."""
     global _console
     if _console is None:
+        import shutil
+
         from rich.console import Console
         from rich.theme import Theme
 
-        _console = Console(theme=Theme(RICH_STYLES), highlight=False)
+        from lixbon_cli.term import is_mintty
+
+        class LixbonConsole(Console):
+            """Console con margen izquierdo automático en cada print."""
+
+            def print(self, *objects, **kwargs):
+                if objects and not kwargs.pop("no_pad", False):
+                    from rich.padding import Padding
+
+                    objects = tuple(
+                        Padding(obj, (0, PAD_RIGHT, 0, PAD_LEFT)) if obj != "" else obj
+                        for obj in objects
+                    )
+                super().print(*objects, **kwargs)
+
+        cols = shutil.get_terminal_size((MAX_WIDTH, 24)).columns
+        _console = LixbonConsole(
+            theme=Theme(RICH_STYLES),
+            highlight=False,
+            width=min(cols, MAX_WIDTH),
+            # mintty (Git Bash) es una terminal real aunque la stdio sean pipes
+            force_terminal=True if is_mintty() else None,
+        )
     return _console
 
 
