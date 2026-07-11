@@ -5,7 +5,7 @@ import time
 import uuid
 from pathlib import Path
 
-from lixbon_cli.agent import run_agent_turn, strip_tool_calls
+from lixbon_cli.agent import clean_prose, run_agent_turn
 from lixbon_cli.api import ApiClient, ApiError
 from lixbon_cli.commands import (
     COMMAND_SPECS,
@@ -475,7 +475,7 @@ class ChatApp:
                 blocks.append(Text(f"{g('spark_alt')} Pensó durante {reasoning_seconds:.1f}s", style="lx.dim2"))
             text = "".join(content_parts).strip()
             if self.mode == "agent":
-                text = strip_tool_calls(text).strip() or f"[herramientas solicitadas {g('ellipsis')}]"
+                text = clean_prose(text) or f"[herramientas solicitadas {g('ellipsis')}]"
             blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
             if interrupted:
                 blocks.append(Text(f"{g('sep')} interrumpido {g('sep')}", style="lx.dim"))
@@ -724,9 +724,9 @@ class ChatApp:
             self.session["auto_approve"] = arg == "on"
         else:
             chosen = select("Auto-aprobar herramientas del agente", [
-                Option("off", "off", "pedir confirmación en cada cambio (recomendado)"),
-                Option("on", "on", "aplicar cambios sin preguntar"),
-            ], default=1 if self.session.get("auto_approve") else 0)
+                Option("on", "on", "aplicar cambios sin preguntar (por defecto; el diff queda en el transcript)"),
+                Option("off", "off", "pedir confirmación en cada cambio"),
+            ], default=0 if self.session.get("auto_approve") else 1)
             if chosen is None:
                 return True
             self.session["auto_approve"] = chosen == "on"

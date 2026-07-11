@@ -20,7 +20,7 @@ def default_config() -> dict:
         "context_window": 8192,  # tokens estimados de la ventana del modelo (para la barra de contexto)
         "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
-        "auto_approve_tools": False,
+        "auto_approve_tools": True,  # el agente escribe directo; /approve off para pedir confirmación
     }
 
 

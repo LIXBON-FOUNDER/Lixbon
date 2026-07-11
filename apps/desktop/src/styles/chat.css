@@ -137,18 +137,57 @@
   50% { opacity: 0.4; }
 }
 
-/* ── Modo agente: filas de herramienta ───────────────────────────────── */
+/* ── Pensamiento del modelo (plegado por defecto) ────────────────────── */
+
+.msg-think {
+  margin-bottom: 8px;
+}
+
+.msg-think__summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-soft);
+  opacity: 0.75;
+  user-select: none;
+}
+
+.msg-think__summary::-webkit-details-marker { display: none; }
+
+.msg-think[open] .msg-think__summary,
+.msg-think__summary:hover { opacity: 1; }
+
+.msg-think__body {
+  margin-top: 6px;
+  padding: 8px 10px 8px 12px;
+  border-left: 2px solid var(--border-soft);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── Modo agente: filas de herramienta (plegadas por defecto) ────────── */
 
 .msg--toolrow {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 7px;
   font-size: 12.5px;
   font-family: var(--font-mono);
   color: var(--ink-soft);
   padding: 2px 4px;
 }
+
+.toolrow__summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.toolrow__summary::-webkit-details-marker { display: none; }
 
 .toolrow__dot {
   color: var(--accent-deep);
@@ -172,6 +211,32 @@
 .toolrow__del { font-style: normal; color: var(--danger); }
 
 .toolrow__err { color: var(--danger); overflow-wrap: anywhere; }
+
+.toolrow__body { margin: 6px 0 2px 17px; }
+
+.toolrow__diff {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diffline--add { color: var(--accent-deep); }
+.diffline--del { color: var(--danger); }
+.diffline--more { color: var(--ink-soft); }
+
+.toolrow__result {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
 
 /* ── Modo agente: tarjeta de aprobación ──────────────────────────────── */
 

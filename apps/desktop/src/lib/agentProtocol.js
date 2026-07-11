@@ -108,14 +108,59 @@ export function stripToolCalls(text) {
   return text;
 }
 
-/** Texto mostrable durante el streaming: sin JSON completo ni JSON a medias. */
+/** Corta la salida donde el modelo empieza a fabricar resultados de
+    herramientas ("TOOL_RESULT …"): los LLMs pequeños se contestan a sí
+    mismos imitando el ejemplo del prompt, y todo lo posterior es alucinado. */
+export function truncateFabricated(text) {
+  const idx = text.indexOf('TOOL_RESULT');
+  if (idx === -1) return text;
+  const lineStart = text.lastIndexOf('\n', idx);
+  return text.slice(0, lineStart === -1 ? idx : lineStart);
+}
+
+/** Prosa final mostrable: sin tool calls, sin TOOL_RESULT fabricados y sin
+    las vallas de código vacías que quedan al extraer el JSON (```json```). */
+export function cleanProse(text) {
+  return stripToolCalls(truncateFabricated(text))
+    .replace(/```[\w-]*\s*```/g, '')
+    .trim();
+}
+
+/** Texto mostrable durante el streaming: sin JSON completo, a medias ni
+    vallas huérfanas. */
 export function displayableText(text) {
-  let out = stripToolCalls(text);
+  let out = stripToolCalls(truncateFabricated(text));
   for (const needle of ['{"tool"', '{ "tool"']) {
     const idx = out.indexOf(needle);
     if (idx !== -1) out = out.slice(0, idx);
   }
+  out = out.replace(/```[\w-]*\s*```/g, '');
+  out = out.replace(/```[\w-]*\s*$/, ''); // valla abierta al final del stream
   return out;
+}
+
+/** Separa el razonamiento `<think>…</think>` del texto visible. Tolera el
+    tag sin cerrar (streaming): lo que sigue a <think> es razonamiento. */
+export function splitThinking(text) {
+  let thinking = '';
+  let visible = '';
+  let rest = text;
+  for (;;) {
+    const open = rest.indexOf('<think>');
+    if (open === -1) {
+      visible += rest;
+      break;
+    }
+    visible += rest.slice(0, open);
+    const close = rest.indexOf('</think>', open + 7);
+    if (close === -1) {
+      thinking += rest.slice(open + 7);
+      break;
+    }
+    thinking += rest.slice(open + 7, close) + '\n';
+    rest = rest.slice(close + 8);
+  }
+  return { thinking: thinking.trim(), visible };
 }
 
 /** Diff barato por líneas: recorta prefijo/sufijo comunes y cuenta el resto. */

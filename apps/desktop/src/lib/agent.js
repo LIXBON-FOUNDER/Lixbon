@@ -16,9 +16,12 @@ import { diffCounts, normalizeRel } from './agentProtocol';
 export {
   MAX_AGENT_STEPS,
   READ_ONLY_TOOLS,
+  cleanProse,
   displayableText,
   extractToolCalls,
+  splitThinking,
   stripToolCalls,
+  truncateFabricated,
 } from './agentProtocol';
 
 const MAX_TREE_ENTRIES = 150;

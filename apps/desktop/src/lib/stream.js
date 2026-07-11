@@ -31,6 +31,7 @@ export async function streamChatCompletion({
   signal,
   onDelta,
   onSources,
+  onReasoning,
   webSearch = false,
 }) {
   const res = await fetch(`${serverUrl}/v1/chat/completions`, {
@@ -80,6 +81,8 @@ export async function streamChatCompletion({
       try {
         const chunk = JSON.parse(data);
         if (chunk.lixbon_sources && onSources) { onSources(chunk.lixbon_sources); continue; }
+        const reasoning = chunk.choices?.[0]?.delta?.reasoning_content;
+        if (reasoning && onReasoning) onReasoning(reasoning);
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) onDelta(delta);
       } catch { /* chunk malformado: se ignora */ }

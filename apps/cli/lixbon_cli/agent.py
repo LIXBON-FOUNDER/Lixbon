@@ -4,6 +4,7 @@ El modelo emite JSON `{"tool": ..., "args": {...}}` embebido en su respuesta;
 aquí se parsea, se pide aprobación (con vista previa del diff) y se ejecuta.
 """
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -318,6 +319,24 @@ def strip_tool_calls(text: str) -> str:
     return text
 
 
+def truncate_fabricated(text: str) -> str:
+    """Corta donde el modelo fabrica un "TOOL_RESULT …" (se contesta a sí
+    mismo imitando el ejemplo del prompt): lo posterior es alucinado."""
+    idx = text.find("TOOL_RESULT")
+    if idx == -1:
+        return text
+    line_start = text.rfind("\n", 0, idx)
+    return text[: idx if line_start == -1 else line_start]
+
+
+def clean_prose(text: str) -> str:
+    """Prosa final mostrable: sin tool calls, sin TOOL_RESULT fabricados y sin
+    las vallas de código vacías que quedan al extraer el JSON (```json```)."""
+    text = strip_tool_calls(truncate_fabricated(text))
+    text = re.sub(r"```[\w-]*\s*```", "", text)
+    return text.strip()
+
+
 # ── Loop del agente ─────────────────────────────────────────────────────────
 
 def run_agent_turn(history: list[dict], workspace: Path, session: dict,
@@ -334,7 +353,8 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     working = history[:]
 
     for _ in range(MAX_AGENT_STEPS):
-        assistant = stream_assistant([system_msg] + working)
+        # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
+        assistant = truncate_fabricated(stream_assistant([system_msg] + working))
         working.append({"role": "assistant", "content": assistant})
 
         tool_calls = extract_all_tool_calls(assistant)

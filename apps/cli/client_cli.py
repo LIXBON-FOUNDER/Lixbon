@@ -281,7 +281,7 @@ def default_config() -> dict:
         "context_window": 8192,  # tokens estimados de la ventana del modelo (para la barra de contexto)
         "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
-        "auto_approve_tools": False,
+        "auto_approve_tools": True,  # el agente escribe directo; /approve off para pedir confirmación
     }
 
 
@@ -1020,6 +1020,7 @@ El modelo emite JSON `{"tool": ..., "args": {...}}` embebido en su respuesta;
 aquí se parsea, se pide aprobación (con vista previa del diff) y se ejecuta.
 """
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -1330,6 +1331,24 @@ def strip_tool_calls(text: str) -> str:
     return text
 
 
+def truncate_fabricated(text: str) -> str:
+    """Corta donde el modelo fabrica un "TOOL_RESULT …" (se contesta a sí
+    mismo imitando el ejemplo del prompt): lo posterior es alucinado."""
+    idx = text.find("TOOL_RESULT")
+    if idx == -1:
+        return text
+    line_start = text.rfind("\n", 0, idx)
+    return text[: idx if line_start == -1 else line_start]
+
+
+def clean_prose(text: str) -> str:
+    """Prosa final mostrable: sin tool calls, sin TOOL_RESULT fabricados y sin
+    las vallas de código vacías que quedan al extraer el JSON (```json```)."""
+    text = strip_tool_calls(truncate_fabricated(text))
+    text = re.sub(r"```[\w-]*\s*```", "", text)
+    return text.strip()
+
+
 # ── Loop del agente ─────────────────────────────────────────────────────────
 
 def run_agent_turn(history: list[dict], workspace: Path, session: dict,
@@ -1346,7 +1365,8 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     working = history[:]
 
     for _ in range(MAX_AGENT_STEPS):
-        assistant = stream_assistant([system_msg] + working)
+        # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
+        assistant = truncate_fabricated(stream_assistant([system_msg] + working))
         working.append({"role": "assistant", "content": assistant})
 
         tool_calls = extract_all_tool_calls(assistant)
@@ -1972,7 +1992,7 @@ class ChatApp:
                 blocks.append(Text(f"{g('spark_alt')} Pensó durante {reasoning_seconds:.1f}s", style="lx.dim2"))
             text = "".join(content_parts).strip()
             if self.mode == "agent":
-                text = strip_tool_calls(text).strip() or f"[herramientas solicitadas {g('ellipsis')}]"
+                text = clean_prose(text) or f"[herramientas solicitadas {g('ellipsis')}]"
             blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
             if interrupted:
                 blocks.append(Text(f"{g('sep')} interrumpido {g('sep')}", style="lx.dim"))
@@ -2221,9 +2241,9 @@ class ChatApp:
             self.session["auto_approve"] = arg == "on"
         else:
             chosen = select("Auto-aprobar herramientas del agente", [
-                Option("off", "off", "pedir confirmación en cada cambio (recomendado)"),
-                Option("on", "on", "aplicar cambios sin preguntar"),
-            ], default=1 if self.session.get("auto_approve") else 0)
+                Option("on", "on", "aplicar cambios sin preguntar (por defecto; el diff queda en el transcript)"),
+                Option("off", "off", "pedir confirmación en cada cambio"),
+            ], default=0 if self.session.get("auto_approve") else 1)
             if chosen is None:
                 return True
             self.session["auto_approve"] = chosen == "on"

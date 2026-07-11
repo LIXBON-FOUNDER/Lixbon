@@ -2,6 +2,7 @@
 // actualizaciones y editor. Las API keys se administran en la web.
 import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
+import { useChatStore } from '../../store/chatStore';
 import { useVersion } from '../../hooks/useVersion';
 import { planColor } from '../../lib/planColors';
 import { useTheme } from '../../lib/theme';
@@ -22,6 +23,7 @@ export function Settings() {
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
     autoSave, setAutoSave,
   } = useAppStore();
+  const { agentMode, setAgentMode, autoApprove, setAutoApprove } = useChatStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
   const [theme, setThemeMode] = useTheme();
 
@@ -294,6 +296,40 @@ export function Settings() {
             role="switch"
             aria-checked={insertSpaces}
             title={insertSpaces ? 'Se insertan espacios' : 'Se insertan tabulaciones'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+      </section>
+
+      <section className="settings__panel">
+        <h3 className="settings__panel-title">Agente del chat</h3>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">Modo agente</span>
+          <button
+            className={`settings__toggle ${agentMode ? 'is-on' : ''}`}
+            onClick={() => setAgentMode(!agentMode)}
+            role="switch"
+            aria-checked={agentMode}
+            title={agentMode
+              ? 'El modelo puede crear, editar y eliminar archivos del workspace'
+              : 'El chat solo conversa, sin tocar archivos'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">Aplicar cambios sin preguntar</span>
+          <button
+            className={`settings__toggle ${autoApprove ? 'is-on' : ''}`}
+            onClick={() => setAutoApprove(!autoApprove)}
+            role="switch"
+            aria-checked={autoApprove}
+            title={autoApprove
+              ? 'El agente escribe directo en los archivos (el diff queda en el chat)'
+              : 'Cada cambio pide aprobación con vista previa del diff'}
           >
             <span className="settings__toggle-knob" />
           </button>

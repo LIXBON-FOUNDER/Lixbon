@@ -14,11 +14,13 @@ import {
   MAX_AGENT_STEPS,
   READ_ONLY_TOOLS,
   buildAgentSystemPrompt,
+  cleanProse,
   computeChangePreview,
   displayableText,
   executeToolCall,
   extractToolCalls,
-  stripToolCalls,
+  splitThinking,
+  truncateFabricated,
 } from '../lib/agent';
 
 let abortController = null;
@@ -29,7 +31,9 @@ export const useChatStore = create((set, get) => ({
   streaming: false,
   view: 'chat', // 'chat' | 'history'
   agentMode: (localStorage.getItem('lixbon_agent_mode') ?? 'true') === 'true',
-  autoApprove: false, // "Aplicar todo" dura la sesión, no se persiste
+  // Por defecto el agente escribe directo (petición del diseño); en Ajustes
+  // se puede exigir aprobación por cambio.
+  autoApprove: (localStorage.getItem('lixbon_agent_auto') ?? 'true') === 'true',
   pendingApproval: null, // { tool, args, change, resolve }
 
   setView: (view) => set({ view }),
@@ -37,6 +41,11 @@ export const useChatStore = create((set, get) => ({
   setAgentMode: (agentMode) => {
     localStorage.setItem('lixbon_agent_mode', agentMode ? 'true' : 'false');
     set({ agentMode });
+  },
+
+  setAutoApprove: (autoApprove) => {
+    localStorage.setItem('lixbon_agent_auto', autoApprove ? 'true' : 'false');
+    set({ autoApprove });
   },
 
   resolveApproval: (decision) => {
@@ -48,7 +57,7 @@ export const useChatStore = create((set, get) => ({
 
   newConversation: () => {
     get().stop();
-    set({ messages: [], conversationId: null, view: 'chat', autoApprove: false });
+    set({ messages: [], conversationId: null, view: 'chat' });
   },
 
   loadConversation: async (id) => {
@@ -66,10 +75,11 @@ export const useChatStore = create((set, get) => ({
           ok: !firstLine.includes('[ERROR]'),
         };
       }
-      const content = m.role === 'assistant'
-        ? stripToolCalls(m.content || '').trim() || m.content
-        : m.content;
-      return { role: m.role === 'assistant' ? 'assistant' : 'user', content };
+      if (m.role === 'assistant') {
+        const { thinking, visible } = splitThinking(m.content || '');
+        return { role: 'assistant', content: cleanProse(visible) || m.content, thinking };
+      }
+      return { role: 'user', content: m.content };
     });
     set({ conversationId: id, messages, view: 'chat' });
   },
@@ -143,6 +153,9 @@ export const useChatStore = create((set, get) => ({
     try {
       for (let step = 0; step < MAX_AGENT_STEPS; step++) {
         let raw = '';
+        let reasoningAcc = ''; // delta.reasoning_content del gateway
+        const liveThinking = (inline) =>
+          [reasoningAcc, inline].filter(Boolean).join('\n').trim();
         await streamChatCompletion({
           serverUrl,
           apiKey,
@@ -152,23 +165,38 @@ export const useChatStore = create((set, get) => ({
           signal,
           onDelta: (delta) => {
             raw += delta;
-            patchLast({ content: agentActive ? displayableText(raw) : raw });
+            const { thinking, visible } = splitThinking(raw);
+            patchLast({
+              content: agentActive ? displayableText(visible) : visible,
+              thinking: liveThinking(thinking),
+            });
+          },
+          onReasoning: (delta) => {
+            reasoningAcc += delta;
+            patchLast({ thinking: liveThinking(splitThinking(raw).thinking) });
           },
           onSources: (sources) => patchLast({ sources }),
         });
 
-        if (!agentActive) break;
+        const { thinking, visible } = splitThinking(raw);
+        const fullThinking = liveThinking(thinking);
 
-        const calls = extractToolCalls(raw);
-        const prose = stripToolCalls(raw).trim();
-        patchLast({ content: prose });
+        if (!agentActive) {
+          patchLast({ content: visible.trim(), thinking: fullThinking });
+          break;
+        }
+
+        const spoken = truncateFabricated(visible);
+        const calls = extractToolCalls(spoken);
+        const prose = cleanProse(spoken);
+        patchLast({ content: prose, thinking: fullThinking });
         if (!calls.length) break;
-        if (!prose) {
+        if (!prose && !fullThinking) {
           // La burbuja solo pedía herramientas: fuera, quedan las filas
           set({ messages: get().messages.slice(0, -1) });
         }
 
-        modelMessages.push({ role: 'assistant', content: raw });
+        modelMessages.push({ role: 'assistant', content: spoken });
         const results = [];
         for (const call of calls) {
           if (signal.aborted) break;
@@ -195,7 +223,7 @@ export const useChatStore = create((set, get) => ({
       // Burbuja vacía sobrante (cancelación entre pasos, tope de pasos…)
       const msgs = get().messages;
       const last = msgs[msgs.length - 1];
-      if (last?.role === 'assistant' && !(last.content || '').trim() && !last.sources) {
+      if (last?.role === 'assistant' && !(last.content || '').trim() && !last.sources && !last.thinking) {
         set({ messages: msgs.slice(0, -1) });
       }
     }
