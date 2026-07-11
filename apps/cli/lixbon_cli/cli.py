@@ -210,7 +210,7 @@ def cmd_ui_demo(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lixbon",
-        description="Lixbon Code — asistente de código en tu terminal",
+        description="Lixbon CLI — asistente de código en tu terminal",
     )
     sub = parser.add_subparsers(dest="command")
 

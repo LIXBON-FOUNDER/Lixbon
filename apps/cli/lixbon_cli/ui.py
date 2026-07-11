@@ -29,7 +29,7 @@ def render_welcome_box(console) -> None:
 
     spark = g("spark")
     body = (
-        f"[lx.accent]{spark}[/] [bold lx.primary]Lixbon Code[/] [lx.dim]{g('sep')} asistente de código en tu terminal[/]\n\n"
+        f"[lx.accent]{spark}[/] [bold lx.primary]Lixbon CLI[/] [lx.dim]{g('sep')} asistente de código en tu terminal[/]\n\n"
         f"[lx.dim]Consejos para empezar:[/]\n\n"
         f" [lx.beige]1.[/] [lx.primary]Pide un cambio en lenguaje natural[/]\n"
         f" [lx.beige]2.[/] [lx.primary]Escribe [lx.accent2]/[/] para ver los comandos[/]\n"
