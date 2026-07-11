@@ -24,8 +24,12 @@ from core.persistence.models import (
     AppVersion,
     AuditEvent,
     Conversation,
+    CreditAccount,
+    CreditLedger,
+    CreditPack,
     EmailToken,
     Message,
+    ModelPricing,
     Node,
     Plan,
     Session,
@@ -189,6 +193,51 @@ def mark_email_verified(user_id: int) -> None:
         s.execute(update(User).where(User.id == user_id).values(email_verified=1))
 
 
+def check_user_password(user_id: int, password: str) -> bool:
+    """Reautenticación para acciones sensibles (p. ej. eliminar cuenta)."""
+    with get_session() as s:
+        user = s.get(User, user_id)
+        return bool(user and _verify_password_internal(password, user.password_hash))
+
+
+# ─── Preferencias del usuario (Ajustes) ────────────────────────────────────
+
+# Defaults en código: settings_json solo guarda lo que el usuario cambió.
+SETTINGS_DEFAULTS: dict[str, bool] = {
+    "anonymous_usage": True,   # métricas agregadas para mejorar el servicio
+    "save_history": True,      # guardar el historial de conversaciones
+}
+
+
+def _parse_settings(raw: str | None) -> dict[str, Any]:
+    try:
+        stored = _json.loads(raw or "{}")
+    except Exception:
+        stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    return {k: bool(stored.get(k, v)) for k, v in SETTINGS_DEFAULTS.items()}
+
+
+def get_user_settings(user_id: int) -> dict[str, Any]:
+    """Preferencias del usuario con los defaults aplicados."""
+    with get_session() as s:
+        user = s.get(User, user_id)
+        return _parse_settings(user.settings_json if user else None)
+
+
+def update_user_settings(user_id: int, patch: dict[str, Any]) -> dict[str, Any]:
+    """Actualiza (merge) las preferencias conocidas y devuelve el resultado."""
+    with get_session() as s:
+        user = s.get(User, user_id)
+        if not user:
+            return dict(SETTINGS_DEFAULTS)
+        current = _parse_settings(user.settings_json)
+        current.update({k: bool(v) for k, v in patch.items() if k in SETTINGS_DEFAULTS})
+        user.settings_json = _json.dumps(current)
+        return current
+
+
 # ─── Sesiones web (cookie) ─────────────────────────────────────────────────
 
 SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "168"))  # 7 días por defecto
@@ -222,7 +271,7 @@ def validate_web_session(raw_token: str) -> dict[str, Any] | None:
         user = s.get(User, ses.user_id)
         if not user or not user.is_active:
             return None  # usuario bloqueado: la sesión deja de valer al instante
-        return _user_to_dict(user)
+        return {**_user_to_dict(user), "auth_via": "session"}
 
 
 def delete_web_session(raw_token: str) -> None:
@@ -450,7 +499,7 @@ def validate_api_key(raw_key: str, ip_address: str | None = None) -> dict[str, A
         user = s.get(User, row.user_id)
         if not user or not user.is_active:
             return None  # usuario bloqueado: sus keys dejan de funcionar
-        result = {**_user_to_dict(user), "key_model": row.model}
+        result = {**_user_to_dict(user), "key_model": row.model, "auth_via": "api_key"}
         row.last_accessed = now
         row.last_used_ip = ip_address
         return result
@@ -926,6 +975,43 @@ def ensure_conversation(
     return True
 
 
+def record_model_usage(
+    user_id: int,
+    model: str | None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    latency_ms: int = 0,
+) -> None:
+    """Agrega el uso diario por (usuario, fecha, modelo). Upsert atómico.
+    Se usa desde save_message y, con el historial desactivado, directamente
+    (el uso se contabiliza aunque el contenido no se persista)."""
+    total_tokens = prompt_tokens + completion_tokens
+    ts = now_iso()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_session() as s:
+        stmt = pg_insert(TokenUsageDaily).values(
+            user_id=user_id,
+            usage_date=today,
+            model=model or "default",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_sum_ms=latency_ms,
+            request_count=1,
+            created_at=ts,
+        ).on_conflict_do_update(
+            constraint="uq_token_usage_daily",
+            set_={
+                "prompt_tokens": TokenUsageDaily.prompt_tokens + prompt_tokens,
+                "completion_tokens": TokenUsageDaily.completion_tokens + completion_tokens,
+                "total_tokens": TokenUsageDaily.total_tokens + total_tokens,
+                "latency_sum_ms": TokenUsageDaily.latency_sum_ms + latency_ms,
+                "request_count": TokenUsageDaily.request_count + 1,
+            },
+        )
+        s.execute(stmt)
+
+
 def save_message(
     conversation_id: str,
     role: str,
@@ -937,6 +1023,7 @@ def save_message(
 ) -> None:
     total_tokens = prompt_tokens + completion_tokens
     ts = now_iso()
+    conv_user_id: int | None = None
     with get_session() as s:
         s.add(Message(
             conversation_id=conversation_id,
@@ -952,28 +1039,401 @@ def save_message(
         conv = s.get(Conversation, conversation_id)
         if conv:
             conv.updated_at = ts
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            stmt = pg_insert(TokenUsageDaily).values(
-                user_id=conv.user_id,
-                usage_date=today,
-                model=model or "default",
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                latency_sum_ms=latency_ms,
-                request_count=1,
+            conv_user_id = conv.user_id
+    if conv_user_id is not None:
+        record_model_usage(conv_user_id, model, prompt_tokens, completion_tokens, latency_ms)
+
+
+# ─── Créditos prepago: tarifas, saldo y ledger (cobro por tokens de API) ───
+
+def _pricing_to_dict(p: ModelPricing) -> dict[str, Any]:
+    return {
+        "id": p.id,
+        "model_prefix": p.model_prefix,
+        "display_name": p.display_name,
+        "input_microusd_per_mtok": p.input_microusd_per_mtok,
+        "output_microusd_per_mtok": p.output_microusd_per_mtok,
+        "is_active": bool(p.is_active),
+        "sort_order": p.sort_order,
+        "updated_at": p.updated_at,
+    }
+
+
+def list_model_pricing(active_only: bool = False) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = select(ModelPricing).order_by(ModelPricing.sort_order, ModelPricing.model_prefix)
+        if active_only:
+            stmt = stmt.where(ModelPricing.is_active == 1)
+        return [_pricing_to_dict(p) for p in s.scalars(stmt).all()]
+
+
+def create_model_pricing(
+    model_prefix: str,
+    display_name: str | None,
+    input_microusd_per_mtok: int,
+    output_microusd_per_mtok: int,
+    sort_order: int = 0,
+) -> dict[str, Any] | None:
+    """Crea una tarifa. None si el prefijo ya existe."""
+    ts = now_iso()
+    try:
+        with get_session() as s:
+            row = ModelPricing(
+                model_prefix=model_prefix.strip(),
+                display_name=(display_name or "").strip() or None,
+                input_microusd_per_mtok=max(0, int(input_microusd_per_mtok)),
+                output_microusd_per_mtok=max(0, int(output_microusd_per_mtok)),
+                sort_order=sort_order,
                 created_at=ts,
-            ).on_conflict_do_update(
-                constraint="uq_token_usage_daily",
-                set_={
-                    "prompt_tokens": TokenUsageDaily.prompt_tokens + prompt_tokens,
-                    "completion_tokens": TokenUsageDaily.completion_tokens + completion_tokens,
-                    "total_tokens": TokenUsageDaily.total_tokens + total_tokens,
-                    "latency_sum_ms": TokenUsageDaily.latency_sum_ms + latency_ms,
-                    "request_count": TokenUsageDaily.request_count + 1,
-                },
+                updated_at=ts,
             )
-            s.execute(stmt)
+            s.add(row)
+            s.flush()
+            return _pricing_to_dict(row)
+    except IntegrityError:
+        return None
+
+
+def update_model_pricing(pricing_id: int, **fields) -> dict[str, Any] | None:
+    allowed = {"display_name", "input_microusd_per_mtok", "output_microusd_per_mtok",
+               "is_active", "sort_order"}
+    with get_session() as s:
+        row = s.get(ModelPricing, pricing_id)
+        if not row:
+            return None
+        for k, v in fields.items():
+            if k in allowed and v is not None:
+                if k in ("input_microusd_per_mtok", "output_microusd_per_mtok"):
+                    v = max(0, int(v))
+                if k == "is_active":
+                    v = 1 if v else 0
+                setattr(row, k, v)
+        row.updated_at = now_iso()
+        s.flush()
+        return _pricing_to_dict(row)
+
+
+def delete_model_pricing(pricing_id: int) -> bool:
+    """Borra una tarifa. La fila '*' (default) no se puede borrar."""
+    with get_session() as s:
+        row = s.get(ModelPricing, pricing_id)
+        if not row or row.model_prefix == "*":
+            return False
+        s.delete(row)
+        return True
+
+
+def get_credit_balance(user_id: int) -> int:
+    """Saldo en micro-USD (0 si el usuario aún no tiene cuenta de créditos)."""
+    with get_session() as s:
+        bal = s.scalar(select(CreditAccount.balance_microusd)
+                       .where(CreditAccount.user_id == user_id))
+        return int(bal or 0)
+
+
+def _adjust_credit_balance(s, user_id: int, delta_microusd: int, ts: str) -> int:
+    """Upsert de la cuenta + ajuste atómico del saldo. Devuelve el saldo resultante.
+    Debe llamarse dentro de una sesión abierta (misma transacción que el ledger)."""
+    s.execute(
+        pg_insert(CreditAccount)
+        .values(user_id=user_id, balance_microusd=0, updated_at=ts)
+        .on_conflict_do_nothing(constraint="uq_credit_accounts_user")
+    )
+    return s.execute(
+        update(CreditAccount)
+        .where(CreditAccount.user_id == user_id)
+        .values(balance_microusd=CreditAccount.balance_microusd + delta_microusd, updated_at=ts)
+        .returning(CreditAccount.balance_microusd)
+    ).scalar_one()
+
+
+def credit_purchase(
+    user_id: int,
+    amount_microusd: int,
+    stripe_ref: str | None = None,
+    note: str | None = None,
+    kind: str = "purchase",
+) -> bool:
+    """Acredita saldo. Idempotente por stripe_ref (webhook repetido → False)."""
+    ts = now_iso()
+    try:
+        with get_session() as s:
+            if stripe_ref:
+                exists = s.scalar(select(CreditLedger.id)
+                                  .where(CreditLedger.stripe_ref == stripe_ref))
+                if exists:
+                    return False
+            balance = _adjust_credit_balance(s, user_id, amount_microusd, ts)
+            s.add(CreditLedger(
+                user_id=user_id,
+                kind=kind,
+                delta_microusd=amount_microusd,
+                balance_after=balance,
+                stripe_ref=stripe_ref,
+                note=note,
+                created_at=ts,
+            ))
+            return True
+    except IntegrityError:
+        return False  # carrera entre webhooks duplicados: el UNIQUE gana
+
+
+def debit_credit_usage(
+    user_id: int,
+    cost_microusd: int,
+    model: str | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> int:
+    """Descuenta el costo de una petición (una transacción: saldo + ledger).
+    El saldo puede quedar negativo (post-pago por petición); el pre-check
+    de ensure_can_use_api bloquea la siguiente. Devuelve el saldo resultante."""
+    ts = now_iso()
+    with get_session() as s:
+        balance = _adjust_credit_balance(s, user_id, -cost_microusd, ts)
+        s.add(CreditLedger(
+            user_id=user_id,
+            kind="usage",
+            delta_microusd=-cost_microusd,
+            balance_after=balance,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            created_at=ts,
+        ))
+        return balance
+
+
+def list_credit_ledger(user_id: int, limit: int = 50, kind: str | None = None) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = (select(CreditLedger).where(CreditLedger.user_id == user_id)
+                .order_by(desc(CreditLedger.id)).limit(limit))
+        if kind:
+            stmt = stmt.where(CreditLedger.kind == kind)
+        return [{
+            "id": r.id,
+            "kind": r.kind,
+            "delta_microusd": r.delta_microusd,
+            "balance_after_microusd": r.balance_after,
+            "model": r.model,
+            "prompt_tokens": r.prompt_tokens,
+            "completion_tokens": r.completion_tokens,
+            "note": r.note,
+            "created_at": r.created_at,
+        } for r in s.scalars(stmt).all()]
+
+
+def credit_usage_daily(user_id: int, days: int = 30) -> list[dict[str, Any]]:
+    """Consumo facturable de la API por (día, modelo), calculado del ledger."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    with get_session() as s:
+        day = func.substr(CreditLedger.created_at, 1, 10).label("day")
+        rows = s.execute(
+            select(
+                day,
+                CreditLedger.model,
+                func.sum(CreditLedger.prompt_tokens),
+                func.sum(CreditLedger.completion_tokens),
+                func.sum(-CreditLedger.delta_microusd),
+                func.count(),
+            )
+            .where(
+                CreditLedger.user_id == user_id,
+                CreditLedger.kind == "usage",
+                CreditLedger.created_at >= since,
+            )
+            .group_by(day, CreditLedger.model)
+            .order_by(day)
+        ).all()
+        return [{
+            "date": r[0],
+            "model": r[1],
+            "prompt_tokens": int(r[2] or 0),
+            "completion_tokens": int(r[3] or 0),
+            "cost_microusd": int(r[4] or 0),
+            "requests": int(r[5] or 0),
+        } for r in rows]
+
+
+def list_credit_packs(active_only: bool = True) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = select(CreditPack).order_by(CreditPack.sort_order)
+        if active_only:
+            stmt = stmt.where(CreditPack.is_active == 1)
+        return [{
+            "id": p.id,
+            "name": p.name,
+            "credit_microusd": p.credit_microusd,
+            "price_cents": p.price_cents,
+            "currency": p.currency,
+        } for p in s.scalars(stmt).all()]
+
+
+def get_credit_pack(pack_id: str) -> dict[str, Any] | None:
+    with get_session() as s:
+        p = s.get(CreditPack, pack_id)
+        if not p or not p.is_active:
+            return None
+        return {
+            "id": p.id,
+            "name": p.name,
+            "credit_microusd": p.credit_microusd,
+            "price_cents": p.price_cents,
+            "currency": p.currency,
+        }
+
+
+def admin_credits_summary() -> dict[str, Any]:
+    """Resumen para el panel admin: ingresos del mes, compras, top consumidores
+    y consumo por modelo — todo del ledger."""
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    with get_session() as s:
+        revenue = s.scalar(
+            select(func.coalesce(func.sum(CreditLedger.delta_microusd), 0))
+            .where(CreditLedger.kind == "purchase", CreditLedger.created_at >= month)
+        ) or 0
+        purchases = s.scalar(
+            select(func.count())
+            .select_from(CreditLedger)
+            .where(CreditLedger.kind == "purchase", CreditLedger.created_at >= month)
+        ) or 0
+        by_model = s.execute(
+            select(
+                CreditLedger.model,
+                func.sum(-CreditLedger.delta_microusd),
+                func.sum(CreditLedger.prompt_tokens + CreditLedger.completion_tokens),
+                func.count(),
+            )
+            .where(CreditLedger.kind == "usage", CreditLedger.created_at >= month)
+            .group_by(CreditLedger.model)
+            .order_by(desc(func.sum(-CreditLedger.delta_microusd)))
+        ).all()
+        top = s.execute(
+            select(
+                User.email,
+                func.sum(-CreditLedger.delta_microusd),
+                func.sum(CreditLedger.prompt_tokens + CreditLedger.completion_tokens),
+            )
+            .join(User, User.id == CreditLedger.user_id)
+            .where(CreditLedger.kind == "usage", CreditLedger.created_at >= month)
+            .group_by(User.email)
+            .order_by(desc(func.sum(-CreditLedger.delta_microusd)))
+            .limit(10)
+        ).all()
+    return {
+        "month": month,
+        "revenue_microusd": int(revenue),
+        "purchases": int(purchases),
+        "usage_by_model": [{
+            "model": r[0],
+            "cost_microusd": int(r[1] or 0),
+            "tokens": int(r[2] or 0),
+            "requests": int(r[3] or 0),
+        } for r in by_model],
+        "top_consumers": [{
+            "email": r[0],
+            "cost_microusd": int(r[1] or 0),
+            "tokens": int(r[2] or 0),
+        } for r in top],
+    }
+
+
+# ─── Tus datos: exportar / borrar historial / eliminar cuenta ──────────────
+
+def export_user_data(user_id: int) -> dict[str, Any] | None:
+    """Copia completa de los datos del usuario (sección Privacidad → Exportar).
+    Sin secretos: ni password_hash ni keys en claro ni ids de Stripe."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return None
+
+    with get_session() as s:
+        convs = s.scalars(
+            select(Conversation).where(Conversation.user_id == user_id)
+            .order_by(Conversation.created_at)
+        ).all()
+        conv_ids = [c.id for c in convs]
+        messages_by_conv: dict[str, list[dict[str, Any]]] = {}
+        if conv_ids:
+            msgs = s.scalars(
+                select(Message).where(Message.conversation_id.in_(conv_ids))
+                .order_by(Message.created_at)
+            ).all()
+            for m in msgs:
+                messages_by_conv.setdefault(m.conversation_id, []).append({
+                    "role": m.role,
+                    "content": m.content,
+                    "model": m.model,
+                    "total_tokens": m.total_tokens,
+                    "created_at": m.created_at,
+                })
+        usage_rows = s.scalars(
+            select(TokenUsageDaily).where(TokenUsageDaily.user_id == user_id)
+            .order_by(TokenUsageDaily.usage_date)
+        ).all()
+        usage = [{
+            "date": u.usage_date,
+            "model": u.model,
+            "prompt_tokens": u.prompt_tokens,
+            "completion_tokens": u.completion_tokens,
+            "total_tokens": u.total_tokens,
+            "requests": u.request_count,
+        } for u in usage_rows]
+        conversations = [{
+            "id": c.id,
+            "title": c.title,
+            "created_at": c.created_at,
+            "updated_at": c.updated_at,
+            "messages": messages_by_conv.get(c.id, []),
+        } for c in convs]
+
+    plan = get_plan_for_user(user_id)
+    return {
+        "exported_at": now_iso(),
+        "profile": user,
+        "settings": get_user_settings(user_id),
+        "plan": {"id": plan["id"], "name": plan["name"]},
+        "api_keys": [
+            {k: v for k, v in key.items() if k in
+             ("name", "masked_key", "model", "is_active", "created_at", "last_accessed")}
+            for key in list_api_keys(user_id)
+        ],
+        "conversations": conversations,
+        "usage_daily": usage,
+        "credits": {
+            "balance_microusd": get_credit_balance(user_id),
+            "ledger": list_credit_ledger(user_id, limit=1000),
+        },
+    }
+
+
+def delete_all_conversations(user_id: int) -> int:
+    """Borra TODAS las conversaciones (y sus mensajes) del usuario."""
+    with get_session() as s:
+        conv_ids = select(Conversation.id).where(Conversation.user_id == user_id)
+        s.execute(delete(Message).where(Message.conversation_id.in_(conv_ids)))
+        result = s.execute(delete(Conversation).where(Conversation.user_id == user_id))
+        return result.rowcount
+
+
+def delete_user_account(user_id: int) -> bool:
+    """Elimina la cuenta y todos sus datos en una transacción.
+    messages/conversations/api_keys/task_embeddings no tienen ON DELETE CASCADE
+    (se borran explícitamente); audit_events se anonimiza (rastro sin PII);
+    el DELETE del usuario cascada sessions, email_tokens, subscriptions,
+    usage_quotas y token_usage_daily."""
+    with get_session() as s:
+        user = s.get(User, user_id)
+        if not user:
+            return False
+        conv_ids = select(Conversation.id).where(Conversation.user_id == user_id)
+        s.execute(delete(Message).where(Message.conversation_id.in_(conv_ids)))
+        s.execute(delete(Conversation).where(Conversation.user_id == user_id))
+        s.execute(delete(ApiKey).where(ApiKey.user_id == user_id))
+        s.execute(delete(TaskEmbedding).where(TaskEmbedding.user_id == user_id))
+        s.execute(update(AuditEvent).where(AuditEvent.user_id == user_id).values(user_id=None))
+        s.delete(user)
+        return True
 
 
 def _conversation_to_dict(c: Conversation) -> dict[str, Any]:

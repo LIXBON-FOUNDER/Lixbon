@@ -196,6 +196,22 @@ p {
   background: var(--bg-secondary);
 }
 
+/* Acción destructiva (eliminar cuenta, borrar historial…) */
+.pill-btn.is-danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.pill-btn--outline.is-danger {
+  background: var(--bg);
+  color: var(--danger);
+}
+
+.pill-btn--outline.is-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;

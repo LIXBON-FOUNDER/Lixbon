@@ -149,11 +149,14 @@ export default function ChatPage() {
       }
     }
 
+    // Privacidad: con el historial desactivado la conversación vive solo en
+    // memoria (el backend tampoco la persiste) — sin URL /c/:id ni sidebar.
+    const saveHistory = user?.settings?.save_history !== false;
     const convId = routeConvId || crypto.randomUUID();
     const isFirstExchange = messages.length === 0;
     const history = [...messages.slice(-CONTEXT_WINDOW), { role: 'user', content: text }];
 
-    if (!routeConvId) {
+    if (!routeConvId && saveHistory) {
       loadedConvRef.current = convId; // evita el refetch al cambiar la URL
       navigate(`/c/${convId}`, { replace: true });
     }
@@ -189,13 +192,13 @@ export default function ChatPage() {
         },
       });
 
-      if (isFirstExchange) {
+      if (isFirstExchange && saveHistory) {
         try {
           const res = await api.post(`/api/conversations/${convId}/generate-title`);
           setTitle(res.data.title);
         } catch { /* el título puede quedar vacío */ }
       }
-      loadConversations();
+      if (saveHistory) loadConversations();
     } catch (err) {
       setMessages((prev) => {
         const next = prev.slice();

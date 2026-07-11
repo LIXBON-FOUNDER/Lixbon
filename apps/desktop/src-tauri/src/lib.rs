@@ -720,9 +720,11 @@ fn git_clone_blocking(app: AppHandle, url: String, dest_parent: String) -> Resul
     }
 }
 
-// ── Extensiones: temas de color de VSCode vía Open VSX ──────────────────
+// ── Extensiones: soporte declarativo de VSCode vía Open VSX ─────────────
 // Un IDE CodeMirror no puede ejecutar el extension host de VSCode, así que
-// solo se extrae lo declarativo: `contributes.themes` (JSON de tema de color).
+// se extrae TODO lo declarativo del .vsix: temas de color, gramáticas
+// TextMate, snippets, temas de iconos y declaraciones de lenguajes. El
+// código (main/browser) no se ejecuta y se avisa con `warnings`.
 
 /// Los JSON de temas de VSCode suelen ser JSONC: comentarios y comas finales.
 fn clean_jsonc(src: &str) -> String {
@@ -831,6 +833,25 @@ fn extensions_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Ruta relativa segura dentro de un .vsix: sin absolutos, sin `..`, sin unidad.
+fn safe_rel_path(rel: &str) -> Option<PathBuf> {
+    let rel = rel.replace('\\', "/");
+    if rel.is_empty() || rel.starts_with('/') || rel.contains(':') {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    for part in rel.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            return None;
+        }
+        out.push(part);
+    }
+    if out.as_os_str().is_empty() { None } else { Some(out) }
+}
+
 #[derive(serde::Serialize)]
 struct ThemeInfo {
     label: String,
@@ -839,10 +860,45 @@ struct ThemeInfo {
 }
 
 #[derive(serde::Serialize)]
+struct GrammarInfo {
+    language: Option<String>,
+    scope_name: String,
+    path: String,
+    embedded: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+struct LanguageInfo {
+    id: String,
+    extensions: Vec<String>,
+    filenames: Vec<String>,
+    aliases: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct SnippetInfo {
+    language: String,
+    path: String,
+}
+
+#[derive(serde::Serialize)]
+struct IconThemeInfo {
+    id: String,
+    label: String,
+    path: String,
+}
+
+#[derive(serde::Serialize)]
 struct ExtInstalled {
     id: String,
     display_name: String,
     themes: Vec<ThemeInfo>,
+    grammars: Vec<GrammarInfo>,
+    languages: Vec<LanguageInfo>,
+    snippets: Vec<SnippetInfo>,
+    icon_themes: Vec<IconThemeInfo>,
+    has_code: bool,
+    warnings: Vec<String>,
 }
 
 /// Busca extensiones en el registro público Open VSX (se hace desde Rust
@@ -888,9 +944,22 @@ async fn ext_install(app: AppHandle, url: String, id: String) -> Result<ExtInsta
         .map_err(|e| e.to_string())?
 }
 
+const VSIX_MAX_UNCOMPRESSED: u64 = 120 * 1024 * 1024;
+const VSIX_MAX_ENTRIES: usize = 20_000;
+
+/// Normaliza el `path` que declara package.json ("./themes/x.json") a la ruta
+/// relativa extraída ("extension/themes/x.json"), validada contra traversal.
+fn contrib_rel(path: &str) -> Option<String> {
+    let rel = format!("extension/{}", path.trim_start_matches("./"));
+    safe_rel_path(&rel).map(|p| p.to_string_lossy().replace('\\', "/"))
+}
+
 fn install_vsix(data: Vec<u8>, dir: PathBuf, id: String) -> Result<ExtInstalled, String> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(data))
         .map_err(|_| "El archivo .vsix no es válido".to_string())?;
+    if zip.len() > VSIX_MAX_ENTRIES {
+        return Err("La extensión contiene demasiados archivos".to_string());
+    }
 
     let mut pkg_raw = String::new();
     zip.by_name("extension/package.json")
@@ -908,22 +977,53 @@ fn install_vsix(data: Vec<u8>, dir: PathBuf, id: String) -> Result<ExtInstalled,
         .unwrap_or(&id)
         .to_string();
 
-    let theme_defs = pkg
-        .pointer("/contributes/themes")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    if theme_defs.is_empty() {
-        return Err(
-            "Esta extensión no aporta temas de color. lixbon solo soporta temas de VSCode \
-             (las extensiones con código necesitan el extension host de VSCode)."
-                .to_string(),
-        );
+    // ── Extraer todo extension/ a disco (con guardas) ──
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut written: u64 = 0;
+    for i in 0..zip.len() {
+        let mut entry = match zip.by_index(i) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        if entry.is_dir() || !entry.name().starts_with("extension/") {
+            continue;
+        }
+        let rel = match safe_rel_path(entry.name()) {
+            Some(p) => p,
+            None => continue, // entrada maliciosa: se ignora
+        };
+        written += entry.size();
+        if written > VSIX_MAX_UNCOMPRESSED {
+            let _ = fs::remove_dir_all(&dir);
+            return Err("La extensión supera los 120 MB descomprimida".to_string());
+        }
+        let target = dir.join(&rel);
+        if let Some(parent) = target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let mut out = match fs::File::create(&target) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        if std::io::copy(&mut entry, &mut out).is_err() {
+            continue;
+        }
     }
 
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let contributes = pkg.get("contributes").cloned().unwrap_or(serde_json::Value::Null);
+    let arr = |key: &str| -> Vec<serde_json::Value> {
+        contributes
+            .get(key)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut warnings: Vec<String> = Vec::new();
+
+    // ── Temas de color: se re-serializan a JSON estricto en la raíz de la
+    //    carpeta (compatibilidad con ext_read_theme y los temas ya activos) ──
     let mut themes = Vec::new();
-    for def in &theme_defs {
+    for def in arr("themes") {
         let label = def
             .get("label")
             .and_then(|v| v.as_str())
@@ -934,20 +1034,13 @@ fn install_vsix(data: Vec<u8>, dir: PathBuf, id: String) -> Result<ExtInstalled,
             None => continue,
         };
         if !rel.ends_with(".json") {
-            continue; // .tmTheme (XML) no soportado
+            warnings.push(format!("Tema '{label}' en formato .tmTheme (XML): no soportado."));
+            continue;
         }
-        let entry = format!("extension/{}", rel.trim_start_matches("./"));
-        let mut raw = String::new();
-        {
-            let mut file = match zip.by_name(&entry) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
-            if file.read_to_string(&mut raw).is_err() {
-                continue;
-            }
-        }
-        // Se re-serializa para garantizar JSON estricto del lado JS
+        let raw = match contrib_rel(rel).and_then(|r| fs::read_to_string(dir.join(r)).ok()) {
+            Some(s) => s,
+            None => continue,
+        };
         let value: serde_json::Value = match serde_json::from_str(&clean_jsonc(&raw)) {
             Ok(v) => v,
             Err(_) => continue,
@@ -968,12 +1061,105 @@ fn install_vsix(data: Vec<u8>, dir: PathBuf, id: String) -> Result<ExtInstalled,
         themes.push(ThemeInfo { label, file: file_name, dark });
     }
 
-    if themes.is_empty() {
-        let _ = fs::remove_dir_all(&dir);
-        return Err("No se pudo extraer ningún tema compatible de la extensión".to_string());
+    // ── Gramáticas TextMate ──
+    let mut grammars = Vec::new();
+    for g in arr("grammars") {
+        let scope = match g.get("scopeName").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let rel = match g.get("path").and_then(|v| v.as_str()).and_then(contrib_rel) {
+            Some(r) if dir.join(&r).exists() => r,
+            _ => continue,
+        };
+        grammars.push(GrammarInfo {
+            language: g.get("language").and_then(|v| v.as_str()).map(String::from),
+            scope_name: scope,
+            path: rel,
+            embedded: g.get("embeddedLanguages").cloned(),
+        });
     }
 
-    Ok(ExtInstalled { id, display_name, themes })
+    // ── Lenguajes declarados (extensiones de archivo → id de lenguaje) ──
+    let str_vec = |v: Option<&serde_json::Value>| -> Vec<String> {
+        v.and_then(|x| x.as_array())
+            .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    let mut languages = Vec::new();
+    for l in arr("languages") {
+        let lang_id = match l.get("id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        languages.push(LanguageInfo {
+            id: lang_id,
+            extensions: str_vec(l.get("extensions")),
+            filenames: str_vec(l.get("filenames")),
+            aliases: str_vec(l.get("aliases")),
+        });
+    }
+
+    // ── Snippets ──
+    let mut snippets = Vec::new();
+    for s in arr("snippets") {
+        let language = match s.get("language").and_then(|v| v.as_str()) {
+            Some(l) => l.to_string(),
+            None => continue,
+        };
+        let rel = match s.get("path").and_then(|v| v.as_str()).and_then(contrib_rel) {
+            Some(r) if dir.join(&r).exists() => r,
+            _ => continue,
+        };
+        snippets.push(SnippetInfo { language, path: rel });
+    }
+
+    // ── Temas de iconos (el lado JS decide si son SVG utilizables) ──
+    let mut icon_themes = Vec::new();
+    for it in arr("iconThemes") {
+        let rel = match it.get("path").and_then(|v| v.as_str()).and_then(contrib_rel) {
+            Some(r) if dir.join(&r).exists() => r,
+            _ => continue,
+        };
+        icon_themes.push(IconThemeInfo {
+            id: it.get("id").and_then(|v| v.as_str()).unwrap_or("icons").to_string(),
+            label: it
+                .get("label")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.starts_with('%'))
+                .unwrap_or("Iconos")
+                .to_string(),
+            path: rel,
+        });
+    }
+
+    let has_code = pkg.get("main").is_some() || pkg.get("browser").is_some();
+    if has_code {
+        warnings.push(
+            "Incluye código que requiere el extension host de VSCode: esa parte no se ejecuta en lixbon."
+                .to_string(),
+        );
+    }
+    if themes.is_empty() && grammars.is_empty() && languages.is_empty()
+        && snippets.is_empty() && icon_themes.is_empty()
+    {
+        warnings.push(
+            "No aporta nada declarativo que lixbon pueda usar (temas, gramáticas, snippets o iconos)."
+                .to_string(),
+        );
+    }
+
+    Ok(ExtInstalled {
+        id,
+        display_name,
+        themes,
+        grammars,
+        languages,
+        snippets,
+        icon_themes,
+        has_code,
+        warnings,
+    })
 }
 
 /// Lee el JSON de un tema ya instalado (confinado a la carpeta de extensiones).
@@ -986,6 +1172,20 @@ fn ext_read_theme(app: AppHandle, id: String, file: String) -> Result<String, St
         .join(sanitize_component(&id))
         .join(sanitize_component(&file));
     fs::read_to_string(&path).map_err(|_| "Tema no encontrado".to_string())
+}
+
+/// Lee cualquier archivo de una extensión instalada (gramáticas, snippets,
+/// iconos…), confinado a su carpeta. Generaliza ext_read_theme.
+#[tauri::command]
+fn ext_read_file(app: AppHandle, id: String, rel_path: String) -> Result<String, String> {
+    if !is_simple_name(&id) {
+        return Err("Nombre inválido".to_string());
+    }
+    let rel = safe_rel_path(&rel_path).ok_or("Ruta inválida".to_string())?;
+    let path = extensions_dir(&app)?
+        .join(sanitize_component(&id))
+        .join(rel);
+    fs::read_to_string(&path).map_err(|_| "Archivo no encontrado".to_string())
 }
 
 #[tauri::command]
@@ -1035,6 +1235,7 @@ pub fn run() {
             ext_search,
             ext_install,
             ext_read_theme,
+            ext_read_file,
             ext_uninstall
         ])
         .run(tauri::generate_context!())
@@ -1077,6 +1278,29 @@ mod tests {
         assert_eq!(sanitize_component("pub.ext-name"), "pub.ext-name");
         assert_eq!(sanitize_component("a/b\\c"), "a-b-c");
         assert_eq!(sanitize_component("../.."), "ext");
+    }
+
+    #[test]
+    fn safe_rel_path_bloquea_traversal() {
+        use super::safe_rel_path;
+        assert!(safe_rel_path("../fuera").is_none());
+        assert!(safe_rel_path("a/../../b").is_none());
+        assert!(safe_rel_path("/absoluta").is_none());
+        assert!(safe_rel_path("C:/windows").is_none());
+        assert!(safe_rel_path("").is_none());
+        assert!(safe_rel_path("./").is_none());
+        let ok = safe_rel_path("extension/./themes/one.json").unwrap();
+        assert_eq!(ok.to_string_lossy().replace('\\', "/"), "extension/themes/one.json");
+        let win = safe_rel_path("extension\\syntaxes\\x.json").unwrap();
+        assert_eq!(win.to_string_lossy().replace('\\', "/"), "extension/syntaxes/x.json");
+    }
+
+    #[test]
+    fn contrib_rel_normaliza() {
+        use super::contrib_rel;
+        assert_eq!(contrib_rel("./themes/x.json").as_deref(), Some("extension/themes/x.json"));
+        assert_eq!(contrib_rel("syntaxes/y.tmLanguage.json").as_deref(), Some("extension/syntaxes/y.tmLanguage.json"));
+        assert!(contrib_rel("../fuga.json").is_none());
     }
 
     #[test]

@@ -19,11 +19,14 @@ from pydantic import BaseModel, Field
 
 from core.gateway import deps
 from core.config import OLLAMA_BASE_URL
+from core.billing import credits
 from core.billing.quota import ensure_can_chat, record_tokens
 from core.persistence.queries import (
     ensure_conversation,
     find_similar_tasks,
     get_plan_for_user,
+    get_user_settings,
+    record_model_usage,
     save_message,
     save_task_embedding,
 )
@@ -109,16 +112,26 @@ async def _routed_chat(model: str, messages: list[dict]) -> tuple[dict[str, Any]
 
 def _persist_assistant(conv_id: str, model: str, text: str,
                        prompt_tokens: int, completion_tokens: int, latency_ms: int,
-                       user_id: int | None = None) -> None:
-    save_message(
-        conv_id, "assistant", text,
-        model=model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        latency_ms=latency_ms,
-    )
+                       user_id: int | None = None, save_history: bool = True,
+                       bill_credits: bool = False) -> None:
+    if save_history:
+        save_message(
+            conv_id, "assistant", text,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            latency_ms=latency_ms,
+        )
+    elif user_id is not None:
+        # Privacidad: sin historial no se persiste contenido, pero el uso
+        # (tokens por modelo) sí se contabiliza.
+        record_model_usage(user_id, model, prompt_tokens, completion_tokens, latency_ms)
     if user_id is not None:
-        record_tokens(user_id, prompt_tokens + completion_tokens)  # cuota mensual (F5)
+        if bill_credits:
+            # Tráfico Bearer: se cobra del saldo prepago, no de la cuota del plan
+            credits.debit_usage(user_id, model, prompt_tokens, completion_tokens)
+        else:
+            record_tokens(user_id, prompt_tokens + completion_tokens)  # cuota mensual (F5)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -136,11 +149,13 @@ async def api_chat(
     """Chat desde el dashboard web. Enrutado por el orquestador (F2)."""
     plan = get_plan_for_user(user_data["id"])
     ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+    save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
-    if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard"):
-        raise HTTPException(status_code=404, detail="Conversación no encontrada")
-    save_message(conv_id, "user", payload.message, model=payload.model)
+    if save_history:
+        if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard"):
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+        save_message(conv_id, "user", payload.message, model=payload.model)
 
     started_at = time.perf_counter()
     ollama_resp, origen = await _routed_chat(payload.model, [{"role": "user", "content": payload.message}])
@@ -150,10 +165,10 @@ async def api_chat(
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
-                       latency_ms, user_id=user_data["id"])
+                       latency_ms, user_id=user_data["id"], save_history=save_history)
 
     return {
-        "conversation_id": conv_id,
+        "conversation_id": conv_id if save_history else None,
         "model": payload.model,
         "node": origen,
         "message": assistant_text,
@@ -174,14 +189,19 @@ async def chat_completions(
     """Endpoint compatible con OpenAI — chat con modelos del cluster."""
     validate_model_access(user_data, payload.model)
     plan = get_plan_for_user(user_data["id"])
-    ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+    is_api = user_data.get("auth_via") == "api_key"
+    if is_api:
+        credits.ensure_can_use_api(user_data["id"], plan, payload.model)  # prepago por tokens
+    else:
+        ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+    save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
-    if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
-        raise HTTPException(status_code=404, detail="Conversación no encontrada")
-
-    if payload.messages and payload.messages[-1].role == "user":
-        save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
+    if save_history:
+        if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+        if payload.messages and payload.messages[-1].role == "user":
+            save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
 
     messages = [m.model_dump() for m in payload.messages]
 
@@ -231,6 +251,8 @@ async def chat_completions(
                         collector.get("completion_tokens", 0),
                         latency_ms,
                         user_id=user_data["id"],
+                        save_history=save_history,
+                        bill_credits=is_api,
                     )
 
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
@@ -242,14 +264,15 @@ async def chat_completions(
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
-                       latency_ms, user_id=user_data["id"])
+                       latency_ms, user_id=user_data["id"], save_history=save_history,
+                       bill_credits=is_api)
 
     return JSONResponse({
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": payload.model,
-        "conversation_id": conv_id,
+        "conversation_id": conv_id if save_history else None,
         "node": origen,
         "choices": [
             {
@@ -272,15 +295,18 @@ async def completions(
     payload: CompletionRequest,
     user_data: dict[str, Any] = Depends(api_key_required),
 ):
-    """Endpoint compatible con OpenAI — text completions."""
+    """Endpoint compatible con OpenAI — text completions. Solo API key (Bearer):
+    se cobra del saldo prepago de créditos."""
     validate_model_access(user_data, payload.model)
     plan = get_plan_for_user(user_data["id"])
-    ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+    credits.ensure_can_use_api(user_data["id"], plan, payload.model)
+    save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
-    if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
-        raise HTTPException(status_code=404, detail="Conversación no encontrada")
-    save_message(conv_id, "user", payload.prompt, model=payload.model)
+    if save_history:
+        if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+        save_message(conv_id, "user", payload.prompt, model=payload.model)
 
     started_at = time.perf_counter()
     ollama_resp, origen = await _routed_chat(
@@ -291,14 +317,15 @@ async def completions(
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
-                       latency_ms, user_id=user_data["id"])
+                       latency_ms, user_id=user_data["id"], save_history=save_history,
+                       bill_credits=True)
 
     return JSONResponse({
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
         "object": "text_completion",
         "created": int(time.time()),
         "model": payload.model,
-        "conversation_id": conv_id,
+        "conversation_id": conv_id if save_history else None,
         "node": origen,
         "choices": [{"index": 0, "text": assistant_text, "finish_reason": "stop"}],
         "usage": {

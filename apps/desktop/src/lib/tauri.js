@@ -66,14 +66,16 @@ export function listFiles() {
   return invoke('list_files');
 }
 
-// ── Extensiones (temas de VSCode vía Open VSX) ────────────────────────
+// ── Extensiones (soporte declarativo de VSCode vía Open VSX) ──────────
 
 /** Busca en el registro Open VSX. Devuelve el JSON crudo de la API. */
 export function extSearch(query) {
   return invoke('ext_search', { query });
 }
 
-/** Descarga el .vsix e instala sus temas. Devuelve {id, display_name, themes}. */
+/** Descarga el .vsix y extrae todo lo declarativo. Devuelve el manifest
+    {id, display_name, themes, grammars, languages, snippets, icon_themes,
+     has_code, warnings}. */
 export function extInstall(url, id) {
   return invoke('ext_install', { url, id });
 }
@@ -81,6 +83,12 @@ export function extInstall(url, id) {
 /** Contenido JSON de un tema instalado. */
 export function extReadTheme(id, file) {
   return invoke('ext_read_theme', { id, file });
+}
+
+/** Contenido de cualquier archivo de una extensión (gramáticas, snippets,
+    iconos…), confinado a su carpeta. */
+export function extReadFile(id, relPath) {
+  return invoke('ext_read_file', { id, relPath });
 }
 
 export function extUninstall(id) {

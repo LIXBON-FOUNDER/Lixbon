@@ -13,7 +13,8 @@ import { ask } from '@tauri-apps/plugin-dialog';
 
 import { readFileContent, writeFileContent } from '../lib/tauri';
 import { lixbonTheme, lixbonSyntax, lixbonThemeDark, lixbonSyntaxDark } from '../editor/lixbonTheme';
-import { languageFor } from '../editor/languages';
+import { resolveLanguage } from '../editor/languages';
+import { snippetSource } from '../editor/snippets';
 
 // ── Registro fuera de React ────────────────────────────────────────────
 const stateCache = new Map(); // path -> EditorState
@@ -113,6 +114,7 @@ export const useEditorStore = create((set, get) => ({
     }
 
     const content = await readFileContent(path); // el llamador maneja el error
+    const language = await resolveLanguage(name); // lezer/legacy → TextMate → plano
 
     const markDirty = EditorView.updateListener.of((update) => {
       if (update.docChanged) get().markDirty(path);
@@ -128,7 +130,10 @@ export const useEditorStore = create((set, get) => ({
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },
         ]),
         themeCompartment.of(themeExts),
-        ...languageFor(name),
+        ...language,
+        // Snippets de extensiones VSCode: fuente dinámica (consulta el
+        // registro en cada query, sin reconfigurar estados al instalar).
+        EditorState.languageData.of(() => [{ autocomplete: snippetSource(name) }]),
         markDirty,
       ],
     });

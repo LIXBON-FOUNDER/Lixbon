@@ -1,6 +1,8 @@
 // docsContent.jsx — contenido de lixbon Docs. Cada sección es un componente que
 // recibe `base` (origen del gateway) para los ejemplos. El índice de la izquierda
 // se genera desde SECTIONS.
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
 import { CodeBlock } from '../components/CodeBlock';
 
 export const SECTIONS = [
@@ -33,6 +35,18 @@ export const SECTIONS = [
     group: 'Desarrolladores',
     title: 'API',
     Body: ApiDocs,
+  },
+  {
+    id: 'usar-api-key',
+    group: 'Desarrolladores',
+    title: 'Usar tu API key',
+    Body: UsarApiKey,
+  },
+  {
+    id: 'precios-api',
+    group: 'Desarrolladores',
+    title: 'Precios de la API',
+    Body: PreciosApi,
   },
   {
     id: 'planes',
@@ -257,8 +271,203 @@ for chunk in stream:
       />
 
       <div className="docs__callout">
-        El límite de solicitudes por minuto y los modelos disponibles dependen de tu
-        plan. Consulta <a href="/docs/planes">Planes y límites</a>.
+        El uso de la API se paga con <strong>créditos prepago</strong> según los tokens
+        que consumas — consulta <a href="/docs/precios-api">Precios de la API</a> y las
+        recetas de integración en <a href="/docs/usar-api-key">Usar tu API key</a>.
+      </div>
+    </>
+  );
+}
+
+function UsarApiKey({ base }) {
+  return (
+    <>
+      <h1>Usar tu API key</h1>
+      <p className="docs__lead">
+        Tu API key <code>lixbon_sk_…</code> funciona en cualquier herramienta compatible
+        con la API de OpenAI: SDKs oficiales, editores con IA, agentes y tus propios
+        scripts. Aquí tienes las recetas más comunes.
+      </p>
+
+      <h2>1. Crea tu key</h2>
+      <p>
+        Ve a <a href="/account/cuenta">Ajustes → Cuenta → API keys</a> y pulsa
+        «Nueva key». Se muestra <strong>una sola vez</strong> — guárdala en un gestor de
+        secretos. Si la pierdes, desactívala y crea otra. Opcionalmente una key puede
+        restringirse a un único modelo.
+      </p>
+
+      <h2>2. Recarga créditos</h2>
+      <p>
+        Las peticiones con API key se pagan con <strong>créditos prepago</strong> según los
+        tokens que uses (ver <a href="/docs/precios-api">Precios de la API</a>). Recarga
+        saldo en <a href="/account/facturacion">Ajustes → Facturación</a>. Sin saldo, la
+        API responde <code>402 insufficient_credits</code>.
+      </p>
+
+      <h2>La configuración universal</h2>
+      <p>Cualquier cliente OpenAI-compatible solo necesita dos valores:</p>
+      <table className="docs__table">
+        <thead><tr><th>Parámetro</th><th>Valor</th></tr></thead>
+        <tbody>
+          <tr><td>Base URL</td><td><code>{base}/v1</code></td></tr>
+          <tr><td>API key</td><td><code>lixbon_sk_tu_clave</code></td></tr>
+        </tbody>
+      </table>
+
+      <h2>cURL</h2>
+      <CodeBlock
+        label="cURL"
+        code={`curl ${base}/v1/chat/completions \\
+  -H "Authorization: Bearer lixbon_sk_tu_clave" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"llama3.2","messages":[{"role":"user","content":"Hola"}]}'`}
+      />
+
+      <h2>Python (SDK de OpenAI)</h2>
+      <CodeBlock
+        label="Python"
+        code={`from openai import OpenAI
+
+client = OpenAI(base_url="${base}/v1", api_key="lixbon_sk_tu_clave")
+
+resp = client.chat.completions.create(
+    model="llama3.2",
+    messages=[{"role": "user", "content": "Hola"}],
+)
+print(resp.choices[0].message.content)`}
+      />
+
+      <h2>JavaScript / Node (SDK de OpenAI)</h2>
+      <CodeBlock
+        label="JavaScript"
+        code={`import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "${base}/v1",
+  apiKey: "lixbon_sk_tu_clave",
+});
+
+const resp = await client.chat.completions.create({
+  model: "llama3.2",
+  messages: [{ role: "user", content: "Hola" }],
+});
+console.log(resp.choices[0].message.content);`}
+      />
+
+      <h2>IDE lixbon</h2>
+      <p>
+        En la <a href="/aplicaciones">app de escritorio</a> no necesitas pegar nada:
+        inicia sesión con tu correo y la app crea y gestiona su propia key
+        («lixbon Desktop»). También puedes entrar pegando una key existente.
+      </p>
+
+      <h2>continue.dev (VS Code / JetBrains)</h2>
+      <CodeBlock
+        label="config.yaml"
+        code={`models:
+  - name: lixbon
+    provider: openai
+    model: llama3.2
+    apiBase: ${base}/v1
+    apiKey: lixbon_sk_tu_clave`}
+      />
+
+      <h2>Otras herramientas</h2>
+      <p>
+        En cualquier app que pida un «proveedor OpenAI compatible» (Open WebUI,
+        LibreChat, aider, LangChain, LlamaIndex…), usa la misma pareja base URL + key.
+        Lista los modelos disponibles con <code>GET {base}/v1/models</code>.
+      </p>
+
+      <div className="docs__callout">
+        Consulta tu consumo detallado por día y modelo en{' '}
+        <a href="/account/uso">Ajustes → Uso</a>, y el costo por modelo en{' '}
+        <a href="/docs/precios-api">Precios de la API</a>.
+      </div>
+    </>
+  );
+}
+
+function PreciosApi() {
+  const [pricing, setPricing] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/pricing')
+      .then((res) => setPricing(res.data.pricing))
+      .catch(() => setError(true));
+  }, []);
+
+  const fmt = (v) => `$${v.toFixed(2)}`;
+
+  return (
+    <>
+      <h1>Precios de la API</h1>
+      <p className="docs__lead">
+        El uso de la API con tu key se paga con <strong>créditos prepago</strong>: compras
+        saldo una vez y cada petición descuenta según los tokens reales que consuma,
+        a la tarifa del modelo. Sin suscripciones ni sorpresas: si no la usas, no gastas.
+      </p>
+
+      <h2>Tarifas por modelo</h2>
+      <p>
+        Precios en USD por <strong>millón de tokens</strong>. La tarifa se elige por el
+        prefijo del id del modelo; si ninguno coincide aplica la tarifa estándar (<code>*</code>).
+      </p>
+      {error && (
+        <p>No se pudieron cargar las tarifas ahora mismo. Intenta de nuevo en unos minutos.</p>
+      )}
+      {pricing === null && !error && <p>Cargando tarifas…</p>}
+      {pricing && (
+        <table className="docs__table">
+          <thead>
+            <tr><th>Modelo</th><th>Entrada ($/Mtok)</th><th>Salida ($/Mtok)</th></tr>
+          </thead>
+          <tbody>
+            {pricing.map((p) => (
+              <tr key={p.model_prefix}>
+                <td>
+                  <code>{p.model_prefix}</code>
+                  {p.display_name ? <> — {p.display_name}</> : null}
+                </td>
+                <td>{fmt(p.input_usd_per_mtok)}</td>
+                <td>{fmt(p.output_usd_per_mtok)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2>Cómo se calcula el costo</h2>
+      <p>
+        Cada respuesta de la API incluye <code>usage</code> con los tokens de entrada
+        (<code>prompt_tokens</code>) y salida (<code>completion_tokens</code>). El costo es:
+      </p>
+      <CodeBlock code={`costo = prompt_tokens × tarifa_entrada / 1 000 000
+      + completion_tokens × tarifa_salida / 1 000 000`} />
+      <p>
+        Ejemplo con la tarifa estándar ($0.20 entrada / $0.60 salida): una petición con
+        1 000 tokens de entrada y 2 000 de salida cuesta $0.0014.
+      </p>
+
+      <h2>Recargas</h2>
+      <ul>
+        <li>Compra packs de créditos en <a href="/account/facturacion">Ajustes → Facturación</a> (pago único con tarjeta).</li>
+        <li>Los créditos <strong>no caducan</strong> y solo se descuentan por uso real de la API.</li>
+        <li>El chat de la web y de la app con tu sesión <strong>no</strong> consume créditos: va con tu plan.</li>
+      </ul>
+
+      <h2>Sin saldo</h2>
+      <p>
+        Cuando el saldo llega a cero, la API responde <code>402</code> con
+        <code> insufficient_credits</code> y tu saldo actual. Recarga y la key vuelve a
+        funcionar al instante — las keys nunca se bloquean por otra razón de pago.
+      </p>
+
+      <div className="docs__callout">
+        Tu consumo detallado (tokens y costo por día y modelo) está siempre visible en{' '}
+        <a href="/account/uso">Ajustes → Uso</a>.
       </div>
     </>
   );
@@ -299,9 +508,15 @@ function Planes() {
       <h2>Cuándo chocas con un límite</h2>
       <p>
         Si superas tu cuota, la plataforma te lo dice con claridad e indica cuándo se
-        reinicia. Para levantar el límite, mejora tu plan. Lo mismo aplica a la API:
-        recibes un error <code>429</code> con el detalle de la cuota y el momento de
-        reinicio.
+        reinicia. Para levantar el límite, mejora tu plan.
+      </p>
+
+      <h2>¿Y la API?</h2>
+      <p>
+        Las peticiones con API key <strong>no</strong> consumen la cuota del plan: se pagan
+        con <a href="/docs/precios-api">créditos prepago</a> por tokens y pueden usar
+        cualquier modelo del clúster. Del plan solo se conserva el límite de
+        solicitudes por minuto.
       </p>
     </>
   );

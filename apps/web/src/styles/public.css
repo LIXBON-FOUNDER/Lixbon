@@ -350,6 +350,19 @@
   width: 100%;
 }
 
+.modal__password {
+  width: 100%;
+  max-width: none;
+  margin-bottom: 14px;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
 .share-link {
   display: flex;
   gap: 8px;

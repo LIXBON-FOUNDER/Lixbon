@@ -1,7 +1,8 @@
-// extStore.js — extensiones de VSCode (solo temas de color, vía Open VSX).
-// El .vsix lo descarga y desempaqueta Rust (ext_install); aquí vive la lista
-// de instaladas (localStorage) y el tema activo, que se aplica al editor
-// convirtiendo el JSON del tema con buildVsCodeTheme.
+// extStore.js — extensiones de VSCode (soporte declarativo, vía Open VSX).
+// El .vsix lo descarga y desempaqueta Rust (ext_install), que devuelve un
+// manifest con TODO lo declarativo: temas de color, gramáticas TextMate,
+// snippets, temas de iconos y lenguajes. Aquí vive la lista de instaladas
+// (localStorage), el tema de color activo y el tema de iconos activo.
 import { create } from 'zustand';
 import { extSearch, extInstall, extUninstall, extReadTheme } from '../lib/tauri';
 import { setEditorThemeExts } from './editorStore';
@@ -9,6 +10,7 @@ import { buildVsCodeTheme, appColorsFromTheme } from '../editor/vsTheme';
 
 const INSTALLED_KEY = 'lixbon_extensions';
 const THEME_KEY = 'lixbon_editor_theme';
+const ICON_KEY = 'lixbon_icon_theme';
 
 // Tokens del shell que un tema puede sobreescribir (base.css los define).
 const APP_COLOR_KEYS = ['--bg', '--bg-secondary', '--ink', '--ink-soft', '--border', '--border-soft'];
@@ -37,8 +39,11 @@ function readJson(key, fallback) {
 }
 
 export const useExtStore = create((set, get) => ({
-  installed: readJson(INSTALLED_KEY, []), // [{id, display_name, themes:[{label,file,dark}]}]
+  // Manifests de instaladas. Las instalaciones previas a la v0.6 solo traen
+  // {id, display_name, themes}; el resto de campos se tratan como [] al leer.
+  installed: readJson(INSTALLED_KEY, []),
   activeTheme: readJson(THEME_KEY, null), // {extId, label, file, dark} | null
+  activeIconTheme: readJson(ICON_KEY, null), // {extId, id, label, path} | null
   results: [],
   searching: false,
   installing: null, // id de la extensión en descarga
@@ -86,7 +91,19 @@ export const useExtStore = create((set, get) => ({
     const installed = get().installed.filter((e) => e.id !== id);
     localStorage.setItem(INSTALLED_KEY, JSON.stringify(installed));
     if (get().activeTheme?.extId === id) get().resetTheme();
+    if (get().activeIconTheme?.extId === id) get().resetIconTheme();
     set({ installed });
+  },
+
+  applyIconTheme: (extId, iconTheme) => {
+    const sel = { extId, id: iconTheme.id, label: iconTheme.label, path: iconTheme.path };
+    localStorage.setItem(ICON_KEY, JSON.stringify(sel));
+    set({ activeIconTheme: sel });
+  },
+
+  resetIconTheme: () => {
+    localStorage.removeItem(ICON_KEY);
+    set({ activeIconTheme: null });
   },
 
   applyTheme: async (extId, theme) => {
@@ -120,3 +137,31 @@ export const useExtStore = create((set, get) => ({
     }
   },
 }));
+
+// ── Selectores derivados (para el editor: gramáticas, snippets, lenguajes) ──
+
+/** Todas las gramáticas TextMate instaladas: [{extId, scopeName, language, path, embedded}] */
+export function installedGrammars() {
+  return useExtStore.getState().installed.flatMap((e) =>
+    (e.grammars || []).map((g) => ({ extId: e.id, scopeName: g.scope_name, language: g.language, path: g.path, embedded: g.embedded })),
+  );
+}
+
+/** Declaraciones de lenguaje aportadas por extensiones:
+    [{extId, id, extensions: ['.ex'], filenames, aliases}] */
+export function installedLanguages() {
+  return useExtStore.getState().installed.flatMap((e) =>
+    (e.languages || []).map((l) => ({ extId: e.id, ...l })),
+  );
+}
+
+/** Snippets instalados agrupados por id de lenguaje VSCode: {lang: [{extId, path}]} */
+export function installedSnippets() {
+  const byLang = {};
+  for (const e of useExtStore.getState().installed) {
+    for (const s of e.snippets || []) {
+      (byLang[s.language] ||= []).push({ extId: e.id, path: s.path });
+    }
+  }
+  return byLang;
+}

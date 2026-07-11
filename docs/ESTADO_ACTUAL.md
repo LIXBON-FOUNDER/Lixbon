@@ -17,7 +17,7 @@ La integración está completa y verificada en modo degradado + lógica de webho
 1. **Cuenta Stripe** (modo test primero): crea 2 **Productos** con precio recurrente mensual — Pro ($9.90) y Advance ($24.90). Copia sus `price_...`.
 2. **Conecta los precios**: en el panel admin → tab **Modelos** → "Precios de Stripe", pega cada `price_...` en su plan. (O `PATCH /api/admin/plans/{id}` con `{"stripe_price_id": "price_..."}`.)
 3. **Variables de entorno** (`.env` local y Railway): `STRIPE_SECRET_KEY=sk_test_...`, `STRIPE_PUBLISHABLE_KEY=pk_test_...`, `STRIPE_WEBHOOK_SECRET=whsec_...`, y `PUBLIC_BASE_URL=https://tu-dominio` (para las URLs de retorno del checkout).
-4. **Webhook en Stripe**: apunta un endpoint a `https://tu-dominio/api/billing/webhook` y suscríbelo a `customer.subscription.created/updated/deleted` e `invoice.payment_failed`. Copia el signing secret a `STRIPE_WEBHOOK_SECRET`.
+4. **Webhook en Stripe**: apunta un endpoint a `https://tu-dominio/api/billing/webhook` y suscríbelo a `customer.subscription.created/updated/deleted`, `invoice.payment_failed` y **`checkout.session.completed`** (este último acredita los packs de créditos de API). Copia el signing secret a `STRIPE_WEBHOOK_SECRET`.
 5. **Probar**: en modo test, tarjeta `4242 4242 4242 4242`. Suscríbete desde `/planes` → checkout → vuelve a `/account/facturacion`. El webhook activa el plan solo.
 6. Cuando funcione en test, repite con las claves **live**.
 
@@ -253,6 +253,45 @@ Corrige los 3 bugs reportados sobre la 0.5.1. Versión unificada **0.5.2** (pack
 - **"Las extensiones no se instalan"**: la instalación Rust funciona (verificado: `app_data/extensions/mskelton.one-dark-theme/` existe y el tema quedó activo en localStorage; la lógica pasa contra los 12 temas top de Open VSX). El problema era de percepción: el tema solo re-coloreaba el área CodeMirror. Ahora `vsTheme.js#appColorsFromTheme` mapea los colores de workbench (`editor.background/foreground`, `sideBar.background`…) a los tokens del shell (`--bg`, `--bg-secondary`, `--ink`, `--ink-soft`, `--border`, `--border-soft`) y `extStore` los aplica/retira a `:root` — el tema viste TODA la app. Además: errores del panel en caja visible (`.extpanel__error`) y `clean_jsonc` tolera BOM UTF-8.
 - **Secciones exclusivas**: Control de código dejó de ser vista central y pasó al panel izquierdo (`leftView: 'explorer'|'search'|'git'|'extensions'`), como VSCode — ya no puede convivir con Extensiones/Explorador. `.scm` re-estilado para la barra lateral (título uppercase, branch con wrap).
 - **Pendiente**: CI valida el Rust (BOM strip) al taggear `v0.5.2`; tras el deploy del gateway ejecutar el DELETE del 0.6.0 fantasma.
+
+---
+
+## 6.16 ✅ Ajustes web completos + créditos prepago de API (2026-07-11)
+
+Implementa todos los "Próximamente" de Ajustes (menos Idioma, pospuesto) y el cobro por tokens de las API keys. Verificado E2E: 29/29 checks de lógica (BD staging) + 18/18 checks HTTP (gateway local).
+
+**Ajustes (web + backend)**:
+- `users.settings_json` (migración idempotente) + `GET/PATCH /api/account/settings` (defaults en `queries.SETTINGS_DEFAULTS`: `anonymous_usage`, `save_history`). `/api/auth/me` incluye `settings`.
+- **Apariencia** (General): selector claro/oscuro/sistema (`lib/theme.js` ganó `get/setThemePreference`; "sistema" borra la key y sigue `prefers-color-scheme`).
+- **Privacidad**: toggles persistidos. `save_history=false` ⇒ los 3 endpoints de inferencia no persisten conversación/mensajes (el uso sí se contabiliza vía `record_model_usage`, extraída de `save_message`); responden `conversation_id: null` y el ChatPage mantiene el hilo solo en memoria (sin `/c/:id` ni sidebar).
+- **Exportar datos** (`GET /api/account/export`): JSON descargable con perfil, settings, plan, keys enmascaradas, conversaciones+mensajes, uso diario y ledger de créditos.
+- **Borrar historial** (`DELETE /api/account/conversations`): DELETE masivo con `ConfirmDialog` (componente nuevo, patrón ShareDialog).
+- **Eliminar cuenta** (`DELETE /api/account` con `{password}`): reauth (`check_user_password`, 403+rate-limit si falla), cancela la suscripción Stripe (best-effort), borra en una transacción messages/conversations/api_keys/task_embeddings (sin CASCADE), anonimiza `audit_events` y el DELETE de users cascada el resto. Audit `account_deleted` con hash del correo (sin PII). Estilos `pill-btn is-danger` añadidos (no existían).
+
+**Créditos prepago (cobro por tokens de las API keys — SOLO tráfico Bearer)**:
+- Tablas nuevas: `model_pricing` (tarifas por prefijo de modelo en µ$/Mtok, fila `*` = default, seed $0.20 in / $0.60 out), `credit_accounts` (saldo BIGINT µ$), `credit_ledger` (movimientos; `stripe_ref` UNIQUE = idempotencia de webhooks), `credit_packs` (seed starter $5 / plus $20 / power $50).
+- `core/billing/credits.py`: `resolve_pricing` (longest-prefix, cache 60 s, sin tarifa ⇒ 503), `ensure_can_use_api` (rate limit del plan + saldo>0 o **402 insufficient_credits**), `debit_usage` (costo entero al terminar; transacción saldo+ledger; nunca tumba la respuesta). Modelo post-pago por petición: descubierto acotado a céntimos, saldo negativo bloquea la siguiente.
+- **El tráfico Bearer se desacopla del plan**: `validate_api_key`/`validate_web_session` marcan `auth_via`; en chat.py, Bearer usa `ensure_can_use_api` (ignora messages/día, tokens/mes y allowed_models — los créditos pagan cualquier modelo) y NO toca `usage_quotas` (que es enforcement del chat con sesión); `_persist_assistant(bill_credits=True)` debita en vez de `record_tokens`. `/v1/completions` (solo key) siempre cobra créditos.
+- Stripe: `create_credit_checkout` (mode=payment, price_data inline, sin configurar productos) + rama `checkout.session.completed` del webhook (acredita 1 sola vez por `stripe_ref`).
+- Endpoints: `GET /api/pricing` y `GET /api/credits/packs` (públicos), `POST /api/credits/checkout`, `GET /api/credits` (saldo+ledger), `GET /api/credits/usage` (por día/modelo con costo, del ledger). Sin Stripe: packs visibles, checkout 503.
+- **Web**: Facturación con bloque "Créditos de API" (saldo, packs, recargas, banner `?credits=success`); Uso con tabla "Consumo de API" (tokens in/out, peticiones, costo por día/modelo). **Admin**: tabs **Tarifas** (CRUD `/api/admin/pricing` en $/Mtok, la fila `*` no se borra, cache invalidada al editar) e **Ingresos** (`/api/admin/credits/summary`: revenue mes, recargas, consumo por modelo, top consumidores).
+- **Docs**: secciones nuevas "Usar tu API key" (curl, Python/JS SDK OpenAI, continue.dev, IDE lixbon) y "Precios de la API" (tabla dinámica de `GET /api/pricing`, cálculo del costo, 402); "API" y "Planes y límites" actualizadas al modelo de créditos.
+
+**Pendiente operativo**: añadir `checkout.session.completed` al webhook de Stripe cuando se activen los pagos (sección 0).
+
+## 6.17 ✅ IDE v0.5.3: sintaxis colorida, extensiones declarativas completas y TextMate (2026-07-11)
+
+Versión unificada **0.5.3** (package.json estaba en 0.5.2 con tauri.conf/Cargo en 0.5.3 — resincronizadas). Rust pendiente de validar en CI (sin cargo local).
+
+- **Sintaxis colorida** (`editor/lixbonTheme.js`): paleta rica en claro (familia One Light: keywords magenta, funciones azul, tipos dorado, strings verde, números naranja, variables coral, operadores cian) y oscuro (familia One Dark), ~30 reglas por tema cubriendo también los tags de los legacy modes (regexp, escape, self, parámetros, diffs, headings…). Chrome del editor intacto.
+- **Más lenguajes** (`editor/languages.js`, todos vía `@codemirror/legacy-modes`, 0 deps nuevas): C#, Kotlin, Scala, Dart, Obj-C, Ruby, Lua, Perl, R, Swift, Haskell, Julia, Groovy/gradle, Clojure, Erlang, PowerShell, CMake, Pascal, protobuf (+`CMakeLists.txt` por nombre).
+- **Temas VSCode más fieles**: `SCOPE_TO_TAGS` ampliado de ~21 a ~60 scopes y extraído a `editor/scopeMap.js` (compartido con TextMate — los temas pintan igual tokens lezer y TextMate).
+- **Extensiones "declarativo máximo"** (`install_vsix` reescrito en lib.rs): desempaqueta TODO `extension/` (guardas: `safe_rel_path` anti-traversal con tests, tope 120 MB descomprimido / 20k entradas) y devuelve manifest `{themes, grammars, languages, snippets, icon_themes, has_code, warnings}`. Ya NO falla sin temas; lo no soportado se explica en `warnings`. Comando nuevo `ext_read_file` (lectura confinada); `ext_read_theme` se mantiene (compat). Los temas siguen re-serializados en la raíz de la carpeta (instalaciones viejas intactas).
+- **Snippets** (`editor/snippets.js`): archivos de `contributes.snippets` convertidos a `snippetCompletion` de CM (sintaxis VSCode→CM: `$0`→`${}`, choices y variables TM_ resueltas); fuente de autocompletado dinámica registrada por `languageData` en `openFile` — snippets recién instalados aplican sin reconfigurar estados. Mapa ext→id de lenguaje VSCode + lenguajes contribuidos.
+- **Temas de iconos** (`editor/iconTheme.js` + FileTree): parser de `contributes.iconThemes` (fileExtensions compuestas, fileNames, folder/folderExpanded, languageIds), SVG por data-URL con caché y fallback a los iconos propios (solo SVG — cubre Material Icon Theme; los de fuente avisan). Selector en el panel de extensiones (`applyIconTheme` en extStore, localStorage `lixbon_icon_theme`).
+- **TextMate real** (`editor/textmate.js`): `vscode-textmate` + `vscode-oniguruma` (WASM ~160 KB gz, carga perezosa al abrir el primer archivo que lo necesita; fallo ⇒ texto plano). Adaptador `StreamParser` (ruleStack por línea + `tokenTable` desde scopeMap). Resolución en `resolveLanguage`: 1º lezer/legacy, 2º gramática de extensión instalada, 3º plano. CSP: `script-src` ganó `'wasm-unsafe-eval'` (WebView2 lo exige para WASM).
+- **ExtensionsPanel**: chips de contribuciones por extensión ("2 temas", "sintaxis: elixir", "snippets: python", "iconos") + warnings visibles.
+- **Pendiente de verificar en CI/manual**: compilación Rust (tests `safe_rel_path`/`contrib_rel` incluidos), instalar Material Icon Theme y una extensión de gramática (ej. Elixir/Zig) y abrir un archivo suyo.
 
 ---
 

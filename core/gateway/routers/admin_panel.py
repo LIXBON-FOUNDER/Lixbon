@@ -11,20 +11,26 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from core.billing.credits import invalidate_pricing_cache, microusd_to_usd
 from core.billing.quota import usage_snapshot
 from core.gateway import deps
 from core.persistence.queries import (
+    admin_credits_summary,
     count_active_keys,
+    create_model_pricing,
+    delete_model_pricing,
     get_daily_metrics,
     get_global_stats,
     get_plan_for_user,
     get_user_by_id,
     list_audit_events,
+    list_model_pricing,
     list_plans,
     list_users_admin,
     log_audit_event,
     set_user_active,
     set_user_plan,
+    update_model_pricing,
     update_plan,
 )
 from core.security.auth import admin_required
@@ -182,6 +188,116 @@ async def api_admin_models(_admin: dict[str, Any] = Depends(admin_required)):
         ]
         models.append({"id": model_id, "nodes": node_ids, "plans": in_plans})
     return {"models": models, "plans": plans}
+
+
+# ── Tarifas por modelo (créditos de API) ────────────────────────────────────
+
+_USD_PER_MICRO = 1_000_000
+
+
+def _pricing_public(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row,
+        "input_usd_per_mtok": row["input_microusd_per_mtok"] / _USD_PER_MICRO,
+        "output_usd_per_mtok": row["output_microusd_per_mtok"] / _USD_PER_MICRO,
+    }
+
+
+class PricingCreatePayload(BaseModel):
+    model_prefix: str
+    display_name: str | None = None
+    input_usd_per_mtok: float = 0.0   # la UI trabaja en $/Mtok; aquí se convierte a µ$
+    output_usd_per_mtok: float = 0.0
+    sort_order: int = 0
+
+
+class PricingUpdatePayload(BaseModel):
+    display_name: str | None = None
+    input_usd_per_mtok: float | None = None
+    output_usd_per_mtok: float | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
+@router.get("/pricing")
+async def api_admin_pricing(_admin: dict[str, Any] = Depends(admin_required)):
+    return {"pricing": [_pricing_public(r) for r in list_model_pricing(active_only=False)]}
+
+
+@router.post("/pricing")
+async def api_admin_pricing_create(
+    payload: PricingCreatePayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    prefix = payload.model_prefix.strip()
+    if not prefix:
+        raise HTTPException(status_code=400, detail="Falta el prefijo del modelo")
+    row = create_model_pricing(
+        prefix,
+        payload.display_name,
+        round(payload.input_usd_per_mtok * _USD_PER_MICRO),
+        round(payload.output_usd_per_mtok * _USD_PER_MICRO),
+        payload.sort_order,
+    )
+    if not row:
+        raise HTTPException(status_code=409, detail="Ya existe una tarifa con ese prefijo")
+    invalidate_pricing_cache()
+    log_audit_event("pricing_created", user_id=admin["id"], model_prefix=prefix)
+    return {"pricing": _pricing_public(row)}
+
+
+@router.patch("/pricing/{pricing_id}")
+async def api_admin_pricing_update(
+    pricing_id: int,
+    payload: PricingUpdatePayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    fields: dict[str, Any] = {
+        "display_name": payload.display_name,
+        "is_active": payload.is_active,
+        "sort_order": payload.sort_order,
+    }
+    if payload.input_usd_per_mtok is not None:
+        fields["input_microusd_per_mtok"] = round(payload.input_usd_per_mtok * _USD_PER_MICRO)
+    if payload.output_usd_per_mtok is not None:
+        fields["output_microusd_per_mtok"] = round(payload.output_usd_per_mtok * _USD_PER_MICRO)
+    row = update_model_pricing(pricing_id, **fields)
+    if not row:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+    invalidate_pricing_cache()
+    log_audit_event("pricing_updated", user_id=admin["id"], pricing_id=pricing_id)
+    return {"pricing": _pricing_public(row)}
+
+
+@router.delete("/pricing/{pricing_id}")
+async def api_admin_pricing_delete(
+    pricing_id: int,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    if not delete_model_pricing(pricing_id):
+        raise HTTPException(status_code=400, detail="No existe o es la tarifa por defecto (*)")
+    invalidate_pricing_cache()
+    log_audit_event("pricing_deleted", user_id=admin["id"], pricing_id=pricing_id)
+    return {"deleted": True}
+
+
+@router.get("/credits/summary")
+async def api_admin_credits_summary(_admin: dict[str, Any] = Depends(admin_required)):
+    """Ingresos y consumo de créditos del mes en curso (del ledger)."""
+    data = admin_credits_summary()
+    return {
+        "month": data["month"],
+        "revenue_usd": microusd_to_usd(data["revenue_microusd"]),
+        "purchases": data["purchases"],
+        "usage_by_model": [
+            {**r, "cost_usd": microusd_to_usd(r["cost_microusd"])}
+            for r in data["usage_by_model"]
+        ],
+        "top_consumers": [
+            {**r, "cost_usd": microusd_to_usd(r["cost_microusd"])}
+            for r in data["top_consumers"]
+        ],
+    }
 
 
 # ── Audit log global ────────────────────────────────────────────────────────

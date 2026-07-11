@@ -24,7 +24,9 @@ from core.config import (
 )
 from core.persistence.queries import (
     apply_stripe_subscription,
+    credit_purchase,
     downgrade_to_free,
+    get_credit_pack,
     get_plan,
     get_plan_by_stripe_price,
     get_subscription,
@@ -166,6 +168,49 @@ def payment_method_summary(user: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def create_credit_checkout(user: dict[str, Any], pack: dict[str, Any],
+                           request_base: str | None = None) -> str:
+    """Checkout de pago único para un pack de créditos de API. El precio va
+    inline (price_data): no hace falta configurar products en el dashboard."""
+    stripe = _client()
+    customer_id = _ensure_customer(stripe, user)
+    base = _base_url(request_base)
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer=customer_id,
+        line_items=[{
+            "price_data": {
+                "currency": (pack.get("currency") or "USD").lower(),
+                "unit_amount": pack["price_cents"],
+                "product_data": {"name": f"Créditos de API lixbon — {pack['name']}"},
+            },
+            "quantity": 1,
+        }],
+        success_url=f"{base}/account/facturacion?credits=success",
+        cancel_url=f"{base}/account/facturacion?credits=cancel",
+        metadata={"lixbon_user_id": str(user["id"]), "kind": "credit_pack", "pack_id": pack["id"]},
+    )
+    log_audit_event("credit_checkout_started", user_id=user["id"], pack_id=pack["id"])
+    return session.url
+
+
+def cancel_subscription_immediately(user_id: int) -> None:
+    """Cancela la suscripción en Stripe al eliminar la cuenta. Best-effort:
+    si falla se registra y el borrado continúa (el webhook deleted ya no
+    encontrará al usuario, lo cual es inocuo)."""
+    if not stripe_configured():
+        return
+    sub = get_subscription(user_id)
+    if not sub or not sub.get("stripe_subscription_id"):
+        return
+    try:
+        stripe = _client()
+        stripe.Subscription.delete(sub["stripe_subscription_id"])
+        logger.info(f"Suscripción de Stripe cancelada al eliminar la cuenta (user {user_id})")
+    except Exception as exc:
+        logger.warning(f"No se pudo cancelar la suscripción de Stripe al eliminar la cuenta: {exc}")
+
+
 # ── Webhooks ────────────────────────────────────────────────────────────────
 
 def verify_and_parse(payload: bytes, sig_header: str | None) -> dict[str, Any]:
@@ -230,6 +275,32 @@ def handle_event(event: dict[str, Any]) -> None:
         if user_id:
             downgrade_to_free(user_id)
             log_audit_event("subscription_canceled", user_id=user_id)
+
+    elif etype == "checkout.session.completed":
+        # Solo nos interesan los packs de créditos (las suscripciones se
+        # sincronizan por los eventos customer.subscription.*).
+        meta = obj.get("metadata") or {}
+        if meta.get("kind") != "credit_pack":
+            return
+        if obj.get("payment_status") != "paid":
+            logger.info(f"[webhook] checkout de créditos sin pagar aún ({obj.get('id')})")
+            return
+        uid = meta.get("lixbon_user_id")
+        user_id = int(uid) if uid and str(uid).isdigit() else None
+        pack = get_credit_pack(meta.get("pack_id") or "")
+        if not user_id or not pack or not get_user_by_id(user_id):
+            logger.warning(f"[webhook] checkout de créditos sin usuario/pack resoluble ({obj.get('id')})")
+            return
+        credited = credit_purchase(
+            user_id, pack["credit_microusd"],
+            stripe_ref=obj.get("id"),
+            note=f"Pack {pack['name']}",
+        )
+        if credited:
+            log_audit_event("credits_purchased", user_id=user_id,
+                            pack_id=pack["id"], amount_microusd=pack["credit_microusd"])
+        else:
+            logger.info(f"[webhook] compra de créditos ya acreditada ({obj.get('id')})")
 
     elif etype == "invoice.payment_failed":
         user = get_user_by_stripe_customer(obj.get("customer"))

@@ -4,33 +4,7 @@
 // los scopes que usan prácticamente todos los temas.
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { tags as t } from '@lezer/highlight';
-
-// Scope TextMate representativo → tags de lezer que pintan lo mismo.
-// El orden no importa: para cada objetivo se busca la regla más específica.
-const SCOPE_TO_TAGS = [
-  ['comment', [t.comment, t.lineComment, t.blockComment]],
-  ['string', [t.string, t.special(t.string)]],
-  ['constant.numeric', [t.number, t.integer, t.float]],
-  ['constant.language', [t.bool, t.null, t.atom]],
-  ['constant.character.escape', [t.escape]],
-  ['keyword.operator', [t.operator, t.arithmeticOperator, t.logicOperator, t.compareOperator, t.updateOperator]],
-  ['keyword', [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword]],
-  ['storage.type', [t.definitionKeyword]],
-  ['entity.name.function', [t.function(t.variableName), t.function(t.propertyName)]],
-  ['entity.name.type', [t.typeName]],
-  ['entity.name.class', [t.className]],
-  ['variable.other.property', [t.propertyName]],
-  ['variable', [t.variableName, t.definition(t.variableName)]],
-  ['entity.name.tag', [t.tagName]],
-  ['entity.other.attribute-name', [t.attributeName]],
-  ['punctuation', [t.punctuation, t.separator, t.bracket]],
-  ['markup.heading', [t.heading]],
-  ['markup.bold', [t.strong]],
-  ['markup.italic', [t.emphasis]],
-  ['markup.underline.link', [t.link, t.url]],
-  ['invalid', [t.invalid]],
-];
+import { SCOPE_TO_TAGS } from './scopeMap';
 
 /** Settings de la regla cuyo scope sea el prefijo más largo del objetivo
     (semántica de especificidad de TextMate, simplificada). */

@@ -175,10 +175,12 @@ async def api_logout(lixbon_session: str | None = Cookie(default=None)):
 
 @router.get("/api/auth/me")
 async def api_me(user_data: dict[str, Any] = Depends(cookie_auth_required)):
-    """Usuario actual + plan vigente (para hidratar la web al cargar)."""
-    from core.persistence.queries import get_plan_for_user
+    """Usuario actual + plan vigente + preferencias (para hidratar la web al cargar)."""
+    from core.persistence.queries import get_plan_for_user, get_user_settings
     plan = get_plan_for_user(user_data["id"])
-    return {"user": {**user_data, "plan_id": plan["id"], "plan_name": plan["name"]}}
+    settings = get_user_settings(user_data["id"])
+    return {"user": {**user_data, "plan_id": plan["id"], "plan_name": plan["name"],
+                     "settings": settings}}
 
 
 # ── Verificación de email ──────────────────────────────────────────────────

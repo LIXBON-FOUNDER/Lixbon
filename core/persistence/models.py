@@ -5,7 +5,7 @@ igual que el esquema legacy, para no cambiar la lógica de los routers en esta f
 """
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, Text, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Index, LargeBinary, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.persistence.database import Base
@@ -23,6 +23,8 @@ class User(Base):
     email_verified: Mapped[int] = mapped_column(nullable=False, default=0)
     is_active: Mapped[int] = mapped_column(nullable=False, default=1)         # 0 = bloqueado por admin (F6)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # Preferencias del usuario (JSON parcial; los defaults viven en queries.SETTINGS_DEFAULTS)
+    settings_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -245,6 +247,72 @@ class UsageQuota(Base):
     messages: Mapped[int] = mapped_column(nullable=False, default=0)
     tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ModelPricing(Base):
+    """Tarifas para el cobro por tokens de las API keys. Match por prefijo del
+    id del modelo (longest-prefix); la fila '*' es la tarifa por defecto.
+    Precios en micro-USD (1e-6 USD) por millón de tokens — aritmética entera."""
+    __tablename__ = "model_pricing"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    model_prefix: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # "*" = default
+    display_name: Mapped[str | None] = mapped_column(Text)
+    input_microusd_per_mtok: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    output_microusd_per_mtok: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CreditAccount(Base):
+    """Saldo prepago de créditos de API por usuario, en micro-USD."""
+    __tablename__ = "credit_accounts"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_credit_accounts_user"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    balance_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CreditLedger(Base):
+    """Movimientos de créditos (compra, consumo, ajuste). Fuente de verdad del
+    uso facturable de la API; stripe_ref único da idempotencia a los webhooks."""
+    __tablename__ = "credit_ledger"
+    __table_args__ = (
+        Index("idx_credit_ledger_user", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # purchase | usage | adjustment
+    delta_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    model: Mapped[str | None] = mapped_column(Text)
+    prompt_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    stripe_ref: Mapped[str | None] = mapped_column(Text, unique=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CreditPack(Base):
+    """Packs de recarga (Stripe Checkout de pago único). Crédito = precio;
+    el margen del negocio va en la tarifa por tokens."""
+    __tablename__ = "credit_packs"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)   # slug: starter | plus | power
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    credit_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    price_cents: Mapped[int] = mapped_column(nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, default="USD")
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class TokenUsageDaily(Base):

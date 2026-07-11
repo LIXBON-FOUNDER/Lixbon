@@ -1,6 +1,6 @@
 // lixbonTheme.js — temas claro y oscuro de CodeMirror 6 con los tokens lixbon.
-// Paleta contenida: tinta + acentos tierra/oliva derivados de la identidad
-// (nada de arcoíris de sintaxis; jerarquía por peso y pocos matices).
+// Sintaxis con paleta rica (cada familia de token tiene su color propio) sobre
+// el chrome del IDE. Contraste AA sobre los fondos claro (#fff) y oscuro (#1A1913).
 // El fondo usa var(--bg): el modo (data-theme) ya pinta la superficie correcta.
 
 import { EditorView } from '@codemirror/view';
@@ -9,11 +9,16 @@ import { tags as t } from '@lezer/highlight';
 
 const ink = '#171717';
 const inkSoft = 'rgba(23, 23, 23, 0.55)';
-const olive = '#5f7a1f';   // strings — pariente oscuro del accent #d9e64a
-const earth = '#a8551a';   // números y constantes — pariente del Pro #CE7F25
-const pine = '#2f6b5e';    // tipos y clases
-const slate = '#3a4a63';   // variables — pariente frío/tinta, contenido
-const prop = '#4a6b62';    // propiedades — variante clara del pino
+// Paleta clara (familia One Light, ajustada a la identidad lixbon)
+const lComment = '#8b9096';
+const lKeyword = '#a626a4';   // keywords — magenta
+const lFunc = '#3861d6';      // funciones — azul
+const lType = '#b78307';      // tipos y clases — dorado
+const lString = '#50a14f';    // strings — verde
+const lNumber = '#b76201';    // números y constantes — naranja
+const lVar = '#e45649';       // variables y tags — coral
+const lProp = '#c05a3d';      // propiedades
+const lOper = '#0184bc';      // operadores, regexp y escapes — cian
 const danger = '#c0392b';
 
 export const lixbonTheme = EditorView.theme(
@@ -77,23 +82,34 @@ export const lixbonTheme = EditorView.theme(
 );
 
 const lixbonHighlight = HighlightStyle.define([
-  { tag: t.comment, color: inkSoft, fontStyle: 'italic' },
-  { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword], color: ink, fontWeight: '600' },
-  { tag: [t.string, t.special(t.string), t.regexp], color: olive },
-  { tag: [t.number, t.bool, t.null, t.atom, t.constant(t.variableName)], color: earth },
-  { tag: [t.typeName, t.className, t.namespace], color: pine },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: ink, fontWeight: '500' },
-  { tag: [t.variableName, t.definition(t.variableName), t.local(t.variableName)], color: slate },
-  { tag: [t.propertyName, t.definition(t.propertyName)], color: prop },
-  { tag: [t.labelName, t.macroName], color: slate },
-  { tag: [t.operator, t.punctuation, t.bracket], color: 'rgba(23, 23, 23, 0.7)' },
-  { tag: [t.meta, t.processingInstruction], color: inkSoft },
-  { tag: t.tagName, color: pine },
-  { tag: t.attributeName, color: earth },
-  { tag: t.heading, fontWeight: '600' },
+  { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: lComment, fontStyle: 'italic' },
+  { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword, t.definitionKeyword, t.modifier], color: lKeyword, fontWeight: '600' },
+  { tag: [t.string, t.special(t.string), t.character, t.docString], color: lString },
+  { tag: [t.regexp, t.escape], color: lOper },
+  { tag: [t.number, t.integer, t.float, t.bool, t.null, t.atom, t.unit], color: lNumber },
+  { tag: [t.constant(t.variableName), t.standard(t.variableName)], color: lNumber },
+  { tag: [t.typeName, t.className, t.namespace, t.annotation], color: lType },
+  { tag: [t.function(t.variableName), t.function(t.propertyName), t.macroName], color: lFunc, fontWeight: '500' },
+  { tag: [t.variableName, t.definition(t.variableName)], color: lVar },
+  { tag: [t.local(t.variableName), t.special(t.variableName)], color: lProp, fontStyle: 'italic' },
+  { tag: t.self, color: lKeyword, fontStyle: 'italic' },
+  { tag: [t.propertyName, t.definition(t.propertyName)], color: lProp },
+  { tag: t.labelName, color: lNumber },
+  { tag: [t.operator, t.arithmeticOperator, t.logicOperator, t.compareOperator, t.updateOperator, t.derefOperator], color: lOper },
+  { tag: [t.punctuation, t.separator, t.bracket], color: 'rgba(23, 23, 23, 0.62)' },
+  { tag: [t.meta, t.processingInstruction, t.documentMeta], color: inkSoft },
+  { tag: t.tagName, color: lVar },
+  { tag: [t.attributeName, t.attributeValue], color: lNumber },
+  { tag: t.heading, color: lKeyword, fontWeight: '650' },
+  { tag: t.quote, color: lString, fontStyle: 'italic' },
+  { tag: t.monospace, color: lProp },
+  { tag: t.inserted, color: lString },
+  { tag: t.deleted, color: lVar },
+  { tag: t.changed, color: lNumber },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strong, fontWeight: '600' },
-  { tag: t.link, color: olive, textDecoration: 'underline' },
+  { tag: [t.link, t.url], color: lFunc, textDecoration: 'underline' },
+  { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: t.invalid, color: danger },
 ]);
 
@@ -103,11 +119,16 @@ export const lixbonSyntax = syntaxHighlighting(lixbonHighlight);
 
 const dInk = '#F3F0E2';
 const dInkSoft = 'rgba(243, 240, 226, 0.55)';
-const dOlive = '#A9B86E';  // strings — accent del modo oscuro
-const dEarth = '#D89B62';  // números y constantes
-const dPine = '#7FB8A4';   // tipos y clases
-const dSlate = '#9FB0CC';  // variables
-const dProp = '#8FB0A3';   // propiedades
+// Paleta oscura (familia One Dark, ajustada al fondo crema-oscuro #1A1913)
+const dComment = '#8a8574';
+const dKeyword = '#c678dd';   // keywords — lila
+const dFunc = '#61afef';      // funciones — azul
+const dType = '#e5c07b';      // tipos y clases — dorado
+const dString = '#98c379';    // strings — verde
+const dNumber = '#d19a66';    // números y constantes — naranja
+const dVar = '#e06c75';       // variables y tags — coral
+const dProp = '#d8985f';      // propiedades
+const dOper = '#56b6c2';      // operadores, regexp y escapes — cian
 const dDanger = '#E0685A';
 
 export const lixbonThemeDark = EditorView.theme(
@@ -171,23 +192,34 @@ export const lixbonThemeDark = EditorView.theme(
 );
 
 const lixbonHighlightDark = HighlightStyle.define([
-  { tag: t.comment, color: dInkSoft, fontStyle: 'italic' },
-  { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword], color: dInk, fontWeight: '600' },
-  { tag: [t.string, t.special(t.string), t.regexp], color: dOlive },
-  { tag: [t.number, t.bool, t.null, t.atom, t.constant(t.variableName)], color: dEarth },
-  { tag: [t.typeName, t.className, t.namespace], color: dPine },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: dInk, fontWeight: '500' },
-  { tag: [t.variableName, t.definition(t.variableName), t.local(t.variableName)], color: dSlate },
+  { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: dComment, fontStyle: 'italic' },
+  { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword, t.definitionKeyword, t.modifier], color: dKeyword, fontWeight: '600' },
+  { tag: [t.string, t.special(t.string), t.character, t.docString], color: dString },
+  { tag: [t.regexp, t.escape], color: dOper },
+  { tag: [t.number, t.integer, t.float, t.bool, t.null, t.atom, t.unit], color: dNumber },
+  { tag: [t.constant(t.variableName), t.standard(t.variableName)], color: dNumber },
+  { tag: [t.typeName, t.className, t.namespace, t.annotation], color: dType },
+  { tag: [t.function(t.variableName), t.function(t.propertyName), t.macroName], color: dFunc, fontWeight: '500' },
+  { tag: [t.variableName, t.definition(t.variableName)], color: dVar },
+  { tag: [t.local(t.variableName), t.special(t.variableName)], color: dProp, fontStyle: 'italic' },
+  { tag: t.self, color: dKeyword, fontStyle: 'italic' },
   { tag: [t.propertyName, t.definition(t.propertyName)], color: dProp },
-  { tag: [t.labelName, t.macroName], color: dSlate },
-  { tag: [t.operator, t.punctuation, t.bracket], color: 'rgba(243, 240, 226, 0.65)' },
-  { tag: [t.meta, t.processingInstruction], color: dInkSoft },
-  { tag: t.tagName, color: dPine },
-  { tag: t.attributeName, color: dEarth },
-  { tag: t.heading, fontWeight: '600' },
+  { tag: t.labelName, color: dNumber },
+  { tag: [t.operator, t.arithmeticOperator, t.logicOperator, t.compareOperator, t.updateOperator, t.derefOperator], color: dOper },
+  { tag: [t.punctuation, t.separator, t.bracket], color: 'rgba(243, 240, 226, 0.6)' },
+  { tag: [t.meta, t.processingInstruction, t.documentMeta], color: dInkSoft },
+  { tag: t.tagName, color: dVar },
+  { tag: [t.attributeName, t.attributeValue], color: dNumber },
+  { tag: t.heading, color: dKeyword, fontWeight: '650' },
+  { tag: t.quote, color: dString, fontStyle: 'italic' },
+  { tag: t.monospace, color: dProp },
+  { tag: t.inserted, color: dString },
+  { tag: t.deleted, color: dVar },
+  { tag: t.changed, color: dNumber },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strong, fontWeight: '600' },
-  { tag: t.link, color: dOlive, textDecoration: 'underline' },
+  { tag: [t.link, t.url], color: dFunc, textDecoration: 'underline' },
+  { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: t.invalid, color: dDanger },
 ]);
 

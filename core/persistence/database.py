@@ -86,6 +86,8 @@ def init_db() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email)",
         # F6: bloqueo de usuarios desde el panel admin
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1",
+        # Ajustes: preferencias del usuario (apariencia/privacidad)
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS settings_json TEXT",
         # F7: enlace con Stripe (pagos)
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS stripe_price_id TEXT",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT",
@@ -121,6 +123,29 @@ def init_db() -> None:
     from datetime import datetime, timezone
     with engine.begin() as conn:
         conn.execute(text(_plans_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+
+    # ── Seed: tarifa por defecto y packs de créditos (cobro por tokens de la
+    #    API). ON CONFLICT DO NOTHING: el admin los edita y nada los pisa.
+    #    Precios en micro-USD por millón de tokens ($0.20 in / $0.60 out). ──
+    _pricing_seed = """
+        INSERT INTO model_pricing (model_prefix, display_name,
+                                   input_microusd_per_mtok, output_microusd_per_mtok,
+                                   is_active, sort_order, created_at, updated_at)
+        VALUES ('*', 'Tarifa estándar', 200000, 600000, 1, 999, :ts, :ts)
+        ON CONFLICT (model_prefix) DO NOTHING
+    """
+    _packs_seed = """
+        INSERT INTO credit_packs (id, name, credit_microusd, price_cents, currency,
+                                  is_active, sort_order, created_at)
+        VALUES
+          ('starter', 'Starter', 5000000, 500, 'USD', 1, 0, :ts),
+          ('plus', 'Plus', 20000000, 2000, 'USD', 1, 1, :ts),
+          ('power', 'Power', 50000000, 5000, 'USD', 1, 2, :ts)
+        ON CONFLICT (id) DO NOTHING
+    """
+    with engine.begin() as conn:
+        conn.execute(text(_pricing_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+        conn.execute(text(_packs_seed), {"ts": datetime.now(timezone.utc).isoformat()})
 
     # ── Seed: promover admins definidos por entorno ──
     import os

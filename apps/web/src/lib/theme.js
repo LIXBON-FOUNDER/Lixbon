@@ -17,6 +17,29 @@ export function setTheme(theme) {
   } catch { /* modo privado sin localStorage: solo dura la sesión */ }
 }
 
+// Preferencia explícita: 'light' | 'dark' | 'system' (system = sin key guardada,
+// se sigue prefers-color-scheme, igual que el script inline de index.html).
+export function getThemePreference() {
+  try {
+    const t = localStorage.getItem(STORAGE_KEY);
+    return t === 'light' || t === 'dark' ? t : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+export function setThemePreference(pref) {
+  if (pref === 'system') {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch { /* noop */ }
+    const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = sys;
+  } else {
+    setTheme(pref);
+  }
+}
+
 export function useTheme() {
   const [theme, setState] = useState(getTheme);
   const toggle = useCallback(() => {

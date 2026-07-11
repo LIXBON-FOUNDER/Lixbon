@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "LIXBON",
+        "title": "Lixbon",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https:; connect-src 'self' https: ws://localhost:* http://localhost:* ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https:; connect-src 'self' https: ws://localhost:* http://localhost:* ipc: http://ipc.localhost"
     }
   },
   "bundle": {

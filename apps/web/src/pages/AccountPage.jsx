@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
+import { getThemePreference, setThemePreference } from '../lib/theme';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
 import { planColor } from '../lib/planColors';
@@ -57,6 +59,22 @@ function Row({ label, hint, children }) {
 
 const SoonTag = () => <span className="set-soon">Próximamente</span>;
 
+function Toggle({ checked, onChange, disabled, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={`set-toggle ${checked ? 'is-on' : ''}`}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="set-toggle__knob" />
+    </button>
+  );
+}
+
 // ── General ─────────────────────────────────────────────────────────────
 
 function GeneralSection({ user, onSaved }) {
@@ -64,6 +82,12 @@ function GeneralSection({ user, onSaved }) {
   const [last, setLast] = useState(user.last_name || '');
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState(false);
+  const [themePref, setThemePref] = useState(getThemePreference);
+
+  const changeTheme = (pref) => {
+    setThemePreference(pref);
+    setThemePref(pref);
+  };
 
   const dirty = first.trim() !== (user.first_name || '') || last.trim() !== (user.last_name || '');
 
@@ -106,7 +130,24 @@ function GeneralSection({ user, onSaved }) {
 
       <h2 className="set-title">Preferencias</h2>
       <div className="set-card">
-        <Row label="Apariencia" hint="Tema claro / oscuro"><SoonTag /></Row>
+        <Row label="Apariencia" hint="Tema de la interfaz">
+          <div className="set-seg" role="radiogroup" aria-label="Apariencia">
+            {[
+              { id: 'light', label: 'Claro' },
+              { id: 'dark', label: 'Oscuro' },
+              { id: 'system', label: 'Sistema' },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`set-seg__btn ${themePref === opt.id ? 'is-active' : ''}`}
+                onClick={() => changeTheme(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </Row>
         <Row label="Idioma" hint="Idioma de la interfaz"><SoonTag /></Row>
       </div>
     </>
@@ -120,6 +161,22 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pwSent, setPwSent] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delError, setDelError] = useState('');
+
+  const deleteAccount = async (password) => {
+    setDelBusy(true);
+    setDelError('');
+    try {
+      await api.delete('/api/account', { data: { password } });
+      await onLogout(); // la sesión ya no existe; limpia el estado y navega
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setDelError(typeof d === 'string' ? d : 'No se pudo eliminar la cuenta. Intenta de nuevo.');
+      setDelBusy(false);
+    }
+  };
 
   const activeKeys = keys.filter((k) => k.is_active);
 
@@ -219,15 +276,103 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
             <IconLogout size={14} /> Cerrar sesión
           </button>
         </Row>
-        <Row label="Eliminar cuenta" hint="Borra tu cuenta y tus datos"><SoonTag /></Row>
+        <Row label="Eliminar cuenta" hint="Borra tu cuenta y todos tus datos de forma permanente">
+          <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmDelete(true)}>
+            Eliminar cuenta
+          </button>
+        </Row>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="¿Eliminar tu cuenta?"
+          confirmLabel="Eliminar cuenta"
+          busyLabel="Eliminando…"
+          requirePassword
+          busy={delBusy}
+          error={delError}
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={deleteAccount}
+        >
+          Se borrarán tu perfil, tus conversaciones, tus API keys y tu suscripción de
+          forma permanente. Esta acción no se puede deshacer. Escribe tu contraseña
+          para confirmar.
+        </ConfirmDialog>
+      )}
     </>
   );
 }
 
 // ── Privacidad ──────────────────────────────────────────────────────────
 
-function PrivacidadSection() {
+function PrivacidadSection({ user, onUserChange }) {
+  const [settings, setSettings] = useState(user.settings || null);
+  const [busyKey, setBusyKey] = useState(null);
+  const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
+  const [clearError, setClearError] = useState('');
+  const [cleared, setCleared] = useState(false);
+
+  const exportData = async () => {
+    setError('');
+    setExporting(true);
+    try {
+      const res = await api.get('/api/account/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `lixbon-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('No se pudieron exportar tus datos. Intenta de nuevo.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const clearHistory = async () => {
+    setClearBusy(true);
+    setClearError('');
+    try {
+      await api.delete('/api/account/conversations');
+      setCleared(true);
+      setConfirmClear(false);
+    } catch {
+      setClearError('No se pudo borrar el historial. Intenta de nuevo.');
+    } finally {
+      setClearBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (settings) return;
+    api.get('/api/account/settings')
+      .then((res) => setSettings(res.data.settings))
+      .catch(() => setError('No se pudieron cargar tus preferencias.'));
+  }, [settings]);
+
+  const toggle = async (key, value) => {
+    setError('');
+    setBusyKey(key);
+    const prev = settings;
+    setSettings({ ...settings, [key]: value }); // optimista
+    try {
+      const res = await api.patch('/api/account/settings', { [key]: value });
+      setSettings(res.data.settings);
+      onUserChange({ ...user, settings: res.data.settings });
+    } catch {
+      setSettings(prev);
+      setError('No se pudo guardar el cambio. Intenta de nuevo.');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   return (
     <>
       <h2 className="set-title">Privacidad</h2>
@@ -235,16 +380,56 @@ function PrivacidadSection() {
         En lixbon tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
         clúster y no compartimos tus datos con terceros.
       </p>
+      {error && <p className="page__error" role="alert">{error}</p>}
       <div className="set-card">
-        <Row label="Datos de uso anónimos" hint="Métricas agregadas para mejorar el servicio"><SoonTag /></Row>
-        <Row label="Historial de conversaciones" hint="Guardar el historial de tus chats"><SoonTag /></Row>
+        <Row label="Datos de uso anónimos" hint="Métricas agregadas para mejorar el servicio">
+          {settings
+            ? <Toggle label="Datos de uso anónimos" checked={settings.anonymous_usage}
+                disabled={busyKey === 'anonymous_usage'}
+                onChange={(v) => toggle('anonymous_usage', v)} />
+            : <span className="set-static">…</span>}
+        </Row>
+        <Row label="Historial de conversaciones" hint="Guardar el historial de tus chats. Desactivado, los chats nuevos no se guardan (el uso sí se contabiliza)">
+          {settings
+            ? <Toggle label="Historial de conversaciones" checked={settings.save_history}
+                disabled={busyKey === 'save_history'}
+                onChange={(v) => toggle('save_history', v)} />
+            : <span className="set-static">…</span>}
+        </Row>
       </div>
 
       <h2 className="set-title">Tus datos</h2>
       <div className="set-card">
-        <Row label="Exportar datos" hint="Descarga una copia de tus conversaciones"><SoonTag /></Row>
-        <Row label="Borrar historial" hint="Elimina todas tus conversaciones"><SoonTag /></Row>
+        <Row label="Exportar datos" hint="Descarga una copia de tus conversaciones y tu uso (JSON)">
+          <button className="pill-btn pill-btn--outline set-btn" onClick={exportData} disabled={exporting}>
+            {exporting ? 'Preparando…' : 'Exportar'}
+          </button>
+        </Row>
+        <Row label="Borrar historial" hint="Elimina todas tus conversaciones de forma permanente">
+          {cleared
+            ? <span className="set-ok">Historial borrado ✓</span>
+            : (
+              <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmClear(true)}>
+                Borrar historial
+              </button>
+            )}
+        </Row>
       </div>
+
+      {confirmClear && (
+        <ConfirmDialog
+          title="¿Borrar todo el historial?"
+          confirmLabel="Borrar historial"
+          busyLabel="Borrando…"
+          busy={clearBusy}
+          error={clearError}
+          onClose={() => setConfirmClear(false)}
+          onConfirm={clearHistory}
+        >
+          Se eliminarán todas tus conversaciones y sus mensajes de forma permanente.
+          Las estadísticas de uso se conservan. Esta acción no se puede deshacer.
+        </ConfirmDialog>
+      )}
     </>
   );
 }
@@ -257,17 +442,38 @@ function FacturacionSection({ plan }) {
   const [billing, setBilling] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [credits, setCredits] = useState(null);
+  const [packs, setPacks] = useState(null);
+  const [packBusy, setPackBusy] = useState(null);
+
+  const creditsOk = new URLSearchParams(window.location.search).get('credits') === 'success';
 
   useEffect(() => {
     api.get('/api/billing/status')
       .then((res) => setBilling(res.data))
       .catch(() => setError('No se pudo cargar tu facturación.'));
+    api.get('/api/credits').then((res) => setCredits(res.data)).catch(() => {});
+    api.get('/api/credits/packs').then((res) => setPacks(res.data)).catch(() => {});
     // aviso de retorno del checkout
     const params = new URLSearchParams(window.location.search);
     if (params.get('checkout') === 'success') {
       setError('');
     }
   }, []);
+
+  const buyPack = async (packId) => {
+    setError('');
+    setPackBusy(packId);
+    try {
+      const res = await api.post('/api/credits/checkout', { pack_id: packId });
+      window.location.href = res.data.url;
+    } catch {
+      setError('No se pudo iniciar la compra de créditos.');
+      setPackBusy(null);
+    }
+  };
+
+  const purchases = (credits?.ledger || []).filter((l) => l.kind === 'purchase');
 
   const openPortal = async () => {
     setBusy(true);
@@ -317,6 +523,61 @@ function FacturacionSection({ plan }) {
           </Link>
         )}
       </div>
+
+      <h2 className="set-title">Créditos de API</h2>
+      {creditsOk && (
+        <p className="admin-ok" role="status">
+          ¡Recarga completada! El saldo puede tardar unos segundos en reflejarse.
+        </p>
+      )}
+      <div className="set-card">
+        <Row label="Saldo disponible" hint="Se descuenta por tokens al usar tus API keys">
+          <span className="set-credits">
+            {credits ? `$${credits.balance_usd.toFixed(2)}` : '…'}
+          </span>
+        </Row>
+        <Row
+          label="Recargar saldo"
+          hint={packs?.enabled
+            ? 'Pago único con tarjeta; los créditos no caducan'
+            : 'Los pagos en línea llegan pronto'}
+        >
+          <div className="set-packs">
+            {(packs?.packs || []).map((p) => (
+              <button
+                key={p.id}
+                className="pill-btn pill-btn--outline set-btn"
+                disabled={!packs?.enabled || packBusy !== null}
+                onClick={() => buyPack(p.id)}
+              >
+                {packBusy === p.id ? 'Abriendo…' : `${p.name} · $${p.price_usd}`}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label="Precios por modelo" hint="Cuánto cuesta cada millón de tokens">
+          <Link to="/docs/precios-api" className="pill-btn pill-btn--outline set-btn">Ver precios</Link>
+        </Row>
+      </div>
+
+      {purchases.length > 0 && (
+        <>
+          <h2 className="set-title">Recargas</h2>
+          <div className="set-card">
+            <ul className="keys">
+              {purchases.map((p) => (
+                <li key={p.id} className="keys__item">
+                  <div className="keys__info">
+                    <span className="keys__name">{fmtDate(p.created_at)}</span>
+                    <span className="keys__masked">{p.note || 'Recarga'}</span>
+                  </div>
+                  <span className="keys__meta">+${p.delta_usd.toFixed(2)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
 
       <h2 className="set-title">Pago</h2>
       <div className="set-card">
@@ -373,6 +634,16 @@ function FacturacionSection({ plan }) {
 // ── Uso ─────────────────────────────────────────────────────────────────
 
 function UsoSection({ usage, daily, plan }) {
+  const [apiUsage, setApiUsage] = useState(null);
+
+  useEffect(() => {
+    api.get('/api/credits/usage')
+      .then((res) => setApiUsage(res.data.daily))
+      .catch(() => setApiUsage([]));
+  }, []);
+
+  const apiTotal = (apiUsage || []).reduce((acc, r) => acc + r.cost_usd, 0);
+
   return (
     <>
       <h2 className="set-title">Uso del período <span className="set-plan-tag" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span></h2>
@@ -394,6 +665,48 @@ function UsoSection({ usage, daily, plan }) {
       <h2 className="set-title">Tokens por día — últimos 30 días</h2>
       <div className="set-card">
         <UsageChart daily={daily} />
+      </div>
+
+      <h2 className="set-title">Consumo de API — últimos 30 días</h2>
+      <div className="set-card">
+        {apiUsage === null ? (
+          <p className="card__muted">Cargando…</p>
+        ) : apiUsage.length === 0 ? (
+          <p className="card__muted">
+            Aún no has usado la API con créditos. Las peticiones con tu API key
+            aparecerán aquí desglosadas por día y modelo.
+          </p>
+        ) : (
+          <>
+            <div className="set-table-wrap">
+              <table className="set-table">
+                <thead>
+                  <tr>
+                    <th>Día</th>
+                    <th>Modelo</th>
+                    <th>Tokens entrada</th>
+                    <th>Tokens salida</th>
+                    <th>Peticiones</th>
+                    <th>Costo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {apiUsage.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.date}</td>
+                      <td><code>{r.model}</code></td>
+                      <td>{r.prompt_tokens.toLocaleString()}</td>
+                      <td>{r.completion_tokens.toLocaleString()}</td>
+                      <td>{r.requests}</td>
+                      <td>${r.cost_usd.toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="set-table-total">Total del período: <strong>${apiTotal.toFixed(4)}</strong></p>
+          </>
+        )}
       </div>
     </>
   );
@@ -480,7 +793,7 @@ export default function AccountPage() {
               {current.id === 'cuenta' && (
                 <CuentaSection user={user} plan={plan} keys={keys} onReloadKeys={loadKeys} onLogout={doLogout} />
               )}
-              {current.id === 'privacidad' && <PrivacidadSection />}
+              {current.id === 'privacidad' && <PrivacidadSection user={user} onUserChange={setUser} />}
               {current.id === 'facturacion' && <FacturacionSection plan={plan} />}
               {current.id === 'uso' && <UsoSection usage={account.usage} daily={account.daily} plan={plan} />}
             </>

@@ -590,6 +590,121 @@
   white-space: nowrap;
 }
 
+/* Créditos de API */
+.set-credits {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.set-packs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.set-table-wrap {
+  overflow-x: auto;
+  padding: 8px 0;
+}
+
+.set-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.set-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.set-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.set-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.set-table-total {
+  padding: 10px 12px 12px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+/* Toggle (switch) de preferencias */
+.set-toggle {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.set-toggle.is-on {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.set-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.set-toggle__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 0.18s ease;
+}
+
+.set-toggle.is-on .set-toggle__knob {
+  transform: translateX(18px);
+}
+
+/* Selector segmentado (Apariencia: claro / oscuro / sistema) */
+.set-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+}
+
+.set-seg__btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.set-seg__btn.is-active {
+  background: var(--ink);
+  color: var(--bg);
+}
+
 .set-plan {
   display: flex;
   align-items: center;

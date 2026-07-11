@@ -1,14 +1,37 @@
-// ExtensionsPanel.jsx — panel de extensiones (temas de VSCode desde Open VSX).
-// Busca en el registro público, instala el .vsix (Rust extrae los temas) y
-// permite aplicar cualquiera de sus temas al editor.
+// ExtensionsPanel.jsx — panel de extensiones (Open VSX). Instala el .vsix y
+// Rust extrae TODO lo declarativo: temas de color, gramáticas TextMate,
+// snippets, temas de iconos y lenguajes. Lo no soportado se avisa (warnings).
 import { useState, useEffect, useRef } from 'react';
 import { useExtStore } from '../../store/extStore';
 import { IconSearch, IconTrash, IconCheck, IconDownload } from '../../components/Icons';
 
+/** Chips de lo que aporta una extensión instalada. */
+function ContribChips({ ext }) {
+  const chips = [];
+  const n = (arr) => (arr || []).length;
+  if (n(ext.themes)) chips.push(`${n(ext.themes)} tema${n(ext.themes) > 1 ? 's' : ''}`);
+  if (n(ext.grammars)) {
+    const langs = [...new Set((ext.grammars || []).map((g) => g.language).filter(Boolean))];
+    chips.push(langs.length ? `sintaxis: ${langs.slice(0, 3).join(', ')}` : 'sintaxis');
+  }
+  if (n(ext.snippets)) {
+    const langs = [...new Set((ext.snippets || []).map((s) => s.language))];
+    chips.push(`snippets: ${langs.slice(0, 3).join(', ')}`);
+  }
+  if (n(ext.icon_themes)) chips.push('iconos');
+  if (n(ext.languages)) chips.push(`${n(ext.languages)} lenguaje${n(ext.languages) > 1 ? 's' : ''}`);
+  if (!chips.length) return null;
+  return (
+    <div className="extpanel__chips">
+      {chips.map((c) => <span key={c} className="extpanel__chip">{c}</span>)}
+    </div>
+  );
+}
+
 export function ExtensionsPanel() {
   const {
-    installed, activeTheme, results, searching, installing, error,
-    search, install, uninstall, applyTheme, resetTheme,
+    installed, activeTheme, activeIconTheme, results, searching, installing, error,
+    search, install, uninstall, applyTheme, resetTheme, applyIconTheme, resetIconTheme,
   } = useExtStore();
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
@@ -33,7 +56,7 @@ export function ExtensionsPanel() {
         <input
           ref={inputRef}
           className="searchpanel__input"
-          placeholder="Buscar temas en Open VSX…"
+          placeholder="Buscar extensiones en Open VSX…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           spellCheck={false}
@@ -41,8 +64,9 @@ export function ExtensionsPanel() {
       </div>
 
       <p className="extpanel__note">
-        Compatible con <strong>temas de color</strong> de VSCode (Open VSX). Las
-        extensiones con código no son ejecutables fuera de VSCode.
+        Compatible con lo declarativo de las extensiones de VSCode (Open VSX):
+        <strong> temas, sintaxis, snippets e iconos</strong>. El código de las
+        extensiones no es ejecutable fuera de VSCode.
       </p>
 
       {error && <p className="extpanel__error">{error}</p>}
@@ -64,8 +88,9 @@ export function ExtensionsPanel() {
                     <IconTrash size={14} />
                   </button>
                 </div>
+                <ContribChips ext={ext} />
                 <div className="extpanel__themes">
-                  {ext.themes.map((theme) => {
+                  {(ext.themes || []).map((theme) => {
                     const isActive =
                       activeTheme?.extId === ext.id && activeTheme?.file === theme.file;
                     return (
@@ -80,7 +105,25 @@ export function ExtensionsPanel() {
                       </button>
                     );
                   })}
+                  {(ext.icon_themes || []).map((it) => {
+                    const isActive =
+                      activeIconTheme?.extId === ext.id && activeIconTheme?.path === it.path;
+                    return (
+                      <button
+                        key={it.path}
+                        className={`extpanel__theme ${isActive ? 'is-active' : ''}`}
+                        onClick={() => (isActive ? resetIconTheme() : applyIconTheme(ext.id, it))}
+                        title={isActive ? 'Quitar (volver a los iconos lixbon)' : 'Usar estos iconos en el explorador'}
+                      >
+                        {isActive && <IconCheck size={13} />}
+                        {it.label} (iconos)
+                      </button>
+                    );
+                  })}
                 </div>
+                {(ext.warnings || []).map((w) => (
+                  <p key={w} className="extpanel__warning">⚠ {w}</p>
+                ))}
               </div>
             ))}
             {activeTheme && (
@@ -130,8 +173,9 @@ export function ExtensionsPanel() {
 
         {!query.trim() && results.length === 0 && installed.length === 0 && (
           <p className="filetree__hint">
-            Busca un tema (por ejemplo "dracula", "one dark", "night owl") y aplícalo
-            al editor.
+            Busca una extensión (por ejemplo "one dark", "material icon theme",
+            "elixir") e instálala: temas, sintaxis, snippets e iconos aplican al
+            momento.
           </p>
         )}
       </div>

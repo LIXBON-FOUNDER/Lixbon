@@ -12,16 +12,30 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from core.billing import stripe_gateway as sg
+from core.billing.credits import microusd_to_usd
 from core.config import STRIPE_PUBLISHABLE_KEY
-from core.persistence.queries import get_plan_for_user, get_subscription
+from core.persistence.queries import (
+    credit_usage_daily,
+    get_credit_balance,
+    get_credit_pack,
+    get_plan_for_user,
+    get_subscription,
+    list_credit_ledger,
+    list_credit_packs,
+)
 from core.security.auth import cookie_auth_required
 
 logger = logging.getLogger("lixbon.payments")
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+credits_router = APIRouter(prefix="/api/credits", tags=["credits"])
 
 
 class CheckoutPayload(BaseModel):
     plan_id: str
+
+
+class CreditCheckoutPayload(BaseModel):
+    pack_id: str
 
 
 def _require_enabled():
@@ -93,6 +107,98 @@ async def billing_status(user_data: dict[str, Any] = Depends(cookie_auth_require
         "cancel_at_period_end": sub.get("cancel_at_period_end") if sub else False,
         "payment_method": sg.payment_method_summary(user_data) if paid else None,
         "invoices": sg.list_invoices(user_data) if paid else [],
+    }
+
+
+# ── Créditos prepago de la API (cobro por tokens) ──────────────────────────
+
+def _ledger_row_public(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "delta_usd": microusd_to_usd(row["delta_microusd"]),
+        "balance_after_usd": microusd_to_usd(row["balance_after_microusd"]),
+        "model": row["model"],
+        "prompt_tokens": row["prompt_tokens"],
+        "completion_tokens": row["completion_tokens"],
+        "note": row["note"],
+        "created_at": row["created_at"],
+    }
+
+
+@credits_router.get("/packs")
+async def credit_packs():
+    """Público: packs de recarga disponibles (la web los muestra aunque el
+    checkout esté deshabilitado)."""
+    return {
+        "enabled": sg.enabled(),
+        "packs": [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "credit_usd": microusd_to_usd(p["credit_microusd"]),
+                "price_usd": p["price_cents"] / 100,
+                "currency": p["currency"],
+            }
+            for p in list_credit_packs()
+        ],
+    }
+
+
+@credits_router.post("/checkout")
+async def credit_checkout(
+    payload: CreditCheckoutPayload,
+    request: Request,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Inicia el pago único de un pack de créditos."""
+    _require_enabled()
+    pack = get_credit_pack(payload.pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail={
+            "code": "pack_inexistente", "message": "Ese pack de créditos no existe.",
+        })
+    try:
+        url = sg.create_credit_checkout(user_data, pack, str(request.base_url))
+    except Exception as exc:
+        logger.error(f"checkout de créditos falló: {exc}")
+        raise HTTPException(status_code=502, detail="No se pudo contactar con la pasarela de pago")
+    return {"url": url}
+
+
+@credits_router.get("")
+async def credit_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+    """Saldo actual + últimos movimientos, para Ajustes → Facturación."""
+    user_id = user_data["id"]
+    balance = get_credit_balance(user_id)
+    return {
+        "enabled": sg.enabled(),
+        "balance_usd": microusd_to_usd(balance),
+        "ledger": [_ledger_row_public(r) for r in list_credit_ledger(user_id, limit=50)],
+    }
+
+
+@credits_router.get("/usage")
+async def credit_usage(
+    days: int = 30,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Consumo facturable de la API por día y modelo (del ledger)."""
+    days = max(1, min(days, 90))
+    rows = credit_usage_daily(user_data["id"], days=days)
+    return {
+        "days": days,
+        "daily": [
+            {
+                "date": r["date"],
+                "model": r["model"],
+                "prompt_tokens": r["prompt_tokens"],
+                "completion_tokens": r["completion_tokens"],
+                "cost_usd": microusd_to_usd(r["cost_microusd"]),
+                "requests": r["requests"],
+            }
+            for r in rows
+        ],
     }
 
 

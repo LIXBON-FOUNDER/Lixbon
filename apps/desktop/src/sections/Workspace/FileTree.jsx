@@ -10,6 +10,8 @@ import {
 } from '../../lib/tauri';
 import { useEditorStore } from '../../store/editorStore';
 import { useAppStore } from '../../store/appStore';
+import { useExtStore } from '../../store/extStore';
+import { loadIconTheme, unloadIconTheme, iconDefIdFor, iconDataUrl } from '../../editor/iconTheme';
 import {
   IconFolder,
   IconFolderOpen,
@@ -30,6 +32,35 @@ const CODE_EXTS = new Set([
 function fileIcon(name) {
   const ext = (name.split('.').pop() || '').toLowerCase();
   return CODE_EXTS.has(ext) ? <IconFileCode size={15} /> : <IconFile size={15} />;
+}
+
+/** Icono del tema de iconos de VSCode activo (SVG → data-URL); si el tema no
+    tiene icono para la entrada (o no hay tema) cae al icono propio. */
+function ExtIcon({ name, isDir = false, expanded = false, fallback }) {
+  const active = useExtStore((s) => s.activeIconTheme);
+  const [url, setUrl] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!active) {
+      unloadIconTheme();
+      setUrl(null);
+      return undefined;
+    }
+    (async () => {
+      try {
+        await loadIconTheme(active);
+        const u = await iconDataUrl(iconDefIdFor(name, isDir, expanded));
+        if (!cancelled) setUrl(u);
+      } catch {
+        if (!cancelled) setUrl(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [active, name, isDir, expanded]);
+
+  if (!url) return fallback;
+  return <img className="filetree__exticon" src={url} alt="" width={15} height={15} />;
 }
 
 function baseName(path) {
@@ -309,7 +340,12 @@ export function FileTree() {
               onContextMenu={(e) => openCtxMenu(e, entry, parentPath)}
             >
               {isExpanded ? <IconChevron size={13} open /> : <IconChevronRight size={13} />}
-              {isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />}
+              <ExtIcon
+                name={entry.name}
+                isDir
+                expanded={isExpanded}
+                fallback={isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />}
+              />
               <span className="filetree__label">{entry.name}</span>
               <span className="filetree__node-actions">
                 <button
@@ -340,7 +376,7 @@ export function FileTree() {
           onClick={() => handleSelectFile(entry.path, entry.name)}
           onContextMenu={(e) => openCtxMenu(e, entry, parentPath)}
         >
-          {fileIcon(entry.name)}
+          <ExtIcon name={entry.name} fallback={fileIcon(entry.name)} />
           <span className="filetree__label">{entry.name}</span>
         </div>
       );

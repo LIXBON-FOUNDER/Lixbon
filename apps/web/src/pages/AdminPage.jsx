@@ -14,6 +14,8 @@ const TABS = [
   { id: 'usuarios', label: 'Usuarios' },
   { id: 'nodos', label: 'Nodos' },
   { id: 'modelos', label: 'Modelos' },
+  { id: 'tarifas', label: 'Tarifas' },
+  { id: 'ingresos', label: 'Ingresos' },
   { id: 'releases', label: 'Releases' },
   { id: 'auditoria', label: 'Auditoría' },
 ];
@@ -507,6 +509,259 @@ function ModelosTab() {
   );
 }
 
+// ── Tarifas (créditos de API) ───────────────────────────────────────────
+
+const EMPTY_PRICING = { model_prefix: '', display_name: '', input: '', output: '' };
+
+function TarifasTab() {
+  const [rows, setRows] = useState(null);
+  const [drafts, setDrafts] = useState({});
+  const [nuevo, setNuevo] = useState(EMPTY_PRICING);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get('/api/admin/pricing');
+      setRows(res.data.pricing);
+      setDrafts(Object.fromEntries(res.data.pricing.map((r) => [r.id, {
+        input: String(r.input_usd_per_mtok),
+        output: String(r.output_usd_per_mtok),
+      }])));
+    } catch (err) {
+      setError(errMsg(err, 'No se pudieron cargar las tarifas'));
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (row) => {
+    setError('');
+    const d = drafts[row.id];
+    try {
+      await api.patch(`/api/admin/pricing/${row.id}`, {
+        input_usd_per_mtok: parseFloat(d.input) || 0,
+        output_usd_per_mtok: parseFloat(d.output) || 0,
+      });
+      setSaved(row.id);
+      setTimeout(() => setSaved(null), 2500);
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo guardar la tarifa'));
+    }
+  };
+
+  const toggleActive = async (row) => {
+    setError('');
+    try {
+      await api.patch(`/api/admin/pricing/${row.id}`, { is_active: !row.is_active });
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo cambiar el estado'));
+    }
+  };
+
+  const remove = async (row) => {
+    if (!window.confirm(`¿Eliminar la tarifa de "${row.model_prefix}"? Los modelos que la usaban pasarán a la tarifa por defecto (*).`)) return;
+    setError('');
+    try {
+      await api.delete(`/api/admin/pricing/${row.id}`);
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo eliminar'));
+    }
+  };
+
+  const create = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      await api.post('/api/admin/pricing', {
+        model_prefix: nuevo.model_prefix.trim(),
+        display_name: nuevo.display_name.trim() || null,
+        input_usd_per_mtok: parseFloat(nuevo.input) || 0,
+        output_usd_per_mtok: parseFloat(nuevo.output) || 0,
+      });
+      setNuevo(EMPTY_PRICING);
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo crear la tarifa'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (error && !rows) return <p className="page__error" role="alert">{error}</p>;
+  if (!rows) return <p className="card__muted">Cargando…</p>;
+
+  return (
+    <>
+      {error && <p className="page__error" role="alert">{error}</p>}
+      <section className="card">
+        <h2 className="card__title">Tarifas por modelo (créditos de API)</h2>
+        <p className="card__muted">
+          Precio en <strong>USD por millón de tokens</strong>, match por prefijo del id del modelo
+          (el más largo gana). La fila <code>*</code> es la tarifa por defecto y no se puede eliminar.
+          Los cambios aplican a las peticiones nuevas en menos de un minuto.
+        </p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Prefijo</th><th>Nombre</th><th>$ entrada / Mtok</th>
+                <th>$ salida / Mtok</th><th>Estado</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td><code>{r.model_prefix}</code></td>
+                  <td className="table__muted">{r.display_name || '—'}</td>
+                  <td>
+                    <input
+                      className="plan-models__input table-num"
+                      value={drafts[r.id]?.input ?? ''}
+                      onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...drafts[r.id], input: e.target.value } })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="plan-models__input table-num"
+                      value={drafts[r.id]?.output ?? ''}
+                      onChange={(e) => setDrafts({ ...drafts, [r.id]: { ...drafts[r.id], output: e.target.value } })}
+                    />
+                  </td>
+                  <td>
+                    <button className="pill-btn pill-btn--outline table__action" onClick={() => toggleActive(r)}>
+                      {r.is_active ? 'Activa' : 'Inactiva'}
+                    </button>
+                  </td>
+                  <td>
+                    <button className="pill-btn pill-btn--primary table__action" onClick={() => save(r)}>
+                      {saved === r.id ? 'Guardado ✓' : 'Guardar'}
+                    </button>
+                    {r.model_prefix !== '*' && (
+                      <button className="pill-btn pill-btn--outline table__action is-danger" onClick={() => remove(r)}>
+                        <IconTrash size={13} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2 className="card__title">Nueva tarifa</h2>
+        <div className="plan-models">
+          <input
+            className="plan-models__input"
+            placeholder="Prefijo (ej: qwen2.5)"
+            value={nuevo.model_prefix}
+            onChange={(e) => setNuevo({ ...nuevo, model_prefix: e.target.value })}
+          />
+          <input
+            className="plan-models__input"
+            placeholder="Nombre visible (opcional)"
+            value={nuevo.display_name}
+            onChange={(e) => setNuevo({ ...nuevo, display_name: e.target.value })}
+          />
+          <input
+            className="plan-models__input table-num"
+            placeholder="$ entrada"
+            value={nuevo.input}
+            onChange={(e) => setNuevo({ ...nuevo, input: e.target.value })}
+          />
+          <input
+            className="plan-models__input table-num"
+            placeholder="$ salida"
+            value={nuevo.output}
+            onChange={(e) => setNuevo({ ...nuevo, output: e.target.value })}
+          />
+          <button
+            className="pill-btn pill-btn--primary table__action"
+            disabled={busy || !nuevo.model_prefix.trim()}
+            onClick={create}
+          >
+            <IconPlus size={13} /> Añadir
+          </button>
+        </div>
+      </section>
+    </>
+  );
+}
+
+// ── Ingresos (créditos de API) ──────────────────────────────────────────
+
+function IngresosTab() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get('/api/admin/credits/summary')
+      .then((res) => setData(res.data))
+      .catch((err) => setError(errMsg(err, 'No se pudo cargar el resumen de ingresos')));
+  }, []);
+
+  if (error) return <p className="page__error" role="alert">{error}</p>;
+  if (!data) return <p className="card__muted">Cargando…</p>;
+
+  return (
+    <>
+      <div className="stats">
+        <StatTile label={`Ingresos ${data.month}`} value={`$${data.revenue_usd.toFixed(2)}`} />
+        <StatTile label="Recargas del mes" value={data.purchases} />
+      </div>
+
+      <section className="card">
+        <h2 className="card__title">Consumo por modelo — {data.month}</h2>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Modelo</th><th>Tokens</th><th>Peticiones</th><th>Facturado</th></tr></thead>
+            <tbody>
+              {data.usage_by_model.map((r, i) => (
+                <tr key={i}>
+                  <td><code>{r.model}</code></td>
+                  <td>{r.tokens.toLocaleString()}</td>
+                  <td>{r.requests}</td>
+                  <td>${r.cost_usd.toFixed(4)}</td>
+                </tr>
+              ))}
+              {data.usage_by_model.length === 0 && (
+                <tr><td colSpan={4} className="card__muted">Sin consumo de API este mes</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2 className="card__title">Top consumidores — {data.month}</h2>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Usuario</th><th>Tokens</th><th>Facturado</th></tr></thead>
+            <tbody>
+              {data.top_consumers.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.email}</td>
+                  <td>{r.tokens.toLocaleString()}</td>
+                  <td>${r.cost_usd.toFixed(4)}</td>
+                </tr>
+              ))}
+              {data.top_consumers.length === 0 && (
+                <tr><td colSpan={3} className="card__muted">Sin consumo de API este mes</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
 // ── Releases ────────────────────────────────────────────────────────────
 
 const EMPTY_RELEASE = { version: '', channel: 'stable', title: '', changelog: '', checksum_sha256: '' };
@@ -757,6 +1012,8 @@ export default function AdminPage() {
         {tab === 'usuarios' && <UsuariosTab />}
         {tab === 'nodos' && <NodosTab />}
         {tab === 'modelos' && <ModelosTab />}
+        {tab === 'tarifas' && <TarifasTab />}
+        {tab === 'ingresos' && <IngresosTab />}
         {tab === 'releases' && <ReleasesTab />}
         {tab === 'auditoria' && <AuditoriaTab />}
       </main>

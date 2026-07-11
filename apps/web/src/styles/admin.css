@@ -315,6 +315,12 @@ tr.is-blocked {
   border-color: var(--ink);
 }
 
+/* Inputs numéricos compactos (tab Tarifas) */
+.plan-models__input.table-num {
+  flex: 0 0 auto;
+  width: 110px;
+}
+
 /* ── Releases (subida) ───────────────────────────────────────────────── */
 
 .admin-ok {
