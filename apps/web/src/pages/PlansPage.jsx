@@ -95,7 +95,7 @@ export default function PlansPage() {
                     {busy === p.id
                       ? 'Procesando…'
                       : currentPrice > 0 && p.price_monthly_cents > currentPrice
-                        ? `Mejorar a ${p.name} · solo la diferencia`
+                        ? `Mejorar a ${p.name}`
                         : `Suscribirme a ${p.name}`}
                   </button>
                 ) : (

@@ -156,20 +156,28 @@ function Cli({ base }) {
       </p>
       <CodeBlock code={`export PATH="$HOME/.local/bin:$PATH"`} />
 
-      <h2>Configuración</h2>
+      <h2>Primer uso</h2>
       <p>
-        La primera vez, ejecuta <code>setup</code> para guardar tu servidor y tu API
-        key (la generas en <a href="/account">Mi cuenta</a>):
+        Ejecuta <code>lixbon</code> y listo: la primera vez se abre el inicio de
+        sesión interactivo — con tu correo y contraseña, o pegando una API key{' '}
+        <code>lixbon_sk_…</code> (la generas en <a href="/account">Mi cuenta</a>).
+        Después eliges el modelo con las flechas del teclado y ya estás chateando.
       </p>
-      <CodeBlock code={`lixbon setup`} />
+      <CodeBlock code={`lixbon`} />
+      <p>
+        Dentro del chat, escribe <code>/</code> para ver todos los comandos
+        (cambiar de modelo o modo, adjuntar imágenes con <code>@ruta.png</code>,
+        compactar la conversación con <code>/compact</code>, etc.).
+      </p>
 
       <h2>Comandos principales</h2>
       <table className="docs__table">
         <thead><tr><th>Comando</th><th>Qué hace</th></tr></thead>
         <tbody>
-          <tr><td><code>lixbon setup</code></td><td>Configuración inicial (servidor y API key)</td></tr>
-          <tr><td><code>lixbon chat</code></td><td>Chat interactivo en la terminal</td></tr>
-          <tr><td><code>lixbon status</code></td><td>Estado del gateway y del clúster</td></tr>
+          <tr><td><code>lixbon</code></td><td>Abre el chat (con login integrado la primera vez)</td></tr>
+          <tr><td><code>lixbon setup</code></td><td>Volver a iniciar sesión (correo o API key)</td></tr>
+          <tr><td><code>lixbon models</code></td><td>Listar los modelos disponibles</td></tr>
+          <tr><td><code>lixbon status</code></td><td>Ver la configuración local del CLI</td></tr>
           <tr><td><code>lixbon update</code></td><td>Actualiza el CLI a la última versión</td></tr>
         </tbody>
       </table>

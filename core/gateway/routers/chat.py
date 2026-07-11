@@ -50,6 +50,9 @@ router = APIRouter()
 class ChatMessage(BaseModel):
     role: str
     content: str
+    # Imágenes en base64 (passthrough a Ollama para modelos multimodales).
+    # No se persisten en el historial: solo viajan al modelo.
+    images: list[str] | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -203,7 +206,7 @@ async def chat_completions(
         if payload.messages and payload.messages[-1].role == "user":
             save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
 
-    messages = [m.model_dump() for m in payload.messages]
+    messages = [m.model_dump(exclude_none=True) for m in payload.messages]
 
     # "Modo investigar": busca en internet e inyecta el contexto antes de responder.
     web_sources: list[dict] = []

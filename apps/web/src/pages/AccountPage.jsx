@@ -500,7 +500,7 @@ function FacturacionSection({ plan }) {
       )}
       {upgradeOk && (
         <p className="admin-ok" role="status">
-          ¡Plan mejorado! Se cobró solo la diferencia prorrateada del mes — la verás en tus facturas.
+          ¡Plan mejorado! Se cobró la diferencia — la verás en tus facturas.
         </p>
       )}
       {error && <p className="page__error" role="alert">{error}</p>}

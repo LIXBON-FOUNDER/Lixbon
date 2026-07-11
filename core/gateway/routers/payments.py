@@ -77,7 +77,7 @@ async def create_checkout(
             return {
                 "upgraded": True,
                 "message": f"Tu plan ahora es {result['plan_name']}. "
-                           "Se cobró solo la diferencia prorrateada del mes.",
+                           "Se cobró la diferencia, el siguiente mes se cobrara el precio total de tu plan.",
             }
         url = sg.create_checkout_session(user_data, payload.plan_id, str(request.base_url))
     except ValueError as exc:

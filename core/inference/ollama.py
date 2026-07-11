@@ -144,12 +144,19 @@ async def stream_chat_openai(
                     continue
 
                 content = data.get("message", {}).get("content", "")
+                thinking = data.get("message", {}).get("thinking", "")
                 done = data.get("done", False)
                 if content:
                     parts.append(content)
-                if done and collector is not None:
-                    collector["prompt_tokens"] = int(data.get("prompt_eval_count") or 0)
-                    collector["completion_tokens"] = int(data.get("eval_count") or 0)
+
+                delta: dict = {}
+                if not done:
+                    delta["content"] = content
+                    if thinking:
+                        # Razonamiento del modelo (modelos thinking de Ollama):
+                        # se reenvía como reasoning_content para que el cliente
+                        # lo muestre en segundo plano.
+                        delta["reasoning_content"] = thinking
 
                 openai_chunk = {
                     "id": chat_id,
@@ -159,11 +166,22 @@ async def stream_chat_openai(
                     "choices": [
                         {
                             "index": 0,
-                            "delta": {"content": content} if not done else {},
+                            "delta": delta,
                             "finish_reason": "stop" if done else None,
                         }
                     ],
                 }
+                if done:
+                    prompt_tokens = int(data.get("prompt_eval_count") or 0)
+                    completion_tokens = int(data.get("eval_count") or 0)
+                    if collector is not None:
+                        collector["prompt_tokens"] = prompt_tokens
+                        collector["completion_tokens"] = completion_tokens
+                    openai_chunk["usage"] = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens,
+                    }
                 yield f"data: {json.dumps(openai_chunk)}\n\n"
 
     if collector is not None:

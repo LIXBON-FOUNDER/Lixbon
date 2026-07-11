@@ -1,6 +1,6 @@
 # lixbon — Estado actual del proyecto
 
-> Actualizado: 2026-07-04 (F7 pagos: integración lista, falta conectar credenciales). Documento para retomar el trabajo.
+> Actualizado: 2026-07-11 (CLI v2 reescrito: terminal pura estilo Claude Code, sin TUI). Documento para retomar el trabajo.
 > Referencias: `docs/PLAN_MAESTRO.md` (plan por fases) · `docs/DISENO_WEB.md` (diseño de la web) · `docs/INFORME_Y_PLAN.md` (diagnóstico original).
 
 ---
@@ -8,6 +8,19 @@
 ## 1. Resumen en una línea
 
 **F0–F7 implementadas (backend, web, planes/límites, panel admin, releases R2, pagos Stripe). Pendiente: conectar credenciales de Stripe en Railway, y F8 (calidad/tests).**
+
+---
+
+## 0.b CLI v2 (2026-07-11) — reescritura completa, terminal pura
+
+- **Textual (TUI) eliminado.** Interfaz estilo Claude Code: transcript inline, streaming SSE en vivo, thinking del modelo en gris (`delta.reasoning_content` + tags `<think>` inline), selectores con flechas/mouse (nunca números), menú de slash-commands al escribir `/`, barra de estado inferior (modelo | sesión | % contexto | tokens | UTF-8).
+- **Código fuente modular** en `apps/cli/lixbon_cli/` (term/theme/config/sse/api/ui/diffs/agent/commands/app/cli); `apps/cli/build.py` lo concatena en el `client_cli.py` de siempre (la distribución `/install/client_cli.py`, install.sh/ps1 y el self-update NO cambian). Test anti-drift: `apps/cli/tests/test_build_fresh.py`. **No editar client_cli.py a mano: editar módulos + `python apps/cli/build.py`.**
+- Deps de la interfaz (`prompt_toolkit` + `rich`) se autoinstalan solo para `chat`; `init/status/models/usage/update` siguen siendo stdlib puro.
+- **Login interactivo**: Credenciales (email+password → `issue_api_key:true`, mismo flujo que la desktop), Crear cuenta, o pegar `lixbon_sk_...` (valida con `/api/key/info`).
+- **Modo agent**: diffs colapsados `● Update(archivo) +N -M` con aprobación de 3 vías (Sí / Sí y no preguntar más / No); herramientas de solo lectura no piden confirmación. `/compact` (resumen client-side), `/image ruta` y `@ruta.png` inline (imágenes base64).
+- **Gateway (cambios aditivos)**: `ChatMessage.images` passthrough a Ollama (multimodal), `delta.reasoning_content` desde `message.thinking`, y `usage` en el último chunk SSE antes de `[DONE]`.
+- Paleta del ícono: acento `#B4C13A`, crema `#F6F7ED`, beige `#CBC7A9`, oliva, grises `#8A8A80`/`#5C5C55`; glifos con fallback ASCII para conhost legacy.
+- Verificado: build/frescura, selector y confirm3 con input simulado, SSE completo (sources/reasoning/content/usage) contra server fake, turno agent E2E (aprobar/rechazar/always), `/compact`, login real contra gateway local (usuario de prueba `cli_test_*@test.local` quedó en staging), self-update E2E. **Pendiente manual**: probar mouse/colores en Windows Terminal real y chat con inferencia real (requiere Ollama local o túnel GPU).
 
 ---
 
