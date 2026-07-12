@@ -26,6 +26,7 @@ import {
   truncateFabricated,
 } from '../lib/agent';
 import { useEditorStore } from './editorStore';
+import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
 
 let abortController = null;
 
@@ -38,6 +39,9 @@ export const useChatStore = create((set, get) => ({
   // Por defecto el agente escribe directo (petición del diseño); en Ajustes
   // se puede exigir aprobación por cambio.
   autoApprove: (localStorage.getItem('lixbon_agent_auto') ?? 'true') === 'true',
+  // Tool-calling nativo (opt-in): requiere un modelo que soporte tools en
+  // Ollama. Off = protocolo de texto (JSON embebido), fiable y por defecto.
+  nativeTools: (localStorage.getItem('lixbon_agent_native') ?? 'false') === 'true',
   pendingApproval: null, // { tool, args, change, resolve }
 
   setView: (view) => set({ view }),
@@ -50,6 +54,11 @@ export const useChatStore = create((set, get) => ({
   setAutoApprove: (autoApprove) => {
     localStorage.setItem('lixbon_agent_auto', autoApprove ? 'true' : 'false');
     set({ autoApprove });
+  },
+
+  setNativeTools: (nativeTools) => {
+    localStorage.setItem('lixbon_agent_native', nativeTools ? 'true' : 'false');
+    set({ nativeTools });
   },
 
   resolveApproval: (decision) => {
@@ -169,11 +178,14 @@ export const useChatStore = create((set, get) => ({
     // Un solo recordatorio por turno: si el modelo "sugiere" código en vez de
     // aplicarlo (vicio de los modelos chicos), se le exige usar la herramienta.
     let nudged = false;
+    // Tool-calling nativo (opt-in): solo se envían los schemas en modo agente.
+    const useNative = agentActive && get().nativeTools;
 
     try {
       for (let step = 0; step < MAX_AGENT_STEPS; step++) {
         let raw = '';
         let reasoningAcc = ''; // delta.reasoning_content del gateway
+        let nativeCalls = [];  // tool_calls nativos de esta respuesta
         const liveThinking = (inline) =>
           [reasoningAcc, inline].filter(Boolean).join('\n').trim();
         await streamChatCompletion({
@@ -183,6 +195,7 @@ export const useChatStore = create((set, get) => ({
           messages: modelMessages,
           conversationId: convId,
           signal,
+          tools: useNative ? TOOL_SCHEMAS : null,
           onDelta: (delta) => {
             raw += delta;
             const { thinking, visible } = splitThinking(raw);
@@ -195,6 +208,7 @@ export const useChatStore = create((set, get) => ({
             reasoningAcc += delta;
             patchLast({ thinking: liveThinking(splitThinking(raw).thinking) });
           },
+          onToolCalls: (tc) => { nativeCalls = tc.map(nativeCallToInternal); },
           onSources: (sources) => patchLast({ sources }),
         });
 
@@ -207,7 +221,8 @@ export const useChatStore = create((set, get) => ({
         }
 
         const spoken = truncateFabricated(visible);
-        const calls = extractToolCalls(spoken);
+        // Preferir los tool_calls NATIVOS; si no hay, caer al JSON en texto.
+        const calls = nativeCalls.length ? nativeCalls : extractToolCalls(spoken);
         const prose = cleanProse(spoken);
 
         if (!calls.length && nudged && (/^ok\.?$/i.test(prose.trim()) || !prose.trim())) {

@@ -162,6 +162,30 @@
   height: 100%;
 }
 
+/* ── Diff inline del agente (@codemirror/merge) ──────────────────────── */
+/* Líneas añadidas/cambiadas en verde, bloques eliminados en rojo, alineado
+   con la paleta. Los botones Aceptar/Rechazar por bloque los pinta el paquete. */
+.cm-host .cm-changedLine {
+  background: color-mix(in srgb, var(--accent-deep) 16%, transparent);
+}
+.cm-host .cm-changedText {
+  background: color-mix(in srgb, var(--accent-deep) 26%, transparent);
+}
+.cm-host .cm-deletedChunk {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+.cm-host .cm-deletedChunk .cm-deletedText,
+.cm-host .cm-deletedChunk del {
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+  text-decoration: none;
+}
+.cm-host .cm-changeGutter { width: 3px; }
+/* Botones Aceptar/Rechazar del bloque */
+.cm-host .cm-merge-revert button,
+.cm-host .cm-changedLine .cm-mergeControl {
+  cursor: pointer;
+}
+
 /* ── Explorador de archivos ──────────────────────────────────────────── */
 
 .filetree {

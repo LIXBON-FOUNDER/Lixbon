@@ -52,15 +52,36 @@ function parseLoose(candidate) {
   }
 }
 
+// `{` + cualquier espacio + `"tool"` (nuestro formato) o `"name"` (formato
+// función de OpenAI, que emiten los modelos primados con tools, p.ej.
+// qwen2.5-coder). Los modelos suelen indentar el JSON ({\n  "tool": …).
+const TOOL_START_RE = /\{\s*"(tool|name)"/g;
+
+/** Normaliza un objeto a {tool, args}. Acepta {tool,args} y {name,arguments}
+    (formato función OpenAI). Devuelve null si no parece una llamada. */
+function normalizeCall(data) {
+  if (!data || typeof data !== 'object') return null;
+  if (data.tool) {
+    return { tool: data.tool, args: data.args && typeof data.args === 'object' ? data.args : {} };
+  }
+  // {name, arguments}: solo si trae arguments (evita falsos positivos de
+  // cualquier objeto con un campo "name").
+  if (data.name && data.arguments !== undefined) {
+    let a = data.arguments;
+    if (typeof a === 'string') { try { a = JSON.parse(a); } catch { a = {}; } }
+    return { tool: data.name, args: a && typeof a === 'object' ? a : {} };
+  }
+  return null;
+}
+
 function iterToolCallSpans(text) {
   const spans = [];
   let i = 0;
   while (i < text.length) {
-    const plain = text.indexOf('{"tool"', i);
-    const spaced = text.indexOf('{ "tool"', i);
-    let start = plain;
-    if (start === -1 || (spaced !== -1 && spaced < start)) start = spaced;
-    if (start === -1) break;
+    TOOL_START_RE.lastIndex = i;
+    const m = TOOL_START_RE.exec(text);
+    if (!m) break;
+    const start = m.index;
     let depth = 0;
     let inString = false;
     let escapeNext = false;
@@ -79,11 +100,8 @@ function iterToolCallSpans(text) {
         else if (ch === '}') {
           depth--;
           if (depth === 0) {
-            const data = parseLoose(text.slice(start, j + 1));
-            if (data && typeof data === 'object' && data.tool) {
-              if (!data.args || typeof data.args !== 'object') data.args = {};
-              spans.push({ call: data, start, end: j + 1 });
-            }
+            const call = normalizeCall(parseLoose(text.slice(start, j + 1)));
+            if (call) spans.push({ call, start, end: j + 1 });
             i = j + 1;
             closed = true;
             break;

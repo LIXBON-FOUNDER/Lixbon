@@ -98,7 +98,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "(old_text copiado tal cual, con su indentación). Usa write_file solo para archivos nuevos o reescrituras totales.\n"
         "5. Puedes encadenar varias herramientas en una misma respuesta.\n"
         "6. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar; nunca los escribas tú.\n"
-        "7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command.\n"
+        "7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command; "
+        "si el resultado trae un error (EXIT distinto de 0), CORRIGE el archivo y vuelve a ejecutar hasta que pase.\n"
         "8. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON ni código) resumiendo lo que hiciste.\n\n"
         "=== EJEMPLO 1 (crear) ===\n"
         "Usuario: crea un script que imprima hola\n"
@@ -305,11 +306,29 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict) -> str:
 # ── Parseo de tool calls embebidos en texto ─────────────────────────────────
 
 def _validate_tool_dict(data: dict) -> dict | None:
-    if isinstance(data, dict) and data.get("tool"):
-        if "args" not in data or not isinstance(data.get("args"), dict):
-            data["args"] = {}
-        return data
+    """Normaliza a {tool, args}. Acepta nuestro formato {tool,args} y el de
+    función de OpenAI {name,arguments} (que emiten modelos primados con tools,
+    p.ej. qwen2.5-coder). Devuelve None si no parece una llamada."""
+    if not isinstance(data, dict):
+        return None
+    if data.get("tool"):
+        args = data.get("args")
+        return {"tool": data["tool"], "args": args if isinstance(args, dict) else {}}
+    # {name, arguments}: solo con arguments presente (evita falsos positivos)
+    if data.get("name") and data.get("arguments") is not None:
+        args = data["arguments"]
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        return {"tool": data["name"], "args": args if isinstance(args, dict) else {}}
     return None
+
+
+# `{` + cualquier espacio + `"tool"` (nuestro formato) o `"name"` (formato
+# función de OpenAI). Los modelos suelen indentar el JSON ({\n  "tool": …).
+_TOOL_START = re.compile(r'\{\s*"(tool|name)"')
 
 
 def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
@@ -320,11 +339,10 @@ def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
     results = []
     i = 0
     while i < len(text):
-        start = text.find('{"tool"', i)
-        if start == -1:
-            start = text.find('{ "tool"', i)
-        if start == -1:
+        m = _TOOL_START.search(text, i)
+        if not m:
             break
+        start = m.start()
         depth = 0
         j = start
         in_string = False

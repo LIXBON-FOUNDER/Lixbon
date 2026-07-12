@@ -7,6 +7,7 @@ el mejor nodo GPU y cae al Ollama local del gateway solo si no hay nodos.
 El streaming persiste el mensaje del asistente y los tokens al terminar.
 """
 from __future__ import annotations
+import json
 import logging
 import time
 import uuid
@@ -49,10 +50,15 @@ router = APIRouter()
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str = ""  # los mensajes 'assistant' con solo tool_calls van sin content
     # Imágenes en base64 (passthrough a Ollama para modelos multimodales).
     # No se persisten en el historial: solo viajan al modelo.
     images: list[str] | None = None
+    # Tool-calling nativo (round-trip): el assistant devuelve tool_calls y el
+    # cliente responde con role="tool". Passthrough a Ollama; no se persisten.
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -63,6 +69,35 @@ class ChatCompletionRequest(BaseModel):
     client_id: str | None = None
     stream: bool = False
     web_search: bool = False  # "modo investigar": busca en internet e inyecta contexto
+    # Definiciones de funciones para tool-calling nativo (passthrough a Ollama).
+    # None ⇒ comportamiento clásico (la web nunca las envía).
+    tools: list[dict] | None = None
+    tool_choice: Any | None = None
+
+
+def _normalize_for_ollama(messages: list[dict]) -> list[dict]:
+    """Adapta los mensajes OpenAI al formato que espera Ollama en /api/chat:
+    los tool_calls llevan `arguments` como string JSON en OpenAI, pero Ollama
+    los quiere como objeto. Se ignoran campos que Ollama no entiende."""
+    out = []
+    for m in messages:
+        calls = m.get("tool_calls")
+        if calls:
+            fixed = []
+            for c in calls:
+                fn = (c.get("function") or {})
+                args = fn.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                fixed.append({"function": {"name": fn.get("name", ""), "arguments": args}})
+            m = {**m, "tool_calls": fixed}
+            m.pop("tool_call_id", None)
+            m.pop("name", None)
+        out.append(m)
+    return out
 
 
 class UIChatRequest(BaseModel):
@@ -207,6 +242,8 @@ async def chat_completions(
             save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
 
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
+    if payload.tools:
+        messages = _normalize_for_ollama(messages)
 
     # "Modo investigar": busca en internet e inyecta el contexto antes de responder.
     web_sources: list[dict] = []
@@ -230,7 +267,8 @@ async def chat_completions(
             try:
                 try:
                     async for chunk in stream_chat_openai(base, payload.model, messages,
-                                                          headers=headers, collector=collector):
+                                                          headers=headers, collector=collector,
+                                                          tools=payload.tools):
                         streamed_something = True
                         yield chunk
                 except Exception as exc:
@@ -239,7 +277,7 @@ async def chat_completions(
                     if origen != "local" and not streamed_something:
                         logger.warning(f"[stream] Nodo '{origen}' falló ({exc}); fallback local")
                         async for chunk in stream_chat_openai(OLLAMA_BASE_URL, payload.model, messages,
-                                                              collector=collector):
+                                                              collector=collector, tools=payload.tools):
                             yield chunk
                     else:
                         logger.error(f"[stream] Falló el streaming ({exc})")

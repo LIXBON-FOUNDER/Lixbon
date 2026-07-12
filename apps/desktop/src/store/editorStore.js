@@ -9,6 +9,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { indentUnit } from '@codemirror/language';
 import { indentWithTab } from '@codemirror/commands';
+import { unifiedMergeView } from '@codemirror/merge';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 import { readFileContent, writeFileContent } from '../lib/tauri';
@@ -75,6 +76,50 @@ export function getLiveView() {
   return liveView;
 }
 
+// ── Diff inline del agente (estilo Cursor) ──────────────────────────────
+// Cuando el agente edita un archivo, se muestra el diff EN el editor (verde
+// añadido / rojo eliminado) con Aceptar/Rechazar por bloque, vía
+// @codemirror/merge. El compartment está vacío salvo cuando hay un diff activo.
+const mergeCompartment = new Compartment();
+// path -> contenido ORIGINAL (antes de la edición del agente), pendiente de
+// pintar en cuanto la vista monte ese archivo (el montaje es asíncrono).
+const pendingMerge = new Map();
+
+function mergeExtension(original) {
+  return unifiedMergeView({
+    original,
+    mergeControls: true,       // botones Aceptar/Rechazar por bloque
+    gutter: true,
+    highlightChanges: true,
+    syntaxHighlightDeletions: true,
+  });
+}
+
+/** Primera línea (1-based) que difiere entre dos textos, para saltar allí. */
+function firstChangedLine(oldText, newText) {
+  const a = oldText.split('\n');
+  const b = newText.split('\n');
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if (a[i] !== b[i]) return i + 1;
+  }
+  return Math.min(a.length, b.length) + 1;
+}
+
+/** La llama CodeMirrorHost tras montar un archivo: si tiene diff pendiente,
+    lo pinta ahora (resuelve el timing del montaje asíncrono). */
+export function applyPendingMerge(view, path) {
+  const original = pendingMerge.get(path);
+  if (original === undefined || !view) return;
+  pendingMerge.delete(path);
+  view.dispatch({ effects: mergeCompartment.reconfigure(mergeExtension(original)) });
+  cacheState(path, view.state);
+  const line = firstChangedLine(original, view.state.doc.toString());
+  const ln = Math.min(Math.max(1, line), view.state.doc.lines);
+  const pos = view.state.doc.line(ln).from;
+  view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: 'center' }) });
+}
+
 // ── Autoguardado ───────────────────────────────────────────────────────
 // Debounce único: 1 s después del último cambio se guardan todas las
 // pestañas sucias (solo la activa puede ensuciarse, pero saveAll es barato).
@@ -125,6 +170,7 @@ export const useEditorStore = create((set, get) => ({
       extensions: [
         basicSetup,
         indentCompartment.of(indentExtension()),
+        mergeCompartment.of([]), // vacío salvo cuando el agente deja un diff
         keymap.of([
           indentWithTab,
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },
@@ -154,6 +200,35 @@ export const useEditorStore = create((set, get) => ({
   },
 
   setActive: (path) => set({ activePath: path }),
+
+  /** El agente editó `path`: lo abre, salta al cambio y pinta el diff inline
+      (verde/rojo con Aceptar/Rechazar). `oldContent` = contenido previo
+      (cadena vacía para archivos nuevos → todo verde). */
+  showAgentDiff: async (path, name, oldContent) => {
+    pendingMerge.set(path, oldContent ?? '');
+    await get().openFile(path, name);
+    set({ activePath: path });
+    // Si ya estaba montado y activo, el efecto de CodeMirrorHost no se dispara;
+    // aplicarlo aquí. Si no, applyPendingMerge lo hará al montar.
+    requestAnimationFrame(() => {
+      if (liveView && get().activePath === path && pendingMerge.has(path)) {
+        applyPendingMerge(liveView, path);
+      }
+    });
+  },
+
+  /** Quita el diff inline de un archivo (vuelve a edición normal). */
+  clearAgentDiff: (path) => {
+    pendingMerge.delete(path);
+    const clear = (state) => state.update({ effects: mergeCompartment.reconfigure([]) }).state;
+    if (liveView && get().activePath === path) {
+      liveView.dispatch({ effects: mergeCompartment.reconfigure([]) });
+      stateCache.set(path, liveView.state);
+    } else {
+      const st = stateCache.get(path);
+      if (st) stateCache.set(path, clear(st));
+    }
+  },
 
   /** Abre un archivo y coloca el cursor en `line` (búsqueda global / Quick Open). */
   openFileAtLine: async (path, name, line) => {

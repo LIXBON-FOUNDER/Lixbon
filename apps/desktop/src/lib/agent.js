@@ -69,6 +69,16 @@ function notifyFsChanged() {
   window.dispatchEvent(new CustomEvent('lixbon:fs-changed'));
 }
 
+/** Tras una edición del agente: recarga la pestaña abierta, la abre/enfoca y
+    pinta el diff inline (verde/rojo con Aceptar/Rechazar) saltando al cambio. */
+async function revealEdit(abs, name, oldContent) {
+  const store = useEditorStore.getState();
+  try {
+    await store.reloadFromDisk(abs);
+    await store.showAgentDiff(abs, name, oldContent ?? '');
+  } catch { /* la UI no debe romper la herramienta */ }
+}
+
 // ── Herramientas ───────────────────────────────────────────────────────
 
 async function toolListFiles(root, relPath) {
@@ -123,9 +133,7 @@ async function toolEditFile(root, relPath, oldText, newText, all = false) {
     ? content.split(oldText).join(newText ?? '')
     : content.replace(oldText, newText ?? '');
   await writeFileContent(abs, updated);
-  try {
-    await useEditorStore.getState().reloadFromDisk(abs);
-  } catch { /* la UI no debe romper la herramienta */ }
+  await revealEdit(abs, rel.split('/').pop(), content); // content = versión previa
   notifyFsChanged();
   return `Archivo editado: ${rel} (${count > 1 ? `${count} reemplazos` : '1 reemplazo'})`;
 }
@@ -157,13 +165,16 @@ async function toolWriteFile(root, relPath, content) {
   const segments = rel.split('/');
   const name = segments.pop();
   const parentAbs = await ensureDirs(root, segments.join('/'));
-  const isNew = !(await fileExists(root, rel));
-  if (isNew) await createNewEntry(parentAbs, name, false);
   const abs = joinPath(root, rel);
+  const isNew = !(await fileExists(root, rel));
+  let oldContent = '';
+  if (isNew) {
+    await createNewEntry(parentAbs, name, false);
+  } else {
+    try { oldContent = await readFileContent(abs); } catch { oldContent = ''; }
+  }
   await writeFileContent(abs, content);
-  try {
-    await useEditorStore.getState().reloadFromDisk(abs);
-  } catch { /* la UI no debe romper la herramienta */ }
+  await revealEdit(abs, name, oldContent);
   notifyFsChanged();
   return `Archivo ${isNew ? 'creado' : 'actualizado'}: ${rel} (${content.length} chars)`;
 }
@@ -287,7 +298,18 @@ export async function revertSnapshot(root, snapshot) {
     // El archivo no existía: revertir = eliminarlo
     return toolDeleteFile(root, snapshot.path);
   }
-  return toolWriteFile(root, snapshot.path, snapshot.oldContent);
+  // Revertir escribe el contenido previo y LIMPIA el diff inline (no deja uno
+  // nuevo del propio revert), a diferencia de una edición normal del agente.
+  const rel = normalizeRel(snapshot.path);
+  const abs = joinPath(root, rel);
+  await writeFileContent(abs, snapshot.oldContent);
+  const store = useEditorStore.getState();
+  try {
+    await store.reloadFromDisk(abs);
+    store.clearAgentDiff(abs);
+  } catch { /* la UI no debe romper el revert */ }
+  notifyFsChanged();
+  return `Revertido: ${rel}`;
 }
 
 // ── Vista previa del cambio (para la tarjeta de aprobación) ────────────
@@ -387,7 +409,8 @@ export async function buildAgentSystemPrompt(root, activeFile = '') {
     '(old_text copiado tal cual, con su indentación). Usa write_file solo para archivos nuevos o reescrituras totales.\n' +
     '5. Puedes encadenar varias herramientas en una misma respuesta.\n' +
     '6. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar; nunca los escribas tú.\n' +
-    '7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command.\n' +
+    '7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command; ' +
+    'si el resultado trae un error (EXIT distinto de 0), CORRIGE el archivo y vuelve a ejecutar hasta que pase.\n' +
     '8. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON ni código) resumiendo lo que hiciste.\n\n' +
     '=== EJEMPLO 1 (crear) ===\n' +
     'Usuario: crea un script que imprima hola\n' +

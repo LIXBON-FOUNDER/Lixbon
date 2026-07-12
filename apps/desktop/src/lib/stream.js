@@ -32,6 +32,8 @@ export async function streamChatCompletion({
   onDelta,
   onSources,
   onReasoning,
+  onToolCalls,
+  tools = null,
   webSearch = false,
 }) {
   const res = await fetch(`${serverUrl}/v1/chat/completions`, {
@@ -46,6 +48,7 @@ export async function streamChatCompletion({
       conversation_id: conversationId,
       stream: true,
       web_search: webSearch,
+      ...(tools ? { tools } : {}),
     }),
     signal,
   });
@@ -64,6 +67,11 @@ export async function streamChatCompletion({
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const toolCalls = []; // tool_calls nativos acumulados (Ollama los da completos)
+
+  const flush = () => {
+    if (toolCalls.length && onToolCalls) onToolCalls(toolCalls);
+  };
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -77,15 +85,17 @@ export async function streamChatCompletion({
       const line = event.trim();
       if (!line.startsWith('data:')) continue; // ignora keep-alives
       const data = line.slice(5).trim();
-      if (data === '[DONE]') return;
+      if (data === '[DONE]') { flush(); return; }
       try {
         const chunk = JSON.parse(data);
         if (chunk.lixbon_sources && onSources) { onSources(chunk.lixbon_sources); continue; }
-        const reasoning = chunk.choices?.[0]?.delta?.reasoning_content;
-        if (reasoning && onReasoning) onReasoning(reasoning);
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) onDelta(delta);
+        const delta = chunk.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta.reasoning_content && onReasoning) onReasoning(delta.reasoning_content);
+        if (delta.tool_calls) toolCalls.push(...delta.tool_calls);
+        if (delta.content) onDelta(delta.content);
       } catch { /* chunk malformado: se ignora */ }
     }
   }
+  flush();
 }

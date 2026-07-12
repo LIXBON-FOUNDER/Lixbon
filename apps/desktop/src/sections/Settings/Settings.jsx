@@ -23,7 +23,7 @@ export function Settings() {
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
     autoSave, setAutoSave,
   } = useAppStore();
-  const { agentMode, setAgentMode, autoApprove, setAutoApprove } = useChatStore();
+  const { agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools } = useChatStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
   const [theme, setThemeMode] = useTheme();
 
@@ -330,6 +330,24 @@ export function Settings() {
             title={autoApprove
               ? 'El agente escribe directo en los archivos (el diff queda en el chat)'
               : 'Cada cambio pide aprobación con vista previa del diff'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Herramientas nativas
+            <span className="settings__row-hint"> · requiere un modelo con soporte de tools (qwen2.5-coder, llama3.1…)</span>
+          </span>
+          <button
+            className={`settings__toggle ${nativeTools ? 'is-on' : ''}`}
+            onClick={() => setNativeTools(!nativeTools)}
+            role="switch"
+            aria-checked={nativeTools}
+            title={nativeTools
+              ? 'El modelo emite tool_calls nativos (más fiable). Si tu modelo no los soporta, desactívalo.'
+              : 'Protocolo de texto (JSON embebido), compatible con cualquier modelo'}
           >
             <span className="settings__toggle-knob" />
           </button>

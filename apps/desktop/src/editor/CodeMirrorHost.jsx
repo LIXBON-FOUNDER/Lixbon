@@ -7,6 +7,7 @@ import {
   registerEditorView,
   getCachedState,
   cacheState,
+  applyPendingMerge,
 } from '../store/editorStore';
 
 export function CodeMirrorHost() {
@@ -46,6 +47,7 @@ export function CodeMirrorHost() {
         view.setState(next);
       }
       view.focus();
+      applyPendingMerge(view, activePath); // diff inline del agente, si lo hay
     }
     shownPathRef.current = activePath;
   }, [activePath]);

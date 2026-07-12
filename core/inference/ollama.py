@@ -109,23 +109,47 @@ async def _lines_with_keepalive(
         pump_task.cancel()
 
 
+def _ollama_tool_calls_to_openai(raw_calls: list[dict]) -> list[dict]:
+    """Convierte los tool_calls de Ollama (arguments = objeto) al formato OpenAI
+    (arguments = string JSON), que es lo que esperan los clientes."""
+    out = []
+    for i, call in enumerate(raw_calls or []):
+        fn = call.get("function", {}) or {}
+        args = fn.get("arguments", {})
+        if not isinstance(args, str):
+            args = json.dumps(args, ensure_ascii=False)
+        out.append({
+            "index": i,
+            "id": call.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {"name": fn.get("name", ""), "arguments": args},
+        })
+    return out
+
+
 async def stream_chat_openai(
     base_url: str,
     model: str,
     messages: list[dict],
     headers: dict | None = None,
     collector: dict | None = None,
+    tools: list[dict] | None = None,
 ) -> AsyncIterator[str]:
     """
     Chat en streaming, convertido a chunks SSE en formato OpenAI.
     Si se pasa `collector` (dict), al terminar contiene:
-      content (texto completo), prompt_tokens, completion_tokens
+      content (texto completo), prompt_tokens, completion_tokens, tool_calls
     para que el caller persista el mensaje y el uso.
+    `tools`: definiciones de funciones (passthrough a Ollama para tool-calling
+    nativo); si es None el comportamiento no cambia (retrocompatible con la web).
     """
     url = f"{base_url.rstrip('/')}/api/chat"
-    payload = {"model": model, "messages": messages, "stream": True}
+    payload: dict = {"model": model, "messages": messages, "stream": True}
+    if tools:
+        payload["tools"] = tools
     chat_id = f"chatcmpl-{uuid.uuid4()}"
     parts: list[str] = []
+    collected_tool_calls: list[dict] = []
 
     async with httpx.AsyncClient(timeout=STREAM_TIMEOUT) as client:
         async with client.stream("POST", url, json=payload, headers=headers) as response:
@@ -143,8 +167,10 @@ async def stream_chat_openai(
                     logger.warning(f"Chunk no-JSON de Ollama ignorado: {line[:80]}")
                     continue
 
-                content = data.get("message", {}).get("content", "")
-                thinking = data.get("message", {}).get("thinking", "")
+                msg = data.get("message", {}) or {}
+                content = msg.get("content", "")
+                thinking = msg.get("thinking", "")
+                raw_tool_calls = msg.get("tool_calls") or []
                 done = data.get("done", False)
                 if content:
                     parts.append(content)
@@ -157,6 +183,12 @@ async def stream_chat_openai(
                         # se reenvía como reasoning_content para que el cliente
                         # lo muestre en segundo plano.
                         delta["reasoning_content"] = thinking
+                    if raw_tool_calls:
+                        # Tool-calling nativo: Ollama entrega los tool_calls
+                        # completos en un chunk (no incrementales como OpenAI).
+                        oa_calls = _ollama_tool_calls_to_openai(raw_tool_calls)
+                        delta["tool_calls"] = oa_calls
+                        collected_tool_calls.extend(oa_calls)
 
                 openai_chunk = {
                     "id": chat_id,
@@ -167,7 +199,10 @@ async def stream_chat_openai(
                         {
                             "index": 0,
                             "delta": delta,
-                            "finish_reason": "stop" if done else None,
+                            "finish_reason": (
+                                "tool_calls" if (done and collected_tool_calls)
+                                else "stop" if done else None
+                            ),
                         }
                     ],
                 }
@@ -186,4 +221,6 @@ async def stream_chat_openai(
 
     if collector is not None:
         collector["content"] = "".join(parts)
+        if collected_tool_calls:
+            collector["tool_calls"] = collected_tool_calls
     yield "data: [DONE]\n\n"
