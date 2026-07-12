@@ -48,6 +48,7 @@ export async function streamChatCompletion({
       conversation_id: conversationId,
       stream: true,
       web_search: webSearch,
+      source: 'ide', // historial independiente del de la web/CLI
       ...(tools ? { tools } : {}),
     }),
     signal,

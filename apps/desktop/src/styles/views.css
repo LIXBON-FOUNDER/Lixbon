@@ -405,6 +405,19 @@
   opacity: 0.7;
 }
 
+.settings__select {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg);
+  color: var(--ink);
+  max-width: 220px;
+  cursor: pointer;
+}
+
+.settings__select:hover { border-color: var(--border); }
+
 .settings__row-value {
   font-weight: 500;
   text-align: right;

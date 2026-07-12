@@ -21,12 +21,14 @@ import {
   displayableText,
   executeToolCall,
   extractToolCalls,
+  hasUnclosedCall,
   revertSnapshot,
   splitThinking,
   truncateFabricated,
 } from '../lib/agent';
 import { useEditorStore } from './editorStore';
 import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
+import { describeImages } from '../lib/vision';
 
 let abortController = null;
 
@@ -115,11 +117,13 @@ export const useChatStore = create((set, get) => ({
    * — se antepone como bloque de código al mensaje que ve el modelo,
    * pero en la UI solo se muestra el chip.
    */
-  send: async (text, context = null) => {
+  send: async (text, context = null, images = []) => {
     const { messages, conversationId, streaming, agentMode } = get();
-    if (streaming || !text.trim()) return;
+    const hasImages = Array.isArray(images) && images.length > 0;
+    if (streaming || (!text.trim() && !hasImages)) return;
 
-    const { serverUrl, apiKey, currentModel, workspaceRoot } = useAppStore.getState();
+    const appState = useAppStore.getState();
+    const { serverUrl, apiKey, currentModel, workspaceRoot } = appState;
     if (!currentModel) {
       set({ messages: [...messages, { role: 'error', content: 'No hay ningún modelo disponible. Comprueba la conexión con el servidor.' }] });
       return;
@@ -129,7 +133,45 @@ export const useChatStore = create((set, get) => ({
     const convId = conversationId || crypto.randomUUID();
     const agentActive = agentMode && !!workspaceRoot;
 
-    let modelText = text.trim();
+    // ── Sub-agente de visión: si hay imágenes, un modelo multimodal las
+    //    describe en texto para que el modelo de texto (qwen…) las entienda. ──
+    const userMsg = {
+      role: 'user',
+      content: text.trim(),
+      context: context ? { name: context.name, selection: context.isSelection } : null,
+      images: hasImages ? images.map((im) => im.dataUrl) : null,
+    };
+    let visionText = '';
+    if (hasImages) {
+      const visionModel = appState.effectiveVisionModel();
+      if (!visionModel) {
+        set({ messages: [...messages, userMsg, {
+          role: 'error',
+          content: 'Adjuntaste una imagen pero no hay un modelo de visión disponible. '
+            + 'Instala uno en Ollama (p. ej. `ollama pull llava`) y selecciónalo en Ajustes → Chat.',
+        }] });
+        return;
+      }
+      abortController = new AbortController();
+      set({ messages: [...messages, userMsg, { role: 'assistant', content: '', vision: true }], streaming: true, conversationId: convId });
+      try {
+        const desc = await describeImages({
+          serverUrl, apiKey, model: visionModel,
+          images: images.map((im) => im.base64),
+          signal: abortController.signal,
+        });
+        visionText = `[El usuario adjuntó ${images.length} imagen(es). Un modelo de visión (${visionModel}) las describió así:\n${desc}\n]\n\n`;
+      } catch (err) {
+        abortController = null;
+        if (err.name === 'AbortError') { set({ messages: get().messages.slice(0, -1), streaming: false }); return; }
+        set({ messages: [...get().messages.slice(0, -1), { role: 'error', content: `Visión: ${err.message}` }], streaming: false });
+        return;
+      }
+      // Quita la burbuja de estado "viendo imagen"; sigue el flujo normal
+      set({ messages: get().messages.slice(0, -1), streaming: false });
+    }
+
+    let modelText = text.trim() || '(ver la imagen adjunta)';
     if (context?.code) {
       if (agentActive) {
         // En modo agente NO se inyecta el archivo como bloque cercado (```): eso
@@ -146,8 +188,9 @@ export const useChatStore = create((set, get) => ({
           modelText;
       }
     }
+    // La descripción de la imagen (del sub-agente de visión) va primero
+    if (visionText) modelText = visionText + modelText;
 
-    const userMsg = { role: 'user', content: text.trim(), context: context ? { name: context.name, selection: context.isSelection } : null };
     const history = [...messages, userMsg];
     set({ messages: [...history, { role: 'assistant', content: '', sources: null }], streaming: true, conversationId: convId });
 
@@ -232,6 +275,20 @@ export const useChatStore = create((set, get) => ({
         }
         patchLast({ content: prose, thinking: fullThinking });
         if (!calls.length) {
+          // Salida truncada a mitad de un tool-call (archivo demasiado grande):
+          // empujar a edit_file, que emite fragmentos pequeños.
+          if (!nudged && hasUnclosedCall(spoken)) {
+            nudged = true;
+            modelMessages.push({ role: 'assistant', content: cleanProse(spoken) || '(salida truncada)' });
+            modelMessages.push({
+              role: 'user',
+              content: 'Tu respuesta anterior se CORTÓ a mitad porque el contenido era demasiado largo. '
+                + 'NO reescribas el archivo entero con write_file. Usa edit_file para cambiar solo las '
+                + 'secciones necesarias (old_text/new_text), en varios pasos pequeños si hace falta.',
+            });
+            pushMsg({ role: 'assistant', content: '', sources: null });
+            continue;
+          }
           if (!nudged && /```/.test(spoken)) {
             // Mostró código en vez de aplicarlo: una oportunidad de corregirse
             nudged = true;

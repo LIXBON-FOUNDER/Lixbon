@@ -14,7 +14,7 @@ import struct
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy import delete, desc, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -949,9 +949,11 @@ def get_global_stats(days: int = 30) -> dict[str, Any]:
 # ─── Conversaciones y mensajes ─────────────────────────────────────────────
 
 def ensure_conversation(
-    conversation_id: str, user_id: int, title: str | None, client_id: str | None
+    conversation_id: str, user_id: int, title: str | None, client_id: str | None,
+    source: str | None = None,
 ) -> bool:
-    """Crea (o toca) la conversación. False si existe pero pertenece a OTRO usuario."""
+    """Crea (o toca) la conversación. False si existe pero pertenece a OTRO usuario.
+    `source` (web/ide/cli) se fija al crear; en una existente solo si estaba vacío."""
     ts = now_iso()
     with get_session() as s:
         conv = s.get(Conversation, conversation_id)
@@ -963,12 +965,15 @@ def ensure_conversation(
                 conv.title = title
             if client_id:
                 conv.client_id = client_id
+            if source and not conv.source:
+                conv.source = source
         else:
             s.add(Conversation(
                 id=conversation_id,
                 user_id=user_id,
                 title=title,
                 client_id=client_id,
+                source=source,
                 created_at=ts,
                 updated_at=ts,
             ))
@@ -1447,9 +1452,11 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
 
 
 def list_conversations(
-    user_id: int, limit: int = 50, offset: int = 0, q: str | None = None
+    user_id: int, limit: int = 50, offset: int = 0, q: str | None = None,
+    source: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Conversaciones del usuario, más recientes primero. `q` busca en el título."""
+    """Conversaciones del usuario, más recientes primero. `q` busca en el título.
+    `source` filtra por superficie (web/ide/cli); 'web' incluye las legacy (NULL)."""
     with get_session() as s:
         stmt = (
             select(Conversation)
@@ -1458,6 +1465,10 @@ def list_conversations(
             .limit(limit)
             .offset(offset)
         )
+        if source == "web":
+            stmt = stmt.where(or_(Conversation.source == "web", Conversation.source.is_(None)))
+        elif source:
+            stmt = stmt.where(Conversation.source == source)
         if q:
             stmt = stmt.where(Conversation.title.ilike(f"%{q}%"))
         return [_conversation_to_dict(c) for c in s.scalars(stmt).all()]

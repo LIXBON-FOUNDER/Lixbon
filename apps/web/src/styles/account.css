@@ -177,6 +177,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 18px;
+  margin: 12px;
   border-radius: var(--radius-box);
   background: var(--bg-secondary);
   border: 1px solid var(--border-soft);

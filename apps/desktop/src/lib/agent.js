@@ -20,6 +20,7 @@ export {
   cleanProse,
   displayableText,
   extractToolCalls,
+  hasUnclosedCall,
   splitThinking,
   stripToolCalls,
   truncateFabricated,
@@ -405,8 +406,9 @@ export async function buildAgentSystemPrompt(root, activeFile = '') {
     '2. PROHIBIDO responder a una petición de cambio mostrando código en bloques ```: ' +
     'el código va DENTRO del JSON de edit_file o write_file.\n' +
     '3. Emite el JSON puro de la herramienta, sin envolverlo en markdown.\n' +
-    '4. Para EDITAR un archivo existente: primero read_file, luego **edit_file** con el fragmento exacto ' +
-    '(old_text copiado tal cual, con su indentación). Usa write_file solo para archivos nuevos o reescrituras totales.\n' +
+    '4. Para EDITAR o MEJORAR un archivo existente: primero read_file, luego **edit_file** con el fragmento exacto ' +
+    '(old_text copiado tal cual, con su indentación). NUNCA reescribas un archivo grande entero con write_file: ' +
+    'la salida se trunca y falla. write_file es SOLO para archivos nuevos. Haz varios edit_file pequeños si el cambio es amplio.\n' +
     '5. Puedes encadenar varias herramientas en una misma respuesta.\n' +
     '6. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar; nunca los escribas tú.\n' +
     '7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command; ' +

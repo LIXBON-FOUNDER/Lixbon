@@ -97,6 +97,9 @@ def init_db() -> None:
         # Compartir conversaciones por enlace público
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS share_token TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_share ON conversations (share_token)",
+        # Origen de la conversación (web/ide/cli): historial independiente por
+        # superficie. NULL = legacy (se muestra en la web).
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source TEXT",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

@@ -136,22 +136,50 @@ export function truncateFabricated(text) {
   return text.slice(0, lineStart === -1 ? idx : lineStart);
 }
 
-/** Prosa final mostrable: sin tool calls, sin TOOL_RESULT fabricados y sin
-    las vallas de código vacías que quedan al extraer el JSON (```json```). */
+/** Corta un tool-call JSON iniciado pero SIN CERRAR al final del texto
+    (salida truncada por límite de tokens al reescribir un archivo grande):
+    evita que el JSON crudo se filtre al chat. Solo mira el ÚLTIMO inicio. */
+export function cutUnclosedCall(text) {
+  TOOL_START_RE.lastIndex = 0;
+  let m;
+  let lastStart = -1;
+  while ((m = TOOL_START_RE.exec(text)) !== null) lastStart = m.index;
+  if (lastStart === -1) return text;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let closed = false;
+  for (let j = lastStart; j < text.length; j++) {
+    const ch = text[j];
+    if (esc) esc = false;
+    else if (ch === '\\' && inStr) esc = true;
+    else if (ch === '"') inStr = !inStr;
+    else if (!inStr) {
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) { closed = true; break; } }
+    }
+  }
+  return closed ? text : text.slice(0, lastStart);
+}
+
+/** ¿El texto termina con un tool-call truncado (iniciado sin cerrar)? */
+export function hasUnclosedCall(text) {
+  return cutUnclosedCall(text).length < text.length;
+}
+
+/** Prosa final mostrable: sin tool calls (completos ni truncados), sin
+    TOOL_RESULT fabricados y sin las vallas de código vacías. */
 export function cleanProse(text) {
-  return stripToolCalls(truncateFabricated(text))
+  return cutUnclosedCall(stripToolCalls(truncateFabricated(text)))
     .replace(/```[\w-]*\s*```/g, '')
+    .replace(/```[\w-]*\s*$/, '')
     .trim();
 }
 
 /** Texto mostrable durante el streaming: sin JSON completo, a medias ni
     vallas huérfanas. */
 export function displayableText(text) {
-  let out = stripToolCalls(truncateFabricated(text));
-  for (const needle of ['{"tool"', '{ "tool"']) {
-    const idx = out.indexOf(needle);
-    if (idx !== -1) out = out.slice(0, idx);
-  }
+  let out = cutUnclosedCall(stripToolCalls(truncateFabricated(text)));
   out = out.replace(/```[\w-]*\s*```/g, '');
   out = out.replace(/```[\w-]*\s*$/, ''); // valla abierta al final del stream
   return out;

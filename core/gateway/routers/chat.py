@@ -69,6 +69,8 @@ class ChatCompletionRequest(BaseModel):
     client_id: str | None = None
     stream: bool = False
     web_search: bool = False  # "modo investigar": busca en internet e inyecta contexto
+    # Origen (web/ide/cli): historial independiente por superficie.
+    source: str | None = None
     # Definiciones de funciones para tool-calling nativo (passthrough a Ollama).
     # None ⇒ comportamiento clásico (la web nunca las envía).
     tools: list[dict] | None = None
@@ -191,7 +193,7 @@ async def api_chat(
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if save_history:
-        if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard"):
+        if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard", source="web"):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         save_message(conv_id, "user", payload.message, model=payload.model)
 
@@ -228,15 +230,20 @@ async def chat_completions(
     validate_model_access(user_data, payload.model)
     plan = get_plan_for_user(user_data["id"])
     is_api = user_data.get("auth_via") == "api_key"
+    bill_credits = False
     if is_api:
-        credits.ensure_can_use_api(user_data["id"], plan, payload.model)  # prepago por tokens
+        # Pro/Advance usan su cuota del plan (no se cobra crédito, evita redundar
+        # con lo que ya pagan); Gratuito o cuota agotada ⇒ prepago por créditos.
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
     else:
         ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
     save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
+    # Origen: lo declara el cliente; si no, se infiere (web = sesión, resto = api)
+    source = payload.source or ("web" if user_data.get("auth_via") == "session" else "api")
     if save_history:
-        if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
+        if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id, source=source):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         if payload.messages and payload.messages[-1].role == "user":
             save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
@@ -293,7 +300,7 @@ async def chat_completions(
                         latency_ms,
                         user_id=user_data["id"],
                         save_history=save_history,
-                        bill_credits=is_api,
+                        bill_credits=bill_credits,
                     )
 
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
@@ -306,7 +313,7 @@ async def chat_completions(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       bill_credits=is_api)
+                       bill_credits=bill_credits)
 
     return JSONResponse({
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
@@ -337,15 +344,15 @@ async def completions(
     user_data: dict[str, Any] = Depends(api_key_required),
 ):
     """Endpoint compatible con OpenAI — text completions. Solo API key (Bearer):
-    se cobra del saldo prepago de créditos."""
+    Pro/Advance usan su cuota del plan; Gratuito o cuota agotada, créditos prepago."""
     validate_model_access(user_data, payload.model)
     plan = get_plan_for_user(user_data["id"])
-    credits.ensure_can_use_api(user_data["id"], plan, payload.model)
+    bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
     save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if save_history:
-        if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id):
+        if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id, source="api"):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         save_message(conv_id, "user", payload.prompt, model=payload.model)
 
@@ -359,7 +366,7 @@ async def completions(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       bill_credits=True)
+                       bill_credits=bill_credits)
 
     return JSONResponse({
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
@@ -376,6 +383,71 @@ async def completions(
         },
         "latency_ms": latency_ms,
     })
+
+
+DEFAULT_VISION_PROMPT = (
+    "Describe esta imagen con el MÁXIMO detalle para que otro asistente de IA "
+    "que NO puede verla entienda su contenido y pueda trabajar con él. Incluye: "
+    "todo el texto visible (transcríbelo literal), código si lo hay (transcríbelo), "
+    "elementos de interfaz, disposición/diseño, colores, errores o mensajes, y "
+    "cualquier detalle relevante. Responde SOLO con la descripción, sin preámbulo."
+)
+
+
+class VisionDescribeRequest(BaseModel):
+    model: str = Field(..., description="Modelo de visión de Ollama (llava, moondream, qwen2.5-vl…)")
+    images: list[str] = Field(..., description="Imágenes en base64")
+    prompt: str | None = None
+
+
+@router.post("/api/vision/describe")
+async def vision_describe(
+    payload: VisionDescribeRequest,
+    user_data: dict[str, Any] = Depends(web_or_api_key_auth),
+):
+    """Sub-agente de visión: un modelo multimodal DESCRIBE la(s) imagen(es) en
+    texto para que un modelo de solo-texto (qwen…) pueda razonar sobre ellas.
+    No persiste historial; se cobra como cualquier inferencia."""
+    if not payload.images:
+        raise HTTPException(status_code=400, detail="No se adjuntaron imágenes")
+    validate_model_access(user_data, payload.model)
+    plan = get_plan_for_user(user_data["id"])
+    bill_credits = False
+    if user_data.get("auth_via") == "api_key":
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+    else:
+        ensure_can_chat(user_data["id"], plan, payload.model)
+
+    messages = [{
+        "role": "user",
+        "content": (payload.prompt or DEFAULT_VISION_PROMPT),
+        "images": payload.images,
+    }]
+    started_at = time.perf_counter()
+    resp, origen = await _routed_chat(payload.model, messages)
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
+    description = resp.get("message", {}).get("content", "").strip()
+    prompt_tokens = int(resp.get("prompt_eval_count") or 0)
+    completion_tokens = int(resp.get("eval_count") or 0)
+
+    # Uso/cobro (sin persistir contenido: las imágenes no se guardan)
+    if user_data.get("id") is not None:
+        if bill_credits:
+            credits.debit_usage(user_data["id"], payload.model, prompt_tokens, completion_tokens)
+        else:
+            record_tokens(user_data["id"], prompt_tokens + completion_tokens)
+
+    return {
+        "description": description,
+        "model": payload.model,
+        "node": origen,
+        "latency_ms": latency_ms,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
 
 
 @router.post("/api/delegate")

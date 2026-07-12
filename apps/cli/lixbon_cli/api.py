@@ -120,6 +120,7 @@ class ApiClient:
             "conversation_id": conversation_id,
             "client_id": client_id,
             "title": title,
+            "source": "cli",  # historial independiente del de la web/IDE
         }
         return self._json("POST", f"{self.base_url}/chat/completions", payload, timeout=timeout)
 
@@ -134,6 +135,7 @@ class ApiClient:
             "title": title,
             "stream": True,
             "web_search": web_search,
+            "source": "cli",  # historial independiente del de la web/IDE
         }
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)

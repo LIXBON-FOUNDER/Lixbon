@@ -3,6 +3,7 @@ import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
 import { setIndentConfig, setAutoSaveConfig } from './editorStore';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
+import { detectVisionModel } from '../lib/vision';
 
 // Aplica los ajustes de indentación persistidos al arrancar (antes de abrir archivos).
 setIndentConfig(
@@ -40,6 +41,9 @@ export const useAppStore = create((set, get) => ({
   panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
 
   currentModel: localStorage.getItem('lixbon_current_model') || '',
+  // Modelo de visión (sub-agente que describe imágenes para el modelo de texto).
+  // '' = autodetectar de los modelos disponibles.
+  visionModel: localStorage.getItem('lixbon_vision_model') || '',
   availableModels: [],
   latency: 0,
 
@@ -160,6 +164,19 @@ export const useAppStore = create((set, get) => ({
   },
 
   setAvailableModels: (availableModels) => set({ availableModels }),
+
+  setVisionModel: (model) => {
+    localStorage.setItem('lixbon_vision_model', model || '');
+    set({ visionModel: model || '' });
+  },
+
+  /** Modelo de visión efectivo: el elegido, o autodetectado de la lista. */
+  effectiveVisionModel: () => {
+    const { visionModel, availableModels } = get();
+    if (visionModel && availableModels.includes(visionModel)) return visionModel;
+    return detectVisionModel(availableModels);
+  },
+
   setLatency: (latency) => set({ latency }),
 
   logout: () => {

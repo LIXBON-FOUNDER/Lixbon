@@ -27,6 +27,7 @@ from fastapi import HTTPException
 from core.persistence.queries import (
     debit_credit_usage,
     get_credit_balance,
+    get_usage_quota,
     list_model_pricing,
 )
 from core.security.ratelimit import enforce_rate_limit
@@ -95,11 +96,54 @@ def compute_cost_microusd(pricing: dict[str, Any], prompt_tokens: int,
     ) // MTOK
 
 
-def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = None) -> None:
-    """Pre-check de una petición con API key: tarifa disponible, rate limit
-    del plan y saldo positivo. Lanza 503/429/402."""
-    resolve_pricing(model)  # 503 si no hay tarifas
+def _current_month() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m")
+
+
+def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = None) -> str:
+    """Pre-check de una petición con API key. Devuelve el MODO de cobro:
+
+      - 'plan'    : la suscripción de pago (Pro/Advance) cubre el uso con su
+                    cuota mensual de tokens — sin cobrar créditos (no redundar
+                    con lo que el usuario ya paga por su plan).
+      - 'credits' : se cobra del saldo prepago. Aplica a usuarios sin plan de
+                    pago (Gratuito) y a Pro/Advance que ya AGOTARON su cuota
+                    mensual (recargar créditos para seguir usando la API).
+
+    Lanza 503 (sin tarifa), 429 (rate limit), 403 (modelo) o 402 (sin saldo)."""
+    resolve_pricing(model)  # 503 si no hay tarifas (necesarias para el cobro por créditos)
     enforce_rate_limit(f"user:{user_id}", limit=plan.get("rate_limit_per_min"))
+
+    is_paid = plan.get("id") != "free" and int(plan.get("price_monthly_cents") or 0) > 0
+    if is_paid:
+        from core.billing.quota import model_allowed
+        if not model_allowed(plan, model):
+            raise HTTPException(status_code=403, detail={
+                "code": "model_not_allowed",
+                "message": f"El modelo '{model}' no está incluido en tu plan {plan['name']}.",
+            })
+        tok_limit = int(plan.get("tokens_per_month") or -1)
+        if tok_limit < 0:  # plan ilimitado ⇒ la suscripción cubre todo
+            return "plan"
+        used = get_usage_quota(user_id, "month", _current_month())["tokens"]
+        if used < tok_limit:
+            return "plan"  # aún dentro de la cuota mensual del plan
+        # Cuota del plan agotada: seguir con créditos si tiene saldo
+        balance = get_credit_balance(user_id)
+        if balance > CREDITS_MIN_START_MICROUSD:
+            return "credits"
+        raise HTTPException(status_code=402, detail={
+            "code": "plan_tokens_exhausted",
+            "message": (
+                f"Agotaste los {tok_limit:,} tokens mensuales de tu plan {plan['name']}. "
+                "Recarga créditos para seguir usando la API este mes (pagas solo por lo que uses)."
+            ),
+            "balance_usd": microusd_to_usd(balance),
+            "topup_path": "/account/facturacion",
+        })
+
+    # Sin plan de pago (Gratuito): prepago por créditos
     balance = get_credit_balance(user_id)
     if balance <= CREDITS_MIN_START_MICROUSD:
         raise HTTPException(status_code=402, detail={
@@ -109,6 +153,7 @@ def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = N
             "balance_usd": microusd_to_usd(balance),
             "topup_path": "/account/facturacion",
         })
+    return "credits"
 
 
 def debit_usage(user_id: int, model: str | None, prompt_tokens: int,

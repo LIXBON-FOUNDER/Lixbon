@@ -548,6 +548,7 @@ class ApiClient:
             "conversation_id": conversation_id,
             "client_id": client_id,
             "title": title,
+            "source": "cli",  # historial independiente del de la web/IDE
         }
         return self._json("POST", f"{self.base_url}/chat/completions", payload, timeout=timeout)
 
@@ -562,6 +563,7 @@ class ApiClient:
             "title": title,
             "stream": True,
             "web_search": web_search,
+            "source": "cli",  # historial independiente del de la web/IDE
         }
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)
@@ -1050,6 +1052,12 @@ NUDGE_PROMPT = (
     '(JSON puro, sin ```). Si no había nada que aplicar, responde solo "OK".'
 )
 
+TRUNCATED_PROMPT = (
+    "Tu respuesta anterior se CORTÓ a mitad porque el contenido era demasiado largo. "
+    "NO reescribas el archivo entero con write_file. Usa edit_file para cambiar solo las "
+    "secciones necesarias (old_text/new_text), en varios pasos pequeños si hace falta."
+)
+
 IGNORED_TREE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
     "target", ".next", ".idea", ".vscode", ".mypy_cache", ".pytest_cache",
@@ -1119,8 +1127,9 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "2. PROHIBIDO responder a una petición de cambio mostrando código en bloques ```: "
         "el código va DENTRO del JSON de edit_file o write_file.\n"
         "3. Emite el JSON puro de la herramienta, sin envolverlo en markdown.\n"
-        "4. Para EDITAR un archivo existente: primero read_file, luego edit_file con el fragmento exacto "
-        "(old_text copiado tal cual, con su indentación). Usa write_file solo para archivos nuevos o reescrituras totales.\n"
+        "4. Para EDITAR o MEJORAR un archivo existente: primero read_file, luego edit_file con el fragmento exacto "
+        "(old_text copiado tal cual, con su indentación). NUNCA reescribas un archivo grande entero con write_file: "
+        "la salida se trunca y falla. write_file es SOLO para archivos nuevos. Haz varios edit_file pequeños si el cambio es amplio.\n"
         "5. Puedes encadenar varias herramientas en una misma respuesta.\n"
         "6. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar; nunca los escribas tú.\n"
         "7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command; "
@@ -1429,10 +1438,46 @@ def truncate_fabricated(text: str) -> str:
     return text[: idx if line_start == -1 else line_start]
 
 
+def cut_unclosed_call(text: str) -> str:
+    """Corta un tool-call JSON iniciado pero SIN CERRAR al final (salida
+    truncada al reescribir un archivo grande): evita filtrar JSON crudo."""
+    starts = [m.start() for m in _TOOL_START.finditer(text)]
+    if not starts:
+        return text
+    last = starts[-1]
+    depth = 0
+    in_string = False
+    escape_next = False
+    closed = False
+    j = last
+    while j < len(text):
+        ch = text[j]
+        if escape_next:
+            escape_next = False
+        elif ch == "\\" and in_string:
+            escape_next = True
+        elif ch == '"':
+            in_string = not in_string
+        elif not in_string:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    closed = True
+                    break
+        j += 1
+    return text if closed else text[:last]
+
+
+def has_unclosed_call(text: str) -> bool:
+    return len(cut_unclosed_call(text)) < len(text)
+
+
 def clean_prose(text: str) -> str:
-    """Prosa final mostrable: sin tool calls, sin TOOL_RESULT fabricados y sin
-    las vallas de código vacías que quedan al extraer el JSON (```json```)."""
-    text = strip_tool_calls(truncate_fabricated(text))
+    """Prosa final mostrable: sin tool calls (completos ni truncados), sin
+    TOOL_RESULT fabricados y sin las vallas de código vacías (```json```)."""
+    text = cut_unclosed_call(strip_tool_calls(truncate_fabricated(text)))
     text = re.sub(r"```[\w-]*\s*```", "", text)
     return text.strip()
 
@@ -1460,6 +1505,11 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
         tool_calls = extract_all_tool_calls(assistant)
         if not tool_calls:
+            if not nudged and has_unclosed_call(assistant):
+                # Salida truncada a mitad de un tool-call: empujar a edit_file
+                nudged = True
+                working.append({"role": "user", "content": TRUNCATED_PROMPT})
+                continue
             if not nudged and "```" in assistant:
                 # Mostró código en vez de aplicarlo: una oportunidad de corregirse
                 nudged = True

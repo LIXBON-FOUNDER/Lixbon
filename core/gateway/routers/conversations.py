@@ -45,9 +45,15 @@ async def api_list_conversations(
     q: str | None = Query(default=None, max_length=120),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    source: str | None = Query(default=None, max_length=16),
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
-    items = list_conversations(user_data["id"], limit=limit, offset=offset, q=q)
+    # Historial independiente por superficie: cada cliente pide su `source`
+    # (web/ide/cli). Si no lo manda, se infiere por el tipo de auth para que la
+    # web (sesión) NO vea las conversaciones del IDE/CLI.
+    if not source:
+        source = "web" if user_data.get("auth_via") == "session" else None
+    items = list_conversations(user_data["id"], limit=limit, offset=offset, q=q, source=source)
     return {"conversations": items, "limit": limit, "offset": offset}
 
 

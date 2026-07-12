@@ -22,7 +22,9 @@ export function Settings() {
     editorFontSize, setEditorFontSize,
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
     autoSave, setAutoSave,
+    visionModel, setVisionModel, availableModels,
   } = useAppStore();
+  const autoVision = useAppStore((s) => s.effectiveVisionModel());
   const { agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools } = useChatStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
   const [theme, setThemeMode] = useTheme();
@@ -333,6 +335,26 @@ export function Settings() {
           >
             <span className="settings__toggle-knob" />
           </button>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Modelo de visión
+            <span className="settings__row-hint">
+              {' · '}describe las imágenes que adjuntas para el modelo de texto
+              {autoVision ? '' : ' · instala uno en Ollama (p. ej. llava)'}
+            </span>
+          </span>
+          <select
+            className="settings__select"
+            value={visionModel}
+            onChange={(e) => setVisionModel(e.target.value)}
+          >
+            <option value="">{autoVision ? `Automático (${autoVision})` : 'Automático (ninguno)'}</option>
+            {availableModels.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
         </div>
 
         <div className="settings__inline settings__inline--spread">

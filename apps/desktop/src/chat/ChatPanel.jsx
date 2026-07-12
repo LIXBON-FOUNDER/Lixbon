@@ -2,9 +2,35 @@
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { ChatMessage } from './ChatMessage';
+import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
 import { HistoryList } from './HistoryList';
+
+/** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
+    el resto se renderiza como mensajes normales. */
+function renderMessages(messages, streaming) {
+  const out = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'tool') {
+      const start = i;
+      const run = [];
+      while (i < messages.length && messages[i].role === 'tool') { run.push(messages[i]); i++; }
+      i--; // el for vuelve a incrementar
+      out.push(<ToolGroup key={`g${start}`} messages={run} startIndex={start} />);
+    } else {
+      out.push(
+        <ChatMessage
+          key={i}
+          message={messages[i]}
+          index={i}
+          streaming={streaming && i === messages.length - 1}
+        />,
+      );
+    }
+  }
+  return out;
+}
 import { IconPlus, IconChevron, IconDots } from '../components/Icons';
 
 export function ChatPanel() {
@@ -59,14 +85,7 @@ export function ChatPanel() {
                 </p>
               </div>
             ) : (
-              messages.map((m, i) => (
-                <ChatMessage
-                  key={i}
-                  message={m}
-                  index={i}
-                  streaming={streaming && i === messages.length - 1}
-                />
-              ))
+              renderMessages(messages, streaming)
             )}
           </div>
           <ApprovalCard />

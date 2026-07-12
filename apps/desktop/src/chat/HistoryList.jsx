@@ -13,7 +13,7 @@ export function HistoryList() {
 
   const fetchList = async (q = '') => {
     try {
-      const res = await api.get(`/api/conversations?limit=50${q ? `&q=${encodeURIComponent(q)}` : ''}`);
+      const res = await api.get(`/api/conversations?source=ide&limit=50${q ? `&q=${encodeURIComponent(q)}` : ''}`);
       setItems(res.conversations || []);
     } catch (e) {
       console.error('[history] Error cargando historial:', e);
