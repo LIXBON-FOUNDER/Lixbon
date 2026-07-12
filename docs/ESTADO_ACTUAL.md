@@ -46,6 +46,11 @@ Feedback del usuario: "llama3.2 no crea archivos y no tiene en cuenta el workspa
 - **Archivo activo en el prompt** del IDE: "Archivo abierto en el editor ahora mismo: X (si el usuario dice \"este archivo\", es este)".
 - CLI: preview de diff de edit_file en `diffs.compute_change`. Verificado: edit_file (único/ambiguo/no encontrado/all), rangos, diff +2/−1, build de archivo único y Vite.
 
+**Bug "el 2º mensaje no usa herramientas" (IDE, reportado con qwen2.5-coder:7b) — dos causas combinadas, ambas corregidas:**
+1. **Historial envenenado**: al mostrar la respuesta del agente se le quita el JSON (cleanProse) y las burbujas solo-herramienta se eliminan, así que en el turno 2 el modelo veía su turno 1 como PURA PROSA ("Hecho: creé…") y aprendía "aquí se responde con texto". Fix: `buildModelHistory(messages, agentActive)` (agentProtocol.js) reconstruye la conversación real turno a turno — cada fila `tool` vuelve como llamada del asistente (`{"tool":...}`) + su `TOOL_RESULT` (con `full` = salida hasta 4000 chars guardada en el mensaje). El CLI NO tenía este bug (run_agent_turn ya devuelve el `working` completo con JSON+TOOL_RESULT a self.history).
+2. **Bloque cercado en el contexto**: adjuntar el archivo abierto lo inyectaba como ```html…```; un 7B, al ver un bloque de código y pedirle "modifícalo", devuelve otro bloque en vez de usar la tool. Fix: en modo agente el adjunto ya NO se indenta como bloque — se da la referencia (`El usuario tiene abierto index.html; usa read_file…`) y el agente lee/edita con herramientas (como Cursor). En modo chat normal se mantiene el bloque inline.
+- Nudge reforzado ("NO repitas el código; responde ÚNICAMENTE con el/los JSON…"). La función "Insertar" del bloque de código NO era el problema (es manual e independiente); una vez el modelo usa la tool, el bloque no aparece y sí se ven las filas de diff. Verificado: 13 grupos de tests JS (nuevo: buildModelHistory replaya el write_file del turno 1 como uso de herramienta) + build.
+
 ---
 
 ## 0. Cómo ACTIVAR Stripe (F7 — pagos) 🔴

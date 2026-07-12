@@ -14,6 +14,7 @@ import {
   MAX_AGENT_STEPS,
   READ_ONLY_TOOLS,
   buildAgentSystemPrompt,
+  buildModelHistory,
   captureSnapshot,
   cleanProse,
   computeChangePreview,
@@ -115,28 +116,35 @@ export const useChatStore = create((set, get) => ({
       return;
     }
 
-    let modelText = text.trim();
-    if (context?.code) {
-      modelText =
-        `Contexto — archivo \`${context.path}\`:\n\n` +
-        '```' + (context.language || '') + '\n' + context.code + '\n```\n\n' +
-        modelText;
-    }
-
     // El backend acepta ids de conversación generados por el cliente
     const convId = conversationId || crypto.randomUUID();
     const agentActive = agentMode && !!workspaceRoot;
+
+    let modelText = text.trim();
+    if (context?.code) {
+      if (agentActive) {
+        // En modo agente NO se inyecta el archivo como bloque cercado (```): eso
+        // le enseña al modelo a "responder con un bloque de código" en vez de
+        // editar. Se le da la referencia y el agente lee con read_file.
+        modelText =
+          `(El usuario tiene abierto \`${context.path}\`${context.isSelection ? ' con una selección activa' : ''}. ` +
+          'Usa read_file para ver su contenido actual y edit_file/write_file para modificarlo.)\n\n' +
+          modelText;
+      } else {
+        modelText =
+          `Contexto — archivo \`${context.path}\`:\n\n` +
+          '```' + (context.language || '') + '\n' + context.code + '\n```\n\n' +
+          modelText;
+      }
+    }
 
     const userMsg = { role: 'user', content: text.trim(), context: context ? { name: context.name, selection: context.isSelection } : null };
     const history = [...messages, userMsg];
     set({ messages: [...history, { role: 'assistant', content: '', sources: null }], streaming: true, conversationId: convId });
 
-    // Historial que ve el modelo: sin burbujas de error ni filas de
-    // herramienta, y con el contexto de código incorporado al último mensaje
+    // Historial que ve el modelo (reconstrucción turno a turno en agentProtocol)
     const modelMessages = [
-      ...history.slice(0, -1)
-        .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
-        .map((m) => ({ role: m.role, content: m.content })),
+      ...buildModelHistory(history.slice(0, -1), agentActive),
       { role: 'user', content: modelText },
     ];
     if (agentActive) {
@@ -215,8 +223,8 @@ export const useChatStore = create((set, get) => ({
             modelMessages.push({ role: 'assistant', content: spoken });
             modelMessages.push({
               role: 'user',
-              content: 'Si ese código debía aplicarse a un archivo del workspace, hazlo AHORA con '
-                + '{"tool":"write_file","args":{"path":"...","content":"CONTENIDO COMPLETO"}} (JSON puro, sin ```). '
+              content: 'NO repitas el código. Responde ÚNICAMENTE con el/los JSON de herramienta '
+                + 'necesarios para aplicar ese cambio al archivo (edit_file o write_file), sin prosa ni ```. '
                 + 'Si no había nada que aplicar, responde solo "OK".',
             });
             pushMsg({ role: 'assistant', content: '', sources: null });
@@ -237,6 +245,7 @@ export const useChatStore = create((set, get) => ({
           pushMsg({
             role: 'tool', tool: call.tool, args: call.args, ok: result.ok,
             content: result.display, change: result.change, snapshot: result.snapshot,
+            full: (result.output || '').slice(0, 4000), // para replay del historial
           });
           results.push(`TOOL_RESULT ${call.tool}: ${result.output}`);
         }

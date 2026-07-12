@@ -16,6 +16,7 @@ import { diffCounts, normalizeRel } from './agentProtocol';
 export {
   MAX_AGENT_STEPS,
   READ_ONLY_TOOLS,
+  buildModelHistory,
   cleanProse,
   displayableText,
   extractToolCalls,

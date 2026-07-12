@@ -163,6 +163,27 @@ export function splitThinking(text) {
   return { thinking: thinking.trim(), visible };
 }
 
+/** Reconstruye el historial que ve el modelo a partir de las burbujas del
+    chat. En modo agente cada fila de herramienta vuelve como una llamada del
+    asistente (su JSON) + su TOOL_RESULT, para que el modelo vea que aquí SÍ se
+    usan herramientas — si no, aprende de su propia prosa a dejar de usarlas. */
+export function buildModelHistory(messages, agentActive) {
+  return messages.flatMap((m) => {
+    if (m.role === 'user' && m.content) return [{ role: 'user', content: m.content }];
+    if (m.role === 'assistant' && (m.content || '').trim()) {
+      return [{ role: 'assistant', content: m.content }];
+    }
+    if (agentActive && m.role === 'tool') {
+      const callJson = JSON.stringify({ tool: m.tool, args: m.args || {} });
+      return [
+        { role: 'assistant', content: callJson },
+        { role: 'user', content: `TOOL_RESULT ${m.tool}: ${m.full || m.content || ''}` },
+      ];
+    }
+    return [];
+  });
+}
+
 /** Diff barato por líneas: recorta prefijo/sufijo comunes y cuenta el resto. */
 export function diffCounts(oldText, newText) {
   const a = oldText ? oldText.split('\n') : [];
