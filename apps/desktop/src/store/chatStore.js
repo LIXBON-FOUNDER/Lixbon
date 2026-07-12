@@ -243,10 +243,13 @@ export const useChatStore = create((set, get) => ({
           onDelta: (delta) => {
             raw += delta;
             const { thinking, visible } = splitThinking(raw);
-            patchLast({
-              content: agentActive ? displayableText(visible) : visible,
-              thinking: liveThinking(thinking),
-            });
+            const shown = agentActive ? displayableText(visible) : visible;
+            // Si está generando un tool-call largo (write_file grande), el
+            // contenido va oculto: mostrar progreso para que no parezca colgado.
+            const generating = agentActive && !shown.trim() && hasUnclosedCall(visible)
+              ? visible.length
+              : null;
+            patchLast({ content: shown, thinking: liveThinking(thinking), generating });
           },
           onReasoning: (delta) => {
             reasoningAcc += delta;
@@ -274,7 +277,7 @@ export const useChatStore = create((set, get) => ({
           set({ messages: get().messages.slice(0, -1) });
           break;
         }
-        patchLast({ content: prose, thinking: fullThinking });
+        patchLast({ content: prose, thinking: fullThinking, generating: null });
         if (!calls.length) {
           // Salida truncada a mitad de un tool-call (archivo demasiado grande):
           // empujar a edit_file, que emite fragmentos pequeños.

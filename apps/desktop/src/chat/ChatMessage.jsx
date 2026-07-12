@@ -52,6 +52,10 @@ export function ChatMessage({ message, streaming }) {
         <ChatMarkdown>{message.content}</ChatMarkdown>
       ) : message.vision ? (
         <span className="msg__thinking">👁 Analizando la imagen…</span>
+      ) : message.generating ? (
+        <span className="msg__thinking">
+          ✍️ Generando cambio… ({(message.generating / 1000).toFixed(1)}k caracteres)
+        </span>
       ) : (
         streaming && <span className="msg__thinking">Pensando…</span>
       )}
