@@ -24,7 +24,12 @@ solo TRUNCATE ... RESTART IDENTITY CASCADE sobre las tablas del alcance.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+
+# Permite ejecutar tanto `python scripts/reset_db.py` como `python -m scripts.reset_db`:
+# añade la raíz del repo al path para que `import core...` resuelva.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import text
 
