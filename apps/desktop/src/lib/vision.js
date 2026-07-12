@@ -8,12 +8,18 @@ const VISION_PATTERNS = [
   'qwen2-vl', 'qwen2.5-vl', 'qwen2.5vl', 'qwenvl', 'vision', 'gemma3', 'granite3.2-vision',
 ];
 
+/** Id (string) de un modelo. `availableModels` puede traer objetos {id,…}
+    (formato /v1/models) o strings; esta función normaliza a string. */
+export function modelId(m) {
+  if (typeof m === 'string') return m;
+  return (m && (m.id || m.name)) || '';
+}
+
 /** Elige un modelo de visión de la lista disponible (o '' si no hay). */
 export function detectVisionModel(availableModels = []) {
-  const lower = availableModels.map((m) => [m, m.toLowerCase()]);
-  for (const pat of VISION_PATTERNS) {
-    const hit = lower.find(([, l]) => l.includes(pat));
-    if (hit) return hit[0];
+  for (const m of availableModels) {
+    const id = modelId(m);
+    if (id && VISION_PATTERNS.some((p) => id.toLowerCase().includes(p))) return id;
   }
   return '';
 }

@@ -3,7 +3,7 @@ import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
 import { setIndentConfig, setAutoSaveConfig } from './editorStore';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
-import { detectVisionModel } from '../lib/vision';
+import { detectVisionModel, modelId } from '../lib/vision';
 
 // Aplica los ajustes de indentación persistidos al arrancar (antes de abrir archivos).
 setIndentConfig(
@@ -179,10 +179,12 @@ export const useAppStore = create((set, get) => ({
     set({ contextWindow: v });
   },
 
-  /** Modelo de visión efectivo: el elegido, o autodetectado de la lista. */
+  /** Modelo de visión efectivo: el elegido, o autodetectado de la lista.
+      availableModels trae objetos {id,…}, no strings — normalizar con modelId. */
   effectiveVisionModel: () => {
     const { visionModel, availableModels } = get();
-    if (visionModel && availableModels.includes(visionModel)) return visionModel;
+    const ids = availableModels.map(modelId);
+    if (visionModel && ids.includes(visionModel)) return visionModel;
     return detectVisionModel(availableModels);
   },
 

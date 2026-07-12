@@ -7,7 +7,7 @@ import { useVersion } from '../../hooks/useVersion';
 import { planColor } from '../../lib/planColors';
 import { useTheme } from '../../lib/theme';
 import { openExternal } from '../../lib/tauri';
-import { detectVisionModel } from '../../lib/vision';
+import { detectVisionModel, modelId } from '../../lib/vision';
 import { IconEye, IconEyeOff, IconCopy, IconCheck } from '../../components/Icons';
 
 function normalizeUrl(raw) {
@@ -28,9 +28,11 @@ export function Settings() {
   } = useAppStore();
   // Se computa en el componente (NO como selector `s.effectiveVisionModel()`:
   // llamar un método del store como selector rompe con React 19).
-  const autoVision = (visionModel && availableModels.includes(visionModel))
+  // availableModels trae objetos {id,…}, no strings — normalizar con modelId.
+  const modelIdList = (availableModels || []).map(modelId).filter(Boolean);
+  const autoVision = (visionModel && modelIdList.includes(visionModel))
     ? visionModel
-    : detectVisionModel(availableModels);
+    : detectVisionModel(availableModels || []);
   const { agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools } = useChatStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
   const [theme, setThemeMode] = useTheme();
@@ -377,8 +379,8 @@ export function Settings() {
             onChange={(e) => setVisionModel(e.target.value)}
           >
             <option value="">{autoVision ? `Automático (${autoVision})` : 'Automático (ninguno)'}</option>
-            {availableModels.map((m) => (
-              <option key={m} value={m}>{m}</option>
+            {modelIdList.map((id) => (
+              <option key={id} value={id}>{id}</option>
             ))}
           </select>
         </div>
