@@ -385,12 +385,17 @@ async def completions(
     })
 
 
+# En inglés a propósito: los modelos de visión pequeños (moondream, llava…)
+# están entrenados casi todo en inglés y devuelven basura con prompts en otros
+# idiomas. La descripción resultante la consume un modelo multilingüe (qwen…),
+# así que el idioma de salida no importa; se pide transcribir el texto TAL CUAL
+# (preservando su idioma original).
 DEFAULT_VISION_PROMPT = (
-    "Describe esta imagen con el MÁXIMO detalle para que otro asistente de IA "
-    "que NO puede verla entienda su contenido y pueda trabajar con él. Incluye: "
-    "todo el texto visible (transcríbelo literal), código si lo hay (transcríbelo), "
-    "elementos de interfaz, disposición/diseño, colores, errores o mensajes, y "
-    "cualquier detalle relevante. Responde SOLO con la descripción, sin preámbulo."
+    "Describe this image in maximum detail so another AI that cannot see it can "
+    "fully understand and work with its content. Transcribe ALL visible text and "
+    "code EXACTLY as written, preserving the original language and formatting. "
+    "Describe UI elements, layout, colors, any error or message, and every "
+    "relevant detail. Respond ONLY with the description, no preamble."
 )
 
 
