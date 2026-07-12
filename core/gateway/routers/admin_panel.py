@@ -317,12 +317,17 @@ async def api_admin_credits_grant(
 
 @router.get("/credits/summary")
 async def api_admin_credits_summary(_admin: dict[str, Any] = Depends(admin_required)):
-    """Ingresos y consumo de créditos del mes en curso (del ledger)."""
+    """Ingresos (suscripciones + recargas) y consumo de créditos del mes."""
     data = admin_credits_summary()
     return {
         "month": data["month"],
-        "revenue_usd": microusd_to_usd(data["revenue_microusd"]),
+        # Ingresos: dinero que entra
+        "subscription_mrr_usd": microusd_to_usd(data["subscription_mrr_microusd"]),
+        "active_subscriptions": data["active_subscriptions"],
+        "topups_usd": microusd_to_usd(data["topups_microusd"]),
         "purchases": data["purchases"],
+        "total_revenue_usd": microusd_to_usd(data["total_revenue_microusd"]),
+        # Consumo de créditos: saldo prepago gastado (no es ingreso)
         "usage_by_model": [
             {**r, "cost_usd": microusd_to_usd(r["cost_microusd"])}
             for r in data["usage_by_model"]

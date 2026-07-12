@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from core.gateway import deps
 from core.persistence.queries import delete_node, list_nodes, log_audit_event, upsert_node
@@ -66,6 +67,16 @@ async def create_or_update_node(
         "token": token,
         "message": "Configura este token como NODE_SHARED_SECRET en el node_agent de esa PC. No se volverá a mostrar completo.",
     }
+
+
+@router.post("/{node_id}/retry")
+async def retry_node(node_id: str, admin: dict[str, Any] = Depends(admin_required)) -> dict[str, Any]:
+    """Fuerza un reintento inmediato del nodo, ignorando el backoff del circuit breaker."""
+    if node_id not in {n["id"] for n in list_nodes(mask_token=True)}:
+        raise HTTPException(status_code=404, detail=f"Nodo '{node_id}' no existe")
+    online = await run_in_threadpool(deps.orquestador.reintentar_nodo, node_id)
+    log_audit_event("node_retry", user_id=admin["id"], node_id=node_id)
+    return {"node_id": node_id, "online": online}
 
 
 @router.delete("/{node_id}")

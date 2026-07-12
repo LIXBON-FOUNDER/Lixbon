@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
-import { IconChevron, IconPlus, IconTrash, IconX } from '../components/Icons';
+import { IconChevron, IconPlus, IconRefresh, IconTrash, IconX } from '../components/Icons';
 
 const TABS = [
   { id: 'resumen', label: 'Resumen' },
@@ -26,11 +26,12 @@ const errMsg = (err, fallback) => {
   return (d && d.message) || (typeof d === 'string' ? d : fallback);
 };
 
-function StatTile({ label, value }) {
+function StatTile({ label, value, hint }) {
   return (
     <div className="stat">
       <span className="stat__value">{value}</span>
       <span className="stat__label">{label}</span>
+      {hint && <span className="stat__hint">{hint}</span>}
     </div>
   );
 }
@@ -252,6 +253,7 @@ function NodosTab() {
   const [newToken, setNewToken] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [retrying, setRetrying] = useState(null); // id del nodo en reintento
 
   const load = useCallback(() => {
     api.get('/api/admin/nodes')
@@ -277,6 +279,19 @@ function NodosTab() {
       setError(errMsg(err, 'No se pudo guardar el nodo'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const retry = async (id) => {
+    setError('');
+    setRetrying(id);
+    try {
+      await api.post(`/api/admin/nodes/${id}/retry`);
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'No se pudo reintentar'));
+    } finally {
+      setRetrying(null);
     }
   };
 
@@ -366,6 +381,12 @@ function NodosTab() {
                 </div>
               )}
               <div className="admin-actions">
+                {st && !st.online && (
+                  <button className="pill-btn pill-btn--outline table__action"
+                    onClick={() => retry(n.id)} disabled={retrying === n.id}>
+                    <IconRefresh size={13} /> {retrying === n.id ? 'Reintentando…' : 'Reintentar'}
+                  </button>
+                )}
                 <button className="pill-btn pill-btn--outline table__action"
                   onClick={() => setForm({ editing: true, id: n.id, name: n.name, agent_url: n.agent_url })}>
                   Editar
@@ -783,20 +804,40 @@ function IngresosTab() {
   if (error) return <p className="page__error" role="alert">{error}</p>;
   if (!data) return <p className="card__muted">Cargando…</p>;
 
+  const consumo = data.usage_by_model.reduce((a, r) => a + r.cost_usd, 0);
+
   return (
     <>
       <div className="stats">
-        <StatTile label={`Ingresos ${data.month}`} value={`$${data.revenue_usd.toFixed(2)}`} />
-        <StatTile label="Recargas del mes" value={data.purchases} />
+        <StatTile label={`Ingresos ${data.month}`} value={`$${data.total_revenue_usd.toFixed(2)}`} />
+        <StatTile
+          label="Suscripciones (MRR)"
+          value={`$${data.subscription_mrr_usd.toFixed(2)}`}
+          hint={`${data.active_subscriptions} de pago activas`}
+        />
+        <StatTile
+          label="Recargas de créditos"
+          value={`$${data.topups_usd.toFixed(2)}`}
+          hint={`${data.purchases} este mes`}
+        />
       </div>
+      <p className="card__muted admin-hint">
+        <strong>Ingresos</strong> = suscripciones (ingreso recurrente de los planes de pago) +
+        recargas de créditos del mes. El consumo de créditos de más abajo <strong>no</strong> es
+        ingreso: es saldo prepago que el usuario ya pagó y ahora gasta.
+      </p>
 
       <GrantCreditsCard />
 
       <section className="card">
-        <h2 className="card__title">Consumo por modelo — {data.month}</h2>
+        <h2 className="card__title">Consumo de créditos por modelo — {data.month}</h2>
+        <p className="card__muted">
+          Saldo prepago gastado por uso de API (débitos del ledger), <strong>no</strong> ingreso.
+          El costo se congela al momento del cobro: editar Tarifas después no recalcula lo ya cobrado.
+        </p>
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Modelo</th><th>Tokens</th><th>Peticiones</th><th>Facturado</th></tr></thead>
+            <thead><tr><th>Modelo</th><th>Tokens</th><th>Peticiones</th><th>Consumido</th></tr></thead>
             <tbody>
               {data.usage_by_model.map((r, i) => (
                 <tr key={i}>
@@ -806,8 +847,13 @@ function IngresosTab() {
                   <td>${r.cost_usd.toFixed(4)}</td>
                 </tr>
               ))}
-              {data.usage_by_model.length === 0 && (
-                <tr><td colSpan={4} className="card__muted">Sin consumo de API este mes</td></tr>
+              {data.usage_by_model.length === 0 ? (
+                <tr><td colSpan={4} className="card__muted">Sin consumo de créditos este mes</td></tr>
+              ) : (
+                <tr className="table__total-row">
+                  <td colSpan={3}><strong>Total consumido</strong></td>
+                  <td><strong>${consumo.toFixed(4)}</strong></td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -815,10 +861,10 @@ function IngresosTab() {
       </section>
 
       <section className="card">
-        <h2 className="card__title">Top consumidores — {data.month}</h2>
+        <h2 className="card__title">Top consumidores de créditos — {data.month}</h2>
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Usuario</th><th>Tokens</th><th>Facturado</th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Tokens</th><th>Consumido</th></tr></thead>
             <tbody>
               {data.top_consumers.map((r, i) => (
                 <tr key={i}>
@@ -828,7 +874,7 @@ function IngresosTab() {
                 </tr>
               ))}
               {data.top_consumers.length === 0 && (
-                <tr><td colSpan={3} className="card__muted">Sin consumo de API este mes</td></tr>
+                <tr><td colSpan={3} className="card__muted">Sin consumo de créditos este mes</td></tr>
               )}
             </tbody>
           </table>

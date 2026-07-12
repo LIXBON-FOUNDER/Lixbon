@@ -78,6 +78,22 @@
   color: var(--ink-soft);
 }
 
+.stat__hint {
+  font-size: 12px;
+  color: var(--ink-faint, var(--ink-soft));
+  opacity: 0.8;
+}
+
+.admin-hint {
+  margin: -4px 0 16px;
+  line-height: 1.5;
+}
+
+.table__total-row td {
+  border-top: 2px solid var(--border-soft);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Tablas ──────────────────────────────────────────────────────────── */
 
 .table-wrap {

@@ -536,8 +536,16 @@ function FacturacionSection({ plan }) {
           ¡Recarga completada! El saldo puede tardar unos segundos en reflejarse.
         </p>
       )}
+      <p className="card__muted">
+        {paid
+          ? `Con tu plan ${plan.name}, el uso de la API ya está incluido en tu cuota mensual de tokens. Los créditos solo se descuentan si agotas esa cuota y quieres seguir usando la API el resto del mes.`
+          : 'Sin plan de pago, cada petición con tu API key se descuenta de este saldo según la tarifa del modelo.'}
+      </p>
       <div className="set-card">
-        <Row label="Saldo disponible" hint="Se descuenta por tokens al usar tus API keys">
+        <Row
+          label="Saldo disponible"
+          hint={paid ? 'Solo se usa si agotas la cuota de tu plan' : 'Se descuenta por tokens al usar tus API keys'}
+        >
           <span className="set-credits">
             {credits ? `$${credits.balance_usd.toFixed(2)}` : '…'}
           </span>
@@ -649,10 +657,18 @@ function UsoSection({ usage, daily, plan }) {
   }, []);
 
   const apiTotal = (apiUsage || []).reduce((acc, r) => acc + r.cost_usd, 0);
+  const paid = plan.price_monthly_cents > 0 && plan.id !== 'free';
+  const unlimitedTokens = usage.tokens_per_month === -1;
+  const withinQuota = unlimitedTokens || usage.tokens_month < usage.tokens_per_month;
 
   return (
     <>
       <h2 className="set-title">Uso del período <span className="set-plan-tag" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span></h2>
+      <p className="card__muted">
+        {paid
+          ? 'Tu plan se mide en tokens (la barra de abajo). El chat de la web, el IDE y el CLI, y también la API, se cubren con esa cuota mensual. Solo pagas créditos aparte si agotas la cuota.'
+          : 'Tu plan gratuito se mide en tokens (la barra de abajo) para el chat. El uso de la API con tu key se cobra por separado de tu saldo de créditos.'}
+      </p>
       <div className="set-card">
         <QuotaBar
           label="Mensajes hoy"
@@ -673,14 +689,21 @@ function UsoSection({ usage, daily, plan }) {
         <UsageChart daily={daily} />
       </div>
 
-      <h2 className="set-title">Consumo de API — últimos 30 días</h2>
+      <h2 className="set-title">Consumo de créditos de API — últimos 30 días</h2>
       <div className="set-card">
+        {paid && (
+          <p className="card__muted">
+            {withinQuota
+              ? `Estás dentro de la cuota de tu plan ${plan.name}, así que tu uso de la API está incluido y no gasta créditos. Solo verás cargos aquí si agotas la cuota.`
+              : `Agotaste la cuota mensual de tu plan ${plan.name}. A partir de ahí, el uso de la API se cobra de tus créditos, como se detalla abajo.`}
+          </p>
+        )}
         {apiUsage === null ? (
           <p className="card__muted">Cargando…</p>
         ) : apiUsage.length === 0 ? (
           <p className="card__muted">
-            Aún no has usado la API con créditos. Las peticiones con tu API key
-            aparecerán aquí desglosadas por día y modelo.
+            No hay cargos de créditos. Las peticiones con tu API key que se cobren
+            del saldo aparecerán aquí desglosadas por día y modelo.
           </p>
         ) : (
           <>

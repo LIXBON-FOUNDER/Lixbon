@@ -28,6 +28,10 @@ export const IconSearch = (p) => (
   <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></Svg>
 );
 
+export const IconRefresh = (p) => (
+  <Svg {...p}><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v4h-4" /></Svg>
+);
+
 export const IconPanel = (p) => (
   <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9.5 4v16" /></Svg>
 );

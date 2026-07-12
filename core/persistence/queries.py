@@ -1289,11 +1289,17 @@ def get_credit_pack(pack_id: str) -> dict[str, Any] | None:
 
 
 def admin_credits_summary() -> dict[str, Any]:
-    """Resumen para el panel admin: ingresos del mes, compras, top consumidores
-    y consumo por modelo — todo del ledger."""
+    """Resumen para el panel admin. Distingue dos cosas que NO deben mezclarse:
+
+      - Ingresos (dinero que ENTRA): suscripciones de pago (MRR = suma mensual de
+        los planes activos) + recargas de créditos del mes.
+      - Consumo de créditos (dinero ya pagado que se GASTA): débitos del ledger
+        por uso de API. Esto NO es ingreso; es saldo prepago consumido.
+    """
     month = datetime.now(timezone.utc).strftime("%Y-%m")
     with get_session() as s:
-        revenue = s.scalar(
+        # Recargas de créditos cobradas este mes (pago único)
+        topups = s.scalar(
             select(func.coalesce(func.sum(CreditLedger.delta_microusd), 0))
             .where(CreditLedger.kind == "purchase", CreditLedger.created_at >= month)
         ) or 0
@@ -1302,6 +1308,18 @@ def admin_credits_summary() -> dict[str, Any]:
             .select_from(CreditLedger)
             .where(CreditLedger.kind == "purchase", CreditLedger.created_at >= month)
         ) or 0
+        # Suscripciones de pago activas → MRR (ingreso recurrente).
+        # price_monthly_cents es céntimos; ×10_000 = micro-USD.
+        mrr_cents, active_subs = s.execute(
+            select(
+                func.coalesce(func.sum(Plan.price_monthly_cents), 0),
+                func.count(),
+            )
+            .select_from(Subscription)
+            .join(Plan, Plan.id == Subscription.plan_id)
+            .where(Subscription.status == "active", Plan.price_monthly_cents > 0)
+        ).one()
+        subscription_mrr = int(mrr_cents or 0) * 10_000
         by_model = s.execute(
             select(
                 CreditLedger.model,
@@ -1327,8 +1345,13 @@ def admin_credits_summary() -> dict[str, Any]:
         ).all()
     return {
         "month": month,
-        "revenue_microusd": int(revenue),
+        # Ingresos (dinero que entra)
+        "subscription_mrr_microusd": subscription_mrr,
+        "active_subscriptions": int(active_subs or 0),
+        "topups_microusd": int(topups),
         "purchases": int(purchases),
+        "total_revenue_microusd": subscription_mrr + int(topups),
+        # Consumo de créditos (saldo prepago gastado — NO es ingreso)
         "usage_by_model": [{
             "model": r[0],
             "cost_microusd": int(r[1] or 0),

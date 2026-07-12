@@ -247,6 +247,29 @@ class NodeOrchestrator:
                         vistos[nombre]["nodos"].append(nid)
         return list(vistos.values())
 
+    def reintentar_nodo(self, nid: str) -> bool:
+        """
+        Fuerza un reintento inmediato de un nodo: limpia el circuit breaker
+        (next_retry=0, fallos=0) y lo vuelve a pollear al instante, sin esperar
+        el backoff. Devuelve True si el nodo quedó online.
+        """
+        with self._lock:
+            estado = self._estado.get(nid)
+            if estado is None:
+                return False
+            estado["fallos"] = 0
+            estado["next_retry"] = 0.0
+            nodo = estado["config"]
+
+        try:
+            self._poll_nodo(nodo)
+        except Exception as exc:
+            logger.error(f"Error en reintento manual de {nid}: {exc}")
+
+        with self._lock:
+            estado = self._estado.get(nid)
+            return bool(estado and estado["online"])
+
     # ──────────────────────────────────────────
     # Información para endpoints de API
     # ──────────────────────────────────────────
