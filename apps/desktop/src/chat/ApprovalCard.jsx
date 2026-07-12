@@ -8,6 +8,7 @@ const KIND_LABEL = {
   delete: 'Eliminar',
   rename: 'Mover / renombrar',
   mkdir: 'Nueva carpeta',
+  command: 'Ejecutar comando',
 };
 
 export function ApprovalCard() {

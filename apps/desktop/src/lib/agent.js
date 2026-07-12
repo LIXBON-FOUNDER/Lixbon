@@ -6,7 +6,7 @@
 
 import {
   listFiles, readDir, readFileContent, writeFileContent, createNewEntry,
-  renameEntry, deleteEntry, searchInFiles,
+  renameEntry, deleteEntry, searchInFiles, runCommand,
 } from './tauri';
 import { useEditorStore } from '../store/editorStore';
 import { diffCounts, normalizeRel } from './agentProtocol';
@@ -83,11 +83,59 @@ async function toolListFiles(root, relPath) {
   return shown.join('\n') + (extra > 0 ? `\n… (${extra} más)` : '');
 }
 
-async function toolReadFile(root, relPath) {
+async function toolReadFile(root, relPath, startLine, endLine) {
   const rel = normalizeRel(relPath);
   if (!rel) throw new Error('Falta la ruta del archivo');
   const content = await readFileContent(joinPath(root, rel));
-  return content.slice(0, MAX_READ_CHARS);
+  if (startLine || endLine) {
+    const lines = content.split('\n');
+    const s = Math.max(1, parseInt(startLine, 10) || 1);
+    const e = Math.min(lines.length, parseInt(endLine, 10) || lines.length);
+    return `(líneas ${s}-${e} de ${lines.length})\n` + lines.slice(s - 1, e).join('\n');
+  }
+  if (content.length > MAX_READ_CHARS) {
+    const total = content.split('\n').length;
+    return `(archivo grande: ${total} líneas; pide rangos con start_line/end_line)\n`
+      + content.slice(0, MAX_READ_CHARS);
+  }
+  return content;
+}
+
+/** Edición parcial estilo Cursor/Claude Code: reemplazo EXACTO de un
+    fragmento. Evita reescribir archivos enteros (donde los modelos truncan). */
+async function toolEditFile(root, relPath, oldText, newText, all = false) {
+  const rel = normalizeRel(relPath);
+  if (!rel) throw new Error('Falta la ruta del archivo');
+  if (!oldText) throw new Error('Falta old_text (el fragmento exacto a reemplazar)');
+  const abs = joinPath(root, rel);
+  const content = await readFileContent(abs);
+  const count = content.split(oldText).length - 1;
+  if (count === 0) {
+    throw new Error(`No se encontró old_text en ${rel}. Debe coincidir EXACTO `
+      + '(espacios e indentación incluidos); usa read_file y copia el fragmento tal cual');
+  }
+  if (count > 1 && !all) {
+    throw new Error(`old_text aparece ${count} veces en ${rel}; añade más líneas de `
+      + 'contexto para que sea único, o pasa "all":true para reemplazar todas');
+  }
+  const updated = all
+    ? content.split(oldText).join(newText ?? '')
+    : content.replace(oldText, newText ?? '');
+  await writeFileContent(abs, updated);
+  try {
+    await useEditorStore.getState().reloadFromDisk(abs);
+  } catch { /* la UI no debe romper la herramienta */ }
+  notifyFsChanged();
+  return `Archivo editado: ${rel} (${count > 1 ? `${count} reemplazos` : '1 reemplazo'})`;
+}
+
+async function toolRunCommand(root, command, timeoutSecs) {
+  if (!String(command ?? '').trim()) throw new Error('Falta el comando');
+  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 300000);
+  const res = await runCommand(command, timeoutMs);
+  const output = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
+  const prefix = res.timed_out ? '[TIMEOUT] ' : `[EXIT ${res.code}] `;
+  return prefix + (output.slice(0, 8000) || '(sin salida)');
 }
 
 async function fileExists(root, rel) {
@@ -190,15 +238,55 @@ async function toolRenameFile(root, srcRel, dstRel) {
 export async function executeToolCall(root, tool, args = {}) {
   switch (tool) {
     case 'list_files': return toolListFiles(root, args.path ?? '.');
-    case 'read_file': return toolReadFile(root, args.path);
+    case 'read_file': return toolReadFile(root, args.path, args.start_line, args.end_line);
     case 'write_file': return toolWriteFile(root, args.path, String(args.content ?? ''));
+    case 'edit_file': return toolEditFile(root, args.path, args.old_text, args.new_text, !!args.all);
     case 'append_file': return toolAppendFile(root, args.path, String(args.content ?? ''));
     case 'mkdir': return toolMkdir(root, args.path);
     case 'search': return toolSearch(root, args.pattern);
     case 'delete_file': return toolDeleteFile(root, args.path);
     case 'rename_file': return toolRenameFile(root, args.src, args.dst);
+    case 'run_command': return toolRunCommand(root, args.command, args.timeout);
     default: throw new Error(`Herramienta no soportada en el IDE: ${tool}`);
   }
+}
+
+// ── Checkpoints: revertir un cambio del agente (estilo Cursor) ─────────
+
+const MAX_SNAPSHOT_CHARS = 300000;
+
+/** Captura lo necesario para deshacer una herramienta mutadora ANTES de
+    ejecutarla. null = no reversible (mkdir, comandos, archivos enormes). */
+export async function captureSnapshot(root, tool, args = {}) {
+  try {
+    if (tool === 'write_file' || tool === 'append_file' || tool === 'edit_file' || tool === 'delete_file') {
+      const rel = normalizeRel(args.path);
+      if (!rel) return null;
+      let oldContent = null; // null = el archivo no existía
+      try {
+        oldContent = await readFileContent(joinPath(root, rel));
+      } catch { /* nuevo o binario */ }
+      if (oldContent !== null && oldContent.length > MAX_SNAPSHOT_CHARS) return null;
+      return { kind: 'file', path: rel, oldContent };
+    }
+    if (tool === 'rename_file') {
+      return { kind: 'rename', src: normalizeRel(args.src), dst: normalizeRel(args.dst) };
+    }
+  } catch { /* rutas inválidas: sin snapshot */ }
+  return null;
+}
+
+/** Deshace un cambio a partir de su snapshot. */
+export async function revertSnapshot(root, snapshot) {
+  if (!snapshot) throw new Error('Este cambio no es reversible');
+  if (snapshot.kind === 'rename') {
+    return toolRenameFile(root, snapshot.dst, snapshot.src);
+  }
+  if (snapshot.oldContent === null) {
+    // El archivo no existía: revertir = eliminarlo
+    return toolDeleteFile(root, snapshot.path);
+  }
+  return toolWriteFile(root, snapshot.path, snapshot.oldContent);
 }
 
 // ── Vista previa del cambio (para la tarjeta de aprobación) ────────────
@@ -215,6 +303,23 @@ export async function computeChangePreview(root, tool, args = {}) {
       : String(args.content ?? '');
     const d = diffCounts(oldText ?? '', newText);
     return { kind: oldText === null ? 'create' : 'update', path: rel, ...d };
+  }
+  if (tool === 'edit_file') {
+    const rel = normalizeRel(args.path);
+    const empty = { kind: 'update', path: rel, added: 0, removed: 0, sampleOld: [], sampleNew: [] };
+    let oldText = null;
+    try {
+      oldText = await readFileContent(joinPath(root, rel));
+    } catch { /* no existe: el error real saldrá al ejecutar */ }
+    if (oldText === null || !args.old_text || !oldText.includes(args.old_text)) return empty;
+    const newText = args.all
+      ? oldText.split(args.old_text).join(args.new_text ?? '')
+      : oldText.replace(args.old_text, args.new_text ?? '');
+    const d = diffCounts(oldText, newText);
+    return { kind: 'update', path: rel, ...d };
+  }
+  if (tool === 'run_command') {
+    return { kind: 'command', path: String(args.command ?? ''), added: 0, removed: 0, sampleOld: [], sampleNew: [] };
   }
   if (tool === 'delete_file') {
     const rel = normalizeRel(args.path);
@@ -239,7 +344,7 @@ export async function computeChangePreview(root, tool, args = {}) {
 
 // ── System prompt ──────────────────────────────────────────────────────
 
-export async function buildAgentSystemPrompt(root) {
+export async function buildAgentSystemPrompt(root, activeFile = '') {
   let tree = '(no se pudo listar el workspace)';
   try {
     const files = await listFiles();
@@ -250,34 +355,54 @@ export async function buildAgentSystemPrompt(root) {
     }
   } catch { /* sin árbol: el agente puede usar list_files */ }
 
+  const activeLine = activeFile
+    ? `Archivo abierto en el editor ahora mismo: ${activeFile} (si el usuario dice "este archivo", es este).\n`
+    : '';
+
   return (
     'Eres un agente de código experto que trabaja DIRECTAMENTE sobre los archivos del usuario dentro del IDE Lixbon.\n' +
     `Workspace: ${root}\n` +
+    activeLine +
     'Rutas siempre RELATIVAS al workspace.\n\n' +
     '=== HERRAMIENTAS DISPONIBLES ===\n' +
     'Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n' +
     '{"tool":"list_files","args":{"path":"."}}\n' +
-    '{"tool":"read_file","args":{"path":"archivo.txt"}}\n' +
+    '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes)\n' +
+    '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n' +
     '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n' +
     '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n' +
     '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n' +
     '{"tool":"search","args":{"pattern":"texto a buscar"}}\n' +
     '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n' +
-    '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n\n' +
+    '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n' +
+    '{"tool":"run_command","args":{"command":"npm test","timeout":60}}\n\n' +
     '=== REGLAS OBLIGATORIAS ===\n' +
-    '1. Si el usuario pide crear, modificar o eliminar algo, DEBES usar herramientas. ' +
-    'No describas el cambio ni muestres el código en un bloque: APLÍCALO con la herramienta.\n' +
-    '2. Responde con el JSON puro de la herramienta. NUNCA lo envuelvas en markdown (```).\n' +
-    '3. Para EDITAR un archivo existente: primero read_file, luego write_file con el contenido COMPLETO ya modificado.\n' +
-    '4. Puedes encadenar varias herramientas en una misma respuesta.\n' +
-    '5. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar.\n' +
-    '6. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON) resumiendo lo que hiciste.\n\n' +
-    '=== EJEMPLO ===\n' +
+    '1. Si el usuario pide crear, modificar, arreglar o eliminar algo, DEBES hacerlo con herramientas EN ESTA MISMA RESPUESTA. ' +
+    'Tú ejecutas los cambios; el usuario no copia código.\n' +
+    '2. PROHIBIDO responder a una petición de cambio mostrando código en bloques ```: ' +
+    'el código va DENTRO del JSON de edit_file o write_file.\n' +
+    '3. Emite el JSON puro de la herramienta, sin envolverlo en markdown.\n' +
+    '4. Para EDITAR un archivo existente: primero read_file, luego **edit_file** con el fragmento exacto ' +
+    '(old_text copiado tal cual, con su indentación). Usa write_file solo para archivos nuevos o reescrituras totales.\n' +
+    '5. Puedes encadenar varias herramientas en una misma respuesta.\n' +
+    '6. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar; nunca los escribas tú.\n' +
+    '7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command.\n' +
+    '8. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON ni código) resumiendo lo que hiciste.\n\n' +
+    '=== EJEMPLO 1 (crear) ===\n' +
     'Usuario: crea un script que imprima hola\n' +
     'Asistente: {"tool":"write_file","args":{"path":"hola.py","content":"print(\'hola\')\\n"}}\n' +
     'Usuario: TOOL_RESULT write_file: Archivo creado: hola.py (14 chars)\n' +
     'Asistente: Listo: creé hola.py, que imprime «hola» al ejecutarlo.\n\n' +
+    '=== EJEMPLO 2 (editar) ===\n' +
+    'Usuario: renombra la variable x a total en utils.js\n' +
+    'Asistente: {"tool":"read_file","args":{"path":"utils.js"}}\n' +
+    'Usuario: TOOL_RESULT read_file: export const x = 1;\\nexport const y = x + 2;\n' +
+    'Asistente: {"tool":"edit_file","args":{"path":"utils.js","old_text":"export const x = 1;\\nexport const y = x + 2;","new_text":"export const total = 1;\\nexport const y = total + 2;"}}\n' +
+    'Usuario: TOOL_RESULT edit_file: Archivo editado: utils.js (1 reemplazo)\n' +
+    'Asistente: Hecho: renombré x a total en utils.js.\n\n' +
     '=== ARCHIVOS DEL WORKSPACE ===\n' +
-    tree
+    tree +
+    '\n\n=== RECUERDA ===\n' +
+    'Las peticiones de cambio se resuelven con herramientas, nunca mostrando código en el chat.'
   );
 }

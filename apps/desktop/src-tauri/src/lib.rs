@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -626,6 +627,104 @@ fn git_run(
     })
 }
 
+#[derive(serde::Serialize)]
+struct CmdOutput {
+    stdout: String,
+    stderr: String,
+    code: i32,
+    timed_out: bool,
+}
+
+/// Ejecuta un comando de shell en la carpeta de trabajo y captura la salida.
+/// Para el agente del chat (tests, builds, instalación de dependencias); el
+/// frontend pide aprobación antes de llamarlo. Timeout duro con kill.
+#[tauri::command]
+async fn run_command(
+    command: String,
+    timeout_ms: Option<u64>,
+    root: State<'_, WorkspaceRoot>,
+) -> Result<CmdOutput, String> {
+    let dir = workspace_path(&root)?;
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 600_000));
+    tauri::async_runtime::spawn_blocking(move || run_command_blocking(command, dir, timeout))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn run_command_blocking(command: String, dir: PathBuf, timeout: Duration) -> Result<CmdOutput, String> {
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", &command]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.args(["-c", &command]);
+        c
+    };
+    cmd.current_dir(&dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+
+    let mut child = cmd.spawn().map_err(|e| format!("No se pudo ejecutar el comando: {e}"))?;
+
+    // Lectores en hilos: sin drenar los pipes, un proceso verboso se bloquea.
+    let mut out_pipe = child.stdout.take().ok_or_else(|| "Sin stdout".to_string())?;
+    let mut err_pipe = child.stderr.take().ok_or_else(|| "Sin stderr".to_string())?;
+    let out_h = thread::spawn(move || {
+        let mut v = Vec::new();
+        let _ = out_pipe.read_to_end(&mut v);
+        v
+    });
+    let err_h = thread::spawn(move || {
+        let mut v = Vec::new();
+        let _ = err_pipe.read_to_end(&mut v);
+        v
+    });
+
+    let start = Instant::now();
+    let mut timed_out = false;
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code().unwrap_or(-1),
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    timed_out = true;
+                    break -1;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+
+    // Se conserva la COLA de la salida: ahí viven los errores que importan.
+    fn tail_utf8(v: Vec<u8>) -> String {
+        let s = String::from_utf8_lossy(&v).into_owned();
+        if s.len() <= 20_000 {
+            return s;
+        }
+        let mut cut = s.len() - 20_000;
+        while !s.is_char_boundary(cut) {
+            cut += 1;
+        }
+        s[cut..].to_string()
+    }
+
+    Ok(CmdOutput {
+        stdout: tail_utf8(out_h.join().unwrap_or_default()),
+        stderr: tail_utf8(err_h.join().unwrap_or_default()),
+        code,
+        timed_out,
+    })
+}
+
 /// Extrae "repo" de URLs tipo https://github.com/u/repo.git o git@host:u/repo.git
 fn repo_name_from_url(url: &str) -> Option<String> {
     let trimmed = url.trim().trim_end_matches('/');
@@ -1232,6 +1331,7 @@ pub fn run() {
             term_close,
             git_run,
             git_clone,
+            run_command,
             ext_search,
             ext_install,
             ext_read_theme,

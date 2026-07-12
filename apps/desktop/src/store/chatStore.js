@@ -14,14 +14,17 @@ import {
   MAX_AGENT_STEPS,
   READ_ONLY_TOOLS,
   buildAgentSystemPrompt,
+  captureSnapshot,
   cleanProse,
   computeChangePreview,
   displayableText,
   executeToolCall,
   extractToolCalls,
+  revertSnapshot,
   splitThinking,
   truncateFabricated,
 } from '../lib/agent';
+import { useEditorStore } from './editorStore';
 
 let abortController = null;
 
@@ -137,7 +140,12 @@ export const useChatStore = create((set, get) => ({
       { role: 'user', content: modelText },
     ];
     if (agentActive) {
-      modelMessages.unshift({ role: 'system', content: await buildAgentSystemPrompt(workspaceRoot) });
+      // El archivo abierto le da al modelo el referente de "este archivo"
+      const activePath = useEditorStore.getState().activePath || '';
+      const activeRel = activePath.startsWith(workspaceRoot)
+        ? activePath.slice(workspaceRoot.length).replace(/^[\\/]+/, '').replace(/\\/g, '/')
+        : '';
+      modelMessages.unshift({ role: 'system', content: await buildAgentSystemPrompt(workspaceRoot, activeRel) });
     }
 
     abortController = new AbortController();
@@ -149,6 +157,10 @@ export const useChatStore = create((set, get) => ({
       set({ messages: [...msgs.slice(0, -1), { ...last, ...patch }] });
     };
     const pushMsg = (msg) => set({ messages: [...get().messages, msg] });
+
+    // Un solo recordatorio por turno: si el modelo "sugiere" código en vez de
+    // aplicarlo (vicio de los modelos chicos), se le exige usar la herramienta.
+    let nudged = false;
 
     try {
       for (let step = 0; step < MAX_AGENT_STEPS; step++) {
@@ -189,8 +201,29 @@ export const useChatStore = create((set, get) => ({
         const spoken = truncateFabricated(visible);
         const calls = extractToolCalls(spoken);
         const prose = cleanProse(spoken);
+
+        if (!calls.length && nudged && (/^ok\.?$/i.test(prose.trim()) || !prose.trim())) {
+          // Tras el recordatorio confirmó que no había nada que aplicar
+          set({ messages: get().messages.slice(0, -1) });
+          break;
+        }
         patchLast({ content: prose, thinking: fullThinking });
-        if (!calls.length) break;
+        if (!calls.length) {
+          if (!nudged && /```/.test(spoken)) {
+            // Mostró código en vez de aplicarlo: una oportunidad de corregirse
+            nudged = true;
+            modelMessages.push({ role: 'assistant', content: spoken });
+            modelMessages.push({
+              role: 'user',
+              content: 'Si ese código debía aplicarse a un archivo del workspace, hazlo AHORA con '
+                + '{"tool":"write_file","args":{"path":"...","content":"CONTENIDO COMPLETO"}} (JSON puro, sin ```). '
+                + 'Si no había nada que aplicar, responde solo "OK".',
+            });
+            pushMsg({ role: 'assistant', content: '', sources: null });
+            continue;
+          }
+          break;
+        }
         if (!prose && !fullThinking) {
           // La burbuja solo pedía herramientas: fuera, quedan las filas
           set({ messages: get().messages.slice(0, -1) });
@@ -201,7 +234,10 @@ export const useChatStore = create((set, get) => ({
         for (const call of calls) {
           if (signal.aborted) break;
           const result = await get()._runTool(workspaceRoot, call);
-          pushMsg({ role: 'tool', tool: call.tool, args: call.args, ok: result.ok, content: result.display, change: result.change });
+          pushMsg({
+            role: 'tool', tool: call.tool, args: call.args, ok: result.ok,
+            content: result.display, change: result.change, snapshot: result.snapshot,
+          });
           results.push(`TOOL_RESULT ${call.tool}: ${result.output}`);
         }
         if (signal.aborted) break;
@@ -234,6 +270,7 @@ export const useChatStore = create((set, get) => ({
     const tool = call.tool;
     const args = call.args || {};
     let change = null;
+    let snapshot = null;
     if (!READ_ONLY_TOOLS.has(tool)) {
       try {
         change = await computeChangePreview(root, tool, args);
@@ -249,13 +286,28 @@ export const useChatStore = create((set, get) => ({
           return { ok: false, display: 'rechazado por el usuario', output: 'Ejecución cancelada por el usuario', change };
         }
       }
+      snapshot = await captureSnapshot(root, tool, args);
     }
     try {
       const output = await executeToolCall(root, tool, args);
-      return { ok: true, display: output.split('\n')[0].slice(0, 160), output, change };
+      return { ok: true, display: output.split('\n')[0].slice(0, 160), output, change, snapshot };
     } catch (err) {
       const message = String(err?.message || err);
       return { ok: false, display: message.slice(0, 160), output: `[ERROR] ${message}`, change };
+    }
+  },
+
+  /** Deshace el cambio de una fila de herramienta (checkpoint estilo Cursor). */
+  revertTool: async (index) => {
+    const msgs = get().messages;
+    const msg = msgs[index];
+    if (!msg || msg.role !== 'tool' || !msg.snapshot || msg.reverted) return;
+    const root = useAppStore.getState().workspaceRoot;
+    try {
+      await revertSnapshot(root, msg.snapshot);
+      set({ messages: msgs.map((m, i) => (i === index ? { ...m, reverted: true } : m)) });
+    } catch (err) {
+      set({ messages: [...get().messages, { role: 'error', content: `No se pudo revertir: ${err?.message || err}` }] });
     }
   },
 }));

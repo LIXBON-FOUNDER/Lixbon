@@ -930,6 +930,19 @@ def compute_change(workspace: Path, tool_name: str, args: dict, resolve_path) ->
         if old is None:
             return FileChange("create", rel, "", new_content)
         return FileChange("update", rel, old, new_content)
+    if tool_name == "edit_file":
+        old_frag = args.get("old_text", "")
+        try:
+            target = resolve_path(workspace, rel)
+            old = target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
+        except Exception:
+            old = ""
+        if not old or not old_frag or old_frag not in old:
+            # El error real (no encontrado / ambiguo) saldrá al ejecutar
+            return FileChange("update", rel, old, old)
+        new = (old.replace(old_frag, args.get("new_text", ""))
+               if args.get("all") else old.replace(old_frag, args.get("new_text", ""), 1))
+        return FileChange("update", rel, old, new)
     if tool_name == "delete_file":
         try:
             target = resolve_path(workspace, rel)
@@ -1029,6 +1042,14 @@ MAX_AGENT_STEPS = 12
 
 READ_ONLY_TOOLS = {"list_files", "read_file", "search"}
 
+# Recordatorio de una sola vez cuando el modelo "sugiere" código en el chat
+# en vez de aplicarlo con herramientas (vicio típico de los modelos chicos).
+NUDGE_PROMPT = (
+    "Si ese código debía aplicarse a un archivo del workspace, hazlo AHORA con "
+    '{"tool":"write_file","args":{"path":"...","content":"CONTENIDO COMPLETO"}} '
+    '(JSON puro, sin ```). Si no había nada que aplicar, responde solo "OK".'
+)
+
 IGNORED_TREE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
     "target", ".next", ".idea", ".vscode", ".mypy_cache", ".pytest_cache",
@@ -1083,7 +1104,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "=== HERRAMIENTAS DISPONIBLES ===\n"
         "Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n"
         '{"tool":"list_files","args":{"path":"."}}\n'
-        '{"tool":"read_file","args":{"path":"archivo.txt"}}\n'
+        '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes)\n'
+        '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n'
         '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n'
         '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n'
         '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n'
@@ -1092,21 +1114,33 @@ def build_agent_system_prompt(workspace: Path) -> str:
         '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n'
         '{"tool":"run_command","args":{"command":"npm install","timeout":60}}\n\n'
         "=== REGLAS OBLIGATORIAS ===\n"
-        "1. Si el usuario pide crear, modificar, eliminar o ejecutar algo, DEBES usar herramientas. "
-        "No describas el cambio ni muestres el código en un bloque: APLÍCALO con la herramienta.\n"
-        "2. Responde con el JSON puro de la herramienta. NUNCA lo envuelvas en markdown (```).\n"
-        "3. Para EDITAR un archivo existente: primero read_file, luego write_file con el contenido COMPLETO ya modificado.\n"
-        "4. Puedes encadenar varias herramientas en una misma respuesta.\n"
-        "5. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar.\n"
-        "6. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON) resumiendo lo que hiciste.\n"
-        "7. Si la tarea involucra comandos del sistema, usa run_command.\n\n"
-        "=== EJEMPLO ===\n"
+        "1. Si el usuario pide crear, modificar, arreglar, eliminar o ejecutar algo, DEBES hacerlo "
+        "con herramientas EN ESTA MISMA RESPUESTA. Tú ejecutas los cambios; el usuario no copia código.\n"
+        "2. PROHIBIDO responder a una petición de cambio mostrando código en bloques ```: "
+        "el código va DENTRO del JSON de edit_file o write_file.\n"
+        "3. Emite el JSON puro de la herramienta, sin envolverlo en markdown.\n"
+        "4. Para EDITAR un archivo existente: primero read_file, luego edit_file con el fragmento exacto "
+        "(old_text copiado tal cual, con su indentación). Usa write_file solo para archivos nuevos o reescrituras totales.\n"
+        "5. Puedes encadenar varias herramientas en una misma respuesta.\n"
+        "6. Los resultados te llegan como TOOL_RESULT. Úsalos para continuar; nunca los escribas tú.\n"
+        "7. Tras cambiar código, si el proyecto tiene tests o build, verifica con run_command.\n"
+        "8. Cuando termines todas las acciones, responde SOLO con texto normal (sin JSON ni código) resumiendo lo que hiciste.\n\n"
+        "=== EJEMPLO 1 (crear) ===\n"
         "Usuario: crea un script que imprima hola\n"
         'Asistente: {"tool":"write_file","args":{"path":"hola.py","content":"print(\'hola\')\\n"}}\n'
         "Usuario: TOOL_RESULT write_file: Archivo creado: hola.py (14 chars)\n"
         "Asistente: Listo: creé hola.py, que imprime «hola» al ejecutarlo.\n\n"
+        "=== EJEMPLO 2 (editar) ===\n"
+        "Usuario: renombra la variable x a total en utils.js\n"
+        'Asistente: {"tool":"read_file","args":{"path":"utils.js"}}\n'
+        "Usuario: TOOL_RESULT read_file: export const x = 1;\\nexport const y = x + 2;\n"
+        'Asistente: {"tool":"edit_file","args":{"path":"utils.js","old_text":"export const x = 1;\\nexport const y = x + 2;","new_text":"export const total = 1;\\nexport const y = total + 2;"}}\n'
+        "Usuario: TOOL_RESULT edit_file: Archivo editado: utils.js (1 reemplazo)\n"
+        "Asistente: Hecho: renombré x a total en utils.js.\n\n"
         "=== ARCHIVOS DEL WORKSPACE ===\n"
-        f"{workspace_tree(workspace)}"
+        f"{workspace_tree(workspace)}\n\n"
+        "=== RECUERDA ===\n"
+        "Las peticiones de cambio se resuelven con herramientas, nunca mostrando código en el chat."
     )
 
 
@@ -1134,11 +1168,43 @@ def tool_list_files(workspace: Path, rel_path: str = ".") -> str:
     return "\n".join(lines) if lines else "(vacio)"
 
 
-def tool_read_file(workspace: Path, rel_path: str) -> str:
+def tool_read_file(workspace: Path, rel_path: str, start_line: int = 0, end_line: int = 0) -> str:
     target = resolve_safe_path(workspace, rel_path)
     if not target.exists() or not target.is_file():
         return f"Archivo no encontrado: {rel_path}"
-    return target.read_text(encoding="utf-8", errors="replace")[:120000]
+    content = target.read_text(encoding="utf-8", errors="replace")
+    if start_line or end_line:
+        lines = content.split("\n")
+        s = max(1, int(start_line or 1))
+        e = min(len(lines), int(end_line or len(lines)))
+        return f"(líneas {s}-{e} de {len(lines)})\n" + "\n".join(lines[s - 1:e])
+    if len(content) > 120000:
+        total = content.count("\n") + 1
+        return (f"(archivo grande: {total} líneas; pide rangos con start_line/end_line)\n"
+                + content[:120000])
+    return content
+
+
+def tool_edit_file(workspace: Path, rel_path: str, old_text: str, new_text: str,
+                   replace_all: bool = False) -> str:
+    """Edición parcial estilo Cursor/Claude Code: reemplazo EXACTO de un
+    fragmento. Evita reescribir archivos enteros (donde los modelos truncan)."""
+    target = resolve_safe_path(workspace, rel_path)
+    if not target.is_file():
+        return f"Archivo no encontrado: {rel_path}"
+    if not old_text:
+        return "[ERROR] Falta old_text (el fragmento exacto a reemplazar)"
+    content = target.read_text(encoding="utf-8", errors="replace")
+    count = content.count(old_text)
+    if count == 0:
+        return (f"[ERROR] No se encontró old_text en {rel_path}. Debe coincidir EXACTO "
+                "(espacios e indentación incluidos); usa read_file y copia el fragmento tal cual")
+    if count > 1 and not replace_all:
+        return (f"[ERROR] old_text aparece {count} veces en {rel_path}; añade más líneas de "
+                'contexto para que sea único, o pasa "all":true para reemplazar todas')
+    updated = content.replace(old_text, new_text) if replace_all else content.replace(old_text, new_text, 1)
+    target.write_text(updated, encoding="utf-8")
+    return f"Archivo editado: {rel_path} ({count} reemplazo{'s' if count > 1 else ''})"
 
 
 def tool_write_file(workspace: Path, rel_path: str, content: str) -> str:
@@ -1239,9 +1305,13 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict) -> str:
     if tool_name == "list_files":
         return tool_list_files(workspace, args.get("path", "."))
     if tool_name == "read_file":
-        return tool_read_file(workspace, args.get("path", ""))
+        return tool_read_file(workspace, args.get("path", ""),
+                              int(args.get("start_line") or 0), int(args.get("end_line") or 0))
     if tool_name == "write_file":
         return tool_write_file(workspace, args.get("path", ""), args.get("content", ""))
+    if tool_name == "edit_file":
+        return tool_edit_file(workspace, args.get("path", ""), args.get("old_text", ""),
+                              args.get("new_text", ""), bool(args.get("all")))
     if tool_name == "append_file":
         return tool_append_file(workspace, args.get("path", ""), args.get("content", ""))
     if tool_name == "mkdir":
@@ -1364,6 +1434,7 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     system_msg = {"role": "system", "content": build_agent_system_prompt(workspace)}
     working = history[:]
 
+    nudged = False
     for _ in range(MAX_AGENT_STEPS):
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
         assistant = truncate_fabricated(stream_assistant([system_msg] + working))
@@ -1371,6 +1442,11 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
         tool_calls = extract_all_tool_calls(assistant)
         if not tool_calls:
+            if not nudged and "```" in assistant:
+                # Mostró código en vez de aplicarlo: una oportunidad de corregirse
+                nudged = True
+                working.append({"role": "user", "content": NUDGE_PROMPT})
+                continue
             return assistant, working
 
         combined_results = []

@@ -1,8 +1,9 @@
-// ChatMessage.jsx — una burbuja del chat (usuario / asistente / error).
+// ChatMessage.jsx — una burbuja del chat (usuario / asistente / error / herramienta).
 import { ChatMarkdown } from './ChatMarkdown';
+import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode } from '../components/Icons';
 
-export function ChatMessage({ message, streaming }) {
+export function ChatMessage({ message, index, streaming }) {
   if (message.role === 'user') {
     return (
       <div className="msg msg--user">
@@ -61,6 +62,19 @@ export function ChatMessage({ message, streaming }) {
             </pre>
           )}
           {!failed && message.content && <p className="toolrow__result">{message.content}</p>}
+          {message.snapshot && !failed && (
+            <button
+              className="toolrow__revert"
+              disabled={message.reverted}
+              onClick={(e) => {
+                e.preventDefault();
+                useChatStore.getState().revertTool(index);
+              }}
+              title="Deshace este cambio en el disco (checkpoint)"
+            >
+              {message.reverted ? 'Revertido ✓' : 'Revertir este cambio'}
+            </button>
+          )}
         </div>
       </details>
     );

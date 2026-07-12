@@ -127,6 +127,12 @@ export function gitClone(url, destParent) {
   return invoke('git_clone', { url, destParent });
 }
 
+/** Ejecuta un comando de shell en la carpeta de trabajo (agente del chat).
+    Devuelve {stdout, stderr, code, timed_out}. */
+export function runCommand(command, timeoutMs) {
+  return invoke('run_command', { command, timeoutMs: timeoutMs ?? null });
+}
+
 // ── Plugins ───────────────────────────────────────────────────────────
 
 /** Abre el selector nativo de carpetas. Devuelve la ruta o null si se cancela. */

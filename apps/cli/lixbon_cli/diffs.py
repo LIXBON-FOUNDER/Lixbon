@@ -45,6 +45,19 @@ def compute_change(workspace: Path, tool_name: str, args: dict, resolve_path) ->
         if old is None:
             return FileChange("create", rel, "", new_content)
         return FileChange("update", rel, old, new_content)
+    if tool_name == "edit_file":
+        old_frag = args.get("old_text", "")
+        try:
+            target = resolve_path(workspace, rel)
+            old = target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
+        except Exception:
+            old = ""
+        if not old or not old_frag or old_frag not in old:
+            # El error real (no encontrado / ambiguo) saldrá al ejecutar
+            return FileChange("update", rel, old, old)
+        new = (old.replace(old_frag, args.get("new_text", ""))
+               if args.get("all") else old.replace(old_frag, args.get("new_text", ""), 1))
+        return FileChange("update", rel, old, new)
     if tool_name == "delete_file":
         try:
             target = resolve_path(workspace, rel)

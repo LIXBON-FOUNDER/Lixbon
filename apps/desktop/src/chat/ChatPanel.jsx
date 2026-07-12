@@ -63,6 +63,7 @@ export function ChatPanel() {
                 <ChatMessage
                   key={i}
                   message={m}
+                  index={i}
                   streaming={streaming && i === messages.length - 1}
                 />
               ))

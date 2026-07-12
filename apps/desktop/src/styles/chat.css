@@ -238,6 +238,27 @@
   color: var(--ink-soft);
 }
 
+.toolrow__revert {
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-family: var(--font-ui);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.toolrow__revert:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.toolrow__revert:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* ── Modo agente: tarjeta de aprobación ──────────────────────────────── */
 
 .approval {
