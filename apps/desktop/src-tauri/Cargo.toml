@@ -1,6 +1,6 @@
 [package]
 name = "lixbon"
-version = "0.6.2"
+version = "0.6.3"
 description = "Lixbon"
 authors = ["Lixbon by GBX"]
 edition = "2021"
@@ -18,7 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `devtools`: habilita el inspector (Ctrl+Shift+I) también en builds de release,
+# para poder diagnosticar errores de la UI en la app instalada.
+tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2"
 tauri-plugin-http = "2"

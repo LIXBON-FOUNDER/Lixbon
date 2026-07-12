@@ -102,6 +102,80 @@
   --danger-soft: rgba(224, 104, 90, 0.14);
 }
 
+/* ── Error boundary (evita la pantalla en blanco) ────────────────────── */
+
+.errboundary {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  overflow: auto;
+}
+
+.errboundary__card {
+  max-width: 720px;
+  width: 100%;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 20px 22px;
+  background: var(--bg-secondary);
+}
+
+.errboundary__card h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: var(--danger);
+}
+
+.errboundary__hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.errboundary__msg,
+.errboundary__stack {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+}
+
+.errboundary__msg { color: var(--danger); }
+
+.errboundary__stack {
+  max-height: 320px;
+  overflow: auto;
+  color: var(--ink-soft);
+}
+
+.errboundary__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.errboundary__actions button {
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.errboundary__actions button:first-child {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: transparent;
+}
+
 /* ── Reset ───────────────────────────────────────────────────────────── */
 
 *,
