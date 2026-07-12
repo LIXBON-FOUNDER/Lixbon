@@ -505,6 +505,47 @@
   border-color: var(--border);
 }
 
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.settings__btn {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+  color: var(--ink);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.settings__btn:hover:not(:disabled) { border-color: var(--border); }
+.settings__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  outline: none;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.settings__textarea:focus {
+  border-color: var(--border);
+}
+
 .settings__status {
   font-size: 13px;
   color: var(--ink-soft);
@@ -732,3 +773,211 @@
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Git: visor de diff (C1/C2) ─────────────────────────────────────────── */
+.diffview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.diffview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.diffview__title {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffview__body { flex: 1; min-height: 0; overflow: auto; }
+
+.diffview__pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.diffview__line {
+  padding: 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diffview__line--add { background: rgba(46, 160, 67, 0.14); color: var(--accent-deep); }
+.diffview__line--del { background: rgba(192, 57, 43, 0.12); color: var(--danger); }
+.diffview__line--hunk { color: var(--ink-soft); background: var(--bg-secondary); }
+.diffview__line--file { color: var(--ink); font-weight: 600; }
+.diffview__line--meta { color: var(--ink-soft); }
+
+/* ── Git: rama / historial / stash ──────────────────────────────────────── */
+.scm__branch-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink);
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.scm__branch-btn:hover { background: var(--bg-secondary); }
+
+.scm__branchmenu {
+  margin: 0 10px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 5px;
+  background: var(--bg);
+}
+.scm__branchitem {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.scm__branchitem:hover { background: var(--bg-secondary); }
+.scm__branchitem.is-current { color: var(--ink-soft); cursor: default; }
+.scm__branchnew { display: flex; gap: 6px; align-items: center; margin-top: 4px; padding: 4px; }
+.scm__branchnew .settings__input { padding: 6px 10px; font-size: 13px; }
+
+.scm__toolbar {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.scm__file-open {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  color: var(--ink);
+}
+
+.scm__history .scm__commit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: var(--ink);
+}
+.scm__history .scm__commit-row:hover { background: var(--bg-secondary); }
+.scm__commit-hash { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); flex-shrink: 0; }
+.scm__commit-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.scm__commit-meta { font-size: 11px; color: var(--ink-soft); flex-shrink: 0; }
+
+/* ── Esquema / outline (A3) ─────────────────────────────────────────────── */
+.outline { height: 100%; padding: 10px; overflow-y: auto; }
+.outline__list { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }
+.outline__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: var(--ink);
+}
+.outline__item:hover { background: var(--bg-secondary); }
+.outline__kind {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 5px;
+  color: var(--ink-soft);
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.outline__kind--class, .outline__kind--struct, .outline__kind--enum, .outline__kind--trait { color: #a8551a; }
+.outline__kind--function, .outline__kind--method { color: #2f6b5e; }
+.outline__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.outline__line { font-size: 11px; color: var(--ink-soft); flex-shrink: 0; }
+
+/* ── Problemas (A2) ─────────────────────────────────────────────────────── */
+.problem__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: var(--ink);
+}
+.problem__item:hover { background: var(--bg-secondary); }
+.problem__sev { flex-shrink: 0; display: inline-flex; }
+.problem__sev--error { color: var(--danger); }
+.problem__sev--warning { color: #a8551a; }
+[data-theme='dark'] .problem__sev--warning { color: #d89b62; }
+.problem__msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+
+/* ── Editor de atajos (D5) ──────────────────────────────────────────────── */
+.keybind__list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.keybind__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 4px;
+}
+.keybind__title { display: flex; align-items: center; gap: 8px; font-size: 13.5px; min-width: 0; }
+.keybind__chord {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.keybind__chord:hover { border-color: var(--border); }
+.keybind__chord.is-recording { border-color: var(--danger); color: var(--danger); }

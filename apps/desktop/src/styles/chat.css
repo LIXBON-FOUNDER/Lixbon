@@ -336,6 +336,12 @@
   overflow-wrap: anywhere;
 }
 
+.approval__command {
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .approval__line--add { color: var(--accent-deep); }
 .approval__line--del { color: var(--danger); }
 .approval__line--more { color: var(--ink-soft); }
@@ -548,12 +554,51 @@
 /* ── Caja de entrada (crema, redondeada) ─────────────────────────────── */
 
 .chat-inputbar {
+  position: relative;
   margin: 10px 12px 12px;
   padding: 10px 12px 8px;
   background: var(--bg-secondary);
   border-radius: var(--radius-box);
   transition: box-shadow 0.2s ease;
   flex-shrink: 0;
+}
+
+/* Menú de @-menciones (aparece sobre la caja) */
+.mention-menu {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% - 4px);
+  z-index: 30;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(var(--shadow-rgb), 0.2);
+  padding: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.mention-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.mention-menu__item.is-selected { background: var(--bg-secondary); }
+.mention-menu__item svg { flex-shrink: 0; color: var(--ink-soft); }
+.mention-menu__name { font-weight: 500; flex-shrink: 0; }
+.mention-menu__rel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--ink-soft);
 }
 
 .chat-inputbar:focus-within {

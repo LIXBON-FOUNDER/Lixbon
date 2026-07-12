@@ -11,18 +11,27 @@ import { UpdateModal } from '../components/UpdateModal';
 
 import { FileTree } from '../sections/Workspace/FileTree';
 import { SearchPanel } from '../sections/Search/SearchPanel';
+import { OutlinePanel } from '../sections/Outline/OutlinePanel';
+import { ProblemsPanel } from '../sections/Problems/ProblemsPanel';
 import { ExtensionsPanel } from '../sections/Extensions/ExtensionsPanel';
 import { EditorTabs } from '../editor/EditorTabs';
 import { RunControls } from '../editor/RunControls';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
+import { Preview } from '../editor/Preview';
 import { TerminalPanel } from '../editor/TerminalPanel';
 import { ChatPanel } from '../chat/ChatPanel';
 import { Metrics } from '../sections/Metrics/Metrics';
 import { Settings } from '../sections/Settings/Settings';
 import { SourceControl } from '../sections/SourceControl/SourceControl';
+import { DiffView } from '../sections/SourceControl/DiffView';
+import { Welcome } from '../sections/Workspace/Welcome';
 import { QuickOpen } from '../components/QuickOpen';
+import { CommandPalette } from '../components/CommandPalette';
+import { InlineEdit } from '../editor/InlineEdit';
 import { useExtStore } from '../store/extStore';
 import { IconX } from '../components/Icons';
+import { registerBuiltinCommands } from '../commands/builtin';
+import { dispatchKeydown } from '../lib/keymap';
 
 const TERM_MIN_H = 120;
 const TERM_MAX_H = 640;
@@ -32,11 +41,12 @@ export function AppShell() {
     panels, panelWidths, setPanelWidth,
     panelHeights, setPanelHeight, togglePanel,
     centerView, editorFontSize, serverUrl,
-    leftView, quickOpen,
+    leftView, quickOpen, commandPalette, previewOpen,
   } = useAppStore();
   const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate } = useVersion();
 
   const hasTabs = useEditorStore((s) => s.tabs.length > 0);
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const termFrame = useRef(null);
 
   // Reabrir la última carpeta de trabajo (el sandbox Rust no persiste)
@@ -51,35 +61,12 @@ export function AppShell() {
     document.documentElement.style.setProperty('--editor-font-size', `${editorFontSize}px`);
   }, [editorFontSize]);
 
-  // Atajos globales del IDE (CodeMirror maneja Ctrl+S dentro del editor;
-  // aquí cubrimos Ctrl+W y Ctrl+Tab, y Ctrl+S cuando el foco está fuera).
+  // Atajos globales del IDE: se resuelven contra el keymap central, que dispara
+  // comandos del registro. CodeMirror sigue manejando Ctrl+S dentro del editor
+  // (el doble disparo es inofensivo: guardar es idempotente).
   useEffect(() => {
-    const onKeyDown = (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const store = useEditorStore.getState();
-
-      if (e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        if (e.shiftKey) store.saveAll();
-        else store.saveActive();
-      } else if (e.key === 'w') {
-        e.preventDefault();
-        if (store.activePath) store.closeTab(store.activePath);
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        store.cycleTab(e.shiftKey ? -1 : 1);
-      } else if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        useAppStore.getState().setQuickOpen(true);
-      } else if (e.key === 'F' || (e.shiftKey && e.key === 'f')) {
-        e.preventDefault();
-        useAppStore.getState().openLeftPanel('search');
-      } else if (e.key === '`' || e.key === 'ñ') {
-        e.preventDefault();
-        useAppStore.getState().togglePanel('terminal');
-      }
-    };
+    registerBuiltinCommands();
+    const onKeyDown = (e) => dispatchKeydown(e);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
@@ -119,6 +106,9 @@ export function AppShell() {
         </div>
       );
     }
+    if (centerView === 'diff') {
+      return <DiffView />;
+    }
     // Editor con pestañas
     return (
       <div className="editor-area">
@@ -127,13 +117,23 @@ export function AppShell() {
           <RunControls />
         </div>
         {hasTabs ? (
-          <CodeMirrorHost />
+          previewOpen ? (
+            <div className="editor-split">
+              <CodeMirrorHost />
+              <Preview />
+            </div>
+          ) : (
+            <CodeMirrorHost />
+          )
+        ) : !workspaceRoot ? (
+          <Welcome />
         ) : (
           <div className="editor-empty">
             <span className="brand">LIXBON</span>
             <p>Abre un archivo desde el explorador para empezar a editar.</p>
             <p>
               <kbd>Ctrl</kbd> + <kbd>S</kbd> guarda · <kbd>Ctrl</kbd> + <kbd>W</kbd> cierra la pestaña
+              {' · '}<kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>P</kbd> comandos
             </p>
           </div>
         )}
@@ -166,6 +166,10 @@ export function AppShell() {
           >
             {leftView === 'search' ? (
               <SearchPanel />
+            ) : leftView === 'outline' ? (
+              <OutlinePanel />
+            ) : leftView === 'problems' ? (
+              <ProblemsPanel />
             ) : leftView === 'git' ? (
               <SourceControl />
             ) : leftView === 'extensions' ? (
@@ -214,6 +218,8 @@ export function AppShell() {
       </div>
 
       {quickOpen && <QuickOpen />}
+      {commandPalette && <CommandPalette />}
+      <InlineEdit />
 
       <StatusBar />
     </div>

@@ -10,10 +10,14 @@ import { create } from 'zustand';
 import { useAppStore } from './appStore';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
+import { readFileContent } from '../lib/tauri';
+import { searchIndex } from '../lib/codebaseIndex';
 import {
   MAX_AGENT_STEPS,
   READ_ONLY_TOOLS,
   buildAgentSystemPrompt,
+  DEFAULT_CMD_ALLOWLIST,
+  isAllowedCommand,
   buildModelHistory,
   captureSnapshot,
   cleanProse,
@@ -44,6 +48,17 @@ export const useChatStore = create((set, get) => ({
   // Tool-calling nativo (opt-in): requiere un modelo que soporte tools en
   // Ollama. Off = protocolo de texto (JSON embebido), fiable y por defecto.
   nativeTools: (localStorage.getItem('lixbon_agent_native') ?? 'false') === 'true',
+  // Ejecutar comandos del agente sin aprobación (B4). OFF por defecto: correr
+  // shell es irreversible (a diferencia de editar archivos, que tiene revert),
+  // así que los comandos SIEMPRE piden confirmación salvo que estén en la
+  // allowlist o que el usuario active esto explícitamente.
+  autoRunCommands: (localStorage.getItem('lixbon_agent_autorun') ?? 'false') === 'true',
+  commandAllowlist: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('lixbon_agent_cmd_allowlist') || 'null');
+      return Array.isArray(saved) ? saved : DEFAULT_CMD_ALLOWLIST;
+    } catch { return DEFAULT_CMD_ALLOWLIST; }
+  })(),
   pendingApproval: null, // { tool, args, change, resolve }
 
   setView: (view) => set({ view }),
@@ -61,6 +76,17 @@ export const useChatStore = create((set, get) => ({
   setNativeTools: (nativeTools) => {
     localStorage.setItem('lixbon_agent_native', nativeTools ? 'true' : 'false');
     set({ nativeTools });
+  },
+
+  setAutoRunCommands: (autoRunCommands) => {
+    localStorage.setItem('lixbon_agent_autorun', autoRunCommands ? 'true' : 'false');
+    set({ autoRunCommands });
+  },
+
+  setCommandAllowlist: (list) => {
+    const arr = Array.isArray(list) ? list.map((s) => String(s).trim()).filter(Boolean) : [];
+    localStorage.setItem('lixbon_agent_cmd_allowlist', JSON.stringify(arr));
+    set({ commandAllowlist: arr });
   },
 
   resolveApproval: (decision) => {
@@ -117,7 +143,7 @@ export const useChatStore = create((set, get) => ({
    * — se antepone como bloque de código al mensaje que ve el modelo,
    * pero en la UI solo se muestra el chip.
    */
-  send: async (text, context = null, images = []) => {
+  send: async (text, context = null, images = [], mentions = []) => {
     const { messages, conversationId, streaming, agentMode } = get();
     const hasImages = Array.isArray(images) && images.length > 0;
     if (streaming || (!text.trim() && !hasImages)) return;
@@ -188,6 +214,40 @@ export const useChatStore = create((set, get) => ({
           modelText;
       }
     }
+    // Archivos mencionados con @ en el chat. En modo agente se pasan como
+    // REFERENCIA (el agente los lee con read_file); en chat normal se inyecta
+    // su contenido para que el modelo razone sobre ellos.
+    if (Array.isArray(mentions) && mentions.length) {
+      if (agentActive) {
+        const list = mentions.map((m) => `- ${m.rel || m.path}`).join('\n');
+        modelText = `(El usuario mencionó estos archivos; léelos con read_file si los necesitas:\n${list}\n)\n\n` + modelText;
+      } else {
+        const MAX_MENTION_CHARS = 16000;
+        const blocks = [];
+        for (const m of mentions) {
+          try {
+            let code = await readFileContent(m.path);
+            if (code.length > MAX_MENTION_CHARS) code = code.slice(0, MAX_MENTION_CHARS) + '\n… (recortado)';
+            blocks.push(`Archivo \`${m.rel || m.name}\`:\n\n\`\`\`\n${code}\n\`\`\``);
+          } catch { /* ilegible/binario: se omite */ }
+        }
+        if (blocks.length) modelText = blocks.join('\n\n') + '\n\n' + modelText;
+      }
+      userMsg.mentions = mentions.map((m) => m.name);
+    }
+
+    // RAG: en chat normal, inyecta fragmentos relevantes del índice del codebase
+    // (en modo agente no: el agente llama a search_codebase cuando lo necesita).
+    if (appState.useCodebaseContext && !agentActive && text.trim()) {
+      try {
+        const hits = await searchIndex(text.trim(), 5);
+        if (hits.length) {
+          const block = hits.map((h) => `# ${h.rel}:${h.start}-${h.end}\n${h.text}`).join('\n\n');
+          modelText = `Contexto relevante del proyecto (búsqueda semántica):\n\n${block}\n\n---\n\n` + modelText;
+        }
+      } catch { /* sin índice/modelo de embeddings: se ignora */ }
+    }
+
     // La descripción de la imagen (del sub-agente de visión) va primero
     if (visionText) modelText = visionText + modelText;
 
@@ -350,10 +410,24 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
+  /** ¿La herramienta requiere aprobación explícita antes de ejecutarse?
+      Los comandos (run_command) son irreversibles → SIEMPRE piden confirmación
+      salvo que estén en la allowlist o que el usuario active auto-run; el
+      auto-aplicado de archivos (autoApprove) NO los cubre. */
+  _needsApproval: (tool, args) => {
+    if (READ_ONLY_TOOLS.has(tool)) return false;
+    if (tool === 'run_command') {
+      if (get().autoRunCommands) return false;
+      return !isAllowedCommand(args?.command || '', get().commandAllowlist);
+    }
+    return !get().autoApprove;
+  },
+
   /** Ejecuta una herramienta del agente con aprobación previa (interno). */
   _runTool: async (root, call) => {
     const tool = call.tool;
     const args = call.args || {};
+    const isCommand = tool === 'run_command';
     let change = null;
     let snapshot = null;
     if (!READ_ONLY_TOOLS.has(tool)) {
@@ -362,16 +436,20 @@ export const useChatStore = create((set, get) => ({
       } catch {
         change = null; // ruta inválida: el error real saldrá al ejecutar
       }
-      if (!get().autoApprove) {
+      if (get()._needsApproval(tool, args)) {
         const decision = await new Promise((resolve) => {
           set({ pendingApproval: { tool, args, change, resolve } });
         });
-        if (decision === 'always') set({ autoApprove: true });
-        else if (decision !== 'yes') {
+        // "Aplicar todo" en un comando activa auto-run de comandos (no el
+        // auto-aplicado de archivos, que es un ajuste distinto).
+        if (decision === 'always') {
+          if (isCommand) get().setAutoRunCommands(true);
+          else get().setAutoApprove(true);
+        } else if (decision !== 'yes') {
           return { ok: false, display: 'rechazado por el usuario', output: 'Ejecución cancelada por el usuario', change };
         }
       }
-      snapshot = await captureSnapshot(root, tool, args);
+      if (!isCommand) snapshot = await captureSnapshot(root, tool, args);
     }
     try {
       const output = await executeToolCall(root, tool, args);

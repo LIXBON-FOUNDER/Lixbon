@@ -1,8 +1,10 @@
 // Settings.jsx — ajustes de la app: perfil/plan, API key, servidor,
 // actualizaciones y editor. Las API keys se administran en la web.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { useChatStore } from '../../store/chatStore';
+import { useIndexStore } from '../../store/indexStore';
+import { Keybindings } from './Keybindings';
 import { useVersion } from '../../hooks/useVersion';
 import { planColor } from '../../lib/planColors';
 import { useTheme } from '../../lib/theme';
@@ -23,8 +25,11 @@ export function Settings() {
     editorFontSize, setEditorFontSize,
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
     autoSave, setAutoSave,
+    formatOnSave, setFormatOnSave,
     visionModel, setVisionModel, availableModels,
     contextWindow, setContextWindow,
+    ghostText, setGhostText, ghostModel, setGhostModel, currentModel,
+    embedModel, setEmbedModel, useCodebaseContext, setUseCodebaseContext,
   } = useAppStore();
   // Se computa en el componente (NO como selector `s.effectiveVisionModel()`:
   // llamar un método del store como selector rompe con React 19).
@@ -33,9 +38,19 @@ export function Settings() {
   const autoVision = (visionModel && modelIdList.includes(visionModel))
     ? visionModel
     : detectVisionModel(availableModels || []);
-  const { agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools } = useChatStore();
+  const {
+    agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools,
+    autoRunCommands, setAutoRunCommands, commandAllowlist, setCommandAllowlist,
+  } = useChatStore();
+  const {
+    building: indexBuilding, progress: indexProgress, status: indexStat,
+    error: indexErr, build: buildIndexNow, cancel: cancelIndex, refreshStatus: refreshIndex,
+  } = useIndexStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
   const [theme, setThemeMode] = useTheme();
+
+  useEffect(() => { refreshIndex(); }, [refreshIndex]);
+  const embedAuto = modelIdList.find((id) => /embed/i.test(id));
 
   const [urlInput, setUrlInput] = useState(serverUrl);
   const [urlStatus, setUrlStatus] = useState(null); // { ok, text }
@@ -270,6 +285,60 @@ export function Settings() {
         </div>
 
         <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Formatear al guardar
+            <span className="settings__row-hint"> · con Ctrl+S (requiere prettier/black/rustfmt/gofmt instalado)</span>
+          </span>
+          <button
+            className={`settings__toggle ${formatOnSave ? 'is-on' : ''}`}
+            onClick={() => setFormatOnSave(!formatOnSave)}
+            role="switch"
+            aria-checked={formatOnSave}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Autocompletado con IA
+            <span className="settings__row-hint">
+              {' · '}sugerencias en gris mientras escribes (Tab acepta); usa un modelo de código y consume VRAM
+            </span>
+          </span>
+          <button
+            className={`settings__toggle ${ghostText ? 'is-on' : ''}`}
+            onClick={() => setGhostText(!ghostText)}
+            role="switch"
+            aria-checked={ghostText}
+            title={ghostText ? 'Sugiere código mientras escribes' : 'Desactivado'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
+        {ghostText && (
+          <div className="settings__inline settings__inline--spread">
+            <span className="settings__row-label">
+              Modelo de autocompletado
+              <span className="settings__row-hint"> · idealmente uno con FIM (qwen2.5-coder…)</span>
+            </span>
+            <select
+              className="settings__select"
+              value={ghostModel}
+              onChange={(e) => setGhostModel(e.target.value)}
+            >
+              <option value="">
+                Automático ({modelIdList.find((id) => /coder|code/i.test(id)) || currentModel || 'ninguno'})
+              </option>
+              {modelIdList.map((id) => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="settings__inline settings__inline--spread">
           <span className="settings__row-label">Tamaño de letra</span>
           <span className="settings__slider">
             <input
@@ -347,6 +416,42 @@ export function Settings() {
 
         <div className="settings__inline settings__inline--spread">
           <span className="settings__row-label">
+            Ejecutar comandos sin preguntar
+            <span className="settings__row-hint">
+              {' · '}correr comandos es irreversible; por seguridad se piden aparte del auto-aplicado de archivos
+            </span>
+          </span>
+          <button
+            className={`settings__toggle ${autoRunCommands ? 'is-on' : ''}`}
+            onClick={() => setAutoRunCommands(!autoRunCommands)}
+            role="switch"
+            aria-checked={autoRunCommands}
+            title={autoRunCommands
+              ? 'El agente ejecuta cualquier comando sin confirmación (riesgo)'
+              : 'Cada comando pide confirmación salvo los de la lista permitida'}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings__field">
+          <label className="settings__row-label">
+            Comandos permitidos sin confirmación
+            <span className="settings__row-hint">
+              {' · '}un prefijo por línea (p. ej. «npm test»); los que llevan {'&&'}, |, ;, {'>'} siempre piden confirmación
+            </span>
+          </label>
+          <textarea
+            className="settings__textarea"
+            rows={4}
+            spellCheck={false}
+            value={commandAllowlist.join('\n')}
+            onChange={(e) => setCommandAllowlist(e.target.value.split('\n'))}
+          />
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
             Ventana de contexto
             <span className="settings__row-hint">
               {' · '}Ollama usa 4096 por defecto (aunque el modelo soporte más). Más = menos cortes, pero más VRAM/lento.
@@ -403,6 +508,70 @@ export function Settings() {
           </button>
         </div>
       </section>
+
+      <section className="settings__panel">
+        <h3 className="settings__panel-title">Índice del codebase (RAG)</h3>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Usar contexto del codebase en el chat
+            <span className="settings__row-hint">
+              {' · '}inyecta fragmentos relevantes por significado; requiere construir el índice
+            </span>
+          </span>
+          <button
+            className={`settings__toggle ${useCodebaseContext ? 'is-on' : ''}`}
+            onClick={() => setUseCodebaseContext(!useCodebaseContext)}
+            role="switch"
+            aria-checked={useCodebaseContext}
+          >
+            <span className="settings__toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Modelo de embeddings
+            <span className="settings__row-hint">
+              {embedAuto ? '' : ' · instala uno en Ollama (p. ej. `ollama pull nomic-embed-text`)'}
+            </span>
+          </span>
+          <select
+            className="settings__select"
+            value={embedModel}
+            onChange={(e) => setEmbedModel(e.target.value)}
+          >
+            <option value="">Automático ({embedAuto || 'ninguno'})</option>
+            {modelIdList.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Índice
+            <span className="settings__row-hint">
+              {' · '}
+              {indexBuilding
+                ? `construyendo… ${indexProgress.done}/${indexProgress.total}`
+                : indexStat.exists
+                  ? `${indexStat.count} fragmentos · modelo ${indexStat.model}`
+                  : 'sin construir'}
+              {indexErr ? ` · ${indexErr}` : ''}
+            </span>
+          </span>
+          {indexBuilding ? (
+            <button className="settings__btn" onClick={cancelIndex}>Cancelar</button>
+          ) : (
+            <button className="settings__btn" onClick={buildIndexNow} disabled={!embedAuto && !embedModel}>
+              {indexStat.exists ? 'Reconstruir' : 'Construir'}
+            </button>
+          )}
+        </div>
+      </section>
+
+      <Keybindings />
     </div>
   );
 }

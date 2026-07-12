@@ -3,7 +3,35 @@
 // Espejo del protocolo del CLI (apps/cli/lixbon_cli/agent.py).
 
 export const MAX_AGENT_STEPS = 8;
-export const READ_ONLY_TOOLS = new Set(['list_files', 'read_file', 'search']);
+export const READ_ONLY_TOOLS = new Set(['list_files', 'read_file', 'search', 'search_codebase']);
+
+// ── Seguridad de run_command (B4) ──────────────────────────────────────
+// Prefijos de comandos considerados seguros: se ejecutan sin pedir aprobación
+// aunque el auto-aplicado de archivos esté activo. Editable por el usuario
+// (Ajustes → Agente). Solo aplica a comandos SIN encadenamiento/redirección.
+export const DEFAULT_CMD_ALLOWLIST = [
+  'npm test', 'npm run', 'npm ci', 'npm install', 'npm i', 'npx', 'node', 'pnpm', 'yarn',
+  'cargo build', 'cargo test', 'cargo check', 'cargo run', 'cargo clippy', 'cargo fmt',
+  'python', 'python3', 'pytest', 'pip', 'ruff', 'black', 'mypy', 'deno',
+  'go build', 'go test', 'go run', 'go vet',
+  'git status', 'git diff', 'git log', 'git branch', 'git rev-parse', 'git show',
+  'ls', 'pwd', 'echo', 'cat', 'tsc', 'eslint', 'prettier', 'make',
+];
+
+// Encadenamiento, subshell o redirección: `cmd && rm -rf`, `a | b`, `$(...)`,
+// `> archivo`. Con cualquiera de estos, NUNCA se auto-permite (siempre aprueba).
+const CMD_CHAIN_RE = /[;&|`]|\$\(|>|<|\n/;
+
+/** ¿El comando puede ejecutarse sin aprobación según la allowlist? */
+export function isAllowedCommand(command, allowlist = DEFAULT_CMD_ALLOWLIST) {
+  const cmd = String(command ?? '').trim();
+  if (!cmd || CMD_CHAIN_RE.test(cmd)) return false;
+  const lower = cmd.toLowerCase();
+  return allowlist.some((p) => {
+    const pref = String(p).trim().toLowerCase();
+    return pref && (lower === pref || lower.startsWith(pref + ' '));
+  });
+}
 
 /** Normaliza la ruta relativa que dio el modelo; rechaza absolutas y '..'. */
 export function normalizeRel(rel) {

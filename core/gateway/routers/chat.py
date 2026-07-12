@@ -32,7 +32,12 @@ from core.persistence.queries import (
     save_task_embedding,
 )
 from core.delegation.embeddings import classify_request, get_embedding, pick_classifier_model, route_request
-from core.inference.ollama import chat as ollama_chat, stream_chat_openai
+from core.inference.ollama import (
+    chat as ollama_chat,
+    generate as ollama_generate,
+    embed_many as ollama_embed_many,
+    stream_chat_openai,
+)
 from core.inference import websearch
 from core.security.auth import (
     api_key_required,
@@ -79,6 +84,9 @@ class ChatCompletionRequest(BaseModel):
     # None ⇒ comportamiento clásico (la web nunca las envía).
     tools: list[dict] | None = None
     tool_choice: Any | None = None
+    # Petición efímera (edición inline Ctrl+K del IDE): no crea conversación ni
+    # guarda contenido, pero el uso se contabiliza/cobra igual. La web no lo envía.
+    no_persist: bool = False
 
 
 def _normalize_for_ollama(messages: list[dict]) -> list[dict]:
@@ -242,6 +250,8 @@ async def chat_completions(
     else:
         ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
     save_history = get_user_settings(user_data["id"])["save_history"]
+    if payload.no_persist:
+        save_history = False  # edición inline: sin historial, pero se cobra el uso
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     # Origen: lo declara el cliente; si no, se infiere (web = sesión, resto = api)
@@ -458,6 +468,119 @@ async def vision_describe(
             "total_tokens": prompt_tokens + completion_tokens,
         },
     }
+
+
+class FimRequest(BaseModel):
+    model: str = Field(..., description="Modelo de código con soporte FIM (qwen2.5-coder…)")
+    prefix: str = ""  # texto ANTES del cursor
+    suffix: str = ""  # texto DESPUÉS del cursor
+    max_tokens: int = 96
+    num_ctx: int | None = None
+    stop: list[str] | None = None
+
+
+@router.post("/api/fim")
+async def fim_complete(
+    payload: FimRequest,
+    user_data: dict[str, Any] = Depends(web_or_api_key_auth),
+):
+    """Autocompletado fill-in-the-middle (ghost text del IDE). Devuelve la
+    continuación que va en la posición del cursor entre `prefix` y `suffix`.
+    No persiste historial; se contabiliza/cobra como cualquier inferencia."""
+    validate_model_access(user_data, payload.model)
+    plan = get_plan_for_user(user_data["id"])
+    bill_credits = False
+    if user_data.get("auth_via") == "api_key":
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+    else:
+        ensure_can_chat(user_data["id"], plan, payload.model)
+
+    options: dict[str, Any] = {"num_predict": max(1, min(int(payload.max_tokens), 512))}
+    if payload.num_ctx:
+        options["num_ctx"] = int(payload.num_ctx)
+    if payload.stop:
+        options["stop"] = payload.stop
+
+    base, headers, origen = deps.orquestador.ollama_target(payload.model)
+    started_at = time.perf_counter()
+    try:
+        resp = await ollama_generate(base, payload.model, payload.prefix, payload.suffix,
+                                     options=options, headers=headers, client=deps.http_client_chat)
+    except Exception as exc:
+        if origen == "local":
+            raise HTTPException(status_code=502, detail=f"FIM falló: {exc}") from exc
+        logger.warning(f"[fim] Nodo '{origen}' falló ({exc}); fallback local")
+        resp = await ollama_generate(OLLAMA_BASE_URL, payload.model, payload.prefix, payload.suffix,
+                                     options=options, client=deps.http_client_chat)
+
+    completion = resp.get("response", "")
+    prompt_tokens = int(resp.get("prompt_eval_count") or 0)
+    completion_tokens = int(resp.get("eval_count") or 0)
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
+
+    if user_data.get("id") is not None:
+        if bill_credits:
+            credits.debit_usage(user_data["id"], payload.model, prompt_tokens, completion_tokens)
+        else:
+            record_tokens(user_data["id"], prompt_tokens + completion_tokens)
+
+    return {
+        "completion": completion,
+        "model": payload.model,
+        "node": origen,
+        "latency_ms": latency_ms,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+
+
+class EmbedRequest(BaseModel):
+    model: str = Field(..., description="Modelo de embeddings (nomic-embed-text…)")
+    input: list[str] = Field(default_factory=list)
+
+
+@router.post("/api/embed")
+async def embed_texts(
+    payload: EmbedRequest,
+    user_data: dict[str, Any] = Depends(web_or_api_key_auth),
+):
+    """Embeddings en lote para el índice del codebase (RAG del IDE). No valida el
+    modelo contra el plan (los modelos de embedding no están en la lista de chat).
+    Se contabiliza el uso; si el modelo no tiene tarifa, el cobro se omite."""
+    if not payload.input:
+        raise HTTPException(status_code=400, detail="input vacío")
+
+    plan = get_plan_for_user(user_data["id"])
+    bill_credits = False
+    if user_data.get("auth_via") == "api_key":
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+
+    base, headers, origen = deps.orquestador.ollama_target(payload.model)
+    try:
+        resp = await ollama_embed_many(base, payload.model, payload.input,
+                                       headers=headers, client=deps.http_client_chat)
+    except Exception as exc:
+        if origen == "local":
+            raise HTTPException(status_code=502, detail=f"Embeddings fallaron: {exc}") from exc
+        logger.warning(f"[embed] Nodo '{origen}' falló ({exc}); fallback local")
+        resp = await ollama_embed_many(OLLAMA_BASE_URL, payload.model, payload.input,
+                                       client=deps.http_client_chat)
+
+    embeddings = resp.get("embeddings", []) or []
+    prompt_tokens = int(resp.get("prompt_eval_count") or 0)
+    if user_data.get("id") is not None and prompt_tokens:
+        try:
+            if bill_credits:
+                credits.debit_usage(user_data["id"], payload.model, prompt_tokens, 0)
+            else:
+                record_tokens(user_data["id"], prompt_tokens)
+        except Exception as exc:  # tarifa ausente para el modelo de embedding: no romper
+            logger.warning(f"[embed] cobro omitido ({exc})")
+
+    return {"embeddings": embeddings, "model": payload.model, "node": origen}
 
 
 @router.post("/api/delegate")

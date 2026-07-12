@@ -29,6 +29,18 @@ export const IconSearch = (p) => (
   <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></Svg>
 );
 
+export const IconList = (p) => (
+  <Svg {...p}><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></Svg>
+);
+
+export const IconWarn = (p) => (
+  <Svg {...p}><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></Svg>
+);
+
+export const IconBook = (p) => (
+  <Svg {...p}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5Z" /><path d="M20 17v4H6.5A2.5 2.5 0 0 1 4 18.5" /></Svg>
+);
+
 export const IconPanel = (p) => (
   <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9.5 4v16" /></Svg>
 );

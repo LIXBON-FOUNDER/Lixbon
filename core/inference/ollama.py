@@ -50,6 +50,35 @@ async def chat(
         return resp.json()
 
 
+async def generate(
+    base_url: str,
+    model: str,
+    prompt: str,
+    suffix: str = "",
+    options: dict | None = None,
+    headers: dict | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Completado con /api/generate. Con `suffix` activa fill-in-the-middle (FIM)
+    para modelos que lo soportan (qwen2.5-coder, codellama, deepseek-coder…):
+    Ollama aplica el template FIM del modelo. Retorna la respuesta cruda
+    ({response, prompt_eval_count, eval_count, …}). Lanza httpx.HTTPError si falla."""
+    url = f"{base_url.rstrip('/')}/api/generate"
+    payload: dict = {"model": model, "prompt": prompt, "stream": False}
+    if suffix:
+        payload["suffix"] = suffix
+    if options:
+        payload["options"] = options
+    if client is not None:
+        resp = await client.post(url, json=payload, headers=headers, timeout=STREAM_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    async with httpx.AsyncClient(timeout=STREAM_TIMEOUT) as own:
+        resp = await own.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def embed(
     base_url: str,
     text: str,
@@ -63,6 +92,27 @@ async def embed(
         resp.raise_for_status()
         embeddings = resp.json().get("embeddings", [])
         return embeddings[0] if embeddings else []
+
+
+async def embed_many(
+    base_url: str,
+    model: str,
+    texts: list[str],
+    headers: dict | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Embeddings en lote (/api/embed con input=lista). Retorna la respuesta
+    cruda de Ollama ({embeddings: [[...]], prompt_eval_count, model})."""
+    url = f"{base_url.rstrip('/')}/api/embed"
+    payload = {"model": model, "input": texts}
+    if client is not None:
+        resp = await client.post(url, json=payload, headers=headers, timeout=STREAM_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    async with httpx.AsyncClient(timeout=60.0) as own:
+        resp = await own.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
 
 
 async def list_models(base_url: str, headers: dict | None = None) -> list[dict]:

@@ -25,6 +25,7 @@
     "@codemirror/lang-xml": "^6.1.0",
     "@codemirror/lang-yaml": "^6.1.2",
     "@codemirror/legacy-modes": "^6.5.1",
+    "@codemirror/lint": "^6.9.7",
     "@codemirror/merge": "^6.12.2",
     "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2",

@@ -13,19 +13,51 @@ export function SourceControl() {
     isRepo, branch, changes, loading, error, message,
     setMessage, refresh, stage, unstage, stageAll, commit,
     init, pull, push, fetch, cloneRepo, cloning, cloneProgress,
+    fileDiff, log, commitDiff, branches, checkout, stash,
   } = useGitStore();
   const panels = useAppStore((s) => s.panels);
   const togglePanel = useAppStore((s) => s.togglePanel);
   const openWorkspace = useAppStore((s) => s.openWorkspace);
+  const openDiff = useAppStore((s) => s.openDiff);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
 
   const [commitStatus, setCommitStatus] = useState('');
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneUrl, setCloneUrl] = useState('');
   const [cloneStatus, setCloneStatus] = useState(null); // { ok, text }
+  const [showHistory, setShowHistory] = useState(false);
+  const [commits, setCommits] = useState([]);
+  const [branchMenu, setBranchMenu] = useState(false);
+  const [branchList, setBranchList] = useState([]);
+  const [newBranch, setNewBranch] = useState('');
 
   // Refrescar al entrar y cuando cambia la carpeta de trabajo
   useEffect(() => { refresh(); }, [refresh, workspaceRoot]);
+
+  const openFileDiff = async (c, isStaged) => {
+    const patch = await fileDiff(c.path, isStaged);
+    openDiff(`${fileName(c.path)} ${isStaged ? '(preparado)' : '(cambios)'}`,
+      patch || (c.untracked ? '# Archivo nuevo sin seguimiento (aún no rastreado por Git)' : '# Sin diferencias'));
+  };
+
+  const toggleHistory = async () => {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (next) setCommits(await log(80));
+  };
+
+  const openBranchMenu = async () => {
+    const next = !branchMenu;
+    setBranchMenu(next);
+    if (next) setBranchList(await branches());
+  };
+
+  const doCheckout = async (name, create = false) => {
+    const res = await checkout(name, create);
+    setBranchMenu(false);
+    setNewBranch('');
+    if (!res.ok) setCommitStatus(res.error);
+  };
 
   const withTerminal = (fn) => {
     if (!panels.terminal) togglePanel('terminal');
@@ -66,12 +98,14 @@ export function SourceControl() {
   const fileName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
   const row = (c, isStaged) => (
-    <div className="scm__file" key={(isStaged ? 's:' : 'u:') + c.path} title={c.path}>
+    <div className="scm__file" key={(isStaged ? 's:' : 'u:') + c.path} title="Clic para ver diferencias">
       <span className={`scm__badge scm__badge--${c.untracked ? 'new' : c.index || c.wt}`}>
         {c.untracked ? 'U' : (c.staged ? c.index : c.wt)}
       </span>
-      <span className="scm__file-name">{fileName(c.path)}</span>
-      <span className="scm__file-path">{c.path}</span>
+      <button className="scm__file-open" onClick={() => openFileDiff(c, isStaged)}>
+        <span className="scm__file-name">{fileName(c.path)}</span>
+        <span className="scm__file-path">{c.path}</span>
+      </button>
       <button
         className="icon-btn scm__file-action"
         onClick={() => (isStaged ? unstage(c.path) : stage(c.path))}
@@ -136,8 +170,10 @@ export function SourceControl() {
       ) : (
         <>
           <div className="scm__branch">
-            <IconGitBranch size={16} />
-            <span className="scm__branch-name">{branch || '—'}</span>
+            <button className="scm__branch-btn" onClick={openBranchMenu} title="Cambiar de rama">
+              <IconGitBranch size={16} />
+              <span className="scm__branch-name">{branch || '—'}</span>
+            </button>
             <span className="scm__net">
               <button className="scm__net-btn" onClick={() => withTerminal(fetch)} title="git fetch">
                 <IconRefresh size={14} /> Fetch
@@ -150,6 +186,37 @@ export function SourceControl() {
               </button>
             </span>
           </div>
+
+          {branchMenu && (
+            <div className="scm__branchmenu">
+              {branchList.map((b) => (
+                <button
+                  key={b.name}
+                  className={`scm__branchitem ${b.current ? 'is-current' : ''}`}
+                  onClick={() => !b.current && doCheckout(b.name)}
+                >
+                  <IconGitBranch size={13} /> {b.name}{b.current ? ' ·' : ''}
+                </button>
+              ))}
+              <div className="scm__branchnew">
+                <input
+                  className="settings__input"
+                  placeholder="Nueva rama…"
+                  value={newBranch}
+                  onChange={(e) => setNewBranch(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && newBranch.trim()) doCheckout(newBranch.trim(), true); }}
+                  spellCheck={false}
+                />
+                <button
+                  className="scm__link"
+                  disabled={!newBranch.trim()}
+                  onClick={() => doCheckout(newBranch.trim(), true)}
+                >
+                  Crear
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="scm__commit">
             <textarea
@@ -192,6 +259,40 @@ export function SourceControl() {
               unstaged.map((c) => row(c, false))
             )}
           </div>
+
+          <div className="scm__toolbar">
+            <button className="scm__link" onClick={() => stash('push')} title="Guardar cambios en un stash">
+              Stash
+            </button>
+            <button className="scm__link" onClick={() => stash('pop')} title="Recuperar el último stash">
+              Stash pop
+            </button>
+            <button className="scm__link" onClick={toggleHistory}>
+              {showHistory ? 'Ocultar historial' : 'Historial'}
+            </button>
+          </div>
+
+          {showHistory && (
+            <div className="scm__group scm__history">
+              <div className="scm__group-head"><span>Commits recientes</span></div>
+              {commits.length === 0 ? (
+                <p className="settings__hint">Sin commits.</p>
+              ) : (
+                commits.map((c) => (
+                  <button
+                    key={c.hash}
+                    className="scm__commit-row"
+                    title={`${c.author} · ${c.date}`}
+                    onClick={async () => openDiff(`${c.short} · ${c.subject}`, await commitDiff(c.hash))}
+                  >
+                    <span className="scm__commit-hash">{c.short}</span>
+                    <span className="scm__commit-subject">{c.subject}</span>
+                    <span className="scm__commit-meta">{c.date}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

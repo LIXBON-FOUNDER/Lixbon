@@ -16,6 +16,8 @@ import { readFileContent, writeFileContent } from '../lib/tauri';
 import { lixbonTheme, lixbonSyntax, lixbonThemeDark, lixbonSyntaxDark } from '../editor/lixbonTheme';
 import { resolveLanguage } from '../editor/languages';
 import { snippetSource } from '../editor/snippets';
+import { ghostText as ghostTextExt } from '../editor/ghostText';
+import { lintExtension } from '../editor/lintExt';
 
 // ── Registro fuera de React ────────────────────────────────────────────
 const stateCache = new Map(); // path -> EditorState
@@ -150,6 +152,7 @@ export function cacheState(path, state) {
 export const useEditorStore = create((set, get) => ({
   tabs: [], // [{ path, name, dirty }]
   activePath: null,
+  docVersion: 0, // se incrementa en cada edición (para la vista previa en vivo)
 
   openFile: async (path, name) => {
     const { tabs } = get();
@@ -162,7 +165,10 @@ export const useEditorStore = create((set, get) => ({
     const language = await resolveLanguage(name); // lezer/legacy → TextMate → plano
 
     const markDirty = EditorView.updateListener.of((update) => {
-      if (update.docChanged) get().markDirty(path);
+      if (update.docChanged) {
+        get().markDirty(path);
+        set({ docVersion: get().docVersion + 1 });
+      }
     });
 
     const state = EditorState.create({
@@ -176,6 +182,8 @@ export const useEditorStore = create((set, get) => ({
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },
         ]),
         themeCompartment.of(themeExts),
+        ...ghostTextExt, // autocompletado fantasma (inerte si está desactivado)
+        ...lintExtension, // gutter de diagnósticos (A2)
         ...language,
         // Snippets de extensiones VSCode: fuente dinámica (consulta el
         // registro en cada query, sin reconfigurar estados al instalar).
@@ -275,7 +283,18 @@ export const useEditorStore = create((set, get) => ({
 
   saveActive: async () => {
     const { activePath } = get();
-    if (activePath) await get().saveTab(activePath);
+    if (!activePath) return;
+    await get().saveTab(activePath);
+    // Formatear al guardar (solo guardado manual; el autosave usa saveAll).
+    if ((localStorage.getItem('lixbon_format_on_save') ?? 'false') === 'true') {
+      const tab = get().tabs.find((t) => t.path === activePath);
+      if (tab) {
+        try {
+          const { formatFile, canFormat } = await import('../lib/format');
+          if (canFormat(tab.name)) await formatFile(activePath, tab.name);
+        } catch { /* formateador ausente: no romper el guardado */ }
+      }
+    }
   },
 
   saveAll: async (silent = false) => {
@@ -393,6 +412,43 @@ export const useEditorStore = create((set, get) => ({
     liveView.dispatch(liveView.state.replaceSelection(text));
     liveView.focus();
     return true;
+  },
+
+  /** Objetivo de una edición inline (Ctrl+K): rango, texto, coordenadas en
+      pantalla y documento completo. Si no hay selección, toma la línea actual.
+      Devuelve null si no hay editor vivo. */
+  getEditTarget: () => {
+    const { activePath, tabs } = get();
+    if (!activePath || !liveView) return null;
+    const sel = liveView.state.selection.main;
+    let from = sel.from;
+    let to = sel.to;
+    if (from === to) {
+      const line = liveView.state.doc.lineAt(from);
+      from = line.from;
+      to = line.to;
+    }
+    const tab = tabs.find((t) => t.path === activePath);
+    return {
+      from,
+      to,
+      name: tab?.name ?? activePath,
+      text: liveView.state.sliceDoc(from, to),
+      doc: liveView.state.doc.toString(),
+      coords: liveView.coordsAtPos(from),
+    };
+  },
+
+  /** Aplica una edición inline: reemplaza [from,to) por newText en la vista
+      activa y pinta el diff inline (verde/rojo con Aceptar/Rechazar por bloque)
+      contra `originalDoc`. Reutiliza el mismo mergeCompartment que el agente. */
+  applyInlineEdit: (from, to, newText, originalDoc) => {
+    if (!liveView) return;
+    const path = get().activePath;
+    liveView.dispatch({ changes: { from, to, insert: newText } });
+    liveView.dispatch({ effects: mergeCompartment.reconfigure(mergeExtension(originalDoc)) });
+    if (path) cacheState(path, liveView.state);
+    liveView.dispatch({ effects: EditorView.scrollIntoView(from, { y: 'center' }) });
   },
 
   /** Contenido y selección del editor activo (contexto para el chat). */

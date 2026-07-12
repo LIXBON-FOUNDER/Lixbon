@@ -97,11 +97,23 @@ export const TOOL_SCHEMAS = [
     type: 'function',
     function: {
       name: 'search',
-      description: 'Busca un texto en los archivos del workspace.',
+      description: 'Busca un texto EXACTO en los archivos del workspace (grep).',
       parameters: {
         type: 'object',
         properties: { pattern: p('string', 'Texto a buscar') },
         required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_codebase',
+      description: 'Búsqueda SEMÁNTICA en el índice del codebase: encuentra fragmentos relevantes por significado (no por texto exacto). Útil para "dónde se hace X".',
+      parameters: {
+        type: 'object',
+        properties: { query: p('string', 'Qué buscar, en lenguaje natural') },
+        required: ['query'],
       },
     },
   },

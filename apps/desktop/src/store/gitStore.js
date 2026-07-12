@@ -74,6 +74,56 @@ export const useGitStore = create((set, get) => ({
 
   init: async () => { await gitRun(['init']); await get().refresh(); },
 
+  // ── Diff / historial / ramas (C1–C3), todo vía gitRun ──────────────
+  /** Diff unified de un archivo (staged o del árbol de trabajo). */
+  fileDiff: async (path, staged) => {
+    const args = ['diff', ...(staged ? ['--cached'] : []), '--', path];
+    const res = await gitRun(args);
+    return res.stdout || (res.code !== 0 ? `# ${res.stderr.trim()}` : '');
+  },
+
+  /** Últimos `limit` commits: [{hash, short, author, date, subject}]. */
+  log: async (limit = 100) => {
+    const US = '\x1f';
+    const res = await gitRun(['log', `--pretty=format:%H${US}%an${US}%ad${US}%s`, '--date=short', '-n', String(limit)]);
+    if (res.code !== 0) return [];
+    return res.stdout.split('\n').filter(Boolean).map((l) => {
+      const [hash, author, date, subject] = l.split(US);
+      return { hash, short: hash.slice(0, 7), author, date, subject };
+    });
+  },
+
+  /** Diff completo de un commit (git show). */
+  commitDiff: async (hash) => {
+    const res = await gitRun(['show', hash]);
+    return res.stdout || (res.code !== 0 ? `# ${res.stderr.trim()}` : '');
+  },
+
+  /** Ramas locales: [{name, current}]. */
+  branches: async () => {
+    const res = await gitRun(['branch', '--format=%(refname:short)%09%(HEAD)']);
+    if (res.code !== 0) return [];
+    return res.stdout.split('\n').filter(Boolean).map((l) => {
+      const [name, head] = l.split('\t');
+      return { name: name.trim(), current: head.trim() === '*' };
+    });
+  },
+
+  /** Cambia (o crea) de rama y refresca. Devuelve { ok, error }. */
+  checkout: async (name, create = false) => {
+    const args = create ? ['checkout', '-b', name] : ['checkout', name];
+    const res = await gitRun(args);
+    await get().refresh();
+    return res.code === 0 ? { ok: true } : { ok: false, error: (res.stderr || res.stdout).trim() };
+  },
+
+  /** Stash. op: 'push' | 'pop' | 'list'. */
+  stash: async (op = 'push') => {
+    const res = await gitRun(op === 'push' ? ['stash', 'push', '-u'] : ['stash', op]);
+    if (op !== 'list') await get().refresh();
+    return res.code === 0 ? { ok: true, out: res.stdout.trim() } : { ok: false, error: (res.stderr || res.stdout).trim() };
+  },
+
   // ── Operaciones de red: van al terminal integrado ──────────────────
   pull: () => useTerminalStore.getState().runCommand('git pull'),
   push: () => useTerminalStore.getState().runCommand('git push'),

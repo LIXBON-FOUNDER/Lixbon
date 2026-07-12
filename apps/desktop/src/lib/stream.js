@@ -36,6 +36,7 @@ export async function streamChatCompletion({
   tools = null,
   numCtx = null,
   webSearch = false,
+  noPersist = false,
 }) {
   const res = await fetch(`${serverUrl}/v1/chat/completions`, {
     method: 'POST',
@@ -52,6 +53,7 @@ export async function streamChatCompletion({
       source: 'ide', // historial independiente del de la web/CLI
       ...(numCtx ? { num_ctx: numCtx } : {}),
       ...(tools ? { tools } : {}),
+      ...(noPersist ? { no_persist: true } : {}),
     }),
     signal,
   });

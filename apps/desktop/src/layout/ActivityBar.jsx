@@ -2,7 +2,7 @@
 // El toggle del chat vive en la TitleBar (a la derecha, junto al panel que abre).
 import { useAppStore } from '../store/appStore';
 import {
-  IconPanel, IconSearch, IconChart, IconGear, IconTerminal, IconGitBranch, IconPuzzle,
+  IconPanel, IconSearch, IconChart, IconGear, IconTerminal, IconGitBranch, IconPuzzle, IconList, IconWarn,
 } from '../components/Icons';
 
 export function ActivityBar() {
@@ -31,6 +31,22 @@ export function ActivityBar() {
         title="Buscar en archivos (Ctrl+Mayús+F)"
       >
         <IconSearch size={19} />
+      </button>
+
+      <button
+        className={`activitybar__btn ${leftActive('outline') ? 'is-active' : ''}`}
+        onClick={() => openLeftPanel('outline')}
+        title="Esquema (símbolos del archivo)"
+      >
+        <IconList size={19} />
+      </button>
+
+      <button
+        className={`activitybar__btn ${leftActive('problems') ? 'is-active' : ''}`}
+        onClick={() => openLeftPanel('problems')}
+        title="Problemas (linter)"
+      >
+        <IconWarn size={19} />
       </button>
 
       <button

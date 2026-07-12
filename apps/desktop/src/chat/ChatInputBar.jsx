@@ -1,15 +1,30 @@
 // ChatInputBar.jsx — caja de entrada del chat (crema, redondeada, según diseño web)
 // con chip de contexto del editor y selector de modelo.
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useEditorStore } from '../store/editorStore';
 import { useAppStore } from '../store/appStore';
 import { languageLabel } from '../editor/languages';
+import { listFiles } from '../lib/tauri';
 import { ModelPicker } from './ModelPicker';
 import { IconSend, IconStop, IconX, IconFileCode, IconHammer, IconClip } from '../components/Icons';
 
 const MAX_CONTEXT_CHARS = 24000; // evita reventar la ventana del modelo
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Fuzzy match por subsecuencia (igual que QuickOpen). -1 = no coincide. */
+function fuzzyScore(text, q) {
+  const t = text.toLowerCase();
+  let ti = 0, score = 0, streak = 0;
+  for (const ch of q) {
+    const idx = t.indexOf(ch, ti);
+    if (idx === -1) return -1;
+    streak = idx === ti ? streak + 3 : 1;
+    score += streak - Math.min(idx - ti, 20) * 0.05;
+    ti = idx + 1;
+  }
+  return score - t.length * 0.01;
+}
 
 /** Blob/File → base64 (sin el prefijo data:) + dataUrl para la miniatura. */
 function readImage(file) {
@@ -31,6 +46,10 @@ export function ChatInputBar() {
   const [text, setText] = useState('');
   const [includeContext, setIncludeContext] = useState(true);
   const [images, setImages] = useState([]); // { name, dataUrl, base64 }
+  const [mentions, setMentions] = useState([]); // { name, path, rel }
+  const [mentionQuery, setMentionQuery] = useState(null); // null = menú cerrado
+  const [mentionSel, setMentionSel] = useState(0);
+  const [allFiles, setAllFiles] = useState([]);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -65,6 +84,49 @@ export function ChatInputBar() {
     el.style.height = Math.min(el.scrollHeight, 132) + 'px';
   }, [text]);
 
+  // ── @-menciones: detecta "@token" ANTES del cursor y abre el menú ────────
+  const detectMention = (value, caret) => {
+    const before = value.slice(0, caret);
+    const m = before.match(/(?:^|\s)@([^\s@]*)$/);
+    if (!m) { setMentionQuery(null); return; }
+    setMentionQuery(m[1]);
+    setMentionSel(0);
+    if (!allFiles.length && workspaceRoot) {
+      listFiles().then(setAllFiles).catch(() => {});
+    }
+  };
+
+  const onChange = (e) => {
+    setText(e.target.value);
+    detectMention(e.target.value, e.target.selectionStart);
+  };
+
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    const pool = allFiles.filter((f) => !mentions.some((mn) => mn.path === f.path));
+    if (!q) return pool.slice(0, 8);
+    return pool
+      .map((f) => ({ f, s: fuzzyScore(f.rel, q) }))
+      .filter((x) => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 8)
+      .map((x) => x.f);
+  }, [allFiles, mentions, mentionQuery]);
+
+  const pickMention = (file) => {
+    // Quita el "@token" que disparó el menú del texto.
+    const el = textareaRef.current;
+    const caret = el ? el.selectionStart : text.length;
+    const before = text.slice(0, caret).replace(/(^|\s)@([^\s@]*)$/, '$1');
+    const after = text.slice(caret);
+    setText(before + after);
+    setMentions((prev) => prev.some((m) => m.path === file.path)
+      ? prev : [...prev, { name: file.name, path: file.path, rel: file.rel }]);
+    setMentionQuery(null);
+    requestAnimationFrame(() => el?.focus());
+  };
+
   const buildContext = () => {
     if (!includeContext || !activeTab) return null;
     const ctx = useEditorStore.getState().getActiveContext();
@@ -80,12 +142,21 @@ export function ChatInputBar() {
 
   const handleSend = () => {
     if (streaming || (!text.trim() && !images.length)) return;
-    send(text, buildContext(), images);
+    send(text, buildContext(), images, mentions);
     setText('');
     setImages([]);
+    setMentions([]);
   };
 
+  const menuOpen = mentionQuery !== null && mentionMatches.length > 0;
+
   const onKeyDown = (e) => {
+    if (menuOpen) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSel((s) => Math.min(s + 1, mentionMatches.length - 1)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionSel((s) => Math.max(s - 1, 0)); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionMatches[mentionSel]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setMentionQuery(null); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -94,8 +165,20 @@ export function ChatInputBar() {
 
   return (
     <div className="chat-inputbar">
-      {(activeTab || images.length > 0) && (
+      {(activeTab || images.length > 0 || mentions.length > 0) && (
         <div className="chat-inputbar__chips">
+          {mentions.map((m) => (
+            <span key={m.path} className="ctx-chip" title={m.rel}>
+              <IconFileCode size={13} />
+              @{m.name}
+              <button
+                onClick={() => setMentions((prev) => prev.filter((x) => x.path !== m.path))}
+                title="Quitar mención"
+              >
+                <IconX size={12} />
+              </button>
+            </span>
+          ))}
           {activeTab && (includeContext ? (
             <span className="ctx-chip" title={`Se adjunta ${activeTab.name} como contexto`}>
               <IconFileCode size={13} />
@@ -121,13 +204,30 @@ export function ChatInputBar() {
         </div>
       )}
 
+      {menuOpen && (
+        <div className="mention-menu">
+          {mentionMatches.map((f, i) => (
+            <div
+              key={f.path}
+              className={`mention-menu__item ${i === mentionSel ? 'is-selected' : ''}`}
+              onPointerEnter={() => setMentionSel(i)}
+              onMouseDown={(e) => { e.preventDefault(); pickMention(f); }}
+            >
+              <IconFileCode size={13} />
+              <span className="mention-menu__name">{f.name}</span>
+              <span className="mention-menu__rel">{f.rel}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={agentActive ? 'Pide un cambio en tu código…' : 'Pregunta sobre tu código…'}
+        placeholder={agentActive ? 'Pide un cambio en tu código…  (@ para mencionar un archivo)' : 'Pregunta sobre tu código…  (@ para mencionar un archivo)'}
         rows={1}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={onChange}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         disabled={streaming}

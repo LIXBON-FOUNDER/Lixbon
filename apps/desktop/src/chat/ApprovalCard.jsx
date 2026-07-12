@@ -17,8 +17,10 @@ export function ApprovalCard() {
   if (!pending) return null;
 
   const { tool, args, change } = pending;
+  const isCommand = tool === 'run_command';
   const label = (change && KIND_LABEL[change.kind]) || tool;
   const path = change?.path || args?.path || '';
+  const command = isCommand ? (args?.command || change?.path || '') : '';
   const hasDiff = change && (change.sampleOld?.length > 0 || change.sampleNew?.length > 0);
   const hiddenLines = change
     ? Math.max(0, change.removed - (change.sampleOld?.length || 0)) +
@@ -29,7 +31,7 @@ export function ApprovalCard() {
     <div className="approval">
       <div className="approval__head">
         <span className="approval__kind">{label}</span>
-        <span className="approval__path">{path}</span>
+        {!isCommand && <span className="approval__path">{path}</span>}
         {change && (change.added > 0 || change.removed > 0) && (
           <span className="approval__counts">
             {change.added > 0 && <em className="toolrow__add">+{change.added}</em>}
@@ -37,6 +39,10 @@ export function ApprovalCard() {
           </span>
         )}
       </div>
+
+      {isCommand && (
+        <pre className="approval__diff approval__command">$ {command}</pre>
+      )}
 
       {hasDiff && (
         <pre className="approval__diff">
@@ -54,10 +60,14 @@ export function ApprovalCard() {
 
       <div className="approval__actions">
         <button className="approval__btn approval__btn--primary" onClick={() => resolveApproval('yes')}>
-          Aplicar
+          {isCommand ? 'Ejecutar' : 'Aplicar'}
         </button>
-        <button className="approval__btn" onClick={() => resolveApproval('always')} title="Auto-aprobar el resto de la conversación">
-          Aplicar todo
+        <button
+          className="approval__btn"
+          onClick={() => resolveApproval('always')}
+          title={isCommand ? 'Ejecutar comandos sin preguntar durante esta sesión' : 'Auto-aprobar el resto de la conversación'}
+        >
+          {isCommand ? 'Ejecutar siempre' : 'Aplicar todo'}
         </button>
         <button className="approval__btn approval__btn--danger" onClick={() => resolveApproval('no')}>
           Rechazar

@@ -4,6 +4,8 @@ import { setIndentConfig, setAutoSaveConfig } from './editorStore';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
 import { detectVisionModel, modelId } from '../lib/vision';
+import { setGhostConfig } from '../editor/ghostText';
+import { resetIndexCache } from '../lib/codebaseIndex';
 
 // Aplica los ajustes de indentación persistidos al arrancar (antes de abrir archivos).
 setIndentConfig(
@@ -11,6 +13,8 @@ setIndentConfig(
   (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
 );
 setAutoSaveConfig((localStorage.getItem('lixbon_auto_save') ?? 'true') === 'true');
+// Autocompletado fantasma (B1): OFF por defecto (coste de VRAM/latencia).
+setGhostConfig({ enabled: (localStorage.getItem('lixbon_ghost') ?? 'false') === 'true' });
 
 export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
@@ -27,15 +31,22 @@ export const useAppStore = create((set, get) => ({
   tabSize: parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
   insertSpaces: (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
   autoSave: (localStorage.getItem('lixbon_auto_save') ?? 'true') === 'true',
+  formatOnSave: (localStorage.getItem('lixbon_format_on_save') ?? 'false') === 'true',
   connectionStatus: 'disconnected', // 'connected' | 'disconnected' | 'connecting'
 
   // Carpeta de trabajo (canónica). '' = sin carpeta abierta.
   workspaceRoot: '',
+  // Carpetas abiertas recientemente (para la pantalla de bienvenida, D4).
+  recentFolders: JSON.parse(localStorage.getItem('lixbon_recents') || '[]'),
 
   // Layout del IDE
-  centerView: 'editor', // 'editor' | 'metrics' | 'settings'
+  centerView: 'editor', // 'editor' | 'metrics' | 'settings' | 'diff'
+  diffData: null, // { title, patch } para el visor de diff (Git)
   leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'git' | 'extensions'
   quickOpen: false, // overlay Ctrl+P
+  commandPalette: false, // overlay Ctrl+Mayús+P
+  inlineEditOpen: false, // widget de edición inline con IA (Ctrl+K)
+  previewOpen: false, // vista previa Markdown/HTML junto al editor (D3)
   panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"explorer":true,"chat":true,"terminal":false}'),
   panelWidths: JSON.parse(localStorage.getItem('lixbon_panel_widths') || '{"explorer":260,"chat":360}'),
   panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
@@ -44,6 +55,13 @@ export const useAppStore = create((set, get) => ({
   // Modelo de visión (sub-agente que describe imágenes para el modelo de texto).
   // '' = autodetectar de los modelos disponibles.
   visionModel: localStorage.getItem('lixbon_vision_model') || '',
+  // Autocompletado fantasma (B1): activado y modelo (vacío = autodetectar coder).
+  ghostText: (localStorage.getItem('lixbon_ghost') ?? 'false') === 'true',
+  ghostModel: localStorage.getItem('lixbon_ghost_model') || '',
+  // Modelo de embeddings para el índice del codebase (B3). '' = autodetectar.
+  embedModel: localStorage.getItem('lixbon_embed_model') || '',
+  // Inyectar contexto relevante del codebase (RAG) en el chat automáticamente.
+  useCodebaseContext: (localStorage.getItem('lixbon_rag') ?? 'false') === 'true',
   // Ventana de contexto (num_ctx) que se pide a Ollama. Ollama usa 4096 por
   // defecto aunque el modelo soporte más; subirla evita truncar. Más = más VRAM.
   contextWindow: parseInt(localStorage.getItem('lixbon_context_window') || '8192', 10),
@@ -65,6 +83,9 @@ export const useAppStore = create((set, get) => ({
 
   setCenterView: (centerView) => set({ centerView }),
 
+  /** Abre el visor de diff en el centro con un patch unified. */
+  openDiff: (title, patch) => set({ diffData: { title, patch }, centerView: 'diff' }),
+
   /** Muestra `view` en el panel izquierdo; clic sobre la vista ya activa lo pliega.
       (panels.explorer sigue siendo el flag de "panel izquierdo visible".) */
   openLeftPanel: (view) => {
@@ -80,14 +101,29 @@ export const useAppStore = create((set, get) => ({
 
   setQuickOpen: (quickOpen) => set({ quickOpen }),
 
+  setCommandPalette: (commandPalette) => set({ commandPalette }),
+
+  setInlineEditOpen: (inlineEditOpen) => set({ inlineEditOpen }),
+
+  setPreviewOpen: (previewOpen) => set({ previewOpen }),
+
   /** Fija la carpeta de trabajo (sandbox Rust incluido) y refresca Git.
       Devuelve la ruta canónica. */
   openWorkspace: async (path) => {
     const canonical = await setWorkspaceRoot(path);
     localStorage.setItem('lixbon_workspace_root', canonical);
-    set({ workspaceRoot: canonical });
+    const recents = [canonical, ...get().recentFolders.filter((p) => p !== canonical)].slice(0, 8);
+    localStorage.setItem('lixbon_recents', JSON.stringify(recents));
+    set({ workspaceRoot: canonical, recentFolders: recents });
+    resetIndexCache(); // el índice RAG es por-workspace
     useGitStore.getState().refresh();
     return canonical;
+  },
+
+  removeRecent: (path) => {
+    const recents = get().recentFolders.filter((p) => p !== path);
+    localStorage.setItem('lixbon_recents', JSON.stringify(recents));
+    set({ recentFolders: recents });
   },
 
   /** Al arrancar: reabre la última carpeta usada (el estado Rust no persiste). */
@@ -105,6 +141,11 @@ export const useAppStore = create((set, get) => ({
     localStorage.setItem('lixbon_auto_save', autoSave ? 'true' : 'false');
     setAutoSaveConfig(autoSave);
     set({ autoSave });
+  },
+
+  setFormatOnSave: (formatOnSave) => {
+    localStorage.setItem('lixbon_format_on_save', formatOnSave ? 'true' : 'false');
+    set({ formatOnSave });
   },
 
   togglePanel: (name) => {
@@ -171,6 +212,45 @@ export const useAppStore = create((set, get) => ({
   setVisionModel: (model) => {
     localStorage.setItem('lixbon_vision_model', model || '');
     set({ visionModel: model || '' });
+  },
+
+  setGhostText: (ghostText) => {
+    localStorage.setItem('lixbon_ghost', ghostText ? 'true' : 'false');
+    setGhostConfig({ enabled: ghostText });
+    set({ ghostText });
+  },
+
+  setGhostModel: (model) => {
+    localStorage.setItem('lixbon_ghost_model', model || '');
+    set({ ghostModel: model || '' });
+  },
+
+  /** Modelo del ghost text: el elegido, o autodetecta uno de código
+      (id con "coder"/"code"), o cae al modelo de chat actual. */
+  effectiveGhostModel: () => {
+    const { ghostModel, availableModels, currentModel } = get();
+    const ids = availableModels.map(modelId);
+    if (ghostModel && ids.includes(ghostModel)) return ghostModel;
+    const coder = ids.find((id) => /coder|code/i.test(id));
+    return coder || currentModel;
+  },
+
+  setEmbedModel: (model) => {
+    localStorage.setItem('lixbon_embed_model', model || '');
+    set({ embedModel: model || '' });
+  },
+
+  setUseCodebaseContext: (v) => {
+    localStorage.setItem('lixbon_rag', v ? 'true' : 'false');
+    set({ useCodebaseContext: v });
+  },
+
+  /** Modelo de embeddings: el elegido, o autodetecta uno con "embed" en el id. */
+  effectiveEmbedModel: () => {
+    const { embedModel, availableModels } = get();
+    const ids = availableModels.map(modelId);
+    if (embedModel && ids.includes(embedModel)) return embedModel;
+    return ids.find((id) => /embed/i.test(id)) || '';
   },
 
   setContextWindow: (n) => {
