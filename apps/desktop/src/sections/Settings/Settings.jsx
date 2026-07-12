@@ -7,6 +7,7 @@ import { useVersion } from '../../hooks/useVersion';
 import { planColor } from '../../lib/planColors';
 import { useTheme } from '../../lib/theme';
 import { openExternal } from '../../lib/tauri';
+import { detectVisionModel } from '../../lib/vision';
 import { IconEye, IconEyeOff, IconCopy, IconCheck } from '../../components/Icons';
 
 function normalizeUrl(raw) {
@@ -25,7 +26,11 @@ export function Settings() {
     visionModel, setVisionModel, availableModels,
     contextWindow, setContextWindow,
   } = useAppStore();
-  const autoVision = useAppStore((s) => s.effectiveVisionModel());
+  // Se computa en el componente (NO como selector `s.effectiveVisionModel()`:
+  // llamar un método del store como selector rompe con React 19).
+  const autoVision = (visionModel && availableModels.includes(visionModel))
+    ? visionModel
+    : detectVisionModel(availableModels);
   const { agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools } = useChatStore();
   const { currentVersion, checkForUpdates, updateInfo } = useVersion();
   const [theme, setThemeMode] = useTheme();
