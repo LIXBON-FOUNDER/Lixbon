@@ -44,6 +44,9 @@ export const useAppStore = create((set, get) => ({
   // Modelo de visión (sub-agente que describe imágenes para el modelo de texto).
   // '' = autodetectar de los modelos disponibles.
   visionModel: localStorage.getItem('lixbon_vision_model') || '',
+  // Ventana de contexto (num_ctx) que se pide a Ollama. Ollama usa 4096 por
+  // defecto aunque el modelo soporte más; subirla evita truncar. Más = más VRAM.
+  contextWindow: parseInt(localStorage.getItem('lixbon_context_window') || '8192', 10),
   availableModels: [],
   latency: 0,
 
@@ -168,6 +171,12 @@ export const useAppStore = create((set, get) => ({
   setVisionModel: (model) => {
     localStorage.setItem('lixbon_vision_model', model || '');
     set({ visionModel: model || '' });
+  },
+
+  setContextWindow: (n) => {
+    const v = Math.max(2048, Math.min(131072, parseInt(n, 10) || 8192));
+    localStorage.setItem('lixbon_context_window', String(v));
+    set({ contextWindow: v });
   },
 
   /** Modelo de visión efectivo: el elegido, o autodetectado de la lista. */

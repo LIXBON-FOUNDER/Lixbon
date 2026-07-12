@@ -239,6 +239,7 @@ export const useChatStore = create((set, get) => ({
           conversationId: convId,
           signal,
           tools: useNative ? TOOL_SCHEMAS : null,
+          numCtx: appState.contextWindow,
           onDelta: (delta) => {
             raw += delta;
             const { thinking, visible } = splitThinking(raw);

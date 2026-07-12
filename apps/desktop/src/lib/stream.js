@@ -34,6 +34,7 @@ export async function streamChatCompletion({
   onReasoning,
   onToolCalls,
   tools = null,
+  numCtx = null,
   webSearch = false,
 }) {
   const res = await fetch(`${serverUrl}/v1/chat/completions`, {
@@ -49,6 +50,7 @@ export async function streamChatCompletion({
       stream: true,
       web_search: webSearch,
       source: 'ide', // historial independiente del de la web/CLI
+      ...(numCtx ? { num_ctx: numCtx } : {}),
       ...(tools ? { tools } : {}),
     }),
     signal,

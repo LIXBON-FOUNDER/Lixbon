@@ -23,6 +23,7 @@ export function Settings() {
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
     autoSave, setAutoSave,
     visionModel, setVisionModel, availableModels,
+    contextWindow, setContextWindow,
   } = useAppStore();
   const autoVision = useAppStore((s) => s.effectiveVisionModel());
   const { agentMode, setAgentMode, autoApprove, setAutoApprove, nativeTools, setNativeTools } = useChatStore();
@@ -335,6 +336,26 @@ export function Settings() {
           >
             <span className="settings__toggle-knob" />
           </button>
+        </div>
+
+        <div className="settings__inline settings__inline--spread">
+          <span className="settings__row-label">
+            Ventana de contexto
+            <span className="settings__row-hint">
+              {' · '}Ollama usa 4096 por defecto (aunque el modelo soporte más). Más = menos cortes, pero más VRAM/lento.
+            </span>
+          </span>
+          <select
+            className="settings__select"
+            value={contextWindow}
+            onChange={(e) => setContextWindow(e.target.value)}
+          >
+            <option value={4096}>4096 (mínimo)</option>
+            <option value={8192}>8192 (recomendado)</option>
+            <option value={16384}>16384</option>
+            <option value={32768}>32768 (mucha VRAM)</option>
+            <option value={65536}>65536 (solo GPUs grandes)</option>
+          </select>
         </div>
 
         <div className="settings__inline settings__inline--spread">

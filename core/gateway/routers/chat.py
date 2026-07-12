@@ -71,6 +71,10 @@ class ChatCompletionRequest(BaseModel):
     web_search: bool = False  # "modo investigar": busca en internet e inyecta contexto
     # Origen (web/ide/cli): historial independiente por superficie.
     source: str | None = None
+    # Ventana de contexto de Ollama. None ⇒ default de Ollama (4096). Subirla
+    # evita que el modelo trunque en archivos/conversaciones grandes (aunque el
+    # modelo soporte 256K, Ollama solo usa 4096 salvo que se le indique).
+    num_ctx: int | None = None
     # Definiciones de funciones para tool-calling nativo (passthrough a Ollama).
     # None ⇒ comportamiento clásico (la web nunca las envía).
     tools: list[dict] | None = None
@@ -125,14 +129,14 @@ class DelegateRequest(BaseModel):
 
 # ── Helper: chat no-streaming con fallback local ───────────────────────────
 
-async def _routed_chat(model: str, messages: list[dict]) -> tuple[dict[str, Any], str]:
+async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = None) -> tuple[dict[str, Any], str]:
     """
     Ejecuta un chat por el mejor nodo; si el nodo falla, fallback al Ollama local.
     Retorna (respuesta_ollama, origen).
     """
     base, headers, origen = deps.orquestador.ollama_target(model)
     try:
-        resp = await ollama_chat(base, model, messages, headers=headers, client=deps.http_client_chat)
+        resp = await ollama_chat(base, model, messages, headers=headers, client=deps.http_client_chat, num_ctx=num_ctx)
         return resp, origen
     except httpx.HTTPStatusError as exc:
         if origen == "local":
@@ -144,7 +148,7 @@ async def _routed_chat(model: str, messages: list[dict]) -> tuple[dict[str, Any]
         logger.warning(f"[chat] Nodo '{origen}' inaccesible ({exc}); fallback local")
 
     try:
-        resp = await ollama_chat(OLLAMA_BASE_URL, model, messages, client=deps.http_client_chat)
+        resp = await ollama_chat(OLLAMA_BASE_URL, model, messages, client=deps.http_client_chat, num_ctx=num_ctx)
         return resp, "local-fallback"
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Sin nodos disponibles y sin Ollama local: {exc}") from exc
@@ -275,7 +279,7 @@ async def chat_completions(
                 try:
                     async for chunk in stream_chat_openai(base, payload.model, messages,
                                                           headers=headers, collector=collector,
-                                                          tools=payload.tools):
+                                                          tools=payload.tools, num_ctx=payload.num_ctx):
                         streamed_something = True
                         yield chunk
                 except Exception as exc:
@@ -284,7 +288,8 @@ async def chat_completions(
                     if origen != "local" and not streamed_something:
                         logger.warning(f"[stream] Nodo '{origen}' falló ({exc}); fallback local")
                         async for chunk in stream_chat_openai(OLLAMA_BASE_URL, payload.model, messages,
-                                                              collector=collector, tools=payload.tools):
+                                                              collector=collector, tools=payload.tools,
+                                                              num_ctx=payload.num_ctx):
                             yield chunk
                     else:
                         logger.error(f"[stream] Falló el streaming ({exc})")
@@ -306,7 +311,7 @@ async def chat_completions(
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
 
     # Modo sin streaming
-    ollama_resp, origen = await _routed_chat(payload.model, messages)
+    ollama_resp, origen = await _routed_chat(payload.model, messages, num_ctx=payload.num_ctx)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)

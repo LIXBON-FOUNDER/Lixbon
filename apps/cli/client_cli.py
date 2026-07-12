@@ -554,7 +554,7 @@ class ApiClient:
 
     def chat_stream(self, model: str, messages: list[dict], conversation_id: str | None = None,
                     client_id: str = "cli", title: str | None = None,
-                    web_search: bool = False) -> ChatStream:
+                    web_search: bool = False, num_ctx: int | None = None) -> ChatStream:
         payload = {
             "model": model,
             "messages": messages,
@@ -565,6 +565,8 @@ class ApiClient:
             "web_search": web_search,
             "source": "cli",  # historial independiente del de la web/IDE
         }
+        if num_ctx:
+            payload["num_ctx"] = int(num_ctx)
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)
 
@@ -2104,6 +2106,7 @@ class ChatApp:
             conversation_id=self.conversation_id,
             client_id=self.client_id,
             title=self.title,
+            num_ctx=self.cfg.get("context_window"),
         )
 
         content_parts: list[str] = []

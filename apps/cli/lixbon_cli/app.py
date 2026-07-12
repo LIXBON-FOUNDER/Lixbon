@@ -442,6 +442,7 @@ class ChatApp:
             conversation_id=self.conversation_id,
             client_id=self.client_id,
             title=self.title,
+            num_ctx=self.cfg.get("context_window"),
         )
 
         content_parts: list[str] = []

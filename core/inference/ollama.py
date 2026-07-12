@@ -31,10 +31,15 @@ async def chat(
     messages: list[dict],
     headers: dict | None = None,
     client: httpx.AsyncClient | None = None,
+    num_ctx: int | None = None,
 ) -> dict[str, Any]:
-    """Chat sin streaming. Retorna la respuesta cruda de Ollama. Lanza httpx.HTTPError si falla."""
+    """Chat sin streaming. Retorna la respuesta cruda de Ollama. Lanza httpx.HTTPError si falla.
+    `num_ctx`: ventana de contexto (Ollama usa 4096 por defecto aunque el modelo
+    soporte más; súbela para archivos/conversaciones grandes — cuesta VRAM)."""
     url = f"{base_url.rstrip('/')}/api/chat"
-    payload = {"model": model, "messages": messages, "stream": False}
+    payload: dict = {"model": model, "messages": messages, "stream": False}
+    if num_ctx:
+        payload["options"] = {"num_ctx": int(num_ctx)}
     if client is not None:
         resp = await client.post(url, json=payload, headers=headers, timeout=STREAM_TIMEOUT)
         resp.raise_for_status()
@@ -134,6 +139,7 @@ async def stream_chat_openai(
     headers: dict | None = None,
     collector: dict | None = None,
     tools: list[dict] | None = None,
+    num_ctx: int | None = None,
 ) -> AsyncIterator[str]:
     """
     Chat en streaming, convertido a chunks SSE en formato OpenAI.
@@ -142,11 +148,15 @@ async def stream_chat_openai(
     para que el caller persista el mensaje y el uso.
     `tools`: definiciones de funciones (passthrough a Ollama para tool-calling
     nativo); si es None el comportamiento no cambia (retrocompatible con la web).
+    `num_ctx`: ventana de contexto (Ollama usa 4096 por defecto aunque el modelo
+    soporte más). Súbela para no truncar en archivos/conversaciones grandes.
     """
     url = f"{base_url.rstrip('/')}/api/chat"
     payload: dict = {"model": model, "messages": messages, "stream": True}
     if tools:
         payload["tools"] = tools
+    if num_ctx:
+        payload["options"] = {"num_ctx": int(num_ctx)}
     chat_id = f"chatcmpl-{uuid.uuid4()}"
     parts: list[str] = []
     collected_tool_calls: list[dict] = []
