@@ -84,13 +84,16 @@ function MenuItem({ checked, onClick, children }) {
 
 export function StatusBar() {
   const {
-    connectionStatus, latency, currentModel, user, openModal, openBottomPanel, openLeftPanel,
+    connectionStatus, latency, currentModel, user, workspaceRoot,
+    openModal, openBottomPanel, openLeftPanel,
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
   } = useAppStore();
 
   const { tabs, activePath, cursor, setEol } = useEditorStore();
   const diagnostics = useProblemsStore((s) => s.diagnostics);
-  const { isRepo, branch, changes, refresh: gitRefresh, loading: gitLoading } = useGitStore();
+  const {
+    isRepo, branch, changes, refresh: gitRefresh, init: gitInit, loading: gitLoading,
+  } = useGitStore();
   const lspServers = useLspStore((s) => s.servers);
 
   const [currentVersion, setCurrentVersion] = useState('');
@@ -122,6 +125,20 @@ export function StatusBar() {
         {STATUS_LABEL[connectionStatus] || connectionStatus}
         {connectionStatus === 'connected' && latency > 0 && ` · ${latency} ms`}
       </span>
+
+      {/* En una carpeta que no es repo, lo útil no es esconder Git: es ofrecer
+          crear el repositorio ahí mismo. */}
+      {workspaceRoot && isRepo === false && (
+        <button
+          className="statusbar__item"
+          onClick={gitInit}
+          title="Crear un repositorio Git en esta carpeta (git init)"
+          disabled={gitLoading}
+        >
+          <IconGitBranch size={13} />
+          Inicializar repositorio
+        </button>
+      )}
 
       {isRepo && branch && (
         <span className="statusbar__group">

@@ -710,7 +710,7 @@
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-soft);
   user-select: none;
-  overflow: hidden;
+  /* Sin overflow: hidden — recortaría los menús que se abren hacia arriba. */
 }
 
 .statusbar__item {

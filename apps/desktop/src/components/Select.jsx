@@ -1,10 +1,17 @@
 // Select.jsx — desplegable propio. El <select> nativo no se puede tematizar:
 // en Windows el menú lo pinta el sistema (fondo blanco, fuente del SO), así que
-// rompía el tema oscuro del IDE. Este usa un botón + lista flotante con teclado.
+// rompía el tema oscuro del IDE.
+//
+// El menú se monta en un PORTAL con posición fija: dentro del árbol lo recortaba
+// cualquier ancestro con overflow (la barra de pestañas del terminal, el centro
+// del shell…), y el desplegable simplemente no se veía.
 //
 // options: [{ value, label, hint?, disabled? }]
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { IconChevronDown, IconCheck } from './Icons';
+
+const GAP = 6;
 
 export function Select({
   value,
@@ -12,26 +19,51 @@ export function Select({
   options,
   placeholder = 'Elegir…',
   disabled = false,
-  up = false,           // abre hacia arriba (para controles pegados al borde inferior)
+  up = false,           // abre hacia arriba (controles pegados al borde inferior)
   className = '',
   title,
 }) {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState(0);
-  const rootRef = useRef(null);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
   const listRef = useRef(null);
 
   const idx = options.findIndex((o) => o.value === value);
   const selected = idx >= 0 ? options[idx] : null;
 
+  // Posición del menú a partir del botón (coordenadas de viewport: es fixed).
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({
+      minWidth: r.width,
+      right: window.innerWidth - r.right,
+      ...(up
+        ? { bottom: window.innerHeight - r.top + GAP }
+        : { top: r.bottom + GAP }),
+    });
+  }, [open, up]);
+
   useEffect(() => {
     if (!open) return;
     setHover(idx >= 0 ? idx : 0);
+
     const onDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+      if (btnRef.current?.contains(e.target) || listRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
+    // Si el ancla se mueve, la posición fija deja de valer: cerrar es lo honesto.
+    const onMove = () => setOpen(false);
+
     window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    };
   }, [open, idx]);
 
   // Mantener visible la opción resaltada al navegar con las flechas.
@@ -73,8 +105,9 @@ export function Select({
   };
 
   return (
-    <div className={`select ${className} ${open ? 'is-open' : ''}`} ref={rootRef}>
+    <div className={`select ${className} ${open ? 'is-open' : ''}`}>
       <button
+        ref={btnRef}
         type="button"
         className="select__btn"
         onClick={() => !disabled && setOpen(!open)}
@@ -88,8 +121,8 @@ export function Select({
         <IconChevronDown size={13} />
       </button>
 
-      {open && (
-        <ul className={`select__menu ${up ? 'select__menu--up' : ''}`} role="listbox" ref={listRef}>
+      {open && pos && createPortal(
+        <ul className="select__menu" role="listbox" ref={listRef} style={pos}>
           {options.map((o, i) => (
             <li
               key={o.value}
@@ -108,7 +141,8 @@ export function Select({
               </span>
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body,
       )}
     </div>
   );

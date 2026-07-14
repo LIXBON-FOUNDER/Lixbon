@@ -43,10 +43,13 @@ export const useGitStore = create((set, get) => ({
               error: notRepo ? '' : status.stderr.trim() });
         return;
       }
-      const branch = await gitRun(['rev-parse', '--abbrev-ref', 'HEAD']);
+      // `branch --show-current` da el nombre incluso sin commits (HEAD naciente),
+      // donde `rev-parse --abbrev-ref HEAD` falla y dejaba un "(sin commits)".
+      const branch = await gitRun(['branch', '--show-current']);
+      const name = branch.code === 0 ? branch.stdout.trim() : '';
       set({
         isRepo: true,
-        branch: branch.code === 0 ? branch.stdout.trim() : '(sin commits)',
+        branch: name || '(HEAD suelto)',
         changes: parseStatus(status.stdout),
         loading: false,
       });

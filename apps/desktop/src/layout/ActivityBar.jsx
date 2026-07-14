@@ -1,8 +1,11 @@
 // ActivityBar.jsx — barra fina de navegación del IDE (izquierda).
+// Solo vistas del panel lateral (+ terminal). Problemas vive en el dock inferior
+// y Consumo en la barra de estado y el menú de cuenta: duplicarlos aquí solo
+// añadía iconos que no llevan a ninguna parte nueva.
 // El toggle del chat vive en la TitleBar (a la derecha, junto al panel que abre).
 import { useAppStore } from '../store/appStore';
 import {
-  IconPanel, IconSearch, IconChart, IconGear, IconTerminal, IconGitBranch, IconPuzzle, IconList, IconWarn,
+  IconPanel, IconSearch, IconGear, IconTerminal, IconGitBranch, IconPuzzle, IconList,
 } from '../components/Icons';
 
 export function ActivityBar() {
@@ -44,14 +47,6 @@ export function ActivityBar() {
       </button>
 
       <button
-        className={`activitybar__btn ${bottomActive('problems') ? 'is-active' : ''}`}
-        onClick={() => openBottomPanel('problems')}
-        title="Problemas (linter) — panel inferior"
-      >
-        <IconWarn size={19} />
-      </button>
-
-      <button
         className={`activitybar__btn ${leftActive('git') ? 'is-active' : ''}`}
         onClick={() => openLeftPanel('git')}
         title="Control de código (Git)"
@@ -76,14 +71,6 @@ export function ActivityBar() {
       </button>
 
       <div className="activitybar__spacer" />
-
-      <button
-        className={`activitybar__btn ${modalView === 'metrics' ? 'is-active' : ''}`}
-        onClick={() => toggleModal('metrics')}
-        title="Consumo del plan"
-      >
-        <IconChart size={19} />
-      </button>
 
       <button
         className={`activitybar__btn ${modalView === 'settings' ? 'is-active' : ''}`}
