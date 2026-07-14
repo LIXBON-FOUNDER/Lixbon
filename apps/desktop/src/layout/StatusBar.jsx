@@ -85,7 +85,7 @@ function MenuItem({ checked, onClick, children }) {
 export function StatusBar() {
   const {
     connectionStatus, latency, currentModel, user, workspaceRoot,
-    openModal, openBottomPanel, showBottomPanel, openLeftPanel,
+    openModal, openBottomPanel, openLeftPanel,
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
   } = useAppStore();
 
@@ -153,9 +153,7 @@ export function StatusBar() {
           </button>
           <button
             className="statusbar__item"
-            onClick={hasRemote
-              ? () => { showBottomPanel('terminal'); gitSync(); } // el push puede pedir credenciales
-              : gitRefresh}
+            onClick={hasRemote ? gitSync : gitRefresh} // en segundo plano, sin consola
             title={hasRemote
               ? 'Sincronizar con el remoto (pull + push)'
               : 'Actualizar el estado de Git · sin remoto configurado'}

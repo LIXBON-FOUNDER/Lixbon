@@ -10,12 +10,12 @@ import {
 
 export function SourceControl() {
   const {
-    isRepo, branch, changes, hasRemote, ahead, behind, loading, error, message,
+    isRepo, branch, changes, hasRemote, ahead, behind, netBusy, netError,
+    loading, error, message,
     setMessage, refresh, stage, unstage, stageAll, commit,
     init, pull, push, fetch, sync, publish, cloneRepo, cloning, cloneProgress,
     fileDiff, log, commitDiff, branches, checkout, stash,
   } = useGitStore();
-  const showBottomPanel = useAppStore((s) => s.showBottomPanel);
   const openWorkspace = useAppStore((s) => s.openWorkspace);
   const openDiff = useAppStore((s) => s.openDiff);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
@@ -61,14 +61,8 @@ export function SourceControl() {
     if (!res.ok) setCommitStatus(res.error);
   };
 
-  const withTerminal = (fn) => {
-    showBottomPanel('terminal'); // pull/push/fetch salen por el PTY
-    fn();
-  };
-
   const handlePublish = async () => {
     setPublishError('');
-    showBottomPanel('terminal'); // el push pide credenciales por el PTY
     const res = await publish(publishUrl);
     if (!res.ok) {
       setPublishError(res.error);
@@ -83,6 +77,62 @@ export function SourceControl() {
     const res = await commit();
     if (!res.ok) setCommitStatus(res.error || 'No se pudo hacer commit.');
   };
+
+  /** La acción principal, un solo botón que va cambiando de forma:
+      hay cambios → Commit · hay commits sin subir → Push (N) · hay commits
+      nuevos en el remoto → Pull · las dos cosas → Sincronizar.
+      Los commits sin subir se van acumulando solos: si haces dos commits y no
+      subes, `ahead` vale 2 y el botón dice "Push (2)". */
+  const primaryAction = () => {
+    if (netBusy) {
+      const doing = { fetch: 'Buscando…', pull: 'Descargando…', push: 'Subiendo…', sync: 'Sincronizando…' };
+      return { label: doing[netBusy] || 'Trabajando…', disabled: true, run: () => {}, icon: <IconRefresh size={15} /> };
+    }
+    if (changes.length > 0) {
+      const blocked = !message.trim() || staged.length === 0;
+      return {
+        label: `Commit (${staged.length})`,
+        icon: <IconGitCommit size={15} />,
+        run: handleCommit,
+        disabled: blocked,
+        title: staged.length === 0
+          ? 'Prepara algún cambio primero (+)'
+          : !message.trim() ? 'Escribe un mensaje de commit' : 'Confirmar los cambios preparados',
+      };
+    }
+    if (ahead > 0 && behind > 0) {
+      return {
+        label: `Sincronizar (↓${behind} ↑${ahead})`,
+        icon: <IconRefresh size={15} />,
+        run: sync,
+        title: 'Traer los commits del remoto y subir los tuyos',
+      };
+    }
+    if (ahead > 0) {
+      return {
+        label: `Push (${ahead})`,
+        icon: <IconArrowUp size={15} />,
+        run: push,
+        title: `Subir ${ahead} ${ahead === 1 ? 'commit' : 'commits'} al remoto`,
+      };
+    }
+    if (behind > 0) {
+      return {
+        label: `Pull Changes (${behind})`,
+        icon: <IconArrowDown size={15} />,
+        run: pull,
+        title: `Descargar ${behind} ${behind === 1 ? 'commit' : 'commits'} del remoto`,
+      };
+    }
+    return {
+      label: hasRemote ? 'Todo sincronizado' : 'Sin cambios',
+      icon: <IconGitCommit size={15} />,
+      run: () => {},
+      disabled: true,
+    };
+  };
+
+  const action = primaryAction();
 
   const handleClone = async () => {
     const url = cloneUrl.trim();
@@ -190,27 +240,15 @@ export function SourceControl() {
             </button>
 
             {hasRemote ? (
+              // Acciones finas. La habitual es el botón grande de abajo.
               <span className="scm__net">
-                <button
-                  className="scm__net-btn scm__net-btn--sync"
-                  onClick={() => withTerminal(sync)}
-                  title="Sincronizar: traer del remoto y subir tus commits (pull + push)"
-                >
-                  <IconRefresh size={14} /> Sincronizar
-                  {(behind > 0 || ahead > 0) && (
-                    <span className="scm__counts">
-                      {behind > 0 && <><IconArrowDown size={11} />{behind}</>}
-                      {ahead > 0 && <><IconArrowUp size={11} />{ahead}</>}
-                    </span>
-                  )}
-                </button>
-                <button className="scm__net-btn" onClick={() => withTerminal(fetch)} title="git fetch">
+                <button className="scm__net-btn" onClick={fetch} disabled={!!netBusy} title="git fetch">
                   <IconRefresh size={14} /> Fetch
                 </button>
-                <button className="scm__net-btn" onClick={() => withTerminal(pull)} title="git pull">
+                <button className="scm__net-btn" onClick={pull} disabled={!!netBusy} title="git pull">
                   <IconArrowDown size={14} /> Pull
                 </button>
-                <button className="scm__net-btn" onClick={() => withTerminal(push)} title="git push">
+                <button className="scm__net-btn" onClick={push} disabled={!!netBusy} title="git push">
                   <IconArrowUp size={14} /> Push
                 </button>
               </span>
@@ -295,14 +333,15 @@ export function SourceControl() {
             />
             <button
               className="pill-btn pill-btn--primary scm__commit-btn"
-              onClick={handleCommit}
-              disabled={!message.trim() || staged.length === 0}
-              title={staged.length === 0 ? 'No hay cambios en el stage' : 'Confirmar'}
+              onClick={action.run}
+              disabled={action.disabled}
+              title={action.title}
             >
-              <IconGitCommit size={15} /> Commit ({staged.length})
+              {action.icon} {action.label}
             </button>
           </div>
           {commitStatus && <p className="settings__status is-error">{commitStatus}</p>}
+          {netError && <p className="settings__status is-error">{netError}</p>}
 
           {staged.length > 0 && (
             <div className="scm__group">

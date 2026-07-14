@@ -4,6 +4,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useEditorStore } from '../store/editorStore';
+import { useGitStore } from '../store/gitStore';
 import { useVersion } from '../hooks/useVersion';
 
 import { ActivityBar } from './ActivityBar';
@@ -51,6 +52,9 @@ export function AppShell() {
   useEffect(() => {
     useAppStore.getState().restoreWorkspace();
     useExtStore.getState().hydrateTheme();
+    // Sin consultar al remoto no hay forma de saber que hay commits nuevos:
+    // el botón de Git no podría ofrecer "Pull" nunca.
+    useGitStore.getState().startAutoFetch();
   }, []);
 
   // Tamaño de letra del editor (ajustable en Ajustes)

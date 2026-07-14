@@ -103,11 +103,13 @@
   border-color: var(--border);
 }
 
+/* Botón principal: mismo ancho que la caja del mensaje, debajo de ella. */
 .scm__commit-btn {
-  align-self: flex-start;
+  width: 100%;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 7px;
 }
 
 .scm__group {

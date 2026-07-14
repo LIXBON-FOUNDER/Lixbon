@@ -4,22 +4,11 @@
 
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
-import { gitRun, gitClone, getWorkspaceRoot } from '../lib/tauri';
-import { useTerminalStore } from './terminalStore';
+import { gitRun, gitClone } from '../lib/tauri';
 
-/** Comando de red para el terminal. Lleva SIEMPRE `-C "<raíz>"`: el terminal
-    puede estar en cualquier carpeta (el usuario navega con cd, o la sesión nació
-    antes de abrirse el workspace), y sin esto `git push` fallaba con
-    "not a git repository" aunque el repo estuviera bien. */
-async function gitTerminalCmd(args) {
-  const root = await getWorkspaceRoot();
-  const prefix = root ? `git -C "${root}"` : 'git';
-  return `${prefix} ${args}`;
-}
-
-async function runInTerminal(args) {
-  useTerminalStore.getState().runCommand(await gitTerminalCmd(args));
-}
+// Cada cuánto se consulta al remoto si hay commits nuevos.
+const AUTO_FETCH_MS = 3 * 60 * 1000;
+let autoFetchTimer = null;
 
 /** Parsea `git status --porcelain=v1` a una lista de cambios. */
 function parseStatus(stdout) {
@@ -42,8 +31,10 @@ export const useGitStore = create((set, get) => ({
   branch: '',
   changes: [],
   hasRemote: false, // sin remoto no hay nada que sincronizar: hay que publicar
-  ahead: 0,         // commits locales sin subir
+  ahead: 0,         // commits locales sin subir (se acumulan: Push (2), (3)…)
   behind: 0,        // commits del remoto sin traer
+  netBusy: '',      // '' | 'fetch' | 'pull' | 'push' | 'sync'
+  netError: '',
   loading: false,
   error: '',
   message: '',
@@ -163,17 +154,45 @@ export const useGitStore = create((set, get) => ({
     return res.code === 0 ? { ok: true, out: res.stdout.trim() } : { ok: false, error: (res.stderr || res.stdout).trim() };
   },
 
-  // ── Operaciones de red: van al terminal integrado (para ver los prompts
-  //    de credenciales), pero siempre con `-C <raíz>` ──────────────────
-  pull: () => runInTerminal('pull'),
-  push: () => runInTerminal('push'),
-  fetch: () => runInTerminal('fetch --all --prune'),
+  // ── Operaciones de red: en SEGUNDO PLANO ───────────────────────────
+  // Antes se escupían en el terminal integrado. Además de ensuciar la consola,
+  // dependían de su cwd. Ahora las corre Rust (`git_run`), que ya lanza git sin
+  // ventana y con GIT_TERMINAL_PROMPT=0: si hicieran falta credenciales, git no
+  // se queda colgado esperando, falla y el error se muestra en el panel.
+  // (El gestor de credenciales de Windows sigue abriendo su ventana si toca.)
 
-  /** Sincronizar (como en VSCode): traer y luego subir. Son dos líneas seguidas
-      en la shell, así que se ejecutan en orden. */
+  /** Corre una operación de red y refresca. `kind` marca qué botón está ocupado. */
+  _net: async (kind, args) => {
+    if (get().netBusy) return { ok: false, error: 'Ya hay una operación en curso.' };
+    set({ netBusy: kind, netError: '' });
+    try {
+      const res = await gitRun(args);
+      if (res.code !== 0) {
+        const error = (res.stderr || res.stdout).trim() || `git ${args[0]} falló.`;
+        set({ netError: error });
+        return { ok: false, error };
+      }
+      return { ok: true };
+    } catch (e) {
+      const error = String(e);
+      set({ netError: error });
+      return { ok: false, error };
+    } finally {
+      set({ netBusy: '' });
+      await get().refresh();
+    }
+  },
+
+  fetch: () => get()._net('fetch', ['fetch', '--all', '--prune']),
+  pull: () => get()._net('pull', ['pull']),
+  push: () => get()._net('push', ['push']),
+
+  /** Sincronizar (como en VSCode): traer y luego subir. Si el pull falla no se
+      sube nada: subir encima de un rechazo solo encadena otro error. */
   sync: async () => {
-    await runInTerminal('pull');
-    await runInTerminal('push');
+    const pulled = await get()._net('sync', ['pull']);
+    if (!pulled.ok) return pulled;
+    return get()._net('sync', ['push']);
   },
 
   /** Añade el remoto `origin` y sube la rama actual estableciendo upstream.
@@ -189,9 +208,24 @@ export const useGitStore = create((set, get) => ({
       }
     }
     const branch = get().branch || 'master';
-    await runInTerminal(`push -u origin ${branch}`);
-    await get().refresh();
-    return { ok: true };
+    return get()._net('push', ['push', '-u', 'origin', branch]);
+  },
+
+  /** Auto-fetch: sin traer del remoto no hay forma de saber que hay commits
+      nuevos, así que el botón nunca podría ofrecer "Pull". Silencioso: no toca
+      netBusy ni netError para no parpadear la UI. */
+  startAutoFetch: () => {
+    if (autoFetchTimer) return;
+    const tick = async () => {
+      const { isRepo, hasRemote, netBusy } = get();
+      if (!isRepo || !hasRemote || netBusy) return;
+      try {
+        await gitRun(['fetch', '--quiet']);
+        await get().refresh();
+      } catch { /* sin red: se reintenta al siguiente tick */ }
+    };
+    autoFetchTimer = setInterval(tick, AUTO_FETCH_MS);
+    tick();
   },
 
   // ── Clonación: comando Rust dedicado con progreso en vivo ──────────
