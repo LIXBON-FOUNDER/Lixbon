@@ -4,6 +4,7 @@
 // ningún comando de Rust (el sandbox de archivos está atado al workspace, y una
 // foto de perfil puede estar en cualquier sitio del disco).
 import { useEffect, useRef, useState } from 'react';
+import { FiCamera } from 'react-icons/fi';
 import { useAppStore } from '../store/appStore';
 import { Avatar } from '../components/Avatar';
 import {
@@ -11,7 +12,7 @@ import {
 } from '../lib/account';
 import { openExternal } from '../lib/tauri';
 import { planColor } from '../lib/planColors';
-import { IconUser, IconGear, IconChart, IconGlobe, IconTrash, IconLogout } from '../components/Icons';
+import { IconUser, IconGear, IconChart, IconGlobe, IconLogout } from '../components/Icons';
 
 export function AccountMenu() {
   const { user, serverUrl, apiKey, setUser, openModal, logout } = useAppStore();
@@ -106,7 +107,19 @@ export function AccountMenu() {
       {open && (
         <div className="account__menu">
           <div className="account__head">
-            <Avatar user={user} serverUrl={serverUrl} size={44} />
+            {/* La foto ES el botón: al pasar el ratón sale la cámara. */}
+            <button
+              className="avatar-edit"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              title={user.avatar_url ? 'Cambiar foto' : 'Subir foto'}
+            >
+              <Avatar user={user} serverUrl={serverUrl} size={44} />
+              <span className="avatar-edit__overlay">
+                {busy ? <span className="avatar-edit__spinner" /> : <FiCamera size={16} />}
+              </span>
+            </button>
+
             <div className="account__id">
               <span className="account__name">{displayName}</span>
               {user.email && <span className="account__email">{user.email}</span>}
@@ -116,26 +129,15 @@ export function AccountMenu() {
               >
                 Plan {user.plan_name || 'Gratuito'}
               </span>
+              {user.avatar_url && (
+                <button className="avatar-edit__remove" onClick={onRemove} disabled={busy}>
+                  Quitar foto
+                </button>
+              )}
             </div>
           </div>
 
           {error && <p className="account__error">{error}</p>}
-
-          <div className="account__photo">
-            <button
-              className="settings__btn"
-              disabled={busy}
-              onClick={() => fileRef.current?.click()}
-            >
-              {busy ? 'Subiendo…' : user.avatar_url ? 'Cambiar foto' : 'Subir foto'}
-            </button>
-            {user.avatar_url && (
-              <button className="icon-btn" onClick={onRemove} disabled={busy} title="Quitar foto">
-                <IconTrash size={15} />
-              </button>
-            )}
-            <span className="account__hint">PNG, JPG o WEBP · máx. 3 MB</span>
-          </div>
 
           <div className="ctx-menu__sep" />
 

@@ -2,6 +2,7 @@
 // Privacidad, Facturación, Uso). Reemplaza la antigua vista plana de Mi cuenta.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FiCamera } from 'react-icons/fi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
@@ -131,24 +132,30 @@ function AvatarField({ user, onSaved }) {
 
   return (
     <div className="set-avatar-field">
-      {user.avatar_url ? (
-        <img className="set-avatar set-avatar--img" src={user.avatar_url} alt="" />
-      ) : (
-        <span className="set-avatar">{initialOf(user)}</span>
-      )}
+      <input ref={fileRef} type="file" accept={AVATAR_ACCEPT} hidden onChange={pick} />
 
-      <div className="set-avatar-actions">
-        <input ref={fileRef} type="file" accept={AVATAR_ACCEPT} hidden onChange={pick} />
-        <button className="set-btn" disabled={busy} onClick={() => fileRef.current?.click()}>
-          {busy ? 'Subiendo…' : user.avatar_url ? 'Cambiar' : 'Subir foto'}
-        </button>
-        {user.avatar_url && (
-          <button className="set-btn set-btn--ghost" disabled={busy} onClick={remove}>
-            Quitar
-          </button>
+      {/* La foto ES el botón: al pasar el ratón aparece la cámara. */}
+      <button
+        className="avatar-edit"
+        onClick={() => fileRef.current?.click()}
+        disabled={busy}
+        title={user.avatar_url ? 'Cambiar foto' : 'Subir foto'}
+      >
+        {user.avatar_url ? (
+          <img className="set-avatar set-avatar--img" src={user.avatar_url} alt="" />
+        ) : (
+          <span className="set-avatar">{initialOf(user)}</span>
         )}
-        <span className="set-hint">PNG, JPG o WEBP · máx. 3 MB</span>
-      </div>
+        <span className="avatar-edit__overlay">
+          {busy ? <span className="avatar-edit__spinner" /> : <FiCamera size={17} />}
+        </span>
+      </button>
+
+      {user.avatar_url && (
+        <button className="avatar-edit__remove" onClick={remove} disabled={busy}>
+          Quitar
+        </button>
+      )}
 
       {error && <p className="set-error">{error}</p>}
     </div>
@@ -186,7 +193,7 @@ function GeneralSection({ user, onSaved }) {
     <>
       <h2 className="set-title">Perfil</h2>
       <div className="set-card">
-        <Row label="Avatar" hint="Se ve también en el IDE">
+        <Row label="Avatar" hint="Se ve también en el IDE · PNG, JPG o WEBP, máx. 3 MB">
           <AvatarField user={user} onSaved={onSaved} />
         </Row>
         <Row label="Nombre">

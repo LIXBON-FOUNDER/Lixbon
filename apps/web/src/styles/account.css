@@ -568,6 +568,7 @@
 }
 
 /* ── Foto de perfil (la misma que muestra el IDE) ────────────────────── */
+/* La foto es el propio botón: al pasar el ratón se oscurece y sale la cámara. */
 
 .set-avatar--img {
   object-fit: cover;
@@ -578,34 +579,67 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 12px;
 }
 
-.set-avatar-actions {
+.avatar-edit {
+  position: relative;
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.avatar-edit:disabled { cursor: default; }
+
+.avatar-edit__overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
-.set-avatar-actions .set-btn {
-  padding: 7px 14px;
-  font-size: 13px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--bg);
-  color: var(--ink);
-  cursor: pointer;
+.avatar-edit:hover .avatar-edit__overlay,
+.avatar-edit:focus-visible .avatar-edit__overlay,
+.avatar-edit:disabled .avatar-edit__overlay {
+  opacity: 1;
 }
 
-.set-avatar-actions .set-btn:hover:not(:disabled) { border-color: var(--border); }
-.set-avatar-actions .set-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.set-avatar-actions .set-btn--ghost { color: var(--ink-soft); }
+.avatar-edit__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: avatar-spin 0.7s linear infinite;
+}
 
-.set-hint {
-  font-size: 12px;
+@keyframes avatar-spin {
+  to { transform: rotate(360deg); }
+}
+
+.avatar-edit__remove {
+  font-size: 12.5px;
   color: var(--ink-soft);
+  background: none;
+  border: none;
+  padding: 4px 2px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
+
+.avatar-edit__remove:hover:not(:disabled) { color: var(--danger); }
+.avatar-edit__remove:disabled { opacity: 0.5; cursor: default; }
 
 .set-error {
   width: 100%;
