@@ -36,6 +36,9 @@ export const useAppStore = create((set, get) => ({
 
   // Carpeta de trabajo (canónica). '' = sin carpeta abierta.
   workspaceRoot: '',
+  // true cuando restoreWorkspace ya terminó (con carpeta o sin ella). El
+  // terminal no debe abrir su PTY antes: heredaría el cwd equivocado.
+  workspaceReady: false,
   // Carpetas abiertas recientemente (para la pantalla de bienvenida, D4).
   recentFolders: JSON.parse(localStorage.getItem('lixbon_recents') || '[]'),
 
@@ -159,14 +162,24 @@ export const useAppStore = create((set, get) => ({
     set({ recentFolders: recents });
   },
 
-  /** Al arrancar: reabre la última carpeta usada (el estado Rust no persiste). */
+  /** Al arrancar: reabre la última carpeta usada (el estado Rust no persiste).
+      Marca `workspaceReady` pase lo que pase: el terminal espera a esta señal
+      para abrir su primera sesión, porque un PTY nace con el cwd que haya en ese
+      momento y ya no se puede cambiar (si nace antes, cae en la carpeta del
+      usuario y todo lo que se lance ahí — git, run, build — va a la carpeta
+      equivocada). */
   restoreWorkspace: async () => {
     const saved = localStorage.getItem('lixbon_workspace_root');
-    if (!saved || get().workspaceRoot) return;
+    if (!saved || get().workspaceRoot) {
+      set({ workspaceReady: true });
+      return;
+    }
     try {
       await get().openWorkspace(saved);
     } catch {
       localStorage.removeItem('lixbon_workspace_root'); // la carpeta ya no existe
+    } finally {
+      set({ workspaceReady: true });
     }
   },
 

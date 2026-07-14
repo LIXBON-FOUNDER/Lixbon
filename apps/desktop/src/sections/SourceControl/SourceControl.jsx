@@ -10,9 +10,9 @@ import {
 
 export function SourceControl() {
   const {
-    isRepo, branch, changes, loading, error, message,
+    isRepo, branch, changes, hasRemote, ahead, behind, loading, error, message,
     setMessage, refresh, stage, unstage, stageAll, commit,
-    init, pull, push, fetch, cloneRepo, cloning, cloneProgress,
+    init, pull, push, fetch, sync, publish, cloneRepo, cloning, cloneProgress,
     fileDiff, log, commitDiff, branches, checkout, stash,
   } = useGitStore();
   const showBottomPanel = useAppStore((s) => s.showBottomPanel);
@@ -21,6 +21,9 @@ export function SourceControl() {
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
 
   const [commitStatus, setCommitStatus] = useState('');
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishUrl, setPublishUrl] = useState('');
+  const [publishError, setPublishError] = useState('');
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneUrl, setCloneUrl] = useState('');
   const [cloneStatus, setCloneStatus] = useState(null); // { ok, text }
@@ -61,6 +64,18 @@ export function SourceControl() {
   const withTerminal = (fn) => {
     showBottomPanel('terminal'); // pull/push/fetch salen por el PTY
     fn();
+  };
+
+  const handlePublish = async () => {
+    setPublishError('');
+    showBottomPanel('terminal'); // el push pide credenciales por el PTY
+    const res = await publish(publishUrl);
+    if (!res.ok) {
+      setPublishError(res.error);
+      return;
+    }
+    setPublishOpen(false);
+    setPublishUrl('');
   };
 
   const handleCommit = async () => {
@@ -173,18 +188,71 @@ export function SourceControl() {
               <IconGitBranch size={16} />
               <span className="scm__branch-name">{branch || '—'}</span>
             </button>
-            <span className="scm__net">
-              <button className="scm__net-btn" onClick={() => withTerminal(fetch)} title="git fetch">
-                <IconRefresh size={14} /> Fetch
-              </button>
-              <button className="scm__net-btn" onClick={() => withTerminal(pull)} title="git pull">
-                <IconArrowDown size={14} /> Pull
-              </button>
-              <button className="scm__net-btn" onClick={() => withTerminal(push)} title="git push">
-                <IconArrowUp size={14} /> Push
-              </button>
-            </span>
+
+            {hasRemote ? (
+              <span className="scm__net">
+                <button
+                  className="scm__net-btn scm__net-btn--sync"
+                  onClick={() => withTerminal(sync)}
+                  title="Sincronizar: traer del remoto y subir tus commits (pull + push)"
+                >
+                  <IconRefresh size={14} /> Sincronizar
+                  {(behind > 0 || ahead > 0) && (
+                    <span className="scm__counts">
+                      {behind > 0 && <><IconArrowDown size={11} />{behind}</>}
+                      {ahead > 0 && <><IconArrowUp size={11} />{ahead}</>}
+                    </span>
+                  )}
+                </button>
+                <button className="scm__net-btn" onClick={() => withTerminal(fetch)} title="git fetch">
+                  <IconRefresh size={14} /> Fetch
+                </button>
+                <button className="scm__net-btn" onClick={() => withTerminal(pull)} title="git pull">
+                  <IconArrowDown size={14} /> Pull
+                </button>
+                <button className="scm__net-btn" onClick={() => withTerminal(push)} title="git push">
+                  <IconArrowUp size={14} /> Push
+                </button>
+              </span>
+            ) : (
+              // Sin remoto no hay nada que sincronizar: primero hay que decirle a
+              // git a qué repositorio de GitHub subir.
+              <span className="scm__net">
+                <button
+                  className="scm__net-btn scm__net-btn--sync"
+                  onClick={() => setPublishOpen((v) => !v)}
+                  title="Conectar con un repositorio remoto y subir la rama"
+                >
+                  <IconArrowUp size={14} /> Publicar en GitHub
+                </button>
+              </span>
+            )}
           </div>
+
+          {!hasRemote && publishOpen && (
+            <div className="scm__clone">
+              <p className="settings__hint">
+                Crea el repositorio vacío en GitHub y pega aquí su URL. Se añadirá
+                como <code>origin</code> y se subirá la rama <strong>{branch}</strong>.
+              </p>
+              <input
+                className="settings__input"
+                placeholder="https://github.com/usuario/repo.git"
+                value={publishUrl}
+                onChange={(e) => { setPublishUrl(e.target.value); setPublishError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handlePublish(); }}
+                spellCheck={false}
+              />
+              <button
+                className="pill-btn pill-btn--primary"
+                onClick={handlePublish}
+                disabled={!publishUrl.trim()}
+              >
+                Publicar
+              </button>
+              {publishError && <p className="settings__status is-error">{publishError}</p>}
+            </div>
+          )}
 
           {branchMenu && (
             <div className="scm__branchmenu">

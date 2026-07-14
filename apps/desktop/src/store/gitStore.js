@@ -4,8 +4,22 @@
 
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
-import { gitRun, gitClone } from '../lib/tauri';
+import { gitRun, gitClone, getWorkspaceRoot } from '../lib/tauri';
 import { useTerminalStore } from './terminalStore';
+
+/** Comando de red para el terminal. Lleva SIEMPRE `-C "<raíz>"`: el terminal
+    puede estar en cualquier carpeta (el usuario navega con cd, o la sesión nació
+    antes de abrirse el workspace), y sin esto `git push` fallaba con
+    "not a git repository" aunque el repo estuviera bien. */
+async function gitTerminalCmd(args) {
+  const root = await getWorkspaceRoot();
+  const prefix = root ? `git -C "${root}"` : 'git';
+  return `${prefix} ${args}`;
+}
+
+async function runInTerminal(args) {
+  useTerminalStore.getState().runCommand(await gitTerminalCmd(args));
+}
 
 /** Parsea `git status --porcelain=v1` a una lista de cambios. */
 function parseStatus(stdout) {
@@ -27,6 +41,9 @@ export const useGitStore = create((set, get) => ({
   isRepo: null, // null = sin comprobar
   branch: '',
   changes: [],
+  hasRemote: false, // sin remoto no hay nada que sincronizar: hay que publicar
+  ahead: 0,         // commits locales sin subir
+  behind: 0,        // commits del remoto sin traer
   loading: false,
   error: '',
   message: '',
@@ -39,7 +56,8 @@ export const useGitStore = create((set, get) => ({
       const status = await gitRun(['status', '--porcelain=v1']);
       if (status.code !== 0) {
         const notRepo = /not a git repository/i.test(status.stderr);
-        set({ isRepo: !notRepo, changes: [], branch: '', loading: false,
+        set({ isRepo: !notRepo, changes: [], branch: '', hasRemote: false,
+              ahead: 0, behind: 0, loading: false,
               error: notRepo ? '' : status.stderr.trim() });
         return;
       }
@@ -47,10 +65,28 @@ export const useGitStore = create((set, get) => ({
       // donde `rev-parse --abbrev-ref HEAD` falla y dejaba un "(sin commits)".
       const branch = await gitRun(['branch', '--show-current']);
       const name = branch.code === 0 ? branch.stdout.trim() : '';
+
+      const remotes = await gitRun(['remote']);
+      const hasRemote = remotes.code === 0 && !!remotes.stdout.trim();
+
+      // Cuánto nos separa del upstream. Falla (y da 0/0) si la rama no tiene
+      // upstream todavía: es justo el caso de un repo recién publicado.
+      let ahead = 0;
+      let behind = 0;
+      const counts = await gitRun(['rev-list', '--left-right', '--count', 'HEAD...@{u}']);
+      if (counts.code === 0) {
+        const [a, b] = counts.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0);
+        ahead = a || 0;
+        behind = b || 0;
+      }
+
       set({
         isRepo: true,
         branch: name || '(HEAD suelto)',
         changes: parseStatus(status.stdout),
+        hasRemote,
+        ahead,
+        behind,
         loading: false,
       });
     } catch (e) {
@@ -127,10 +163,36 @@ export const useGitStore = create((set, get) => ({
     return res.code === 0 ? { ok: true, out: res.stdout.trim() } : { ok: false, error: (res.stderr || res.stdout).trim() };
   },
 
-  // ── Operaciones de red: van al terminal integrado ──────────────────
-  pull: () => useTerminalStore.getState().runCommand('git pull'),
-  push: () => useTerminalStore.getState().runCommand('git push'),
-  fetch: () => useTerminalStore.getState().runCommand('git fetch --all --prune'),
+  // ── Operaciones de red: van al terminal integrado (para ver los prompts
+  //    de credenciales), pero siempre con `-C <raíz>` ──────────────────
+  pull: () => runInTerminal('pull'),
+  push: () => runInTerminal('push'),
+  fetch: () => runInTerminal('fetch --all --prune'),
+
+  /** Sincronizar (como en VSCode): traer y luego subir. Son dos líneas seguidas
+      en la shell, así que se ejecutan en orden. */
+  sync: async () => {
+    await runInTerminal('pull');
+    await runInTerminal('push');
+  },
+
+  /** Añade el remoto `origin` y sube la rama actual estableciendo upstream.
+      Es lo que falta tras un `git init` para que el repo aparezca en GitHub. */
+  publish: async (url) => {
+    const remote = url.trim();
+    if (!remote) return { ok: false, error: 'Pega la URL del repositorio.' };
+
+    if (!get().hasRemote) {
+      const res = await gitRun(['remote', 'add', 'origin', remote]);
+      if (res.code !== 0) {
+        return { ok: false, error: (res.stderr || res.stdout).trim() };
+      }
+    }
+    const branch = get().branch || 'master';
+    await runInTerminal(`push -u origin ${branch}`);
+    await get().refresh();
+    return { ok: true };
+  },
 
   // ── Clonación: comando Rust dedicado con progreso en vivo ──────────
   cloning: false,

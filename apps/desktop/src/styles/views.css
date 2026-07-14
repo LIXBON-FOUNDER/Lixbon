@@ -66,6 +66,20 @@
   background: rgba(var(--ink-rgb), 0.04);
 }
 
+/* Sincronizar / Publicar: la acción principal de la fila de red */
+.scm__net-btn--sync {
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.scm__counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
 .scm__commit {
   display: flex;
   flex-direction: column;

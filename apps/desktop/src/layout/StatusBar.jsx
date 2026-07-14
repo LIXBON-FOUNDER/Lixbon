@@ -85,14 +85,15 @@ function MenuItem({ checked, onClick, children }) {
 export function StatusBar() {
   const {
     connectionStatus, latency, currentModel, user, workspaceRoot,
-    openModal, openBottomPanel, openLeftPanel,
+    openModal, openBottomPanel, showBottomPanel, openLeftPanel,
     tabSize, setTabSize, insertSpaces, setInsertSpaces,
   } = useAppStore();
 
   const { tabs, activePath, cursor, setEol } = useEditorStore();
   const diagnostics = useProblemsStore((s) => s.diagnostics);
   const {
-    isRepo, branch, changes, refresh: gitRefresh, init: gitInit, loading: gitLoading,
+    isRepo, branch, changes, hasRemote, ahead, behind,
+    refresh: gitRefresh, init: gitInit, sync: gitSync, loading: gitLoading,
   } = useGitStore();
   const lspServers = useLspStore((s) => s.servers);
 
@@ -152,11 +153,18 @@ export function StatusBar() {
           </button>
           <button
             className="statusbar__item"
-            onClick={gitRefresh}
-            title="Actualizar el estado de Git"
+            onClick={hasRemote
+              ? () => { showBottomPanel('terminal'); gitSync(); } // el push puede pedir credenciales
+              : gitRefresh}
+            title={hasRemote
+              ? 'Sincronizar con el remoto (pull + push)'
+              : 'Actualizar el estado de Git · sin remoto configurado'}
             disabled={gitLoading}
           >
             <IconRefresh size={13} />
+            {hasRemote && (behind > 0 || ahead > 0) && (
+              <>{behind > 0 && `↓${behind}`}{ahead > 0 && `↑${ahead}`}</>
+            )}
           </button>
         </span>
       )}
