@@ -88,6 +88,7 @@ def init_db() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1",
         # Ajustes: preferencias del usuario (apariencia/privacidad)
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS settings_json TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key TEXT",
         # F7: enlace con Stripe (pagos)
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS stripe_price_id TEXT",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT",

@@ -4,11 +4,11 @@
 // sobreviven al cambio de pestaña sin re-crear el DOM del editor).
 
 import { create } from 'zustand';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState, EditorSelection, Compartment, countColumn } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { indentUnit } from '@codemirror/language';
-import { indentWithTab } from '@codemirror/commands';
+import { indentMore, indentLess } from '@codemirror/commands';
 import { unifiedMergeView } from '@codemirror/merge';
 import { ask } from '@tauri-apps/plugin-dialog';
 
@@ -17,7 +17,17 @@ import { lixbonTheme, lixbonSyntax, lixbonThemeDark, lixbonSyntaxDark } from '..
 import { resolveLanguage } from '../editor/languages';
 import { snippetSource } from '../editor/snippets';
 import { ghostText as ghostTextExt } from '../editor/ghostText';
-import { lintExtension } from '../editor/lintExt';
+import { lintExtension, applyDiagnostics } from '../editor/lintExt';
+import { lspExtensions } from '../editor/lspExt';
+
+// ── Puente con los servidores de lenguaje (A1) ─────────────────────────
+// lspStore importa este módulo: el import perezoso rompe el ciclo. Todas las
+// llamadas son "dispara y olvida": si el LSP falla, el editor sigue igual.
+let lspModule = null;
+function withLsp(fn) {
+  lspModule ??= import('./lspStore');
+  lspModule.then(({ useLspStore }) => fn(useLspStore.getState())).catch(() => {});
+}
 
 // ── Registro fuera de React ────────────────────────────────────────────
 const stateCache = new Map(); // path -> EditorState
@@ -68,6 +78,60 @@ export function setIndentConfig(tabSize, insertSpaces) {
   if (liveView) {
     liveView.dispatch({ effects: indentCompartment.reconfigure(indentExtension()) });
   }
+}
+
+/** Tab: inserta la indentación EN el cursor, no al principio de la línea.
+    (`indentWithTab` de CodeMirror siempre re-indenta la línea entera, que es
+    lo correcto con una selección de varias líneas pero no al teclear.) */
+function insertTabAtCursor(view) {
+  const { state } = view;
+
+  // Con algo seleccionado sí se indentan las líneas del rango.
+  if (state.selection.ranges.some((r) => !r.empty)) return indentMore(view);
+
+  const { tabSize, insertSpaces } = indentConfig;
+  const changes = state.changeByRange((range) => {
+    let insert = '\t';
+    if (insertSpaces) {
+      // Hasta la siguiente parada de tabulación, no siempre `tabSize` espacios.
+      const line = state.doc.lineAt(range.head);
+      const col = countColumn(state.sliceDoc(line.from, range.head), tabSize);
+      insert = ' '.repeat(tabSize - (col % tabSize));
+    }
+    return {
+      changes: { from: range.head, insert },
+      range: EditorSelection.cursor(range.head + insert.length),
+    };
+  });
+
+  view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: 'input.indent' }));
+  return true;
+}
+
+const tabKeymap = { key: 'Tab', run: insertTabAtCursor, shift: indentLess };
+
+// ── Fin de línea (LF / CRLF) ───────────────────────────────────────────
+// CodeMirror serializa con "\n" salvo que se le diga otra cosa: sin esto, abrir
+// y guardar un archivo CRLF lo reescribía entero a LF (y git lo veía como un
+// cambio de todas las líneas). Se detecta al abrir y se conserva.
+const eolCompartment = new Compartment();
+
+function detectEol(text) {
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const lf = (text.match(/(?<!\r)\n/g) || []).length;
+  return crlf > lf ? '\r\n' : '\n';
+}
+
+// ── Posición del cursor (para la barra de estado) ──────────────────────
+
+function cursorFrom(state) {
+  const sel = state.selection.main;
+  const line = state.doc.lineAt(sel.head);
+  return {
+    line: line.number,
+    col: sel.head - line.from + 1,
+    selected: sel.to - sel.from,
+  };
 }
 
 export function registerEditorView(view) {
@@ -150,24 +214,33 @@ export function cacheState(path, state) {
 
 // ── Store ──────────────────────────────────────────────────────────────
 export const useEditorStore = create((set, get) => ({
-  tabs: [], // [{ path, name, dirty }]
+  tabs: [], // [{ path, name, dirty, eol }]
   activePath: null,
   docVersion: 0, // se incrementa en cada edición (para la vista previa en vivo)
+  cursor: { line: 1, col: 1, selected: 0 }, // lo pinta la barra de estado
 
   openFile: async (path, name) => {
     const { tabs } = get();
     if (tabs.some((t) => t.path === path)) {
-      set({ activePath: path });
+      get().setActive(path);
       return;
     }
 
     const content = await readFileContent(path); // el llamador maneja el error
     const language = await resolveLanguage(name); // lezer/legacy → TextMate → plano
+    const eol = detectEol(content);
 
     const markDirty = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         get().markDirty(path);
         set({ docVersion: get().docVersion + 1 });
+        // El servidor necesita ver el documento tal como está en el editor,
+        // no como está en disco (changeDoc agrupa los cambios).
+        const text = update.state.doc.toString();
+        withLsp((lsp) => lsp.changeDoc(path, name, text));
+      }
+      if ((update.docChanged || update.selectionSet) && get().activePath === path) {
+        set({ cursor: cursorFrom(update.state) });
       }
     });
 
@@ -176,14 +249,16 @@ export const useEditorStore = create((set, get) => ({
       extensions: [
         basicSetup,
         indentCompartment.of(indentExtension()),
+        eolCompartment.of(EditorState.lineSeparator.of(eol)),
         mergeCompartment.of([]), // vacío salvo cuando el agente deja un diff
         keymap.of([
-          indentWithTab,
+          tabKeymap,
           { key: 'Mod-s', run: () => { get().saveActive(); return true; } },
         ]),
         themeCompartment.of(themeExts),
         ...ghostTextExt, // autocompletado fantasma (inerte si está desactivado)
         ...lintExtension, // gutter de diagnósticos (A2)
+        ...lspExtensions(path, name), // completado real, hover, F12 (A1)
         ...language,
         // Snippets de extensiones VSCode: fuente dinámica (consulta el
         // registro en cada query, sin reconfigurar estados al instalar).
@@ -193,7 +268,14 @@ export const useEditorStore = create((set, get) => ({
     });
 
     stateCache.set(path, state);
-    set({ tabs: [...tabs, { path, name, dirty: false }], activePath: path });
+    set({
+      tabs: [...tabs, { path, name, dirty: false, eol }],
+      activePath: path,
+      cursor: cursorFrom(state),
+    });
+
+    // Arranca el servidor del lenguaje (si hay) y le abre el documento.
+    withLsp((lsp) => lsp.openDoc(path, name, content));
   },
 
   markDirty: (path) => {
@@ -207,7 +289,21 @@ export const useEditorStore = create((set, get) => ({
     }
   },
 
-  setActive: (path) => set({ activePath: path }),
+  setActive: (path) => {
+    const state = stateCache.get(path);
+    set({ activePath: path, ...(state ? { cursor: cursorFrom(state) } : {}) });
+    // El servidor pudo publicar diagnósticos de este archivo mientras estabas
+    // en otra pestaña: repintarlos al volver (la vista monta en el próximo frame).
+    const tab = get().tabs.find((t) => t.path === path);
+    if (!tab) return;
+    withLsp((lsp) => {
+      if (!lsp.clientFor(tab.name)) return; // sin LSP mandan ruff/eslint
+      const diagnostics = lsp.diagnosticsFor(path);
+      requestAnimationFrame(() => {
+        if (get().activePath === path && liveView) applyDiagnostics(liveView, diagnostics);
+      });
+    });
+  },
 
   /** El agente editó `path`: lo abre, salta al cambio y pinta el diff inline
       (verde/rojo con Aceptar/Rechazar). `oldContent` = contenido previo
@@ -268,13 +364,16 @@ export const useEditorStore = create((set, get) => ({
 
     const savedDoc = state.doc;
     try {
-      await writeFileContent(path, savedDoc.toString());
+      // sliceDoc (no doc.toString): respeta el fin de línea del archivo. Con
+      // toString() un archivo CRLF se reescribía entero a LF al guardarlo.
+      await writeFileContent(path, state.sliceDoc());
       if (isActive) stateCache.set(path, liveView.state);
       // Si el usuario siguió tecleando durante la escritura, sigue sucia.
       const unchanged = !isActive || liveView.state.doc === savedDoc || liveView.state.doc.eq(savedDoc);
       if (unchanged) {
         set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false } : t)) });
       }
+      withLsp((lsp) => lsp.saveDoc(path, tab.name));
     } catch (e) {
       if (silent) console.error('[editor] Autoguardado falló:', path, e);
       else alert('Error guardando el archivo: ' + e);
@@ -295,6 +394,26 @@ export const useEditorStore = create((set, get) => ({
         } catch { /* formateador ausente: no romper el guardado */ }
       }
     }
+  },
+
+  /** Cambia el fin de línea de una pestaña (LF ↔ CRLF) y la guarda. */
+  setEol: async (path, eol) => {
+    const tab = get().tabs.find((t) => t.path === path);
+    if (!tab || tab.eol === eol) return;
+
+    const effect = eolCompartment.reconfigure(EditorState.lineSeparator.of(eol));
+    if (path === get().activePath && liveView) {
+      liveView.dispatch({ effects: effect });
+      stateCache.set(path, liveView.state);
+    } else {
+      const state = stateCache.get(path);
+      if (state) stateCache.set(path, state.update({ effects: effect }).state);
+    }
+
+    // El texto no cambia (CodeMirror guarda las líneas, no los saltos): solo
+    // cambia cómo se serializa. Hay que marcarla sucia para que se reescriba.
+    set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, eol, dirty: true } : t)) });
+    await get().saveTab(path, true);
   },
 
   saveAll: async (silent = false) => {
@@ -389,6 +508,7 @@ export const useEditorStore = create((set, get) => ({
     }
 
     stateCache.delete(path);
+    withLsp((lsp) => lsp.closeDoc(path, tab.name));
     const remaining = tabs.filter((t) => t.path !== path);
     const nextActive =
       activePath === path

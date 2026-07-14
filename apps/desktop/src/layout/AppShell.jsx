@@ -1,24 +1,25 @@
-// AppShell.jsx — cascarón del IDE: activity bar + explorador + editor + chat + status bar.
-import { useEffect, useRef } from 'react';
+// AppShell.jsx — cascarón del IDE: activity bar + explorador + editor + chat +
+// dock inferior (terminal/problemas) + status bar. Ajustes y Consumo se abren
+// como ventana flotante para no desplazar el área de trabajo.
+import { useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useEditorStore } from '../store/editorStore';
 import { useVersion } from '../hooks/useVersion';
 
 import { ActivityBar } from './ActivityBar';
 import { SidePanel } from './SidePanel';
+import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
 import { UpdateModal } from '../components/UpdateModal';
 
 import { FileTree } from '../sections/Workspace/FileTree';
 import { SearchPanel } from '../sections/Search/SearchPanel';
 import { OutlinePanel } from '../sections/Outline/OutlinePanel';
-import { ProblemsPanel } from '../sections/Problems/ProblemsPanel';
 import { ExtensionsPanel } from '../sections/Extensions/ExtensionsPanel';
 import { EditorTabs } from '../editor/EditorTabs';
 import { RunControls } from '../editor/RunControls';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { Preview } from '../editor/Preview';
-import { TerminalPanel } from '../editor/TerminalPanel';
 import { ChatPanel } from '../chat/ChatPanel';
 import { Metrics } from '../sections/Metrics/Metrics';
 import { Settings } from '../sections/Settings/Settings';
@@ -27,27 +28,23 @@ import { DiffView } from '../sections/SourceControl/DiffView';
 import { Welcome } from '../sections/Workspace/Welcome';
 import { QuickOpen } from '../components/QuickOpen';
 import { CommandPalette } from '../components/CommandPalette';
+import { Modal } from '../components/Modal';
 import { InlineEdit } from '../editor/InlineEdit';
 import { useExtStore } from '../store/extStore';
-import { IconX } from '../components/Icons';
 import { registerBuiltinCommands } from '../commands/builtin';
 import { dispatchKeydown } from '../lib/keymap';
-
-const TERM_MIN_H = 120;
-const TERM_MAX_H = 640;
 
 export function AppShell() {
   const {
     panels, panelWidths, setPanelWidth,
-    panelHeights, setPanelHeight, togglePanel,
     centerView, editorFontSize, serverUrl,
     leftView, quickOpen, commandPalette, previewOpen,
+    modalView, modalSection, closeModal,
   } = useAppStore();
   const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate } = useVersion();
 
   const hasTabs = useEditorStore((s) => s.tabs.length > 0);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
-  const termFrame = useRef(null);
 
   // Reabrir la última carpeta de trabajo (el sandbox Rust no persiste)
   // y re-aplicar el tema de editor persistido (extensiones)
@@ -71,41 +68,7 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Arrastre del borde superior del panel de terminal para redimensionarlo.
-  const startTermDrag = (e) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = panelHeights.terminal || 240;
-    const onMove = (ev) => {
-      if (termFrame.current) cancelAnimationFrame(termFrame.current);
-      termFrame.current = requestAnimationFrame(() => {
-        const next = Math.min(TERM_MAX_H, Math.max(TERM_MIN_H, startH + (startY - ev.clientY)));
-        setPanelHeight('terminal', next);
-      });
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
-
   const renderCenter = () => {
-    if (centerView === 'metrics') {
-      return (
-        <div className="center-view">
-          <Metrics />
-        </div>
-      );
-    }
-    if (centerView === 'settings') {
-      return (
-        <div className="center-view">
-          <Settings />
-        </div>
-      );
-    }
     if (centerView === 'diff') {
       return <DiffView />;
     }
@@ -168,8 +131,6 @@ export function AppShell() {
               <SearchPanel />
             ) : leftView === 'outline' ? (
               <OutlinePanel />
-            ) : leftView === 'problems' ? (
-              <ProblemsPanel />
             ) : leftView === 'git' ? (
               <SourceControl />
             ) : leftView === 'extensions' ? (
@@ -185,25 +146,7 @@ export function AppShell() {
             {renderCenter()}
           </div>
 
-          {panels.terminal && (
-            <div
-              className="terminal-dock"
-              style={{ height: panelHeights.terminal || 240 }}
-            >
-              <div className="terminal-dock__resizer" onPointerDown={startTermDrag} />
-              <div className="terminal-dock__head">
-                <span className="terminal-dock__title">Terminal</span>
-                <button
-                  className="icon-btn"
-                  onClick={() => togglePanel('terminal')}
-                  title="Ocultar terminal (Ctrl+`)"
-                >
-                  <IconX size={15} />
-                </button>
-              </div>
-              <TerminalPanel />
-            </div>
-          )}
+          {panels.terminal && <BottomPanel />}
         </main>
 
         {panels.chat && (
@@ -220,6 +163,22 @@ export function AppShell() {
       {quickOpen && <QuickOpen />}
       {commandPalette && <CommandPalette />}
       <InlineEdit />
+
+      {modalView === 'settings' && (
+        <Modal title="Ajustes" onClose={closeModal} size="lg">
+          <Settings initialSection={modalSection} />
+        </Modal>
+      )}
+      {modalView === 'metrics' && (
+        <Modal
+          title="Consumo"
+          subtitle="Cuotas del período y tokens por día"
+          onClose={closeModal}
+          size="md"
+        >
+          <Metrics />
+        </Modal>
+      )}
 
       <StatusBar />
     </div>

@@ -8,7 +8,8 @@ import { listen } from '@tauri-apps/api/event';
 
 import { useTerminalStore } from '../store/terminalStore';
 import { termOpen, termWrite, termResize, termClose } from '../lib/tauri';
-import { IconX, IconPlus, IconChevronDown } from '../components/Icons';
+import { Select } from '../components/Select';
+import { IconX, IconPlus } from '../components/Icons';
 
 const XTERM_THEME = {
   background: '#171717',
@@ -116,18 +117,12 @@ function TerminalInstance({ session, active }) {
 
 export function TerminalPanel() {
   const { sessions, activeKey, addSession, closeSession, setActive } = useTerminalStore();
-  const pickerRef = useRef(null);
 
   // Abre una sesión por defecto la primera vez que se muestra el panel.
   useEffect(() => {
     if (sessions.length === 0) addSession('powershell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const onPick = (e) => {
-    const shell = e.target.value;
-    if (shell) { addSession(shell); e.target.value = ''; }
-  };
 
   return (
     <div className="terminal-panel">
@@ -157,15 +152,15 @@ export function TerminalPanel() {
           >
             <IconPlus size={15} />
           </button>
-          <div className="terminal-shell-picker" ref={pickerRef}>
-            <select onChange={onPick} defaultValue="" title="Elegir shell">
-              <option value="" disabled>Shell…</option>
-              {SHELLS.map((sh) => (
-                <option key={sh.id} value={sh.id}>{sh.label}</option>
-              ))}
-            </select>
-            <IconChevronDown size={13} />
-          </div>
+          <Select
+            className="select--compact"
+            up
+            value=""
+            placeholder="Shell…"
+            title="Abrir un terminal con otra shell"
+            options={SHELLS.map((sh) => ({ value: sh.id, label: sh.label }))}
+            onChange={(shell) => addSession(shell)}
+          />
         </div>
       </div>
 

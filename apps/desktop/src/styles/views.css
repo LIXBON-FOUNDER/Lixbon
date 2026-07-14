@@ -353,13 +353,261 @@
   pointer-events: none;
 }
 
+/* ── Ventana flotante (Ajustes / Consumo) ────────────────────────────── */
+/* No son documentos: se superponen al área de trabajo en vez de expulsar
+   al usuario del editor. Esc o clic fuera las cierra. */
+
+.modal__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 600;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5vh 24px;
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  box-shadow: 0 24px 64px rgba(var(--shadow-rgb), 0.28);
+  overflow: hidden;
+  animation: modal-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.modal--md { max-width: 780px; }
+.modal--lg { max-width: 1020px; height: 100%; }
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 16px 26px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.modal__title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.modal__subtitle {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.modal__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* El Consumo es una columna simple: le damos el scroll y el aire aquí. */
+.modal--md .modal__body {
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 24px 26px 28px;
+}
+
+/* ── Desplegable propio (Select.jsx) ─────────────────────────────────── */
+
+.select {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.select__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 190px;
+  max-width: 240px;
+  padding: 7px 10px 7px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.select__btn:hover:not(:disabled) { border-color: var(--border); }
+.select__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.select.is-open .select__btn { border-color: var(--border); background: var(--bg-secondary); }
+
+.select__btn svg {
+  flex-shrink: 0;
+  color: var(--ink-soft);
+  transition: transform 0.15s ease;
+}
+
+.select.is-open .select__btn svg { transform: rotate(180deg); }
+
+.select__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 50;
+  min-width: 100%;
+  max-width: 320px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 5px;
+  margin: 0;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  box-shadow: 0 14px 36px rgba(var(--shadow-rgb), 0.2);
+}
+
+/* Para controles pegados al borde inferior (picker de shell del terminal). */
+.select__menu--up {
+  top: auto;
+  bottom: calc(100% + 5px);
+}
+
+.select__opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.select__opt.is-hover { background: var(--bg-secondary); }
+.select__opt.is-disabled { opacity: 0.45; cursor: default; }
+
+.select__opt-check {
+  flex-shrink: 0;
+  width: 14px;
+  display: inline-flex;
+  color: var(--ink-soft);
+}
+
+.select__opt-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select__opt-hint {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+/* Variante fina (barra del terminal) */
+.select--compact .select__btn {
+  min-width: 0;
+  padding: 3px 6px 3px 9px;
+  font-size: 11.5px;
+  border-radius: 6px;
+}
+
 /* ── Ajustes ─────────────────────────────────────────────────────────── */
 
-.settings {
-  max-width: 640px;
+/* Navegación por secciones: la lista de categorías a la izquierda y el panel
+   de la categoría activa a la derecha. */
+.settings-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.settings-nav {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 12px;
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+  overflow-y: auto;
+}
+
+.settings-nav__search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  outline: none;
+}
+
+.settings-nav__search:focus { border-color: var(--border); }
+
+.settings-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  text-align: left;
+  color: var(--ink-soft);
+  background: none;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.settings-nav__item:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+
+.settings-nav__item.is-active {
+  color: var(--ink);
+  background: var(--bg);
+  font-weight: 500;
+}
+
+.settings-nav__item svg { flex-shrink: 0; color: var(--ink-soft); }
+.settings-nav__item.is-active svg { color: var(--ink); }
+
+.settings-nav__empty { padding: 4px 12px; }
+
+.settings-pane {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 18px;
+  padding: 24px 26px 28px;
+  overflow-y: auto;
 }
 
 .settings__panel {
@@ -404,19 +652,6 @@
   color: var(--ink-soft);
   opacity: 0.7;
 }
-
-.settings__select {
-  font-size: 13px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border-soft);
-  background: var(--bg);
-  color: var(--ink);
-  max-width: 220px;
-  cursor: pointer;
-}
-
-.settings__select:hover { border-color: var(--border); }
 
 .settings__row-value {
   font-weight: 500;
@@ -936,7 +1171,59 @@
 .outline__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .outline__line { font-size: 11px; color: var(--ink-soft); flex-shrink: 0; }
 
-/* ── Problemas (A2) ─────────────────────────────────────────────────────── */
+/* ── Problemas (A2) — vive en el dock inferior, junto al Terminal ───────── */
+.problems {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.problems__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.problems__summary {
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problems__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.problems__empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.problems__empty.is-error { color: var(--danger); }
+
+.problem__loc {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 .problem__item {
   display: flex;
   align-items: center;
@@ -956,6 +1243,65 @@
 .problem__sev--warning { color: #a8551a; }
 [data-theme='dark'] .problem__sev--warning { color: #d89b62; }
 .problem__msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+
+/* ── Servidores de lenguaje / LSP (A1) ──────────────────────────────────── */
+.lsp__list { display: flex; flex-direction: column; gap: 2px; }
+
+.lsp__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+}
+.lsp__row:last-child { border-bottom: none; }
+
+.lsp__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  flex-shrink: 0;
+}
+
+.lsp__state {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--ink-soft);
+  background: var(--bg-secondary);
+}
+.lsp__state--ready { color: var(--on-accent); background: var(--accent); }
+.lsp__state--installed { color: var(--ink); }
+.lsp__state--failed { color: var(--danger); background: var(--danger-soft); }
+
+.lsp__action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lsp__error {
+  font-size: 11.5px;
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.lsp__manual {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 
 /* ── Editor de atajos (D5) ──────────────────────────────────────────────── */
 .keybind__list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }

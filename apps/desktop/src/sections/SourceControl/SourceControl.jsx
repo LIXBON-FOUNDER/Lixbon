@@ -15,8 +15,7 @@ export function SourceControl() {
     init, pull, push, fetch, cloneRepo, cloning, cloneProgress,
     fileDiff, log, commitDiff, branches, checkout, stash,
   } = useGitStore();
-  const panels = useAppStore((s) => s.panels);
-  const togglePanel = useAppStore((s) => s.togglePanel);
+  const showBottomPanel = useAppStore((s) => s.showBottomPanel);
   const openWorkspace = useAppStore((s) => s.openWorkspace);
   const openDiff = useAppStore((s) => s.openDiff);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
@@ -60,7 +59,7 @@ export function SourceControl() {
   };
 
   const withTerminal = (fn) => {
-    if (!panels.terminal) togglePanel('terminal');
+    showBottomPanel('terminal'); // pull/push/fetch salen por el PTY
     fn();
   };
 

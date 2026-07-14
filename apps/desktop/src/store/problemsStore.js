@@ -17,6 +17,18 @@ export const useProblemsStore = create((set) => ({
     const path = ed.activePath;
     const tab = ed.tabs.find((t) => t.path === path);
     if (!tab) { set({ diagnostics: [], path: '', name: '', error: 'No hay archivo activo.' }); return; }
+
+    // Con un servidor de lenguaje vivo, él es la fuente de verdad: ya publica
+    // diagnósticos solo. Lanzar además ruff/eslint solo duplicaría los avisos.
+    const { useLspStore } = await import('./lspStore');
+    const lsp = useLspStore.getState();
+    if (lsp.clientFor(tab.name)) {
+      const diagnostics = lsp.diagnosticsFor(path);
+      set({ diagnostics, running: false, path, name: tab.name, error: '' });
+      applyDiagnostics(getLiveView(), diagnostics);
+      return;
+    }
+
     if (!hasLinter(tab.name)) {
       set({ diagnostics: [], path, name: tab.name, error: `No hay linter para ${tab.name}.` });
       clearDiagnostics(getLiveView());

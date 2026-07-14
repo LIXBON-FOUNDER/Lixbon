@@ -40,9 +40,16 @@ export const useAppStore = create((set, get) => ({
   recentFolders: JSON.parse(localStorage.getItem('lixbon_recents') || '[]'),
 
   // Layout del IDE
-  centerView: 'editor', // 'editor' | 'metrics' | 'settings' | 'diff'
+  centerView: 'editor', // 'editor' | 'diff' — el centro es SIEMPRE el área de trabajo
   diffData: null, // { title, patch } para el visor de diff (Git)
-  leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'git' | 'extensions'
+  leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'outline' | 'git' | 'extensions'
+  // Ventana flotante sobre el área de trabajo: null | 'settings' | 'metrics'.
+  // Ajustes y Consumo no son documentos: no deben ocupar el sitio del editor.
+  modalView: null,
+  modalSection: null, // categoría inicial de Ajustes (null = la última/por defecto)
+  // Panel inferior (como el de VSCode): 'terminal' | 'problems'.
+  // Su visibilidad sigue siendo panels.terminal (clave persistida desde antes).
+  bottomView: localStorage.getItem('lixbon_bottom_view') || 'terminal',
   quickOpen: false, // overlay Ctrl+P
   commandPalette: false, // overlay Ctrl+Mayús+P
   inlineEditOpen: false, // widget de edición inline con IA (Ctrl+K)
@@ -86,6 +93,29 @@ export const useAppStore = create((set, get) => ({
   /** Abre el visor de diff en el centro con un patch unified. */
   openDiff: (title, patch) => set({ diffData: { title, patch }, centerView: 'diff' }),
 
+  /** Ventana flotante (Ajustes / Consumo): no desplaza el editor.
+      `section` abre Ajustes directamente en esa categoría (barra de estado). */
+  openModal: (modalView, section = null) => set({ modalView, modalSection: section }),
+  closeModal: () => set({ modalView: null, modalSection: null }),
+
+  /** Muestra `view` en el panel inferior; clic sobre la vista ya activa lo pliega. */
+  openBottomPanel: (view) => {
+    const { panels, bottomView } = get();
+    if (panels.terminal && bottomView === view) {
+      get().togglePanel('terminal');
+      return;
+    }
+    get().showBottomPanel(view);
+  },
+
+  /** Igual que openBottomPanel pero sin plegar: lo usan Run/Build y Git, que
+      siempre necesitan el terminal a la vista. */
+  showBottomPanel: (view) => {
+    localStorage.setItem('lixbon_bottom_view', view);
+    set({ bottomView: view });
+    if (!get().panels.terminal) get().togglePanel('terminal');
+  },
+
   /** Muestra `view` en el panel izquierdo; clic sobre la vista ya activa lo pliega.
       (panels.explorer sigue siendo el flag de "panel izquierdo visible".) */
   openLeftPanel: (view) => {
@@ -116,6 +146,9 @@ export const useAppStore = create((set, get) => ({
     localStorage.setItem('lixbon_recents', JSON.stringify(recents));
     set({ workspaceRoot: canonical, recentFolders: recents });
     resetIndexCache(); // el índice RAG es por-workspace
+    // Los servidores de lenguaje se lanzan con una raíz fija: al cambiar de
+    // carpeta hay que matarlos (el siguiente archivo abierto los relanza).
+    import('./lspStore').then(({ useLspStore }) => useLspStore.getState().stopAll()).catch(() => {});
     useGitStore.getState().refresh();
     return canonical;
   },

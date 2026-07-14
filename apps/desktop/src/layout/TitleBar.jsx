@@ -1,6 +1,6 @@
 // TitleBar.jsx — barra de ventana propia (decorations: false).
 // Izquierda: logo + menús (Archivo/Editar/Ver/Terminal). Centro: arrastre.
-// Derecha: toggle del chat + controles de ventana (min/max/cerrar).
+// Derecha: cuenta + toggle del chat + controles de ventana (min/max/cerrar).
 // En modo `minimal` (carga y login) solo logo, título y controles.
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -10,6 +10,7 @@ import { openSearchPanel } from '@codemirror/search';
 import { useAppStore } from '../store/appStore';
 import { useEditorStore, getLiveView } from '../store/editorStore';
 import { useTerminalStore } from '../store/terminalStore';
+import { AccountMenu } from './AccountMenu';
 import { pickDirectory } from '../lib/tauri';
 import {
   IconWinMin, IconWinMax, IconWinRestore, IconX, IconPanelRight, IconCheck,
@@ -25,9 +26,10 @@ function withView(fn) {
 
 export function TitleBar({ minimal = false }) {
   const {
-    panels, togglePanel, centerView, setCenterView,
+    panels, togglePanel, setCenterView,
     autoSave, setAutoSave, openWorkspace,
     leftView, openLeftPanel, setQuickOpen,
+    bottomView, openBottomPanel, showBottomPanel, openModal,
   } = useAppStore();
   const hasActiveTab = useEditorStore((s) => !!s.activePath);
 
@@ -77,7 +79,7 @@ export function TitleBar({ minimal = false }) {
   };
 
   const newTerminal = (shell) => {
-    if (!useAppStore.getState().panels.terminal) togglePanel('terminal');
+    showBottomPanel('terminal');
     useTerminalStore.getState().addSession(shell);
   };
 
@@ -118,14 +120,16 @@ export function TitleBar({ minimal = false }) {
         { label: 'Buscar en archivos', shortcut: 'Ctrl+Mayús+F', run: () => openLeftPanel('search') },
         { sep: true },
         { label: 'Explorador', check: panels.explorer && leftView === 'explorer', run: () => openLeftPanel('explorer') },
+        { label: 'Esquema', check: panels.explorer && leftView === 'outline', run: () => openLeftPanel('outline') },
         { label: 'Control de código', check: panels.explorer && leftView === 'git', run: () => openLeftPanel('git') },
         { label: 'Extensiones', check: panels.explorer && leftView === 'extensions', run: () => openLeftPanel('extensions') },
         { label: 'Chat', check: panels.chat, run: () => togglePanel('chat') },
-        { label: 'Terminal', shortcut: 'Ctrl+`', check: panels.terminal, run: () => togglePanel('terminal') },
         { sep: true },
-        { label: 'Editor', check: centerView === 'editor', run: () => setCenterView('editor') },
-        { label: 'Métricas', check: centerView === 'metrics', run: () => setCenterView('metrics') },
-        { label: 'Ajustes', check: centerView === 'settings', run: () => setCenterView('settings') },
+        { label: 'Problemas', check: panels.terminal && bottomView === 'problems', run: () => openBottomPanel('problems') },
+        { label: 'Terminal', shortcut: 'Ctrl+`', check: panels.terminal && bottomView === 'terminal', run: () => openBottomPanel('terminal') },
+        { sep: true },
+        { label: 'Consumo…', run: () => openModal('metrics') },
+        { label: 'Ajustes…', run: () => openModal('settings') },
       ],
     },
     {
@@ -135,7 +139,7 @@ export function TitleBar({ minimal = false }) {
         { label: 'Nuevo terminal (cmd)', run: () => newTerminal('cmd') },
         { label: 'Nuevo terminal (bash)', run: () => newTerminal('bash') },
         { sep: true },
-        { label: panels.terminal ? 'Ocultar panel' : 'Mostrar panel', shortcut: 'Ctrl+`', run: () => togglePanel('terminal') },
+        { label: panels.terminal ? 'Ocultar panel' : 'Mostrar panel', shortcut: 'Ctrl+`', run: () => openBottomPanel('terminal') },
       ],
     },
   ];
@@ -190,6 +194,7 @@ export function TitleBar({ minimal = false }) {
       </div>
 
       <div className="titlebar__right">
+        {!minimal && <AccountMenu />}
         {!minimal && (
           <button
             className={`titlebar__chat ${panels.chat ? 'is-active' : ''}`}

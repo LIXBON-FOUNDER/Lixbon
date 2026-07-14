@@ -6,14 +6,16 @@ import {
 } from '../components/Icons';
 
 export function ActivityBar() {
-  const { panels, togglePanel, centerView, setCenterView, leftView, openLeftPanel } = useAppStore();
-
-  // Métricas y Ajustes ocupan el centro; clic de nuevo vuelve al editor
-  const toggleCenter = (view) => {
-    setCenterView(centerView === view ? 'editor' : view);
-  };
+  const {
+    panels, leftView, openLeftPanel,
+    bottomView, openBottomPanel,
+    modalView, openModal, closeModal,
+  } = useAppStore();
 
   const leftActive = (view) => panels.explorer && leftView === view;
+  const bottomActive = (view) => panels.terminal && bottomView === view;
+  // Ajustes y Consumo son ventanas flotantes: el botón las abre y las cierra.
+  const toggleModal = (view) => (modalView === view ? closeModal() : openModal(view));
 
   return (
     <nav className="activitybar">
@@ -42,9 +44,9 @@ export function ActivityBar() {
       </button>
 
       <button
-        className={`activitybar__btn ${leftActive('problems') ? 'is-active' : ''}`}
-        onClick={() => openLeftPanel('problems')}
-        title="Problemas (linter)"
+        className={`activitybar__btn ${bottomActive('problems') ? 'is-active' : ''}`}
+        onClick={() => openBottomPanel('problems')}
+        title="Problemas (linter) — panel inferior"
       >
         <IconWarn size={19} />
       </button>
@@ -66,8 +68,8 @@ export function ActivityBar() {
       </button>
 
       <button
-        className={`activitybar__btn ${panels.terminal ? 'is-active' : ''}`}
-        onClick={() => togglePanel('terminal')}
+        className={`activitybar__btn ${bottomActive('terminal') ? 'is-active' : ''}`}
+        onClick={() => openBottomPanel('terminal')}
         title="Terminal (Ctrl+`)"
       >
         <IconTerminal size={19} />
@@ -76,16 +78,16 @@ export function ActivityBar() {
       <div className="activitybar__spacer" />
 
       <button
-        className={`activitybar__btn ${centerView === 'metrics' ? 'is-active' : ''}`}
-        onClick={() => toggleCenter('metrics')}
-        title="Métricas de uso"
+        className={`activitybar__btn ${modalView === 'metrics' ? 'is-active' : ''}`}
+        onClick={() => toggleModal('metrics')}
+        title="Consumo del plan"
       >
         <IconChart size={19} />
       </button>
 
       <button
-        className={`activitybar__btn ${centerView === 'settings' ? 'is-active' : ''}`}
-        onClick={() => toggleCenter('settings')}
+        className={`activitybar__btn ${modalView === 'settings' ? 'is-active' : ''}`}
+        onClick={() => toggleModal('settings')}
         title="Ajustes"
       >
         <IconGear size={19} />

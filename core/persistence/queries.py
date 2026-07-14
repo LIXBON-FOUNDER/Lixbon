@@ -97,6 +97,14 @@ def cosine_similarity(v1: Any, v2: Any) -> float:
 
 # ─── Usuarios ──────────────────────────────────────────────────────────────
 
+def avatar_url_for(avatar_key: str | None) -> str | None:
+    """URL pública de la foto de perfil. Relativa: la web la usa tal cual y el
+    IDE le antepone su serverUrl."""
+    if not avatar_key:
+        return None
+    return f"/api/avatar/{avatar_key.rsplit('/', 1)[-1]}"
+
+
 def _user_to_dict(user: User) -> dict[str, Any]:
     return {
         "id": user.id,
@@ -107,8 +115,20 @@ def _user_to_dict(user: User) -> dict[str, Any]:
         "role": user.role or "user",
         "email_verified": bool(user.email_verified),
         "is_active": bool(user.is_active),
+        "avatar_url": avatar_url_for(user.avatar_key),
         "created_at": user.created_at,
     }
+
+
+def get_user_avatar_key(user_id: int) -> str | None:
+    with get_session() as s:
+        user = s.get(User, user_id)
+        return user.avatar_key if user else None
+
+
+def set_user_avatar(user_id: int, avatar_key: str | None) -> None:
+    with get_session() as s:
+        s.execute(update(User).where(User.id == user_id).values(avatar_key=avatar_key))
 
 
 def create_user(

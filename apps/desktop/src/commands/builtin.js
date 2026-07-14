@@ -11,6 +11,7 @@ import { useGitStore } from '../store/gitStore';
 import { useIndexStore } from '../store/indexStore';
 import { useProblemsStore } from '../store/problemsStore';
 import { formatFile } from '../lib/format';
+import { gotoDefinition } from '../editor/lspExt';
 
 let registered = false;
 
@@ -53,12 +54,12 @@ export function registerBuiltinCommands() {
     {
       id: 'problems.show', title: 'Problemas: analizar archivo',
       category: 'Ver', keywords: 'problemas linter errores lint ruff eslint',
-      run: () => { app().openLeftPanel('problems'); useProblemsStore.getState().run(); },
+      run: () => { app().showBottomPanel('problems'); useProblemsStore.getState().run(); },
     },
     {
       id: 'workbench.toggleTerminal', title: 'Alternar terminal',
       category: 'Ver', keywords: 'terminal consola shell',
-      run: () => app().togglePanel('terminal'),
+      run: () => app().openBottomPanel('terminal'),
     },
     {
       id: 'workbench.toggleChat', title: 'Alternar panel de chat',
@@ -71,14 +72,14 @@ export function registerBuiltinCommands() {
       run: () => app().openLeftPanel('extensions'),
     },
     {
-      id: 'workbench.showMetrics', title: 'Métricas de uso',
-      category: 'Ver', keywords: 'metricas uso tokens',
-      run: () => app().setCenterView('metrics'),
+      id: 'workbench.showMetrics', title: 'Consumo del plan',
+      category: 'Ver', keywords: 'metricas consumo uso tokens',
+      run: () => app().openModal('metrics'),
     },
     {
       id: 'workbench.openSettings', title: 'Ajustes',
       category: 'Ver', keywords: 'ajustes settings preferencias config',
-      run: () => app().setCenterView('settings'),
+      run: () => app().openModal('settings'),
     },
 
     // ── Editor ──────────────────────────────────────────────────────────
@@ -121,6 +122,14 @@ export function registerBuiltinCommands() {
         if (!tab) return;
         const res = await formatFile(tab.path, tab.name);
         if (!res.ok) alert('Formatear: ' + res.error);
+      },
+    },
+    {
+      id: 'editor.gotoDefinition', title: 'Ir a definición', category: 'Editor',
+      keywords: 'definicion definition lsp f12 saltar', when: hasTab,
+      run: async () => {
+        const ok = await gotoDefinition();
+        if (!ok) alert('No hay definición aquí (o el servidor de lenguaje no está activo).');
       },
     },
     {

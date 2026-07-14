@@ -1,9 +1,10 @@
 // AccountPage.jsx — "Ajustes": sección con sidebar interno (General, Cuenta,
 // Privacidad, Facturación, Uso). Reemplaza la antigua vista plana de Mi cuenta.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
+import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
 import { getThemePreference, setThemePreference } from '../lib/theme';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Logo } from '../components/Logo';
@@ -77,6 +78,83 @@ function Toggle({ checked, onChange, disabled, label }) {
 
 // ── General ─────────────────────────────────────────────────────────────
 
+function AvatarField({ user, onSaved }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  /** Tras cambiar la foto se relee el usuario: es la fuente de verdad que
+      comparten la web y el IDE. */
+  const sync = async () => {
+    const me = await api.get('/api/auth/me');
+    onSaved(me.data.user);
+  };
+
+  const pick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite reelegir el mismo archivo
+    if (!file) return;
+
+    const problem = validateAvatar(file);
+    if (problem) { setError(problem); return; }
+
+    setBusy(true);
+    setError('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      // El cliente axios manda application/json por defecto, y con ese header
+      // convertiría el FormData a JSON. Hay que declarar el multipart.
+      await api.post('/api/account/avatar', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      await sync();
+    } catch (err) {
+      setError(err?.response?.data?.detail?.message || 'No se pudo subir la imagen.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.delete('/api/account/avatar');
+      await sync();
+    } catch {
+      setError('No se pudo quitar la imagen.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="set-avatar-field">
+      {user.avatar_url ? (
+        <img className="set-avatar set-avatar--img" src={user.avatar_url} alt="" />
+      ) : (
+        <span className="set-avatar">{initialOf(user)}</span>
+      )}
+
+      <div className="set-avatar-actions">
+        <input ref={fileRef} type="file" accept={AVATAR_ACCEPT} hidden onChange={pick} />
+        <button className="set-btn" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? 'Subiendo…' : user.avatar_url ? 'Cambiar' : 'Subir foto'}
+        </button>
+        {user.avatar_url && (
+          <button className="set-btn set-btn--ghost" disabled={busy} onClick={remove}>
+            Quitar
+          </button>
+        )}
+        <span className="set-hint">PNG, JPG o WEBP · máx. 3 MB</span>
+      </div>
+
+      {error && <p className="set-error">{error}</p>}
+    </div>
+  );
+}
+
 function GeneralSection({ user, onSaved }) {
   const [first, setFirst] = useState(user.first_name || '');
   const [last, setLast] = useState(user.last_name || '');
@@ -108,8 +186,8 @@ function GeneralSection({ user, onSaved }) {
     <>
       <h2 className="set-title">Perfil</h2>
       <div className="set-card">
-        <Row label="Avatar">
-          <span className="set-avatar">{(first || user.username || '?')[0].toUpperCase()}</span>
+        <Row label="Avatar" hint="Se ve también en el IDE">
+          <AvatarField user={user} onSaved={onSaved} />
         </Row>
         <Row label="Nombre">
           <input className="set-input" value={first} onChange={(e) => setFirst(e.target.value)} />

@@ -224,6 +224,225 @@ muestra en `centerView: 'diff'` (`sections/SourceControl/DiffView.jsx`).
 
 ---
 
+## 6-bis. Reforma de UX del shell (2026-07-13)
+
+Cambios de dónde vive cada cosa. **Ninguno toca Rust ni el gateway.**
+
+### Panel inferior con pestañas (como VSCode)
+
+Antes: **Problemas** se abría en el panel izquierdo y el Terminal era un dock
+aparte. Ahora ambos son pestañas del **mismo dock inferior**.
+
+| Acción | Resultado esperado |
+|---|---|
+| Clic en el icono ⚠ de la activity bar | Abre el dock inferior en la pestaña **Problemas** |
+| Clic otra vez en el mismo icono | Pliega el dock |
+| `Ctrl+\`` o icono de terminal | Abre el dock en la pestaña **Terminal** |
+| Cambiar de pestaña Problemas ↔ Terminal | La sesión de PTY **sobrevive** (el buffer sigue ahí) |
+| Ejecutar Run/Build o `git pull` | Fuerza el dock a la pestaña **Terminal** |
+| Contador `0 · 0` de la status bar | Clic abre Problemas; muestra errores · avisos |
+
+> El linter solo corre cuando la pestaña **Problemas** está a la vista (lanza un
+> proceso `ruff`/`eslint`); con el Terminal delante no gasta nada.
+
+### Ajustes y Consumo como ventana flotante
+
+Antes ocupaban el centro y **echaban al usuario del editor**. Ahora se
+superponen: al cerrarlos (**Esc**, clic fuera o la ✕) el código sigue donde
+estaba, con las mismas pestañas abiertas.
+
+- Se abren desde: activity bar (⚙ y 📊), menú **Ver**, paleta de comandos, y
+  el chip del plan en la status bar (→ Consumo).
+- Verificar: abre un archivo, entra a Ajustes, ciérralo → **la pestaña y el
+  cursor siguen igual**.
+
+### Ajustes por secciones
+
+Era una columna con diez paneles seguidos. Ahora hay navegación lateral con un
+buscador: **Cuenta · Apariencia · Editor · IA · Agente · Índice (RAG) · Atajos ·
+Avanzado**.
+
+- Verificar que cada ajuste sigue **persistiendo** (cámbialo, cierra la ventana,
+  reábrela): tema, tamaño de letra, autoguardado, formatear al guardar,
+  tabulador, ghost text + modelo, modelo de visión, ventana de contexto, modo
+  agente, permisos de comandos, allowlist, RAG y atajos.
+- El buscador filtra por nombre de sección y palabras clave (p. ej. «rag»,
+  «tema», «comandos»).
+
+### Desplegables propios
+
+Los `<select>` nativos los pintaba Windows (fondo blanco, fuente del SO), así que
+rompían el tema oscuro. Sustituidos por `components/Select.jsx`.
+
+- Dónde: modelo de autocompletado, modelo de visión, ventana de contexto, modelo
+  de embeddings y el **picker de shell** del terminal (este abre **hacia arriba**).
+- Verificar: teclado completo (↑ ↓ para navegar, Enter selecciona, Esc cierra sin
+  cerrar la ventana de Ajustes) y clic fuera para cerrar.
+
+---
+
+## 6-ter. A1 · Servidores de lenguaje (LSP) — 2026-07-13
+
+**Qué resuelve.** La inteligencia de código que la gente busca en las extensiones
+de VSCode no vive en la extensión: vive en su **servidor**. La extensión de
+Python es un envoltorio de Pyright; la de Rust, de rust-analyzer. Esos servidores
+hablan **LSP**, un protocolo abierto — así que hablamos con ellos directamente,
+sin ejecutar una línea de código de extensión.
+
+**Lo que aporta:** autocompletado real (con tipos, no con palabras del archivo),
+errores en vivo, *hover* con documentación e **ir a definición (F12)**.
+
+### Arquitectura
+
+- **Rust** (`lsp_start` / `lsp_send` / `lsp_stop`) hace **solo de transporte**:
+  lanza el servidor, desenmarca el framing (`Content-Length: …`) y emite cada
+  mensaje por `lsp:msg:{id}`. Mismo patrón de proceso largo que el PTY.
+- **`lib/lspClient.js`** habla JSON-RPC: handshake, ciclo de vida del documento,
+  peticiones, y **responde a lo que el servidor nos pregunta** (`workspace/configuration`
+  — sin esto Pyright se queda colgado al arrancar).
+- **`store/lspStore.js`**: un proceso por servidor, no por archivo
+  (typescript-language-server sirve .ts/.tsx/.js/.jsx a la vez). Arranque perezoso.
+- **`editor/lspExt.js`**: completado, hover y F12 en CodeMirror.
+
+### Los servidores se instalan solos
+
+Al abrir el primer archivo de un lenguaje, si su servidor falta **se descarga e
+instala solo** (ajuste *Instalar servidores automáticamente*, ON por defecto).
+La status bar muestra «Instalando Pyright…» mientras tanto.
+
+Se instalan **dentro del app-data de lixbon**: no son globales, no piden
+permisos de administrador y no tocan el PATH. Si el usuario ya tiene uno
+instalado por su cuenta, **ese tiene prioridad** (Rust resuelve app-data → PATH).
+
+| Servidor | Automático | Prerequisito |
+|---|---|---|
+| Pyright (Python) | ✅ npm | **Node.js** |
+| TypeScript / JavaScript | ✅ npm | **Node.js** |
+| JSON · HTML · CSS · YAML | ✅ npm | **Node.js** |
+| rust-analyzer | ✅ .zip de GitHub (Windows) | — |
+| gopls (Go) | ❌ manual | toolchain de **Go** |
+| clangd (C/C++) | ❌ manual | **LLVM** |
+
+> Los dos manuales lo son por su naturaleza: `gopls` se **compila** con la
+> toolchain de Go, y el release de `clangd` lleva la versión en el nombre del
+> archivo (no hay URL estable). Ajustes → Lenguajes muestra el comando exacto.
+
+> **Ojo Windows:** los servidores de npm quedan como `.cmd`, y `CreateProcess`
+> **no ejecuta scripts** (solo `.exe`). Por eso Rust resuelve el PATH a mano con
+> `PATHEXT` y lanza los `.cmd` vía `cmd /C`.
+
+### Verificación
+
+| Paso | Resultado esperado |
+|---|---|
+| Abrir una carpeta con un proyecto Python y un `.py` (Node.js instalado) | Status bar: «Instalando Pyright…» → luego Ajustes → Lenguajes muestra **Pyright · activo** |
+| Ajustes → Lenguajes, botón **Instalar** | Instala ese servidor sin abrir ningún archivo |
+| Sin Node.js instalado | El servidor npm falla con *«Necesitas Node.js instalado»* (no rompe el editor) |
+| Escribir `import os` y luego `os.` | Autocompletado **con miembros reales** de `os` (no palabras del archivo) |
+| Escribir un error (`x: int = "a"`) | Subrayado rojo + fila en **Problemas**, sin pulsar nada |
+| Pasar el ratón sobre una función | Hover con su firma y documentación |
+| Cursor sobre una función y **F12** | Salta a su definición (aunque esté en otro archivo) |
+| Paleta → «Ir a definición» | Lo mismo |
+| Cambiar de carpeta de trabajo | Los servidores se **matan** (se relanzan solos al abrir un archivo) |
+| Apagar LSP en Ajustes | Vuelven ruff/eslint como fuente de Problemas |
+
+> Con un servidor LSP activo, **él sustituye a ruff/eslint**: publicar dos veces
+> los mismos errores solo duplicaría los avisos.
+
+**Si algo falla:** abre DevTools (Ctrl+Shift+I) — el stderr del servidor se
+reenvía a la consola con el prefijo `[lsp:<id>]`.
+
+### Bug del tabulador (arreglado)
+
+`indentWithTab` de CodeMirror **siempre re-indenta la línea entera**: al pulsar
+Tab con el cursor a mitad de línea, el espacio aparecía al *principio*. Ahora Tab
+inserta la indentación **en el cursor** (hasta la siguiente parada de
+tabulación), y solo re-indenta líneas cuando hay una selección. Mayús+Tab sigue
+quitando indentación.
+
+- Verificar: cursor a mitad de línea + Tab → el hueco sale **donde está el
+  cursor**. Seleccionar varias líneas + Tab → se indentan todas.
+
+---
+
+## 6-quater. Barra de estado (estilo VSCode) — 2026-07-13
+
+**Criterio:** en la barra van los ajustes que se cambian **a menudo y en el
+contexto del archivo abierto**. Los que se tocan una vez siguen en Ajustes.
+
+### Izquierda
+
+| Item | Qué hace |
+|---|---|
+| ● Conectado · 141 ms | Estado del gateway (como antes) |
+| ⎇ `master*` | Rama actual; el `*` indica cambios sin confirmar. Clic → panel de Git. Solo aparece si la carpeta es un repo |
+| ⟳ | Actualiza el estado de Git |
+| ⊗ 0 ⚠ 0 | Errores y avisos del archivo. Clic → pestaña **Problemas** |
+| «Instalando Pyright…» | Solo mientras un servidor se instala o arranca |
+
+### Derecha
+
+| Item | Qué hace |
+|---|---|
+| `Ln 9, Col 42` | Posición del cursor (y `(N sel.)` si hay selección) |
+| **`Espacios: 2`** | **Menú de indentación**: espacios ↔ tabulaciones y tamaño 2/4/8. Es el acceso directo que pediste |
+| `LF` / `CRLF` | **Menú de fin de línea**; cambiarlo reescribe el archivo |
+| `javascript` | Lenguaje detectado |
+| ● `Pyright` | Servidor de lenguaje del archivo (verde = activo). Clic → Ajustes → Lenguajes |
+| `qwen2.5-coder` | Modelo de IA activo |
+| **📊 Consumo · Plan Pro** | Abre la ventana de **Consumo** |
+| `v0.7.0` | Versión |
+
+### Bug de CRLF que salió al hacerlo (arreglado)
+
+CodeMirror serializa con `\n` salvo que se le diga otra cosa: `doc.toString()`
+**siempre** devuelve LF. Es decir, **abrir y guardar un archivo CRLF lo reescribía
+entero a LF** — y git lo veía como un cambio de *todas* las líneas.
+
+Ahora el fin de línea se **detecta al abrir** (`EditorState.lineSeparator`) y se
+conserva al guardar (`state.sliceDoc()` en vez de `doc.toString()`).
+
+- **Verificar:** abre un archivo con CRLF (la barra debe decir `CRLF`), toca una
+  línea, guarda y mira `git diff` → **solo debe salir esa línea**, no el archivo
+  entero.
+
+---
+
+## 6-quinquies. Cuenta y foto de perfil — 2026-07-13
+
+**Requiere desplegar el gateway** (columna nueva + endpoints) y tener **R2
+configurado** (`R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`). Sin R2, la subida responde 503 con un mensaje claro y
+todo lo demás sigue funcionando.
+
+### Dónde vive la imagen
+
+En **R2**, no en el disco de Railway (que es efímero: se perdería en cada
+redeploy). La fila `users` solo guarda `avatar_key`.
+
+El bucket es **privado**, así que `GET /api/avatar/{token}` hace de **proxy**: la
+credencial de R2 nunca sale del servidor. Ese GET es **público a propósito** — la
+key lleva un token aleatorio de 128 bits (impredecible) y así la **misma URL vale
+para la web (cookie) y para el IDE (Bearer)**: un `<img src>` no puede mandar
+cabeceras de autenticación.
+
+### Verificación
+
+| Paso | Resultado esperado |
+|---|---|
+| IDE: clic en la foto (arriba a la derecha) | Menú con nombre, correo, plan, y acciones |
+| «Subir foto» → elegir un PNG | La foto aparece en la barra de título al instante |
+| Recargar la **web** → barra lateral y Ajustes → Perfil | **La misma foto** (mismo usuario, misma BD) |
+| Subir desde la **web** → reabrir el IDE | La foto se ve también ahí |
+| Subir un archivo de 5 MB | «La imagen pesa 5.0 MB y el límite son 3 MB» (no se sube) |
+| Renombrar un `.txt` a `.png` y subirlo | Rechazado: el servidor comprueba la **firma** del archivo, no solo el tipo declarado |
+| «Quitar foto» | Vuelve la inicial del nombre, en web e IDE |
+
+> El plan del menú y el de la barra de estado (`Consumo · Plan Pro`) salen de
+> `user.plan_name`: cambian solos con el plan y se pintan con su color.
+
+---
+
 ## 7. Checklist final rápido
 
 - [ ] Las 3 versiones sincronizadas + tag `v0.7.0` pusheado
@@ -232,6 +451,10 @@ muestra en `centerView: 'diff'` (`sections/SourceControl/DiffView.jsx`).
 - [ ] Modelos en Ollama: `qwen2.5-coder`, `nomic-embed-text`
 - [ ] **`run_command` funciona** (probar B4 o A4 → si falla, el binario no lo trae)
 - [ ] M0 paleta · M1 Ctrl+K + agente · M2 ghost/@/RAG · M3 Git · M4 problemas/outline/formato · M5 preview/bienvenida/atajos
+- [ ] UX: dock inferior con pestañas · Ajustes/Consumo en ventana flotante · Ajustes por secciones · dropdowns propios
+- [ ] **A1 LSP**: servidor instalado → autocompletado real, errores en vivo, hover, F12 (ver §6-ter)
+- [ ] Barra de estado: rama, indentación, LF/CRLF, Consumo (§6-quater)
+- [ ] **Foto de perfil**: gateway desplegado + R2 configurado; se sincroniza web ↔ IDE (§6-quinquies)
 
 > Si algo falla, anota: (1) qué función, (2) qué esperabas, (3) el error exacto
 > (consola del IDE con F12 / DevTools, o el log del CI). Con eso lo depuramos.

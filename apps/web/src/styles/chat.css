@@ -306,6 +306,11 @@
   font-weight: 500;
 }
 
+.sidebar__avatar--img {
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+
 .sidebar__profile-info {
   flex: 1;
   min-width: 0;

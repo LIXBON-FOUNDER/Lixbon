@@ -9,8 +9,7 @@ import { IconPlay, IconHammer } from '../components/Icons';
 
 export function RunControls() {
   const [config, setConfig] = useState(null);
-  const panels = useAppStore((s) => s.panels);
-  const togglePanel = useAppStore((s) => s.togglePanel);
+  const showBottomPanel = useAppStore((s) => s.showBottomPanel);
   const runCommand = useTerminalStore((s) => s.runCommand);
 
   useEffect(() => {
@@ -28,7 +27,7 @@ export function RunControls() {
 
   const run = (cmd) => {
     if (!cmd) return;
-    if (!panels.terminal) togglePanel('terminal');
+    showBottomPanel('terminal'); // el comando escribe en el PTY: hay que verlo
     runCommand(cmd);
   };
 

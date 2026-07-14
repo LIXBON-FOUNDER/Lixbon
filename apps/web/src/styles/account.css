@@ -567,6 +567,52 @@
   text-decoration: none;
 }
 
+/* ── Foto de perfil (la misma que muestra el IDE) ────────────────────── */
+
+.set-avatar--img {
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+
+.set-avatar-field {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.set-avatar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.set-avatar-actions .set-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.set-avatar-actions .set-btn:hover:not(:disabled) { border-color: var(--border); }
+.set-avatar-actions .set-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.set-avatar-actions .set-btn--ghost { color: var(--ink-soft); }
+
+.set-hint {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.set-error {
+  width: 100%;
+  font-size: 13px;
+  color: var(--danger);
+}
+
 .set-actions {
   display: flex;
   align-items: center;

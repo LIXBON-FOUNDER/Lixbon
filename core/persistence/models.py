@@ -23,6 +23,9 @@ class User(Base):
     email_verified: Mapped[int] = mapped_column(nullable=False, default=0)
     is_active: Mapped[int] = mapped_column(nullable=False, default=1)         # 0 = bloqueado por admin (F6)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # Foto de perfil: key del objeto en R2 ("avatars/<token>.png"). El token es
+    # impredecible, así que el GET público no necesita autenticación.
+    avatar_key: Mapped[str | None] = mapped_column(Text)
     # Preferencias del usuario (JSON parcial; los defaults viven en queries.SETTINGS_DEFAULTS)
     settings_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)

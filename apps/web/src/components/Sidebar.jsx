@@ -197,9 +197,13 @@ export function Sidebar({
         <div className="sidebar__profile">
           {user ? (
             <>
-              <span className="sidebar__avatar">
-                {(user.first_name || user.username || '?')[0].toUpperCase()}
-              </span>
+              {user.avatar_url ? (
+                <img className="sidebar__avatar sidebar__avatar--img" src={user.avatar_url} alt="" />
+              ) : (
+                <span className="sidebar__avatar">
+                  {(user.first_name || user.username || '?')[0].toUpperCase()}
+                </span>
+              )}
               <div className="sidebar__profile-info">
                 <span className="sidebar__profile-name">
                   {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}

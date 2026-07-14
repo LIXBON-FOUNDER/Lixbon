@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -579,6 +579,434 @@ fn term_close(id: String, terms: State<Terminals>) -> Result<(), String> {
         let _ = handle.child.kill();
     }
     Ok(())
+}
+
+// ── LSP (servidores de lenguaje) ─────────────────────────────────────────
+//
+// Rust solo hace de transporte: lanza el servidor, desenmarca el framing de
+// LSP (`Content-Length: N\r\n\r\n{json}`) y emite cada mensaje entero al
+// frontend, que es quien habla JSON-RPC. Un servidor por `id` (= lenguaje).
+
+/// Servidor de lenguaje vivo. El hilo lector no toca este estado: aquí solo
+/// queda stdin (para escribir) y el hijo (para matarlo al parar).
+struct LspHandle {
+    stdin: std::process::ChildStdin,
+    child: std::process::Child,
+}
+
+struct LspServers(Mutex<HashMap<String, LspHandle>>);
+
+/// Tope de un mensaje LSP. rust-analyzer manda respuestas enormes en repos
+/// grandes, pero un `Content-Length` absurdo solo puede ser un marco corrupto.
+const MAX_LSP_MESSAGE: usize = 64 * 1024 * 1024;
+
+/// Lee un mensaje del framing de LSP: cabeceras `Clave: valor` hasta una línea
+/// vacía, y después `Content-Length` bytes de cuerpo JSON.
+/// `Ok(None)` = EOF o marco irrecuperable → el hilo lector termina.
+fn read_lsp_message<R: std::io::BufRead>(reader: &mut R) -> std::io::Result<Option<String>> {
+    let mut len: Option<usize> = None;
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(None); // el servidor cerró stdout
+        }
+        let header = line.trim_end_matches(['\r', '\n']);
+        if header.is_empty() {
+            break; // línea en blanco: acaban las cabeceras
+        }
+        if let Some(value) = header.strip_prefix("Content-Length:") {
+            len = value.trim().parse().ok();
+        }
+    }
+
+    let Some(len) = len else {
+        return Ok(None); // sin Content-Length no hay forma de desenmarcar
+    };
+    if len > MAX_LSP_MESSAGE {
+        return Ok(None);
+    }
+
+    let mut body = vec![0u8; len];
+    reader.read_exact(&mut body)?;
+    Ok(Some(String::from_utf8_lossy(&body).into_owned()))
+}
+
+/// Busca el ejecutable en el PATH. En Windows hay que probar las extensiones de
+/// PATHEXT a mano: CreateProcess solo añade `.exe`, y casi todos los servidores
+/// que se instalan con npm (pyright, typescript-language-server…) quedan como
+/// `.cmd`, así que sin esto «no se encuentra» aunque estén instalados.
+fn resolve_program(program: &str) -> Option<PathBuf> {
+    let direct = Path::new(program);
+    if direct.is_absolute() {
+        return direct.is_file().then(|| direct.to_path_buf());
+    }
+
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(program);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        #[cfg(windows)]
+        {
+            let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT".to_string());
+            for ext in exts.split(';').filter(|e| !e.is_empty()) {
+                let candidate = dir.join(format!("{program}{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Prepara el proceso del servidor. Los `.cmd`/`.bat` son scripts: CreateProcess
+/// no los ejecuta, hay que pasarlos por `cmd /C`.
+fn build_lsp_command(program: &str, args: &[String]) -> Result<Command, String> {
+    let resolved = resolve_program(program).ok_or_else(|| {
+        format!("No se encontró «{program}» en el PATH. Instálalo y reinicia lixbon.")
+    })?;
+
+    #[cfg(windows)]
+    {
+        let is_script = resolved
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+            .unwrap_or(false);
+        if is_script {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C").arg(&resolved).args(args);
+            return Ok(cmd);
+        }
+    }
+
+    let mut cmd = Command::new(&resolved);
+    cmd.args(args);
+    Ok(cmd)
+}
+
+// ── Instalación de servidores ────────────────────────────────────────────
+//
+// Los servidores se instalan en el app-data de lixbon (NO globales: no hacen
+// falta permisos de administrador ni tocan el PATH del usuario). Si el usuario
+// ya tiene uno instalado por su cuenta, ese gana.
+
+fn servers_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("servers");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Nombres de archivo válidos para un ejecutable. En Windows se EXCLUYE el
+/// nombre pelado a propósito: npm deja junto al `.cmd` un script de shell sin
+/// extensión que CreateProcess no sabe ejecutar.
+fn binary_names(bin: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        vec![format!("{bin}.exe"), format!("{bin}.cmd"), format!("{bin}.bat")]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![bin.to_string()]
+    }
+}
+
+fn find_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
+    if depth == 0 {
+        return None;
+    }
+    let mut subdirs = Vec::new();
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            subdirs.push(path);
+        } else if path.file_name().and_then(|n| n.to_str()) == Some(name) {
+            return Some(path);
+        }
+    }
+    for sub in subdirs {
+        if let Some(found) = find_file(&sub, name, depth - 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Busca el ejecutable dentro de la carpeta gestionada. Primero los sitios
+/// donde debería estar (npm lo deja en `node_modules/.bin`), y si no, se
+/// rastrea el árbol: los zips de rust-analyzer/clangd lo anidan.
+fn find_managed_binary(dir: &Path, bin: &str) -> Option<PathBuf> {
+    let names = binary_names(bin);
+    for name in &names {
+        for candidate in [dir.join("node_modules").join(".bin").join(name), dir.join(name)] {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    for name in &names {
+        if let Some(found) = find_file(dir, name, 4) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Ruta del servidor `bin`: primero el instalado por lixbon, luego el PATH del
+/// sistema. `None` = no está.
+#[tauri::command]
+fn lsp_resolve(app: AppHandle, id: String, bin: String) -> Result<Option<String>, String> {
+    let dir = servers_dir(&app)?.join(sanitize_component(&id));
+    if dir.is_dir() {
+        if let Some(path) = find_managed_binary(&dir, &bin) {
+            return Ok(Some(display_path(&path)));
+        }
+    }
+    Ok(resolve_program(&bin).map(|p| display_path(&p)))
+}
+
+/// Instala un servidor publicado en npm, local a lixbon (`npm install --prefix`).
+/// Devuelve la ruta del ejecutable. Requiere Node.js en el sistema.
+#[tauri::command]
+async fn lsp_install_npm(
+    app: AppHandle,
+    id: String,
+    package: String,
+    bin: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = servers_dir(&app)?.join(sanitize_component(&id));
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+        let args: Vec<String> = vec![
+            "install".into(),
+            "--prefix".into(),
+            display_path(&dir),
+            "--no-audit".into(),
+            "--no-fund".into(),
+            "--loglevel".into(),
+            "error".into(),
+            package.clone(),
+        ];
+        let mut cmd = build_lsp_command("npm", &args)
+            .map_err(|_| "Necesitas Node.js instalado (no se encontró npm).".to_string())?;
+        cmd.current_dir(&dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        hide_console(&mut cmd);
+
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("npm falló instalando {package}: {}", err.trim()));
+        }
+
+        find_managed_binary(&dir, &bin)
+            .map(|p| display_path(&p))
+            .ok_or_else(|| format!("Se instaló {package}, pero no apareció «{bin}»."))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+const SERVER_MAX_BYTES: usize = 200 * 1024 * 1024;
+
+/// Descarga un servidor distribuido como .zip (releases de GitHub) y lo extrae
+/// en el app-data. Devuelve la ruta del ejecutable.
+#[tauri::command]
+async fn lsp_install_archive(
+    app: AppHandle,
+    id: String,
+    url: String,
+    bin: String,
+) -> Result<String, String> {
+    if !url.starts_with("https://github.com/") {
+        return Err("Solo se descargan servidores desde github.com".to_string());
+    }
+
+    let resp = tauri_plugin_http::reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Descarga fallida: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Descarga fallida ({})", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > SERVER_MAX_BYTES {
+        return Err("El servidor supera los 200 MB".to_string());
+    }
+    let data = bytes.to_vec();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = servers_dir(&app)?.join(sanitize_component(&id));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; // reinstalar limpio
+        }
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        unzip_into(data, &dir)?;
+        find_managed_binary(&dir, &bin)
+            .map(|p| display_path(&p))
+            .ok_or_else(|| format!("El archivo no contenía «{bin}»."))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn unzip_into(data: Vec<u8>, dir: &Path) -> Result<(), String> {
+    let mut zip =
+        zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| format!("Zip inválido: {e}"))?;
+    if zip.len() > VSIX_MAX_ENTRIES {
+        return Err("El archivo tiene demasiadas entradas".to_string());
+    }
+
+    let mut total: u64 = 0;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        // enclosed_name() ya descarta rutas absolutas y `..` (zip slip).
+        let Some(rel) = entry.enclosed_name() else { continue };
+        let out = dir.join(rel);
+
+        if entry.is_dir() {
+            fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            continue;
+        }
+        total += entry.size();
+        if total > VSIX_MAX_UNCOMPRESSED {
+            return Err("El archivo es demasiado grande al descomprimir".to_string());
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut file = fs::File::create(&out).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(mode) = entry.unix_mode() {
+                let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Borra un servidor instalado por lixbon (para reinstalarlo limpio).
+#[tauri::command]
+fn lsp_uninstall_server(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = servers_dir(&app)?.join(sanitize_component(&id));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn lsp_kill(id: &str, servers: &State<LspServers>) -> Result<(), String> {
+    let mut map = servers.0.lock().map_err(|_| "Estado interno corrupto".to_string())?;
+    if let Some(mut handle) = map.remove(id) {
+        let _ = handle.child.kill();
+        let _ = handle.child.wait();
+    }
+    Ok(())
+}
+
+/// Lanza un servidor de lenguaje en la carpeta de trabajo. Los mensajes que
+/// emita llegan por el evento `lsp:msg:{id}` (JSON ya desenmarcado), sus logs
+/// por `lsp:err:{id}` y su muerte por `lsp:exit:{id}`.
+#[tauri::command]
+fn lsp_start(
+    app: AppHandle,
+    id: String,
+    command: String,
+    args: Vec<String>,
+    root: State<WorkspaceRoot>,
+    servers: State<LspServers>,
+) -> Result<(), String> {
+    let dir = workspace_path(&root)?;
+    lsp_kill(&id, &servers)?; // reiniciar = matar el anterior
+
+    let mut cmd = build_lsp_command(&command, &args)?;
+    cmd.current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("No se pudo iniciar «{command}»: {e}"))?;
+
+    let stdin = child.stdin.take().ok_or("El servidor no expuso stdin")?;
+    let stdout = child.stdout.take().ok_or("El servidor no expuso stdout")?;
+    let stderr = child.stderr.take().ok_or("El servidor no expuso stderr")?;
+
+    let msg_event = format!("lsp:msg:{id}");
+    let exit_event = format!("lsp:exit:{id}");
+    let app_out = app.clone();
+    thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stdout);
+        while let Ok(Some(msg)) = read_lsp_message(&mut reader) {
+            if app_out.emit(&msg_event, msg).is_err() {
+                break; // la ventana se fue
+            }
+        }
+        let _ = app_out.emit(&exit_event, ());
+    });
+
+    // Los servidores usan stderr para logs; se reenvía para poder depurarlos.
+    let err_event = format!("lsp:err:{id}");
+    let app_err = app.clone();
+    thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let _ = app_err.emit(&err_event, line.trim_end().to_string());
+                }
+            }
+        }
+    });
+
+    servers
+        .0
+        .lock()
+        .map_err(|_| "Estado interno corrupto".to_string())?
+        .insert(id, LspHandle { stdin, child });
+
+    Ok(())
+}
+
+/// Envía un mensaje JSON-RPC ya serializado (el framing lo pone Rust).
+#[tauri::command]
+fn lsp_send(id: String, message: String, servers: State<LspServers>) -> Result<(), String> {
+    let mut map = servers.0.lock().map_err(|_| "Estado interno corrupto".to_string())?;
+    let handle = map
+        .get_mut(&id)
+        .ok_or_else(|| "Servidor de lenguaje no encontrado".to_string())?;
+
+    let body = message.as_bytes();
+    handle
+        .stdin
+        .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+        .map_err(|e| e.to_string())?;
+    handle.stdin.write_all(body).map_err(|e| e.to_string())?;
+    handle.stdin.flush().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn lsp_stop(id: String, servers: State<LspServers>) -> Result<(), String> {
+    lsp_kill(&id, &servers)
 }
 
 // ── Git (CLI del sistema) ────────────────────────────────────────────────
@@ -1304,6 +1732,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
+        .manage(LspServers(Mutex::new(HashMap::new())))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
@@ -1329,6 +1758,13 @@ pub fn run() {
             term_write,
             term_resize,
             term_close,
+            lsp_start,
+            lsp_send,
+            lsp_stop,
+            lsp_resolve,
+            lsp_install_npm,
+            lsp_install_archive,
+            lsp_uninstall_server,
             git_run,
             git_clone,
             run_command,

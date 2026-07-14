@@ -79,6 +79,21 @@ def presigned_get_url(key: str, ttl_min: int | None = None) -> str:
     )
 
 
+def upload_bytes(key: str, data: bytes, content_type: str | None = None) -> str:
+    """Sube bytes al bucket (fotos de perfil). Lanza R2NotConfigured."""
+    import io
+
+    return upload_release(key, io.BytesIO(data), content_type)
+
+
+def get_object_bytes(key: str) -> bytes:
+    """Descarga un objeto entero. El bucket es privado, así que el gateway hace
+    de proxy: nunca se expone la credencial ni el bucket."""
+    client = _get_client()
+    resp = client.get_object(Bucket=R2_BUCKET, Key=key)
+    return resp["Body"].read()
+
+
 def object_exists(key: str) -> bool:
     client = _get_client()
     try:

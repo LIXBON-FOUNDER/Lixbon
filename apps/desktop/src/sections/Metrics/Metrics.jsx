@@ -51,7 +51,6 @@ export function Metrics() {
   if (error) {
     return (
       <div className="metrics">
-        <h2 className="center-view__title">Consumo</h2>
         <p className="metrics__error">No se pudo cargar el consumo: {error}</p>
       </div>
     );
@@ -60,7 +59,6 @@ export function Metrics() {
   if (!data) {
     return (
       <div className="metrics">
-        <h2 className="center-view__title">Consumo</h2>
         <div className="metrics__tiles">
           <span className="skeleton metrics__skeleton-tile" />
           <span className="skeleton metrics__skeleton-tile" />
@@ -74,14 +72,13 @@ export function Metrics() {
 
   return (
     <div className="metrics">
-      <div className="metrics__head">
-        <h2 className="center-view__title">Consumo</h2>
-        {plan && (
+      {plan && (
+        <div className="metrics__head">
           <span className="metrics__plan" style={{ color: planColor(plan.id) }}>
             Plan {plan.name}
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="metrics__tiles">
         <QuotaTile
