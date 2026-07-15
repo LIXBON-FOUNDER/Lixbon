@@ -227,6 +227,35 @@ fn delete_entry(path: String, root: State<WorkspaceRoot>) -> Result<(), String> 
     }
 }
 
+/// Mueve una entrada a otra carpeta (drag & drop del explorador). Devuelve la
+/// nueva ruta. Guarda contra: mover la raíz, destino que no es carpeta, mover
+/// una carpeta dentro de sí misma o de un descendiente, y pisar algo existente.
+#[tauri::command]
+fn move_entry(path: String, dest_dir: String, root: State<WorkspaceRoot>) -> Result<String, String> {
+    let src = ensure_inside_root(&root, &path)?;
+    let dst_dir = ensure_inside_root(&root, &dest_dir)?;
+    if is_workspace_root(&root, &src) {
+        return Err("No se puede mover la carpeta de trabajo".to_string());
+    }
+    if !dst_dir.is_dir() {
+        return Err("El destino no es una carpeta".to_string());
+    }
+    let name = src.file_name().ok_or_else(|| "Ruta inválida".to_string())?;
+    let dest = dst_dir.join(name);
+    if dest == src {
+        return Ok(display_path(&src)); // ya está en esa carpeta
+    }
+    // starts_with(src) cubre tanto el propio origen como cualquier descendiente.
+    if dst_dir.starts_with(&src) {
+        return Err("No se puede mover una carpeta dentro de sí misma".to_string());
+    }
+    if dest.exists() {
+        return Err("Ya existe una entrada con ese nombre en el destino".to_string());
+    }
+    fs::rename(&src, &dest).map_err(|e| e.to_string())?;
+    Ok(display_path(&dest))
+}
+
 fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     if src.is_dir() {
         fs::create_dir_all(dst)?;
@@ -773,6 +802,80 @@ fn lsp_resolve(app: AppHandle, id: String, bin: String) -> Result<Option<String>
     Ok(resolve_program(&bin).map(|p| display_path(&p)))
 }
 
+/// Busca un binario instalado por el propio proyecto (`node_modules/.bin/<bin>`),
+/// subiendo desde la carpeta del archivo hasta la raíz del workspace — igual que
+/// hace VSCode con eslint/prettier. `None` si el proyecto no lo trae.
+#[tauri::command]
+fn resolve_project_bin(
+    start_dir: String,
+    bin: String,
+    root: State<WorkspaceRoot>,
+) -> Result<Option<String>, String> {
+    let start = ensure_inside_root(&root, &start_dir)?;
+    let root_dir = workspace_path(&root)?;
+    let names = binary_names(&bin);
+    let mut dir: PathBuf = if start.is_dir() {
+        start
+    } else {
+        start.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| root_dir.clone())
+    };
+    loop {
+        for name in &names {
+            let cand = dir.join("node_modules").join(".bin").join(name);
+            if cand.is_file() {
+                return Ok(Some(display_path(&cand)));
+            }
+        }
+        if dir == root_dir {
+            break;
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => break,
+        }
+    }
+    Ok(None)
+}
+
+/// Config plano por defecto de ESLint que usa lixbon cuando el proyecto no trae
+/// el suyo: reglas de núcleo (sin plugins) para que el análisis funcione «de
+/// fábrica». `.mjs` para forzar ESM sin depender del package.json del proyecto.
+const ESLINT_DEFAULT_CONFIG: &str = r#"// Config por defecto de lixbon (solo reglas de núcleo, sin plugins).
+export default [
+  {
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: {
+        console: 'readonly', window: 'readonly', document: 'readonly',
+        process: 'readonly', module: 'readonly', require: 'readonly',
+        __dirname: 'readonly', setTimeout: 'readonly', setInterval: 'readonly',
+        fetch: 'readonly', globalThis: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': 'warn',
+      'no-undef': 'error',
+      'no-unreachable': 'warn',
+      'no-constant-condition': 'warn',
+    },
+  },
+];
+"#;
+
+/// Asegura el config por defecto de ESLint en la app-data de lixbon y devuelve
+/// su ruta. Se pasa con `--config` cuando el proyecto no tiene uno propio.
+#[tauri::command]
+fn eslint_default_config(app: AppHandle) -> Result<String, String> {
+    let dir = servers_dir(&app)?.join("tool-eslint");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let cfg = dir.join("eslint.config.mjs");
+    if !cfg.is_file() {
+        fs::write(&cfg, ESLINT_DEFAULT_CONFIG).map_err(|e| e.to_string())?;
+    }
+    Ok(display_path(&cfg))
+}
+
 /// Instala un servidor publicado en npm, local a lixbon (`npm install --prefix`).
 /// Devuelve la ruta del ejecutable. Requiere Node.js en el sistema.
 #[tauri::command]
@@ -1070,9 +1173,15 @@ struct CmdOutput {
 async fn run_command(
     command: String,
     timeout_ms: Option<u64>,
+    cwd: Option<String>,
     root: State<'_, WorkspaceRoot>,
 ) -> Result<CmdOutput, String> {
-    let dir = workspace_path(&root)?;
+    // cwd opcional (p. ej. la carpeta del archivo para que eslint encuentre su
+    // config); si no se pasa, la carpeta de trabajo. Siempre dentro de la raíz.
+    let dir = match cwd {
+        Some(c) => ensure_inside_root(&root, &c)?,
+        None => workspace_path(&root)?,
+    };
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 600_000));
     tauri::async_runtime::spawn_blocking(move || run_command_blocking(command, dir, timeout))
         .await
@@ -1751,6 +1860,9 @@ pub fn run() {
             rename_entry,
             delete_entry,
             duplicate_entry,
+            move_entry,
+            resolve_project_bin,
+            eslint_default_config,
             reveal_in_os,
             search_in_files,
             list_files,

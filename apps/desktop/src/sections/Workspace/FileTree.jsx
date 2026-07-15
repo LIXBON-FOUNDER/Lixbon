@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ask } from '@tauri-apps/plugin-dialog';
 import {
   readDir, createNewEntry, renameEntry, deleteEntry, duplicateEntry,
-  revealInOs, pickDirectory,
+  moveEntry, revealInOs, pickDirectory,
 } from '../../lib/tauri';
 import { useEditorStore } from '../../store/editorStore';
 import { useAppStore } from '../../store/appStore';
@@ -89,6 +89,12 @@ export function FileTree() {
   // Menú contextual: { x, y, entry, parent } (entry=null → área raíz)
   const [ctxMenu, setCtxMenu] = useState(null);
   const menuRef = useRef(null);
+
+  // Nodo seleccionado (destino de la tecla Supr): { entry, parent }
+  const [selected, setSelected] = useState(null);
+  // Drag & drop: origen arrastrado y carpeta resaltada como destino
+  const dragSrc = useRef(null); // { entry, parent }
+  const [dropTarget, setDropTarget] = useState(null); // path de la carpeta destino
 
   const loadRoot = useCallback(async () => {
     if (!rootPath) return;
@@ -220,11 +226,29 @@ export function FileTree() {
     try {
       await deleteEntry(entry.path);
       useEditorStore.getState().closeUnder(entry.path);
+      setSelected(null);
       await refreshParent(parent);
     } catch (err) {
       alert('Error eliminando: ' + err);
     }
   };
+
+  // Tecla Supr: elimina el nodo seleccionado. Escucha en ventana pero con
+  // guardia: no dispara si estás escribiendo (editor, inputs), para no borrar un
+  // archivo sin querer mientras editas. Escape limpia la selección.
+  useEffect(() => {
+    const isTyping = (el) =>
+      !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { setSelected(null); return; }
+      if (e.key === 'Delete' && selected && !isTyping(document.activeElement)) {
+        e.preventDefault();
+        handleDelete(selected.entry, selected.parent);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDuplicate = async (entry, parent) => {
     try {
@@ -233,6 +257,61 @@ export function FileTree() {
     } catch (err) {
       alert('Error duplicando: ' + err);
     }
+  };
+
+  // ── Mover (drag & drop) ──────────────────────────────────────────────
+
+  const handleMove = async (src, destDir) => {
+    if (!src) return;
+    if (src.parent === destDir) return;      // ya está en esa carpeta
+    if (src.entry.path === destDir) return;  // soltar sobre sí misma
+    try {
+      const newPath = await moveEntry(src.entry.path, destDir);
+      useEditorStore.getState().remapPaths(src.entry.path, newPath);
+      setSelected(null);
+      setExpandedDirs((p) => ({ ...p, [destDir]: true }));
+      await refreshParent(src.parent);
+      await refreshParent(destDir);
+    } catch (err) {
+      alert('Error moviendo: ' + err);
+    }
+  };
+
+  const startDrag = (e, entry, parent) => {
+    dragSrc.current = { entry, parent };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', entry.path);
+  };
+
+  // Sobre una carpeta: la resalta y permite soltar dentro.
+  const onDirDragOver = (e, path) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    if (dropTarget !== path) setDropTarget(path);
+  };
+
+  const onDirDrop = (e, path) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+    handleMove(dragSrc.current, path);
+    dragSrc.current = null;
+  };
+
+  // Sobre un archivo: se mueve a la carpeta que lo contiene (su padre).
+  const onLeafDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const onLeafDrop = (e, parent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+    handleMove(dragSrc.current, parent);
+    dragSrc.current = null;
   };
 
   const copyToClipboard = (text) => navigator.clipboard.writeText(text).catch(() => {});
@@ -347,10 +426,15 @@ export function FileTree() {
         return (
           <div key={entry.path}>
             <div
-              className="filetree__node"
+              className={`filetree__node ${selected?.entry.path === entry.path ? 'is-active' : ''} ${dropTarget === entry.path ? 'is-drop-target' : ''}`}
               style={{ paddingLeft: indent }}
-              onClick={() => toggleDirectory(entry.path)}
-              onContextMenu={(e) => openCtxMenu(e, entry, parentPath)}
+              draggable
+              onDragStart={(e) => startDrag(e, entry, parentPath)}
+              onDragOver={(e) => onDirDragOver(e, entry.path)}
+              onDragLeave={() => setDropTarget((t) => (t === entry.path ? null : t))}
+              onDrop={(e) => onDirDrop(e, entry.path)}
+              onClick={() => { setSelected({ entry, parent: parentPath }); toggleDirectory(entry.path); }}
+              onContextMenu={(e) => { setSelected({ entry, parent: parentPath }); openCtxMenu(e, entry, parentPath); }}
             >
               {isExpanded ? <IconChevron size={13} open /> : <IconChevronRight size={13} />}
               <ExtIcon
@@ -384,10 +468,14 @@ export function FileTree() {
       return (
         <div
           key={entry.path}
-          className={`filetree__node ${activePath === entry.path ? 'is-active' : ''}`}
+          className={`filetree__node ${activePath === entry.path || selected?.entry.path === entry.path ? 'is-active' : ''}`}
           style={{ paddingLeft: indent + 17 }}
-          onClick={() => handleSelectFile(entry.path, entry.name)}
-          onContextMenu={(e) => openCtxMenu(e, entry, parentPath)}
+          draggable
+          onDragStart={(e) => startDrag(e, entry, parentPath)}
+          onDragOver={onLeafDragOver}
+          onDrop={(e) => onLeafDrop(e, parentPath)}
+          onClick={() => { setSelected({ entry, parent: parentPath }); handleSelectFile(entry.path, entry.name); }}
+          onContextMenu={(e) => { setSelected({ entry, parent: parentPath }); openCtxMenu(e, entry, parentPath); }}
         >
           <ExtIcon name={entry.name} fallback={fileIcon(entry.name)} />
           <span className="filetree__label">{entry.name}</span>
@@ -442,6 +530,13 @@ export function FileTree() {
       <div
         className="filetree__body"
         onContextMenu={(e) => openCtxMenu(e, null, rootPath)}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDropTarget(null);
+          handleMove(dragSrc.current, rootPath);
+          dragSrc.current = null;
+        }}
       >
         {treeData.length === 0 && !error ? (
           <p className="filetree__hint">Carpeta vacía.</p>

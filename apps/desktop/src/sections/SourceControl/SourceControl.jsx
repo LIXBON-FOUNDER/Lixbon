@@ -36,6 +36,12 @@ export function SourceControl() {
   // Refrescar al entrar y cuando cambia la carpeta de trabajo
   useEffect(() => { refresh(); }, [refresh, workspaceRoot]);
 
+  // Derivados de `changes`. Deben declararse antes de primaryAction(), que los
+  // lee: si no, `staged` queda en la zona muerta temporal (TDZ) y al haber
+  // cambios revienta con "Cannot access 'staged' before initialization".
+  const staged = changes.filter((c) => c.staged);
+  const unstaged = changes.filter((c) => !c.staged);
+
   const openFileDiff = async (c, isStaged) => {
     const patch = await fileDiff(c.path, isStaged);
     openDiff(`${fileName(c.path)} ${isStaged ? '(preparado)' : '(cambios)'}`,
@@ -155,9 +161,6 @@ export function SourceControl() {
       setCloneStatus({ ok: false, text: res.error || 'No se pudo clonar el repositorio.' });
     }
   };
-
-  const staged = changes.filter((c) => c.staged);
-  const unstaged = changes.filter((c) => !c.staged);
 
   const fileName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 

@@ -51,6 +51,11 @@ export function duplicateEntry(path) {
   return invoke('duplicate_entry', { path });
 }
 
+/** Mueve una entrada a otra carpeta (drag & drop). Devuelve la nueva ruta. */
+export function moveEntry(path, destDir) {
+  return invoke('move_entry', { path, destDir });
+}
+
 /** Muestra la entrada en el explorador de archivos del sistema. */
 export function revealInOs(path) {
   return invoke('reveal_in_os', { path });
@@ -169,8 +174,19 @@ export function gitClone(url, destParent) {
 
 /** Ejecuta un comando de shell en la carpeta de trabajo (agente del chat).
     Devuelve {stdout, stderr, code, timed_out}. */
-export function runCommand(command, timeoutMs) {
-  return invoke('run_command', { command, timeoutMs: timeoutMs ?? null });
+export function runCommand(command, timeoutMs, cwd) {
+  return invoke('run_command', { command, timeoutMs: timeoutMs ?? null, cwd: cwd ?? null });
+}
+
+/** Ruta del binario que trae el proyecto (node_modules/.bin), subiendo desde
+    `startDir` hasta la raíz. null si el proyecto no lo tiene. */
+export function resolveProjectBin(startDir, bin) {
+  return invoke('resolve_project_bin', { startDir, bin });
+}
+
+/** Ruta del config por defecto de ESLint de lixbon (lo crea si no existe). */
+export function eslintDefaultConfig() {
+  return invoke('eslint_default_config');
 }
 
 // ── Plugins ───────────────────────────────────────────────────────────
