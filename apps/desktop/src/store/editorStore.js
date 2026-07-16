@@ -12,7 +12,7 @@ import { indentMore, indentLess } from '@codemirror/commands';
 import { unifiedMergeView } from '@codemirror/merge';
 import { ask } from '@tauri-apps/plugin-dialog';
 
-import { readFileContent, writeFileContent } from '../lib/tauri';
+import { readFileContent, writeFileContent, statFile } from '../lib/tauri';
 import { lixbonTheme, lixbonSyntax, lixbonThemeDark, lixbonSyntaxDark } from '../editor/lixbonTheme';
 import { resolveLanguage } from '../editor/languages';
 import { snippetSource } from '../editor/snippets';
@@ -212,6 +212,17 @@ export function cacheState(path, state) {
   stateCache.set(path, state);
 }
 
+// ── Sesión (pestañas abiertas por carpeta de trabajo) ──────────────────
+// Se persisten en localStorage con clave por raíz. `restoring` silencia el
+// autoguardado de sesión mientras se reabre (para no pisar lo guardado con un
+// estado a medio construir).
+let sessionRoot = localStorage.getItem('lixbon_workspace_root') || '';
+let restoringSession = false;
+
+export function setSessionRoot(root) {
+  sessionRoot = root || '';
+}
+
 // ── Store ──────────────────────────────────────────────────────────────
 export const useEditorStore = create((set, get) => ({
   tabs: [], // [{ path, name, dirty, eol }]
@@ -229,6 +240,8 @@ export const useEditorStore = create((set, get) => ({
     const content = await readFileContent(path); // el llamador maneja el error
     const language = await resolveLanguage(name); // lezer/legacy → TextMate → plano
     const eol = detectEol(content);
+    // mtime al abrir = "versión" contra la que se detecta un cambio externo.
+    const mtime = await statFile(path).catch(() => 0);
 
     const markDirty = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
@@ -269,7 +282,7 @@ export const useEditorStore = create((set, get) => ({
 
     stateCache.set(path, state);
     set({
-      tabs: [...tabs, { path, name, dirty: false, eol }],
+      tabs: [...tabs, { path, name, dirty: false, eol, mtime }],
       activePath: path,
       cursor: cursorFrom(state),
     });
@@ -363,18 +376,47 @@ export const useEditorStore = create((set, get) => ({
     if (!state) return;
 
     const savedDoc = state.doc;
+    // sliceDoc (no doc.toString): respeta el fin de línea del archivo. Con
+    // toString() un archivo CRLF se reescribía entero a LF al guardarlo.
+    const content = state.sliceDoc();
     try {
-      // sliceDoc (no doc.toString): respeta el fin de línea del archivo. Con
-      // toString() un archivo CRLF se reescribía entero a LF al guardarlo.
-      await writeFileContent(path, state.sliceDoc());
+      const newMtime = await writeFileContent(path, content, tab.mtime ?? null);
       if (isActive) stateCache.set(path, liveView.state);
       // Si el usuario siguió tecleando durante la escritura, sigue sucia.
       const unchanged = !isActive || liveView.state.doc === savedDoc || liveView.state.doc.eq(savedDoc);
-      if (unchanged) {
-        set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false } : t)) });
-      }
+      set({
+        tabs: get().tabs.map((t) =>
+          t.path === path ? { ...t, mtime: newMtime, dirty: unchanged ? false : t.dirty } : t
+        ),
+      });
       withLsp((lsp) => lsp.saveDoc(path, tab.name));
     } catch (e) {
+      const msg = String(e?.message || e);
+      // El archivo cambió en disco desde que se abrió: no pisar a ciegas.
+      if (msg.startsWith('CONFLICT:')) {
+        if (silent) {
+          console.warn('[editor] Conflicto en disco; autoguardado pospuesto:', path);
+          return; // se queda sucia; el guardado manual pedirá qué hacer
+        }
+        const overwrite = await ask(
+          `"${tab.name}" cambió en disco desde que lo abriste.\n\n«Sobrescribir» guarda tu versión y descarta el cambio del disco.\n«Recargar» trae la versión del disco y descarta tus cambios sin guardar.`,
+          { title: 'lixbon', kind: 'warning', okLabel: 'Sobrescribir', cancelLabel: 'Recargar del disco' }
+        );
+        if (overwrite) {
+          try {
+            const forcedMtime = await writeFileContent(path, content, null); // sin guardia
+            set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, mtime: forcedMtime, dirty: false } : t)) });
+            withLsp((lsp) => lsp.saveDoc(path, tab.name));
+          } catch (e2) {
+            alert('Error guardando el archivo: ' + e2);
+          }
+        } else {
+          // Recargar: marcar limpia primero para que reloadFromDisk no la salte.
+          set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false } : t)) });
+          await get().reloadFromDisk(path);
+        }
+        return;
+      }
       if (silent) console.error('[editor] Autoguardado falló:', path, e);
       else alert('Error guardando el archivo: ' + e);
     }
@@ -450,7 +492,56 @@ export const useEditorStore = create((set, get) => ({
       );
     }
     // El dispatch de arriba dispara markDirty; el contenido ya está en disco
-    set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false } : t)) });
+    const mtime = await statFile(path).catch(() => 0);
+    set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, dirty: false, mtime } : t)) });
+  },
+
+  /** Reacciona a cambios externos en disco (file watcher). Recarga las pestañas
+      NO sucias afectadas; las sucias se dejan intactas (no perder ediciones) y
+      quedarán en conflicto al guardar. */
+  onDiskChanged: (paths) => {
+    if (!paths || !paths.length) return;
+    const affected = new Set(paths);
+    for (const t of get().tabs) {
+      if (affected.has(t.path) && !t.dirty) get().reloadFromDisk(t.path);
+    }
+  },
+
+  /** Guarda la sesión (pestañas abiertas + activa) de la carpeta actual. */
+  persistSession: () => {
+    if (restoringSession || !sessionRoot) return;
+    const { tabs, activePath } = get();
+    const data = { tabs: tabs.map((t) => ({ path: t.path, name: t.name })), active: activePath };
+    try {
+      localStorage.setItem(`lixbon_session_${sessionRoot}`, JSON.stringify(data));
+    } catch { /* cuota de localStorage: sin persistencia de sesión, no es crítico */ }
+  },
+
+  /** Reabre las pestañas guardadas de `root` (arranque o cambio de carpeta).
+      Cierra antes lo que hubiera de otra carpeta. Archivos ya inexistentes se
+      omiten en silencio. */
+  restoreSession: async (root) => {
+    restoringSession = true;
+    try {
+      for (const t of get().tabs) stateCache.delete(t.path);
+      set({ tabs: [], activePath: null });
+      setSessionRoot(root);
+      let data = null;
+      try {
+        data = JSON.parse(localStorage.getItem(`lixbon_session_${root}`) || 'null');
+      } catch { data = null; }
+      if (data && Array.isArray(data.tabs)) {
+        for (const t of data.tabs) {
+          try { await get().openFile(t.path, t.name); } catch { /* ya no existe */ }
+        }
+        if (data.active && get().tabs.some((t) => t.path === data.active)) {
+          get().setActive(data.active);
+        }
+      }
+    } finally {
+      restoringSession = false;
+      get().persistSession();
+    }
   },
 
   /** Tras renombrar en disco (archivo o carpeta): remapea pestañas y caché. */
@@ -516,6 +607,35 @@ export const useEditorStore = create((set, get) => ({
         : activePath;
     set({ tabs: remaining, activePath: nextActive });
   },
+
+  /** Cierra en bloque las pestañas LIMPIAS que cumplan `shouldClose` (las sucias
+      se conservan para no perder cambios ni encadenar diálogos). */
+  closeClean: (shouldClose) => {
+    const { tabs, activePath } = get();
+    const toClose = tabs.filter((t) => !t.dirty && shouldClose(t));
+    if (toClose.length === 0) return;
+    const closing = new Set(toClose.map((t) => t.path));
+    for (const t of toClose) {
+      stateCache.delete(t.path);
+      withLsp((lsp) => lsp.closeDoc(t.path, t.name));
+    }
+    const remaining = tabs.filter((t) => !closing.has(t.path));
+    const nextActive = closing.has(activePath)
+      ? (remaining[remaining.length - 1]?.path ?? null)
+      : activePath;
+    set({ tabs: remaining, activePath: nextActive });
+  },
+
+  closeOthers: (path) => get().closeClean((t) => t.path !== path),
+
+  closeToRight: (path) => {
+    const idx = get().tabs.findIndex((t) => t.path === path);
+    if (idx < 0) return;
+    const right = new Set(get().tabs.slice(idx + 1).map((t) => t.path));
+    get().closeClean((t) => right.has(t.path));
+  },
+
+  closeSaved: () => get().closeClean(() => true),
 
   cycleTab: (dir = 1) => {
     const { tabs, activePath } = get();

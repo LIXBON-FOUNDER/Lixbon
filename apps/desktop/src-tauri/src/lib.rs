@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -43,6 +43,14 @@ struct Terminals(Mutex<HashMap<String, TermHandle>>);
 
 static TERM_SEQ: AtomicU64 = AtomicU64::new(1);
 
+/// Vigilancia del sistema de archivos. `watcher` mantiene vivo el observador de
+/// la carpeta actual (al reemplazarlo se deja de vigilar la anterior); `pending`
+/// acumula las rutas cambiadas que un hilo emite en lotes al frontend.
+struct FsWatchState {
+    watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    pending: Arc<Mutex<HashSet<String>>>,
+}
+
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024; // 5 MB
 
 #[derive(serde::Serialize)]
@@ -57,6 +65,45 @@ struct FileEntry {
 fn display_path(p: &Path) -> String {
     let s = p.to_string_lossy();
     s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+}
+
+/// Milisegundos desde el epoch de la última modificación (0 si no disponible).
+/// Sirve de "versión" del archivo para detectar cambios externos antes de pisarlo.
+fn mtime_ms(meta: &fs::Metadata) -> f64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
+/// Escritura atómica: vuelca a un temporal en la MISMA carpeta y luego renombra.
+/// `fs::rename` es atómico dentro de la misma unidad (y sobrescribe en Windows),
+/// así que si el proceso muere a mitad, el archivo original queda intacto en vez
+/// de quedar truncado/corrupto.
+fn write_atomic(dest: &Path, bytes: &[u8]) -> Result<(), String> {
+    let dir = dest.parent().ok_or_else(|| "Ruta inválida".to_string())?;
+    let base = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "f".into());
+    let tmp = dir.join(format!(".{base}.lixbon-tmp-{}", std::process::id()));
+    {
+        let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(bytes).map_err(|e| e.to_string())?;
+        let _ = f.sync_all();
+    }
+    // Conserva permisos del original (best-effort; en Windows se heredan del dir).
+    if let Ok(meta) = fs::metadata(dest) {
+        let _ = fs::set_permissions(&tmp, meta.permissions());
+    }
+    match fs::rename(&tmp, dest) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e.to_string())
+        }
+    }
 }
 
 /// Canonicaliza `path` y comprueba que quede dentro de la raíz del workspace.
@@ -80,14 +127,70 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
-fn set_workspace_root(path: String, root: State<WorkspaceRoot>) -> Result<String, String> {
+fn set_workspace_root(
+    path: String,
+    root: State<WorkspaceRoot>,
+    fs_watch: State<FsWatchState>,
+) -> Result<String, String> {
     let canonical = fs::canonicalize(&path).map_err(|_| "La carpeta no existe".to_string())?;
     if !canonical.is_dir() {
         return Err("La ruta no es una carpeta".to_string());
     }
     let resolved = display_path(&canonical);
+    start_fs_watch(&fs_watch, &canonical);
     *root.0.lock().map_err(|_| "Estado interno corrupto".to_string())? = Some(canonical);
     Ok(resolved)
+}
+
+/// ¿Algún componente de la ruta es una carpeta ignorada (node_modules, .git…)?
+/// Filtra el ruido de instalaciones/builds para no inundar de eventos al frontend.
+fn path_has_skip_component(p: &Path) -> bool {
+    p.components().any(|c| {
+        matches!(c, std::path::Component::Normal(os) if skip_dir(&os.to_string_lossy()))
+    })
+}
+
+/// (Re)inicia la vigilancia recursiva de `root`. El watcher previo se descarta
+/// aquí (deja de vigilar la carpeta anterior). Si falla, la app sigue: solo no
+/// habrá auto-refresco.
+fn start_fs_watch(state: &State<FsWatchState>, root: &Path) {
+    use notify::Watcher;
+    let pending = state.pending.clone();
+    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let event = match res {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        if let Ok(mut set) = pending.lock() {
+            for path in event.paths {
+                if !path_has_skip_component(&path) {
+                    set.insert(display_path(&path));
+                }
+            }
+        }
+    }) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+    if watcher.watch(root, notify::RecursiveMode::Recursive).is_err() {
+        return;
+    }
+    if let Ok(mut guard) = state.watcher.lock() {
+        *guard = Some(watcher); // el anterior se dropea aquí
+    }
+}
+
+/// Hilo perpetuo: cada 300 ms vacía el acumulador y emite `fs:changed` con el
+/// lote de rutas cambiadas (coalescer: evita una avalancha de eventos IPC).
+fn spawn_fs_emitter(app: AppHandle, pending: Arc<Mutex<HashSet<String>>>) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(300));
+        let batch: Vec<String> = match pending.lock() {
+            Ok(mut set) if !set.is_empty() => set.drain().collect(),
+            _ => continue,
+        };
+        let _ = app.emit("fs:changed", batch);
+    });
 }
 
 #[tauri::command]
@@ -152,9 +255,40 @@ fn read_file_content(path: String, root: State<WorkspaceRoot>) -> Result<String,
 }
 
 #[tauri::command]
-fn write_file_content(path: String, content: String, root: State<WorkspaceRoot>) -> Result<(), String> {
+fn write_file_content(
+    path: String,
+    content: String,
+    expected_mtime: Option<f64>,
+    root: State<WorkspaceRoot>,
+) -> Result<f64, String> {
     let file = ensure_inside_root(&root, &path)?;
-    fs::write(&file, content).map_err(|e| e.to_string())
+
+    if content.len() as u64 > MAX_FILE_BYTES {
+        return Err("El contenido supera los 5 MB permitidos".to_string());
+    }
+
+    // Guardia anti-clobber: si el archivo cambió en disco desde que el editor lo
+    // cargó (mtime distinto), no lo pisamos a ciegas — el frontend decide.
+    if let Some(expected) = expected_mtime {
+        if let Ok(meta) = fs::metadata(&file) {
+            let current = mtime_ms(&meta);
+            if (current - expected).abs() > 1.0 {
+                return Err(format!("CONFLICT:{current}"));
+            }
+        }
+    }
+
+    write_atomic(&file, content.as_bytes())?;
+    let meta = fs::metadata(&file).map_err(|e| e.to_string())?;
+    Ok(mtime_ms(&meta))
+}
+
+/// mtime del archivo en ms (la "versión" que el editor guarda al abrirlo).
+#[tauri::command]
+fn stat_file(path: String, root: State<WorkspaceRoot>) -> Result<f64, String> {
+    let file = ensure_inside_root(&root, &path)?;
+    let meta = fs::metadata(&file).map_err(|e| e.to_string())?;
+    Ok(mtime_ms(&meta))
 }
 
 #[tauri::command]
@@ -358,7 +492,31 @@ struct SearchHit {
 const SEARCH_MAX_HITS: usize = 500;
 const SEARCH_MAX_FILE_BYTES: u64 = 1024 * 1024; // 1 MB por archivo
 
-fn search_walk(dir: &Path, needle: &str, hits: &mut Vec<SearchHit>) {
+/// Compila la consulta con las opciones de la UI. En modo literal se escapa la
+/// consulta; `whole_word` la envuelve en límites de palabra; `case_sensitive`
+/// falso añade insensibilidad a mayúsculas. Unifica búsqueda y reemplazo.
+fn build_query_regex(
+    query: &str,
+    case_sensitive: bool,
+    is_regex: bool,
+    whole_word: bool,
+) -> Result<regex::Regex, String> {
+    let mut pat = if is_regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
+    if whole_word {
+        pat = format!(r"\b(?:{pat})\b");
+    }
+    regex::RegexBuilder::new(&pat)
+        .case_insensitive(!case_sensitive)
+        .size_limit(10 * (1 << 20)) // 10 MB de programa: frena regex patológicas
+        .build()
+        .map_err(|e| format!("Expresión de búsqueda inválida: {e}"))
+}
+
+fn search_walk(dir: &Path, re: &regex::Regex, hits: &mut Vec<SearchHit>) {
     if hits.len() >= SEARCH_MAX_HITS {
         return;
     }
@@ -395,7 +553,7 @@ fn search_walk(dir: &Path, needle: &str, hits: &mut Vec<SearchHit>) {
             continue;
         }
         for (i, line) in content.lines().enumerate() {
-            if line.to_lowercase().contains(needle) {
+            if re.is_match(line) {
                 hits.push(SearchHit {
                     path: display_path(&path),
                     name: name.clone(),
@@ -409,25 +567,122 @@ fn search_walk(dir: &Path, needle: &str, hits: &mut Vec<SearchHit>) {
         }
     }
     for d in subdirs {
-        search_walk(&d, needle, hits);
+        search_walk(&d, re, hits);
         if hits.len() >= SEARCH_MAX_HITS {
             return;
         }
     }
 }
 
-/// Busca texto (sin distinguir mayúsculas) en todos los archivos del workspace.
+/// Busca en todos los archivos del workspace. `is_regex` interpreta la consulta
+/// como expresión regular; `case_sensitive`/`whole_word` afinan la coincidencia.
 #[tauri::command]
-async fn search_in_files(query: String, root: State<'_, WorkspaceRoot>) -> Result<Vec<SearchHit>, String> {
+async fn search_in_files(
+    query: String,
+    case_sensitive: bool,
+    is_regex: bool,
+    whole_word: bool,
+    root: State<'_, WorkspaceRoot>,
+) -> Result<Vec<SearchHit>, String> {
     let base = workspace_path(&root)?;
-    let needle = query.trim().to_lowercase();
-    if needle.len() < 2 {
+    if query.trim().len() < 2 {
         return Ok(Vec::new());
     }
+    let re = build_query_regex(&query, case_sensitive, is_regex, whole_word)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut hits = Vec::new();
-        search_walk(&base, &needle, &mut hits);
+        search_walk(&base, &re, &mut hits);
         hits
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+// ── Reemplazo global (buscar y reemplazar en todo el workspace) ──────────
+
+#[derive(serde::Serialize)]
+struct ReplaceResult {
+    files: usize,
+    replacements: usize,
+}
+
+fn replace_walk(
+    dir: &Path,
+    re: &regex::Regex,
+    replacement: &str,
+    is_regex: bool,
+    res: &mut ReplaceResult,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if path.is_dir() {
+            if !skip_dir(&name) {
+                subdirs.push(path);
+            }
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() > SEARCH_MAX_FILE_BYTES {
+            continue;
+        }
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue, // binario/no-UTF8: se omite
+        };
+        if content.contains('\0') {
+            continue;
+        }
+        let count = re.find_iter(&content).count();
+        if count == 0 {
+            continue;
+        }
+        // En modo regex el reemplazo expande $1, ${name}…; en modo literal se
+        // trata tal cual (NoExpand) para que un "$" del usuario no se interprete.
+        let new_content = if is_regex {
+            re.replace_all(&content, replacement).into_owned()
+        } else {
+            re.replace_all(&content, regex::NoExpand(replacement)).into_owned()
+        };
+        if write_atomic(&path, new_content.as_bytes()).is_ok() {
+            res.files += 1;
+            res.replacements += count;
+        }
+    }
+    for d in subdirs {
+        replace_walk(&d, re, replacement, is_regex, res);
+    }
+}
+
+/// Reemplaza `query` por `replacement` en todos los archivos de texto del
+/// workspace (mismos filtros/opciones que la búsqueda). Escritura atómica por
+/// archivo.
+#[tauri::command]
+async fn replace_in_files(
+    query: String,
+    replacement: String,
+    case_sensitive: bool,
+    is_regex: bool,
+    whole_word: bool,
+    root: State<'_, WorkspaceRoot>,
+) -> Result<ReplaceResult, String> {
+    let base = workspace_path(&root)?;
+    if query.trim().len() < 2 {
+        return Err("El término de búsqueda es demasiado corto".to_string());
+    }
+    let re = build_query_regex(&query, case_sensitive, is_regex, whole_word)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut res = ReplaceResult { files: 0, replacements: 0 };
+        replace_walk(&base, &re, &replacement, is_regex, &mut res);
+        res
     })
     .await
     .map_err(|e| e.to_string())
@@ -1188,11 +1443,41 @@ async fn run_command(
         .map_err(|e| e.to_string())?
 }
 
+/// Máximo de bytes de salida (por flujo) que se conservan en memoria. Se guarda
+/// la cola; el resto se descarta pero se sigue drenando el pipe.
+const CMD_OUTPUT_CAP: usize = 2 * 1024 * 1024; // 2 MB
+
+/// Lee todo el pipe pero mantiene en memoria como mucho ~`cap` bytes finales.
+/// El recorte se hace de forma amortizada (solo al duplicar `cap`), así el coste
+/// total es lineal aunque el proceso escriba sin parar.
+fn read_tail_capped<R: Read>(mut pipe: R, cap: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 16384];
+    loop {
+        match pipe.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                out.extend_from_slice(&buf[..n]);
+                if out.len() > cap * 2 {
+                    let drop = out.len() - cap;
+                    out.drain(0..drop);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    out
+}
+
 fn run_command_blocking(command: String, dir: PathBuf, timeout: Duration) -> Result<CmdOutput, String> {
     #[cfg(windows)]
     let mut cmd = {
         let mut c = Command::new("cmd");
-        c.args(["/C", &command]);
+        // Command escaparía las comillas internas al estilo C (\"), pero cmd.exe
+        // las trata literalmente y rompe cualquier ruta entrecomillada (p. ej.
+        // "…\.bin\eslint.cmd"). raw_arg pasa la línea verbatim; /S hace que cmd
+        // quite solo la primera y última comilla y ejecute el resto tal cual.
+        c.raw_arg(format!("/S /C \"{command}\""));
         c
     };
     #[cfg(not(windows))]
@@ -1210,18 +1495,12 @@ fn run_command_blocking(command: String, dir: PathBuf, timeout: Duration) -> Res
     let mut child = cmd.spawn().map_err(|e| format!("No se pudo ejecutar el comando: {e}"))?;
 
     // Lectores en hilos: sin drenar los pipes, un proceso verboso se bloquea.
-    let mut out_pipe = child.stdout.take().ok_or_else(|| "Sin stdout".to_string())?;
-    let mut err_pipe = child.stderr.take().ok_or_else(|| "Sin stderr".to_string())?;
-    let out_h = thread::spawn(move || {
-        let mut v = Vec::new();
-        let _ = out_pipe.read_to_end(&mut v);
-        v
-    });
-    let err_h = thread::spawn(move || {
-        let mut v = Vec::new();
-        let _ = err_pipe.read_to_end(&mut v);
-        v
-    });
+    // read_tail_capped sigue drenando pero conserva en memoria solo la COLA (que
+    // es donde viven los errores), así un comando que escupe gigas no agota RAM.
+    let out_pipe = child.stdout.take().ok_or_else(|| "Sin stdout".to_string())?;
+    let err_pipe = child.stderr.take().ok_or_else(|| "Sin stderr".to_string())?;
+    let out_h = thread::spawn(move || read_tail_capped(out_pipe, CMD_OUTPUT_CAP));
+    let err_h = thread::spawn(move || read_tail_capped(err_pipe, CMD_OUTPUT_CAP));
 
     let start = Instant::now();
     let mut timed_out = false;
@@ -1842,6 +2121,16 @@ pub fn run() {
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
         .manage(LspServers(Mutex::new(HashMap::new())))
+        .manage(FsWatchState {
+            watcher: Mutex::new(None),
+            pending: Arc::new(Mutex::new(HashSet::new())),
+        })
+        .setup(|app| {
+            // Hilo que emite los lotes de cambios de disco al frontend.
+            let pending = app.state::<FsWatchState>().pending.clone();
+            spawn_fs_emitter(app.handle().clone(), pending);
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
@@ -1856,6 +2145,8 @@ pub fn run() {
             read_dir,
             read_file_content,
             write_file_content,
+            stat_file,
+            replace_in_files,
             create_new_entry,
             rename_entry,
             delete_entry,
@@ -1958,5 +2249,75 @@ mod tests {
         assert_eq!(repo_name_from_url("git@github.com:u/otro.git").as_deref(), Some("otro"));
         assert_eq!(repo_name_from_url(""), None);
         assert_eq!(repo_name_from_url("https://"), None);
+    }
+
+    #[test]
+    fn regex_literal_insensible_y_palabra_completa() {
+        use super::build_query_regex;
+        // literal, insensible a mayúsculas
+        let re = build_query_regex("foo", false, false, false).unwrap();
+        assert!(re.is_match("un FOO aquí"));
+        assert_eq!(re.find_iter("foo Foo FOO").count(), 3);
+        // sensible: solo el exacto
+        let re = build_query_regex("Foo", true, false, false).unwrap();
+        assert_eq!(re.find_iter("foo Foo FOO").count(), 1);
+        // palabra completa: no dentro de otra palabra
+        let re = build_query_regex("cat", false, false, true).unwrap();
+        assert!(re.is_match("a cat sat"));
+        assert!(!re.is_match("category"));
+        // en modo literal los metacaracteres se escapan
+        let re = build_query_regex("a.b", true, false, false).unwrap();
+        assert!(re.is_match("a.b"));
+        assert!(!re.is_match("axb"));
+    }
+
+    #[test]
+    fn regex_modo_expresion() {
+        use super::build_query_regex;
+        let re = build_query_regex(r"\d+", false, true, false).unwrap();
+        assert_eq!(re.find_iter("a12 b3").count(), 2);
+        // una regex inválida devuelve error, no panic
+        assert!(build_query_regex("(", false, true, false).is_err());
+    }
+
+    #[test]
+    fn reemplazo_literal_no_expande_dolar() {
+        use super::build_query_regex;
+        let re = build_query_regex("x", false, false, false).unwrap();
+        // literal: "$1" se conserva tal cual, no se interpreta como grupo
+        let out = re.replace_all("x y x", regex::NoExpand("$1")).into_owned();
+        assert_eq!(out, "$1 y $1");
+    }
+
+    #[test]
+    fn escritura_atomica_ida_y_vuelta() {
+        use super::write_atomic;
+        let mut p = std::env::temp_dir();
+        p.push(format!("lixbon-test-{}.txt", std::process::id()));
+        write_atomic(&p, b"hola").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "hola");
+        // sobrescribe un archivo existente
+        write_atomic(&p, b"adios mundo").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "adios mundo");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn cola_capada_conserva_el_final() {
+        use super::read_tail_capped;
+        let data: String = (0..10_000u32).map(|n| format!("{n}\n")).collect();
+        let out = read_tail_capped(std::io::Cursor::new(data.clone().into_bytes()), 128);
+        // conserva a lo sumo ~2*cap y siempre el final del flujo
+        assert!(out.len() <= 256);
+        assert!(data.ends_with(&String::from_utf8(out).unwrap()));
+    }
+
+    #[test]
+    fn salta_carpetas_pesadas() {
+        use super::path_has_skip_component;
+        use std::path::Path;
+        assert!(path_has_skip_component(Path::new("proj/node_modules/x/index.js")));
+        assert!(path_has_skip_component(Path::new("proj/.git/HEAD")));
+        assert!(!path_has_skip_component(Path::new("proj/src/main.rs")));
     }
 }

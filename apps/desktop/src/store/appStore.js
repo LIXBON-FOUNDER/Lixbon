@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
-import { setIndentConfig, setAutoSaveConfig } from './editorStore';
+import { setIndentConfig, setAutoSaveConfig, useEditorStore } from './editorStore';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
 import { detectVisionModel, modelId } from '../lib/vision';
@@ -144,6 +144,9 @@ export const useAppStore = create((set, get) => ({
       Devuelve la ruta canónica. */
   openWorkspace: async (path) => {
     const canonical = await setWorkspaceRoot(path);
+    // Guardar la sesión de la carpeta previa antes de cambiar (bajo su propia raíz).
+    const prevRoot = localStorage.getItem('lixbon_workspace_root');
+    if (prevRoot && prevRoot !== canonical) useEditorStore.getState().persistSession();
     localStorage.setItem('lixbon_workspace_root', canonical);
     const recents = [canonical, ...get().recentFolders.filter((p) => p !== canonical)].slice(0, 8);
     localStorage.setItem('lixbon_recents', JSON.stringify(recents));
@@ -153,6 +156,8 @@ export const useAppStore = create((set, get) => ({
     // carpeta hay que matarlos (el siguiente archivo abierto los relanza).
     import('./lspStore').then(({ useLspStore }) => useLspStore.getState().stopAll()).catch(() => {});
     useGitStore.getState().refresh();
+    // Reabrir las pestañas guardadas de esta carpeta (cierra las de la anterior).
+    await useEditorStore.getState().restoreSession(canonical);
     return canonical;
   },
 

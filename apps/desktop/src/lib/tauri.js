@@ -29,8 +29,28 @@ export function readFileContent(path) {
   return invoke('read_file_content', { path });
 }
 
-export function writeFileContent(path, content) {
-  return invoke('write_file_content', { path, content });
+/** Guarda el archivo (escritura atómica). Con `expectedMtime` no vacío, si el
+    archivo cambió en disco desde entonces rechaza con "CONFLICT:<mtime>" en vez
+    de pisarlo. Devuelve el mtime nuevo (ms). */
+export function writeFileContent(path, content, expectedMtime) {
+  return invoke('write_file_content', { path, content, expectedMtime: expectedMtime ?? null });
+}
+
+/** mtime del archivo en ms (la "versión" que el editor guarda al abrirlo). */
+export function statFile(path) {
+  return invoke('stat_file', { path });
+}
+
+/** Reemplaza `query` por `replacement` en todo el workspace. `opts` como en
+    searchInFiles. Devuelve {files, replacements}. */
+export function replaceInFiles(query, replacement, opts = {}) {
+  return invoke('replace_in_files', {
+    query,
+    replacement,
+    caseSensitive: !!opts.caseSensitive,
+    isRegex: !!opts.isRegex,
+    wholeWord: !!opts.wholeWord,
+  });
 }
 
 export function createNewEntry(parentPath, name, isDir) {
@@ -61,9 +81,15 @@ export function revealInOs(path) {
   return invoke('reveal_in_os', { path });
 }
 
-/** Busca texto en todos los archivos del workspace. [{path,name,line,text}] */
-export function searchInFiles(query) {
-  return invoke('search_in_files', { query });
+/** Busca en todos los archivos del workspace. `opts` = {caseSensitive, isRegex,
+    wholeWord}. Devuelve [{path,name,line,text}]. */
+export function searchInFiles(query, opts = {}) {
+  return invoke('search_in_files', {
+    query,
+    caseSensitive: !!opts.caseSensitive,
+    isRegex: !!opts.isRegex,
+    wholeWord: !!opts.wholeWord,
+  });
 }
 
 /** Lista plana de archivos del workspace (Quick Open). [{name,path,rel}] */

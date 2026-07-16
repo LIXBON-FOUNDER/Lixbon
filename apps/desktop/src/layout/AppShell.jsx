@@ -2,6 +2,8 @@
 // dock inferior (terminal/problemas) + status bar. Ajustes y Consumo se abren
 // como ventana flotante para no desplazar el área de trabajo.
 import { useEffect } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store/appStore';
 import { useEditorStore } from '../store/editorStore';
 import { useGitStore } from '../store/gitStore';
@@ -61,6 +63,55 @@ export function AppShell() {
   useEffect(() => {
     document.documentElement.style.setProperty('--editor-font-size', `${editorFontSize}px`);
   }, [editorFontSize]);
+
+  // Vigilancia de disco: el backend emite `fs:changed` con las rutas cambiadas.
+  // Refresca el árbol (FileTree ya escucha el evento window) y recarga las
+  // pestañas abiertas no sucias afectadas.
+  useEffect(() => {
+    let unlisten;
+    (async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      unlisten = await listen('fs:changed', (e) => {
+        const paths = Array.isArray(e.payload) ? e.payload : [];
+        window.dispatchEvent(new CustomEvent('lixbon:fs-changed'));
+        useEditorStore.getState().onDiskChanged(paths);
+      });
+    })();
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  // Persistir la sesión (pestañas abiertas) al cambiar de pestañas o de activa.
+  useEffect(() => {
+    return useEditorStore.subscribe((s, prev) => {
+      if (s.tabs !== prev.tabs || s.activePath !== prev.activePath) {
+        useEditorStore.getState().persistSession();
+      }
+    });
+  }, []);
+
+  // Guarda de cierre: si hay pestañas sin guardar, interceptar el cierre de la
+  // ventana y ofrecer guardar antes de salir (evita perder cambios).
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let unlisten;
+    (async () => {
+      unlisten = await win.onCloseRequested(async (event) => {
+        const dirty = useEditorStore.getState().tabs.filter((t) => t.dirty);
+        if (dirty.length === 0) return; // sin cambios: cerrar sin más
+        event.preventDefault();
+        const save = await ask(
+          `Hay ${dirty.length} archivo(s) con cambios sin guardar. ¿Guardarlos antes de salir?`,
+          { title: 'lixbon', kind: 'warning', okLabel: 'Guardar y salir', cancelLabel: 'Cancelar' }
+        );
+        if (!save) return; // se queda abierta
+        await useEditorStore.getState().saveAll();
+        // Si algún guardado falló, no cerrar: el usuario debe verlo.
+        if (useEditorStore.getState().tabs.some((t) => t.dirty)) return;
+        await win.destroy();
+      });
+    })();
+    return () => { if (unlisten) unlisten(); };
+  }, []);
 
   // Atajos globales del IDE: se resuelven contra el keymap central, que dispara
   // comandos del registro. CodeMirror sigue manejando Ctrl+S dentro del editor

@@ -142,6 +142,32 @@ export function FileTree() {
     };
   }, [ctxMenu]);
 
+  // Auto-reveal: al cambiar el archivo activo, expandir sus carpetas ancestro y
+  // desplazar el árbol hasta él (sincroniza el explorador con el editor).
+  useEffect(() => {
+    if (!activePath || !rootPath || !activePath.startsWith(rootPath)) return undefined;
+    const rel = activePath.slice(rootPath.length).replace(/^[\\/]+/, '');
+    const parts = rel.split(/[\\/]/);
+    parts.pop(); // nombre del archivo
+    if (parts.length) {
+      const sep = rootPath.includes('\\') ? '\\' : '/';
+      let cur = rootPath.replace(/[\\/]+$/, '');
+      const ancestors = [];
+      for (const p of parts) { cur = cur + sep + p; ancestors.push(cur); }
+      setExpandedDirs((prev) => {
+        const next = { ...prev };
+        for (const d of ancestors) next[d] = true;
+        return next;
+      });
+      for (const d of ancestors) refreshDirectory(d);
+    }
+    const t = setTimeout(() => {
+      document.querySelector('.filetree__node.is-active')?.scrollIntoView({ block: 'nearest' });
+    }, 60);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePath, rootPath]);
+
   const handleOpenFolder = async () => {
     try {
       const selected = await pickDirectory({ title: 'Abrir carpeta de trabajo' });
