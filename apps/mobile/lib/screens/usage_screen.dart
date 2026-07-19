@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
-import '../state.dart';
 import '../theme.dart';
 
 class UsageScreen extends StatefulWidget {
