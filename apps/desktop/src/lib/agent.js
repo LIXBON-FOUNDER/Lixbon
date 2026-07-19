@@ -19,6 +19,7 @@ export {
   READ_ONLY_TOOLS,
   DEFAULT_CMD_ALLOWLIST,
   isAllowedCommand,
+  isNeverAutoCommand,
   buildModelHistory,
   cleanProse,
   displayableText,

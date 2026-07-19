@@ -9,10 +9,14 @@ export const READ_ONLY_TOOLS = new Set(['list_files', 'read_file', 'search', 'se
 // Prefijos de comandos considerados seguros: se ejecutan sin pedir aprobación
 // aunque el auto-aplicado de archivos esté activo. Editable por el usuario
 // (Ajustes → Agente). Solo aplica a comandos SIN encadenamiento/redirección.
+// Fuera de la lista quedan a propósito los intérpretes directos (node, python,
+// deno) y los instaladores (npm install, npx, pip): ejecutan código arbitrario
+// que no es del proyecto, y con auto-run un prompt injection en un archivo
+// leído por el agente bastaría para correr lo que quiera sin aprobación.
 export const DEFAULT_CMD_ALLOWLIST = [
-  'npm test', 'npm run', 'npm ci', 'npm install', 'npm i', 'npx', 'node', 'pnpm', 'yarn',
+  'npm test', 'npm run', 'npm ci', 'pnpm test', 'pnpm run', 'yarn test', 'yarn run',
   'cargo build', 'cargo test', 'cargo check', 'cargo run', 'cargo clippy', 'cargo fmt',
-  'python', 'python3', 'pytest', 'pip', 'ruff', 'black', 'mypy', 'deno',
+  'pytest', 'ruff', 'black', 'mypy',
   'go build', 'go test', 'go run', 'go vet',
   'git status', 'git diff', 'git log', 'git branch', 'git rev-parse', 'git show',
   'ls', 'pwd', 'echo', 'cat', 'tsc', 'eslint', 'prettier', 'make',
@@ -20,12 +24,30 @@ export const DEFAULT_CMD_ALLOWLIST = [
 
 // Encadenamiento, subshell o redirección: `cmd && rm -rf`, `a | b`, `$(...)`,
 // `> archivo`. Con cualquiera de estos, NUNCA se auto-permite (siempre aprueba).
-const CMD_CHAIN_RE = /[;&|`]|\$\(|>|<|\n/;
+const CMD_CHAIN_RE = /[;&|`]|\$\(|>|<|\r|\n/;
+
+// Aunque el usuario amplíe su allowlist, estos patrones SIEMPRE piden
+// aprobación: ejecutan código externo/arbitrario (npx, curl→sh, flags de
+// evaluación tipo `node -e` / `python -c` / `powershell -Command`) o instalan
+// paquetes nuevos (cuyos scripts postinstall corren al instalar), o borran.
+const CMD_NEVER_AUTO_RE = new RegExp(
+  '(^|\\s)(npx|dlx|curl|wget|rm|del|rmdir|rd|mklink|format)(\\s|$)'
+  + '|(^|\\s)--?eval(\\s|=|$)'
+  + '|(^|\\s)-(c|e|command|encodedcommand)(\\s|$)'
+  + '|(^|\\s)(npm|pnpm|yarn|pip|pip3|cargo|gem|composer)\\s+(install|i|add|uninstall|remove)(\\s|$)',
+  'i',
+);
+
+/** ¿Es un comando que exige aprobación SIEMPRE, incluso con auto-run activo? */
+export function isNeverAutoCommand(command) {
+  const cmd = String(command ?? '').trim();
+  return !cmd || CMD_CHAIN_RE.test(cmd) || CMD_NEVER_AUTO_RE.test(cmd);
+}
 
 /** ¿El comando puede ejecutarse sin aprobación según la allowlist? */
 export function isAllowedCommand(command, allowlist = DEFAULT_CMD_ALLOWLIST) {
   const cmd = String(command ?? '').trim();
-  if (!cmd || CMD_CHAIN_RE.test(cmd)) return false;
+  if (!cmd || CMD_CHAIN_RE.test(cmd) || CMD_NEVER_AUTO_RE.test(cmd)) return false;
   const lower = cmd.toLowerCase();
   return allowlist.some((p) => {
     const pref = String(p).trim().toLowerCase();

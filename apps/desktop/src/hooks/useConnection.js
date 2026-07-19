@@ -3,7 +3,7 @@ import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
 
 export function useConnection() {
-  const { serverUrl, connectionStatus, setConnectionStatus, setLatency } = useAppStore();
+  const { serverUrl, setConnectionStatus, setLatency } = useAppStore();
   const intervalRef = useRef(null);
 
   useEffect(() => {
@@ -16,7 +16,9 @@ export function useConnection() {
     const checkConnection = async () => {
       const start = performance.now();
       try {
-        if (connectionStatus === 'disconnected') {
+        // getState (no el closure): el valor capturado quedaba congelado en el
+        // del primer render y el estado "connecting" no se mostraba nunca.
+        if (useAppStore.getState().connectionStatus === 'disconnected') {
           setConnectionStatus('connecting');
         }
         await api.get('/health');

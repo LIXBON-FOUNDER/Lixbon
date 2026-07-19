@@ -591,11 +591,22 @@ export const useEditorStore = create((set, get) => ({
     if (!tab) return;
 
     if (tab.dirty) {
-      const discard = await ask(
-        `${tab.name} tiene cambios sin guardar. ¿Cerrar de todos modos?`,
-        { title: 'lixbon', kind: 'warning', okLabel: 'Cerrar sin guardar', cancelLabel: 'Cancelar' }
-      );
-      if (!discard) return;
+      const { showConfirm } = await import('../lib/confirm');
+      const { choice } = await showConfirm({
+        message: `${tab.name} tiene cambios sin guardar.`,
+        options: [
+          { id: 'save', label: 'Guardar y cerrar', kind: 'primary' },
+          { id: 'discard', label: 'Cerrar sin guardar', kind: 'danger' },
+          { id: 'cancel', label: 'Cancelar' },
+        ],
+      });
+      if (choice !== 'save' && choice !== 'discard') return;
+      if (choice === 'save') {
+        await get().saveTab(path);
+        // Si el guardado falló (o quedó en conflicto), la pestaña sigue sucia:
+        // no cerrarla a ciegas, el usuario debe ver qué pasó.
+        if (get().tabs.find((t) => t.path === path)?.dirty) return;
+      }
     }
 
     stateCache.delete(path);
@@ -642,7 +653,21 @@ export const useEditorStore = create((set, get) => ({
     if (tabs.length < 2) return;
     const idx = tabs.findIndex((t) => t.path === activePath);
     const next = tabs[(idx + dir + tabs.length) % tabs.length];
-    set({ activePath: next.path });
+    // setActive (no set directo): repinta diagnósticos LSP y actualiza el cursor.
+    get().setActive(next.path);
+  },
+
+  /** Reordena las pestañas (drag & drop): mueve la de `fromPath` a la posición
+      de `toPath`. El orden se persiste con la sesión. */
+  reorderTabs: (fromPath, toPath) => {
+    const { tabs } = get();
+    const from = tabs.findIndex((t) => t.path === fromPath);
+    const to = tabs.findIndex((t) => t.path === toPath);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...tabs];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    set({ tabs: next });
   },
 
   /** Inserta texto en la posición del cursor del editor activo (lo usa el chat). */

@@ -37,17 +37,30 @@ export function SearchPanel() {
     }
     setBusy(true);
     setError('');
+    setHits([]);
+    setCollapsed({});
+    // Streaming: Rust va emitiendo lotes por evento mientras recorre el árbol,
+    // así los primeros resultados aparecen al instante en repos grandes. El
+    // retorno final de searchInFiles es la lista completa y pisa lo parcial.
+    const streamId = `s${seq}`;
+    let unlisten = null;
     try {
-      const result = await searchInFiles(q, opts);
+      const { listen } = await import('@tauri-apps/api/event');
+      unlisten = await listen(`search:hits:${streamId}`, (e) => {
+        if (seq !== seqRef.current) return; // de una búsqueda anterior
+        const batch = Array.isArray(e.payload) ? e.payload : [];
+        if (batch.length) setHits((prev) => [...(prev || []), ...batch]);
+      });
+      const result = await searchInFiles(q, opts, streamId);
       if (seq !== seqRef.current) return; // llegó tarde: hay otra búsqueda
       setHits(result);
-      setCollapsed({});
     } catch (e) {
       if (seq === seqRef.current) {
         setError(String(e));
         setHits(null);
       }
     } finally {
+      if (unlisten) unlisten();
       if (seq === seqRef.current) setBusy(false);
     }
   };

@@ -164,9 +164,147 @@ export async function gotoDefinition() {
   return true;
 }
 
+// ── Renombrar símbolo (F2) ──────────────────────────────────────────────
+
+/** Aplica un WorkspaceEdit de LSP. Pestañas abiertas: se edita el buffer (la
+    pestaña queda sucia y el guardado normal persiste); archivos cerrados: se
+    reescriben en disco directamente. */
+async function applyWorkspaceEdit(edit) {
+  // Normalizar ambas formas del protocolo a { uri → TextEdit[] }.
+  const byUri = new Map();
+  if (edit.changes) {
+    for (const [uri, edits] of Object.entries(edit.changes)) byUri.set(uri, edits);
+  }
+  if (Array.isArray(edit.documentChanges)) {
+    for (const dc of edit.documentChanges) {
+      if (dc.textDocument?.uri && Array.isArray(dc.edits)) {
+        byUri.set(dc.textDocument.uri, [...(byUri.get(dc.textDocument.uri) || []), ...dc.edits]);
+      }
+      // create/rename/delete de ARCHIVOS: fuera de alcance de un rename de símbolo.
+    }
+  }
+  if (!byUri.size) return 0;
+
+  const { useEditorStore, getLiveView, getCachedState, cacheState } = await import('../store/editorStore');
+  const { useLspStore } = await import('../store/lspStore');
+  const { readFileContent, writeFileContent } = await import('../lib/tauri');
+  const ed = useEditorStore.getState();
+  let touched = 0;
+
+  for (const [uri, edits] of byUri) {
+    const path = uriToPath(uri);
+    const tab = ed.tabs.find((t) => t.path === path);
+
+    if (tab) {
+      const isActive = ed.activePath === path && getLiveView();
+      const state = isActive ? getLiveView().state : getCachedState(path);
+      if (!state) continue;
+      const changes = edits.map((e) => ({
+        from: lspToPos(state, e.range?.start),
+        to: lspToPos(state, e.range?.end),
+        insert: e.newText ?? '',
+      }));
+      if (isActive) {
+        // El dispatch dispara el updateListener: markDirty + didChange al LSP.
+        getLiveView().dispatch({ changes });
+      } else {
+        // Un estado cacheado no tiene vista: el listener no corre, así que el
+        // dirty y la sincronización con el servidor se hacen a mano.
+        const next = state.update({ changes }).state;
+        cacheState(path, next);
+        ed.markDirty(path);
+        useLspStore.getState().changeDoc(path, tab.name, next.doc.toString());
+      }
+      touched++;
+      continue;
+    }
+
+    // Archivo no abierto: aplicar sobre el texto del disco por offsets.
+    const content = await readFileContent(path).catch(() => null);
+    if (content == null) continue;
+    const updated = applyEditsToText(content, edits);
+    if (updated !== content) {
+      await writeFileContent(path, updated).catch(() => {});
+      touched++;
+    }
+  }
+  return touched;
+}
+
+/** Aplica TextEdits (rangos línea/columna LSP) sobre un string plano. */
+function applyEditsToText(content, edits) {
+  // Offsets de inicio de cada línea (0-based), contando el salto real.
+  const lineStarts = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') lineStarts.push(i + 1);
+  }
+  const offsetAt = (p) => {
+    const li = Math.min(Math.max(0, p?.line ?? 0), lineStarts.length - 1);
+    const lineEnd = li + 1 < lineStarts.length ? lineStarts[li + 1] - 1 : content.length;
+    return Math.min(lineStarts[li] + Math.max(0, p?.character ?? 0), lineEnd);
+  };
+  // De atrás hacia delante para que los offsets previos no se desplacen.
+  const resolved = edits
+    .map((e) => ({ from: offsetAt(e.range?.start), to: offsetAt(e.range?.end), text: e.newText ?? '' }))
+    .sort((a, b) => b.from - a.from);
+  let out = content;
+  for (const e of resolved) {
+    out = out.slice(0, e.from) + e.text + out.slice(Math.max(e.from, e.to));
+  }
+  return out;
+}
+
+/** F2: renombra el símbolo bajo el cursor en todo el proyecto (LSP). */
+export async function renameSymbol() {
+  const tab = await activeTab();
+  if (!tab) return false;
+  const client = await lspFor(tab.name);
+  if (!client || !client.capabilities?.renameProvider) return false;
+
+  const { getLiveView } = await import('../store/editorStore');
+  const view = getLiveView();
+  if (!view) return false;
+
+  const state = view.state;
+  const pos = state.selection.main.head;
+  const line = state.doc.lineAt(pos);
+  const text = line.text;
+  const off = pos - line.from;
+  let a = off;
+  let b = off;
+  while (a > 0 && /[\w$]/.test(text[a - 1])) a--;
+  while (b < text.length && /[\w$]/.test(text[b])) b++;
+  const current = text.slice(a, b);
+  if (!current) return false;
+
+  const { showConfirm } = await import('../lib/confirm');
+  const { choice, value } = await showConfirm({
+    title: 'Renombrar símbolo',
+    message: `Renombrar «${current}» en todo el proyecto:`,
+    input: { value: current, placeholder: 'Nuevo nombre' },
+    options: [
+      { id: 'ok', label: 'Renombrar', kind: 'primary' },
+      { id: 'cancel', label: 'Cancelar' },
+    ],
+  });
+  const newName = (value || '').trim();
+  if (choice !== 'ok' || !newName || newName === current) return false;
+
+  let edit;
+  try {
+    edit = await client.rename(tab.path, posToLsp(state, pos), newName);
+  } catch {
+    return false; // el servidor lo rechazó (posición no renombrable)
+  }
+  if (!edit) return false;
+  await applyWorkspaceEdit(edit);
+  return true;
+}
+
 const definitionKeymap = keymap.of([
   { key: 'F12', run: () => { gotoDefinition(); return true; } },
   { key: 'Mod-F12', run: () => { gotoDefinition(); return true; } },
+  { key: 'F2', run: () => { renameSymbol(); return true; } },
 ]);
 
 const hoverTheme = EditorView.baseTheme({

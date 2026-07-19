@@ -91,6 +91,7 @@ export class LspClient {
           },
           hover: { contentFormat: ['markdown', 'plaintext'] },
           definition: {},
+          rename: {},
         },
         workspace: { configuration: true, workspaceFolders: true },
       },
@@ -243,6 +244,16 @@ export class LspClient {
     return this.request('textDocument/definition', {
       textDocument: { uri: pathToUri(path) },
       position,
+    });
+  }
+
+  /** Renombra el símbolo bajo `position` en todo el proyecto. Devuelve el
+      WorkspaceEdit del servidor (lspExt lo aplica). */
+  rename(path, position, newName) {
+    return this.request('textDocument/rename', {
+      textDocument: { uri: pathToUri(path) },
+      position,
+      newName,
     });
   }
 

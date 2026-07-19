@@ -10,6 +10,30 @@ import { gitRun, gitClone } from '../lib/tauri';
 const AUTO_FETCH_MS = 3 * 60 * 1000;
 let autoFetchTimer = null;
 
+/** Des-entrecomilla una ruta de porcelain: git envuelve en "…" las rutas con
+    espacios/caracteres especiales y escapa en estilo C, con los bytes UTF-8
+    no-ASCII como octales (\303\251 = é). Sin esto, stage/unstage/diff sobre
+    esas rutas fallaban (git recibía la ruta con comillas y escapes literales). */
+function unquoteGitPath(p) {
+  if (!p.startsWith('"') || !p.endsWith('"') || p.length < 2) return p;
+  const inner = p.slice(1, -1);
+  const enc = new TextEncoder();
+  const bytes = [];
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c !== '\\') { bytes.push(...enc.encode(c)); continue; }
+    const n = inner[i + 1];
+    if (n >= '0' && n <= '7') {
+      bytes.push(parseInt(inner.slice(i + 1, i + 4), 8) || 0);
+      i += 3;
+    } else {
+      bytes.push(...enc.encode(n === 't' ? '\t' : n === 'n' ? '\n' : (n ?? '')));
+      i += 1;
+    }
+  }
+  try { return new TextDecoder().decode(new Uint8Array(bytes)); } catch { return inner; }
+}
+
 /** Parsea `git status --porcelain=v1` a una lista de cambios. */
 function parseStatus(stdout) {
   const changes = [];
@@ -19,6 +43,7 @@ function parseStatus(stdout) {
     const wt = raw[1];
     let path = raw.slice(3);
     if (path.includes(' -> ')) path = path.split(' -> ')[1]; // renombrado
+    path = unquoteGitPath(path.trim());
     const untracked = index === '?' && wt === '?';
     const staged = !untracked && index !== ' ';
     changes.push({ path, index, wt, staged, untracked });
@@ -52,19 +77,22 @@ export const useGitStore = create((set, get) => ({
               error: notRepo ? '' : status.stderr.trim() });
         return;
       }
+      // Las tres consultas son independientes: en paralelo el refresh tarda
+      // lo que la más lenta, no la suma (se nota en repos grandes).
       // `branch --show-current` da el nombre incluso sin commits (HEAD naciente),
       // donde `rev-parse --abbrev-ref HEAD` falla y dejaba un "(sin commits)".
-      const branch = await gitRun(['branch', '--show-current']);
+      const [branch, remotes, counts] = await Promise.all([
+        gitRun(['branch', '--show-current']),
+        gitRun(['remote']),
+        // Cuánto nos separa del upstream. Falla (y da 0/0) si la rama no tiene
+        // upstream todavía: es justo el caso de un repo recién publicado.
+        gitRun(['rev-list', '--left-right', '--count', 'HEAD...@{u}']),
+      ]);
       const name = branch.code === 0 ? branch.stdout.trim() : '';
-
-      const remotes = await gitRun(['remote']);
       const hasRemote = remotes.code === 0 && !!remotes.stdout.trim();
 
-      // Cuánto nos separa del upstream. Falla (y da 0/0) si la rama no tiene
-      // upstream todavía: es justo el caso de un repo recién publicado.
       let ahead = 0;
       let behind = 0;
-      const counts = await gitRun(['rev-list', '--left-right', '--count', 'HEAD...@{u}']);
       if (counts.code === 0) {
         const [a, b] = counts.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0);
         ahead = a || 0;

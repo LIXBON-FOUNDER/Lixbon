@@ -354,6 +354,12 @@ fn delete_entry(path: String, root: State<WorkspaceRoot>) -> Result<(), String> 
     if is_workspace_root(&root, &target) {
         return Err("No se puede eliminar la carpeta de trabajo".to_string());
     }
+    // A la papelera del SO: un mal clic en el explorador deja de ser
+    // irreversible. Si el SO no puede (unidades de red, papelera llena),
+    // se cae al borrado definitivo de siempre.
+    if trash::delete(&target).is_ok() {
+        return Ok(());
+    }
     if target.is_dir() {
         fs::remove_dir_all(&target).map_err(|e| e.to_string())
     } else {
@@ -481,12 +487,40 @@ fn workspace_path(root: &State<WorkspaceRoot>) -> Result<PathBuf, String> {
         .ok_or_else(|| "No hay carpeta de trabajo abierta".to_string())
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct SearchHit {
     path: String,
     name: String,
     line: u32,
     text: String,
+}
+
+/// Recorre el workspace respetando el `.gitignore` del proyecto (crate `ignore`,
+/// el walker de ripgrep), además de las carpetas fijas de SKIP_DIRS. Sustituye
+/// a los walkers manuales: sin ruido de builds/artefactos ignorados.
+fn workspace_walker(base: &Path) -> ignore::Walk {
+    ignore::WalkBuilder::new(base)
+        .follow_links(false)
+        .hidden(false) // los dotfiles (.env, .github…) sí se listan, como antes
+        .git_global(false) // solo el .gitignore del repo: comportamiento predecible
+        .filter_entry(|e| {
+            e.file_name()
+                .to_str()
+                .map(|n| !skip_dir(n))
+                .unwrap_or(true)
+        })
+        .build()
+}
+
+/// Extrae la ruta si la entrada del walker es un archivo normal (None si es
+/// carpeta, error de lectura o tipo raro).
+fn entry_file_path(entry: Result<ignore::DirEntry, ignore::Error>) -> Option<PathBuf> {
+    let entry = entry.ok()?;
+    if entry.file_type()?.is_file() {
+        Some(entry.into_path())
+    } else {
+        None
+    }
 }
 
 const SEARCH_MAX_HITS: usize = 500;
@@ -516,72 +550,19 @@ fn build_query_regex(
         .map_err(|e| format!("Expresión de búsqueda inválida: {e}"))
 }
 
-fn search_walk(dir: &Path, re: &regex::Regex, hits: &mut Vec<SearchHit>) {
-    if hits.len() >= SEARCH_MAX_HITS {
-        return;
-    }
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        if hits.len() >= SEARCH_MAX_HITS {
-            return;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = entry.path();
-        if path.is_dir() {
-            if !skip_dir(&name) {
-                subdirs.push(path);
-            }
-            continue;
-        }
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if meta.len() > SEARCH_MAX_FILE_BYTES {
-            continue;
-        }
-        // read_to_string falla en binarios no-UTF8; el NUL cubre el resto
-        let content = match fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if content.contains('\0') {
-            continue;
-        }
-        for (i, line) in content.lines().enumerate() {
-            if re.is_match(line) {
-                hits.push(SearchHit {
-                    path: display_path(&path),
-                    name: name.clone(),
-                    line: (i + 1) as u32,
-                    text: line.trim().chars().take(240).collect(),
-                });
-                if hits.len() >= SEARCH_MAX_HITS {
-                    return;
-                }
-            }
-        }
-    }
-    for d in subdirs {
-        search_walk(&d, re, hits);
-        if hits.len() >= SEARCH_MAX_HITS {
-            return;
-        }
-    }
-}
-
 /// Busca en todos los archivos del workspace. `is_regex` interpreta la consulta
 /// como expresión regular; `case_sensitive`/`whole_word` afinan la coincidencia.
+/// Con `stream_id`, los resultados van llegando en lotes por el evento
+/// `search:hits:{stream_id}` mientras se busca; el retorno final es la lista
+/// completa (autoritativa: el frontend la usa para el estado definitivo).
 #[tauri::command]
 async fn search_in_files(
+    app: AppHandle,
     query: String,
     case_sensitive: bool,
     is_regex: bool,
     whole_word: bool,
+    stream_id: Option<String>,
     root: State<'_, WorkspaceRoot>,
 ) -> Result<Vec<SearchHit>, String> {
     let base = workspace_path(&root)?;
@@ -590,8 +571,55 @@ async fn search_in_files(
     }
     let re = build_query_regex(&query, case_sensitive, is_regex, whole_word)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut hits = Vec::new();
-        search_walk(&base, &re, &mut hits);
+        let event = stream_id.map(|id| format!("search:hits:{}", sanitize_component(&id)));
+        let mut hits: Vec<SearchHit> = Vec::new();
+        let mut batch: Vec<SearchHit> = Vec::new();
+        for entry in workspace_walker(&base) {
+            if hits.len() >= SEARCH_MAX_HITS {
+                break;
+            }
+            let Some(path) = entry_file_path(entry) else { continue };
+            let Ok(meta) = fs::metadata(&path) else { continue };
+            if meta.len() > SEARCH_MAX_FILE_BYTES {
+                continue;
+            }
+            // read_to_string falla en binarios no-UTF8; el NUL cubre el resto
+            let Ok(content) = fs::read_to_string(&path) else { continue };
+            if content.contains('\0') {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            for (i, line) in content.lines().enumerate() {
+                if re.is_match(line) {
+                    let hit = SearchHit {
+                        path: display_path(&path),
+                        name: name.clone(),
+                        line: (i + 1) as u32,
+                        text: line.trim().chars().take(240).collect(),
+                    };
+                    if event.is_some() {
+                        batch.push(hit.clone());
+                    }
+                    hits.push(hit);
+                    if hits.len() >= SEARCH_MAX_HITS {
+                        break;
+                    }
+                }
+            }
+            if let Some(ev) = &event {
+                if batch.len() >= 20 {
+                    let _ = app.emit(ev, std::mem::take(&mut batch));
+                }
+            }
+        }
+        if let Some(ev) = &event {
+            if !batch.is_empty() {
+                let _ = app.emit(ev, batch);
+            }
+        }
         hits
     })
     .await
@@ -606,38 +634,15 @@ struct ReplaceResult {
     replacements: usize,
 }
 
-fn replace_walk(
-    dir: &Path,
-    re: &regex::Regex,
-    replacement: &str,
-    is_regex: bool,
-    res: &mut ReplaceResult,
-) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = entry.path();
-        if path.is_dir() {
-            if !skip_dir(&name) {
-                subdirs.push(path);
-            }
-            continue;
-        }
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+fn replace_walk(base: &Path, re: &regex::Regex, replacement: &str, is_regex: bool) -> ReplaceResult {
+    let mut res = ReplaceResult { files: 0, replacements: 0 };
+    for entry in workspace_walker(base) {
+        let Some(path) = entry_file_path(entry) else { continue };
+        let Ok(meta) = fs::metadata(&path) else { continue };
         if meta.len() > SEARCH_MAX_FILE_BYTES {
             continue;
         }
-        let content = match fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(_) => continue, // binario/no-UTF8: se omite
-        };
+        let Ok(content) = fs::read_to_string(&path) else { continue }; // binario: se omite
         if content.contains('\0') {
             continue;
         }
@@ -657,9 +662,7 @@ fn replace_walk(
             res.replacements += count;
         }
     }
-    for d in subdirs {
-        replace_walk(&d, re, replacement, is_regex, res);
-    }
+    res
 }
 
 /// Reemplaza `query` por `replacement` en todos los archivos de texto del
@@ -679,13 +682,9 @@ async fn replace_in_files(
         return Err("El término de búsqueda es demasiado corto".to_string());
     }
     let re = build_query_regex(&query, case_sensitive, is_regex, whole_word)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut res = ReplaceResult { files: 0, replacements: 0 };
-        replace_walk(&base, &re, &replacement, is_regex, &mut res);
-        res
-    })
-    .await
-    .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || replace_walk(&base, &re, &replacement, is_regex))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -697,38 +696,21 @@ struct QuickFile {
 
 const LIST_MAX_FILES: usize = 5000;
 
-fn files_walk(base: &Path, dir: &Path, out: &mut Vec<QuickFile>) {
-    if out.len() >= LIST_MAX_FILES {
-        return;
-    }
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
+fn files_walk(base: &Path, out: &mut Vec<QuickFile>) {
+    for entry in workspace_walker(base) {
         if out.len() >= LIST_MAX_FILES {
             return;
         }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = entry.path();
-        if path.is_dir() {
-            if !skip_dir(&name) {
-                subdirs.push(path);
-            }
-            continue;
-        }
+        let Some(path) = entry_file_path(entry) else { continue };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let rel = path
             .strip_prefix(base)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| name.clone());
         out.push(QuickFile { name, path: display_path(&path), rel });
-    }
-    for d in subdirs {
-        files_walk(base, &d, out);
-        if out.len() >= LIST_MAX_FILES {
-            return;
-        }
     }
 }
 
@@ -738,7 +720,7 @@ async fn list_files(root: State<'_, WorkspaceRoot>) -> Result<Vec<QuickFile>, St
     let base = workspace_path(&root)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut out = Vec::new();
-        files_walk(&base, &base, &mut out);
+        files_walk(&base, &mut out);
         out
     })
     .await
@@ -1376,9 +1358,39 @@ struct GitOutput {
     code: i32,
 }
 
+/// Subcomandos de git que la UI puede invocar. Todo lo demás (push/pull, y
+/// cualquier flag global tipo `-c` o `--exec-path` que permita ejecutar código)
+/// se rechaza: el frontend es de confianza, pero validar en Rust es la línea
+/// de defensa que no depende del WebView.
+const GIT_ALLOWED_SUBCOMMANDS: [&str; 19] = [
+    "status", "diff", "log", "show", "branch", "add", "commit", "reset", "restore",
+    "checkout", "stash", "rev-parse", "rev-list", "remote", "init", "fetch", "merge",
+    "pull", "push",
+];
+
+fn validate_git_args(args: &[String]) -> Result<(), String> {
+    let sub = args.first().ok_or_else(|| "Falta el subcomando de git".to_string())?;
+    if !GIT_ALLOWED_SUBCOMMANDS.contains(&sub.as_str()) {
+        return Err(format!("Subcomando git no permitido desde la UI: {sub}"));
+    }
+    for a in args {
+        let l = a.to_lowercase();
+        if l == "-c"
+            || l == "--config"
+            || l.starts_with("--config-env")
+            || l.starts_with("--exec-path")
+            || l.starts_with("--upload-pack")
+            || l.starts_with("--receive-pack")
+        {
+            return Err(format!("Opción de git no permitida: {a}"));
+        }
+    }
+    Ok(())
+}
+
 /// Ejecuta `git` con los argumentos dados y captura la salida. Solo para
 /// operaciones de lectura/local (status, branch, log, add, commit); las de red
-/// (clone/push/pull/fetch) se lanzan desde el terminal integrado para que los
+/// (clone/push/pull) se lanzan desde el terminal integrado para que los
 /// prompts de credenciales sean visibles. cwd por defecto = carpeta de trabajo.
 #[tauri::command]
 fn git_run(
@@ -1386,6 +1398,7 @@ fn git_run(
     cwd: Option<String>,
     root: State<WorkspaceRoot>,
 ) -> Result<GitOutput, String> {
+    validate_git_args(&args)?;
     let dir = match cwd {
         Some(c) => ensure_inside_root(&root, &c)?,
         None => root
@@ -2115,6 +2128,69 @@ fn ext_uninstall(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ── Secretos (almacén de credenciales del SO) ────────────────────────────
+// La API key del usuario deja de vivir en claro en el JSON de settings: en
+// Windows va al Credential Manager (cifrado por DPAPI con la cuenta del
+// usuario). En otros SO los comandos devuelven error y el frontend cae al
+// JSON de siempre — la app funciona igual, solo que sin cifrado.
+
+#[cfg(windows)]
+const SECRET_SERVICE: &str = "com.usuario.app-lixbon";
+
+#[cfg(windows)]
+fn secret_entry(name: &str) -> Result<keyring::Entry, String> {
+    if !is_simple_name(name) {
+        return Err("Nombre de secreto inválido".to_string());
+    }
+    keyring::Entry::new(SECRET_SERVICE, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secret_set(name: String, value: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        secret_entry(&name)?.set_password(&value).map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (name, value);
+        Err("Almacén de credenciales no soportado en este SO".to_string())
+    }
+}
+
+#[tauri::command]
+fn secret_get(name: String) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        match secret_entry(&name)?.get_password() {
+            Ok(v) => Ok(Some(v)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        Err("Almacén de credenciales no soportado en este SO".to_string())
+    }
+}
+
+#[tauri::command]
+fn secret_delete(name: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        match secret_entry(&name)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        Err("Almacén de credenciales no soportado en este SO".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2175,7 +2251,10 @@ pub fn run() {
             ext_install,
             ext_read_theme,
             ext_read_file,
-            ext_uninstall
+            ext_uninstall,
+            secret_set,
+            secret_get,
+            secret_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

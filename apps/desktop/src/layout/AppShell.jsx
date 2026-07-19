@@ -3,7 +3,6 @@
 // como ventana flotante para no desplazar el área de trabajo.
 import { useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { ask } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store/appStore';
 import { useEditorStore } from '../store/editorStore';
 import { useGitStore } from '../store/gitStore';
@@ -20,6 +19,7 @@ import { SearchPanel } from '../sections/Search/SearchPanel';
 import { OutlinePanel } from '../sections/Outline/OutlinePanel';
 import { ExtensionsPanel } from '../sections/Extensions/ExtensionsPanel';
 import { EditorTabs } from '../editor/EditorTabs';
+import { Breadcrumbs } from '../editor/Breadcrumbs';
 import { RunControls } from '../editor/RunControls';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { Preview } from '../editor/Preview';
@@ -31,6 +31,7 @@ import { DiffView } from '../sections/SourceControl/DiffView';
 import { Welcome } from '../sections/Workspace/Welcome';
 import { QuickOpen } from '../components/QuickOpen';
 import { CommandPalette } from '../components/CommandPalette';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Modal } from '../components/Modal';
 import { InlineEdit } from '../editor/InlineEdit';
 import { useExtStore } from '../store/extStore';
@@ -99,11 +100,17 @@ export function AppShell() {
         const dirty = useEditorStore.getState().tabs.filter((t) => t.dirty);
         if (dirty.length === 0) return; // sin cambios: cerrar sin más
         event.preventDefault();
-        const save = await ask(
-          `Hay ${dirty.length} archivo(s) con cambios sin guardar. ¿Guardarlos antes de salir?`,
-          { title: 'lixbon', kind: 'warning', okLabel: 'Guardar y salir', cancelLabel: 'Cancelar' }
-        );
-        if (!save) return; // se queda abierta
+        const { showConfirm } = await import('../lib/confirm');
+        const { choice } = await showConfirm({
+          message: `Hay ${dirty.length} archivo(s) con cambios sin guardar.`,
+          options: [
+            { id: 'save', label: 'Guardar y salir', kind: 'primary' },
+            { id: 'discard', label: 'Salir sin guardar', kind: 'danger' },
+            { id: 'cancel', label: 'Cancelar' },
+          ],
+        });
+        if (choice === 'discard') { await win.destroy(); return; }
+        if (choice !== 'save') return; // cancelado: se queda abierta
         await useEditorStore.getState().saveAll();
         // Si algún guardado falló, no cerrar: el usuario debe verlo.
         if (useEditorStore.getState().tabs.some((t) => t.dirty)) return;
@@ -134,6 +141,7 @@ export function AppShell() {
           <EditorTabs />
           <RunControls />
         </div>
+        {hasTabs && <Breadcrumbs />}
         {hasTabs ? (
           previewOpen ? (
             <div className="editor-split">
@@ -201,7 +209,13 @@ export function AppShell() {
             {renderCenter()}
           </div>
 
-          {panels.terminal && <BottomPanel />}
+          {/* Montado SIEMPRE y oculto con display: si se desmontara al plegar
+              (Ctrl+`), los PTY quedarían huérfanos en Rust (el shell seguiría
+              vivo sin nadie que lo cierre) y al reabrir se crearía otro shell
+              duplicado perdiendo además el buffer del terminal. */}
+          <div style={{ display: panels.terminal ? 'contents' : 'none' }}>
+            <BottomPanel />
+          </div>
         </main>
 
         {panels.chat && (
@@ -217,6 +231,7 @@ export function AppShell() {
 
       {quickOpen && <QuickOpen />}
       {commandPalette && <CommandPalette />}
+      <ConfirmDialog />
       <InlineEdit />
 
       {modalView === 'settings' && (

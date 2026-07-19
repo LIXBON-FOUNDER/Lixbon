@@ -18,6 +18,7 @@ import {
   buildAgentSystemPrompt,
   DEFAULT_CMD_ALLOWLIST,
   isAllowedCommand,
+  isNeverAutoCommand,
   buildModelHistory,
   captureSnapshot,
   cleanProse,
@@ -103,7 +104,19 @@ export const useChatStore = create((set, get) => ({
 
   loadConversation: async (id) => {
     get().stop();
-    const res = await api.get(`/api/conversations/${id}/messages`);
+    let res;
+    try {
+      res = await api.get(`/api/conversations/${id}/messages`);
+    } catch (err) {
+      set({
+        view: 'chat',
+        messages: [...get().messages, {
+          role: 'error',
+          content: `No se pudo cargar la conversación: ${err?.message || err}`,
+        }],
+      });
+      return;
+    }
     const messages = (res.messages || []).map((m) => {
       // Los TOOL_RESULT del modo agente quedan persistidos como mensajes de
       // usuario; al recargar se muestran como filas de herramienta discretas.
@@ -417,8 +430,11 @@ export const useChatStore = create((set, get) => ({
   _needsApproval: (tool, args) => {
     if (READ_ONLY_TOOLS.has(tool)) return false;
     if (tool === 'run_command') {
-      if (get().autoRunCommands) return false;
-      return !isAllowedCommand(args?.command || '', get().commandAllowlist);
+      const cmd = args?.command || '';
+      // Ni con auto-run: los comandos que ejecutan código externo (npx, curl,
+      // flags -e/-c), instalan paquetes o encadenan piden aprobación SIEMPRE.
+      if (get().autoRunCommands) return isNeverAutoCommand(cmd);
+      return !isAllowedCommand(cmd, get().commandAllowlist);
     }
     return !get().autoApprove;
   },

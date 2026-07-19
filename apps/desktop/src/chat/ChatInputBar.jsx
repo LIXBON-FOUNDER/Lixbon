@@ -53,7 +53,10 @@ export function ChatInputBar() {
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const { send, stop, streaming, agentMode, setAgentMode } = useChatStore();
+  const {
+    send, stop, streaming, agentMode, setAgentMode,
+    autoApprove, setAutoApprove, autoRunCommands, setAutoRunCommands,
+  } = useChatStore();
   const activeTab = useEditorStore((s) => s.tabs.find((t) => t.path === s.activePath));
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const agentActive = agentMode && !!workspaceRoot;
@@ -259,6 +262,28 @@ export function ChatInputBar() {
             <IconHammer size={12} />
             Agente
           </button>
+          {agentActive && (
+            <>
+              <button
+                className={`agent-toggle ${autoApprove ? 'is-on' : ''}`}
+                onClick={() => setAutoApprove(!autoApprove)}
+                title={autoApprove
+                  ? 'Auto-aplicar ACTIVO: el agente escribe archivos sin pedir aprobación (los cambios se pueden revertir). Clic para exigir aprobación por cambio.'
+                  : 'Auto-aplicar inactivo: cada cambio de archivo pide tu aprobación. Clic para dejar que el agente aplique directo.'}
+              >
+                Auto
+              </button>
+              <button
+                className={`agent-toggle ${autoRunCommands ? 'is-on' : ''}`}
+                onClick={() => setAutoRunCommands(!autoRunCommands)}
+                title={autoRunCommands
+                  ? 'Auto-run ACTIVO: el agente ejecuta comandos sin preguntar (los peligrosos siguen pidiendo aprobación). Clic para confirmar cada comando.'
+                  : 'Auto-run inactivo: los comandos piden confirmación salvo los de la allowlist (tests, builds). Clic para ejecutar sin preguntar.'}
+              >
+                Run
+              </button>
+            </>
+          )}
           <button
             className="chat-inputbar__attach"
             onClick={() => fileInputRef.current?.click()}

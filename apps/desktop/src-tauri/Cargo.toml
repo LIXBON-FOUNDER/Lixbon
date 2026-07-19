@@ -1,6 +1,6 @@
 [package]
 name = "lixbon"
-version = "0.9.0"
+version = "0.9.1"
 description = "Lixbon"
 authors = ["Lixbon by GBX"]
 edition = "2021"
@@ -34,4 +34,14 @@ portable-pty = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 notify = "6"
 regex = "1"
+# Walker de ripgrep: respeta el .gitignore del proyecto en búsqueda/listado.
+ignore = "0.4"
+# Papelera del SO para delete_entry (borrar deja de ser irreversible).
+trash = "5"
+
+# Windows Credential Manager para guardar la API key cifrada (DPAPI) en vez
+# de en claro en el JSON de settings. Solo Windows: en otros SO el frontend
+# cae al JSON de siempre.
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
 

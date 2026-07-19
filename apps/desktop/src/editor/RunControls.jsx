@@ -1,7 +1,7 @@
 // RunControls.jsx — botones Run/Build. Detecta el tipo de proyecto en el root del
 // workspace y ejecuta el comando en el terminal integrado (reutiliza el PTY).
 import { useEffect, useState } from 'react';
-import { getWorkspaceRoot, readDir } from '../lib/tauri';
+import { readDir } from '../lib/tauri';
 import { detectRunConfig } from '../lib/runConfigs';
 import { useAppStore } from '../store/appStore';
 import { useTerminalStore } from '../store/terminalStore';
@@ -10,20 +10,37 @@ import { IconPlay, IconHammer } from '../components/Icons';
 export function RunControls() {
   const [config, setConfig] = useState(null);
   const showBottomPanel = useAppStore((s) => s.showBottomPanel);
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const runCommand = useTerminalStore((s) => s.runCommand);
 
+  // Re-detecta al cambiar de carpeta (el arranque restaura el workspace en
+  // ASYNC: con la detección única de antes, los botones no aparecían nunca en
+  // un arranque frío) y cuando cambia el disco (p. ej. el agente acaba de
+  // crear el package.json), con un pequeño debounce.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timer = null;
+    const detect = async () => {
+      if (!workspaceRoot) { setConfig(null); return; }
       try {
-        const root = await getWorkspaceRoot();
-        if (!root) return;
-        const entries = await readDir(root);
+        const entries = await readDir(workspaceRoot);
         if (!cancelled) setConfig(detectRunConfig(entries));
-      } catch { /* sin workspace todavía */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      } catch {
+        if (!cancelled) setConfig(null);
+      }
+    };
+    detect();
+    const onFsChanged = () => {
+      clearTimeout(timer);
+      timer = setTimeout(detect, 800);
+    };
+    window.addEventListener('lixbon:fs-changed', onFsChanged);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener('lixbon:fs-changed', onFsChanged);
+    };
+  }, [workspaceRoot]);
 
   const run = (cmd) => {
     if (!cmd) return;

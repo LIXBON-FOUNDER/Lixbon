@@ -12,13 +12,30 @@ import { termOpen, termWrite, termResize, termClose } from '../lib/tauri';
 import { Select } from '../components/Select';
 import { IconX, IconPlus } from '../components/Icons';
 
-const XTERM_THEME = {
-  background: '#171717',
-  foreground: '#e7e7de',
-  cursor: '#d9e64a',
-  cursorAccent: '#171717',
-  selectionBackground: 'rgba(217, 230, 74, 0.30)',
+// Temas del terminal según el modo de la app (<html data-theme>): antes era
+// siempre oscuro y en modo claro chocaba con el resto del IDE.
+const XTERM_THEMES = {
+  dark: {
+    background: '#171717',
+    foreground: '#e7e7de',
+    cursor: '#d9e64a',
+    cursorAccent: '#171717',
+    selectionBackground: 'rgba(217, 230, 74, 0.30)',
+  },
+  light: {
+    background: '#f6f7ed',
+    foreground: '#171717',
+    cursor: '#171717',
+    cursorAccent: '#f6f7ed',
+    selectionBackground: 'rgba(23, 23, 23, 0.18)',
+  },
 };
+
+function currentXtermTheme() {
+  return document.documentElement.dataset.theme === 'dark'
+    ? XTERM_THEMES.dark
+    : XTERM_THEMES.light;
+}
 
 const SHELLS = [
   { id: 'powershell', label: 'PowerShell' },
@@ -35,7 +52,7 @@ function TerminalInstance({ session, active }) {
 
   useEffect(() => {
     const term = new Terminal({
-      theme: XTERM_THEME,
+      theme: currentXtermTheme(),
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       fontSize: 13,
       cursorBlink: true,
@@ -45,6 +62,13 @@ function TerminalInstance({ session, active }) {
     term.loadAddon(fit);
     term.open(hostRef.current);
     fitRef.current = fit;
+
+    // Si el usuario cambia el modo claro/oscuro con el terminal abierto,
+    // re-aplicar el tema en vivo (el modo vive en <html data-theme>).
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = currentXtermTheme();
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
     let disposed = false;
     let unlistenOut = null;
@@ -87,6 +111,7 @@ function TerminalInstance({ session, active }) {
     return () => {
       disposed = true;
       ro.disconnect();
+      themeObserver.disconnect();
       if (unlistenOut) unlistenOut();
       if (unlistenExit) unlistenExit();
       term.dispose();
@@ -120,14 +145,17 @@ function TerminalInstance({ session, active }) {
 export function TerminalPanel() {
   const { sessions, activeKey, addSession, closeSession, setActive } = useTerminalStore();
   const workspaceReady = useAppStore((s) => s.workspaceReady);
+  const terminalVisible = useAppStore((s) => s.panels.terminal);
 
   // Sesión por defecto, pero NO antes de saber cuál es la carpeta de trabajo:
   // el PTY hereda el cwd al nacer y ya no se puede cambiar. Si se abría antes,
   // caía en la carpeta del usuario y `git push` fallaba con "not a git repository".
+  // Y solo cuando el panel está a la vista: el componente ahora vive montado
+  // (oculto) siempre, y no queremos un shell corriendo que nadie pidió.
   useEffect(() => {
-    if (workspaceReady && sessions.length === 0) addSession('powershell');
+    if (workspaceReady && terminalVisible && sessions.length === 0) addSession('powershell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceReady]);
+  }, [workspaceReady, terminalVisible]);
 
   return (
     <div className="terminal-panel">

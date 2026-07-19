@@ -7,9 +7,10 @@ import { revealInOs } from '../lib/tauri';
 import { IconX } from '../components/Icons';
 
 export function EditorTabs() {
-  const { tabs, activePath, setActive, closeTab, closeOthers, closeToRight, closeSaved } =
+  const { tabs, activePath, setActive, closeTab, closeOthers, closeToRight, closeSaved, reorderTabs } =
     useEditorStore();
   const [menu, setMenu] = useState(null); // { x, y, path }
+  const [dragOver, setDragOver] = useState(null); // path bajo el arrastre
   const menuRef = useRef(null);
 
   // Cerrar el menú contextual con clic fuera o Escape
@@ -58,8 +59,27 @@ export function EditorTabs() {
           key={tab.path}
           role="tab"
           aria-selected={tab.path === activePath}
-          className={`editor-tab ${tab.path === activePath ? 'is-active' : ''}`}
+          className={`editor-tab ${tab.path === activePath ? 'is-active' : ''} ${dragOver === tab.path ? 'is-dragover' : ''}`}
           title={tab.path}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/lixbon-tab', tab.path);
+            e.dataTransfer.effectAllowed = 'move';
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('text/lixbon-tab')) {
+              e.preventDefault();
+              setDragOver(tab.path);
+            }
+          }}
+          onDragLeave={() => setDragOver((p) => (p === tab.path ? null : p))}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(null);
+            const src = e.dataTransfer.getData('text/lixbon-tab');
+            if (src && src !== tab.path) reorderTabs(src, tab.path);
+          }}
+          onDragEnd={() => setDragOver(null)}
           onClick={() => setActive(tab.path)}
           onAuxClick={(e) => { if (e.button === 1) closeTab(tab.path); }}
           onContextMenu={(e) => openMenu(e, tab.path)}

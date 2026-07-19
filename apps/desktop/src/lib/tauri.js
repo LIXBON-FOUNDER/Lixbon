@@ -82,13 +82,15 @@ export function revealInOs(path) {
 }
 
 /** Busca en todos los archivos del workspace. `opts` = {caseSensitive, isRegex,
-    wholeWord}. Devuelve [{path,name,line,text}]. */
-export function searchInFiles(query, opts = {}) {
+    wholeWord}. Devuelve [{path,name,line,text}]. Con `streamId`, los lotes
+    parciales llegan por el evento `search:hits:{streamId}` mientras se busca. */
+export function searchInFiles(query, opts = {}, streamId = null) {
   return invoke('search_in_files', {
     query,
     caseSensitive: !!opts.caseSensitive,
     isRegex: !!opts.isRegex,
     wholeWord: !!opts.wholeWord,
+    streamId: streamId || null,
   });
 }
 

@@ -1336,3 +1336,103 @@
 }
 .keybind__chord:hover { border-color: var(--border); }
 .keybind__chord.is-recording { border-color: var(--danger); color: var(--danger); }
+
+/* ── Diálogo de confirmación propio (lib/confirm.js) ─────────────────── */
+/* Hasta 3 opciones + input opcional: lo que el ask de Tauri no puede.    */
+
+.confirm__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900; /* por encima de modales normales */
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.confirm {
+  width: min(440px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+}
+
+.confirm__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.confirm__message {
+  font-size: 13.5px;
+  color: var(--ink);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.confirm__input {
+  width: 100%;
+  margin-top: 12px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  outline: none;
+}
+
+.confirm__input:focus { border-color: var(--accent-deep); }
+
+.confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirm__btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  color: var(--ink);
+  background: transparent;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.confirm__btn:hover { background: rgba(var(--ink-rgb), 0.05); }
+
+.confirm__btn--primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.confirm__btn--primary:hover { opacity: 0.88; background: var(--ink); }
+
+.confirm__btn--danger {
+  color: var(--danger, #b3372f);
+  border-color: color-mix(in srgb, var(--danger, #b3372f) 45%, transparent);
+}
+
+.confirm__btn--danger:hover {
+  background: color-mix(in srgb, var(--danger, #b3372f) 10%, transparent);
+}
+
+/* ── Virtualización ligera del árbol de archivos ─────────────────────── */
+/* En workspaces con miles de nodos, el navegador se salta el layout/paint  */
+/* de las filas fuera del viewport (virtualización nativa por CSS).        */
+
+.filetree__node {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
+}
