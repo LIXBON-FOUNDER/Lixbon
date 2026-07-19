@@ -1,0 +1,18 @@
+# Flutter: solo se versiona lib/ + pubspec + fonts + tool; las carpetas de
+# plataforma las genera el CI con `flutter create --platforms=android .`
+# y las parchea tool/patch_android.py.
+.dart_tool/
+.idea/
+build/
+android/
+ios/
+linux/
+macos/
+windows/
+web/
+test/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+pubspec.lock
+*.log

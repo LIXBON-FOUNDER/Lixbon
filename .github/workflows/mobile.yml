@@ -1,0 +1,82 @@
+name: Compile & Release Android App
+
+# La app móvil compila SOLO en CI (como el Rust del desktop): no hace falta
+# Flutter ni Android SDK en local. La carpeta android/ no se versiona: la
+# genera `flutter create` aquí y la ajusta tool/patch_android.py.
+on:
+  push:
+    tags:
+      - 'mobile-v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.32.0
+          cache: true
+
+      - name: Check tag matches pubspec version
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        run: |
+          # Igual que el desktop: el tag debe coincidir con la versión visible
+          # del binario para no publicar releases con nombre equivocado.
+          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//;s/+.*//')
+          TAG="${GITHUB_REF_NAME#mobile-v}"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "El tag (mobile-v$TAG) no coincide con pubspec.yaml ($VERSION)." >&2
+            exit 1
+          fi
+
+      - name: Generate Android platform
+        run: flutter create --platforms=android --org com.usuario --project-name lixbon .
+
+      - name: Patch Android project
+        run: python3 tool/patch_android.py
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        # Solo los errores bloquean: los avisos/infos de lints se toleran para
+        # que un lint nuevo del SDK no tumbe releases.
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Build APK
+        run: |
+          flutter build apk --release
+          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//;s/+.*//')
+          cp build/app/outputs/flutter-apk/app-release.apk "build/Lixbon-$VERSION.apk"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lixbon-android
+          path: apps/mobile/build/Lixbon-*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 'Lixbon Android ${{ github.ref_name }}'
+          files: apps/mobile/build/Lixbon-*.apk
+          draft: true
