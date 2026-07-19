@@ -299,6 +299,14 @@ def delete_web_session(raw_token: str) -> None:
         s.execute(delete(Session).where(Session.token_hash == hash_api_key(raw_token)))
 
 
+def delete_user_sessions(user_id: int) -> int:
+    """Invalida TODAS las sesiones web del usuario (reset de contraseña,
+    bloqueo por admin). Retorna cuántas se eliminaron."""
+    with get_session() as s:
+        result = s.execute(delete(Session).where(Session.user_id == user_id))
+        return result.rowcount
+
+
 def purge_expired_sessions() -> int:
     with get_session() as s:
         result = s.execute(delete(Session).where(Session.expires_at < now_iso()))

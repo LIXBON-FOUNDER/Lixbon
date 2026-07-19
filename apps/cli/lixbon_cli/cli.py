@@ -134,6 +134,11 @@ def cmd_update(args: argparse.Namespace | None) -> int:
 
     cfg = load_config()
     base = server_base(cfg.get("base_url") or DEFAULT_BASE_URL)
+    # El update descarga CÓDIGO que luego se ejecuta: nunca por http plano
+    # (un MitM podría inyectar lo que quisiera). localhost queda exento (dev).
+    if base.startswith("http://") and "//localhost" not in base and "//127.0.0.1" not in base:
+        print("Por seguridad el update requiere HTTPS (tu base_url es http://).")
+        return 1
     url = f"{base}/install/client_cli.py?ts={int(time.time() * 1000)}"
     print(f"Actualizando CLI desde: {url}")
     try:
@@ -144,6 +149,17 @@ def cmd_update(args: argparse.Namespace | None) -> int:
         )
         with request.urlopen(req, timeout=120) as resp:
             content = resp.read().decode("utf-8")
+        # Sanity check antes de sobreescribirnos: que sea Python válido y
+        # parezca el CLI (si el servidor devuelve un HTML de error o un
+        # archivo truncado, no nos autodestruimos).
+        try:
+            compile(content, "client_cli.py", "exec")
+        except SyntaxError:
+            print("La descarga no es un CLI válido (¿error del servidor?). No se actualizó nada.")
+            return 1
+        if "lixbon" not in content:
+            print("La descarga no parece el CLI de lixbon. No se actualizó nada.")
+            return 1
         old_content = real_target.read_text(encoding="utf-8") if real_target.exists() else ""
         old_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest() if old_content else ""
         new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()

@@ -23,6 +23,7 @@ from core.persistence.queries import (
     create_web_session,
     deactivate_all_user_keys,
     deactivate_key,
+    delete_user_sessions,
     delete_web_session,
     get_active_key_for_user,
     get_user_by_email,
@@ -227,6 +228,7 @@ async def reset_password(payload: ResetPasswordPayload, request: Request):
         raise HTTPException(status_code=400, detail="Enlace inválido o expirado")
     set_user_password(user_id, payload.new_password)
     deactivate_all_user_keys(user_id)  # rotar credenciales tras cambio de contraseña
+    delete_user_sessions(user_id)      # una sesión robada no debe sobrevivir al reset
     log_audit_event("password_reset_completed", user_id=user_id, ip_address=_client_ip(request))
     return {"message": "Contraseña actualizada. Inicia sesión de nuevo."}
 

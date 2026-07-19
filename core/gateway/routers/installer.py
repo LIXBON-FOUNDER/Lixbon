@@ -8,9 +8,16 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from core.config import CLI_SOURCE_PATH
+from core.config import CLI_SOURCE_PATH, PUBLIC_BASE_URL
 
 router = APIRouter()
+
+
+def _server_base(request: Request) -> str:
+    """Base pública para los scripts generados. Preferimos PUBLIC_BASE_URL:
+    request.base_url depende de la cabecera Host (manipulable) y detrás del
+    proxy llega como http://."""
+    return (PUBLIC_BASE_URL or str(request.base_url)).rstrip("/")
 
 
 @router.get("/install/client_cli.py")
@@ -28,7 +35,7 @@ async def download_cli() -> FileResponse:
 @router.get("/install.sh")
 async def install_script(request: Request) -> PlainTextResponse:
     """Genera un script bash de instalación del CLI para Linux/macOS."""
-    server_base = str(request.base_url).rstrip("/")
+    server_base = _server_base(request)
     script = f"""#!/usr/bin/env bash
 set -euo pipefail
 
@@ -78,7 +85,7 @@ echo "  export PATH=\\"\\$HOME/.local/bin:\\$PATH\\""
 @router.get("/install.ps1")
 async def install_script_windows(request: Request) -> PlainTextResponse:
     """Genera un script PowerShell de instalación del CLI para Windows."""
-    server_base = str(request.base_url).rstrip("/")
+    server_base = _server_base(request)
     script = f"""$ErrorActionPreference = "Stop"
 
 $ServerUrl = if ($args.Count -gt 0 -and $args[0]) {{ $args[0] }} else {{ "{server_base}" }}

@@ -34,6 +34,14 @@ async def check_ollama_status() -> tuple[str, list[str]]:
 
 @router.websocket("/ws/status")
 async def ws_status_endpoint(websocket: WebSocket):
+    # El payload expone el estado interno del cluster (nodos, métricas, modelos,
+    # latencia de BD): exige una sesión web válida en el handshake. La cookie
+    # viaja en el upgrade del WebSocket igual que en cualquier petición.
+    session_token = websocket.cookies.get("lixbon_session")
+    user = db.validate_web_session(session_token) if session_token else None
+    if not user:
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     try:
         while True:

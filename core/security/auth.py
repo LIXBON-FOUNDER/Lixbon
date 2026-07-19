@@ -8,8 +8,6 @@ Cambios respecto a la versión anterior:
 - Headers HTTP de seguridad disponibles como middleware
 """
 from __future__ import annotations
-import hashlib
-import os
 from typing import Any
 
 from fastapi import Cookie, Header, HTTPException, Request, Response
@@ -17,32 +15,13 @@ from fastapi import Cookie, Header, HTTPException, Request, Response
 from core.persistence.queries import validate_api_key
 
 # ── Hashing de contraseñas ─────────────────────────────────────────────────
-
-def hash_password(password: str) -> str:
-    """
-    Hash seguro con scrypt + salt aleatorio de 16 bytes.
-    Formato de almacenamiento: 'scrypt$<salt_hex>$<dk_hex>'
-    """
-    salt = os.urandom(16)
-    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
-    return f"scrypt${salt.hex()}${dk.hex()}"
-
-
-def verify_password(password: str, stored_hash: str) -> bool:
-    """
-    Verifica una contraseña contra un hash almacenado.
-    Soporta el nuevo formato scrypt y el legacy SHA-256 para compatibilidad.
-    """
-    if stored_hash.startswith("scrypt$"):
-        try:
-            _, salt_hex, dk_hex = stored_hash.split("$", 2)
-            salt = bytes.fromhex(salt_hex)
-            dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
-            return dk.hex() == dk_hex
-        except Exception:
-            return False
-    # Fallback legacy SHA-256 (para usuarios registrados antes de v2.0)
-    return hashlib.sha256(password.encode("utf-8")).hexdigest() == stored_hash
+# Implementación ÚNICA en core/persistence/queries.py (scrypt + salt, con
+# compare_digest en tiempo constante). Se re-exportan aquí para no tener dos
+# copias que puedan divergir — la duplicada de este módulo comparaba con `==`.
+from core.persistence.queries import (  # noqa: E402, F401
+    _verify_password_internal as verify_password,
+    hash_password,
+)
 
 
 # ── Rate limiting y anti-brute-force ───────────────────────────────────────
@@ -105,6 +84,9 @@ def cookie_auth_required(
     if bearer:
         user_data = validate_api_key(bearer)
         if user_data:
+            # Mismo rate limit que el resto de rutas con API key: sin esto,
+            # este camino era una vía libre para martillear la API.
+            enforce_rate_limit(bearer)
             return user_data
 
     raise HTTPException(status_code=401, detail="Sesión inválida o expirada")

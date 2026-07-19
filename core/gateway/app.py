@@ -30,6 +30,14 @@ from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, 
 async def lifespan(app: FastAPI):
     """Inicializa logging, BD, clientes HTTP y orquestador; los cierra al terminar."""
     setup_logging()
+    import logging as _log
+    import os as _os
+    if _os.getenv("COOKIE_SECURE", "0") != "1":
+        _log.getLogger("lixbon").warning(
+            "COOKIE_SECURE no está en '1': las cookies de sesión se emiten sin el "
+            "flag Secure. Correcto en desarrollo local; en producción (HTTPS) es "
+            "obligatorio configurar COOKIE_SECURE=1."
+        )
     mimetypes.add_type("application/x-msi", ".msi")
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     init_db()

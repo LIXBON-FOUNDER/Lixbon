@@ -39,6 +39,13 @@ def load_config() -> dict:
 def save_config(cfg: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    # El config guarda la API key: solo el dueño debe poder leerlo.
+    # En Windows chmod es casi un no-op (ACLs aparte); en POSIX evita que el
+    # umask por defecto lo deje legible para todo el mundo.
+    try:
+        CONFIG_FILE.chmod(0o600)
+    except OSError:
+        pass
 
 
 def server_base(base_url: str) -> str:

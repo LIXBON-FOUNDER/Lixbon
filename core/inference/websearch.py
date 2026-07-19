@@ -114,19 +114,54 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
+def _is_public_url(url: str) -> bool:
+    """Anti-SSRF: solo http(s) hacia hosts que resuelven a IPs públicas.
+    Las URLs vienen del buscador (no del usuario directamente), pero una consulta
+    manipulada puede hacer aflorar URLs del atacante, y este fetch corre DESDE el
+    gateway: sin este filtro serviría para tocar la red interna (metadata de la
+    nube, localhost, etc.)."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    try:
+        parts = urlparse(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return False
+        for info in socket.getaddrinfo(parts.hostname, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if not ip.is_global:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def _fetch_page_text(url: str) -> str:
     import httpx
     try:
-        resp = httpx.get(
-            url,
-            timeout=8,
-            follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; lixbonBot/1.0)"},
-        )
-        ctype = resp.headers.get("content-type", "")
-        if "html" not in ctype and "text" not in ctype:
-            return ""
-        return _html_to_text(resp.text)[:FETCH_CHARS]
+        # Redirecciones a mano (máx. 3): follow_redirects=True validaría solo
+        # la URL inicial y un redirect podría saltar a una IP interna.
+        for _ in range(3):
+            if not _is_public_url(url):
+                return ""
+            resp = httpx.get(
+                url,
+                timeout=8,
+                follow_redirects=False,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; lixbonBot/1.0)"},
+            )
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("location")
+                if not location:
+                    return ""
+                url = str(httpx.URL(url).join(location))
+                continue
+            ctype = resp.headers.get("content-type", "")
+            if "html" not in ctype and "text" not in ctype:
+                return ""
+            return _html_to_text(resp.text)[:FETCH_CHARS]
+        return ""  # demasiadas redirecciones
     except Exception as exc:
         logger.debug(f"No se pudo descargar {url}: {exc}")
         return ""

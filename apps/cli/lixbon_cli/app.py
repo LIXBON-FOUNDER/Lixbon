@@ -53,7 +53,11 @@ class ChatApp:
         # El workspace es SIEMPRE la carpeta desde la que se lanzó el CLI
         # (como Claude Code); /workspace lo cambia solo para la sesión.
         self.workspace = Path.cwd().resolve()
-        self.session = {"auto_approve": bool(self.cfg.get("auto_approve_tools", False))}
+        self.session = {
+            "auto_approve": bool(self.cfg.get("auto_approve_tools", False)),
+            # Comandos de shell: flag aparte de auto_approve (irreversibles).
+            "auto_run_commands": bool(self.cfg.get("auto_run_commands", False)),
+        }
         self.history: list[dict] = []
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
@@ -688,6 +692,7 @@ class ChatApp:
             ("Base URL", self.api.base_url),
             ("Workspace", str(self.workspace)),
             ("Auto-aprobar", "on" if self.session.get("auto_approve") else "off"),
+            ("Auto-run comandos", "on" if self.session.get("auto_run_commands") else "off"),
             ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
         ]
         for label, value in rows:

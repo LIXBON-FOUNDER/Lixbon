@@ -520,7 +520,18 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     else:
         console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]{tool_name}[/] [lx.dim]{esc(args)}[/]")
 
-    if not session.get("auto_approve"):
+    # Los comandos de shell son irreversibles (sin snapshot que los deshaga):
+    # tienen su propio flag y NO los cubre auto_approve. Así, responder
+    # "siempre" tras una edición de archivo no habilita ejecutar comandos.
+    if tool_name == "run_command":
+        if not session.get("auto_run_commands"):
+            decision = confirm3("¿Ejecutar este comando?")
+            if decision == "always":
+                session["auto_run_commands"] = True
+            elif decision in ("no", None):
+                console.print(f"[lx.dim]{dot} rechazado[/]")
+                return "Ejecución cancelada por el usuario"
+    elif not session.get("auto_approve"):
         decision = confirm3("¿Aplicar este cambio?")
         if decision == "always":
             session["auto_approve"] = True
