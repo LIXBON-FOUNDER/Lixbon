@@ -61,7 +61,10 @@ class LoginRequest(BaseModel):
     email: str | None = None
     username: str | None = None   # compat con clientes pre-F3
     password: str
-    issue_api_key: bool = False   # la app de escritorio pide una key propia al entrar
+    issue_api_key: bool = False   # las apps (desktop/móvil) piden una key propia al entrar
+    # Nombre de la key a rotar. Cada app usa el suyo ("lixbon Desktop",
+    # "Lixbon Mobile") para no pisarse las credenciales entre sí.
+    key_name: str | None = Field(default=None, min_length=1, max_length=60)
 
 
 class ResetRequestPayload(BaseModel):
@@ -86,6 +89,17 @@ def _set_session_cookie(response: JSONResponse, token: str) -> None:
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def issue_named_api_key(user_id: int, key_name: str, ip: str) -> str:
+    """Rota la API key de una app concreta: desactiva la anterior con el mismo
+    nombre y emite una nueva. Compartido por el login clásico y el OAuth."""
+    for k in list_api_keys(user_id):
+        if k["name"] == key_name and k["is_active"]:
+            deactivate_key(k["id"], user_id)
+    raw_key, key_data = create_api_key(key_name, user_id)
+    log_audit_event("app_key_issued", user_id=user_id, key_id=key_data["id"], ip_address=ip)
+    return raw_key
 
 
 # ── Registro / Login / Logout ──────────────────────────────────────────────
@@ -142,17 +156,13 @@ async def api_login(payload: LoginRequest, request: Request):
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
 
     if payload.issue_api_key:
-        # La app de escritorio no puede reusar la cookie de sesión en peticiones
-        # cross-origin (SameSite=Lax desde tauri://localhost), así que el login le
-        # entrega directamente una API key propia y rotable. Desactivamos la key
-        # previa de la app para no acumular una por cada inicio de sesión.
-        for k in list_api_keys(user["id"]):
-            if k["name"] == DESKTOP_KEY_NAME and k["is_active"]:
-                deactivate_key(k["id"], user["id"])
-        raw_key, key_data = create_api_key(DESKTOP_KEY_NAME, user["id"])
-        body["api_key"] = raw_key
+        # Las apps (desktop/móvil) no pueden reusar la cookie de sesión en
+        # peticiones cross-origin (SameSite=Lax desde tauri://localhost o desde
+        # la app Android), así que el login les entrega directamente una API key
+        # propia y rotable, identificada por nombre de app.
+        key_name = (payload.key_name or DESKTOP_KEY_NAME).strip() or DESKTOP_KEY_NAME
+        body["api_key"] = issue_named_api_key(user["id"], key_name, ip)
         body["api_key_notice"] = "Guárdala: no se volverá a mostrar"
-        log_audit_event("desktop_key_issued", user_id=user["id"], key_id=key_data["id"], ip_address=ip)
     # Compat CLI/desktop pre-F3: si el usuario no tiene ninguna API key activa,
     # se crea una y se muestra UNA única vez.
     elif not get_active_key_for_user(user["id"]):
