@@ -1,79 +1,45 @@
-# Lixbon móvil (Android · Flutter)
+# Lixbon móvil (Android)
 
-App de Lixbon para Android en **Flutter**. Mismo diseño que la web (tokens de
-`docs/DISENO_WEB.md`, Bruno Ace SC + Bricolage Grotesque embebidas en
-`fonts/`, temas claro/oscuro) y misma cuenta: el historial se comparte con la
-web (`source=web`).
+App Android de Lixbon en **React Native + Expo**: chat con streaming,
+historial compartido con la web, uso del plan y gestión de cuenta. Mismo
+diseño que la web (tokens de `docs/DISENO_WEB.md`, Bruno Ace SC + Bricolage
+Grotesque embebidas en `assets/fonts/`, temas claro/oscuro).
 
-**La compilación está centralizada en GitHub Actions** (como el Rust del
-desktop): no hace falta Flutter ni Android Studio en local.
+## Filosofía de compilación
 
-## Qué incluye
+Igual que el Rust del desktop: **la app compila solo en CI** — no hace falta
+Android Studio ni SDK en local. La carpeta `android/` no se versiona: la
+genera `npx expo prebuild --platform android` en GitHub Actions
+(`.github/workflows/mobile.yml`) y el APK sale firmado con la keystore de
+debug (instalable, no Play Store).
 
-- **Login / Registro / Olvidé mi contraseña** e **inicio de sesión con Google
-  y Apple** (los botones aparecen solo si el gateway tiene el proveedor
-  configurado — `GET /api/auth/oauth/providers`).
-- **Chat** con streaming SSE, markdown, selector de modelo y modo investigar
-  (búsqueda web con fuentes).
-- **Historial**: buscar, abrir, renombrar y eliminar (mantener pulsado).
-- **Uso**: plan vigente, mensajes/día, tokens/mes y gráfica de 30 días.
-- **Cuenta**: perfil, verificación de correo, tema, privacidad, regenerar API
-  key, borrar historial, cerrar sesión, eliminar cuenta y **Documentación**
-  (abre `lixbon.com/docs`).
+- **Release**: subir la versión en `package.json` (única fuente: `app.config.js`
+  la lee de ahí) y empujar el tag `mobile-vX.Y.Z` (el CI comprueba que
+  coincidan). Sale: artifact `lixbon-android`, release borrador en GitHub y
+  subida a `/api/versions/upload` (tarjeta Android de `/aplicaciones`).
+- **Desarrollo local** (opcional): `npm install && npx expo start` y abrir con
+  Expo Go en el teléfono (misma red). El OAuth con esquema `lixbon://` solo
+  funciona en el APK compilado; en Expo Go el gateway acepta `exp://`.
 
-La app se autentica con una **API key Bearer** propia (`"Lixbon Mobile"`,
-rotada en cada login) guardada en el Keystore de Android vía
-`flutter_secure_storage`.
+## Estructura
 
-## Compilar (CI)
-
-`.github/workflows/mobile.yml`:
-
-- **Manual**: pestaña Actions → "Compile & Release Android App" →
-  *Run workflow* → el APK queda como artifact `lixbon-android`.
-- **Release**: `git tag mobile-v0.1.0 && git push --tags` → compila, comprueba
-  que el tag coincide con `version:` de `pubspec.yaml` y publica un release
-  (borrador) con `Lixbon-0.1.0.apk`.
-
-La carpeta `android/` **no se versiona**: la genera el CI con
-`flutter create --platforms=android .` y la ajusta `tool/patch_android.py`
-(permiso INTERNET, activity de callback `lixbon://` para el OAuth, minSdk 23
-y etiqueta "Lixbon"). Solo se versionan `lib/`, `pubspec.yaml`, `fonts/` y
-`tool/`.
-
-### Desarrollo local (opcional)
-
-Si algún día se instala Flutter:
-
-```bash
-cd apps/mobile
-flutter create --platforms=android --org com.usuario --project-name lixbon .
-python tool/patch_android.py
-flutter pub get
-flutter run
+```
+App.js                  raíz: fuentes, providers, gate de auth y tab bar propia
+src/theme.js            tokens de diseño (espejo de apps/web/src/styles/base.css)
+src/api.js              cliente HTTP del gateway (Bearer API key, 401 → logout)
+src/sse.js              streaming del chat vía XHR (fetch de RN no streamea)
+src/oauth.js            PKCE + Custom Tab para Google/Apple
+src/state.js            contextos: prefs (AsyncStorage), sesión (SecureStore), chat
+src/components/         iconos de trazo propios, UI de marca, diálogos/toasts
+src/screens/            Auth, Chat, Historial, Uso, Cuenta
+assets/fonts/           Bruno Ace SC + Bricolage Grotesque (embebidas)
 ```
 
-Para apuntar a un gateway local: **mantén pulsado 1 s el pie "lixbon.com"**
-en la pantalla de login y escribe la URL (p. ej. `http://192.168.1.50:8000`).
+## Detalles útiles
 
-## OAuth: configuración del gateway (Railway)
-
-El flujo corre en el servidor (`core/gateway/routers/oauth.py`); la app solo
-hace PKCE por `lixbon://oauth` y canjea un código de un solo uso. Variables:
-
-| Var | Valor |
-| --- | --- |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google Cloud Console → OAuth client tipo **Web**, redirect URI `https://lixbon.com/api/auth/oauth/google/callback` |
-| `APPLE_OAUTH_CLIENT_ID` | Services ID de Apple Developer (return URL `https://lixbon.com/api/auth/oauth/apple/callback`) |
-| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Team ID, Key ID y PEM de la key `.p8` (los saltos pueden ir como `\n`) |
-| `OAUTH_STATE_SECRET` | opcional; si falta se genera al arrancar |
-
-Apple requiere cuenta de Apple Developer (99 USD/año). Sin variables, los
-botones sociales no aparecen. En backend hace falta `PyJWT[crypto]` (ya está
-en `requirements.txt`) solo para Apple.
-
-## Pendiente antes de Play Store
-
-- Icono/splash propios (el CI usa los de la plantilla de Flutter).
-- Firma de release con keystore propio (hoy firma debug: instalable
-  directamente, pero no publicable en Play Store).
+- **Sesión**: API key propia `"Lixbon Mobile"` (el login pasa `key_name`),
+  guardada en el Keystore vía `expo-secure-store`; se rota en cada login.
+- **Historial compartido**: el chat envía `source: 'web'` → misma cuenta,
+  mismas conversaciones que la web.
+- **Cambiar de servidor (dev)**: mantener pulsado el pie «lixbon.com» de la
+  pantalla de login.

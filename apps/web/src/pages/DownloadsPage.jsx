@@ -1,14 +1,16 @@
-// DownloadsPage.jsx — descargas públicas (/descargas): app de escritorio y CLI.
-// El CLI se instala con un comando (PowerShell en Windows, bash en Linux/macOS)
-// que baja e instala client_cli.py y crea el lanzador `lixbon`.
+// DownloadsPage.jsx — descargas públicas (/descargas): app de escritorio,
+// app de Android y CLI. Escritorio y Android van como dos cuadros iguales;
+// el CLI se instala con un comando (PowerShell en Windows, bash en
+// Linux/macOS) que baja e instala client_cli.py y crea el lanzador `lixbon`.
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
 import { CodeBlock } from '../components/CodeBlock';
-import { IconDownload, IconTerminal, IconCheck } from '../components/Icons';
+import { IconDownload, IconTerminal, IconCheck, IconPhone } from '../components/Icons';
 
 export default function DownloadsPage() {
   const [desktop, setDesktop] = useState(null);
+  const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');
 
   // Origen del gateway (para los comandos de instalación del CLI)
@@ -18,6 +20,9 @@ export default function DownloadsPage() {
     api.get('/api/updates/latest/stable')
       .then((res) => setDesktop(res.data))
       .catch(() => setDesktop({ available: false }));
+    api.get('/api/updates/latest/stable?product=android')
+      .then((res) => setAndroid(res.data))
+      .catch(() => setAndroid({ available: false }));
     if (/Mac|Linux|X11/.test(navigator.platform) && !/Win/.test(navigator.platform)) {
       setOs('unix');
     }
@@ -31,38 +36,73 @@ export default function DownloadsPage() {
       <PublicNav />
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">Aplicaciones</h1>
-        <p className="plans__sub">Lleva lixbon a tu escritorio y a tu terminal.</p>
+        <p className="plans__sub">Lleva lixbon a tu escritorio, a tu bolsillo y a tu terminal.</p>
 
         <div className="downloads">
-          {/* ── App de escritorio ── */}
-          <section className="dl-card dl-card--app">
-            <img src="/favicon.svg" alt="Icono de lixbon" className="dl-card__logo" draggable={false} />
-            <h2 className="dl-card__title">App de escritorio</h2>
-            <p className="dl-card__desc">
-              La experiencia completa de lixbon en una app nativa para Windows.
-            </p>
-            <ul className="dl-card__features">
-              <li><IconCheck size={15} /> Editor de código con chat integrado</li>
-              <li><IconCheck size={15} /> Terminales, Git y explorador de archivos</li>
-              <li><IconCheck size={15} /> Actualizaciones automáticas</li>
-            </ul>
-            <div className="dl-card__bottom">
-              {desktop?.available ? (
-                <>
-                  <a href={desktop.download_url} className="pill-btn pill-btn--primary dl-card__cta">
-                    <IconDownload size={16} /> Descargar v{desktop.version}
-                  </a>
-                  <span className="dl-card__meta">
-                    {desktop.title} · {desktop.release_date} · Windows 10/11 (64 bits)
+          {/* ── Apps: escritorio + Android, dos cuadros iguales ── */}
+          <div className="downloads__apps">
+            <section className="dl-card dl-card--app">
+              <img src="/favicon.svg" alt="Icono de lixbon" className="dl-card__logo" draggable={false} />
+              <h2 className="dl-card__title">App de escritorio</h2>
+              <p className="dl-card__desc">
+                La experiencia completa de lixbon en una app nativa para Windows.
+              </p>
+              <ul className="dl-card__features">
+                <li><IconCheck size={15} /> Editor de código con chat integrado</li>
+                <li><IconCheck size={15} /> Terminales, Git y explorador de archivos</li>
+                <li><IconCheck size={15} /> Actualizaciones automáticas</li>
+              </ul>
+              <div className="dl-card__bottom">
+                {desktop?.available ? (
+                  <>
+                    <a href={desktop.download_url} className="pill-btn pill-btn--primary dl-card__cta">
+                      <IconDownload size={16} /> Descargar v{desktop.version}
+                    </a>
+                    <span className="dl-card__meta">
+                      {desktop.title} · {desktop.release_date} · Windows 10/11 (64 bits)
+                    </span>
+                  </>
+                ) : (
+                  <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
+                    Próximamente
                   </span>
-                </>
-              ) : (
-                <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
-                  Próximamente
-                </span>
-              )}
-            </div>
-          </section>
+                )}
+              </div>
+            </section>
+
+            <section className="dl-card dl-card--android">
+              <div className="dl-card__icon"><IconPhone size={26} /></div>
+              <h2 className="dl-card__title">App de Android</h2>
+              <p className="dl-card__desc">
+                Chatea con el cluster desde tu teléfono, con tu misma cuenta e historial.
+              </p>
+              <ul className="dl-card__features">
+                <li><IconCheck size={15} /> Chat con streaming y búsqueda web</li>
+                <li><IconCheck size={15} /> Historial compartido con la web</li>
+                <li><IconCheck size={15} /> Uso del plan y gestión de cuenta</li>
+              </ul>
+              <div className="dl-card__bottom">
+                {android?.available ? (
+                  <>
+                    <a href={android.download_url} className="pill-btn pill-btn--primary dl-card__cta">
+                      <IconDownload size={16} /> Descargar v{android.version}
+                    </a>
+                    <span className="dl-card__meta">
+                      {android.title} · {android.release_date} · APK · Android 7.0+
+                    </span>
+                    <span className="dl-card__note">
+                      Al instalar, Android pedirá permitir «orígenes desconocidos»: es lo
+                      normal para APKs fuera de Play Store.
+                    </span>
+                  </>
+                ) : (
+                  <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
+                    Próximamente
+                  </span>
+                )}
+              </div>
+            </section>
+          </div>
 
           {/* ── CLI ── */}
           <section className="dl-card dl-card--cli">

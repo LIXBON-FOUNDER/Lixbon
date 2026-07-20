@@ -886,7 +886,7 @@ function IngresosTab() {
 
 // ── Releases ────────────────────────────────────────────────────────────
 
-const EMPTY_RELEASE = { version: '', channel: 'stable', title: '', changelog: '', checksum_sha256: '' };
+const EMPTY_RELEASE = { product: 'desktop', version: '', channel: 'stable', title: '', changelog: '', checksum_sha256: '' };
 
 function ReleasesTab() {
   const [versions, setVersions] = useState([]);
@@ -912,6 +912,7 @@ function ReleasesTab() {
     setBusy(true);
     try {
       const fd = new FormData();
+      fd.append('product', form.product);
       fd.append('version', form.version.trim());
       fd.append('channel', form.channel);
       fd.append('title', form.title.trim());
@@ -947,6 +948,12 @@ function ReleasesTab() {
           en el almacenamiento privado y la descarga se sirve por URL firmada.
         </p>
         <div className="release-form__grid">
+          <label>Producto
+            <select value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
+              <option value="desktop">desktop (MSI)</option>
+              <option value="android">android (APK)</option>
+            </select>
+          </label>
           <label>Versión
             <input required placeholder="2.5.0" value={form.version}
               onChange={(e) => setForm({ ...form, version: e.target.value })} />
@@ -983,11 +990,12 @@ function ReleasesTab() {
       <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>Versión</th><th>Canal</th><th>Título</th><th>Fecha</th></tr>
+            <tr><th>Producto</th><th>Versión</th><th>Canal</th><th>Título</th><th>Fecha</th></tr>
           </thead>
           <tbody>
             {versions.map((v) => (
-              <tr key={`${v.version}-${v.channel}`}>
+              <tr key={`${v.product || 'desktop'}-${v.version}-${v.channel}`}>
+                <td><span className="chip">{v.product || 'desktop'}</span></td>
                 <td><code>{v.version}</code></td>
                 <td><span className={`badge ${v.channel === 'stable' ? 'badge--ok' : 'chip'}`}>{v.channel}</span></td>
                 <td>{v.title}</td>
@@ -995,7 +1003,7 @@ function ReleasesTab() {
               </tr>
             ))}
             {versions.length === 0 && (
-              <tr><td colSpan={4} className="card__muted">Aún no hay versiones publicadas</td></tr>
+              <tr><td colSpan={5} className="card__muted">Aún no hay versiones publicadas</td></tr>
             )}
           </tbody>
         </table>

@@ -1,13 +1,17 @@
 name: Compile & Release Android App
 
 # La app móvil compila SOLO en CI (como el Rust del desktop): no hace falta
-# Flutter ni Android SDK en local. La carpeta android/ no se versiona: la
-# genera `flutter create` aquí y la ajusta tool/patch_android.py.
+# Node/Android SDK en local. La carpeta android/ no se versiona: la genera
+# `npx expo prebuild` aquí a partir de app.config.js (Expo la parchea sola:
+# scheme lixbon://, package com.usuario.lixbon, permisos).
 on:
   push:
     tags:
       - 'mobile-v*'
   workflow_dispatch:
+
+env:
+  EXPO_NO_TELEMETRY: '1'
 
 jobs:
   build:
@@ -27,44 +31,42 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          channel: stable
-          flutter-version: 3.32.0
-          cache: true
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
-      - name: Check tag matches pubspec version
+      - name: Check tag matches package.json version
         if: startsWith(github.ref, 'refs/tags/mobile-v')
         run: |
           # Igual que el desktop: el tag debe coincidir con la versión visible
           # del binario para no publicar releases con nombre equivocado.
-          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//;s/+.*//')
+          VERSION=$(node -p "require('./package.json').version")
           TAG="${GITHUB_REF_NAME#mobile-v}"
           if [ "$TAG" != "$VERSION" ]; then
-            echo "El tag (mobile-v$TAG) no coincide con pubspec.yaml ($VERSION)." >&2
+            echo "El tag (mobile-v$TAG) no coincide con package.json ($VERSION)." >&2
             exit 1
           fi
 
-      - name: Generate Android platform
-        run: flutter create --platforms=android --org com.usuario --project-name lixbon .
-
-      - name: Patch Android project
-        run: python3 tool/patch_android.py
-
       - name: Install dependencies
-        run: flutter pub get
+        run: npm ci
 
-      - name: Analyze
-        # Solo los errores bloquean: los avisos/infos de lints se toleran para
-        # que un lint nuevo del SDK no tumbe releases.
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+      - name: Generate Android platform
+        run: npx expo prebuild --platform android --no-install
 
       - name: Build APK
         run: |
-          flutter build apk --release
-          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//;s/+.*//')
-          cp build/app/outputs/flutter-apk/app-release.apk "build/Lixbon-$VERSION.apk"
+          cd android
+          chmod +x gradlew
+          # Solo ABIs ARM: son los móviles reales; x86 solo sirve en emuladores
+          # y duplicaría el tamaño del APK y el tiempo de CI.
+          ./gradlew --no-daemon :app:assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          cd ..
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p build
+          cp android/app/build/outputs/apk/release/app-release.apk "build/Lixbon-$VERSION.apk"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -80,3 +82,25 @@ jobs:
           name: 'Lixbon Android ${{ github.ref_name }}'
           files: apps/mobile/build/Lixbon-*.apk
           draft: true
+
+      - name: Upload APK to server (tags only)
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        run: |
+          # Mismo circuito que el MSI del desktop: POST /api/versions/upload con
+          # product=android → la tarjeta de Android de /aplicaciones lo sirve.
+          VERSION=$(node -p "require('./package.json').version")
+          case "$VERSION" in
+            *beta*|*rc*|*Beta*|*RC*) CHANNEL=beta ;;
+            *) CHANNEL=stable ;;
+          esac
+          CHANGELOG=$(git log -n 3 --pretty=format:%s | python3 -c "import json,sys; print(json.dumps(sys.stdin.read().splitlines()))")
+          echo "Version=$VERSION Channel=$CHANNEL"
+          curl --fail-with-body --show-error -X POST \
+            -H "X-Admin-Token: ${{ secrets.LIXBON_ADMIN_TOKEN }}" \
+            -F "product=android" \
+            -F "version=$VERSION" \
+            -F "channel=$CHANNEL" \
+            -F "title=Lixbon Android v$VERSION" \
+            -F "changelog=$CHANGELOG" \
+            -F "file=@build/Lixbon-$VERSION.apk" \
+            "${{ vars.LIXBON_SERVER_URL || 'https://llm-datacent-production.up.railway.app' }}/api/versions/upload"

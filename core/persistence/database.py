@@ -101,6 +101,12 @@ def init_db() -> None:
         # Origen de la conversación (web/ide/cli): historial independiente por
         # superficie. NULL = legacy (se muestra en la web).
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source TEXT",
+        # Releases multi-producto (desktop/android): la unicidad pasa de
+        # version → (product, version). El DROP del constraint viejo es
+        # imprescindible: con él, registrar el APK 0.1.0 pisaría el MSI 0.1.0.
+        "ALTER TABLE app_versions ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT 'desktop'",
+        "ALTER TABLE app_versions DROP CONSTRAINT IF EXISTS app_versions_version_key",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_app_versions_product_version ON app_versions (product, version)",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

@@ -144,6 +144,10 @@ export const IconWindow = (p) => (
   <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></Svg>
 );
 
+export const IconPhone = (p) => (
+  <Svg {...p}><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" /><path d="M11 18.5h2" /></Svg>
+);
+
 export const IconCheck = (p) => (
   <Svg {...p}><path d="M4 12l5 5L20 6" /></Svg>
 );

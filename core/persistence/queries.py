@@ -1715,6 +1715,7 @@ def _version_to_dict(v: AppVersion) -> dict[str, Any]:
         changelog = []
     return {
         "id": v.id,
+        "product": v.product,
         "version": v.version,
         "channel": v.channel,
         "release_date": v.release_date,
@@ -1732,10 +1733,10 @@ def get_all_versions() -> list[dict[str, Any]]:
         return [_version_to_dict(v) for v in rows]
 
 
-def get_latest_version(channel: str = "stable") -> dict[str, Any] | None:
-    """Mayor versión SEMÁNTICA del canal. Ordenar por id (orden de inserción)
-    es frágil: un re-upload de una versión vieja (upsert conserva el id) o un
-    registro fuera de orden harían que "la última" no fuese la mayor."""
+def get_latest_version(channel: str = "stable", product: str = "desktop") -> dict[str, Any] | None:
+    """Mayor versión SEMÁNTICA del canal y producto. Ordenar por id (orden de
+    inserción) es frágil: un re-upload de una versión vieja (upsert conserva el
+    id) o un registro fuera de orden harían que "la última" no fuese la mayor."""
     from packaging.version import InvalidVersion, Version
 
     def sort_key(row: dict[str, Any]):
@@ -1745,19 +1746,27 @@ def get_latest_version(channel: str = "stable") -> dict[str, Any] | None:
             return (0, Version("0"), row["id"])
 
     with get_session() as s:
-        rows = s.scalars(select(AppVersion).where(AppVersion.channel == channel)).all()
+        rows = s.scalars(
+            select(AppVersion)
+            .where(AppVersion.channel == channel)
+            .where(AppVersion.product == product)
+        ).all()
         if not rows:
             return None
         return max((_version_to_dict(r) for r in rows), key=sort_key)
 
 
-def delete_app_version(version: str, channel: str | None = None) -> dict[str, Any] | None:
+def delete_app_version(
+    version: str, channel: str | None = None, product: str | None = None,
+) -> dict[str, Any] | None:
     """Elimina un release registrado. Devuelve la fila borrada (para limpiar
     también el objeto de R2) o None si no existía."""
     with get_session() as s:
         stmt = select(AppVersion).where(AppVersion.version == version)
         if channel:
             stmt = stmt.where(AppVersion.channel == channel)
+        if product:
+            stmt = stmt.where(AppVersion.product == product)
         row = s.scalar(stmt.limit(1))
         if not row:
             return None
@@ -1769,9 +1778,11 @@ def delete_app_version(version: str, channel: str | None = None) -> dict[str, An
 def add_app_version(
     version: str, channel: str, release_date: str, title: str,
     changelog: list[str], download_url: str, checksum: str | None = None,
+    product: str = "desktop",
 ) -> None:
     with get_session() as s:
         stmt = pg_insert(AppVersion).values(
+            product=product,
             version=version,
             channel=channel,
             release_date=release_date,
@@ -1781,7 +1792,7 @@ def add_app_version(
             checksum_sha256=checksum,
             created_at=now_iso(),
         ).on_conflict_do_update(
-            index_elements=["version"],
+            index_elements=["product", "version"],
             set_={
                 "channel": channel,
                 "release_date": release_date,

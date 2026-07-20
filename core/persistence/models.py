@@ -163,9 +163,16 @@ class TaskEmbedding(Base):
 
 class AppVersion(Base):
     __tablename__ = "app_versions"
+    __table_args__ = (
+        # Multi-producto: el desktop 0.9.1 y el Android 0.9.1 pueden convivir.
+        UniqueConstraint("product", "version", name="uq_app_versions_product_version"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    version: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    # "desktop" (MSI de Tauri) o "android" (APK). El updater de Tauri y el CLI
+    # solo miran desktop; la tarjeta de Android de /aplicaciones mira android.
+    product: Mapped[str] = mapped_column(Text, nullable=False, default="desktop")
+    version: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(Text, nullable=False, default="stable")
     release_date: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)

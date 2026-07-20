@@ -133,17 +133,22 @@
 
 /* ── Descargas ───────────────────────────────────────────────────────── */
 
-/* Dos columnas a la misma altura: app (estrecha) + CLI (ancha).
-   En pantallas angostas se apilan. */
+/* Arriba las dos apps como cuadros gemelos (escritorio + Android) y debajo
+   el CLI a todo el ancho. En pantallas angostas se apila todo. */
 .downloads {
   display: grid;
-  grid-template-columns: minmax(300px, 2fr) 3fr;
+  gap: 18px;
+}
+
+.downloads__apps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 18px;
   align-items: stretch;
 }
 
 @media (max-width: 880px) {
-  .downloads {
+  .downloads__apps {
     grid-template-columns: 1fr;
   }
 }

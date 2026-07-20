@@ -1,18 +1,9 @@
-# Flutter: solo se versiona lib/ + pubspec + fonts + tool; las carpetas de
-# plataforma las genera el CI con `flutter create --platforms=android .`
-# y las parchea tool/patch_android.py.
-.dart_tool/
-.idea/
-build/
+# Expo/React Native: solo se versiona el JS + assets + configuración; la
+# carpeta android/ la genera el CI con `npx expo prebuild --platform android`.
+node_modules/
+.expo/
 android/
 ios/
-linux/
-macos/
-windows/
-web/
-test/
-.flutter-plugins
-.flutter-plugins-dependencies
-.metadata
-pubspec.lock
+build/
+dist/
 *.log

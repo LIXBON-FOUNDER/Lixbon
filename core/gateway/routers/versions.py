@@ -49,6 +49,7 @@ def sync_versions_to_db():
                 changelog=v["changelog"],
                 download_url=v["download_url"],
                 checksum=v.get("checksum_sha256"),
+                product=v.get("product", "desktop"),
             )
     except Exception as e:
         logger.warning(f"[versions] Error al sincronizar versiones: {e}")
@@ -56,7 +57,11 @@ def sync_versions_to_db():
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _public_download_url(request: Request, version: str, channel: str) -> str:
+VALID_PRODUCTS = ("desktop", "android")
+
+
+def _public_download_url(request: Request, version: str, channel: str,
+                         product: str = "desktop") -> str:
     """URL estable del gateway que resuelve la descarga (redirige a R2 o local).
 
     Detrás de Railway/Cloudflare el TLS se termina fuera y la petición llega al
@@ -68,12 +73,18 @@ def _public_download_url(request: Request, version: str, channel: str) -> str:
     proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
     if proto == "https" and base.startswith("http://"):
         base = "https://" + base[len("http://"):]
-    return f"{base}/api/updates/download/{version}/{channel}"
+    url = f"{base}/api/updates/download/{version}/{channel}"
+    # El path histórico (sin query) sigue siendo desktop: los enlaces de
+    # updaters ya distribuidos no cambian.
+    if product != "desktop":
+        url += f"?product={product}"
+    return url
 
 
-def _find_version(version: str, channel: str) -> dict | None:
+def _find_version(version: str, channel: str, product: str = "desktop") -> dict | None:
     for v in db.get_all_versions():
-        if v["version"] == version and v["channel"] == channel:
+        if (v["version"] == version and v["channel"] == channel
+                and v.get("product", "desktop") == product):
             return v
     return None
 
@@ -95,7 +106,8 @@ async def get_current_version():
 async def check_update(request: Request, v: str = Query(..., description="Versión instalada en el cliente")):
     """Compara la versión del cliente con la última del canal correspondiente."""
     is_beta_client = "beta" in v.lower() or "rc" in v.lower()
-    latest_release = db.get_latest_version(channel="beta" if is_beta_client else "stable")
+    latest_release = db.get_latest_version(channel="beta" if is_beta_client else "stable",
+                                           product="desktop")
     if not latest_release:
         return {"update_available": False, "latest_version": v}
 
@@ -119,31 +131,35 @@ async def check_update(request: Request, v: str = Query(..., description="Versi�
 
 
 @router.get("/api/updates/latest/{channel}")
-async def get_latest(channel: str, request: Request):
-    """Última versión de un canal para la página de descargas. Nunca 404: si no
-    hay releases devuelve {available: false} para que el front lo maneje limpio."""
+async def get_latest(channel: str, request: Request,
+                     product: str = Query("desktop")):
+    """Última versión de un canal/producto para la página de descargas. Nunca
+    404: si no hay releases devuelve {available: false} para el front."""
     if channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Canal de actualización inválido")
-    latest = db.get_latest_version(channel=channel)
+    if product not in VALID_PRODUCTS:
+        raise HTTPException(status_code=400, detail="Producto inválido")
+    latest = db.get_latest_version(channel=channel, product=product)
     if not latest:
-        return {"available": False, "channel": channel}
+        return {"available": False, "channel": channel, "product": product}
     return {
         "available": True,
         "channel": channel,
+        "product": product,
         "version": latest["version"],
         "title": latest["title"],
         "release_date": latest["release_date"],
         "changelog": latest["changelog"],
-        "download_url": _public_download_url(request, latest["version"], channel),
+        "download_url": _public_download_url(request, latest["version"], channel, product),
     }
 
 
 @router.get("/api/updates/manifest/{channel}")
 async def get_tauri_manifest(channel: str, request: Request):
-    """Manifest en el formato del auto-updater de Tauri 2."""
+    """Manifest en el formato del auto-updater de Tauri 2 (solo desktop)."""
     if channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Canal de actualización inválido")
-    latest = db.get_latest_version(channel=channel)
+    latest = db.get_latest_version(channel=channel, product="desktop")
     if not latest:
         raise HTTPException(status_code=404, detail="No se encontró versión para este canal")
 
@@ -166,7 +182,7 @@ async def get_cli_manifest(channel: str, request: Request):
     """Manifest del CLI (formato propio, consumido por `client_cli.py --update`)."""
     if channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Canal de actualización inválido")
-    latest = db.get_latest_version(channel=channel)
+    latest = db.get_latest_version(channel=channel, product="desktop")
     if not latest:
         raise HTTPException(status_code=404, detail="No se encontró versión para este canal")
     return {
@@ -181,10 +197,13 @@ async def get_cli_manifest(channel: str, request: Request):
 
 
 @router.get("/api/updates/download/{version}/{channel}")
-async def download_release(version: str, channel: str):
+async def download_release(version: str, channel: str,
+                           product: str = Query("desktop")):
     """Resuelve la descarga: redirige a una URL prefirmada de R2 (o al archivo
     local en dev). URL pública estable; la firmada se genera al vuelo."""
-    row = _find_version(version, channel)
+    if product not in VALID_PRODUCTS:
+        raise HTTPException(status_code=400, detail="Producto inválido")
+    row = _find_version(version, channel, product)
     if not row:
         raise HTTPException(status_code=404, detail="Versión no encontrada")
 
@@ -213,6 +232,7 @@ async def api_upload_version(
     title: str = Form(...),
     changelog: str = Form(...),
     checksum_sha256: str = Form(None),
+    product: str = Form("desktop"),
     file: UploadFile = File(...),
     _: None = Depends(admin_or_token),
 ):
@@ -220,6 +240,8 @@ async def api_upload_version(
     import re as _re
     if not _re.fullmatch(r"[A-Za-z0-9._-]+", version) or channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Versión o canal inválidos")
+    if product not in VALID_PRODUCTS:
+        raise HTTPException(status_code=400, detail="Producto inválido")
 
     try:
         changelog_list = json.loads(changelog)
@@ -227,7 +249,12 @@ async def api_upload_version(
         changelog_list = [changelog]
 
     suffix = Path(file.filename or "").suffix or ".bin"
-    filename = f"app-lixbon-{version}-{channel}{suffix}"
+    # El nombre histórico del desktop no cambia (hay URLs de R2 ya registradas
+    # con ese patrón); los demás productos llevan el suyo en el nombre.
+    if product == "desktop":
+        filename = f"app-lixbon-{version}-{channel}{suffix}"
+    else:
+        filename = f"lixbon-{product}-{version}-{channel}{suffix}"
 
     if r2_configured():
         key = f"releases/{filename}"
@@ -255,16 +282,20 @@ async def api_upload_version(
         changelog=changelog_list,
         download_url=download_url,
         checksum=checksum_sha256,
+        product=product,
     )
-    db.log_audit_event("release_uploaded", version=version, channel=channel, storage=storage)
+    db.log_audit_event("release_uploaded", version=version, channel=channel,
+                       product=product, storage=storage)
 
-    return {"success": True, "version": version, "channel": channel, "storage": storage}
+    return {"success": True, "product": product, "version": version,
+            "channel": channel, "storage": storage}
 
 
 @router.delete("/api/versions/{version}")
 async def api_delete_version(
     version: str,
     channel: str | None = Query(None, description="Canal (opcional; si se omite borra la versión en cualquier canal)"),
+    product: str | None = Query(None, description="Producto (desktop/android; opcional)"),
     _: None = Depends(admin_or_token),
 ):
     """Elimina un release registrado (fila en BD + instalador en R2 si aplica).
@@ -272,7 +303,9 @@ async def api_delete_version(
     Necesario cuando se registra una versión errónea (p. ej. una versión que no
     corresponde al binario subido): mientras exista, el updater la ofrecerá en
     bucle a clientes que nunca podrán alcanzarla."""
-    row = db.delete_app_version(version, channel)
+    if product is not None and product not in VALID_PRODUCTS:
+        raise HTTPException(status_code=400, detail="Producto inválido")
+    row = db.delete_app_version(version, channel, product)
     if not row:
         raise HTTPException(status_code=404, detail="Versión no encontrada")
 
