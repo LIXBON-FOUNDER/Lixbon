@@ -75,6 +75,8 @@ export default function DownloadsPage() {
               <h2 className="dl-card__title">App de Android</h2>
               <p className="dl-card__desc">
                 Chatea con el cluster desde tu teléfono, con tu misma cuenta e historial.
+                Se instala directamente como APK (Android pedirá permitir «orígenes
+                desconocidos»: es lo normal fuera de Play Store).
               </p>
               <ul className="dl-card__features">
                 <li><IconCheck size={15} /> Chat con streaming y búsqueda web</li>
@@ -89,10 +91,6 @@ export default function DownloadsPage() {
                     </a>
                     <span className="dl-card__meta">
                       {android.title} · {android.release_date} · APK · Android 7.0+
-                    </span>
-                    <span className="dl-card__note">
-                      Al instalar, Android pedirá permitir «orígenes desconocidos»: es lo
-                      normal para APKs fuera de Play Store.
                     </span>
                   </>
                 ) : (

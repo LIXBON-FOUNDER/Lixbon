@@ -1,14 +1,16 @@
 // App.js — raíz de la app móvil de Lixbon: wiring de estado (prefs, sesión,
-// chat), tema claro/oscuro con los tokens de la marca y gate de autenticación
-// → pestañas (Chat, Historial, Uso, Cuenta) con una tab bar propia.
+// chat), tema claro/oscuro con los tokens de la marca y gate de autenticación.
+// Shell tipo Claude/web: el chat es la pantalla principal, un drawer lateral
+// (sidebar de la web) lleva historial + perfil, y Uso/Cuenta entran como
+// pantallas apiladas deslizándose desde la derecha.
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Pressable, Text, View } from 'react-native';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, BackHandler, Easing, Pressable, View, useWindowDimensions } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import Icon from './src/components/Icon';
 import { DialogProvider } from './src/components/dialogs';
+import Sidebar from './src/components/Sidebar';
 import {
   LixLogo,
   ThemeProvider,
@@ -19,10 +21,11 @@ import {
 import AccountScreen from './src/screens/AccountScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import ChatScreen from './src/screens/ChatScreen';
-import HistoryScreen from './src/screens/HistoryScreen';
 import UsageScreen from './src/screens/UsageScreen';
 import { AppState, useAuth } from './src/state';
-import { FONTS, LIGHT, RADIUS_PILL } from './src/theme';
+import { FONTS, LIGHT } from './src/theme';
+
+const EASE = Easing.bezier(0.22, 1, 0.36, 1);
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -100,74 +103,136 @@ function Splash() {
   );
 }
 
-const TABS = [
-  { key: 'chat', label: 'Chat', icon: 'chat' },
-  { key: 'history', label: 'Historial', icon: 'history' },
-  { key: 'usage', label: 'Uso', icon: 'chart' },
-  { key: 'account', label: 'Cuenta', icon: 'user' },
-];
-
 function HomeShell() {
   const c = useColors();
-  const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState('chat');
+  const reduced = useReducedMotion();
+  const { width } = useWindowDimensions();
+  const drawerWidth = Math.min(width * 0.82, 320);
+
+  // ── Drawer lateral ─────────────────────────────────────────────────────
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawer = useRef(new Animated.Value(0)).current; // 0 cerrado · 1 abierto
+
+  const animateDrawer = useCallback(
+    (to) => {
+      Animated.timing(drawer, {
+        toValue: to,
+        duration: reduced ? 0 : 260,
+        easing: EASE,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished && to === 0) setDrawerOpen(false);
+      });
+    },
+    [drawer, reduced],
+  );
+
+  const openDrawer = useCallback(() => {
+    setDrawerOpen(true);
+    animateDrawer(1);
+  }, [animateDrawer]);
+
+  const closeDrawer = useCallback(() => animateDrawer(0), [animateDrawer]);
+
+  // ── Pantallas apiladas (Uso / Cuenta) ──────────────────────────────────
+  const [stack, setStack] = useState(null); // null | 'usage' | 'account'
+  const slide = useRef(new Animated.Value(0)).current; // 0 fuera · 1 dentro
+
+  const pushScreen = useCallback(
+    (name) => {
+      setStack(name);
+      closeDrawer();
+      Animated.timing(slide, {
+        toValue: 1,
+        duration: reduced ? 0 : 280,
+        easing: EASE,
+        useNativeDriver: true,
+      }).start();
+    },
+    [slide, reduced, closeDrawer],
+  );
+
+  const popScreen = useCallback(() => {
+    Animated.timing(slide, {
+      toValue: 0,
+      duration: reduced ? 0 : 240,
+      easing: EASE,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setStack(null);
+    });
+  }, [slide, reduced]);
+
+  // Botón atrás de Android: cierra drawer o pantalla apilada antes de salir.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (drawerOpen) {
+        closeDrawer();
+        return true;
+      }
+      if (stack) {
+        popScreen();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [drawerOpen, stack, closeDrawer, popScreen]);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
-      <View style={{ flex: 1 }}>
-        {tab === 'chat' && <ChatScreen />}
-        {tab === 'history' && <HistoryScreen onOpenChat={() => setTab('chat')} />}
-        {tab === 'usage' && <UsageScreen />}
-        {tab === 'account' && <AccountScreen />}
-      </View>
+      <ChatScreen onMenu={openDrawer} />
 
-      <View
-        style={{
-          flexDirection: 'row',
-          backgroundColor: c.bgSidebar,
-          borderTopWidth: 1,
-          borderTopColor: c.borderSoft,
-          paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom, 10),
-          paddingHorizontal: 6,
-        }}
-      >
-        {TABS.map(({ key, label, icon }) => {
-          const active = tab === key;
-          return (
-            <Pressable
-              key={key}
-              onPress={() => setTab(key)}
-              style={{ flex: 1, alignItems: 'center', gap: 3 }}
-            >
-              <View
-                style={{
-                  paddingHorizontal: 18,
-                  paddingVertical: 4,
-                  borderRadius: RADIUS_PILL,
-                  backgroundColor: active ? c.accentSoft : 'transparent',
-                }}
-              >
-                <Icon
-                  name={icon}
-                  size={21}
-                  color={active ? c.ink : c.inkMuted}
-                  strokeWidth={active ? 2 : 1.7}
-                />
-              </View>
-              <Text
-                style={{
-                  fontFamily: active ? FONTS.uiMedium : FONTS.ui,
-                  fontSize: 11,
-                  color: active ? c.ink : c.inkSoft,
-                }}
-              >
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {/* Pantalla apilada */}
+      {stack != null && (
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: c.bgSecondary,
+            transform: [
+              { translateX: slide.interpolate({ inputRange: [0, 1], outputRange: [width, 0] }) },
+            ],
+          }}
+        >
+          {stack === 'usage' ? (
+            <UsageScreen onBack={popScreen} />
+          ) : (
+            <AccountScreen onBack={popScreen} />
+          )}
+        </Animated.View>
+      )}
+
+      {/* Drawer + scrim */}
+      {drawerOpen && (
+        <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }}>
+          <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, opacity: drawer }}>
+            <Pressable onPress={closeDrawer} style={{ flex: 1, backgroundColor: c.scrim }} />
+          </Animated.View>
+          <Animated.View
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: drawerWidth,
+              transform: [
+                {
+                  translateX: drawer.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-drawerWidth, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            <Sidebar open={drawerOpen} onClose={closeDrawer} onNavigate={pushScreen} />
+          </Animated.View>
+        </View>
+      )}
     </View>
   );
 }

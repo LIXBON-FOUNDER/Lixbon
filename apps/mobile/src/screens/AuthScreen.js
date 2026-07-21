@@ -95,6 +95,15 @@ export default function AuthScreen() {
   const withProvider = async (provider) => {
     auth.clearNotice();
     setError('');
+    // Los botones se muestran siempre (como en la web); si el gateway aún no
+    // tiene el proveedor configurado, se avisa en lugar de abrir el navegador.
+    if (!providers.includes(provider)) {
+      setError(
+        `El inicio de sesión con ${provider === 'google' ? 'Google' : 'Apple'} ` +
+          'aún no está disponible. Usa tu correo y contraseña.',
+      );
+      return;
+    }
     setBusy(true);
     try {
       await auth.loginWithProvider(provider);
@@ -254,7 +263,7 @@ export default function AuthScreen() {
               <LinkText onPress={() => switchMode('login')}>Volver a iniciar sesión</LinkText>
             )}
 
-            {mode !== 'forgot' && providers.length > 0 && (
+            {mode !== 'forgot' && (
               <>
                 {/* Divisor (.auth__divider) */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 6 }}>
@@ -267,25 +276,21 @@ export default function AuthScreen() {
 
                 {/* Sociales: Google superficie clara, Apple tinta (auth.css) */}
                 <View style={{ flexDirection: 'row', gap: 14 }}>
-                  {providers.includes('google') && (
-                    <SocialButton
-                      label="Google"
-                      icon={<GoogleLogo />}
-                      variant="surface"
-                      surface={surface}
-                      disabled={busy}
-                      onPress={() => withProvider('google')}
-                    />
-                  )}
-                  {providers.includes('apple') && (
-                    <SocialButton
-                      label="Apple"
-                      icon={<AppleLogo color={dark ? DARK_APPLE : '#FFFFFF'} />}
-                      variant="ink"
-                      disabled={busy}
-                      onPress={() => withProvider('apple')}
-                    />
-                  )}
+                  <SocialButton
+                    label="Google"
+                    icon={<GoogleLogo />}
+                    variant="surface"
+                    surface={surface}
+                    disabled={busy}
+                    onPress={() => withProvider('google')}
+                  />
+                  <SocialButton
+                    label="Apple"
+                    icon={<AppleLogo color={dark ? DARK_APPLE : '#FFFFFF'} />}
+                    variant="ink"
+                    disabled={busy}
+                    onPress={() => withProvider('apple')}
+                  />
                 </View>
               </>
             )}

@@ -1,6 +1,6 @@
 {
   "name": "lixbon",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "expo-font": "~14.0.8",
     "expo-linking": "~8.0.8",
     "expo-secure-store": "~15.0.7",
+    "expo-splash-screen": "~31.0.10",
     "expo-status-bar": "~3.0.8",
     "expo-web-browser": "~15.0.7",
     "react": "19.1.0",

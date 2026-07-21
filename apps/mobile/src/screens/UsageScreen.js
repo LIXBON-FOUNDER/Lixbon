@@ -7,7 +7,7 @@ import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, Text
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
-import { Card, CardTitle, PlanPill, ScreenTitle, useColors } from '../components/ui';
+import { Card, CardTitle, PlanPill, StackHeader, useColors } from '../components/ui';
 import { ApiException } from '../api';
 import { useApi } from '../state';
 import { FONTS, RADIUS_PILL } from '../theme';
@@ -27,7 +27,7 @@ function fmtDate(iso) {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
-export default function UsageScreen() {
+export default function UsageScreen({ onBack }) {
   const c = useColors();
   const api = useApi();
   const [data, setData] = useState(null);
@@ -54,8 +54,9 @@ export default function UsageScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bgSecondary }}>
+      <StackHeader title="Uso" onBack={onBack} />
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 30 }}
+        contentContainerStyle={{ paddingBottom: 30, paddingTop: 6 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -69,7 +70,6 @@ export default function UsageScreen() {
           />
         }
       >
-        <ScreenTitle>Uso</ScreenTitle>
         <View style={{ paddingHorizontal: 16, gap: 14 }}>
           {data == null && !error && (
             <View style={{ paddingTop: 40, alignItems: 'center' }}>

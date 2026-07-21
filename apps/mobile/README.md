@@ -24,16 +24,20 @@ debug (instalable, no Play Store).
 ## Estructura
 
 ```
-App.js                  raíz: fuentes, providers, gate de auth y tab bar propia
+App.js                  raíz: fuentes, providers, gate de auth y shell con drawer
 src/theme.js            tokens de diseño (espejo de apps/web/src/styles/base.css)
 src/api.js              cliente HTTP del gateway (Bearer API key, 401 → logout)
 src/sse.js              streaming del chat vía XHR (fetch de RN no streamea)
 src/oauth.js            PKCE + Custom Tab para Google/Apple
 src/state.js            contextos: prefs (AsyncStorage), sesión (SecureStore), chat
-src/components/         iconos de trazo propios, UI de marca, diálogos/toasts
-src/screens/            Auth, Chat, Historial, Uso, Cuenta
-assets/fonts/           Bruno Ace SC + Bricolage Grotesque (embebidas)
+src/components/         iconos (mismos paths que la web), UI de marca, sidebar, diálogos
+src/screens/            Auth, Chat (principal), Uso y Cuenta (apiladas con volver)
+assets/                 fuentes embebidas + iconos de la app (desde favicon.svg)
 ```
+
+El shell es tipo Claude/web: el chat es la pantalla principal, el botón ☰ abre
+el **sidebar** (Nueva conversación, búsqueda, historial, Uso, Documentación y
+footer de perfil con engranaje → Cuenta).
 
 ## Detalles útiles
 

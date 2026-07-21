@@ -23,7 +23,7 @@ import { FadeUp, IconButton, useColors } from '../components/ui';
 import { useAuth, useChat } from '../state';
 import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
 
-export default function ChatScreen() {
+export default function ChatScreen({ onMenu }) {
   const c = useColors();
   const chat = useChat();
   const auth = useAuth();
@@ -53,26 +53,29 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      {/* Cabecera: título + nueva conversación (.chat-header) */}
+      {/* Cabecera: menú (drawer) + título + nueva conversación (.chat-header) */}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingLeft: 18,
-          paddingRight: 12,
-          paddingVertical: 10,
+          gap: 8,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
           borderBottomWidth: 1,
           borderBottomColor: c.borderSoft,
         }}
       >
+        <IconButton onPress={onMenu} size={38}>
+          <Icon name="menu" size={20} color={c.ink} />
+        </IconButton>
         <Text
           numberOfLines={1}
           style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}
         >
           {chat.title || 'Nueva conversación'}
         </Text>
-        <IconButton onPress={chat.newChat}>
-          <Icon name="edit" size={18} color={c.ink} />
+        <IconButton onPress={chat.newChat} size={38}>
+          <Icon name="pencil" size={18} color={c.ink} />
         </IconButton>
       </View>
 

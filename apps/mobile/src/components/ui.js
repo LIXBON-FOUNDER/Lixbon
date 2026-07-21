@@ -275,6 +275,44 @@ export function CardTitle({ children, style }) {
   );
 }
 
+/// Cabecera de pantalla apilada: flecha de volver + título.
+export function StackHeader({ title, onBack }) {
+  const c = useColors();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+      }}
+    >
+      <IconButton onPress={onBack} size={38}>
+        <SvgBack color={c.ink} />
+      </IconButton>
+      <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 18, color: c.ink }}>
+        {title}
+      </Text>
+    </View>
+  );
+}
+
+function SvgBack({ color }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path
+        d="M19 12H5M11 18l-6-6 6-6"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 export function ScreenTitle({ children }) {
   const c = useColors();
   return (

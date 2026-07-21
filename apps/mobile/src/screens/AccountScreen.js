@@ -10,12 +10,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { Card, CardTitle, IconButton, PlanPill, ScreenTitle, useColors } from '../components/ui';
+import { Card, CardTitle, IconButton, PlanPill, StackHeader, useColors } from '../components/ui';
 import { ApiException } from '../api';
 import { useApi, useAuth, useChat, usePrefs } from '../state';
 import { FONTS, RADIUS_PILL } from '../theme';
 
-export default function AccountScreen() {
+export default function AccountScreen({ onBack }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
@@ -155,8 +155,8 @@ export default function AccountScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bgSecondary }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <ScreenTitle>Cuenta</ScreenTitle>
+      <StackHeader title="Cuenta" onBack={onBack} />
+      <ScrollView contentContainerStyle={{ paddingBottom: 40, paddingTop: 6 }}>
         <View style={{ paddingHorizontal: 16, gap: 14 }}>
           {/* Perfil */}
           <Card>
