@@ -123,6 +123,99 @@ def set_title(text: str) -> None:
         pass
 
 
+def clear_screen() -> None:
+    """Deja la terminal en blanco antes de dibujar la interfaz del CLI.
+
+    `2J` borra lo visible y `3J` el scrollback: sin esta última el usuario
+    puede subir con la rueda y volver a ver el banner de cmd/PowerShell y la
+    línea que lanzó el programa, y la sesión sigue pareciendo una consola del
+    sistema con texto encima. En terminales que no soporten 3J el escape se
+    ignora y solo se limpia lo visible.
+    """
+    if not is_interactive():
+        return  # en un pipe/redirección el escape ensuciaría la salida
+    try:
+        sys.stdout.write("\033[H\033[2J\033[3J")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+# ── Fila reservada para la barra de estado ─────────────────────────────────
+# La última fila se saca de la región de scroll (DECSTBM): el transcript
+# desplaza solo las filas 1..h-1 y la barra se queda clavada abajo, sin
+# desaparecer al enviar ni viajar pegada a lo que escribe el agente.
+#
+# CONTRAPARTIDA: con una región de scroll parcial, las líneas que salen por
+# arriba NO van al scrollback de la terminal (es el mismo motivo por el que
+# tmux implementa el suyo propio). Si molesta, `fixed_status_bar: false` en
+# ~/.lixbon/config.json devuelve la barra al pie de prompt_toolkit.
+
+_status_rows = 0  # filas con las que se calculó la región activa (0 = inactiva)
+
+
+def term_size() -> tuple[int, int]:
+    import shutil
+
+    size = shutil.get_terminal_size((100, 24))
+    return size.columns, size.lines
+
+
+def _write(seq: str) -> None:
+    try:
+        sys.stdout.write(seq)
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def reserve_status_line() -> bool:
+    """Saca la última fila de la región de scroll. Solo tras limpiar la
+    pantalla: DECSTBM manda el cursor a home y arrastraría lo ya escrito."""
+    global _status_rows
+    if not is_interactive():
+        return False
+    _, rows = term_size()
+    if rows < 6:  # terminal diminuta: no merece la pena robarle una fila
+        return False
+    _status_rows = rows
+    _write(f"\033[1;{rows - 1}r\033[H")
+    # Si el proceso muere por una excepción sin pasar por el finally, la región
+    # quedaría puesta y la terminal seguiría confinando su salida a h-1 filas.
+    import atexit
+
+    atexit.register(release_status_line)
+    return True
+
+
+def status_line_active() -> bool:
+    return _status_rows > 0
+
+
+def release_status_line() -> None:
+    """Devuelve la región de scroll a la pantalla completa y borra la barra."""
+    global _status_rows
+    if not _status_rows:
+        return
+    rows = _status_rows
+    _status_rows = 0
+    # DECSTBM vuelve a mover el cursor a home, así que se guarda y restaura.
+    _write(f"\0337\033[{rows};1H\033[2K\0338\0337\033[r\0338")
+
+
+def draw_status_line(ansi: str) -> None:
+    """Pinta la barra en la fila reservada sin mover el cursor del transcript.
+    Si la terminal cambió de alto, rehace la región antes de pintar."""
+    global _status_rows
+    if not _status_rows:
+        return
+    _, rows = term_size()
+    if rows != _status_rows and rows >= 6:
+        _status_rows = rows
+        _write(f"\0337\033[1;{rows - 1}r\0338")
+    _write(f"\0337\033[{_status_rows};1H\033[2K{ansi}\033[0m\0338")
+
+
 def is_mintty() -> bool:
     """Git Bash / MSYS (mintty): la stdio son pipes, no una consola Windows."""
     return bool(os.environ.get("MSYSTEM") or os.environ.get("TERM_PROGRAM") == "mintty")
@@ -214,6 +307,10 @@ RICH_STYLES = {
     "lx.diff.add": PALETTE["ok"],
     "lx.diff.del": PALETTE["err"],
     "lx.diff.hunk": PALETTE["dim"],
+    # Fondo de la barra de estado fija. Va como estilo BASE del Text: los
+    # spans de cada trozo solo fijan color de texto, así que el fondo
+    # sobrevive por debajo y llega hasta el relleno del borde derecho.
+    "lx.bar": "on #1E1E1A",  # rich usa `on <color>`; el `bg:` es de prompt_toolkit
 }
 
 _console = None
@@ -238,7 +335,9 @@ def make_console():
     if _console is None:
         import shutil
 
-        from rich.console import Console
+        from rich.console import Console, NewLine
+        from rich.control import Control
+        from rich.padding import Padding
         from rich.theme import Theme
 
 
@@ -247,10 +346,16 @@ def make_console():
 
             def print(self, *objects, **kwargs):
                 if objects and not kwargs.pop("no_pad", False):
-                    from rich.padding import Padding
-
+                    # Los Control (mover cursor, borrar línea) son la fontanería
+                    # con la que Live/Status repintan y BORRAN su línea. Si se
+                    # envuelven en Padding, rich los maqueta como un bloque del
+                    # ancho de la consola: la línea del spinner se rellenaba de
+                    # espacios, hacía wrap y el `cursor-up + erase` final ya no
+                    # la alcanzaba → cada spinner dejaba su rastro en pantalla.
                     objects = tuple(
-                        Padding(obj, (0, PAD_RIGHT, 0, PAD_LEFT)) if obj != "" else obj
+                        obj
+                        if obj == "" or isinstance(obj, (Control, NewLine))
+                        else Padding(obj, (0, PAD_RIGHT, 0, PAD_LEFT))
                         for obj in objects
                     )
                 super().print(*objects, **kwargs)
@@ -264,6 +369,45 @@ def make_console():
             force_terminal=True if is_mintty() else None,
         )
     return _console
+
+
+_ansi_console = None
+_ansi_width = 0
+
+
+def render_ansi(renderable, width: int) -> str:
+    """Renderiza con el tema Lixbon a una cadena con escapes ANSI, en UNA línea.
+
+    Sirve para pintar fuera del flujo normal (la fila reservada de la barra de
+    estado), donde no vale `console.print` porque movería el cursor. Se recorta
+    a `width - 1`: llenar la última columna dispara el autowrap de la terminal
+    y la barra se derramaría sobre la línea siguiente.
+    """
+    global _ansi_console, _ansi_width
+    inner = max(width - 1, 10)
+    if _ansi_console is None or _ansi_width != inner:
+        import io
+
+        from rich.console import Console
+        from rich.theme import Theme
+
+        _ansi_width = inner
+        # Escribe a un StringIO, así que rich no puede sondear la terminal y
+        # degradaría a 16 colores: hereda la profundidad ya detectada por la
+        # consola real para que la barra tenga los mismos tonos que el resto.
+        _ansi_console = Console(
+            file=io.StringIO(),
+            theme=Theme(RICH_STYLES),
+            width=inner,
+            force_terminal=True,
+            highlight=False,
+            color_system=make_console().color_system or None,
+        )
+    buf = _ansi_console.file
+    buf.seek(0)
+    buf.truncate(0)
+    _ansi_console.print(renderable, end="", no_wrap=True, overflow="ellipsis", crop=True)
+    return buf.getvalue().split("\n")[0]
 
 
 def pt_style():
@@ -301,7 +445,7 @@ def pt_style():
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.1.0"
+CLI_VERSION = "2.1.1"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 CONFIG_DIR = Path.home() / ".lixbon"
@@ -1049,11 +1193,16 @@ class StatusBar:
         """Fragmentos para bottom_toolbar de prompt_toolkit."""
         return self._parts()
 
-    def rich_line(self, compact: bool = False):
-        """La misma barra como línea rich (pie del Live durante el stream)."""
+    def rich_line(self, compact: bool = False, bar: bool = False, width: int = 0):
+        """La misma barra como línea rich.
+
+        `bar=True` la viste como barra de verdad (fondo propio de borde a
+        borde) para la fila reservada al pie de la terminal; sin él es una
+        línea más del transcript.
+        """
         from rich.text import Text
 
-        text = Text()
+        text = Text(style="lx.bar" if bar else "")
         for style_cls, chunk in (self._compact_parts() if compact else self._parts()):
             if style_cls == "class:bottom-toolbar.dot":
                 text.append(chunk, style="lx.accent2")
@@ -1063,6 +1212,9 @@ class StatusBar:
                 text.append(chunk, style="lx.dim2")
             else:
                 text.append(chunk, style="lx.dim")
+        if width:
+            # Relleno hasta el borde: sin él el fondo acabaría a media fila.
+            text.pad_right(max(0, width - text.cell_len))
         return text
 
 
@@ -2226,6 +2378,20 @@ class ChatApp:
         tokens, pct = self._estimate_context()
         self.status.tokens = self.session_tokens or tokens
         self.status.ctx_pct = pct
+        self._paint_status()
+
+    def _paint_status(self) -> None:
+        """Repinta la barra en su fila reservada (no hace nada si no la hay)."""
+        if not status_line_active():
+            return
+
+        cols, _ = term_size()
+        width = max(cols, 20)
+        try:
+            line = self.status.rich_line(bar=True, width=width - 1)
+            draw_status_line(render_ansi(line, width))
+        except Exception:
+            pass  # la barra nunca puede tumbar la sesión
 
     def _estimate_context(self) -> tuple[int, float]:
         # Mide lo que se ENVIARÁ al modelo (últimos max_context_messages),
@@ -2251,6 +2417,15 @@ class ChatApp:
 
     def run(self, once: str = "") -> int:
         self._set_tab_title()
+        # La sesión toma la terminal entera: fuera el banner de cmd/PowerShell
+        # y la línea que lanzó el CLI. Todo lo que sigue (spinner, onboarding,
+        # cabecera) se dibuja ya sobre lienzo limpio. Con la pantalla en blanco
+        # es también el único momento seguro para reservar la fila de la barra
+        # (DECSTBM manda el cursor a home).
+        if not once:
+            clear_screen()
+            if self.cfg.get("fixed_status_bar", True):
+                reserve_status_line()
 
         if not self.cfg.get("api_key"):
             if not is_interactive():
@@ -2289,7 +2464,10 @@ class ChatApp:
             print_note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos.")
         # Zona 3: a partir de aquí, todo es conversación.
         rule(self.console, "conversación")
-        return self._prompt_loop()
+        try:
+            return self._prompt_loop()
+        finally:
+            release_status_line()
 
     def _render_identity(self) -> None:
         """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
@@ -2491,7 +2669,10 @@ class ChatApp:
             complete_while_typing=True,
             key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
-            bottom_toolbar=lambda: self.status.pt_toolbar(),
+            # Con la fila reservada la barra la pinta el CLI y queda fija; el
+            # bottom_toolbar de prompt_toolkit solo vive mientras hay prompt
+            # (por eso desaparecía al enviar), así que sería un duplicado.
+            bottom_toolbar=None if status_line_active() else (lambda: self.status.pt_toolbar()),
             reserve_space_for_menu=6,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
@@ -2658,7 +2839,10 @@ class ChatApp:
                     blocks.append(Markdown(raw))
             if not blocks:
                 blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
-            blocks.append(self.status.rich_line(compact=True))
+            # Con la fila reservada la barra ya está clavada abajo; repetirla
+            # aquí la pegaría al texto que va saliendo.
+            if not status_line_active():
+                blocks.append(self.status.rich_line(compact=True))
             return pad(Group(*blocks))
 
         def _final_view():
@@ -2680,6 +2864,9 @@ class ChatApp:
 
         from rich.live import Live
 
+        # La barra fija deja de ser un adorno estático: acompaña al turno.
+        self.status.extra = "respondiendo…"
+        self._paint_status()
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
@@ -2709,6 +2896,7 @@ class ChatApp:
                 interrupted = True
                 stream.close()
 
+        self.status.extra = ""
         final = _final_view()
         if final is not None:
             self.console.print(final)
@@ -2720,6 +2908,7 @@ class ChatApp:
 
         if usage:
             self._register_usage(usage)
+        self._refresh_status()  # tokens/contexto nuevos → repinta la barra fija
         text = "".join(content_parts).strip()
         if self.remote:
             # El controller reemplaza lo streameado por el texto final limpio
@@ -2994,9 +3183,12 @@ class ChatApp:
         return True
 
     def cmd_clear(self, arg: str):
-        self.console.clear()
+        # console.clear() solo borra lo visible: el scrollback conservaba la
+        # conversación anterior, así que /clear no limpiaba de verdad.
+        clear_screen()
         self._render_identity()
         rule(self.console, "conversación")
+        self._paint_status()  # el 2J del clear también borró la fila reservada
         return True
 
     def cmd_update(self, arg: str):

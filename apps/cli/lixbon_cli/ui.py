@@ -407,11 +407,16 @@ class StatusBar:
         """Fragmentos para bottom_toolbar de prompt_toolkit."""
         return self._parts()
 
-    def rich_line(self, compact: bool = False):
-        """La misma barra como línea rich (pie del Live durante el stream)."""
+    def rich_line(self, compact: bool = False, bar: bool = False, width: int = 0):
+        """La misma barra como línea rich.
+
+        `bar=True` la viste como barra de verdad (fondo propio de borde a
+        borde) para la fila reservada al pie de la terminal; sin él es una
+        línea más del transcript.
+        """
         from rich.text import Text
 
-        text = Text()
+        text = Text(style="lx.bar" if bar else "")
         for style_cls, chunk in (self._compact_parts() if compact else self._parts()):
             if style_cls == "class:bottom-toolbar.dot":
                 text.append(chunk, style="lx.accent2")
@@ -421,6 +426,9 @@ class StatusBar:
                 text.append(chunk, style="lx.dim2")
             else:
                 text.append(chunk, style="lx.dim")
+        if width:
+            # Relleno hasta el borde: sin él el fondo acabaría a media fila.
+            text.pad_right(max(0, width - text.cell_len))
         return text
 
 

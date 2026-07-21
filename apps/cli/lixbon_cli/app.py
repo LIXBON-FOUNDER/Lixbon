@@ -24,7 +24,18 @@ from lixbon_cli.config import (
     mask_key,
     save_config,
 )
-from lixbon_cli.term import g, is_interactive, set_title, setup_terminal
+from lixbon_cli.term import (
+    clear_screen,
+    draw_status_line,
+    g,
+    is_interactive,
+    release_status_line,
+    reserve_status_line,
+    set_title,
+    setup_terminal,
+    status_line_active,
+    term_size,
+)
 from lixbon_cli.theme import make_console, pt_style
 from lixbon_cli.ui import (
     Option,
@@ -96,6 +107,21 @@ class ChatApp:
         tokens, pct = self._estimate_context()
         self.status.tokens = self.session_tokens or tokens
         self.status.ctx_pct = pct
+        self._paint_status()
+
+    def _paint_status(self) -> None:
+        """Repinta la barra en su fila reservada (no hace nada si no la hay)."""
+        if not status_line_active():
+            return
+        from lixbon_cli.theme import render_ansi
+
+        cols, _ = term_size()
+        width = max(cols, 20)
+        try:
+            line = self.status.rich_line(bar=True, width=width - 1)
+            draw_status_line(render_ansi(line, width))
+        except Exception:
+            pass  # la barra nunca puede tumbar la sesión
 
     def _estimate_context(self) -> tuple[int, float]:
         # Mide lo que se ENVIARÁ al modelo (últimos max_context_messages),
@@ -121,6 +147,15 @@ class ChatApp:
 
     def run(self, once: str = "") -> int:
         self._set_tab_title()
+        # La sesión toma la terminal entera: fuera el banner de cmd/PowerShell
+        # y la línea que lanzó el CLI. Todo lo que sigue (spinner, onboarding,
+        # cabecera) se dibuja ya sobre lienzo limpio. Con la pantalla en blanco
+        # es también el único momento seguro para reservar la fila de la barra
+        # (DECSTBM manda el cursor a home).
+        if not once:
+            clear_screen()
+            if self.cfg.get("fixed_status_bar", True):
+                reserve_status_line()
 
         if not self.cfg.get("api_key"):
             if not is_interactive():
@@ -159,7 +194,10 @@ class ChatApp:
             print_note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos.")
         # Zona 3: a partir de aquí, todo es conversación.
         rule(self.console, "conversación")
-        return self._prompt_loop()
+        try:
+            return self._prompt_loop()
+        finally:
+            release_status_line()
 
     def _render_identity(self) -> None:
         """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
@@ -363,7 +401,10 @@ class ChatApp:
             complete_while_typing=True,
             key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
-            bottom_toolbar=lambda: self.status.pt_toolbar(),
+            # Con la fila reservada la barra la pinta el CLI y queda fija; el
+            # bottom_toolbar de prompt_toolkit solo vive mientras hay prompt
+            # (por eso desaparecía al enviar), así que sería un duplicado.
+            bottom_toolbar=None if status_line_active() else (lambda: self.status.pt_toolbar()),
             reserve_space_for_menu=6,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
@@ -531,7 +572,10 @@ class ChatApp:
                     blocks.append(Markdown(raw))
             if not blocks:
                 blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
-            blocks.append(self.status.rich_line(compact=True))
+            # Con la fila reservada la barra ya está clavada abajo; repetirla
+            # aquí la pegaría al texto que va saliendo.
+            if not status_line_active():
+                blocks.append(self.status.rich_line(compact=True))
             return pad(Group(*blocks))
 
         def _final_view():
@@ -553,6 +597,9 @@ class ChatApp:
 
         from rich.live import Live
 
+        # La barra fija deja de ser un adorno estático: acompaña al turno.
+        self.status.extra = "respondiendo…"
+        self._paint_status()
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
@@ -582,6 +629,7 @@ class ChatApp:
                 interrupted = True
                 stream.close()
 
+        self.status.extra = ""
         final = _final_view()
         if final is not None:
             self.console.print(final)
@@ -593,6 +641,7 @@ class ChatApp:
 
         if usage:
             self._register_usage(usage)
+        self._refresh_status()  # tokens/contexto nuevos → repinta la barra fija
         text = "".join(content_parts).strip()
         if self.remote:
             # El controller reemplaza lo streameado por el texto final limpio
@@ -867,9 +916,12 @@ class ChatApp:
         return True
 
     def cmd_clear(self, arg: str):
-        self.console.clear()
+        # console.clear() solo borra lo visible: el scrollback conservaba la
+        # conversación anterior, así que /clear no limpiaba de verdad.
+        clear_screen()
         self._render_identity()
         rule(self.console, "conversación")
+        self._paint_status()  # el 2J del clear también borró la fila reservada
         return True
 
     def cmd_update(self, arg: str):

@@ -50,6 +50,10 @@ RICH_STYLES = {
     "lx.diff.add": PALETTE["ok"],
     "lx.diff.del": PALETTE["err"],
     "lx.diff.hunk": PALETTE["dim"],
+    # Fondo de la barra de estado fija. Va como estilo BASE del Text: los
+    # spans de cada trozo solo fijan color de texto, así que el fondo
+    # sobrevive por debajo y llega hasta el relleno del borde derecho.
+    "lx.bar": "on #1E1E1A",  # rich usa `on <color>`; el `bg:` es de prompt_toolkit
 }
 
 _console = None
@@ -74,7 +78,9 @@ def make_console():
     if _console is None:
         import shutil
 
-        from rich.console import Console
+        from rich.console import Console, NewLine
+        from rich.control import Control
+        from rich.padding import Padding
         from rich.theme import Theme
 
         from lixbon_cli.term import is_mintty
@@ -84,10 +90,16 @@ def make_console():
 
             def print(self, *objects, **kwargs):
                 if objects and not kwargs.pop("no_pad", False):
-                    from rich.padding import Padding
-
+                    # Los Control (mover cursor, borrar línea) son la fontanería
+                    # con la que Live/Status repintan y BORRAN su línea. Si se
+                    # envuelven en Padding, rich los maqueta como un bloque del
+                    # ancho de la consola: la línea del spinner se rellenaba de
+                    # espacios, hacía wrap y el `cursor-up + erase` final ya no
+                    # la alcanzaba → cada spinner dejaba su rastro en pantalla.
                     objects = tuple(
-                        Padding(obj, (0, PAD_RIGHT, 0, PAD_LEFT)) if obj != "" else obj
+                        obj
+                        if obj == "" or isinstance(obj, (Control, NewLine))
+                        else Padding(obj, (0, PAD_RIGHT, 0, PAD_LEFT))
                         for obj in objects
                     )
                 super().print(*objects, **kwargs)
@@ -101,6 +113,45 @@ def make_console():
             force_terminal=True if is_mintty() else None,
         )
     return _console
+
+
+_ansi_console = None
+_ansi_width = 0
+
+
+def render_ansi(renderable, width: int) -> str:
+    """Renderiza con el tema Lixbon a una cadena con escapes ANSI, en UNA línea.
+
+    Sirve para pintar fuera del flujo normal (la fila reservada de la barra de
+    estado), donde no vale `console.print` porque movería el cursor. Se recorta
+    a `width - 1`: llenar la última columna dispara el autowrap de la terminal
+    y la barra se derramaría sobre la línea siguiente.
+    """
+    global _ansi_console, _ansi_width
+    inner = max(width - 1, 10)
+    if _ansi_console is None or _ansi_width != inner:
+        import io
+
+        from rich.console import Console
+        from rich.theme import Theme
+
+        _ansi_width = inner
+        # Escribe a un StringIO, así que rich no puede sondear la terminal y
+        # degradaría a 16 colores: hereda la profundidad ya detectada por la
+        # consola real para que la barra tenga los mismos tonos que el resto.
+        _ansi_console = Console(
+            file=io.StringIO(),
+            theme=Theme(RICH_STYLES),
+            width=inner,
+            force_terminal=True,
+            highlight=False,
+            color_system=make_console().color_system or None,
+        )
+    buf = _ansi_console.file
+    buf.seek(0)
+    buf.truncate(0)
+    _ansi_console.print(renderable, end="", no_wrap=True, overflow="ellipsis", crop=True)
+    return buf.getvalue().split("\n")[0]
 
 
 def pt_style():

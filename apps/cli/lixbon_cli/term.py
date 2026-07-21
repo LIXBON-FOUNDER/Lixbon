@@ -114,6 +114,99 @@ def set_title(text: str) -> None:
         pass
 
 
+def clear_screen() -> None:
+    """Deja la terminal en blanco antes de dibujar la interfaz del CLI.
+
+    `2J` borra lo visible y `3J` el scrollback: sin esta última el usuario
+    puede subir con la rueda y volver a ver el banner de cmd/PowerShell y la
+    línea que lanzó el programa, y la sesión sigue pareciendo una consola del
+    sistema con texto encima. En terminales que no soporten 3J el escape se
+    ignora y solo se limpia lo visible.
+    """
+    if not is_interactive():
+        return  # en un pipe/redirección el escape ensuciaría la salida
+    try:
+        sys.stdout.write("\033[H\033[2J\033[3J")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+# ── Fila reservada para la barra de estado ─────────────────────────────────
+# La última fila se saca de la región de scroll (DECSTBM): el transcript
+# desplaza solo las filas 1..h-1 y la barra se queda clavada abajo, sin
+# desaparecer al enviar ni viajar pegada a lo que escribe el agente.
+#
+# CONTRAPARTIDA: con una región de scroll parcial, las líneas que salen por
+# arriba NO van al scrollback de la terminal (es el mismo motivo por el que
+# tmux implementa el suyo propio). Si molesta, `fixed_status_bar: false` en
+# ~/.lixbon/config.json devuelve la barra al pie de prompt_toolkit.
+
+_status_rows = 0  # filas con las que se calculó la región activa (0 = inactiva)
+
+
+def term_size() -> tuple[int, int]:
+    import shutil
+
+    size = shutil.get_terminal_size((100, 24))
+    return size.columns, size.lines
+
+
+def _write(seq: str) -> None:
+    try:
+        sys.stdout.write(seq)
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def reserve_status_line() -> bool:
+    """Saca la última fila de la región de scroll. Solo tras limpiar la
+    pantalla: DECSTBM manda el cursor a home y arrastraría lo ya escrito."""
+    global _status_rows
+    if not is_interactive():
+        return False
+    _, rows = term_size()
+    if rows < 6:  # terminal diminuta: no merece la pena robarle una fila
+        return False
+    _status_rows = rows
+    _write(f"\033[1;{rows - 1}r\033[H")
+    # Si el proceso muere por una excepción sin pasar por el finally, la región
+    # quedaría puesta y la terminal seguiría confinando su salida a h-1 filas.
+    import atexit
+
+    atexit.register(release_status_line)
+    return True
+
+
+def status_line_active() -> bool:
+    return _status_rows > 0
+
+
+def release_status_line() -> None:
+    """Devuelve la región de scroll a la pantalla completa y borra la barra."""
+    global _status_rows
+    if not _status_rows:
+        return
+    rows = _status_rows
+    _status_rows = 0
+    # DECSTBM vuelve a mover el cursor a home, así que se guarda y restaura.
+    _write(f"\0337\033[{rows};1H\033[2K\0338\0337\033[r\0338")
+
+
+def draw_status_line(ansi: str) -> None:
+    """Pinta la barra en la fila reservada sin mover el cursor del transcript.
+    Si la terminal cambió de alto, rehace la región antes de pintar."""
+    global _status_rows
+    if not _status_rows:
+        return
+    _, rows = term_size()
+    if rows != _status_rows and rows >= 6:
+        _status_rows = rows
+        _write(f"\0337\033[1;{rows - 1}r\0338")
+    _write(f"\0337\033[{_status_rows};1H\033[2K{ansi}\033[0m\0338")
+
+
 def is_mintty() -> bool:
     """Git Bash / MSYS (mintty): la stdio son pipes, no una consola Windows."""
     return bool(os.environ.get("MSYSTEM") or os.environ.get("TERM_PROGRAM") == "mintty")
