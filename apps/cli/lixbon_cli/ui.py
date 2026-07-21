@@ -2,7 +2,7 @@
 import sys
 from dataclasses import dataclass, field
 
-from lixbon_cli.term import g
+from lixbon_cli.term import UNICODE_OK, g
 from lixbon_cli.theme import PALETTE, make_console, pt_style
 
 
@@ -15,9 +15,23 @@ def esc(text: object) -> str:
 
 # ── Cabecera de identidad ───────────────────────────────────────────────────
 
-# Ancho del bloque del ícono (2 facetas + destello): el texto de las tres
-# líneas se alinea contra este margen.
-LOGO_WIDTH = 3
+# El ícono se dibuja con bloques llenos (█) de 2×2 celdas, un color por
+# cuadrante — los mismos del favicon. Los triángulos ◢◣ se veían rotos y
+# desalineados en Cascadia Mono; █ (U+2588) se renderiza igual en toda fuente
+# monoespaciada, así que el logo es fiable en cualquier terminal.
+LOGO_WIDTH = 2
+LOGO_GAP = 2  # separación entre el ícono y el texto
+
+
+def _logo_rows() -> tuple[list, list]:
+    """Filas superior e inferior del ícono como fragmentos de rich.Text."""
+    if not UNICODE_OK:
+        return ([("[]", "lx.facet.top")], [("[]", "lx.facet.bottom")])
+    block = g("block")
+    return (
+        [(block, "lx.facet.top"), (block, "lx.facet.top2")],
+        [(block, "lx.facet.bottom"), (block, "lx.facet.bottom2")],
+    )
 
 
 def short_path(path, max_len: int = 60) -> str:
@@ -41,9 +55,9 @@ def render_header(console, version: str, model: str = "", plan: str = "",
                   workspace: object = None) -> None:
     """Bloque de identidad, arriba a la izquierda y sin cajas.
 
-        ◢◣   Lixbon CLI v2.1.0
-        ◥◤✦  qwen2.5-coder:7b · Lixbon Pro
-             ~/proyectos/api
+        ██  Lixbon CLI v2.1.0
+        ██  qwen2.5-coder:7b · Lixbon Pro
+            ~/proyectos/api
 
     Se imprime una vez al arrancar (y tras /clear): sube con el transcript en
     lugar de robar espacio permanente. Los datos vivos (contexto, tokens,
@@ -51,21 +65,17 @@ def render_header(console, version: str, model: str = "", plan: str = "",
     """
     from rich.text import Text
 
-    top = g("logo_top")
-    bottom = g("logo_bottom")
-    indent = " " * (LOGO_WIDTH + 2)
+    top_row, bottom_row = _logo_rows()
+    gap = " " * LOGO_GAP
+    indent = " " * (LOGO_WIDTH + LOGO_GAP)
 
-    # Text.assemble en vez de markup: el logo ASCII de respaldo contiene `\`,
-    # que rich interpretaría como escape del cierre de etiqueta.
+    # Text.assemble en vez de markup: el logo ASCII de respaldo contiene `[`,
+    # que rich interpretaría como apertura de etiqueta.
     console.print()
     console.print(Text.assemble(
-        (top, "lx.facet.top"), " " * (LOGO_WIDTH - len(top) + 2),
-        ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
+        *top_row, gap, ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
     ))
-    line2 = [
-        (bottom, "lx.facet.bottom"), (g("spark"), "lx.primary"), "  ",
-        (model or "sin modelo", "lx.beige"),
-    ]
+    line2 = [*bottom_row, gap, (model or "sin modelo", "lx.beige")]
     if plan:
         line2 += [(f" {g('sep')} ", "lx.dim2"), (f"Lixbon {plan}", "lx.dim")]
     console.print(Text.assemble(*line2))
@@ -80,8 +90,9 @@ def render_intro_line(console, version: str, note: str = "") -> None:
     modelo y plan que mostrar: así no se repite dos veces en el arranque."""
     from rich.text import Text
 
+    top_row, _ = _logo_rows()
     parts = [
-        (g("logo_top"), "lx.facet.top"), (g("logo_bottom"), "lx.facet.bottom"), " ",
+        *top_row, " " * LOGO_GAP,
         ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
     ]
     if note:

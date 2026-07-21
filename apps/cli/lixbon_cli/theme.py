@@ -15,8 +15,12 @@ PALETTE = {
     "beige": "#CBC7A9",   # marca (cuadrante superior del ícono)
     "olive": "#4A5A2A",   # marca (cuadrante inferior del ícono)
     "olive_lt": "#8C9A3C",  # oliva legible sobre fondo oscuro (nombre del CLI)
-    "facet_top": "#DCD6BC",  # facetas claras del ícono (rombo, mitad superior)
-    "facet_bottom": "#6E7A33",  # facetas oscuras del ícono (mitad inferior)
+    # Las 4 facetas del ícono (colores exactos del favicon), en el mismo orden
+    # que los cuadrantes: claro/beige arriba, oliva/oliva oscuro abajo.
+    "facet_top": "#DCD6BC",
+    "facet_top2": "#C7BE9F",
+    "facet_bottom": "#4B5327",
+    "facet_bottom2": "#333A1C",
     "dim": "#8A8A80",     # secundario: metadatos, hints, barra de estado
     "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
     "ok": "#5FB85F",      # éxito, líneas + de diff
@@ -32,8 +36,10 @@ RICH_STYLES = {
     "lx.accent2": PALETTE["accent"],
     "lx.beige": PALETTE["beige"],
     "lx.brand": f"bold {PALETTE['olive_lt']}",       # "Lixbon CLI" en la cabecera
-    "lx.facet.top": PALETTE["facet_top"],            # ícono: facetas superiores
-    "lx.facet.bottom": PALETTE["facet_bottom"],      # ícono: facetas inferiores
+    "lx.facet.top": PALETTE["facet_top"],            # ícono: cuadrantes
+    "lx.facet.top2": PALETTE["facet_top2"],
+    "lx.facet.bottom": PALETTE["facet_bottom"],
+    "lx.facet.bottom2": PALETTE["facet_bottom2"],
     "lx.rule": PALETTE["dim2"],
     "lx.dim": PALETTE["dim"],
     "lx.dim2": PALETTE["dim2"],

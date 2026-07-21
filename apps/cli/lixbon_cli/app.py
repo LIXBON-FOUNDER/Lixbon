@@ -129,10 +129,14 @@ class ChatApp:
             render_intro_line(self.console, CLI_VERSION, "iniciar sesión")
             if not self.onboarding_flow():
                 return 1
-        elif not once:
-            render_intro_line(self.console, CLI_VERSION, "conectando…")
 
-        self._load_account_quietly()
+        # Con sesión no hay preámbulo: la marca se ve una sola vez, en la
+        # cabecera de abajo, ya con modelo y plan resueltos.
+        if once or not is_interactive():
+            self._load_account_quietly()
+        else:
+            with spinner("conectando con Lixbon…"):
+                self._load_account_quietly()
         if not self.model:
             if not self.pick_model():
                 return 1

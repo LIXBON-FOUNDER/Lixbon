@@ -41,7 +41,7 @@ def _unicode_ok() -> bool:
     if not IS_WINDOWS:
         return True
     try:
-        "✦●▓░❯╭◢◣─".encode(_ORIG_ENCODING)
+        "✦●▓░❯╭█─".encode(_ORIG_ENCODING)
         return True
     except (UnicodeEncodeError, LookupError):
         # Windows Terminal renderiza unicode aunque el codepage legacy no:
@@ -65,9 +65,8 @@ _GLYPHS_UNICODE = {
     "cross": "✗",
     "sep": "·",
     "image": "🖼",
-    # Ícono de marca: rombo de 4 facetas (beige arriba, oliva abajo) + destello
-    "logo_top": "◢◣",
-    "logo_bottom": "◥◤",
+    # Ícono de marca: 2×2 celdas de bloque lleno, un color por faceta
+    "block": "█",
     "rule": "─",
     "gear": "⚙",
     "corner": "└",
@@ -86,8 +85,7 @@ _GLYPHS_ASCII = {
     "cross": "X",
     "sep": "-",
     "image": "[img]",
-    "logo_top": "/\\",
-    "logo_bottom": "\\/",
+    "block": "#",
     "rule": "-",
     "gear": "*",
     "corner": "`",
