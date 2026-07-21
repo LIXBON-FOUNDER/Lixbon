@@ -11,6 +11,19 @@
 
 ---
 
+## 0.a Control remoto `/remote` (2026-07-20) — IDE/CLI controlables desde la app móvil
+
+Diseño completo en `docs/PLAN_REMOTE.md` (fases R0–R6; **R0–R5 implementadas**). El IDE o el CLI actúan de host (solo conexiones salientes: SSE de comandos + POST de eventos, sin WS porque el CLI es stdlib puro), el gateway releva con `core/gateway/remote_hub.py` (memoria, 1 réplica) y la app móvil / web son el mando: transcript en vivo, prompts, interrupción y **aprobaciones de herramientas en el teléfono**.
+
+- **Backend**: tablas `remote_sessions` (share token hasheado, 24 h, revocable) y `device_tokens` (push Expo); router `core/gateway/routers/remote.py` (11 rutas `/api/remote/*`, QR con `segno` en png/svg/txt, claim con rate-limit + audit); sweep cada 5 min en `app.py`. Tests: `core/gateway/test_remote_hub.py`.
+- **CLI 2.1.0**: `/remote` imprime link + QR unicode y entra en **takeover** (teclado local en pausa, Ctrl+C termina y recupera); `lixbon_cli/remote.py` (hilos lector/flusher), aprobaciones remotas en `agent.py` vía `session["remote"]`.
+- **IDE**: `/remote` en el chat o paleta → modal con QR; `src/store/remoteStore.js` deriva los eventos **suscribiéndose a chatStore** (sin tocar `send`); las `pendingApproval` se resuelven también desde el móvil; indicador "Remote" en la status bar.
+- **Móvil 0.3.0**: sección **Remote** en el drawer (lista en vivo vía `/api/remote/subscribe` — la sesión aparece al instante al ejecutar `/remote`), detalle con transcript/composer/aprobaciones, deep link `lixbon.com/remote/*`, push best-effort (`expo-notifications`).
+- **Web**: `/remote/:token` (llegada por QR/link; **exige login con la cuenta dueña** — sin sesión redirige a `/auth?next=…` y vuelve) y `/remote` (lista con sesión web). El token del link solo identifica la sesión, nunca es credencial.
+- **Pendiente operativo**: `/.well-known/assetlinks.json` para App Links verificados y `google-services.json` (FCM) en el build Android para que lleguen los push; sin eso todo lo demás funciona igual.
+
+---
+
 ## 0.b CLI v2 (2026-07-11) — reescritura completa, terminal pura
 
 - **Textual (TUI) eliminado.** Interfaz estilo Claude Code: transcript inline, streaming SSE en vivo, thinking del modelo en gris (`delta.reasoning_content` + tags `<think>` inline), selectores con flechas/mouse (nunca números), menú de slash-commands al escribir `/`, barra de estado inferior (modelo | sesión | % contexto | tokens | UTF-8).

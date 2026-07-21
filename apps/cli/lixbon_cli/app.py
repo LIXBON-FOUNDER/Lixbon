@@ -1,5 +1,7 @@
 """ChatApp: loop principal del CLI interactivo (transcript inline estilo Claude Code)."""
 import os
+import platform
+import queue
 import subprocess
 import time
 import uuid
@@ -7,6 +9,7 @@ from pathlib import Path
 
 from lixbon_cli.agent import clean_prose, run_agent_turn
 from lixbon_cli.api import ApiClient, ApiError
+from lixbon_cli.remote import RemoteLink
 from lixbon_cli.commands import (
     COMMAND_SPECS,
     encode_image,
@@ -59,6 +62,7 @@ class ChatApp:
             "auto_run_commands": bool(self.cfg.get("auto_run_commands", False)),
         }
         self.history: list[dict] = []
+        self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
         self.pending_images: list[Path] = []
@@ -391,7 +395,7 @@ class ChatApp:
 
     # ── envío de mensajes ────────────────────────────────────────────────
 
-    def send_message(self, text: str) -> None:
+    def send_message(self, text: str, origin: str = "local") -> None:
         clean, at_images, errors = parse_attachments(text, self.workspace)
         for err in errors:
             print_error(err)
@@ -414,6 +418,9 @@ class ChatApp:
         if encoded:
             user_msg["images"] = encoded
         self.history.append(user_msg)
+        if self.remote:
+            self.remote.emit("user_msg", text=clean or text, origin=origin)
+            self.remote.emit("status", state="thinking")
 
         try:
             if self.mode == "delegate":
@@ -428,6 +435,9 @@ class ChatApp:
         except ApiError:
             self.history.pop()
             raise
+        finally:
+            if self.remote:
+                self.remote.emit("status", state="idle")
         self._refresh_status()
 
     def _context_messages(self) -> list[dict]:
@@ -492,6 +502,12 @@ class ChatApp:
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
+                    if self.remote and self.remote.interrupt_requested:
+                        # Interrupción pedida desde el móvil/web (equivale a Ctrl+C)
+                        self.remote.interrupt_requested = False
+                        interrupted = True
+                        stream.close()
+                        break
                     if kind == "reasoning":
                         if not reasoning_parts:
                             reasoning_started = time.monotonic()
@@ -501,6 +517,8 @@ class ChatApp:
                         if reasoning_parts and not content_parts and reasoning_started:
                             reasoning_seconds = time.monotonic() - reasoning_started
                         content_parts.append(payload)
+                        if self.remote:
+                            self.remote.emit("assistant_delta", text=payload)
                     elif kind == "sources":
                         sources = payload
                     elif kind == "usage":
@@ -519,6 +537,11 @@ class ChatApp:
         if usage:
             self._register_usage(usage)
         text = "".join(content_parts).strip()
+        if self.remote:
+            # El controller reemplaza lo streameado por el texto final limpio
+            # (en modo agent, los JSON de herramientas desaparecen del transcript)
+            display = clean_prose(text) if self.mode == "agent" else text
+            self.remote.emit("assistant_done", text=display, interrupted=interrupted)
         if interrupted:
             text += "\n[respuesta interrumpida por el usuario]"
         return text
@@ -793,6 +816,112 @@ class ChatApp:
 
         cmd_update(None)
         return True
+
+    # ── control remoto (/remote) ─────────────────────────────────────────
+
+    def _remote_snapshot(self) -> list[dict]:
+        """Historial renderizable para un controller que se une: sin system,
+        sin TOOL_RESULT internos y con la prosa del asistente limpia."""
+        msgs: list[dict] = []
+        for m in self.history:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role == "system":
+                continue
+            if role == "user" and content.startswith("TOOL_RESULT"):
+                continue
+            if role == "assistant":
+                content = clean_prose(content) or content[:400]
+                if not content:
+                    continue
+            msgs.append({"role": role, "content": content})
+        return msgs[-80:]
+
+    def cmd_remote(self, arg: str):
+        arg = (arg or "").strip().lower()
+        if arg and arg not in ("start", "stop", "status"):
+            print_error("Uso: /remote — inicia el control remoto desde tu app móvil")
+            return True
+        if arg in ("stop", "status"):
+            print_note("El control remoto se activa con /remote y se termina con Ctrl+C dentro del modo remoto.")
+            return True
+        if not self.cfg.get("api_key"):
+            print_error("Necesitas una sesión activa (/login) para usar /remote.")
+            return True
+
+        title = self.workspace.name or "workspace"
+        machine = platform.node() or "PC"
+        link = RemoteLink(self.api, source="cli", title=title, machine=machine)
+        try:
+            with spinner("creando sesión remota…"):
+                link.start(mode=self.mode, model=self.model)
+                qr = link.qr_text()
+        except ApiError as exc:
+            print_error(f"No se pudo iniciar el control remoto: {exc}")
+            return True
+
+        link.snapshot_provider = self._remote_snapshot
+        self.remote = link
+        self.session["remote"] = link
+
+        self.console.print()
+        self.console.print(f"  [bold lx.primary]{g('spark')} Control remoto activo[/]")
+        self.console.print(f"  [lx.dim]Sesión:[/] [lx.primary]{esc(title)}[/] [lx.dim]en {esc(machine)}[/]")
+        self.console.print(f"  [lx.dim]Link:[/]   [lx.accent2]{esc(link.share_url)}[/]")
+        if qr:
+            self.console.print()
+            for line in qr.rstrip("\n").splitlines():
+                self.console.print(f"  {line}")
+        self.console.print()
+        print_note("La sesión ya aparece en la sección Remote de tu app Lixbon.")
+        print_note("Sin la app, escanea el QR: abre la sesión en la web (te pedirá iniciar sesión con tu cuenta).")
+
+        try:
+            self._remote_loop(link)
+        finally:
+            self.session.pop("remote", None)
+            self.remote = None
+        return True
+
+    def _remote_loop(self, link: RemoteLink) -> None:
+        """Takeover: el teclado local queda en pausa y los prompts llegan del
+        móvil/web. Ctrl+C termina la sesión remota y devuelve el control."""
+        print_note("Control local en pausa — Ctrl+C para terminar el modo remoto y volver aquí.")
+        self.console.print()
+        link.emit_snapshot()
+        link.emit("status", state="idle")
+        try:
+            while True:
+                try:
+                    cmd = link.commands.get(timeout=0.5)
+                except queue.Empty:
+                    if link.ended:
+                        break
+                    continue
+                kind = cmd.get("type")
+                if kind == "bye":
+                    break
+                if kind != "prompt":
+                    continue
+                text = (cmd.get("text") or "").strip()
+                if not text:
+                    continue
+                link.interrupt_requested = False
+                self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(text)}[/] [lx.dim]\\[remoto][/]")
+                if text == "/new":
+                    self.cmd_new("")
+                    link.emit("status", state="idle")
+                    continue
+                try:
+                    self.send_message(text, origin="remote")
+                except ApiError as exc:
+                    print_error(str(exc))
+                    link.emit("error", message=str(exc))
+        except KeyboardInterrupt:
+            pass
+        link.stop(end_session=True)
+        self.console.print()
+        print_note("Control remoto terminado; la sesión vuelve a esta terminal.")
 
     def cmd_exit(self, arg: str):
         print_note("Hasta pronto.")

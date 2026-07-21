@@ -1,0 +1,217 @@
+/* remote.css — página de control remoto (/remote y /remote/:token). */
+
+.remote-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.remote__center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.remote__empty-title {
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.remote__dim {
+  color: var(--ink-soft, #6b6a63);
+  font-size: 14px;
+}
+
+.remote__dim--danger { color: var(--danger, #b3372f); }
+
+.remote__dim code {
+  background: var(--bg-secondary, #ecebe0);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+/* ── Lista de sesiones ── */
+
+.remote__list {
+  width: min(680px, 100% - 32px);
+  margin: 28px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.remote__card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  padding: 16px 18px;
+  border: 1px solid var(--border-soft, #dcdbcf);
+  border-radius: 18px;
+  background: var(--bg, #f6f7ed);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.remote__card:hover:not(:disabled) { background: var(--bg-secondary, #ecebe0); }
+.remote__card:disabled { opacity: 0.55; cursor: default; }
+
+.remote__card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.remote__card-body strong {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote__badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft, #e3e4d5);
+}
+
+.remote__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink-soft, #9a998f);
+  flex-shrink: 0;
+}
+
+.remote__dot.is-online {
+  background: #2e9e5b;
+  animation: remote-pulse 1.6s ease-in-out infinite;
+}
+
+.remote__dot--lg { width: 12px; height: 12px; }
+
+@keyframes remote-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── Sesión en vivo ── */
+
+.remote__session {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100% - 32px);
+  margin: 0 auto;
+  padding: 18px 0 22px;
+  min-height: 0;
+}
+
+.remote__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft, #dcdbcf);
+}
+
+.remote__title { font-size: 19px; font-weight: 600; }
+
+.remote__thread {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 4px;
+  min-height: 200px;
+}
+
+.remote__hint { margin: auto; text-align: center; }
+
+.remote__tool {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft, #dcdbcf);
+  border-radius: 12px;
+  background: var(--bg-secondary, #ecebe0);
+  color: var(--ink-soft, #6b6a63);
+}
+
+.remote__tool.is-error { border-color: color-mix(in srgb, var(--danger, #b3372f) 40%, transparent); }
+
+.remote__tool-name { font-weight: 600; color: var(--ink, #171717); }
+
+.remote__tool-summary {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+}
+
+.remote__tool-state { flex-shrink: 0; }
+
+.remote__error {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger, #b3372f) 10%, transparent);
+  color: var(--danger, #b3372f);
+  font-size: 13.5px;
+}
+
+.remote__approval {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--border-soft, #dcdbcf);
+  border-radius: 18px;
+  background: var(--bg-secondary, #ecebe0);
+}
+
+.remote__approval code {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.remote__approval-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.remote__composer {
+  display: flex;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft, #dcdbcf);
+}
+
+.remote__composer input {
+  flex: 1;
+  padding: 12px 18px;
+  border: 1px solid var(--border-soft, #dcdbcf);
+  border-radius: 999px;
+  background: var(--bg, #fff);
+  font: inherit;
+  color: var(--ink, #171717);
+}
+
+.remote__composer input:focus { outline: 2px solid var(--ink, #171717); outline-offset: -1px; }
+.remote__composer input:disabled { opacity: 0.55; }

@@ -145,6 +145,12 @@ export function ChatInputBar() {
 
   const handleSend = () => {
     if (streaming || (!text.trim() && !images.length)) return;
+    // /remote: abre el control remoto en lugar de mandar el texto al modelo
+    if (/^\/remote(\s|$)/i.test(text.trim())) {
+      useAppStore.getState().openModal('remote');
+      setText('');
+      return;
+    }
     send(text, buildContext(), images, mentions);
     setText('');
     setImages([]);

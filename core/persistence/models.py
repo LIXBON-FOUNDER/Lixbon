@@ -327,6 +327,45 @@ class CreditPack(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class RemoteSession(Base):
+    """Sesión de control remoto (/remote): un IDE o CLI actuando de host y la
+    app móvil / web como mando a distancia. El transcript NO se persiste aquí
+    (viaja por el RemoteHub en memoria); esto son solo los metadatos."""
+    __tablename__ = "remote_sessions"
+    __table_args__ = (
+        Index("idx_remote_sessions_user", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # uuid corto (12 hex)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)        # "cli" | "ide"
+    title: Mapped[str] = mapped_column(Text, nullable=False)         # carpeta del workspace
+    machine: Mapped[str | None] = mapped_column(Text)                # hostname del host
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="online")  # online|offline|ended
+    # Token del link/QR: hasheado como las API keys; NULL = link revocado
+    share_token_hash: Mapped[str | None] = mapped_column(Text, unique=True)
+    token_expires_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    last_seen_at: Mapped[str] = mapped_column(Text, nullable=False)
+    ended_at: Mapped[str | None] = mapped_column(Text)
+
+
+class DeviceToken(Base):
+    """Push tokens de Expo por dispositivo (avisos de /remote con la app cerrada)."""
+    __tablename__ = "device_tokens"
+    __table_args__ = (
+        UniqueConstraint("expo_push_token", name="uq_device_tokens_token"),
+        Index("idx_device_tokens_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    expo_push_token: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str | None] = mapped_column(Text)               # "android" | "ios"
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    last_seen_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class TokenUsageDaily(Base):
     __tablename__ = "token_usage_daily"
     __table_args__ = (

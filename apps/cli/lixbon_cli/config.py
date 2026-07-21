@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.0.0"
+CLI_VERSION = "2.1.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 CONFIG_DIR = Path.home() / ".lixbon"

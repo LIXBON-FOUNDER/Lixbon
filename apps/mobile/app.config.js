@@ -24,6 +24,18 @@ module.exports = {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#1B1A17',
       },
+      // App Links del control remoto: el QR apunta a https://lixbon.com/remote/…
+      // Con la app instalada, Android la abre directo en la sesión; sin ella,
+      // el navegador carga la web. autoVerify exige publicar
+      // /.well-known/assetlinks.json con la huella SHA-256 del certificado.
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          data: [{ scheme: 'https', host: 'lixbon.com', pathPrefix: '/remote/' }],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
+      ],
     },
     plugins: [
       [

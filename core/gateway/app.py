@@ -19,9 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from core.gateway import deps
 from core.gateway.logging_setup import setup_logging
 from core.config import ALLOWED_ORIGINS, APP_DESCRIPTION, APP_TITLE, APP_VERSION, LOGS_DIR, WEB_DIST_DIR
-from core.persistence.queries import archive_old_inactive_keys, init_db, purge_expired_sessions
+from core.persistence.queries import archive_old_inactive_keys, init_db, purge_expired_sessions, sweep_remote_sessions
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, installer, keys, nodes_admin, oauth, payments, versions, ws_status, monitor
+from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, installer, keys, nodes_admin, oauth, payments, remote, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -103,6 +103,7 @@ app.include_router(payments.credits_router)
 app.include_router(admin_panel.router)
 app.include_router(installer.router)
 app.include_router(versions.router)
+app.include_router(remote.router)
 app.include_router(ws_status.router)
 app.include_router(monitor.router)
 app.include_router(nodes_admin.router)
@@ -129,6 +130,18 @@ def _start_archiver_cron() -> None:
                 _log.getLogger("lixbon").warning(f"[cron] Error en tareas de mantenimiento: {exc}")
 
     threading.Thread(target=_run, daemon=True, name="key-archiver").start()
+
+    def _run_remote_sweep():
+        # Cadencia corta: marca offline las sesiones /remote cuyo host dejó de
+        # dar señales (p.ej. tras un reinicio del gateway) y cierra las viejas.
+        while True:
+            time.sleep(300)
+            try:
+                sweep_remote_sessions()
+            except Exception as exc:
+                _log.getLogger("lixbon").warning(f"[cron] Error en sweep de sesiones remotas: {exc}")
+
+    threading.Thread(target=_run_remote_sweep, daemon=True, name="remote-sweeper").start()
 
 
 # ── Archivos estáticos y frontend (React SPA) ──────────────────────────────

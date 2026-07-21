@@ -27,11 +27,13 @@ from core.persistence.models import (
     CreditAccount,
     CreditLedger,
     CreditPack,
+    DeviceToken,
     EmailToken,
     Message,
     ModelPricing,
     Node,
     Plan,
+    RemoteSession,
     Session,
     Subscription,
     TaskEmbedding,
@@ -1872,3 +1874,157 @@ def get_daily_metrics(user_id: int, days_limit: int = 30) -> list[dict[str, Any]
             }
             for r in rows
         ]
+
+
+# ─── Control remoto (/remote) ──────────────────────────────────────────────
+
+REMOTE_TOKEN_TTL_HOURS = 24
+REMOTE_STALE_ENDED_HOURS = 24
+
+
+def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "source": r.source,
+        "title": r.title,
+        "machine": r.machine,
+        "status": r.status,
+        "created_at": r.created_at,
+        "last_seen_at": r.last_seen_at,
+        "ended_at": r.ended_at,
+    }
+
+
+def create_remote_session(user_id: int, source: str, title: str, machine: str | None) -> tuple[str, dict[str, Any]]:
+    """Crea la sesión remota y su share token. Devuelve (token_en_claro, sesión)."""
+    raw_token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + timedelta(hours=REMOTE_TOKEN_TTL_HOURS)).isoformat()
+    with get_session() as s:
+        session = RemoteSession(
+            id=secrets.token_hex(6),
+            user_id=user_id,
+            source=source,
+            title=title[:120] or "Sesión remota",
+            machine=(machine or "")[:80] or None,
+            status="online",
+            share_token_hash=hash_api_key(raw_token),
+            token_expires_at=expires,
+            created_at=now_iso(),
+            last_seen_at=now_iso(),
+        )
+        s.add(session)
+        s.flush()
+        return raw_token, _remote_session_to_dict(session)
+
+
+def get_remote_session(session_id: str, user_id: int | None = None) -> dict[str, Any] | None:
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or (user_id is not None and r.user_id != user_id):
+            return None
+        return {**_remote_session_to_dict(r), "user_id": r.user_id}
+
+
+def list_remote_sessions(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """Sesiones remotas del usuario, activas primero (las ended muy viejas no salen)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=REMOTE_STALE_ENDED_HOURS)).isoformat()
+    with get_session() as s:
+        rows = s.scalars(
+            select(RemoteSession)
+            .where(RemoteSession.user_id == user_id)
+            .where(or_(RemoteSession.status != "ended", RemoteSession.ended_at > cutoff))
+            .order_by(desc(RemoteSession.created_at))
+            .limit(limit)
+        ).all()
+        return [_remote_session_to_dict(r) for r in rows]
+
+
+def claim_remote_session(raw_token: str) -> dict[str, Any] | None:
+    """Valida un share token (link/QR) y devuelve la sesión si sigue vigente."""
+    token_hash = hash_api_key(raw_token)
+    with get_session() as s:
+        r = s.scalars(
+            select(RemoteSession).where(RemoteSession.share_token_hash == token_hash)
+        ).first()
+        if not r or r.status == "ended":
+            return None
+        if r.token_expires_at and r.token_expires_at < now_iso():
+            return None
+        return {**_remote_session_to_dict(r), "user_id": r.user_id}
+
+
+def touch_remote_session(session_id: str, status: str | None = None) -> None:
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or r.status == "ended":
+            return
+        r.last_seen_at = now_iso()
+        if status in ("online", "offline"):
+            r.status = status
+
+
+def end_remote_session(session_id: str, user_id: int | None = None) -> bool:
+    """Termina la sesión y revoca el share token (idempotente)."""
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or (user_id is not None and r.user_id != user_id):
+            return False
+        if r.status != "ended":
+            r.status = "ended"
+            r.ended_at = now_iso()
+        r.share_token_hash = None
+        return True
+
+
+def sweep_remote_sessions(offline_after_s: int = 60, end_after_h: int = 24) -> int:
+    """Mantenimiento: online sin señales → offline; offline muy viejas → ended."""
+    now = datetime.now(timezone.utc)
+    offline_cutoff = (now - timedelta(seconds=offline_after_s)).isoformat()
+    ended_cutoff = (now - timedelta(hours=end_after_h)).isoformat()
+    with get_session() as s:
+        changed = s.execute(
+            update(RemoteSession)
+            .where(RemoteSession.status == "online", RemoteSession.last_seen_at < offline_cutoff)
+            .values(status="offline")
+        ).rowcount
+        changed += s.execute(
+            update(RemoteSession)
+            .where(RemoteSession.status == "offline", RemoteSession.last_seen_at < ended_cutoff)
+            .values(status="ended", ended_at=now_iso(), share_token_hash=None)
+        ).rowcount
+        return changed
+
+
+# ─── Push tokens de dispositivos (Expo) ────────────────────────────────────
+
+def register_device_token(user_id: int, expo_push_token: str, platform: str | None = None) -> None:
+    """Alta/refresco idempotente. Si el token cambia de usuario (logout/login
+    en el mismo dispositivo), se reasigna al usuario nuevo."""
+    with get_session() as s:
+        row = s.scalars(
+            select(DeviceToken).where(DeviceToken.expo_push_token == expo_push_token)
+        ).first()
+        if row:
+            row.user_id = user_id
+            row.platform = platform or row.platform
+            row.last_seen_at = now_iso()
+            return
+        s.add(DeviceToken(
+            user_id=user_id,
+            expo_push_token=expo_push_token,
+            platform=platform,
+            created_at=now_iso(),
+            last_seen_at=now_iso(),
+        ))
+
+
+def list_device_tokens(user_id: int) -> list[str]:
+    with get_session() as s:
+        rows = s.scalars(select(DeviceToken).where(DeviceToken.user_id == user_id)).all()
+        return [r.expo_push_token for r in rows]
+
+
+def delete_device_token(expo_push_token: str) -> None:
+    """Baja de un push token (p.ej. cuando Expo reporta DeviceNotRegistered)."""
+    with get_session() as s:
+        s.execute(delete(DeviceToken).where(DeviceToken.expo_push_token == expo_push_token))

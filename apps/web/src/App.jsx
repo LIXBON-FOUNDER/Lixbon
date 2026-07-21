@@ -11,6 +11,7 @@ import DownloadsPage from './pages/DownloadsPage';
 import ReleasesPage from './pages/ReleasesPage';
 import DocsPage from './pages/DocsPage';
 import SharedPage from './pages/SharedPage';
+import RemotePage from './pages/RemotePage';
 
 export default function App() {
   return (
@@ -31,6 +32,8 @@ export default function App() {
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:section" element={<DocsPage />} />
           <Route path="/s/:token" element={<SharedPage />} />
+          <Route path="/remote" element={<RemotePage />} />
+          <Route path="/remote/:token" element={<RemotePage />} />
           {/* Rutas legacy del dashboard viejo */}
           <Route path="/login" element={<Navigate to="/auth" replace />} />
           <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />

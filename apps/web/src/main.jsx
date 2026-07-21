@@ -8,6 +8,7 @@ import './styles/chat.css';
 import './styles/account.css';
 import './styles/admin.css';
 import './styles/public.css';
+import './styles/remote.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

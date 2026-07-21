@@ -1436,3 +1436,75 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 26px;
 }
+
+/* ── Control remoto (/remote) ─────────────────────────────────────────── */
+
+.remote-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 8px 10px;
+  text-align: center;
+}
+
+.remote-modal__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 420px;
+}
+
+.remote-modal__desc--dim { color: var(--ink-dim, var(--muted)); font-size: 12px; }
+
+.remote-modal__error { color: var(--danger); font-size: 12.5px; }
+
+.remote-modal__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.remote-modal__qr {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.remote-modal__qr img { display: block; width: 200px; height: 200px; }
+
+.remote-modal__link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.remote-modal__link code {
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.remote-modal__end { color: var(--danger); }
+
+.statusbar__item .remote-live {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2e9e5b;
+  animation: remote-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes remote-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

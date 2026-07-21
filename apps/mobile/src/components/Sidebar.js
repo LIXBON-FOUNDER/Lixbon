@@ -254,6 +254,7 @@ export default function Sidebar({ open, onClose, onNavigate }) {
 
       {/* Accesos */}
       <View style={{ borderTopWidth: 1, borderTopColor: c.borderSoft, paddingVertical: 6 }}>
+        <NavItem icon="activity" label="Remote" onPress={() => onNavigate('remote')} />
         <NavItem icon="chart" label="Uso" onPress={() => onNavigate('usage')} />
         <NavItem
           icon="book"

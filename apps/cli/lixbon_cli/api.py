@@ -110,6 +110,32 @@ class ApiClient:
         return self._json("POST", f"{self.server}/api/delegate",
                           {"user_input": user_input}, timeout=180)
 
+    # ── control remoto (/remote) ─────────────────────────────────────────
+
+    def remote_create(self, source: str, title: str, machine: str) -> dict:
+        return self._json("POST", f"{self.server}/api/remote/sessions",
+                          {"source": source, "title": title, "machine": machine}, timeout=20)
+
+    def remote_events(self, session_id: str, events: list[dict]) -> dict:
+        return self._json("POST", f"{self.server}/api/remote/sessions/{session_id}/events",
+                          {"events": events}, timeout=20)
+
+    def remote_end(self, session_id: str) -> dict:
+        return self._json("DELETE", f"{self.server}/api/remote/sessions/{session_id}", timeout=20)
+
+    def remote_commands_stream(self, session_id: str):
+        """SSE de larga duración con los comandos del móvil/web. El timeout es
+        de inactividad del socket; el gateway manda keepalives cada 15 s."""
+        return self._open("GET", f"{self.server}/api/remote/sessions/{session_id}/commands",
+                          timeout=90)
+
+    def remote_qr_txt(self, data: str) -> str:
+        from urllib.parse import quote
+
+        with self._open("GET", f"{self.server}/api/remote/qr?fmt=txt&data={quote(data, safe='')}",
+                        timeout=20) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
     # ── chat ─────────────────────────────────────────────────────────────
 
     def chat(self, model: str, messages: list[dict], conversation_id: str | None = None,

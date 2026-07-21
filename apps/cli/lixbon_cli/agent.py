@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from lixbon_cli.diffs import compute_change, render_change
+from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
 from lixbon_cli.term import g
 from lixbon_cli.theme import make_console
 from lixbon_cli.ui import confirm3, esc
@@ -504,12 +505,18 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
     dot = g("dot")
+    # Con /remote activo, la sesión se maneja desde el móvil/web: los eventos
+    # de herramientas viajan al controller y las aprobaciones se piden allí
+    # (localmente no hay nadie al teclado durante el takeover).
+    remote = session.get("remote")
 
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
         console.print(f"[lx.dim]{dot} {tool_name}({esc(label)})[/]")
-        return _run(console, workspace, tool_name, args)
+        if remote:
+            remote.emit("tool_use", tool=tool_name, summary=str(label), readonly=True)
+        return _run(console, workspace, tool_name, args, remote)
 
     try:
         change = compute_change(workspace, tool_name, args, resolve_safe_path)
@@ -519,30 +526,42 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         render_change(console, change)
     else:
         console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]{tool_name}[/] [lx.dim]{esc(args)}[/]")
+    if remote:
+        remote.emit("tool_use", tool=tool_name, summary=_args_summary(tool_name, args), readonly=False)
 
     # Los comandos de shell son irreversibles (sin snapshot que los deshaga):
     # tienen su propio flag y NO los cubre auto_approve. Así, responder
     # "siempre" tras una edición de archivo no habilita ejecutar comandos.
     if tool_name == "run_command":
         if not session.get("auto_run_commands"):
-            decision = confirm3("¿Ejecutar este comando?")
+            if remote:
+                if remote.request_approval(tool_name, _args_summary(tool_name, args), "command") != "allow":
+                    console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                    return "Ejecución cancelada por el usuario"
+            else:
+                decision = confirm3("¿Ejecutar este comando?")
+                if decision == "always":
+                    session["auto_run_commands"] = True
+                elif decision in ("no", None):
+                    console.print(f"[lx.dim]{dot} rechazado[/]")
+                    return "Ejecución cancelada por el usuario"
+    elif not session.get("auto_approve"):
+        if remote:
+            if remote.request_approval(tool_name, _args_summary(tool_name, args), "edit") != "allow":
+                console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                return "Ejecución cancelada por el usuario"
+        else:
+            decision = confirm3("¿Aplicar este cambio?")
             if decision == "always":
-                session["auto_run_commands"] = True
+                session["auto_approve"] = True
             elif decision in ("no", None):
                 console.print(f"[lx.dim]{dot} rechazado[/]")
                 return "Ejecución cancelada por el usuario"
-    elif not session.get("auto_approve"):
-        decision = confirm3("¿Aplicar este cambio?")
-        if decision == "always":
-            session["auto_approve"] = True
-        elif decision in ("no", None):
-            console.print(f"[lx.dim]{dot} rechazado[/]")
-            return "Ejecución cancelada por el usuario"
 
-    return _run(console, workspace, tool_name, args)
+    return _run(console, workspace, tool_name, args, remote)
 
 
-def _run(console, workspace: Path, tool_name: str, args: dict) -> str:
+def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
     try:
         result = execute_tool_call(workspace, tool_name, args)
     except Exception as exc:
@@ -551,4 +570,9 @@ def _run(console, workspace: Path, tool_name: str, args: dict) -> str:
         first_line = result.split("\n", 1)[0][:120]
         style = "lx.err" if result.startswith("[ERROR]") else "lx.dim"
         console.print(f"  [{style}]{g('arrow')} {esc(first_line)}[/]")
+    if remote:
+        failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
+                  or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
+        remote.emit("tool_result", tool=tool_name,
+                    result=result[:REMOTE_RESULT_CHARS], error=failed)
     return result

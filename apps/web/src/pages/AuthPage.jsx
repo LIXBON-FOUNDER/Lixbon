@@ -121,6 +121,10 @@ function AuthIllustration() {
 export default function AuthPage() {
   const [params] = useSearchParams();
   const initialMode = params.get('mode') === 'register' ? 'register' : 'login';
+  // Vuelta post-login (p.ej. /remote/<token> desde el QR). Solo rutas internas:
+  // un next externo sería un open-redirect.
+  const rawNext = params.get('next') || '';
+  const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
   const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'forgot'
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -147,14 +151,14 @@ export default function AuthPage() {
     try {
       if (mode === 'login') {
         await login(email, password);
-        navigate('/', { replace: true });
+        navigate(nextPath, { replace: true });
       } else if (mode === 'register') {
         if (password !== confirm) {
           setError('Las contraseñas no coinciden');
           return;
         }
         await register({ firstName, lastName, email, password });
-        navigate('/', { replace: true });
+        navigate(nextPath, { replace: true });
       } else {
         await api.post('/api/auth/request-password-reset', { email });
         setNotice('Si el correo existe, te enviamos un enlace para restablecer la contraseña.');

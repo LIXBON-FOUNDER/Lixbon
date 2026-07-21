@@ -33,6 +33,7 @@ import { QuickOpen } from '../components/QuickOpen';
 import { CommandPalette } from '../components/CommandPalette';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Modal } from '../components/Modal';
+import { RemoteModal } from '../components/RemoteModal';
 import { InlineEdit } from '../editor/InlineEdit';
 import { useExtStore } from '../store/extStore';
 import { registerBuiltinCommands } from '../commands/builtin';
@@ -237,6 +238,16 @@ export function AppShell() {
       {modalView === 'settings' && (
         <Modal title="Ajustes" onClose={closeModal} size="lg">
           <Settings initialSection={modalSection} />
+        </Modal>
+      )}
+      {modalView === 'remote' && (
+        <Modal
+          title="Control remoto"
+          subtitle="Maneja esta sesión desde tu app móvil o la web"
+          onClose={closeModal}
+          size="md"
+        >
+          <RemoteModal />
         </Modal>
       )}
       {modalView === 'metrics' && (

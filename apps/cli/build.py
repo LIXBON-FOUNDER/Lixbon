@@ -30,6 +30,7 @@ MODULE_ORDER = [
     "api",
     "ui",
     "diffs",
+    "remote",
     "agent",
     "commands",
     "app",

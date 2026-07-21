@@ -4,6 +4,7 @@
 // (sidebar de la web) lleva historial + perfil, y Uso/Cuenta entran como
 // pantallas apiladas deslizándose desde la derecha.
 import { useFonts } from 'expo-font';
+import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, BackHandler, Easing, Pressable, View, useWindowDimensions } from 'react-native';
@@ -21,6 +22,7 @@ import {
 import AccountScreen from './src/screens/AccountScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import RemoteScreen from './src/screens/RemoteScreen';
 import UsageScreen from './src/screens/UsageScreen';
 import { AppState, useAuth } from './src/state';
 import { FONTS, LIGHT } from './src/theme';
@@ -134,8 +136,9 @@ function HomeShell() {
 
   const closeDrawer = useCallback(() => animateDrawer(0), [animateDrawer]);
 
-  // ── Pantallas apiladas (Uso / Cuenta) ──────────────────────────────────
-  const [stack, setStack] = useState(null); // null | 'usage' | 'account'
+  // ── Pantallas apiladas (Uso / Cuenta / Remote) ─────────────────────────
+  const [stack, setStack] = useState(null); // null | 'usage' | 'account' | 'remote'
+  const [remoteToken, setRemoteToken] = useState(null); // token del deep link /remote/<token>
   const slide = useRef(new Animated.Value(0)).current; // 0 fuera · 1 dentro
 
   const pushScreen = useCallback(
@@ -159,9 +162,30 @@ function HomeShell() {
       easing: EASE,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) setStack(null);
+      if (finished) {
+        setStack(null);
+        setRemoteToken(null);
+      }
     });
   }, [slide, reduced]);
+
+  // Deep link del QR / control remoto: https://lixbon.com/remote/<token> o
+  // lixbon://remote/<token> abre directamente la sesión en la sección Remote.
+  const deepLink = Linking.useURL();
+  useEffect(() => {
+    if (!deepLink) return;
+    const match = deepLink.match(/remote\/([A-Za-z0-9_-]{20,})/);
+    if (match) {
+      setRemoteToken(match[1]);
+      pushScreen('remote');
+    }
+  }, [deepLink, pushScreen]);
+
+  // Tap sobre una notificación push de /remote → abre la sección Remote.
+  useEffect(() => {
+    const { onRemoteNotificationTap } = require('./src/push');
+    return onRemoteNotificationTap(() => pushScreen('remote'));
+  }, [pushScreen]);
 
   // Botón atrás de Android: cierra drawer o pantalla apilada antes de salir.
   useEffect(() => {
@@ -200,6 +224,8 @@ function HomeShell() {
         >
           {stack === 'usage' ? (
             <UsageScreen onBack={popScreen} />
+          ) : stack === 'remote' ? (
+            <RemoteScreen onBack={popScreen} initialToken={remoteToken} />
           ) : (
             <AccountScreen onBack={popScreen} />
           )}

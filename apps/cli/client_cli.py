@@ -263,7 +263,7 @@ def pt_style():
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.0.0"
+CLI_VERSION = "2.1.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 CONFIG_DIR = Path.home() / ".lixbon"
@@ -544,6 +544,32 @@ class ApiClient:
     def delegate(self, user_input: str) -> dict:
         return self._json("POST", f"{self.server}/api/delegate",
                           {"user_input": user_input}, timeout=180)
+
+    # ── control remoto (/remote) ─────────────────────────────────────────
+
+    def remote_create(self, source: str, title: str, machine: str) -> dict:
+        return self._json("POST", f"{self.server}/api/remote/sessions",
+                          {"source": source, "title": title, "machine": machine}, timeout=20)
+
+    def remote_events(self, session_id: str, events: list[dict]) -> dict:
+        return self._json("POST", f"{self.server}/api/remote/sessions/{session_id}/events",
+                          {"events": events}, timeout=20)
+
+    def remote_end(self, session_id: str) -> dict:
+        return self._json("DELETE", f"{self.server}/api/remote/sessions/{session_id}", timeout=20)
+
+    def remote_commands_stream(self, session_id: str):
+        """SSE de larga duración con los comandos del móvil/web. El timeout es
+        de inactividad del socket; el gateway manda keepalives cada 15 s."""
+        return self._open("GET", f"{self.server}/api/remote/sessions/{session_id}/commands",
+                          timeout=90)
+
+    def remote_qr_txt(self, data: str) -> str:
+        from urllib.parse import quote
+
+        with self._open("GET", f"{self.server}/api/remote/qr?fmt=txt&data={quote(data, safe='')}",
+                        timeout=20) as resp:
+            return resp.read().decode("utf-8", errors="replace")
 
     # ── chat ─────────────────────────────────────────────────────────────
 
@@ -1034,6 +1060,217 @@ def render_change(console, change: FileChange, max_lines: int = 40) -> None:
 
 def _escape(line: str) -> str:
     return line.replace("[", "\\[")
+
+# ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/remote.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Host del control remoto (/remote): la sesión CLI se controla desde la app.
+
+Transporte stdlib puro, igual que el resto del CLI:
+- Bajada: SSE de larga duración con los comandos del móvil/web (hilo lector).
+- Subida: POST de lotes de eventos del transcript (hilo flusher, ~4 Hz).
+El gateway solo releva; este proceso sigue siendo quien ejecuta todo.
+"""
+import json
+import queue
+import threading
+import time
+import uuid
+
+
+REMOTE_FLUSH_SECONDS = 0.25
+REMOTE_RECONNECT_MAX_S = 30
+REMOTE_RESULT_CHARS = 600  # tamaño máximo del resumen de un tool_result
+
+
+def _args_summary(tool: str, args: dict) -> str:
+    """Resumen compacto y legible de los argumentos de una herramienta."""
+    if tool == "run_command":
+        return str(args.get("command", ""))[:200]
+    if tool == "rename_file":
+        return f"{args.get('src', '?')} → {args.get('dst', '?')}"
+    if tool == "search":
+        return f"«{args.get('pattern', '')}» en {args.get('path', '.')}"
+    if tool == "edit_file":
+        old = str(args.get("old_text", ""))
+        return f"{args.get('path', '?')} (reemplaza {len(old)} chars)"
+    if tool in ("write_file", "append_file"):
+        content = str(args.get("content", ""))
+        return f"{args.get('path', '?')} ({len(content)} chars)"
+    return str(args.get("path") or args.get("pattern") or args)[:200]
+
+
+class RemoteLink:
+    """Canal del host contra el gateway. Los hilos internos solo tocan la red;
+    la ejecución de prompts/herramientas sigue en el hilo principal del CLI."""
+
+    def __init__(self, api, source: str = "cli", title: str = "", machine: str = ""):
+        self.api = api  # ApiClient
+        self.source = source
+        self.title = title
+        self.machine = machine
+        self.session_id = ""
+        self.share_url = ""
+        self.commands: queue.Queue = queue.Queue()  # prompt/bye hacia el loop principal
+        self.interrupt_requested = False
+        self.ended = False
+        self.snapshot_provider = None  # callable -> list[dict] (lo pone ChatApp)
+        self._buffer: list[dict] = []
+        self._buf_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._approvals: dict[str, str] = {}
+        self._approval_cv = threading.Condition()
+        self._threads: list[threading.Thread] = []
+
+    # ── ciclo de vida ────────────────────────────────────────────────────
+
+    def start(self, mode: str = "", model: str = "") -> dict:
+        """Crea la sesión en el gateway y arranca lector y flusher."""
+        resp = self.api.remote_create(self.source, self.title, self.machine)
+        self.session_id = resp["session"]["id"]
+        self.share_url = resp.get("share_url", "")
+        self.emit("hello", source=self.source, title=self.title,
+                  machine=self.machine, mode=mode, model=model)
+        for target, name in ((self._reader_loop, "remote-reader"),
+                             (self._flusher_loop, "remote-flusher")):
+            t = threading.Thread(target=target, daemon=True, name=name)
+            t.start()
+            self._threads.append(t)
+        return resp
+
+    def stop(self, end_session: bool = True) -> None:
+        """Corta hilos, hace un último flush y (opcional) termina la sesión."""
+        self._stop.set()
+        with self._approval_cv:
+            self._approval_cv.notify_all()
+        if end_session and not self.ended:
+            try:
+                self.emit("bye", reason="host_closed")
+                self._flush_now()
+                self.api.remote_end(self.session_id)
+            except ApiError:
+                pass
+        self.ended = True
+
+    def qr_text(self) -> str:
+        """QR unicode (half-blocks) del share_url, generado por el gateway."""
+        try:
+            return self.api.remote_qr_txt(self.share_url)
+        except ApiError:
+            return ""
+
+    # ── eventos (host → controllers) ─────────────────────────────────────
+
+    def emit(self, event_type: str, **fields) -> None:
+        ev = {"type": event_type, **fields}
+        with self._buf_lock:
+            self._buffer.append(ev)
+
+    def emit_snapshot(self) -> None:
+        if self.snapshot_provider is None:
+            return
+        try:
+            messages = self.snapshot_provider()
+        except Exception:
+            return
+        self.emit("snapshot", messages=messages)
+
+    def _flush_now(self) -> None:
+        with self._buf_lock:
+            batch, self._buffer = self._buffer, []
+        if not batch:
+            return
+        try:
+            self.api.remote_events(self.session_id, batch)
+        except ApiError as exc:
+            if exc.status in (404, 410):
+                self.ended = True
+                self.commands.put({"type": "bye", "reason": "gone"})
+                return
+            # Fallo transitorio: devolver el lote al frente para reintentar
+            with self._buf_lock:
+                self._buffer = batch + self._buffer
+                # Tope defensivo: nunca acumular sin límite si el server no vuelve
+                if len(self._buffer) > 2000:
+                    self._buffer = self._buffer[-1000:]
+
+    def _flusher_loop(self) -> None:
+        while not self._stop.is_set():
+            time.sleep(REMOTE_FLUSH_SECONDS)
+            self._flush_now()
+
+    # ── comandos (controllers → host) ────────────────────────────────────
+
+    def _reader_loop(self) -> None:
+        backoff = 2
+        while not self._stop.is_set() and not self.ended:
+            try:
+                response = self.api.remote_commands_stream(self.session_id)
+                backoff = 2
+                self._consume_commands(response)
+            except ApiError as exc:
+                if exc.status in (404, 410):
+                    self.ended = True
+                    self.commands.put({"type": "bye", "reason": "gone"})
+                    return
+            except Exception:
+                pass
+            if not self._stop.is_set() and not self.ended:
+                time.sleep(backoff)
+                backoff = min(backoff * 2, REMOTE_RECONNECT_MAX_S)
+
+    def _consume_commands(self, response) -> None:
+        try:
+            for raw in response:
+                if self._stop.is_set():
+                    return
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    cmd = json.loads(line[len("data:"):].strip())
+                except json.JSONDecodeError:
+                    continue
+                self._dispatch(cmd)
+        finally:
+            try:
+                response.close()
+            except Exception:
+                pass
+
+    def _dispatch(self, cmd: dict) -> None:
+        kind = cmd.get("type")
+        if kind == "prompt":
+            self.commands.put(cmd)
+        elif kind == "interrupt":
+            self.interrupt_requested = True
+        elif kind == "approve":
+            with self._approval_cv:
+                self._approvals[str(cmd.get("id"))] = cmd.get("decision") or "deny"
+                self._approval_cv.notify_all()
+        elif kind == "request_snapshot":
+            self.emit_snapshot()
+        elif kind == "bye":
+            self.ended = True
+            with self._approval_cv:
+                self._approval_cv.notify_all()
+            self.commands.put(cmd)
+
+    # ── aprobaciones remotas ─────────────────────────────────────────────
+
+    def request_approval(self, tool: str, summary: str, risk: str) -> str:
+        """Emite approval_request y bloquea hasta la decisión del móvil/web.
+        Devuelve "allow" | "deny" (fin de sesión ⇒ deny)."""
+        approval_id = uuid.uuid4().hex[:10]
+        self.emit("approval_request", id=approval_id, tool=tool, summary=summary, risk=risk)
+        with self._approval_cv:
+            while approval_id not in self._approvals:
+                if self.ended or self._stop.is_set():
+                    return "deny"
+                self._approval_cv.wait(timeout=1.0)
+        decision = self._approvals.pop(approval_id)
+        self.emit("approval_resolved", id=approval_id, decision=decision)
+        return "allow" if decision == "allow" else "deny"
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/agent.py
@@ -1540,12 +1777,18 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
     dot = g("dot")
+    # Con /remote activo, la sesión se maneja desde el móvil/web: los eventos
+    # de herramientas viajan al controller y las aprobaciones se piden allí
+    # (localmente no hay nadie al teclado durante el takeover).
+    remote = session.get("remote")
 
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
         console.print(f"[lx.dim]{dot} {tool_name}({esc(label)})[/]")
-        return _run(console, workspace, tool_name, args)
+        if remote:
+            remote.emit("tool_use", tool=tool_name, summary=str(label), readonly=True)
+        return _run(console, workspace, tool_name, args, remote)
 
     try:
         change = compute_change(workspace, tool_name, args, resolve_safe_path)
@@ -1555,30 +1798,42 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         render_change(console, change)
     else:
         console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]{tool_name}[/] [lx.dim]{esc(args)}[/]")
+    if remote:
+        remote.emit("tool_use", tool=tool_name, summary=_args_summary(tool_name, args), readonly=False)
 
     # Los comandos de shell son irreversibles (sin snapshot que los deshaga):
     # tienen su propio flag y NO los cubre auto_approve. Así, responder
     # "siempre" tras una edición de archivo no habilita ejecutar comandos.
     if tool_name == "run_command":
         if not session.get("auto_run_commands"):
-            decision = confirm3("¿Ejecutar este comando?")
+            if remote:
+                if remote.request_approval(tool_name, _args_summary(tool_name, args), "command") != "allow":
+                    console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                    return "Ejecución cancelada por el usuario"
+            else:
+                decision = confirm3("¿Ejecutar este comando?")
+                if decision == "always":
+                    session["auto_run_commands"] = True
+                elif decision in ("no", None):
+                    console.print(f"[lx.dim]{dot} rechazado[/]")
+                    return "Ejecución cancelada por el usuario"
+    elif not session.get("auto_approve"):
+        if remote:
+            if remote.request_approval(tool_name, _args_summary(tool_name, args), "edit") != "allow":
+                console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                return "Ejecución cancelada por el usuario"
+        else:
+            decision = confirm3("¿Aplicar este cambio?")
             if decision == "always":
-                session["auto_run_commands"] = True
+                session["auto_approve"] = True
             elif decision in ("no", None):
                 console.print(f"[lx.dim]{dot} rechazado[/]")
                 return "Ejecución cancelada por el usuario"
-    elif not session.get("auto_approve"):
-        decision = confirm3("¿Aplicar este cambio?")
-        if decision == "always":
-            session["auto_approve"] = True
-        elif decision in ("no", None):
-            console.print(f"[lx.dim]{dot} rechazado[/]")
-            return "Ejecución cancelada por el usuario"
 
-    return _run(console, workspace, tool_name, args)
+    return _run(console, workspace, tool_name, args, remote)
 
 
-def _run(console, workspace: Path, tool_name: str, args: dict) -> str:
+def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
     try:
         result = execute_tool_call(workspace, tool_name, args)
     except Exception as exc:
@@ -1587,6 +1842,11 @@ def _run(console, workspace: Path, tool_name: str, args: dict) -> str:
         first_line = result.split("\n", 1)[0][:120]
         style = "lx.err" if result.startswith("[ERROR]") else "lx.dim"
         console.print(f"  [{style}]{g('arrow')} {esc(first_line)}[/]")
+    if remote:
+        failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
+                  or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
+        remote.emit("tool_result", tool=tool_name,
+                    result=result[:REMOTE_RESULT_CHARS], error=failed)
     return result
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -1614,6 +1874,7 @@ COMMAND_SPECS: list[tuple[str, str, str]] = [
     ("login", "", "Iniciar sesión de nuevo"),
     ("key", "<api_key>", "Usar otra API key"),
     ("approve", "[on|off]", "Auto-aprobar herramientas del agente"),
+    ("remote", "", "Controlar esta sesión desde la app móvil (link + QR)"),
     ("workspace", "<ruta>", "Carpeta de trabajo del modo agent"),
     ("context-window", "<n>", "Tokens de la ventana de contexto (para la barra)"),
     ("copy", "", "Copiar la última respuesta al portapapeles"),
@@ -1715,6 +1976,8 @@ def fmt_size(num_bytes: int) -> str:
 # ──────────────────────────────────────────────────────────────────────────
 """ChatApp: loop principal del CLI interactivo (transcript inline estilo Claude Code)."""
 import os
+import platform
+import queue
 import subprocess
 import time
 import uuid
@@ -1743,6 +2006,7 @@ class ChatApp:
             "auto_run_commands": bool(self.cfg.get("auto_run_commands", False)),
         }
         self.history: list[dict] = []
+        self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
         self.pending_images: list[Path] = []
@@ -2073,7 +2337,7 @@ class ChatApp:
 
     # ── envío de mensajes ────────────────────────────────────────────────
 
-    def send_message(self, text: str) -> None:
+    def send_message(self, text: str, origin: str = "local") -> None:
         clean, at_images, errors = parse_attachments(text, self.workspace)
         for err in errors:
             print_error(err)
@@ -2096,6 +2360,9 @@ class ChatApp:
         if encoded:
             user_msg["images"] = encoded
         self.history.append(user_msg)
+        if self.remote:
+            self.remote.emit("user_msg", text=clean or text, origin=origin)
+            self.remote.emit("status", state="thinking")
 
         try:
             if self.mode == "delegate":
@@ -2110,6 +2377,9 @@ class ChatApp:
         except ApiError:
             self.history.pop()
             raise
+        finally:
+            if self.remote:
+                self.remote.emit("status", state="idle")
         self._refresh_status()
 
     def _context_messages(self) -> list[dict]:
@@ -2173,6 +2443,12 @@ class ChatApp:
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
+                    if self.remote and self.remote.interrupt_requested:
+                        # Interrupción pedida desde el móvil/web (equivale a Ctrl+C)
+                        self.remote.interrupt_requested = False
+                        interrupted = True
+                        stream.close()
+                        break
                     if kind == "reasoning":
                         if not reasoning_parts:
                             reasoning_started = time.monotonic()
@@ -2182,6 +2458,8 @@ class ChatApp:
                         if reasoning_parts and not content_parts and reasoning_started:
                             reasoning_seconds = time.monotonic() - reasoning_started
                         content_parts.append(payload)
+                        if self.remote:
+                            self.remote.emit("assistant_delta", text=payload)
                     elif kind == "sources":
                         sources = payload
                     elif kind == "usage":
@@ -2200,6 +2478,11 @@ class ChatApp:
         if usage:
             self._register_usage(usage)
         text = "".join(content_parts).strip()
+        if self.remote:
+            # El controller reemplaza lo streameado por el texto final limpio
+            # (en modo agent, los JSON de herramientas desaparecen del transcript)
+            display = clean_prose(text) if self.mode == "agent" else text
+            self.remote.emit("assistant_done", text=display, interrupted=interrupted)
         if interrupted:
             text += "\n[respuesta interrumpida por el usuario]"
         return text
@@ -2473,6 +2756,112 @@ class ChatApp:
 
         cmd_update(None)
         return True
+
+    # ── control remoto (/remote) ─────────────────────────────────────────
+
+    def _remote_snapshot(self) -> list[dict]:
+        """Historial renderizable para un controller que se une: sin system,
+        sin TOOL_RESULT internos y con la prosa del asistente limpia."""
+        msgs: list[dict] = []
+        for m in self.history:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role == "system":
+                continue
+            if role == "user" and content.startswith("TOOL_RESULT"):
+                continue
+            if role == "assistant":
+                content = clean_prose(content) or content[:400]
+                if not content:
+                    continue
+            msgs.append({"role": role, "content": content})
+        return msgs[-80:]
+
+    def cmd_remote(self, arg: str):
+        arg = (arg or "").strip().lower()
+        if arg and arg not in ("start", "stop", "status"):
+            print_error("Uso: /remote — inicia el control remoto desde tu app móvil")
+            return True
+        if arg in ("stop", "status"):
+            print_note("El control remoto se activa con /remote y se termina con Ctrl+C dentro del modo remoto.")
+            return True
+        if not self.cfg.get("api_key"):
+            print_error("Necesitas una sesión activa (/login) para usar /remote.")
+            return True
+
+        title = self.workspace.name or "workspace"
+        machine = platform.node() or "PC"
+        link = RemoteLink(self.api, source="cli", title=title, machine=machine)
+        try:
+            with spinner("creando sesión remota…"):
+                link.start(mode=self.mode, model=self.model)
+                qr = link.qr_text()
+        except ApiError as exc:
+            print_error(f"No se pudo iniciar el control remoto: {exc}")
+            return True
+
+        link.snapshot_provider = self._remote_snapshot
+        self.remote = link
+        self.session["remote"] = link
+
+        self.console.print()
+        self.console.print(f"  [bold lx.primary]{g('spark')} Control remoto activo[/]")
+        self.console.print(f"  [lx.dim]Sesión:[/] [lx.primary]{esc(title)}[/] [lx.dim]en {esc(machine)}[/]")
+        self.console.print(f"  [lx.dim]Link:[/]   [lx.accent2]{esc(link.share_url)}[/]")
+        if qr:
+            self.console.print()
+            for line in qr.rstrip("\n").splitlines():
+                self.console.print(f"  {line}")
+        self.console.print()
+        print_note("La sesión ya aparece en la sección Remote de tu app Lixbon.")
+        print_note("Sin la app, escanea el QR: abre la sesión en la web (te pedirá iniciar sesión con tu cuenta).")
+
+        try:
+            self._remote_loop(link)
+        finally:
+            self.session.pop("remote", None)
+            self.remote = None
+        return True
+
+    def _remote_loop(self, link: RemoteLink) -> None:
+        """Takeover: el teclado local queda en pausa y los prompts llegan del
+        móvil/web. Ctrl+C termina la sesión remota y devuelve el control."""
+        print_note("Control local en pausa — Ctrl+C para terminar el modo remoto y volver aquí.")
+        self.console.print()
+        link.emit_snapshot()
+        link.emit("status", state="idle")
+        try:
+            while True:
+                try:
+                    cmd = link.commands.get(timeout=0.5)
+                except queue.Empty:
+                    if link.ended:
+                        break
+                    continue
+                kind = cmd.get("type")
+                if kind == "bye":
+                    break
+                if kind != "prompt":
+                    continue
+                text = (cmd.get("text") or "").strip()
+                if not text:
+                    continue
+                link.interrupt_requested = False
+                self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(text)}[/] [lx.dim]\\[remoto][/]")
+                if text == "/new":
+                    self.cmd_new("")
+                    link.emit("status", state="idle")
+                    continue
+                try:
+                    self.send_message(text, origin="remote")
+                except ApiError as exc:
+                    print_error(str(exc))
+                    link.emit("error", message=str(exc))
+        except KeyboardInterrupt:
+            pass
+        link.stop(end_session=True)
+        self.console.print()
+        print_note("Control remoto terminado; la sesión vuelve a esta terminal.")
 
     def cmd_exit(self, arg: str):
         print_note("Hasta pronto.")

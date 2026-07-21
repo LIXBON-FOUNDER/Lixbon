@@ -12,6 +12,7 @@ import { useEditorStore } from '../store/editorStore';
 import { useProblemsStore } from '../store/problemsStore';
 import { useGitStore } from '../store/gitStore';
 import { useLspStore } from '../store/lspStore';
+import { useRemoteStore } from '../store/remoteStore';
 import { serversFor, serverById } from '../lib/lspServers';
 import { languageLabel } from '../editor/languages';
 import { getAppVersion } from '../lib/tauri';
@@ -96,6 +97,7 @@ export function StatusBar() {
     refresh: gitRefresh, init: gitInit, sync: gitSync, loading: gitLoading,
   } = useGitStore();
   const lspServers = useLspStore((s) => s.servers);
+  const remoteActive = useRemoteStore((s) => s.active);
 
   const [currentVersion, setCurrentVersion] = useState('');
   useEffect(() => { getAppVersion().then(setCurrentVersion).catch(() => {}); }, []);
@@ -185,6 +187,17 @@ export function StatusBar() {
         >
           {busy[1].state === 'installing' ? 'Instalando' : 'Arrancando'}{' '}
           {serverById(busy[0])?.label || busy[0]}…
+        </button>
+      )}
+
+      {remoteActive && (
+        <button
+          className="statusbar__item"
+          onClick={() => openModal('remote')}
+          title="Control remoto activo: esta sesión se maneja desde tu app móvil / web"
+        >
+          <span className="remote-live" />
+          Remote
         </button>
       )}
 

@@ -77,6 +77,11 @@ export function registerBuiltinCommands() {
       run: () => app().openModal('metrics'),
     },
     {
+      id: 'remote.open', title: 'Control remoto (/remote)',
+      category: 'IA', keywords: 'remote remoto movil telefono qr controlar',
+      run: () => app().openModal('remote'),
+    },
+    {
       id: 'workbench.openSettings', title: 'Ajustes',
       category: 'Ver', keywords: 'ajustes settings preferencias config',
       run: () => app().openModal('settings'),

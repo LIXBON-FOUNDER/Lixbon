@@ -13,3 +13,4 @@ stripe
 pypdf
 ddgs
 PyJWT[crypto]
+segno

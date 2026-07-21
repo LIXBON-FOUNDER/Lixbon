@@ -18,6 +18,7 @@ import React, {
 
 import { ApiClient, ApiException } from './api';
 import { oauthAuthorize } from './oauth';
+import { registerPushToken } from './push';
 import { streamChatCompletion } from './sse';
 
 export const DEFAULT_API_BASE = 'https://lixbon.com';
@@ -216,6 +217,12 @@ export function AppState({ children }) {
   );
 
   const clearNotice = useCallback(() => setNotice(''), []);
+
+  // Con sesión activa, registra el push token del dispositivo (avisos de
+  // /remote con la app cerrada). Best-effort: sin FCM/permiso es un no-op.
+  useEffect(() => {
+    if (apiKey) registerPushToken(api);
+  }, [apiKey, api]);
 
   const auth = useMemo(
     () => ({

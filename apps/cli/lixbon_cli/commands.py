@@ -20,6 +20,7 @@ COMMAND_SPECS: list[tuple[str, str, str]] = [
     ("login", "", "Iniciar sesión de nuevo"),
     ("key", "<api_key>", "Usar otra API key"),
     ("approve", "[on|off]", "Auto-aprobar herramientas del agente"),
+    ("remote", "", "Controlar esta sesión desde la app móvil (link + QR)"),
     ("workspace", "<ruta>", "Carpeta de trabajo del modo agent"),
     ("context-window", "<n>", "Tokens de la ventana de contexto (para la barra)"),
     ("copy", "", "Copiar la última respuesta al portapapeles"),
