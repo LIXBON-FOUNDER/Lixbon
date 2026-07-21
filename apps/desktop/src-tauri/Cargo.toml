@@ -1,6 +1,6 @@
 [package]
 name = "lixbon"
-version = "0.9.1"
+version = "0.9.2"
 description = "Lixbon"
 authors = ["Lixbon by GBX"]
 edition = "2021"
