@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lixbon_cli.term import g
+from lixbon_cli.ui import KIND_VERB, render_action
 
 
 @dataclass
@@ -16,15 +17,7 @@ class FileChange:
 
     @property
     def verb(self) -> str:
-        return {
-            "create": "Create",
-            "update": "Update",
-            "delete": "Delete",
-            "rename": "Rename",
-            "mkdir": "Mkdir",
-            "append": "Append",
-            "command": "Run",
-        }.get(self.kind, self.kind.title())
+        return KIND_VERB.get(self.kind, self.kind)
 
 
 def compute_change(workspace: Path, tool_name: str, args: dict, resolve_path) -> FileChange | None:
@@ -96,26 +89,19 @@ def _unified(change: FileChange) -> list[str]:
 
 
 def render_change(console, change: FileChange, max_lines: int = 40) -> None:
-    """Imprime `● Update(ruta) +12 -3` y el diff coloreado truncado."""
-    dot = g("dot")
+    """Imprime la acción (`● editó  ruta  +12 -3`) y el diff coloreado."""
     if change.kind == "command":
-        console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]Run[/][lx.dim]([/][lx.beige]{_escape(change.detail)}[/][lx.dim])[/]")
+        render_action(console, change.verb, change.detail)
         return
     if change.kind == "rename":
-        console.print(
-            f"[lx.accent2]{dot}[/] [bold lx.primary]Rename[/][lx.dim]([/][lx.beige]{_escape(change.path)}[/]"
-            f"[lx.dim] {g('arrow')} [/][lx.beige]{_escape(change.detail)}[/][lx.dim])[/]"
-        )
+        render_action(console, change.verb, f"{change.path} {g('arrow')} {change.detail}")
         return
     if change.kind == "mkdir":
-        console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]Mkdir[/][lx.dim]([/][lx.beige]{_escape(change.path)}[/][lx.dim])[/]")
+        render_action(console, change.verb, change.path)
         return
 
     adds, dels = diff_counts(change)
-    summary = f"[lx.accent2]{dot}[/] [bold lx.primary]{change.verb}[/][lx.dim]([/][lx.beige]{_escape(change.path)}[/][lx.dim])[/]"
-    if adds or dels:
-        summary += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
-    console.print(summary)
+    render_action(console, change.verb, change.path, adds=adds, dels=dels)
 
     lines = _unified(change)
     if not lines:

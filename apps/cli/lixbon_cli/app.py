@@ -24,7 +24,7 @@ from lixbon_cli.config import (
     mask_key,
     save_config,
 )
-from lixbon_cli.term import g, is_interactive, setup_terminal
+from lixbon_cli.term import g, is_interactive, set_title, setup_terminal
 from lixbon_cli.theme import make_console, pt_style
 from lixbon_cli.ui import (
     Option,
@@ -35,8 +35,12 @@ from lixbon_cli.ui import (
     print_note,
     print_ok,
     render_header,
-    render_welcome_box,
+    render_intro_line,
+    render_speaker,
+    render_tips,
+    rule,
     select,
+    short_path,
     spinner,
 )
 
@@ -65,6 +69,9 @@ class ChatApp:
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
+        # Plan comercial (Pro/Advance/Gratuito): se muestra en la cabecera.
+        # Se cachea en el config para que el arranque no dependa de la red.
+        self.plan_name = self.cfg.get("plan_name", "")
         self.pending_images: list[Path] = []
         self.session_tokens = 0
         self.chars_per_token = 4.0
@@ -113,19 +120,19 @@ class ChatApp:
     # ── arranque ─────────────────────────────────────────────────────────
 
     def run(self, once: str = "") -> int:
-        render_header(self.console, CLI_VERSION)
+        self._set_tab_title()
 
         if not self.cfg.get("api_key"):
             if not is_interactive():
                 print_error("No hay sesión. Ejecuta el CLI en una terminal interactiva para iniciar sesión.")
                 return 1
-            render_welcome_box(self.console)
+            render_intro_line(self.console, CLI_VERSION, "iniciar sesión")
             if not self.onboarding_flow():
                 return 1
         elif not once:
-            render_welcome_box(self.console)
+            render_intro_line(self.console, CLI_VERSION, "conectando…")
 
-        self._load_models_quietly()
+        self._load_account_quietly()
         if not self.model:
             if not self.pick_model():
                 return 1
@@ -140,17 +147,41 @@ class ChatApp:
             print_error("Terminal no interactiva. Usa `lixbon chat --once \"mensaje\"` o una terminal real.")
             return 1
 
-        print_note(f"Escribe un mensaje, o / para ver los comandos. Modo: {self.mode} {g('sep')} {self.workspace}")
+        # Zona 1: identidad (quién soy, con qué modelo y sobre qué carpeta).
+        self._render_identity()
+        # Zona 2: cómo se usa.
+        render_tips(self.console)
         if self.mode == "ask":
-            print_note("En modo ask el modelo solo conversa; usa /mode agent para que cree y edite archivos.")
-        self.console.print()
+            print_note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos.")
+        # Zona 3: a partir de aquí, todo es conversación.
+        rule(self.console, "conversación")
         return self._prompt_loop()
 
-    def _load_models_quietly(self) -> None:
+    def _render_identity(self) -> None:
+        """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
+        render_header(self.console, CLI_VERSION, model=self.model,
+                      plan=self.plan_name, workspace=self.workspace)
+
+    def _set_tab_title(self) -> None:
+        """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon."""
+        set_title(f"{g('spark')} Lixbon {g('sep')} {self.workspace.name}")
+
+    def _load_account_quietly(self) -> None:
+        """Modelos disponibles y plan del usuario, sin ruido si el server falla."""
         try:
             self.models_cache = self.api.models()
         except ApiError:
             self.models_cache = []
+        if not self.cfg.get("api_key"):
+            return
+        try:
+            plan = (self.api.key_info().get("plan") or {}).get("name") or ""
+        except ApiError:
+            return  # servidor viejo o sin red: se conserva el plan cacheado
+        if plan and plan != self.plan_name:
+            self.plan_name = plan
+            self.cfg["plan_name"] = plan
+            save_config(self.cfg)
 
     def onboarding_flow(self) -> bool:
         print_note("No hay una sesión activa. Inicia sesión para continuar.")
@@ -256,7 +287,7 @@ class ChatApp:
             self.model = self.cfg["key_model"]
             return True
         if not self.models_cache:
-            self._load_models_quietly()
+            self._load_account_quietly()
         if not self.models_cache:
             print_error("No hay modelos disponibles en el servidor ahora mismo.")
             return False
@@ -418,10 +449,17 @@ class ChatApp:
         if encoded:
             user_msg["images"] = encoded
         self.history.append(user_msg)
+        if origin != "local":
+            # El mensaje llegó por /remote: aquí nadie lo tecleó, así que el
+            # transcript local tiene que mostrarlo para no perder el hilo.
+            render_speaker(self.console, "user")
+            self.console.print(f"[lx.primary]{esc(clean or text)}[/]")
         if self.remote:
             self.remote.emit("user_msg", text=clean or text, origin=origin)
             self.remote.emit("status", state="thinking")
 
+        self.console.print()
+        render_speaker(self.console, "assistant")
         try:
             if self.mode == "delegate":
                 self._delegate_turn(clean or text)
@@ -478,10 +516,18 @@ class ChatApp:
                 for line in tail:
                     blocks.append(Text(f"  {line}", style="lx.thinking"))
             if content_parts:
-                blocks.append(Markdown("".join(content_parts)))
+                raw = "".join(content_parts)
+                if self.mode == "agent":
+                    # En vivo se muestra la prosa, no el JSON de las llamadas:
+                    # las herramientas aparecen luego en el bloque de acciones.
+                    prose = clean_prose(raw)
+                    blocks.append(Markdown(prose) if prose
+                                  else Text(f"{g('spark_alt')} preparando acciones…", style="lx.dim"))
+                else:
+                    blocks.append(Markdown(raw))
             if not blocks:
                 blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
-            blocks.append(self.status.rich_line())
+            blocks.append(self.status.rich_line(compact=True))
             return pad(Group(*blocks))
 
         def _final_view():
@@ -490,15 +536,19 @@ class ChatApp:
                 blocks.append(Text(f"{g('spark_alt')} Pensó durante {reasoning_seconds:.1f}s", style="lx.dim2"))
             text = "".join(content_parts).strip()
             if self.mode == "agent":
-                text = clean_prose(text) or f"[herramientas solicitadas {g('ellipsis')}]"
-            blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
+                # Paso intermedio del agente (solo tool calls): no hay prosa que
+                # mostrar — lo que sigue es el bloque de acciones, que ya se lee.
+                text = clean_prose(text)
+                if text:
+                    blocks.append(Markdown(text))
+            else:
+                blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
             if interrupted:
                 blocks.append(Text(f"{g('sep')} interrumpido {g('sep')}", style="lx.dim"))
-            return Group(*blocks)
+            return Group(*blocks) if blocks else None
 
         from rich.live import Live
 
-        self.console.print()
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
@@ -528,11 +578,14 @@ class ChatApp:
                 interrupted = True
                 stream.close()
 
-        self.console.print(_final_view())
+        final = _final_view()
+        if final is not None:
+            self.console.print(final)
+            self.console.print()
         if sources:
             self.console.print(f"[lx.dim]Fuentes web: " + "; ".join(
                 str(s.get("url") or s.get("title") or "?") for s in sources[:5]) + "[/]")
-        self.console.print()
+            self.console.print()
 
         if usage:
             self._register_usage(usage)
@@ -551,7 +604,6 @@ class ChatApp:
             result = self.api.delegate(text)
         routing = result.get("routing", {})
         classification = result.get("classification", {})
-        self.console.print()
         self.console.print(
             f"[lx.accent2]{g('spark')}[/] [bold lx.primary]Delegación[/] "
             f"[lx.beige]\\[{esc(routing.get('type', 'PLAN'))}][/] "
@@ -624,7 +676,9 @@ class ChatApp:
         self.history = []
         self.session_tokens = 0
         self.conversation_id = str(uuid.uuid4())
-        print_ok("Conversación nueva")
+        # El separador marca dónde empieza el contexto nuevo: sin él, el
+        # transcript anterior parece seguir vivo.
+        rule(self.console, "conversación nueva")
         return True
 
     def cmd_compact(self, arg: str):
@@ -709,6 +763,7 @@ class ChatApp:
         self.console.print()
         rows = [
             ("Modelo", self.model or "no configurado"),
+            ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido"),
             ("Modo", self.mode),
             ("Sesión", self._session_label()),
             ("API key", mask_key(self.cfg.get("api_key", ""))),
@@ -725,7 +780,7 @@ class ChatApp:
 
     def cmd_login(self, arg: str):
         if self.onboarding_flow():
-            self._load_models_quietly()
+            self._load_account_quietly()
             self._refresh_status()
         return True
 
@@ -773,7 +828,8 @@ class ChatApp:
             print_error("Ruta inválida o no es una carpeta.")
             return True
         self.workspace = new_ws  # solo para esta sesión; al relanzar vuelve a cwd
-        print_ok(f"Workspace: {new_ws}")
+        self._set_tab_title()
+        print_ok(f"Workspace: {short_path(new_ws)}")
         return True
 
     def cmd_context_window(self, arg: str):
@@ -808,7 +864,8 @@ class ChatApp:
 
     def cmd_clear(self, arg: str):
         self.console.clear()
-        render_header(self.console, CLI_VERSION)
+        self._render_identity()
+        rule(self.console, "conversación")
         return True
 
     def cmd_update(self, arg: str):

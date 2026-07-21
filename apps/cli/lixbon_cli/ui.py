@@ -13,30 +13,163 @@ def esc(text: object) -> str:
     return escape(str(text))
 
 
-# ── Header y bienvenida ─────────────────────────────────────────────────────
+# ── Cabecera de identidad ───────────────────────────────────────────────────
 
-def render_header(console, version: str) -> None:
-    spark = g("spark")
-    wordmark = " ".join("LIXBON")
+# Ancho del bloque del ícono (2 facetas + destello): el texto de las tres
+# líneas se alinea contra este margen.
+LOGO_WIDTH = 3
+
+
+def short_path(path, max_len: int = 60) -> str:
+    """Ruta legible: ~ para el home y elisión por el medio si es muy larga."""
+    from pathlib import Path
+
+    text = str(path)
+    try:
+        home = str(Path.home())
+        if text.startswith(home):
+            text = "~" + text[len(home):]
+    except Exception:
+        pass
+    if len(text) <= max_len:
+        return text
+    keep = (max_len - 3) // 2
+    return f"{text[:keep]}{g('ellipsis')}{text[-keep:]}"
+
+
+def render_header(console, version: str, model: str = "", plan: str = "",
+                  workspace: object = None) -> None:
+    """Bloque de identidad, arriba a la izquierda y sin cajas.
+
+        ◢◣   Lixbon CLI v2.1.0
+        ◥◤✦  qwen2.5-coder:7b · Lixbon Pro
+             ~/proyectos/api
+
+    Se imprime una vez al arrancar (y tras /clear): sube con el transcript en
+    lugar de robar espacio permanente. Los datos vivos (contexto, tokens,
+    modo) viven en la barra inferior, que sí es fija.
+    """
+    from rich.text import Text
+
+    top = g("logo_top")
+    bottom = g("logo_bottom")
+    indent = " " * (LOGO_WIDTH + 2)
+
+    # Text.assemble en vez de markup: el logo ASCII de respaldo contiene `\`,
+    # que rich interpretaría como escape del cierre de etiqueta.
     console.print()
-    console.print(f"[lx.accent]{spark} {wordmark}[/]  [lx.dim]code {g('sep')} v{version}[/]")
+    console.print(Text.assemble(
+        (top, "lx.facet.top"), " " * (LOGO_WIDTH - len(top) + 2),
+        ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
+    ))
+    line2 = [
+        (bottom, "lx.facet.bottom"), (g("spark"), "lx.primary"), "  ",
+        (model or "sin modelo", "lx.beige"),
+    ]
+    if plan:
+        line2 += [(f" {g('sep')} ", "lx.dim2"), (f"Lixbon {plan}", "lx.dim")]
+    console.print(Text.assemble(*line2))
+    if workspace is not None:
+        console.print(Text(f"{indent}{short_path(workspace)}", style="lx.dim"))
     console.print()
 
 
-def render_welcome_box(console) -> None:
-    from rich import box
-    from rich.panel import Panel
+def render_intro_line(console, version: str, note: str = "") -> None:
+    """Preámbulo de una línea para las fases previas al chat (login, elegir
+    modelo). El bloque de identidad completo se imprime después, cuando ya hay
+    modelo y plan que mostrar: así no se repite dos veces en el arranque."""
+    from rich.text import Text
 
-    spark = g("spark")
-    body = (
-        f"[lx.accent]{spark}[/] [bold lx.primary]Lixbon CLI[/] [lx.dim]{g('sep')} asistente de código en tu terminal[/]\n\n"
-        f"[lx.dim]Consejos para empezar:[/]\n\n"
-        f" [lx.beige]1.[/] [lx.primary]Pide un cambio en lenguaje natural[/]\n"
-        f" [lx.beige]2.[/] [lx.primary]Escribe [lx.accent2]/[/] para ver los comandos[/]\n"
-        f" [lx.beige]3.[/] [lx.primary]Aprueba las ediciones antes de aplicarlas[/]"
+    parts = [
+        (g("logo_top"), "lx.facet.top"), (g("logo_bottom"), "lx.facet.bottom"), " ",
+        ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
+    ]
+    if note:
+        parts += [(f" {g('sep')} ", "lx.dim2"), (note, "lx.dim")]
+    console.print()
+    console.print(Text.assemble(*parts))
+    console.print()
+
+
+def render_tips(console) -> None:
+    """Consejos de arranque: texto suelto, sin panel (el panel era una caja
+    más que competía visualmente con el chat)."""
+    console.print(
+        f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
+        f"Ctrl+C dos veces para salir[/]"
     )
-    console.print(Panel(body, box=box.ROUNDED, border_style="lx.dim2", padding=(1, 2), expand=False))
+
+
+def rule(console, label: str = "") -> None:
+    """Separador horizontal con etiqueta opcional: divide zonas del CLI
+    (arranque │ conversación) sin encerrar nada en un recuadro."""
+    from lixbon_cli.theme import PAD_LEFT, PAD_RIGHT
+
+    dash = g("rule")
+    width = max(20, console.width - PAD_LEFT - PAD_RIGHT)
     console.print()
+    if label:
+        rest = max(0, width - 5 - len(label))
+        console.print(f"[lx.rule]{dash * 3}[/] [lx.dim]{esc(label)}[/] [lx.rule]{dash * rest}[/]")
+    else:
+        console.print(f"[lx.rule]{dash * width}[/]")
+    console.print()
+
+
+def render_speaker(console, who: str) -> None:
+    """Etiqueta de turno: marca de quién es el bloque que viene debajo."""
+    if who == "user":
+        console.print(f"[lx.accent2]{g('prompt')}[/] [lx.dim]tú[/]")
+    else:
+        console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
+
+
+# ── Acciones del agente ─────────────────────────────────────────────────────
+
+# Mismos verbos que el panel de acciones del IDE (apps/desktop ToolGroup.jsx):
+# el agente "hace cosas" y se lee igual en las dos superficies.
+TOOL_VERB = {
+    "read_file": "leyó", "write_file": "escribió", "edit_file": "editó",
+    "append_file": "añadió a", "delete_file": "eliminó", "rename_file": "movió",
+    "mkdir": "creó carpeta", "search": "buscó", "list_files": "listó",
+    "run_command": "ejecutó",
+}
+KIND_VERB = {
+    "create": "creó", "update": "editó", "delete": "eliminó", "rename": "movió",
+    "mkdir": "creó carpeta", "append": "añadió a", "command": "ejecutó",
+}
+VERB_WIDTH = 12  # columna fija: los objetivos quedan alineados entre acciones
+
+
+def render_actions_header(console) -> None:
+    """Abre la zona de acciones de un turno para que no se confunda con la
+    respuesta en prosa que viene después."""
+    console.print(f"[lx.dim2]{g('gear')} acciones[/]")
+
+
+def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
+                  readonly: bool = False) -> None:
+    """Una acción del agente: `● editó   src/app.py  +12 -3`.
+
+    Las de solo lectura van apagadas (rastro, no evento) y las que tocan el
+    disco en acento: al hojear el transcript se ve qué cambió de verdad.
+    """
+    dot = g("dot")
+    padded = f"{verb:<{VERB_WIDTH}}"
+    if readonly:
+        line = f"[lx.dim2]{dot}[/] [lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
+    else:
+        line = f"[lx.accent2]{dot}[/] [bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
+    if adds or dels:
+        line += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
+    console.print(line)
+
+
+def render_action_result(console, text: str, error: bool = False) -> None:
+    """Resultado de una acción, colgando de ella."""
+    style = "lx.err" if error else "lx.dim2"
+    console.print(f"  [lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
 
 
 # ── Selector interactivo (flechas + mouse) ──────────────────────────────────
@@ -246,16 +379,29 @@ class StatusBar:
             parts += [sep, ("class:bottom-toolbar", self.extra)]
         return parts
 
+    def _compact_parts(self) -> list[tuple[str, str]]:
+        """Versión corta para el pie del stream: cabe en una línea y no repite
+        lo que ya está en la cabecera (sesión, encoding)."""
+        sep = ("class:bottom-toolbar.sep", f"  {g('sep')}  ")
+        return [
+            ("class:bottom-toolbar.dot", f"{g('dot')} "),
+            ("class:bottom-toolbar.model", self.model or "sin modelo"),
+            sep,
+            ("class:bottom-toolbar", f"contexto {context_bar(self.ctx_pct, 8)} {self.ctx_pct:.0f}%"),
+            sep,
+            ("class:bottom-toolbar", f"{fmt_tokens(self.tokens)} tokens"),
+        ]
+
     def pt_toolbar(self):
         """Fragmentos para bottom_toolbar de prompt_toolkit."""
         return self._parts()
 
-    def rich_line(self):
+    def rich_line(self, compact: bool = False):
         """La misma barra como línea rich (pie del Live durante el stream)."""
         from rich.text import Text
 
         text = Text()
-        for style_cls, chunk in self._parts():
+        for style_cls, chunk in (self._compact_parts() if compact else self._parts()):
             if style_cls == "class:bottom-toolbar.dot":
                 text.append(chunk, style="lx.accent2")
             elif style_cls == "class:bottom-toolbar.model":
@@ -291,8 +437,17 @@ def print_note(message: str) -> None:
 
 def ui_demo() -> int:
     console = make_console()
-    render_header(console, "2.0.0-demo")
-    render_welcome_box(console)
+    from pathlib import Path
+
+    render_header(console, "2.0.0-demo", model="qwen2.5-coder:7b", plan="Pro",
+                  workspace=Path.cwd())
+    render_tips(console)
+    rule(console, "conversación")
+    render_speaker(console, "assistant")
+    render_actions_header(console)
+    render_action(console, "leyó", "src/app.py", readonly=True)
+    render_action(console, "editó", "src/app.py", adds=12, dels=3)
+    render_action_result(console, "1 reemplazo aplicado")
 
     choice = select("Método de acceso", [
         Option("Credenciales", "creds", "correo y contraseña"),

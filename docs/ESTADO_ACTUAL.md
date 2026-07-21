@@ -79,6 +79,17 @@ Feedback del usuario: "llama3.2 no crea archivos y no tiene en cuenta el workspa
 
 **Bug "aplica los cambios muy rara vez" (causa raíz definitiva, hallada en un chat compartido real) — el extractor era ciego al JSON indentado.** qwen2.5-coder emite JSON *pretty-printed* (`{\n  "tool": "write_file",\n  "args": {…`), pero `_iter_tool_call_spans`/`iterToolCallSpans` solo buscaban `{"tool"` (pegado) o `{ "tool"` (un espacio) con `str.find`/`indexOf` → la 1ª respuesta de cada turno NO se detectaba, saltaba el nudge, y solo tras el nudge (que exige "sin ```") el modelo emitía JSON compacto que sí matcheaba. Fix (IDE + CLI): buscar el inicio con regex `\{\s*"tool"` (`{` + cualquier espacio + `"tool"`), conservando el conteo de llaves con estado de string para los `{`/`}` dentro de content (p.ej. template literals `${x}`). Ahora el JSON indentado dentro de ```json fences se detecta y aplica al primer intento. Verificado con el caso exacto del chat (16 grupos JS + test Python) + build de archivo único + Vite. Nota menor pendiente: los mensajes de nudge y TOOL_RESULT se persisten en la conversación del backend (se ven en la vista compartida); no rompe nada pero ensucia el historial visible.
 
+### 0.b.2 Identidad y jerarquía visual del CLI (2026-07-21)
+
+Feedback del usuario: la pestaña seguía llamándose `cmd`, el arranque y el chat se mezclaban sin división, y las acciones del agente no destacaban como en el IDE.
+
+- **Pestaña de la terminal**: `term.set_title()` (OSC 2, solo si `is_interactive()`) → la pestaña pasa a `✦ Lixbon · <carpeta>`; se actualiza con `/workspace`. El **ícono** de la pestaña no es cambiable desde el proceso (lo define el perfil de la terminal).
+- **Cabecera de identidad** (`ui.render_header`), impresa una vez al arrancar y tras `/clear`, arriba a la izquierda y sin recuadros — **sube con el transcript**, no ocupa espacio fijo: `◢◣ Lixbon CLI vX.Y.Z` (oliva `#8C9A3C` + versión en `dim2`), debajo `modelo · Lixbon <plan>`, debajo el workspace (`short_path`, `~` y elisión). El ícono son los cuadrantes del logo (`logo_top`/`logo_bottom` + destello) con fallback ASCII. **Se construye con `Text.assemble`, no con markup: el `/\` del fallback ASCII escapa el cierre de etiqueta de rich.**
+- **División de zonas**: el orden de arranque es intro de una línea (login/conectando) → cabecera → consejos (`render_tips`, ya sin `Panel`) → `rule("conversación")`. `/new` imprime `rule("conversación nueva")`. Cada turno abre con `render_speaker` (`✦ Lixbon`).
+- **Acciones del agente como en el IDE**: mismos verbos que `ToolGroup.jsx` (`TOOL_VERB`/`KIND_VERB` en ui.py), cabecera `⚙ acciones` una vez por turno, filas `● editó   ruta  +N -M` (solo lectura en gris, escrituras en acento) y resultado colgando (`└ …`, rojo si falla). `diffs.render_change` usa las mismas filas.
+- **Stream más limpio**: en modo agent la vista en vivo pasa por `clean_prose` (ya no se ve el JSON crudo mientras se escribe) y el pie usa `StatusBar.rich_line(compact=True)` (modelo · contexto · tokens) para no desbordar a dos líneas. Los pasos intermedios sin prosa ya no imprimen `[herramientas solicitadas …]`.
+- **Plan en la cabecera**: `GET /api/key/info` devuelve ahora `plan: {id, name}` (cambio aditivo en `core/gateway/routers/keys.py`); el CLI lo pide al arrancar y lo cachea en `~/.lixbon/config.json` (`plan_name`), degradando en silencio con servidores viejos. **Requiere deploy del gateway** para que deje de mostrarse sin plan.
+
 ---
 
 ## 0. Cómo ACTIVAR Stripe (F7 — pagos) 🔴

@@ -12,7 +12,13 @@ from lixbon_cli.diffs import compute_change, render_change
 from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
 from lixbon_cli.term import g
 from lixbon_cli.theme import make_console
-from lixbon_cli.ui import confirm3, esc
+from lixbon_cli.ui import (
+    TOOL_VERB,
+    confirm3,
+    render_action,
+    render_action_result,
+    render_actions_header,
+)
 
 MAX_AGENT_STEPS = 12
 
@@ -472,6 +478,7 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     working = history[:]
 
     nudged = False
+    actions_open = False  # la cabecera "acciones" se abre una vez por turno
     for _ in range(MAX_AGENT_STEPS):
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
         assistant = truncate_fabricated(stream_assistant([system_msg] + working))
@@ -491,6 +498,10 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 continue
             return assistant, working
 
+        if not actions_open:
+            render_actions_header(console)
+            actions_open = True
+
         combined_results = []
         for call in tool_calls:
             tool_name = call.get("tool", "")
@@ -504,7 +515,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
 
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
-    dot = g("dot")
     # Con /remote activo, la sesión se maneja desde el móvil/web: los eventos
     # de herramientas viajan al controller y las aprobaciones se piden allí
     # (localmente no hay nadie al teclado durante el takeover).
@@ -513,7 +523,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
-        console.print(f"[lx.dim]{dot} {tool_name}({esc(label)})[/]")
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label), readonly=True)
         if remote:
             remote.emit("tool_use", tool=tool_name, summary=str(label), readonly=True)
         return _run(console, workspace, tool_name, args, remote)
@@ -525,7 +535,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     if change is not None:
         render_change(console, change)
     else:
-        console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]{tool_name}[/] [lx.dim]{esc(args)}[/]")
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), _args_summary(tool_name, args))
     if remote:
         remote.emit("tool_use", tool=tool_name, summary=_args_summary(tool_name, args), readonly=False)
 
@@ -536,26 +546,26 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         if not session.get("auto_run_commands"):
             if remote:
                 if remote.request_approval(tool_name, _args_summary(tool_name, args), "command") != "allow":
-                    console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                    render_action_result(console, "rechazado desde el control remoto", error=True)
                     return "Ejecución cancelada por el usuario"
             else:
                 decision = confirm3("¿Ejecutar este comando?")
                 if decision == "always":
                     session["auto_run_commands"] = True
                 elif decision in ("no", None):
-                    console.print(f"[lx.dim]{dot} rechazado[/]")
+                    render_action_result(console, "rechazado por el usuario", error=True)
                     return "Ejecución cancelada por el usuario"
     elif not session.get("auto_approve"):
         if remote:
             if remote.request_approval(tool_name, _args_summary(tool_name, args), "edit") != "allow":
-                console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                render_action_result(console, "rechazado desde el control remoto", error=True)
                 return "Ejecución cancelada por el usuario"
         else:
             decision = confirm3("¿Aplicar este cambio?")
             if decision == "always":
                 session["auto_approve"] = True
             elif decision in ("no", None):
-                console.print(f"[lx.dim]{dot} rechazado[/]")
+                render_action_result(console, "rechazado por el usuario", error=True)
                 return "Ejecución cancelada por el usuario"
 
     return _run(console, workspace, tool_name, args, remote)
@@ -566,13 +576,11 @@ def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> s
         result = execute_tool_call(workspace, tool_name, args)
     except Exception as exc:
         result = f"[ERROR] {exc}"
-    if tool_name not in READ_ONLY_TOOLS:
-        first_line = result.split("\n", 1)[0][:120]
-        style = "lx.err" if result.startswith("[ERROR]") else "lx.dim"
-        console.print(f"  [{style}]{g('arrow')} {esc(first_line)}[/]")
+    failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
+              or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
+    if tool_name not in READ_ONLY_TOOLS or failed:
+        render_action_result(console, result.split("\n", 1)[0][:120], error=failed)
     if remote:
-        failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
-                  or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
         remote.emit("tool_result", tool=tool_name,
                     result=result[:REMOTE_RESULT_CHARS], error=failed)
     return result

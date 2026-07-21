@@ -14,8 +14,11 @@ PALETTE = {
     "accent": "#B4C13A",  # acento verde-amarillo: logo, prompt, selección
     "beige": "#CBC7A9",   # marca (cuadrante superior del ícono)
     "olive": "#4A5A2A",   # marca (cuadrante inferior del ícono)
+    "olive_lt": "#8C9A3C",  # oliva legible sobre fondo oscuro (nombre del CLI)
+    "facet_top": "#DCD6BC",  # facetas claras del ícono (rombo, mitad superior)
+    "facet_bottom": "#6E7A33",  # facetas oscuras del ícono (mitad inferior)
     "dim": "#8A8A80",     # secundario: metadatos, hints, barra de estado
-    "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados
+    "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
     "ok": "#5FB85F",      # éxito, líneas + de diff
     "err": "#E05C5C",     # error, líneas - de diff
     "warn": "#D6B44C",    # avisos, confirmaciones delicadas
@@ -28,6 +31,10 @@ RICH_STYLES = {
     "lx.accent": f"bold {PALETTE['accent']}",
     "lx.accent2": PALETTE["accent"],
     "lx.beige": PALETTE["beige"],
+    "lx.brand": f"bold {PALETTE['olive_lt']}",       # "Lixbon CLI" en la cabecera
+    "lx.facet.top": PALETTE["facet_top"],            # ícono: facetas superiores
+    "lx.facet.bottom": PALETTE["facet_bottom"],      # ícono: facetas inferiores
+    "lx.rule": PALETTE["dim2"],
     "lx.dim": PALETTE["dim"],
     "lx.dim2": PALETTE["dim2"],
     "lx.thinking": f"italic {PALETTE['dim2']}",

@@ -41,7 +41,7 @@ def _unicode_ok() -> bool:
     if not IS_WINDOWS:
         return True
     try:
-        "✦●▓░❯╭".encode(_ORIG_ENCODING)
+        "✦●▓░❯╭◢◣─".encode(_ORIG_ENCODING)
         return True
     except (UnicodeEncodeError, LookupError):
         # Windows Terminal renderiza unicode aunque el codepage legacy no:
@@ -65,6 +65,12 @@ _GLYPHS_UNICODE = {
     "cross": "✗",
     "sep": "·",
     "image": "🖼",
+    # Ícono de marca: rombo de 4 facetas (beige arriba, oliva abajo) + destello
+    "logo_top": "◢◣",
+    "logo_bottom": "◥◤",
+    "rule": "─",
+    "gear": "⚙",
+    "corner": "└",
 }
 _GLYPHS_ASCII = {
     "spark": "*",
@@ -80,6 +86,11 @@ _GLYPHS_ASCII = {
     "cross": "X",
     "sep": "-",
     "image": "[img]",
+    "logo_top": "/\\",
+    "logo_bottom": "\\/",
+    "rule": "-",
+    "gear": "*",
+    "corner": "`",
 }
 
 
@@ -87,6 +98,22 @@ def g(name: str) -> str:
     """Glifo unicode con fallback ASCII para consolas legacy."""
     table = _GLYPHS_UNICODE if UNICODE_OK else _GLYPHS_ASCII
     return table.get(name, "?")
+
+
+def set_title(text: str) -> None:
+    """Renombra la pestaña/ventana de la terminal (OSC 2).
+
+    Windows Terminal, conhost con VT y mintty lo respetan; en el resto el
+    escape se ignora silenciosamente. El ÍCONO de la pestaña no es cambiable
+    desde el proceso: lo define el perfil de la terminal.
+    """
+    if not is_interactive():
+        return  # en un pipe/redirección el escape ensuciaría la salida
+    try:
+        sys.stdout.write(f"\033]0;{text}\007")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def is_mintty() -> bool:

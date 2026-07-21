@@ -201,10 +201,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 1
     from lixbon_cli.app import ChatApp
     from lixbon_cli.theme import make_console
-    from lixbon_cli.ui import render_header
+    from lixbon_cli.ui import render_intro_line
 
     app = ChatApp()
-    render_header(make_console(), CLI_VERSION)
+    render_intro_line(make_console(), CLI_VERSION, "iniciar sesión")
     ok = app.onboarding_flow()
     if ok and not app.model:
         app.pick_model()

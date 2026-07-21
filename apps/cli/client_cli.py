@@ -50,7 +50,7 @@ def _unicode_ok() -> bool:
     if not IS_WINDOWS:
         return True
     try:
-        "✦●▓░❯╭".encode(_ORIG_ENCODING)
+        "✦●▓░❯╭◢◣─".encode(_ORIG_ENCODING)
         return True
     except (UnicodeEncodeError, LookupError):
         # Windows Terminal renderiza unicode aunque el codepage legacy no:
@@ -74,6 +74,12 @@ _GLYPHS_UNICODE = {
     "cross": "✗",
     "sep": "·",
     "image": "🖼",
+    # Ícono de marca: rombo de 4 facetas (beige arriba, oliva abajo) + destello
+    "logo_top": "◢◣",
+    "logo_bottom": "◥◤",
+    "rule": "─",
+    "gear": "⚙",
+    "corner": "└",
 }
 _GLYPHS_ASCII = {
     "spark": "*",
@@ -89,6 +95,11 @@ _GLYPHS_ASCII = {
     "cross": "X",
     "sep": "-",
     "image": "[img]",
+    "logo_top": "/\\",
+    "logo_bottom": "\\/",
+    "rule": "-",
+    "gear": "*",
+    "corner": "`",
 }
 
 
@@ -96,6 +107,22 @@ def g(name: str) -> str:
     """Glifo unicode con fallback ASCII para consolas legacy."""
     table = _GLYPHS_UNICODE if UNICODE_OK else _GLYPHS_ASCII
     return table.get(name, "?")
+
+
+def set_title(text: str) -> None:
+    """Renombra la pestaña/ventana de la terminal (OSC 2).
+
+    Windows Terminal, conhost con VT y mintty lo respetan; en el resto el
+    escape se ignora silenciosamente. El ÍCONO de la pestaña no es cambiable
+    desde el proceso: lo define el perfil de la terminal.
+    """
+    if not is_interactive():
+        return  # en un pipe/redirección el escape ensuciaría la salida
+    try:
+        sys.stdout.write(f"\033]0;{text}\007")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def is_mintty() -> bool:
@@ -153,8 +180,11 @@ PALETTE = {
     "accent": "#B4C13A",  # acento verde-amarillo: logo, prompt, selección
     "beige": "#CBC7A9",   # marca (cuadrante superior del ícono)
     "olive": "#4A5A2A",   # marca (cuadrante inferior del ícono)
+    "olive_lt": "#8C9A3C",  # oliva legible sobre fondo oscuro (nombre del CLI)
+    "facet_top": "#DCD6BC",  # facetas claras del ícono (rombo, mitad superior)
+    "facet_bottom": "#6E7A33",  # facetas oscuras del ícono (mitad inferior)
     "dim": "#8A8A80",     # secundario: metadatos, hints, barra de estado
-    "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados
+    "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
     "ok": "#5FB85F",      # éxito, líneas + de diff
     "err": "#E05C5C",     # error, líneas - de diff
     "warn": "#D6B44C",    # avisos, confirmaciones delicadas
@@ -167,6 +197,10 @@ RICH_STYLES = {
     "lx.accent": f"bold {PALETTE['accent']}",
     "lx.accent2": PALETTE["accent"],
     "lx.beige": PALETTE["beige"],
+    "lx.brand": f"bold {PALETTE['olive_lt']}",       # "Lixbon CLI" en la cabecera
+    "lx.facet.top": PALETTE["facet_top"],            # ícono: facetas superiores
+    "lx.facet.bottom": PALETTE["facet_bottom"],      # ícono: facetas inferiores
+    "lx.rule": PALETTE["dim2"],
     "lx.dim": PALETTE["dim"],
     "lx.dim2": PALETTE["dim2"],
     "lx.thinking": f"italic {PALETTE['dim2']}",
@@ -619,30 +653,162 @@ def esc(text: object) -> str:
     return escape(str(text))
 
 
-# ── Header y bienvenida ─────────────────────────────────────────────────────
+# ── Cabecera de identidad ───────────────────────────────────────────────────
 
-def render_header(console, version: str) -> None:
-    spark = g("spark")
-    wordmark = " ".join("LIXBON")
+# Ancho del bloque del ícono (2 facetas + destello): el texto de las tres
+# líneas se alinea contra este margen.
+LOGO_WIDTH = 3
+
+
+def short_path(path, max_len: int = 60) -> str:
+    """Ruta legible: ~ para el home y elisión por el medio si es muy larga."""
+    from pathlib import Path
+
+    text = str(path)
+    try:
+        home = str(Path.home())
+        if text.startswith(home):
+            text = "~" + text[len(home):]
+    except Exception:
+        pass
+    if len(text) <= max_len:
+        return text
+    keep = (max_len - 3) // 2
+    return f"{text[:keep]}{g('ellipsis')}{text[-keep:]}"
+
+
+def render_header(console, version: str, model: str = "", plan: str = "",
+                  workspace: object = None) -> None:
+    """Bloque de identidad, arriba a la izquierda y sin cajas.
+
+        ◢◣   Lixbon CLI v2.1.0
+        ◥◤✦  qwen2.5-coder:7b · Lixbon Pro
+             ~/proyectos/api
+
+    Se imprime una vez al arrancar (y tras /clear): sube con el transcript en
+    lugar de robar espacio permanente. Los datos vivos (contexto, tokens,
+    modo) viven en la barra inferior, que sí es fija.
+    """
+    from rich.text import Text
+
+    top = g("logo_top")
+    bottom = g("logo_bottom")
+    indent = " " * (LOGO_WIDTH + 2)
+
+    # Text.assemble en vez de markup: el logo ASCII de respaldo contiene `\`,
+    # que rich interpretaría como escape del cierre de etiqueta.
     console.print()
-    console.print(f"[lx.accent]{spark} {wordmark}[/]  [lx.dim]code {g('sep')} v{version}[/]")
+    console.print(Text.assemble(
+        (top, "lx.facet.top"), " " * (LOGO_WIDTH - len(top) + 2),
+        ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
+    ))
+    line2 = [
+        (bottom, "lx.facet.bottom"), (g("spark"), "lx.primary"), "  ",
+        (model or "sin modelo", "lx.beige"),
+    ]
+    if plan:
+        line2 += [(f" {g('sep')} ", "lx.dim2"), (f"Lixbon {plan}", "lx.dim")]
+    console.print(Text.assemble(*line2))
+    if workspace is not None:
+        console.print(Text(f"{indent}{short_path(workspace)}", style="lx.dim"))
     console.print()
 
 
-def render_welcome_box(console) -> None:
-    from rich import box
-    from rich.panel import Panel
+def render_intro_line(console, version: str, note: str = "") -> None:
+    """Preámbulo de una línea para las fases previas al chat (login, elegir
+    modelo). El bloque de identidad completo se imprime después, cuando ya hay
+    modelo y plan que mostrar: así no se repite dos veces en el arranque."""
+    from rich.text import Text
 
-    spark = g("spark")
-    body = (
-        f"[lx.accent]{spark}[/] [bold lx.primary]Lixbon CLI[/] [lx.dim]{g('sep')} asistente de código en tu terminal[/]\n\n"
-        f"[lx.dim]Consejos para empezar:[/]\n\n"
-        f" [lx.beige]1.[/] [lx.primary]Pide un cambio en lenguaje natural[/]\n"
-        f" [lx.beige]2.[/] [lx.primary]Escribe [lx.accent2]/[/] para ver los comandos[/]\n"
-        f" [lx.beige]3.[/] [lx.primary]Aprueba las ediciones antes de aplicarlas[/]"
+    parts = [
+        (g("logo_top"), "lx.facet.top"), (g("logo_bottom"), "lx.facet.bottom"), " ",
+        ("Lixbon CLI", "lx.brand"), " ", (f"v{version}", "lx.dim2"),
+    ]
+    if note:
+        parts += [(f" {g('sep')} ", "lx.dim2"), (note, "lx.dim")]
+    console.print()
+    console.print(Text.assemble(*parts))
+    console.print()
+
+
+def render_tips(console) -> None:
+    """Consejos de arranque: texto suelto, sin panel (el panel era una caja
+    más que competía visualmente con el chat)."""
+    console.print(
+        f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
+        f"Ctrl+C dos veces para salir[/]"
     )
-    console.print(Panel(body, box=box.ROUNDED, border_style="lx.dim2", padding=(1, 2), expand=False))
+
+
+def rule(console, label: str = "") -> None:
+    """Separador horizontal con etiqueta opcional: divide zonas del CLI
+    (arranque │ conversación) sin encerrar nada en un recuadro."""
+
+    dash = g("rule")
+    width = max(20, console.width - PAD_LEFT - PAD_RIGHT)
     console.print()
+    if label:
+        rest = max(0, width - 5 - len(label))
+        console.print(f"[lx.rule]{dash * 3}[/] [lx.dim]{esc(label)}[/] [lx.rule]{dash * rest}[/]")
+    else:
+        console.print(f"[lx.rule]{dash * width}[/]")
+    console.print()
+
+
+def render_speaker(console, who: str) -> None:
+    """Etiqueta de turno: marca de quién es el bloque que viene debajo."""
+    if who == "user":
+        console.print(f"[lx.accent2]{g('prompt')}[/] [lx.dim]tú[/]")
+    else:
+        console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
+
+
+# ── Acciones del agente ─────────────────────────────────────────────────────
+
+# Mismos verbos que el panel de acciones del IDE (apps/desktop ToolGroup.jsx):
+# el agente "hace cosas" y se lee igual en las dos superficies.
+TOOL_VERB = {
+    "read_file": "leyó", "write_file": "escribió", "edit_file": "editó",
+    "append_file": "añadió a", "delete_file": "eliminó", "rename_file": "movió",
+    "mkdir": "creó carpeta", "search": "buscó", "list_files": "listó",
+    "run_command": "ejecutó",
+}
+KIND_VERB = {
+    "create": "creó", "update": "editó", "delete": "eliminó", "rename": "movió",
+    "mkdir": "creó carpeta", "append": "añadió a", "command": "ejecutó",
+}
+VERB_WIDTH = 12  # columna fija: los objetivos quedan alineados entre acciones
+
+
+def render_actions_header(console) -> None:
+    """Abre la zona de acciones de un turno para que no se confunda con la
+    respuesta en prosa que viene después."""
+    console.print(f"[lx.dim2]{g('gear')} acciones[/]")
+
+
+def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
+                  readonly: bool = False) -> None:
+    """Una acción del agente: `● editó   src/app.py  +12 -3`.
+
+    Las de solo lectura van apagadas (rastro, no evento) y las que tocan el
+    disco en acento: al hojear el transcript se ve qué cambió de verdad.
+    """
+    dot = g("dot")
+    padded = f"{verb:<{VERB_WIDTH}}"
+    if readonly:
+        line = f"[lx.dim2]{dot}[/] [lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
+    else:
+        line = f"[lx.accent2]{dot}[/] [bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
+    if adds or dels:
+        line += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
+    console.print(line)
+
+
+def render_action_result(console, text: str, error: bool = False) -> None:
+    """Resultado de una acción, colgando de ella."""
+    style = "lx.err" if error else "lx.dim2"
+    console.print(f"  [lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
 
 
 # ── Selector interactivo (flechas + mouse) ──────────────────────────────────
@@ -851,16 +1017,29 @@ class StatusBar:
             parts += [sep, ("class:bottom-toolbar", self.extra)]
         return parts
 
+    def _compact_parts(self) -> list[tuple[str, str]]:
+        """Versión corta para el pie del stream: cabe en una línea y no repite
+        lo que ya está en la cabecera (sesión, encoding)."""
+        sep = ("class:bottom-toolbar.sep", f"  {g('sep')}  ")
+        return [
+            ("class:bottom-toolbar.dot", f"{g('dot')} "),
+            ("class:bottom-toolbar.model", self.model or "sin modelo"),
+            sep,
+            ("class:bottom-toolbar", f"contexto {context_bar(self.ctx_pct, 8)} {self.ctx_pct:.0f}%"),
+            sep,
+            ("class:bottom-toolbar", f"{fmt_tokens(self.tokens)} tokens"),
+        ]
+
     def pt_toolbar(self):
         """Fragmentos para bottom_toolbar de prompt_toolkit."""
         return self._parts()
 
-    def rich_line(self):
+    def rich_line(self, compact: bool = False):
         """La misma barra como línea rich (pie del Live durante el stream)."""
         from rich.text import Text
 
         text = Text()
-        for style_cls, chunk in self._parts():
+        for style_cls, chunk in (self._compact_parts() if compact else self._parts()):
             if style_cls == "class:bottom-toolbar.dot":
                 text.append(chunk, style="lx.accent2")
             elif style_cls == "class:bottom-toolbar.model":
@@ -896,8 +1075,17 @@ def print_note(message: str) -> None:
 
 def ui_demo() -> int:
     console = make_console()
-    render_header(console, "2.0.0-demo")
-    render_welcome_box(console)
+    from pathlib import Path
+
+    render_header(console, "2.0.0-demo", model="qwen2.5-coder:7b", plan="Pro",
+                  workspace=Path.cwd())
+    render_tips(console)
+    rule(console, "conversación")
+    render_speaker(console, "assistant")
+    render_actions_header(console)
+    render_action(console, "leyó", "src/app.py", readonly=True)
+    render_action(console, "editó", "src/app.py", adds=12, dels=3)
+    render_action_result(console, "1 reemplazo aplicado")
 
     choice = select("Método de acceso", [
         Option("Credenciales", "creds", "correo y contraseña"),
@@ -938,15 +1126,7 @@ class FileChange:
 
     @property
     def verb(self) -> str:
-        return {
-            "create": "Create",
-            "update": "Update",
-            "delete": "Delete",
-            "rename": "Rename",
-            "mkdir": "Mkdir",
-            "append": "Append",
-            "command": "Run",
-        }.get(self.kind, self.kind.title())
+        return KIND_VERB.get(self.kind, self.kind)
 
 
 def compute_change(workspace: Path, tool_name: str, args: dict, resolve_path) -> FileChange | None:
@@ -1018,26 +1198,19 @@ def _unified(change: FileChange) -> list[str]:
 
 
 def render_change(console, change: FileChange, max_lines: int = 40) -> None:
-    """Imprime `● Update(ruta) +12 -3` y el diff coloreado truncado."""
-    dot = g("dot")
+    """Imprime la acción (`● editó  ruta  +12 -3`) y el diff coloreado."""
     if change.kind == "command":
-        console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]Run[/][lx.dim]([/][lx.beige]{_escape(change.detail)}[/][lx.dim])[/]")
+        render_action(console, change.verb, change.detail)
         return
     if change.kind == "rename":
-        console.print(
-            f"[lx.accent2]{dot}[/] [bold lx.primary]Rename[/][lx.dim]([/][lx.beige]{_escape(change.path)}[/]"
-            f"[lx.dim] {g('arrow')} [/][lx.beige]{_escape(change.detail)}[/][lx.dim])[/]"
-        )
+        render_action(console, change.verb, f"{change.path} {g('arrow')} {change.detail}")
         return
     if change.kind == "mkdir":
-        console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]Mkdir[/][lx.dim]([/][lx.beige]{_escape(change.path)}[/][lx.dim])[/]")
+        render_action(console, change.verb, change.path)
         return
 
     adds, dels = diff_counts(change)
-    summary = f"[lx.accent2]{dot}[/] [bold lx.primary]{change.verb}[/][lx.dim]([/][lx.beige]{_escape(change.path)}[/][lx.dim])[/]"
-    if adds or dels:
-        summary += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
-    console.print(summary)
+    render_action(console, change.verb, change.path, adds=adds, dels=dels)
 
     lines = _unified(change)
     if not lines:
@@ -1744,6 +1917,7 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     working = history[:]
 
     nudged = False
+    actions_open = False  # la cabecera "acciones" se abre una vez por turno
     for _ in range(MAX_AGENT_STEPS):
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
         assistant = truncate_fabricated(stream_assistant([system_msg] + working))
@@ -1763,6 +1937,10 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 continue
             return assistant, working
 
+        if not actions_open:
+            render_actions_header(console)
+            actions_open = True
+
         combined_results = []
         for call in tool_calls:
             tool_name = call.get("tool", "")
@@ -1776,7 +1954,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
 
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
-    dot = g("dot")
     # Con /remote activo, la sesión se maneja desde el móvil/web: los eventos
     # de herramientas viajan al controller y las aprobaciones se piden allí
     # (localmente no hay nadie al teclado durante el takeover).
@@ -1785,7 +1962,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
-        console.print(f"[lx.dim]{dot} {tool_name}({esc(label)})[/]")
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label), readonly=True)
         if remote:
             remote.emit("tool_use", tool=tool_name, summary=str(label), readonly=True)
         return _run(console, workspace, tool_name, args, remote)
@@ -1797,7 +1974,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     if change is not None:
         render_change(console, change)
     else:
-        console.print(f"[lx.accent2]{dot}[/] [bold lx.primary]{tool_name}[/] [lx.dim]{esc(args)}[/]")
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), _args_summary(tool_name, args))
     if remote:
         remote.emit("tool_use", tool=tool_name, summary=_args_summary(tool_name, args), readonly=False)
 
@@ -1808,26 +1985,26 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         if not session.get("auto_run_commands"):
             if remote:
                 if remote.request_approval(tool_name, _args_summary(tool_name, args), "command") != "allow":
-                    console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                    render_action_result(console, "rechazado desde el control remoto", error=True)
                     return "Ejecución cancelada por el usuario"
             else:
                 decision = confirm3("¿Ejecutar este comando?")
                 if decision == "always":
                     session["auto_run_commands"] = True
                 elif decision in ("no", None):
-                    console.print(f"[lx.dim]{dot} rechazado[/]")
+                    render_action_result(console, "rechazado por el usuario", error=True)
                     return "Ejecución cancelada por el usuario"
     elif not session.get("auto_approve"):
         if remote:
             if remote.request_approval(tool_name, _args_summary(tool_name, args), "edit") != "allow":
-                console.print(f"[lx.dim]{dot} rechazado (remoto)[/]")
+                render_action_result(console, "rechazado desde el control remoto", error=True)
                 return "Ejecución cancelada por el usuario"
         else:
             decision = confirm3("¿Aplicar este cambio?")
             if decision == "always":
                 session["auto_approve"] = True
             elif decision in ("no", None):
-                console.print(f"[lx.dim]{dot} rechazado[/]")
+                render_action_result(console, "rechazado por el usuario", error=True)
                 return "Ejecución cancelada por el usuario"
 
     return _run(console, workspace, tool_name, args, remote)
@@ -1838,13 +2015,11 @@ def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> s
         result = execute_tool_call(workspace, tool_name, args)
     except Exception as exc:
         result = f"[ERROR] {exc}"
-    if tool_name not in READ_ONLY_TOOLS:
-        first_line = result.split("\n", 1)[0][:120]
-        style = "lx.err" if result.startswith("[ERROR]") else "lx.dim"
-        console.print(f"  [{style}]{g('arrow')} {esc(first_line)}[/]")
+    failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
+              or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
+    if tool_name not in READ_ONLY_TOOLS or failed:
+        render_action_result(console, result.split("\n", 1)[0][:120], error=failed)
     if remote:
-        failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
-                  or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
         remote.emit("tool_result", tool=tool_name,
                     result=result[:REMOTE_RESULT_CHARS], error=failed)
     return result
@@ -2009,6 +2184,9 @@ class ChatApp:
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
+        # Plan comercial (Pro/Advance/Gratuito): se muestra en la cabecera.
+        # Se cachea en el config para que el arranque no dependa de la red.
+        self.plan_name = self.cfg.get("plan_name", "")
         self.pending_images: list[Path] = []
         self.session_tokens = 0
         self.chars_per_token = 4.0
@@ -2057,19 +2235,19 @@ class ChatApp:
     # ── arranque ─────────────────────────────────────────────────────────
 
     def run(self, once: str = "") -> int:
-        render_header(self.console, CLI_VERSION)
+        self._set_tab_title()
 
         if not self.cfg.get("api_key"):
             if not is_interactive():
                 print_error("No hay sesión. Ejecuta el CLI en una terminal interactiva para iniciar sesión.")
                 return 1
-            render_welcome_box(self.console)
+            render_intro_line(self.console, CLI_VERSION, "iniciar sesión")
             if not self.onboarding_flow():
                 return 1
         elif not once:
-            render_welcome_box(self.console)
+            render_intro_line(self.console, CLI_VERSION, "conectando…")
 
-        self._load_models_quietly()
+        self._load_account_quietly()
         if not self.model:
             if not self.pick_model():
                 return 1
@@ -2084,17 +2262,41 @@ class ChatApp:
             print_error("Terminal no interactiva. Usa `lixbon chat --once \"mensaje\"` o una terminal real.")
             return 1
 
-        print_note(f"Escribe un mensaje, o / para ver los comandos. Modo: {self.mode} {g('sep')} {self.workspace}")
+        # Zona 1: identidad (quién soy, con qué modelo y sobre qué carpeta).
+        self._render_identity()
+        # Zona 2: cómo se usa.
+        render_tips(self.console)
         if self.mode == "ask":
-            print_note("En modo ask el modelo solo conversa; usa /mode agent para que cree y edite archivos.")
-        self.console.print()
+            print_note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos.")
+        # Zona 3: a partir de aquí, todo es conversación.
+        rule(self.console, "conversación")
         return self._prompt_loop()
 
-    def _load_models_quietly(self) -> None:
+    def _render_identity(self) -> None:
+        """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
+        render_header(self.console, CLI_VERSION, model=self.model,
+                      plan=self.plan_name, workspace=self.workspace)
+
+    def _set_tab_title(self) -> None:
+        """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon."""
+        set_title(f"{g('spark')} Lixbon {g('sep')} {self.workspace.name}")
+
+    def _load_account_quietly(self) -> None:
+        """Modelos disponibles y plan del usuario, sin ruido si el server falla."""
         try:
             self.models_cache = self.api.models()
         except ApiError:
             self.models_cache = []
+        if not self.cfg.get("api_key"):
+            return
+        try:
+            plan = (self.api.key_info().get("plan") or {}).get("name") or ""
+        except ApiError:
+            return  # servidor viejo o sin red: se conserva el plan cacheado
+        if plan and plan != self.plan_name:
+            self.plan_name = plan
+            self.cfg["plan_name"] = plan
+            save_config(self.cfg)
 
     def onboarding_flow(self) -> bool:
         print_note("No hay una sesión activa. Inicia sesión para continuar.")
@@ -2199,7 +2401,7 @@ class ChatApp:
             self.model = self.cfg["key_model"]
             return True
         if not self.models_cache:
-            self._load_models_quietly()
+            self._load_account_quietly()
         if not self.models_cache:
             print_error("No hay modelos disponibles en el servidor ahora mismo.")
             return False
@@ -2360,10 +2562,17 @@ class ChatApp:
         if encoded:
             user_msg["images"] = encoded
         self.history.append(user_msg)
+        if origin != "local":
+            # El mensaje llegó por /remote: aquí nadie lo tecleó, así que el
+            # transcript local tiene que mostrarlo para no perder el hilo.
+            render_speaker(self.console, "user")
+            self.console.print(f"[lx.primary]{esc(clean or text)}[/]")
         if self.remote:
             self.remote.emit("user_msg", text=clean or text, origin=origin)
             self.remote.emit("status", state="thinking")
 
+        self.console.print()
+        render_speaker(self.console, "assistant")
         try:
             if self.mode == "delegate":
                 self._delegate_turn(clean or text)
@@ -2419,10 +2628,18 @@ class ChatApp:
                 for line in tail:
                     blocks.append(Text(f"  {line}", style="lx.thinking"))
             if content_parts:
-                blocks.append(Markdown("".join(content_parts)))
+                raw = "".join(content_parts)
+                if self.mode == "agent":
+                    # En vivo se muestra la prosa, no el JSON de las llamadas:
+                    # las herramientas aparecen luego en el bloque de acciones.
+                    prose = clean_prose(raw)
+                    blocks.append(Markdown(prose) if prose
+                                  else Text(f"{g('spark_alt')} preparando acciones…", style="lx.dim"))
+                else:
+                    blocks.append(Markdown(raw))
             if not blocks:
                 blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
-            blocks.append(self.status.rich_line())
+            blocks.append(self.status.rich_line(compact=True))
             return pad(Group(*blocks))
 
         def _final_view():
@@ -2431,15 +2648,19 @@ class ChatApp:
                 blocks.append(Text(f"{g('spark_alt')} Pensó durante {reasoning_seconds:.1f}s", style="lx.dim2"))
             text = "".join(content_parts).strip()
             if self.mode == "agent":
-                text = clean_prose(text) or f"[herramientas solicitadas {g('ellipsis')}]"
-            blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
+                # Paso intermedio del agente (solo tool calls): no hay prosa que
+                # mostrar — lo que sigue es el bloque de acciones, que ya se lee.
+                text = clean_prose(text)
+                if text:
+                    blocks.append(Markdown(text))
+            else:
+                blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
             if interrupted:
                 blocks.append(Text(f"{g('sep')} interrumpido {g('sep')}", style="lx.dim"))
-            return Group(*blocks)
+            return Group(*blocks) if blocks else None
 
         from rich.live import Live
 
-        self.console.print()
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
@@ -2469,11 +2690,14 @@ class ChatApp:
                 interrupted = True
                 stream.close()
 
-        self.console.print(_final_view())
+        final = _final_view()
+        if final is not None:
+            self.console.print(final)
+            self.console.print()
         if sources:
             self.console.print(f"[lx.dim]Fuentes web: " + "; ".join(
                 str(s.get("url") or s.get("title") or "?") for s in sources[:5]) + "[/]")
-        self.console.print()
+            self.console.print()
 
         if usage:
             self._register_usage(usage)
@@ -2492,7 +2716,6 @@ class ChatApp:
             result = self.api.delegate(text)
         routing = result.get("routing", {})
         classification = result.get("classification", {})
-        self.console.print()
         self.console.print(
             f"[lx.accent2]{g('spark')}[/] [bold lx.primary]Delegación[/] "
             f"[lx.beige]\\[{esc(routing.get('type', 'PLAN'))}][/] "
@@ -2565,7 +2788,9 @@ class ChatApp:
         self.history = []
         self.session_tokens = 0
         self.conversation_id = str(uuid.uuid4())
-        print_ok("Conversación nueva")
+        # El separador marca dónde empieza el contexto nuevo: sin él, el
+        # transcript anterior parece seguir vivo.
+        rule(self.console, "conversación nueva")
         return True
 
     def cmd_compact(self, arg: str):
@@ -2650,6 +2875,7 @@ class ChatApp:
         self.console.print()
         rows = [
             ("Modelo", self.model or "no configurado"),
+            ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido"),
             ("Modo", self.mode),
             ("Sesión", self._session_label()),
             ("API key", mask_key(self.cfg.get("api_key", ""))),
@@ -2666,7 +2892,7 @@ class ChatApp:
 
     def cmd_login(self, arg: str):
         if self.onboarding_flow():
-            self._load_models_quietly()
+            self._load_account_quietly()
             self._refresh_status()
         return True
 
@@ -2714,7 +2940,8 @@ class ChatApp:
             print_error("Ruta inválida o no es una carpeta.")
             return True
         self.workspace = new_ws  # solo para esta sesión; al relanzar vuelve a cwd
-        print_ok(f"Workspace: {new_ws}")
+        self._set_tab_title()
+        print_ok(f"Workspace: {short_path(new_ws)}")
         return True
 
     def cmd_context_window(self, arg: str):
@@ -2749,7 +2976,8 @@ class ChatApp:
 
     def cmd_clear(self, arg: str):
         self.console.clear()
-        render_header(self.console, CLI_VERSION)
+        self._render_identity()
+        rule(self.console, "conversación")
         return True
 
     def cmd_update(self, arg: str):
@@ -3062,7 +3290,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 1
 
     app = ChatApp()
-    render_header(make_console(), CLI_VERSION)
+    render_intro_line(make_console(), CLI_VERSION, "iniciar sesión")
     ok = app.onboarding_flow()
     if ok and not app.model:
         app.pick_model()

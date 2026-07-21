@@ -79,8 +79,14 @@ async def delete_api_key(
 
 @router.get("/api/key/info")
 async def api_key_info(user_data: dict[str, Any] = Depends(api_key_required)):
-    """Devuelve información de la API key actual (usuario y modelo vinculado)."""
+    """Info de la API key actual: usuario, modelo vinculado y plan vigente.
+
+    El CLI muestra el plan en su cabecera ("Lixbon Pro"), así que se sirve aquí
+    y no en /api/usage: este es el único endpoint de perfil que acepta Bearer.
+    """
+    plan = get_plan_for_user(user_data["id"])
     return {
         "user": user_data.get("username"),
         "key_model": user_data.get("key_model"),
+        "plan": {"id": plan.get("id"), "name": plan.get("name")},
     }
