@@ -1,11 +1,14 @@
 // Sidebar.js — contenido del drawer lateral, espejo del sidebar de la web
-// (DISENO_WEB.md 2.1): wordmark arriba, "Nueva conversación", búsqueda,
-// sección Historial con las conversaciones (abrir / mantener pulsado para
-// renombrar o eliminar), accesos a Uso y Documentación, y footer de perfil
-// crema con avatar de tinta, plan y engranaje (→ Cuenta).
+// (DISENO_WEB.md 2.1): wordmark arriba, "Nueva conversación" como bloque
+// crema, búsqueda, sección Historial con las conversaciones (abrir / mantener
+// pulsado para renombrar o eliminar), un menú crema que despliega Remote / Uso
+// / Documentación hacia arriba (sin separadores que corten la columna), y
+// footer de perfil crema con avatar de tinta, plan y engranaje (→ Cuenta).
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
   Linking,
   Pressable,
@@ -20,7 +23,9 @@ import { useApi, useAuth, useChat } from '../state';
 import { FONTS, RADIUS_PILL } from '../theme';
 import Icon from './Icon';
 import { useDialogs } from './dialogs';
-import { IconButton, LixLogo, PlanPill, useColors } from './ui';
+import { IconButton, LixLogo, PlanPill, useColors, useReducedMotion } from './ui';
+
+const MENU_ITEM_HEIGHT = 46;
 
 export default function Sidebar({ open, onClose, onNavigate }) {
   const c = useColors();
@@ -35,6 +40,7 @@ export default function Sidebar({ open, onClose, onNavigate }) {
   const queryRef = useRef('');
   const debounceRef = useRef(null);
   const loadedOnce = useRef(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const load = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -54,11 +60,14 @@ export default function Sidebar({ open, onClose, onNavigate }) {
     }
   };
 
-  // Recarga cada vez que se abre el drawer (la primera con spinner).
+  // Recarga cada vez que se abre el drawer (la primera con spinner). Al
+  // cerrarlo el menú desplegable vuelve a su estado plegado.
   useEffect(() => {
     if (open) {
       load({ silent: loadedOnce.current });
       loadedOnce.current = true;
+    } else {
+      setMenuOpen(false);
     }
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -150,23 +159,41 @@ export default function Sidebar({ open, onClose, onNavigate }) {
           justifyContent: 'space-between',
           paddingLeft: 18,
           paddingRight: 10,
-          paddingBottom: 12,
+          paddingBottom: 14,
         }}
       >
-        <LixLogo size={20} />
+        <LixLogo size={24} />
         <IconButton onPress={onClose}>
           <Icon name="panel" size={19} color={c.inkSoft} />
         </IconButton>
       </View>
 
-      {/* Nueva conversación */}
-      <NavItem icon="plus" label="Nueva conversación" onPress={newChat} strong />
+      {/* Nueva conversación: bloque crema, la acción principal del drawer */}
+      <Pressable
+        onPress={newChat}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          marginHorizontal: 12,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+          borderRadius: 18,
+          backgroundColor: c.primary,
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <Icon name="plus" size={19} color={c.onPrimary} strokeWidth={1.9} />
+        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onPrimary }}>
+          Nueva conversación
+        </Text>
+      </Pressable>
 
       {/* Búsqueda */}
       <View
         style={{
           marginHorizontal: 12,
-          marginTop: 8,
+          marginTop: 10,
           marginBottom: 4,
           flexDirection: 'row',
           alignItems: 'center',
@@ -179,25 +206,26 @@ export default function Sidebar({ open, onClose, onNavigate }) {
         <Icon name="search" size={15} color={c.inkSoft} />
         <TextInput
           onChangeText={onQuery}
-          placeholder="Buscar…"
+          placeholder="Buscar conversaciones…"
           placeholderTextColor={c.inkSoft}
           autoCorrect={false}
-          style={{ flex: 1, paddingVertical: 9, fontFamily: FONTS.ui, fontSize: 14, color: c.ink }}
+          style={{ flex: 1, paddingVertical: 10, fontFamily: FONTS.ui, fontSize: 14, color: c.ink }}
         />
       </View>
 
       {/* Historial */}
       <Text
         style={{
-          fontFamily: FONTS.ui,
-          fontSize: 12,
+          fontFamily: FONTS.uiMedium,
+          fontSize: 11,
+          letterSpacing: 1.1,
           color: c.inkMuted,
           paddingHorizontal: 20,
-          paddingTop: 10,
-          paddingBottom: 4,
+          paddingTop: 16,
+          paddingBottom: 6,
         }}
       >
-        Historial
+        HISTORIAL
       </Text>
       <View style={{ flex: 1 }}>
         {loading && items.length === 0 ? (
@@ -229,18 +257,30 @@ export default function Sidebar({ open, onClose, onNavigate }) {
                   onPress={() => openConversation(item)}
                   onLongPress={() => longPress(item)}
                   style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 11,
                     paddingVertical: 10,
                     paddingHorizontal: 12,
                     borderRadius: 12,
                     backgroundColor: active ? c.accentSoft : pressed ? c.pressed : 'transparent',
                   })}
                 >
+                  <View
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: active ? c.accent : c.inkMuted,
+                    }}
+                  />
                   <Text
                     numberOfLines={1}
                     style={{
+                      flex: 1,
                       fontFamily: active ? FONTS.uiMedium : FONTS.ui,
                       fontSize: 14,
-                      color: c.ink,
+                      color: active ? c.ink : c.inkSoft,
                     }}
                   >
                     {item.title || 'Sin título'}
@@ -252,18 +292,22 @@ export default function Sidebar({ open, onClose, onNavigate }) {
         )}
       </View>
 
-      {/* Accesos */}
-      <View style={{ borderTopWidth: 1, borderTopColor: c.borderSoft, paddingVertical: 6 }}>
-        <NavItem icon="activity" label="Remote" onPress={() => onNavigate('remote')} />
-        <NavItem icon="chart" label="Uso" onPress={() => onNavigate('usage')} />
-        <NavItem
-          icon="book"
-          label="Documentación"
-          onPress={() => Linking.openURL(`${api.base}/docs`)}
-        />
-      </View>
+      {/* Accesos: menú que se despliega hacia arriba desde su propio botón */}
+      <CollapsibleMenu
+        open={menuOpen}
+        onToggle={() => setMenuOpen((v) => !v)}
+        items={[
+          { icon: 'activity', label: 'Remote', onPress: () => onNavigate('remote') },
+          { icon: 'chart', label: 'Uso', onPress: () => onNavigate('usage') },
+          {
+            icon: 'book',
+            label: 'Documentación',
+            onPress: () => Linking.openURL(`${api.base}/docs`),
+          },
+        ]}
+      />
 
-      {/* Footer de perfil (crema, como la web) */}
+      {/* Footer de perfil (tarjeta crema, como la web) */}
       <Pressable
         onPress={() => onNavigate('account')}
         style={({ pressed }) => ({
@@ -271,9 +315,11 @@ export default function Sidebar({ open, onClose, onNavigate }) {
           alignItems: 'center',
           gap: 12,
           backgroundColor: pressed ? c.bgInput : c.bgSecondary,
-          paddingHorizontal: 16,
-          paddingTop: 14,
-          paddingBottom: Math.max(insets.bottom, 14),
+          borderRadius: 18,
+          marginHorizontal: 12,
+          marginBottom: Math.max(insets.bottom, 12),
+          paddingHorizontal: 14,
+          paddingVertical: 12,
         })}
       >
         <View
@@ -302,32 +348,82 @@ export default function Sidebar({ open, onClose, onNavigate }) {
   );
 }
 
-function NavItem({ icon, label, onPress, strong = false }) {
+/// Menú de accesos que crece hacia arriba desde su botón, sin separadores que
+/// corten la columna. El botón es crema (el color más contrastado del tema)
+/// para que se lea como el mando de "más opciones" del drawer.
+function CollapsibleMenu({ open, onToggle, items }) {
   const c = useColors();
+  const reduced = useReducedMotion();
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: open ? 1 : 0,
+      duration: reduced ? 0 : 220,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+      useNativeDriver: false, // anima altura: no puede ir por el hilo nativo
+    }).start();
+  }, [open, anim, reduced]);
+
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        marginHorizontal: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 11,
-        borderRadius: 12,
-        backgroundColor: pressed ? c.pressed : 'transparent',
-      })}
-    >
-      <Icon name={icon} size={19} color={c.ink} strokeWidth={strong ? 1.9 : 1.6} />
-      <Text
+    <View style={{ paddingBottom: 8 }}>
+      <Animated.View
+        // El clip evita que los ítems asomen mientras la altura se pliega.
         style={{
-          fontFamily: strong ? FONTS.uiMedium : FONTS.ui,
-          fontSize: 14.5,
-          color: c.ink,
+          overflow: 'hidden',
+          opacity: anim,
+          height: anim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, items.length * MENU_ITEM_HEIGHT + 6],
+          }),
         }}
       >
-        {label}
-      </Text>
-    </Pressable>
+        {items.map((item) => (
+          <Pressable
+            key={item.label}
+            onPress={item.onPress}
+            style={({ pressed }) => ({
+              height: MENU_ITEM_HEIGHT,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              marginHorizontal: 12,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: pressed ? c.pressed : 'transparent',
+            })}
+          >
+            <Icon name={item.icon} size={19} color={c.inkSoft} />
+            <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>
+              {item.label}
+            </Text>
+          </Pressable>
+        ))}
+      </Animated.View>
+
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={open ? 'Cerrar el menú de opciones' : 'Abrir el menú de opciones'}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          marginHorizontal: 12,
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          borderRadius: RADIUS_PILL,
+          backgroundColor: c.primary,
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <Icon name="menu" size={18} color={c.onPrimary} strokeWidth={1.9} />
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.onPrimary }}>
+          {open ? 'Cerrar menú' : 'Más opciones'}
+        </Text>
+        <Icon name={open ? 'chevron-down' : 'chevron-up'} size={16} color={c.onPrimary} />
+      </Pressable>
+    </View>
   );
 }

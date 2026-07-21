@@ -41,7 +41,18 @@ const ICONS = {
   'arrow-up': { paths: ['M12 19V5M6 11l6-6 6 6'] },
   'chevron-right': { paths: ['m9 18 6-6-6-6'] },
   'chevron-down': { paths: ['m6 9 6 6 6-6'] },
+  'chevron-up': { paths: ['m6 15 6-6 6 6'] },
   stop: { rects: [{ x: 6, y: 6, width: 12, height: 12, rx: 2 }] },
+  // Sugerencias del hero del chat: investigar (diana), analizar (documento
+  // a dos columnas) y comparar (dos series de datos).
+  target: { circles: [{ cx: 12, cy: 12, r: 9 }, { cx: 12, cy: 12, r: 3.2 }] },
+  doc: { paths: ['M12 5v14'], rects: [{ x: 3, y: 5, width: 18, height: 14, rx: 2.5 }] },
+  waves: {
+    paths: [
+      'M3 8.5c2.2-2.6 4.4-2.6 6.6 0s4.4 2.6 6.6 0 3.6-2 4.8-.9',
+      'M3 15.5c2.2-2.6 4.4-2.6 6.6 0s4.4 2.6 6.6 0 3.6-2 4.8-.9',
+    ],
+  },
 };
 
 export default function Icon({ name, size = 20, color = '#000', strokeWidth = 1.6 }) {

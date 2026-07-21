@@ -108,6 +108,9 @@ export const useRemoteStore = create((set, get) => ({
     set({ active: false, session: null, shareUrl: '', qrSvg: '', error: null });
   },
 
+  // El QR llega como SVG y se inyecta en un <img> como data: URI. NO vale
+  // URL.createObjectURL: la CSP del webview (tauri.conf.json) no lista `blob:`
+  // en img-src, así que la imagen quedaba rota con el link ya visible.
   _loadQr: async (shareUrl) => {
     try {
       const { serverUrl, apiKey } = useAppStore.getState();
@@ -116,10 +119,8 @@ export const useRemoteStore = create((set, get) => ({
         { headers: { Authorization: `Bearer ${apiKey}` } },
       );
       if (!res.ok) return;
-      const blob = await res.blob();
-      const prev = get().qrSvg;
-      if (prev) URL.revokeObjectURL(prev);
-      set({ qrSvg: URL.createObjectURL(blob) });
+      const svg = await res.text();
+      set({ qrSvg: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` });
     } catch { /* sin QR: el link sigue disponible */ }
   },
 }));

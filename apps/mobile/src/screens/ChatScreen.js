@@ -1,9 +1,10 @@
 // ChatScreen.js — conversación con streaming SSE, markdown en respuestas y
-// selector de modelo. Espejo del chat de la web (chat.css): hero centrado
-// "¿Qué investigaremos hoy?" en vacío, burbuja del usuario invertida
-// (radius-box con esquina 15), y compositor caja (.chat-input): texto arriba
-// y barra inferior con búsqueda web + modelo a la izquierda y enviar (círculo
-// tinta 40px) a la derecha.
+// selector de modelo. Espejo del chat de la web (chat.css): cabecera limpia
+// con el título en pill y punto de estado, hero de marca centrado
+// ("¿Qué investigaremos hoy?" + atajos de arranque) cuando no hay mensajes,
+// burbuja del usuario invertida (radius-box con esquina 15), y compositor caja
+// (.chat-input): texto arriba y barra inferior con búsqueda web + modelo a la
+// izquierda y enviar (círculo tinta 40px) a la derecha.
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -22,6 +23,14 @@ import { useDialogs } from '../components/dialogs';
 import { FadeUp, IconButton, useColors } from '../components/ui';
 import { useAuth, useChat } from '../state';
 import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
+
+// Atajos del hero: rellenan el compositor con un arranque de conversación en
+// vez de enviarlo, para que el usuario complete la idea antes de disparar.
+const STARTERS = [
+  { icon: 'target', label: 'Investigar un tema a fondo', prompt: 'Investiga a fondo ' },
+  { icon: 'doc', label: 'Analizar un documento', prompt: 'Analiza este documento y resume lo importante:\n\n' },
+  { icon: 'waves', label: 'Comparar datos y fuentes', prompt: 'Compara estos datos y contrasta las fuentes:\n\n' },
+];
 
 export default function ChatScreen({ onMenu }) {
   const c = useColors();
@@ -53,27 +62,48 @@ export default function ChatScreen({ onMenu }) {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      {/* Cabecera: menú (drawer) + título + nueva conversación (.chat-header) */}
+      {/* Cabecera: menú (drawer) + título en pill + nueva conversación */}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 8,
+          gap: 6,
           paddingHorizontal: 10,
           paddingVertical: 8,
-          borderBottomWidth: 1,
-          borderBottomColor: c.borderSoft,
         }}
       >
         <IconButton onPress={onMenu} size={38}>
           <Icon name="menu" size={20} color={c.ink} />
         </IconButton>
-        <Text
-          numberOfLines={1}
-          style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}
-        >
-          {chat.title || 'Nueva conversación'}
-        </Text>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              maxWidth: '100%',
+              paddingHorizontal: 15,
+              paddingVertical: 7,
+              borderRadius: RADIUS_PILL,
+              backgroundColor: c.bgSecondary,
+            }}
+          >
+            <View
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 3.5,
+                backgroundColor: chat.streaming ? c.accent : c.accentDeep,
+              }}
+            />
+            <Text
+              numberOfLines={1}
+              style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}
+            >
+              {chat.title || 'Nueva conversación'}
+            </Text>
+          </View>
+        </View>
         <IconButton onPress={chat.newChat} size={38}>
           <Icon name="pencil" size={18} color={c.ink} />
         </IconButton>
@@ -85,7 +115,7 @@ export default function ChatScreen({ onMenu }) {
             <ActivityIndicator color={c.inkSoft} />
           </View>
         ) : empty ? (
-          <Hero firstName={firstName} />
+          <Hero firstName={firstName} onPick={onChangeInput} />
         ) : (
           <MessageList />
         )}
@@ -100,12 +130,26 @@ export default function ChatScreen({ onMenu }) {
   );
 }
 
-// Hero del chat vacío (.chat-hero): saludo + título grande centrado.
-function Hero({ firstName }) {
+// Hero del chat vacío (.chat-hero): marca, saludo, título grande centrado y
+// atajos de arranque que precargan el compositor.
+function Hero({ firstName, onPick }) {
   const c = useColors();
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingBottom: 60 }}>
-      <FadeUp style={{ alignItems: 'center', gap: 10 }}>
+    <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 26, paddingBottom: 20 }}>
+      <FadeUp style={{ alignItems: 'center', gap: 8 }}>
+        <View
+          style={{
+            width: 58,
+            height: 58,
+            borderRadius: 20,
+            backgroundColor: c.bgSecondary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 8,
+          }}
+        >
+          <Text style={{ fontFamily: FONTS.brand, fontSize: 26, color: c.inkSoft }}>L</Text>
+        </View>
         {!!firstName && (
           <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.inkSoft }}>
             Hola, {firstName}.
@@ -114,15 +158,55 @@ function Hero({ firstName }) {
         <Text
           style={{
             textAlign: 'center',
-            fontFamily: FONTS.uiMedium,
-            fontSize: 27,
-            lineHeight: 34,
+            fontFamily: FONTS.uiBold,
+            fontSize: 34,
+            lineHeight: 40,
+            letterSpacing: -0.5,
             color: c.ink,
           }}
         >
           ¿Qué investigaremos hoy?
         </Text>
       </FadeUp>
+
+      <View style={{ gap: 10, marginTop: 34 }}>
+        {STARTERS.map((s, i) => (
+          <FadeUp key={s.icon} delay={80 + i * 60}>
+            <Pressable
+              onPress={() => onPick(s.prompt)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 14,
+                padding: 12,
+                borderRadius: 18,
+                borderWidth: 1,
+                borderColor: c.borderSoft,
+                backgroundColor: pressed ? c.bgInput : c.bgSecondary,
+              })}
+            >
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: c.bg,
+                }}
+              >
+                <Icon name={s.icon} size={18} color={c.accent} />
+              </View>
+              <Text
+                style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, lineHeight: 20, color: c.ink }}
+              >
+                {s.label}
+              </Text>
+              <Icon name="chevron-right" size={16} color={c.inkMuted} />
+            </Pressable>
+          </FadeUp>
+        ))}
+      </View>
     </View>
   );
 }
@@ -309,6 +393,8 @@ function Composer({ input, onChangeInput, onSend }) {
                 borderRadius: 17,
                 alignItems: 'center',
                 justifyContent: 'center',
+                borderWidth: chat.webSearch ? 0 : 1,
+                borderColor: c.borderSoft,
                 backgroundColor: chat.webSearch ? c.primary : pressed ? c.pressed : 'transparent',
               })}
             >

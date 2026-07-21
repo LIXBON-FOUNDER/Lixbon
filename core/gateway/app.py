@@ -19,7 +19,13 @@ from fastapi.staticfiles import StaticFiles
 from core.gateway import deps
 from core.gateway.logging_setup import setup_logging
 from core.config import ALLOWED_ORIGINS, APP_DESCRIPTION, APP_TITLE, APP_VERSION, LOGS_DIR, WEB_DIST_DIR
-from core.persistence.queries import archive_old_inactive_keys, init_db, purge_expired_sessions, sweep_remote_sessions
+from core.persistence.queries import (
+    archive_old_inactive_keys,
+    init_db,
+    purge_expired_sessions,
+    sweep_remote_sessions,
+    touch_remote_session,
+)
 from core.security.auth import security_headers_middleware
 from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, installer, keys, nodes_admin, oauth, payments, remote, versions, ws_status, monitor
 
@@ -134,9 +140,16 @@ def _start_archiver_cron() -> None:
     def _run_remote_sweep():
         # Cadencia corta: marca offline las sesiones /remote cuyo host dejó de
         # dar señales (p.ej. tras un reinicio del gateway) y cierra las viejas.
+        # Antes del barrido se refrescan las que siguen enganchadas al hub: el
+        # host solo hace touch al publicar eventos, así que un IDE conectado
+        # pero sin actividad de chat aparecía "sin conexión" al minuto.
+        from core.gateway.remote_hub import hub as _hub
+
         while True:
             time.sleep(300)
             try:
+                for _sid in _hub.live_host_sessions():
+                    touch_remote_session(_sid)
                 sweep_remote_sessions()
             except Exception as exc:
                 _log.getLogger("lixbon").warning(f"[cron] Error en sweep de sesiones remotas: {exc}")

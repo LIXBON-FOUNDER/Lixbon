@@ -205,6 +205,24 @@ export function FileTree() {
     }
   };
 
+  // Destino de "Nuevo archivo/carpeta" de la barra: la carpeta seleccionada,
+  // la carpeta que contiene el archivo seleccionado, o la raíz si no hay nada
+  // marcado (como VSCode). Antes siempre era la raíz: con Backend/ abierta y
+  // seleccionada, el archivo aparecía fuera de ella.
+  const createParent = () => {
+    if (!selected?.entry) return rootPath;
+    return selected.entry.is_dir ? selected.entry.path : selected.parent || rootPath;
+  };
+
+  const startCreateIn = (parent, type) => {
+    if (parent !== rootPath) {
+      setExpandedDirs((prev) => ({ ...prev, [parent]: true }));
+      refreshDirectory(parent);
+    }
+    setNewItemParent(parent);
+    setNewItemType(type);
+  };
+
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!newItemName.trim()) return;
@@ -367,8 +385,8 @@ export function FileTree() {
     if (!entry) {
       // Área vacía / raíz
       return [
-        { label: 'Nuevo archivo', run: () => { setNewItemParent(rootPath); setNewItemType('file'); } },
-        { label: 'Nueva carpeta', run: () => { setNewItemParent(rootPath); setNewItemType('dir'); } },
+        { label: 'Nuevo archivo', run: () => startCreateIn(rootPath, 'file') },
+        { label: 'Nueva carpeta', run: () => startCreateIn(rootPath, 'dir') },
         { sep: true },
         { label: 'Refrescar', run: loadRoot },
         { label: 'Revelar en el explorador', run: () => revealInOs(rootPath).catch(() => {}) },
@@ -378,8 +396,8 @@ export function FileTree() {
     const items = [];
     if (entry.is_dir) {
       items.push(
-        { label: 'Nuevo archivo', run: () => { setNewItemParent(entry.path); setNewItemType('file'); setExpandedDirs((p) => ({ ...p, [entry.path]: true })); } },
-        { label: 'Nueva carpeta', run: () => { setNewItemParent(entry.path); setNewItemType('dir'); setExpandedDirs((p) => ({ ...p, [entry.path]: true })); } },
+        { label: 'Nuevo archivo', run: () => startCreateIn(entry.path, 'file') },
+        { label: 'Nueva carpeta', run: () => startCreateIn(entry.path, 'dir') },
         { sep: true },
       );
     } else {
@@ -473,13 +491,13 @@ export function FileTree() {
               <span className="filetree__node-actions">
                 <button
                   title="Nuevo archivo"
-                  onClick={(e) => { e.stopPropagation(); setNewItemParent(entry.path); setNewItemType('file'); }}
+                  onClick={(e) => { e.stopPropagation(); startCreateIn(entry.path, 'file'); }}
                 >
                   <IconFilePlus size={13} />
                 </button>
                 <button
                   title="Nueva carpeta"
-                  onClick={(e) => { e.stopPropagation(); setNewItemParent(entry.path); setNewItemType('dir'); }}
+                  onClick={(e) => { e.stopPropagation(); startCreateIn(entry.path, 'dir'); }}
                 >
                   <IconFolderPlus size={13} />
                 </button>
@@ -529,15 +547,15 @@ export function FileTree() {
         <span className="filetree__actions">
           <button
             className="icon-btn"
-            title="Nuevo archivo"
-            onClick={() => { setNewItemParent(rootPath); setNewItemType('file'); }}
+            title={`Nuevo archivo en ${baseName(createParent())}`}
+            onClick={() => startCreateIn(createParent(), 'file')}
           >
             <IconFilePlus size={15} />
           </button>
           <button
             className="icon-btn"
-            title="Nueva carpeta"
-            onClick={() => { setNewItemParent(rootPath); setNewItemType('dir'); }}
+            title={`Nueva carpeta en ${baseName(createParent())}`}
+            onClick={() => startCreateIn(createParent(), 'dir')}
           >
             <IconFolderPlus size={15} />
           </button>

@@ -76,7 +76,15 @@
   overflow-y: hidden;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg);
+  /* La barra ocupa su hueco siempre (sin saltos de layout) pero solo se ve
+     al pasar el ratón por la tira de pestañas, como en VSCode. */
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.15s ease;
+}
+
+.editor-tabs:hover {
+  scrollbar-color: rgba(var(--ink-rgb), 0.28) transparent;
 }
 
 .editor-tab {

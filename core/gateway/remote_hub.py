@@ -51,6 +51,11 @@ class RemoteHub:
     def get(self, session_id: str) -> RemoteChannel | None:
         return self._channels.get(session_id)
 
+    def live_host_sessions(self) -> list[str]:
+        """Sesiones con el host enganchado ahora mismo. El barrido las refresca
+        para no marcar offline un IDE conectado pero sin actividad de chat."""
+        return [sid for sid, ch in self._channels.items() if ch.host_connected]
+
     def drop(self, session_id: str) -> None:
         ch = self._channels.pop(session_id, None)
         if ch:

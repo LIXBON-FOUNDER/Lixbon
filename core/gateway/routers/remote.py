@@ -158,11 +158,15 @@ async def list_sessions_endpoint(
 ):
     user = cookie_auth_required(lixbon_session, authorization)
     sessions = list_remote_sessions(user["id"])
-    # El estado real de conexión lo da el hub, no la BD
+    # El estado real de conexión lo da el hub, no la BD (que solo se refresca
+    # cuando el host publica eventos o pasa el barrido).
     for sess in sessions:
         ch = hub.get(sess["id"])
-        sess["host_connected"] = bool(ch and ch.host_connected)
+        connected = bool(ch and ch.host_connected)
+        sess["host_connected"] = connected
         sess["controllers"] = len(ch.controllers) if ch else 0
+        if connected and sess["status"] != "ended":
+            sess["status"] = "online"
     return {"sessions": sessions}
 
 

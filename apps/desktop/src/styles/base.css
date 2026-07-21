@@ -379,6 +379,16 @@ p {
 
 /* ── Scrollbars (WebView2) ───────────────────────────────────────────── */
 
+/* Chromium (y por tanto WebView2) ignora TODOS los ::-webkit-scrollbar de un
+   elemento en cuanto este declara scrollbar-width o scrollbar-color, y pinta
+   la barra nativa del sistema. Por eso las superficies con `scrollbar-width:
+   thin` salían con la barra clara de Windows sobre la UI oscura. El estándar
+   va primero y los pseudo-elementos quedan de respaldo. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--ink-rgb), 0.22) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   Text,
   TextInput,
   View,
@@ -75,28 +76,44 @@ function RemoteListView({ onBack, onOpen }) {
   const auth = useAuth();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
   const streamRef = useRef(null);
   const aliveRef = useRef(true);
 
   const load = useCallback(async () => {
     try {
       const res = await api.get('/api/remote/sessions');
-      if (aliveRef.current) setSessions(Array.isArray(res?.sessions) ? res.sessions : []);
-    } catch {
-      // offline: se queda la lista anterior
+      if (!aliveRef.current) return;
+      setSessions(Array.isArray(res?.sessions) ? res.sessions : []);
+      setError(null);
+    } catch (err) {
+      // El fallo se muestra: una lista vacía "porque sí" hacía parecer que el
+      // IDE no había publicado la sesión cuando el problema era la petición.
+      if (aliveRef.current) {
+        setError(err instanceof ApiException ? err.message : 'Sin conexión con el servidor');
+      }
     } finally {
       if (aliveRef.current) setLoading(false);
     }
   }, [api]);
 
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
   // Suscripción en vivo: cuando se ejecuta /remote en el IDE/CLI, la sesión
-  // aparece aquí al instante sin refrescar.
+  // aparece aquí al instante sin refrescar. Cada (re)conexión relee la lista:
+  // los avisos emitidos mientras el stream estaba caído no se reenvían, así
+  // que sin esto una sesión creada durante el corte no aparecía nunca.
   useEffect(() => {
     aliveRef.current = true;
-    load();
     let backoff = 2000;
     const connect = () => {
       if (!aliveRef.current) return;
+      load();
       streamRef.current = openEventStream({
         base: api.base,
         token: auth.apiKey,
@@ -106,10 +123,20 @@ function RemoteListView({ onBack, onOpen }) {
           if (ev.type === 'session_created' && ev.session) {
             setSessions((cur) => [ev.session, ...cur.filter((sx) => sx.id !== ev.session.id)]);
           } else if (ev.type === 'session_online' || ev.type === 'session_offline') {
-            const status = ev.type === 'session_online' ? 'online' : 'offline';
-            setSessions((cur) => cur.map((sx) => (sx.id === ev.session_id ? { ...sx, status } : sx)));
+            const online = ev.type === 'session_online';
+            setSessions((cur) =>
+              cur.map((sx) =>
+                sx.id === ev.session_id
+                  ? { ...sx, status: online ? 'online' : 'offline', host_connected: online }
+                  : sx,
+              ),
+            );
           } else if (ev.type === 'session_ended') {
-            setSessions((cur) => cur.map((sx) => (sx.id === ev.session_id ? { ...sx, status: 'ended' } : sx)));
+            setSessions((cur) =>
+              cur.map((sx) =>
+                sx.id === ev.session_id ? { ...sx, status: 'ended', host_connected: false } : sx,
+              ),
+            );
           }
         },
         onEnd: () => setTimeout(connect, backoff),
@@ -134,22 +161,35 @@ function RemoteListView({ onBack, onOpen }) {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={c.inkSoft} />
         </View>
-      ) : sessions.length === 0 ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 12 }}>
-          <Icon name="activity" size={30} color={c.inkSoft} />
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 17, color: c.ink, textAlign: 'center' }}>
-            Sin sesiones remotas
-          </Text>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 14, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
-            Ejecuta /remote en el IDE o el CLI de Lixbon y la sesión aparecerá aquí
-            al instante para controlarla desde el teléfono.
-          </Text>
-        </View>
       ) : (
         <FlatList
           data={sessions}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 14, gap: 10 }}
+          contentContainerStyle={{ padding: 14, gap: 10, flexGrow: 1 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.inkSoft} />
+          }
+          ListHeaderComponent={
+            error ? (
+              <View style={{ padding: 12, borderRadius: 12, backgroundColor: c.dangerSoft }}>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{error}</Text>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, gap: 12 }}>
+              <Icon name="activity" size={30} color={c.inkSoft} />
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 17, color: c.ink, textAlign: 'center' }}>
+                Sin sesiones remotas
+              </Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 14, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
+                Ejecuta /remote en el IDE o el CLI de Lixbon y la sesión aparecerá aquí
+                al instante. Tiene que ser la misma cuenta Lixbon y el mismo servidor
+                ({api.base.replace(/^https?:\/\//, '')}). Desliza hacia abajo para
+                actualizar.
+              </Text>
+            </View>
+          }
           renderItem={({ item }) => <SessionCard session={item} onPress={() => onOpen(item)} />}
         />
       )}
@@ -159,8 +199,13 @@ function RemoteListView({ onBack, onOpen }) {
 
 function SessionCard({ session, onPress }) {
   const c = useColors();
-  const online = session.status === 'online';
   const ended = session.status === 'ended';
+  // host_connected lo calcula el gateway desde el hub y es la verdad viva; el
+  // status de la BD puede ir por detrás (el barrido corre cada pocos minutos).
+  const online =
+    !ended && (typeof session.host_connected === 'boolean'
+      ? session.host_connected
+      : session.status === 'online');
   return (
     <Pressable
       onPress={ended ? undefined : onPress}
