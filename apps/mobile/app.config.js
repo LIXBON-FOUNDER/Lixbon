@@ -4,6 +4,13 @@
 // Iconos: generados desde apps/web/public/favicon.svg (rombo de la marca).
 const { version } = require('./package.json');
 
+// versionCode DERIVADO de la versión: Android se niega a instalar un APK cuyo
+// versionCode no sea mayor que el instalado, así que dejarlo fijo mientras
+// sube la versión hace que la app "no actualice" al descargarla.
+// 0.3.0 → 300 · 1.2.3 → 10203 (monotónico mientras crezca la versión).
+const [major, minor, patch] = version.split('.').map((n) => parseInt(n, 10) || 0);
+const versionCode = major * 10000 + minor * 100 + patch;
+
 module.exports = {
   expo: {
     name: 'Lixbon',
@@ -18,7 +25,7 @@ module.exports = {
     scheme: 'lixbon',
     android: {
       package: 'com.usuario.lixbon',
-      versionCode: 2,
+      versionCode,
       edgeToEdgeEnabled: true,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
