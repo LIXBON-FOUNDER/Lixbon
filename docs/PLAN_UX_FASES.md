@@ -62,6 +62,7 @@ adornos: es una que **repite las mismas decisiones** en todas partes.
 |---|---|---|
 | F0 | Correcciones que bloquean el uso diario | ✅ hecha |
 | F1 | CLI: lenguaje de interacción y catálogo de comandos | ✅ hecha |
+| F1.5 | Móvil: teclado, cabecera de chat, historial unificado y comandos en remoto | ✅ hecha |
 | F2 | CLI: funciones de trabajo real | ⬜ pendiente |
 | F3 | IDE: identidad visual propia | ⬜ pendiente |
 | F4 | IDE: funciones que hoy obligan a salir del IDE | ⬜ pendiente |
@@ -126,6 +127,42 @@ Criterios de aceptación:
 
 - `/model` con 20 modelos se resuelve escribiendo tres letras.
 - Ningún comando de `COMMAND_SPECS` se queda sin handler (verificado en CI).
+
+---
+
+### F1.5 · Móvil: teclado, cabecera, historial y comandos en remoto ✅
+
+**Objetivo.** Que la app deje de ser una vista reducida del chat de la web y
+hable el mismo idioma que el CLI.
+
+Entregables:
+
+- **Teclado.** Con `edgeToEdgeEnabled` la ventana ya no se redimensiona sola, así
+  que `adjustResize` dejó de tapar el hueco: el compositor quedaba **debajo** del
+  teclado y no se veía lo que se escribía. Se envuelve el chat, el chat remoto,
+  el login y los diálogos en `KeyboardAvoidingView` con `behavior="padding"`
+  (React Native mide el teclado con `WindowInsets.ime()` y descuenta la barra de
+  navegación, por eso el inset inferior del compositor **suma** en vez de
+  duplicar).
+- **Cabecera de conversación** (`ui.ChatHeader`): título + subtítulo con el
+  contexto real (modelo, origen, host, estado) y menú `⋮` de opciones. El bloque
+  central también es pulsable: el `⋮` es un atajo, no el único camino.
+- **Historial unificado.** El *sidebar* pedía `?source=web` fijo, y por eso el
+  historial del CLI y del IDE **no aparecía nunca**. Ahora lista todas las
+  superficies con chips `Todo / App / CLI / IDE` y un distintivo de origen por
+  conversación. El gateway expone `source` en `/api/conversations`; seguir una
+  conversación del CLI desde el móvil **no** le cambia el origen.
+- **Comandos en el chat remoto.** El host publica en el `hello` los comandos que
+  acepta (`REMOTE_COMMANDS`), la app los ofrece mientras se escribe `/…` y el
+  host responde con un evento `notice` que se pinta como salida del equipo, no
+  como algo dicho por el modelo. Un host antiguo no publica nada y la app cae a
+  su catálogo de reserva.
+
+Criterios de aceptación:
+
+- Escribir en el chat con el teclado abierto muestra siempre el texto.
+- Una conversación empezada en el CLI se abre desde el móvil y sigue marcada CLI.
+- `/model` desde la app cambia el modelo del host y contesta con el nombre nuevo.
 
 ---
 

@@ -17,6 +17,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { DARK, FONTS, LIGHT, RADIUS_BOX, RADIUS_PILL } from '../theme';
 import { usePrefs } from '../state';
+import Icon from './Icon';
 
 // ── Tema activo ──────────────────────────────────────────────────────────────
 
@@ -328,6 +329,119 @@ export function ScreenTitle({ children }) {
     >
       {children}
     </Text>
+  );
+}
+
+/// Cabecera de conversación: acción izquierda, bloque central de título con
+/// subtítulo bajo él, y menú de opciones a la derecha. El título es la única
+/// pieza que crece; el subtítulo lleva el contexto (modelo, host, estado) que
+/// antes había que adivinar. Todo el bloque central es pulsable cuando hay
+/// opciones, así que el ⋮ es un atajo y no el único camino.
+export function ChatHeader({
+  title,
+  subtitle,
+  onLeading,
+  leadingIcon = 'menu',
+  onOptions,
+  dot = null, // 'live' | 'idle' | null — punto de estado antes del título
+  divider = false,
+}) {
+  const c = useColors();
+  const dotColor = dot === 'live' ? c.accent : c.inkMuted;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 6,
+        borderBottomWidth: divider ? 1 : 0,
+        borderBottomColor: c.borderSoft,
+      }}
+    >
+      <IconButton onPress={onLeading} size={40}>
+        <Icon name={leadingIcon} size={20} color={c.ink} />
+      </IconButton>
+
+      <Pressable
+        onPress={onOptions}
+        disabled={!onOptions}
+        style={({ pressed }) => ({
+          flex: 1,
+          alignItems: 'center',
+          paddingVertical: 2,
+          borderRadius: 12,
+          backgroundColor: pressed && onOptions ? c.pressed : 'transparent',
+        })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, maxWidth: '100%' }}>
+          {dot !== null && (
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
+          )}
+          <Text
+            numberOfLines={1}
+            style={{ flexShrink: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15.5, color: c.ink }}
+          >
+            {title}
+          </Text>
+        </View>
+        {!!subtitle && (
+          <Text
+            numberOfLines={1}
+            style={{
+              maxWidth: '100%',
+              marginTop: 1,
+              fontFamily: FONTS.ui,
+              fontSize: 12,
+              color: c.inkMuted,
+            }}
+          >
+            {subtitle}
+          </Text>
+        )}
+      </Pressable>
+
+      {onOptions ? (
+        <IconButton onPress={onOptions} size={40}>
+          <Icon name="dots" size={19} color={c.ink} />
+        </IconButton>
+      ) : (
+        <View style={{ width: 40 }} />
+      )}
+    </View>
+  );
+}
+
+/// Distintivo de la superficie donde nació una conversación (app / CLI / IDE).
+export const SOURCE_META = {
+  cli: { label: 'CLI', icon: 'terminal' },
+  ide: { label: 'IDE', icon: 'panel' },
+  web: { label: 'App', icon: 'chat' },
+  api: { label: 'API', icon: 'key' },
+};
+
+export function SourceBadge({ source, muted = false }) {
+  const c = useColors();
+  const meta = SOURCE_META[source] || SOURCE_META.web;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingLeft: 6,
+        paddingRight: 8,
+        paddingVertical: 2,
+        borderRadius: RADIUS_PILL,
+        backgroundColor: muted ? 'transparent' : c.bgInput,
+      }}
+    >
+      <Icon name={meta.icon} size={11} color={c.inkMuted} strokeWidth={1.8} />
+      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 10.5, color: c.inkMuted }}>
+        {meta.label}
+      </Text>
+    </View>
   );
 }
 

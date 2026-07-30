@@ -23,9 +23,19 @@ import { useApi, useAuth, useChat } from '../state';
 import { FONTS, RADIUS_PILL } from '../theme';
 import Icon from './Icon';
 import { useDialogs } from './dialogs';
-import { IconButton, LixLogo, PlanPill, useColors, useReducedMotion } from './ui';
+import { IconButton, LixLogo, PlanPill, SourceBadge, useColors, useReducedMotion } from './ui';
 
 const MENU_ITEM_HEIGHT = 46;
+
+// Filtros de superficie del historial. "Todo" no manda `source`, y el gateway
+// responde con las conversaciones de todas las superficies cuando la petición
+// va autenticada con API key — que es siempre el caso de la app.
+const SOURCE_FILTERS = [
+  { key: '', label: 'Todo' },
+  { key: 'web', label: 'App' },
+  { key: 'cli', label: 'CLI' },
+  { key: 'ide', label: 'IDE' },
+];
 
 export default function Sidebar({ open, onClose, onNavigate }) {
   const c = useColors();
@@ -37,7 +47,9 @@ export default function Sidebar({ open, onClose, onNavigate }) {
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState('');
   const queryRef = useRef('');
+  const filterRef = useRef('');
   const debounceRef = useRef(null);
   const loadedOnce = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -45,8 +57,12 @@ export default function Sidebar({ open, onClose, onNavigate }) {
   const load = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const q = queryRef.current;
-      const qs = q ? `?q=${encodeURIComponent(q)}&source=web` : '?source=web';
+      const params = [];
+      if (queryRef.current) params.push(`q=${encodeURIComponent(queryRef.current)}`);
+      // Sin `source` el gateway devuelve TODAS las superficies. Antes iba fijo
+      // a "web", y por eso el historial del CLI y del IDE no aparecía nunca.
+      if (filterRef.current) params.push(`source=${filterRef.current}`);
+      const qs = params.length ? `?${params.join('&')}` : '';
       const res = await api.get(`/api/conversations${qs}`);
       setItems(
         (Array.isArray(res?.conversations) ? res.conversations : []).filter(
@@ -79,8 +95,19 @@ export default function Sidebar({ open, onClose, onNavigate }) {
     debounceRef.current = setTimeout(() => load({ silent: true }), 300);
   };
 
+  const onFilter = (key) => {
+    if (key === sourceFilter) return;
+    filterRef.current = key;
+    setSourceFilter(key);
+    load({ silent: true });
+  };
+
   const openConversation = (item) => {
-    chat.openConversation(item.id, typeof item.title === 'string' ? item.title : null);
+    chat.openConversation(
+      item.id,
+      typeof item.title === 'string' ? item.title : null,
+      typeof item.source === 'string' ? item.source : 'web',
+    );
     onClose();
   };
 
@@ -213,7 +240,9 @@ export default function Sidebar({ open, onClose, onNavigate }) {
         />
       </View>
 
-      {/* Historial */}
+      {/* Historial: una sola lista con todas las superficies y chips para
+          acotarla. El CLI y el IDE guardan sus conversaciones en la misma
+          cuenta, así que aquí se ven todas. */}
       <Text
         style={{
           fontFamily: FONTS.uiMedium,
@@ -222,11 +251,41 @@ export default function Sidebar({ open, onClose, onNavigate }) {
           color: c.inkMuted,
           paddingHorizontal: 20,
           paddingTop: 16,
-          paddingBottom: 6,
+          paddingBottom: 8,
         }}
       >
         HISTORIAL
       </Text>
+      <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingBottom: 8 }}>
+        {SOURCE_FILTERS.map((f) => {
+          const active = sourceFilter === f.key;
+          return (
+            <Pressable
+              key={f.key || 'all'}
+              onPress={() => onFilter(f.key)}
+              style={({ pressed }) => ({
+                flex: 1,
+                alignItems: 'center',
+                paddingVertical: 6,
+                borderRadius: RADIUS_PILL,
+                borderWidth: 1,
+                borderColor: active ? 'transparent' : c.borderSoft,
+                backgroundColor: active ? c.primary : pressed ? c.pressed : 'transparent',
+              })}
+            >
+              <Text
+                style={{
+                  fontFamily: active ? FONTS.uiMedium : FONTS.ui,
+                  fontSize: 12,
+                  color: active ? c.onPrimary : c.inkSoft,
+                }}
+              >
+                {f.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <View style={{ flex: 1 }}>
         {loading && items.length === 0 ? (
           <View style={{ paddingTop: 30, alignItems: 'center' }}>
@@ -243,7 +302,13 @@ export default function Sidebar({ open, onClose, onNavigate }) {
               color: c.inkMuted,
             }}
           >
-            {queryRef.current ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}
+            {queryRef.current
+              ? 'Sin resultados.'
+              : sourceFilter
+                ? `Aún no hay conversaciones desde ${
+                    SOURCE_FILTERS.find((f) => f.key === sourceFilter)?.label
+                  }.`
+                : 'Aún no tienes conversaciones.'}
           </Text>
         ) : (
           <FlatList
@@ -285,6 +350,11 @@ export default function Sidebar({ open, onClose, onNavigate }) {
                   >
                     {item.title || 'Sin título'}
                   </Text>
+                  {/* Con el historial unificado hay que poder distinguir de un
+                      vistazo qué salió del CLI, del IDE o de la propia app. */}
+                  {!sourceFilter && item.source && item.source !== 'web' && (
+                    <SourceBadge source={item.source} />
+                  )}
                 </Pressable>
               );
             }}

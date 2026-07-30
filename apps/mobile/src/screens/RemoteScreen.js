@@ -3,10 +3,11 @@
 // transcript del agente en streaming, envío de prompts, interrupción y
 // tarjetas de aprobación. Todo se ejecuta en la máquina host; esta pantalla
 // es un mando a distancia.
-import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Pressable,
   RefreshControl,
   Text,
@@ -14,17 +15,25 @@ import {
   View,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { FadeUp, IconButton, useColors } from '../components/ui';
+import { ChatHeader, FadeUp, IconButton, useColors } from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
 
 const SOURCE_LABEL = { cli: 'CLI', ide: 'IDE' };
+
+// Catálogo de reserva: si el host es de una versión anterior a que el `hello`
+// publicara sus comandos, la barra sigue ofreciendo lo básico en vez de nada.
+const FALLBACK_COMMANDS = [
+  { name: 'help', args: '', description: 'Ver los comandos disponibles' },
+  { name: 'new', args: '', description: 'Empezar una conversación nueva' },
+  { name: 'status', args: '', description: 'Estado de la sesión y del host' },
+];
 
 export default function RemoteScreen({ onBack, initialToken = null }) {
   const api = useApi();
@@ -259,7 +268,7 @@ function RemoteSessionView({ session, onBack }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
-  const { confirm, toast } = useDialogs();
+  const { confirm, sheet, toast } = useDialogs();
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -350,94 +359,102 @@ function RemoteSessionView({ session, onBack }) {
   };
 
   const title = state.meta?.title || session.title || 'Sesión remota';
-  const subtitle = state.ended
+  const status = state.ended
     ? 'Sesión terminada'
     : !state.hostConnected
       ? 'Host sin conexión…'
       : state.agentState === 'thinking'
         ? 'El agente está trabajando…'
         : 'Conectado · listo';
+  const subtitle = [
+    SOURCE_LABEL[state.meta?.source || session.source],
+    state.meta?.machine,
+    status,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+
+  const commands = state.meta?.commands?.length ? state.meta.commands : FALLBACK_COMMANDS;
+
+  const options = async () => {
+    const action = await sheet({
+      title,
+      items: [
+        { label: 'Ver comandos', icon: 'slash', value: 'commands' },
+        ...(state.agentState === 'thinking'
+          ? [{ label: 'Interrumpir al agente', icon: 'stop', value: 'interrupt' }]
+          : []),
+        ...(state.ended
+          ? []
+          : [{ label: 'Terminar sesión remota', icon: 'logout', danger: true, value: 'end' }]),
+      ],
+    });
+    if (action === 'commands') setInput('/');
+    if (action === 'interrupt') interrupt();
+    if (action === 'end') endSession();
+  };
 
   const items = [...state.items].reverse();
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      {/* Cabecera */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          paddingHorizontal: 10,
-          paddingVertical: 8,
-          borderBottomWidth: 1,
-          borderBottomColor: c.borderSoft,
-        }}
-      >
-        <IconButton onPress={onBack} size={38}>
-          <Icon name="arrow-left" size={20} color={c.ink} />
-        </IconButton>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ChatHeader
+          title={title}
+          subtitle={subtitle}
+          onLeading={onBack}
+          leadingIcon="arrow-left"
+          onOptions={options}
+          dot={state.hostConnected && !state.ended ? 'live' : 'idle'}
+          divider
+        />
+
+        {/* Transcript */}
         <View style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>
-            {title}
-          </Text>
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12, color: state.ended ? c.danger : c.inkMuted }}>
-            {SOURCE_LABEL[state.meta?.source || session.source] || ''}
-            {state.meta?.machine ? ` · ${state.meta.machine}` : ''}
-            {'  ·  '}
-            {subtitle}
-          </Text>
+          {state.items.length === 0 ? (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 10 }}>
+              {state.hostConnected ? (
+                <>
+                  <Icon name="chat" size={26} color={c.inkSoft} />
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, textAlign: 'center' }}>
+                    Sesión conectada. Escribe abajo para pedirle algo al agente,
+                    o empieza con «/» para usar un comando.
+                  </Text>
+                </>
+              ) : (
+                <ActivityIndicator color={c.inkSoft} />
+              )}
+            </View>
+          ) : (
+            <FlatList
+              inverted
+              data={items}
+              keyExtractor={(item) => item.key}
+              contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 14 }}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => <TranscriptRow item={item} />}
+            />
+          )}
         </View>
-        {!state.ended && (
-          <IconButton onPress={endSession} size={38}>
-            <Icon name="logout" size={18} color={c.danger} />
-          </IconButton>
-        )}
-      </View>
 
-      {/* Transcript */}
-      <View style={{ flex: 1 }}>
-        {state.items.length === 0 ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 10 }}>
-            {state.hostConnected ? (
-              <>
-                <Icon name="chat" size={26} color={c.inkSoft} />
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, textAlign: 'center' }}>
-                  Sesión conectada. Escribe abajo para pedirle algo al agente.
-                </Text>
-              </>
-            ) : (
-              <ActivityIndicator color={c.inkSoft} />
-            )}
-          </View>
-        ) : (
-          <FlatList
-            inverted
-            data={items}
-            keyExtractor={(item) => item.key}
-            contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 14 }}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => <TranscriptRow item={item} />}
-          />
-        )}
-      </View>
+        {/* Aprobaciones pendientes */}
+        {state.approvals.map((a) => (
+          <ApprovalCard key={a.id} approval={a} onDecide={approve} />
+        ))}
 
-      {/* Aprobaciones pendientes */}
-      {state.approvals.map((a) => (
-        <ApprovalCard key={a.id} approval={a} onDecide={approve} />
-      ))}
-
-      {/* Compositor */}
-      <RemoteComposer
-        input={input}
-        onChangeInput={setInput}
-        onSend={sendPrompt}
-        onInterrupt={interrupt}
-        thinking={state.agentState === 'thinking'}
-        disabled={state.ended || !state.hostConnected}
-        sending={sending}
-        ended={state.ended}
-      />
+        {/* Compositor */}
+        <RemoteComposer
+          input={input}
+          onChangeInput={setInput}
+          onSend={sendPrompt}
+          onInterrupt={interrupt}
+          commands={commands}
+          thinking={state.agentState === 'thinking'}
+          disabled={state.ended || !state.hostConnected}
+          sending={sending}
+          ended={state.ended}
+        />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -496,6 +513,28 @@ function TranscriptRow({ item }) {
           {!item.running && item.result ? `\n${firstLine(item.result)}` : ''}
         </Text>
       </View>
+    );
+  }
+  if (item.kind === 'notice') {
+    // Respuesta del host a un comando: monoespaciada y sin burbuja, para que
+    // se lea como salida del equipo y no como algo que dijo el modelo.
+    return (
+      <FadeUp style={{ marginVertical: 6 }}>
+        <View
+          style={{
+            paddingHorizontal: 13,
+            paddingVertical: 10,
+            borderRadius: 12,
+            borderLeftWidth: 2,
+            borderLeftColor: c.accent,
+            backgroundColor: c.bgSecondary,
+          }}
+        >
+          <Text style={{ fontFamily: 'monospace', fontSize: 12.5, lineHeight: 19, color: c.ink }}>
+            {item.text}
+          </Text>
+        </View>
+      </FadeUp>
     );
   }
   if (item.kind === 'error') {
@@ -579,11 +618,93 @@ function ApprovalCard({ approval, onDecide }) {
   );
 }
 
-function RemoteComposer({ input, onChangeInput, onSend, onInterrupt, thinking, disabled, sending, ended }) {
+function RemoteComposer({
+  input,
+  onChangeInput,
+  onSend,
+  onInterrupt,
+  commands,
+  thinking,
+  disabled,
+  sending,
+  ended,
+}) {
   const c = useColors();
+  const insets = useSafeAreaInsets();
   const canSend = !!input.trim() && !disabled && !sending;
+
+  // El menú de comandos aparece mientras se escribe el nombre (antes del primer
+  // espacio): a partir de ahí lo que se teclea es el argumento.
+  const query = useMemo(() => {
+    if (!input.startsWith('/') || input.includes(' ') || input.includes('\n')) return null;
+    return input.slice(1).toLowerCase();
+  }, [input]);
+  const matches = useMemo(
+    () => (query === null ? [] : commands.filter((cmd) => cmd.name.startsWith(query))),
+    [query, commands],
+  );
+
+  // Igual que en el CLI: sin argumento se envía de una; con argumento se deja
+  // el nombre escrito y el foco puesto para completarlo.
+  const pick = (cmd) => {
+    if (cmd.args) onChangeInput(`/${cmd.name} `);
+    else onChangeInput(`/${cmd.name}`);
+  };
+
   return (
-    <View style={{ paddingHorizontal: 14, paddingTop: 6, paddingBottom: 12 }}>
+    <View
+      style={{
+        paddingHorizontal: 14,
+        paddingTop: 6,
+        // Edge-to-edge: sin este inset la barra de navegación tapa el botón.
+        paddingBottom: Math.max(insets.bottom, 12),
+      }}
+    >
+      {matches.length > 0 && !ended && (
+        <View
+          style={{
+            marginBottom: 8,
+            borderRadius: RADIUS_BOX,
+            borderWidth: 1,
+            borderColor: c.borderSoft,
+            backgroundColor: c.bgSecondary,
+            overflow: 'hidden',
+          }}
+        >
+          {matches.slice(0, 6).map((cmd, i) => (
+            <Pressable
+              key={cmd.name}
+              onPress={() => pick(cmd)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+                paddingHorizontal: 14,
+                paddingVertical: 11,
+                borderTopWidth: i === 0 ? 0 : 1,
+                borderTopColor: c.borderSoft,
+                backgroundColor: pressed ? c.pressed : 'transparent',
+              })}
+            >
+              <Text style={{ fontFamily: 'monospace', fontSize: 14, color: c.ink }}>
+                /{cmd.name}
+              </Text>
+              {!!cmd.args && (
+                <Text style={{ fontFamily: 'monospace', fontSize: 12.5, color: c.inkMuted }}>
+                  {cmd.args}
+                </Text>
+              )}
+              <Text
+                numberOfLines={1}
+                style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}
+              >
+                {cmd.description}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
       <View
         style={{
           backgroundColor: c.bgInput,
@@ -612,7 +733,26 @@ function RemoteComposer({ input, onChangeInput, onSend, onInterrupt, thinking, d
             color: c.ink,
           }}
         />
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+          {/* Atajo a los comandos: el «/» no es descubrible por sí solo. */}
+          <Pressable
+            onPress={() => onChangeInput(input.startsWith('/') ? '' : '/')}
+            disabled={ended}
+            hitSlop={6}
+            style={({ pressed }) => ({
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: query !== null ? 0 : 1,
+              borderColor: c.borderSoft,
+              backgroundColor: query !== null ? c.primary : pressed ? c.pressed : 'transparent',
+            })}
+          >
+            <Icon name="slash" size={17} color={query !== null ? c.onPrimary : c.ink} />
+          </Pressable>
+
           <Pressable
             onPress={thinking ? onInterrupt : onSend}
             disabled={thinking ? disabled : !canSend}

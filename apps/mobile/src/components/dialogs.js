@@ -6,7 +6,6 @@ import {
   Animated,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   Text,
   TextInput,
@@ -91,8 +90,11 @@ export function DialogProvider({ children }) {
 
       {/* Prompt / Confirm */}
       <Modal visible={!!dialog} transparent animationType="fade" onRequestClose={() => closeDialog(dialog?.kind === 'confirm' ? false : null)}>
+        {/* 'padding' también en Android: con edge-to-edge la ventana ya no se
+            redimensiona sola, así que dejarlo en undefined dejaba el campo de
+            texto del diálogo debajo del teclado. */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           style={{ flex: 1, backgroundColor: c.scrim, justifyContent: 'center', padding: 26 }}
         >
           <View

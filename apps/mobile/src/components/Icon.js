@@ -43,6 +43,14 @@ const ICONS = {
   'chevron-down': { paths: ['m6 9 6 6 6-6'] },
   'chevron-up': { paths: ['m6 15 6-6 6 6'] },
   stop: { rects: [{ x: 6, y: 6, width: 12, height: 12, rx: 2 }] },
+  // Menú de opciones de la cabecera: tres puntos verticales. Los "puntos" son
+  // segmentos de longitud cero con extremo redondo (mismo truco que la web),
+  // así heredan el grosor de trazo del resto del set en vez de ser círculos.
+  dots: { paths: ['M12 5h.01', 'M12 12h.01', 'M12 19h.01'], dotted: true },
+  // Superficies: CLI (terminal), IDE (panel, ya existe) y app (chat).
+  terminal: { paths: ['m4 17 6-6-6-6', 'M12 19h8'] },
+  // Prefijo de los slash-commands.
+  slash: { paths: ['M7 20 17 4'] },
   // Sugerencias del hero del chat: investigar (diana), analizar (documento
   // a dos columnas) y comparar (dos series de datos).
   target: { circles: [{ cx: 12, cy: 12, r: 9 }, { cx: 12, cy: 12, r: 3.2 }] },
@@ -59,7 +67,8 @@ export default function Icon({ name, size = 20, color = '#000', strokeWidth = 1.
   const def = ICONS[name] || { paths: [] };
   const common = {
     stroke: color,
-    strokeWidth,
+    // Los iconos de puntos necesitan trazo grueso para leerse como puntos.
+    strokeWidth: def.dotted ? Math.max(strokeWidth, 2.2) : strokeWidth,
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
     fill: 'none',

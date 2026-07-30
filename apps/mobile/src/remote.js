@@ -138,7 +138,20 @@ export function remoteReducer(state, ev) {
         meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
       };
     case 'hello':
-      return { ...s, meta: { source: ev.source, title: ev.title, machine: ev.machine, mode: ev.mode, model: ev.model } };
+      return {
+        ...s,
+        meta: {
+          source: ev.source,
+          title: ev.title,
+          machine: ev.machine,
+          mode: ev.mode,
+          model: ev.model,
+          // El host publica los comandos que acepta; cada superficie tiene los
+          // suyos, así que la app no los adivina (con un host viejo llega
+          // undefined y se cae al catálogo por defecto).
+          commands: Array.isArray(ev.commands) ? ev.commands : null,
+        },
+      };
     case 'snapshot':
       return { ...s, items: mapSnapshotMessages(ev.messages) };
     case 'user_msg':
@@ -185,6 +198,10 @@ export function remoteReducer(state, ev) {
       return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit' }] };
     case 'approval_resolved':
       return { ...s, approvals: s.approvals.filter((a) => a.id !== ev.id) };
+    case 'notice':
+      // Respuesta del host a un slash-command: no es del modelo, así que se
+      // pinta como una nota del sistema y no como una burbuja del asistente.
+      return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'notice', text: ev.text || '' })] };
     case 'error':
       return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':

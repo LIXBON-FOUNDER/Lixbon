@@ -4,7 +4,15 @@
 // etiqueta sobre el borde, CTA pill grande, enlaces olivo subrayados y
 // botones sociales Google (blanco) / Apple (tinta).
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDialogs } from '../components/dialogs';
@@ -137,6 +145,10 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: screenBg }}>
+      {/* Sin esto el teclado tapaba los campos de abajo: con edge-to-edge la
+          ventana no se encoge, así que el ScrollView tampoco tenía nada que
+          desplazar y el formulario quedaba a medias. */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
@@ -301,6 +313,7 @@ export default function AuthScreen() {
           <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>lixbon.com</Text>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

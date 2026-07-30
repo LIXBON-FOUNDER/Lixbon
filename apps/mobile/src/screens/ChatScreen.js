@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Linking,
   Pressable,
   Text,
@@ -16,12 +17,12 @@ import {
   View,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { FadeUp, IconButton, useColors } from '../components/ui';
-import { useAuth, useChat } from '../state';
+import { ChatHeader, FadeUp, SOURCE_META, useColors } from '../components/ui';
+import { useApi, useAuth, useChat } from '../state';
 import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
 
 // Atajos del hero: rellenan el compositor con un arranque de conversación en
@@ -36,12 +37,75 @@ export default function ChatScreen({ onMenu }) {
   const c = useColors();
   const chat = useChat();
   const auth = useAuth();
+  const api = useApi();
+  const { sheet, prompt, confirm, toast } = useDialogs();
   const [input, setInput] = useState(chat.draftRef.current);
 
   React.useEffect(() => {
     if (chat.models.length === 0) chat.loadModels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Menú ⋮ de la cabecera. Las acciones sobre la conversación solo tienen
+  // sentido cuando ya existe en el servidor, así que se ocultan si no la hay.
+  const openOptions = async () => {
+    const saved = !!chat.conversationId && chat.messages.length > 0;
+    const action = await sheet({
+      title: chat.title || 'Nueva conversación',
+      items: [
+        { label: 'Nueva conversación', icon: 'plus', value: 'new' },
+        { label: 'Cambiar de modelo', icon: 'activity', value: 'model' },
+        ...(saved
+          ? [
+              { label: 'Renombrar', icon: 'pencil', value: 'rename' },
+              { label: 'Eliminar', icon: 'trash', danger: true, value: 'delete' },
+            ]
+          : []),
+      ],
+    });
+    if (action === 'new') chat.newChat();
+    if (action === 'model') await pickModel();
+    if (action === 'rename') {
+      const value = await prompt({
+        title: 'Renombrar conversación',
+        placeholder: 'Nuevo título',
+        initialValue: chat.title || '',
+        confirmLabel: 'Guardar',
+      });
+      const trimmed = (value || '').trim();
+      if (!trimmed) return;
+      try {
+        await api.patch(`/api/conversations/${chat.conversationId}`, { title: trimmed });
+        chat.setTitle(trimmed);
+      } catch {
+        toast('No se pudo renombrar la conversación');
+      }
+    }
+    if (action === 'delete') {
+      const ok = await confirm({
+        title: 'Eliminar conversación',
+        message: `"${chat.title || 'Sin título'}" se eliminará definitivamente.`,
+        confirmLabel: 'Eliminar',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await api.delete(`/api/conversations/${chat.conversationId}`);
+        chat.newChat();
+      } catch {
+        toast('No se pudo eliminar la conversación');
+      }
+    }
+  };
+
+  const pickModel = async () => {
+    const value = await sheet({
+      title: 'Modelo',
+      emptyLabel: 'No hay modelos disponibles.',
+      items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model })),
+    });
+    if (value) chat.setModel(value);
+  };
 
   // El draft sobrevive al cambio de pestaña (vive en el contexto).
   const onChangeInput = (v) => {
@@ -60,72 +124,51 @@ export default function ChatScreen({ onMenu }) {
   const empty = chat.messages.length === 0 && !chat.loadingMessages;
   const firstName = typeof auth.user?.first_name === 'string' ? auth.user.first_name : null;
 
+  // Subtítulo: el contexto que antes había que adivinar (modelo activo, si la
+  // conversación viene del CLI o del IDE, y si el modelo está respondiendo).
+  const origin = chat.source && chat.source !== 'web' ? SOURCE_META[chat.source]?.label : '';
+  const subtitle = chat.streaming
+    ? 'Respondiendo…'
+    : [origin, chat.model || (chat.models.length === 0 ? 'Sin modelos' : '')]
+        .filter(Boolean)
+        .join('  ·  ');
+
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      {/* Cabecera: menú (drawer) + título en pill + nueva conversación */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          paddingHorizontal: 10,
-          paddingVertical: 8,
-        }}
-      >
-        <IconButton onPress={onMenu} size={38}>
-          <Icon name="menu" size={20} color={c.ink} />
-        </IconButton>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              maxWidth: '100%',
-              paddingHorizontal: 15,
-              paddingVertical: 7,
-              borderRadius: RADIUS_PILL,
-              backgroundColor: c.bgSecondary,
-            }}
-          >
-            <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 3.5,
-                backgroundColor: chat.streaming ? c.accent : c.accentDeep,
-              }}
-            />
-            <Text
-              numberOfLines={1}
-              style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}
-            >
-              {chat.title || 'Nueva conversación'}
-            </Text>
-          </View>
+      {/* KeyboardAvoidingView es lo que faltaba: con edge-to-edge la ventana ya
+          no se redimensiona sola y el compositor quedaba DEBAJO del teclado, así
+          que no se veía lo que se escribía. React Native mide el teclado con
+          WindowInsets.ime() y descuenta la barra de navegación, por eso el
+          inset inferior del compositor y este padding se suman sin solaparse. */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ChatHeader
+          title={chat.title || 'Nueva conversación'}
+          subtitle={subtitle}
+          onLeading={onMenu}
+          leadingIcon="menu"
+          onOptions={openOptions}
+          dot={chat.streaming ? 'live' : 'idle'}
+        />
+
+        <View style={{ flex: 1 }}>
+          {chat.loadingMessages ? (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              <ActivityIndicator color={c.inkSoft} />
+            </View>
+          ) : empty ? (
+            <Hero firstName={firstName} onPick={onChangeInput} />
+          ) : (
+            <MessageList />
+          )}
         </View>
-        <IconButton onPress={chat.newChat} size={38}>
-          <Icon name="pencil" size={18} color={c.ink} />
-        </IconButton>
-      </View>
 
-      <View style={{ flex: 1 }}>
-        {chat.loadingMessages ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-            <ActivityIndicator color={c.inkSoft} />
-          </View>
-        ) : empty ? (
-          <Hero firstName={firstName} onPick={onChangeInput} />
-        ) : (
-          <MessageList />
-        )}
-      </View>
-
-      <Composer
-        input={input}
-        onChangeInput={onChangeInput}
-        onSend={send}
-      />
+        <Composer
+          input={input}
+          onChangeInput={onChangeInput}
+          onSend={send}
+          onPickModel={pickModel}
+        />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -309,24 +352,23 @@ function MessageList() {
 
 // Compositor (.chat-composer / .chat-input): caja crema redondeada con el
 // texto arriba y una barra inferior de acciones.
-function Composer({ input, onChangeInput, onSend }) {
+function Composer({ input, onChangeInput, onSend, onPickModel }) {
   const c = useColors();
   const chat = useChat();
-  const { sheet } = useDialogs();
-
-  const pickModel = async () => {
-    const value = await sheet({
-      title: 'Modelo',
-      emptyLabel: 'No hay modelos disponibles.',
-      items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model })),
-    });
-    if (value) chat.setModel(value);
-  };
+  const insets = useSafeAreaInsets();
 
   const canSend = !!input.trim() || chat.streaming;
 
   return (
-    <View style={{ paddingHorizontal: 14, paddingTop: 6, paddingBottom: 12 }}>
+    <View
+      style={{
+        paddingHorizontal: 14,
+        paddingTop: 6,
+        // Con edge-to-edge la barra de navegación se superpone al contenido:
+        // sin este inset el compositor quedaba medio tapado por ella.
+        paddingBottom: Math.max(insets.bottom, 12),
+      }}
+    >
       {!!chat.error && (
         <View
           style={{
@@ -403,7 +445,7 @@ function Composer({ input, onChangeInput, onSend }) {
 
             {/* Selector de modelo (.chat-input__model: pill con borde suave) */}
             <Pressable
-              onPress={pickModel}
+              onPress={onPickModel}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',

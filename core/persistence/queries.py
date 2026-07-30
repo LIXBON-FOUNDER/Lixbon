@@ -1499,6 +1499,10 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
         "id": c.id,
         "title": c.title,
         "client_id": c.client_id,
+        # La superficie de origen viaja al cliente: la app la usa para marcar
+        # de dónde salió cada conversación cuando lista todas juntas.
+        # Las legacy (NULL) son de la web, igual que en el filtro de listado.
+        "source": c.source or "web",
         "created_at": c.created_at,
         "updated_at": c.updated_at,
     }
