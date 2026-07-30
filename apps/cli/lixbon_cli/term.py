@@ -207,6 +207,40 @@ def draw_status_line(ansi: str) -> None:
     _write(f"\0337\033[{_status_rows};1H\033[2K{ansi}\033[0m\0338")
 
 
+# ── Repintado de la barra ──────────────────────────────────────────────────
+# prompt_toolkit dibuja con `erase_down()` (ESC[J) en su primer render y al
+# cerrarse: eso BORRA todo lo que hay del cursor hacia abajo, incluida la fila
+# reservada. Como el prompt es el estado normal del CLI, la barra desaparecía
+# nada más pintarla. La solución es repintarla después de cada render de
+# prompt_toolkit (evento `after_render`), no solo cuando cambian los datos.
+
+_status_painter = None  # callable que sabe redibujar la barra (lo pone ChatApp)
+
+
+def set_status_painter(painter) -> None:
+    global _status_painter
+    _status_painter = painter
+
+
+def repaint_status() -> None:
+    """Redibuja la barra si hay fila reservada y alguien sabe pintarla."""
+    if _status_rows and _status_painter is not None:
+        try:
+            _status_painter()
+        except Exception:
+            pass  # la barra nunca puede tumbar la sesión
+
+
+def attach_status_repaint(app) -> None:
+    """Engancha el repintado a los renders de una Application de prompt_toolkit."""
+    if not _status_rows:
+        return
+    try:
+        app.after_render += lambda _: repaint_status()
+    except Exception:
+        pass
+
+
 def is_mintty() -> bool:
     """Git Bash / MSYS (mintty): la stdio son pipes, no una consola Windows."""
     return bool(os.environ.get("MSYSTEM") or os.environ.get("TERM_PROGRAM") == "mintty")

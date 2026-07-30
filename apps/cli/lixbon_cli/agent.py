@@ -24,6 +24,22 @@ MAX_AGENT_STEPS = 12
 
 READ_ONLY_TOOLS = {"list_files", "read_file", "search"}
 
+# Catálogo legible de lo que el agente puede hacer (lo muestra /tools). Es la
+# misma lista que se le describe al modelo en el system prompt, escrita para
+# personas: quien usa el CLI necesita saber qué puede tocar el agente.
+TOOL_SPECS: list[tuple[str, str, str]] = [
+    ("list_files", "path", "Listar el contenido de una carpeta"),
+    ("read_file", "path, start_line?, end_line?", "Leer un archivo (o un rango de líneas)"),
+    ("search", "pattern, path", "Buscar texto en el workspace"),
+    ("write_file", "path, content", "Crear o reemplazar un archivo entero"),
+    ("edit_file", "path, old_text, new_text", "Sustituir un fragmento exacto de un archivo"),
+    ("append_file", "path, content", "Añadir texto al final de un archivo"),
+    ("mkdir", "path", "Crear una carpeta"),
+    ("delete_file", "path", "Eliminar un archivo"),
+    ("rename_file", "src, dst", "Mover o renombrar un archivo"),
+    ("run_command", "command, timeout?", "Ejecutar un comando de shell en el workspace"),
+]
+
 # Recordatorio de una sola vez cuando el modelo "sugiere" código en el chat
 # en vez de aplicarlo con herramientas (vicio típico de los modelos chicos).
 NUDGE_PROMPT = (

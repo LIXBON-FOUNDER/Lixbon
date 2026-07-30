@@ -162,13 +162,20 @@ def pt_style():
         # Prompt de entrada
         "prompt": f"bold {PALETTE['accent']}",
         # Selector interactivo
+        "sel.mark": PALETTE["accent"],
         "sel.title": f"bold {PALETTE['cream']}",
         "sel.hint": PALETTE["dim2"],
+        "sel.count": PALETTE["dim2"],
+        "sel.query": f"bold {PALETTE['accent']}",
+        "sel.scroll": PALETTE["dim2"],
+        "sel.disabled": f"italic {PALETTE['dim2']}",
         "sel.pointer": f"bold {PALETTE['accent']}",
         "sel.active": f"bold {PALETTE['accent']}",
         "sel.active.desc": PALETTE["dim"],
         "sel.option": PALETTE["cream"],
         "sel.option.desc": PALETTE["dim2"],
+        "sel.badge": PALETTE["beige"],
+        "sel.badge.active": f"bold {PALETTE['beige']}",
         # Barra de estado inferior (bottom_toolbar) — fondo propio sutil
         "bottom-toolbar": f"{PALETTE['dim']} bg:#1E1E1A noinherit",
         "bottom-toolbar.dot": f"{PALETTE['accent']} bg:#1E1E1A",

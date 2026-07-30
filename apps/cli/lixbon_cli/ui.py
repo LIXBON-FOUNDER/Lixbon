@@ -2,7 +2,7 @@
 import sys
 from dataclasses import dataclass, field
 
-from lixbon_cli.term import UNICODE_OK, g
+from lixbon_cli.term import UNICODE_OK, attach_status_repaint, g, repaint_status
 from lixbon_cli.theme import PALETTE, make_console, pt_style
 
 
@@ -108,7 +108,12 @@ def render_tips(console) -> None:
     console.print(
         f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
         f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]@ruta[/] para adjuntar una imagen  [lx.dim2]{g('sep')}[/]  "
         f"Ctrl+C dos veces para salir[/]"
+    )
+    console.print(
+        f"[lx.dim2]/help abre el menú de comandos  {g('sep')}  /config los ajustes  "
+        f"{g('sep')}  /doctor revisa terminal y conexión[/]"
     )
 
 
@@ -190,98 +195,262 @@ class Option:
     label: str
     value: object = None
     description: str = ""
+    badge: str = ""       # etiqueta corta a la derecha: "actual", "recomendado"…
+    disabled: bool = False  # se muestra pero no se puede elegir
 
     def __post_init__(self):
         if self.value is None:
             self.value = self.label
 
 
-def select(title: str, options: list, default: int = 0, hint: str = "clic o flechas para elegir"):
-    """Selector inline estilo Claude Code. Devuelve Option.value o None (Esc).
+# Con más opciones que esto el selector se vuelve buscable: escribir filtra en
+# vez de navegar. Por debajo (modo, sí/no) las teclas j/k siguen moviendo, que
+# es lo que espera quien viene de vim y no molesta en menús de 2-3 líneas.
+SEARCH_THRESHOLD = 6
+MAX_VISIBLE = 10  # filas de opciones antes de paginar
 
-    Navegación: ↑/↓ (también j/k), Enter confirma, Esc/Ctrl+C cancela.
-    Mouse: hover mueve la selección, clic confirma.
+
+def select(title: str, options: list, default: int = 0, hint: str = "",
+           searchable: bool | None = None, max_visible: int = MAX_VISIBLE):
+    """Selector inline de la marca. Devuelve Option.value o None (Esc).
+
+    Navegación: ↑/↓ (Ctrl+P/Ctrl+N), PgUp/PgDn, Inicio/Fin. Enter confirma,
+    Esc/Ctrl+C cancela. Mouse: hover mueve la selección, clic confirma y la
+    rueda desplaza. En listas largas escribir filtra (Backspace borra).
     En terminales sin soporte (Git Bash/mintty) degrada a texto plano.
     """
     from lixbon_cli.term import ui_capable
 
     options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
+    if not options:
+        return None
     if not ui_capable():
         return _select_plain(title, options, default)
     try:
-        return _select_app(title, options, default, hint)
+        return _select_app(title, options, default, hint, searchable, max_visible)
     except Exception:
         # La terminal mintió sobre sus capacidades: degradar en caliente
         return _select_plain(title, options, default)
 
 
-def _select_app(title: str, options: list, default: int, hint: str):
+def _select_app(title: str, options: list, default: int, hint: str,
+                searchable: bool | None, max_visible: int):
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
     from prompt_toolkit.layout import HSplit, Layout, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.mouse_events import MouseEventType
 
-    state = {"index": max(0, min(default, len(options) - 1)), "result": None, "accepted": False}
-    pointer = g("prompt")
+    total = len(options)
+    if searchable is None:
+        searchable = total > SEARCH_THRESHOLD
+    if not hint:
+        hint = ("escribe para filtrar  ↑↓ mover  ↵ elegir  esc salir"
+                if searchable else "↑↓ mover  ↵ elegir  esc salir")
 
-    def _mouse_handler_for(i: int):
+    pointer = g("prompt")
+    state = {
+        "matches": list(range(total)),
+        "cursor": max(0, min(default, total - 1)),
+        "top": 0,
+        "query": "",
+        "accepted": False,
+    }
+    _has_disabled = any(o.disabled for o in options)
+
+    def _clamp() -> None:
+        count = len(state["matches"])
+        if not count:
+            state["cursor"] = state["top"] = 0
+            return
+        state["cursor"] = max(0, min(state["cursor"], count - 1))
+        window = min(max_visible, count)
+        if state["cursor"] < state["top"]:
+            state["top"] = state["cursor"]
+        elif state["cursor"] >= state["top"] + window:
+            state["top"] = state["cursor"] - window + 1
+        state["top"] = max(0, min(state["top"], count - window))
+
+    def _skip_disabled() -> None:
+        """El cursor nunca debe nacer sobre una cabecera de grupo."""
+        for _ in range(total):
+            if not options[state["matches"][state["cursor"]]].disabled:
+                return
+            state["cursor"] = (state["cursor"] + 1) % max(1, len(state["matches"]))
+
+    def _refilter() -> None:
+        query = state["query"].strip().lower()
+        if not query:
+            state["matches"] = list(range(total))
+        else:
+            state["matches"] = [
+                i for i, opt in enumerate(options)
+                if query in opt.label.lower() or query in (opt.description or "").lower()
+            ]
+            state["cursor"] = 0
+        if state["matches"]:
+            _skip_disabled()
+        _clamp()
+
+    def _move(delta: int) -> None:
+        """Mueve el cursor saltando las filas deshabilitadas (cabeceras de grupo)."""
+        count = len(state["matches"])
+        if not count:
+            return
+        step = 1 if delta >= 0 else -1
+        position = (state["cursor"] + delta) % count
+        for _ in range(count):
+            if not options[state["matches"][position]].disabled:
+                break
+            position = (position + step) % count
+        state["cursor"] = position
+        _clamp()
+
+    def _accept_now(app_ref) -> None:
+        if not state["matches"]:
+            return
+        if options[state["matches"][state["cursor"]]].disabled:
+            return
+        state["accepted"] = True
+        app_ref.exit()
+
+    def _mouse_handler_for(row_index: int):
         def handler(mouse_event):
+            disabled = options[state["matches"][row_index]].disabled
             if mouse_event.event_type == MouseEventType.MOUSE_MOVE:
-                state["index"] = i
+                if not disabled:
+                    state["cursor"] = row_index
+                    _clamp()
             elif mouse_event.event_type == MouseEventType.MOUSE_UP:
-                state["index"] = i
-                state["accepted"] = True
-                app.exit()
+                if not disabled:
+                    state["cursor"] = row_index
+                    _accept_now(app)
+            elif mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+                _move(1)
+            elif mouse_event.event_type == MouseEventType.SCROLL_UP:
+                _move(-1)
             else:
                 return NotImplemented
         return handler
 
     def fragments():
-        out = [
-            ("", "  "),
-            ("class:sel.title", f"? {title} "),
-            ("class:sel.hint", f"({hint})\n"),
-        ]
-        for i, opt in enumerate(options):
-            handler = _mouse_handler_for(i)
-            active = i == state["index"]
+        count = len(state["matches"])
+        window = min(max_visible, count)
+        out: list = [("", "  "), ("class:sel.mark", f"{g('spark')} "),
+                     ("class:sel.title", title)]
+        if state["query"]:
+            out += [("class:sel.hint", "  /"), ("class:sel.query", state["query"])]
+        if searchable:
+            out.append(("class:sel.count", f"   {count}/{total}"))
+        out.append(("", "\n"))
+
+        if state["top"] > 0:
+            out += [("", "    "), ("class:sel.scroll", f"{g('ellipsis')} {state['top']} arriba\n")]
+
+        for row in range(window):
+            position = state["top"] + row
+            index = state["matches"][position]
+            opt = options[index]
+            handler = _mouse_handler_for(position)
+            active = position == state["cursor"]
             out.append(("", "  "))
-            if active:
-                out.append(("class:sel.pointer", f"{pointer} ", handler))
-                out.append(("class:sel.active", opt.label, handler))
+            if opt.disabled:
+                out += [("", "  ", handler), ("class:sel.disabled", opt.label, handler)]
+                if opt.description:
+                    out.append(("class:sel.disabled", f"  {g('sep')} {opt.description}", handler))
+            elif active:
+                out += [("class:sel.pointer", f"{pointer} ", handler),
+                        ("class:sel.active", opt.label, handler)]
                 if opt.description:
                     out.append(("class:sel.active.desc", f"  {g('sep')} {opt.description}", handler))
             else:
-                out.append(("", "  ", handler))
-                out.append(("class:sel.option", opt.label, handler))
+                out += [("", "  ", handler), ("class:sel.option", opt.label, handler)]
                 if opt.description:
                     out.append(("class:sel.option.desc", f"  {g('sep')} {opt.description}", handler))
+            if opt.badge:
+                style = "class:sel.badge.active" if active and not opt.disabled else "class:sel.badge"
+                out.append((style, f"  {opt.badge}", handler))
             out.append(("", "\n"))
+
+        rest = count - state["top"] - window
+        if rest > 0:
+            out += [("", "    "), ("class:sel.scroll", f"{g('ellipsis')} {rest} abajo\n")]
+        if not count:
+            out += [("", "    "), ("class:sel.disabled", "sin coincidencias\n")]
+
+        out += [("", "  "), ("class:sel.hint", hint), ("", "\n")]
         return out
 
     kb = KeyBindings()
 
     @kb.add("up")
-    @kb.add("k")
+    @kb.add("c-p")
     def _up(event):
-        state["index"] = (state["index"] - 1) % len(options)
+        _move(-1)
 
     @kb.add("down")
-    @kb.add("j")
+    @kb.add("c-n")
     def _down(event):
-        state["index"] = (state["index"] + 1) % len(options)
+        _move(1)
+
+    @kb.add("pageup")
+    def _pageup(event):
+        _move(-max_visible)
+
+    @kb.add("pagedown")
+    def _pagedown(event):
+        _move(max_visible)
+
+    @kb.add("home")
+    def _home(event):
+        state["cursor"] = 0
+        _clamp()
+
+    @kb.add("end")
+    def _end(event):
+        state["cursor"] = max(0, len(state["matches"]) - 1)
+        _clamp()
 
     @kb.add("enter")
     def _accept(event):
-        state["accepted"] = True
-        event.app.exit()
+        _accept_now(event.app)
 
     @kb.add("escape", eager=True)
     @kb.add("c-c")
     def _cancel(event):
         state["accepted"] = False
         event.app.exit()
+
+    if searchable:
+        @kb.add("backspace")
+        def _backspace(event):
+            state["query"] = state["query"][:-1]
+            _refilter()
+
+        @kb.add("c-u")
+        def _clear_query(event):
+            state["query"] = ""
+            _refilter()
+
+        @kb.add(Keys.Any)
+        def _type(event):
+            data = event.data
+            if data and data.isprintable():
+                state["query"] += data
+                _refilter()
+    else:
+        @kb.add("k")
+        def _vim_up(event):
+            _move(-1)
+
+        @kb.add("j")
+        def _vim_down(event):
+            _move(1)
+
+    if _has_disabled:
+        _skip_disabled()
+    _clamp()
 
     control = FormattedTextControl(fragments, focusable=True, show_cursor=False)
     app = Application(
@@ -292,14 +461,19 @@ def _select_app(title: str, options: list, default: int, hint: str):
         full_screen=False,
         erase_when_done=True,
     )
+    attach_status_repaint(app)
     app.run()
+    repaint_status()  # erase_when_done borra hasta el pie: la barra vuelve
 
     console = make_console()
-    if state["accepted"]:
-        chosen = options[state["index"]]
-        console.print(f"[lx.dim]?[/] [lx.primary]{esc(title)}[/] [lx.dim]{g('sep')}[/] [lx.accent2]{esc(chosen.label)}[/]")
+    if state["accepted"] and state["matches"]:
+        chosen = options[state["matches"][state["cursor"]]]
+        console.print(
+            f"[lx.dim]{g('spark')}[/] [lx.primary]{esc(title)}[/] "
+            f"[lx.dim2]{g('sep')}[/] [lx.accent2]{esc(chosen.label)}[/]"
+        )
         return chosen.value
-    console.print(f"[lx.dim]? {esc(title)} {g('sep')} cancelado[/]")
+    console.print(f"[lx.dim2]{g('spark')} {esc(title)} {g('sep')} cancelado[/]")
     return None
 
 
@@ -307,11 +481,11 @@ def _select_plain(title: str, options: list, default: int):
     """Fallback sin prompt_toolkit: elegir escribiendo (Git Bash, pipes)."""
     console = make_console()
     default = max(0, min(default, len(options) - 1))
-    console.print(f"[lx.primary]? {esc(title)}[/] [lx.dim2](escribe parte del nombre; Enter = opción marcada; 'x' cancela)[/]")
+    console.print(f"[lx.primary]? {esc(title)}[/] [lx.dim2](escribe parte del nombre o su número; Enter = opción marcada; 'x' cancela)[/]")
     for i, opt in enumerate(options):
         marker = f"[lx.accent2]{g('prompt')}[/]" if i == default else " "
         desc = f"  [lx.dim2]{g('sep')} {esc(opt.description)}[/]" if opt.description else ""
-        console.print(f"{marker} [lx.primary]{esc(opt.label)}[/]{desc}")
+        console.print(f"{marker} [lx.dim2]{i + 1:>2}.[/] [lx.primary]{esc(opt.label)}[/]{desc}")
     while True:
         try:
             raw = input("  > ").strip()
@@ -323,7 +497,14 @@ def _select_plain(title: str, options: list, default: int):
             return options[default].value
         if raw.lower() in ("x", "q", "cancel", "cancelar"):
             return None
-        matches = [o for o in options if raw.lower() in o.label.lower()]
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            chosen = options[int(raw) - 1]
+            if chosen.disabled:
+                console.print("[lx.warn]Esa opción no está disponible.[/]")
+                continue
+            console.print(f"[lx.dim]? {esc(title)} {g('sep')}[/] [lx.accent2]{esc(chosen.label)}[/]")
+            return chosen.value
+        matches = [o for o in options if raw.lower() in o.label.lower() and not o.disabled]
         if len(matches) == 1:
             console.print(f"[lx.dim]? {esc(title)} {g('sep')}[/] [lx.accent2]{esc(matches[0].label)}[/]")
             return matches[0].value
@@ -367,9 +548,11 @@ class StatusBar:
     mode: str = "ask"
     encoding: str = "UTF-8"
     extra: str = ""
+    web: bool = False       # búsqueda web activa (/web)
+    project: bool = False   # hay LIXBON.md cargado en el workspace
 
     def _parts(self) -> list[tuple[str, str]]:
-        sep = ("class:bottom-toolbar.sep", "  |  ")
+        sep = ("class:bottom-toolbar.sep", f"  {g('sep')}  ")
         parts = [
             ("class:bottom-toolbar.dot", f" {g('dot')} "),
             ("class:bottom-toolbar.model", self.model or "sin modelo"),
@@ -383,11 +566,18 @@ class StatusBar:
             ("class:bottom-toolbar", f"contexto {context_bar(self.ctx_pct)} {self.ctx_pct:.0f}%"),
             sep,
             ("class:bottom-toolbar", f"{fmt_tokens(self.tokens)} tokens"),
-            sep,
-            ("class:bottom-toolbar", self.encoding + " "),
         ]
+        # Solo se anuncian los modos ACTIVOS: una barra llena de "off" es ruido.
+        flags = []
+        if self.web:
+            flags.append("web")
+        if self.project:
+            flags.append("LIXBON.md")
+        if flags:
+            parts += [sep, ("class:bottom-toolbar.model", " ".join(flags))]
+        parts += [sep, ("class:bottom-toolbar", self.encoding + " ")]
         if self.extra:
-            parts += [sep, ("class:bottom-toolbar", self.extra)]
+            parts += [sep, ("class:bottom-toolbar.dot", self.extra)]
         return parts
 
     def _compact_parts(self) -> list[tuple[str, str]]:

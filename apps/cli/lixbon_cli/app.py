@@ -7,10 +7,11 @@ import time
 import uuid
 from pathlib import Path
 
-from lixbon_cli.agent import clean_prose, run_agent_turn
+from lixbon_cli.agent import TOOL_SPECS, clean_prose, run_agent_turn, workspace_tree
 from lixbon_cli.api import ApiClient, ApiError
 from lixbon_cli.remote import RemoteLink
 from lixbon_cli.commands import (
+    COMMAND_GROUPS,
     COMMAND_SPECS,
     encode_image,
     fmt_size,
@@ -19,18 +20,22 @@ from lixbon_cli.commands import (
 )
 from lixbon_cli.config import (
     CLI_VERSION,
+    CONFIG_FILE,
     HISTORY_FILE,
     load_config,
     mask_key,
     save_config,
 )
 from lixbon_cli.term import (
+    attach_status_repaint,
     clear_screen,
     draw_status_line,
     g,
     is_interactive,
     release_status_line,
+    repaint_status,
     reserve_status_line,
+    set_status_painter,
     set_title,
     setup_terminal,
     status_line_active,
@@ -45,6 +50,9 @@ from lixbon_cli.ui import (
     print_error,
     print_note,
     print_ok,
+    render_action,
+    render_action_result,
+    render_actions_header,
     render_header,
     render_intro_line,
     render_speaker,
@@ -84,6 +92,8 @@ class ChatApp:
         # Se cachea en el config para que el arranque no dependa de la red.
         self.plan_name = self.cfg.get("plan_name", "")
         self.pending_images: list[Path] = []
+        self.web_search = bool(self.cfg.get("web_search", False))
+        self.project_context = ""  # LIXBON.md del workspace, si lo hay
         self.session_tokens = 0
         self.chars_per_token = 4.0
         self.status = StatusBar(
@@ -104,6 +114,8 @@ class ChatApp:
         self.status.model = self.model or "sin modelo"
         self.status.session_label = self._session_label()
         self.status.mode = self.mode
+        self.status.web = self.web_search
+        self.status.project = bool(self.project_context)
         tokens, pct = self._estimate_context()
         self.status.tokens = self.session_tokens or tokens
         self.status.ctx_pct = pct
@@ -147,6 +159,7 @@ class ChatApp:
 
     def run(self, once: str = "") -> int:
         self._set_tab_title()
+        self._load_project_context()
         # La sesión toma la terminal entera: fuera el banner de cmd/PowerShell
         # y la línea que lanzó el CLI. Todo lo que sigue (spinner, onboarding,
         # cabecera) se dibuja ya sobre lienzo limpio. Con la pantalla en blanco
@@ -155,6 +168,10 @@ class ChatApp:
         if not once:
             clear_screen()
             if self.cfg.get("fixed_status_bar", True):
+                # El painter se registra ANTES de reservar: cualquier interfaz
+                # de prompt_toolkit (prompt, selector) borra la fila con su
+                # erase_down, y este callback es el que la devuelve a su sitio.
+                set_status_painter(self._paint_status)
                 reserve_status_line()
 
         if not self.cfg.get("api_key"):
@@ -168,10 +185,26 @@ class ChatApp:
         # Con sesión no hay preámbulo: la marca se ve una sola vez, en la
         # cabecera de abajo, ya con modelo y plan resueltos.
         if once or not is_interactive():
-            self._load_account_quietly()
+            state = self._load_account_quietly()
         else:
             with spinner("conectando con Lixbon…"):
-                self._load_account_quietly()
+                state = self._load_account_quietly()
+
+        # Una clave rechazada (logout desde la web, key revocada) dejaba entrar
+        # al chat sin modelos y sin explicación: ahora se pide sesión de nuevo.
+        if state == "auth":
+            self._clear_session()
+            print_error("Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
+            if once or not is_interactive():
+                return 1
+            if not self.onboarding_flow():
+                return 1
+            with spinner("conectando con Lixbon…"):
+                state = self._load_account_quietly()
+            self.model = self.cfg.get("key_model") or self.cfg.get("model", "")
+        elif state == "offline":
+            print_error("No se pudo contactar con el servidor; se trabajará con la configuración local.")
+
         if not self.model:
             if not self.pick_model():
                 return 1
@@ -208,22 +241,56 @@ class ChatApp:
         """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon."""
         set_title(f"{g('spark')} Lixbon {g('sep')} {self.workspace.name}")
 
-    def _load_account_quietly(self) -> None:
-        """Modelos disponibles y plan del usuario, sin ruido si el server falla."""
+    def _load_account_quietly(self) -> str:
+        """Modelos disponibles y plan del usuario, sin ruido si el server falla.
+
+        Devuelve el estado de la sesión: `ok`, `auth` (la clave ya no sirve:
+        logout desde la web, key revocada o rotada) u `offline` (no se pudo
+        hablar con el servidor). Distinguirlos importa: antes cualquier fallo
+        acababa igual — entrando al chat con la lista de modelos vacía.
+        """
+        auth_failed = False
         try:
             self.models_cache = self.api.models()
-        except ApiError:
+        except ApiError as exc:
             self.models_cache = []
+            auth_failed = exc.status in (401, 403)
         if not self.cfg.get("api_key"):
-            return
+            return "auth"
         try:
             plan = (self.api.key_info().get("plan") or {}).get("name") or ""
-        except ApiError:
-            return  # servidor viejo o sin red: se conserva el plan cacheado
+        except ApiError as exc:
+            if exc.status in (401, 403):
+                return "auth"
+            # servidor viejo o sin red: se conserva el plan cacheado
+            return "auth" if auth_failed else ("ok" if self.models_cache else "offline")
         if plan and plan != self.plan_name:
             self.plan_name = plan
             self.cfg["plan_name"] = plan
             save_config(self.cfg)
+        return "auth" if auth_failed else "ok"
+
+    def _clear_session(self) -> None:
+        """Olvida la sesión local (logout o clave rechazada por el servidor)."""
+        self.cfg["api_key"] = ""
+        self.cfg["key_model"] = ""
+        self.cfg["account_email"] = ""
+        self.cfg["plan_name"] = ""
+        save_config(self.cfg)
+        self.api.api_key = ""
+        self.plan_name = ""
+        self.models_cache = []
+
+    def _report_api_error(self, exc: ApiError) -> None:
+        """Errores del servidor con la acción que los resuelve, no el crudo."""
+        if exc.status in (401, 403):
+            print_error("Tu sesión ya no es válida. Usa /login para volver a entrar.")
+        elif exc.status == 402:
+            print_error(f"Sin créditos disponibles: {exc}")
+        elif exc.status == 429:
+            print_error("Demasiadas peticiones seguidas; espera unos segundos.")
+        else:
+            print_error(str(exc))
 
     def onboarding_flow(self) -> bool:
         print_note("No hay una sesión activa. Inicia sesión para continuar.")
@@ -256,6 +323,7 @@ class ChatApp:
                 is_password=password,
                 style=pt_style(),
             )
+            repaint_status()  # el prompt borró la fila reservada al cerrarse
             return value.strip()
         except (KeyboardInterrupt, EOFError):
             return None
@@ -329,11 +397,16 @@ class ChatApp:
             self.model = self.cfg["key_model"]
             return True
         if not self.models_cache:
-            self._load_account_quietly()
+            with spinner("consultando modelos…"):
+                state = self._load_account_quietly()
+            if state == "auth":
+                print_error("Tu sesión ya no es válida. Usa /login para volver a entrar.")
+                return False
         if not self.models_cache:
-            print_error("No hay modelos disponibles en el servidor ahora mismo.")
+            print_error("El servidor no está publicando modelos ahora mismo — revísalo con /nodes.")
             return False
-        options = [Option(m, m) for m in self.models_cache]
+        options = [Option(m, m, badge="actual" if m == self.model else "")
+                   for m in self.models_cache]
         default = self.models_cache.index(self.model) if self.model in self.models_cache else 0
         chosen = select("Modelo", options, default=default)
         if chosen is None:
@@ -408,6 +481,9 @@ class ChatApp:
             reserve_space_for_menu=6,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
+        # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
+        # instante (erase_down del primer render): nunca llegaba a verse.
+        attach_status_repaint(session.app)
 
         while True:
             self._refresh_status()
@@ -452,7 +528,7 @@ class ChatApp:
         try:
             self.send_message(text)
         except ApiError as exc:
-            print_error(str(exc))
+            self._report_api_error(exc)
         return True
 
     def _dispatch_command(self, text: str):
@@ -461,12 +537,15 @@ class ChatApp:
         arg = parts[1].strip() if len(parts) > 1 else ""
         handler = getattr(self, f"cmd_{name.replace('-', '_')}", None)
         if handler is None:
-            print_error(f"Comando no reconocido: /{name} — escribe / para ver el menú")
+            near = [n for n, _a, _d in COMMAND_SPECS if n.startswith(name[:3])][:3]
+            hint = f" — ¿quisiste decir {', '.join('/' + n for n in near)}?" if near else \
+                   " — escribe / para ver el menú"
+            print_error(f"Comando no reconocido: /{name}{hint}")
             return True
         try:
             return handler(arg)
         except ApiError as exc:
-            print_error(str(exc))
+            self._report_api_error(exc)
             return True
 
     # ── envío de mensajes ────────────────────────────────────────────────
@@ -523,9 +602,34 @@ class ChatApp:
                 self.remote.emit("status", state="idle")
         self._refresh_status()
 
+    def _load_project_context(self) -> None:
+        """LIXBON.md del workspace: contexto permanente del proyecto.
+
+        Es el equivalente al CLAUDE.md de otros CLIs — lo genera /init y a
+        partir de ahí viaja con cada turno, así el modelo no tiene que
+        redescubrir el stack y las convenciones en cada sesión.
+        """
+        self.project_context = ""
+        for name in ("LIXBON.md", "lixbon.md"):
+            candidate = self.workspace / name
+            try:
+                if candidate.is_file():
+                    text = candidate.read_text(encoding="utf-8", errors="replace").strip()
+                    if text:
+                        self.project_context = text[:12000]
+                    return
+            except OSError:
+                return
+
     def _context_messages(self) -> list[dict]:
         max_msgs = int(self.cfg.get("max_context_messages", 12))
-        return self.history[-max_msgs:]
+        messages = self.history[-max_msgs:]
+        if self.project_context:
+            return [{
+                "role": "system",
+                "content": f"Contexto del proyecto (LIXBON.md):\n{self.project_context}",
+            }] + messages
+        return messages
 
     def _stream_assistant(self, messages: list[dict]) -> str:
         """Streamea una respuesta con Live: thinking en gris, contenido en Markdown."""
@@ -539,6 +643,7 @@ class ChatApp:
             conversation_id=self.conversation_id,
             client_id=self.client_id,
             title=self.title,
+            web_search=self.web_search,
             num_ctx=self.cfg.get("context_window"),
         )
 
@@ -600,9 +705,15 @@ class ChatApp:
         # La barra fija deja de ser un adorno estático: acompaña al turno.
         self.status.extra = "respondiendo…"
         self._paint_status()
+        last_paint = time.monotonic()
         with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
             try:
                 for kind, payload in stream:
+                    if time.monotonic() - last_paint > 0.4:
+                        # El transcript crece y arrastra el scroll; repintar
+                        # cada poco garantiza que la barra siga entera.
+                        last_paint = time.monotonic()
+                        self._paint_status()
                     if self.remote and self.remote.interrupt_requested:
                         # Interrupción pedida desde el móvil/web (equivale a Ctrl+C)
                         self.remote.interrupt_requested = False
@@ -677,12 +788,38 @@ class ChatApp:
     # ── comandos ─────────────────────────────────────────────────────────
 
     def cmd_help(self, arg: str):
-        self.console.print()
-        for name, args, desc in COMMAND_SPECS:
-            cmd = f"/{name} {args}".strip()
-            self.console.print(f"  [lx.accent2]{esc(f'{cmd:<26}')}[/] [lx.dim]{esc(desc)}[/]")
-        self.console.print()
-        return True
+        """Menú de comandos navegable: elegir una fila ejecuta el comando."""
+        if arg in ("plain", "list") or not is_interactive():
+            self.console.print()
+            for group in COMMAND_GROUPS:
+                self.console.print(f"  [lx.dim2]{group}[/]")
+                for name, args, desc, grp in COMMAND_SPECS:
+                    if grp == group:
+                        cmd = f"/{name} {args}".strip()
+                        self.console.print(f"    [lx.accent2]{esc(f'{cmd:<26}')}[/] [lx.dim]{esc(desc)}[/]")
+            self.console.print()
+            return True
+
+        options: list[Option] = []
+        for group in COMMAND_GROUPS:
+            options.append(Option(group.upper(), None, disabled=True))
+            for name, args, desc, grp in COMMAND_SPECS:
+                if grp != group:
+                    continue
+                label = f"/{name} {args}".strip()
+                options.append(Option(f"{label:<26}", name, desc))
+        chosen = select("Comandos", options, hint="escribe para filtrar  ↑↓ mover  ↵ ejecutar  esc salir",
+                        searchable=True, max_visible=14)
+        if chosen is None:
+            return True
+        spec = next((s for s in COMMAND_SPECS if s[0] == chosen), None)
+        if spec and spec[1].startswith("<"):
+            # Argumento OBLIGATORIO (<ruta>, <comando>): no se puede ejecutar a
+            # ciegas desde el menú, así que se explica cómo se usa. Los [args]
+            # opcionales sí se lanzan: abren su propio selector.
+            print_note(f"Uso: /{spec[0]} {spec[1]} {g('sep')} {spec[2]}")
+            return True
+        return self._dispatch_command(f"/{chosen}")
 
     def cmd_model(self, arg: str):
         if self.cfg.get("key_model"):
@@ -824,6 +961,9 @@ class ChatApp:
             ("Workspace", str(self.workspace)),
             ("Auto-aprobar", "on" if self.session.get("auto_approve") else "off"),
             ("Auto-run comandos", "on" if self.session.get("auto_run_commands") else "off"),
+            ("Búsqueda web", "on" if self.web_search else "off"),
+            ("Contexto del proyecto", "LIXBON.md cargado" if self.project_context else "sin LIXBON.md (/init)"),
+            ("Barra fija", "on" if status_line_active() else "off"),
             ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
         ]
         for label, value in rows:
@@ -882,7 +1022,10 @@ class ChatApp:
             return True
         self.workspace = new_ws  # solo para esta sesión; al relanzar vuelve a cwd
         self._set_tab_title()
+        self._load_project_context()
         print_ok(f"Workspace: {short_path(new_ws)}")
+        if self.project_context:
+            print_note("LIXBON.md encontrado: se usará como contexto del proyecto.")
         return True
 
     def cmd_context_window(self, arg: str):
@@ -928,6 +1071,387 @@ class ChatApp:
         from lixbon_cli.cli import cmd_update
 
         cmd_update(None)
+        return True
+
+    # ── cuenta ───────────────────────────────────────────────────────────
+
+    def cmd_logout(self, arg: str):
+        if not self.cfg.get("api_key"):
+            print_note("No hay ninguna sesión activa.")
+            return True
+        who = self._session_label()
+        confirm = select(f"Cerrar la sesión de {who}", [
+            Option("Sí, cerrar sesión", "yes", "se borra la clave guardada en esta máquina"),
+            Option("No", "no", "seguir con la sesión actual"),
+        ], default=1)
+        if confirm != "yes":
+            return True
+        self._clear_session()
+        self.model = ""
+        self._refresh_status()
+        print_ok("Sesión cerrada. Usa /login para volver a entrar.")
+        return True
+
+    def cmd_cost(self, arg: str):
+        """Consumo de ESTA sesión: lo que /usage no cuenta porque es global."""
+        tokens, pct = self._estimate_context()
+        window = int(self.cfg.get("context_window", 8192))
+        users = sum(1 for m in self.history if m.get("role") == "user")
+        assistants = sum(1 for m in self.history if m.get("role") == "assistant")
+        self.console.print()
+        rows = [
+            ("Tokens de la sesión", fmt_tokens(self.session_tokens)),
+            ("Contexto en uso", f"{fmt_tokens(tokens)} / {fmt_tokens(window)}  ({pct:.0f}%)"),
+            ("Turnos", f"{users} tuyos {g('sep')} {assistants} del modelo"),
+            ("Mensajes que se envían", f"últimos {self.cfg.get('max_context_messages', 12)}"),
+            ("Chars por token (medido)", f"{self.chars_per_token:.2f}"),
+        ]
+        for label, value in rows:
+            self.console.print(f"  [lx.dim]{label:<26}[/] [lx.primary]{esc(value)}[/]")
+        if pct > 75:
+            print_note("El contexto va lleno: /compact resume la conversación y libera espacio.")
+        self.console.print()
+        return True
+
+    # ── agente ───────────────────────────────────────────────────────────
+
+    def cmd_tools(self, arg: str):
+        """Qué puede hacer el agente, y con qué nivel de permiso."""
+        from lixbon_cli.agent import READ_ONLY_TOOLS
+
+        self.console.print()
+        self.console.print(f"  [lx.dim2]herramientas del modo agent {g('sep')} workspace {esc(short_path(self.workspace))}[/]")
+        for name, args, desc in TOOL_SPECS:
+            readonly = name in READ_ONLY_TOOLS
+            dot = f"[lx.dim2]{g('dot_empty')}[/]" if readonly else f"[lx.accent2]{g('dot')}[/]"
+            self.console.print(
+                f"  {dot} [bold lx.primary]{esc(f'{name:<14}')}[/][lx.dim2]{esc(args)}[/]"
+            )
+            self.console.print(f"      [lx.dim]{esc(desc)}[/]")
+        approve = "sin preguntar" if self.session.get("auto_approve") else "pidiendo confirmación"
+        commands = "sin preguntar" if self.session.get("auto_run_commands") else "pidiendo confirmación"
+        self.console.print()
+        self.console.print(
+            f"  [lx.dim]Cambios en archivos:[/] [lx.beige]{approve}[/] "
+            f"[lx.dim2]{g('sep')}[/] [lx.dim]comandos de shell:[/] [lx.beige]{commands}[/]"
+        )
+        self.console.print(f"  [lx.dim2]{g('dot_empty')} solo lectura   {g('dot')} modifica tu disco[/]")
+        self.console.print()
+        return True
+
+    def _git(self, *args: str, timeout: int = 20) -> tuple[int, str]:
+        """Ejecuta git en el workspace. Devuelve (código, salida combinada)."""
+        try:
+            proc = subprocess.run(
+                ["git", *args], cwd=str(self.workspace), capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            )
+            return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+        except FileNotFoundError:
+            return 127, "git no está instalado o no está en el PATH."
+        except subprocess.TimeoutExpired:
+            return 124, "git tardó demasiado en responder."
+
+    def cmd_diff(self, arg: str):
+        """Cambios sin confirmar del workspace, con el mismo color que el agente."""
+        code, _ = self._git("rev-parse", "--is-inside-work-tree", timeout=10)
+        if code != 0:
+            print_note(f"{short_path(self.workspace)} no es un repositorio git.")
+            return True
+        target = [arg.strip()] if arg.strip() else []
+        _, status = self._git("status", "--short")
+        if not status.strip():
+            print_ok("El workspace está limpio: no hay cambios sin confirmar.")
+            return True
+        _, stat = self._git("diff", "--stat", "--", *target)
+        _, body = self._git("diff", "--unified=2", "--", *target)
+
+        self.console.print()
+        rule(self.console, "cambios sin confirmar")
+        for line in status.rstrip().splitlines()[:40]:
+            self.console.print(f"  [lx.beige]{esc(line)}[/]")
+        if body.strip():
+            self.console.print()
+            for line in body.rstrip().splitlines()[:220]:
+                if line.startswith("+++") or line.startswith("---"):
+                    style = "lx.dim2"
+                elif line.startswith("+"):
+                    style = "lx.diff.add"
+                elif line.startswith("-"):
+                    style = "lx.diff.del"
+                elif line.startswith("@@"):
+                    style = "lx.diff.hunk"
+                else:
+                    style = "lx.dim"
+                self.console.print(f"  [{style}]{esc(line)}[/]")
+        if stat.strip():
+            self.console.print()
+            self.console.print(f"  [lx.dim]{esc(stat.strip().splitlines()[-1])}[/]")
+        self.console.print()
+        return True
+
+    def cmd_run(self, arg: str):
+        """Ejecuta un comando y deja su salida en el contexto del modelo."""
+        command = arg.strip()
+        if not command:
+            print_error("Uso: /run npm test")
+            return True
+        if not self.session.get("auto_run_commands"):
+            decision = select(f"Ejecutar «{command}»", [
+                Option("Sí", "yes", f"se ejecuta en {short_path(self.workspace)}"),
+                Option("Sí, y no preguntar más", "always", "auto-ejecutar comandos el resto de la sesión"),
+                Option("No", "no", "cancelar"),
+            ], default=0)
+            if decision == "always":
+                self.session["auto_run_commands"] = True
+            elif decision != "yes":
+                return True
+        try:
+            with spinner(f"ejecutando {command}…"):
+                proc = subprocess.run(
+                    command, cwd=str(self.workspace), shell=True, capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", timeout=300,
+                )
+            output = ((proc.stdout or "") + (proc.stderr or "")).rstrip()
+            code = proc.returncode
+        except subprocess.TimeoutExpired:
+            output, code = "El comando superó los 300 s y se canceló.", 124
+        except Exception as exc:
+            output, code = str(exc), 1
+
+        render_actions_header(self.console)
+        render_action(self.console, "ejecutó", command)
+        for line in (output or "(sin salida)").splitlines()[:80]:
+            self.console.print(f"  [lx.dim]{esc(line)}[/]")
+        render_action_result(self.console, f"salida {code}", error=code != 0)
+        self.console.print()
+        # El modelo debe poder razonar sobre el resultado en el siguiente turno.
+        self.history.append({
+            "role": "user",
+            "content": f"TOOL_RESULT run_command `{command}` (EXIT {code}):\n{output[:6000]}",
+        })
+        self._refresh_status()
+        return True
+
+    def cmd_init(self, arg: str):
+        """Genera LIXBON.md: el contexto del proyecto que el CLI carga solo."""
+        target = self.workspace / "LIXBON.md"
+        if target.exists():
+            choice = select("Ya existe LIXBON.md", [
+                Option("Regenerarlo", "yes", "se sobrescribe con un análisis nuevo"),
+                Option("Cancelar", "no", "dejar el archivo como está"),
+            ], default=1)
+            if choice != "yes":
+                return True
+        tree = workspace_tree(self.workspace, max_entries=200)
+        prompt = (
+            "Analiza este proyecto y escribe un LIXBON.md breve (máximo 60 líneas) que sirva "
+            "de contexto permanente para un asistente de código. Incluye: qué es el proyecto, "
+            "stack y estructura, cómo se ejecuta y se prueba, y convenciones que haya que "
+            "respetar. Responde SOLO con el Markdown del archivo, sin explicaciones ni ```.\n\n"
+            f"Carpeta: {self.workspace.name}\nÁrbol:\n{tree}"
+        )
+        with spinner("analizando el proyecto…"):
+            resp = self.api.chat(
+                model=self.model, messages=[{"role": "user", "content": prompt}],
+                conversation_id=None, client_id=self.client_id, title="init",
+            )
+        content = (resp.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+        if not content:
+            print_error("El modelo no devolvió contenido; inténtalo de nuevo.")
+            return True
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        target.write_text(content + "\n", encoding="utf-8")
+        self._load_project_context()
+        render_action(self.console, "escribió", "LIXBON.md", adds=len(content.splitlines()))
+        print_ok("LIXBON.md creado: se cargará como contexto en cada sesión de esta carpeta.")
+        return True
+
+    # ── conversación ─────────────────────────────────────────────────────
+
+    def cmd_web(self, arg: str):
+        if arg in ("on", "off"):
+            self.web_search = arg == "on"
+        else:
+            chosen = select("Búsqueda web", [
+                Option("on", "on", "el modelo consulta la web cuando le hace falta"),
+                Option("off", "off", "solo el conocimiento del modelo"),
+            ], default=0 if self.web_search else 1)
+            if chosen is None:
+                return True
+            self.web_search = chosen == "on"
+        self.cfg["web_search"] = self.web_search
+        save_config(self.cfg)
+        self._refresh_status()
+        print_ok(f"Búsqueda web: {'on' if self.web_search else 'off'}")
+        return True
+
+    def cmd_save(self, arg: str):
+        """Vuelca la conversación a Markdown (para PR, ticket o bitácora)."""
+        if not self.history:
+            print_note("La conversación está vacía.")
+            return True
+        if arg.strip():
+            path = Path(arg.strip('"')).expanduser()
+            if not path.is_absolute():
+                path = self.workspace / path
+        else:
+            stamp = time.strftime("%Y%m%d-%H%M")
+            path = self.workspace / f"lixbon-{stamp}.md"
+        lines = [
+            f"# Conversación Lixbon {g('sep')} {self.workspace.name}",
+            "",
+            f"- Modelo: `{self.model}`",
+            f"- Modo: `{self.mode}`",
+            f"- Fecha: {time.strftime('%Y-%m-%d %H:%M')}",
+            "",
+        ]
+        for msg in self.history:
+            role = msg.get("role", "")
+            content = (msg.get("content") or "").strip()
+            if not content or role == "system":
+                continue
+            if role == "user" and content.startswith("TOOL_RESULT"):
+                continue
+            lines.append("## Tú" if role == "user" else "## Lixbon")
+            lines.append("")
+            lines.append(clean_prose(content) if role == "assistant" and self.mode == "agent" else content)
+            lines.append("")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(lines), encoding="utf-8")
+        except OSError as exc:
+            print_error(f"No se pudo guardar: {exc}")
+            return True
+        print_ok(f"Conversación guardada en {short_path(path)}")
+        return True
+
+    def cmd_history(self, arg: str):
+        """Los mensajes de la sesión; elegir uno lo reenvía tal cual."""
+        mine = [m for m in self.history
+                if m.get("role") == "user" and not (m.get("content") or "").startswith("TOOL_RESULT")]
+        if not mine:
+            print_note("Todavía no has enviado ningún mensaje en esta sesión.")
+            return True
+        options = []
+        for i, msg in enumerate(mine[-30:], start=1):
+            text = " ".join((msg.get("content") or "").split())
+            options.append(Option(text[:70] + (g("ellipsis") if len(text) > 70 else ""), text,
+                                  description=f"mensaje {i}"))
+        chosen = select("Reenviar un mensaje", options, default=len(options) - 1,
+                        hint="escribe para filtrar  ↑↓ mover  ↵ reenviar  esc salir")
+        if chosen is None:
+            return True
+        self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(chosen)}[/]")
+        try:
+            self.send_message(chosen)
+        except ApiError as exc:
+            self._report_api_error(exc)
+        return True
+
+    # ── sistema ──────────────────────────────────────────────────────────
+
+    def cmd_bar(self, arg: str):
+        """Barra fija al pie. Se puede apagar: roba el scrollback nativo."""
+        if arg in ("on", "off"):
+            wanted = arg == "on"
+        else:
+            chosen = select("Barra de estado fija", [
+                Option("on", "on", "clavada al pie, siempre visible"),
+                Option("off", "off", "solo bajo el prompt; conserva el scrollback de la terminal"),
+            ], default=0 if status_line_active() else 1)
+            if chosen is None:
+                return True
+            wanted = chosen == "on"
+        self.cfg["fixed_status_bar"] = wanted
+        save_config(self.cfg)
+        if wanted and not status_line_active():
+            set_status_painter(self._paint_status)
+            reserve_status_line()
+            self._refresh_status()
+        elif not wanted and status_line_active():
+            release_status_line()
+        print_ok(f"Barra fija: {'on' if wanted else 'off'}"
+                 + ("" if wanted else " (vuelve al pie del prompt)"))
+        return True
+
+    def cmd_config(self, arg: str):
+        """Ajustes en un menú, en vez de recordar diez comandos sueltos."""
+        while True:
+            entries = [
+                ("model", f"Modelo{'':<10}", self.model or "sin modelo"),
+                ("mode", "Modo de trabajo", self.mode),
+                ("approve", "Auto-aprobar cambios", "on" if self.session.get("auto_approve") else "off"),
+                ("web", "Búsqueda web", "on" if self.web_search else "off"),
+                ("bar", "Barra fija", "on" if status_line_active() else "off"),
+                ("context-window", "Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
+                ("messages", "Mensajes enviados", str(self.cfg.get("max_context_messages", 12))),
+                ("workspace", "Workspace", short_path(self.workspace, 40)),
+            ]
+            options = [Option(label.strip(), key, description=value) for key, label, value in entries]
+            options.append(Option("Cerrar ajustes", "__close__"))
+            chosen = select("Ajustes", options, hint="↑↓ mover  ↵ cambiar  esc salir",
+                            searchable=False, max_visible=12)
+            if chosen is None or chosen == "__close__":
+                return True
+            if chosen == "messages":
+                value = self._prompt_text("Mensajes de historial que se envían (2-50)")
+                try:
+                    self.cfg["max_context_messages"] = max(2, min(50, int(value or "")))
+                    save_config(self.cfg)
+                    print_ok(f"Se enviarán los últimos {self.cfg['max_context_messages']} mensajes")
+                except (TypeError, ValueError):
+                    print_error("Valor no válido.")
+            elif chosen == "context-window":
+                value = self._prompt_text("Tokens de la ventana de contexto")
+                self.cmd_context_window(value or "")
+            elif chosen == "workspace":
+                value = self._prompt_text("Ruta del workspace")
+                if value:
+                    self.cmd_workspace(value)
+            else:
+                self._dispatch_command(f"/{chosen}")
+            self._refresh_status()
+
+    def cmd_doctor(self, arg: str):
+        """Diagnóstico: por qué la interfaz o la conexión no se ven bien."""
+        from lixbon_cli.term import UNICODE_OK, is_mintty, ui_capable
+
+        cols, rows = term_size()
+        checks: list[tuple[bool | None, str, str]] = [
+            (True, "CLI", f"v{CLI_VERSION} {g('sep')} Python {platform.python_version()} {g('sep')} {platform.system()}"),
+            (is_interactive(), "Terminal interactiva", "sí" if is_interactive() else "no (pipe o redirección)"),
+            (ui_capable(), "Interfaz completa",
+             "prompt_toolkit disponible" if ui_capable() else "modo simplificado (Git Bash/mintty)"),
+            (UNICODE_OK, "Glifos unicode", "sí" if UNICODE_OK else "no; se usan equivalentes ASCII"),
+            (None, "Tamaño", f"{cols}x{rows} {g('sep')} {'mintty' if is_mintty() else os.environ.get('TERM_PROGRAM') or 'consola nativa'}"),
+            (status_line_active(), "Barra fija",
+             "activa" if status_line_active() else "apagada (/bar on para activarla)"),
+            (None, "Config", str(CONFIG_FILE)),
+            (None, "Servidor", self.api.base_url),
+        ]
+        self.console.print()
+        for ok, label, value in checks:
+            icon = f"[lx.dim2]{g('sep')}[/]" if ok is None else (
+                f"[lx.ok]{g('check')}[/]" if ok else f"[lx.warn]{g('cross')}[/]")
+            self.console.print(f"  {icon} [lx.dim]{label:<22}[/] [lx.primary]{esc(value)}[/]")
+
+        started = time.monotonic()
+        try:
+            with spinner("probando el servidor…"):
+                models = self.api.models()
+            elapsed = (time.monotonic() - started) * 1000
+            self.models_cache = models
+            self.console.print(
+                f"  [lx.ok]{g('check')}[/] [lx.dim]{'Modelos':<22}[/] "
+                f"[lx.primary]{len(models)} disponibles[/] [lx.dim2]{elapsed:.0f} ms[/]"
+            )
+        except ApiError as exc:
+            reason = ("la sesión no es válida (/login)" if exc.status in (401, 403)
+                      else f"{exc} [{exc.status or 'sin respuesta'}]")
+            self.console.print(f"  [lx.err]{g('cross')}[/] [lx.dim]{'Modelos':<22}[/] [lx.err]{esc(reason)}[/]")
+        self.console.print()
         return True
 
     # ── control remoto (/remote) ─────────────────────────────────────────
