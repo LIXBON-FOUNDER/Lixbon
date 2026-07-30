@@ -1,7 +1,16 @@
 """Modo agent: herramientas locales de código y loop de ejecución.
 
-El modelo emite JSON `{"tool": ..., "args": {...}}` embebido en su respuesta;
-aquí se parsea, se pide aprobación (con vista previa del diff) y se ejecuta.
+Dos protocolos, en este orden de preferencia:
+
+1. Tool-calling NATIVO: se mandan las definiciones de funciones (TOOL_SCHEMAS)
+   al gateway, que las pasa a Ollama. Los modelos entrenados con tools
+   (qwen2.5-coder, llama3.2, mistral…) devuelven `tool_calls` estructurados.
+   Es lo único que funciona de forma fiable con modelos chicos (7B): pedirles
+   por prompt que escriban JSON a mano casi siempre acaba en un bloque ```.
+2. Fallback de TEXTO: el modelo emite `{"tool": ..., "args": {...}}` embebido en
+   la respuesta y aquí se parsea. Se usa si el modelo no soporta tools nativas.
+
+En ambos casos se pide aprobación (con vista previa del diff) antes de ejecutar.
 """
 import json
 import re
@@ -40,12 +49,131 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("run_command", "command, timeout?", "Ejecutar un comando de shell en el workspace"),
 ]
 
+# Definiciones de funciones en formato OpenAI para tool-calling NATIVO. El
+# gateway (ChatCompletionRequest.tools) las reenvía tal cual a Ollama, que las
+# inyecta en el template del modelo. Deben coincidir con execute_tool_call().
+def _p(kind: str, description: str) -> dict:
+    return {"type": kind, "description": description}
+
+
+TOOL_SCHEMAS: list[dict] = [
+    {"type": "function", "function": {
+        "name": "list_files",
+        "description": "Lista los archivos del workspace (o de una subcarpeta).",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", 'Ruta relativa; "." para la raíz')}}}},
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": "Lee el contenido de un archivo. Admite rango de líneas.",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "start_line": _p("integer", "Primera línea (1-based), opcional"),
+            "end_line": _p("integer", "Última línea, opcional"),
+        }, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "search",
+        "description": "Busca un texto EXACTO en los archivos del workspace (grep).",
+        "parameters": {"type": "object", "properties": {
+            "pattern": _p("string", "Texto a buscar"),
+            "path": _p("string", 'Carpeta donde buscar; "." para todo el workspace'),
+        }, "required": ["pattern"]}}},
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": ("Crea un archivo con su contenido completo, creando las carpetas que falten. "
+                        "Es la herramienta para crear archivos nuevos; para modificar uno existente "
+                        "usa edit_file."),
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "content": _p("string", "Contenido completo del archivo"),
+        }, "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "edit_file",
+        "description": ("Reemplaza un fragmento EXACTO de un archivo existente (edición parcial). "
+                        "Preferir sobre write_file para modificar archivos ya creados."),
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "old_text": _p("string", "Fragmento actual a reemplazar, copiado EXACTO (con su indentación)"),
+            "new_text": _p("string", "Texto nuevo"),
+            "all": _p("boolean", "Reemplazar todas las apariciones (por defecto solo la primera)"),
+        }, "required": ["path", "old_text", "new_text"]}}},
+    {"type": "function", "function": {
+        "name": "append_file",
+        "description": "Añade texto al final de un archivo (lo crea si no existe).",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "content": _p("string", "Texto a añadir"),
+        }, "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "mkdir",
+        "description": "Crea una carpeta (y las intermedias si faltan).",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa de la carpeta")}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "delete_file",
+        "description": "Elimina un archivo o carpeta.",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa")}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "rename_file",
+        "description": "Mueve o renombra un archivo.",
+        "parameters": {"type": "object", "properties": {
+            "src": _p("string", "Ruta origen"),
+            "dst": _p("string", "Ruta destino"),
+        }, "required": ["src", "dst"]}}},
+    {"type": "function", "function": {
+        "name": "run_command",
+        "description": ("Ejecuta un comando de shell en el workspace: inicializar proyectos "
+                        "(npm create, git init…), instalar dependencias, tests y builds."),
+        "parameters": {"type": "object", "properties": {
+            "command": _p("string", "Comando a ejecutar"),
+            "timeout": _p("integer", "Segundos máximos (por defecto 30)"),
+        }, "required": ["command"]}}},
+]
+
+
+def native_call_to_internal(call: dict) -> dict:
+    """Convierte un tool_call nativo (formato OpenAI) al interno {tool, args}."""
+    fn = call.get("function") or {}
+    args = fn.get("arguments")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args or "{}")
+        except Exception:
+            args = {}
+    return {"tool": fn.get("name", ""), "args": args if isinstance(args, dict) else {}}
+
+
+def sanitize_for_plain_chat(messages: list[dict]) -> list[dict]:
+    """Quita el round-trip de tools del historial para un chat normal.
+
+    Los mensajes `role="tool"` solo son válidos justo detrás del assistant que
+    los pidió; si el usuario pasa a modo ask (que recorta el historial) podrían
+    quedar huérfanos y romper el template del modelo.
+    """
+    out = []
+    for m in messages:
+        if m.get("role") == "tool":
+            continue
+        if m.get("tool_calls"):
+            m = {k: v for k, v in m.items() if k != "tool_calls"}
+            if not (m.get("content") or "").strip():
+                continue
+        out.append(m)
+    return out
+
+
 # Recordatorio de una sola vez cuando el modelo "sugiere" código en el chat
 # en vez de aplicarlo con herramientas (vicio típico de los modelos chicos).
 NUDGE_PROMPT = (
     "Si ese código debía aplicarse a un archivo del workspace, hazlo AHORA con "
     '{"tool":"write_file","args":{"path":"...","content":"CONTENIDO COMPLETO"}} '
     '(JSON puro, sin ```). Si no había nada que aplicar, responde solo "OK".'
+)
+
+NATIVE_NUDGE_PROMPT = (
+    "No escribas el código en el chat: aplícalo AHORA llamando a la herramienta "
+    "write_file (o edit_file si el archivo ya existe), y usa run_command para los "
+    'comandos. Si no había nada que aplicar, responde solo "OK".'
 )
 
 TRUNCATED_PROMPT = (
@@ -98,6 +226,43 @@ def workspace_tree(workspace: Path, max_entries: int = MAX_TREE_ENTRIES) -> str:
     if truncated:
         tree += "\n… (hay más archivos; usa list_files para explorar)"
     return tree
+
+
+def build_native_system_prompt(workspace: Path) -> str:
+    """Prompt para tool-calling NATIVO: las herramientas ya van en el template
+    del modelo, así que aquí solo van las reglas de uso (describirlas otra vez
+    confunde al modelo y le hace escribir JSON en el texto)."""
+    return (
+        "Eres un agente de código que trabaja DIRECTAMENTE sobre los archivos del usuario "
+        "llamando a las herramientas que tienes disponibles.\n"
+        f"Workspace: {workspace}\n"
+        "Las rutas son siempre RELATIVAS al workspace.\n\n"
+        "=== REGLAS ===\n"
+        "1. Si el usuario pide crear, inicializar, modificar, arreglar, eliminar o ejecutar algo, "
+        "LLAMA A LAS HERRAMIENTAS. Tú aplicas los cambios: el usuario no copia código a mano.\n"
+        "2. NUNCA respondas con el código en un bloque ``` cuando lo que toca es escribirlo en "
+        "un archivo: eso va en el argumento content de write_file.\n"
+        "3. Para crear un proyecto: mkdir/write_file para los archivos, y run_command para los "
+        "comandos de scaffolding, instalación o git.\n"
+        "4. Para modificar un archivo que ya existe: primero read_file, luego edit_file con el "
+        "fragmento exacto. write_file solo para archivos nuevos o reescrituras completas.\n"
+        "5. Puedes llamar a varias herramientas seguidas; el resultado de cada una te llega antes "
+        "del siguiente paso. Nunca inventes el resultado de una herramienta.\n"
+        "6. Tras cambiar código, si hay tests o build, verifícalo con run_command y corrige si el "
+        "EXIT es distinto de 0.\n"
+        "7. Cuando ya no quede nada que hacer, responde con texto normal resumiendo lo hecho.\n\n"
+        # Los modelos chicos (qwen2.5-coder:7b y similares) conocen el formato
+        # pero se saltan los tags <tool_call>, y entonces Ollama devuelve la
+        # llamada como texto plano. Repetir el formato aquí hace que al menos el
+        # JSON salga bien formado: el CLI lo parsea igual desde el texto.
+        "=== FORMATO DE LLAMADA ===\n"
+        "Cada llamada va EXACTAMENTE así, sin ``` alrededor:\n"
+        "<tool_call>\n"
+        '{"name": "write_file", "arguments": {"path": "…", "content": "…"}}\n'
+        "</tool_call>\n\n"
+        "=== ARCHIVOS DEL WORKSPACE ===\n"
+        f"{workspace_tree(workspace)}"
+    )
 
 
 def build_agent_system_prompt(workspace: Path) -> str:
@@ -361,6 +526,97 @@ def _validate_tool_dict(data: dict) -> dict | None:
 _TOOL_START = re.compile(r'\{\s*"(tool|name)"')
 
 
+def _scan_object(text: str, start: int) -> int:
+    """Fin (exclusivo) del objeto que empieza en `start`, o -1 si no cierra.
+
+    Cuenta llaves ignorando las que van dentro de un string. Reconoce strings
+    con comilla doble Y simple: los modelos chicos escriben los argumentos al
+    estilo Python ('…'), y con esas comillas sin reconocer el conteo se
+    desbalancea y la llamada se pierde entera.
+    """
+    depth = 0
+    quote = ""  # comilla que abrió el string actual ("" = fuera de string)
+    escape_next = False
+    for j in range(start, len(text)):
+        ch = text[j]
+        if escape_next:
+            escape_next = False
+        elif quote:
+            if ch == "\\":
+                escape_next = True
+            elif ch == quote:
+                quote = ""
+        elif ch in ('"', "'"):
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return -1
+
+
+def _quotes_to_json(text: str) -> str:
+    """Convierte los strings 'a la Python' del candidato en strings JSON.
+
+    qwen2.5-coder y otros modelos chicos emiten
+    `{"name": "write_file", "arguments": {"content": '…'}}`: JSON inválido, así
+    que la llamada se descartaba en silencio y el archivo nunca se escribía.
+    Los escapes ya presentes (\\n, \\t…) se conservan tal cual; las comillas
+    dobles y los saltos reales de dentro se escapan.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':  # string JSON legítimo: copiar tal cual
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    break
+                j += 1
+            out.append(text[i:min(j + 1, n)])
+            i = j + 1
+            continue
+        if ch == "'":  # string estilo Python: reescribir con comilla doble
+            buf: list[str] = []
+            j = i + 1
+            while j < n:
+                c = text[j]
+                if c == "\\":
+                    nxt = text[j + 1] if j + 1 < n else ""
+                    buf.append('\\"' if nxt == "'" else text[j:j + 2])
+                    j += 2
+                    continue
+                if c == "'":
+                    break
+                buf.append({'"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}.get(c, c))
+                j += 1
+            out.append('"' + "".join(buf) + '"')
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _loads_lenient(candidate: str):
+    """json.loads tolerante con lo que producen los modelos chicos.
+
+    strict=False acepta saltos de línea reales dentro de los strings; si aun
+    así falla, se prueba con las comillas normalizadas.
+    """
+    try:
+        return json.loads(candidate, strict=False)
+    except Exception:
+        return json.loads(_quotes_to_json(candidate), strict=False)
+
+
 def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
     """Localiza los JSON `{"tool":...}` embebidos: (call, inicio, fin_exclusivo).
 
@@ -373,38 +629,16 @@ def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
         if not m:
             break
         start = m.start()
-        depth = 0
-        j = start
-        in_string = False
-        escape_next = False
-        while j < len(text):
-            ch = text[j]
-            if escape_next:
-                escape_next = False
-            elif ch == "\\" and in_string:
-                escape_next = True
-            elif ch == '"':
-                in_string = not in_string
-            elif not in_string:
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[start: j + 1]
-                        try:
-                            # strict=False: tolera saltos de línea reales dentro
-                            # de strings (JSON inválido pero frecuente en LLMs)
-                            data = _validate_tool_dict(json.loads(candidate, strict=False))
-                            if data:
-                                results.append((data, start, j + 1))
-                        except Exception:
-                            pass
-                        i = j + 1
-                        break
-            j += 1
-        else:
+        end = _scan_object(text, start)
+        if end == -1:  # objeto sin cerrar: no hay más llamadas completas
             break
+        try:
+            data = _validate_tool_dict(_loads_lenient(text[start:end]))
+            if data:
+                results.append((data, start, end))
+        except Exception:
+            pass
+        i = end
     return results
 
 
@@ -441,29 +675,7 @@ def cut_unclosed_call(text: str) -> str:
     if not starts:
         return text
     last = starts[-1]
-    depth = 0
-    in_string = False
-    escape_next = False
-    closed = False
-    j = last
-    while j < len(text):
-        ch = text[j]
-        if escape_next:
-            escape_next = False
-        elif ch == "\\" and in_string:
-            escape_next = True
-        elif ch == '"':
-            in_string = not in_string
-        elif not in_string:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    closed = True
-                    break
-        j += 1
-    return text if closed else text[:last]
+    return text if _scan_object(text, last) != -1 else text[:last]
 
 
 def has_unclosed_call(text: str) -> bool:
@@ -484,20 +696,47 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                    stream_assistant) -> tuple[str, list[dict]]:
     """Ejecuta un turno de agente con aprobación interactiva.
 
-    - `session`: estado mutable con `auto_approve: bool`.
-    - `stream_assistant(messages) -> str`: lo aporta la app; muestra el texto
-      del modelo en vivo y devuelve la respuesta completa.
+    - `session`: estado mutable con `auto_approve: bool` y `native_tools: bool`
+      (este último lo apaga la app si el modelo no soporta tools nativas).
+    - `stream_assistant(messages, tools) -> (texto, tool_calls_nativos)`: lo
+      aporta la app; muestra el texto del modelo en vivo y devuelve la respuesta
+      completa junto con los tool_calls estructurados que haya emitido.
     Devuelve (respuesta_final, history_actualizado).
     """
     console = make_console()
-    system_msg = {"role": "system", "content": build_agent_system_prompt(workspace)}
     working = history[:]
 
     nudged = False
     actions_open = False  # la cabecera "acciones" se abre una vez por turno
     for _ in range(MAX_AGENT_STEPS):
+        # El flag puede apagarse a mitad de turno (fallback si el modelo no
+        # soporta tools), así que se relee en cada paso.
+        native = session.get("native_tools", True)
+        system_msg = {"role": "system", "content": (
+            build_native_system_prompt(workspace) if native
+            else build_agent_system_prompt(workspace))}
+        messages = [system_msg] + (working if native else sanitize_for_plain_chat(working))
+        raw, native_calls = stream_assistant(messages, TOOL_SCHEMAS if native else None)
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
-        assistant = truncate_fabricated(stream_assistant([system_msg] + working))
+        assistant = truncate_fabricated(raw)
+
+        if native_calls:
+            working.append({"role": "assistant", "content": assistant, "tool_calls": native_calls})
+            if not actions_open:
+                render_actions_header(console)
+                actions_open = True
+            for call in native_calls:
+                internal = native_call_to_internal(call)
+                tool_name = internal["tool"]
+                result = _approve_and_run(console, workspace, session, tool_name, internal["args"])
+                working.append({
+                    "role": "tool",
+                    "content": result,
+                    "tool_call_id": str(call.get("id") or ""),
+                    "name": tool_name,
+                })
+            continue
+
         working.append({"role": "assistant", "content": assistant})
 
         tool_calls = extract_all_tool_calls(assistant)
@@ -510,7 +749,8 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
             if not nudged and "```" in assistant:
                 # Mostró código en vez de aplicarlo: una oportunidad de corregirse
                 nudged = True
-                working.append({"role": "user", "content": NUDGE_PROMPT})
+                working.append({"role": "user",
+                                "content": NATIVE_NUDGE_PROMPT if native else NUDGE_PROMPT})
                 continue
             return assistant, working
 

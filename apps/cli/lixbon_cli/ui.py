@@ -13,6 +13,31 @@ def esc(text: object) -> str:
     return escape(str(text))
 
 
+class Tail:
+    """Renderable que muestra solo las últimas `max_height` líneas de otro.
+
+    Al recortar el propio contenido, el render de un Live nunca excede el alto
+    de la pantalla: su borrado (`cursor-up × alto`) siempre cuadra y no queda
+    residuo. Rich por su cuenta también recorta, pero se queda con el PRINCIPIO
+    del bloque, y mientras el modelo escribe lo que interesa leer es el final.
+    """
+
+    def __init__(self, renderable, max_height: int) -> None:
+        self.renderable = renderable
+        self.max_height = max(1, int(max_height))
+
+    def __rich_console__(self, console, options):
+        from rich.segment import Segment
+
+        lines = console.render_lines(self.renderable, options, pad=False)
+        del lines[: max(0, len(lines) - self.max_height)]
+        new_line = Segment.line()
+        for index, line in enumerate(lines):
+            if index:
+                yield new_line  # el salto va ANTES: sin newline final el
+            yield from line     # alto medido es exactamente len(lines)
+
+
 # ── Cabecera de identidad ───────────────────────────────────────────────────
 
 # El ícono se dibuja con bloques llenos (█) de 2×2 celdas, un color por

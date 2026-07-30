@@ -369,14 +369,32 @@ def make_console():
     if _console is None:
         import shutil
 
-        from rich.console import Console, NewLine
+        from rich.console import Console, ConsoleDimensions, NewLine
         from rich.control import Control
         from rich.padding import Padding
         from rich.theme import Theme
 
 
         class LixbonConsole(Console):
-            """Console con margen izquierdo automático en cada print."""
+            """Console con margen izquierdo automático y alto sin la fila fija."""
+
+            @property
+            def size(self):
+                # La fila de la barra de estado vive FUERA de la región de
+                # scroll (DECSTBM, ver term.py). Si rich la cuenta como
+                # disponible, cualquier render de pantalla completa (el Live
+                # del streaming) se pasa una línea: la terminal scrollea dentro
+                # de la región y el `cursor-up + erase` con el que Live se
+                # repinta ya no cuadra → cada refresh deja una línea muerta
+                # arriba y la respuesta acaba pegada al fondo.
+                size = Console.size.fget(self)
+                if status_line_active():
+                    return ConsoleDimensions(size.width, max(size.height - 1, 5))
+                return size
+
+            @size.setter
+            def size(self, new_size):
+                Console.size.fset(self, new_size)
 
             def print(self, *objects, **kwargs):
                 if objects and not kwargs.pop("no_pad", False):
@@ -476,7 +494,15 @@ def pt_style():
         "completion-menu.completion": f"bg:#1E1E1A {PALETTE['cream']}",
         "completion-menu.completion.current": f"bg:{PALETTE['accent']} {PALETTE['ink']}",
         "completion-menu.meta.completion": f"bg:#1E1E1A {PALETTE['dim']}",
-        "completion-menu.meta.completion.current": f"bg:#2A2A24 {PALETTE['dim']}",
+        "completion-menu.meta.completion.current": f"bg:#2A2A24 {PALETTE['beige']}",
+        # Columnas del display de cada comando. Reglas de 2 nombres: la fila
+        # marcada (`completion-menu.completion.current`, 3 nombres) gana en
+        # especificidad y se pinta entera en tinta sobre oliva.
+        "cmd.name": PALETTE["cream"],
+        "cmd.args": PALETTE["dim2"],
+        # Barra de scroll del menú, para que se note que la lista sigue.
+        "scrollbar.background": "bg:#1E1E1A",
+        "scrollbar.button": f"bg:{PALETTE['dim2']}",
     })
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -552,6 +578,8 @@ Eventos tipados que consume la app:
   ("sources", list)     — fuentes de web_search (primer evento si aplica)
   ("reasoning", str)    — razonamiento del modelo (segundo plano)
   ("content", str)      — texto de la respuesta
+  ("tool_calls", list)  — tool-calling nativo (modo agent); Ollama los manda
+                          completos en un chunk, no incrementales como OpenAI
   ("usage", dict)       — tokens reales, llega en el último chunk
   ("done", None)        — fin del stream
 """
@@ -646,6 +674,9 @@ def events_from_stream(response):
             reasoning = delta.get("reasoning_content")
             if reasoning:
                 yield ("reasoning", reasoning)
+            calls = delta.get("tool_calls")
+            if calls:
+                yield ("tool_calls", calls)
             content = delta.get("content")
             if content:
                 yield from think_filter.feed(content)
@@ -810,7 +841,8 @@ class ApiClient:
 
     def chat_stream(self, model: str, messages: list[dict], conversation_id: str | None = None,
                     client_id: str = "cli", title: str | None = None,
-                    web_search: bool = False, num_ctx: int | None = None) -> ChatStream:
+                    web_search: bool = False, num_ctx: int | None = None,
+                    tools: list[dict] | None = None) -> ChatStream:
         payload = {
             "model": model,
             "messages": messages,
@@ -823,6 +855,10 @@ class ApiClient:
         }
         if num_ctx:
             payload["num_ctx"] = int(num_ctx)
+        if tools:
+            # Tool-calling nativo: el gateway se las pasa a Ollama, que las mete
+            # en el template del modelo (modo agent).
+            payload["tools"] = tools
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)
 
@@ -840,6 +876,31 @@ def esc(text: object) -> str:
     from rich.markup import escape
 
     return escape(str(text))
+
+
+class Tail:
+    """Renderable que muestra solo las últimas `max_height` líneas de otro.
+
+    Al recortar el propio contenido, el render de un Live nunca excede el alto
+    de la pantalla: su borrado (`cursor-up × alto`) siempre cuadra y no queda
+    residuo. Rich por su cuenta también recorta, pero se queda con el PRINCIPIO
+    del bloque, y mientras el modelo escribe lo que interesa leer es el final.
+    """
+
+    def __init__(self, renderable, max_height: int) -> None:
+        self.renderable = renderable
+        self.max_height = max(1, int(max_height))
+
+    def __rich_console__(self, console, options):
+        from rich.segment import Segment
+
+        lines = console.render_lines(self.renderable, options, pad=False)
+        del lines[: max(0, len(lines) - self.max_height)]
+        new_line = Segment.line()
+        for index, line in enumerate(lines):
+            if index:
+                yield new_line  # el salto va ANTES: sin newline final el
+            yield from line     # alto medido es exactamente len(lines)
 
 
 # ── Cabecera de identidad ───────────────────────────────────────────────────
@@ -1653,6 +1714,22 @@ REMOTE_FLUSH_SECONDS = 0.25
 REMOTE_RECONNECT_MAX_S = 30
 REMOTE_RESULT_CHARS = 600  # tamaño máximo del resumen de un tool_result
 
+# Comandos que el host acepta desde la app, publicados en el `hello` para que
+# el móvil pueda ofrecerlos sin conocer de antemano quién está al otro lado
+# (CLI e IDE no tienen por qué ofrecer los mismos). Solo entran los que se
+# resuelven con un argumento: en remoto no hay teclado para un selector.
+REMOTE_COMMANDS: list[tuple[str, str, str]] = [
+    ("help", "", "Ver los comandos disponibles aquí"),
+    ("new", "", "Empezar una conversación nueva"),
+    ("model", "[nombre]", "Ver o cambiar el modelo"),
+    ("mode", "[ask|agent|delegate]", "Ver o cambiar el modo de trabajo"),
+    ("approve", "[on|off]", "Auto-aprobar herramientas del agente"),
+    ("web", "[on|off]", "Búsqueda web durante las respuestas"),
+    ("status", "", "Estado de la sesión y del host"),
+    ("cost", "", "Tokens y contexto consumidos"),
+    ("workspace", "", "Carpeta de trabajo del agente"),
+]
+
 
 def _args_summary(tool: str, args: dict) -> str:
     """Resumen compacto y legible de los argumentos de una herramienta."""
@@ -1701,7 +1778,9 @@ class RemoteLink:
         self.session_id = resp["session"]["id"]
         self.share_url = resp.get("share_url", "")
         self.emit("hello", source=self.source, title=self.title,
-                  machine=self.machine, mode=mode, model=model)
+                  machine=self.machine, mode=mode, model=model,
+                  commands=[{"name": n, "args": a, "description": d}
+                            for n, a, d in REMOTE_COMMANDS])
         for target, name in ((self._reader_loop, "remote-reader"),
                              (self._flusher_loop, "remote-flusher")):
             t = threading.Thread(target=target, daemon=True, name=name)
@@ -1848,8 +1927,17 @@ class RemoteLink:
 # ──────────────────────────────────────────────────────────────────────────
 """Modo agent: herramientas locales de código y loop de ejecución.
 
-El modelo emite JSON `{"tool": ..., "args": {...}}` embebido en su respuesta;
-aquí se parsea, se pide aprobación (con vista previa del diff) y se ejecuta.
+Dos protocolos, en este orden de preferencia:
+
+1. Tool-calling NATIVO: se mandan las definiciones de funciones (TOOL_SCHEMAS)
+   al gateway, que las pasa a Ollama. Los modelos entrenados con tools
+   (qwen2.5-coder, llama3.2, mistral…) devuelven `tool_calls` estructurados.
+   Es lo único que funciona de forma fiable con modelos chicos (7B): pedirles
+   por prompt que escriban JSON a mano casi siempre acaba en un bloque ```.
+2. Fallback de TEXTO: el modelo emite `{"tool": ..., "args": {...}}` embebido en
+   la respuesta y aquí se parsea. Se usa si el modelo no soporta tools nativas.
+
+En ambos casos se pide aprobación (con vista previa del diff) antes de ejecutar.
 """
 import json
 import re
@@ -1877,12 +1965,131 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("run_command", "command, timeout?", "Ejecutar un comando de shell en el workspace"),
 ]
 
+# Definiciones de funciones en formato OpenAI para tool-calling NATIVO. El
+# gateway (ChatCompletionRequest.tools) las reenvía tal cual a Ollama, que las
+# inyecta en el template del modelo. Deben coincidir con execute_tool_call().
+def _p(kind: str, description: str) -> dict:
+    return {"type": kind, "description": description}
+
+
+TOOL_SCHEMAS: list[dict] = [
+    {"type": "function", "function": {
+        "name": "list_files",
+        "description": "Lista los archivos del workspace (o de una subcarpeta).",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", 'Ruta relativa; "." para la raíz')}}}},
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": "Lee el contenido de un archivo. Admite rango de líneas.",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "start_line": _p("integer", "Primera línea (1-based), opcional"),
+            "end_line": _p("integer", "Última línea, opcional"),
+        }, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "search",
+        "description": "Busca un texto EXACTO en los archivos del workspace (grep).",
+        "parameters": {"type": "object", "properties": {
+            "pattern": _p("string", "Texto a buscar"),
+            "path": _p("string", 'Carpeta donde buscar; "." para todo el workspace'),
+        }, "required": ["pattern"]}}},
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": ("Crea un archivo con su contenido completo, creando las carpetas que falten. "
+                        "Es la herramienta para crear archivos nuevos; para modificar uno existente "
+                        "usa edit_file."),
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "content": _p("string", "Contenido completo del archivo"),
+        }, "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "edit_file",
+        "description": ("Reemplaza un fragmento EXACTO de un archivo existente (edición parcial). "
+                        "Preferir sobre write_file para modificar archivos ya creados."),
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "old_text": _p("string", "Fragmento actual a reemplazar, copiado EXACTO (con su indentación)"),
+            "new_text": _p("string", "Texto nuevo"),
+            "all": _p("boolean", "Reemplazar todas las apariciones (por defecto solo la primera)"),
+        }, "required": ["path", "old_text", "new_text"]}}},
+    {"type": "function", "function": {
+        "name": "append_file",
+        "description": "Añade texto al final de un archivo (lo crea si no existe).",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "content": _p("string", "Texto a añadir"),
+        }, "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "mkdir",
+        "description": "Crea una carpeta (y las intermedias si faltan).",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa de la carpeta")}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "delete_file",
+        "description": "Elimina un archivo o carpeta.",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa")}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "rename_file",
+        "description": "Mueve o renombra un archivo.",
+        "parameters": {"type": "object", "properties": {
+            "src": _p("string", "Ruta origen"),
+            "dst": _p("string", "Ruta destino"),
+        }, "required": ["src", "dst"]}}},
+    {"type": "function", "function": {
+        "name": "run_command",
+        "description": ("Ejecuta un comando de shell en el workspace: inicializar proyectos "
+                        "(npm create, git init…), instalar dependencias, tests y builds."),
+        "parameters": {"type": "object", "properties": {
+            "command": _p("string", "Comando a ejecutar"),
+            "timeout": _p("integer", "Segundos máximos (por defecto 30)"),
+        }, "required": ["command"]}}},
+]
+
+
+def native_call_to_internal(call: dict) -> dict:
+    """Convierte un tool_call nativo (formato OpenAI) al interno {tool, args}."""
+    fn = call.get("function") or {}
+    args = fn.get("arguments")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args or "{}")
+        except Exception:
+            args = {}
+    return {"tool": fn.get("name", ""), "args": args if isinstance(args, dict) else {}}
+
+
+def sanitize_for_plain_chat(messages: list[dict]) -> list[dict]:
+    """Quita el round-trip de tools del historial para un chat normal.
+
+    Los mensajes `role="tool"` solo son válidos justo detrás del assistant que
+    los pidió; si el usuario pasa a modo ask (que recorta el historial) podrían
+    quedar huérfanos y romper el template del modelo.
+    """
+    out = []
+    for m in messages:
+        if m.get("role") == "tool":
+            continue
+        if m.get("tool_calls"):
+            m = {k: v for k, v in m.items() if k != "tool_calls"}
+            if not (m.get("content") or "").strip():
+                continue
+        out.append(m)
+    return out
+
+
 # Recordatorio de una sola vez cuando el modelo "sugiere" código en el chat
 # en vez de aplicarlo con herramientas (vicio típico de los modelos chicos).
 NUDGE_PROMPT = (
     "Si ese código debía aplicarse a un archivo del workspace, hazlo AHORA con "
     '{"tool":"write_file","args":{"path":"...","content":"CONTENIDO COMPLETO"}} '
     '(JSON puro, sin ```). Si no había nada que aplicar, responde solo "OK".'
+)
+
+NATIVE_NUDGE_PROMPT = (
+    "No escribas el código en el chat: aplícalo AHORA llamando a la herramienta "
+    "write_file (o edit_file si el archivo ya existe), y usa run_command para los "
+    'comandos. Si no había nada que aplicar, responde solo "OK".'
 )
 
 TRUNCATED_PROMPT = (
@@ -1935,6 +2142,43 @@ def workspace_tree(workspace: Path, max_entries: int = MAX_TREE_ENTRIES) -> str:
     if truncated:
         tree += "\n… (hay más archivos; usa list_files para explorar)"
     return tree
+
+
+def build_native_system_prompt(workspace: Path) -> str:
+    """Prompt para tool-calling NATIVO: las herramientas ya van en el template
+    del modelo, así que aquí solo van las reglas de uso (describirlas otra vez
+    confunde al modelo y le hace escribir JSON en el texto)."""
+    return (
+        "Eres un agente de código que trabaja DIRECTAMENTE sobre los archivos del usuario "
+        "llamando a las herramientas que tienes disponibles.\n"
+        f"Workspace: {workspace}\n"
+        "Las rutas son siempre RELATIVAS al workspace.\n\n"
+        "=== REGLAS ===\n"
+        "1. Si el usuario pide crear, inicializar, modificar, arreglar, eliminar o ejecutar algo, "
+        "LLAMA A LAS HERRAMIENTAS. Tú aplicas los cambios: el usuario no copia código a mano.\n"
+        "2. NUNCA respondas con el código en un bloque ``` cuando lo que toca es escribirlo en "
+        "un archivo: eso va en el argumento content de write_file.\n"
+        "3. Para crear un proyecto: mkdir/write_file para los archivos, y run_command para los "
+        "comandos de scaffolding, instalación o git.\n"
+        "4. Para modificar un archivo que ya existe: primero read_file, luego edit_file con el "
+        "fragmento exacto. write_file solo para archivos nuevos o reescrituras completas.\n"
+        "5. Puedes llamar a varias herramientas seguidas; el resultado de cada una te llega antes "
+        "del siguiente paso. Nunca inventes el resultado de una herramienta.\n"
+        "6. Tras cambiar código, si hay tests o build, verifícalo con run_command y corrige si el "
+        "EXIT es distinto de 0.\n"
+        "7. Cuando ya no quede nada que hacer, responde con texto normal resumiendo lo hecho.\n\n"
+        # Los modelos chicos (qwen2.5-coder:7b y similares) conocen el formato
+        # pero se saltan los tags <tool_call>, y entonces Ollama devuelve la
+        # llamada como texto plano. Repetir el formato aquí hace que al menos el
+        # JSON salga bien formado: el CLI lo parsea igual desde el texto.
+        "=== FORMATO DE LLAMADA ===\n"
+        "Cada llamada va EXACTAMENTE así, sin ``` alrededor:\n"
+        "<tool_call>\n"
+        '{"name": "write_file", "arguments": {"path": "…", "content": "…"}}\n'
+        "</tool_call>\n\n"
+        "=== ARCHIVOS DEL WORKSPACE ===\n"
+        f"{workspace_tree(workspace)}"
+    )
 
 
 def build_agent_system_prompt(workspace: Path) -> str:
@@ -2198,6 +2442,97 @@ def _validate_tool_dict(data: dict) -> dict | None:
 _TOOL_START = re.compile(r'\{\s*"(tool|name)"')
 
 
+def _scan_object(text: str, start: int) -> int:
+    """Fin (exclusivo) del objeto que empieza en `start`, o -1 si no cierra.
+
+    Cuenta llaves ignorando las que van dentro de un string. Reconoce strings
+    con comilla doble Y simple: los modelos chicos escriben los argumentos al
+    estilo Python ('…'), y con esas comillas sin reconocer el conteo se
+    desbalancea y la llamada se pierde entera.
+    """
+    depth = 0
+    quote = ""  # comilla que abrió el string actual ("" = fuera de string)
+    escape_next = False
+    for j in range(start, len(text)):
+        ch = text[j]
+        if escape_next:
+            escape_next = False
+        elif quote:
+            if ch == "\\":
+                escape_next = True
+            elif ch == quote:
+                quote = ""
+        elif ch in ('"', "'"):
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return -1
+
+
+def _quotes_to_json(text: str) -> str:
+    """Convierte los strings 'a la Python' del candidato en strings JSON.
+
+    qwen2.5-coder y otros modelos chicos emiten
+    `{"name": "write_file", "arguments": {"content": '…'}}`: JSON inválido, así
+    que la llamada se descartaba en silencio y el archivo nunca se escribía.
+    Los escapes ya presentes (\\n, \\t…) se conservan tal cual; las comillas
+    dobles y los saltos reales de dentro se escapan.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':  # string JSON legítimo: copiar tal cual
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    break
+                j += 1
+            out.append(text[i:min(j + 1, n)])
+            i = j + 1
+            continue
+        if ch == "'":  # string estilo Python: reescribir con comilla doble
+            buf: list[str] = []
+            j = i + 1
+            while j < n:
+                c = text[j]
+                if c == "\\":
+                    nxt = text[j + 1] if j + 1 < n else ""
+                    buf.append('\\"' if nxt == "'" else text[j:j + 2])
+                    j += 2
+                    continue
+                if c == "'":
+                    break
+                buf.append({'"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}.get(c, c))
+                j += 1
+            out.append('"' + "".join(buf) + '"')
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _loads_lenient(candidate: str):
+    """json.loads tolerante con lo que producen los modelos chicos.
+
+    strict=False acepta saltos de línea reales dentro de los strings; si aun
+    así falla, se prueba con las comillas normalizadas.
+    """
+    try:
+        return json.loads(candidate, strict=False)
+    except Exception:
+        return json.loads(_quotes_to_json(candidate), strict=False)
+
+
 def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
     """Localiza los JSON `{"tool":...}` embebidos: (call, inicio, fin_exclusivo).
 
@@ -2210,38 +2545,16 @@ def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
         if not m:
             break
         start = m.start()
-        depth = 0
-        j = start
-        in_string = False
-        escape_next = False
-        while j < len(text):
-            ch = text[j]
-            if escape_next:
-                escape_next = False
-            elif ch == "\\" and in_string:
-                escape_next = True
-            elif ch == '"':
-                in_string = not in_string
-            elif not in_string:
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[start: j + 1]
-                        try:
-                            # strict=False: tolera saltos de línea reales dentro
-                            # de strings (JSON inválido pero frecuente en LLMs)
-                            data = _validate_tool_dict(json.loads(candidate, strict=False))
-                            if data:
-                                results.append((data, start, j + 1))
-                        except Exception:
-                            pass
-                        i = j + 1
-                        break
-            j += 1
-        else:
+        end = _scan_object(text, start)
+        if end == -1:  # objeto sin cerrar: no hay más llamadas completas
             break
+        try:
+            data = _validate_tool_dict(_loads_lenient(text[start:end]))
+            if data:
+                results.append((data, start, end))
+        except Exception:
+            pass
+        i = end
     return results
 
 
@@ -2278,29 +2591,7 @@ def cut_unclosed_call(text: str) -> str:
     if not starts:
         return text
     last = starts[-1]
-    depth = 0
-    in_string = False
-    escape_next = False
-    closed = False
-    j = last
-    while j < len(text):
-        ch = text[j]
-        if escape_next:
-            escape_next = False
-        elif ch == "\\" and in_string:
-            escape_next = True
-        elif ch == '"':
-            in_string = not in_string
-        elif not in_string:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    closed = True
-                    break
-        j += 1
-    return text if closed else text[:last]
+    return text if _scan_object(text, last) != -1 else text[:last]
 
 
 def has_unclosed_call(text: str) -> bool:
@@ -2321,20 +2612,47 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                    stream_assistant) -> tuple[str, list[dict]]:
     """Ejecuta un turno de agente con aprobación interactiva.
 
-    - `session`: estado mutable con `auto_approve: bool`.
-    - `stream_assistant(messages) -> str`: lo aporta la app; muestra el texto
-      del modelo en vivo y devuelve la respuesta completa.
+    - `session`: estado mutable con `auto_approve: bool` y `native_tools: bool`
+      (este último lo apaga la app si el modelo no soporta tools nativas).
+    - `stream_assistant(messages, tools) -> (texto, tool_calls_nativos)`: lo
+      aporta la app; muestra el texto del modelo en vivo y devuelve la respuesta
+      completa junto con los tool_calls estructurados que haya emitido.
     Devuelve (respuesta_final, history_actualizado).
     """
     console = make_console()
-    system_msg = {"role": "system", "content": build_agent_system_prompt(workspace)}
     working = history[:]
 
     nudged = False
     actions_open = False  # la cabecera "acciones" se abre una vez por turno
     for _ in range(MAX_AGENT_STEPS):
+        # El flag puede apagarse a mitad de turno (fallback si el modelo no
+        # soporta tools), así que se relee en cada paso.
+        native = session.get("native_tools", True)
+        system_msg = {"role": "system", "content": (
+            build_native_system_prompt(workspace) if native
+            else build_agent_system_prompt(workspace))}
+        messages = [system_msg] + (working if native else sanitize_for_plain_chat(working))
+        raw, native_calls = stream_assistant(messages, TOOL_SCHEMAS if native else None)
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
-        assistant = truncate_fabricated(stream_assistant([system_msg] + working))
+        assistant = truncate_fabricated(raw)
+
+        if native_calls:
+            working.append({"role": "assistant", "content": assistant, "tool_calls": native_calls})
+            if not actions_open:
+                render_actions_header(console)
+                actions_open = True
+            for call in native_calls:
+                internal = native_call_to_internal(call)
+                tool_name = internal["tool"]
+                result = _approve_and_run(console, workspace, session, tool_name, internal["args"])
+                working.append({
+                    "role": "tool",
+                    "content": result,
+                    "tool_call_id": str(call.get("id") or ""),
+                    "name": tool_name,
+                })
+            continue
+
         working.append({"role": "assistant", "content": assistant})
 
         tool_calls = extract_all_tool_calls(assistant)
@@ -2347,7 +2665,8 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
             if not nudged and "```" in assistant:
                 # Mostró código en vez de aplicarlo: una oportunidad de corregirse
                 nudged = True
-                working.append({"role": "user", "content": NUDGE_PROMPT})
+                working.append({"role": "user",
+                                "content": NATIVE_NUDGE_PROMPT if native else NUDGE_PROMPT})
                 continue
             return assistant, working
 
@@ -2492,6 +2811,36 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
 
 COMMAND_GROUPS = ("conversación", "agente", "cuenta", "sistema")
 
+# Orden de presentación: por grupo (el del catálogo) y, dentro, alfabético.
+# El menú del prompt no puede pintar cabeceras, así que el orden es lo único
+# que agrupa visualmente; sin él son 31 comandos en desorden.
+COMMAND_ORDER: list[tuple[str, str, str, str]] = sorted(
+    COMMAND_SPECS,
+    key=lambda spec: (COMMAND_GROUPS.index(spec[3]) if spec[3] in COMMAND_GROUPS else 99, spec[0]),
+)
+
+# Ancho de la columna del nombre: alinea los argumentos y las descripciones.
+COMMAND_NAME_WIDTH = max(len(name) for name, _a, _d, _g in COMMAND_SPECS) + 1
+
+
+def command_matches(prefix: str) -> list[tuple[str, str, str, str]]:
+    """Comandos cuyo nombre empieza por `prefix` (sin la barra), en orden de menú."""
+    prefix = prefix.lower()
+    return [spec for spec in COMMAND_ORDER if spec[0].startswith(prefix)]
+
+
+def common_command_prefix(names: list[str]) -> str:
+    """Prefijo común a todos los nombres (para completar sin elegir por el usuario)."""
+    if not names:
+        return ""
+    shared = names[0]
+    for name in names[1:]:
+        while not name.startswith(shared):
+            shared = shared[:-1]
+            if not shared:
+                return ""
+    return shared
+
 
 def make_completer(app):
     """Completer de prompt_toolkit: menú al escribir `/` y modelos en `/model `."""
@@ -2511,19 +2860,26 @@ def make_completer(app):
                 return
             if " " in text:
                 return
-            prefix = text[1:]
-            for name, args, desc, group in COMMAND_SPECS:
-                if name.startswith(prefix):
-                    display = f"/{name} {args}".strip()
-                    # Con argumento: dejar espacio final para encadenar el
-                    # autocompletado del argumento (ej. /model → modelos)
-                    completion_text = f"/{name} " if args else f"/{name}"
-                    yield Completion(
-                        completion_text,
-                        start_position=-len(text),
-                        display=display,
-                        display_meta=f"{desc}  ·  {group}",
-                    )
+            prefix = text[1:].lower()
+            for name, args, desc, group in COMMAND_ORDER:
+                if not name.startswith(prefix):
+                    continue
+                # Dos columnas dentro del propio display: el nombre ocupa
+                # siempre lo mismo, así los argumentos quedan en vertical y la
+                # lista se lee como una tabla y no como texto irregular.
+                display = [
+                    ("class:cmd.name", f"/{name}".ljust(COMMAND_NAME_WIDTH + 1)),
+                    ("class:cmd.args", args),
+                ]
+                # Con argumento: dejar espacio final para encadenar el
+                # autocompletado del argumento (ej. /model → modelos)
+                completion_text = f"/{name} " if args else f"/{name}"
+                yield Completion(
+                    completion_text,
+                    start_position=-len(text),
+                    display=display,
+                    display_meta=desc,
+                )
 
     return SlashCompleter()
 
@@ -2595,6 +2951,13 @@ from pathlib import Path
 
 TOKENS_PER_IMAGE = 800  # estimación para la barra de contexto
 
+# Alto máximo de la vista viva del streaming. El Live es transitorio (se borra
+# al cerrarse y el texto íntegro se imprime después), así que si creciera hasta
+# llenar la pantalla taparía el turno anterior y al cerrarse daría un salto.
+# Con una ventana fija se lee la cola de lo que escribe el modelo y el
+# transcript de arriba se queda quieto.
+LIVE_TAIL_ROWS = 20
+
 
 class ChatApp:
     def __init__(self, model_override: str = "", client_id: str = "", title: str = ""):
@@ -2613,7 +2976,12 @@ class ChatApp:
             "auto_approve": bool(self.cfg.get("auto_approve_tools", False)),
             # Comandos de shell: flag aparte de auto_approve (irreversibles).
             "auto_run_commands": bool(self.cfg.get("auto_run_commands", False)),
+            # Tool-calling nativo del modelo (modo agent). Se apaga solo si el
+            # modelo no lo soporta; entonces se usa el protocolo de texto.
+            "native_tools": bool(self.cfg.get("native_tools", True)),
         }
+        # tool_calls nativos del último stream (los consume _stream_agent)
+        self._last_tool_calls: list[dict] = []
         self.history: list[dict] = []
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
@@ -2947,39 +3315,82 @@ class ChatApp:
     # ── loop de entrada ──────────────────────────────────────────────────
 
     def _completion_bindings(self):
-        """Enter/Tab aplican la sugerencia del menú de comandos (como Claude Code)."""
-        from prompt_toolkit.filters import has_completions
+        """Enter resuelve el comando escrito a medias y lo ejecuta.
+
+        Antes esto dependía del menú de prompt_toolkit (`has_completions`), y ahí
+        estaba el fallo: con `complete_while_typing` las sugerencias se calculan
+        en una tarea de fondo, así que escribir «/re» y pulsar Enter enseguida
+        llegaba con el menú todavía vacío y se enviaba «/re» tal cual. Resolver
+        el prefijo contra el catálogo es síncrono y no tiene esa carrera.
+        """
+        from prompt_toolkit.document import Document
+        from prompt_toolkit.filters import completion_is_selected
         from prompt_toolkit.key_binding import KeyBindings
 
         kb = KeyBindings()
 
-        def _apply(event) -> bool:
-            buff = event.current_buffer
-            state = buff.complete_state
-            if not state or not state.completions:
-                return False
-            completion = state.current_completion
-            if completion is None:
-                # Sin navegar: autocompletar solo el NOMBRE del comando;
-                # en menús de argumentos Enter debe enviar, no elegir por ti.
-                if " " in buff.text:
-                    return False
-                completion = state.completions[0]
-            # Si lo escrito ya ES la sugerencia, no hay nada que completar
-            if buff.text.strip() == completion.text.strip():
-                buff.cancel_completion()
-                return False
-            buff.apply_completion(completion)
-            return True
+        def _set_line(buff, value: str) -> None:
+            buff.document = Document(value, len(value))
 
-        @kb.add("enter", filter=has_completions)
+        # Handler general. Se registra ANTES del de "completado seleccionado"
+        # porque prompt_toolkit se queda con la ÚLTIMA vinculación aplicable.
+        @kb.add("enter")
         def _enter(event):
-            if not _apply(event):
-                event.current_buffer.validate_and_handle()
+            buff = event.current_buffer
+            text = buff.text.strip()
+            if not text.startswith("/"):
+                buff.validate_and_handle()
+                return
 
-        @kb.add("tab", filter=has_completions)
-        def _tab(event):
-            _apply(event)
+            head, _sep, rest = text[1:].partition(" ")
+            rest = rest.strip()
+            matches = command_matches(head)
+
+            # Nombre completo (o basura que no es comando): enviar y que el
+            # dispatcher decida; él ya sabe explicar un comando desconocido.
+            if not matches or any(spec[0] == head.lower() for spec in matches):
+                buff.cancel_completion()
+                buff.validate_and_handle()
+                return
+
+            if len(matches) > 1:
+                shared = common_command_prefix([spec[0] for spec in matches])
+                if rest:
+                    # Ya hay argumento: el menú no puede desambiguar (solo
+                    # completa nombres), así que se envía y el dispatcher
+                    # responde con los candidatos en vez de dejar Enter mudo.
+                    buff.cancel_completion()
+                    buff.validate_and_handle()
+                    return
+                # Ambiguo: se avanza hasta donde todos coinciden y se abre el
+                # menú, en vez de elegir por el usuario o enviar un no-comando.
+                if len(shared) > len(head):
+                    _set_line(buff, f"/{shared}")
+                buff.start_completion(select_first=False)
+                return
+
+            name, args = matches[0][0], matches[0][1]
+            if rest:
+                # «/mod gpt» → «/model gpt»: el argumento ya está escrito.
+                _set_line(buff, f"/{name} {rest}")
+                buff.cancel_completion()
+                buff.validate_and_handle()
+                return
+            if args:
+                # Lleva argumento: se completa y se espera a que lo escriba.
+                _set_line(buff, f"/{name} ")
+                buff.start_completion(select_first=False)
+                return
+            # Sin argumentos: un solo Enter completa y ejecuta.
+            _set_line(buff, f"/{name}")
+            buff.cancel_completion()
+            buff.validate_and_handle()
+
+        @kb.add("enter", filter=completion_is_selected)
+        def _enter_selected(event):
+            # El usuario navegó el menú con las flechas: Enter elige lo marcado.
+            buff = event.current_buffer
+            buff.apply_completion(buff.complete_state.current_completion)
 
         return kb
 
@@ -3005,7 +3416,7 @@ class ChatApp:
             # bottom_toolbar de prompt_toolkit solo vive mientras hay prompt
             # (por eso desaparecía al enviar), así que sería un duplicado.
             bottom_toolbar=None if status_line_active() else (lambda: self.status.pt_toolbar()),
-            reserve_space_for_menu=6,
+            reserve_space_for_menu=9,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
         # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
@@ -3064,7 +3475,11 @@ class ChatApp:
         arg = parts[1].strip() if len(parts) > 1 else ""
         handler = getattr(self, f"cmd_{name.replace('-', '_')}", None)
         if handler is None:
-            near = [n for n, _a, _d in COMMAND_SPECS if n.startswith(name[:3])][:3]
+            # Un prefijo ambiguo («/mod algo») llega aquí a propósito: la barra
+            # de comandos no puede desambiguar cuando ya hay un argumento.
+            near = [spec[0] for spec in command_matches(name)][:4]
+            if not near:
+                near = [spec[0] for spec in command_matches(name[:3])][:4]
             hint = f" — ¿quisiste decir {', '.join('/' + n for n in near)}?" if near else \
                    " — escribe / para ver el menú"
             print_error(f"Comando no reconocido: /{name}{hint}")
@@ -3116,7 +3531,7 @@ class ChatApp:
                 self._delegate_turn(clean or text)
             elif self.mode == "agent":
                 assistant, self.history = run_agent_turn(
-                    self.history, self.workspace, self.session, self._stream_assistant
+                    self.history, self.workspace, self.session, self._stream_agent
                 )
             else:
                 assistant = self._stream_assistant(self._context_messages())
@@ -3150,7 +3565,9 @@ class ChatApp:
 
     def _context_messages(self) -> list[dict]:
         max_msgs = int(self.cfg.get("max_context_messages", 12))
-        messages = self.history[-max_msgs:]
+        # El historial puede traer el round-trip de tools de un turno de agente;
+        # recortado a los últimos N quedaría descolgado y rompería el template.
+        messages = sanitize_for_plain_chat(self.history)[-max_msgs:]
         if self.project_context:
             return [{
                 "role": "system",
@@ -3158,12 +3575,32 @@ class ChatApp:
             }] + messages
         return messages
 
-    def _stream_assistant(self, messages: list[dict]) -> str:
+    def _stream_agent(self, messages: list[dict], tools: list[dict] | None = None):
+        """Un paso del agente: devuelve (texto, tool_calls nativos).
+
+        Si el modelo no soporta tool-calling nativo, Ollama responde con un error
+        y el turno pasa al protocolo de texto para el resto de la sesión.
+        """
+        try:
+            text = self._stream_assistant(messages, tools=tools)
+        except ApiError as exc:
+            if tools and "tool" in str(exc).lower():
+                self.session["native_tools"] = False
+                print_note(f"{self.model} no soporta herramientas nativas: "
+                           "el agente pasa al protocolo de texto.")
+                text = self._stream_assistant(
+                    sanitize_for_plain_chat(messages), tools=None)
+            else:
+                raise
+        return text, self._last_tool_calls
+
+    def _stream_assistant(self, messages: list[dict], tools: list[dict] | None = None) -> str:
         """Streamea una respuesta con Live: thinking en gris, contenido en Markdown."""
         from rich.console import Group
         from rich.markdown import Markdown
         from rich.text import Text
 
+        self._last_tool_calls = []
         stream = self.api.chat_stream(
             model=self.model,
             messages=messages,
@@ -3172,6 +3609,7 @@ class ChatApp:
             title=self.title,
             web_search=self.web_search,
             num_ctx=self.cfg.get("context_window"),
+            tools=tools,
         )
 
         content_parts: list[str] = []
@@ -3202,12 +3640,18 @@ class ChatApp:
                 else:
                     blocks.append(Markdown(raw))
             if not blocks:
-                blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
+                blocks.append(Text(
+                    f"{g('spark_alt')} preparando acciones…" if self._last_tool_calls
+                    else f"{g('spark_alt')} …", style="lx.dim"))
             # Con la fila reservada la barra ya está clavada abajo; repetirla
             # aquí la pegaría al texto que va saliendo.
             if not status_line_active():
                 blocks.append(self.status.rich_line(compact=True))
-            return pad(Group(*blocks))
+            # La vista viva se queda en la cola: una respuesta larga desbordaría
+            # la pantalla y el borrado del Live dejaría el hueco de vuelta. El
+            # texto íntegro lo imprime _final_view() al cerrar el Live.
+            rows = min(self.console.size.height - 2, LIVE_TAIL_ROWS)
+            return Tail(pad(Group(*blocks)), max(rows, 4))
 
         def _final_view():
             blocks = []
@@ -3232,7 +3676,16 @@ class ChatApp:
         self.status.extra = "respondiendo…"
         self._paint_status()
         last_paint = time.monotonic()
-        with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
+        with Live(
+            _live_view(),
+            console=self.console,
+            refresh_per_second=8,
+            transient=True,
+            # Tail ya acota el alto; `crop` es la red por si un renderable
+            # midiera distinto — "ellipsis" añadiría una línea de "..." que
+            # descuadraría el borrado.
+            vertical_overflow="crop",
+        ) as live:
             try:
                 for kind, payload in stream:
                     if time.monotonic() - last_paint > 0.4:
@@ -3257,6 +3710,10 @@ class ChatApp:
                         content_parts.append(payload)
                         if self.remote:
                             self.remote.emit("assistant_delta", text=payload)
+                    elif kind == "tool_calls":
+                        # Tool-calling nativo: Ollama los manda enteros; el
+                        # bloque de acciones los renderiza al cerrar el stream.
+                        self._last_tool_calls.extend(payload)
                     elif kind == "sources":
                         sources = payload
                     elif kind == "usage":
@@ -3413,7 +3870,9 @@ class ChatApp:
         with spinner("compactando conversación…"):
             resp = self.api.chat(
                 model=self.model,
-                messages=self.history + [prompt],
+                # sin tools en la petición: el round-trip de herramientas del
+                # modo agent no puede viajar tal cual
+                messages=sanitize_for_plain_chat(self.history) + [prompt],
                 conversation_id=None,
                 client_id=self.client_id,
                 title="compactación",
@@ -3422,7 +3881,7 @@ class ChatApp:
         if not summary:
             print_error("No se pudo generar el resumen.")
             return True
-        keep = self.history[-2:]
+        keep = sanitize_for_plain_chat(self.history)[-2:]
         self.history = [{
             "role": "system",
             "content": f"Resumen de la conversación previa:\n{summary}",
@@ -3660,6 +4119,12 @@ class ChatApp:
             f"[lx.dim2]{g('sep')}[/] [lx.dim]comandos de shell:[/] [lx.beige]{commands}[/]"
         )
         self.console.print(f"  [lx.dim2]{g('dot_empty')} solo lectura   {g('dot')} modifica tu disco[/]")
+        # El protocolo importa al diagnosticar: con modelos chicos, "el agente
+        # no usa las herramientas" casi siempre es que van por texto y no nativas.
+        protocol = ("nativo (el modelo recibe las funciones)"
+                    if self.session.get("native_tools", True)
+                    else "texto (el modelo no soporta herramientas nativas)")
+        self.console.print(f"  [lx.dim]Protocolo:[/] [lx.beige]{protocol}[/]")
         self.console.print()
         return True
 
@@ -3834,7 +4299,7 @@ class ChatApp:
         for msg in self.history:
             role = msg.get("role", "")
             content = (msg.get("content") or "").strip()
-            if not content or role == "system":
+            if not content or role in ("system", "tool"):
                 continue
             if role == "user" and content.startswith("TOOL_RESULT"):
                 continue
@@ -3986,7 +4451,7 @@ class ChatApp:
         for m in self.history:
             role = m.get("role", "")
             content = m.get("content", "")
-            if role == "system":
+            if role in ("system", "tool"):
                 continue
             if role == "user" and content.startswith("TOOL_RESULT"):
                 continue
@@ -4043,6 +4508,92 @@ class ChatApp:
             self.remote = None
         return True
 
+    def _remote_command(self, link: RemoteLink, text: str) -> None:
+        """Ejecuta un slash-command llegado del móvil y devuelve texto plano.
+
+        No se reutilizan los `cmd_*`: escriben en la consola local con `rich` y
+        varios abren selectores interactivos, que en remoto no tienen teclado.
+        Aquí solo viven los que se pueden resolver con un argumento y contestar
+        con una frase, que es lo que la app puede mostrar.
+        """
+        name, _sep, arg = text[1:].partition(" ")
+        name = name.strip().lower()
+        arg = arg.strip()
+
+        # Un prefijo también vale: en el móvil se escribe con el pulgar.
+        known = [spec[0] for spec in REMOTE_COMMANDS]
+        near = [n for n in known if n.startswith(name)] if name not in known else []
+        if len(near) == 1:
+            name = near[0]
+
+        def reply(message: str) -> None:
+            link.emit("notice", text=message)
+
+        if name == "help":
+            lines = ["Comandos disponibles desde la app:"]
+            lines += [f"/{n} {a}".rstrip() + f" — {d}" for n, a, d in REMOTE_COMMANDS]
+            reply("\n".join(lines))
+        elif name == "new":
+            self.cmd_new("")
+            reply("Conversación nueva: el contexto anterior se descartó.")
+        elif name == "model":
+            if not arg:
+                reply(f"Modelo actual: {self.model or 'sin configurar'}")
+            elif self.cfg.get("key_model"):
+                reply(f"El modelo está fijado por la API key: {self.cfg['key_model']}")
+            else:
+                models = self._models_or_empty()
+                match = next((m for m in models if m.lower() == arg.lower()), None) \
+                    or next((m for m in models if arg.lower() in m.lower()), None)
+                if not match:
+                    reply(f"No hay ningún modelo que coincida con «{arg}».")
+                else:
+                    self.model = match
+                    self.cfg["model"] = match
+                    save_config(self.cfg)
+                    reply(f"Modelo cambiado a {match}.")
+        elif name == "mode":
+            if arg in ("ask", "agent", "delegate"):
+                self.mode = arg
+                reply(f"Modo cambiado a {arg}.")
+            else:
+                reply(f"Modo actual: {self.mode}. Usa /mode ask, agent o delegate.")
+        elif name == "approve":
+            if arg in ("on", "off"):
+                self.session["auto_approve"] = arg == "on"
+            reply(f"Auto-aprobar herramientas: {'on' if self.session.get('auto_approve') else 'off'}.")
+        elif name == "web":
+            if arg in ("on", "off"):
+                self.web_search = arg == "on"
+                self.cfg["web_search"] = self.web_search
+                save_config(self.cfg)
+            reply(f"Búsqueda web: {'on' if self.web_search else 'off'}.")
+        elif name == "workspace":
+            reply(f"Workspace: {self.workspace}")
+        elif name == "cost":
+            tokens, pct = self._estimate_context()
+            window = int(self.cfg.get("context_window", 8192))
+            reply(f"Contexto: {tokens} de {window} tokens ({pct} %) en {len(self.history)} mensajes.")
+        elif name == "status":
+            reply(
+                f"Modelo: {self.model or 'sin configurar'}\n"
+                f"Modo: {self.mode}\n"
+                f"Workspace: {self.workspace}\n"
+                f"Auto-aprobar: {'on' if self.session.get('auto_approve') else 'off'}\n"
+                f"Búsqueda web: {'on' if self.web_search else 'off'}"
+            )
+        elif len(near) > 1:
+            reply(f"«/{name}» es ambiguo: " + " o ".join(f"/{n}" for n in near) + ".")
+        else:
+            reply(f"«/{name}» no se puede ejecutar desde la app. Escribe /help para ver los que sí.")
+        link.emit("status", state="idle")
+
+    def _models_or_empty(self) -> list:
+        try:
+            return self.models_cache or self.api.models()
+        except ApiError:
+            return list(self.models_cache)
+
     def _remote_loop(self, link: RemoteLink) -> None:
         """Takeover: el teclado local queda en pausa y los prompts llegan del
         móvil/web. Ctrl+C termina la sesión remota y devuelve el control."""
@@ -4068,9 +4619,8 @@ class ChatApp:
                     continue
                 link.interrupt_requested = False
                 self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(text)}[/] [lx.dim]\\[remoto][/]")
-                if text == "/new":
-                    self.cmd_new("")
-                    link.emit("status", state="idle")
+                if text.startswith("/"):
+                    self._remote_command(link, text)
                     continue
                 try:
                     self.send_message(text, origin="remote")

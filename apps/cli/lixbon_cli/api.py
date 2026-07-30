@@ -152,7 +152,8 @@ class ApiClient:
 
     def chat_stream(self, model: str, messages: list[dict], conversation_id: str | None = None,
                     client_id: str = "cli", title: str | None = None,
-                    web_search: bool = False, num_ctx: int | None = None) -> ChatStream:
+                    web_search: bool = False, num_ctx: int | None = None,
+                    tools: list[dict] | None = None) -> ChatStream:
         payload = {
             "model": model,
             "messages": messages,
@@ -165,5 +166,9 @@ class ApiClient:
         }
         if num_ctx:
             payload["num_ctx"] = int(num_ctx)
+        if tools:
+            # Tool-calling nativo: el gateway se las pasa a Ollama, que las mete
+            # en el template del modelo (modo agent).
+            payload["tools"] = tools
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)

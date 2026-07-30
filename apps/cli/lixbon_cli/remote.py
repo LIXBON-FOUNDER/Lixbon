@@ -17,6 +17,22 @@ REMOTE_FLUSH_SECONDS = 0.25
 REMOTE_RECONNECT_MAX_S = 30
 REMOTE_RESULT_CHARS = 600  # tamaño máximo del resumen de un tool_result
 
+# Comandos que el host acepta desde la app, publicados en el `hello` para que
+# el móvil pueda ofrecerlos sin conocer de antemano quién está al otro lado
+# (CLI e IDE no tienen por qué ofrecer los mismos). Solo entran los que se
+# resuelven con un argumento: en remoto no hay teclado para un selector.
+REMOTE_COMMANDS: list[tuple[str, str, str]] = [
+    ("help", "", "Ver los comandos disponibles aquí"),
+    ("new", "", "Empezar una conversación nueva"),
+    ("model", "[nombre]", "Ver o cambiar el modelo"),
+    ("mode", "[ask|agent|delegate]", "Ver o cambiar el modo de trabajo"),
+    ("approve", "[on|off]", "Auto-aprobar herramientas del agente"),
+    ("web", "[on|off]", "Búsqueda web durante las respuestas"),
+    ("status", "", "Estado de la sesión y del host"),
+    ("cost", "", "Tokens y contexto consumidos"),
+    ("workspace", "", "Carpeta de trabajo del agente"),
+]
+
 
 def _args_summary(tool: str, args: dict) -> str:
     """Resumen compacto y legible de los argumentos de una herramienta."""
@@ -65,7 +81,9 @@ class RemoteLink:
         self.session_id = resp["session"]["id"]
         self.share_url = resp.get("share_url", "")
         self.emit("hello", source=self.source, title=self.title,
-                  machine=self.machine, mode=mode, model=model)
+                  machine=self.machine, mode=mode, model=model,
+                  commands=[{"name": n, "args": a, "description": d}
+                            for n, a, d in REMOTE_COMMANDS])
         for target, name in ((self._reader_loop, "remote-reader"),
                              (self._flusher_loop, "remote-flusher")):
             t = threading.Thread(target=target, daemon=True, name=name)

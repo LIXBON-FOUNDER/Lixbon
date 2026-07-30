@@ -4,6 +4,8 @@ Eventos tipados que consume la app:
   ("sources", list)     — fuentes de web_search (primer evento si aplica)
   ("reasoning", str)    — razonamiento del modelo (segundo plano)
   ("content", str)      — texto de la respuesta
+  ("tool_calls", list)  — tool-calling nativo (modo agent); Ollama los manda
+                          completos en un chunk, no incrementales como OpenAI
   ("usage", dict)       — tokens reales, llega en el último chunk
   ("done", None)        — fin del stream
 """
@@ -98,6 +100,9 @@ def events_from_stream(response):
             reasoning = delta.get("reasoning_content")
             if reasoning:
                 yield ("reasoning", reasoning)
+            calls = delta.get("tool_calls")
+            if calls:
+                yield ("tool_calls", calls)
             content = delta.get("content")
             if content:
                 yield from think_filter.feed(content)

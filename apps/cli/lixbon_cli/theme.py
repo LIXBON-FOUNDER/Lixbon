@@ -78,15 +78,33 @@ def make_console():
     if _console is None:
         import shutil
 
-        from rich.console import Console, NewLine
+        from rich.console import Console, ConsoleDimensions, NewLine
         from rich.control import Control
         from rich.padding import Padding
         from rich.theme import Theme
 
-        from lixbon_cli.term import is_mintty
+        from lixbon_cli.term import is_mintty, status_line_active
 
         class LixbonConsole(Console):
-            """Console con margen izquierdo automático en cada print."""
+            """Console con margen izquierdo automático y alto sin la fila fija."""
+
+            @property
+            def size(self):
+                # La fila de la barra de estado vive FUERA de la región de
+                # scroll (DECSTBM, ver term.py). Si rich la cuenta como
+                # disponible, cualquier render de pantalla completa (el Live
+                # del streaming) se pasa una línea: la terminal scrollea dentro
+                # de la región y el `cursor-up + erase` con el que Live se
+                # repinta ya no cuadra → cada refresh deja una línea muerta
+                # arriba y la respuesta acaba pegada al fondo.
+                size = Console.size.fget(self)
+                if status_line_active():
+                    return ConsoleDimensions(size.width, max(size.height - 1, 5))
+                return size
+
+            @size.setter
+            def size(self, new_size):
+                Console.size.fset(self, new_size)
 
             def print(self, *objects, **kwargs):
                 if objects and not kwargs.pop("no_pad", False):
@@ -186,5 +204,13 @@ def pt_style():
         "completion-menu.completion": f"bg:#1E1E1A {PALETTE['cream']}",
         "completion-menu.completion.current": f"bg:{PALETTE['accent']} {PALETTE['ink']}",
         "completion-menu.meta.completion": f"bg:#1E1E1A {PALETTE['dim']}",
-        "completion-menu.meta.completion.current": f"bg:#2A2A24 {PALETTE['dim']}",
+        "completion-menu.meta.completion.current": f"bg:#2A2A24 {PALETTE['beige']}",
+        # Columnas del display de cada comando. Reglas de 2 nombres: la fila
+        # marcada (`completion-menu.completion.current`, 3 nombres) gana en
+        # especificidad y se pinta entera en tinta sobre oliva.
+        "cmd.name": PALETTE["cream"],
+        "cmd.args": PALETTE["dim2"],
+        # Barra de scroll del menú, para que se note que la lista sigue.
+        "scrollbar.background": "bg:#1E1E1A",
+        "scrollbar.button": f"bg:{PALETTE['dim2']}",
     })

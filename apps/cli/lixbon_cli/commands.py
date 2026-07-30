@@ -49,6 +49,36 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
 
 COMMAND_GROUPS = ("conversación", "agente", "cuenta", "sistema")
 
+# Orden de presentación: por grupo (el del catálogo) y, dentro, alfabético.
+# El menú del prompt no puede pintar cabeceras, así que el orden es lo único
+# que agrupa visualmente; sin él son 31 comandos en desorden.
+COMMAND_ORDER: list[tuple[str, str, str, str]] = sorted(
+    COMMAND_SPECS,
+    key=lambda spec: (COMMAND_GROUPS.index(spec[3]) if spec[3] in COMMAND_GROUPS else 99, spec[0]),
+)
+
+# Ancho de la columna del nombre: alinea los argumentos y las descripciones.
+COMMAND_NAME_WIDTH = max(len(name) for name, _a, _d, _g in COMMAND_SPECS) + 1
+
+
+def command_matches(prefix: str) -> list[tuple[str, str, str, str]]:
+    """Comandos cuyo nombre empieza por `prefix` (sin la barra), en orden de menú."""
+    prefix = prefix.lower()
+    return [spec for spec in COMMAND_ORDER if spec[0].startswith(prefix)]
+
+
+def common_command_prefix(names: list[str]) -> str:
+    """Prefijo común a todos los nombres (para completar sin elegir por el usuario)."""
+    if not names:
+        return ""
+    shared = names[0]
+    for name in names[1:]:
+        while not name.startswith(shared):
+            shared = shared[:-1]
+            if not shared:
+                return ""
+    return shared
+
 
 def make_completer(app):
     """Completer de prompt_toolkit: menú al escribir `/` y modelos en `/model `."""
@@ -68,19 +98,26 @@ def make_completer(app):
                 return
             if " " in text:
                 return
-            prefix = text[1:]
-            for name, args, desc, group in COMMAND_SPECS:
-                if name.startswith(prefix):
-                    display = f"/{name} {args}".strip()
-                    # Con argumento: dejar espacio final para encadenar el
-                    # autocompletado del argumento (ej. /model → modelos)
-                    completion_text = f"/{name} " if args else f"/{name}"
-                    yield Completion(
-                        completion_text,
-                        start_position=-len(text),
-                        display=display,
-                        display_meta=f"{desc}  ·  {group}",
-                    )
+            prefix = text[1:].lower()
+            for name, args, desc, group in COMMAND_ORDER:
+                if not name.startswith(prefix):
+                    continue
+                # Dos columnas dentro del propio display: el nombre ocupa
+                # siempre lo mismo, así los argumentos quedan en vertical y la
+                # lista se lee como una tabla y no como texto irregular.
+                display = [
+                    ("class:cmd.name", f"/{name}".ljust(COMMAND_NAME_WIDTH + 1)),
+                    ("class:cmd.args", args),
+                ]
+                # Con argumento: dejar espacio final para encadenar el
+                # autocompletado del argumento (ej. /model → modelos)
+                completion_text = f"/{name} " if args else f"/{name}"
+                yield Completion(
+                    completion_text,
+                    start_position=-len(text),
+                    display=display,
+                    display_meta=desc,
+                )
 
     return SlashCompleter()
 

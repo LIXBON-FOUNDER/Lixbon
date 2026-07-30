@@ -7,12 +7,20 @@ import time
 import uuid
 from pathlib import Path
 
-from lixbon_cli.agent import TOOL_SPECS, clean_prose, run_agent_turn, workspace_tree
+from lixbon_cli.agent import (
+    TOOL_SPECS,
+    clean_prose,
+    run_agent_turn,
+    sanitize_for_plain_chat,
+    workspace_tree,
+)
 from lixbon_cli.api import ApiClient, ApiError
-from lixbon_cli.remote import RemoteLink
+from lixbon_cli.remote import REMOTE_COMMANDS, RemoteLink
 from lixbon_cli.commands import (
     COMMAND_GROUPS,
     COMMAND_SPECS,
+    command_matches,
+    common_command_prefix,
     encode_image,
     fmt_size,
     make_completer,
@@ -45,6 +53,7 @@ from lixbon_cli.theme import make_console, pt_style
 from lixbon_cli.ui import (
     Option,
     StatusBar,
+    Tail,
     esc,
     fmt_tokens,
     print_error,
@@ -65,6 +74,13 @@ from lixbon_cli.ui import (
 
 TOKENS_PER_IMAGE = 800  # estimación para la barra de contexto
 
+# Alto máximo de la vista viva del streaming. El Live es transitorio (se borra
+# al cerrarse y el texto íntegro se imprime después), así que si creciera hasta
+# llenar la pantalla taparía el turno anterior y al cerrarse daría un salto.
+# Con una ventana fija se lee la cola de lo que escribe el modelo y el
+# transcript de arriba se queda quieto.
+LIVE_TAIL_ROWS = 20
+
 
 class ChatApp:
     def __init__(self, model_override: str = "", client_id: str = "", title: str = ""):
@@ -83,7 +99,12 @@ class ChatApp:
             "auto_approve": bool(self.cfg.get("auto_approve_tools", False)),
             # Comandos de shell: flag aparte de auto_approve (irreversibles).
             "auto_run_commands": bool(self.cfg.get("auto_run_commands", False)),
+            # Tool-calling nativo del modelo (modo agent). Se apaga solo si el
+            # modelo no lo soporta; entonces se usa el protocolo de texto.
+            "native_tools": bool(self.cfg.get("native_tools", True)),
         }
+        # tool_calls nativos del último stream (los consume _stream_agent)
+        self._last_tool_calls: list[dict] = []
         self.history: list[dict] = []
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
@@ -419,39 +440,82 @@ class ChatApp:
     # ── loop de entrada ──────────────────────────────────────────────────
 
     def _completion_bindings(self):
-        """Enter/Tab aplican la sugerencia del menú de comandos (como Claude Code)."""
-        from prompt_toolkit.filters import has_completions
+        """Enter resuelve el comando escrito a medias y lo ejecuta.
+
+        Antes esto dependía del menú de prompt_toolkit (`has_completions`), y ahí
+        estaba el fallo: con `complete_while_typing` las sugerencias se calculan
+        en una tarea de fondo, así que escribir «/re» y pulsar Enter enseguida
+        llegaba con el menú todavía vacío y se enviaba «/re» tal cual. Resolver
+        el prefijo contra el catálogo es síncrono y no tiene esa carrera.
+        """
+        from prompt_toolkit.document import Document
+        from prompt_toolkit.filters import completion_is_selected
         from prompt_toolkit.key_binding import KeyBindings
 
         kb = KeyBindings()
 
-        def _apply(event) -> bool:
-            buff = event.current_buffer
-            state = buff.complete_state
-            if not state or not state.completions:
-                return False
-            completion = state.current_completion
-            if completion is None:
-                # Sin navegar: autocompletar solo el NOMBRE del comando;
-                # en menús de argumentos Enter debe enviar, no elegir por ti.
-                if " " in buff.text:
-                    return False
-                completion = state.completions[0]
-            # Si lo escrito ya ES la sugerencia, no hay nada que completar
-            if buff.text.strip() == completion.text.strip():
-                buff.cancel_completion()
-                return False
-            buff.apply_completion(completion)
-            return True
+        def _set_line(buff, value: str) -> None:
+            buff.document = Document(value, len(value))
 
-        @kb.add("enter", filter=has_completions)
+        # Handler general. Se registra ANTES del de "completado seleccionado"
+        # porque prompt_toolkit se queda con la ÚLTIMA vinculación aplicable.
+        @kb.add("enter")
         def _enter(event):
-            if not _apply(event):
-                event.current_buffer.validate_and_handle()
+            buff = event.current_buffer
+            text = buff.text.strip()
+            if not text.startswith("/"):
+                buff.validate_and_handle()
+                return
 
-        @kb.add("tab", filter=has_completions)
-        def _tab(event):
-            _apply(event)
+            head, _sep, rest = text[1:].partition(" ")
+            rest = rest.strip()
+            matches = command_matches(head)
+
+            # Nombre completo (o basura que no es comando): enviar y que el
+            # dispatcher decida; él ya sabe explicar un comando desconocido.
+            if not matches or any(spec[0] == head.lower() for spec in matches):
+                buff.cancel_completion()
+                buff.validate_and_handle()
+                return
+
+            if len(matches) > 1:
+                shared = common_command_prefix([spec[0] for spec in matches])
+                if rest:
+                    # Ya hay argumento: el menú no puede desambiguar (solo
+                    # completa nombres), así que se envía y el dispatcher
+                    # responde con los candidatos en vez de dejar Enter mudo.
+                    buff.cancel_completion()
+                    buff.validate_and_handle()
+                    return
+                # Ambiguo: se avanza hasta donde todos coinciden y se abre el
+                # menú, en vez de elegir por el usuario o enviar un no-comando.
+                if len(shared) > len(head):
+                    _set_line(buff, f"/{shared}")
+                buff.start_completion(select_first=False)
+                return
+
+            name, args = matches[0][0], matches[0][1]
+            if rest:
+                # «/mod gpt» → «/model gpt»: el argumento ya está escrito.
+                _set_line(buff, f"/{name} {rest}")
+                buff.cancel_completion()
+                buff.validate_and_handle()
+                return
+            if args:
+                # Lleva argumento: se completa y se espera a que lo escriba.
+                _set_line(buff, f"/{name} ")
+                buff.start_completion(select_first=False)
+                return
+            # Sin argumentos: un solo Enter completa y ejecuta.
+            _set_line(buff, f"/{name}")
+            buff.cancel_completion()
+            buff.validate_and_handle()
+
+        @kb.add("enter", filter=completion_is_selected)
+        def _enter_selected(event):
+            # El usuario navegó el menú con las flechas: Enter elige lo marcado.
+            buff = event.current_buffer
+            buff.apply_completion(buff.complete_state.current_completion)
 
         return kb
 
@@ -478,7 +542,7 @@ class ChatApp:
             # bottom_toolbar de prompt_toolkit solo vive mientras hay prompt
             # (por eso desaparecía al enviar), así que sería un duplicado.
             bottom_toolbar=None if status_line_active() else (lambda: self.status.pt_toolbar()),
-            reserve_space_for_menu=6,
+            reserve_space_for_menu=9,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
         # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
@@ -537,7 +601,11 @@ class ChatApp:
         arg = parts[1].strip() if len(parts) > 1 else ""
         handler = getattr(self, f"cmd_{name.replace('-', '_')}", None)
         if handler is None:
-            near = [n for n, _a, _d in COMMAND_SPECS if n.startswith(name[:3])][:3]
+            # Un prefijo ambiguo («/mod algo») llega aquí a propósito: la barra
+            # de comandos no puede desambiguar cuando ya hay un argumento.
+            near = [spec[0] for spec in command_matches(name)][:4]
+            if not near:
+                near = [spec[0] for spec in command_matches(name[:3])][:4]
             hint = f" — ¿quisiste decir {', '.join('/' + n for n in near)}?" if near else \
                    " — escribe / para ver el menú"
             print_error(f"Comando no reconocido: /{name}{hint}")
@@ -589,7 +657,7 @@ class ChatApp:
                 self._delegate_turn(clean or text)
             elif self.mode == "agent":
                 assistant, self.history = run_agent_turn(
-                    self.history, self.workspace, self.session, self._stream_assistant
+                    self.history, self.workspace, self.session, self._stream_agent
                 )
             else:
                 assistant = self._stream_assistant(self._context_messages())
@@ -623,7 +691,9 @@ class ChatApp:
 
     def _context_messages(self) -> list[dict]:
         max_msgs = int(self.cfg.get("max_context_messages", 12))
-        messages = self.history[-max_msgs:]
+        # El historial puede traer el round-trip de tools de un turno de agente;
+        # recortado a los últimos N quedaría descolgado y rompería el template.
+        messages = sanitize_for_plain_chat(self.history)[-max_msgs:]
         if self.project_context:
             return [{
                 "role": "system",
@@ -631,12 +701,32 @@ class ChatApp:
             }] + messages
         return messages
 
-    def _stream_assistant(self, messages: list[dict]) -> str:
+    def _stream_agent(self, messages: list[dict], tools: list[dict] | None = None):
+        """Un paso del agente: devuelve (texto, tool_calls nativos).
+
+        Si el modelo no soporta tool-calling nativo, Ollama responde con un error
+        y el turno pasa al protocolo de texto para el resto de la sesión.
+        """
+        try:
+            text = self._stream_assistant(messages, tools=tools)
+        except ApiError as exc:
+            if tools and "tool" in str(exc).lower():
+                self.session["native_tools"] = False
+                print_note(f"{self.model} no soporta herramientas nativas: "
+                           "el agente pasa al protocolo de texto.")
+                text = self._stream_assistant(
+                    sanitize_for_plain_chat(messages), tools=None)
+            else:
+                raise
+        return text, self._last_tool_calls
+
+    def _stream_assistant(self, messages: list[dict], tools: list[dict] | None = None) -> str:
         """Streamea una respuesta con Live: thinking en gris, contenido en Markdown."""
         from rich.console import Group
         from rich.markdown import Markdown
         from rich.text import Text
 
+        self._last_tool_calls = []
         stream = self.api.chat_stream(
             model=self.model,
             messages=messages,
@@ -645,6 +735,7 @@ class ChatApp:
             title=self.title,
             web_search=self.web_search,
             num_ctx=self.cfg.get("context_window"),
+            tools=tools,
         )
 
         content_parts: list[str] = []
@@ -676,12 +767,18 @@ class ChatApp:
                 else:
                     blocks.append(Markdown(raw))
             if not blocks:
-                blocks.append(Text(f"{g('spark_alt')} …", style="lx.dim"))
+                blocks.append(Text(
+                    f"{g('spark_alt')} preparando acciones…" if self._last_tool_calls
+                    else f"{g('spark_alt')} …", style="lx.dim"))
             # Con la fila reservada la barra ya está clavada abajo; repetirla
             # aquí la pegaría al texto que va saliendo.
             if not status_line_active():
                 blocks.append(self.status.rich_line(compact=True))
-            return pad(Group(*blocks))
+            # La vista viva se queda en la cola: una respuesta larga desbordaría
+            # la pantalla y el borrado del Live dejaría el hueco de vuelta. El
+            # texto íntegro lo imprime _final_view() al cerrar el Live.
+            rows = min(self.console.size.height - 2, LIVE_TAIL_ROWS)
+            return Tail(pad(Group(*blocks)), max(rows, 4))
 
         def _final_view():
             blocks = []
@@ -706,7 +803,16 @@ class ChatApp:
         self.status.extra = "respondiendo…"
         self._paint_status()
         last_paint = time.monotonic()
-        with Live(_live_view(), console=self.console, refresh_per_second=8, transient=True) as live:
+        with Live(
+            _live_view(),
+            console=self.console,
+            refresh_per_second=8,
+            transient=True,
+            # Tail ya acota el alto; `crop` es la red por si un renderable
+            # midiera distinto — "ellipsis" añadiría una línea de "..." que
+            # descuadraría el borrado.
+            vertical_overflow="crop",
+        ) as live:
             try:
                 for kind, payload in stream:
                     if time.monotonic() - last_paint > 0.4:
@@ -731,6 +837,10 @@ class ChatApp:
                         content_parts.append(payload)
                         if self.remote:
                             self.remote.emit("assistant_delta", text=payload)
+                    elif kind == "tool_calls":
+                        # Tool-calling nativo: Ollama los manda enteros; el
+                        # bloque de acciones los renderiza al cerrar el stream.
+                        self._last_tool_calls.extend(payload)
                     elif kind == "sources":
                         sources = payload
                     elif kind == "usage":
@@ -887,7 +997,9 @@ class ChatApp:
         with spinner("compactando conversación…"):
             resp = self.api.chat(
                 model=self.model,
-                messages=self.history + [prompt],
+                # sin tools en la petición: el round-trip de herramientas del
+                # modo agent no puede viajar tal cual
+                messages=sanitize_for_plain_chat(self.history) + [prompt],
                 conversation_id=None,
                 client_id=self.client_id,
                 title="compactación",
@@ -896,7 +1008,7 @@ class ChatApp:
         if not summary:
             print_error("No se pudo generar el resumen.")
             return True
-        keep = self.history[-2:]
+        keep = sanitize_for_plain_chat(self.history)[-2:]
         self.history = [{
             "role": "system",
             "content": f"Resumen de la conversación previa:\n{summary}",
@@ -1136,6 +1248,12 @@ class ChatApp:
             f"[lx.dim2]{g('sep')}[/] [lx.dim]comandos de shell:[/] [lx.beige]{commands}[/]"
         )
         self.console.print(f"  [lx.dim2]{g('dot_empty')} solo lectura   {g('dot')} modifica tu disco[/]")
+        # El protocolo importa al diagnosticar: con modelos chicos, "el agente
+        # no usa las herramientas" casi siempre es que van por texto y no nativas.
+        protocol = ("nativo (el modelo recibe las funciones)"
+                    if self.session.get("native_tools", True)
+                    else "texto (el modelo no soporta herramientas nativas)")
+        self.console.print(f"  [lx.dim]Protocolo:[/] [lx.beige]{protocol}[/]")
         self.console.print()
         return True
 
@@ -1310,7 +1428,7 @@ class ChatApp:
         for msg in self.history:
             role = msg.get("role", "")
             content = (msg.get("content") or "").strip()
-            if not content or role == "system":
+            if not content or role in ("system", "tool"):
                 continue
             if role == "user" and content.startswith("TOOL_RESULT"):
                 continue
@@ -1463,7 +1581,7 @@ class ChatApp:
         for m in self.history:
             role = m.get("role", "")
             content = m.get("content", "")
-            if role == "system":
+            if role in ("system", "tool"):
                 continue
             if role == "user" and content.startswith("TOOL_RESULT"):
                 continue
@@ -1520,6 +1638,92 @@ class ChatApp:
             self.remote = None
         return True
 
+    def _remote_command(self, link: RemoteLink, text: str) -> None:
+        """Ejecuta un slash-command llegado del móvil y devuelve texto plano.
+
+        No se reutilizan los `cmd_*`: escriben en la consola local con `rich` y
+        varios abren selectores interactivos, que en remoto no tienen teclado.
+        Aquí solo viven los que se pueden resolver con un argumento y contestar
+        con una frase, que es lo que la app puede mostrar.
+        """
+        name, _sep, arg = text[1:].partition(" ")
+        name = name.strip().lower()
+        arg = arg.strip()
+
+        # Un prefijo también vale: en el móvil se escribe con el pulgar.
+        known = [spec[0] for spec in REMOTE_COMMANDS]
+        near = [n for n in known if n.startswith(name)] if name not in known else []
+        if len(near) == 1:
+            name = near[0]
+
+        def reply(message: str) -> None:
+            link.emit("notice", text=message)
+
+        if name == "help":
+            lines = ["Comandos disponibles desde la app:"]
+            lines += [f"/{n} {a}".rstrip() + f" — {d}" for n, a, d in REMOTE_COMMANDS]
+            reply("\n".join(lines))
+        elif name == "new":
+            self.cmd_new("")
+            reply("Conversación nueva: el contexto anterior se descartó.")
+        elif name == "model":
+            if not arg:
+                reply(f"Modelo actual: {self.model or 'sin configurar'}")
+            elif self.cfg.get("key_model"):
+                reply(f"El modelo está fijado por la API key: {self.cfg['key_model']}")
+            else:
+                models = self._models_or_empty()
+                match = next((m for m in models if m.lower() == arg.lower()), None) \
+                    or next((m for m in models if arg.lower() in m.lower()), None)
+                if not match:
+                    reply(f"No hay ningún modelo que coincida con «{arg}».")
+                else:
+                    self.model = match
+                    self.cfg["model"] = match
+                    save_config(self.cfg)
+                    reply(f"Modelo cambiado a {match}.")
+        elif name == "mode":
+            if arg in ("ask", "agent", "delegate"):
+                self.mode = arg
+                reply(f"Modo cambiado a {arg}.")
+            else:
+                reply(f"Modo actual: {self.mode}. Usa /mode ask, agent o delegate.")
+        elif name == "approve":
+            if arg in ("on", "off"):
+                self.session["auto_approve"] = arg == "on"
+            reply(f"Auto-aprobar herramientas: {'on' if self.session.get('auto_approve') else 'off'}.")
+        elif name == "web":
+            if arg in ("on", "off"):
+                self.web_search = arg == "on"
+                self.cfg["web_search"] = self.web_search
+                save_config(self.cfg)
+            reply(f"Búsqueda web: {'on' if self.web_search else 'off'}.")
+        elif name == "workspace":
+            reply(f"Workspace: {self.workspace}")
+        elif name == "cost":
+            tokens, pct = self._estimate_context()
+            window = int(self.cfg.get("context_window", 8192))
+            reply(f"Contexto: {tokens} de {window} tokens ({pct} %) en {len(self.history)} mensajes.")
+        elif name == "status":
+            reply(
+                f"Modelo: {self.model or 'sin configurar'}\n"
+                f"Modo: {self.mode}\n"
+                f"Workspace: {self.workspace}\n"
+                f"Auto-aprobar: {'on' if self.session.get('auto_approve') else 'off'}\n"
+                f"Búsqueda web: {'on' if self.web_search else 'off'}"
+            )
+        elif len(near) > 1:
+            reply(f"«/{name}» es ambiguo: " + " o ".join(f"/{n}" for n in near) + ".")
+        else:
+            reply(f"«/{name}» no se puede ejecutar desde la app. Escribe /help para ver los que sí.")
+        link.emit("status", state="idle")
+
+    def _models_or_empty(self) -> list:
+        try:
+            return self.models_cache or self.api.models()
+        except ApiError:
+            return list(self.models_cache)
+
     def _remote_loop(self, link: RemoteLink) -> None:
         """Takeover: el teclado local queda en pausa y los prompts llegan del
         móvil/web. Ctrl+C termina la sesión remota y devuelve el control."""
@@ -1545,9 +1749,8 @@ class ChatApp:
                     continue
                 link.interrupt_requested = False
                 self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(text)}[/] [lx.dim]\\[remoto][/]")
-                if text == "/new":
-                    self.cmd_new("")
-                    link.emit("status", state="idle")
+                if text.startswith("/"):
+                    self._remote_command(link, text)
                     continue
                 try:
                     self.send_message(text, origin="remote")
