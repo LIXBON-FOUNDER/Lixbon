@@ -8,6 +8,23 @@ IS_WINDOWS = os.name == "nt"
 # indicador de si la consola (conhost legacy, cp1252/cp850) mostrará unicode.
 _ORIG_ENCODING = (getattr(sys.stdout, "encoding", None) or "utf-8").lower()
 
+# Salida REAL de la terminal, capturada antes de que nadie la sustituya.
+#
+# Mientras hay un Live (o un Status) de rich activo, rich reemplaza
+# `sys.stdout` por un FileProxy: todo lo que se escriba ahí deja de ir a la
+# terminal y pasa a ser UN RENDERABLE MÁS del transcript. Los escapes de la
+# barra fija (DECSC, ir a la fila reservada, DECRC) contaban entonces como
+# texto visible: rich los medía, hacía wrap y cerraba con un salto de línea,
+# así que cada repintado durante el streaming empujaba el transcript una o dos
+# filas hacia arriba. En segundos la respuesta quedaba pegada al fondo con la
+# pantalla en blanco encima. Todo escape de control se escribe al stdout real.
+_real_stdout = sys.stdout
+
+
+def _out():
+    """Stream de terminal, a salvo del FileProxy con el que rich toma stdout."""
+    return _real_stdout if _real_stdout is not None else sys.stdout
+
 
 def enable_vt() -> None:
     """Habilita secuencias ANSI (VT) en consolas Windows."""
@@ -29,12 +46,15 @@ def enable_vt() -> None:
 
 def setup_terminal() -> None:
     """Prepara la terminal: VT + salida utf-8 tolerante."""
+    global _real_stdout
+
     enable_vt()
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+    _real_stdout = sys.stdout  # se llama al arrancar: aún no hay Live de rich
 
 
 def _unicode_ok() -> bool:
@@ -108,8 +128,9 @@ def set_title(text: str) -> None:
     if not is_interactive():
         return  # en un pipe/redirección el escape ensuciaría la salida
     try:
-        sys.stdout.write(f"\033]0;{text}\007")
-        sys.stdout.flush()
+        out = _out()
+        out.write(f"\033]0;{text}\007")
+        out.flush()
     except Exception:
         pass
 
@@ -126,8 +147,9 @@ def clear_screen() -> None:
     if not is_interactive():
         return  # en un pipe/redirección el escape ensuciaría la salida
     try:
-        sys.stdout.write("\033[H\033[2J\033[3J")
-        sys.stdout.flush()
+        out = _out()
+        out.write("\033[H\033[2J\033[3J")
+        out.flush()
     except Exception:
         pass
 
@@ -154,8 +176,9 @@ def term_size() -> tuple[int, int]:
 
 def _write(seq: str) -> None:
     try:
-        sys.stdout.write(seq)
-        sys.stdout.flush()
+        out = _out()
+        out.write(seq)
+        out.flush()
     except Exception:
         pass
 
@@ -248,7 +271,7 @@ def is_mintty() -> bool:
 
 def is_interactive() -> bool:
     """¿Hay un humano al otro lado? (aunque la terminal sea limitada)."""
-    if sys.stdout.isatty() and sys.stdin.isatty():
+    if _out().isatty() and sys.stdin.isatty():
         return True
     # mintty expone la stdio como pipes: isatty() miente, pero es interactivo.
     return is_mintty()
@@ -265,7 +288,7 @@ def ui_capable() -> bool:
     """
     global _UI_CAPABLE
     if _UI_CAPABLE is None:
-        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        if not (sys.stdin.isatty() and _out().isatty()):
             _UI_CAPABLE = False
         else:
             try:
