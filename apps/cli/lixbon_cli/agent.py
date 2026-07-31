@@ -26,7 +26,6 @@ from lixbon_cli.ui import (
     confirm3,
     render_action,
     render_action_result,
-    render_actions_header,
 )
 
 MAX_AGENT_STEPS = 12
@@ -707,7 +706,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     working = history[:]
 
     nudged = False
-    actions_open = False  # la cabecera "acciones" se abre una vez por turno
     for _ in range(MAX_AGENT_STEPS):
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
@@ -722,9 +720,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
         if native_calls:
             working.append({"role": "assistant", "content": assistant, "tool_calls": native_calls})
-            if not actions_open:
-                render_actions_header(console)
-                actions_open = True
             for call in native_calls:
                 internal = native_call_to_internal(call)
                 tool_name = internal["tool"]
@@ -753,10 +748,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                                 "content": NATIVE_NUDGE_PROMPT if native else NUDGE_PROMPT})
                 continue
             return assistant, working
-
-        if not actions_open:
-            render_actions_header(console)
-            actions_open = True
 
         combined_results = []
         for call in tool_calls:

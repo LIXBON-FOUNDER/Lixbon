@@ -183,8 +183,19 @@ nativas — una línea en `requirements.txt`). Así el CLI sigue siendo stdlib.
 - Las aprobaciones remotas respetan la **allowlist del agente ya existente**
   en el IDE: lo auto-permitido no pregunta; lo sensible genera
   `approval_request` que viaja al móvil.
-- El transcript viaja por el relay pero **no se persiste** en el gateway
-  (solo el buffer en memoria); la conversación ya se guarda donde siempre.
+- El transcript viaja por el relay y **se persiste** en `remote_events`
+  (tabla propia, un evento por fila con el `seq` que reparte el hub). Se
+  guardan los eventos con valor de conversación —`hello`, `snapshot`,
+  `user_msg`, `assistant_done`, `tool_use`, `tool_result`, `notice`, `error`,
+  `bye`—, no los deltas del streaming ni el estado. Con eso:
+  - el replay al (re)conectar sale de la BD y sobrevive a un reinicio del
+    gateway, no solo del buffer de 500 eventos en memoria;
+  - una sesión **terminada** se sigue abriendo en modo lectura desde la app y
+    la web (`GET /api/remote/sessions/{id}/transcript`), en vez de
+    desaparecer; `GET /api/remote/sessions` devuelve `transcript_events` para
+    saber cuáles tienen algo que releer.
+  - tope de `REMOTE_MAX_EVENTS` por sesión (se conservan los últimos) y
+    recorte de textos largos por evento.
 
 ---
 

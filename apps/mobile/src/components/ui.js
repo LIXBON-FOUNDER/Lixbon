@@ -413,38 +413,6 @@ export function ChatHeader({
   );
 }
 
-/// Distintivo de la superficie donde nació una conversación (app / CLI / IDE).
-export const SOURCE_META = {
-  cli: { label: 'CLI', icon: 'terminal' },
-  ide: { label: 'IDE', icon: 'panel' },
-  web: { label: 'App', icon: 'chat' },
-  api: { label: 'API', icon: 'key' },
-};
-
-export function SourceBadge({ source, muted = false }) {
-  const c = useColors();
-  const meta = SOURCE_META[source] || SOURCE_META.web;
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingLeft: 6,
-        paddingRight: 8,
-        paddingVertical: 2,
-        borderRadius: RADIUS_PILL,
-        backgroundColor: muted ? 'transparent' : c.bgInput,
-      }}
-    >
-      <Icon name={meta.icon} size={11} color={c.inkMuted} strokeWidth={1.8} />
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 10.5, color: c.inkMuted }}>
-        {meta.label}
-      </Text>
-    </View>
-  );
-}
-
 /// Etiqueta de plan (.plan-pill: fondo acento, texto tinta).
 export function PlanPill({ children }) {
   const c = useColors();

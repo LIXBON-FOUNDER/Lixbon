@@ -251,7 +251,9 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name, help="Abrir el chat interactivo" if name == "chat" else argparse.SUPPRESS)
         p.add_argument("--model", help="Sobrescribe el modelo por defecto")
         p.add_argument("--client-id", default=os.getenv("HOSTNAME", "cli-client"))
-        p.add_argument("--title", default="Sesión CLI")
+        # Sin valor por defecto: el servidor titula la conversación tras el
+        # primer intercambio (pasarlo aquí fija el nombre a mano).
+        p.add_argument("--title", default="", help="Título fijo de la conversación")
         p.add_argument("--once", default="", help="Enviar un único mensaje y salir (modo no interactivo)")
         p.set_defaults(func=cmd_chat)
 

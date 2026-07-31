@@ -6,6 +6,7 @@
 
 import { listFiles, readFileContent, writeFileContent, createNewEntry } from './tauri';
 import { useAppStore } from '../store/appStore';
+import { roleWarning } from './modelRoles';
 
 const INDEX_DIR = '.lixbon';
 const INDEX_FILE = 'index.json';
@@ -95,7 +96,10 @@ export async function buildIndex(onProgress = () => {}, signal) {
   if (!workspaceRoot) throw new Error('No hay carpeta de trabajo abierta.');
   const model = useAppStore.getState().effectiveEmbedModel();
   if (!model) {
-    throw new Error('No hay modelo de embeddings. Instala uno en Ollama (p. ej. `ollama pull nomic-embed-text`).');
+    // El gateway ya dice qué instalar cuando el rol `embed` no tiene modelo.
+    const aviso = roleWarning(useAppStore.getState().modelRoles, 'embed')
+      || 'Instala uno en Ollama (p. ej. `ollama pull nomic-embed-text`).';
+    throw new Error(`No hay modelo de embeddings. ${aviso}`);
   }
 
   onProgress({ phase: 'scan', done: 0, total: 0 });

@@ -34,12 +34,14 @@ import {
 import { useEditorStore } from './editorStore';
 import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
 import { describeImages } from '../lib/vision';
+import { roleWarning } from '../lib/modelRoles';
 
 let abortController = null;
 
 export const useChatStore = create((set, get) => ({
   messages: [], // { role: 'user'|'assistant'|'error'|'tool', content, sources?, tool?, args?, ok?, change? }
   conversationId: null,
+  conversationTitle: '', // lo pone el auto-título; se ve en la cabecera del panel
   streaming: false,
   view: 'chat', // 'chat' | 'history'
   agentMode: (localStorage.getItem('lixbon_agent_mode') ?? 'true') === 'true',
@@ -99,7 +101,7 @@ export const useChatStore = create((set, get) => ({
 
   newConversation: () => {
     get().stop();
-    set({ messages: [], conversationId: null, view: 'chat' });
+    set({ messages: [], conversationId: null, conversationTitle: '', view: 'chat' });
   },
 
   loadConversation: async (id) => {
@@ -135,7 +137,12 @@ export const useChatStore = create((set, get) => ({
       }
       return { role: 'user', content: m.content };
     });
-    set({ conversationId: id, messages, view: 'chat' });
+    set({
+      conversationId: id,
+      conversationTitle: res.conversation?.title || '',
+      messages,
+      view: 'chat',
+    });
   },
 
   stop: () => {
@@ -170,6 +177,8 @@ export const useChatStore = create((set, get) => ({
 
     // El backend acepta ids de conversación generados por el cliente
     const convId = conversationId || crypto.randomUUID();
+    // Solo el primer intercambio pide título: después ya lo tiene.
+    const isFirstExchange = !conversationId;
     const agentActive = agentMode && !!workspaceRoot;
 
     // ── Sub-agente de visión: si hay imágenes, un modelo multimodal las
@@ -184,10 +193,14 @@ export const useChatStore = create((set, get) => ({
     if (hasImages) {
       const visionModel = appState.effectiveVisionModel();
       if (!visionModel) {
+        // El aviso lo redacta el gateway (sabe qué falta); el texto local es el
+        // respaldo para un gateway antiguo sin roles.
+        const aviso = roleWarning(appState.modelRoles, 'vision')
+          || 'Instala uno en Ollama (p. ej. `ollama pull llava`).';
         set({ messages: [...messages, userMsg, {
           role: 'error',
-          content: 'Adjuntaste una imagen pero no hay un modelo de visión disponible. '
-            + 'Instala uno en Ollama (p. ej. `ollama pull llava`) y selecciónalo en Ajustes → Chat.',
+          content: `Adjuntaste una imagen pero no hay un modelo de visión disponible. ${aviso} `
+            + 'También puedes elegirlo en Ajustes → Modelos.',
         }] });
         return;
       }
@@ -420,6 +433,20 @@ export const useChatStore = create((set, get) => ({
       if (last?.role === 'assistant' && !(last.content || '').trim() && !last.sources && !last.thinking) {
         set({ messages: msgs.slice(0, -1) });
       }
+      if (isFirstExchange) get()._autoTitle(convId);
+    }
+  },
+
+  /** Auto-título tras el primer intercambio (igual que la web y la app).
+      Sin esto toda conversación del IDE se quedaba como "Sin título". */
+  _autoTitle: async (convId) => {
+    try {
+      const res = await api.post(`/api/conversations/${convId}/generate-title`);
+      if (typeof res?.title === 'string' && get().conversationId === convId) {
+        set({ conversationTitle: res.title });
+      }
+    } catch {
+      // sin título automático: no es crítico
     }
   },
 

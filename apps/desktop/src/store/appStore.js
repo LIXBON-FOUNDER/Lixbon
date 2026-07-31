@@ -4,6 +4,7 @@ import { setIndentConfig, setAutoSaveConfig, useEditorStore } from './editorStor
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
 import { detectVisionModel, modelId } from '../lib/vision';
+import { fetchModelRoles, roleModel } from '../lib/modelRoles';
 import { setGhostConfig } from '../editor/ghostText';
 import { resetIndexCache } from '../lib/codebaseIndex';
 
@@ -76,6 +77,11 @@ export const useAppStore = create((set, get) => ({
   // defecto aunque el modelo soporte más; subirla evita truncar. Más = más VRAM.
   contextWindow: parseInt(localStorage.getItem('lixbon_context_window') || '8192', 10),
   availableModels: [],
+  // Mapa rol→modelo que resuelve el gateway (GET /api/model-roles).
+  // NO se persiste: es verdad del servidor, y cachearla haría que el IDE
+  // siguiera creyendo en un modelo que el admin ya reasignó. null = todavía no
+  // se sabe (o gateway antiguo sin el endpoint) ⇒ se usan los heurísticos.
+  modelRoles: null,
   latency: 0,
 
 
@@ -260,6 +266,16 @@ export const useAppStore = create((set, get) => ({
 
   setAvailableModels: (availableModels) => set({ availableModels }),
 
+  setModelRoles: (modelRoles) => set({ modelRoles }),
+
+  /** Carga el mapa rol→modelo del gateway. Silencioso: si no está disponible
+      queda en null y cada effective*Model() cae a su heurístico. */
+  loadModelRoles: async () => {
+    const roles = await fetchModelRoles();
+    if (roles) set({ modelRoles: roles });
+    return roles;
+  },
+
   setVisionModel: (model) => {
     localStorage.setItem('lixbon_vision_model', model || '');
     set({ visionModel: model || '' });
@@ -276,15 +292,25 @@ export const useAppStore = create((set, get) => ({
     set({ ghostModel: model || '' });
   },
 
-  /** Modelo del ghost text: el elegido, o autodetecta uno de código
-      (id con "coder"/"code"), o cae al modelo de chat actual. */
+  /** Modelo del ghost text: el elegido a mano, o el que el gateway asigna al
+      rol `fim`, o (solo con gateway antiguo) un heurístico por nombre.
+
+      Deliberadamente NO cae al modelo de chat: ese fallback hacía que el
+      autocompletado disparara el modelo de razonamiento activo —5 GB y salida
+      con `<think>`— en cada pulsación de tecla. Sin modelo con FIM la respuesta
+      correcta es '' (requestFimCompletion aborta) y avisar en Ajustes. */
   effectiveGhostModel: () => {
-    const { ghostModel, availableModels, currentModel } = get();
+    const { ghostModel, availableModels, modelRoles } = get();
     const ids = availableModels.map(modelId);
     if (ghostModel && ids.includes(ghostModel)) return ghostModel;
+    if (modelRoles) return roleModel(modelRoles, 'fim'); // '' si ninguno sirve
     const coder = ids.find((id) => /coder|code/i.test(id));
-    return coder || currentModel;
+    return coder || '';
   },
+
+  /** ¿Se puede autocompletar? Falso cuando el gateway dice que ningún modelo
+      declara `insert` y el usuario no ha forzado uno a mano. */
+  ghostAvailable: () => !!get().effectiveGhostModel(),
 
   setEmbedModel: (model) => {
     localStorage.setItem('lixbon_embed_model', model || '');
@@ -296,11 +322,12 @@ export const useAppStore = create((set, get) => ({
     set({ useCodebaseContext: v });
   },
 
-  /** Modelo de embeddings: el elegido, o autodetecta uno con "embed" en el id. */
+  /** Modelo de embeddings: el elegido a mano, el del rol `embed`, o heurístico. */
   effectiveEmbedModel: () => {
-    const { embedModel, availableModels } = get();
+    const { embedModel, availableModels, modelRoles } = get();
     const ids = availableModels.map(modelId);
     if (embedModel && ids.includes(embedModel)) return embedModel;
+    if (modelRoles) return roleModel(modelRoles, 'embed');
     return ids.find((id) => /embed/i.test(id)) || '';
   },
 
@@ -310,12 +337,14 @@ export const useAppStore = create((set, get) => ({
     set({ contextWindow: v });
   },
 
-  /** Modelo de visión efectivo: el elegido, o autodetectado de la lista.
+  /** Modelo de visión efectivo: el elegido a mano, el del rol `vision`, o
+      autodetectado de la lista (por capability, y solo si no, por nombre).
       availableModels trae objetos {id,…}, no strings — normalizar con modelId. */
   effectiveVisionModel: () => {
-    const { visionModel, availableModels } = get();
+    const { visionModel, availableModels, modelRoles } = get();
     const ids = availableModels.map(modelId);
     if (visionModel && ids.includes(visionModel)) return visionModel;
+    if (modelRoles) return roleModel(modelRoles, 'vision');
     return detectVisionModel(availableModels);
   },
 

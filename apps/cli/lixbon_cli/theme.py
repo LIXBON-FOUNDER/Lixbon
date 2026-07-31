@@ -25,6 +25,13 @@ PALETTE = {
     "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
     "ok": "#5FB85F",      # éxito, líneas + de diff
     "err": "#E05C5C",     # error, líneas - de diff
+    # Diff: la fila entera se pinta con un fondo tenue (como en un editor) y el
+    # signo va en un tono más vivo para que se lea sobre ese fondo. Elegidos
+    # contra el casi-negro de la terminal: visibles sin tapar el código.
+    "diff_add_bg": "#173A24",
+    "diff_del_bg": "#45191D",
+    "diff_add_fg": "#8FE39B",
+    "diff_del_fg": "#FF9E9E",
     "warn": "#D6B44C",    # avisos, confirmaciones delicadas
     "ink": "#171717",     # texto sobre acento (selección invertida)
 }
@@ -88,6 +95,13 @@ def make_console():
         class LixbonConsole(Console):
             """Console con margen izquierdo automático y alto sin la fila fija."""
 
+            # Contador de impresiones CON CONTENIDO. Sirve para saber si un
+            # turno ya escribió algo (registro de acciones) y decidir si la
+            # respuesta necesita una línea de aire por encima, sin repartir
+            # banderas por medio código. Los Control del Live no cuentan: son
+            # fontanería de repintado y dispararían el contador en cada frame.
+            writes = 0
+
             @property
             def size(self):
                 # La fila de la barra de estado vive FUERA de la región de
@@ -107,6 +121,10 @@ def make_console():
                 Console.size.fset(self, new_size)
 
             def print(self, *objects, **kwargs):
+                if not objects or any(
+                    not isinstance(obj, (Control, NewLine)) for obj in objects
+                ):
+                    self.writes += 1
                 if objects and not kwargs.pop("no_pad", False):
                     # Los Control (mover cursor, borrar línea) son la fontanería
                     # con la que Live/Status repintan y BORRAN su línea. Si se
@@ -127,6 +145,12 @@ def make_console():
             theme=Theme(RICH_STYLES),
             highlight=False,
             width=min(cols, MAX_WIDTH),
+            # Color base de la consola: sin él el Markdown de las respuestas
+            # (que no lleva estilo propio) salía en el blanco por defecto de la
+            # terminal, ajeno a la paleta. Con la base en crema, el cuerpo de la
+            # respuesta es del color de la marca y los grises del registro de
+            # trabajo se leen como lo que son: un escalón por debajo.
+            style=PALETTE["cream"],
             # mintty (Git Bash) es una terminal real aunque la stdio sean pipes
             force_terminal=True if is_mintty() else None,
         )

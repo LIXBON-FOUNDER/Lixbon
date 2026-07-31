@@ -46,6 +46,8 @@ from core.security.auth import (
     web_or_api_key_auth,
 )
 from core.gateway.utils import fetch_models
+from core.gateway.model_router import model_for_request, target_or_503
+from core.inference.roles import REQUIRED_CAPABILITY, resolve_all
 
 logger = logging.getLogger("lixbon.chat")
 router = APIRouter()
@@ -67,14 +69,16 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(..., description="Modelo de Ollama")
+    # Opcional: si no llega, lo decide el rol `chat` del gateway (tabla
+    # model_roles → MODEL_ROLE_CHAT → autodetección por capability).
+    model: str | None = Field(None, description="Modelo de Ollama; vacío = el del rol chat")
     messages: list[ChatMessage]
     conversation_id: str | None = None
     title: str | None = None
     client_id: str | None = None
     stream: bool = False
     web_search: bool = False  # "modo investigar": busca en internet e inyecta contexto
-    # Origen (web/ide/cli): historial independiente por superficie.
+    # Origen (web/mobile/ide/cli): historial independiente por superficie.
     source: str | None = None
     # Ventana de contexto de Ollama. None ⇒ default de Ollama (4096). Subirla
     # evita que el modelo trunque en archivos/conversaciones grandes (aunque el
@@ -115,14 +119,14 @@ def _normalize_for_ollama(messages: list[dict]) -> list[dict]:
 
 
 class UIChatRequest(BaseModel):
-    model: str
+    model: str | None = None
     message: str
     conversation_id: str | None = None
     title: str | None = None
 
 
 class CompletionRequest(BaseModel):
-    model: str = Field(..., description="Modelo de Ollama")
+    model: str | None = Field(None, description="Modelo de Ollama; vacío = el del rol chat")
     prompt: str
     conversation_id: str | None = None
     title: str | None = None
@@ -137,14 +141,17 @@ class DelegateRequest(BaseModel):
 
 # ── Helper: chat no-streaming con fallback local ───────────────────────────
 
-async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = None) -> tuple[dict[str, Any], str]:
+async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = None,
+                       keep_alive: str | None = None) -> tuple[dict[str, Any], str]:
     """
     Ejecuta un chat por el mejor nodo; si el nodo falla, fallback al Ollama local.
     Retorna (respuesta_ollama, origen).
+    `keep_alive`: residencia en VRAM del rol (ver core/inference/roles.py).
     """
-    base, headers, origen = deps.orquestador.ollama_target(model)
+    base, headers, origen = target_or_503(model)
     try:
-        resp = await ollama_chat(base, model, messages, headers=headers, client=deps.http_client_chat, num_ctx=num_ctx)
+        resp = await ollama_chat(base, model, messages, headers=headers, client=deps.http_client_chat,
+                                 num_ctx=num_ctx, keep_alive=keep_alive)
         return resp, origen
     except httpx.HTTPStatusError as exc:
         if origen == "local":
@@ -156,7 +163,8 @@ async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = N
         logger.warning(f"[chat] Nodo '{origen}' inaccesible ({exc}); fallback local")
 
     try:
-        resp = await ollama_chat(OLLAMA_BASE_URL, model, messages, client=deps.http_client_chat, num_ctx=num_ctx)
+        resp = await ollama_chat(OLLAMA_BASE_URL, model, messages, client=deps.http_client_chat,
+                                 num_ctx=num_ctx, keep_alive=keep_alive)
         return resp, "local-fallback"
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Sin nodos disponibles y sin Ollama local: {exc}") from exc
@@ -193,35 +201,54 @@ async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     return {"object": "list", "data": await fetch_models()}
 
 
+@router.get("/api/model-roles")
+async def model_roles(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
+    """Qué modelo sirve cada rol de inferencia ahora mismo.
+
+    Los clientes lo usan para no adivinar: el IDE sabe qué modelo pedir para el
+    autocompletado (y si debe desactivarlo porque ninguno soporta FIM) sin
+    inventar heurísticos sobre el nombre del modelo. Incluye el catálogo para
+    ahorrar un round-trip a /v1/models.
+    """
+    catalog = await fetch_models()
+    return {
+        "roles": {r: res.as_dict() for r, res in resolve_all(catalog).items()},
+        "capability_by_role": REQUIRED_CAPABILITY,
+        "models": catalog,
+    }
+
+
 @router.post("/api/chat")
 async def api_chat(
     payload: UIChatRequest,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
     """Chat desde el dashboard web. Enrutado por el orquestador (F2)."""
+    model, role = await model_for_request(payload.model, "chat", user_data)
     plan = get_plan_for_user(user_data["id"])
-    ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+    ensure_can_chat(user_data["id"], plan, model)  # F5: límites del plan
     save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if save_history:
         if not ensure_conversation(conv_id, user_data["id"], payload.title, "dashboard", source="web"):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
-        save_message(conv_id, "user", payload.message, model=payload.model)
+        save_message(conv_id, "user", payload.message, model=model)
 
     started_at = time.perf_counter()
-    ollama_resp, origen = await _routed_chat(payload.model, [{"role": "user", "content": payload.message}])
+    ollama_resp, origen = await _routed_chat(model, [{"role": "user", "content": payload.message}],
+                                            num_ctx=role.num_ctx, keep_alive=role.keep_alive)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
 
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
+    _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history)
 
     return {
         "conversation_id": conv_id if save_history else None,
-        "model": payload.model,
+        "model": model,
         "node": origen,
         "message": assistant_text,
         "usage": {
@@ -238,17 +265,19 @@ async def chat_completions(
     payload: ChatCompletionRequest,
     user_data: dict[str, Any] = Depends(web_or_api_key_auth),
 ):
-    """Endpoint compatible con OpenAI — chat con modelos del cluster."""
-    validate_model_access(user_data, payload.model)
+    """Endpoint compatible con OpenAI — chat con modelos del cluster.
+    `model` es opcional: sin él se usa el del rol `chat` del gateway."""
+    model, role = await model_for_request(payload.model, "chat", user_data)
+    validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
     is_api = user_data.get("auth_via") == "api_key"
     bill_credits = False
     if is_api:
         # Pro/Advance usan su cuota del plan (no se cobra crédito, evita redundar
         # con lo que ya pagan); Gratuito o cuota agotada ⇒ prepago por créditos.
-        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     else:
-        ensure_can_chat(user_data["id"], plan, payload.model)  # F5: límites del plan
+        ensure_can_chat(user_data["id"], plan, model)  # F5: límites del plan
     save_history = get_user_settings(user_data["id"])["save_history"]
     if payload.no_persist:
         save_history = False  # edición inline: sin historial, pero se cobra el uso
@@ -260,7 +289,7 @@ async def chat_completions(
         if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id, source=source):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         if payload.messages and payload.messages[-1].role == "user":
-            save_message(conv_id, "user", payload.messages[-1].content, model=payload.model)
+            save_message(conv_id, "user", payload.messages[-1].content, model=model)
 
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
     if payload.tools:
@@ -273,9 +302,11 @@ async def chat_completions(
         context = websearch.build_context(messages[-1]["content"], web_sources)
         messages.insert(len(messages) - 1, {"role": "system", "content": context})
 
-    base, headers, origen = deps.orquestador.ollama_target(payload.model)
+    base, headers, origen = target_or_503(model)
+    num_ctx = payload.num_ctx or role.num_ctx
     started_at = time.perf_counter()
-    logger.info(f"[chat] model='{payload.model}' stream={payload.stream} target={origen} web={payload.web_search}")
+    logger.info(f"[chat] model='{model}' ({role.source}) stream={payload.stream} "
+                f"target={origen} web={payload.web_search}")
 
     if payload.stream:
         async def _stream_and_persist():
@@ -287,9 +318,10 @@ async def chat_completions(
                 yield f"data: {_json.dumps({'lixbon_sources': web_sources})}\n\n"
             try:
                 try:
-                    async for chunk in stream_chat_openai(base, payload.model, messages,
+                    async for chunk in stream_chat_openai(base, model, messages,
                                                           headers=headers, collector=collector,
-                                                          tools=payload.tools, num_ctx=payload.num_ctx):
+                                                          tools=payload.tools, num_ctx=num_ctx,
+                                                          keep_alive=role.keep_alive):
                         streamed_something = True
                         yield chunk
                 except Exception as exc:
@@ -297,9 +329,9 @@ async def chat_completions(
                     # (reintentar a mitad de stream duplicaría texto en el cliente)
                     if origen != "local" and not streamed_something:
                         logger.warning(f"[stream] Nodo '{origen}' falló ({exc}); fallback local")
-                        async for chunk in stream_chat_openai(OLLAMA_BASE_URL, payload.model, messages,
+                        async for chunk in stream_chat_openai(OLLAMA_BASE_URL, model, messages,
                                                               collector=collector, tools=payload.tools,
-                                                              num_ctx=payload.num_ctx):
+                                                              num_ctx=num_ctx, keep_alive=role.keep_alive):
                             yield chunk
                     else:
                         logger.error(f"[stream] Falló el streaming ({exc})")
@@ -309,7 +341,7 @@ async def chat_completions(
                 if text:
                     latency_ms = int((time.perf_counter() - started_at) * 1000)
                     _persist_assistant(
-                        conv_id, payload.model, text,
+                        conv_id, model, text,
                         collector.get("prompt_tokens", 0),
                         collector.get("completion_tokens", 0),
                         latency_ms,
@@ -321,12 +353,13 @@ async def chat_completions(
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
 
     # Modo sin streaming
-    ollama_resp, origen = await _routed_chat(payload.model, messages, num_ctx=payload.num_ctx)
+    ollama_resp, origen = await _routed_chat(model, messages, num_ctx=num_ctx,
+                                            keep_alive=role.keep_alive)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
+    _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
                        bill_credits=bill_credits)
 
@@ -334,7 +367,7 @@ async def chat_completions(
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": payload.model,
+        "model": model,
         "conversation_id": conv_id if save_history else None,
         "node": origen,
         "choices": [
@@ -360,26 +393,28 @@ async def completions(
 ):
     """Endpoint compatible con OpenAI — text completions. Solo API key (Bearer):
     Pro/Advance usan su cuota del plan; Gratuito o cuota agotada, créditos prepago."""
-    validate_model_access(user_data, payload.model)
+    model, role = await model_for_request(payload.model, "chat", user_data)
+    validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
-    bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+    bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     save_history = get_user_settings(user_data["id"])["save_history"]
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     if save_history:
         if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id, source="api"):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
-        save_message(conv_id, "user", payload.prompt, model=payload.model)
+        save_message(conv_id, "user", payload.prompt, model=model)
 
     started_at = time.perf_counter()
     ollama_resp, origen = await _routed_chat(
-        payload.model, [{"role": "user", "content": payload.prompt}]
+        model, [{"role": "user", "content": payload.prompt}],
+        num_ctx=role.num_ctx, keep_alive=role.keep_alive,
     )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
-    _persist_assistant(conv_id, payload.model, assistant_text, prompt_tokens, completion_tokens,
+    _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
                        bill_credits=bill_credits)
 
@@ -387,7 +422,7 @@ async def completions(
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
         "object": "text_completion",
         "created": int(time.time()),
-        "model": payload.model,
+        "model": model,
         "conversation_id": conv_id if save_history else None,
         "node": origen,
         "choices": [{"index": 0, "text": assistant_text, "finish_reason": "stop"}],
@@ -415,7 +450,8 @@ DEFAULT_VISION_PROMPT = (
 
 
 class VisionDescribeRequest(BaseModel):
-    model: str = Field(..., description="Modelo de visión de Ollama (llava, moondream, qwen2.5-vl…)")
+    # Vacío = el del rol `vision` (autodetectado por capability `vision`).
+    model: str | None = Field(None, description="Modelo de visión; vacío = el del rol vision")
     images: list[str] = Field(..., description="Imágenes en base64")
     prompt: str | None = None
 
@@ -430,13 +466,14 @@ async def vision_describe(
     No persiste historial; se cobra como cualquier inferencia."""
     if not payload.images:
         raise HTTPException(status_code=400, detail="No se adjuntaron imágenes")
-    validate_model_access(user_data, payload.model)
+    model, role = await model_for_request(payload.model, "vision")
+    validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False
     if user_data.get("auth_via") == "api_key":
-        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     else:
-        ensure_can_chat(user_data["id"], plan, payload.model)
+        ensure_can_chat(user_data["id"], plan, model)
 
     messages = [{
         "role": "user",
@@ -444,7 +481,8 @@ async def vision_describe(
         "images": payload.images,
     }]
     started_at = time.perf_counter()
-    resp, origen = await _routed_chat(payload.model, messages)
+    resp, origen = await _routed_chat(model, messages, num_ctx=role.num_ctx,
+                                      keep_alive=role.keep_alive)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     description = resp.get("message", {}).get("content", "").strip()
     prompt_tokens = int(resp.get("prompt_eval_count") or 0)
@@ -453,13 +491,13 @@ async def vision_describe(
     # Uso/cobro (sin persistir contenido: las imágenes no se guardan)
     if user_data.get("id") is not None:
         if bill_credits:
-            credits.debit_usage(user_data["id"], payload.model, prompt_tokens, completion_tokens)
+            credits.debit_usage(user_data["id"], model, prompt_tokens, completion_tokens)
         else:
             record_tokens(user_data["id"], prompt_tokens + completion_tokens)
 
     return {
         "description": description,
-        "model": payload.model,
+        "model": model,
         "node": origen,
         "latency_ms": latency_ms,
         "usage": {
@@ -471,7 +509,10 @@ async def vision_describe(
 
 
 class FimRequest(BaseModel):
-    model: str = Field(..., description="Modelo de código con soporte FIM (qwen2.5-coder…)")
+    # Vacío = el del rol `fim`, que exige capability `insert`. Si ningún modelo
+    # la declara el gateway responde 503 role_model_unavailable en vez de
+    # autocompletar con el modelo de chat (que devolvería prosa o razonamiento).
+    model: str | None = Field(None, description="Modelo con FIM; vacío = el del rol fim")
     prefix: str = ""  # texto ANTES del cursor
     suffix: str = ""  # texto DESPUÉS del cursor
     max_tokens: int = 96
@@ -487,31 +528,35 @@ async def fim_complete(
     """Autocompletado fill-in-the-middle (ghost text del IDE). Devuelve la
     continuación que va en la posición del cursor entre `prefix` y `suffix`.
     No persiste historial; se contabiliza/cobra como cualquier inferencia."""
-    validate_model_access(user_data, payload.model)
+    model, role = await model_for_request(payload.model, "fim")
+    validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False
     if user_data.get("auth_via") == "api_key":
-        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     else:
-        ensure_can_chat(user_data["id"], plan, payload.model)
+        ensure_can_chat(user_data["id"], plan, model)
 
     options: dict[str, Any] = {"num_predict": max(1, min(int(payload.max_tokens), 512))}
-    if payload.num_ctx:
-        options["num_ctx"] = int(payload.num_ctx)
+    num_ctx = payload.num_ctx or role.num_ctx
+    if num_ctx:
+        options["num_ctx"] = int(num_ctx)
     if payload.stop:
         options["stop"] = payload.stop
 
-    base, headers, origen = deps.orquestador.ollama_target(payload.model)
+    base, headers, origen = target_or_503(model)
     started_at = time.perf_counter()
     try:
-        resp = await ollama_generate(base, payload.model, payload.prefix, payload.suffix,
-                                     options=options, headers=headers, client=deps.http_client_chat)
+        resp = await ollama_generate(base, model, payload.prefix, payload.suffix,
+                                     options=options, headers=headers, client=deps.http_client_chat,
+                                     keep_alive=role.keep_alive)
     except Exception as exc:
         if origen == "local":
             raise HTTPException(status_code=502, detail=f"FIM falló: {exc}") from exc
         logger.warning(f"[fim] Nodo '{origen}' falló ({exc}); fallback local")
-        resp = await ollama_generate(OLLAMA_BASE_URL, payload.model, payload.prefix, payload.suffix,
-                                     options=options, client=deps.http_client_chat)
+        resp = await ollama_generate(OLLAMA_BASE_URL, model, payload.prefix, payload.suffix,
+                                     options=options, client=deps.http_client_chat,
+                                     keep_alive=role.keep_alive)
 
     completion = resp.get("response", "")
     prompt_tokens = int(resp.get("prompt_eval_count") or 0)
@@ -520,13 +565,13 @@ async def fim_complete(
 
     if user_data.get("id") is not None:
         if bill_credits:
-            credits.debit_usage(user_data["id"], payload.model, prompt_tokens, completion_tokens)
+            credits.debit_usage(user_data["id"], model, prompt_tokens, completion_tokens)
         else:
             record_tokens(user_data["id"], prompt_tokens + completion_tokens)
 
     return {
         "completion": completion,
-        "model": payload.model,
+        "model": model,
         "node": origen,
         "latency_ms": latency_ms,
         "usage": {
@@ -538,7 +583,7 @@ async def fim_complete(
 
 
 class EmbedRequest(BaseModel):
-    model: str = Field(..., description="Modelo de embeddings (nomic-embed-text…)")
+    model: str | None = Field(None, description="Modelo de embeddings; vacío = el del rol embed")
     input: list[str] = Field(default_factory=list)
 
 
@@ -553,34 +598,36 @@ async def embed_texts(
     if not payload.input:
         raise HTTPException(status_code=400, detail="input vacío")
 
+    model, role = await model_for_request(payload.model, "embed")
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False
     if user_data.get("auth_via") == "api_key":
-        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, payload.model) == "credits"
+        bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
 
-    base, headers, origen = deps.orquestador.ollama_target(payload.model)
+    base, headers, origen = target_or_503(model)
     try:
-        resp = await ollama_embed_many(base, payload.model, payload.input,
-                                       headers=headers, client=deps.http_client_chat)
+        resp = await ollama_embed_many(base, model, payload.input,
+                                       headers=headers, client=deps.http_client_chat,
+                                       keep_alive=role.keep_alive)
     except Exception as exc:
         if origen == "local":
             raise HTTPException(status_code=502, detail=f"Embeddings fallaron: {exc}") from exc
         logger.warning(f"[embed] Nodo '{origen}' falló ({exc}); fallback local")
-        resp = await ollama_embed_many(OLLAMA_BASE_URL, payload.model, payload.input,
-                                       client=deps.http_client_chat)
+        resp = await ollama_embed_many(OLLAMA_BASE_URL, model, payload.input,
+                                       client=deps.http_client_chat, keep_alive=role.keep_alive)
 
     embeddings = resp.get("embeddings", []) or []
     prompt_tokens = int(resp.get("prompt_eval_count") or 0)
     if user_data.get("id") is not None and prompt_tokens:
         try:
             if bill_credits:
-                credits.debit_usage(user_data["id"], payload.model, prompt_tokens, 0)
+                credits.debit_usage(user_data["id"], model, prompt_tokens, 0)
             else:
                 record_tokens(user_data["id"], prompt_tokens)
         except Exception as exc:  # tarifa ausente para el modelo de embedding: no romper
             logger.warning(f"[embed] cobro omitido ({exc})")
 
-    return {"embeddings": embeddings, "model": payload.model, "node": origen}
+    return {"embeddings": embeddings, "model": model, "node": origen}
 
 
 @router.post("/api/delegate")
@@ -598,30 +645,38 @@ async def delegate_request(
 
     started_at = time.perf_counter()
 
+    catalog = await fetch_models()
+    roles = resolve_all(catalog)
+    embed_role, route_role = roles["embed"], roles["route"]
+
     # Destino para las tareas auxiliares (embedding + clasificación): el mejor nodo disponible
     aux_base, aux_headers, _ = deps.orquestador.ollama_target()
 
-    try:
-        embedding = await get_embedding(payload.user_input, aux_base, headers=aux_headers)
-    except Exception:
-        embedding = []
+    embedding = []
+    if embed_role.model:
+        try:
+            embedding = await get_embedding(payload.user_input, aux_base, embed_role.model,
+                                            headers=aux_headers, keep_alive=embed_role.keep_alive)
+        except Exception:
+            embedding = []
 
     similar_tasks = find_similar_tasks(user_id, embedding) if embedding else []
-    available_models = [
-        m["id"] for m in await fetch_models()
-        if not str(m.get("id", "")).startswith("error:")
-    ]
-    classifier_model = pick_classifier_model(available_models)
-    try:
-        classification = await classify_request(
-            payload.user_input, similar_tasks, aux_base, classifier_model, headers=aux_headers
-        )
-    except Exception:
-        classification = {
-            "intent": "learn", "complexity": 0.5, "domain": "backend",
-            "riskLevel": "low", "requiresApproval": False,
-        }
-    routing = route_request(classification, available_models)
+    # El clasificador y el ejecutor salen del rol `route`: si está fijado manda
+    # ese modelo, y si no se elige por capability entre los realmente instalados.
+    pinned = route_role.model if route_role.source in ("db", "env") else None
+    classifier_model = pinned or pick_classifier_model(catalog)
+    classification = {
+        "intent": "learn", "complexity": 0.5, "domain": "backend",
+        "riskLevel": "low", "requiresApproval": False,
+    }
+    if classifier_model:
+        try:
+            classification = await classify_request(
+                payload.user_input, similar_tasks, aux_base, classifier_model, headers=aux_headers
+            )
+        except Exception:
+            pass
+    routing = route_request(classification, catalog, pinned_model=pinned)
 
     response_text = ""
     success = False
@@ -629,12 +684,20 @@ async def delegate_request(
         response_text = routing["message"]
         success = True
     else:
+        if not routing.get("model"):
+            raise HTTPException(status_code=503, detail={
+                "code": "role_model_unavailable",
+                "message": "No hay ningún modelo disponible para responder. "
+                           "Comprueba que el nodo GPU esté online y tenga modelos instalados.",
+                "role": "route",
+            })
         messages = [
             {"role": "system", "content": routing["system_prompt"]},
             {"role": "user", "content": payload.user_input},
         ]
         try:
-            resp, _ = await _routed_chat(routing["model"], messages)
+            resp, _ = await _routed_chat(routing["model"], messages,
+                                         keep_alive=route_role.keep_alive)
             response_text = resp.get("message", {}).get("content", "")
             success = True
         except Exception as exc:

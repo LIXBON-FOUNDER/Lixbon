@@ -21,6 +21,7 @@ Variables de entorno:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import secrets as _secrets
@@ -50,7 +51,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_WATCHDOG = os.getenv("OLLAMA_WATCHDOG", "1") == "1"
 NODE_SHARED_SECRET = os.getenv("NODE_SHARED_SECRET", "")
 TASK_NAME = "lixbon_NodeAgent"
-AGENT_VERSION = "3.0.0"
+AGENT_VERSION = "3.1.0"
 
 app = FastAPI(title="lixbon Node Agent", version=AGENT_VERSION)
 
@@ -99,13 +100,80 @@ def _gpu_metrics() -> dict:
         }
 
 
-def _ollama_models() -> list[str]:
+# ── Capabilities de los modelos ────────────────────────────────────────────
+# El gateway necesita saber qué puede hacer cada modelo (tools / vision /
+# embedding / insert) para asignar los roles de inferencia sin adivinar por el
+# nombre. Eso solo lo dice `POST /api/show`, así que se consulta aquí y viaja
+# en /metrics. Se cachea por `digest`: un modelo que no cambió no se vuelve a
+# consultar, y por poll solo se resuelven unos pocos nuevos para no pasarse del
+# timeout con el que el gateway nos consulta.
+# Este archivo NO importa nada de core/ a propósito (se despliega solo).
+
+_MODEL_CAPS: dict[str, tuple[str, list[str]]] = {}   # name → (digest, capabilities)
+_CAPS_PER_POLL = 8
+_CAPS_TIMEOUT = 3.0
+
+
+def merge_caps(
+    tags: list[dict],
+    cache: dict[str, tuple[str, list[str]]],
+    budget: int,
+) -> tuple[list[dict], list[str]]:
+    """Cruza /api/tags con la caché. Función pura.
+
+    Devuelve (model_info, pendientes): `capabilities` es None cuando aún no se
+    conocen — el gateway lo interpreta como "desconocido", nunca como "no
+    soportado". `pendientes` son los modelos a consultar en este poll.
+    """
+    info: list[dict] = []
+    pendientes: list[str] = []
+    for m in tags:
+        name = m.get("name")
+        if not name:
+            continue
+        digest = m.get("digest") or ""
+        cached = cache.get(name)
+        caps = cached[1] if cached and cached[0] == digest else None
+        if caps is None and len(pendientes) < max(0, budget):
+            pendientes.append(name)
+        info.append({
+            "name": name,
+            "digest": digest,
+            "size": m.get("size", 0),
+            "capabilities": caps,
+        })
+    return info, pendientes
+
+
+async def _ollama_model_info() -> tuple[list[str], list[dict]]:
+    """(nombres, model_info). `models` se mantiene como lista plana de strings
+    por compatibilidad: un gateway viejo ignora `model_info` sin enterarse."""
     try:
-        resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=4.0)
-        resp.raise_for_status()
-        return [m["name"] for m in resp.json().get("models", [])]
+        async with httpx.AsyncClient(timeout=_CAPS_TIMEOUT) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            resp.raise_for_status()
+            tags = resp.json().get("models", [])
+
+            _, pendientes = merge_caps(tags, _MODEL_CAPS, _CAPS_PER_POLL)
+            if pendientes:
+                digests = {m.get("name"): (m.get("digest") or "") for m in tags}
+
+                async def _show(name: str) -> None:
+                    try:
+                        r = await client.post(f"{OLLAMA_URL}/api/show", json={"model": name})
+                        r.raise_for_status()
+                        caps = r.json().get("capabilities")
+                        if isinstance(caps, list):
+                            _MODEL_CAPS[name] = (digests.get(name, ""), [str(c) for c in caps])
+                    except Exception:
+                        pass  # se reintenta en el siguiente poll
+
+                await asyncio.gather(*(_show(n) for n in pendientes))
+
+            info, _ = merge_caps(tags, _MODEL_CAPS, 0)
+            return [m["name"] for m in info], info
     except Exception:
-        return []
+        return [], []
 
 
 @app.get("/health")
@@ -118,13 +186,16 @@ async def health():
 async def metrics(_: None = Depends(require_node_token)):
     cpu = psutil.cpu_percent(interval=0.3)
     mem = psutil.virtual_memory()
+    modelos, model_info = await _ollama_model_info()
     return {
         "cpu_percent": round(cpu, 1),
         "ram_percent": round(mem.percent, 1),
         "ram_free_gb": round(mem.available / (1024 ** 3), 2),
         "ram_total_gb": round(mem.total / (1024 ** 3), 2),
         "hostname": os.environ.get("COMPUTERNAME", platform.node()),
-        "models": _ollama_models(),
+        "models": modelos,          # lista plana: contrato viejo, no tocar
+        "model_info": model_info,   # + capabilities por modelo (gateway ≥ 2.5)
+        "agent_version": AGENT_VERSION,
         **_gpu_metrics(),
     }
 
@@ -176,6 +247,29 @@ async def proxy_chat(request: Request, _: None = Depends(require_node_token)):
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+
+@app.post("/ollama/api/generate")
+async def proxy_generate(request: Request, _: None = Depends(require_node_token)):
+    """Necesario para /api/fim del gateway: el autocompletado usa `suffix`, que
+    solo existe en /api/generate. Sin este proxy el ghost text solo funcionaba
+    contra el Ollama local del gateway, nunca contra un nodo."""
+    payload = await request.json()
+    timeout = httpx.Timeout(300.0, connect=10.0)
+
+    if payload.get("stream", False):
+        async def _relay():
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", f"{OLLAMA_URL}/api/generate", json=payload) as resp:
+                    resp.raise_for_status()
+                    async for chunk in resp.aiter_raw():
+                        yield chunk
+        return StreamingResponse(_relay(), media_type="application/x-ndjson")
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
         resp.raise_for_status()
         return resp.json()
 

@@ -70,7 +70,7 @@ def _unicode_ok() -> bool:
     if not IS_WINDOWS:
         return True
     try:
-        "✦●▓░❯╭█─".encode(_ORIG_ENCODING)
+        "✦●▓░❯╭█─│┃".encode(_ORIG_ENCODING)
         return True
     except (UnicodeEncodeError, LookupError):
         # Windows Terminal renderiza unicode aunque el codepage legacy no:
@@ -99,6 +99,11 @@ _GLYPHS_UNICODE = {
     "rule": "─",
     "gear": "⚙",
     "corner": "└",
+    # Canal del registro de trabajo del agente: fino para el rastro (lecturas,
+    # diffs, resultados) y grueso para la línea en la que tocó el disco. Los dos
+    # pesos del mismo juego de box-drawing ocupan una celda y alinean igual.
+    "rail": "│",
+    "rail_hot": "┃",
 }
 _GLYPHS_ASCII = {
     "spark": "*",
@@ -118,6 +123,8 @@ _GLYPHS_ASCII = {
     "rule": "-",
     "gear": "*",
     "corner": "`",
+    "rail": "|",
+    "rail_hot": "|",
 }
 
 
@@ -339,6 +346,13 @@ PALETTE = {
     "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
     "ok": "#5FB85F",      # éxito, líneas + de diff
     "err": "#E05C5C",     # error, líneas - de diff
+    # Diff: la fila entera se pinta con un fondo tenue (como en un editor) y el
+    # signo va en un tono más vivo para que se lea sobre ese fondo. Elegidos
+    # contra el casi-negro de la terminal: visibles sin tapar el código.
+    "diff_add_bg": "#173A24",
+    "diff_del_bg": "#45191D",
+    "diff_add_fg": "#8FE39B",
+    "diff_del_fg": "#FF9E9E",
     "warn": "#D6B44C",    # avisos, confirmaciones delicadas
     "ink": "#171717",     # texto sobre acento (selección invertida)
 }
@@ -401,6 +415,13 @@ def make_console():
         class LixbonConsole(Console):
             """Console con margen izquierdo automático y alto sin la fila fija."""
 
+            # Contador de impresiones CON CONTENIDO. Sirve para saber si un
+            # turno ya escribió algo (registro de acciones) y decidir si la
+            # respuesta necesita una línea de aire por encima, sin repartir
+            # banderas por medio código. Los Control del Live no cuentan: son
+            # fontanería de repintado y dispararían el contador en cada frame.
+            writes = 0
+
             @property
             def size(self):
                 # La fila de la barra de estado vive FUERA de la región de
@@ -420,6 +441,10 @@ def make_console():
                 Console.size.fset(self, new_size)
 
             def print(self, *objects, **kwargs):
+                if not objects or any(
+                    not isinstance(obj, (Control, NewLine)) for obj in objects
+                ):
+                    self.writes += 1
                 if objects and not kwargs.pop("no_pad", False):
                     # Los Control (mover cursor, borrar línea) son la fontanería
                     # con la que Live/Status repintan y BORRAN su línea. Si se
@@ -440,6 +465,12 @@ def make_console():
             theme=Theme(RICH_STYLES),
             highlight=False,
             width=min(cols, MAX_WIDTH),
+            # Color base de la consola: sin él el Markdown de las respuestas
+            # (que no lleva estilo propio) salía en el blanco por defecto de la
+            # terminal, ajeno a la paleta. Con la base en crema, el cuerpo de la
+            # respuesta es del color de la marca y los grises del registro de
+            # trabajo se leen como lo que son: un escalón por debajo.
+            style=PALETTE["cream"],
             # mintty (Git Bash) es una terminal real aunque la stdio sean pipes
             force_terminal=True if is_mintty() else None,
         )
@@ -535,7 +566,7 @@ def pt_style():
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.1.1"
+CLI_VERSION = "2.2.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 CONFIG_DIR = Path.home() / ".lixbon"
@@ -554,6 +585,9 @@ def default_config() -> dict:
         "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
         "auto_approve_tools": True,  # el agente escribe directo; /approve off para pedir confirmación
+        # Poder escribir mientras el agente trabaja (se ejecuta al terminar).
+        # A false, el teclado vuelve a estar muerto durante el turno.
+        "input_queue": True,
     }
 
 
@@ -812,11 +846,29 @@ class ApiClient:
         return [str(m.get("id")) for m in data.get("data", [])
                 if m.get("id") and not str(m.get("id")).startswith("error:")]
 
+    def model_roles(self) -> dict:
+        """Mapa rol→modelo que resuelve el gateway. {} si no lo soporta.
+
+        El CLI solo usa el rol `chat` (para no abrir el selector cuando el
+        servidor ya tiene un modelo de chat configurado). Un gateway antiguo
+        responde 404: se degrada en silencio, no es un error del usuario.
+        """
+        try:
+            return self._json("GET", f"{self.server}/api/model-roles", timeout=15)
+        except ApiError:
+            return {}
+
     def usage(self) -> dict:
         return self._json("GET", f"{self.server}/api/usage", timeout=20)
 
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)
+
+    def generate_title(self, conversation_id: str) -> dict:
+        """Auto-título del servidor tras el primer intercambio (como la web)."""
+        return self._json("POST",
+                          f"{self.server}/api/conversations/{conversation_id}/generate-title",
+                          {}, timeout=30)
 
     def delegate(self, user_input: str) -> dict:
         return self._json("POST", f"{self.server}/api/delegate",
@@ -884,6 +936,239 @@ class ApiClient:
             payload["tools"] = tools
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)
+
+# ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/inputq.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Cola de entrada: escribir mientras el agente trabaja.
+
+Durante un turno el CLI está ocupado (streaming + herramientas) y prompt_toolkit
+no corre, así que el teclado quedaba muerto. Aquí se lee en segundo plano: lo
+que se teclea se muestra en la vista viva y, al pulsar Enter, se guarda en una
+cola que el bucle principal vacía en cuanto el turno termina.
+
+DOS REGLAS que hacen que esto no rompa nada:
+
+1. **No se toca lo que hace el agente.** El hilo solo acumula texto; nada se
+   ejecuta hasta que el turno acaba. Un comando escrito a media respuesta no
+   cambia el modelo, el modo ni el workspace en mitad del razonamiento.
+2. **Se cede el teclado a quien lo pida.** Cualquier prompt interactivo
+   (aprobaciones, selectores) pasa por `suspend_input()`, que pausa la lectura
+   y restaura el modo de la terminal mientras dure.
+
+En POSIX se usa `cbreak` y NO `raw`: cbreak deja las señales activas, así que
+Ctrl+C sigue siendo Ctrl+C. En Windows se lee con `msvcrt`, que no cambia el
+modo de la consola en absoluto.
+"""
+import contextlib
+import sys
+import threading
+import time
+
+
+MAX_LINE_CHARS = 2000
+POLL_SECONDS = 0.03
+
+_active = None  # InputQueue en marcha, para que suspend_input() la encuentre
+
+
+class InputQueue:
+    """Lector de teclado en segundo plano con una cola de líneas."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._buffer = ""
+        self._lines: list[str] = []
+        self._stop = threading.Event()
+        self._paused = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._saved_mode = None
+        self.interrupted = False
+        self.running = False
+
+    # ── ciclo de vida ───────────────────────────────────────────────────
+
+    def start(self) -> bool:
+        global _active
+        if self.running:
+            return True
+        if not self._enter_mode():
+            return False
+        self._stop.clear()
+        self._paused.clear()
+        self.interrupted = False
+        self.running = True
+        _active = self
+        # Si el proceso muere sin pasar por stop(), en POSIX la terminal se
+        # quedaría en cbreak (sin eco y sin líneas) para la shell del usuario.
+        import atexit
+
+        atexit.register(self._exit_mode)
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        return True
+
+    def stop(self) -> None:
+        global _active
+        if not self.running:
+            return
+        self.running = False
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=0.5)
+        self._exit_mode()
+        if _active is self:
+            _active = None
+        # El buffer a medias NO se borra: `take_partial()` lo pasa como texto
+        # inicial del prompt, así una frase que se quedó sin Enter no se pierde.
+
+    def pause(self) -> None:
+        if self.running and not self._paused.is_set():
+            self._paused.set()
+            # El hilo puede estar dentro de una lectura: se le da tiempo a
+            # salir antes de devolver la terminal a quien la pidió.
+            time.sleep(POLL_SECONDS * 2)
+            self._exit_mode()
+
+    def resume(self) -> None:
+        if self.running and self._paused.is_set():
+            self._enter_mode()
+            self._paused.clear()
+
+    # ── estado para pintar ──────────────────────────────────────────────
+
+    @property
+    def typing(self) -> str:
+        with self._lock:
+            return self._buffer
+
+    @property
+    def queued(self) -> int:
+        with self._lock:
+            return len(self._lines)
+
+    def take_partial(self) -> str:
+        """Lo que quedó escrito sin Enter (para precargar el prompt)."""
+        with self._lock:
+            text, self._buffer = self._buffer, ""
+        return text
+
+    def drain(self) -> list[str]:
+        """Saca las líneas completas; lo que quede a medias sigue en el buffer."""
+        with self._lock:
+            lines, self._lines = self._lines, []
+        return lines
+
+    # ── modo de terminal ────────────────────────────────────────────────
+
+    def _enter_mode(self) -> bool:
+        if IS_WINDOWS:
+            try:
+                import msvcrt  # noqa: F401
+            except ImportError:
+                return False
+            return True
+        try:
+            import termios
+            import tty
+
+            fd = sys.stdin.fileno()
+            self._saved_mode = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+            return True
+        except Exception:
+            self._saved_mode = None
+            return False
+
+    def _exit_mode(self) -> None:
+        if IS_WINDOWS or self._saved_mode is None:
+            return
+        try:
+            import termios
+
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._saved_mode)
+        except Exception:
+            pass
+        self._saved_mode = None
+
+    # ── lectura ─────────────────────────────────────────────────────────
+
+    def _read_char(self):
+        if IS_WINDOWS:
+            import msvcrt
+
+            if not msvcrt.kbhit():
+                return None
+            char = msvcrt.getwch()
+            if char in ("\x00", "\xe0"):
+                # Flechas, F1-F12, Inicio…: llegan en dos lecturas y aquí no
+                # sirven de nada, pero hay que consumir la segunda.
+                if msvcrt.kbhit():
+                    msvcrt.getwch()
+                return None
+            return char
+        import select
+
+        ready, _, _ = select.select([sys.stdin], [], [], POLL_SECONDS)
+        if not ready:
+            return None
+        return sys.stdin.read(1)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            if self._paused.is_set():
+                time.sleep(POLL_SECONDS)
+                continue
+            try:
+                char = self._read_char()
+            except Exception:
+                return  # la terminal cambió bajo los pies: mejor callarse
+            if char is None:
+                if IS_WINDOWS:
+                    time.sleep(POLL_SECONDS)
+                continue
+            self._handle(char)
+
+    def _handle(self, char: str) -> None:
+        if char == "\x03":  # Ctrl+C
+            self.interrupted = True
+            with self._lock:
+                self._buffer = ""
+            return
+        if char in ("\r", "\n"):
+            with self._lock:
+                text = self._buffer.strip()
+                self._buffer = ""
+                if text:
+                    self._lines.append(text)
+            return
+        if char in ("\x08", "\x7f"):  # Backspace
+            with self._lock:
+                self._buffer = self._buffer[:-1]
+            return
+        if char == "\x1b":  # Esc descarta lo escrito
+            with self._lock:
+                self._buffer = ""
+            return
+        if char < " ":
+            return  # otros controles (Ctrl+letra): sin uso durante el turno
+        with self._lock:
+            if len(self._buffer) < MAX_LINE_CHARS:
+                self._buffer += char
+
+
+@contextlib.contextmanager
+def suspend_input():
+    """Cede el teclado mientras dure el bloque (selectores, aprobaciones)."""
+    queue = _active
+    if queue is not None:
+        queue.pause()
+    try:
+        yield
+    finally:
+        if queue is not None:
+            queue.resume()
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/ui.py
@@ -969,7 +1254,7 @@ def render_header(console, version: str, model: str = "", plan: str = "",
     """Bloque de identidad, arriba a la izquierda y sin cajas.
 
         ██  Lixbon CLI v2.1.0
-        ██  qwen2.5-coder:7b · Lixbon Pro
+        ██  modelo-demo · Lixbon Pro
             ~/proyectos/api
 
     Se imprime una vez al arrancar (y tras /clear): sube con el transcript en
@@ -1021,11 +1306,11 @@ def render_tips(console) -> None:
     console.print(
         f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
         f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
-        f"[lx.accent2]@ruta[/] para adjuntar una imagen  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]Alt+V[/] pega una imagen  [lx.dim2]{g('sep')}[/]  "
         f"Ctrl+C dos veces para salir[/]"
     )
     console.print(
-        f"[lx.dim2]/help abre el menú de comandos  {g('sep')}  /config los ajustes  "
+        f"[lx.dim2]/help abre el menú de comandos  {g('sep')}  @ruta adjunta un archivo  "
         f"{g('sep')}  /doctor revisa terminal y conexión[/]"
     )
 
@@ -1045,15 +1330,39 @@ def rule(console, label: str = "") -> None:
     console.print()
 
 
-def render_speaker(console, who: str) -> None:
-    """Etiqueta de turno: marca de quién es el bloque que viene debajo."""
-    if who == "user":
-        console.print(f"[lx.accent2]{g('prompt')}[/] [lx.dim]tú[/]")
-    else:
-        console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
+def render_speaker(console) -> None:
+    """Rótulo que abre la respuesta de Lixbon.
+
+    Se imprime una sola vez por turno y JUSTO ENCIMA de lo que dice, no al
+    empezar a trabajar: el registro de acciones queda por arriba, dentro de su
+    canal, y el rótulo marca dónde empieza lo que hay que leer.
+    """
+    console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
 
 
-# ── Acciones del agente ─────────────────────────────────────────────────────
+def render_user_message(console, text: str) -> None:
+    """Eco de un mensaje del usuario, idéntico a como lo deja el prompt local.
+
+    Lo usa /remote: lo que llega del móvil tiene que verse en la terminal igual
+    que lo tecleado, o el transcript se lee como dos conversaciones distintas.
+    """
+    lines = (text or "").splitlines() or [""]
+    console.print(f"[lx.accent2]{g('prompt')}[/] [lx.primary]{esc(lines[0])}[/]")
+    for line in lines[1:]:
+        console.print(f"  [lx.primary]{esc(line)}[/]")
+
+
+# ── Registro de trabajo del agente ──────────────────────────────────────────
+#
+# DISTRIBUCIÓN DEL TURNO. Lo que el agente HACE (lecturas, ediciones, diffs,
+# resultados) vive dentro de un canal: una barra vertical en la columna
+# izquierda que lo agrupa y lo baja de nivel. Lo que el agente DICE es lo único
+# del turno sin canal, en crema y rodeado de aire — al hojear el transcript el
+# ojo cae en la respuesta, no en la fontanería que la precede.
+#
+# El canal grueso en acento marca la línea exacta en la que se tocó el disco;
+# su evidencia (el diff, el resultado) sigue en canal fino y apagado. Así un
+# turno largo se resume de un vistazo: donde hay acento, algo cambió.
 
 # Mismos verbos que el panel de acciones del IDE (apps/desktop ToolGroup.jsx):
 # el agente "hace cosas" y se lee igual en las dos superficies.
@@ -1070,34 +1379,45 @@ KIND_VERB = {
 VERB_WIDTH = 12  # columna fija: los objetivos quedan alineados entre acciones
 
 
-def render_actions_header(console) -> None:
-    """Abre la zona de acciones de un turno para que no se confunda con la
-    respuesta en prosa que viene después."""
-    console.print(f"[lx.dim2]{g('gear')} acciones[/]")
+def rail(hot: bool = False) -> str:
+    """Prefijo de canal para una línea del registro de trabajo (markup rich)."""
+    if hot:
+        return f"[lx.accent2]{g('rail_hot')}[/] "
+    return f"[lx.rule]{g('rail')}[/] "
+
+
+def rail_text(hot: bool = False):
+    """El mismo canal como fragmento de `Text.assemble` (para el Live)."""
+    return (f"{g('rail_hot') if hot else g('rail')} ", "lx.accent2" if hot else "lx.rule")
 
 
 def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
                   readonly: bool = False) -> None:
-    """Una acción del agente: `● editó   src/app.py  +12 -3`.
+    """Una acción del agente dentro del canal: `┃ editó   src/app.py  +12 -3`.
 
-    Las de solo lectura van apagadas (rastro, no evento) y las que tocan el
-    disco en acento: al hojear el transcript se ve qué cambió de verdad.
+    El canal ES el marcador: las lecturas dejan rastro fino y apagado, las
+    escrituras encienden el canal grueso en acento. Un solo signo por línea (el
+    `●` de antes sobraba al lado de la barra).
     """
-    dot = g("dot")
     padded = f"{verb:<{VERB_WIDTH}}"
     if readonly:
-        line = f"[lx.dim2]{dot}[/] [lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
+        line = f"{rail()}[lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
     else:
-        line = f"[lx.accent2]{dot}[/] [bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
+        line = f"{rail(hot=True)}[bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
     if adds or dels:
         line += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
     console.print(line)
 
 
 def render_action_result(console, text: str, error: bool = False) -> None:
-    """Resultado de una acción, colgando de ella."""
+    """Resultado de una acción, colgando de ella dentro del canal."""
     style = "lx.err" if error else "lx.dim2"
-    console.print(f"  [lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
+    console.print(f"{rail()}[lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
+
+
+def render_log_line(console, text: str, style: str = "lx.dim") -> None:
+    """Línea suelta del registro (salida de un comando, nota de una acción)."""
+    console.print(f"{rail()}[{style}]{esc(text)}[/]")
 
 
 # ── Selector interactivo (flechas + mouse) ──────────────────────────────────
@@ -1135,13 +1455,17 @@ def select(title: str, options: list, default: int = 0, hint: str = "",
     options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
     if not options:
         return None
-    if not ui_capable():
-        return _select_plain(title, options, default)
-    try:
-        return _select_app(title, options, default, hint, searchable, max_visible)
-    except Exception:
-        # La terminal mintió sobre sus capacidades: degradar en caliente
-        return _select_plain(title, options, default)
+    # Si el agente está trabajando hay un lector de teclado en segundo plano
+    # (inputq): se le cede la terminal mientras dure el selector, o las dos
+    # cosas se robarían las teclas del usuario.
+    with suspend_input():
+        if not ui_capable():
+            return _select_plain(title, options, default)
+        try:
+            return _select_app(title, options, default, hint, searchable, max_visible)
+        except Exception:
+            # La terminal mintió sobre sus capacidades: degradar en caliente
+            return _select_plain(title, options, default)
 
 
 def _select_app(title: str, options: list, default: int, hint: str,
@@ -1559,15 +1883,23 @@ def ui_demo() -> int:
     console = make_console()
     from pathlib import Path
 
-    render_header(console, "2.0.0-demo", model="qwen2.5-coder:7b", plan="Pro",
+    render_header(console, "2.0.0-demo", model="modelo-demo", plan="Pro",
                   workspace=Path.cwd())
     render_tips(console)
     rule(console, "conversación")
-    render_speaker(console, "assistant")
-    render_actions_header(console)
+    render_user_message(console, "arregla el parseo de comillas simples")
+    console.print()
+    render_log_line(console, f"{g('spark_alt')} pensó 3.2 s", "lx.dim2")
     render_action(console, "leyó", "src/app.py", readonly=True)
     render_action(console, "editó", "src/app.py", adds=12, dels=3)
+    console.print(f"{rail()}[lx.diff.hunk]@@ -120,6 +120,8 @@[/]")
+    console.print(f"{rail()}[lx.diff.add]+    return _loads_lenient(raw)[/]")
+    console.print(f"{rail()}[lx.diff.del]-    return json.loads(raw)[/]")
     render_action_result(console, "1 reemplazo aplicado")
+    console.print()
+    render_speaker(console)
+    console.print("El parser ya acepta las comillas simples que emite el modelo.")
+    console.print()
 
     choice = select("Método de acceso", [
         Option("Credenciales", "creds", "correo y contraseña"),
@@ -1591,11 +1923,23 @@ def ui_demo() -> int:
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/diffs.py
 # ──────────────────────────────────────────────────────────────────────────
-"""Gestión visual de cambios de código: resúmenes ● Update(...) +N -M y diffs."""
+"""Gestión visual de cambios de código: acción `┃ editó ruta +N -M` y diff.
+
+El diff se dibuja como en un editor: número de línea, signo y la fila entera
+con fondo (verde lo añadido, rojo lo eliminado). Es la única parte del registro
+de trabajo con color de fondo, y por eso se localiza al vuelo entre decenas de
+líneas de acciones.
+"""
 import difflib
 from dataclasses import dataclass
 from pathlib import Path
 
+
+# Líneas iguales que se muestran alrededor de cada cambio. Con menos se pierde
+# el sitio; con más, un cambio de una línea arrastra media pantalla.
+DIFF_CONTEXT = 3
+DIFF_MAX_ROWS = 44
+NUM_MIN_WIDTH = 3
 
 
 @dataclass
@@ -1658,29 +2002,65 @@ def compute_change(workspace: Path, tool_name: str, args: dict, resolve_path) ->
     return None  # list_files, read_file, search: solo lectura
 
 
+# ── Cálculo de filas ────────────────────────────────────────────────────────
+
+def diff_rows(change: FileChange, context: int = DIFF_CONTEXT) -> list[tuple[str, int, int, str]]:
+    """Filas `(clase, nº antiguo, nº nuevo, texto)` listas para pintar.
+
+    Se usa SequenceMatcher y no `unified_diff` porque este último devuelve
+    texto ya formateado y PIERDE los números de línea, que son justo lo que
+    permite situar el cambio dentro del archivo.
+
+    Clases: `ctx` (contexto), `del`, `add` y `gap` (tramo igual omitido).
+    """
+    old = change.old_text.splitlines()
+    new = change.new_text.splitlines()
+    opcodes = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    rows: list[tuple[str, int, int, str]] = []
+
+    for index, (tag, i1, i2, j1, j2) in enumerate(opcodes):
+        if tag == "equal":
+            total = i2 - i1
+            last = index == len(opcodes) - 1
+            head = 0 if index == 0 else context
+            tail = 0 if last else context
+            # Saltar una sola línea no ahorra nada y cuesta un `…`: se muestra.
+            if total > head + tail + 1:
+                for k in range(head):
+                    rows.append(("ctx", i1 + k + 1, j1 + k + 1, old[i1 + k]))
+                # El `…` solo tiene sentido ENTRE dos tramos visibles: al abrir
+                # (sin filas todavía) o al cerrar el diff no informa de nada.
+                if rows and not last:
+                    rows.append(("gap", 0, 0, ""))
+                for k in range(total - tail, total):
+                    rows.append(("ctx", i1 + k + 1, j1 + k + 1, old[i1 + k]))
+            else:
+                for k in range(total):
+                    rows.append(("ctx", i1 + k + 1, j1 + k + 1, old[i1 + k]))
+            continue
+        for k in range(i1, i2):
+            rows.append(("del", k + 1, 0, old[k]))
+        for k in range(j1, j2):
+            rows.append(("add", 0, k + 1, new[k]))
+    return rows
+
+
 def diff_counts(change: FileChange) -> tuple[int, int]:
+    """Líneas añadidas y eliminadas."""
+    old = change.old_text.splitlines()
+    new = change.new_text.splitlines()
     adds = dels = 0
-    for line in _unified(change):
-        if line.startswith("+") and not line.startswith("+++"):
-            adds += 1
-        elif line.startswith("-") and not line.startswith("---"):
-            dels += 1
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag != "equal":
+            dels += i2 - i1
+            adds += j2 - j1
     return adds, dels
 
 
-def _unified(change: FileChange) -> list[str]:
-    return list(difflib.unified_diff(
-        change.old_text.splitlines(),
-        change.new_text.splitlines(),
-        fromfile=f"{change.path} (antes)",
-        tofile=f"{change.path} (ahora)",
-        lineterm="",
-        n=2,
-    ))
+# ── Pintado ─────────────────────────────────────────────────────────────────
 
-
-def render_change(console, change: FileChange, max_lines: int = 40) -> None:
-    """Imprime la acción (`● editó  ruta  +12 -3`) y el diff coloreado."""
+def render_change(console, change: FileChange, max_rows: int = DIFF_MAX_ROWS) -> None:
+    """Imprime la acción (`┃ editó  ruta  +12 -3`) y el diff con números."""
     if change.kind == "command":
         render_action(console, change.verb, change.detail)
         return
@@ -1693,28 +2073,278 @@ def render_change(console, change: FileChange, max_lines: int = 40) -> None:
 
     adds, dels = diff_counts(change)
     render_action(console, change.verb, change.path, adds=adds, dels=dels)
+    render_diff(console, diff_rows(change), max_rows=max_rows)
 
-    lines = _unified(change)
-    if not lines:
+
+def render_diff(console, rows: list[tuple[str, int, int, str]],
+                max_rows: int = DIFF_MAX_ROWS) -> None:
+    """Pinta las filas de un diff dentro del canal del registro de trabajo."""
+    from rich.cells import set_cell_size
+    from rich.text import Text
+
+
+    if not rows:
         return
-    shown = lines[:max_lines]
-    for line in shown:
-        if line.startswith("+++") or line.startswith("---"):
-            console.print(f"  [lx.dim]{_escape(line)}[/]")
-        elif line.startswith("@@"):
-            console.print(f"  [lx.diff.hunk]{_escape(line)}[/]")
-        elif line.startswith("+"):
-            console.print(f"  [lx.diff.add]{_escape(line)}[/]")
-        elif line.startswith("-"):
-            console.print(f"  [lx.diff.del]{_escape(line)}[/]")
+    numbers = [max(old_no, new_no) for _, old_no, new_no, _ in rows]
+    num_width = max(NUM_MIN_WIDTH, len(str(max(numbers) if numbers else 0)))
+    # El canal se come dos columnas; el resto es la fila coloreada, que llega
+    # hasta el margen derecho para que el fondo forme un bloque limpio.
+    width = max(20, console.width - PAD_LEFT - PAD_RIGHT - 2)
+    code_width = max(8, width - num_width - 2)
+
+    shown = rows[:max_rows]
+    for kind, old_no, new_no, text in shown:
+        if kind == "gap":
+            console.print(f"{rail()}[lx.dim2]{' ' * (num_width + 2)}{g('ellipsis')}[/]")
+            continue
+        if kind == "add":
+            back, sign, sign_fg = PALETTE["diff_add_bg"], "+", PALETTE["diff_add_fg"]
+        elif kind == "del":
+            back, sign, sign_fg = PALETTE["diff_del_bg"], "-", PALETTE["diff_del_fg"]
         else:
-            console.print(f"  [lx.dim]{_escape(line)}[/]")
-    if len(lines) > max_lines:
-        console.print(f"  [lx.dim2]{g('ellipsis')} +{len(lines) - max_lines} líneas más[/]")
+            back, sign, sign_fg = "", " ", PALETTE["dim2"]
+
+        number = str(new_no or old_no)
+        # Los tabuladores descuadran el bloque de color: el fondo se pinta por
+        # celdas y la terminal expande el tabulador a un ancho que rich no sabe.
+        body = set_cell_size(text.replace("\t", "    "), code_width)
+        on = f" on {back}" if back else ""
+
+        line = Text()
+        line.append(g("rail") + " ", style=PALETTE["dim2"])
+        line.append(f"{number:>{num_width}} ", style=f"{PALETTE['dim2']}{on}")
+        line.append(sign, style=f"{sign_fg}{on}")
+        line.append(body, style=f"{PALETTE['cream'] if back else PALETTE['dim']}{on}")
+        console.print(line)
+
+    if len(rows) > max_rows:
+        console.print(
+            f"{rail()}[lx.dim2]{' ' * (num_width + 2)}"
+            f"{g('ellipsis')} {len(rows) - max_rows} líneas más[/]"
+        )
+
+# ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/clipboard.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Pegar imágenes del portapapeles sin dependencias externas.
+
+El CLI se distribuye como UN archivo que se autoinstala solo prompt_toolkit y
+rich, así que aquí no se puede usar Pillow: el DIB de Windows se decodifica a
+mano y el PNG se escribe con `zlib`, que es stdlib. Son ~80 líneas y evitan
+arrastrar una dependencia binaria de 3 MB al instalador.
+"""
+import os
+import struct
+import subprocess
+import sys
+import time
+import zlib
+from pathlib import Path
+
+# Cuántos pegados se conservan en disco. Son capturas de pantalla: pesan y no
+# vuelven a hacer falta una vez el modelo las ha visto.
+PASTE_KEEP = 20
+
+CF_DIB = 8
+CF_HDROP = 15
 
 
-def _escape(line: str) -> str:
-    return line.replace("[", "\\[")
+def paste_dir(home: Path) -> Path:
+    target = home / "pastes"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _prune(folder: Path) -> None:
+    try:
+        files = sorted(folder.glob("paste-*.png"), key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return
+    for old in files[:-PASTE_KEEP]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
+def _new_path(folder: Path) -> Path:
+    return folder / f"paste-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid() % 1000:03d}.png"
+
+
+# ── PNG a mano ──────────────────────────────────────────────────────────────
+
+def _chunk(kind: bytes, data: bytes) -> bytes:
+    return (struct.pack(">I", len(data)) + kind + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+
+
+def encode_png(width: int, height: int, rgb_rows: list[bytes]) -> bytes:
+    """PNG RGB de 8 bits a partir de filas ya en orden superior→inferior."""
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    raw = b"".join(b"\x00" + row for row in rgb_rows)  # filtro 0 por fila
+    return (b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", header)
+            + _chunk(b"IDAT", zlib.compress(raw, 6))
+            + _chunk(b"IEND", b""))
+
+
+def dib_to_png(dib: bytes) -> bytes | None:
+    """Convierte el CF_DIB del portapapeles de Windows a PNG.
+
+    Solo 24 y 32 bits sin comprimir, que es lo que dejan las capturas de
+    pantalla y los editores de imagen. El canal alfa SE DESCARTA a propósito:
+    muchas apps copian 32 bits con alfa a cero y un PNG RGBA salido de ahí se
+    vería completamente transparente (el modelo no vería nada).
+    """
+    if len(dib) < 40:
+        return None
+    header_size, width, height, _planes, bits, compression = struct.unpack_from("<IiiHHI", dib, 0)
+    if header_size < 40 or bits not in (24, 32) or compression not in (0, 3):
+        return None
+    clr_used = struct.unpack_from("<I", dib, 32)[0]
+    offset = header_size + clr_used * 4
+    if compression == 3 and header_size == 40:
+        offset += 12  # máscaras BI_BITFIELDS, que aquí no hacen falta
+    bottom_up = height > 0
+    height = abs(height)
+    if width <= 0 or height <= 0:
+        return None
+
+    stride = ((width * bits + 31) // 32) * 4
+    if len(dib) < offset + stride * height:
+        return None
+
+    step = bits // 8
+    rows: list[bytes] = []
+    for y in range(height):
+        start = offset + y * stride
+        line = dib[start:start + width * step]
+        # El DIB guarda BGR(A); PNG quiere RGB.
+        rows.append(bytes(b for x in range(0, len(line), step)
+                          for b in (line[x + 2], line[x + 1], line[x])))
+    if bottom_up:
+        rows.reverse()
+    return encode_png(width, height, rows)
+
+
+# ── Portapapeles por plataforma ─────────────────────────────────────────────
+
+def _windows_clipboard_image(folder: Path) -> tuple[Path | None, str]:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    shell32 = ctypes.windll.shell32
+    # SIN restype explícito, ctypes asume `int` (32 bits) y en un Windows de 64
+    # bits TRUNCA los handles y punteros: GlobalSize devolvía 0 y la imagen
+    # llegaba vacía. Es el fallo clásico de hablar con la Win32 API por ctypes.
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalUnlock.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+    kernel32.GlobalSize.argtypes = [wintypes.HANDLE]
+    shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT,
+                                       wintypes.LPWSTR, wintypes.UINT]
+
+    def _read(handle) -> bytes:
+        size = kernel32.GlobalSize(handle)
+        pointer = kernel32.GlobalLock(handle)
+        if not pointer or not size:
+            return b""
+        try:
+            return ctypes.string_at(pointer, size)
+        finally:
+            kernel32.GlobalUnlock(handle)
+
+    # Muchas apps (navegadores, capturas, editores) publican también un PNG ya
+    # hecho: usarlo evita decodificar el DIB y conserva la calidad original.
+    png_format = user32.RegisterClipboardFormatW("PNG")
+
+    if not user32.OpenClipboard(None):
+        return None, "no se pudo abrir el portapapeles"
+    try:
+        # Un archivo copiado en el Explorador vale igual que un mapa de bits, y
+        # además conserva el formato original (mejor que reencodificar).
+        if user32.IsClipboardFormatAvailable(CF_HDROP):
+            handle = user32.GetClipboardData(CF_HDROP)
+            if handle:
+                count = shell32.DragQueryFileW(handle, 0xFFFFFFFF, None, 0)
+                for index in range(count):
+                    length = shell32.DragQueryFileW(handle, index, None, 0)
+                    buffer = ctypes.create_unicode_buffer(length + 1)
+                    shell32.DragQueryFileW(handle, index, buffer, length + 1)
+                    candidate = Path(buffer.value)
+                    if candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                        return candidate, ""
+
+        data = b""
+        if png_format and user32.IsClipboardFormatAvailable(png_format):
+            data = _read(user32.GetClipboardData(png_format))
+            if data[:8] == b"\x89PNG\r\n\x1a\n":
+                target = _new_path(folder)
+                target.write_bytes(data)
+                _prune(folder)
+                return target, ""
+
+        if not user32.IsClipboardFormatAvailable(CF_DIB):
+            return None, "el portapapeles no tiene ninguna imagen"
+        dib = _read(user32.GetClipboardData(CF_DIB))
+    finally:
+        user32.CloseClipboard()
+
+    if not dib:
+        return None, "no se pudo leer la imagen del portapapeles"
+    png = dib_to_png(dib)
+    if png is None:
+        return None, "formato de imagen no soportado (usa 24 o 32 bits sin comprimir)"
+    target = _new_path(folder)
+    target.write_bytes(png)
+    _prune(folder)
+    return target, ""
+
+
+def _command_clipboard_image(folder: Path) -> tuple[Path | None, str]:
+    """Linux/macOS: se delega en la herramienta del sistema, si está."""
+    attempts = [
+        (["wl-paste", "--no-newline", "--type", "image/png"], ".png"),
+        (["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], ".png"),
+        (["pngpaste", "-"], ".png"),
+    ]
+    missing = True
+    for command, _suffix in attempts:
+        try:
+            proc = subprocess.run(command, capture_output=True, timeout=10)
+        except (FileNotFoundError, OSError):
+            continue
+        except subprocess.TimeoutExpired:
+            missing = False
+            continue
+        missing = False
+        if proc.returncode == 0 and proc.stdout[:8] == b"\x89PNG\r\n\x1a\n":
+            target = _new_path(folder)
+            target.write_bytes(proc.stdout)
+            _prune(folder)
+            return target, ""
+    if missing:
+        return None, "instala wl-clipboard, xclip o pngpaste para pegar imágenes"
+    return None, "el portapapeles no tiene ninguna imagen"
+
+
+def paste_image(home: Path) -> tuple[Path | None, str]:
+    """Guarda la imagen del portapapeles y devuelve (ruta, error).
+
+    Nunca lanza: pegar es un atajo, y que falle no puede tumbar el prompt.
+    """
+    try:
+        folder = paste_dir(home)
+        if sys.platform == "win32":
+            return _windows_clipboard_image(folder)
+        return _command_clipboard_image(folder)
+    except Exception as exc:
+        return None, f"no se pudo pegar la imagen ({exc})"
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/remote.py
@@ -2646,7 +3276,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     working = history[:]
 
     nudged = False
-    actions_open = False  # la cabecera "acciones" se abre una vez por turno
     for _ in range(MAX_AGENT_STEPS):
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
@@ -2661,9 +3290,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
 
         if native_calls:
             working.append({"role": "assistant", "content": assistant, "tool_calls": native_calls})
-            if not actions_open:
-                render_actions_header(console)
-                actions_open = True
             for call in native_calls:
                 internal = native_call_to_internal(call)
                 tool_name = internal["tool"]
@@ -2692,10 +3318,6 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                                 "content": NATIVE_NUDGE_PROMPT if native else NUDGE_PROMPT})
                 continue
             return assistant, working
-
-        if not actions_open:
-            render_actions_header(console)
-            actions_open = True
 
         combined_results = []
         for call in tool_calls:
@@ -2803,6 +3425,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("compact", "", "Compactar la conversación para liberar contexto", "conversación"),
     ("history", "", "Ver los mensajes de la sesión y reenviar uno", "conversación"),
     ("image", "<ruta>", "Adjuntar una imagen al próximo mensaje (también @ruta)", "conversación"),
+    ("paste", "", "Pegar la imagen del portapapeles (atajo: Alt+V)", "conversación"),
     ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),
@@ -2990,7 +3613,10 @@ class ChatApp:
         self.api = ApiClient(self.cfg["base_url"], self.cfg.get("api_key", ""))
         self.model = self.cfg.get("key_model") or model_override or self.cfg.get("model", "")
         self.client_id = client_id or os.getenv("HOSTNAME", "cli-client")
-        self.title = title or "Sesión CLI"
+        # Sin título fijo: el servidor lo genera tras el primer intercambio
+        # (_maybe_autotitle). Antes iba "Sesión CLI" en CADA mensaje y todas
+        # las conversaciones del CLI acababan llamándose igual.
+        self.title = title or ""
         self.mode = self.cfg.get("mode", "ask")
         # El workspace es SIEMPRE la carpeta desde la que se lanzó el CLI
         # (como Claude Code); /workspace lo cambia solo para la sesión.
@@ -3005,10 +3631,23 @@ class ChatApp:
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
+        # Estado del turno en curso: el rótulo "✦ Lixbon" se imprime una sola vez
+        # y justo encima de la primera prosa, con el registro de acciones ya
+        # arriba. `_turn_mark` recuerda cuántas líneas llevaba impresas el turno
+        # para saber si hace falta aire entre el registro y la respuesta.
+        self._spoke = False
+        self._turn_mark = 0
+        # Teclado durante el turno: se puede escribir mientras el agente
+        # trabaja y lo escrito se ejecuta cuando termina (nunca a mitad).
+        self.input_queue = InputQueue() if self.cfg.get("input_queue", True) else None
         self.history: list[dict] = []
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
+        # Modelo que el gateway asigna al rol `chat` (GET /api/model-roles). Sirve
+        # para no preguntar cuál usar cuando el servidor ya lo tiene decidido.
+        # "" = gateway antiguo o sin modelo de chat resuelto.
+        self.role_chat_model = ""
         # Plan comercial (Pro/Advance/Gratuito): se muestra en la cabecera.
         # Se cachea en el config para que el arranque no dependa de la red.
         self.plan_name = self.cfg.get("plan_name", "")
@@ -3158,8 +3797,26 @@ class ChatApp:
                       plan=self.plan_name, workspace=self.workspace)
 
     def _set_tab_title(self) -> None:
-        """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon."""
-        set_title(f"{g('spark')} Lixbon {g('sep')} {self.workspace.name}")
+        """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon.
+        Con la conversación ya titulada, su nombre acompaña al workspace."""
+        label = self.title or self.workspace.name
+        set_title(f"{g('spark')} Lixbon {g('sep')} {label}")
+
+    def _maybe_autotitle(self) -> None:
+        """Pide el título de la conversación tras el primer intercambio.
+
+        Mismo endpoint que la web y la app: el servidor lo resuelve con el
+        modelo pequeño y, si el cluster no responde, con el primer mensaje.
+        """
+        if self.title or len(self.history) < 2 or not self.conversation_id:
+            return
+        try:
+            title = str(self.api.generate_title(self.conversation_id).get("title") or "").strip()
+        except Exception:
+            return  # el título nunca puede tumbar el turno
+        if title:
+            self.title = title
+            self._set_tab_title()
 
     def _load_account_quietly(self) -> str:
         """Modelos disponibles y plan del usuario, sin ruido si el server falla.
@@ -3175,6 +3832,10 @@ class ChatApp:
         except ApiError as exc:
             self.models_cache = []
             auth_failed = exc.status in (401, 403)
+        # Qué modelo sirve el rol `chat` según el servidor (no falla nunca: el
+        # método devuelve {} con un gateway que no conozca los roles).
+        roles = self.api.model_roles().get("roles") or {}
+        self.role_chat_model = str((roles.get("chat") or {}).get("model") or "")
         if not self.cfg.get("api_key"):
             return "auth"
         try:
@@ -3324,6 +3985,14 @@ class ChatApp:
         if not self.models_cache:
             print_error("El servidor no está publicando modelos ahora mismo — revísalo con /nodes.")
             return False
+        # El servidor ya decidió cuál es el modelo de chat: no hay nada que
+        # preguntar la primera vez. El selector sigue disponible con /model.
+        if not self.model and self.role_chat_model in self.models_cache:
+            self.model = self.role_chat_model
+            self.cfg["model"] = self.model
+            save_config(self.cfg)
+            print_ok(f"Modelo: {self.model} (el que el servidor usa para chat)")
+            return True
         options = [Option(m, m, badge="actual" if m == self.model else "")
                    for m in self.models_cache]
         default = self.models_cache.index(self.model) if self.model in self.models_cache else 0
@@ -3409,6 +4078,15 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
+        @kb.add("escape", "v")
+        def _paste(event):
+            # Alt+V llega como Esc+v. `run_in_terminal` suspende el prompt para
+            # imprimir por encima y lo restaura: escribir directo dejaría el
+            # mensaje pisado por el siguiente repintado de prompt_toolkit.
+            from prompt_toolkit.application import run_in_terminal
+
+            run_in_terminal(self._paste_clipboard_image)
+
         @kb.add("enter", filter=completion_is_selected)
         def _enter_selected(event):
             # El usuario navegó el menú con las flechas: Enter elige lo marcado.
@@ -3448,8 +4126,18 @@ class ChatApp:
 
         while True:
             self._refresh_status()
+            # Lo tecleado durante el turno se ejecuta ahora, antes de volver a
+            # preguntar: en orden, uno detrás de otro y con el agente ya parado.
+            ran = self._run_queued_input()
+            if ran is False:
+                return 0
+            if ran:
+                continue  # esos turnos pueden haber dejado más en la cola
             try:
-                text = session.prompt().strip()
+                # Lo que se quedó a medio escribir durante el turno reaparece
+                # en el prompt, listo para seguir.
+                partial = self.input_queue.take_partial() if self.input_queue else ""
+                text = session.prompt(default=partial).strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
                 if now - self._interrupt_hint_at < 2.5:
@@ -3541,14 +4229,18 @@ class ChatApp:
         if origin != "local":
             # El mensaje llegó por /remote: aquí nadie lo tecleó, así que el
             # transcript local tiene que mostrarlo para no perder el hilo.
-            render_speaker(self.console, "user")
-            self.console.print(f"[lx.primary]{esc(clean or text)}[/]")
+            render_user_message(self.console, clean or text)
         if self.remote:
             self.remote.emit("user_msg", text=clean or text, origin=origin)
             self.remote.emit("status", state="thinking")
 
+        # Aire entre la pregunta y el turno. El rótulo del asistente NO va aquí:
+        # lo imprime _speak_once() cuando hay algo que decir, por debajo del
+        # registro de acciones, para que abra la respuesta y no la fontanería.
         self.console.print()
-        render_speaker(self.console, "assistant")
+        self._spoke = False
+        self._turn_mark = self.console.writes
+        self._start_input_queue()
         try:
             if self.mode == "delegate":
                 self._delegate_turn(clean or text)
@@ -3563,9 +4255,88 @@ class ChatApp:
             self.history.pop()
             raise
         finally:
+            self._stop_input_queue()
             if self.remote:
                 self.remote.emit("status", state="idle")
+        self._maybe_autotitle()
         self._refresh_status()
+
+    # ── teclado durante el turno ─────────────────────────────────────────
+
+    def _start_input_queue(self) -> None:
+        """Empieza a escuchar el teclado mientras el agente trabaja.
+
+        No se activa con `/remote`: ahí quien conduce es el móvil y el teclado
+        local está deliberadamente en pausa.
+        """
+
+        if self.input_queue is None or self.remote or not ui_capable():
+            return
+        self.input_queue.start()
+
+    def _stop_input_queue(self) -> None:
+        if self.input_queue is not None:
+            self.input_queue.stop()
+
+    def _typing_row(self):
+        """Fila de la vista viva con lo tecleado y lo que ya está en cola."""
+        from rich.text import Text
+
+        queue = self.input_queue
+        if queue is None or not queue.running:
+            return None
+        typed, pending = queue.typing, queue.queued
+        if not typed and not pending:
+            return None
+        parts = []
+        if typed:
+            parts += [(f"{g('prompt')} ", "lx.accent2"), (typed, "lx.primary"),
+                      (g("block"), "lx.dim2")]
+        if pending:
+            label = f"{pending} en cola" if pending > 1 else "1 en cola"
+            parts.append((f"{'   ' if typed else ''}{label} {g('sep')} se envía al terminar",
+                          "lx.dim2"))
+        return Text.assemble(*parts)
+
+    def _queue_interrupted(self) -> bool:
+        """Ctrl+C durante el turno: con el lector activo no llega como señal."""
+        queue = self.input_queue
+        if queue is None or not queue.interrupted:
+            return False
+        queue.interrupted = False
+        return True
+
+    def _run_queued_input(self):
+        """Ejecuta lo tecleado durante el turno.
+
+        Devuelve `False` si toca salir del CLI, o el número de líneas que ha
+        ejecutado (que pueden haber dejado más en la cola).
+        """
+        queue = self.input_queue
+        if queue is None:
+            return 0
+        lines = queue.drain()
+        for line in lines:
+            # Se repite en el transcript como si se acabara de escribir: sin el
+            # eco, una respuesta aparecería sin pregunta a la vista.
+            render_user_message(self.console, line)
+            if self._handle_input(line) is False:
+                return False
+        return len(lines)
+
+    def _speak_once(self) -> None:
+        """Abre la zona de respuesta: rótulo `✦ Lixbon`, una vez por turno.
+
+        Va justo encima de la primera prosa del turno, no al empezar a trabajar.
+        Si el registro de acciones ya escribió algo, se separa con una línea en
+        blanco: la respuesta necesita aire propio para despegarse del canal.
+        """
+        if self._spoke:
+            return
+        self._spoke = True
+        if self.console.writes > self._turn_mark:
+            self.console.print()
+        render_speaker(self.console)
 
     def _load_project_context(self) -> None:
         """LIXBON.md del workspace: contexto permanente del proyecto.
@@ -3647,11 +4418,13 @@ class ChatApp:
         def _live_view():
             blocks = []
             if reasoning_parts:
+                # El razonamiento es trabajo, no respuesta: va en el canal, igual
+                # que las acciones, para que en vivo se distinga de lo que dirá.
                 tail = "".join(reasoning_parts).strip().splitlines()[-3:]
-                head = Text(f"{g('spark_alt')} pensando…", style="lx.dim")
-                blocks.append(head)
+                blocks.append(Text.assemble(
+                    rail_text(), (f"{g('spark_alt')} pensando…", "lx.dim")))
                 for line in tail:
-                    blocks.append(Text(f"  {line}", style="lx.thinking"))
+                    blocks.append(Text.assemble(rail_text(), (line, "lx.thinking")))
             if content_parts:
                 raw = "".join(content_parts)
                 if self.mode == "agent":
@@ -3670,16 +4443,26 @@ class ChatApp:
             # aquí la pegaría al texto que va saliendo.
             if not status_line_active():
                 blocks.append(self.status.rich_line(compact=True))
+            # Lo que se está tecleando mientras el modelo responde. Va al final
+            # del bloque vivo (donde estaría el prompt) y el `Tail` lo conserva
+            # aunque la respuesta desborde: escribir a ciegas sería peor que no
+            # poder escribir.
+            typed_row = self._typing_row()
+            if typed_row is not None:
+                blocks.append(typed_row)
             # La vista viva se queda en la cola: una respuesta larga desbordaría
             # la pantalla y el borrado del Live dejaría el hueco de vuelta. El
-            # texto íntegro lo imprime _final_view() al cerrar el Live.
+            # texto íntegro lo imprime _final_body() al cerrar el Live.
             rows = min(self.console.size.height - 2, LIVE_TAIL_ROWS)
             return Tail(pad(Group(*blocks)), max(rows, 4))
 
-        def _final_view():
+        def _final_body():
+            """Lo que el modelo DICE, ya sin la fontanería del turno.
+
+            El resumen del razonamiento no entra aquí: se imprime aparte y
+            dentro del canal, porque pertenece al registro de trabajo.
+            """
             blocks = []
-            if reasoning_seconds > 0.5:
-                blocks.append(Text(f"{g('spark_alt')} Pensó durante {reasoning_seconds:.1f}s", style="lx.dim2"))
             text = "".join(content_parts).strip()
             if self.mode == "agent":
                 # Paso intermedio del agente (solo tool calls): no hay prosa que
@@ -3716,9 +4499,11 @@ class ChatApp:
                         # cada poco garantiza que la barra siga entera.
                         last_paint = time.monotonic()
                         self._paint_status()
-                    if self.remote and self.remote.interrupt_requested:
-                        # Interrupción pedida desde el móvil/web (equivale a Ctrl+C)
-                        self.remote.interrupt_requested = False
+                    if (self.remote and self.remote.interrupt_requested) or self._queue_interrupted():
+                        # Interrupción pedida desde el móvil/web, o Ctrl+C con el
+                        # lector de teclado activo (ahí no llega como señal).
+                        if self.remote:
+                            self.remote.interrupt_requested = False
                         interrupted = True
                         stream.close()
                         break
@@ -3747,13 +4532,18 @@ class ChatApp:
                 stream.close()
 
         self.status.extra = ""
-        final = _final_view()
-        if final is not None:
-            self.console.print(final)
-            self.console.print()
-        if sources:
-            self.console.print(f"[lx.dim]Fuentes web: " + "; ".join(
-                str(s.get("url") or s.get("title") or "?") for s in sources[:5]) + "[/]")
+        if reasoning_seconds > 0.5:
+            render_log_line(self.console,
+                            f"{g('spark_alt')} pensó {reasoning_seconds:.1f} s", "lx.dim2")
+        body = _final_body()
+        if body is not None:
+            self._speak_once()
+            self.console.print(body)
+            if sources:
+                # Pie de la respuesta, no del registro: las fuentes son de lo
+                # que acaba de decir, así que se quedan con ella.
+                self.console.print("[lx.dim2]fuentes: " + esc("; ".join(
+                    str(s.get("url") or s.get("title") or "?") for s in sources[:5])) + "[/]")
             self.console.print()
 
         if usage:
@@ -3774,19 +4564,20 @@ class ChatApp:
             result = self.api.delegate(text)
         routing = result.get("routing", {})
         classification = result.get("classification", {})
-        self.console.print(
-            f"[lx.accent2]{g('spark')}[/] [bold lx.primary]Delegación[/] "
-            f"[lx.beige]\\[{esc(routing.get('type', 'PLAN'))}][/] "
-            f"[lx.dim]modelo {esc(routing.get('model', '?'))} {g('sep')} {result.get('execution_time_ms', 0)}ms[/]"
+        # Cómo se enrutó es registro de trabajo, no respuesta: va en el canal.
+        render_log_line(
+            self.console,
+            f"delegó a {routing.get('model', '?')} "
+            f"[{routing.get('type', 'PLAN')}] {g('sep')} {result.get('execution_time_ms', 0)} ms",
         )
-        tags = "  ".join(
+        render_log_line(self.console, "  ".join(
             f"{k}:{classification.get(v, '?')}"
             for k, v in (("intent", "intent"), ("complejidad", "complexity"),
                          ("dominio", "domain"), ("riesgo", "riskLevel"))
-        )
-        self.console.print(f"[lx.dim2]{tags}[/]")
+        ), "lx.dim2")
         from rich.markdown import Markdown
 
+        self._speak_once()
         self.console.print(Markdown(result.get("response", "(sin respuesta)")))
         self.console.print()
         self.history.append({"role": "assistant", "content": result.get("response", "")})
@@ -3872,6 +4663,8 @@ class ChatApp:
         self.history = []
         self.session_tokens = 0
         self.conversation_id = str(uuid.uuid4())
+        self.title = ""  # la nueva conversación se titulará sola al responder
+        self._set_tab_title()
         # El separador marca dónde empieza el contexto nuevo: sin él, el
         # transcript anterior parece seguir vivo.
         rule(self.console, "conversación nueva")
@@ -3930,6 +4723,31 @@ class ChatApp:
             return True
         self.pending_images.append(path.resolve())
         print_ok(f"{g('image')} {path.name} se adjuntará al próximo mensaje")
+        return True
+
+    def cmd_paste(self, arg: str):
+        self._paste_clipboard_image()
+        return True
+
+    def _paste_clipboard_image(self) -> bool:
+        """Adjunta la imagen del portapapeles. Devuelve si lo consiguió.
+
+        Lo comparten `/paste` y el atajo Alt+V del prompt; el modelo la recibe
+        igual que con `@ruta` (base64 en `ChatMessage.images`), así que solo
+        funciona de verdad con un modelo multimodal.
+        """
+        path, error = paste_image(CONFIG_DIR)
+        if path is None:
+            print_error(error or "el portapapeles no tiene ninguna imagen")
+            return False
+        try:
+            encode_image(path)  # valida formato y tamaño antes de prometer nada
+        except ValueError as exc:
+            print_error(str(exc))
+            return False
+        self.pending_images.append(path)
+        size = fmt_size(path.stat().st_size)
+        print_ok(f"{g('image')} imagen pegada ({size}); se enviará con el próximo mensaje")
         return True
 
     def cmd_usage(self, arg: str):
@@ -4231,10 +5049,10 @@ class ChatApp:
         except Exception as exc:
             output, code = str(exc), 1
 
-        render_actions_header(self.console)
+        self.console.print()
         render_action(self.console, "ejecutó", command)
         for line in (output or "(sin salida)").splitlines()[:80]:
-            self.console.print(f"  [lx.dim]{esc(line)}[/]")
+            render_log_line(self.console, line)
         render_action_result(self.console, f"salida {code}", error=code != 0)
         self.console.print()
         # El modelo debe poder razonar sobre el resultado en el siguiente turno.
@@ -4900,7 +5718,9 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name, help="Abrir el chat interactivo" if name == "chat" else argparse.SUPPRESS)
         p.add_argument("--model", help="Sobrescribe el modelo por defecto")
         p.add_argument("--client-id", default=os.getenv("HOSTNAME", "cli-client"))
-        p.add_argument("--title", default="Sesión CLI")
+        # Sin valor por defecto: el servidor titula la conversación tras el
+        # primer intercambio (pasarlo aquí fija el nombre a mano).
+        p.add_argument("--title", default="", help="Título fijo de la conversación")
         p.add_argument("--once", default="", help="Enviar un único mensaje y salir (modo no interactivo)")
         p.set_defaults(func=cmd_chat)
 

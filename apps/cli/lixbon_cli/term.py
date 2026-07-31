@@ -61,7 +61,7 @@ def _unicode_ok() -> bool:
     if not IS_WINDOWS:
         return True
     try:
-        "✦●▓░❯╭█─".encode(_ORIG_ENCODING)
+        "✦●▓░❯╭█─│┃".encode(_ORIG_ENCODING)
         return True
     except (UnicodeEncodeError, LookupError):
         # Windows Terminal renderiza unicode aunque el codepage legacy no:
@@ -90,6 +90,11 @@ _GLYPHS_UNICODE = {
     "rule": "─",
     "gear": "⚙",
     "corner": "└",
+    # Canal del registro de trabajo del agente: fino para el rastro (lecturas,
+    # diffs, resultados) y grueso para la línea en la que tocó el disco. Los dos
+    # pesos del mismo juego de box-drawing ocupan una celda y alinean igual.
+    "rail": "│",
+    "rail_hot": "┃",
 }
 _GLYPHS_ASCII = {
     "spark": "*",
@@ -109,6 +114,8 @@ _GLYPHS_ASCII = {
     "rule": "-",
     "gear": "*",
     "corner": "`",
+    "rail": "|",
+    "rail_hot": "|",
 }
 
 

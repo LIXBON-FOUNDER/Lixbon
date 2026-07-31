@@ -34,7 +34,7 @@ function renderMessages(messages, streaming) {
 import { IconPlus, IconChevron, IconDots } from '../components/Icons';
 
 export function ChatPanel() {
-  const { messages, streaming, view, setView, newConversation } = useChatStore();
+  const { messages, streaming, view, setView, newConversation, conversationTitle } = useChatStore();
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
 
@@ -55,7 +55,11 @@ export function ChatPanel() {
   return (
     <div className="chatpanel">
       <div className="chatpanel__header">
-        <span className="chatpanel__title">Chat</span>
+        {/* La conversación se titula sola tras el primer intercambio: verlo
+            aquí evita el "¿cuál de todas era esta?" al volver del historial. */}
+        <span className="chatpanel__title" title={conversationTitle || 'Chat'}>
+          {view === 'history' ? 'Historial' : conversationTitle || 'Chat'}
+        </span>
         <span className="chatpanel__actions">
           <button className="icon-btn" title="Nueva conversación" onClick={newConversation}>
             <IconPlus size={16} />

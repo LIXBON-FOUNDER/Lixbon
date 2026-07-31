@@ -18,6 +18,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("compact", "", "Compactar la conversación para liberar contexto", "conversación"),
     ("history", "", "Ver los mensajes de la sesión y reenviar uno", "conversación"),
     ("image", "<ruta>", "Adjuntar una imagen al próximo mensaje (también @ruta)", "conversación"),
+    ("paste", "", "Pegar la imagen del portapapeles (atajo: Alt+V)", "conversación"),
     ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),

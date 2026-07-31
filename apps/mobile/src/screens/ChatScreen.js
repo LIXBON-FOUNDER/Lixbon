@@ -21,7 +21,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { ChatHeader, FadeUp, SOURCE_META, useColors } from '../components/ui';
+import { ChatHeader, FadeUp, useColors } from '../components/ui';
 import { useApi, useAuth, useChat } from '../state';
 import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
 
@@ -124,14 +124,10 @@ export default function ChatScreen({ onMenu }) {
   const empty = chat.messages.length === 0 && !chat.loadingMessages;
   const firstName = typeof auth.user?.first_name === 'string' ? auth.user.first_name : null;
 
-  // Subtítulo: el contexto que antes había que adivinar (modelo activo, si la
-  // conversación viene del CLI o del IDE, y si el modelo está respondiendo).
-  const origin = chat.source && chat.source !== 'web' ? SOURCE_META[chat.source]?.label : '';
+  // Subtítulo: modelo activo, o el aviso de que está respondiendo.
   const subtitle = chat.streaming
     ? 'Respondiendo…'
-    : [origin, chat.model || (chat.models.length === 0 ? 'Sin modelos' : '')]
-        .filter(Boolean)
-        .join('  ·  ');
+    : chat.model || (chat.models.length === 0 ? 'Sin modelos' : '');
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>

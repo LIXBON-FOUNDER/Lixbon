@@ -278,6 +278,26 @@ class ModelPricing(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class ModelRole(Base):
+    """Override del mapa rol→modelo (chat/fim/vision/embed/route).
+
+    Los defaults viven en core/config.py (MODEL_ROLE_*); esta tabla los pisa
+    desde el panel admin. Global al gateway, no por usuario ni por nodo.
+    Una fila por rol, sembrada con model=NULL (= usa el default o autodetecta).
+    `unique` en role es imprescindible: el seed usa ON CONFLICT (role)."""
+    __tablename__ = "model_roles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    role: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    model: Mapped[str | None] = mapped_column(Text)        # NULL/'' = default de env
+    keep_alive: Mapped[str | None] = mapped_column(Text)   # "30m" | "-1" | "0"; NULL = env
+    num_ctx: Mapped[int | None] = mapped_column()          # NULL = lo decide el cliente
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class CreditAccount(Base):
     """Saldo prepago de créditos de API por usuario, en micro-USD."""
     __tablename__ = "credit_accounts"
@@ -329,8 +349,8 @@ class CreditPack(Base):
 
 class RemoteSession(Base):
     """Sesión de control remoto (/remote): un IDE o CLI actuando de host y la
-    app móvil / web como mando a distancia. El transcript NO se persiste aquí
-    (viaja por el RemoteHub en memoria); esto son solo los metadatos."""
+    app móvil / web como mando a distancia. Los metadatos viven aquí y el
+    transcript en `remote_events`, para poder releerlo cuando la sesión acaba."""
     __tablename__ = "remote_sessions"
     __table_args__ = (
         Index("idx_remote_sessions_user", "user_id", "created_at"),
@@ -348,6 +368,29 @@ class RemoteSession(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_seen_at: Mapped[str] = mapped_column(Text, nullable=False)
     ended_at: Mapped[str | None] = mapped_column(Text)
+
+
+class RemoteEvent(Base):
+    """Transcript persistido de una sesión /remote.
+
+    El RemoteHub solo relaya en memoria: al cerrar la sesión (o al reiniciar el
+    gateway) la conversación se perdía entera. Aquí se guardan los eventos con
+    valor de transcript —mensajes, herramientas, avisos—, no los deltas del
+    streaming, para poder reabrir la sesión en modo lectura desde la app o la
+    web mucho después de que el host se haya ido.
+    """
+    __tablename__ = "remote_events"
+    __table_args__ = (
+        Index("idx_remote_events_session", "session_id", "seq"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("remote_sessions.id", ondelete="CASCADE"), nullable=False)
+    seq: Mapped[int] = mapped_column(nullable=False)     # el mismo que reparte el hub
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class DeviceToken(Base):

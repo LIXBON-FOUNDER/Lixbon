@@ -36,6 +36,25 @@ PESO_RAM = 0.35
 PESO_GPU = 0.40
 
 
+class ModelUnavailable(RuntimeError):
+    """El modelo pedido no está en ningún nodo online.
+
+    La levanta ollama_target(strict=True) para que el gateway pueda devolver un
+    error claro en vez de enrutar la petición a un Ollama que no lo tiene.
+    """
+
+    def __init__(self, model: str, nodes_online: list[str]):
+        super().__init__(f"El modelo '{model}' no está en ningún nodo online ({', '.join(nodes_online)})")
+        self.model = model
+        self.nodes_online = nodes_online
+
+
+def _normalizar_modelo(nombre: str | None) -> str:
+    """`nomic-embed-text` ≡ `nomic-embed-text:latest` (lo que devuelve /api/tags)."""
+    n = (nombre or "").strip()
+    return n[: -len(":latest")] if n.endswith(":latest") else n
+
+
 def _calcular_score(metricas: dict) -> float:
     """Score 0-100. Mayor = más recursos libres. Sin GPU usa 50.0 neutral."""
     cpu_libre = 100.0 - float(metricas.get("cpu_percent", 100))
@@ -85,6 +104,9 @@ class NodeOrchestrator:
                         "next_retry": 0.0,
                         "metricas": {},
                         "modelos": [],
+                        "capabilities": {},     # modelo → [capabilities] (node_agent ≥ 3.1)
+                        "tamanos": {},          # modelo → bytes
+                        "agent_version": None,
                         "score": 0.0,
                         "ultimo_poll": None,
                         "config": nodo,
@@ -152,6 +174,17 @@ class NodeOrchestrator:
             resp.raise_for_status()
             metricas = resp.json()
             modelos = metricas.pop("models", [])
+            # model_info solo lo manda el node_agent ≥ 3.1. Sin él, capabilities
+            # queda vacío = "desconocidas", que NO es lo mismo que "ninguna":
+            # los roles no descartan modelos por falta de datos.
+            model_info = metricas.pop("model_info", None) or []
+            agent_version = metricas.pop("agent_version", None)
+            capabilities = {
+                m["name"]: list(m["capabilities"])
+                for m in model_info
+                if m.get("name") and m.get("capabilities")
+            }
+            tamanos = {m["name"]: m.get("size", 0) for m in model_info if m.get("name")}
             score = _calcular_score(metricas)
 
             with self._lock:
@@ -163,6 +196,9 @@ class NodeOrchestrator:
                     "next_retry": 0.0,
                     "metricas": metricas,
                     "modelos": modelos,
+                    "capabilities": capabilities,
+                    "tamanos": tamanos,
+                    "agent_version": agent_version,
                     "score": score,
                     "ultimo_poll": time.time(),
                 })
@@ -207,44 +243,89 @@ class NodeOrchestrator:
             self._rr_index = (self._rr_index + 1) % max(len(empatados), 1)
             return ganador["config"]
 
-    def best_node_for_model(self, model: str) -> dict | None:
-        """Nodo online con mayor score que tenga el modelo; si ninguno lo tiene, el de mayor score."""
+    def best_node_for_model(self, model: str, strict: bool = True) -> dict | None:
+        """Nodo online con mayor score que tenga el modelo.
+
+        `strict=True` (default) devuelve None si ningún nodo online lo tiene, en
+        vez de enrutar a ciegas al mejor nodo: antes la petición llegaba a un
+        Ollama sin ese modelo y el usuario veía el error crudo de Ollama en
+        lugar de un "modelo no disponible" del gateway.
+        La comparación normaliza `:latest` (`nomic-embed-text` ≡ `nomic-embed-text:latest`).
+        """
+        objetivo = _normalizar_modelo(model)
         with self._lock:
             online = [est for est in self._estado.values() if est["online"]]
             if not online:
                 return None
-            con_modelo = [est for est in online if model in est["modelos"]]
-            candidatos = con_modelo if con_modelo else online
-            return max(candidatos, key=lambda e: e["score"])["config"]
+            con_modelo = [
+                est for est in online
+                if any(_normalizar_modelo(m) == objetivo for m in est["modelos"])
+            ]
+            if not con_modelo:
+                if strict:
+                    return None
+                con_modelo = online
+            return max(con_modelo, key=lambda e: e["score"])["config"]
 
-    def ollama_target(self, model: str | None = None) -> tuple[str, dict, str]:
+    def nodos_online(self) -> list[str]:
+        with self._lock:
+            return [est["config"]["id"] for est in self._estado.values() if est["online"]]
+
+    def ollama_target(self, model: str | None = None, strict: bool = False) -> tuple[str, dict, str]:
         """
         Resuelve el destino de inferencia: (base_url_ollama, headers, origen).
         - Con nodo online: el proxy del node_agent ({agent_url}/ollama) autenticado.
         - Sin nodos: el Ollama local del gateway (OLLAMA_BASE_URL) — solo útil en desarrollo.
+
+        Con `strict=True`, si hay nodos online pero ninguno tiene el modelo se
+        levanta ModelUnavailable en vez de mandar la petición a un nodo que no
+        lo tiene. El caso "sin nodos online" sigue cayendo al Ollama local: es
+        el camino legítimo de desarrollo.
         """
-        nodo = self.best_node_for_model(model) if model else self.best_node()
+        if model:
+            nodo = self.best_node_for_model(model, strict=strict)
+            if nodo is None and strict:
+                online = self.nodos_online()
+                if online:
+                    raise ModelUnavailable(model, online)
+        else:
+            nodo = self.best_node()
         if nodo:
             base = f"{nodo['agent_url'].rstrip('/')}/ollama"
             return base, self._headers_nodo(nodo), nodo["id"]
         return OLLAMA_BASE_URL, {}, "local"
 
     def todos_los_modelos(self) -> list[dict]:
-        """Agrega los modelos de todos los nodos online (agrupando duplicados)."""
+        """Agrega los modelos de todos los nodos online (agrupando duplicados).
+
+        `capabilities` es la unión de las conocidas; la clave se OMITE si ningún
+        nodo la conoce, para que el consumidor distinga "desconocido" de "vacío".
+        """
         vistos: dict[str, dict] = {}
         with self._lock:
             for est in self._estado.values():
                 if not est["online"]:
                     continue
                 nid = est["config"]["id"]
+                caps_nodo = est.get("capabilities") or {}
+                tam_nodo = est.get("tamanos") or {}
                 for nombre in est["modelos"]:
-                    if nombre not in vistos:
-                        vistos[nombre] = {
+                    entrada = vistos.get(nombre)
+                    if entrada is None:
+                        entrada = {
                             "id": nombre, "object": "model",
                             "owned_by": "ollama", "nodos": [nid],
                         }
+                        vistos[nombre] = entrada
                     else:
-                        vistos[nombre]["nodos"].append(nid)
+                        entrada["nodos"].append(nid)
+                    caps = caps_nodo.get(nombre)
+                    if caps:
+                        entrada["capabilities"] = sorted(
+                            set(entrada.get("capabilities") or []) | set(caps)
+                        )
+                    if tam_nodo.get(nombre):
+                        entrada["size"] = max(entrada.get("size", 0), tam_nodo[nombre])
         return list(vistos.values())
 
     def reintentar_nodo(self, nid: str) -> bool:
@@ -289,6 +370,10 @@ class NodeOrchestrator:
                     "score": est["score"],
                     "fallos": est["fallos"],
                     "modelos": est["modelos"],
+                    # None = node_agent < 3.1: no manda capabilities y los roles
+                    # de inferencia no se pueden autodetectar contra ese nodo.
+                    "agent_version": est.get("agent_version"),
+                    "capabilities": est.get("capabilities") or {},
                     "metricas": est["metricas"],
                     "ultimo_poll": est["ultimo_poll"],
                     "seconds_ago": round(now - est["ultimo_poll"], 1) if est["ultimo_poll"] else None,

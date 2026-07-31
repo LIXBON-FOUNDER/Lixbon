@@ -2,6 +2,7 @@
 import sys
 from dataclasses import dataclass, field
 
+from lixbon_cli.inputq import suspend_input
 from lixbon_cli.term import UNICODE_OK, attach_status_repaint, g, repaint_status
 from lixbon_cli.theme import PALETTE, make_console, pt_style
 
@@ -81,7 +82,7 @@ def render_header(console, version: str, model: str = "", plan: str = "",
     """Bloque de identidad, arriba a la izquierda y sin cajas.
 
         ██  Lixbon CLI v2.1.0
-        ██  qwen2.5-coder:7b · Lixbon Pro
+        ██  modelo-demo · Lixbon Pro
             ~/proyectos/api
 
     Se imprime una vez al arrancar (y tras /clear): sube con el transcript en
@@ -133,11 +134,11 @@ def render_tips(console) -> None:
     console.print(
         f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
         f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
-        f"[lx.accent2]@ruta[/] para adjuntar una imagen  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]Alt+V[/] pega una imagen  [lx.dim2]{g('sep')}[/]  "
         f"Ctrl+C dos veces para salir[/]"
     )
     console.print(
-        f"[lx.dim2]/help abre el menú de comandos  {g('sep')}  /config los ajustes  "
+        f"[lx.dim2]/help abre el menú de comandos  {g('sep')}  @ruta adjunta un archivo  "
         f"{g('sep')}  /doctor revisa terminal y conexión[/]"
     )
 
@@ -158,15 +159,39 @@ def rule(console, label: str = "") -> None:
     console.print()
 
 
-def render_speaker(console, who: str) -> None:
-    """Etiqueta de turno: marca de quién es el bloque que viene debajo."""
-    if who == "user":
-        console.print(f"[lx.accent2]{g('prompt')}[/] [lx.dim]tú[/]")
-    else:
-        console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
+def render_speaker(console) -> None:
+    """Rótulo que abre la respuesta de Lixbon.
+
+    Se imprime una sola vez por turno y JUSTO ENCIMA de lo que dice, no al
+    empezar a trabajar: el registro de acciones queda por arriba, dentro de su
+    canal, y el rótulo marca dónde empieza lo que hay que leer.
+    """
+    console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
 
 
-# ── Acciones del agente ─────────────────────────────────────────────────────
+def render_user_message(console, text: str) -> None:
+    """Eco de un mensaje del usuario, idéntico a como lo deja el prompt local.
+
+    Lo usa /remote: lo que llega del móvil tiene que verse en la terminal igual
+    que lo tecleado, o el transcript se lee como dos conversaciones distintas.
+    """
+    lines = (text or "").splitlines() or [""]
+    console.print(f"[lx.accent2]{g('prompt')}[/] [lx.primary]{esc(lines[0])}[/]")
+    for line in lines[1:]:
+        console.print(f"  [lx.primary]{esc(line)}[/]")
+
+
+# ── Registro de trabajo del agente ──────────────────────────────────────────
+#
+# DISTRIBUCIÓN DEL TURNO. Lo que el agente HACE (lecturas, ediciones, diffs,
+# resultados) vive dentro de un canal: una barra vertical en la columna
+# izquierda que lo agrupa y lo baja de nivel. Lo que el agente DICE es lo único
+# del turno sin canal, en crema y rodeado de aire — al hojear el transcript el
+# ojo cae en la respuesta, no en la fontanería que la precede.
+#
+# El canal grueso en acento marca la línea exacta en la que se tocó el disco;
+# su evidencia (el diff, el resultado) sigue en canal fino y apagado. Así un
+# turno largo se resume de un vistazo: donde hay acento, algo cambió.
 
 # Mismos verbos que el panel de acciones del IDE (apps/desktop ToolGroup.jsx):
 # el agente "hace cosas" y se lee igual en las dos superficies.
@@ -183,34 +208,45 @@ KIND_VERB = {
 VERB_WIDTH = 12  # columna fija: los objetivos quedan alineados entre acciones
 
 
-def render_actions_header(console) -> None:
-    """Abre la zona de acciones de un turno para que no se confunda con la
-    respuesta en prosa que viene después."""
-    console.print(f"[lx.dim2]{g('gear')} acciones[/]")
+def rail(hot: bool = False) -> str:
+    """Prefijo de canal para una línea del registro de trabajo (markup rich)."""
+    if hot:
+        return f"[lx.accent2]{g('rail_hot')}[/] "
+    return f"[lx.rule]{g('rail')}[/] "
+
+
+def rail_text(hot: bool = False):
+    """El mismo canal como fragmento de `Text.assemble` (para el Live)."""
+    return (f"{g('rail_hot') if hot else g('rail')} ", "lx.accent2" if hot else "lx.rule")
 
 
 def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
                   readonly: bool = False) -> None:
-    """Una acción del agente: `● editó   src/app.py  +12 -3`.
+    """Una acción del agente dentro del canal: `┃ editó   src/app.py  +12 -3`.
 
-    Las de solo lectura van apagadas (rastro, no evento) y las que tocan el
-    disco en acento: al hojear el transcript se ve qué cambió de verdad.
+    El canal ES el marcador: las lecturas dejan rastro fino y apagado, las
+    escrituras encienden el canal grueso en acento. Un solo signo por línea (el
+    `●` de antes sobraba al lado de la barra).
     """
-    dot = g("dot")
     padded = f"{verb:<{VERB_WIDTH}}"
     if readonly:
-        line = f"[lx.dim2]{dot}[/] [lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
+        line = f"{rail()}[lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
     else:
-        line = f"[lx.accent2]{dot}[/] [bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
+        line = f"{rail(hot=True)}[bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
     if adds or dels:
         line += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
     console.print(line)
 
 
 def render_action_result(console, text: str, error: bool = False) -> None:
-    """Resultado de una acción, colgando de ella."""
+    """Resultado de una acción, colgando de ella dentro del canal."""
     style = "lx.err" if error else "lx.dim2"
-    console.print(f"  [lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
+    console.print(f"{rail()}[lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
+
+
+def render_log_line(console, text: str, style: str = "lx.dim") -> None:
+    """Línea suelta del registro (salida de un comando, nota de una acción)."""
+    console.print(f"{rail()}[{style}]{esc(text)}[/]")
 
 
 # ── Selector interactivo (flechas + mouse) ──────────────────────────────────
@@ -249,13 +285,17 @@ def select(title: str, options: list, default: int = 0, hint: str = "",
     options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
     if not options:
         return None
-    if not ui_capable():
-        return _select_plain(title, options, default)
-    try:
-        return _select_app(title, options, default, hint, searchable, max_visible)
-    except Exception:
-        # La terminal mintió sobre sus capacidades: degradar en caliente
-        return _select_plain(title, options, default)
+    # Si el agente está trabajando hay un lector de teclado en segundo plano
+    # (inputq): se le cede la terminal mientras dure el selector, o las dos
+    # cosas se robarían las teclas del usuario.
+    with suspend_input():
+        if not ui_capable():
+            return _select_plain(title, options, default)
+        try:
+            return _select_app(title, options, default, hint, searchable, max_visible)
+        except Exception:
+            # La terminal mintió sobre sus capacidades: degradar en caliente
+            return _select_plain(title, options, default)
 
 
 def _select_app(title: str, options: list, default: int, hint: str,
@@ -673,15 +713,23 @@ def ui_demo() -> int:
     console = make_console()
     from pathlib import Path
 
-    render_header(console, "2.0.0-demo", model="qwen2.5-coder:7b", plan="Pro",
+    render_header(console, "2.0.0-demo", model="modelo-demo", plan="Pro",
                   workspace=Path.cwd())
     render_tips(console)
     rule(console, "conversación")
-    render_speaker(console, "assistant")
-    render_actions_header(console)
+    render_user_message(console, "arregla el parseo de comillas simples")
+    console.print()
+    render_log_line(console, f"{g('spark_alt')} pensó 3.2 s", "lx.dim2")
     render_action(console, "leyó", "src/app.py", readonly=True)
     render_action(console, "editó", "src/app.py", adds=12, dels=3)
+    console.print(f"{rail()}[lx.diff.hunk]@@ -120,6 +120,8 @@[/]")
+    console.print(f"{rail()}[lx.diff.add]+    return _loads_lenient(raw)[/]")
+    console.print(f"{rail()}[lx.diff.del]-    return json.loads(raw)[/]")
     render_action_result(console, "1 reemplazo aplicado")
+    console.print()
+    render_speaker(console)
+    console.print("El parser ya acepta las comillas simples que emite el modelo.")
+    console.print()
 
     choice = select("Método de acceso", [
         Option("Credenciales", "creds", "correo y contraseña"),

@@ -1,25 +1,20 @@
 """
 Módulo de embeddings y delegación inteligente usando Ollama local.
-- Genera embeddings con nomic-embed-text (POST /api/embed)
-- Clasifica solicitudes con un modelo chat ligero de Ollama
+- Genera embeddings con el modelo del rol `embed` (POST /api/embed)
+- Clasifica solicitudes con un modelo chat ligero del cluster
 - Enruta la solicitud al modelo más adecuado según reglas determinísticas
+
+Los candidatos se derivan de los modelos REALMENTE disponibles y de lo que
+declaran saber hacer, no de una lista de nombres fija. Antes había literales
+(`llama3.1:8b`, `phi4`…) con un fallback ciego a `"llama3.1:8b"`: si ninguno
+estaba instalado, la delegación acababa llamando al primer modelo del catálogo
+—que podía ser el de embeddings— o a un modelo inexistente, sin error claro.
 """
 
 import json
-from typing import Any
+from typing import Any, Iterable
 
 import httpx
-
-EMBED_MODEL = "nomic-embed-text"
-
-# Modelos preferidos ordenados de mayor a menor capacidad
-_PLAN_MODELS = [
-    "llama3.1:8b", "llama3.2:3b", "phi4:latest",
-    "mistral:latest", "deepseek-r1:7b", "llama3.2:1b",
-]
-_AUTO_MODELS = [
-    "llama3.2:1b", "phi3:mini", "llama3.2:3b", "llama3.1:8b",
-]
 
 _CLASSIFIER_SYSTEM_PROMPT = """\
 Eres un clasificador de solicitudes técnicas. Analiza la solicitud del usuario \
@@ -38,12 +33,15 @@ y responde ÚNICAMENTE con un JSON válido con este formato exacto (sin texto ad
 async def get_embedding(
     text: str,
     base_url: str,
-    model: str = EMBED_MODEL,
+    model: str,
     headers: dict | None = None,
+    keep_alive: str | None = None,
 ) -> list[float]:
-    """Genera el embedding vía core.inference (Ollama directo o proxy del nodo)."""
+    """Genera el embedding vía core.inference (Ollama directo o proxy del nodo).
+    `model` lo resuelve el llamador con el rol `embed` (no hay default aquí:
+    así este módulo no depende de la config y se puede testear puro)."""
     from core.inference.ollama import embed
-    return await embed(base_url, text, model, headers=headers)
+    return await embed(base_url, text, model, headers=headers, keep_alive=keep_alive)
 
 
 # ─── Clasificación ─────────────────────────────────────────────────────────
@@ -101,25 +99,93 @@ async def classify_request(
         }
 
 
+# ─── Candidatos ────────────────────────────────────────────────────────────
+# El catálogo es lo que devuelve fetch_models(): dicts {"id", "capabilities"?,
+# "size"?}. Se aceptan strings sueltos (⇒ capabilities desconocidas).
+
+def _entries(catalog: Iterable[Any] | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for item in catalog or []:
+        if isinstance(item, str):
+            out.append({"id": item})
+        elif isinstance(item, dict) and item.get("id"):
+            out.append(dict(item))
+    return [e for e in out if not str(e["id"]).startswith("error:")]
+
+
+def _grupos(catalog: Iterable[Any] | None) -> list[list[str]]:
+    """Los aptos para razonar, agrupados por tramo de capacidad (mejor primero).
+
+    Tramos: los que declaran `tools`, los que solo declaran `completion`, y los
+    de capabilities desconocidas (node_agent viejo) — que no se descartan porque
+    "desconocido" no es "no sirve". Los de solo `embedding` sí quedan fuera: un
+    modelo de embeddings no puede responder un chat.
+    """
+    con_tools: list[str] = []
+    con_completion: list[str] = []
+    desconocidos: list[str] = []
+    for e in _entries(catalog):
+        caps = e.get("capabilities")
+        nombre = str(e["id"])
+        if not caps:
+            desconocidos.append(nombre)
+        elif "tools" in caps:
+            con_tools.append(nombre)
+        elif "completion" in caps:
+            con_completion.append(nombre)
+    return [g for g in (con_tools, con_completion, desconocidos) if g]
+
+
+def rank_candidates(catalog: Iterable[Any] | None) -> list[str]:
+    """Modelos aptos para razonar, del más al menos capaz (lista plana)."""
+    return [m for grupo in _grupos(catalog) for m in grupo]
+
+
+def pick_route_model(catalog: Iterable[Any] | None, tier: str = "heavy") -> str | None:
+    """Modelo para la delegación. None si no hay ninguno apto.
+
+    Ambos tiers eligen dentro del **mejor tramo de capacidad** disponible y solo
+    bajan de tramo si está vacío; dentro del tramo decide el tamaño. Elegir el
+    `light` del catálogo entero era peor que el bug que arregla: con lo instalado
+    hoy salía `moondream` (1.7 GB, visión) a clasificar y a titular, cuando hay un
+    `qwen3:4b` con `tools`. El tamaño desempata *entre pares*, no entre tramos.
+
+    `heavy`: el más grande del mejor tramo (más parámetros ≈ mejor razonando).
+    `light`: el más pequeño del mejor tramo — clasificar debe costar poco.
+    """
+    grupos = _grupos(catalog)
+    if not grupos:
+        return None
+    mejor = grupos[0]
+    tamanos = {str(e["id"]): int(e.get("size") or 0) for e in _entries(catalog)}
+    if tier == "light":
+        # Tamaño desconocido ⇒ inf/0 según el tier: nunca gana por defecto, y si
+        # no se conoce ninguno todos empatan y manda el orden del catálogo.
+        return min(mejor, key=lambda m: (tamanos.get(m) or float("inf"), mejor.index(m)))
+    return max(mejor, key=lambda m: (tamanos.get(m) or 0, -mejor.index(m)))
+
+
 # ─── Router ────────────────────────────────────────────────────────────────
 
 def route_request(
     classification: dict[str, Any],
-    available_models: list[str],
+    catalog: Iterable[Any] | None,
+    pinned_model: str | None = None,
 ) -> dict[str, Any]:
     """
     Reglas determinísticas para seleccionar el modelo y estrategia.
     No requiere IA: es lógica pura basada en la clasificación.
+
+    `pinned_model`: si el rol `route` está fijado en BD/env, ese modelo gana en
+    todas las ramas. `model` puede volver None: el llamador debe dar un error
+    claro en vez de llamar a Ollama con un modelo vacío.
     """
     risk = classification.get("riskLevel", "low")
     complexity = float(classification.get("complexity", 0.5))
     intent = str(classification.get("intent", "learn"))
 
-    def pick(preferred: list[str]) -> str:
-        for m in preferred:
-            if m in available_models:
-                return m
-        return available_models[0] if available_models else "llama3.1:8b"
+    def pick(tier: str) -> str | None:
+        return pinned_model or pick_route_model(catalog, tier)
 
     if risk == "critical":
         return {
@@ -134,7 +200,7 @@ def route_request(
     if complexity < 0.3 and risk == "low":
         return {
             "type": "AUTO",
-            "model": pick(_AUTO_MODELS),
+            "model": pick("light"),
             "timeout": 30,
             "priority": "normal",
             "system_prompt": (
@@ -146,7 +212,7 @@ def route_request(
     if intent in ("debug", "troubleshoot") or "error" in intent:
         return {
             "type": "DEBUG",
-            "model": pick(_PLAN_MODELS),
+            "model": pick("heavy"),
             "timeout": 60,
             "priority": "high",
             "system_prompt": (
@@ -158,7 +224,7 @@ def route_request(
     # Por defecto: PLAN (estratégico y detallado)
     return {
         "type": "PLAN",
-        "model": pick(_PLAN_MODELS),
+        "model": pick("heavy"),
         "timeout": 90,
         "priority": "normal",
         "system_prompt": (
@@ -169,13 +235,10 @@ def route_request(
     }
 
 
-def pick_classifier_model(available_models: list[str]) -> str:
+def pick_classifier_model(catalog: Iterable[Any] | None) -> str | None:
     """
-    Selecciona el modelo más ligero disponible para clasificar solicitudes.
-    Prioriza modelos rápidos para minimizar latencia de clasificación.
+    Modelo más ligero disponible para clasificar solicitudes (y para generar
+    títulos de conversación). None si no hay ninguno apto: el llamador decide
+    qué error mostrar en vez de inventarse un nombre de modelo.
     """
-    light_models = ["llama3.2:1b", "phi3:mini", "llama3.2:3b", "llama3.1:8b"]
-    for m in light_models:
-        if m in available_models:
-            return m
-    return available_models[0] if available_models else "llama3.1:8b"
+    return pick_route_model(catalog, "light")

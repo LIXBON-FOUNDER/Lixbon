@@ -5,12 +5,14 @@ import { useAppStore } from '../../../store/appStore';
 import { useIndexStore } from '../../../store/indexStore';
 import { Select } from '../../../components/Select';
 import { modelId } from '../../../lib/vision';
+import { modelsForCapability, roleCapability, roleWarning } from '../../../lib/modelRoles';
 
 export function IndexPanel() {
   const {
-    availableModels,
+    availableModels, modelRoles,
     embedModel, setEmbedModel,
     useCodebaseContext, setUseCodebaseContext,
+    effectiveEmbedModel,
   } = useAppStore();
   const {
     building, progress, status, error,
@@ -20,7 +22,13 @@ export function IndexPanel() {
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
   const ids = (availableModels || []).map(modelId).filter(Boolean);
-  const embedAuto = ids.find((id) => /embed/i.test(id));
+  // El modelo lo resuelve el store (rol `embed` del gateway; heurístico solo si
+  // el gateway es antiguo), y el aviso de qué instalar lo da el propio gateway.
+  const embedAuto = effectiveEmbedModel();
+  const capEmbed = roleCapability(modelRoles, 'embed');
+  const aptos = (capEmbed && modelRoles) ? modelsForCapability(availableModels || [], capEmbed) : ids;
+  const avisoEmbed = roleWarning(modelRoles, 'embed')
+    || 'instala uno en Ollama: `ollama pull nomic-embed-text`';
 
   return (
     <section className="settings__panel">
@@ -47,7 +55,7 @@ export function IndexPanel() {
         <span className="settings__row-label">
           Modelo de embeddings
           <span className="settings__row-hint">
-            {embedAuto ? '' : ' · instala uno en Ollama: `ollama pull nomic-embed-text`'}
+            {embedAuto ? '' : ` · ${avisoEmbed}`}
           </span>
         </span>
         <Select
@@ -55,7 +63,7 @@ export function IndexPanel() {
           onChange={setEmbedModel}
           options={[
             { value: '', label: `Automático (${embedAuto || 'ninguno'})` },
-            ...ids.map((id) => ({ value: id, label: id })),
+            ...(aptos.length ? aptos : ids).map((id) => ({ value: id, label: id })),
           ]}
         />
       </div>

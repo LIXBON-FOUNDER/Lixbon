@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.1.1"
+CLI_VERSION = "2.2.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 CONFIG_DIR = Path.home() / ".lixbon"
@@ -21,6 +21,9 @@ def default_config() -> dict:
         "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
         "auto_approve_tools": True,  # el agente escribe directo; /approve off para pedir confirmación
+        # Poder escribir mientras el agente trabaja (se ejecuta al terminar).
+        # A false, el teclado vuelve a estar muerto durante el turno.
+        "input_queue": True,
     }
 
 

@@ -261,9 +261,6 @@ function ChatState({ api, apiKey, ready, children }) {
   const [model, setModel] = useState('');
   const [conversationId, setConversationId] = useState(null);
   const [title, setTitle] = useState(null);
-  // Superficie de la conversación abierta (web/cli/ide): la app ya lista el
-  // historial de todas, así que hay que poder decir de dónde viene esta.
-  const [source, setSource] = useState('web');
   const [messages, setMessages] = useState([]);
   const [streaming, setStreaming] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -301,33 +298,27 @@ function ChatState({ api, apiKey, ready, children }) {
     stop();
     setConversationId(null);
     setTitle(null);
-    setSource('web');
     setMessages([]);
     setError('');
     hadHistoryRef.current = false;
   }, [stop]);
 
   const openConversation = useCallback(
-    async (id, withTitle = null, withSource = 'web') => {
+    async (id, withTitle = null) => {
       stop();
       setConversationId(id);
       setTitle(withTitle);
-      setSource(withSource || 'web');
       setMessages([]);
       setError('');
       setLoadingMessages(true);
       hadHistoryRef.current = true;
       try {
         const res = await api.get(`/api/conversations/${id}/messages`);
-        // El historial del CLI y del IDE trae roles que el chat de la app no
-        // pinta (tool/system): se filtran para no romper la lista, pero la
-        // conversación se abre igual — es su historial, no otro producto.
         const msgs = (Array.isArray(res?.messages) ? res.messages : [])
           .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
           .map((m) => ({ role: m.role, content: m.content || '' }));
         setMessages(msgs);
         if (typeof res?.conversation?.title === 'string') setTitle(res.conversation.title);
-        if (typeof res?.conversation?.source === 'string') setSource(res.conversation.source);
       } catch (err) {
         setError(err instanceof ApiException ? err.message : 'Sin conexión con el servidor');
       } finally {
@@ -434,7 +425,6 @@ function ChatState({ api, apiKey, ready, children }) {
       model,
       conversationId,
       title,
-      source,
       messages,
       streaming,
       loadingMessages,
@@ -451,7 +441,7 @@ function ChatState({ api, apiKey, ready, children }) {
       send,
       stop,
     }),
-    [models, model, conversationId, title, source, messages, streaming, loadingMessages, error, webSearch, loadModels, newChat, openConversation, send, stop],
+    [models, model, conversationId, title, messages, streaming, loadingMessages, error, webSearch, loadModels, newChat, openConversation, send, stop],
   );
 
   return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;

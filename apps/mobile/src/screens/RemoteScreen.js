@@ -209,6 +209,9 @@ function RemoteListView({ onBack, onOpen }) {
 function SessionCard({ session, onPress }) {
   const c = useColors();
   const ended = session.status === 'ended';
+  // Una sesión terminada con transcript guardado se sigue pudiendo abrir: en
+  // modo lectura, para releer lo que se habló desde el IDE o el CLI.
+  const readable = ended && (session.transcript_events || 0) > 0;
   // host_connected lo calcula el gateway desde el hub y es la verdad viva; el
   // status de la BD puede ir por detrás (el barrido corre cada pocos minutos).
   const online =
@@ -217,7 +220,7 @@ function SessionCard({ session, onPress }) {
       : session.status === 'online');
   return (
     <Pressable
-      onPress={ended ? undefined : onPress}
+      onPress={ended && !readable ? undefined : onPress}
       style={({ pressed }) => ({
         backgroundColor: pressed ? c.bgInput : c.bg,
         borderRadius: RADIUS_BOX,
@@ -225,7 +228,7 @@ function SessionCard({ session, onPress }) {
         borderColor: c.borderSoft,
         padding: 16,
         gap: 6,
-        opacity: ended ? 0.55 : 1,
+        opacity: ended && !readable ? 0.55 : ended ? 0.8 : 1,
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -256,7 +259,13 @@ function SessionCard({ session, onPress }) {
       <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
         {session.machine || '—'}
         {'  ·  '}
-        {ended ? 'terminada' : online ? 'en línea' : 'sin conexión'}
+        {ended
+          ? readable
+            ? 'terminada · ver conversación'
+            : 'terminada'
+          : online
+            ? 'en línea'
+            : 'sin conexión'}
       </Text>
     </Pressable>
   );
@@ -280,8 +289,37 @@ function RemoteSessionView({ session, onBack }) {
     seqRef.current = state.lastSeq;
   }, [state.lastSeq]);
 
+  // Sesión ya terminada: no hay canal en vivo, pero el transcript se guardó.
+  // Se lee de una vez y se reproduce por el mismo reducer que el streaming.
+  const archived = session.status === 'ended';
+  useEffect(() => {
+    if (!archived) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await api.get(`/api/remote/sessions/${session.id}/transcript`);
+        if (!alive) return;
+        for (const ev of Array.isArray(res?.events) ? res.events : []) dispatch(ev);
+      } catch (err) {
+        if (alive) {
+          dispatch({
+            type: 'error',
+            message: err instanceof ApiException ? err.message : 'No se pudo cargar la conversación',
+          });
+        }
+      } finally {
+        if (alive) dispatch({ type: 'session_ended' });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, archived]);
+
   // Stream de eventos con reconexión (retoma desde el último seq visto).
   useEffect(() => {
+    if (archived) return undefined;
     aliveRef.current = true;
     let backoff = 2000;
     const connect = () => {
@@ -314,7 +352,7 @@ function RemoteSessionView({ session, onBack }) {
       streamRef.current?.cancel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id]);
+  }, [session.id, archived]);
 
   const sendCommand = useCallback(
     async (command, { quiet = false } = {}) => {
@@ -419,6 +457,13 @@ function RemoteSessionView({ session, onBack }) {
                   <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, textAlign: 'center' }}>
                     Sesión conectada. Escribe abajo para pedirle algo al agente,
                     o empieza con «/» para usar un comando.
+                  </Text>
+                </>
+              ) : archived && state.ended ? (
+                <>
+                  <Icon name="chat" size={26} color={c.inkSoft} />
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, textAlign: 'center' }}>
+                    Esta sesión terminó sin conversación guardada.
                   </Text>
                 </>
               ) : (

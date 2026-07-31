@@ -14,6 +14,16 @@ from pydantic import BaseModel
 from core.billing.credits import invalidate_pricing_cache, microusd_to_usd
 from core.billing.quota import usage_snapshot
 from core.gateway import deps
+from core.gateway.utils import fetch_models
+from core.inference.roles import (
+    REQUIRED_CAPABILITY,
+    ROLES,
+    capabilities_of,
+    has_capability,
+    invalidate_roles_cache,
+    resolve_all,
+    resolve_role,
+)
 from core.persistence.queries import (
     admin_credits_summary,
     count_active_keys,
@@ -28,6 +38,7 @@ from core.persistence.queries import (
     get_user_by_id,
     list_audit_events,
     list_model_pricing,
+    list_model_roles,
     list_plans,
     list_users_admin,
     log_audit_event,
@@ -35,6 +46,7 @@ from core.persistence.queries import (
     set_user_plan,
     update_model_pricing,
     update_plan,
+    upsert_model_role,
 )
 from core.security.auth import admin_required
 
@@ -282,6 +294,67 @@ async def api_admin_pricing_delete(
     invalidate_pricing_cache()
     log_audit_event("pricing_deleted", user_id=admin["id"], pricing_id=pricing_id)
     return {"deleted": True}
+
+
+class ModelRolePayload(BaseModel):
+    model: str | None = None        # "" desasigna (vuelve al default de env)
+    keep_alive: str | None = None   # "30m" | "-1" | "0"
+    num_ctx: int | None = None
+    is_active: bool | None = None
+    notes: str | None = None
+    # Permite asignar un modelo que aún no está descargado o que no declara la
+    # capability del rol (p. ej. preparar el nodo antes del `ollama pull`).
+    force: bool = False
+
+
+@router.get("/model-roles")
+async def api_admin_model_roles(_admin: dict[str, Any] = Depends(admin_required)):
+    """Filas editables + cómo queda resuelto cada rol ahora mismo + catálogo."""
+    catalog = await fetch_models()
+    return {
+        "roles": list_model_roles(active_only=False),
+        "resolved": {r: res.as_dict() for r, res in resolve_all(catalog).items()},
+        "capability_by_role": REQUIRED_CAPABILITY,
+        "models": catalog,
+    }
+
+
+@router.patch("/model-roles/{role}")
+async def api_admin_model_role_update(
+    role: str,
+    payload: ModelRolePayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    if role not in ROLES:
+        raise HTTPException(status_code=404, detail=f"Rol desconocido: {role}")
+
+    catalog = await fetch_models()
+    modelo = (payload.model or "").strip()
+    if modelo and not payload.force:
+        required = REQUIRED_CAPABILITY[role]
+        if not has_capability(catalog, modelo, required):
+            raise HTTPException(status_code=409, detail={
+                "code": "capability_mismatch",
+                "message": (f"`{modelo}` no declara la capacidad `{required}` que "
+                            f"necesita el rol `{role}`. Envía force=true para asignarlo igualmente."),
+                "role": role, "model": modelo, "required_capability": required,
+                "capabilities": capabilities_of(catalog, modelo),
+            })
+
+    row = upsert_model_role(
+        role,
+        model=payload.model,
+        keep_alive=payload.keep_alive,
+        num_ctx=payload.num_ctx,
+        is_active=payload.is_active,
+        notes=payload.notes,
+    )
+    invalidate_roles_cache()
+    log_audit_event("model_role_updated", user_id=admin["id"], role=role, model=modelo or None)
+    return {
+        "role": row,
+        "resolved": resolve_role(role, catalog).as_dict(),
+    }
 
 
 class GrantCreditsPayload(BaseModel):

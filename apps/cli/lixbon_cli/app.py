@@ -26,8 +26,11 @@ from lixbon_cli.commands import (
     make_completer,
     parse_attachments,
 )
+from lixbon_cli.clipboard import paste_image
+from lixbon_cli.inputq import InputQueue
 from lixbon_cli.config import (
     CLI_VERSION,
+    CONFIG_DIR,
     CONFIG_FILE,
     HISTORY_FILE,
     load_config,
@@ -59,13 +62,15 @@ from lixbon_cli.ui import (
     print_error,
     print_note,
     print_ok,
+    rail_text,
     render_action,
     render_action_result,
-    render_actions_header,
     render_header,
     render_intro_line,
+    render_log_line,
     render_speaker,
     render_tips,
+    render_user_message,
     rule,
     select,
     short_path,
@@ -90,7 +95,10 @@ class ChatApp:
         self.api = ApiClient(self.cfg["base_url"], self.cfg.get("api_key", ""))
         self.model = self.cfg.get("key_model") or model_override or self.cfg.get("model", "")
         self.client_id = client_id or os.getenv("HOSTNAME", "cli-client")
-        self.title = title or "Sesión CLI"
+        # Sin título fijo: el servidor lo genera tras el primer intercambio
+        # (_maybe_autotitle). Antes iba "Sesión CLI" en CADA mensaje y todas
+        # las conversaciones del CLI acababan llamándose igual.
+        self.title = title or ""
         self.mode = self.cfg.get("mode", "ask")
         # El workspace es SIEMPRE la carpeta desde la que se lanzó el CLI
         # (como Claude Code); /workspace lo cambia solo para la sesión.
@@ -105,10 +113,23 @@ class ChatApp:
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
+        # Estado del turno en curso: el rótulo "✦ Lixbon" se imprime una sola vez
+        # y justo encima de la primera prosa, con el registro de acciones ya
+        # arriba. `_turn_mark` recuerda cuántas líneas llevaba impresas el turno
+        # para saber si hace falta aire entre el registro y la respuesta.
+        self._spoke = False
+        self._turn_mark = 0
+        # Teclado durante el turno: se puede escribir mientras el agente
+        # trabaja y lo escrito se ejecuta cuando termina (nunca a mitad).
+        self.input_queue = InputQueue() if self.cfg.get("input_queue", True) else None
         self.history: list[dict] = []
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
         self.models_cache: list[str] = []
+        # Modelo que el gateway asigna al rol `chat` (GET /api/model-roles). Sirve
+        # para no preguntar cuál usar cuando el servidor ya lo tiene decidido.
+        # "" = gateway antiguo o sin modelo de chat resuelto.
+        self.role_chat_model = ""
         # Plan comercial (Pro/Advance/Gratuito): se muestra en la cabecera.
         # Se cachea en el config para que el arranque no dependa de la red.
         self.plan_name = self.cfg.get("plan_name", "")
@@ -259,8 +280,26 @@ class ChatApp:
                       plan=self.plan_name, workspace=self.workspace)
 
     def _set_tab_title(self) -> None:
-        """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon."""
-        set_title(f"{g('spark')} Lixbon {g('sep')} {self.workspace.name}")
+        """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon.
+        Con la conversación ya titulada, su nombre acompaña al workspace."""
+        label = self.title or self.workspace.name
+        set_title(f"{g('spark')} Lixbon {g('sep')} {label}")
+
+    def _maybe_autotitle(self) -> None:
+        """Pide el título de la conversación tras el primer intercambio.
+
+        Mismo endpoint que la web y la app: el servidor lo resuelve con el
+        modelo pequeño y, si el cluster no responde, con el primer mensaje.
+        """
+        if self.title or len(self.history) < 2 or not self.conversation_id:
+            return
+        try:
+            title = str(self.api.generate_title(self.conversation_id).get("title") or "").strip()
+        except Exception:
+            return  # el título nunca puede tumbar el turno
+        if title:
+            self.title = title
+            self._set_tab_title()
 
     def _load_account_quietly(self) -> str:
         """Modelos disponibles y plan del usuario, sin ruido si el server falla.
@@ -276,6 +315,10 @@ class ChatApp:
         except ApiError as exc:
             self.models_cache = []
             auth_failed = exc.status in (401, 403)
+        # Qué modelo sirve el rol `chat` según el servidor (no falla nunca: el
+        # método devuelve {} con un gateway que no conozca los roles).
+        roles = self.api.model_roles().get("roles") or {}
+        self.role_chat_model = str((roles.get("chat") or {}).get("model") or "")
         if not self.cfg.get("api_key"):
             return "auth"
         try:
@@ -426,6 +469,14 @@ class ChatApp:
         if not self.models_cache:
             print_error("El servidor no está publicando modelos ahora mismo — revísalo con /nodes.")
             return False
+        # El servidor ya decidió cuál es el modelo de chat: no hay nada que
+        # preguntar la primera vez. El selector sigue disponible con /model.
+        if not self.model and self.role_chat_model in self.models_cache:
+            self.model = self.role_chat_model
+            self.cfg["model"] = self.model
+            save_config(self.cfg)
+            print_ok(f"Modelo: {self.model} (el que el servidor usa para chat)")
+            return True
         options = [Option(m, m, badge="actual" if m == self.model else "")
                    for m in self.models_cache]
         default = self.models_cache.index(self.model) if self.model in self.models_cache else 0
@@ -511,6 +562,15 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
+        @kb.add("escape", "v")
+        def _paste(event):
+            # Alt+V llega como Esc+v. `run_in_terminal` suspende el prompt para
+            # imprimir por encima y lo restaura: escribir directo dejaría el
+            # mensaje pisado por el siguiente repintado de prompt_toolkit.
+            from prompt_toolkit.application import run_in_terminal
+
+            run_in_terminal(self._paste_clipboard_image)
+
         @kb.add("enter", filter=completion_is_selected)
         def _enter_selected(event):
             # El usuario navegó el menú con las flechas: Enter elige lo marcado.
@@ -551,8 +611,18 @@ class ChatApp:
 
         while True:
             self._refresh_status()
+            # Lo tecleado durante el turno se ejecuta ahora, antes de volver a
+            # preguntar: en orden, uno detrás de otro y con el agente ya parado.
+            ran = self._run_queued_input()
+            if ran is False:
+                return 0
+            if ran:
+                continue  # esos turnos pueden haber dejado más en la cola
             try:
-                text = session.prompt().strip()
+                # Lo que se quedó a medio escribir durante el turno reaparece
+                # en el prompt, listo para seguir.
+                partial = self.input_queue.take_partial() if self.input_queue else ""
+                text = session.prompt(default=partial).strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
                 if now - self._interrupt_hint_at < 2.5:
@@ -644,14 +714,18 @@ class ChatApp:
         if origin != "local":
             # El mensaje llegó por /remote: aquí nadie lo tecleó, así que el
             # transcript local tiene que mostrarlo para no perder el hilo.
-            render_speaker(self.console, "user")
-            self.console.print(f"[lx.primary]{esc(clean or text)}[/]")
+            render_user_message(self.console, clean or text)
         if self.remote:
             self.remote.emit("user_msg", text=clean or text, origin=origin)
             self.remote.emit("status", state="thinking")
 
+        # Aire entre la pregunta y el turno. El rótulo del asistente NO va aquí:
+        # lo imprime _speak_once() cuando hay algo que decir, por debajo del
+        # registro de acciones, para que abra la respuesta y no la fontanería.
         self.console.print()
-        render_speaker(self.console, "assistant")
+        self._spoke = False
+        self._turn_mark = self.console.writes
+        self._start_input_queue()
         try:
             if self.mode == "delegate":
                 self._delegate_turn(clean or text)
@@ -666,9 +740,89 @@ class ChatApp:
             self.history.pop()
             raise
         finally:
+            self._stop_input_queue()
             if self.remote:
                 self.remote.emit("status", state="idle")
+        self._maybe_autotitle()
         self._refresh_status()
+
+    # ── teclado durante el turno ─────────────────────────────────────────
+
+    def _start_input_queue(self) -> None:
+        """Empieza a escuchar el teclado mientras el agente trabaja.
+
+        No se activa con `/remote`: ahí quien conduce es el móvil y el teclado
+        local está deliberadamente en pausa.
+        """
+        from lixbon_cli.term import ui_capable
+
+        if self.input_queue is None or self.remote or not ui_capable():
+            return
+        self.input_queue.start()
+
+    def _stop_input_queue(self) -> None:
+        if self.input_queue is not None:
+            self.input_queue.stop()
+
+    def _typing_row(self):
+        """Fila de la vista viva con lo tecleado y lo que ya está en cola."""
+        from rich.text import Text
+
+        queue = self.input_queue
+        if queue is None or not queue.running:
+            return None
+        typed, pending = queue.typing, queue.queued
+        if not typed and not pending:
+            return None
+        parts = []
+        if typed:
+            parts += [(f"{g('prompt')} ", "lx.accent2"), (typed, "lx.primary"),
+                      (g("block"), "lx.dim2")]
+        if pending:
+            label = f"{pending} en cola" if pending > 1 else "1 en cola"
+            parts.append((f"{'   ' if typed else ''}{label} {g('sep')} se envía al terminar",
+                          "lx.dim2"))
+        return Text.assemble(*parts)
+
+    def _queue_interrupted(self) -> bool:
+        """Ctrl+C durante el turno: con el lector activo no llega como señal."""
+        queue = self.input_queue
+        if queue is None or not queue.interrupted:
+            return False
+        queue.interrupted = False
+        return True
+
+    def _run_queued_input(self):
+        """Ejecuta lo tecleado durante el turno.
+
+        Devuelve `False` si toca salir del CLI, o el número de líneas que ha
+        ejecutado (que pueden haber dejado más en la cola).
+        """
+        queue = self.input_queue
+        if queue is None:
+            return 0
+        lines = queue.drain()
+        for line in lines:
+            # Se repite en el transcript como si se acabara de escribir: sin el
+            # eco, una respuesta aparecería sin pregunta a la vista.
+            render_user_message(self.console, line)
+            if self._handle_input(line) is False:
+                return False
+        return len(lines)
+
+    def _speak_once(self) -> None:
+        """Abre la zona de respuesta: rótulo `✦ Lixbon`, una vez por turno.
+
+        Va justo encima de la primera prosa del turno, no al empezar a trabajar.
+        Si el registro de acciones ya escribió algo, se separa con una línea en
+        blanco: la respuesta necesita aire propio para despegarse del canal.
+        """
+        if self._spoke:
+            return
+        self._spoke = True
+        if self.console.writes > self._turn_mark:
+            self.console.print()
+        render_speaker(self.console)
 
     def _load_project_context(self) -> None:
         """LIXBON.md del workspace: contexto permanente del proyecto.
@@ -751,11 +905,13 @@ class ChatApp:
         def _live_view():
             blocks = []
             if reasoning_parts:
+                # El razonamiento es trabajo, no respuesta: va en el canal, igual
+                # que las acciones, para que en vivo se distinga de lo que dirá.
                 tail = "".join(reasoning_parts).strip().splitlines()[-3:]
-                head = Text(f"{g('spark_alt')} pensando…", style="lx.dim")
-                blocks.append(head)
+                blocks.append(Text.assemble(
+                    rail_text(), (f"{g('spark_alt')} pensando…", "lx.dim")))
                 for line in tail:
-                    blocks.append(Text(f"  {line}", style="lx.thinking"))
+                    blocks.append(Text.assemble(rail_text(), (line, "lx.thinking")))
             if content_parts:
                 raw = "".join(content_parts)
                 if self.mode == "agent":
@@ -774,16 +930,26 @@ class ChatApp:
             # aquí la pegaría al texto que va saliendo.
             if not status_line_active():
                 blocks.append(self.status.rich_line(compact=True))
+            # Lo que se está tecleando mientras el modelo responde. Va al final
+            # del bloque vivo (donde estaría el prompt) y el `Tail` lo conserva
+            # aunque la respuesta desborde: escribir a ciegas sería peor que no
+            # poder escribir.
+            typed_row = self._typing_row()
+            if typed_row is not None:
+                blocks.append(typed_row)
             # La vista viva se queda en la cola: una respuesta larga desbordaría
             # la pantalla y el borrado del Live dejaría el hueco de vuelta. El
-            # texto íntegro lo imprime _final_view() al cerrar el Live.
+            # texto íntegro lo imprime _final_body() al cerrar el Live.
             rows = min(self.console.size.height - 2, LIVE_TAIL_ROWS)
             return Tail(pad(Group(*blocks)), max(rows, 4))
 
-        def _final_view():
+        def _final_body():
+            """Lo que el modelo DICE, ya sin la fontanería del turno.
+
+            El resumen del razonamiento no entra aquí: se imprime aparte y
+            dentro del canal, porque pertenece al registro de trabajo.
+            """
             blocks = []
-            if reasoning_seconds > 0.5:
-                blocks.append(Text(f"{g('spark_alt')} Pensó durante {reasoning_seconds:.1f}s", style="lx.dim2"))
             text = "".join(content_parts).strip()
             if self.mode == "agent":
                 # Paso intermedio del agente (solo tool calls): no hay prosa que
@@ -820,9 +986,11 @@ class ChatApp:
                         # cada poco garantiza que la barra siga entera.
                         last_paint = time.monotonic()
                         self._paint_status()
-                    if self.remote and self.remote.interrupt_requested:
-                        # Interrupción pedida desde el móvil/web (equivale a Ctrl+C)
-                        self.remote.interrupt_requested = False
+                    if (self.remote and self.remote.interrupt_requested) or self._queue_interrupted():
+                        # Interrupción pedida desde el móvil/web, o Ctrl+C con el
+                        # lector de teclado activo (ahí no llega como señal).
+                        if self.remote:
+                            self.remote.interrupt_requested = False
                         interrupted = True
                         stream.close()
                         break
@@ -851,13 +1019,18 @@ class ChatApp:
                 stream.close()
 
         self.status.extra = ""
-        final = _final_view()
-        if final is not None:
-            self.console.print(final)
-            self.console.print()
-        if sources:
-            self.console.print(f"[lx.dim]Fuentes web: " + "; ".join(
-                str(s.get("url") or s.get("title") or "?") for s in sources[:5]) + "[/]")
+        if reasoning_seconds > 0.5:
+            render_log_line(self.console,
+                            f"{g('spark_alt')} pensó {reasoning_seconds:.1f} s", "lx.dim2")
+        body = _final_body()
+        if body is not None:
+            self._speak_once()
+            self.console.print(body)
+            if sources:
+                # Pie de la respuesta, no del registro: las fuentes son de lo
+                # que acaba de decir, así que se quedan con ella.
+                self.console.print("[lx.dim2]fuentes: " + esc("; ".join(
+                    str(s.get("url") or s.get("title") or "?") for s in sources[:5])) + "[/]")
             self.console.print()
 
         if usage:
@@ -878,19 +1051,20 @@ class ChatApp:
             result = self.api.delegate(text)
         routing = result.get("routing", {})
         classification = result.get("classification", {})
-        self.console.print(
-            f"[lx.accent2]{g('spark')}[/] [bold lx.primary]Delegación[/] "
-            f"[lx.beige]\\[{esc(routing.get('type', 'PLAN'))}][/] "
-            f"[lx.dim]modelo {esc(routing.get('model', '?'))} {g('sep')} {result.get('execution_time_ms', 0)}ms[/]"
+        # Cómo se enrutó es registro de trabajo, no respuesta: va en el canal.
+        render_log_line(
+            self.console,
+            f"delegó a {routing.get('model', '?')} "
+            f"[{routing.get('type', 'PLAN')}] {g('sep')} {result.get('execution_time_ms', 0)} ms",
         )
-        tags = "  ".join(
+        render_log_line(self.console, "  ".join(
             f"{k}:{classification.get(v, '?')}"
             for k, v in (("intent", "intent"), ("complejidad", "complexity"),
                          ("dominio", "domain"), ("riesgo", "riskLevel"))
-        )
-        self.console.print(f"[lx.dim2]{tags}[/]")
+        ), "lx.dim2")
         from rich.markdown import Markdown
 
+        self._speak_once()
         self.console.print(Markdown(result.get("response", "(sin respuesta)")))
         self.console.print()
         self.history.append({"role": "assistant", "content": result.get("response", "")})
@@ -976,6 +1150,8 @@ class ChatApp:
         self.history = []
         self.session_tokens = 0
         self.conversation_id = str(uuid.uuid4())
+        self.title = ""  # la nueva conversación se titulará sola al responder
+        self._set_tab_title()
         # El separador marca dónde empieza el contexto nuevo: sin él, el
         # transcript anterior parece seguir vivo.
         rule(self.console, "conversación nueva")
@@ -1034,6 +1210,31 @@ class ChatApp:
             return True
         self.pending_images.append(path.resolve())
         print_ok(f"{g('image')} {path.name} se adjuntará al próximo mensaje")
+        return True
+
+    def cmd_paste(self, arg: str):
+        self._paste_clipboard_image()
+        return True
+
+    def _paste_clipboard_image(self) -> bool:
+        """Adjunta la imagen del portapapeles. Devuelve si lo consiguió.
+
+        Lo comparten `/paste` y el atajo Alt+V del prompt; el modelo la recibe
+        igual que con `@ruta` (base64 en `ChatMessage.images`), así que solo
+        funciona de verdad con un modelo multimodal.
+        """
+        path, error = paste_image(CONFIG_DIR)
+        if path is None:
+            print_error(error or "el portapapeles no tiene ninguna imagen")
+            return False
+        try:
+            encode_image(path)  # valida formato y tamaño antes de prometer nada
+        except ValueError as exc:
+            print_error(str(exc))
+            return False
+        self.pending_images.append(path)
+        size = fmt_size(path.stat().st_size)
+        print_ok(f"{g('image')} imagen pegada ({size}); se enviará con el próximo mensaje")
         return True
 
     def cmd_usage(self, arg: str):
@@ -1337,10 +1538,10 @@ class ChatApp:
         except Exception as exc:
             output, code = str(exc), 1
 
-        render_actions_header(self.console)
+        self.console.print()
         render_action(self.console, "ejecutó", command)
         for line in (output or "(sin salida)").splitlines()[:80]:
-            self.console.print(f"  [lx.dim]{esc(line)}[/]")
+            render_log_line(self.console, line)
         render_action_result(self.console, f"salida {code}", error=code != 0)
         self.console.print()
         # El modelo debe poder razonar sobre el resultado en el siguiente turno.

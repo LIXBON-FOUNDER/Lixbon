@@ -14,6 +14,7 @@ const TABS = [
   { id: 'usuarios', label: 'Usuarios' },
   { id: 'nodos', label: 'Nodos' },
   { id: 'modelos', label: 'Modelos' },
+  { id: 'roles', label: 'Roles' },
   { id: 'tarifas', label: 'Tarifas' },
   { id: 'ingresos', label: 'Ingresos' },
   { id: 'releases', label: 'Releases' },
@@ -525,6 +526,175 @@ function ModelosTab() {
             </button>
           </div>
         ))}
+      </section>
+    </>
+  );
+}
+
+// ── Roles de inferencia (mapa rol→modelo) ───────────────────────────────
+
+const ROLE_LABELS = {
+  chat: 'Chat y agente',
+  fim: 'Autocompletado (FIM)',
+  vision: 'Visión',
+  embed: 'Embeddings',
+  route: 'Delegación / títulos',
+};
+
+const SOURCE_LABELS = {
+  db: 'fijado aquí',
+  env: 'variable de entorno',
+  capability: 'autodetectado',
+  'capability-legacy': 'autodetectado (nodo sin capabilities)',
+  none: 'sin resolver',
+};
+
+function RolesTab() {
+  const [data, setData] = useState(null);
+  const [drafts, setDrafts] = useState({});
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(null);
+  const [showAll, setShowAll] = useState({});
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get('/api/admin/model-roles');
+      setData(res.data);
+      setDrafts(Object.fromEntries(res.data.roles.map((r) => [r.role, {
+        model: r.model || '',
+        keep_alive: r.keep_alive || '',
+        num_ctx: r.num_ctx ? String(r.num_ctx) : '',
+      }])));
+    } catch (err) {
+      setError(errMsg(err, 'No se pudieron cargar los roles'));
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (role, { force = false } = {}) => {
+    setError('');
+    const d = drafts[role] || {};
+    try {
+      await api.patch(`/api/admin/model-roles/${role}`, {
+        model: d.model ?? '',
+        keep_alive: d.keep_alive ?? '',
+        num_ctx: d.num_ctx ? parseInt(d.num_ctx, 10) : 0,
+        force,
+      });
+      setSaved(role);
+      setTimeout(() => setSaved(null), 2500);
+      load();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      if (detail?.code === 'capability_mismatch') {
+        if (window.confirm(`${detail.message}\n\n¿Asignarlo igualmente?`)) {
+          save(role, { force: true });
+          return;
+        }
+        return;
+      }
+      setError(errMsg(err, 'No se pudo guardar el rol'));
+    }
+  };
+
+  if (error && !data) return <p className="page__error" role="alert">{error}</p>;
+  if (!data) return <p className="card__muted">Cargando…</p>;
+
+  const models = data.models || [];
+  const opciones = (role) => {
+    const required = data.capability_by_role[role];
+    if (showAll[role]) return models;
+    // capabilities ausentes = desconocidas (node_agent viejo): no se descartan.
+    return models.filter((m) => !m.capabilities || m.capabilities.includes(required));
+  };
+
+  return (
+    <>
+      {error && <p className="page__error" role="alert">{error}</p>}
+      <section className="card">
+        <h2 className="card__title">Modelo por rol</h2>
+        <p className="card__muted">
+          Cada rol tiene requisitos distintos, así que el gateway usa un modelo para cada uno.
+          Vacío = se usa la variable de entorno o se autodetecta por la capacidad que declara
+          Ollama. <code>keep_alive</code> es cuánto se queda el modelo en la VRAM
+          (<code>30m</code>, <code>-1</code> permanente, <code>0</code> descargar ya);
+          con una sola GPU no pongas <code>-1</code> en el rol de chat.
+          Los cambios aplican en menos de un minuto.
+        </p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Rol</th><th>Capacidad</th><th>Modelo</th>
+                <th>keep_alive</th><th>num_ctx</th><th>Resuelto</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.roles.map((r) => {
+                const res = data.resolved[r.role] || {};
+                const d = drafts[r.role] || {};
+                return (
+                  <tr key={r.role}>
+                    <td>
+                      <strong>{ROLE_LABELS[r.role] || r.role}</strong>
+                      <br /><code className="table__muted">{r.role}</code>
+                    </td>
+                    <td><code>{data.capability_by_role[r.role]}</code></td>
+                    <td>
+                      <select
+                        className="plan-models__input"
+                        value={d.model ?? ''}
+                        onChange={(e) => setDrafts({ ...drafts, [r.role]: { ...d, model: e.target.value } })}
+                      >
+                        <option value="">— automático —</option>
+                        {opciones(r.role).map((m) => (
+                          <option key={m.id} value={m.id}>{m.id}</option>
+                        ))}
+                        {d.model && !models.some((m) => m.id === d.model) && (
+                          <option value={d.model}>{d.model} (no instalado)</option>
+                        )}
+                      </select>
+                      <button
+                        className="pill-btn pill-btn--outline table__action"
+                        onClick={() => setShowAll({ ...showAll, [r.role]: !showAll[r.role] })}
+                      >
+                        {showAll[r.role] ? 'Solo compatibles' : 'Mostrar todos'}
+                      </button>
+                    </td>
+                    <td>
+                      <input
+                        className="plan-models__input table-num"
+                        placeholder="auto"
+                        value={d.keep_alive ?? ''}
+                        onChange={(e) => setDrafts({ ...drafts, [r.role]: { ...d, keep_alive: e.target.value } })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="plan-models__input table-num"
+                        placeholder="auto"
+                        value={d.num_ctx ?? ''}
+                        onChange={(e) => setDrafts({ ...drafts, [r.role]: { ...d, num_ctx: e.target.value } })}
+                      />
+                    </td>
+                    <td>
+                      {res.model
+                        ? <><code>{res.model}</code><br /><span className="table__muted">{SOURCE_LABELS[res.source] || res.source}</span></>
+                        : <span className="table__muted">sin modelo</span>}
+                      {res.warning && <><br /><span className="table__muted">⚠ {res.warning}</span></>}
+                    </td>
+                    <td>
+                      <button className="pill-btn pill-btn--primary table__action" onClick={() => save(r.role)}>
+                        {saved === r.role ? 'Guardado ✓' : 'Guardar'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
     </>
   );
@@ -1142,6 +1312,7 @@ export default function AdminPage() {
         {tab === 'usuarios' && <UsuariosTab />}
         {tab === 'nodos' && <NodosTab />}
         {tab === 'modelos' && <ModelosTab />}
+        {tab === 'roles' && <RolesTab />}
         {tab === 'tarifas' && <TarifasTab />}
         {tab === 'ingresos' && <IngresosTab />}
         {tab === 'releases' && <ReleasesTab />}

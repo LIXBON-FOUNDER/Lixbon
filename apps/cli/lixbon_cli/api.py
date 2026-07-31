@@ -100,11 +100,29 @@ class ApiClient:
         return [str(m.get("id")) for m in data.get("data", [])
                 if m.get("id") and not str(m.get("id")).startswith("error:")]
 
+    def model_roles(self) -> dict:
+        """Mapa rol→modelo que resuelve el gateway. {} si no lo soporta.
+
+        El CLI solo usa el rol `chat` (para no abrir el selector cuando el
+        servidor ya tiene un modelo de chat configurado). Un gateway antiguo
+        responde 404: se degrada en silencio, no es un error del usuario.
+        """
+        try:
+            return self._json("GET", f"{self.server}/api/model-roles", timeout=15)
+        except ApiError:
+            return {}
+
     def usage(self) -> dict:
         return self._json("GET", f"{self.server}/api/usage", timeout=20)
 
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)
+
+    def generate_title(self, conversation_id: str) -> dict:
+        """Auto-título del servidor tras el primer intercambio (como la web)."""
+        return self._json("POST",
+                          f"{self.server}/api/conversations/{conversation_id}/generate-title",
+                          {}, timeout=30)
 
     def delegate(self, user_input: str) -> dict:
         return self._json("POST", f"{self.server}/api/delegate",

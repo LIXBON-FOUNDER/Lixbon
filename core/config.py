@@ -27,6 +27,37 @@ AUTH_RATE_LIMIT: int = int(os.getenv("AUTH_RATE_LIMIT", "5"))
 AUTH_BLOCK_MINUTES: int = int(os.getenv("AUTH_BLOCK_MINUTES", "15"))
 ADMIN_TOKEN: Optional[str] = os.getenv("ADMIN_TOKEN") or None
 
+# ── Roles de inferencia (mapa rol→modelo) ──────────────────────────────────
+# La app tiene cinco roles con requisitos incompatibles (ver
+# docs/CUELLO_DE_BOTELLA_MODELOS.md). Estos son los DEFAULTS; la tabla
+# `model_roles` los sobreescribe desde el panel admin, y si un rol queda vacío
+# el gateway lo autodetecta por la capability real que declara Ollama.
+# Vacío ⇒ autodetectar. MODEL_ROLE_FIM va vacío a propósito: ningún modelo de
+# chat sirve para autocompletar, hace falta uno con capability `insert`.
+MODEL_ROLE_CHAT: str = os.getenv("MODEL_ROLE_CHAT", "deepseek-r1:8b")
+MODEL_ROLE_FIM: str = os.getenv("MODEL_ROLE_FIM", "")
+MODEL_ROLE_VISION: str = os.getenv("MODEL_ROLE_VISION", "moondream")
+MODEL_ROLE_EMBED: str = os.getenv("MODEL_ROLE_EMBED", "nomic-embed-text")
+MODEL_ROLE_ROUTE: str = os.getenv("MODEL_ROLE_ROUTE", "")
+
+# Residencia en VRAM por rol (`keep_alive` de Ollama: campo TOP-LEVEL del
+# payload, NO va dentro de `options`). "30m" | "-1" permanente | "0" descarga ya
+# | "" no enviar nada. OJO: no confundir con KEEPALIVE_SECONDS de
+# core/inference/ollama.py, que es el heartbeat SSE hacia el cliente.
+# Dimensionado para UN solo modelo grande residente (RTX 3050, 6 GB): con
+# deepseek-r1:8b ocupando 5.2 GB, `-1` en chat pinnearía casi toda la GPU.
+MODEL_KEEPALIVE_CHAT: str = os.getenv("MODEL_KEEPALIVE_CHAT", "30m")
+MODEL_KEEPALIVE_FIM: str = os.getenv("MODEL_KEEPALIVE_FIM", "10m")
+MODEL_KEEPALIVE_VISION: str = os.getenv("MODEL_KEEPALIVE_VISION", "60s")
+MODEL_KEEPALIVE_EMBED: str = os.getenv("MODEL_KEEPALIVE_EMBED", "-1")  # 0.3 GB: residente
+MODEL_KEEPALIVE_ROUTE: str = os.getenv("MODEL_KEEPALIVE_ROUTE", "5m")
+
+# Segundos de caché de la tabla `model_roles` (el panel invalida al editar).
+MODEL_ROLES_TTL_S: int = int(os.getenv("MODEL_ROLES_TTL_S", "60"))
+# Segundos de caché del catálogo de modelos. Protege /api/tags de /api/fim,
+# que dispara una petición por pulsación de tecla.
+MODELS_CACHE_TTL_S: int = int(os.getenv("MODELS_CACHE_TTL_S", "10"))
+
 # ── Base de datos (Postgres — Railway staging/prod) ────────────────────────
 # postgresql://user:pass@host:port/db  (Railway la provee; en local apunta a lixbon-staging)
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")

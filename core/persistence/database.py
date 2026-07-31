@@ -120,9 +120,15 @@ def init_db() -> None:
                            rate_limit_per_min, allowed_models, priority, sort_order,
                            is_active, created_at, updated_at)
         VALUES
+          -- allowed_models = NULL (todos). Una whitelist por prefijo de NOMBRE es
+          -- insostenible desde que el gateway elige el modelo por rol: la lista
+          -- que había aquí ('llama3.2', 'phi', 'gemma', 'qwen2.5:0.5b'…) no casaba
+          -- con ningún modelo instalado, así que TODO usuario gratuito recibía un
+          -- 403 model_not_allowed que no podía arreglar. El plan gratuito se limita
+          -- con mensajes/día y tokens/mes, que no dependen de cómo se llame el
+          -- modelo. El mecanismo sigue existiendo para quien quiera usarlo.
           ('free', 'Gratuito', 'Para probar el producto', 0, 'USD',
-           30, 150000, 1, 10,
-           '["llama3.2", "phi", "gemma", "qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b"]',
+           30, 150000, 1, 10, NULL,
            0, 0, 1, :ts, :ts),
           ('pro', 'Pro', 'Para uso habitual', 990, 'USD',
            500, 5000000, 5, 60, NULL, 1, 1, 1, :ts, :ts),
@@ -130,9 +136,21 @@ def init_db() -> None:
            -1, 20000000, 20, 120, NULL, 2, 2, 1, :ts, :ts)
         ON CONFLICT (id) DO NOTHING
     """
+    # ── Migración: el allowed_models obsoleto del plan gratuito. ──
+    #    El seed de arriba no toca una BD existente (ON CONFLICT DO NOTHING), así
+    #    que la lista rota sigue ahí y deja al plan gratuito sin ningún modelo
+    #    usable. Se corrige solo si el valor es EXACTAMENTE el del seed viejo
+    #    (ambos prefijos): una lista que el admin haya puesto a mano no se pisa.
+    _free_plan_fix = """
+        UPDATE plans SET allowed_models = NULL
+         WHERE id = 'free'
+           AND allowed_models LIKE '%llama3.2%'
+           AND allowed_models LIKE '%qwen2.5:0.5b%'
+    """
     from datetime import datetime, timezone
     with engine.begin() as conn:
         conn.execute(text(_plans_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+        conn.execute(text(_free_plan_fix))
 
     # ── Seed: tarifa por defecto y packs de créditos (cobro por tokens de la
     #    API). ON CONFLICT DO NOTHING: el admin los edita y nada los pisa.
@@ -153,9 +171,24 @@ def init_db() -> None:
           ('power', 'Power', 50000000, 5000, 'USD', 1, 2, :ts)
         ON CONFLICT (id) DO NOTHING
     """
+    # ── Seed: las 5 filas del mapa rol→modelo, con model=NULL para que los
+    #    defaults de core/config.py (MODEL_ROLE_*) manden hasta que el admin
+    #    asigne algo. ON CONFLICT DO NOTHING: ningún redeploy pisa lo elegido. ──
+    _roles_seed = """
+        INSERT INTO model_roles (role, model, keep_alive, num_ctx, is_active,
+                                 notes, created_at, updated_at)
+        VALUES
+          ('chat',   NULL, NULL, NULL, 1, 'Chat y agente: tool calling + calidad de código', :ts, :ts),
+          ('fim',    NULL, NULL, NULL, 1, 'Autocompletado: requiere capability insert (FIM)', :ts, :ts),
+          ('vision', NULL, NULL, NULL, 1, 'Descripción de imágenes: requiere capability vision', :ts, :ts),
+          ('embed',  NULL, NULL, NULL, 1, 'Embeddings del índice del codebase', :ts, :ts),
+          ('route',  NULL, NULL, NULL, 1, 'Clasificador de delegación y títulos', :ts, :ts)
+        ON CONFLICT (role) DO NOTHING
+    """
     with engine.begin() as conn:
         conn.execute(text(_pricing_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_packs_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+        conn.execute(text(_roles_seed), {"ts": datetime.now(timezone.utc).isoformat()})
 
     # ── Seed: promover admins definidos por entorno ──
     import os

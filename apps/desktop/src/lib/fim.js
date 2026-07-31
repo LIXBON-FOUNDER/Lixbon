@@ -28,6 +28,22 @@ export function cleanCompletion(text) {
   return t;
 }
 
+// El gateway responde 503 `role_model_unavailable` cuando ningún modelo declara
+// la capacidad `insert` (FIM). Sin esta guarda el IDE se comería un 503 por
+// pulsación de tecla, así que el autocompletado se apaga solo, una vez.
+let fimDesactivadoPorGateway = false;
+
+/** Interpreta un fallo del gateway; true si además hay que apagar el ghost text. */
+async function esRolNoDisponible(res) {
+  if (res.status !== 503) return false;
+  try {
+    const body = await res.json();
+    return body?.detail?.code === 'role_model_unavailable';
+  } catch {
+    return false; // cuerpo no-JSON: un 503 cualquiera (nodo caído, etc.)
+  }
+}
+
 /** Pide una completación FIM. Devuelve '' ante cualquier fallo (es opcional). */
 export async function requestFimCompletion({ prefix, suffix, signal }) {
   const { serverUrl, apiKey, contextWindow } = useAppStore.getState();
@@ -47,10 +63,28 @@ export async function requestFimCompletion({ prefix, suffix, signal }) {
       }),
       signal,
     });
-    if (!res.ok) return '';
+    if (!res.ok) {
+      if (!fimDesactivadoPorGateway && await esRolNoDisponible(res)) {
+        fimDesactivadoPorGateway = true;
+        console.warn(
+          '[fim] El servidor no tiene ningún modelo con FIM (capacidad `insert`); ' +
+          'se desactiva el autocompletado. Asigna uno al rol `fim` para reactivarlo.',
+        );
+        const store = useAppStore.getState();
+        store.setGhostText(false);
+        // Refrescar los roles: Ajustes debe explicar por qué está deshabilitado.
+        store.loadModelRoles();
+      }
+      return '';
+    }
     const data = await res.json();
     return cleanCompletion(data.completion || '');
   } catch {
     return ''; // red/aborto: sin sugerencia
   }
+}
+
+/** Permite reintentar tras cambiar de servidor o asignar un modelo al rol. */
+export function resetFimAvailability() {
+  fimDesactivadoPorGateway = false;
 }

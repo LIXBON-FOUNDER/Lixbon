@@ -1,27 +1,49 @@
 // AiPanel.jsx — modelos de IA: autocompletado (FIM), visión y ventana de contexto.
+// Los desplegables se filtran por la capacidad que exige cada rol (según lo que
+// declara Ollama), con un escape para ver el catálogo entero.
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import { Select } from '../../../components/Select';
-import { detectVisionModel, modelId } from '../../../lib/vision';
+import { modelId } from '../../../lib/vision';
+import { modelsForCapability, roleCapability, roleWarning } from '../../../lib/modelRoles';
+import { resetFimAvailability } from '../../../lib/fim';
 
 export function AiPanel() {
   const {
-    availableModels, currentModel,
+    availableModels, modelRoles, loadModelRoles,
     ghostText, setGhostText, ghostModel, setGhostModel,
     visionModel, setVisionModel,
     contextWindow, setContextWindow,
+    effectiveGhostModel, effectiveVisionModel,
   } = useAppStore();
+  // Escape cuando el filtro por capacidad esconde el modelo que el usuario
+  // quiere (capabilities mal declaradas, modelo aún sin descargar…).
+  const [verTodos, setVerTodos] = useState(false);
+
+  // Abrir Ajustes es el momento en que el usuario mira estos valores: refrescar
+  // aquí evita explicarle un estado obsoleto (el admin pudo reasignar un rol).
+  useEffect(() => { loadModelRoles(); }, [loadModelRoles]);
 
   // availableModels trae objetos {id,…}, no strings.
   const ids = (availableModels || []).map(modelId).filter(Boolean);
-  const autoVision = (visionModel && ids.includes(visionModel))
-    ? visionModel
-    : detectVisionModel(availableModels || []);
-  const autoGhost = ids.find((id) => /coder|code/i.test(id)) || currentModel;
+  const autoGhost = effectiveGhostModel();
+  const autoVision = effectiveVisionModel();
 
-  const modelOptions = (autoLabel) => [
-    { value: '', label: `Automático (${autoLabel || 'ninguno'})` },
-    ...ids.map((id) => ({ value: id, label: id })),
-  ];
+  // Con `modelRoles` cargado y sin modelo para `fim`, no hay nada que ofrecer:
+  // el gateway ya dijo que ninguno declara `insert`.
+  const fimSoportado = !modelRoles || !!modelRoles.roles?.fim?.model || !!ghostModel;
+  const avisoFim = roleWarning(modelRoles, 'fim');
+
+  const opciones = (capability, autoLabel) => {
+    const aptos = (!verTodos && capability && modelRoles)
+      ? modelsForCapability(availableModels || [], capability)
+      : ids;
+    const lista = aptos.length ? aptos : ids;
+    return [
+      { value: '', label: `Automático (${autoLabel || 'ninguno'})` },
+      ...lista.map((id) => ({ value: id, label: id })),
+    ];
+  };
 
   return (
     <>
@@ -32,14 +54,25 @@ export function AiPanel() {
           <span className="settings__row-label">
             Sugerencias mientras escribes
             <span className="settings__row-hint">
-              {' · '}texto en gris que Tab acepta; usa un modelo de código y consume VRAM
+              {fimSoportado
+                ? `${' · '}texto en gris que Tab acepta; usa un modelo de código y consume VRAM`
+                : `${' · '}${avisoFim || 'ningún modelo instalado soporta FIM (capacidad `insert`). Instala uno de código, p. ej. `ollama pull qwen2.5-coder:1.5b`'}`}
             </span>
           </span>
           <button
             className={`settings__toggle ${ghostText ? 'is-on' : ''}`}
-            onClick={() => setGhostText(!ghostText)}
+            onClick={() => {
+              // Al reactivarlo a mano, volver a permitir peticiones que el
+              // gateway había cortado con 503 role_model_unavailable.
+              if (!ghostText) resetFimAvailability();
+              setGhostText(!ghostText);
+            }}
             role="switch"
             aria-checked={ghostText}
+            // Solo se bloquea el ENCENDIDO: si quedó activo de antes hay que
+            // poder apagarlo, o el usuario se queda atrapado con él puesto.
+            disabled={!fimSoportado && !ghostText}
+            title={fimSoportado ? 'Activar autocompletado' : 'No hay ningún modelo con FIM disponible'}
           >
             <span className="settings__toggle-knob" />
           </button>
@@ -49,12 +82,14 @@ export function AiPanel() {
           <div className="settings__inline settings__inline--spread">
             <span className="settings__row-label">
               Modelo de autocompletado
-              <span className="settings__row-hint"> · idealmente uno con FIM (qwen2.5-coder…)</span>
+              <span className="settings__row-hint">
+                {' · '}debe soportar fill-in-the-middle (capacidad <code>insert</code>)
+              </span>
             </span>
             <Select
               value={ghostModel}
               onChange={setGhostModel}
-              options={modelOptions(autoGhost)}
+              options={opciones(roleCapability(modelRoles, 'fim'), autoGhost)}
             />
           </div>
         )}
@@ -74,9 +109,28 @@ export function AiPanel() {
           <Select
             value={visionModel}
             onChange={setVisionModel}
-            options={modelOptions(autoVision)}
+            options={opciones(roleCapability(modelRoles, 'vision'), autoVision)}
           />
         </div>
+
+        {modelRoles && (
+          <div className="settings__inline settings__inline--spread">
+            <span className="settings__row-label">
+              Mostrar todos los modelos
+              <span className="settings__row-hint">
+                {' · '}sin filtrar por capacidad, por si un modelo la declara mal
+              </span>
+            </span>
+            <button
+              className={`settings__toggle ${verTodos ? 'is-on' : ''}`}
+              onClick={() => setVerTodos(!verTodos)}
+              role="switch"
+              aria-checked={verTodos}
+            >
+              <span className="settings__toggle-knob" />
+            </button>
+          </div>
+        )}
 
         <div className="settings__inline settings__inline--spread">
           <span className="settings__row-label">

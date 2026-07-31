@@ -117,8 +117,18 @@ export function remoteReducer(state, ev) {
       else items[idx] = { ...items[idx], text: ev.text || '' };
       return { ...s, items };
     }
-    case 'assistant_done':
+    case 'assistant_done': {
+      // Al releer una sesión guardada no hay deltas (no se persisten), así que
+      // no existe burbuja abierta que cerrar: el turno se crea aquí, ya cerrado.
+      const idx = lastIdx(s.items, (it) => it.kind === 'assistant' && it.open);
+      if (idx === -1) {
+        const text = ev.text || '';
+        return text.trim()
+          ? { ...s, items: [...s.items, withKey({ kind: 'assistant', text, open: false })] }
+          : s;
+      }
       return { ...s, items: closeOpenAssistant(s.items, ev.text || '') };
+    }
     case 'tool_use':
       return {
         ...s,

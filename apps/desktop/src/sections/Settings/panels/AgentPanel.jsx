@@ -38,7 +38,7 @@ export function AgentPanel() {
           <span className="settings__row-label">
             Herramientas nativas
             <span className="settings__row-hint">
-              {' · '}tool_calls del modelo (más fiable); requiere soporte de tools (qwen2.5-coder, llama3.1…)
+              {' · '}tool_calls del modelo (más fiable); el modelo debe declarar la capacidad <code>tools</code>
             </span>
           </span>
           <button

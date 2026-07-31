@@ -31,8 +31,10 @@ from core.persistence.models import (
     EmailToken,
     Message,
     ModelPricing,
+    ModelRole,
     Node,
     Plan,
+    RemoteEvent,
     RemoteSession,
     Session,
     Subscription,
@@ -991,7 +993,11 @@ def ensure_conversation(
             if conv.user_id != user_id:
                 return False
             conv.updated_at = ts
-            if title:
+            # El título de una conversación viva NO se pisa: el CLI y el IDE
+            # mandan el suyo por defecto en CADA mensaje, y así borraban el
+            # auto-título en cuanto el usuario escribía otra vez. Renombrar es
+            # cosa de PATCH /api/conversations/{id}.
+            if title and not conv.title:
                 conv.title = title
             if client_id:
                 conv.client_id = client_id
@@ -1156,6 +1162,55 @@ def delete_model_pricing(pricing_id: int) -> bool:
             return False
         s.delete(row)
         return True
+
+
+def _role_to_dict(r: ModelRole) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "role": r.role,
+        "model": r.model,
+        "keep_alive": r.keep_alive,
+        "num_ctx": r.num_ctx,
+        "is_active": bool(r.is_active),
+        "notes": r.notes,
+        "updated_at": r.updated_at,
+    }
+
+
+def list_model_roles(active_only: bool = False) -> list[dict[str, Any]]:
+    """Filas del mapa rol→modelo. Las 5 vienen sembradas por init_db()."""
+    with get_session() as s:
+        stmt = select(ModelRole).order_by(ModelRole.role)
+        if active_only:
+            stmt = stmt.where(ModelRole.is_active == 1)
+        return [_role_to_dict(r) for r in s.scalars(stmt).all()]
+
+
+def upsert_model_role(role: str, **fields) -> dict[str, Any] | None:
+    """Actualiza (o crea si falta) la fila de un rol.
+
+    `model=""` guarda NULL: es la forma de "desasignar" y volver al default de
+    env / autodetección. Los 5 roles son fijos, así que no hay delete."""
+    allowed = {"model", "keep_alive", "num_ctx", "is_active", "notes"}
+    ts = now_iso()
+    with get_session() as s:
+        row = s.scalar(select(ModelRole).where(ModelRole.role == role))
+        if not row:
+            row = ModelRole(role=role, is_active=1, created_at=ts, updated_at=ts)
+            s.add(row)
+        for k, v in fields.items():
+            if k not in allowed or v is None:
+                continue
+            if k == "is_active":
+                v = 1 if v else 0
+            elif k == "num_ctx":
+                v = max(0, int(v)) or None
+            else:
+                v = (str(v).strip() or None)
+            setattr(row, k, v)
+        row.updated_at = ts
+        s.flush()
+        return _role_to_dict(row)
 
 
 def get_credit_balance(user_id: int) -> int:
@@ -1883,7 +1938,33 @@ def get_daily_metrics(user_id: int, days_limit: int = 30) -> list[dict[str, Any]
 # ─── Control remoto (/remote) ──────────────────────────────────────────────
 
 REMOTE_TOKEN_TTL_HOURS = 24
-REMOTE_STALE_ENDED_HOURS = 24
+# Tope de eventos guardados por sesión: el transcript de una sesión larga no
+# puede crecer sin límite. Al pasarse se descartan los más antiguos.
+REMOTE_MAX_EVENTS = 2000
+# Tipos que forman el transcript. Los deltas del streaming (`assistant_delta`)
+# y el estado (`status`, aprobaciones) son efímeros: se relayan pero no se
+# guardan — `assistant_done` ya trae el texto final del turno.
+REMOTE_PERSISTED_EVENTS = frozenset({
+    "hello", "snapshot", "user_msg", "assistant_done", "tool_use",
+    "tool_result", "notice", "error", "bye",
+})
+# Recorte por texto y por evento: un tool_result puede traer un archivo entero
+# y un snapshot, la conversación completa del host.
+REMOTE_MAX_FIELD_CHARS = 8000
+REMOTE_MAX_EVENT_CHARS = 60000
+
+
+def _trim_event(value: Any, depth: int = 0) -> Any:
+    """Copia del evento con los textos largos recortados (recursiva y acotada)."""
+    if isinstance(value, str):
+        return value if len(value) <= REMOTE_MAX_FIELD_CHARS else value[:REMOTE_MAX_FIELD_CHARS] + "…"
+    if depth >= 4:
+        return value if isinstance(value, (int, float, bool, type(None))) else None
+    if isinstance(value, dict):
+        return {k: _trim_event(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_trim_event(v, depth + 1) for v in value]
+    return value
 
 
 def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
@@ -1929,14 +2010,16 @@ def get_remote_session(session_id: str, user_id: int | None = None) -> dict[str,
         return {**_remote_session_to_dict(r), "user_id": r.user_id}
 
 
-def list_remote_sessions(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
-    """Sesiones remotas del usuario, activas primero (las ended muy viejas no salen)."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=REMOTE_STALE_ENDED_HOURS)).isoformat()
+def list_remote_sessions(user_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    """Sesiones remotas del usuario, las más recientes primero.
+
+    Las terminadas siguen en la lista: su transcript se conserva en
+    `remote_events` y se puede releer desde la app o la web en modo lectura.
+    """
     with get_session() as s:
         rows = s.scalars(
             select(RemoteSession)
             .where(RemoteSession.user_id == user_id)
-            .where(or_(RemoteSession.status != "ended", RemoteSession.ended_at > cutoff))
             .order_by(desc(RemoteSession.created_at))
             .limit(limit)
         ).all()
@@ -1997,6 +2080,93 @@ def sweep_remote_sessions(offline_after_s: int = 60, end_after_h: int = 24) -> i
             .values(status="ended", ended_at=now_iso(), share_token_hash=None)
         ).rowcount
         return changed
+
+
+# ─── Transcript persistido de las sesiones remotas ─────────────────────────
+
+def save_remote_events(session_id: str, events: list[dict[str, Any]]) -> int:
+    """Guarda los eventos con valor de transcript. Devuelve cuántos escribió.
+
+    Se llama desde el camino caliente del relay, así que es best-effort: el
+    control remoto tiene que seguir funcionando aunque la BD falle.
+    """
+    rows = []
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("type") not in REMOTE_PERSISTED_EVENTS:
+            continue
+        payload = _json.dumps(_trim_event(ev), ensure_ascii=False)
+        if len(payload) > REMOTE_MAX_EVENT_CHARS:
+            # Guardarlo cortado dejaría un JSON ilegible al releerlo: mejor
+            # perder ese evento que envenenar el transcript.
+            continue
+        rows.append(RemoteEvent(
+            session_id=session_id,
+            seq=int(ev.get("seq") or 0),
+            type=str(ev.get("type") or ""),
+            payload_json=payload,
+            created_at=now_iso(),
+        ))
+    if not rows:
+        return 0
+    with get_session() as s:
+        s.add_all(rows)
+        s.flush()
+        total = s.scalar(
+            select(func.count()).select_from(RemoteEvent)
+            .where(RemoteEvent.session_id == session_id)
+        ) or 0
+        if total > REMOTE_MAX_EVENTS:
+            # Se conservan los últimos: en una sesión larga lo que se quiere
+            # releer es el final, no el saludo del host.
+            cutoff = s.scalar(
+                select(RemoteEvent.seq)
+                .where(RemoteEvent.session_id == session_id)
+                .order_by(desc(RemoteEvent.seq))
+                .limit(1)
+                .offset(REMOTE_MAX_EVENTS - 1)
+            )
+            if cutoff is not None:
+                s.execute(
+                    delete(RemoteEvent)
+                    .where(RemoteEvent.session_id == session_id, RemoteEvent.seq < cutoff)
+                )
+    return len(rows)
+
+
+def list_remote_events(session_id: str, from_seq: int = 0,
+                       limit: int = REMOTE_MAX_EVENTS) -> list[dict[str, Any]]:
+    """Transcript guardado de la sesión, en orden. No comprueba pertenencia:
+    el router ya resolvió que la sesión es del usuario."""
+    with get_session() as s:
+        rows = s.scalars(
+            select(RemoteEvent)
+            .where(RemoteEvent.session_id == session_id, RemoteEvent.seq > from_seq)
+            .order_by(RemoteEvent.seq)
+            .limit(limit)
+        ).all()
+    events = []
+    for r in rows:
+        try:
+            ev = _json.loads(r.payload_json)
+        except ValueError:
+            continue
+        if isinstance(ev, dict):
+            ev["seq"] = r.seq
+            events.append(ev)
+    return events
+
+
+def count_remote_events(user_id: int) -> dict[str, int]:
+    """Eventos guardados por sesión del usuario (para marcar cuáles tienen
+    transcript que releer, sin una consulta por sesión)."""
+    with get_session() as s:
+        rows = s.execute(
+            select(RemoteEvent.session_id, func.count(RemoteEvent.id))
+            .join(RemoteSession, RemoteSession.id == RemoteEvent.session_id)
+            .where(RemoteSession.user_id == user_id)
+            .group_by(RemoteEvent.session_id)
+        ).all()
+        return {sid: int(n) for sid, n in rows}
 
 
 # ─── Push tokens de dispositivos (Expo) ────────────────────────────────────

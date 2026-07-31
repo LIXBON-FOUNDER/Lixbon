@@ -107,14 +107,19 @@ function RemoteList({ onOpen }) {
         <button
           key={s.id}
           className="remote__card"
-          disabled={s.status === 'ended'}
+          // Una sesión terminada con transcript guardado se abre igual, en
+          // modo lectura: la conversación del IDE/CLI no se pierde al cerrar.
+          disabled={s.status === 'ended' && !(s.transcript_events > 0)}
           onClick={() => onOpen(s)}
         >
           <span className={`remote__dot ${s.status === 'online' ? 'is-online' : ''}`} />
           <span className="remote__card-body">
             <strong>{s.title || 'Sesión remota'}</strong>
             <span className="remote__dim">
-              {s.machine || '—'} · {s.status === 'ended' ? 'terminada' : s.status === 'online' ? 'en línea' : 'sin conexión'}
+              {s.machine || '—'} ·{' '}
+              {s.status === 'ended'
+                ? s.transcript_events > 0 ? 'terminada · ver conversación' : 'terminada'
+                : s.status === 'online' ? 'en línea' : 'sin conexión'}
             </span>
           </span>
           <span className="remote__badge">{SOURCE_LABEL[s.source] || s.source}</span>
@@ -140,7 +145,27 @@ function RemoteSession({ session }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.items, state.approvals]);
 
+  // Sesión ya terminada: sin canal en vivo, pero con transcript guardado. Se
+  // lee de una vez y lo reproduce el mismo reducer que el streaming.
+  const archived = session.status === 'ended';
   useEffect(() => {
+    if (!archived) return undefined;
+    let alive = true;
+    api.get(`/api/remote/sessions/${session.id}/transcript`)
+      .then((res) => {
+        if (!alive) return;
+        for (const ev of res.data.events || []) dispatch(ev);
+      })
+      .catch(() => {
+        if (alive) dispatch({ type: 'error', message: 'No se pudo cargar la conversación.' });
+      })
+      .finally(() => { if (alive) dispatch({ type: 'session_ended' }); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, archived]);
+
+  useEffect(() => {
+    if (archived) return undefined;
     const abort = new AbortController();
     let backoff = 2000;
     let alive = true;
@@ -167,7 +192,7 @@ function RemoteSession({ session }) {
     connect();
     return () => { alive = false; abort.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id]);
+  }, [session.id, archived]);
 
   const sendCommand = useCallback((command) => {
     return api.post(`/api/remote/sessions/${session.id}/commands`, command).catch(() => {});

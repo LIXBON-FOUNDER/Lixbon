@@ -5,6 +5,11 @@
 // leyendo responseText en onprogress.
 import { ApiException, extractDetail } from './api';
 
+// Superficie de la app: su historial es suyo y no se mezcla con el de la web,
+// el CLI o el IDE. Lo que se hable desde el IDE/CLI se sigue en la pantalla
+// Remoto, que guarda su propio transcript.
+export const CHAT_SOURCE = 'mobile';
+
 export function streamChatCompletion({
   base,
   token,
@@ -99,8 +104,7 @@ export function streamChatCompletion({
       conversation_id: conversationId,
       stream: true,
       web_search: webSearch,
-      // Historial compartido con la web: misma cuenta, mismas conversaciones.
-      source: 'web',
+      source: CHAT_SOURCE,
     }),
   );
 

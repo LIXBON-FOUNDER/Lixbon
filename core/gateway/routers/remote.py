@@ -30,14 +30,17 @@ from core.gateway import deps
 from core.gateway.remote_hub import hub
 from core.persistence.queries import (
     claim_remote_session,
+    count_remote_events,
     create_remote_session,
     delete_device_token,
     end_remote_session,
     get_remote_session,
     list_device_tokens,
+    list_remote_events,
     list_remote_sessions,
     log_audit_event,
     register_device_token,
+    save_remote_events,
     touch_remote_session,
 )
 from core.security.auth import cookie_auth_required
@@ -158,6 +161,9 @@ async def list_sessions_endpoint(
 ):
     user = cookie_auth_required(lixbon_session, authorization)
     sessions = list_remote_sessions(user["id"])
+    # Cuántos eventos guardados tiene cada una: la app marca así las sesiones
+    # terminadas que todavía se pueden abrir para releer la conversación.
+    counts = count_remote_events(user["id"])
     # El estado real de conexión lo da el hub, no la BD (que solo se refresca
     # cuando el host publica eventos o pasa el barrido).
     for sess in sessions:
@@ -165,6 +171,7 @@ async def list_sessions_endpoint(
         connected = bool(ch and ch.host_connected)
         sess["host_connected"] = connected
         sess["controllers"] = len(ch.controllers) if ch else 0
+        sess["transcript_events"] = counts.get(sess["id"], 0)
         if connected and sess["status"] != "ended":
             sess["status"] = "online"
     return {"sessions": sessions}
@@ -261,8 +268,15 @@ async def host_publish_events(
     if not isinstance(events, list) or len(events) > MAX_EVENTS_PER_BATCH:
         raise HTTPException(status_code=422, detail="Lote de eventos inválido")
     ch = hub.channel(session_id, sess["user_id"])
-    last_seq = hub.publish_events(ch, [ev for ev in events if isinstance(ev, dict)])
+    clean = [ev for ev in events if isinstance(ev, dict)]
+    last_seq = hub.publish_events(ch, clean)
     touch_remote_session(session_id)
+    # El transcript se guarda DESPUÉS de repartirlo: el relay manda, la BD es
+    # lo que hace que la conversación siga ahí cuando la sesión termine.
+    try:
+        await asyncio.to_thread(save_remote_events, session_id, clean)
+    except Exception as exc:
+        log.warning(f"[remote] no se pudo guardar el transcript de {session_id}: {exc}")
 
     for ev in events:
         if ev.get("type") == "approval_request":
@@ -305,9 +319,17 @@ async def controller_events_stream(
         "session": {k: v for k, v in sess.items() if k != "user_id"},
         "meta": ch.meta,
     }
-    first = [status_ev] + hub.replay(ch, from_seq)
-    # Si el controller llega sin historial, el host reemite un snapshot completo
-    if from_seq == 0 and ch.host_connected:
+    # Replay: primero lo guardado (sobrevive al reinicio del gateway y a las
+    # sesiones de días), luego lo que el buffer en memoria tenga por encima.
+    buffered = hub.replay(ch, from_seq)
+    oldest_buffered = buffered[0].get("seq", 0) if buffered else None
+    stored = await asyncio.to_thread(list_remote_events, session_id, from_seq)
+    if oldest_buffered is not None:
+        stored = [ev for ev in stored if ev.get("seq", 0) < oldest_buffered]
+    first = [status_ev] + stored + buffered
+    # Si el controller llega sin nada que mostrar, el host reemite un snapshot
+    # completo (solo tiene sentido si sigue conectado).
+    if from_seq == 0 and ch.host_connected and not stored:
         hub.push_command(ch, {"type": "request_snapshot", "from_seq": 0})
 
     async def gen():
@@ -318,6 +340,27 @@ async def controller_events_stream(
             hub.detach_controller(ch, cid)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.get("/api/remote/sessions/{session_id}/transcript")
+async def controller_transcript(
+    session_id: str,
+    from_seq: int = 0,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """Transcript guardado de la sesión, sin SSE.
+
+    Es la vista de lectura de una sesión ya terminada: el host se fue, no hay
+    canal en vivo, pero la conversación sigue estando.
+    """
+    sess = _owner_required(session_id, lixbon_session, authorization)
+    events = await asyncio.to_thread(list_remote_events, session_id, from_seq)
+    return {
+        "session": {k: v for k, v in sess.items() if k != "user_id"},
+        "events": events,
+        "last_seq": events[-1].get("seq", from_seq) if events else from_seq,
+    }
 
 
 @router.post("/api/remote/sessions/{session_id}/commands")

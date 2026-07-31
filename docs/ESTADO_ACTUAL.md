@@ -1,6 +1,6 @@
 # lixbon — Estado actual del proyecto
 
-> Actualizado: 2026-07-11 (CLI v2 reescrito: terminal pura estilo Claude Code, sin TUI). Documento para retomar el trabajo.
+> Actualizado: 2026-07-31 (mapa rol→modelo: un modelo por rol de inferencia). Documento para retomar el trabajo.
 > Referencias: `docs/PLAN_MAESTRO.md` (plan por fases) · `docs/DISENO_WEB.md` (diseño de la web) · `docs/INFORME_Y_PLAN.md` (diagnóstico original).
 
 ---
@@ -8,6 +8,75 @@
 ## 1. Resumen en una línea
 
 **F0–F7 implementadas (backend, web, planes/límites, panel admin, releases R2, pagos Stripe). Pendiente: conectar credenciales de Stripe en Railway, y F8 (calidad/tests).**
+
+---
+
+## 0.-1 Mapa rol→modelo: se acabó «el modelo» como una sola cosa (2026-07-31)
+
+`docs/CUELLO_DE_BOTELLA_MODELOS.md` documentaba que Lixbon trataba «el modelo» como una
+sola cosa configurable cuando en realidad hay **cinco roles de inferencia** con requisitos
+incompatibles. Resueltos los puntos **A, B, D y E**; **F y G siguen abiertos** (fuera de
+alcance), y el **C estaba sobreestimado**.
+
+**Lo que cambia.** Los roles (`chat`, `fim`, `vision`, `embed`, `route`) se resuelven por la
+**capacidad que el modelo declara** en Ollama (`POST /api/show` → `capabilities`:
+`completion`, `tools`, `thinking`, `vision`, `embedding`, `insert`), no por regex sobre su
+nombre. Precedencia: tabla `model_roles` › env `MODEL_ROLE_*` › autodetección por capacidad
+› heurístico legacy por nombre (nunca para `fim`) › nada + aviso de qué instalar.
+
+- **Gateway**: `core/inference/roles.py` (resolvedor puro), `core/gateway/model_router.py`
+  (lo aplica a cada request), `GET /api/model-roles` para los clientes, `keep_alive` por rol
+  (campo **top-level** de Ollama, no `options`; nada que ver con `KEEPALIVE_SECONDS`, que es
+  el heartbeat SSE). El campo `model` de los 6 payloads pasa a ser **opcional**.
+- **Nodos**: `metrics.model_info` + `agent_version` (aditivo: `models` sigue siendo
+  `list[str]`), `/api/show` cacheado por digest con tope de 8 por poll, y el proxy
+  **`/ollama/api/generate`** que faltaba — sin él `/api/fim` nunca funcionó contra un nodo.
+  `AGENT_VERSION = 3.1.0`. **Los nodos se despliegan ANTES que el gateway.**
+- **Errores nuevos**: 503 `role_model_unavailable`, 503 `model_not_available` (el routing
+  por nodo ya no enruta a ciegas), 409 `capability_mismatch` en el panel admin.
+- **Panel admin** → pestaña **Roles**: las 5 filas editables con el `source` resuelto.
+- **IDE**: el ghost text ya no cae al modelo de chat (**bug A**); sin modelo con `insert` se
+  apaga y Ajustes dice qué instalar. **CLI**: solo usa el rol `chat` para no preguntar.
+- **Plan `free` arreglado**: su `allowed_models` (`llama3.2`, `phi`, `gemma`…) no casaba con
+  ningún modelo instalado ⇒ 403 inarreglable para todo usuario gratuito. Ahora `NULL`, con
+  migración idempotente que solo pisa el valor del seed viejo.
+
+**Estado del hardware (RTX 3050, 6 GB):** un solo modelo grande residente a la vez.
+`chat`→`deepseek-r1:8b`, `route`→`qwen3:4b`, `vision`→`moondream`, `embed`→`nomic-embed-text`
+y **`fim` sin servir**: ningún modelo instalado declara `insert`. Para reactivar el
+autocompletado: `ollama pull qwen2.5-coder:1.5b` y asignarlo al rol `fim`.
+
+Tests: `core/inference/test_roles.py`, `core/orchestration/test_orchestrator_routing.py`,
+`core/delegation/test_delegation_routing.py`, `core/node_agent/test_capabilities_cache.py`
+(`python -m pytest core apps/cli/tests -q`).
+
+---
+
+## 0.0 Historial por superficie, títulos y transcript remoto persistente (2026-07-30)
+
+Tres quejas del usuario, en el mismo bloque:
+
+1. **La app móvil mostraba TODO** (web, CLI, IDE). La app pasa a ser su propia
+   superficie: `source: 'mobile'` al chatear (`apps/mobile/src/sse.js`,
+   `CHAT_SOURCE`) y `?source=mobile` al listar; fuera los chips de filtro y el
+   distintivo de origen del Sidebar. Aviso: las conversaciones que la app creó
+   antes quedaron guardadas como `web`, así que ahora se ven en la web, no en
+   la app.
+2. **Nadie titulaba las conversaciones** ("Sesión CLI", "Sin título"). El CLI
+   ya no manda un título fijo en cada mensaje (`--title` sin default) y pide
+   `POST /api/conversations/{id}/generate-title` tras el primer intercambio,
+   igual que el IDE (`chatStore._autoTitle`, título visible en la cabecera del
+   panel) y la app. Dos apoyos en el gateway: `ensure_conversation` ya **no
+   pisa** el título de una conversación viva (era lo que borraba el
+   auto-título en cada mensaje del CLI/IDE), y `generate-title` cae al primer
+   mensaje del usuario si el cluster no responde en vez de devolver 502/503.
+3. **El chat de una sesión remota desaparecía al terminarla.** El transcript
+   se persiste en la tabla nueva `remote_events` (ver `docs/PLAN_REMOTE.md`):
+   el replay al reconectar sale de la BD, `GET /api/remote/sessions` marca con
+   `transcript_events` las que tienen algo que releer y
+   `GET /api/remote/sessions/{id}/transcript` sirve la conversación de una
+   sesión terminada, que app y web abren en **modo lectura**. Tests:
+   `core/persistence/test_remote_events.py`.
 
 ---
 
@@ -89,6 +158,33 @@ Feedback del usuario: la pestaña seguía llamándose `cmd`, el arranque y el ch
 - **Acciones del agente como en el IDE**: mismos verbos que `ToolGroup.jsx` (`TOOL_VERB`/`KIND_VERB` en ui.py), cabecera `⚙ acciones` una vez por turno, filas `● editó   ruta  +N -M` (solo lectura en gris, escrituras en acento) y resultado colgando (`└ …`, rojo si falla). `diffs.render_change` usa las mismas filas.
 - **Stream más limpio**: en modo agent la vista en vivo pasa por `clean_prose` (ya no se ve el JSON crudo mientras se escribe) y el pie usa `StatusBar.rich_line(compact=True)` (modelo · contexto · tokens) para no desbordar a dos líneas. Los pasos intermedios sin prosa ya no imprimen `[herramientas solicitadas …]`.
 - **Plan en la cabecera**: `GET /api/key/info` devuelve ahora `plan: {id, name}` (cambio aditivo en `core/gateway/routers/keys.py`); el CLI lo pide al arrancar y lo cachea en `~/.lixbon/config.json` (`plan_name`), degradando en silencio con servidores viejos. **Requiere deploy del gateway** para que deje de mostrarse sin plan.
+
+### 0.b.3 Distribución del turno: canal de trabajo y zona de respuesta (2026-07-31)
+
+Petición del usuario: mejorar la distribución del CLI **con énfasis en la sección donde el agente responde**. El diagnóstico: todo el turno vivía en la misma columna y con el mismo peso (rótulo, acciones, diffs, resultados y prosa), y el rótulo `✦ Lixbon` encabezaba la fontanería en vez de la respuesta. En un turno de agente con varias ediciones, lo único que hay que leer quedaba enterrado.
+
+**Decisión de diseño: dos canales.** Lo que el agente HACE va dentro de un canal (una barra vertical en la columna izquierda); lo que el agente DICE es lo único del turno SIN canal. La respuesta se destaca por sustracción —es el bloque más ancho, más claro y el único suelto— en lugar de meterla en un recuadro.
+
+- **Canal** (`ui.rail()` / `rail_text()`, glifos `rail`/`rail_hot` con fallback ASCII `|`): fino y apagado (`│`, `lx.rule`) para el rastro —lecturas, líneas de diff, salida de comandos, resultados, resumen de razonamiento— y **grueso en acento (`┃`) en la línea exacta donde se tocó el disco**. Hojeando un turno largo, donde hay acento algo cambió.
+- **Orden nuevo del turno**: registro de trabajo arriba (dentro del canal) → línea en blanco → `✦ Lixbon` → respuesta. El rótulo lo imprime `ChatApp._speak_once()` **una sola vez por turno y justo encima de la primera prosa**, no al empezar a trabajar. Para saber si hace falta el aire de separación, `LixbonConsole` cuenta las impresiones **con contenido** (`writes`; los `Control` del `Live` no cuentan o el contador se dispararía en cada frame del stream).
+- **Ruido eliminado** alrededor de la respuesta: la cabecera `⚙ acciones` (el canal ya agrupa el bloque), el `●` de cada acción (el canal ES el marcador) y las cabeceras `--- ruta (antes)` / `+++ ruta (ahora)` de cada diff, que repetían la ruta que la acción acababa de nombrar. Se cortan **por posición** (`_unified(change)[2:]`), no por prefijo: una línea borrada que empiece por `--` produce un `---` idéntico al de la cabecera.
+- **Color base de la consola en crema** (`Console(style=…)`): el Markdown de las respuestas no lleva estilo propio y salía en el blanco por defecto de la terminal, ajeno a la paleta. Ahora el cuerpo de la respuesta es del color de la marca y los grises del registro se leen como lo que son, un escalón por debajo.
+- **El razonamiento es trabajo, no respuesta**: en vivo y al cerrar (`✻ pensó 3.2 s`) va dentro del canal. Las fuentes web, en cambio, se quedan pegadas a la respuesta: son su pie, no del registro.
+- **`render_user_message`**: el eco de un mensaje que llega por `/remote` se ve idéntico a lo tecleado en local (`❯ texto`, con las líneas siguientes indentadas). Antes imprimía `❯ tú` + el texto debajo y el transcript se leía como dos conversaciones distintas.
+
+Verificado renderizando un turno completo (cabecera → pregunta → razonamiento → lecturas → edición con diff → comando → respuesta → barra) y con un smoke del `_stream_assistant` real contra un stream falso. `apps/cli` 17 tests y `core` 70 en verde.
+
+### 0.b.4 Diff con números, pegar imágenes y escribir mientras el agente trabaja (2026-07-31, CLI v2.2.0)
+
+Tres peticiones del usuario en el mismo bloque, con capturas de Claude Code como referencia del diff.
+
+**1. El código que se añade, edita y elimina se ve como en un editor** (`diffs.py` reescrito). Antes se imprimía la salida de `unified_diff` tal cual, que **pierde los números de línea** — lo único que permite situar el cambio dentro del archivo. Ahora se usa `SequenceMatcher.get_opcodes()` y se construyen filas `(clase, nº viejo, nº nuevo, texto)`: `diff_rows()` es lógica pura y está testeada. Al pintar, la fila entera lleva fondo (`#173A24` lo añadido, `#45191D` lo eliminado) hasta el margen derecho, con el número en gris y el signo en un tono vivo; el contexto va sin fondo y apagado. Detalles que costaron una iteración: el número de una eliminación es del archivo VIEJO y el de una adición del NUEVO; los tabuladores se expanden a 4 espacios (el fondo se pinta por celdas y la terminal expande el tabulador a un ancho que rich no conoce); `set_cell_size` recorta y rellena a un ancho exacto; y el `…` de tramo omitido solo aparece ENTRE dos tramos visibles y nunca por una sola línea.
+
+**2. Pegar imágenes con Alt+V** (`clipboard.py` nuevo, `/paste` como equivalente escribible). Sin Pillow: el CLI se distribuye como un archivo que solo autoinstala prompt_toolkit y rich, así que el DIB de Windows se decodifica a mano y el PNG se escribe con `zlib` (~80 líneas). Orden de preferencia del portapapeles: **CF_HDROP** (archivo copiado en el Explorador, conserva el original) → **formato registrado "PNG"** (lo publican navegadores y capturas, no hay que decodificar nada) → **CF_DIB**. En Linux/macOS se delega en `wl-paste`/`xclip`/`pngpaste`. **GOTCHA que costó el primer intento: sin `restype` explícito ctypes asume `int` de 32 bits y TRUNCA los handles en Windows de 64 bits — `GlobalSize` devolvía 0 y la imagen llegaba vacía.** El alfa se descarta a propósito (color type 2): muchas apps copian 32 bits con alfa a cero y un PNG RGBA salido de ahí se vería transparente entero. Verificado pegando una captura real de 1572×809. La imagen viaja como siempre (base64 en `ChatMessage.images`), así que hace falta un modelo multimodal.
+
+**3. Escribir mientras el agente trabaja** (`inputq.py` nuevo, `input_queue: true` en el config para apagarlo). Durante un turno prompt_toolkit no corre y el teclado estaba muerto. Ahora un hilo lee las teclas, lo tecleado se ve en la vista viva (`❯ texto█   2 en cola · se envía al terminar`) y las líneas completas se ejecutan **cuando el turno acaba**, en orden, desde `_prompt_loop`. **Deliberadamente NO se ejecutan a mitad de turno**: un `/model` o un `/workspace` aplicados mientras el modelo razona cambiarían el suelo bajo sus pies. Reglas de convivencia: en POSIX se usa `cbreak` y no `raw` (cbreak deja las señales, así que Ctrl+C sigue siendo Ctrl+C) y en Windows `msvcrt`, que no toca el modo de la consola; todo prompt interactivo pasa por `suspend_input()` en `ui.select()`, que pausa la lectura y devuelve la terminal; `atexit` restaura el modo si el proceso muere de mala manera; con el lector activo Ctrl+C llega como `\x03` y no como señal, así que el bucle del stream lo consulta igual que la interrupción remota; y lo que quedó escrito sin Enter se precarga en el prompt siguiente (`take_partial()`). No se activa con `/remote` (ahí conduce el móvil) ni en terminales sin `ui_capable()`.
+
+15 tests nuevos en `apps/cli/tests/test_diff_and_input.py` (filas y cortes del diff, DIB→PNG con el orden de color y el volteo, cola con Enter/Backspace/Esc/Ctrl+C y cesión del teclado). Batería del CLI: 32 en verde.
 
 ---
 
