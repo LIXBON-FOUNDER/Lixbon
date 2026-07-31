@@ -2,7 +2,15 @@
 // parseo de tool calls embebidos, limpieza de texto y diff barato.
 // Espejo del protocolo del CLI (apps/cli/lixbon_cli/agent.py).
 
-export const MAX_AGENT_STEPS = 8;
+// Tope de pasos por turno. Es un cortafuegos contra bucles, NO un presupuesto
+// de trabajo: leer varios archivos, editarlos, lanzar los tests y corregir se
+// come 8 pasos enseguida, y el turno moría ahí borrando la burbuja vacía, sin
+// decir nada. Ahora hay margen de sobra y, si se alcanza, se explica.
+export const MAX_AGENT_STEPS = 40;
+
+// Tandas de llamadas idénticas seguidas que se toleran: un modelo atascado
+// repite la misma herramienta con los mismos argumentos indefinidamente.
+export const MAX_REPEATED_CALLS = 3;
 export const READ_ONLY_TOOLS = new Set(['list_files', 'read_file', 'search', 'search_codebase']);
 
 // ── Seguridad de run_command (B4) ──────────────────────────────────────

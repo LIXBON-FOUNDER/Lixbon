@@ -17,6 +17,12 @@ import re
 import subprocess
 from pathlib import Path
 
+from lixbon_cli.context import (
+    clip_tool_output,
+    estimate_tokens,
+    fit_history,
+    prompt_budget,
+)
 from lixbon_cli.diffs import compute_change, render_change
 from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
 from lixbon_cli.term import g
@@ -24,11 +30,20 @@ from lixbon_cli.theme import make_console
 from lixbon_cli.ui import (
     TOOL_VERB,
     confirm3,
+    print_note,
     render_action,
     render_action_result,
 )
 
-MAX_AGENT_STEPS = 12
+# Tope de pasos por turno. Es un cortafuegos contra bucles, NO un presupuesto de
+# trabajo: una tarea real (leer varios archivos, editarlos, ejecutar los tests y
+# corregir) se come 12 pasos enseguida, y antes el turno moría ahí sin decir
+# nada. Ahora hay margen de sobra y, si se alcanza, se dice por qué.
+MAX_AGENT_STEPS = 40
+
+# Llamadas idénticas seguidas que se toleran antes de romper el bucle: un modelo
+# atascado repite la misma herramienta con los mismos argumentos indefinidamente.
+MAX_REPEATED_CALLS = 3
 
 READ_ONLY_TOOLS = {"list_files", "read_file", "search"}
 
@@ -691,34 +706,72 @@ def clean_prose(text: str) -> str:
 
 # ── Loop del agente ─────────────────────────────────────────────────────────
 
+def _call_signature(call: dict) -> str:
+    """Huella de una llamada para detectar que el modelo se repite."""
+    return json.dumps({"t": call.get("tool", ""), "a": call.get("args", {})},
+                      sort_keys=True, ensure_ascii=False)[:400]
+
+
 def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                    stream_assistant) -> tuple[str, list[dict]]:
     """Ejecuta un turno de agente con aprobación interactiva.
 
-    - `session`: estado mutable con `auto_approve: bool` y `native_tools: bool`
-      (este último lo apaga la app si el modelo no soporta tools nativas).
+    - `session`: estado mutable con `auto_approve: bool`, `native_tools: bool`
+      (este último lo apaga la app si el modelo no soporta tools nativas) y
+      `context_window: int` (la ventana que se le pide a Ollama).
     - `stream_assistant(messages, tools) -> (texto, tool_calls_nativos)`: lo
       aporta la app; muestra el texto del modelo en vivo y devuelve la respuesta
       completa junto con los tool_calls estructurados que haya emitido.
     Devuelve (respuesta_final, history_actualizado).
+
+    El turno solo termina cuando el modelo deja de pedir herramientas, cuando se
+    detecta que está atascado o cuando se agota el tope de pasos — y en los dos
+    últimos casos lo dice. Nunca se queda callado a mitad de trabajo.
     """
     console = make_console()
     working = history[:]
+    window = int(session.get("context_window") or 8192)
 
     nudged = False
-    for _ in range(MAX_AGENT_STEPS):
+    empty_retries = 0     # respuestas vacías consecutivas ya reintentadas
+    last_signature = ""   # última tanda de llamadas, para detectar bucles
+    repeated = 0
+    pruned_warned = False
+
+    for step in range(MAX_AGENT_STEPS):
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
         native = session.get("native_tools", True)
         system_msg = {"role": "system", "content": (
             build_native_system_prompt(workspace) if native
             else build_agent_system_prompt(workspace))}
-        messages = [system_msg] + (working if native else sanitize_for_plain_chat(working))
-        raw, native_calls = stream_assistant(messages, TOOL_SCHEMAS if native else None)
+        tools = TOOL_SCHEMAS if native else None
+
+        body = working if native else sanitize_for_plain_chat(working)
+        # El prompt tiene que caber en la ventana CON el system prompt y las
+        # definiciones de herramientas dentro: si se pasa, Ollama descarta el
+        # principio (justo esos dos) y el modelo responde vacío. Podar aquí es
+        # lo que impide que el agente se congele a los pocos minutos.
+        budget = prompt_budget(window, tools, estimate_tokens([system_msg]))
+        body, pruned = fit_history(body, budget)
+        if pruned and not pruned_warned:
+            pruned_warned = True
+            print_note("La conversación llenaba la ventana de contexto: se han "
+                       "recortado los pasos más antiguos para poder seguir.")
+
+        messages = [system_msg] + body
+        raw, native_calls = stream_assistant(messages, tools)
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
         assistant = truncate_fabricated(raw)
 
         if native_calls:
+            empty_retries = 0
+            signature = "|".join(_call_signature(native_call_to_internal(c)) for c in native_calls)
+            repeated = repeated + 1 if signature == last_signature else 0
+            last_signature = signature
+            if repeated >= MAX_REPEATED_CALLS:
+                return ("Me estaba repitiendo con la misma acción sin avanzar, así que "
+                        "he parado. Dime cómo seguir."), working
             working.append({"role": "assistant", "content": assistant, "tool_calls": native_calls})
             for call in native_calls:
                 internal = native_call_to_internal(call)
@@ -726,15 +779,33 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 result = _approve_and_run(console, workspace, session, tool_name, internal["args"])
                 working.append({
                     "role": "tool",
-                    "content": result,
+                    # Al modelo le va una versión acotada del resultado; el
+                    # usuario ha visto la salida completa en pantalla. Un
+                    # read_file de 100 000 caracteres desbordaba la ventana él solo.
+                    "content": clip_tool_output(result),
                     "tool_call_id": str(call.get("id") or ""),
                     "name": tool_name,
                 })
             continue
 
+        tool_calls = extract_all_tool_calls(assistant)
+
+        if not tool_calls and not assistant.strip():
+            # Respuesta vacía: casi siempre es el prompt desbordando la ventana
+            # (Ollama recorta por delante y el modelo se queda sin instrucciones).
+            # Se poda a la mitad del presupuesto y se reintenta antes de rendirse.
+            if empty_retries < 2:
+                empty_retries += 1
+                working, _ = fit_history(working, budget // 2)
+                print_note("El modelo devolvió una respuesta vacía; libero contexto "
+                           "y lo reintento.")
+                continue
+            return ("Me quedé sin respuesta del modelo (probablemente por contexto lleno). "
+                    "Usa /compact o /new y vuelve a pedírmelo."), working
+        empty_retries = 0
+
         working.append({"role": "assistant", "content": assistant})
 
-        tool_calls = extract_all_tool_calls(assistant)
         if not tool_calls:
             if not nudged and has_unclosed_call(assistant):
                 # Salida truncada a mitad de un tool-call: empujar a edit_file
@@ -749,16 +820,24 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 continue
             return assistant, working
 
+        signature = "|".join(_call_signature(c) for c in tool_calls)
+        repeated = repeated + 1 if signature == last_signature else 0
+        last_signature = signature
+        if repeated >= MAX_REPEATED_CALLS:
+            return ("Me estaba repitiendo con la misma acción sin avanzar, así que "
+                    "he parado. Dime cómo seguir."), working
+
         combined_results = []
         for call in tool_calls:
             tool_name = call.get("tool", "")
             args = call.get("args", {})
             result = _approve_and_run(console, workspace, session, tool_name, args)
-            combined_results.append(f"TOOL_RESULT {tool_name}: {result}")
+            combined_results.append(f"TOOL_RESULT {tool_name}: {clip_tool_output(result)}")
 
         working.append({"role": "user", "content": "\n".join(combined_results)})
 
-    return "No se pudo finalizar: se alcanzó el máximo de pasos del agente.", working
+    return (f"He llegado al tope de {MAX_AGENT_STEPS} pasos en un mismo turno y paro aquí "
+            "para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba."), working
 
 
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:

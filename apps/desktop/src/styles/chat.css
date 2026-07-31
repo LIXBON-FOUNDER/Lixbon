@@ -134,6 +134,17 @@
   font-size: 13.5px;
 }
 
+/* Aviso del IDE, no del modelo: se lee como una nota al margen, sin la carga
+   visual de un error (recortar contexto o parar por el tope es normal). */
+.msg--note {
+  align-self: stretch;
+  color: var(--ink-soft);
+  border-left: 2px solid color-mix(in srgb, var(--ink-soft) 45%, transparent);
+  padding: 4px 0 4px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 .msg__thinking {
   color: var(--ink-soft);
   animation: pulse 1.2s ease-in-out infinite;

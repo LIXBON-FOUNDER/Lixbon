@@ -17,7 +17,13 @@ def default_config() -> dict:
         "model": "",
         "key_model": "",  # Si está definido, la key es de modelo específico (no se puede cambiar)
         "max_context_messages": 12,
-        "context_window": 8192,  # tokens estimados de la ventana del modelo (para la barra de contexto)
+        # Ventana de contexto que se le pide a Ollama (num_ctx) y con la que se
+        # calcula el presupuesto del turno de agente. 8192 se quedaba corto: los
+        # resultados de las herramientas la llenaban en pocos pasos y el modelo
+        # se quedaba sin system prompt (Ollama recorta por delante), que es como
+        # el agente acababa congelado. Si el nodo va justo de VRAM, bájala con
+        # /context-window: el CLI se adapta al valor que haya.
+        "context_window": 16384,
         "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
         "auto_approve_tools": True,  # el agente escribe directo; /approve off para pedir confirmación

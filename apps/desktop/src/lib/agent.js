@@ -16,6 +16,7 @@ import { searchIndex } from './codebaseIndex';
 // agentProtocol.js para poder testearse sin Tauri; se re-exporta desde aquí.
 export {
   MAX_AGENT_STEPS,
+  MAX_REPEATED_CALLS,
   READ_ONLY_TOOLS,
   DEFAULT_CMD_ALLOWLIST,
   isAllowedCommand,

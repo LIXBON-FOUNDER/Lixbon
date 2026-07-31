@@ -30,6 +30,13 @@ export function ChatMessage({ message, streaming }) {
     return <div className="msg msg--error">{message.content}</div>;
   }
 
+  // Aviso del propio IDE (contexto recortado, tope de pasos…): no es del
+  // modelo ni un error, pero el usuario tiene que verlo — sin esto el agente
+  // se paraba y no había ninguna pista de por qué.
+  if (message.role === 'note') {
+    return <div className="msg msg--note">{message.content}</div>;
+  }
+
   return (
     <div className="msg msg--assistant">
       {message.thinking && (

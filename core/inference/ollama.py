@@ -347,6 +347,22 @@ async def stream_chat_openai(
                     if collector is not None:
                         collector["prompt_tokens"] = prompt_tokens
                         collector["completion_tokens"] = completion_tokens
+                    # Ventana desbordada: Ollama no da error, descarta el
+                    # principio del prompt (system prompt y tools incluidos) y el
+                    # modelo responde vacío tras un rato largo de prompt-eval.
+                    # Sin esta traza el síntoma en el cliente es un agente que se
+                    # congela sin motivo aparente.
+                    if num_ctx and prompt_tokens >= int(num_ctx) * 0.9:
+                        logger.warning(
+                            f"[stream] prompt de {prompt_tokens} tokens contra num_ctx={num_ctx}: "
+                            "Ollama va a recortar el principio del prompt (system prompt y tools). "
+                            f"model={model} completion={completion_tokens}"
+                        )
+                    elif not parts and not collected_tool_calls:
+                        logger.warning(
+                            f"[stream] el modelo no devolvió nada (model={model}, "
+                            f"prompt={prompt_tokens} tokens, num_ctx={num_ctx})"
+                        )
                     openai_chunk["usage"] = {
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,

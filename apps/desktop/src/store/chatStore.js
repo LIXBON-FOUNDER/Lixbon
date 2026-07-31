@@ -14,6 +14,7 @@ import { readFileContent } from '../lib/tauri';
 import { searchIndex } from '../lib/codebaseIndex';
 import {
   MAX_AGENT_STEPS,
+  MAX_REPEATED_CALLS,
   READ_ONLY_TOOLS,
   buildAgentSystemPrompt,
   DEFAULT_CMD_ALLOWLIST,
@@ -33,6 +34,7 @@ import {
 } from '../lib/agent';
 import { useEditorStore } from './editorStore';
 import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
+import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib/agentContext';
 import { describeImages } from '../lib/vision';
 import { roleWarning } from '../lib/modelRoles';
 
@@ -280,8 +282,10 @@ export const useChatStore = create((set, get) => ({
     const history = [...messages, userMsg];
     set({ messages: [...history, { role: 'assistant', content: '', sources: null }], streaming: true, conversationId: convId });
 
-    // Historial que ve el modelo (reconstrucción turno a turno en agentProtocol)
-    const modelMessages = [
+    // Historial que ve el modelo (reconstrucción turno a turno en agentProtocol).
+    // `let` y no `const`: si el contexto se desborda hay que poder sustituirlo
+    // por una versión podada a mitad de turno.
+    let modelMessages = [
       ...buildModelHistory(history.slice(0, -1), agentActive),
       { role: 'user', content: modelText },
     ];
@@ -309,6 +313,17 @@ export const useChatStore = create((set, get) => ({
     let nudged = false;
     // Tool-calling nativo (opt-in): solo se envían los schemas en modo agente.
     const useNative = agentActive && get().nativeTools;
+    // Bucles y desbordamientos: el turno no puede acabar en silencio por
+    // ninguno de los dos (era exactamente lo que parecía "el agente se cuelga").
+    let lastSignature = '';
+    let repeated = 0;
+    let emptyRetries = 0;
+    let prunedWarned = false;
+    const signatureOf = (calls) =>
+      calls.map((c) => JSON.stringify({ t: c.tool, a: c.args || {} }).slice(0, 400)).join('|');
+    const stopWith = (text) => {
+      patchLast({ content: text, thinking: null, generating: null });
+    };
 
     try {
       for (let step = 0; step < MAX_AGENT_STEPS; step++) {
@@ -317,14 +332,39 @@ export const useChatStore = create((set, get) => ({
         let nativeCalls = [];  // tool_calls nativos de esta respuesta
         const liveThinking = (inline) =>
           [reasoningAcc, inline].filter(Boolean).join('\n').trim();
+
+        // El prompt tiene que caber en la ventana CON el system prompt y las
+        // definiciones de herramientas dentro. Si se pasa, Ollama descarta el
+        // principio (justo esos dos), el modelo se queda sin instrucciones y
+        // responde vacío: es la causa de que el agente se congelara a los
+        // pocos minutos de trabajo. Se poda el historial, nunca el system.
+        const tools = useNative ? TOOL_SCHEMAS : null;
+        const systemMsg = modelMessages[0]?.role === 'system' ? [modelMessages[0]] : [];
+        const body = modelMessages.slice(systemMsg.length);
+        const budget = promptBudget(appState.contextWindow, tools, estimateTokens(systemMsg));
+        const fitted = fitHistory(body, budget);
+        if (fitted.pruned && !prunedWarned) {
+          prunedWarned = true;
+          // La burbuja vacía en curso se sustituye por la nota y se abre otra:
+          // así el aviso queda ANTES de lo que el modelo vaya a responder.
+          set({
+            messages: [...get().messages.slice(0, -1), {
+              role: 'note',
+              content: 'La conversación llenaba la ventana de contexto: se han recortado '
+                + 'los pasos más antiguos para poder seguir.',
+            }],
+          });
+          pushMsg({ role: 'assistant', content: '', sources: null });
+        }
+
         await streamChatCompletion({
           serverUrl,
           apiKey,
           model: currentModel,
-          messages: modelMessages,
+          messages: [...systemMsg, ...fitted.messages],
           conversationId: convId,
           signal,
-          tools: useNative ? TOOL_SCHEMAS : null,
+          tools,
           numCtx: appState.contextWindow,
           onDelta: (delta) => {
             raw += delta;
@@ -363,6 +403,36 @@ export const useChatStore = create((set, get) => ({
           set({ messages: get().messages.slice(0, -1) });
           break;
         }
+
+        // Respuesta completamente vacía: casi siempre es el prompt desbordando
+        // la ventana (Ollama recorta por delante y el modelo pierde el system
+        // prompt). Se libera contexto y se reintenta antes de darse por vencido:
+        // rendirse aquí en silencio es lo que dejaba al agente "colgado".
+        if (!calls.length && !spoken.trim() && !fullThinking) {
+          if (emptyRetries < 2) {
+            emptyRetries += 1;
+            const relief = fitHistory(modelMessages.slice(systemMsg.length),
+                                      Math.floor(budget / 2));
+            modelMessages = [...systemMsg, ...relief.messages];
+            continue;
+          }
+          stopWith('Me quedé sin respuesta del modelo, probablemente por contexto lleno. '
+            + 'Empieza un chat nuevo o reduce el tamaño de los archivos que estoy leyendo.');
+          break;
+        }
+        emptyRetries = 0;
+
+        if (calls.length) {
+          const signature = signatureOf(calls);
+          repeated = signature === lastSignature ? repeated + 1 : 0;
+          lastSignature = signature;
+          if (repeated >= MAX_REPEATED_CALLS) {
+            stopWith('Me estaba repitiendo con la misma acción sin avanzar, así que he parado. '
+              + 'Dime cómo seguir.');
+            break;
+          }
+        }
+
         patchLast({ content: prose, thinking: fullThinking, generating: null });
         if (!calls.length) {
           // Salida truncada a mitad de un tool-call (archivo demasiado grande):
@@ -409,11 +479,21 @@ export const useChatStore = create((set, get) => ({
             content: result.display, change: result.change, snapshot: result.snapshot,
             full: (result.output || '').slice(0, 4000), // para replay del historial
           });
-          results.push(`TOOL_RESULT ${call.tool}: ${result.output}`);
+          // Al modelo le va una versión acotada; el usuario ve la salida
+          // completa en su fila. Un read_file de 100 000 caracteres desbordaba
+          // la ventana de contexto él solo.
+          results.push(`TOOL_RESULT ${call.tool}: ${clipToolOutput(result.output)}`);
         }
         if (signal.aborted) break;
         modelMessages.push({ role: 'user', content: results.join('\n') });
         pushMsg({ role: 'assistant', content: '', sources: null });
+
+        if (step === MAX_AGENT_STEPS - 1) {
+          // El tope se alcanzaba borrando la burbuja vacía: el agente se paraba
+          // a media tarea sin una sola pista de por qué.
+          stopWith(`He llegado al tope de ${MAX_AGENT_STEPS} pasos en un mismo turno y paro `
+            + 'aquí para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba.');
+        }
       }
     } catch (err) {
       if (err.name === 'AbortError') {

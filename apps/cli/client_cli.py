@@ -581,7 +581,13 @@ def default_config() -> dict:
         "model": "",
         "key_model": "",  # Si está definido, la key es de modelo específico (no se puede cambiar)
         "max_context_messages": 12,
-        "context_window": 8192,  # tokens estimados de la ventana del modelo (para la barra de contexto)
+        # Ventana de contexto que se le pide a Ollama (num_ctx) y con la que se
+        # calcula el presupuesto del turno de agente. 8192 se quedaba corto: los
+        # resultados de las herramientas la llenaban en pocos pasos y el modelo
+        # se quedaba sin system prompt (Ollama recorta por delante), que es como
+        # el agente acababa congelado. Si el nodo va justo de VRAM, bájala con
+        # /context-window: el CLI se adapta al valor que haya.
+        "context_window": 16384,
         "mode": "agent",  # por defecto el modelo puede crear/editar archivos (con aprobación)
         "workspace": str(Path.cwd()),
         "auto_approve_tools": True,  # el agente escribe directo; /approve off para pedir confirmación
@@ -2576,6 +2582,198 @@ class RemoteLink:
         return "allow" if decision == "allow" else "deny"
 
 # ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/context.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Presupuesto de la ventana de contexto del turno de agente.
+
+Por qué existe: en modo agent el historial NO son solo los mensajes del chat;
+son también los resultados de cada herramienta. Un `read_file` puede aportar
+100 000 caracteres y un `run_command` varios miles, así que en pocos pasos el
+prompt supera el `num_ctx` que se le pide a Ollama.
+
+Y cuando eso pasa Ollama no da error: descarta el principio del prompt, que es
+justo donde viven el system prompt y las definiciones de herramientas. El
+modelo se queda sin instrucciones y sin tools, "razona" un rato (el tiempo de
+reprocesar toda la ventana, decenas de segundos) y devuelve una respuesta vacía
+o sin ninguna llamada. El turno termina en silencio y el agente parece
+congelado — y sigue igual con el mensaje siguiente, porque el historial no ha
+adelgazado.
+
+Aquí se resuelve en dos niveles:
+
+1. `clip_tool_output` recorta lo que un resultado de herramienta APORTA AL
+   MODELO (el usuario sigue viendo la salida completa en pantalla).
+2. `fit_history` poda mensajes enteros —por fronteras seguras, sin romper el
+   round-trip de tool-calling— hasta que el prompt cabe en el presupuesto.
+"""
+
+# Fracción de la ventana que puede ocupar el PROMPT. El resto queda para que el
+# modelo genere: sin margen, un prompt que "cabe justo" deja al modelo sin sitio
+# para responder y la respuesta sale vacía o truncada.
+PROMPT_BUDGET_RATIO = 0.65
+
+# Estimación conservadora. El código y el JSON de las herramientas tienen peor
+# ratio que la prosa (~3 chars/token frente a ~4), y quedarse corto en la
+# estimación es lo que provoca el desbordamiento que este módulo evita.
+CHARS_PER_TOKEN = 3.2
+
+# Lo que un resultado de herramienta puede aportar al contexto del modelo.
+# Suficiente para que razone sobre un archivo o la salida de un comando, lejos
+# del orden de magnitud que reventaba la ventana.
+MAX_TOOL_OUTPUT_CHARS = 6000
+
+# Los resultados que ya no son el último paso valen aún menos: el modelo suele
+# necesitar el detalle solo del turno que está resolviendo.
+MAX_OLD_TOOL_OUTPUT_CHARS = 1200
+
+# Mensajes recientes que nunca se podan (el paso en curso y su contexto
+# inmediato): sin ellos el modelo pierde el hilo de lo que acaba de hacer.
+KEEP_RECENT = 6
+
+CLIP_MARK = "\n…[recortado: {omitted} caracteres omitidos]…\n"
+PRUNE_NOTE = ("[Nota del sistema: los pasos más antiguos de este turno se han "
+              "recortado para no desbordar la ventana de contexto. Si necesitas "
+              "algo de un archivo que ya leíste, vuelve a leerlo.]")
+
+
+def estimate_tokens(messages: list[dict]) -> int:
+    """Tokens aproximados que ocupa una lista de mensajes.
+
+    Incluye el JSON de los `tool_calls`: en modo nativo el argumento `content`
+    de un write_file viaja ahí y es lo más pesado del mensaje.
+    """
+    chars = 0
+    for m in messages:
+        chars += len(m.get("content") or "")
+        calls = m.get("tool_calls")
+        if calls:
+            chars += sum(len(str(c)) for c in calls)
+        # Cada mensaje paga además los tokens del template (rol, separadores).
+        chars += 16
+    return int(chars / CHARS_PER_TOKEN)
+
+
+def tools_tokens(tools: list[dict] | None) -> int:
+    """Coste de las definiciones de herramientas, que Ollama inyecta en el
+    template. Son ~700 tokens que hay que descontar del presupuesto."""
+    if not tools:
+        return 0
+    return int(len(str(tools)) / CHARS_PER_TOKEN)
+
+
+def clip_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
+    """Recorta por el MEDIO un resultado de herramienta.
+
+    Por el medio y no por el final a propósito: en un `read_file` importa el
+    principio (imports, cabecera) y en un `run_command` importa el final (el
+    error y el código de salida). Cortando por el medio se conservan ambos.
+    """
+    if not text or len(text) <= limit:
+        return text
+    head = int(limit * 0.6)
+    tail = limit - head
+    omitted = len(text) - limit
+    return text[:head] + CLIP_MARK.format(omitted=omitted) + text[-tail:]
+
+
+def _is_tool_result(msg: dict) -> bool:
+    """¿El mensaje es el resultado de una herramienta?
+
+    Cubre los dos protocolos: `role="tool"` (tool-calling nativo) y el mensaje
+    de usuario `TOOL_RESULT …` (protocolo de texto).
+    """
+    if msg.get("role") == "tool":
+        return True
+    return (msg.get("role") == "user"
+            and (msg.get("content") or "").lstrip().startswith("TOOL_RESULT"))
+
+
+def shrink_old_results(messages: list[dict],
+                       keep_recent: int = KEEP_RECENT,
+                       limit: int = MAX_OLD_TOOL_OUTPUT_CHARS) -> list[dict]:
+    """Recorta más los resultados de herramienta que ya no son recientes.
+
+    Es la poda barata: conserva la ESTRUCTURA del turno (el modelo sigue viendo
+    qué hizo y en qué orden) y solo adelgaza el detalle que ya no necesita.
+    """
+    if len(messages) <= keep_recent:
+        return messages
+    cut = len(messages) - keep_recent
+    out = []
+    for i, msg in enumerate(messages):
+        if i < cut and _is_tool_result(msg):
+            content = msg.get("content") or ""
+            if len(content) > limit:
+                msg = {**msg, "content": clip_tool_output(content, limit)}
+        out.append(msg)
+    return out
+
+
+def _safe_start(messages: list[dict], index: int) -> int:
+    """Primer índice ≥ `index` en el que se puede empezar sin dejar huérfano un
+    resultado de herramienta.
+
+    Un `role="tool"` (o un `TOOL_RESULT`) suelto al principio, sin el assistant
+    que lo pidió, rompe el template del modelo — que es otra forma de acabar con
+    una respuesta vacía.
+    """
+    while index < len(messages) and _is_tool_result(messages[index]):
+        index += 1
+    return index
+
+
+def fit_history(messages: list[dict], budget_tokens: int,
+                keep_recent: int = KEEP_RECENT) -> tuple[list[dict], bool]:
+    """Devuelve (historial que cabe en el presupuesto, si hubo que podar).
+
+    Estrategia, de menos a más destructiva:
+      1. recortar el detalle de los resultados antiguos,
+      2. soltar los mensajes más antiguos conservando SIEMPRE la petición
+         original del usuario (sin ella el modelo olvida qué se le pidió),
+      3. como último recurso, quedarse con los últimos mensajes.
+
+    El primer mensaje se conserva aparte y se marca con una nota, para que el
+    modelo sepa que el hueco es un recorte y no que nunca pasó nada.
+    """
+    if budget_tokens <= 0 or not messages:
+        return messages, False
+
+    working = shrink_old_results(messages, keep_recent)
+    if estimate_tokens(working) <= budget_tokens:
+        return working, working is not messages and working != messages
+
+    # El primer mensaje del usuario es la petición que se está resolviendo:
+    # viaja siempre, aunque todo lo de en medio se caiga.
+    first = working[0] if working and working[0].get("role") == "user" else None
+    head = [first, {"role": "user", "content": PRUNE_NOTE}] if first else []
+    head_tokens = estimate_tokens(head)
+
+    # Se avanza el corte hasta que el resto quepa.
+    start = 1 if first else 0
+    while start < len(working):
+        start = _safe_start(working, start)
+        tail = working[start:]
+        if not tail:
+            break
+        if head_tokens + estimate_tokens(tail) <= budget_tokens:
+            return head + tail, True
+        start += 1
+
+    # Nada cabe con la cabecera: se salva lo último, que es lo que el modelo
+    # necesita para dar el siguiente paso.
+    tail = working[-keep_recent:] if len(working) > keep_recent else working
+    tail = tail[_safe_start(tail, 0):]
+    return ([{"role": "user", "content": PRUNE_NOTE}] + tail) if tail else working, True
+
+
+def prompt_budget(context_window: int, tools: list[dict] | None = None,
+                  system_tokens: int = 0) -> int:
+    """Tokens disponibles para el HISTORIAL, descontando lo que ya ocupan el
+    system prompt y las definiciones de herramientas."""
+    total = int(max(context_window, 1) * PROMPT_BUDGET_RATIO)
+    return max(total - tools_tokens(tools) - system_tokens, 512)
+
+# ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/agent.py
 # ──────────────────────────────────────────────────────────────────────────
 """Modo agent: herramientas locales de código y loop de ejecución.
@@ -2598,7 +2796,15 @@ import subprocess
 from pathlib import Path
 
 
-MAX_AGENT_STEPS = 12
+# Tope de pasos por turno. Es un cortafuegos contra bucles, NO un presupuesto de
+# trabajo: una tarea real (leer varios archivos, editarlos, ejecutar los tests y
+# corregir) se come 12 pasos enseguida, y antes el turno moría ahí sin decir
+# nada. Ahora hay margen de sobra y, si se alcanza, se dice por qué.
+MAX_AGENT_STEPS = 40
+
+# Llamadas idénticas seguidas que se toleran antes de romper el bucle: un modelo
+# atascado repite la misma herramienta con los mismos argumentos indefinidamente.
+MAX_REPEATED_CALLS = 3
 
 READ_ONLY_TOOLS = {"list_files", "read_file", "search"}
 
@@ -3261,34 +3467,72 @@ def clean_prose(text: str) -> str:
 
 # ── Loop del agente ─────────────────────────────────────────────────────────
 
+def _call_signature(call: dict) -> str:
+    """Huella de una llamada para detectar que el modelo se repite."""
+    return json.dumps({"t": call.get("tool", ""), "a": call.get("args", {})},
+                      sort_keys=True, ensure_ascii=False)[:400]
+
+
 def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                    stream_assistant) -> tuple[str, list[dict]]:
     """Ejecuta un turno de agente con aprobación interactiva.
 
-    - `session`: estado mutable con `auto_approve: bool` y `native_tools: bool`
-      (este último lo apaga la app si el modelo no soporta tools nativas).
+    - `session`: estado mutable con `auto_approve: bool`, `native_tools: bool`
+      (este último lo apaga la app si el modelo no soporta tools nativas) y
+      `context_window: int` (la ventana que se le pide a Ollama).
     - `stream_assistant(messages, tools) -> (texto, tool_calls_nativos)`: lo
       aporta la app; muestra el texto del modelo en vivo y devuelve la respuesta
       completa junto con los tool_calls estructurados que haya emitido.
     Devuelve (respuesta_final, history_actualizado).
+
+    El turno solo termina cuando el modelo deja de pedir herramientas, cuando se
+    detecta que está atascado o cuando se agota el tope de pasos — y en los dos
+    últimos casos lo dice. Nunca se queda callado a mitad de trabajo.
     """
     console = make_console()
     working = history[:]
+    window = int(session.get("context_window") or 8192)
 
     nudged = False
-    for _ in range(MAX_AGENT_STEPS):
+    empty_retries = 0     # respuestas vacías consecutivas ya reintentadas
+    last_signature = ""   # última tanda de llamadas, para detectar bucles
+    repeated = 0
+    pruned_warned = False
+
+    for step in range(MAX_AGENT_STEPS):
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
         native = session.get("native_tools", True)
         system_msg = {"role": "system", "content": (
             build_native_system_prompt(workspace) if native
             else build_agent_system_prompt(workspace))}
-        messages = [system_msg] + (working if native else sanitize_for_plain_chat(working))
-        raw, native_calls = stream_assistant(messages, TOOL_SCHEMAS if native else None)
+        tools = TOOL_SCHEMAS if native else None
+
+        body = working if native else sanitize_for_plain_chat(working)
+        # El prompt tiene que caber en la ventana CON el system prompt y las
+        # definiciones de herramientas dentro: si se pasa, Ollama descarta el
+        # principio (justo esos dos) y el modelo responde vacío. Podar aquí es
+        # lo que impide que el agente se congele a los pocos minutos.
+        budget = prompt_budget(window, tools, estimate_tokens([system_msg]))
+        body, pruned = fit_history(body, budget)
+        if pruned and not pruned_warned:
+            pruned_warned = True
+            print_note("La conversación llenaba la ventana de contexto: se han "
+                       "recortado los pasos más antiguos para poder seguir.")
+
+        messages = [system_msg] + body
+        raw, native_calls = stream_assistant(messages, tools)
         # Sin el corte, el modelo "ejecutaría" resultados que él mismo inventó
         assistant = truncate_fabricated(raw)
 
         if native_calls:
+            empty_retries = 0
+            signature = "|".join(_call_signature(native_call_to_internal(c)) for c in native_calls)
+            repeated = repeated + 1 if signature == last_signature else 0
+            last_signature = signature
+            if repeated >= MAX_REPEATED_CALLS:
+                return ("Me estaba repitiendo con la misma acción sin avanzar, así que "
+                        "he parado. Dime cómo seguir."), working
             working.append({"role": "assistant", "content": assistant, "tool_calls": native_calls})
             for call in native_calls:
                 internal = native_call_to_internal(call)
@@ -3296,15 +3540,33 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 result = _approve_and_run(console, workspace, session, tool_name, internal["args"])
                 working.append({
                     "role": "tool",
-                    "content": result,
+                    # Al modelo le va una versión acotada del resultado; el
+                    # usuario ha visto la salida completa en pantalla. Un
+                    # read_file de 100 000 caracteres desbordaba la ventana él solo.
+                    "content": clip_tool_output(result),
                     "tool_call_id": str(call.get("id") or ""),
                     "name": tool_name,
                 })
             continue
 
+        tool_calls = extract_all_tool_calls(assistant)
+
+        if not tool_calls and not assistant.strip():
+            # Respuesta vacía: casi siempre es el prompt desbordando la ventana
+            # (Ollama recorta por delante y el modelo se queda sin instrucciones).
+            # Se poda a la mitad del presupuesto y se reintenta antes de rendirse.
+            if empty_retries < 2:
+                empty_retries += 1
+                working, _ = fit_history(working, budget // 2)
+                print_note("El modelo devolvió una respuesta vacía; libero contexto "
+                           "y lo reintento.")
+                continue
+            return ("Me quedé sin respuesta del modelo (probablemente por contexto lleno). "
+                    "Usa /compact o /new y vuelve a pedírmelo."), working
+        empty_retries = 0
+
         working.append({"role": "assistant", "content": assistant})
 
-        tool_calls = extract_all_tool_calls(assistant)
         if not tool_calls:
             if not nudged and has_unclosed_call(assistant):
                 # Salida truncada a mitad de un tool-call: empujar a edit_file
@@ -3319,16 +3581,24 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 continue
             return assistant, working
 
+        signature = "|".join(_call_signature(c) for c in tool_calls)
+        repeated = repeated + 1 if signature == last_signature else 0
+        last_signature = signature
+        if repeated >= MAX_REPEATED_CALLS:
+            return ("Me estaba repitiendo con la misma acción sin avanzar, así que "
+                    "he parado. Dime cómo seguir."), working
+
         combined_results = []
         for call in tool_calls:
             tool_name = call.get("tool", "")
             args = call.get("args", {})
             result = _approve_and_run(console, workspace, session, tool_name, args)
-            combined_results.append(f"TOOL_RESULT {tool_name}: {result}")
+            combined_results.append(f"TOOL_RESULT {tool_name}: {clip_tool_output(result)}")
 
         working.append({"role": "user", "content": "\n".join(combined_results)})
 
-    return "No se pudo finalizar: se alcanzó el máximo de pasos del agente.", working
+    return (f"He llegado al tope de {MAX_AGENT_STEPS} pasos en un mismo turno y paro aquí "
+            "para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba."), working
 
 
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
@@ -3403,6 +3673,241 @@ def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> s
     return result
 
 # ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/sessions.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Historial persistente de sesiones del CLI (~/.lixbon/sessions/).
+
+Antes no existía: `/history` listaba los mensajes de la sesión EN CURSO para
+reenviar uno, y al cerrar el CLI se perdía todo. Cada conversación es ahora un
+archivo propio con sus mensajes, sus llamadas a herramientas y sus fechas, y se
+puede volver a abrir tal cual — igual que en Claude, ChatGPT o Gemini.
+
+Formato: un JSON por sesión más un `index.json` con las cabeceras, para poder
+listar sin abrir (ni cargar en memoria) conversaciones enteras. El índice es
+caché reconstruible: si se pierde o se corrompe, `rebuild_index()` lo rehace
+leyendo los archivos.
+"""
+import json
+import time
+import uuid
+from pathlib import Path
+
+# Tope por mensaje al guardar: un `read_file` de un archivo grande no tiene por
+# qué ocupar megas en disco para siempre. Es mucho más de lo que se le manda al
+# modelo, así que el transcript se lee entero sin sorpresas.
+MAX_STORED_CHARS = 20000
+
+MAX_SESSIONS = 200  # las más antiguas se van borrando solas
+
+
+def _now() -> float:
+    return time.time()
+
+
+def new_session_id() -> str:
+    return str(uuid.uuid4())
+
+
+def relative_time(timestamp: float) -> str:
+    """«ahora», «hace 5 horas», «hace 2 días» — como en cualquier app de chat."""
+    delta = max(0, int(_now() - (timestamp or 0)))
+    if delta < 60:
+        return "ahora"
+    if delta < 3600:
+        minutes = delta // 60
+        return f"hace {minutes} min"
+    if delta < 86400:
+        hours = delta // 3600
+        return f"hace {hours} hora{'s' if hours > 1 else ''}"
+    days = delta // 86400
+    if days < 30:
+        return f"hace {days} día{'s' if days > 1 else ''}"
+    months = days // 30
+    if months < 12:
+        return f"hace {months} mes{'es' if months > 1 else ''}"
+    years = days // 365
+    return f"hace {years} año{'s' if years > 1 else ''}"
+
+
+def _trim(messages: list[dict]) -> list[dict]:
+    out = []
+    for msg in messages:
+        content = msg.get("content") or ""
+        if len(content) > MAX_STORED_CHARS:
+            msg = {**msg, "content": content[:MAX_STORED_CHARS] + "\n…[truncado al guardar]"}
+        # Las imágenes en base64 no se persisten: multiplicarían el tamaño del
+        # archivo por diez y no se pueden reenviar sin el original de todos modos.
+        if msg.get("images"):
+            msg = {k: v for k, v in msg.items() if k != "images"}
+            msg["content"] = (msg.get("content") or "") + " [imagen adjunta]"
+        out.append(msg)
+    return out
+
+
+def derive_title(messages: list[dict]) -> str:
+    """Título de emergencia a partir del primer mensaje del usuario.
+
+    El bueno lo pone el servidor (`/api/conversations/{id}/generate-title`); este
+    es el que evita una lista de conversaciones todas llamadas «Sin título».
+    """
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        text = " ".join((msg.get("content") or "").split())
+        if not text or text.startswith("TOOL_RESULT"):
+            continue
+        return text[:60] + ("…" if len(text) > 60 else "")
+    return "Sin título"
+
+
+class SessionStore:
+    """Sesiones guardadas en disco. Ninguna operación puede tumbar el CLI: el
+    historial es una comodidad, no algo por lo que valga la pena perder un turno."""
+
+    def __init__(self, base_dir: Path):
+        self.dir = Path(base_dir) / "sessions"
+        self.index_file = self.dir / "index.json"
+
+    # ── lectura ──────────────────────────────────────────────────────────
+
+    def _read_index(self) -> list[dict]:
+        try:
+            data = json.loads(self.index_file.read_text(encoding="utf-8-sig"))
+            return [s for s in data.get("sessions", []) if isinstance(s, dict) and s.get("id")]
+        except Exception:
+            return []
+
+    def list_sessions(self, limit: int = 50) -> "list[dict]":
+        """Cabeceras de las sesiones, la más reciente primero."""
+        items = self._read_index()
+        if not items and self.dir.is_dir():
+            items = self.rebuild_index()
+        items.sort(key=lambda s: s.get("updated_at") or 0, reverse=True)
+        return items[:limit]
+
+    def load(self, session_id: str) -> dict | None:
+        """Sesión completa (con sus mensajes) o None si ya no está."""
+        path = self._path(session_id)
+        try:
+            return json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return None
+
+    # ── escritura ────────────────────────────────────────────────────────
+
+    def _path(self, session_id: str) -> Path:
+        return self.dir / f"{session_id}.json"
+
+    def save(self, session_id: str, messages: list[dict], *, title: str = "",
+             model: str = "", mode: str = "", workspace: str = "",
+             tokens: int = 0) -> None:
+        """Crea o actualiza una sesión. Sin mensajes reales no se guarda nada:
+        abrir el CLI y cerrarlo no debe dejar una conversación vacía en la lista."""
+        real = [m for m in messages
+                if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
+                and not (m.get("content") or "").lstrip().startswith("TOOL_RESULT")]
+        if not real:
+            return
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            existing = self.load(session_id) or {}
+            created = existing.get("created_at") or _now()
+            record = {
+                "id": session_id,
+                "title": title or existing.get("title") or derive_title(messages),
+                "created_at": created,
+                "updated_at": _now(),
+                "model": model or existing.get("model", ""),
+                "mode": mode or existing.get("mode", ""),
+                "workspace": workspace or existing.get("workspace", ""),
+                "tokens": tokens or existing.get("tokens", 0),
+                "messages": _trim(messages),
+            }
+            tmp = self._path(session_id).with_suffix(".tmp")
+            tmp.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(self._path(session_id))  # atómico: nunca un JSON a medias
+            self._update_index(record)
+        except OSError:
+            pass  # disco lleno o sin permisos: el turno sigue igual
+
+    def _header(self, record: dict) -> dict:
+        """Lo que va al índice: todo menos los mensajes."""
+        counts = {"user": 0, "assistant": 0, "tool": 0}
+        for msg in record.get("messages", []):
+            role = msg.get("role")
+            if role == "tool" or msg.get("tool_calls"):
+                counts["tool"] += 1
+            elif role in counts:
+                counts[role] += 1
+        return {
+            "id": record["id"],
+            "title": record["title"],
+            "created_at": record["created_at"],
+            "updated_at": record["updated_at"],
+            "model": record.get("model", ""),
+            "mode": record.get("mode", ""),
+            "workspace": record.get("workspace", ""),
+            "tokens": record.get("tokens", 0),
+            "messages": counts["user"] + counts["assistant"],
+            "user_messages": counts["user"],
+            "tools": counts["tool"],
+        }
+
+    def _update_index(self, record: dict) -> None:
+        items = [s for s in self._read_index() if s.get("id") != record["id"]]
+        items.append(self._header(record))
+        items.sort(key=lambda s: s.get("updated_at") or 0, reverse=True)
+        for stale in items[MAX_SESSIONS:]:
+            try:
+                self._path(stale["id"]).unlink(missing_ok=True)
+            except OSError:
+                pass
+        items = items[:MAX_SESSIONS]
+        try:
+            tmp = self.index_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"sessions": items}, ensure_ascii=False, indent=1),
+                           encoding="utf-8")
+            tmp.replace(self.index_file)
+        except OSError:
+            pass
+
+    def rebuild_index(self) -> list[dict]:
+        """Rehace el índice leyendo los archivos (arranque tras una versión que
+        no lo escribía, o índice corrupto)."""
+        items = []
+        try:
+            for path in self.dir.glob("*.json"):
+                if path.name == "index.json":
+                    continue
+                try:
+                    items.append(self._header(json.loads(path.read_text(encoding="utf-8-sig"))))
+                except Exception:
+                    continue
+        except OSError:
+            return []
+        items.sort(key=lambda s: s.get("updated_at") or 0, reverse=True)
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            self.index_file.write_text(json.dumps({"sessions": items}, ensure_ascii=False, indent=1),
+                                       encoding="utf-8")
+        except OSError:
+            pass
+        return items
+
+    def delete(self, session_id: str) -> bool:
+        try:
+            self._path(session_id).unlink(missing_ok=True)
+        except OSError:
+            return False
+        items = [s for s in self._read_index() if s.get("id") != session_id]
+        try:
+            self.index_file.write_text(json.dumps({"sessions": items}, ensure_ascii=False, indent=1),
+                                       encoding="utf-8")
+        except OSError:
+            pass
+        return True
+
+# ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/commands.py
 # ──────────────────────────────────────────────────────────────────────────
 """Slash-commands: especificación, autocompletado con menú y adjuntos de imagen."""
@@ -3423,13 +3928,13 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("mode", "[ask|agent|delegate]", "Cambiar modo de trabajo", "conversación"),
     ("new", "", "Empezar una conversación nueva", "conversación"),
     ("compact", "", "Compactar la conversación para liberar contexto", "conversación"),
-    ("history", "", "Ver los mensajes de la sesión y reenviar uno", "conversación"),
+    ("history", "[mensajes]", "Ver y reabrir conversaciones anteriores", "conversación"),
     ("image", "<ruta>", "Adjuntar una imagen al próximo mensaje (también @ruta)", "conversación"),
     ("paste", "", "Pegar la imagen del portapapeles (atajo: Alt+V)", "conversación"),
     ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),
-    ("clear", "", "Limpiar la pantalla", "conversación"),
+    ("clear", "", "Vaciar el contexto y empezar de cero", "conversación"),
     # ── agente ──────────────────────────────────────────────────────────
     ("approve", "[on|off]", "Auto-aprobar herramientas del agente", "agente"),
     ("tools", "", "Ver las herramientas que puede usar el agente", "agente"),
@@ -3628,6 +4133,10 @@ class ChatApp:
             # Tool-calling nativo del modelo (modo agent). Se apaga solo si el
             # modelo no lo soporta; entonces se usa el protocolo de texto.
             "native_tools": bool(self.cfg.get("native_tools", True)),
+            # Ventana con la que el loop del agente calcula su presupuesto de
+            # contexto. Es la misma que viaja como num_ctx a Ollama: si no
+            # coincidieran, el agente podaría de más o de menos.
+            "context_window": int(self.cfg.get("context_window", 16384)),
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
@@ -3643,6 +4152,9 @@ class ChatApp:
         self.history: list[dict] = []
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
+        # Historial persistente: cada conversación sobrevive al cierre del CLI y
+        # se puede reabrir con /history.
+        self.sessions = SessionStore(CONFIG_DIR)
         self.models_cache: list[str] = []
         # Modelo que el gateway asigna al rol `chat` (GET /api/model-roles). Sirve
         # para no preguntar cuál usar cuando el servidor ya lo tiene decidido.
@@ -3695,13 +4207,24 @@ class ChatApp:
             pass  # la barra nunca puede tumbar la sesión
 
     def _estimate_context(self) -> tuple[int, float]:
-        # Mide lo que se ENVIARÁ al modelo (últimos max_context_messages),
-        # no todo el historial: es lo que de verdad ocupa la ventana.
-        sent = self._context_messages()
+        # Mide lo que se ENVIARÁ al modelo, que NO es lo mismo en cada modo: en
+        # ask son los últimos max_context_messages, pero en agent viaja el turno
+        # entero (con los resultados de las herramientas, que es lo que pesa) más
+        # el system prompt del agente. Medir solo el chat plano hacía que la
+        # barra marcara 20 % con la ventana ya desbordada.
+        if self.mode == "agent":
+            sent = self.history
+            extra = estimate_tokens([{"role": "system",
+                                      "content": build_native_system_prompt(self.workspace)}])
+            extra += tools_tokens(TOOL_SCHEMAS) if self.session.get("native_tools", True) else 0
+        else:
+            sent = self._context_messages()
+            extra = 0
         chars = sum(len(m.get("content", "")) for m in sent)
-        tokens = int(chars / max(self.chars_per_token, 1.0))
+        chars += sum(len(str(m.get("tool_calls") or "")) for m in sent)
+        tokens = int(chars / max(self.chars_per_token, 1.0)) + extra
         tokens += TOKENS_PER_IMAGE * sum(len(m.get("images") or []) for m in sent)
-        window = max(int(self.cfg.get("context_window", 8192)), 1)
+        window = max(int(self.cfg.get("context_window", 16384)), 1)
         return tokens, min(100.0, tokens * 100.0 / window)
 
     def _register_usage(self, usage: dict) -> None:
@@ -3789,6 +4312,7 @@ class ChatApp:
         try:
             return self._prompt_loop()
         finally:
+            self._persist_session()  # salir del CLI no pierde la conversación
             release_status_line()
 
     def _render_identity(self) -> None:
@@ -3850,6 +4374,89 @@ class ChatApp:
             self.cfg["plan_name"] = plan
             save_config(self.cfg)
         return "auth" if auth_failed else "ok"
+
+    # ── sesiones (conversaciones persistentes) ───────────────────────────
+
+    def _persist_session(self) -> None:
+        """Guarda la conversación en curso en el historial local.
+
+        Se llama al final de cada turno y al salir, así que cerrar la terminal
+        (o que se caiga) nunca pierde lo hablado.
+        """
+        self.sessions.save(
+            self.conversation_id, self.history,
+            title=self.title, model=self.model, mode=self.mode,
+            workspace=str(self.workspace), tokens=self.session_tokens,
+        )
+
+    def _new_session(self, label: str = "conversación nueva") -> None:
+        """Empieza una conversación DE VERDAD nueva.
+
+        Nuevo id de conversación (el servidor abre otra), contexto vacío y
+        pantalla limpia. Antes `/clear` solo borraba lo visible: el modelo
+        seguía recibiendo el contexto anterior y no había forma real de
+        empezar de cero sin cerrar el CLI.
+        """
+        self._persist_session()  # lo anterior no se pierde: queda en /history
+        self.history = []
+        self.session_tokens = 0
+        self.conversation_id = str(uuid.uuid4())
+        self.title = ""  # la nueva conversación se titulará sola al responder
+        self.pending_images = []
+        self._set_tab_title()
+        clear_screen()
+        self._render_identity()
+        rule(self.console, label)
+        self._paint_status()  # el 2J del clear también borró la fila reservada
+        self._refresh_status()
+
+    def _open_session(self, session_id: str) -> bool:
+        """Reabre una conversación guardada: contexto, id y transcript."""
+        record = self.sessions.load(session_id)
+        if not record:
+            print_error("Esa conversación ya no está disponible.")
+            return False
+        self._persist_session()  # la actual se guarda antes de cambiar
+        self.history = list(record.get("messages") or [])
+        self.conversation_id = record.get("id") or session_id
+        self.title = record.get("title") or ""
+        self.session_tokens = int(record.get("tokens") or 0)
+        self.pending_images = []
+        self._set_tab_title()
+        clear_screen()
+        self._render_identity()
+        rule(self.console, self.title or "conversación")
+        self._replay_transcript()
+        self._refresh_status()
+        return True
+
+    def _replay_transcript(self) -> None:
+        """Repinta una conversación cargada del historial.
+
+        No reproduce la fontanería del turno (diffs, aprobaciones): las
+        herramientas se resumen en una línea cada una, que es lo que hace
+        legible una conversación larga al reabrirla.
+        """
+        from rich.markdown import Markdown
+
+        for msg in self.history:
+            role = msg.get("role")
+            content = (msg.get("content") or "").strip()
+            if role == "user":
+                if content.startswith("TOOL_RESULT"):
+                    continue
+                render_user_message(self.console, content)
+            elif role == "assistant":
+                for call in msg.get("tool_calls") or []:
+                    fn = (call.get("function") or {}).get("name", "herramienta")
+                    render_action(self.console, TOOL_VERB.get(fn, fn), "", readonly=True)
+                prose = clean_prose(content) if self.mode == "agent" else content
+                if prose:
+                    self.console.print()
+                    render_speaker(self.console)
+                    self.console.print(Markdown(prose))
+        self.console.print()
+        rule(self.console, "continúa la conversación")
 
     def _clear_session(self) -> None:
         """Olvida la sesión local (logout o clave rechazada por el servidor)."""
@@ -4259,6 +4866,7 @@ class ChatApp:
             if self.remote:
                 self.remote.emit("status", state="idle")
         self._maybe_autotitle()
+        self._persist_session()  # el historial se actualiza turno a turno
         self._refresh_status()
 
     # ── teclado durante el turno ─────────────────────────────────────────
@@ -4660,14 +5268,8 @@ class ChatApp:
         return True
 
     def cmd_new(self, arg: str):
-        self.history = []
-        self.session_tokens = 0
-        self.conversation_id = str(uuid.uuid4())
-        self.title = ""  # la nueva conversación se titulará sola al responder
-        self._set_tab_title()
-        # El separador marca dónde empieza el contexto nuevo: sin él, el
-        # transcript anterior parece seguir vivo.
-        rule(self.console, "conversación nueva")
+        self._new_session("conversación nueva")
+        print_note("Conversación nueva: contexto vacío. La anterior queda en /history.")
         return True
 
     def cmd_compact(self, arg: str):
@@ -4861,6 +5463,9 @@ class ChatApp:
             print_error("Uso: /context-window 8192")
             return True
         self.cfg["context_window"] = value
+        # El loop del agente presupuesta con esta misma cifra: si se quedara con
+        # la vieja podaría contra una ventana que ya no es la que usa Ollama.
+        self.session["context_window"] = value
         save_config(self.cfg)
         self._refresh_status()
         print_ok(f"Ventana de contexto: {value} tokens")
@@ -4885,12 +5490,11 @@ class ChatApp:
         return True
 
     def cmd_clear(self, arg: str):
-        # console.clear() solo borra lo visible: el scrollback conservaba la
-        # conversación anterior, así que /clear no limpiaba de verdad.
-        clear_screen()
-        self._render_identity()
-        rule(self.console, "conversación")
-        self._paint_status()  # el 2J del clear también borró la fila reservada
+        # /clear reinicia la conversación, no solo la pantalla: limpiar lo
+        # visible dejando el mismo contexto vivo era engañoso — el modelo seguía
+        # arrastrando todo lo anterior y no había manera de empezar de cero.
+        self._new_session("contexto limpio")
+        print_note("Contexto limpio: empiezas de cero. La conversación anterior queda en /history.")
         return True
 
     def cmd_update(self, arg: str):
@@ -4928,7 +5532,12 @@ class ChatApp:
             ("Tokens de la sesión", fmt_tokens(self.session_tokens)),
             ("Contexto en uso", f"{fmt_tokens(tokens)} / {fmt_tokens(window)}  ({pct:.0f}%)"),
             ("Turnos", f"{users} tuyos {g('sep')} {assistants} del modelo"),
-            ("Mensajes que se envían", f"últimos {self.cfg.get('max_context_messages', 12)}"),
+            # En agent viaja el turno entero (con los resultados de las
+            # herramientas), no los últimos N del chat: decir lo contrario
+            # hacía imposible entender por qué se llenaba la ventana.
+            ("Mensajes que se envían",
+             "el turno entero (se poda al llenarse)" if self.mode == "agent"
+             else f"últimos {self.cfg.get('max_context_messages', 12)}"),
             ("Chars por token (medido)", f"{self.chars_per_token:.2f}"),
         ]
         for label, value in rows:
@@ -5158,11 +5767,54 @@ class ChatApp:
         return True
 
     def cmd_history(self, arg: str):
-        """Los mensajes de la sesión; elegir uno lo reenvía tal cual."""
+        """Historial de conversaciones: elegir una la reabre entera.
+
+        `/history mensajes` mantiene el comportamiento anterior (reenviar un
+        mensaje de la sesión en curso), que es otra cosa y sigue siendo útil.
+        """
+        if arg.strip().lower() in ("mensajes", "messages", "msg"):
+            return self._history_messages()
+
+        # La sesión en curso tiene que aparecer en la lista aunque aún no se
+        # haya cerrado: es la conversación con la que se está trabajando.
+        self._persist_session()
+        items = self.sessions.list_sessions(limit=50)
+        if not items:
+            print_note("Todavía no hay conversaciones guardadas. Al primer mensaje "
+                       "empieza a guardarse sola.")
+            return True
+
+        options = []
+        for item in items:
+            title = item.get("title") or "Sin título"
+            when = relative_time(item.get("updated_at") or 0)
+            msgs = int(item.get("messages") or 0)
+            tools = int(item.get("tools") or 0)
+            current = item.get("id") == self.conversation_id
+            detail = f"{when} {g('sep')} {msgs} mensaje{'s' if msgs != 1 else ''}"
+            if tools:
+                detail += f" {g('sep')} {tools} acción{'es' if tools != 1 else ''}"
+            if current:
+                detail += f" {g('sep')} actual"
+            options.append(Option(title[:60] + (g("ellipsis") if len(title) > 60 else ""),
+                                  item["id"], description=detail))
+        chosen = select("Conversaciones", options,
+                        hint="escribe para filtrar  ↑↓ mover  ↵ abrir  esc salir")
+        if chosen is None:
+            return True
+        if chosen == self.conversation_id:
+            print_note("Ya estás en esa conversación.")
+            return True
+        if self._open_session(chosen):
+            print_ok(f"Conversación reabierta: {self.title or 'sin título'}")
+        return True
+
+    def _history_messages(self):
+        """Los mensajes de la sesión en curso; elegir uno lo reenvía tal cual."""
         mine = [m for m in self.history
                 if m.get("role") == "user" and not (m.get("content") or "").startswith("TOOL_RESULT")]
         if not mine:
-            print_note("Todavía no has enviado ningún mensaje en esta sesión.")
+            print_note("Todavía no has enviado ningún mensaje en esta conversación.")
             return True
         options = []
         for i, msg in enumerate(mine[-30:], start=1):

@@ -8,13 +8,16 @@ import uuid
 from pathlib import Path
 
 from lixbon_cli.agent import (
+    TOOL_SCHEMAS,
     TOOL_SPECS,
+    build_native_system_prompt,
     clean_prose,
     run_agent_turn,
     sanitize_for_plain_chat,
     workspace_tree,
 )
 from lixbon_cli.api import ApiClient, ApiError
+from lixbon_cli.context import estimate_tokens, tools_tokens
 from lixbon_cli.remote import REMOTE_COMMANDS, RemoteLink
 from lixbon_cli.commands import (
     COMMAND_GROUPS,
@@ -37,6 +40,7 @@ from lixbon_cli.config import (
     mask_key,
     save_config,
 )
+from lixbon_cli.sessions import SessionStore, relative_time
 from lixbon_cli.term import (
     attach_status_repaint,
     clear_screen,
@@ -59,6 +63,7 @@ from lixbon_cli.ui import (
     Tail,
     esc,
     fmt_tokens,
+    TOOL_VERB,
     print_error,
     print_note,
     print_ok,
@@ -110,6 +115,10 @@ class ChatApp:
             # Tool-calling nativo del modelo (modo agent). Se apaga solo si el
             # modelo no lo soporta; entonces se usa el protocolo de texto.
             "native_tools": bool(self.cfg.get("native_tools", True)),
+            # Ventana con la que el loop del agente calcula su presupuesto de
+            # contexto. Es la misma que viaja como num_ctx a Ollama: si no
+            # coincidieran, el agente podaría de más o de menos.
+            "context_window": int(self.cfg.get("context_window", 16384)),
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
@@ -125,6 +134,9 @@ class ChatApp:
         self.history: list[dict] = []
         self.remote: RemoteLink | None = None  # host de /remote (takeover activo)
         self.conversation_id = str(uuid.uuid4())
+        # Historial persistente: cada conversación sobrevive al cierre del CLI y
+        # se puede reabrir con /history.
+        self.sessions = SessionStore(CONFIG_DIR)
         self.models_cache: list[str] = []
         # Modelo que el gateway asigna al rol `chat` (GET /api/model-roles). Sirve
         # para no preguntar cuál usar cuando el servidor ya lo tiene decidido.
@@ -178,13 +190,24 @@ class ChatApp:
             pass  # la barra nunca puede tumbar la sesión
 
     def _estimate_context(self) -> tuple[int, float]:
-        # Mide lo que se ENVIARÁ al modelo (últimos max_context_messages),
-        # no todo el historial: es lo que de verdad ocupa la ventana.
-        sent = self._context_messages()
+        # Mide lo que se ENVIARÁ al modelo, que NO es lo mismo en cada modo: en
+        # ask son los últimos max_context_messages, pero en agent viaja el turno
+        # entero (con los resultados de las herramientas, que es lo que pesa) más
+        # el system prompt del agente. Medir solo el chat plano hacía que la
+        # barra marcara 20 % con la ventana ya desbordada.
+        if self.mode == "agent":
+            sent = self.history
+            extra = estimate_tokens([{"role": "system",
+                                      "content": build_native_system_prompt(self.workspace)}])
+            extra += tools_tokens(TOOL_SCHEMAS) if self.session.get("native_tools", True) else 0
+        else:
+            sent = self._context_messages()
+            extra = 0
         chars = sum(len(m.get("content", "")) for m in sent)
-        tokens = int(chars / max(self.chars_per_token, 1.0))
+        chars += sum(len(str(m.get("tool_calls") or "")) for m in sent)
+        tokens = int(chars / max(self.chars_per_token, 1.0)) + extra
         tokens += TOKENS_PER_IMAGE * sum(len(m.get("images") or []) for m in sent)
-        window = max(int(self.cfg.get("context_window", 8192)), 1)
+        window = max(int(self.cfg.get("context_window", 16384)), 1)
         return tokens, min(100.0, tokens * 100.0 / window)
 
     def _register_usage(self, usage: dict) -> None:
@@ -272,6 +295,7 @@ class ChatApp:
         try:
             return self._prompt_loop()
         finally:
+            self._persist_session()  # salir del CLI no pierde la conversación
             release_status_line()
 
     def _render_identity(self) -> None:
@@ -333,6 +357,89 @@ class ChatApp:
             self.cfg["plan_name"] = plan
             save_config(self.cfg)
         return "auth" if auth_failed else "ok"
+
+    # ── sesiones (conversaciones persistentes) ───────────────────────────
+
+    def _persist_session(self) -> None:
+        """Guarda la conversación en curso en el historial local.
+
+        Se llama al final de cada turno y al salir, así que cerrar la terminal
+        (o que se caiga) nunca pierde lo hablado.
+        """
+        self.sessions.save(
+            self.conversation_id, self.history,
+            title=self.title, model=self.model, mode=self.mode,
+            workspace=str(self.workspace), tokens=self.session_tokens,
+        )
+
+    def _new_session(self, label: str = "conversación nueva") -> None:
+        """Empieza una conversación DE VERDAD nueva.
+
+        Nuevo id de conversación (el servidor abre otra), contexto vacío y
+        pantalla limpia. Antes `/clear` solo borraba lo visible: el modelo
+        seguía recibiendo el contexto anterior y no había forma real de
+        empezar de cero sin cerrar el CLI.
+        """
+        self._persist_session()  # lo anterior no se pierde: queda en /history
+        self.history = []
+        self.session_tokens = 0
+        self.conversation_id = str(uuid.uuid4())
+        self.title = ""  # la nueva conversación se titulará sola al responder
+        self.pending_images = []
+        self._set_tab_title()
+        clear_screen()
+        self._render_identity()
+        rule(self.console, label)
+        self._paint_status()  # el 2J del clear también borró la fila reservada
+        self._refresh_status()
+
+    def _open_session(self, session_id: str) -> bool:
+        """Reabre una conversación guardada: contexto, id y transcript."""
+        record = self.sessions.load(session_id)
+        if not record:
+            print_error("Esa conversación ya no está disponible.")
+            return False
+        self._persist_session()  # la actual se guarda antes de cambiar
+        self.history = list(record.get("messages") or [])
+        self.conversation_id = record.get("id") or session_id
+        self.title = record.get("title") or ""
+        self.session_tokens = int(record.get("tokens") or 0)
+        self.pending_images = []
+        self._set_tab_title()
+        clear_screen()
+        self._render_identity()
+        rule(self.console, self.title or "conversación")
+        self._replay_transcript()
+        self._refresh_status()
+        return True
+
+    def _replay_transcript(self) -> None:
+        """Repinta una conversación cargada del historial.
+
+        No reproduce la fontanería del turno (diffs, aprobaciones): las
+        herramientas se resumen en una línea cada una, que es lo que hace
+        legible una conversación larga al reabrirla.
+        """
+        from rich.markdown import Markdown
+
+        for msg in self.history:
+            role = msg.get("role")
+            content = (msg.get("content") or "").strip()
+            if role == "user":
+                if content.startswith("TOOL_RESULT"):
+                    continue
+                render_user_message(self.console, content)
+            elif role == "assistant":
+                for call in msg.get("tool_calls") or []:
+                    fn = (call.get("function") or {}).get("name", "herramienta")
+                    render_action(self.console, TOOL_VERB.get(fn, fn), "", readonly=True)
+                prose = clean_prose(content) if self.mode == "agent" else content
+                if prose:
+                    self.console.print()
+                    render_speaker(self.console)
+                    self.console.print(Markdown(prose))
+        self.console.print()
+        rule(self.console, "continúa la conversación")
 
     def _clear_session(self) -> None:
         """Olvida la sesión local (logout o clave rechazada por el servidor)."""
@@ -744,6 +851,7 @@ class ChatApp:
             if self.remote:
                 self.remote.emit("status", state="idle")
         self._maybe_autotitle()
+        self._persist_session()  # el historial se actualiza turno a turno
         self._refresh_status()
 
     # ── teclado durante el turno ─────────────────────────────────────────
@@ -1147,14 +1255,8 @@ class ChatApp:
         return True
 
     def cmd_new(self, arg: str):
-        self.history = []
-        self.session_tokens = 0
-        self.conversation_id = str(uuid.uuid4())
-        self.title = ""  # la nueva conversación se titulará sola al responder
-        self._set_tab_title()
-        # El separador marca dónde empieza el contexto nuevo: sin él, el
-        # transcript anterior parece seguir vivo.
-        rule(self.console, "conversación nueva")
+        self._new_session("conversación nueva")
+        print_note("Conversación nueva: contexto vacío. La anterior queda en /history.")
         return True
 
     def cmd_compact(self, arg: str):
@@ -1348,6 +1450,9 @@ class ChatApp:
             print_error("Uso: /context-window 8192")
             return True
         self.cfg["context_window"] = value
+        # El loop del agente presupuesta con esta misma cifra: si se quedara con
+        # la vieja podaría contra una ventana que ya no es la que usa Ollama.
+        self.session["context_window"] = value
         save_config(self.cfg)
         self._refresh_status()
         print_ok(f"Ventana de contexto: {value} tokens")
@@ -1372,12 +1477,11 @@ class ChatApp:
         return True
 
     def cmd_clear(self, arg: str):
-        # console.clear() solo borra lo visible: el scrollback conservaba la
-        # conversación anterior, así que /clear no limpiaba de verdad.
-        clear_screen()
-        self._render_identity()
-        rule(self.console, "conversación")
-        self._paint_status()  # el 2J del clear también borró la fila reservada
+        # /clear reinicia la conversación, no solo la pantalla: limpiar lo
+        # visible dejando el mismo contexto vivo era engañoso — el modelo seguía
+        # arrastrando todo lo anterior y no había manera de empezar de cero.
+        self._new_session("contexto limpio")
+        print_note("Contexto limpio: empiezas de cero. La conversación anterior queda en /history.")
         return True
 
     def cmd_update(self, arg: str):
@@ -1416,7 +1520,12 @@ class ChatApp:
             ("Tokens de la sesión", fmt_tokens(self.session_tokens)),
             ("Contexto en uso", f"{fmt_tokens(tokens)} / {fmt_tokens(window)}  ({pct:.0f}%)"),
             ("Turnos", f"{users} tuyos {g('sep')} {assistants} del modelo"),
-            ("Mensajes que se envían", f"últimos {self.cfg.get('max_context_messages', 12)}"),
+            # En agent viaja el turno entero (con los resultados de las
+            # herramientas), no los últimos N del chat: decir lo contrario
+            # hacía imposible entender por qué se llenaba la ventana.
+            ("Mensajes que se envían",
+             "el turno entero (se poda al llenarse)" if self.mode == "agent"
+             else f"últimos {self.cfg.get('max_context_messages', 12)}"),
             ("Chars por token (medido)", f"{self.chars_per_token:.2f}"),
         ]
         for label, value in rows:
@@ -1647,11 +1756,54 @@ class ChatApp:
         return True
 
     def cmd_history(self, arg: str):
-        """Los mensajes de la sesión; elegir uno lo reenvía tal cual."""
+        """Historial de conversaciones: elegir una la reabre entera.
+
+        `/history mensajes` mantiene el comportamiento anterior (reenviar un
+        mensaje de la sesión en curso), que es otra cosa y sigue siendo útil.
+        """
+        if arg.strip().lower() in ("mensajes", "messages", "msg"):
+            return self._history_messages()
+
+        # La sesión en curso tiene que aparecer en la lista aunque aún no se
+        # haya cerrado: es la conversación con la que se está trabajando.
+        self._persist_session()
+        items = self.sessions.list_sessions(limit=50)
+        if not items:
+            print_note("Todavía no hay conversaciones guardadas. Al primer mensaje "
+                       "empieza a guardarse sola.")
+            return True
+
+        options = []
+        for item in items:
+            title = item.get("title") or "Sin título"
+            when = relative_time(item.get("updated_at") or 0)
+            msgs = int(item.get("messages") or 0)
+            tools = int(item.get("tools") or 0)
+            current = item.get("id") == self.conversation_id
+            detail = f"{when} {g('sep')} {msgs} mensaje{'s' if msgs != 1 else ''}"
+            if tools:
+                detail += f" {g('sep')} {tools} acción{'es' if tools != 1 else ''}"
+            if current:
+                detail += f" {g('sep')} actual"
+            options.append(Option(title[:60] + (g("ellipsis") if len(title) > 60 else ""),
+                                  item["id"], description=detail))
+        chosen = select("Conversaciones", options,
+                        hint="escribe para filtrar  ↑↓ mover  ↵ abrir  esc salir")
+        if chosen is None:
+            return True
+        if chosen == self.conversation_id:
+            print_note("Ya estás en esa conversación.")
+            return True
+        if self._open_session(chosen):
+            print_ok(f"Conversación reabierta: {self.title or 'sin título'}")
+        return True
+
+    def _history_messages(self):
+        """Los mensajes de la sesión en curso; elegir uno lo reenvía tal cual."""
         mine = [m for m in self.history
                 if m.get("role") == "user" and not (m.get("content") or "").startswith("TOOL_RESULT")]
         if not mine:
-            print_note("Todavía no has enviado ningún mensaje en esta sesión.")
+            print_note("Todavía no has enviado ningún mensaje en esta conversación.")
             return True
         options = []
         for i, msg in enumerate(mine[-30:], start=1):
