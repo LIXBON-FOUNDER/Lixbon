@@ -122,6 +122,9 @@ class ChatApp:
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
+        # Razonamiento del último stream (modelos thinking); lo consume el loop
+        # del agente para no perder las llamadas que el modelo deja ahí dentro.
+        self._last_reasoning = ""
         # Estado del turno en curso: el rótulo "✦ Lixbon" se imprime una sola vez
         # y justo encima de la primera prosa, con el registro de acciones ya
         # arriba. `_turn_mark` recuerda cuántas líneas llevaba impresas el turno
@@ -980,6 +983,9 @@ class ChatApp:
                     sanitize_for_plain_chat(messages), tools=None)
             else:
                 raise
+        # El loop lo lee para rescatar las llamadas que el modelo dejó en su
+        # razonamiento (ver run_agent_turn).
+        self.session["last_reasoning"] = self._last_reasoning
         return text, self._last_tool_calls
 
     def _stream_assistant(self, messages: list[dict], tools: list[dict] | None = None) -> str:
@@ -1144,6 +1150,11 @@ class ChatApp:
         if usage:
             self._register_usage(usage)
         self._refresh_status()  # tokens/contexto nuevos → repinta la barra fija
+        # El razonamiento no se muestra como respuesta, pero el loop del agente
+        # lo necesita: los modelos thinking (qwen3.5…) a veces meten la llamada
+        # a la herramienta DENTRO del bloque de pensamiento, y sin mirarlo ahí
+        # el turno parece vacío aunque el modelo sí había decidido qué hacer.
+        self._last_reasoning = "".join(reasoning_parts).strip()
         text = "".join(content_parts).strip()
         if self.remote:
             # El controller reemplaza lo streameado por el texto final limpio

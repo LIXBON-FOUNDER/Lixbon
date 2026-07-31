@@ -105,15 +105,24 @@ def test_shrink_respeta_los_pasos_recientes():
 # ── el turno nunca acaba en silencio ────────────────────────────────────────
 
 class _FakeStream:
-    """Modelo de mentira: devuelve las respuestas que se le den, en orden."""
+    """Modelo de mentira: devuelve las respuestas que se le den, en orden.
 
-    def __init__(self, replies):
+    `reasonings` simula el canal `thinking` de Ollama, que es por donde los
+    modelos de razonamiento mandan (a veces) la llamada a la herramienta.
+    """
+
+    def __init__(self, replies, reasonings=None, session=None):
         self.replies = list(replies)
+        self.reasonings = list(reasonings or [])
+        self.session = session
         self.calls = []
 
     def __call__(self, messages, tools):
         self.calls.append(messages)
         reply = self.replies.pop(0) if self.replies else ""
+        if self.session is not None:
+            self.session["last_reasoning"] = (
+                self.reasonings.pop(0) if self.reasonings else "")
         return reply, []
 
 
@@ -128,13 +137,63 @@ def test_respuesta_vacia_se_reintenta_liberando_contexto(tmp_path):
     assert "corregido el login" in answer
 
 
-def test_respuesta_vacia_persistente_lo_dice(tmp_path):
-    stream = _FakeStream(["", "", "", ""])
+def test_reintentar_no_borra_la_conversacion(tmp_path):
+    # El reintento podaba el historial de trabajo, así que la conversación del
+    # usuario desaparecía (la barra de contexto se quedaba en 1 %).
+    historia = _agent_history(20)
+    stream = _FakeStream(["", "Listo."])
     session = {"native_tools": True, "auto_approve": True, "context_window": 8192}
+    _, working = run_agent_turn(historia, tmp_path, session, stream)
+
+    assert working[0]["content"] == historia[0]["content"]
+    assert len(working) >= len(historia)
+
+
+def test_la_llamada_escondida_en_el_razonamiento_se_rescata(tmp_path):
+    # qwen3.5:9b y otros modelos thinking deciden la herramienta DENTRO del
+    # bloque de pensamiento: Ollama la manda por `thinking` y nunca llega como
+    # content ni como tool_call. Ignorarlo era ver "pensó 12 s" y nada más.
+    (tmp_path / "index.html").write_text("<h1>hola</h1>", encoding="utf-8")
+    session = {"native_tools": False, "auto_approve": True, "context_window": 8192}
+    stream = _FakeStream(
+        ["", "Ya lo he leído."],
+        reasonings=['Debería mirar el archivo: {"tool":"read_file","args":{"path":"index.html"}}',
+                    ""],
+        session=session,
+    )
+    answer, working = run_agent_turn([{"role": "user", "content": "lee el html"}],
+                                     tmp_path, session, stream)
+
+    assert "leído" in answer
+    resultados = [m for m in working if (m.get("content") or "").startswith("TOOL_RESULT")]
+    assert resultados and "hola" in resultados[0]["content"]
+
+
+def test_razonar_sin_responder_pide_el_paso_concreto(tmp_path):
+    # Sin llamada que rescatar, repetir la petición tal cual le hace razonar lo
+    # mismo otra vez: hay que pedirle el paso concreto.
+    session = {"native_tools": False, "auto_approve": True, "context_window": 8192}
+    stream = _FakeStream(["", "Hecho."],
+                         reasonings=["Mmm, déjame pensar cómo abordarlo…", ""],
+                         session=session)
+    answer, _ = run_agent_turn([{"role": "user", "content": "arregla el css"}],
+                               tmp_path, session, stream)
+
+    empujon = stream.calls[1][-1]
+    assert empujon["role"] == "user"
+    assert "NO vuelvas a razonar" in empujon["content"]
+    assert answer == "Hecho."
+
+
+def test_respuesta_vacia_persistente_lo_dice(tmp_path):
+    session = {"native_tools": True, "auto_approve": True, "context_window": 8192}
+    stream = _FakeStream(["", "", "", ""],
+                         reasonings=["pienso", "pienso", "pienso", "pienso"],
+                         session=session)
     answer, _ = run_agent_turn([{"role": "user", "content": "haz algo"}], tmp_path, session, stream)
 
-    assert answer.strip()                   # nunca vuelve en blanco
-    assert "contexto" in answer.lower()     # y explica por qué
+    assert answer.strip()                    # nunca vuelve en blanco
+    assert "responder" in answer.lower()     # y explica qué le pasa al modelo
 
 
 def test_bucle_de_la_misma_llamada_se_corta_con_explicacion(tmp_path):

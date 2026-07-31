@@ -395,7 +395,20 @@ export const useChatStore = create((set, get) => ({
 
         const spoken = truncateFabricated(visible);
         // Preferir los tool_calls NATIVOS; si no hay, caer al JSON en texto.
-        const calls = nativeCalls.length ? nativeCalls : extractToolCalls(spoken);
+        let calls = nativeCalls.length ? nativeCalls : extractToolCalls(spoken);
+        // Último recurso: el RAZONAMIENTO. Los modelos thinking (qwen3.5…)
+        // deciden la herramienta dentro del bloque de pensamiento y la escriben
+        // ahí, así que Ollama la manda por el canal `thinking` y nunca llega
+        // como content ni como tool_call. Ignorarlo era ver al agente pensar
+        // 12 s y no hacer nada, con el contexto casi vacío.
+        let rescued = false;
+        if (!calls.length && !spoken.trim() && fullThinking) {
+          const fromThinking = extractToolCalls(fullThinking);
+          if (fromThinking.length) {
+            calls = fromThinking;
+            rescued = true;
+          }
+        }
         const prose = cleanProse(spoken);
 
         if (!calls.length && nudged && (/^ok\.?$/i.test(prose.trim()) || !prose.trim())) {
@@ -404,20 +417,31 @@ export const useChatStore = create((set, get) => ({
           break;
         }
 
-        // Respuesta completamente vacía: casi siempre es el prompt desbordando
-        // la ventana (Ollama recorta por delante y el modelo pierde el system
-        // prompt). Se libera contexto y se reintenta antes de darse por vencido:
-        // rendirse aquí en silencio es lo que dejaba al agente "colgado".
-        if (!calls.length && !spoken.trim() && !fullThinking) {
+        // Ni texto ni llamadas (tampoco rescatadas del razonamiento). Rendirse
+        // aquí en silencio es lo que dejaba al agente "colgado".
+        if (!calls.length && !spoken.trim()) {
           if (emptyRetries < 2) {
             emptyRetries += 1;
-            const relief = fitHistory(modelMessages.slice(systemMsg.length),
-                                      Math.floor(budget / 2));
-            modelMessages = [...systemMsg, ...relief.messages];
+            if (fullThinking) {
+              // Razonó pero no llegó a responder: no es contexto, se quedó
+              // pensando. Se le pide el paso concreto.
+              modelMessages.push({
+                role: 'user',
+                content: 'Has razonado pero no has emitido ninguna respuesta ni ninguna '
+                  + 'llamada a herramienta. NO vuelvas a razonar: ejecuta AHORA el siguiente '
+                  + 'paso llamando a la herramienta que toque, o responde con el resumen '
+                  + 'final si ya no queda nada por hacer.',
+              });
+            } else {
+              // Nada en absoluto: ahí sí huele a ventana desbordada.
+              const relief = fitHistory(modelMessages.slice(systemMsg.length),
+                                        Math.floor(budget / 2));
+              modelMessages = [...systemMsg, ...relief.messages];
+            }
             continue;
           }
-          stopWith('Me quedé sin respuesta del modelo, probablemente por contexto lleno. '
-            + 'Empieza un chat nuevo o reduce el tamaño de los archivos que estoy leyendo.');
+          stopWith('Me quedé sin respuesta del modelo: razona pero no llega a responder. '
+            + 'Prueba con un modelo sin «thinking», o empieza un chat nuevo.');
           break;
         }
         emptyRetries = 0;
@@ -469,7 +493,14 @@ export const useChatStore = create((set, get) => ({
           set({ messages: get().messages.slice(0, -1) });
         }
 
-        modelMessages.push({ role: 'assistant', content: spoken });
+        // Con la llamada rescatada del razonamiento, `spoken` está vacío: el
+        // historial guarda la llamada para que el modelo lea bien el resultado.
+        modelMessages.push({
+          role: 'assistant',
+          content: rescued
+            ? calls.map((c) => JSON.stringify({ tool: c.tool, args: c.args || {} })).join('\n')
+            : spoken,
+        });
         const results = [];
         for (const call of calls) {
           if (signal.aborted) break;

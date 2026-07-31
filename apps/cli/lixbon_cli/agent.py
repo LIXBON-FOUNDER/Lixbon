@@ -22,6 +22,7 @@ from lixbon_cli.context import (
     estimate_tokens,
     fit_history,
     prompt_budget,
+    shrink_old_results,
 )
 from lixbon_cli.diffs import compute_change, render_change
 from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
@@ -188,6 +189,16 @@ NATIVE_NUDGE_PROMPT = (
     "No escribas el código en el chat: aplícalo AHORA llamando a la herramienta "
     "write_file (o edit_file si el archivo ya existe), y usa run_command para los "
     'comandos. Si no había nada que aplicar, responde solo "OK".'
+)
+
+# Los modelos thinking a veces agotan el turno razonando y no llegan a emitir
+# nada. Repetir la petición tal cual les hace volver a razonar lo mismo; pedir
+# el paso CONCRETO y prohibir el preámbulo es lo que los desatasca.
+NO_OUTPUT_PROMPT = (
+    "Has razonado pero no has emitido ninguna respuesta ni ninguna llamada a "
+    "herramienta. NO vuelvas a razonar: ejecuta AHORA el siguiente paso llamando "
+    "a la herramienta que toque, o responde con el resumen final si ya no queda "
+    "nada por hacer."
 )
 
 TRUNCATED_PROMPT = (
@@ -706,6 +717,33 @@ def clean_prose(text: str) -> str:
 
 # ── Loop del agente ─────────────────────────────────────────────────────────
 
+def dump_empty_turn(messages: list[dict], reasoning: str, raw: str) -> str:
+    """Guarda un turno sin respuesta en ~/.lixbon/empty-turns/ para poder verlo.
+
+    Un turno vacío no deja rastro por definición: sin esto, saber POR QUÉ el
+    modelo no dijo nada exige reproducirlo a ciegas. Solo se activa con
+    LIXBON_DEBUG=1, y guarda lo que se envió junto a lo que llegó.
+    """
+    import os
+    import time as _time
+    from pathlib import Path as _Path
+
+    if os.environ.get("LIXBON_DEBUG") != "1":
+        return ""
+    try:
+        folder = _Path.home() / ".lixbon" / "empty-turns"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{_time.strftime('%Y%m%d-%H%M%S')}.json"
+        path.write_text(json.dumps({
+            "sent": messages,
+            "reasoning": reasoning,
+            "content": raw,
+        }, ensure_ascii=False, indent=1), encoding="utf-8")
+        return str(path)
+    except Exception:
+        return ""
+
+
 def _call_signature(call: dict) -> str:
     """Huella de una llamada para detectar que el modelo se repite."""
     return json.dumps({"t": call.get("tool", ""), "a": call.get("args", {})},
@@ -791,17 +829,45 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
         tool_calls = extract_all_tool_calls(assistant)
 
         if not tool_calls and not assistant.strip():
-            # Respuesta vacía: casi siempre es el prompt desbordando la ventana
-            # (Ollama recorta por delante y el modelo se queda sin instrucciones).
-            # Se poda a la mitad del presupuesto y se reintenta antes de rendirse.
-            if empty_retries < 2:
+            # Sin texto y sin llamadas. Antes de darlo por perdido hay que mirar
+            # el RAZONAMIENTO: los modelos thinking (qwen3.5 y compañía) muchas
+            # veces deciden la herramienta dentro del bloque de pensamiento y la
+            # escriben ahí, así que Ollama la manda por el canal `thinking` y no
+            # como content ni como tool_call. Descartarlo era ver al agente
+            # "pensar 12 s y no hacer nada" con el contexto casi vacío.
+            reasoning = str(session.get("last_reasoning") or "")
+            dumped = dump_empty_turn(messages, reasoning, raw)
+            if dumped:
+                print_note(f"Turno sin respuesta volcado en {dumped}")
+            rescued = extract_all_tool_calls(reasoning)
+            if rescued:
+                tool_calls = rescued
+                # El historial guarda la llamada rescatada, no un turno vacío:
+                # el modelo tiene que ver lo que pidió para leer bien el resultado.
+                assistant = "\n".join(
+                    json.dumps({"tool": c.get("tool", ""), "args": c.get("args", {})},
+                               ensure_ascii=False)
+                    for c in rescued)
+                render_action_result(console, "llamada recuperada del razonamiento")
+            elif empty_retries < 2:
                 empty_retries += 1
-                working, _ = fit_history(working, budget // 2)
-                print_note("El modelo devolvió una respuesta vacía; libero contexto "
-                           "y lo reintento.")
+                if reasoning:
+                    # Razonó pero no dijo nada: no es contexto, es que se quedó
+                    # pensando. Se le pide el paso concreto, sin tocar el historial.
+                    working.append({"role": "user", "content": NO_OUTPUT_PROMPT})
+                    print_note("El modelo se quedó pensando sin responder; le pido "
+                               "que ejecute el siguiente paso.")
+                else:
+                    # Nada en absoluto (ni razonamiento): ahí sí huele a ventana
+                    # desbordada. Se recorta lo que se ENVÍA, no el historial:
+                    # podar `working` borraba la conversación del usuario.
+                    print_note("El modelo no devolvió nada; libero contexto y lo reintento.")
+                    working = shrink_old_results(working, keep_recent=2)
                 continue
-            return ("Me quedé sin respuesta del modelo (probablemente por contexto lleno). "
-                    "Usa /compact o /new y vuelve a pedírmelo."), working
+            else:
+                return ("Me quedé sin respuesta del modelo: razona pero no llega a "
+                        "responder. Prueba con /model a uno sin «thinking», o /new "
+                        "para empezar con el contexto limpio."), working
         empty_retries = 0
 
         working.append({"role": "assistant", "content": assistant})
