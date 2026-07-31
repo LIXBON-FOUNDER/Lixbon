@@ -25,6 +25,7 @@
 
   position: relative;
   min-height: 100%;
+  min-height: 100dvh; /* la barra del navegador móvil cambia el 100vh */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -33,6 +34,8 @@
   background: var(--auth-bg);
   color: var(--auth-ink);
   padding: 40px 16px;
+  padding-top: calc(40px + var(--safe-t));
+  padding-bottom: calc(40px + var(--safe-b));
   overflow: hidden;
 }
 
@@ -237,6 +240,13 @@
 
 .auth__link:hover {
   opacity: 0.72;
+}
+
+/* Con el dedo, un enlace de 21px de alto es difícil de acertar. */
+@media (pointer: coarse) {
+  .auth__link {
+    padding: 10px 8px;
+  }
 }
 
 .auth__error {
@@ -539,5 +549,38 @@
 @media (max-width: 900px) {
   .auth-illu {
     display: none;
+  }
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .auth {
+    gap: 22px;
+    padding: 28px 16px calc(28px + var(--safe-b));
+    justify-content: flex-start;
+  }
+
+  .auth__card {
+    gap: 18px;
+  }
+
+  .ffield__input,
+  .auth__cta {
+    padding: 15px 20px;
+  }
+
+  .auth__social-btn {
+    padding: 13px 14px;
+  }
+}
+
+/* A partir de aquí dos columnas dejan de caber: Nombre/Apellido y los botones
+   sociales se estrangulan antes que el resto del formulario. */
+@media (max-width: 400px) {
+  .auth__row,
+  .auth__social {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 }

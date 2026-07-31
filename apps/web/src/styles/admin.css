@@ -98,6 +98,7 @@
 
 .table-wrap {
   overflow-x: auto;
+  overscroll-behavior-x: contain; /* deslizar la tabla no navega atrás en iOS */
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-box);
   background: var(--bg);
@@ -395,13 +396,65 @@ tr.is-blocked {
   background: var(--bg-secondary);
 }
 
+/* ── Responsive ──────────────────────────────────────────────────────── */
+
+@media (max-width: 860px) {
+  /* Las tabs no pueden envolverse: el indicador deslizante se mide en una
+     sola línea. Se deslizan en horizontal, como en cualquier app móvil. */
+  .admin-tabs {
+    align-self: stretch;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .admin-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-tab {
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 640px) {
   .plan-models {
     flex-wrap: wrap;
   }
 
-  .admin-tabs {
-    align-self: stretch;
-    justify-content: center;
+  .plan-models__name {
+    width: auto;
+  }
+
+  .plan-models__input.table-num {
+    width: 100%;
+  }
+
+  .admin-search {
+    flex-wrap: wrap;
+  }
+
+  .admin-search .pill-btn {
+    flex: 1;
+  }
+
+  .admin-actions {
+    flex-wrap: wrap;
+  }
+
+  .table__meta {
+    max-width: 180px;
+  }
+
+  /* Menos de 16px hace que iOS haga zoom al enfocar el control. */
+  .admin-search__input,
+  .table__select,
+  .plan-models__input,
+  .node-form__grid input,
+  .release-form input,
+  .release-form select,
+  .release-form textarea {
+    font-size: 16px;
   }
 }

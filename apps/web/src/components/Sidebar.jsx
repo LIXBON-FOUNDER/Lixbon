@@ -2,23 +2,51 @@
 // navegación, Historial colapsable y footer de perfil con plan.
 // El colapso anima el ancho: el contenido completo vive en __body y el modo
 // colapsado en __rail; ambos se funden con opacidad durante la transición.
-import { useEffect, useRef, useState } from 'react';
+// En compacto (≤860px) el panel deja de ser columna y se comporta como cajón:
+// `compact` llega desde ChatPage y cambia el colapsar por un cerrar.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
 import { planColor } from '../lib/planColors';
 import { useTheme } from '../lib/theme';
+import { useDismiss } from '../hooks/useDismiss';
 import { HistorySkeleton } from './Skeleton';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
-  IconDownload, IconBook, IconBolt, IconGlobe, IconSun, IconMoon,
+  IconBook, IconBolt, IconGlobe, IconSun, IconMoon,
 } from './Icons';
 
-function HistoryItem({ conv, active, onRename, onDelete }) {
+const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
+
+function HistoryItem({ conv, active, onRename, onDelete, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState(null); // { left, top } en coordenadas de viewport
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const navigate = useNavigate();
+  const rootRef = useRef(null);
+  const btnRef = useRef(null);
+
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useDismiss(menuOpen, rootRef, closeMenu);
+
+  // El menú es `position: fixed` porque el historial hace scroll y lo recortaba.
+  // Se mide justo antes de pintar para que no salte.
+  useLayoutEffect(() => {
+    if (!menuOpen) return undefined;
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setMenuPos({
+        left: Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8),
+        top: Math.min(r.bottom + 4, window.innerHeight - 110),
+      });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [menuOpen]);
 
   const startEdit = () => {
     setDraft(conv.title || '');
@@ -51,19 +79,24 @@ function HistoryItem({ conv, active, onRename, onDelete }) {
   }
 
   return (
-    <div className={`sb-item ${active ? 'is-active' : ''}`}>
-      <button className="sb-item__title" onClick={() => navigate(`/c/${conv.id}`)}>
+    <div className={`sb-item ${active ? 'is-active' : ''}`} ref={rootRef}>
+      <button
+        className="sb-item__title"
+        onClick={() => { navigate(`/c/${conv.id}`); onNavigate?.(); }}
+      >
         {conv.title || 'Sin título'}
       </button>
       <button
+        ref={btnRef}
         className="icon-btn sb-item__menu-btn"
         onClick={() => setMenuOpen((v) => !v)}
         aria-label="Opciones de la conversación"
+        aria-expanded={menuOpen}
       >
         <IconDots size={14} />
       </button>
-      {menuOpen && (
-        <div className="sb-menu" onMouseLeave={() => setMenuOpen(false)}>
+      {menuOpen && menuPos && (
+        <div className="sb-menu" style={{ left: menuPos.left, top: menuPos.top }} role="menu">
           <button onClick={startEdit}><IconPencil size={14} /> Renombrar</button>
           <button className="sb-menu__danger" onClick={() => { setMenuOpen(false); onDelete(conv.id); }}>
             <IconTrash size={14} /> Eliminar
@@ -76,7 +109,7 @@ function HistoryItem({ conv, active, onRename, onDelete }) {
 
 export function Sidebar({
   user, conversations, loadingConversations, activeId, collapsed, onToggleCollapse,
-  onRename, onDelete, onLogout,
+  onRename, onDelete, onLogout, compact = false, open = false, onClose,
 }) {
   const [historyOpen, setHistoryOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -84,18 +117,52 @@ export function Sidebar({
   const [profileMenu, setProfileMenu] = useState(false);
   const [theme, toggleTheme] = useTheme();
   const searchRef = useRef(null);
+  const profileRef = useRef(null);
+  const closeBtnRef = useRef(null);
   const navigate = useNavigate();
+
+  const closeProfile = useCallback(() => setProfileMenu(false), []);
+  useDismiss(profileMenu, profileRef, closeProfile);
 
   useEffect(() => {
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
 
+  // El foco entra en el cajón al abrirlo. Depende solo de `open` a propósito:
+  // con `onClose` en las dependencias, cada re-render del chat durante el
+  // streaming robaría el foco al campo de búsqueda.
+  useEffect(() => {
+    if (compact && open) closeBtnRef.current?.focus();
+  }, [compact, open]);
+
+  // Escape cierra el cajón.
+  useEffect(() => {
+    if (!compact || !open) return undefined;
+    const onKeyDown = (e) => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [compact, open, onClose]);
+
+  // Navegar desde el cajón lo cierra: en móvil tapa todo el chat.
+  const go = (path) => {
+    navigate(path);
+    if (compact) onClose?.();
+  };
+
   const visible = query
     ? conversations.filter((c) => (c.title || '').toLowerCase().includes(query.toLowerCase()))
     : conversations;
 
+  const drawerHidden = compact && !open;
+
   return (
-    <aside className={`sidebar ${collapsed ? 'is-collapsed' : ''}`}>
+    <aside
+      className={`sidebar ${collapsed && !compact ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}
+      id="sidebar-drawer"
+      aria-label="Panel de conversaciones"
+      aria-hidden={drawerHidden || undefined}
+      inert={drawerHidden || undefined}
+    >
       {/* Modo colapsado: columna de iconos */}
       <div className="sidebar__rail" aria-hidden={!collapsed}>
         <button className="icon-btn" onClick={onToggleCollapse} aria-label="Abrir panel" tabIndex={collapsed ? 0 : -1}>
@@ -107,9 +174,11 @@ export function Sidebar({
       </div>
 
       {/* Contenido completo */}
-      <div className="sidebar__body" aria-hidden={collapsed}>
+      <div className="sidebar__body" aria-hidden={collapsed && !compact}>
         <div className="sidebar__header">
-          <Link to="/" className="sidebar__logo"><Logo size={30} /></Link>
+          <Link to="/" className="sidebar__logo" onClick={compact ? onClose : undefined}>
+            <Logo size={30} />
+          </Link>
           <div className="sidebar__header-actions">
             <button
               className="icon-btn"
@@ -121,9 +190,15 @@ export function Sidebar({
             <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
               {searchOpen ? <IconX /> : <IconSearch />}
             </button>
-            <button className="icon-btn" onClick={onToggleCollapse} aria-label="Colapsar panel">
-              <IconPanel />
-            </button>
+            {compact ? (
+              <button ref={closeBtnRef} className="icon-btn" onClick={onClose} aria-label="Cerrar panel">
+                <IconX />
+              </button>
+            ) : (
+              <button className="icon-btn" onClick={onToggleCollapse} aria-label="Colapsar panel">
+                <IconPanel />
+              </button>
+            )}
           </div>
         </div>
 
@@ -141,13 +216,13 @@ export function Sidebar({
         </div>
 
         <nav className="sidebar__nav">
-          <button className="sb-nav" onClick={() => navigate('/')}>
+          <button className="sb-nav" onClick={() => go('/')}>
             <IconPlus /> <span>Nueva conversación</span>
           </button>
           <button className="sb-nav" onClick={() => setHistoryOpen(true)}>
             <IconChat /> <span>Conversaciones</span>
           </button>
-          <button className="sb-nav" onClick={() => navigate('/aplicaciones')}>
+          <button className="sb-nav" onClick={() => go('/aplicaciones')}>
             <IconGrid /> <span>Aplicaciones</span>
           </button>
           <button className="sb-nav sb-nav--soon" title="Próximamente">
@@ -174,6 +249,7 @@ export function Sidebar({
                         active={c.id === activeId}
                         onRename={onRename}
                         onDelete={onDelete}
+                        onNavigate={compact ? onClose : undefined}
                       />
                     ))}
                     {visible.length === 0 && (
@@ -189,12 +265,12 @@ export function Sidebar({
         </div>
 
         {user && user.plan_id !== 'advance' && (
-          <button className="sidebar__upgrade" onClick={() => navigate('/planes')}>
+          <button className="sidebar__upgrade" onClick={() => go('/planes')}>
             <IconBolt size={16} /> <span>Mejorar plan</span>
           </button>
         )}
 
-        <div className="sidebar__profile">
+        <div className="sidebar__profile" ref={profileRef}>
           {user ? (
             <>
               {user.avatar_url ? (
@@ -211,30 +287,36 @@ export function Sidebar({
                 <Link
                   to="/planes"
                   className="sidebar__plan"
+                  onClick={compact ? onClose : undefined}
                   style={{ background: planColor(user.plan_id), color: '#fff' }}
                 >
                   Plan {user.plan_name || 'Gratuito'}
                 </Link>
               </div>
-              <button className="icon-btn" onClick={() => setProfileMenu((v) => !v)} aria-label="Ajustes">
+              <button
+                className="icon-btn"
+                onClick={() => setProfileMenu((v) => !v)}
+                aria-label="Ajustes"
+                aria-expanded={profileMenu}
+              >
                 <IconGear />
               </button>
               {profileMenu && (
-                <div className="sb-menu sb-menu--profile" onMouseLeave={() => setProfileMenu(false)}>
-                  <button onClick={() => { setProfileMenu(false); navigate('/planes'); }}>
+                <div className="sb-menu sb-menu--profile" role="menu">
+                  <button onClick={() => { setProfileMenu(false); go('/planes'); }}>
                     <IconBolt size={14} /> Planes
                   </button>
                   <button className="sb-menu__soon" disabled title="Próximamente">
                     <IconGlobe size={14} /> Lenguaje <span className="sb-menu__tag">Pronto</span>
                   </button>
-                  <button onClick={() => { setProfileMenu(false); navigate('/account'); }}>
+                  <button onClick={() => { setProfileMenu(false); go('/account'); }}>
                     <IconGear size={14} /> Ajustes
                   </button>
-                  <button onClick={() => { setProfileMenu(false); navigate('/docs'); }}>
+                  <button onClick={() => { setProfileMenu(false); go('/docs'); }}>
                     <IconBook size={14} /> Documentación
                   </button>
                   {user.role === 'admin' && (
-                    <button onClick={() => { setProfileMenu(false); navigate('/admin'); }}>
+                    <button onClick={() => { setProfileMenu(false); go('/admin'); }}>
                       <IconGrid size={14} /> Panel admin
                     </button>
                   )}
@@ -246,8 +328,12 @@ export function Sidebar({
             <>
               <span className="sidebar__avatar">?</span>
               <div className="sidebar__profile-info">
-                <Link to="/auth" className="sidebar__profile-name">Iniciar sesion</Link>
-                <Link to="/planes" className="sidebar__plan">Ver planes</Link>
+                <Link to="/auth" className="sidebar__profile-name" onClick={compact ? onClose : undefined}>
+                  Iniciar sesion
+                </Link>
+                <Link to="/planes" className="sidebar__plan" onClick={compact ? onClose : undefined}>
+                  Ver planes
+                </Link>
               </div>
             </>
           )}

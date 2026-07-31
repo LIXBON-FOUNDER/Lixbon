@@ -70,6 +70,13 @@
   --radius-pill: 999px;
   --radius-box: 22px;
   --sidebar-w: 280px;
+
+  /* Márgenes seguros del dispositivo (notch, barra de gestos). Fuera de móvil
+     valen 0, así se pueden sumar sin condicionales. */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
 }
 
 /* Modo oscuro (docs/DISENO_WEB.md · paleta "Modo oscuro"):
@@ -114,6 +121,11 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+html {
+  /* Android Chrome infla la tipografía de bloques anchos si no se desactiva. */
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -225,6 +237,38 @@ p {
 
 .icon-btn:hover {
   background: rgba(var(--ink-rgb), 0.07);
+}
+
+/* ── Puntero grueso (dedo, lápiz) ────────────────────────────────────── */
+/* No es cuestión de ancho de pantalla: un portátil táctil necesita lo mismo
+   que un teléfono. Los objetivos crecen hasta los 44px sin mover el layout. */
+
+@media (pointer: coarse) {
+  .pill-btn {
+    min-height: 44px;
+  }
+
+  .icon-btn {
+    position: relative;
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Amplía el área sensible sin agrandar el círculo visible. */
+  .icon-btn::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+  }
+}
+
+/* En táctil el :hover se «pega» tras pulsar; el feedback lo da :active. */
+@media (hover: none) {
+  .pill-btn:active:not(:disabled),
+  .icon-btn:active {
+    opacity: 0.7;
+  }
 }
 
 /* ── Colapso animado (búsqueda, historial…) ──────────────────────────── */

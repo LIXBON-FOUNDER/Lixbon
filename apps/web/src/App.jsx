@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './hooks/useAuth';
+import { useViewportHeight } from './hooks/useViewportHeight';
 
 import ChatPage from './pages/ChatPage';
 import AuthPage from './pages/AuthPage';
@@ -14,6 +15,8 @@ import SharedPage from './pages/SharedPage';
 import RemotePage from './pages/RemotePage';
 
 export default function App() {
+  useViewportHeight(); // --app-vh: alto real del viewport (teclado móvil)
+
   return (
     <BrowserRouter>
       <AuthProvider>

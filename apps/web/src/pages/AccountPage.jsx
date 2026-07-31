@@ -882,11 +882,16 @@ export default function AccountPage() {
       </header>
 
       <div className="settings">
-        <button className="docs__menu-toggle" onClick={() => setMenuOpen((v) => !v)}>
+        <button
+          className="docs__menu-toggle"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-expanded={menuOpen}
+          aria-controls="settings-nav"
+        >
           {current.label} <IconChevron size={14} open={menuOpen} />
         </button>
 
-        <aside className={`settings__nav ${menuOpen ? 'is-open' : ''}`}>
+        <aside id="settings-nav" className={`settings__nav ${menuOpen ? 'is-open' : ''}`}>
           <span className="settings__nav-title">Ajustes</span>
           {SECTIONS.map((s) => (
             <button

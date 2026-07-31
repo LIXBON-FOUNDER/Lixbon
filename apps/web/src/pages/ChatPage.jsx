@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useIsCompact } from '../hooks/useMediaQuery';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
 import { Sidebar } from '../components/Sidebar';
@@ -11,7 +12,7 @@ import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
-import { IconShare, IconArrowDown, IconGlobe } from '../components/Icons';
+import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Icons';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
@@ -44,6 +45,9 @@ export default function ChatPage() {
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  // En compacto el panel es un cajón sobre el chat, no una columna.
+  const compact = useIsCompact();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState(null); // { text, leaving }
   const [showJump, setShowJump] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -63,6 +67,13 @@ export default function ChatPage() {
       setTimeout(() => setToast(null), 2800),
     ];
   };
+
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+
+  // Al pasar a escritorio el cajón deja de tener sentido (el panel es fijo).
+  useEffect(() => {
+    if (!compact) setDrawerOpen(false);
+  }, [compact]);
 
   // ── Datos iniciales (usuario con sesión) ─────────────────────────────
   const loadConversations = useCallback(async () => {
@@ -270,10 +281,26 @@ export default function ChatPage() {
         onRename={renameConversation}
         onDelete={deleteConversation}
         onLogout={handleLogout}
+        compact={compact}
+        open={compact && drawerOpen}
+        onClose={closeDrawer}
       />
+
+      {compact && drawerOpen && (
+        <div className="sidebar-scrim" onClick={closeDrawer} aria-hidden="true" />
+      )}
 
       <main className="chat-main">
         <header className="chat-header">
+          <button
+            className="icon-btn chat-header__menu"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Abrir panel de conversaciones"
+            aria-controls="sidebar-drawer"
+            aria-expanded={drawerOpen}
+          >
+            <IconMenu />
+          </button>
           <h1 className="chat-header__title">{title || (empty ? '' : 'Sin título')}</h1>
           {user ? (
             !empty && routeConvId && (
@@ -332,12 +359,14 @@ export default function ChatPage() {
                 ))}
               </div>
             </div>
-            {showJump && (
-              <button className="chat-jump" onClick={jumpToBottom}>
-                más <IconArrowDown size={14} />
-              </button>
-            )}
             <div className="chat-composer">
+              {/* Dentro del compositor: se apoya en su borde superior y lo sigue
+                  cuando la caja crece o el teclado móvil la empuja. */}
+              {showJump && (
+                <button className="chat-jump" onClick={jumpToBottom}>
+                  más <IconArrowDown size={14} />
+                </button>
+              )}
               <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
             </div>

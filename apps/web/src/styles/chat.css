@@ -3,7 +3,19 @@
 .chat-shell {
   display: flex;
   height: 100%;
+  height: 100dvh; /* en móvil la barra del navegador cambia el 100vh */
+  height: var(--app-vh, 100dvh); /* …y el teclado de iOS tampoco lo cambia */
   background: var(--bg);
+}
+
+/* Velo del cajón lateral (solo en compacto, lo monta ChatPage) */
+.sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: var(--scrim);
+  animation: fade-in 0.22s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* ── Sidebar (ancho animado; __body = completo, __rail = colapsado) ──── */
@@ -112,6 +124,7 @@
 .sidebar__history {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain; /* el scroll no se propaga al hilo del chat */
   padding: 10px 8px 8px;
 }
 
@@ -170,8 +183,18 @@
   transition: opacity 0.15s ease;
 }
 
-.sb-item:hover .sb-item__menu-btn {
+.sb-item:hover .sb-item__menu-btn,
+.sb-item__menu-btn:focus-visible {
   opacity: 1;
+}
+
+/* Sin hover (táctil) el menú sería inalcanzable: siempre visible y más grande. */
+@media (hover: none) {
+  .sb-item__menu-btn {
+    opacity: 1;
+    width: 34px;
+    height: 34px;
+  }
 }
 
 .sb-item__edit {
@@ -186,11 +209,11 @@
 
 /* Menús contextuales */
 
+/* Fijo, no absoluto: el historial hace scroll (overflow) y recortaba el menú.
+   HistoryItem calcula left/top desde el rectángulo del botón. */
 .sb-menu {
-  position: absolute;
-  right: 4px;
-  top: 100%;
-  z-index: 20;
+  position: fixed;
+  z-index: 60;
   display: flex;
   flex-direction: column;
   min-width: 160px;
@@ -229,7 +252,9 @@
   color: var(--danger);
 }
 
+/* El menú del perfil sí cabe dentro del panel: se ancla al pie y sube. */
 .sb-menu--profile {
+  position: absolute;
   right: 10px;
   top: auto;
   bottom: calc(100% + 6px);
@@ -363,7 +388,15 @@
   padding: 16px 28px;
 }
 
+/* Abre el cajón lateral. Solo existe cuando el panel se vuelve cajón. */
+.chat-header__menu {
+  display: none;
+  flex-shrink: 0;
+}
+
 .chat-header__title {
+  flex: 1;
+  min-width: 0;
   font-size: 18px;
   font-weight: 500;
   white-space: nowrap;
@@ -424,6 +457,7 @@
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain; /* evita el «tirar para recargar» al llegar arriba */
 }
 
 .chat-thread {
@@ -574,11 +608,12 @@
   color: var(--ink-soft);
 }
 
-/* Botón "más ↓" */
+/* Botón "más ↓" — vive dentro del compositor y se apoya en su borde superior,
+   así sigue a la caja cuando crece (varias líneas, adjuntos, teclado abierto). */
 
 .chat-jump {
   position: absolute;
-  bottom: 130px;
+  bottom: calc(100% - 6px);
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
@@ -603,6 +638,7 @@
 /* Composer + caja de input */
 
 .chat-composer {
+  position: relative; /* ancla de .chat-jump */
   padding: 8px 24px 22px;
   max-width: 780px;
   margin: 0 auto;
@@ -782,8 +818,185 @@
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 
-@media (max-width: 760px) {
+/* Con el dedo, los controles de texto del panel son demasiado bajos. Va al
+   final del archivo a propósito: varias de estas reglas usan la forma corta
+   `padding` más abajo y pisarían un `padding-top` declarado antes. */
+
+@media (pointer: coarse) {
+  .sb-nav {
+    padding: 13px 10px;
+  }
+
+  .sidebar__history-head {
+    padding: 12px 10px;
+  }
+
+  .sb-item__title {
+    padding: 12px 10px;
+  }
+
+  .sb-menu button {
+    padding: 12px 10px;
+  }
+
+  /* Solo cuando es enlace (sesión cerrada); con sesión es un <span>. */
+  a.sidebar__profile-name {
+    padding: 7px 0;
+  }
+
+  .sidebar__plan {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+}
+
+/* Compacto (≤860px): el panel deja de ser una columna y pasa a ser un cajón
+   sobre el chat. Nada desaparece — historial, perfil, planes y ajustes siguen
+   estando, a un toque del botón de la cabecera. */
+
+@media (max-width: 860px) {
   .sidebar {
+    position: fixed;
+    z-index: 40;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(320px, 84vw);
+    padding-left: var(--safe-l);
+    padding-bottom: var(--safe-b);
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .sidebar.is-open {
+    transform: none;
+    box-shadow: 0 0 70px rgba(var(--shadow-rgb), 0.28);
+  }
+
+  /* El riel colapsado es una idea de escritorio: aquí el cajón está o no está. */
+  .sidebar.is-collapsed {
+    width: min(320px, 84vw);
+  }
+
+  .sidebar__rail {
     display: none;
+  }
+
+  .sidebar.is-collapsed .sidebar__body {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar__body {
+    width: 100%;
+  }
+
+  .chat-header {
+    gap: 10px;
+    padding: 10px 12px;
+    padding-top: calc(10px + var(--safe-t));
+    padding-right: calc(12px + var(--safe-r));
+    padding-left: calc(12px + var(--safe-l));
+  }
+
+  .chat-header__menu {
+    display: inline-flex;
+  }
+
+  .chat-header__title {
+    font-size: 16px;
+  }
+
+  .chat-toast {
+    top: calc(14px + var(--safe-t));
+    max-width: calc(100% - 32px);
+  }
+
+  .chat-thread,
+  .sk-thread {
+    padding: 8px 16px 20px;
+    gap: 16px;
+  }
+
+  .msg--user {
+    max-width: 88%;
+  }
+
+  .chat-composer {
+    padding: 6px 12px calc(12px + var(--safe-b));
+  }
+
+  .chat-hero {
+    gap: 22px;
+    padding: 0 16px 6vh;
+  }
+
+  .chat-hero__title {
+    font-size: 27px;
+  }
+
+  /* 16px es el mínimo que evita que iOS haga zoom al enfocar un control. */
+  .sidebar__search,
+  .sb-item__edit,
+  .chat-input__model {
+    font-size: 16px;
+  }
+
+  /* Sin min-width:0 el <select> no encoge por debajo del nombre del modelo y
+     empuja al botón de enviar fuera de la caja. */
+  .chat-input__bar {
+    gap: 8px;
+  }
+
+  .chat-input__left {
+    min-width: 0;
+  }
+
+  .chat-input__model {
+    min-width: 0;
+    max-width: 150px;
+    text-overflow: ellipsis;
+  }
+
+  .md pre {
+    /* El bloque de código se sale del ancho del hilo si no se le deja respirar. */
+    padding: 12px;
+    font-size: 13px;
+  }
+}
+
+/* Teléfono (≤400px): la barra del compositor es lo primero que se rompe. */
+
+@media (max-width: 400px) {
+  .chat-hero__title {
+    font-size: 23px;
+  }
+
+  .chat-input {
+    padding: 11px 12px 9px;
+  }
+
+  .chat-input__model {
+    margin-left: 2px;
+    padding: 5px 10px;
+    max-width: 116px;
+  }
+
+  .chat-header__auth .pill-btn {
+    padding: 8px 14px;
+    font-size: 13.5px;
+  }
+}
+
+/* Móvil apaisado: la altura manda, se recorta el aire vertical. */
+
+@media (max-height: 480px) and (orientation: landscape) {
+  .chat-hero {
+    gap: 16px;
+    padding-bottom: 0;
+  }
+
+  .chat-hero__title {
+    font-size: 21px;
   }
 }

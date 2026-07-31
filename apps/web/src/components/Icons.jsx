@@ -36,6 +36,10 @@ export const IconPanel = (p) => (
   <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9.5 4v16" /></Svg>
 );
 
+export const IconMenu = (p) => (
+  <Svg {...p}><path d="M4 7h16M4 12h16M4 17h16" /></Svg>
+);
+
 export const IconChat = (p) => (
   <Svg {...p}><path d="M21 12a8 8 0 0 1-8 8H4l1.7-3.4A8 8 0 1 1 21 12Z" /></Svg>
 );

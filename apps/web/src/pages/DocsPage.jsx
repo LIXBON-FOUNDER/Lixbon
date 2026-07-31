@@ -42,11 +42,16 @@ export default function DocsPage() {
     <div className="page">
       <PublicNav />
       <div className="docs">
-        <button className="docs__menu-toggle" onClick={() => setMenuOpen((v) => !v)}>
+        <button
+          className="docs__menu-toggle"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-expanded={menuOpen}
+          aria-controls="docs-nav"
+        >
           {current.title} <IconChevron size={14} open={menuOpen} />
         </button>
 
-        <aside className={`docs__nav ${menuOpen ? 'is-open' : ''}`}>
+        <aside id="docs-nav" className={`docs__nav ${menuOpen ? 'is-open' : ''}`}>
           {groups.map((g) => (
             <div key={g.name} className="docs__nav-group">
               <span className="docs__nav-title">{g.name}</span>

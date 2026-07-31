@@ -806,22 +806,23 @@
   letter-spacing: -0.01em;
 }
 
-@media (max-width: 640px) {
-  .page__title {
-    font-size: 25px;
-  }
+/* ── Responsive ──────────────────────────────────────────────────────── */
 
-  .card {
-    padding: 18px;
-  }
+/* Compacto (≤860px): el índice de Ajustes se pliega tras el mismo botón que
+   usa Docs (.docs__menu-toggle), así que ambos han de plegarse a la vez. */
 
-  .card__row {
-    flex-wrap: wrap;
+@media (max-width: 860px) {
+  .page__bar {
+    padding: 14px 16px;
+    padding-top: calc(14px + var(--safe-t));
+    padding-right: calc(16px + var(--safe-r));
+    padding-left: calc(16px + var(--safe-l));
   }
 
   .settings {
     grid-template-columns: 1fr;
     gap: 14px;
+    width: min(980px, calc(100% - 32px));
   }
 
   .settings__nav {
@@ -834,9 +835,103 @@
 
   .settings__nav.is-open {
     display: flex;
+    animation: pubnav-menu-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .settings__nav-link {
+    padding: 12px;
+    font-size: 15.5px;
+  }
+}
+
+/* Teléfono (≤640px): las filas etiqueta + control dejan de convivir en línea. */
+
+@media (max-width: 640px) {
+  .page__title {
+    font-size: 25px;
+  }
+
+  .page__body {
+    width: min(720px, calc(100% - 32px));
+  }
+
+  .page__body--wide {
+    width: min(1040px, calc(100% - 32px));
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .card__row {
+    flex-wrap: wrap;
+  }
+
+  /* Etiqueta arriba, control abajo y a todo el ancho: nada se estrangula. */
+  .set-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .set-row--head {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .set-row__control {
+    display: flex;
+    justify-content: flex-start;
   }
 
   .set-input {
-    width: 180px;
+    width: 100%;
+    max-width: none;
+    font-size: 16px; /* menos de 16px hace que iOS haga zoom al enfocar */
+  }
+
+  .set-packs {
+    justify-content: flex-start;
+  }
+
+  .set-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .set-actions .pill-btn {
+    width: 100%;
+  }
+
+  .set-plan {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px;
+  }
+
+  .set-plan .pill-btn {
+    width: 100%;
+  }
+
+  .key-reveal {
+    flex-direction: column;
+    margin: 12px 0;
+  }
+
+  .keys__item {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .keys__meta {
+    font-size: 12.5px;
+  }
+
+  .plan-card {
+    padding: 24px 20px;
+  }
+
+  .plan-card__desc {
+    min-height: 0;
   }
 }
