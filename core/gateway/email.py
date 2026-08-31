@@ -252,6 +252,50 @@ async def send_subscription_email(to: str, plan: dict[str, Any],
         precio=_precio(plan),
         limites=limites_de_plan(plan),
         renovacion=fecha_larga(renovacion_iso),
-        url=f"{PUBLIC_BASE_URL}/cuenta",
+        url=f"{PUBLIC_BASE_URL}/account",
     )
     return await send_email(to, asunto, html, texto)
+
+
+async def send_password_changed_email(to: str, *, user_agent: str | None, ip: str | None,
+                                      cuando: datetime | None = None) -> bool:
+    asunto, html, texto = plantillas.password_cambiada(
+        cuando=momento_largo(cuando),
+        dispositivo=describir_dispositivo(user_agent),
+        ip=recortar_ip(ip),
+        # El mismo camino que usó quien cambió la contraseña sirve para
+        # recuperarla: si no fue el dueño, es justo lo que necesita ahora.
+        url_recuperar=f"{PUBLIC_BASE_URL}/reset-password",
+    )
+    return await send_email(to, asunto, html, texto)
+
+
+async def send_subscription_canceled_email(to: str, plan_nombre: str,
+                                           plan_gratis: dict[str, Any] | None = None) -> bool:
+    asunto, html, texto = plantillas.suscripcion_cancelada(
+        plan_nombre=plan_nombre,
+        limites_gratis=limites_de_plan(plan_gratis or {}),
+        url_planes=f"{PUBLIC_BASE_URL}/planes",
+    )
+    return await send_email(to, asunto, html, texto)
+
+
+async def send_payment_failed_email(to: str, plan_nombre: str, *,
+                                    importe: str | None = None,
+                                    reintento_iso: str | None = None,
+                                    url_pago: str | None = None) -> bool:
+    asunto, html, texto = plantillas.pago_fallido(
+        plan_nombre=plan_nombre,
+        importe=importe,
+        reintento=fecha_larga(reintento_iso),
+        # La factura de Stripe deja pagar y cambiar la tarjeta sin iniciar
+        # sesión; la sección de facturación es el respaldo cuando no viene.
+        url_pago=url_pago or f"{PUBLIC_BASE_URL}/account/facturacion",
+    )
+    return await send_email(to, asunto, html, texto)
+
+
+def importe_de_factura(centavos: int | None, moneda: str | None) -> str | None:
+    if not centavos:
+        return None
+    return f"${centavos / 100:.2f} {(moneda or 'usd').upper()}"

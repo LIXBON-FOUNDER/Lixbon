@@ -420,6 +420,11 @@ p {
   animation: fade-in 0.2s ease;
 }
 
+/* El correo no llegó a salir: es un fallo nuestro, no un recordatorio. */
+.verify-bar.is-error {
+  background: var(--danger-soft);
+}
+
 .verify-bar__text {
   color: var(--ink-soft);
 }

@@ -12,10 +12,11 @@ Comprueba, en este orden:
 
   1. Las variables del gateway (BREVO_API_KEY, EMAIL_FROM, PUBLIC_BASE_URL).
   2. Que la clave vale, preguntándole a Brevo por la cuenta.
-  3. Que el DOMINIO del remitente está autenticado en Brevo (SPF+DKIM). Este es
-     el que más veces falla: la clave es correcta, el código es correcto, y aun
-     así Brevo rechaza cada envío porque el dominio todavía no es suyo.
-  4. Si se le pasa un destinatario, envía uno de los cinco correos de verdad y
+  3. Que el REMITENTE exacto está dado de alta y validado. Sin esto, el relay
+     contesta «the sender you used is not valid» y no sale ni un correo.
+  4. Que el DOMINIO del remitente está autenticado (SPF+DKIM). Sin esto los
+     correos salen, pero con muchas papeletas de acabar en spam.
+  5. Si se le pasa un destinatario, envía uno de los ocho correos de verdad y
      enseña la respuesta cruda de Brevo, incluido el motivo de un rechazo.
 """
 from __future__ import annotations
@@ -38,7 +39,8 @@ import httpx
 from core.gateway import email as correo
 from core.gateway import email_templates as plantillas
 
-PLANTILLAS = ("verificacion", "bienvenida", "acceso", "suscripcion", "reset")
+PLANTILLAS = ("verificacion", "bienvenida", "acceso", "suscripcion", "reset",
+              "password", "cancelacion", "pago")
 
 PLAN_DE_MUESTRA = {
     "name": "Pro", "price_monthly_cents": 1900, "messages_per_day": 500,
@@ -105,8 +107,45 @@ def revisar_cuenta(cliente: httpx.Client) -> bool:
     return True
 
 
+def revisar_remitente(cliente: httpx.Client) -> bool:
+    """El remitente exacto, dado de alta y validado en Brevo.
+
+    Es el error literal que devuelve el relay cuando falta: «Sending has been
+    rejected because the sender you used ... is not valid»."""
+    cabecera("3. El remitente, dado de alta en Brevo")
+    direccion = correo._remitente()["email"].lower()
+    try:
+        resp = cliente.get("https://api.brevo.com/v3/senders")
+    except Exception as exc:
+        linea("!!", f"No se pudo consultar los remitentes: {exc}")
+        return False
+    if resp.status_code != 200:
+        linea("!!", f"Brevo respondió {resp.status_code}: {resp.text[:200]}")
+        return False
+
+    remitentes = resp.json().get("senders") or []
+    encontrado = next((r for r in remitentes
+                       if str(r.get("email") or "").lower() == direccion), None)
+    if not encontrado:
+        linea("!!", f"«{direccion}» NO está dado de alta como remitente. Brevo "
+                    "rechaza cada envío con «the sender you used is not valid».")
+        if remitentes:
+            linea("--", "Los que sí están: "
+                        + ", ".join(str(r.get("email")) for r in remitentes))
+        linea("--", "Alta en Brevo -> Senders, Domains & Dedicated IPs -> Senders. "
+                    "Brevo manda un código a esa dirección: con el reenvío de "
+                    "Cloudflare Email Routing llega al buzón de destino.")
+        return False
+    if encontrado.get("active"):
+        linea("ok", f"«{direccion}» está dado de alta y validado.")
+        return True
+    linea("!!", f"«{direccion}» está dado de alta pero SIN validar: Brevo envió un "
+                "código a esa dirección y nadie lo confirmó todavía.")
+    return False
+
+
 def revisar_dominio(cliente: httpx.Client) -> bool:
-    cabecera("3. El dominio del remitente, autenticado en Brevo")
+    cabecera("4. El dominio del remitente, autenticado en Brevo")
     dominio = correo._remitente()["email"].split("@")[-1].lower()
     try:
         resp = cliente.get("https://api.brevo.com/v3/senders/domains")
@@ -152,6 +191,26 @@ def construir(plantilla: str) -> tuple[str, str, str]:
             url=base,
             url_planes=f"{base}/planes",
         )
+    if plantilla == "password":
+        return plantillas.password_cambiada(
+            cuando=correo.momento_largo(),
+            dispositivo=correo.describir_dispositivo(UA_DE_MUESTRA),
+            ip=correo.recortar_ip("190.24.18.77"),
+            url_recuperar=f"{base}/reset-password",
+        )
+    if plantilla == "cancelacion":
+        return plantillas.suscripcion_cancelada(
+            plan_nombre=PLAN_DE_MUESTRA["name"],
+            limites_gratis=["30 mensajes al día", "150 000 tokens al mes", "1 clave de API"],
+            url_planes=f"{base}/planes",
+        )
+    if plantilla == "pago":
+        return plantillas.pago_fallido(
+            plan_nombre=PLAN_DE_MUESTRA["name"],
+            importe=correo.importe_de_factura(PLAN_DE_MUESTRA["price_monthly_cents"], "usd"),
+            reintento=correo.fecha_larga("2026-09-03T10:00:00Z"),
+            url_pago=f"{base}/account/facturacion",
+        )
     if plantilla == "reset":
         return plantillas.reset_password(f"{base}/reset-password?token=PRUEBA")
     if plantilla == "acceso":
@@ -171,7 +230,7 @@ def construir(plantilla: str) -> tuple[str, str, str]:
 
 
 def enviar(cliente: httpx.Client, destino: str, plantilla: str) -> bool:
-    cabecera(f"4. Envío de prueba a {destino} (plantilla: {plantilla})")
+    cabecera(f"5. Envío de prueba a {destino} (plantilla: {plantilla})")
     asunto, html, texto = construir(plantilla)
     linea("--", f"Asunto: {asunto}")
     try:
@@ -199,7 +258,7 @@ def main() -> int:
     partes = argparse.ArgumentParser(description="Diagnostica el correo transaccional de lixbon.")
     partes.add_argument("destino", nargs="?", help="Dirección a la que mandar el correo de prueba")
     partes.add_argument("--plantilla", choices=PLANTILLAS, default="verificacion",
-                        help="Cuál de los cinco correos enviar (por defecto: verificacion)")
+                        help="Cuál de los ocho correos enviar (por defecto: verificacion)")
     args = partes.parse_args()
 
     print("Diagnóstico del correo transaccional de lixbon")
@@ -217,11 +276,12 @@ def main() -> int:
         "content-type": "application/json",
     }) as cliente:
         todo_bien = revisar_cuenta(cliente) and todo_bien
+        todo_bien = revisar_remitente(cliente) and todo_bien
         todo_bien = revisar_dominio(cliente) and todo_bien
         if args.destino:
             todo_bien = enviar(cliente, args.destino, args.plantilla) and todo_bien
         else:
-            cabecera("4. Envío de prueba")
+            cabecera("5. Envío de prueba")
             linea("--", "No se pidió: pásale una dirección para enviar uno de verdad.")
 
     print()

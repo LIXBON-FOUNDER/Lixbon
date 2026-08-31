@@ -306,14 +306,17 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
         <Row
           label="Correo"
           hint={user.email_verified
-            ? 'Verificado'
+            ? 'Nadie más puede reclamar esta dirección'
             : verifyState === 'enviado'
               ? 'Te enviamos un enlace; revisa también la carpeta de spam'
               : verifyState === 'error'
                 ? 'No se pudo enviar el correo; inténtalo en unos minutos'
-                : 'Sin verificar'}
+                : 'Verifícalo para poder recuperar la cuenta si pierdes la contraseña'}
         >
           <span className="set-static">{user.email || user.username}</span>
+          <span className={user.email_verified ? 'verify-chip is-ok' : 'verify-chip'}>
+            {user.email_verified ? 'Verificado' : 'Sin verificar'}
+          </span>
           {!user.email_verified && user.email && verifyState !== 'enviado' && (
             <button
               className="pill-btn pill-btn--outline set-btn"

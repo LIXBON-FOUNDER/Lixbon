@@ -535,6 +535,33 @@
   margin-left: 12px;
 }
 
+/* Estado del correo: sin esto, "verificado o no" solo se leía en la letra
+   pequeña de la fila, donde nadie mira. */
+.verify-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.verify-chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.verify-chip.is-ok::before {
+  background: var(--ok);
+}
+
 .set-input {
   width: 260px;
   max-width: 46vw;

@@ -6,6 +6,11 @@
 // aviso aparece donde el usuario ya está (el chat) y trae la única acción que
 // resuelve el problema.
 //
+// Distingue tres situaciones, porque exigen cosas distintas del usuario:
+// acabas de registrarte y el correo salió (espéralo), acabas de registrarte y
+// NO salió (el fallo es nuestro, vuelve a intentarlo), o llevas tiempo sin
+// verificar (hazlo ya).
+//
 // No bloquea nada por sí solo: quien decide si el servicio se puede usar sin
 // verificar es el gateway (REQUIRE_EMAIL_VERIFICATION).
 import { useState } from 'react';
@@ -32,23 +37,27 @@ export function useReenvioVerificacion() {
 }
 
 export function VerifyBanner() {
-  const { user } = useAuth();
+  const { user, verificationSent } = useAuth();
   const { estado, reenviar } = useReenvioVerificacion();
 
   // Las cuentas heredadas sin correo no tienen nada que verificar.
   if (!user?.email || user.email_verified) return null;
 
+  // Un fallo del reenvío pesa más que el resultado del registro: es lo último
+  // que ha pasado y lo que el usuario acaba de provocar.
+  const fallo = estado === 'error' || (estado === 'reposo' && verificationSent === false);
+
+  const texto = fallo ? (
+    <>No pudimos enviar el correo de verificación a <strong>{user.email}</strong>. No es cosa tuya: vuelve a intentarlo en unos minutos.</>
+  ) : estado === 'enviado' || verificationSent === true ? (
+    <>Te enviamos un enlace a <strong>{user.email}</strong> para verificar tu cuenta. Revisa también la carpeta de spam.</>
+  ) : (
+    <>Verifica tu correo electrónico para asegurar tu cuenta. Enviamos el enlace a <strong>{user.email}</strong>.</>
+  );
+
   return (
-    <div className="verify-bar" role="status">
-      <span className="verify-bar__text">
-        {estado === 'enviado' ? (
-          <>Te enviamos un enlace a <strong>{user.email}</strong>. Revisa también la carpeta de spam.</>
-        ) : estado === 'error' ? (
-          <>No pudimos enviar el correo ahora mismo. Vuelve a intentarlo en unos minutos.</>
-        ) : (
-          <>Verifica tu correo electrónico para asegurar tu cuenta. Enviamos el enlace a <strong>{user.email}</strong>.</>
-        )}
-      </span>
+    <div className={fallo ? 'verify-bar is-error' : 'verify-bar'} role="status">
+      <span className="verify-bar__text">{texto}</span>
       {estado !== 'enviado' && (
         <button
           className="pill-btn pill-btn--outline verify-bar__btn"

@@ -340,6 +340,46 @@ def _avisar_suscripcion(user_id: int, plan: dict[str, Any], fin_de_ciclo: str | 
     en_segundo_plano(send_subscription_email(correo, plan, fin_de_ciclo))
 
 
+def _avisar_cancelacion(user_id: int, subscription: dict[str, Any],
+                        anterior: dict[str, Any] | None) -> None:
+    # Solo si de verdad había algo que cancelar. Stripe reenvía los webhooks que
+    # no confirma, y sin esta guarda un reenvío avisaría dos veces de la misma
+    # cancelación a alguien que ya está en el Gratuito.
+    if not anterior or anterior.get("status") not in ("active", "trialing", "past_due"):
+        return
+    plan = _plan_from_subscription(subscription) or get_plan(anterior.get("plan_id") or "")
+    if not plan or plan["id"] == "free":
+        return
+    correo = (get_user_by_id(user_id) or {}).get("email")
+    if not correo:
+        return
+    from core.gateway.email import en_segundo_plano, send_subscription_canceled_email
+    en_segundo_plano(send_subscription_canceled_email(correo, plan["name"], get_plan("free")))
+
+
+def _avisar_pago_fallido(user: dict[str, Any], invoice: dict[str, Any]) -> None:
+    # Solo las facturas de una suscripción: un pack de créditos que falla no
+    # pone en riesgo ningún plan, y su correo diría algo que no es verdad.
+    if not invoice.get("subscription"):
+        return
+    if not user.get("email"):
+        return
+    sub = get_subscription(user["id"])
+    plan = get_plan(sub.get("plan_id") or "") if sub else None
+    from core.gateway.email import (
+        en_segundo_plano, importe_de_factura, send_payment_failed_email,
+    )
+    en_segundo_plano(send_payment_failed_email(
+        user["email"],
+        (plan or {}).get("name") or "de pago",
+        importe=importe_de_factura(invoice.get("amount_due"), invoice.get("currency")),
+        reintento_iso=_iso(invoice.get("next_payment_attempt")),
+        # La factura alojada en Stripe deja pagar y cambiar la tarjeta sin
+        # iniciar sesión en lixbon: menos pasos entre el aviso y el arreglo.
+        url_pago=invoice.get("hosted_invoice_url"),
+    ))
+
+
 def handle_event(event: dict[str, Any]) -> None:
     """Procesa un evento de Stripe ya verificado (idempotente)."""
     etype = event["type"]
@@ -373,8 +413,10 @@ def handle_event(event: dict[str, Any]) -> None:
     elif etype == "customer.subscription.deleted":
         user_id = _user_id_from_subscription(stripe, obj)
         if user_id:
+            anterior = get_subscription(user_id)  # qué plan termina, antes de perderlo
             downgrade_to_free(user_id)
             log_audit_event("subscription_canceled", user_id=user_id)
+            _avisar_cancelacion(user_id, obj, anterior)
 
     elif etype == "checkout.session.completed":
         # Solo nos interesan los packs de créditos (las suscripciones se
@@ -406,6 +448,7 @@ def handle_event(event: dict[str, Any]) -> None:
         user = get_user_by_stripe_customer(obj.get("customer"))
         if user:
             log_audit_event("payment_failed", user_id=user["id"])
+            _avisar_pago_fallido(user, obj)
 
     else:
         logger.debug(f"[webhook] evento ignorado: {etype}")

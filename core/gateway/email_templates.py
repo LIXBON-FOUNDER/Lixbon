@@ -324,3 +324,135 @@ def reset_password(url: str) -> tuple[str, str, str]:
     return ("Restablece tu contraseña — lixbon",
             envoltura(eyebrow="Seguridad", titulo="Restablecer contraseña", cuerpo_html=cuerpo),
             texto)
+
+
+def password_cambiada(*, cuando: str, dispositivo: str, ip: str,
+                      url_recuperar: str) -> tuple[str, str, str]:
+    pares = [
+        ("Cuándo", _esc(cuando)),
+        ("Desde", _esc(dispositivo)),
+        ("Dirección IP", f'<span style="font-family:{MONO};">{_esc(ip)}</span>'),
+    ]
+    cuerpo = (
+        parrafo("La contraseña de tu cuenta de lixbon acaba de cambiar. Si fuiste tú, "
+                "ya está: entra con la contraseña nueva y no tienes que hacer nada más.",
+                margen="0 0 24px")
+        + caja(filas_dato(pares), relleno="6px 18px")
+        + _hueco(24)
+        + parrafo("Al cambiarla se cerraron todas las sesiones abiertas y se revocaron "
+                  "las claves de API activas. Las aplicaciones que las usaran —el IDE, "
+                  "la CLI, tus guiones— piden iniciar sesión otra vez.", margen="0 0 24px")
+        + parrafo(f'<strong style="font-weight:600;color:{TINTA};">¿No la cambiaste tú?</strong> '
+                  "Alguien con acceso a este correo pudo hacerlo. Recupera la cuenta ahora: "
+                  "el enlace te deja poner una contraseña nueva y vuelve a cerrar todo.",
+                  margen="0 0 18px")
+        + boton("Recuperar mi cuenta", url_recuperar)
+        + raya()
+        + nota("Si tampoco puedes entrar en este buzón, escríbenos desde otra dirección "
+               "antes de intentar nada más.")
+    )
+    texto = (
+        "Tu contraseña cambió\n\n"
+        "La contraseña de tu cuenta de lixbon acaba de cambiar. Si fuiste tú, no tienes "
+        "que hacer nada.\n\n"
+        f"Cuándo: {cuando}\n"
+        f"Desde: {dispositivo}\n"
+        f"Dirección IP: {ip}\n\n"
+        "Al cambiarla se cerraron todas las sesiones abiertas y se revocaron las claves "
+        "de API activas.\n\n"
+        "¿No la cambiaste tú? Recupera la cuenta ahora:\n"
+        f"{url_recuperar}\n"
+    )
+    return ("Tu contraseña cambió — lixbon",
+            envoltura(eyebrow="Seguridad", titulo="Tu contraseña cambió", cuerpo_html=cuerpo,
+                      pie_html="Este aviso es de seguridad: se envía siempre y no se puede desactivar."),
+            texto)
+
+
+def suscripcion_cancelada(*, plan_nombre: str, limites_gratis: list[str],
+                          url_planes: str) -> tuple[str, str, str]:
+    lista = "".join(
+        f'<p style="margin:0 0 7px;font-family:{TIPO};font-size:13.5px;line-height:1.45;'
+        f'color:{TINTA_SUAVE};"><span style="color:{OLIVO};font-weight:700;">·</span>&nbsp;{_esc(l)}</p>'
+        for l in limites_gratis
+    )
+    bloque = caja(
+        f'<p style="margin:0 0 12px;font-family:{TIPO};font-size:14px;font-weight:600;'
+        f'color:{TINTA};">Plan Gratuito — lo que sigues teniendo</p>{lista}',
+        relleno="16px 18px 10px",
+    )
+    cuerpo = (
+        parrafo(f'Tu plan <strong style="font-weight:600;color:{TINTA};">{_esc(plan_nombre)}</strong> '
+                "terminó y no habrá más cobros. Tu cuenta sigue abierta: pasa al plan "
+                "Gratuito desde ahora mismo.", margen="0 0 26px")
+        + bloque
+        + _hueco(24)
+        + parrafo("No se borra nada. Tus conversaciones, tus proyectos y tus claves de API "
+                  "siguen donde estaban; solo cambian los límites.", margen="0 0 24px")
+        + boton("Volver a suscribirme", url_planes)
+        + raya()
+        + nota("Si cancelaste por error, volver a suscribirte tarda lo que tardes en pagar: "
+               "el plan y sus límites se reactivan al instante.")
+    )
+    texto = (
+        f"Tu plan {plan_nombre} terminó\n\n"
+        f"Tu plan {plan_nombre} terminó y no habrá más cobros. Tu cuenta sigue abierta y "
+        "pasa al plan Gratuito desde ahora mismo.\n\n"
+        "Plan Gratuito — lo que sigues teniendo:\n"
+        + "".join(f"- {l}\n" for l in limites_gratis)
+        + "\nNo se borra nada: tus conversaciones, tus proyectos y tus claves de API siguen "
+          "donde estaban.\n\n"
+        f"{url_planes}\n"
+    )
+    return (f"Tu plan {plan_nombre} terminó — lixbon",
+            envoltura(eyebrow="Suscripción", titulo=f"Tu plan {plan_nombre} terminó",
+                      cuerpo_html=cuerpo),
+            texto)
+
+
+def pago_fallido(*, plan_nombre: str, importe: str | None, reintento: str | None,
+                 url_pago: str) -> tuple[str, str, str]:
+    pares = [("Plan", _esc(plan_nombre))]
+    if importe:
+        pares.append(("Importe", _esc(importe)))
+    if reintento:
+        pares.append(("Reintento", _esc(reintento)))
+
+    if reintento:
+        aviso = (f'Lo intentaremos otra vez el <strong style="font-weight:600;color:{TINTA};">'
+                 f'{_esc(reintento)}</strong>. Tu plan sigue activo hasta entonces.')
+    else:
+        aviso = ("Lo intentaremos otra vez en los próximos días. Tu plan sigue activo "
+                 "mientras tanto.")
+
+    cuerpo = (
+        parrafo("No pudimos cobrar la última factura de tu suscripción. Suele ser una "
+                "tarjeta caducada, sin fondos o rechazada por el banco.", margen="0 0 24px")
+        + caja(filas_dato(pares), relleno="6px 18px")
+        + _hueco(24)
+        + parrafo(aviso, margen="0 0 24px")
+        + boton("Actualizar el método de pago", url_pago)
+        + raya()
+        + nota("Si todos los intentos fallan, la suscripción se cancela y la cuenta vuelve "
+               "al plan Gratuito. No se borra nada, solo cambian los límites.")
+    )
+    lineas = [f"Plan: {plan_nombre}"]
+    if importe:
+        lineas.append(f"Importe: {importe}")
+    if reintento:
+        lineas.append(f"Reintento: {reintento}")
+    texto = (
+        "No pudimos cobrar tu suscripción\n\n"
+        "No pudimos cobrar la última factura de tu suscripción. Suele ser una tarjeta "
+        "caducada, sin fondos o rechazada por el banco.\n\n"
+        + "\n".join(lineas)
+        + "\n\n" + ("Lo intentaremos otra vez el " + reintento + ". " if reintento
+                    else "Lo intentaremos otra vez en los próximos días. ")
+        + "Tu plan sigue activo hasta entonces.\n\n"
+        "Actualiza el método de pago:\n"
+        f"{url_pago}\n"
+    )
+    return ("No pudimos cobrar tu suscripción — lixbon",
+            envoltura(eyebrow="Facturación", titulo="No pudimos cobrar tu suscripción",
+                      cuerpo_html=cuerpo),
+            texto)

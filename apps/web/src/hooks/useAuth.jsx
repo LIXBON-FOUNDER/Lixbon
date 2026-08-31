@@ -7,6 +7,11 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Si el correo de verificación llegó a salir en este registro: null mientras
+  // no haya habido uno. El backend puede decir que NO salió (Brevo caído, mal
+  // configurado), y callárselo dejaría al recién registrado esperando un correo
+  // que nadie envió.
+  const [verificationSent, setVerificationSent] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +45,7 @@ export function AuthProvider({ children }) {
       password,
     });
     setUser(res.data.user);
+    setVerificationSent(res.data.verification_email_sent !== false);
     return res.data;
   }, []);
 
@@ -51,7 +57,9 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, setUser, loading, login, register, logout, verificationSent }}
+    >
       {children}
     </AuthContext.Provider>
   );

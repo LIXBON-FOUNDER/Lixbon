@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from core.gateway.email import (
     en_segundo_plano,
     send_login_alert_email,
+    send_password_changed_email,
     send_password_reset_email,
     send_verification_email,
     send_welcome_email,
@@ -262,6 +263,17 @@ async def reset_password(payload: ResetPasswordPayload, request: Request):
     deactivate_all_user_keys(user_id)  # rotar credenciales tras cambio de contraseña
     delete_user_sessions(user_id)      # una sesión robada no debe sobrevivir al reset
     log_audit_event("password_reset_completed", user_id=user_id, ip_address=_client_ip(request))
+
+    # Aviso al buzón, no a la pantalla: quien cambia la contraseña ya sabe que
+    # la cambió. Este correo es para el caso contrario — que la haya cambiado
+    # otro — y por eso sale aunque el cambio haya ido bien.
+    usuario = get_user_by_id(user_id)
+    if usuario and usuario.get("email"):
+        en_segundo_plano(send_password_changed_email(
+            usuario["email"],
+            user_agent=request.headers.get("user-agent"),
+            ip=_client_ip(request),
+        ))
     return {"message": "Contraseña actualizada. Inicia sesión de nuevo."}
 
 

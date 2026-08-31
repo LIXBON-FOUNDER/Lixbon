@@ -229,3 +229,85 @@ def test_sin_verificar_no_se_puede_usar_el_servicio(monkeypatch):
         exigir_correo_verificado(sin_verificar)
     assert caida.value.status_code == 403
     assert caida.value.detail["error"] == "email_not_verified"
+
+
+# ── Los tres avisos que faltaban ──────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def plan_pro(_esquema):
+    with get_session() as s:
+        if not s.get(Plan, "pro"):
+            s.add(Plan(id="pro", name="Pro", description="", price_monthly_cents=990,
+                       currency="USD", messages_per_day=500, tokens_per_month=5000000,
+                       max_api_keys=5, rate_limit_per_min=60, allowed_models=None,
+                       priority=1, sort_order=1, is_active=1,
+                       created_at=q.now_iso(), updated_at=q.now_iso()))
+    return q.get_plan("pro")
+
+
+def test_cambiar_la_contrasena_avisa_a_su_dueno(cliente, verificada):
+    # El aviso es para el caso en que la cambie otro: por eso sale del cambio
+    # que salió bien, no de un error.
+    usuario = q.get_user_by_email("ana@lixbon.test")
+    token = q.create_email_token(usuario["id"], "reset_password", hours=2)
+    BUZON.clear()
+    r = cliente.post("/api/auth/reset-password",
+                     json={"token": token, "new_password": "otra-clave-bien-larga"},
+                     headers={"user-agent": FIREFOX})
+    assert r.status_code == 200
+    assert len(BUZON) == 1
+    aviso = BUZON[0]
+    assert "Tu contraseña cambió" in aviso["asunto"]
+    assert "Firefox en Linux" in aviso["html"]
+    assert "187.190.24.•••" in aviso["html"]
+    assert "reset-password" in aviso["html"]  # la salida, si no fue el dueño
+
+
+def test_la_cancelacion_avisa_una_vez_y_no_si_ya_estaba_en_gratuito(plan_pro):
+    from core.billing.stripe_gateway import _avisar_cancelacion
+
+    usuario = q.get_user_by_email("ana@lixbon.test")
+    # Sin precio en la BD: cae al respaldo por metadata, como en producción
+    # cuando la suscripción es más vieja que el precio actual.
+    suscripcion = {"metadata": {"plan_id": "pro"},
+                   "items": {"data": [{"price": {"id": "price_desconocido"}}]}}
+
+    BUZON.clear()
+    _avisar_cancelacion(usuario["id"], suscripcion, {"plan_id": "pro", "status": "active"})
+    assert len(BUZON) == 1
+    assert "Tu plan Pro terminó" in BUZON[0]["asunto"]
+    assert "Plan Gratuito" in BUZON[0]["html"]
+    assert "30 mensajes al día" in BUZON[0]["html"]
+
+    # Stripe reenvía los webhooks que no confirma: el segundo no puede avisar.
+    BUZON.clear()
+    _avisar_cancelacion(usuario["id"], suscripcion, {"plan_id": "free", "status": "canceled"})
+    assert BUZON == []
+
+    BUZON.clear()
+    _avisar_cancelacion(usuario["id"], suscripcion, None)
+    assert BUZON == []
+
+
+def test_el_pago_fallido_avisa_solo_si_hay_suscripcion_en_juego(plan_pro):
+    from core.billing.stripe_gateway import _avisar_pago_fallido
+
+    usuario = q.get_user_by_email("ana@lixbon.test")
+    q.set_user_plan(usuario["id"], "pro")
+    factura = {"subscription": "sub_123", "amount_due": 990, "currency": "usd",
+               "next_payment_attempt": 1788700000,
+               "hosted_invoice_url": "https://invoice.stripe.com/i/abc"}
+
+    BUZON.clear()
+    _avisar_pago_fallido(usuario, factura)
+    assert len(BUZON) == 1
+    aviso = BUZON[0]
+    assert "No pudimos cobrar tu suscripción" in aviso["asunto"]
+    assert "$9.90 USD" in aviso["html"]
+    assert "invoice.stripe.com" in aviso["html"]  # pagar sin tener que entrar
+
+    # Un pack de créditos que falla no pone en riesgo ningún plan.
+    BUZON.clear()
+    _avisar_pago_fallido(usuario, {**factura, "subscription": None})
+    assert BUZON == []
+    q.set_user_plan(usuario["id"], "free")
