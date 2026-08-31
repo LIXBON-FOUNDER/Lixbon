@@ -13,7 +13,13 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from core.gateway.email import send_password_reset_email, send_verification_email
+from core.gateway.email import (
+    en_segundo_plano,
+    send_login_alert_email,
+    send_password_reset_email,
+    send_verification_email,
+    send_welcome_email,
+)
 from core.persistence.queries import (
     count_daily_regenerations,
     create_api_key,
@@ -26,10 +32,13 @@ from core.persistence.queries import (
     delete_user_sessions,
     delete_web_session,
     get_active_key_for_user,
+    get_plan_for_user,
     get_user_by_email,
+    get_user_by_id,
     list_api_keys,
     log_audit_event,
     mark_email_verified,
+    registrar_dispositivo,
     set_user_password,
     set_user_plan,
     verify_user,
@@ -119,7 +128,9 @@ async def api_register(payload: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese correo")
 
     set_user_plan(user["id"], "free")  # F5: plan Gratuito por defecto
-    session_token = create_web_session(user["id"], ip, request.headers.get("user-agent"))
+    agente = request.headers.get("user-agent")
+    session_token = create_web_session(user["id"], ip, agente)
+    registrar_dispositivo(user["id"], agente)
     log_audit_event("user_registered", user_id=user["id"], ip_address=ip)
 
     # Verificación de correo (no bloqueante: la cuenta ya funciona)
@@ -150,8 +161,12 @@ async def api_login(payload: LoginRequest, request: Request):
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
     clear_auth_attempts(ip)
-    session_token = create_web_session(user["id"], ip, request.headers.get("user-agent"))
+    agente = request.headers.get("user-agent")
+    session_token = create_web_session(user["id"], ip, agente)
     log_audit_event("user_login", user_id=user["id"], ip_address=ip)
+
+    if registrar_dispositivo(user["id"], agente) and user.get("email"):
+        en_segundo_plano(send_login_alert_email(user["email"], user_agent=agente, ip=ip))
 
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
 
@@ -203,6 +218,10 @@ async def verify_email(token: str):
         raise HTTPException(status_code=400, detail="Enlace inválido o expirado")
     mark_email_verified(user_id)
     log_audit_event("email_verified", user_id=user_id)
+
+    usuario = get_user_by_id(user_id)
+    if usuario and usuario.get("email"):
+        en_segundo_plano(send_welcome_email(usuario["email"], get_plan_for_user(user_id)))
     return RedirectResponse(url="/?verified=1", status_code=303)
 
 

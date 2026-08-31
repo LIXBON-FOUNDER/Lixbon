@@ -29,6 +29,7 @@ from core.persistence.models import (
     CreditPack,
     DeviceToken,
     EmailToken,
+    LoginDevice,
     Message,
     ModelPricing,
     ModelRole,
@@ -2202,3 +2203,29 @@ def delete_device_token(expo_push_token: str) -> None:
     """Baja de un push token (p.ej. cuando Expo reporta DeviceNotRegistered)."""
     with get_session() as s:
         s.execute(delete(DeviceToken).where(DeviceToken.expo_push_token == expo_push_token))
+
+
+# ─── Dispositivos conocidos (aviso de inicio de sesión) ────────────────────
+
+def registrar_dispositivo(user_id: int, user_agent: str | None) -> bool:
+    # El ON CONFLICT decide en una sola sentencia si es la primera vez: dos
+    # logins simultáneos desde el mismo navegador no pueden mandar dos avisos.
+    huella = hashlib.sha256((user_agent or "").encode("utf-8")).hexdigest()
+    ahora = now_iso()
+    with get_session() as s:
+        insertado = s.execute(
+            pg_insert(LoginDevice)
+            .values(user_id=user_id, fingerprint=huella,
+                    user_agent=(user_agent or "")[:300] or None,
+                    first_seen=ahora, last_seen=ahora)
+            .on_conflict_do_nothing(index_elements=["user_id", "fingerprint"])
+            .returning(LoginDevice.id)
+        ).first()
+        if insertado:
+            return True
+        s.execute(
+            update(LoginDevice)
+            .where(LoginDevice.user_id == user_id, LoginDevice.fingerprint == huella)
+            .values(last_seen=ahora)
+        )
+        return False

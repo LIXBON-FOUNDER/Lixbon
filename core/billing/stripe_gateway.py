@@ -323,6 +323,23 @@ def _period_end_from_subscription(subscription: dict[str, Any]) -> str | None:
     return _iso(ts)
 
 
+def _avisar_suscripcion(user_id: int, plan: dict[str, Any], fin_de_ciclo: str | None,
+                        anterior: dict[str, Any] | None) -> None:
+    # Solo al empezar o al cambiar de plan. Stripe manda un
+    # customer.subscription.updated por cada ciclo cobrado, y avisar en cada uno
+    # convertiría el correo en ruido mensual.
+    seguia_igual = bool(anterior
+                        and anterior.get("plan_id") == plan["id"]
+                        and anterior.get("status") in ("active", "trialing", "past_due"))
+    if seguia_igual:
+        return
+    correo = (get_user_by_id(user_id) or {}).get("email")
+    if not correo:
+        return
+    from core.gateway.email import en_segundo_plano, send_subscription_email
+    en_segundo_plano(send_subscription_email(correo, plan, fin_de_ciclo))
+
+
 def handle_event(event: dict[str, Any]) -> None:
     """Procesa un evento de Stripe ya verificado (idempotente)."""
     etype = event["type"]
@@ -337,17 +354,20 @@ def handle_event(event: dict[str, Any]) -> None:
             return
         status = obj.get("status", "active")
         active = status in ("active", "trialing", "past_due")
+        anterior = get_subscription(user_id)
         if not active:
             downgrade_to_free(user_id)
         else:
+            fin_de_ciclo = _period_end_from_subscription(obj)
             apply_stripe_subscription(
                 user_id, plan["id"],
                 customer_id=obj.get("customer"),
                 subscription_id=obj.get("id"),
-                current_period_end=_period_end_from_subscription(obj),
+                current_period_end=fin_de_ciclo,
                 cancel_at_period_end=bool(obj.get("cancel_at_period_end")),
                 status=status,
             )
+            _avisar_suscripcion(user_id, plan, fin_de_ciclo, anterior)
         log_audit_event("subscription_synced", user_id=user_id, plan_id=plan["id"], status=status)
 
     elif etype == "customer.subscription.deleted":

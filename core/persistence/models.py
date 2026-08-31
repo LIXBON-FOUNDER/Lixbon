@@ -584,3 +584,19 @@ class IdeAuthToken(Base):
     redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
     expira_en: Mapped[str] = mapped_column(Text, nullable=False)
     creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# Tabla propia y no la de sesiones: el logout borra las sesiones, y entonces
+# cada regreso al mismo navegador parecería un dispositivo nuevo.
+class LoginDevice(Base):
+    __tablename__ = "login_devices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "fingerprint", name="uq_login_devices_user_fp"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    first_seen: Mapped[str] = mapped_column(Text, nullable=False)
+    last_seen: Mapped[str] = mapped_column(Text, nullable=False)
