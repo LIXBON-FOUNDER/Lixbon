@@ -529,6 +529,12 @@
   flex-shrink: 0;
 }
 
+/* Filas con dos controles (el valor y una acción, como reenviar la
+   verificación); las de un solo hijo no se enteran. */
+.set-row__control > * + * {
+  margin-left: 12px;
+}
+
 .set-input {
   width: 260px;
   max-width: 46vw;

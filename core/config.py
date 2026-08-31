@@ -105,6 +105,13 @@ CLI_SOURCE_PATH: Path = PROJECT_ROOT / "apps" / "cli" / "client_cli.py"
 WEB_DIST_DIR: Path = PROJECT_ROOT / "apps" / "web" / "dist"
 LOGS_DIR: Path = PROJECT_ROOT / "logs"
 
+# ── Verificación de correo ──────────────────────────────────────────────────
+# "1" = una cuenta con el correo sin verificar puede entrar y ver su cuenta,
+# pero no usar el servicio. Por defecto "0": encenderlo con el correo mal
+# configurado dejaría fuera a todo el mundo a la vez y sin salida, porque la
+# única forma de desbloquearse es recibir un correo.
+REQUIRE_EMAIL_VERIFICATION: bool = os.getenv("REQUIRE_EMAIL_VERIFICATION", "0") == "1"
+
 # ── Seguridad de claves ─────────────────────────────────────────────────────
 KEY_EXPIRY_DAYS: int = int(os.getenv("KEY_EXPIRY_DAYS", "90"))
 SESSION_EXPIRY_HOURS: int = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))

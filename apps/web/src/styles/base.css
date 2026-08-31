@@ -404,3 +404,39 @@ p {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Aviso de correo sin verificar ───────────────────────────────────── */
+
+.verify-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 20px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.9rem;
+  animation: fade-in 0.2s ease;
+}
+
+.verify-bar__text {
+  color: var(--ink-soft);
+}
+
+.verify-bar__text strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.verify-bar__btn {
+  padding: 6px 16px;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .verify-bar {
+    justify-content: flex-start;
+    padding: 10px 16px;
+  }
+}

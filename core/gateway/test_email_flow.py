@@ -31,6 +31,9 @@ FIREFOX = "Mozilla/5.0 (X11; Linux x86_64; rv:129.0) Gecko/20100101 Firefox/129.
 CLAVE = "contrasena-larga-de-prueba"
 
 BUZON: list[dict] = []
+# El envío de verdad, antes de que el buzón lo sustituya: alguna prueba necesita
+# comprobar qué hace él, no el doble.
+ENVIO_REAL = correo.send_email
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -57,6 +60,7 @@ def _buzon(_esquema):
 
     correo.send_email = capturar
     yield BUZON
+    correo.send_email = ENVIO_REAL
 
 
 @pytest.fixture(scope="module")
@@ -173,3 +177,55 @@ def test_la_suscripcion_avisa_al_empezar_y_al_cambiar_pero_no_al_renovar(_esquem
 def test_todos_los_correos_llevan_version_de_texto(verificada, registrada):
     for mensaje in registrada + verificada:
         assert mensaje["texto"].strip(), f"sin texto plano: {mensaje['asunto']}"
+
+
+# ── El correo que no sale, y la cuenta que no lo ha verificado ─────────────
+
+def test_un_correo_perdido_no_se_cuenta_como_enviado(cliente, monkeypatch):
+    # Decir siempre "verification_email_sent: true" dejaba al recién registrado
+    # esperando indefinidamente un correo que nadie llegó a enviar.
+    async def fallar(*_a, **_k):
+        return False
+
+    monkeypatch.setattr(correo, "send_email", fallar)
+    r = cliente.post("/api/auth/register", json={
+        "first_name": "Sin", "last_name": "Correo",
+        "email": "perdido@lixbon.test", "password": CLAVE},
+        headers={"user-agent": CHROME})
+    assert r.status_code == 200
+    assert r.json()["verification_email_sent"] is False
+
+
+def test_en_produccion_sin_clave_el_correo_no_se_da_por_enviado(monkeypatch):
+    # PUBLIC_BASE_URL es https en este módulo: el gateway real. Ahí, la falta de
+    # clave no es un "modo desarrollo", es un correo perdido.
+    monkeypatch.setattr(correo, "BREVO_API_KEY", "")
+    assert correo.en_produccion() is True
+    assert correo.problema_de_configuracion() is not None
+
+    import asyncio
+    assert asyncio.run(ENVIO_REAL("a@b.test", "Asunto", "<p>hola</p>")) is False
+
+
+def test_sin_verificar_no_se_puede_usar_el_servicio(monkeypatch):
+    from fastapi import HTTPException
+
+    from core.security.auth import exigir_correo_verificado
+
+    sin_verificar = {"id": 1, "email": "ana@lixbon.test", "email_verified": False}
+    verificado = {**sin_verificar, "email_verified": True}
+    heredado = {"id": 2, "email": None, "email_verified": False}
+
+    # Apagado (el valor por defecto): nadie se queda fuera.
+    monkeypatch.setattr("core.config.REQUIRE_EMAIL_VERIFICATION", False)
+    assert exigir_correo_verificado(sin_verificar) is sin_verificar
+
+    monkeypatch.setattr("core.config.REQUIRE_EMAIL_VERIFICATION", True)
+    assert exigir_correo_verificado(verificado) is verificado
+    # Sin correo no hay nada que verificar: exigirlo sería un bloqueo sin salida.
+    assert exigir_correo_verificado(heredado) is heredado
+
+    with pytest.raises(HTTPException) as caida:
+        exigir_correo_verificado(sin_verificar)
+    assert caida.value.status_code == 403
+    assert caida.value.detail["error"] == "email_not_verified"

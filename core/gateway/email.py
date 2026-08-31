@@ -33,10 +33,39 @@ def _remitente() -> dict[str, str]:
     return {"name": "lixbon", "email": EMAIL_FROM.strip()}
 
 
+def en_produccion() -> bool:
+    # El gateway de verdad se sirve por HTTPS; el de desarrollo, por
+    # http://localhost. Sirve para no tratar como «modo dev» a un despliegue al
+    # que sencillamente se le olvidó la clave.
+    return PUBLIC_BASE_URL.startswith("https://")
+
+
+def problema_de_configuracion() -> str | None:
+    """El motivo por el que un correo enviado ahora no llegaría, o None.
+
+    No comprueba el DNS: eso solo lo sabe Brevo al recibir el envío. Detecta lo
+    que sí se puede ver desde aquí, que es lo que más veces ha fallado."""
+    if not BREVO_API_KEY:
+        return ("BREVO_API_KEY está vacía: ningún correo sale de aquí "
+                "(verificación, bienvenida, aviso de acceso ni suscripción).")
+    if not _remitente()["email"] or "@" not in _remitente()["email"]:
+        return f"EMAIL_FROM no tiene una dirección utilizable: {EMAIL_FROM!r}"
+    if not PUBLIC_BASE_URL or "localhost" in PUBLIC_BASE_URL or "127.0.0.1" in PUBLIC_BASE_URL:
+        return (f"PUBLIC_BASE_URL apunta a {PUBLIC_BASE_URL}: los correos saldrían, "
+                "pero sus enlaces de verificación no funcionarían fuera de este equipo.")
+    return None
+
+
 async def send_email(to: str, subject: str, html: str, text: str = "") -> bool:
     if not to:
         return False
     if not BREVO_API_KEY:
+        # En producción esto no es un modo de trabajo, es un correo perdido: se
+        # devuelve False para que quien llame pueda contarlo en vez de dar por
+        # enviado algo que nadie recibió.
+        if en_produccion():
+            logger.error(f"Correo NO enviado a {to} ({subject}): falta BREVO_API_KEY.")
+            return False
         logger.warning(f"[email-dev] Para: {to} | Asunto: {subject}")
         logger.warning(f"[email-dev] Texto: {text or '(solo HTML)'}")
         return True

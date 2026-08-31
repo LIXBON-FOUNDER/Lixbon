@@ -12,6 +12,7 @@ import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
+import { VerifyBanner } from '../components/VerifyBanner';
 import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Icons';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
@@ -318,6 +319,8 @@ export default function ChatPage() {
             </div>
           )}
         </header>
+
+        <VerifyBanner />
 
         {msgsLoading && empty ? (
           <>

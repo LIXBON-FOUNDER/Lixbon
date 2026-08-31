@@ -46,6 +46,35 @@ def get_bearer_token(authorization: str | None) -> str | None:
     return parts[1].strip()
 
 
+# ── Verificación de correo ─────────────────────────────────────────────────
+
+def exigir_correo_verificado(user_data: dict[str, Any]) -> dict[str, Any]:
+    """Deja pasar solo a quien haya verificado su correo, si el gateway lo pide.
+
+    Bloquea el USO del servicio, no la sesión: entrar, ver la cuenta y pedir que
+    reenvíen el correo siguen funcionando, porque son justo lo que necesita
+    quien está bloqueado para dejar de estarlo.
+
+    Las cuentas heredadas sin correo quedan exentas: no hay nada que verificar,
+    y no tendrían manera de desbloquearse."""
+    from core.config import REQUIRE_EMAIL_VERIFICATION
+
+    if not REQUIRE_EMAIL_VERIFICATION:
+        return user_data
+    if not user_data.get("email") or user_data.get("email_verified"):
+        return user_data
+    raise HTTPException(
+        status_code=403,
+        # Cuerpo con forma, no una frase: la web distingue este 403 de los demás
+        # para enseñar el aviso de verificación en vez de un error genérico.
+        detail={
+            "error": "email_not_verified",
+            "message": "Verifica tu correo electrónico para usar lixbon. "
+                       "Te enviamos un enlace al crear la cuenta.",
+        },
+    )
+
+
 # ── Dependencias FastAPI ───────────────────────────────────────────────────
 
 def api_key_required(
@@ -61,7 +90,7 @@ def api_key_required(
     if not user_data:
         raise HTTPException(status_code=401, detail="API key inválida o expirada")
     enforce_rate_limit(token)
-    return user_data
+    return exigir_correo_verificado(user_data)
 
 
 def cookie_auth_required(
@@ -108,7 +137,7 @@ def web_or_api_key_auth(
     if lixbon_session:
         user_data = validate_web_session(lixbon_session)
         if user_data:
-            return user_data
+            return exigir_correo_verificado(user_data)
 
     token = get_bearer_token(authorization)
     if token:
@@ -116,7 +145,7 @@ def web_or_api_key_auth(
         user_data = validate_api_key(token, ip_address=ip)
         if user_data:
             enforce_rate_limit(token)
-            return user_data
+            return exigir_correo_verificado(user_data)
 
     raise HTTPException(status_code=401, detail="Autenticación requerida (sesión o API key)")
 

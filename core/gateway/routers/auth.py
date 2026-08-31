@@ -133,14 +133,15 @@ async def api_register(payload: RegisterRequest, request: Request):
     registrar_dispositivo(user["id"], agente)
     log_audit_event("user_registered", user_id=user["id"], ip_address=ip)
 
-    # Verificación de correo (no bloqueante: la cuenta ya funciona)
     verify_token = create_email_token(user["id"], "verify_email", hours=48)
-    await send_verification_email(email, verify_token)
+    enviado = await send_verification_email(email, verify_token)
 
     response = JSONResponse({
         "message": "Cuenta creada correctamente",
         "user": user,
-        "verification_email_sent": True,
+        # El valor real: decir siempre `true` convertía un correo perdido en un
+        # usuario esperando indefinidamente un mensaje que nadie envió.
+        "verification_email_sent": enviado,
     })
     _set_session_cookie(response, session_token)
     return response
@@ -232,7 +233,9 @@ async def resend_verification(user_data: dict[str, Any] = Depends(cookie_auth_re
     if not user_data.get("email"):
         raise HTTPException(status_code=400, detail="La cuenta no tiene correo asociado")
     token = create_email_token(user_data["id"], "verify_email", hours=48)
-    await send_verification_email(user_data["email"], token)
+    if not await send_verification_email(user_data["email"], token):
+        raise HTTPException(status_code=502,
+                            detail="No se pudo enviar el correo. Inténtalo de nuevo en unos minutos.")
     return {"message": "Correo de verificación reenviado"}
 
 

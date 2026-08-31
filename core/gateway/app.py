@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
             "flag Secure. Correcto en desarrollo local; en producción (HTTPS) es "
             "obligatorio configurar COOKIE_SECURE=1."
         )
+    from core.gateway.email import problema_de_configuracion
+    _problema_correo = problema_de_configuracion()
+    if _problema_correo:
+        # Un correo que no sale no rompe ninguna petición, así que sin este
+        # aviso el fallo solo se nota cuando alguien dice que no le llegó nada.
+        _log.getLogger("lixbon.email").warning(f"Correo transaccional: {_problema_correo}")
     mimetypes.add_type("application/x-msi", ".msi")
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     init_db()

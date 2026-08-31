@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
 import { getThemePreference, setThemePreference } from '../lib/theme';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useReenvioVerificacion } from '../components/VerifyBanner';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
 import { planColor } from '../lib/planColors';
@@ -246,6 +247,7 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pwSent, setPwSent] = useState(false);
+  const { estado: verifyState, reenviar: resendVerify } = useReenvioVerificacion();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [delBusy, setDelBusy] = useState(false);
   const [delError, setDelError] = useState('');
@@ -301,8 +303,26 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
     <>
       <h2 className="set-title">Cuenta</h2>
       <div className="set-card">
-        <Row label="Correo" hint={user.email_verified ? 'Verificado' : 'Sin verificar'}>
+        <Row
+          label="Correo"
+          hint={user.email_verified
+            ? 'Verificado'
+            : verifyState === 'enviado'
+              ? 'Te enviamos un enlace; revisa también la carpeta de spam'
+              : verifyState === 'error'
+                ? 'No se pudo enviar el correo; inténtalo en unos minutos'
+                : 'Sin verificar'}
+        >
           <span className="set-static">{user.email || user.username}</span>
+          {!user.email_verified && user.email && verifyState !== 'enviado' && (
+            <button
+              className="pill-btn pill-btn--outline set-btn"
+              onClick={resendVerify}
+              disabled={verifyState === 'enviando'}
+            >
+              {verifyState === 'enviando' ? 'Enviando…' : 'Reenviar verificación'}
+            </button>
+          )}
         </Row>
         <Row label="Contraseña" hint="Te enviamos un enlace por correo para cambiarla">
           {pwSent
