@@ -27,7 +27,7 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, installer, keys, nodes_admin, oauth, payments, remote, versions, ws_status, monitor
+from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, installer, keys, nodes_admin, oauth, payments, remote, team, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -97,6 +97,8 @@ app.middleware("http")(security_headers_middleware)
 
 # ── Routers ────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
+app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
+app.include_router(team.router)       # /api/team/* + /ws/team (Lixbon Team)
 app.include_router(oauth.router)
 app.include_router(keys.router)
 app.include_router(chat.router)
@@ -132,6 +134,13 @@ def _start_archiver_cron() -> None:
                 m = purge_expired_sessions()
                 if m:
                     _log.getLogger("lixbon").info(f"[cron] {m} sesiones expiradas purgadas.")
+                # Adjuntos de Team que se subieron y nunca llegaron a un
+                # mensaje: alguien eligió una foto y cerró la ventana antes de
+                # enviarla. Sin esto el bucket crece para siempre con archivos
+                # que no puede ver nadie, que es una factura.
+                a = team.purgar_adjuntos_huerfanos()
+                if a:
+                    _log.getLogger("lixbon").info(f"[cron] {a} adjuntos huérfanos de Team borrados.")
             except Exception as exc:
                 _log.getLogger("lixbon").warning(f"[cron] Error en tareas de mantenimiento: {exc}")
 

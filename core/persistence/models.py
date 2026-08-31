@@ -426,3 +426,161 @@ class TokenUsageDaily(Base):
     latency_sum_ms: Mapped[int] = mapped_column(nullable=False, default=0)
     request_count: Mapped[int] = mapped_column(nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# ── Lixbon Team ────────────────────────────────────────────────────────────
+# Contrato: docs/team-protocolo.md del repo del IDE. Los campos van en español
+# y snake_case, como dice la sección 0; la única excepción es el objeto
+# `usuario`, que sale de la tabla `users` con sus nombres de siempre
+# (first_name, avatar_url…).
+
+
+class TeamProyecto(Base):
+    """Un proyecto ES un espacio: foto, miembros, canales, un repositorio de
+    GitHub y un grupo de Linear. No hay un nivel por encima.
+
+    De Linear y GitHub se guarda el IDENTIFICADOR, nunca una credencial: cada
+    integrante consulta esos servicios con su propia llave personal, así que un
+    `linear_team_id` en la BD no da acceso a nada por sí solo (sección 8)."""
+    __tablename__ = "team_proyectos"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    lider_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    github_repo: Mapped[str | None] = mapped_column(Text)          # "owner/repo"
+    linear_team_id: Mapped[str | None] = mapped_column(Text)
+    linear_project_id: Mapped[str | None] = mapped_column(Text)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamMiembro(Base):
+    __tablename__ = "team_miembros"
+    __table_args__ = (
+        Index("idx_team_miembros_usuario", "usuario_id"),
+    )
+
+    proyecto_id: Mapped[str] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"), primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    rol: Mapped[str] = mapped_column(Text, nullable=False, default="integrante")  # lider|integrante
+    desde: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamCanal(Base):
+    """Público: lo ve todo el proyecto. Privado: solo team_canal_miembros.
+    Directo: no pertenece a ningún proyecto y tiene exactamente dos miembros."""
+    __tablename__ = "team_canales"
+    __table_args__ = (
+        Index("idx_team_canales_proyecto", "proyecto_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    proyecto_id: Mapped[str | None] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"))       # NULL en los directos
+    nombre: Mapped[str] = mapped_column(Text, nullable=False, default="")  # sin almohadilla
+    tipo: Mapped[str] = mapped_column(Text, nullable=False)        # publico|privado|directo
+    tema: Mapped[str | None] = mapped_column(Text)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamCanalMiembro(Base):
+    """Solo se rellena en privados y directos; en los públicos la pertenencia
+    se deduce de `team_miembros`."""
+    __tablename__ = "team_canal_miembros"
+    __table_args__ = (
+        Index("idx_team_canal_miembros_usuario", "usuario_id"),
+    )
+
+    canal_id: Mapped[str] = mapped_column(
+        ForeignKey("team_canales.id", ondelete="CASCADE"), primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+
+
+class TeamMensaje(Base):
+    """El índice (canal_id, seq) es lo que hace posible el replay de la regla 2,
+    y el ÚNICO (canal_id, client_id) es lo que hace la idempotencia de la regla
+    1 barata en vez de cara: reenviar tras una reconexión no duplica porque la
+    BD no deja."""
+    __tablename__ = "team_mensajes"
+    __table_args__ = (
+        UniqueConstraint("canal_id", "client_id", name="uq_team_mensajes_client"),
+        UniqueConstraint("canal_id", "seq", name="uq_team_mensajes_seq"),
+        Index("idx_team_mensajes_canal_seq", "canal_id", "seq"),
+        Index("idx_team_mensajes_hilo", "canal_id", "responde_a", "seq"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    canal_id: Mapped[str] = mapped_column(
+        ForeignKey("team_canales.id", ondelete="CASCADE"), nullable=False)
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)   # monotónico POR CANAL
+    autor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    texto: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    client_id: Mapped[str] = mapped_column(Text, nullable=False)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+    editado_en: Mapped[str | None] = mapped_column(Text)
+    responde_a: Mapped[str | None] = mapped_column(Text)           # id de la RAÍZ del hilo
+    borrado_en: Mapped[str | None] = mapped_column(Text)           # lápida (regla 10)
+
+
+class TeamAmistad(Base):
+    __tablename__ = "team_amistades"
+    __table_args__ = (
+        UniqueConstraint("de_id", "a_id", name="uq_team_amistades"),
+        Index("idx_team_amistades_a", "a_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    de_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    a_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    estado: Mapped[str] = mapped_column(Text, nullable=False, default="pendiente")  # pendiente|aceptada
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamAdjunto(Base):
+    """Un adjunto pertenece a un CANAL, no a quien tenga su id (regla 5): el
+    `canal_id` es lo que decide quién puede pedir una URL para él."""
+    __tablename__ = "team_adjuntos"
+    __table_args__ = (
+        Index("idx_team_adjuntos_canal", "canal_id"),
+        Index("idx_team_adjuntos_mensaje", "mensaje_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    canal_id: Mapped[str] = mapped_column(
+        ForeignKey("team_canales.id", ondelete="CASCADE"), nullable=False)
+    subido_por: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    mensaje_id: Mapped[str | None] = mapped_column(Text)           # NULL hasta que se manda
+    tipo: Mapped[str] = mapped_column(Text, nullable=False)        # imagen|video|audio|archivo
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    mime: Mapped[str] = mapped_column(Text, nullable=False)
+    bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    clave_r2: Mapped[str] = mapped_column(Text, nullable=False)
+    ancho: Mapped[int | None] = mapped_column()
+    alto: Mapped[int | None] = mapped_column()
+    duracion_ms: Mapped[int | None] = mapped_column(BigInteger)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class IdeAuthToken(Base):
+    """Token de un solo uso del canje del IDE (`/ide/connect` → `/exchange`).
+
+    En la BD y no en memoria porque el gateway puede reiniciarse entre la ida al
+    navegador y la vuelta al IDE, y porque un solo uso de verdad exige un DELETE
+    atómico que dos réplicas respeten: en memoria, dos procesos canjearían el
+    mismo token. Se guarda HASHEADO, como las API keys — quien lea la tabla no
+    puede canjear nada."""
+    __tablename__ = "ide_auth_tokens"
+    __table_args__ = (
+        Index("idx_ide_auth_tokens_exp", "expira_en"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    challenge: Mapped[str] = mapped_column(Text, nullable=False)   # base64url(SHA-256(verifier))
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    expira_en: Mapped[str] = mapped_column(Text, nullable=False)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
