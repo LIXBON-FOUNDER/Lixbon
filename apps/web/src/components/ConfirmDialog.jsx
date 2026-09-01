@@ -2,6 +2,7 @@
 // Con requirePassword pide la contraseña (reautenticación) y la pasa a onConfirm.
 import { useState } from 'react';
 import { IconX } from './Icons';
+import { useCierreAnimado } from '../hooks/useCierreAnimado';
 
 export function ConfirmDialog({
   title,
@@ -16,13 +17,17 @@ export function ConfirmDialog({
 }) {
   const [password, setPassword] = useState('');
   const canConfirm = !busy && (!requirePassword || password.length > 0);
+  const { cerrando, cerrar } = useCierreAnimado(onClose);
 
   return (
-    <div className="modal-overlay" onClick={busy ? undefined : onClose}>
+    <div
+      className={cerrando ? 'modal-overlay is-closing' : 'modal-overlay'}
+      onClick={busy ? undefined : cerrar}
+    >
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <h2 className="modal__title">{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Cerrar" disabled={busy}>
+          <button className="icon-btn" onClick={cerrar} aria-label="Cerrar" disabled={busy}>
             <IconX />
           </button>
         </div>
@@ -45,7 +50,7 @@ export function ConfirmDialog({
         {error && <p className="page__error" role="alert">{error}</p>}
 
         <div className="modal__actions">
-          <button className="pill-btn pill-btn--outline" onClick={onClose} disabled={busy}>
+          <button className="pill-btn pill-btn--outline" onClick={cerrar} disabled={busy}>
             Cancelar
           </button>
           <button

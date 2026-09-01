@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { IconX, IconCopy, IconCheck, IconTrash } from './Icons';
+import { useCierreAnimado } from '../hooks/useCierreAnimado';
 
 export function ShareDialog({ conversationId, onClose }) {
   const [token, setToken] = useState(null);
@@ -9,6 +10,7 @@ export function ShareDialog({ conversationId, onClose }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
+  const { cerrando, cerrar } = useCierreAnimado(onClose);
 
   const link = token ? `${window.location.origin}/s/${token}` : '';
 
@@ -53,11 +55,11 @@ export function ShareDialog({ conversationId, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className={cerrando ? 'modal-overlay is-closing' : 'modal-overlay'} onClick={cerrar}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <h2 className="modal__title">Compartir conversación</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Cerrar"><IconX /></button>
+          <button className="icon-btn" onClick={cerrar} aria-label="Cerrar"><IconX /></button>
         </div>
 
         {loading ? (

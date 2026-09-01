@@ -1,0 +1,370 @@
+/* motion.css — el movimiento de la interfaz, en un solo sitio.
+ *
+ * Va el ÚLTIMO en main.jsx a propósito: solo añade movimiento a lo que ya
+ * existe, y a igualdad de especificidad gana sobre los estilos de cada página
+ * sin tener que tocarlas. Si algún día molesta, se quita este import y la web
+ * vuelve a comportarse exactamente como antes.
+ *
+ * Tres reglas que sigue todo lo de abajo:
+ *   1. Se anima lo que ya se movía por sí solo (color, fondo, opacidad) y las
+ *      entradas; nunca el tamaño del texto ni la posición del contenido leído.
+ *   2. Nada por encima de ~350 ms: una interfaz lenta se siente rota, no fina.
+ *   3. Transform y opacity antes que cualquier otra propiedad — son las dos
+ *      que el navegador puede animar sin volver a calcular el diseño.
+ */
+
+:root {
+  --dur-1: 120ms; /* respuesta directa: pulsar, marcar */
+  --dur-2: 200ms; /* cambio de estado: hover, abrir, cerrar */
+  --dur-3: 320ms; /* recorridos: página, tema, paneles */
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);       /* entra rápido, posa suave */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);      /* recorridos simétricos */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);  /* rebote corto: knobs */
+}
+
+/* ── Cambio de tema ──────────────────────────────────────────────────── */
+/* El salto de claro a oscuro era el corte más duro de la web: cambiaban de
+   golpe fondo, texto y bordes de todo lo visible. La clase la pone y la quita
+   theme.js alrededor del cambio, así que estas transiciones solo existen
+   durante ese tercio de segundo — dejarlas puestas encarecería cada hover de
+   la interfaz entera. */
+
+html.theme-anim,
+html.theme-anim *,
+html.theme-anim *::before,
+html.theme-anim *::after {
+  transition:
+    background-color var(--dur-3) var(--ease-in-out),
+    border-color var(--dur-3) var(--ease-in-out),
+    color var(--dur-3) var(--ease-in-out),
+    fill var(--dur-3) var(--ease-in-out),
+    box-shadow var(--dur-3) var(--ease-in-out) !important;
+}
+
+/* Donde el navegador la soporta, el cambio va por View Transitions: un
+   fundido real entre las dos pantallas en vez de propiedad por propiedad. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-3);
+  animation-timing-function: var(--ease-in-out);
+}
+
+/* ── Cambio de página ────────────────────────────────────────────────── */
+/* Solo opacidad: un transform aquí convertiría este contenedor en el marco de
+   referencia de todo lo `position: fixed` que hay dentro (el cajón lateral, el
+   aviso flotante del chat), y se descolocarían mientras durase la animación. */
+
+.route-fade {
+  height: 100%;
+}
+
+.route-fade.is-entering {
+  animation: route-in var(--dur-3) var(--ease-out);
+}
+
+@keyframes route-in {
+  from { opacity: 0; }
+}
+
+/* El desplazamiento del contenido no se pone aquí: las páginas que lo llevan
+   (`.page__body`, `.settings__content`, `.docs__content`) ya entran con
+   `page-in` al montarse, y repetirlo sería animar dos veces lo mismo. Este
+   fundido es para el corte entre una página y la siguiente, que no tenía nada.
+   Las páginas sin animación propia —el chat, Remote— se quedan con él. */
+
+/* ── Pulsar ──────────────────────────────────────────────────────────── */
+/* Un botón que no se hunde al pulsarlo se siente como una imagen. El scale es
+   pequeño a propósito: se nota con el dedo, no se ve como un efecto. */
+
+.pill-btn,
+.set-btn,
+.pubnav__btn,
+.auth__social-btn,
+.card__cta,
+.plan-card__cta,
+.dl-card__cta {
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+
+.pill-btn:active:not(:disabled),
+.set-btn:active:not(:disabled),
+.pubnav__btn:active,
+.auth__social-btn:active:not(:disabled),
+.card__cta:active,
+.plan-card__cta:active:not(:disabled),
+.dl-card__cta:active {
+  transform: scale(0.97);
+}
+
+.icon-btn {
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+/* Los iconos que giran o se voltean al cambiar de estado (chevrons de
+   acordeón, flecha del panel plegable). */
+.docs__nav-group svg,
+.table__expand svg,
+.sidebar__history-head svg {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+
+/* ── Superficies que reaccionan ──────────────────────────────────────── */
+
+.dl-card,
+.stat,
+.release,
+.remote__card {
+  transition:
+    transform var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+/* Solo con ratón: en táctil el :hover se queda pegado después de tocar. */
+@media (hover: hover) {
+  .dl-card:hover,
+  .stat:hover,
+  .release:hover,
+  .remote__card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border);
+  }
+}
+
+/* Filas de lista: nunca se mueven de sitio (se leen), solo cambian de fondo. */
+.sb-item,
+.keys__item,
+.set-row,
+.docs__nav-link,
+.settings__nav-link,
+.sb-nav,
+.pubnav__link,
+.pubnav__menu-link {
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+}
+
+/* ── Controles ───────────────────────────────────────────────────────── */
+
+/* El interruptor: la bolita sale con un rebote corto y el carril cambia de
+   color un poco más despacio, para que se lea el recorrido y no el salto. */
+.set-toggle {
+  transition:
+    background var(--dur-2) var(--ease-in-out),
+    border-color var(--dur-2) var(--ease-in-out);
+}
+
+.set-toggle__knob {
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    width var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+.set-toggle:active:not(:disabled) .set-toggle__knob {
+  /* Se estira hacia el lado al que va: el gesto de un interruptor real. */
+  width: 22px;
+}
+
+/* Selector segmentado (Claro / Oscuro / Sistema): el fondo del activo pasa a
+   ser una pastilla que se desliza entre las tres opciones en vez de aparecer
+   de golpe en la de destino. Los botones se reparten el ancho para que la
+   pastilla pueda ir a tercios exactos. */
+/* Rejilla y no flex: en un inline-flex cada botón se queda con el ancho de su
+   palabra ("Claro" 61px, "Sistema" 79px) y la pastilla, que mide un tercio, no
+   caería nunca encima del botón activo. Con columnas de 1fr los tres miden lo
+   mismo y los tercios son exactos. */
+.set-seg {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0;
+  isolation: isolate;
+}
+
+.set-seg__btn {
+  position: relative;
+  z-index: 1;
+  transition: color var(--dur-2) var(--ease-out);
+}
+
+.set-seg::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  opacity: 0;
+  transform: translateX(0);
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out);
+}
+
+.set-seg:has(.set-seg__btn.is-active)::before {
+  opacity: 1;
+}
+
+.set-seg:has(.set-seg__btn:nth-child(2).is-active)::before {
+  transform: translateX(100%);
+}
+
+.set-seg:has(.set-seg__btn:nth-child(3).is-active)::before {
+  transform: translateX(200%);
+}
+
+/* El activo ya no pinta su propio fondo: lo pone la pastilla de detrás. */
+.set-seg__btn.is-active {
+  background: transparent;
+  color: var(--bg);
+}
+
+/* Sin :has() (navegadores viejos) la pastilla no se dibuja y vuelve el fondo
+   sólido de siempre: se pierde el deslizamiento, nunca la legibilidad. */
+@supports not selector(:has(*)) {
+  .set-seg::before { display: none; }
+  .set-seg__btn.is-active { background: var(--ink); }
+}
+
+/* Campos de texto: el foco entra en lugar de encenderse. */
+.set-input,
+.ffield__input,
+.chat-input__text,
+.admin-search__input,
+.plan-models__input,
+.share-link__input {
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    background var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+/* La barra de escritura del chat, al enfocarla. */
+.chat-input__bar {
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+/* Barras de cuota y de uso: crecen desde donde estaban. */
+.quota__fill,
+.uchart__bar {
+  transition: width var(--dur-3) var(--ease-out), height var(--dur-3) var(--ease-out);
+}
+
+/* ── Aparecer y desaparecer ──────────────────────────────────────────── */
+
+/* Los diálogos ya entraban con un pop; lo que faltaba era la salida, que se
+   cortaba en seco. La clase la pone useCierreAnimado justo antes de desmontar. */
+.modal-overlay.is-closing {
+  animation: overlay-out var(--dur-2) var(--ease-in-out) forwards;
+}
+
+.modal-overlay.is-closing .modal {
+  animation: modal-out var(--dur-2) var(--ease-in-out) forwards;
+}
+
+@keyframes overlay-out {
+  to { opacity: 0; }
+}
+
+@keyframes modal-out {
+  to { opacity: 0; transform: scale(0.97) translateY(4px); }
+}
+
+/* Cambio de sección en Ajustes: el contenedor no se remonta (la columna se
+   queda), así que la entrada la hace el panel de dentro. */
+/* Sin display propio a propósito: sus hijos se apilaban en flujo normal y un
+   contenedor flex les cambiaría el espaciado (en flex los márgenes ya no
+   colapsan). Aquí solo hace falta que anime. */
+.settings__pane {
+  animation: pane-in var(--dur-2) var(--ease-out);
+}
+
+@keyframes pane-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+/* Avisos y tarjetas que aparecen dentro de una página ya montada. */
+.verify-bar,
+.auth__error,
+.page__error,
+.chat-input__error,
+.set-ok,
+.admin-ok {
+  animation: soft-in var(--dur-3) var(--ease-out);
+}
+
+@keyframes soft-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+/* Listas que se pintan de una vez: entran escalonadas, no en bloque. El
+   escalón se corta pronto — con veinte elementos, esperar al último es peor
+   que no animar nada. */
+.plans .plan-card,
+.downloads__apps .dl-card,
+.stats .stat {
+  animation: card-in var(--dur-3) var(--ease-out) backwards;
+}
+
+.plans .plan-card:nth-child(2),
+.downloads__apps .dl-card:nth-child(2),
+.stats .stat:nth-child(2) { animation-delay: 60ms; }
+
+.plans .plan-card:nth-child(3),
+.downloads__apps .dl-card:nth-child(3),
+.stats .stat:nth-child(3) { animation-delay: 120ms; }
+
+.plans .plan-card:nth-child(n + 4),
+.downloads__apps .dl-card:nth-child(n + 4),
+.stats .stat:nth-child(n + 4) { animation-delay: 180ms; }
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
+
+/* ── Sin animaciones si el sistema lo pide ───────────────────────────── */
+/* base.css ya neutraliza duraciones globalmente; aquí se apagan además los
+   recorridos propios de este archivo, que son los que más se notan. */
+
+@media (prefers-reduced-motion: reduce) {
+  .route-fade.is-entering,
+  .plans .plan-card,
+  .downloads__apps .dl-card,
+  .stats .stat,
+  .verify-bar,
+  .modal-overlay.is-closing,
+  .modal-overlay.is-closing .modal {
+    animation: none !important;
+  }
+
+  .pill-btn:active:not(:disabled),
+  .icon-btn:active:not(:disabled),
+  .dl-card:hover,
+  .stat:hover,
+  .release:hover,
+  .remote__card:hover {
+    transform: none;
+  }
+}

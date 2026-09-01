@@ -930,7 +930,11 @@ export default function AccountPage() {
         <main className="settings__content">
           {error && <p className="page__error" role="alert">{error}</p>}
           {account && user && (
-            <>
+            /* key por sección: cambiar de pestaña vuelve a montar este bloque y
+               dispara su animación de entrada. Las secciones ya se montaban y
+               desmontaban una a una, así que no se pierde ningún estado que
+               antes sobreviviera. */
+            <div className="settings__pane" key={current.id}>
               {current.id === 'general' && <GeneralSection user={user} onSaved={setUser} />}
               {current.id === 'cuenta' && (
                 <CuentaSection user={user} plan={plan} keys={keys} onReloadKeys={loadKeys} onLogout={doLogout} />
@@ -938,7 +942,7 @@ export default function AccountPage() {
               {current.id === 'privacidad' && <PrivacidadSection user={user} onUserChange={setUser} />}
               {current.id === 'facturacion' && <FacturacionSection plan={plan} />}
               {current.id === 'uso' && <UsoSection usage={account.usage} daily={account.daily} plan={plan} />}
-            </>
+            </div>
           )}
         </main>
       </div>
