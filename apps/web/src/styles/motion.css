@@ -266,6 +266,18 @@ html.theme-anim *::after {
     box-shadow var(--dur-2) var(--ease-out);
 }
 
+/* Escribir: la caja crecía a saltos de una línea entera. Ahora acompaña al
+   texto. Corta (120 ms) a propósito — quien escribe rápido no puede ir por
+   delante de su propia caja, y el alto lo fija ChatInput en píxeles para que
+   haya dos valores entre los que transicionar. */
+.chat-input__text {
+  transition: height var(--dur-1) var(--ease-out);
+}
+
+.chat-input.is-dropping {
+  transition: box-shadow var(--dur-2) var(--ease-out);
+}
+
 /* Barras de cuota y de uso: crecen desde donde estaban. */
 .quota__fill,
 .uchart__bar {
@@ -357,6 +369,10 @@ html.theme-anim *::after {
   .modal-overlay.is-closing,
   .modal-overlay.is-closing .modal {
     animation: none !important;
+  }
+
+  .chat-input__text {
+    transition: none;
   }
 
   .pill-btn:active:not(:disabled),

@@ -11,6 +11,7 @@ packaging
 boto3
 stripe
 pypdf
+python-docx
 ddgs
 PyJWT[crypto]
 segno

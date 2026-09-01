@@ -1,8 +1,11 @@
 """
 attachments.py — Adjuntar documentos al chat.
-Extrae el TEXTO de un documento (PDF, texto plano, código) para inyectarlo como
-contexto del mensaje. No guarda el archivo: los modelos solo necesitan el texto.
-Imágenes/audio/vídeo se rechazan (requieren modelos multimodales — feature futura).
+Extrae el TEXTO de un documento (PDF, Word, texto plano, código) para inyectarlo
+como contexto del mensaje. No guarda el archivo: los modelos solo necesitan el texto.
+
+Las imágenes NO pasan por aquí: el chat las manda a /api/vision/describe, donde un
+modelo multimodal las describe, y esa descripción se adjunta como texto. El audio
+no tiene camino todavía — el gateway no transcribe.
 """
 from __future__ import annotations
 
@@ -31,6 +34,21 @@ _TEXT_EXTS = {
 def _ext(name: str) -> str:
     dot = name.rfind(".")
     return name[dot:].lower() if dot >= 0 else ""
+
+
+def _extract_docx(data: bytes) -> str:
+    """Texto de un .docx: párrafos y, además, el contenido de las tablas, que en
+    un documento de trabajo suele ser justo lo que importa."""
+    from docx import Document  # dependencia opcional: si falta, el .docx cae en «no soportado»
+
+    doc = Document(io.BytesIO(data))
+    partes = [p.text for p in doc.paragraphs if p.text.strip()]
+    for tabla in doc.tables:
+        for fila in tabla.rows:
+            celdas = [c.text.strip() for c in fila.cells if c.text.strip()]
+            if celdas:
+                partes.append(" | ".join(celdas))
+    return '\n'.join(partes)
 
 
 def _extract_pdf(data: bytes) -> str:
@@ -68,6 +86,19 @@ async def upload_attachment(
             raise HTTPException(status_code=422, detail={
                 "code": "pdf_unreadable", "message": "No se pudo leer el texto de ese PDF.",
             })
+    elif ext == ".docx":
+        try:
+            text = _extract_docx(data)
+        except ImportError:
+            raise HTTPException(status_code=415, detail={
+                "code": "unsupported",
+                "message": "Este servidor no puede leer archivos .docx todavía.",
+            })
+        except Exception as exc:
+            logger.warning(f"DOCX ilegible: {exc}")
+            raise HTTPException(status_code=422, detail={
+                "code": "docx_unreadable", "message": "No se pudo leer el texto de ese documento.",
+            })
     elif ext in _TEXT_EXTS or (file.content_type or "").startswith("text/"):
         try:
             text = data.decode("utf-8", errors="replace")
@@ -78,8 +109,8 @@ async def upload_attachment(
     else:
         raise HTTPException(status_code=415, detail={
             "code": "unsupported",
-            "message": "Por ahora solo se admiten documentos (PDF, texto y código). "
-                       "Imágenes y audio llegarán pronto.",
+            "message": "Solo se admiten documentos (PDF, Word, texto y código) e "
+                       "imágenes. El audio todavía no: usa el micrófono para dictar.",
         })
 
     text = text.strip()

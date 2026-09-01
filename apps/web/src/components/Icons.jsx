@@ -186,3 +186,25 @@ export const IconSun = (p) => (
 export const IconMoon = (p) => (
   <Svg {...p}><path d="M20 13A8 8 0 1 1 11 4a6.5 6.5 0 0 0 9 9Z" /></Svg>
 );
+
+export const IconMic = (p) => (
+  <Svg {...p}>
+    <rect x="9" y="2.5" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5M8.5 21.5h7" />
+  </Svg>
+);
+
+export const IconImage = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="3" />
+    <circle cx="8.5" cy="9.5" r="1.6" />
+    <path d="m4 17 4.5-4.5a2 2 0 0 1 2.8 0L16 17M14 15l1.8-1.8a2 2 0 0 1 2.8 0L20 14.5" />
+  </Svg>
+);
+
+export const IconFile = (p) => (
+  <Svg {...p}>
+    <path d="M14 2.5H7.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2.5V7h4.5" />
+  </Svg>
+);
