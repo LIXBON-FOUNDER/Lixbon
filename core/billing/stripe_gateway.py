@@ -343,29 +343,66 @@ def _resultado(intento) -> dict[str, Any]:
     }
 
 
-def _secreto_de_factura(stripe, factura) -> str | None:
-    """Stripe movió el secreto del primer cobro de sitio entre versiones de la
-    API: antes colgaba de `payment_intent` y ahora de `confirmation_secret`.
-    Se aceptan las dos formas para no atarse a una versión concreta."""
+def _cobro_de_factura(stripe, factura) -> tuple[Any, str | None]:
+    """Devuelve (PaymentIntent, client_secret) del primer cobro de una factura.
+
+    Stripe ha movido esto de sitio tres veces: `invoice.payment_intent` en las
+    versiones viejas, `invoice.confirmation_secret` en las intermedias y
+    `invoice.payments` en las nuevas. Se prueban las tres, cada una con su
+    guarda: pedir un `expand` que la versión de la cuenta no conoce es un error
+    de la API, no un campo vacío."""
     if not factura:
-        return None
+        return None, None
+
     intento = getattr(factura, "payment_intent", None)
     if isinstance(intento, str):
-        try:
-            intento = stripe.PaymentIntent.retrieve(intento)
-        except Exception:
-            intento = None
-    secreto = getattr(intento, "client_secret", None) if intento else None
-    if secreto:
-        return secreto
-    confirmacion = getattr(factura, "confirmation_secret", None)
-    if confirmacion is None:
-        try:
-            factura = stripe.Invoice.retrieve(factura.id, expand=["confirmation_secret"])
-            confirmacion = getattr(factura, "confirmation_secret", None)
-        except Exception:
-            return None
-    return getattr(confirmacion, "client_secret", None) if confirmacion else None
+        intento = _traer_intento(stripe, intento)
+    if getattr(intento, "client_secret", None):
+        return intento, intento.client_secret
+
+    for expandir in (None, "confirmation_secret"):
+        actual = factura
+        if expandir:
+            try:
+                actual = stripe.Invoice.retrieve(factura.id, expand=[expandir])
+            except Exception:
+                continue
+        confirmacion = getattr(actual, "confirmation_secret", None)
+        secreto = getattr(confirmacion, "client_secret", None) if confirmacion else None
+        if secreto:
+            return intento, secreto
+
+    try:
+        cobros = stripe.Invoice.retrieve(factura.id, expand=["payments"])
+    except Exception:
+        cobros = factura
+    for pago in getattr(getattr(cobros, "payments", None), "data", None) or []:
+        ref = getattr(getattr(pago, "payment", None), "payment_intent", None)
+        intento = _traer_intento(stripe, ref) if isinstance(ref, str) else ref
+        if getattr(intento, "client_secret", None):
+            return intento, intento.client_secret
+
+    # Este log es lo único que queda para diagnosticar una versión de la API que
+    # no encaje en ninguna de las tres formas, así que no puede reventar él mismo.
+    try:
+        campos = sorted(_a_dict(factura).keys())
+    except Exception:
+        campos = type(factura).__name__
+    logger.error(
+        f"No se encontró el cobro de la factura {getattr(factura, 'id', '?')}; "
+        f"campos disponibles: {campos}"
+    )
+    return intento, None
+
+
+def _traer_intento(stripe, intento_id: str | None):
+    if not intento_id:
+        return None
+    try:
+        return stripe.PaymentIntent.retrieve(intento_id, expand=["latest_charge"])
+    except Exception as exc:
+        logger.warning(f"No se pudo leer el PaymentIntent {intento_id}: {exc}")
+        return None
 
 
 def subscribe(user: dict[str, Any], plan_id: str, pm_id: str) -> dict[str, Any]:
@@ -407,13 +444,43 @@ def subscribe(user: dict[str, Any], plan_id: str, pm_id: str) -> dict[str, Any]:
         sync_subscription(user)
         return {"status": "succeeded", "succeeded": True, "requires_action": False,
                 "plan_name": plan["name"]}
+
+    # El estado de la suscripción recién creada no basta: quien decide si hay
+    # que pasar por el banco es el cobro de su primera factura.
+    intento, secreto = _cobro_de_factura(stripe, creada.latest_invoice)
+    estado = getattr(intento, "status", None) or creada.status
+
+    if estado == "succeeded":
+        sync_subscription(user)
+        exito = {"status": "succeeded", "succeeded": True, "requires_action": False,
+                 "plan_name": plan["name"]}
+        return {**_resultado(intento), **exito} if intento else exito
+
+    if secreto:
+        return {
+            "status": estado,
+            "succeeded": False,
+            "requires_action": True,
+            "client_secret": secreto,
+            "subscription_id": creada.id,
+            "plan_name": plan["name"],
+        }
+
+    # Sin secreto no se puede confirmar desde el navegador. La suscripción ya
+    # existe en Stripe y puede cerrarse sola, así que esto no es un rechazo:
+    # decirlo así sería mentir sobre lo que hizo el banco.
+    logger.error(f"Suscripción {creada.id} en {estado} sin secreto para confirmar")
+    sync_subscription(user)
     return {
-        "status": creada.status,
+        "status": estado,
         "succeeded": False,
-        "requires_action": True,
-        "client_secret": _secreto_de_factura(stripe, creada.latest_invoice),
+        "requires_action": False,
         "subscription_id": creada.id,
         "plan_name": plan["name"],
+        "titulo": "El cobro quedó a la espera",
+        "decline_message": "Stripe aceptó la suscripción pero no devolvió con qué "
+                           "confirmarla desde aquí. Revisa Ajustes → Facturación en "
+                           "unos segundos antes de volver a intentarlo.",
     }
 
 

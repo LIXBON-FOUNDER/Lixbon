@@ -150,25 +150,39 @@ function Aprobado({ resultado, concepto, onCerrar }) {
   );
 }
 
+// El título lo manda el resultado cuando el cobro no cerró por algo que no fue
+// el banco: dar por rechazado lo que no sabemos afirma algo que el emisor nunca
+// dijo, y manda al usuario a cambiar una tarjeta que estaba bien.
 function Rechazado({ resultado, onReintentar, onCerrar }) {
+  const rechazo = Boolean(resultado.decline_code || resultado.status === 'requires_payment_method');
   return (
     <div className="pago__desenlace">
       <span className="pago__icono is-bad"><IconAlert size={20} /></span>
       <div className="pago__titulo-grupo">
-        <span className="pago__titular">El banco rechazó el cobro</span>
-        <span className="pago__sub">No se cobró nada. Puedes intentarlo con otra tarjeta.</span>
-      </div>
-      <div className="pago__motivo">
-        <span className="pago__icono-min"><IconAlert size={14} /></span>
-        <span className="pago__motivo-txt">
-          <span>{resultado.decline_message || 'El emisor no autorizó la operación.'}</span>
-          {resultado.decline_code && (
-            <span className="pago__sub">Motivo del emisor · {resultado.decline_code}</span>
-          )}
+        <span className="pago__titular">
+          {resultado.titulo || (rechazo ? 'El banco rechazó el cobro' : 'No pudimos completar el cobro')}
+        </span>
+        <span className="pago__sub">
+          {rechazo
+            ? 'No se cobró nada. Puedes intentarlo con otra tarjeta.'
+            : 'Si se llegó a cobrar, lo verás en Ajustes → Facturación.'}
         </span>
       </div>
+      {resultado.decline_message && (
+        <div className="pago__motivo">
+          <span className="pago__icono-min"><IconAlert size={14} /></span>
+          <span className="pago__motivo-txt">
+            <span>{resultado.decline_message}</span>
+            {resultado.decline_code && (
+              <span className="pago__sub">Motivo del emisor · {resultado.decline_code}</span>
+            )}
+          </span>
+        </div>
+      )}
       <div className="pago__botones">
-        <button className="pago__cta" onClick={onReintentar}>Probar con otra tarjeta</button>
+        <button className="pago__cta" onClick={onReintentar}>
+          {rechazo ? 'Probar con otra tarjeta' : 'Volver a intentarlo'}
+        </button>
         <button className="pago__btn" onClick={onCerrar}>Cancelar</button>
       </div>
     </div>
@@ -244,6 +258,16 @@ export function DialogoPago({
       setResultado(res);
       setFase('aprobado');
       onHecho?.(res);
+      return;
+    }
+    if (res.requires_action && !res.client_secret) {
+      setResultado({
+        ...res,
+        titulo: 'El cobro quedó a la espera',
+        decline_message: res.decline_message
+          || 'La pasarela no devolvió con qué confirmar el cobro desde aquí.',
+      });
+      setFase('rechazado');
       return;
     }
     if (res.requires_action && res.client_secret && sdk) {
