@@ -12,7 +12,7 @@ import { apariencia, cargarStripe } from '../../lib/stripe';
 import { useCierreAnimado } from '../../hooks/useCierreAnimado';
 import { LogoMark } from '../Logo';
 import { IconAlert, IconCheck, IconDownload, IconPlus, IconShield, IconX } from '../Icons';
-import { Tarjeta, errMsg, fmtUSD } from './comunes';
+import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
 
 function Cuerpo({
   resumen, extra, etiquetaAccion, guardarFijo, notaGuardar,
@@ -129,25 +129,44 @@ function Cuerpo({
   );
 }
 
+// Bajar de plan no cobra: deja a favor lo no consumido. Un "Pago aprobado" con
+// un importe de cero no dice nada de eso, así que el desenlace cuenta las dos
+// historias por separado: lo que se cobró, o lo que pasará en la próxima factura.
+function filasDelDesenlace(r) {
+  if (r.charged === false) {
+    return [
+      ['Cobrado hoy', fmtUSD(0)],
+      r.credit ? ['A tu favor', fmtUSD(r.credit)] : null,
+      r.next_amount != null ? ['Próxima factura', r.next_date
+        ? `${fmtUSD(r.next_amount)} · ${fmtDia(r.next_date)}`
+        : fmtUSD(r.next_amount)] : null,
+    ].filter(Boolean);
+  }
+  return [
+    r.amount != null ? ['Importe', fmtUSD(r.amount)] : null,
+    r.last4 ? ['Tarjeta', `•••• ${r.last4}`] : null,
+    r.payment_intent ? ['Referencia', r.payment_intent, 'mono'] : null,
+  ].filter(Boolean);
+}
+
 function Aprobado({ resultado, concepto, onCerrar }) {
+  const sinCobro = resultado.charged === false;
+  const filas = filasDelDesenlace(resultado);
   return (
     <div className="pago__desenlace">
       <span className="pago__icono is-ok"><IconCheck size={20} /></span>
       <div className="pago__titulo-grupo">
-        <span className="pago__titular">Pago aprobado</span>
+        <span className="pago__titular">{sinCobro ? 'Plan actualizado' : 'Pago aprobado'}</span>
         <span className="pago__sub">{concepto}</span>
       </div>
-      {(resultado.amount != null || resultado.last4 || resultado.payment_intent) && (
+      {filas.length > 0 && (
         <div className="pago__detalle">
-          {resultado.amount != null
-            && <div><span>Importe</span><span>{fmtUSD(resultado.amount)}</span></div>}
-          {resultado.last4 && <div><span>Tarjeta</span><span>•••• {resultado.last4}</span></div>}
-          {resultado.payment_intent && (
-            <div>
-              <span>Referencia</span>
-              <span className="mono">{resultado.payment_intent}</span>
+          {filas.map(([etiqueta, valor, clase]) => (
+            <div key={etiqueta}>
+              <span>{etiqueta}</span>
+              <span className={clase}>{valor}</span>
             </div>
-          )}
+          ))}
         </div>
       )}
       <div className="pago__botones">

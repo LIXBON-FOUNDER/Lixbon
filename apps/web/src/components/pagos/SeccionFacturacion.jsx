@@ -8,14 +8,10 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { IconBolt, IconPlus, IconTrash } from '../Icons';
 import { DialogoTarjeta } from './DialogoTarjeta';
 import { PagoCreditos } from './PagoCreditos';
-import { Tarjeta, errMsg, fmtUSD } from './comunes';
+import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
 
 const fmtFecha = (iso) => (iso ? new Date(iso).toLocaleDateString('es', {
   day: 'numeric', month: 'long', year: 'numeric',
-}) : '—');
-
-const fmtDia = (iso) => (iso ? new Date(iso).toLocaleDateString('es', {
-  day: 'numeric', month: 'long',
 }) : '—');
 
 const ESTADO_FACTURA = {

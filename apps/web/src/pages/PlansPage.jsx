@@ -74,17 +74,30 @@ export default function PlansPage() {
                 {current ? (
                   <span className="pill-btn pill-btn--outline plan-card__cta is-current">Tu plan actual</span>
                 ) : !paid ? (
-                  <Link to="/auth?mode=register" className="pill-btn pill-btn--outline plan-card__cta">Empieza gratis</Link>
+                  // Volver al gratuito desde un plan de pago es cancelar, no
+                  // registrarse: mandar a /auth a quien ya tiene cuenta y plan
+                  // le ofrece lo único que no necesita.
+                  currentPrice > 0 ? (
+                    <Link to="/account/facturacion" className="pill-btn pill-btn--outline plan-card__cta">
+                      Cancelar la suscripción
+                    </Link>
+                  ) : (
+                    <Link to="/auth?mode=register" className="pill-btn pill-btn--outline plan-card__cta">Empieza gratis</Link>
+                  )
                 ) : billingEnabled ? (
                   <button
                     className="pill-btn pill-btn--primary plan-card__cta"
                     onClick={() => subscribe(p)}
-                    title={currentPrice > 0 && p.price_monthly_cents > currentPrice
-                      ? 'Se cobra solo la diferencia prorrateada del mes'
+                    title={currentPrice > 0
+                      ? (p.price_monthly_cents > currentPrice
+                        ? 'Se cobra solo la diferencia prorrateada del mes'
+                        : 'Hoy no se cobra nada: lo que queda pagado se te acredita')
                       : undefined}
                   >
-                    {currentPrice > 0 && p.price_monthly_cents > currentPrice
-                      ? `Mejorar a ${p.name}`
+                    {currentPrice > 0
+                      ? (p.price_monthly_cents > currentPrice
+                        ? `Mejorar a ${p.name}`
+                        : `Cambiar a ${p.name}`)
                       : `Suscribirme a ${p.name}`}
                   </button>
                 ) : (

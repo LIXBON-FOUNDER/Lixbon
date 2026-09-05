@@ -120,7 +120,7 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
     if not items:
         raise ValueError("sin_suscripcion")
 
-    stripe.Subscription.modify(
+    cambiada = stripe.Subscription.modify(
         sub_id,
         items=[{"id": items[0].id, "price": plan["stripe_price_id"]}],
         proration_behavior="always_invoice" if sube else "create_prorations",
@@ -146,7 +146,81 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
         "changed": True,
         "upgrade": sube,
         "plan_name": plan["name"],
+        **_prorrateo_del_cambio(stripe, cambiada, sub.get("stripe_customer_id")),
     }
+
+
+def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None) -> dict[str, Any]:
+    """Qué pasó con el dinero al cambiar de plan.
+
+    Subir factura la diferencia y la cobra ahí mismo. Bajar no devuelve dinero:
+    deja a favor lo no consumido y lo descuenta de la siguiente factura. Decir
+    solo "aprobado" deja al usuario sin saber cuál de las dos cosas ocurrió."""
+    cobrado = _cobro_del_cambio(stripe, suscripcion)
+    if cobrado and cobrado.get("amount"):
+        return {"charged": True, **cobrado}
+
+    siguiente = _factura_siguiente(stripe, customer_id)
+    detalle: dict[str, Any] = {"charged": False, "amount": 0.0}
+    if cobrado:
+        detalle["receipt_url"] = cobrado.get("receipt_url")
+        detalle["payment_intent"] = cobrado.get("payment_intent")
+    saldo = _saldo_a_favor(stripe, customer_id)
+    if saldo:
+        detalle["credit"] = saldo
+    detalle.update(siguiente)
+    return detalle
+
+
+def _cobro_del_cambio(stripe, suscripcion) -> dict[str, Any] | None:
+    factura = getattr(suscripcion, "latest_invoice", None)
+    if isinstance(factura, str):
+        try:
+            factura = stripe.Invoice.retrieve(factura)
+        except Exception as exc:
+            logger.warning(f"No se pudo leer la factura del cambio de plan: {exc}")
+            return None
+    if not factura:
+        return None
+    intento, _ = _cobro_de_factura(stripe, factura)
+    if not intento:
+        return None
+    cobro = _resultado(intento)
+    return {clave: cobro[clave] for clave in
+            ("amount", "currency", "payment_intent", "last4", "receipt_url")}
+
+
+def _saldo_a_favor(stripe, customer_id: str | None) -> float:
+    """El abono de una bajada vive en el balance del cliente, en negativo."""
+    if not customer_id:
+        return 0.0
+    try:
+        balance = getattr(stripe.Customer.retrieve(customer_id), "balance", 0) or 0
+    except Exception as exc:
+        logger.warning(f"No se pudo leer el saldo del cliente: {exc}")
+        return 0.0
+    return round(-balance / 100, 2) if balance < 0 else 0.0
+
+
+def _factura_siguiente(stripe, customer_id: str | None) -> dict[str, Any]:
+    """Stripe renombró `Invoice.upcoming` a `Invoice.create_preview`; se prueban
+    las dos porque cuál existe depende de la versión de la cuenta."""
+    if not customer_id:
+        return {}
+    for nombre in ("create_preview", "upcoming"):
+        metodo = getattr(stripe.Invoice, nombre, None)
+        if not callable(metodo):
+            continue
+        try:
+            previa = metodo(customer=customer_id)
+        except Exception:
+            continue
+        return {
+            "next_amount": (getattr(previa, "amount_due", 0) or 0) / 100,
+            "next_date": _iso(getattr(previa, "next_payment_attempt", None)
+                              or getattr(previa, "period_end", None)),
+        }
+    return {}
 
 
 def list_invoices(user: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]:

@@ -30,6 +30,7 @@ export function UsageChart({ daily }) {
     return lastNDays(30).map((date) => ({ date, tokens: byDate[date] || 0 }));
   }, [daily]);
 
+  const vacio = data.every((d) => d.tokens === 0);
   const max = Math.max(1, ...data.map((d) => d.tokens));
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
@@ -39,6 +40,17 @@ export function UsageChart({ daily }) {
   const maxIdx = data.findIndex((d) => d.tokens === max);
 
   const gridVals = [max, max / 2];
+
+  // Sin datos, el mínimo de 1 token dibuja una escala que no existe: dos líneas
+  // rotuladas "1" que el usuario lee como si hubiera consumido algo.
+  if (vacio) {
+    return (
+      <p className="card__muted">
+        Todavía no hay consumo. Las barras aparecerán en cuanto uses el chat, el
+        IDE o tus API keys.
+      </p>
+    );
+  }
 
   return (
     <div className="uchart">

@@ -220,6 +220,11 @@
   font-size: 11px;
 }
 
+.pago-tarjeta__chip.is-mala {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
 .pago-tarjeta__pie {
   overflow: hidden;
   font-size: 12px;
