@@ -447,7 +447,8 @@ function PreciosApi() {
             {pricing.map((p) => (
               <tr key={p.model_prefix}>
                 <td>
-                  {p.display_name ? <> — {p.display_name}</> : p.model_prefix}
+                  <code>{p.model_prefix}</code>
+                  {p.display_name ? ` — ${p.display_name}` : ''}
                 </td>
                 <td>{fmt(p.input_usd_per_mtok)}</td>
                 <td>{fmt(p.output_usd_per_mtok)}</td>
