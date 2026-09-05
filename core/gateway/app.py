@@ -178,8 +178,18 @@ _static_dir = Path(__file__).resolve().parent / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
+class _AssetsConHash(StaticFiles):
+    """Vite pone el hash del contenido en el nombre, así que un asset nunca
+    cambia: se puede cachear para siempre."""
+
+    def file_response(self, *args, **kwargs):
+        respuesta = super().file_response(*args, **kwargs)
+        respuesta.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return respuesta
+
+
 if WEB_DIST_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(WEB_DIST_DIR / "assets")), name="assets")
+    app.mount("/assets", _AssetsConHash(directory=str(WEB_DIST_DIR / "assets")), name="assets")
 
     @app.get("/{path_name:path}")
     async def serve_frontend(path_name: str):
@@ -189,4 +199,8 @@ if WEB_DIST_DIR.exists():
         candidate = (WEB_DIST_DIR / path_name).resolve()
         if path_name and candidate.is_file() and candidate.is_relative_to(WEB_DIST_DIR):
             return FileResponse(str(candidate))
-        return FileResponse(str(WEB_DIST_DIR / "index.html"))
+        # El index es lo único que nombra los assets del despliegue actual. Sin
+        # esto el navegador se queda con el de la versión anterior y pide unos
+        # archivos que ya no existen: pantalla en blanco tras cada despliegue.
+        return FileResponse(str(WEB_DIST_DIR / "index.html"),
+                            headers={"Cache-Control": "no-cache"})
