@@ -47,9 +47,13 @@ function Cuerpo({
       await onResultado(res, stripe);
     } catch (e) {
       const d = e?.response?.data?.detail;
+      // Solo el 402 viene del emisor. Un 400 de validación o un 502 de la
+      // pasarela pintados como rechazo mandan a cambiar una tarjeta que va bien.
+      const delBanco = e?.response?.status === 402;
       onResultado({
         succeeded: false,
-        status: 'requires_payment_method',
+        status: delBanco ? 'requires_payment_method' : 'error',
+        titulo: delBanco ? undefined : 'No pudimos completar el cobro',
         decline_message: (typeof d === 'string' ? d : d?.message)
           || 'No se pudo completar el cobro.',
         decline_code: d?.decline_code,

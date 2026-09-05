@@ -136,7 +136,16 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
     )
     log_audit_event("plan_changed", user_id=user["id"],
                     from_plan=sub.get("plan_id"), to_plan=new_plan_id)
-    return {"changed": True, "plan_name": plan["name"], "upgrade": sube}
+    # Misma forma que subscribe: quien llama no distingue un alta de un cambio,
+    # y con error_if_incomplete llegar hasta aquí ya significa que el cobro entró.
+    return {
+        "status": "succeeded",
+        "succeeded": True,
+        "requires_action": False,
+        "changed": True,
+        "upgrade": sube,
+        "plan_name": plan["name"],
+    }
 
 
 def list_invoices(user: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]:
