@@ -19,6 +19,9 @@ import AdminNodos from './pages/admin/Nodos';
 import AdminIngresos from './pages/admin/Ingresos';
 import AdminReleases from './pages/admin/Releases';
 import AdminAuditoria from './pages/admin/Auditoria';
+import AdminTransacciones from './pages/admin/Transacciones';
+import AdminLiquidaciones from './pages/admin/Liquidaciones';
+import AdminPasarela from './pages/admin/Pasarela';
 import DownloadsPage from './pages/DownloadsPage';
 import ReleasesPage from './pages/ReleasesPage';
 import DocsPage from './pages/DocsPage';
@@ -49,6 +52,10 @@ export default function App() {
               <Route path="proveedores" element={<AdminProveedores />} />
               <Route path="nodos" element={<AdminNodos />} />
               <Route path="ingresos" element={<AdminIngresos />} />
+              <Route path="pagos" element={<Navigate to="/admin/pagos/transacciones" replace />} />
+              <Route path="pagos/transacciones" element={<AdminTransacciones />} />
+              <Route path="pagos/liquidaciones" element={<AdminLiquidaciones />} />
+              <Route path="pagos/pasarela" element={<AdminPasarela />} />
               <Route path="usuarios" element={<AdminUsuarios />} />
               <Route path="releases" element={<AdminReleases />} />
               <Route path="auditoria" element={<AdminAuditoria />} />

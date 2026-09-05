@@ -170,5 +170,7 @@ def debit_usage(user_id: int, model: str | None, prompt_tokens: int,
             f"[credits] user={user_id} model={model} tokens={prompt_tokens}+{completion_tokens} "
             f"costo={microusd_to_usd(cost)}$ saldo={microusd_to_usd(balance)}$"
         )
+        from core.billing.stripe_gateway import maybe_autoreload
+        maybe_autoreload(user_id, balance)
     except Exception as exc:
         logger.error(f"[credits] No se pudo debitar el uso (user={user_id}, model={model}): {exc}")

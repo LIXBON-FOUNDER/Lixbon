@@ -1295,6 +1295,100 @@ def debit_credit_usage(
         return balance
 
 
+AUTORELOAD_DEFECTO = {
+    "enabled": False,
+    "threshold_microusd": 0,
+    "pack_id": None,
+    "payment_method": None,
+    "last_run": None,
+    "last_error": None,
+}
+
+
+def get_credit_account(user_id: int) -> dict[str, Any]:
+    """Saldo y ajustes de recarga automática. Sin fila aún → todo por defecto."""
+    with get_session() as s:
+        acc = s.scalars(select(CreditAccount)
+                        .where(CreditAccount.user_id == user_id)).first()
+        if not acc:
+            return {"balance_microusd": 0, "autoreload": dict(AUTORELOAD_DEFECTO)}
+        return {
+            "balance_microusd": int(acc.balance_microusd or 0),
+            "autoreload": {
+                "enabled": bool(acc.autoreload_enabled),
+                "threshold_microusd": int(acc.autoreload_threshold_microusd or 0),
+                "pack_id": acc.autoreload_pack_id,
+                "payment_method": acc.autoreload_payment_method,
+                "last_run": acc.autoreload_last_run,
+                "last_error": acc.autoreload_last_error,
+            },
+        }
+
+
+def _credit_account_row(s, user_id: int, ts: str) -> CreditAccount:
+    s.execute(
+        pg_insert(CreditAccount)
+        .values(user_id=user_id, balance_microusd=0, updated_at=ts)
+        .on_conflict_do_nothing(constraint="uq_credit_accounts_user")
+    )
+    return s.scalars(select(CreditAccount)
+                     .where(CreditAccount.user_id == user_id)).one()
+
+
+def set_autoreload(
+    user_id: int,
+    *,
+    enabled: bool,
+    threshold_microusd: int = 0,
+    pack_id: str | None = None,
+    payment_method: str | None = None,
+) -> dict[str, Any]:
+    """Guarda (o apaga) la recarga automática. Apagarla conserva el umbral y el
+    pack para que volver a encenderla no obligue a reconfigurarlo."""
+    ts = now_iso()
+    with get_session() as s:
+        acc = _credit_account_row(s, user_id, ts)
+        acc.autoreload_enabled = 1 if enabled else 0
+        if enabled:
+            acc.autoreload_threshold_microusd = threshold_microusd
+            acc.autoreload_pack_id = pack_id
+            acc.autoreload_payment_method = payment_method
+            acc.autoreload_last_error = None
+        acc.updated_at = ts
+    return get_credit_account(user_id)["autoreload"]
+
+
+def record_autoreload_run(user_id: int, error: str | None = None) -> None:
+    """Sella el intento. Un fallo apaga la recarga: reintentar a ciegas contra
+    una tarjeta que el banco rechaza solo acumula intentos fallidos."""
+    ts = now_iso()
+    with get_session() as s:
+        acc = s.scalars(select(CreditAccount)
+                        .where(CreditAccount.user_id == user_id)).first()
+        if not acc:
+            return
+        acc.autoreload_last_run = ts
+        acc.autoreload_last_error = error
+        if error:
+            acc.autoreload_enabled = 0
+        acc.updated_at = ts
+
+
+def forget_autoreload_payment_method(user_id: int, payment_method: str) -> bool:
+    """Al borrar una tarjeta, la recarga automática que dependía de ella se
+    apaga: dejarla encendida sin método cobraría contra la tarjeta equivocada."""
+    ts = now_iso()
+    with get_session() as s:
+        acc = s.scalars(select(CreditAccount)
+                        .where(CreditAccount.user_id == user_id)).first()
+        if not acc or acc.autoreload_payment_method != payment_method:
+            return False
+        acc.autoreload_enabled = 0
+        acc.autoreload_payment_method = None
+        acc.updated_at = ts
+        return True
+
+
 def list_credit_ledger(user_id: int, limit: int = 50, kind: str | None = None) -> list[dict[str, Any]]:
     with get_session() as s:
         stmt = (select(CreditLedger).where(CreditLedger.user_id == user_id)

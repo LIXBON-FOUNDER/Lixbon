@@ -1,0 +1,561 @@
+/* pagos.css — el modal de cobro y la sección de Facturación.
+   El diálogo se apoya en #161616, un escalón por encima del fondo, para
+   despegarse del velo sin pedir borde. Sin bordes: la jerarquía la da el
+   relleno.
+   #161616 diálogo · #1C1C1C bloque y campo · #242424 elegido */
+
+.pago-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+  background: rgba(6, 6, 6, 0.74);
+  animation: fade-in 0.18s ease;
+}
+
+.pago {
+  display: flex;
+  flex-direction: column;
+  width: min(468px, 100%);
+  margin: auto;
+  animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pago__tab {
+  width: 104px;
+  height: 12px;
+  margin-left: 34px;
+  border-radius: 8px 8px 0 0;
+  background: #161616;
+}
+
+.pago__caja {
+  --tarjeta-fondo: var(--surface-3);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 26px 28px 24px;
+  border-radius: var(--radius);
+  background: #161616;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
+}
+
+.pago__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pago__marca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pago__nombre {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pago__form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Resumen de lo que se cobra ─────────────────────────────────────────── */
+
+.pago__resumen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+}
+
+.pago__resumen-fila {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pago__resumen-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pago__resumen-nombre {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.pago__resumen-precio {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.pago__resumen-nota {
+  font-size: 11.5px;
+  color: var(--ink-label);
+  text-wrap: pretty;
+}
+
+.pago__sub {
+  font-size: 12.5px;
+  color: #8A8A88;
+  text-wrap: pretty;
+}
+
+/* ── Elegir tarjeta ─────────────────────────────────────────────────────── */
+
+.pago__campo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pago__label {
+  font-size: 12px;
+  color: #8A8A88;
+}
+
+.pago__metodos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pago-opcion {
+  display: block;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  background: none;
+  cursor: pointer;
+}
+
+.pago-opcion--nueva {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.pago-opcion--nueva:hover,
+.pago-opcion--nueva[aria-pressed='true'] {
+  background: var(--surface-4);
+  color: var(--ink);
+}
+
+.pago-tarjeta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--tarjeta-fondo, var(--bg-row));
+  transition: background 0.16s ease;
+}
+
+.pago-opcion:hover .pago-tarjeta,
+.pago-tarjeta.is-activa {
+  background: var(--surface-4);
+}
+
+.pago-tarjeta__marca {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  background: var(--field-focus);
+  color: var(--ink-soft);
+}
+
+.pago-tarjeta__datos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.pago-tarjeta__linea {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pago-tarjeta__num {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.pago-tarjeta__chip {
+  padding: 2px 8px;
+  border-radius: var(--radius-chip);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.pago-tarjeta__pie {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pago-tarjeta__acciones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Los campos de tarjeta son iframes de Stripe: solo se les puede dar sitio,
+   el interior lo pinta la Appearance API desde lib/stripe.js. */
+.pago__elements {
+  min-height: 44px;
+}
+
+.pago__cargando {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+/* ── Guardar la tarjeta ─────────────────────────────────────────────────── */
+
+.pago__guardar,
+.pago__nota-guardar {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+
+.pago__guardar {
+  cursor: pointer;
+}
+
+.pago__guardar input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pago__tick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-chip);
+  background: var(--surface-4);
+  color: transparent;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.pago__guardar input:checked ~ .pago__tick,
+.pago__nota-guardar .pago__tick {
+  background: var(--accent-deep);
+  color: var(--on-accent);
+}
+
+.pago__guardar input:focus-visible ~ .pago__tick {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Acciones ───────────────────────────────────────────────────────────── */
+
+.pago__cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 48px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.16s ease;
+}
+
+.pago__cta:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pago__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 18px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink-body);
+  font-size: 13.5px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.pago__btn:hover {
+  background: var(--surface-4);
+}
+
+.pago__botones {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+}
+
+.pago__botones .pago__cta {
+  flex: 1;
+}
+
+.pago__error {
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  background: var(--field-error);
+  color: var(--danger-ink);
+  font-size: 12.5px;
+  text-wrap: pretty;
+}
+
+.pago__pie {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.pago__pie svg {
+  flex-shrink: 0;
+}
+
+/* ── Desenlaces ─────────────────────────────────────────────────────────── */
+
+.pago__desenlace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.pago__icono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+}
+
+.pago__icono.is-ok { background: var(--accent-soft); color: var(--accent); }
+.pago__icono.is-bad { background: var(--danger-soft); color: var(--danger-ink); }
+.pago__icono.is-espera { background: var(--surface-4); color: var(--ink-soft); }
+
+.pago__titulo-grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pago__titular {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pago__detalle {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 6px 18px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+}
+
+.pago__detalle > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  font-size: 13px;
+}
+
+.pago__detalle > div + div {
+  box-shadow: inset 0 1px 0 rgba(var(--ink-rgb), 0.05);
+}
+
+.pago__detalle span:first-child { color: var(--ink-muted); }
+.pago__detalle span:last-child {
+  overflow: hidden;
+  color: var(--ink-body);
+  text-overflow: ellipsis;
+}
+
+.pago__motivo {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: var(--radius);
+  background: var(--field-error);
+  text-align: left;
+}
+
+.pago__icono-min {
+  display: flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--danger-ink);
+}
+
+.pago__motivo-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-body);
+}
+
+/* ── Packs de recarga ───────────────────────────────────────────────────── */
+
+.pago__packs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pago-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.pago-pack:hover,
+.pago-pack.is-activo {
+  background: var(--surface-4);
+}
+
+.pago-pack__nombre {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.pago-pack__precio {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.pago-pack__nota {
+  font-size: 11.5px;
+  color: var(--ink-label);
+}
+
+/* ── Ajustes → Facturación ──────────────────────────────────────────────── */
+
+/* La columna del saldo es fija: el número grande no debe encogerse con la
+   ventana mientras la lista de al lado sí puede. */
+.pago-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.pago-saldo {
+  gap: 14px;
+}
+
+.pago-saldo__cifra {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.pago-saldo__enlace {
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.pago-monto {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-body);
+}
+
+.set-card > .pago-tarjeta + .pago-tarjeta {
+  margin-top: 2px;
+}
+
+@media (max-width: 980px) {
+  .pago-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .pago__caja {
+    padding: 22px 20px 20px;
+  }
+
+  .pago__packs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pago__botones {
+    flex-direction: column;
+  }
+}

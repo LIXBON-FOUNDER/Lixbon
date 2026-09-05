@@ -299,7 +299,11 @@ class ModelRole(Base):
 
 
 class CreditAccount(Base):
-    """Saldo prepago de créditos de API por usuario, en micro-USD."""
+    """Saldo prepago de créditos de API por usuario, en micro-USD.
+
+    Los campos autoreload_* guardan la recarga automática: cuando el saldo baja
+    del umbral se cobra el pack indicado contra la tarjeta guardada, sin que el
+    usuario esté presente."""
     __tablename__ = "credit_accounts"
     __table_args__ = (
         UniqueConstraint("user_id", name="uq_credit_accounts_user"),
@@ -308,6 +312,12 @@ class CreditAccount(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     balance_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    autoreload_enabled: Mapped[int] = mapped_column(nullable=False, default=0)
+    autoreload_threshold_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    autoreload_pack_id: Mapped[str | None] = mapped_column(Text)
+    autoreload_payment_method: Mapped[str | None] = mapped_column(Text)
+    autoreload_last_run: Mapped[str | None] = mapped_column(Text)
+    autoreload_last_error: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 

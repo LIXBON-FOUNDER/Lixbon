@@ -1,7 +1,10 @@
 """
-payments.py — Endpoints de pagos con Stripe (F7).
-Checkout, portal de cliente, webhook y estado de facturación. Si Stripe no está
-configurado, /config informa enabled:false y los demás devuelven 503.
+payments.py — Endpoints de pagos.
+
+El cobro ocurre dentro de lixbon: no hay Checkout alojado ni portal de cliente.
+El navegador guarda la tarjeta contra Stripe con Elements y aquí solo entra un
+`pm_...`; con ese id se crean la suscripción y las recargas de saldo. Si Stripe
+no está configurado, /config informa enabled:false y el resto devuelve 503.
 """
 from __future__ import annotations
 
@@ -9,19 +12,20 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.billing import stripe_gateway as sg
-from core.billing.credits import microusd_to_usd
+from core.billing.credits import MICRO_PER_USD, microusd_to_usd
 from core.config import STRIPE_PUBLISHABLE_KEY
 from core.persistence.queries import (
     credit_usage_daily,
-    get_credit_balance,
+    get_credit_account,
     get_credit_pack,
     get_plan_for_user,
     get_subscription,
     list_credit_ledger,
     list_credit_packs,
+    set_autoreload,
 )
 from core.security.auth import cookie_auth_required
 
@@ -30,12 +34,30 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 credits_router = APIRouter(prefix="/api/credits", tags=["credits"])
 
 
-class CheckoutPayload(BaseModel):
+class SubscribePayload(BaseModel):
     plan_id: str
+    payment_method_id: str = Field(..., min_length=3, max_length=255)
 
 
-class CreditCheckoutPayload(BaseModel):
+class PaymentMethodPayload(BaseModel):
+    payment_method_id: str = Field(..., min_length=3, max_length=255)
+
+
+class ResolvePayload(BaseModel):
+    payment_intent_id: str = Field(..., min_length=3, max_length=255)
+
+
+class TopupPayload(BaseModel):
     pack_id: str
+    payment_method_id: str = Field(..., min_length=3, max_length=255)
+    guardar: bool = True
+
+
+class AutoreloadPayload(BaseModel):
+    enabled: bool
+    pack_id: str | None = None
+    threshold_usd: float = Field(default=5.0, ge=0, le=10_000)
+    payment_method_id: str | None = None
 
 
 def _require_enabled():
@@ -46,77 +68,141 @@ def _require_enabled():
         })
 
 
-@router.get("/config")
-async def billing_config():
-    """Público: ¿está habilitado el pago? (para que la web muestre el CTA correcto)."""
-    return {"enabled": sg.enabled(), "publishable_key": STRIPE_PUBLISHABLE_KEY or None}
-
-
-_CHECKOUT_ERRORS = {
+_ERRORES = {
     "plan_inexistente": "Ese plan no existe.",
     "plan_sin_precio": "Ese plan aún no tiene un precio configurado.",
-    "sin_suscripcion": "No se encontró tu suscripción. Intenta desde Ajustes → Facturación.",
-    "downgrade_por_portal": "Para bajar de plan usa «Gestionar» en Ajustes → Facturación.",
+    "mismo_plan": "Ya estás en ese plan.",
+    "sin_suscripcion": "No tienes una suscripción activa.",
+    "sin_cliente": "Todavía no tienes ningún método de pago guardado.",
+    "metodo_ajeno": "Esa tarjeta no es tuya.",
+    "cobro_ajeno": "Ese cobro no es tuyo.",
+    "ultima_tarjeta": "Es la única tarjeta de una suscripción activa. Añade otra antes "
+                      "de quitar esta, o cancela la suscripción.",
 }
 
 
-@router.post("/checkout")
-async def create_checkout(
-    payload: CheckoutPayload,
-    request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
-):
-    """Sin suscripción → Checkout de Stripe. Con suscripción activa de Stripe →
-    upgrade in-place con prorrateo (se cobra solo la diferencia)."""
-    _require_enabled()
-    sub = get_subscription(user_data["id"])
-    is_upgrade = bool(sub and sub.get("stripe_subscription_id"))
-    try:
-        if is_upgrade:
-            result = sg.upgrade_subscription(user_data, payload.plan_id)
-            return {
-                "upgraded": True,
-                "message": f"Tu plan ahora es {result['plan_name']}. "
-                           "Se cobró la diferencia, el siguiente mes se cobrara el precio total de tu plan.",
-            }
-        url = sg.create_checkout_session(user_data, payload.plan_id, str(request.base_url))
-    except ValueError as exc:
-        msg = _CHECKOUT_ERRORS.get(str(exc), "No se pudo iniciar el pago.")
-        raise HTTPException(status_code=400, detail={"code": str(exc), "message": msg})
-    except Exception as exc:
-        if "CardError" in type(exc).__name__:
-            raise HTTPException(status_code=402, detail={
-                "code": "card_declined",
-                "message": "Tu tarjeta rechazó el cobro de la diferencia. "
-                           "Actualiza el método de pago desde Ajustes → Facturación.",
-            })
-        logger.error(f"checkout falló: {exc}")
-        raise HTTPException(status_code=502, detail="No se pudo contactar con la pasarela de pago")
-    return {"url": url}
-
-
-@router.post("/portal")
-async def create_portal(
-    request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
-):
-    _require_enabled()
-    try:
-        url = sg.create_portal_session(user_data, str(request.base_url))
-    except ValueError:
-        raise HTTPException(status_code=400, detail={
-            "code": "no_subscription",
-            "message": "No tienes una suscripción activa que gestionar.",
+def _fallo(exc: Exception, generico: str) -> HTTPException:
+    """Traduce un fallo de Stripe. El rechazo del banco es un 402 con el motivo
+    tal cual lo da el emisor: es lo único que le sirve al usuario para decidir
+    si reintenta o cambia de tarjeta."""
+    if isinstance(exc, ValueError):
+        codigo = str(exc)
+        if codigo in _ERRORES:
+            estado = 403 if codigo in ("metodo_ajeno", "cobro_ajeno") else 400
+            return HTTPException(status_code=estado,
+                                 detail={"code": codigo, "message": _ERRORES[codigo]})
+    if "CardError" in type(exc).__name__:
+        return HTTPException(status_code=402, detail={
+            "code": getattr(exc, "code", None) or "card_declined",
+            "decline_code": getattr(exc, "decline_code", None),
+            "message": getattr(exc, "user_message", None)
+                       or "El banco rechazó el cobro. Prueba con otra tarjeta.",
         })
+    logger.error(f"{generico}: {exc}")
+    return HTTPException(status_code=502, detail={
+        "code": "gateway_error", "message": generico,
+    })
+
+
+@router.get("/config")
+async def billing_config():
+    """Público: la web necesita la clave publicable para montar Elements."""
+    return {"enabled": sg.enabled(), "publishable_key": STRIPE_PUBLISHABLE_KEY or None}
+
+
+# ── Tarjetas guardadas ──────────────────────────────────────────────────────
+
+@router.post("/setup-intent")
+async def create_setup_intent(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+    """Secreto para que el navegador guarde una tarjeta nueva sin cobrar."""
+    _require_enabled()
+    try:
+        return sg.create_setup_intent(user_data)
     except Exception as exc:
-        logger.error(f"portal falló: {exc}")
-        raise HTTPException(status_code=502, detail="No se pudo abrir el portal de facturación")
-    return {"url": url}
+        raise _fallo(exc, "No se pudo preparar el formulario de tarjeta")
+
+
+@router.get("/payment-methods")
+async def list_payment_methods(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+    return {"payment_methods": sg.list_payment_methods(user_data)}
+
+
+@router.post("/payment-methods/default")
+async def set_default_payment_method(
+    payload: PaymentMethodPayload,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    _require_enabled()
+    try:
+        sg.set_default_payment_method(user_data, payload.payment_method_id)
+    except Exception as exc:
+        raise _fallo(exc, "No se pudo cambiar la tarjeta predeterminada")
+    return {"payment_methods": sg.list_payment_methods(user_data)}
+
+
+@router.delete("/payment-methods/{pm_id}")
+async def delete_payment_method(
+    pm_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    _require_enabled()
+    try:
+        sg.detach_payment_method(user_data, pm_id)
+    except Exception as exc:
+        raise _fallo(exc, "No se pudo quitar la tarjeta")
+    return {"payment_methods": sg.list_payment_methods(user_data)}
+
+
+# ── Suscripción ─────────────────────────────────────────────────────────────
+
+@router.post("/subscribe")
+async def subscribe(
+    payload: SubscribePayload,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Alta o cambio de plan con una tarjeta guardada. Si el banco pide
+    confirmación, devuelve el secreto para que el navegador la resuelva."""
+    _require_enabled()
+    try:
+        return sg.subscribe(user_data, payload.plan_id, payload.payment_method_id)
+    except Exception as exc:
+        raise _fallo(exc, "No se pudo activar la suscripción")
+
+
+@router.post("/cancel")
+async def cancel(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+    _require_enabled()
+    try:
+        return sg.cancel_subscription(user_data)
+    except Exception as exc:
+        raise _fallo(exc, "No se pudo cancelar la suscripción")
+
+
+@router.post("/resume")
+async def resume(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+    _require_enabled()
+    try:
+        return sg.resume_subscription(user_data)
+    except Exception as exc:
+        raise _fallo(exc, "No se pudo reactivar la suscripción")
+
+
+@router.post("/resolve")
+async def resolve(
+    payload: ResolvePayload,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Cierra un cobro que pasó por el banco sin esperar al webhook."""
+    _require_enabled()
+    try:
+        return sg.resolve_payment(user_data, payload.payment_intent_id)
+    except Exception as exc:
+        raise _fallo(exc, "No se pudo confirmar el cobro")
 
 
 @router.get("/status")
 async def billing_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
-    """Estado de facturación para la sección Ajustes → Facturación."""
+    """Todo lo que pinta Ajustes → Facturación en una sola llamada."""
     user_id = user_data["id"]
     plan = get_plan_for_user(user_id)
     sub = get_subscription(user_id)
@@ -127,12 +213,13 @@ async def billing_status(user_data: dict[str, Any] = Depends(cookie_auth_require
         "is_paid": paid,
         "current_period_end": sub.get("current_period_end") if sub else None,
         "cancel_at_period_end": sub.get("cancel_at_period_end") if sub else False,
-        "payment_method": sg.payment_method_summary(user_data) if paid else None,
+        "payment_methods": sg.list_payment_methods(user_data),
+        "charges": sg.list_charges(user_data),
         "invoices": sg.list_invoices(user_data) if paid else [],
     }
 
 
-# ── Créditos prepago de la API (cobro por tokens) ──────────────────────────
+# ── Créditos prepago de la API ──────────────────────────────────────────────
 
 def _ledger_row_public(row: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -150,8 +237,7 @@ def _ledger_row_public(row: dict[str, Any]) -> dict[str, Any]:
 
 @credits_router.get("/packs")
 async def credit_packs():
-    """Público: packs de recarga disponibles (la web los muestra aunque el
-    checkout esté deshabilitado)."""
+    """Público: packs de recarga disponibles."""
     return {
         "enabled": sg.enabled(),
         "packs": [
@@ -167,13 +253,12 @@ async def credit_packs():
     }
 
 
-@credits_router.post("/checkout")
-async def credit_checkout(
-    payload: CreditCheckoutPayload,
-    request: Request,
+@credits_router.post("/topup")
+async def topup(
+    payload: TopupPayload,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
-    """Inicia el pago único de un pack de créditos."""
+    """Recarga el saldo cobrando una tarjeta guardada."""
     _require_enabled()
     pack = get_credit_pack(payload.pack_id)
     if not pack:
@@ -181,21 +266,68 @@ async def credit_checkout(
             "code": "pack_inexistente", "message": "Ese pack de créditos no existe.",
         })
     try:
-        url = sg.create_credit_checkout(user_data, pack, str(request.base_url))
+        return sg.charge_topup(user_data, pack, payload.payment_method_id,
+                               guardar=payload.guardar)
     except Exception as exc:
-        logger.error(f"checkout de créditos falló: {exc}")
-        raise HTTPException(status_code=502, detail="No se pudo contactar con la pasarela de pago")
-    return {"url": url}
+        raise _fallo(exc, "No se pudo cobrar la recarga")
+
+
+@credits_router.put("/autoreload")
+async def update_autoreload(
+    payload: AutoreloadPayload,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Recarga automática: cobra el pack elegido cuando el saldo baja del umbral."""
+    if payload.enabled:
+        _require_enabled()
+        if not payload.pack_id or not get_credit_pack(payload.pack_id):
+            raise HTTPException(status_code=400, detail={
+                "code": "pack_inexistente",
+                "message": "Elige cuánto quieres que se recargue.",
+            })
+        if not payload.payment_method_id:
+            raise HTTPException(status_code=400, detail={
+                "code": "sin_metodo",
+                "message": "Elige con qué tarjeta se cobrará la recarga.",
+            })
+        # La tarjeta la elige el navegador: sin comprobar que es de este cliente
+        # se podría dejar apuntando a la de otro usuario.
+        if not any(m["id"] == payload.payment_method_id
+                   for m in sg.list_payment_methods(user_data)):
+            raise HTTPException(status_code=403, detail={
+                "code": "metodo_ajeno", "message": "Esa tarjeta no es tuya.",
+            })
+
+    ajustes = set_autoreload(
+        user_data["id"],
+        enabled=payload.enabled,
+        threshold_microusd=int(payload.threshold_usd * MICRO_PER_USD),
+        pack_id=payload.pack_id,
+        payment_method=payload.payment_method_id,
+    )
+    return {"autoreload": _autoreload_public(ajustes)}
+
+
+def _autoreload_public(ajustes: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": ajustes["enabled"],
+        "threshold_usd": microusd_to_usd(ajustes["threshold_microusd"]),
+        "pack_id": ajustes["pack_id"],
+        "payment_method_id": ajustes["payment_method"],
+        "last_run": ajustes["last_run"],
+        "last_error": ajustes["last_error"],
+    }
 
 
 @credits_router.get("")
 async def credit_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
-    """Saldo actual + últimos movimientos, para Ajustes → Facturación."""
+    """Saldo, recarga automática y últimos movimientos."""
     user_id = user_data["id"]
-    balance = get_credit_balance(user_id)
+    cuenta = get_credit_account(user_id)
     return {
         "enabled": sg.enabled(),
-        "balance_usd": microusd_to_usd(balance),
+        "balance_usd": microusd_to_usd(cuenta["balance_microusd"]),
+        "autoreload": _autoreload_public(cuenta["autoreload"]),
         "ledger": [_ledger_row_public(r) for r in list_credit_ledger(user_id, limit=50)],
     }
 

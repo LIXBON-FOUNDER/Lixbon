@@ -5,7 +5,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useAuth } from '../../hooks/useAuth';
 import { Logo, LogoMark } from '../../components/Logo';
 import {
-  IconApps, IconBag, IconCaret, IconChat, IconDownload, IconGear,
+  IconApps, IconBag, IconCard, IconCaret, IconChat, IconDownload, IconGear,
   IconHome, IconNodes, IconShield, IconTrend, IconUsers,
 } from '../../components/Icons';
 import { inicialDe } from './comunes';
@@ -13,7 +13,7 @@ import { inicialDe } from './comunes';
 const AREAS = [
   { to: '/admin', end: true, icon: IconHome, label: 'Inicio' },
   {
-    grupo: 'ia',
+    grupo: '/admin/ia',
     icon: IconApps,
     label: 'IA',
     hijos: [
@@ -25,6 +25,16 @@ const AREAS = [
   { to: '/admin/proveedores', icon: IconBag, label: 'Proveedores' },
   { to: '/admin/nodos', icon: IconNodes, label: 'Nodos' },
   { to: '/admin/ingresos', icon: IconTrend, label: 'Ingresos' },
+  {
+    grupo: '/admin/pagos',
+    icon: IconCard,
+    label: 'Pagos',
+    hijos: [
+      { to: '/admin/pagos/transacciones', label: 'Transacciones' },
+      { to: '/admin/pagos/liquidaciones', label: 'Liquidaciones' },
+      { to: '/admin/pagos/pasarela', label: 'Configuración' },
+    ],
+  },
   { to: '/admin/usuarios', icon: IconUsers, label: 'Usuarios' },
   { to: '/admin/releases', icon: IconDownload, label: 'Releases' },
   { to: '/admin/auditoria', icon: IconShield, label: 'Auditoría' },
@@ -37,12 +47,19 @@ export default function AdminLayout() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const dentroDeIA = pathname.startsWith('/admin/ia');
-  const [abierto, setAbierto] = useState(dentroDeIA);
+  // Un grupo se abre solo cuando estás dentro, y se puede plegar a mano.
+  const [abiertos, setAbiertos] = useState(
+    () => AREAS.filter((a) => a.grupo && pathname.startsWith(a.grupo)).map((a) => a.grupo),
+  );
 
   useEffect(() => {
-    if (dentroDeIA) setAbierto(true);
-  }, [dentroDeIA]);
+    const dentro = AREAS.find((a) => a.grupo && pathname.startsWith(a.grupo));
+    if (dentro) setAbiertos((v) => (v.includes(dentro.grupo) ? v : [...v, dentro.grupo]));
+  }, [pathname]);
+
+  const alternar = (grupo) => setAbiertos(
+    (v) => (v.includes(grupo) ? v.filter((g) => g !== grupo) : [...v, grupo]),
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -83,12 +100,14 @@ export default function AdminLayout() {
               );
             }
             const Icono = a.icon;
+            const dentro = pathname.startsWith(a.grupo);
+            const abierto = abiertos.includes(a.grupo);
             return (
               <div key={a.grupo}>
                 <button
                   type="button"
-                  className={`adm-link ${dentroDeIA ? 'is-active' : ''}`}
-                  onClick={() => setAbierto((v) => !v)}
+                  className={`adm-link ${dentro ? 'is-active' : ''}`}
+                  onClick={() => alternar(a.grupo)}
                   aria-expanded={abierto}
                 >
                   <Icono size={18} />

@@ -449,6 +449,15 @@
   align-items: center;
 }
 
+/* base.css solo hereda el color de los enlaces; el subrayado del navegador hay
+   que quitarlo donde el enlace no es prosa. */
+.adm-link,
+.adm-sublink,
+.adm__back,
+a.adm-btn {
+  text-decoration: none;
+}
+
 .adm-tabla__cabecera {
   padding: 0 16px;
 }

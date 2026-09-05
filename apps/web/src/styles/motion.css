@@ -192,10 +192,12 @@
 
 /* Los diálogos ya entraban con un pop; lo que faltaba era la salida, que se
    cortaba en seco. La clase la pone useCierreAnimado justo antes de desmontar. */
+.pago-overlay.is-closing,
 .modal-overlay.is-closing {
   animation: overlay-out var(--dur-2) var(--ease-in-out) forwards;
 }
 
+.pago-overlay.is-closing .pago,
 .modal-overlay.is-closing .modal {
   animation: modal-out var(--dur-2) var(--ease-in-out) forwards;
 }
@@ -272,7 +274,9 @@
   .adm-stats .adm-stat,
   .verify-bar,
   .modal-overlay.is-closing,
-  .modal-overlay.is-closing .modal {
+  .modal-overlay.is-closing .modal,
+  .pago-overlay.is-closing,
+  .pago-overlay.is-closing .pago {
     animation: none !important;
   }
 

@@ -10,10 +10,11 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useReenvioVerificacion } from '../components/VerifyBanner';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
+import { SeccionFacturacion } from '../components/pagos/SeccionFacturacion';
 import { planBadge } from '../lib/planColors';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
-  IconPlus, IconTrash, IconX, IconChevron, IconBolt, IconLogout,
+  IconPlus, IconTrash, IconX, IconChevron, IconLogout,
 } from '../components/Icons';
 
 const unlimited = (v) => v === -1;
@@ -517,217 +518,6 @@ function PrivacidadSection({ user, onUserChange }) {
   );
 }
 
-// ── Facturación ─────────────────────────────────────────────────────────
-
-const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString() : '—');
-
-function FacturacionSection({ plan }) {
-  const [billing, setBilling] = useState(null);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [credits, setCredits] = useState(null);
-  const [packs, setPacks] = useState(null);
-  const [packBusy, setPackBusy] = useState(null);
-
-  const creditsOk = new URLSearchParams(window.location.search).get('credits') === 'success';
-  const upgradeOk = new URLSearchParams(window.location.search).get('upgrade') === 'success';
-
-  useEffect(() => {
-    api.get('/api/billing/status')
-      .then((res) => setBilling(res.data))
-      .catch(() => setError('No se pudo cargar tu facturación.'));
-    api.get('/api/credits').then((res) => setCredits(res.data)).catch(() => {});
-    api.get('/api/credits/packs').then((res) => setPacks(res.data)).catch(() => {});
-    // aviso de retorno del checkout
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('checkout') === 'success') {
-      setError('');
-    }
-  }, []);
-
-  const buyPack = async (packId) => {
-    setError('');
-    setPackBusy(packId);
-    try {
-      const res = await api.post('/api/credits/checkout', { pack_id: packId });
-      window.location.href = res.data.url;
-    } catch {
-      setError('No se pudo iniciar la compra de créditos.');
-      setPackBusy(null);
-    }
-  };
-
-  const purchases = (credits?.ledger || []).filter((l) => l.kind === 'purchase');
-
-  const openPortal = async () => {
-    setBusy(true);
-    try {
-      const res = await api.post('/api/billing/portal');
-      window.location.href = res.data.url;
-    } catch {
-      setError('No se pudo abrir el portal de facturación.');
-      setBusy(false);
-    }
-  };
-
-  const price = plan.price_monthly_cents === 0
-    ? 'Gratis'
-    : `$${(plan.price_monthly_cents / 100).toFixed(2)} / mes`;
-  const paid = billing?.is_paid;
-  const renews = new URLSearchParams(window.location.search).get('checkout') === 'success';
-
-  return (
-    <>
-      {renews && (
-        <p className="admin-ok" role="status">¡Listo! Tu suscripción se está activando. Puede tardar unos segundos en reflejarse.</p>
-      )}
-      {upgradeOk && (
-        <p className="admin-ok" role="status">
-          ¡Plan mejorado! Se cobró la diferencia — la verás en tus facturas.
-        </p>
-      )}
-      {error && <p className="page__error" role="alert">{error}</p>}
-
-      <div className="set-card set-plan">
-        <h2 className="set-title">Plan</h2>
-        <div className="set-plan__info">
-          <span className="plan-pill" style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}>Plan {plan.name}</span>
-          <p className="card__muted">{plan.description}</p>
-          <span className="set-plan__price">{price}</span>
-          {paid && billing.current_period_end && (
-            <span className="card__muted">
-              {billing.cancel_at_period_end
-                ? `Se cancela el ${fmtDate(billing.current_period_end)}`
-                : `Se renueva el ${fmtDate(billing.current_period_end)}`}
-            </span>
-          )}
-        </div>
-        {paid ? (
-          <button className="pill-btn pill-btn--primary set-btn" onClick={openPortal} disabled={busy}>
-            {busy ? 'Abriendo…' : 'Ajustar plan'}
-          </button>
-        ) : (
-          <Link to="/planes" className="pill-btn pill-btn--primary set-btn">
-            <IconBolt size={15} /> {billing?.enabled ? 'Mejorar plan' : 'Ver planes'}
-          </Link>
-        )}
-      </div>
-
-      <div className="set-card">
-        <h2 className="set-title">Créditos de API</h2>
-        {creditsOk && (
-        <p className="admin-ok" role="status">
-        ¡Recarga completada! El saldo puede tardar unos segundos en reflejarse.
-        </p>
-        )}
-        <p className="card__muted">
-        {paid
-        ? `Con tu plan ${plan.name}, el uso de la API ya está incluido en tu cuota mensual de tokens. Los créditos solo se descuentan si agotas esa cuota y quieres seguir usando la API el resto del mes.`
-        : 'Sin plan de pago, cada petición con tu API key se descuenta de este saldo según la tarifa del modelo.'}
-        </p>
-        <Row
-          label="Saldo disponible"
-          hint={paid ? 'Solo se usa si agotas la cuota de tu plan' : 'Se descuenta por tokens al usar tus API keys'}
-        >
-          <span className="set-credits">
-            {credits ? `$${credits.balance_usd.toFixed(2)}` : '…'}
-          </span>
-        </Row>
-        <Row
-          label="Recargar saldo"
-          hint={packs?.enabled
-            ? 'Pago único con tarjeta; los créditos no caducan'
-            : 'Los pagos en línea llegan pronto'}
-        >
-          <div className="set-packs">
-            {(packs?.packs || []).map((p) => (
-              <button
-                key={p.id}
-                className="pill-btn pill-btn--outline set-btn"
-                disabled={!packs?.enabled || packBusy !== null}
-                onClick={() => buyPack(p.id)}
-              >
-                {packBusy === p.id ? 'Abriendo…' : `${p.name} · $${p.price_usd}`}
-              </button>
-            ))}
-          </div>
-        </Row>
-        <Row label="Precios por modelo" hint="Cuánto cuesta cada millón de tokens">
-          <Link to="/docs/precios-api" className="pill-btn pill-btn--outline set-btn">Ver precios</Link>
-        </Row>
-      </div>
-
-      {purchases.length > 0 && (
-        <>
-          <div className="set-card">
-            <h2 className="set-title">Recargas</h2>
-            <ul className="keys">
-              {purchases.map((p) => (
-                <li key={p.id} className="keys__item">
-                  <div className="keys__info">
-                    <span className="keys__name">{fmtDate(p.created_at)}</span>
-                    <span className="keys__masked">{p.note || 'Recarga'}</span>
-                  </div>
-                  <span className="keys__meta">+${p.delta_usd.toFixed(2)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </>
-      )}
-
-      <div className="set-card">
-        <h2 className="set-title">Pago</h2>
-        {paid && billing.payment_method ? (
-          <Row label="Método de pago" hint="Gestiónalo desde el portal">
-            <span className="set-static">
-              {billing.payment_method.brand?.toUpperCase()} ···· {billing.payment_method.last4}
-            </span>
-          </Row>
-        ) : (
-          <Row label="Método de pago" hint={billing?.enabled ? 'Se añade al suscribirte' : 'Los pagos en línea llegan pronto'}>
-            <SoonTag />
-          </Row>
-        )}
-      </div>
-
-      <div className="set-card">
-        <h2 className="set-title">Facturas</h2>
-        {paid && billing.invoices?.length > 0 ? (
-          <ul className="keys">
-            {billing.invoices.map((inv) => (
-              <li key={inv.id} className="keys__item">
-                <div className="keys__info">
-                  <span className="keys__name">{fmtDate(inv.date)}</span>
-                  <span className="keys__masked">{inv.currency} {inv.amount.toFixed(2)} · {inv.status}</span>
-                </div>
-                {inv.hosted_url && (
-                  <a className="keys__meta" href={inv.hosted_url} target="_blank" rel="noreferrer">Ver</a>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="card__muted">Aún no tienes facturas. Aparecerán aquí cuando actives un plan de pago.</p>
-        )}
-      </div>
-
-      <div className="set-card">
-        <h2 className="set-title">Cancelación</h2>
-        {paid ? (
-          <Row label="Cancelar plan" hint="Gestiona la cancelación desde el portal de facturación">
-            <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={openPortal} disabled={busy}>
-              Gestionar
-            </button>
-          </Row>
-        ) : (
-          <Row label="Cancelar plan" hint="Disponible con los planes de pago"><SoonTag /></Row>
-        )}
-      </div>
-    </>
-  );
-}
-
 // ── Uso ─────────────────────────────────────────────────────────────────
 
 function UsoSection({ usage, daily, plan }) {
@@ -916,7 +706,7 @@ export default function AccountPage() {
                 <CuentaSection user={user} plan={plan} keys={keys} onReloadKeys={loadKeys} onLogout={doLogout} />
               )}
               {current.id === 'privacidad' && <PrivacidadSection user={user} onUserChange={setUser} />}
-              {current.id === 'facturacion' && <FacturacionSection plan={plan} />}
+              {current.id === 'facturacion' && <SeccionFacturacion plan={plan} />}
               {current.id === 'uso' && <UsoSection usage={account.usage} daily={account.daily} plan={plan} />}
             </div>
           )}

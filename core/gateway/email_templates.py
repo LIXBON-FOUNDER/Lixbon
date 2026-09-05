@@ -456,3 +456,34 @@ def pago_fallido(*, plan_nombre: str, importe: str | None, reintento: str | None
             envoltura(eyebrow="Facturación", titulo="No pudimos cobrar tu suscripción",
                       cuerpo_html=cuerpo),
             texto)
+
+
+def recarga_automatica_fallida(*, pack_nombre: str, url_facturacion: str) -> tuple[str, str, str]:
+    cuerpo = (
+        parrafo("No pudimos cobrar la recarga automática de tu saldo de créditos, así que "
+                "la desactivamos para no seguir intentándolo contra una tarjeta que el "
+                "banco rechaza.", margen="0 0 24px")
+        + caja(filas_dato([("Recarga", _esc(pack_nombre))]), relleno="6px 18px")
+        + _hueco(24)
+        + parrafo("Tu plan y tus conversaciones no se ven afectados. Lo que se queda sin "
+                  "saldo son las peticiones hechas con tus API keys.", margen="0 0 24px")
+        + boton("Revisar el método de pago", url_facturacion)
+        + raya()
+        + nota("Puedes recargar a mano y volver a activar la recarga automática cuando "
+               "quieras desde Ajustes → Facturación.")
+    )
+    texto = (
+        "No pudimos recargar tu saldo\n\n"
+        "No pudimos cobrar la recarga automática de tu saldo de créditos, así que la "
+        "desactivamos para no seguir intentándolo contra una tarjeta que el banco "
+        "rechaza.\n\n"
+        f"Recarga: {pack_nombre}\n\n"
+        "Tu plan y tus conversaciones no se ven afectados. Lo que se queda sin saldo son "
+        "las peticiones hechas con tus API keys.\n\n"
+        "Revisa el método de pago:\n"
+        f"{url_facturacion}\n"
+    )
+    return ("No pudimos recargar tu saldo — lixbon",
+            envoltura(eyebrow="Facturación", titulo="No pudimos recargar tu saldo",
+                      cuerpo_html=cuerpo),
+            texto)

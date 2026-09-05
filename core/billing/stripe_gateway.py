@@ -1,14 +1,19 @@
 """
-stripe_gateway.py — Integración de pagos con Stripe (F7).
+stripe_gateway.py — Pagos con Stripe, cobrados desde lixbon.
 
-El bucket de secretos vive en variables de entorno (STRIPE_*). Si Stripe no está
-configurado, `enabled()` es False y los endpoints devuelven 503 con un mensaje
-claro — la web muestra "Próximamente" hasta que se conecten las credenciales.
+Los secretos viven en variables de entorno (STRIPE_*). Sin configurar,
+`enabled()` es False y los endpoints devuelven 503 — la web muestra
+"Próximamente".
 
-Flujo:
-  Checkout Session (modo subscription) → el usuario paga en el checkout hosted de
-  Stripe → Stripe emite webhooks → aquí se refleja el plan en la BD. El binario
-  de tarjeta nunca toca nuestro servidor (PCI simplificado).
+El cobro NO sale de lixbon: no hay Checkout alojado ni portal de cliente. El
+navegador tokeniza la tarjeta contra Stripe con Elements y aquí solo llega un
+`pm_...`; con ese id se crean la suscripción y los cobros de créditos. El número
+de tarjeta nunca toca este servidor ni la base de datos, que es lo que mantiene
+el alcance PCI en el cuestionario corto: si el PAN pasara por aquí el
+cuestionario sería SAQ D, con auditoría anual.
+
+Todo cobro es idempotente contra su id de Stripe, porque el mismo resultado
+llega por dos caminos: la respuesta al confirmar y el webhook.
 """
 from __future__ import annotations
 
@@ -26,6 +31,8 @@ from core.persistence.queries import (
     apply_stripe_subscription,
     credit_purchase,
     downgrade_to_free,
+    forget_autoreload_payment_method,
+    get_credit_account,
     get_credit_pack,
     get_plan,
     get_plan_by_stripe_price,
@@ -33,6 +40,7 @@ from core.persistence.queries import (
     get_user_by_id,
     get_user_by_stripe_customer,
     log_audit_event,
+    record_autoreload_run,
     set_stripe_customer,
 )
 
@@ -55,9 +63,8 @@ def _client():
     return stripe
 
 
-def _base_url(request_base: str | None = None) -> str:
-    """URL pública para success/cancel: PUBLIC_BASE_URL o el host de la petición."""
-    return PUBLIC_BASE_URL or (request_base or "").rstrip("/")
+def _base_url() -> str:
+    return (PUBLIC_BASE_URL or "").rstrip("/")
 
 
 def _iso(ts: int | None) -> str | None:
@@ -66,7 +73,7 @@ def _iso(ts: int | None) -> str | None:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
-# ── Cliente/checkout ────────────────────────────────────────────────────────
+# ── Cliente y plan ──────────────────────────────────────────────────────────
 
 def _ensure_customer(stripe, user: dict[str, Any]) -> str:
     """Devuelve el customer de Stripe del usuario, creándolo si hace falta."""
@@ -82,38 +89,14 @@ def _ensure_customer(stripe, user: dict[str, Any]) -> str:
     return customer.id
 
 
-def create_checkout_session(user: dict[str, Any], plan_id: str, request_base: str | None = None) -> str:
-    """Crea una Checkout Session de suscripción y devuelve su URL."""
-    stripe = _client()
-    plan = get_plan(plan_id)
-    if not plan:
-        raise ValueError("plan_inexistente")
-    if not plan.get("stripe_price_id"):
-        raise ValueError("plan_sin_precio")  # falta configurar el price_ en el plan
+def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
+    """Cambia el plan de una suscripción viva, en cualquier dirección.
 
-    customer_id = _ensure_customer(stripe, user)
-    base = _base_url(request_base)
-    session = stripe.checkout.Session.create(
-        mode="subscription",
-        customer=customer_id,
-        line_items=[{"price": plan["stripe_price_id"], "quantity": 1}],
-        success_url=f"{base}/account/facturacion?checkout=success",
-        cancel_url=f"{base}/planes?checkout=cancel",
-        allow_promotion_codes=True,
-        metadata={"lixbon_user_id": str(user["id"]), "plan_id": plan_id},
-        subscription_data={"metadata": {"lixbon_user_id": str(user["id"]), "plan_id": plan_id}},
-    )
-    log_audit_event("checkout_started", user_id=user["id"], plan_id=plan_id)
-    return session.url
-
-
-def upgrade_subscription(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
-    """Upgrade in-place de la suscripción existente (ej. Pro → Advance) con
-    PRORRATEO: Stripe acredita lo no usado del plan actual y cobra la
-    diferencia al instante (always_invoice). Recién pagado Pro, la diferencia
-    es ~$15.00; a mitad de ciclo, menos (ya se pagó medio Pro). La renovación
-    siguiente ya va al precio nuevo. Solo hacia un plan MÁS CARO — los
-    downgrades se gestionan desde el customer portal."""
+    Subir cobra la diferencia al instante (`always_invoice`): recién pagado Pro,
+    la diferencia es casi el precio entero de Advance; a mitad de ciclo, menos.
+    Bajar no devuelve dinero: Stripe abona lo no consumido al saldo del cliente
+    y lo descuenta de la siguiente factura. En ambos casos el plan nuevo aplica
+    ya, para que el usuario no pague por límites que ya no tiene."""
     stripe = _client()
     plan = get_plan(new_plan_id)
     if not plan:
@@ -124,25 +107,25 @@ def upgrade_subscription(user: dict[str, Any], new_plan_id: str) -> dict[str, An
     if not sub or not sub.get("stripe_subscription_id"):
         raise ValueError("sin_suscripcion")
 
-    current_plan = get_plan(sub["plan_id"]) if sub.get("plan_id") else None
-    if current_plan and plan["price_monthly_cents"] <= current_plan["price_monthly_cents"]:
-        raise ValueError("downgrade_por_portal")
+    actual = get_plan(sub["plan_id"]) if sub.get("plan_id") else None
+    if actual and plan["id"] == actual["id"]:
+        raise ValueError("mismo_plan")
+    sube = not actual or plan["price_monthly_cents"] > actual["price_monthly_cents"]
 
     sub_id = sub["stripe_subscription_id"]
-    current = stripe.Subscription.retrieve(sub_id)
-    # Acceso por atributo (StripeObject nuevos no son dicts)
-    items = getattr(getattr(current, "items", None), "data", None) or []
+    actual_stripe = stripe.Subscription.retrieve(sub_id)
+    # Los StripeObject nuevos no son dicts: acceso por atributo.
+    items = getattr(getattr(actual_stripe, "items", None), "data", None) or []
     if not items:
         raise ValueError("sin_suscripcion")
 
     stripe.Subscription.modify(
         sub_id,
         items=[{"id": items[0].id, "price": plan["stripe_price_id"]}],
-        proration_behavior="always_invoice",     # factura y cobra la diferencia YA
-        payment_behavior="error_if_incomplete",  # si el cobro falla, no queda a medias
+        proration_behavior="always_invoice" if sube else "create_prorations",
+        payment_behavior="error_if_incomplete" if sube else "allow_incomplete",
         metadata={"lixbon_user_id": str(user["id"]), "plan_id": new_plan_id},
     )
-    # Reflejo inmediato en BD; el webhook subscription.updated llega igual y es idempotente
     apply_stripe_subscription(
         user["id"], new_plan_id,
         customer_id=sub.get("stripe_customer_id"),
@@ -151,23 +134,9 @@ def upgrade_subscription(user: dict[str, Any], new_plan_id: str) -> dict[str, An
         cancel_at_period_end=False,
         status="active",
     )
-    log_audit_event("subscription_upgraded", user_id=user["id"],
+    log_audit_event("plan_changed", user_id=user["id"],
                     from_plan=sub.get("plan_id"), to_plan=new_plan_id)
-    return {"upgraded": True, "plan_name": plan["name"]}
-
-
-def create_portal_session(user: dict[str, Any], request_base: str | None = None) -> str:
-    """Portal de cliente de Stripe (cambiar método de pago, cancelar, facturas)."""
-    stripe = _client()
-    sub = get_subscription(user["id"])
-    if not sub or not sub.get("stripe_customer_id"):
-        raise ValueError("sin_cliente")
-    base = _base_url(request_base)
-    portal = stripe.billing_portal.Session.create(
-        customer=sub["stripe_customer_id"],
-        return_url=f"{base}/account/facturacion",
-    )
-    return portal.url
+    return {"changed": True, "plan_name": plan["name"], "upgrade": sube}
 
 
 def list_invoices(user: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]:
@@ -197,64 +166,6 @@ def list_invoices(user: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]
     ]
 
 
-def payment_method_summary(user: dict[str, Any]) -> dict[str, Any] | None:
-    """Marca y últimos 4 dígitos del método de pago por defecto, si existe."""
-    if not stripe_configured():
-        return None
-    sub = get_subscription(user["id"])
-    if not sub or not sub.get("stripe_customer_id"):
-        return None
-    stripe = _client()
-    try:
-        # Acceso por atributo: los StripeObject nuevos no son dicts (.get falla)
-        cust = stripe.Customer.retrieve(
-            sub["stripe_customer_id"], expand=["invoice_settings.default_payment_method"]
-        )
-        inv = getattr(cust, "invoice_settings", None)
-        pm = getattr(inv, "default_payment_method", None) if inv else None
-        # Checkout guarda la tarjeta como default de la SUSCRIPCIÓN, no del
-        # customer — si el customer no tiene, se mira ahí.
-        if not pm and sub.get("stripe_subscription_id"):
-            s = stripe.Subscription.retrieve(
-                sub["stripe_subscription_id"], expand=["default_payment_method"]
-            )
-            pm = getattr(s, "default_payment_method", None)
-        if isinstance(pm, str):  # id sin expandir
-            pm = stripe.PaymentMethod.retrieve(pm)
-        card = getattr(pm, "card", None) if pm else None
-        if card:
-            return {"brand": card.brand, "last4": card.last4}
-    except Exception as exc:
-        logger.warning(f"No se pudo leer el método de pago: {exc}")
-    return None
-
-
-def create_credit_checkout(user: dict[str, Any], pack: dict[str, Any],
-                           request_base: str | None = None) -> str:
-    """Checkout de pago único para un pack de créditos de API. El precio va
-    inline (price_data): no hace falta configurar products en el dashboard."""
-    stripe = _client()
-    customer_id = _ensure_customer(stripe, user)
-    base = _base_url(request_base)
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        customer=customer_id,
-        line_items=[{
-            "price_data": {
-                "currency": (pack.get("currency") or "USD").lower(),
-                "unit_amount": pack["price_cents"],
-                "product_data": {"name": f"Créditos de API lixbon — {pack['name']}"},
-            },
-            "quantity": 1,
-        }],
-        success_url=f"{base}/account/facturacion?credits=success",
-        cancel_url=f"{base}/account/facturacion?credits=cancel",
-        metadata={"lixbon_user_id": str(user["id"]), "kind": "credit_pack", "pack_id": pack["id"]},
-    )
-    log_audit_event("credit_checkout_started", user_id=user["id"], pack_id=pack["id"])
-    return session.url
-
-
 def cancel_subscription_immediately(user_id: int) -> None:
     """Cancela la suscripción en Stripe al eliminar la cuenta. Best-effort:
     si falla se registra y el borrado continúa (el webhook deleted ya no
@@ -270,6 +181,645 @@ def cancel_subscription_immediately(user_id: int) -> None:
         logger.info(f"Suscripción de Stripe cancelada al eliminar la cuenta (user {user_id})")
     except Exception as exc:
         logger.warning(f"No se pudo cancelar la suscripción de Stripe al eliminar la cuenta: {exc}")
+
+
+# ── Tarjetas guardadas ──────────────────────────────────────────────────────
+
+def _customer_id(user: dict[str, Any]) -> str | None:
+    sub = get_subscription(user["id"])
+    return sub.get("stripe_customer_id") if sub else None
+
+
+def _pm_publico(pm, id_por_defecto: str | None) -> dict[str, Any]:
+    card = getattr(pm, "card", None)
+    datos = getattr(pm, "billing_details", None)
+    return {
+        "id": pm.id,
+        "brand": getattr(card, "brand", None),
+        "last4": getattr(card, "last4", None),
+        "exp_month": getattr(card, "exp_month", None),
+        "exp_year": getattr(card, "exp_year", None),
+        "name": getattr(datos, "name", None) if datos else None,
+        "is_default": pm.id == id_por_defecto,
+    }
+
+
+def _pm_por_defecto(stripe, sub: dict[str, Any]) -> str | None:
+    """Id (sin expandir) del método por defecto: el del cliente y, si no lo
+    tiene, el que quedó fijado en la suscripción."""
+    cliente = stripe.Customer.retrieve(sub["stripe_customer_id"])
+    ajustes = getattr(cliente, "invoice_settings", None)
+    pm = getattr(ajustes, "default_payment_method", None) if ajustes else None
+    if not pm and sub.get("stripe_subscription_id"):
+        suscripcion = stripe.Subscription.retrieve(sub["stripe_subscription_id"])
+        pm = getattr(suscripcion, "default_payment_method", None)
+    return pm if isinstance(pm, str) else (getattr(pm, "id", None) if pm else None)
+
+
+def _pm_del_cliente(stripe, customer_id: str, pm_id: str):
+    """El id llega del navegador: hay que confirmar que la tarjeta es de este
+    cliente antes de tocarla, o cualquiera podría borrar la de otro usuario."""
+    pm = stripe.PaymentMethod.retrieve(pm_id)
+    if getattr(pm, "customer", None) != customer_id:
+        raise ValueError("metodo_ajeno")
+    return pm
+
+
+def create_setup_intent(user: dict[str, Any]) -> dict[str, Any]:
+    """Secreto para que Elements guarde una tarjeta nueva sin cobrar nada."""
+    stripe = _client()
+    customer_id = _ensure_customer(stripe, user)
+    intento = stripe.SetupIntent.create(
+        customer=customer_id,
+        usage="off_session",
+        payment_method_types=["card"],
+        metadata={"lixbon_user_id": str(user["id"])},
+    )
+    return {"client_secret": intento.client_secret}
+
+
+def list_payment_methods(user: dict[str, Any]) -> list[dict[str, Any]]:
+    if not stripe_configured():
+        return []
+    sub = get_subscription(user["id"])
+    if not sub or not sub.get("stripe_customer_id"):
+        return []
+    stripe = _client()
+    try:
+        por_defecto = _pm_por_defecto(stripe, sub)
+        tarjetas = stripe.PaymentMethod.list(customer=sub["stripe_customer_id"], type="card")
+    except Exception as exc:
+        logger.warning(f"No se pudieron listar las tarjetas: {exc}")
+        return []
+    metodos = [_pm_publico(pm, por_defecto) for pm in tarjetas.data]
+    metodos.sort(key=lambda m: not m["is_default"])
+    return metodos
+
+
+def set_default_payment_method(user: dict[str, Any], pm_id: str) -> None:
+    stripe = _client()
+    customer_id = _customer_id(user)
+    if not customer_id:
+        raise ValueError("sin_cliente")
+    _pm_del_cliente(stripe, customer_id, pm_id)
+    stripe.Customer.modify(customer_id, invoice_settings={"default_payment_method": pm_id})
+    sub = get_subscription(user["id"])
+    if sub and sub.get("stripe_subscription_id"):
+        stripe.Subscription.modify(sub["stripe_subscription_id"], default_payment_method=pm_id)
+    log_audit_event("payment_method_default", user_id=user["id"])
+
+
+def detach_payment_method(user: dict[str, Any], pm_id: str) -> None:
+    """Quitar una tarjeta guardada. La última no se puede quitar mientras haya
+    una suscripción viva: la dejaría sin con qué renovarse."""
+    stripe = _client()
+    customer_id = _customer_id(user)
+    if not customer_id:
+        raise ValueError("sin_cliente")
+    _pm_del_cliente(stripe, customer_id, pm_id)
+
+    sub = get_subscription(user["id"])
+    restantes = [m for m in list_payment_methods(user) if m["id"] != pm_id]
+    if not restantes and sub and sub.get("stripe_subscription_id"):
+        raise ValueError("ultima_tarjeta")
+
+    stripe.PaymentMethod.detach(pm_id)
+    if restantes and not any(m["is_default"] for m in restantes):
+        set_default_payment_method(user, restantes[0]["id"])
+    if forget_autoreload_payment_method(user["id"], pm_id):
+        logger.info(f"Recarga automática apagada al borrar su tarjeta (user {user['id']})")
+    log_audit_event("payment_method_removed", user_id=user["id"])
+
+
+def payment_method_summary(user: dict[str, Any]) -> dict[str, Any] | None:
+    """Marca y últimos 4 del método por defecto (cabecera de Facturación)."""
+    for m in list_payment_methods(user):
+        if m["is_default"]:
+            return {"brand": m["brand"], "last4": m["last4"]}
+    return None
+
+
+# ── Cobro ───────────────────────────────────────────────────────────────────
+
+def _cargo_de(pi):
+    """El cargo de un PaymentIntent colgaba de `charges.data` y en las versiones
+    nuevas de la API es `latest_charge`. Se aceptan las dos."""
+    ultimo = getattr(pi, "latest_charge", None)
+    if ultimo is not None and not isinstance(ultimo, str):
+        return ultimo
+    cargos = getattr(getattr(pi, "charges", None), "data", None) or []
+    return cargos[0] if cargos else None
+
+
+def _tarjeta_de(pi) -> str | None:
+    cargo = _cargo_de(pi)
+    if not cargo:
+        return None
+    detalle = getattr(getattr(cargo, "payment_method_details", None), "card", None)
+    return getattr(detalle, "last4", None) if detalle else None
+
+
+def _resultado(intento) -> dict[str, Any]:
+    """Forma común de un cobro: la web solo necesita saber si terminó, si hay
+    que pasar por el banco, o por qué se cayó."""
+    estado = getattr(intento, "status", None)
+    cargo = _cargo_de(intento)
+    error = getattr(intento, "last_payment_error", None)
+    return {
+        "status": estado,
+        "client_secret": getattr(intento, "client_secret", None),
+        "payment_intent": getattr(intento, "id", None),
+        "requires_action": estado in ("requires_action", "requires_confirmation"),
+        "succeeded": estado == "succeeded",
+        "amount": (getattr(intento, "amount", 0) or 0) / 100,
+        "currency": (getattr(intento, "currency", None) or "usd").upper(),
+        "payment_method": (getattr(intento, "payment_method", None)
+                           if isinstance(getattr(intento, "payment_method", None), str)
+                           else getattr(getattr(intento, "payment_method", None), "id", None)),
+        "last4": _tarjeta_de(intento),
+        "receipt_url": getattr(cargo, "receipt_url", None) if cargo else None,
+        "decline_message": getattr(error, "message", None) if error else None,
+        "decline_code": getattr(error, "decline_code", None) if error else None,
+    }
+
+
+def _secreto_de_factura(stripe, factura) -> str | None:
+    """Stripe movió el secreto del primer cobro de sitio entre versiones de la
+    API: antes colgaba de `payment_intent` y ahora de `confirmation_secret`.
+    Se aceptan las dos formas para no atarse a una versión concreta."""
+    if not factura:
+        return None
+    intento = getattr(factura, "payment_intent", None)
+    if isinstance(intento, str):
+        try:
+            intento = stripe.PaymentIntent.retrieve(intento)
+        except Exception:
+            intento = None
+    secreto = getattr(intento, "client_secret", None) if intento else None
+    if secreto:
+        return secreto
+    confirmacion = getattr(factura, "confirmation_secret", None)
+    if confirmacion is None:
+        try:
+            factura = stripe.Invoice.retrieve(factura.id, expand=["confirmation_secret"])
+            confirmacion = getattr(factura, "confirmation_secret", None)
+        except Exception:
+            return None
+    return getattr(confirmacion, "client_secret", None) if confirmacion else None
+
+
+def subscribe(user: dict[str, Any], plan_id: str, pm_id: str) -> dict[str, Any]:
+    """Alta de suscripción con una tarjeta ya guardada. Si la suscripción ya
+    existe esto es un cambio de plan, no un alta."""
+    stripe = _client()
+    plan = get_plan(plan_id)
+    if not plan:
+        raise ValueError("plan_inexistente")
+    if not plan.get("stripe_price_id"):
+        raise ValueError("plan_sin_precio")
+
+    sub = get_subscription(user["id"])
+    if sub and sub.get("stripe_subscription_id"):
+        return change_plan(user, plan_id)
+
+    customer_id = _ensure_customer(stripe, user)
+    _pm_del_cliente(stripe, customer_id, pm_id)
+    stripe.Customer.modify(customer_id, invoice_settings={"default_payment_method": pm_id})
+
+    creada = stripe.Subscription.create(
+        customer=customer_id,
+        items=[{"price": plan["stripe_price_id"]}],
+        default_payment_method=pm_id,
+        # default_incomplete deja la suscripción esperando a que el navegador
+        # confirme el primer cobro; sin esto una tarjeta con 3-D Secure fallaría
+        # en vez de pedir la confirmación del banco.
+        payment_behavior="default_incomplete",
+        payment_settings={
+            "save_default_payment_method": "on_subscription",
+            "payment_method_types": ["card"],
+        },
+        expand=["latest_invoice"],
+        metadata={"lixbon_user_id": str(user["id"]), "plan_id": plan_id},
+    )
+    log_audit_event("subscription_started", user_id=user["id"], plan_id=plan_id)
+
+    if creada.status in ("active", "trialing"):
+        sync_subscription(user)
+        return {"status": "succeeded", "succeeded": True, "requires_action": False,
+                "plan_name": plan["name"]}
+    return {
+        "status": creada.status,
+        "succeeded": False,
+        "requires_action": True,
+        "client_secret": _secreto_de_factura(stripe, creada.latest_invoice),
+        "subscription_id": creada.id,
+        "plan_name": plan["name"],
+    }
+
+
+def cancel_subscription(user: dict[str, Any]) -> dict[str, Any]:
+    """Cancela al final del periodo pagado: lo ya cobrado se sigue disfrutando."""
+    stripe = _client()
+    sub = get_subscription(user["id"])
+    if not sub or not sub.get("stripe_subscription_id"):
+        raise ValueError("sin_suscripcion")
+    stripe.Subscription.modify(sub["stripe_subscription_id"], cancel_at_period_end=True)
+    apply_stripe_subscription(
+        user["id"], sub["plan_id"],
+        customer_id=sub.get("stripe_customer_id"),
+        subscription_id=sub["stripe_subscription_id"],
+        current_period_end=sub.get("current_period_end"),
+        cancel_at_period_end=True,
+        status=sub.get("status") or "active",
+    )
+    log_audit_event("subscription_cancel_scheduled", user_id=user["id"],
+                    plan_id=sub.get("plan_id"))
+    return {"cancel_at_period_end": True, "until": sub.get("current_period_end")}
+
+
+def resume_subscription(user: dict[str, Any]) -> dict[str, Any]:
+    stripe = _client()
+    sub = get_subscription(user["id"])
+    if not sub or not sub.get("stripe_subscription_id"):
+        raise ValueError("sin_suscripcion")
+    stripe.Subscription.modify(sub["stripe_subscription_id"], cancel_at_period_end=False)
+    apply_stripe_subscription(
+        user["id"], sub["plan_id"],
+        customer_id=sub.get("stripe_customer_id"),
+        subscription_id=sub["stripe_subscription_id"],
+        current_period_end=sub.get("current_period_end"),
+        cancel_at_period_end=False,
+        status=sub.get("status") or "active",
+    )
+    log_audit_event("subscription_resumed", user_id=user["id"], plan_id=sub.get("plan_id"))
+    return {"cancel_at_period_end": False}
+
+
+def sync_subscription(user: dict[str, Any]) -> dict[str, Any] | None:
+    """Relee la suscripción en Stripe y la refleja en la BD. Cierra la ventana
+    entre que el navegador confirma el cobro y llega el webhook — y en local,
+    donde no hay webhook, es lo único que la sincroniza."""
+    if not stripe_configured():
+        return None
+    sub = get_subscription(user["id"])
+    if not sub or not sub.get("stripe_customer_id"):
+        return None
+    stripe = _client()
+    try:
+        suscripciones = stripe.Subscription.list(
+            customer=sub["stripe_customer_id"], status="all", limit=5,
+        )
+    except Exception as exc:
+        logger.warning(f"No se pudo releer la suscripción: {exc}")
+        return None
+
+    viva = next((x for x in suscripciones.data
+                 if x.status in ("active", "trialing", "past_due")), None)
+    if not viva:
+        return None
+    plan = _plan_from_subscription(_a_dict(viva))
+    if not plan:
+        return None
+    fin = _period_end_from_subscription(_a_dict(viva))
+    apply_stripe_subscription(
+        user["id"], plan["id"],
+        customer_id=sub["stripe_customer_id"],
+        subscription_id=viva.id,
+        current_period_end=fin,
+        cancel_at_period_end=bool(getattr(viva, "cancel_at_period_end", False)),
+        status=viva.status,
+    )
+    return {"plan_id": plan["id"], "status": viva.status, "current_period_end": fin}
+
+
+def _a_dict(objeto) -> dict[str, Any]:
+    """Los helpers del webhook leen dicts planos; los objetos que devuelve la
+    librería ya no lo son."""
+    try:
+        return objeto.to_dict_recursive()
+    except AttributeError:
+        return dict(objeto)
+
+
+# ── Créditos ────────────────────────────────────────────────────────────────
+
+def _acreditar(user_id: int, pack: dict[str, Any], referencia: str) -> bool:
+    return credit_purchase(
+        user_id, pack["credit_microusd"],
+        stripe_ref=referencia,
+        note=f"Pack {pack['name']}",
+    )
+
+
+def charge_topup(user: dict[str, Any], pack: dict[str, Any], pm_id: str,
+                 guardar: bool = True) -> dict[str, Any]:
+    """Cobra un pack de créditos contra una tarjeta guardada."""
+    stripe = _client()
+    customer_id = _ensure_customer(stripe, user)
+    _pm_del_cliente(stripe, customer_id, pm_id)
+
+    intento = stripe.PaymentIntent.create(
+        amount=pack["price_cents"],
+        currency=(pack.get("currency") or "USD").lower(),
+        customer=customer_id,
+        payment_method=pm_id,
+        confirm=True,
+        off_session=False,
+        payment_method_types=["card"],
+        expand=["latest_charge"],
+        description=f"Créditos de API lixbon — {pack['name']}",
+        metadata={
+            "lixbon_user_id": str(user["id"]),
+            "kind": "credit_pack",
+            "pack_id": pack["id"],
+            "keep_pm": "1" if guardar else "0",
+        },
+    )
+    log_audit_event("credit_charge_started", user_id=user["id"], pack_id=pack["id"])
+
+    if intento.status == "succeeded":
+        _acreditar(user["id"], pack, intento.id)
+        if not guardar:
+            _olvidar_tarjeta(stripe, user, pm_id)
+    return _resultado(intento)
+
+
+def _olvidar_tarjeta(stripe, user: dict[str, Any], pm_id: str) -> None:
+    """Quien no marcó «guardar» pagó con una tarjeta que hubo que guardar para
+    poder cobrarla; se suelta en cuanto el cobro cierra."""
+    try:
+        if any(m["id"] == pm_id for m in list_payment_methods(user)):
+            detach_payment_method(user, pm_id)
+    except Exception as exc:
+        logger.warning(f"No se pudo soltar la tarjeta de un pago suelto: {exc}")
+
+
+def resolve_payment(user: dict[str, Any], payment_intent_id: str) -> dict[str, Any]:
+    """Cierra un cobro que pasó por el banco. El webhook hace lo mismo, pero
+    llega cuando llega: sin esto la pantalla de «aprobado» mentiría."""
+    stripe = _client()
+    customer_id = _customer_id(user)
+    intento = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["latest_charge"])
+    if getattr(intento, "customer", None) != customer_id:
+        raise ValueError("cobro_ajeno")
+
+    meta = getattr(intento, "metadata", None) or {}
+    if intento.status == "succeeded" and meta.get("kind") == "credit_pack":
+        pack = get_credit_pack(meta.get("pack_id") or "")
+        if pack:
+            _acreditar(user["id"], pack, intento.id)
+            if meta.get("keep_pm") == "0":
+                _olvidar_tarjeta(stripe, user, getattr(intento, "payment_method", "") or "")
+    else:
+        sync_subscription(user)
+    return _resultado(intento)
+
+
+def list_charges(user: dict[str, Any], limit: int = 10) -> list[dict[str, Any]]:
+    """Últimos cobros del usuario: renovaciones y recargas en una sola lista."""
+    if not stripe_configured():
+        return []
+    customer_id = _customer_id(user)
+    if not customer_id:
+        return []
+    stripe = _client()
+    try:
+        intentos = stripe.PaymentIntent.list(
+            customer=customer_id, limit=limit, expand=["data.latest_charge"],
+        )
+    except Exception as exc:
+        logger.warning(f"No se pudieron listar los cobros: {exc}")
+        return []
+
+    cobros = []
+    for pi in intentos.data:
+        meta = getattr(pi, "metadata", None) or {}
+        cobros.append({
+            "id": pi.id,
+            "date": _iso(getattr(pi, "created", None)),
+            "amount": (pi.amount or 0) / 100,
+            "currency": (pi.currency or "usd").upper(),
+            "status": pi.status,
+            "concept": pi.description or ("Recarga de créditos"
+                                          if meta.get("kind") == "credit_pack"
+                                          else "Suscripción"),
+            "last4": _tarjeta_de(pi),
+        })
+    return cobros
+
+
+# ── Recarga automática ──────────────────────────────────────────────────────
+
+_recargas_en_curso: set[int] = set()
+
+
+def maybe_autoreload(user_id: int, balance_microusd: int) -> None:
+    """Dispara la recarga automática si el saldo cayó por debajo del umbral.
+    Se llama al terminar cada petición cobrada, así que va en un hilo aparte:
+    el usuario no espera a Stripe para recibir su respuesta."""
+    if not stripe_configured():
+        return
+    cuenta = get_credit_account(user_id)
+    ajustes = cuenta["autoreload"]
+    if not ajustes["enabled"] or balance_microusd > ajustes["threshold_microusd"]:
+        return
+    if user_id in _recargas_en_curso:
+        return
+    _recargas_en_curso.add(user_id)
+
+    import threading
+    threading.Thread(target=_ejecutar_autorecarga, args=(user_id, ajustes),
+                     daemon=True).start()
+
+
+def _ejecutar_autorecarga(user_id: int, ajustes: dict[str, Any]) -> None:
+    try:
+        usuario = get_user_by_id(user_id)
+        pack = get_credit_pack(ajustes["pack_id"] or "")
+        if not usuario or not pack or not ajustes["payment_method"]:
+            record_autoreload_run(user_id, "configuración incompleta")
+            return
+        stripe = _client()
+        intento = stripe.PaymentIntent.create(
+            amount=pack["price_cents"],
+            currency=(pack.get("currency") or "USD").lower(),
+            customer=_customer_id(usuario),
+            payment_method=ajustes["payment_method"],
+            confirm=True,
+            # Sin el titular delante: si el banco pide 3-D Secure, Stripe falla
+            # con authentication_required en vez de dejar el cobro colgado.
+            off_session=True,
+            payment_method_types=["card"],
+            description=f"Recarga automática lixbon — {pack['name']}",
+            metadata={"lixbon_user_id": str(user_id), "kind": "credit_pack",
+                      "pack_id": pack["id"], "auto": "1"},
+        )
+        if intento.status == "succeeded":
+            _acreditar(user_id, pack, intento.id)
+            record_autoreload_run(user_id)
+            log_audit_event("credits_autoreloaded", user_id=user_id, pack_id=pack["id"])
+        else:
+            record_autoreload_run(user_id, f"el cobro quedó en {intento.status}")
+            _avisar_autorecarga_fallida(user_id, pack)
+    except Exception as exc:
+        motivo = getattr(exc, "user_message", None) or str(exc)
+        record_autoreload_run(user_id, motivo[:300])
+        log_audit_event("credits_autoreload_failed", user_id=user_id)
+        logger.warning(f"Recarga automática fallida (user {user_id}): {motivo}")
+        pack = get_credit_pack(ajustes["pack_id"] or "")
+        if pack:
+            _avisar_autorecarga_fallida(user_id, pack)
+    finally:
+        _recargas_en_curso.discard(user_id)
+
+
+def _avisar_autorecarga_fallida(user_id: int, pack: dict[str, Any]) -> None:
+    correo = (get_user_by_id(user_id) or {}).get("email")
+    if not correo:
+        return
+    try:
+        from core.gateway.email import en_segundo_plano, send_autoreload_failed_email
+        en_segundo_plano(send_autoreload_failed_email(correo, pack["name"]))
+    except Exception as exc:
+        logger.warning(f"No se pudo avisar de la recarga fallida: {exc}")
+
+
+# ── Panel de administración ─────────────────────────────────────────────────
+
+def _inicio_del_dia() -> int:
+    from datetime import time as _time
+    hoy = datetime.now(timezone.utc).date()
+    return int(datetime.combine(hoy, _time.min, tzinfo=timezone.utc).timestamp())
+
+
+def admin_transactions(limit: int = 50, starting_after: str | None = None,
+                       query: str | None = None) -> dict[str, Any]:
+    """Intentos de cobro que pasaron por la pasarela. Las cifras del día se
+    calculan sobre los cobros de hoy, no sobre la página que se muestra."""
+    stripe = _client()
+    params: dict[str, Any] = {"limit": min(limit, 100), "expand": ["data.latest_charge"]}
+    if starting_after:
+        params["starting_after"] = starting_after
+    intentos = stripe.PaymentIntent.list(**params)
+    hoy = stripe.PaymentIntent.list(created={"gte": _inicio_del_dia()}, limit=100)
+
+    aprobados = [p for p in hoy.data if p.status == "succeeded"]
+    rechazados = [p for p in hoy.data
+                  if p.status in ("requires_payment_method", "canceled") and p.amount]
+    ultimo = intentos.data[-1].id if intentos.data else None
+    filas = [_transaccion_publica(p) for p in intentos.data]
+    if query:
+        q = query.lower().strip()
+        filas = [f for f in filas if q in (f["reference"] or "").lower()
+                 or q in (f["email"] or "").lower()
+                 or q in (f["last4"] or "")]
+    return {
+        "transactions": filas,
+        "has_more": intentos.has_more,
+        "next_cursor": ultimo if intentos.has_more else None,
+        "today": {
+            "charged": sum(p.amount for p in aprobados) / 100,
+            "count": len(aprobados),
+            "attempts": len(hoy.data),
+            "declined": len(rechazados),
+            "approval_rate": round(100 * len(aprobados) / len(hoy.data), 1) if hoy.data else None,
+            "truncated": len(hoy.data) >= 100,
+        },
+    }
+
+
+def _transaccion_publica(pi) -> dict[str, Any]:
+    meta = getattr(pi, "metadata", None) or {}
+    uid = meta.get("lixbon_user_id")
+    usuario = None
+    if uid and str(uid).isdigit():
+        usuario = get_user_by_id(int(uid))
+    if not usuario:
+        usuario = get_user_by_stripe_customer(getattr(pi, "customer", None))
+    cargo = _cargo_de(pi)
+    motivo = getattr(cargo, "failure_message", None) if cargo else None
+    error = getattr(pi, "last_payment_error", None)
+    return {
+        "reference": pi.id,
+        "email": (usuario or {}).get("email"),
+        "user_id": (usuario or {}).get("id"),
+        "concept": pi.description or ("Recarga de créditos"
+                                      if meta.get("kind") == "credit_pack" else "Suscripción"),
+        "automatic": meta.get("auto") == "1",
+        "amount": (pi.amount or 0) / 100,
+        "currency": (pi.currency or "usd").upper(),
+        "status": pi.status,
+        "last4": _tarjeta_de(pi),
+        "date": _iso(getattr(pi, "created", None)),
+        "decline_reason": motivo or (getattr(error, "message", None) if error else None),
+        "decline_code": getattr(error, "decline_code", None) if error else None,
+    }
+
+
+def admin_payouts(limit: int = 12) -> dict[str, Any]:
+    """Depósitos de Stripe en la cuenta del negocio, y el saldo pendiente."""
+    stripe = _client()
+    lotes = stripe.Payout.list(limit=min(limit, 50))
+    saldo = stripe.Balance.retrieve()
+
+    def _suma(entradas):
+        return sum(e.amount for e in (entradas or [])) / 100
+
+    return {
+        "payouts": [{
+            "id": p.id,
+            "amount": (p.amount or 0) / 100,
+            "currency": (p.currency or "usd").upper(),
+            "status": p.status,
+            "arrival_date": _iso(getattr(p, "arrival_date", None)),
+            "created": _iso(getattr(p, "created", None)),
+            "method": getattr(p, "method", None),
+            "description": getattr(p, "description", None),
+        } for p in lotes.data],
+        "balance": {
+            "available": _suma(getattr(saldo, "available", None)),
+            "pending": _suma(getattr(saldo, "pending", None)),
+            "currency": (getattr(saldo, "available", None) or [{}])[0].currency.upper()
+                        if getattr(saldo, "available", None) else "USD",
+        },
+    }
+
+
+def admin_gateway() -> dict[str, Any]:
+    """Estado de la pasarela, de solo lectura: las claves viven en variables de
+    entorno y editarlas desde el panel sería guardarlas en la base de datos."""
+    stripe = _client()
+    cuenta = stripe.Account.retrieve()
+    endpoints, eventos = [], []
+    try:
+        endpoints = [{
+            "url": e.url,
+            "status": e.status,
+            "events": len(getattr(e, "enabled_events", []) or []),
+        } for e in stripe.WebhookEndpoint.list(limit=5).data]
+    except Exception as exc:
+        logger.warning(f"No se pudieron leer los webhooks: {exc}")
+    try:
+        eventos = stripe.Event.list(limit=100).data
+    except Exception as exc:
+        logger.warning(f"No se pudieron leer los eventos: {exc}")
+
+    pendientes = sum(1 for e in eventos if getattr(e, "pending_webhooks", 0))
+    return {
+        "processor": "Stripe",
+        "account_id": cuenta.id,
+        "country": getattr(cuenta, "country", None),
+        "default_currency": (getattr(cuenta, "default_currency", None) or "").upper() or None,
+        "charges_enabled": bool(getattr(cuenta, "charges_enabled", False)),
+        "payouts_enabled": bool(getattr(cuenta, "payouts_enabled", False)),
+        "livemode": STRIPE_SECRET_KEY.startswith("sk_live_"),
+        "publishable_key": STRIPE_PUBLISHABLE_KEY or None,
+        "webhook_secret_set": bool(STRIPE_WEBHOOK_SECRET),
+        "webhook_url": f"{_base_url()}/api/billing/webhook" if _base_url() else None,
+        "endpoints": endpoints,
+        "events_seen": len(eventos),
+        "events_pending": pendientes,
+    }
 
 
 # ── Webhooks ────────────────────────────────────────────────────────────────
@@ -418,31 +968,35 @@ def handle_event(event: dict[str, Any]) -> None:
             log_audit_event("subscription_canceled", user_id=user_id)
             _avisar_cancelacion(user_id, obj, anterior)
 
-    elif etype == "checkout.session.completed":
-        # Solo nos interesan los packs de créditos (las suscripciones se
-        # sincronizan por los eventos customer.subscription.*).
+    elif etype == "payment_intent.succeeded":
+        # Solo los packs de créditos: lo de las suscripciones ya lo cuentan los
+        # eventos customer.subscription.*.
         meta = obj.get("metadata") or {}
         if meta.get("kind") != "credit_pack":
-            return
-        if obj.get("payment_status") != "paid":
-            logger.info(f"[webhook] checkout de créditos sin pagar aún ({obj.get('id')})")
             return
         uid = meta.get("lixbon_user_id")
         user_id = int(uid) if uid and str(uid).isdigit() else None
         pack = get_credit_pack(meta.get("pack_id") or "")
         if not user_id or not pack or not get_user_by_id(user_id):
-            logger.warning(f"[webhook] checkout de créditos sin usuario/pack resoluble ({obj.get('id')})")
+            logger.warning(f"[webhook] cobro de créditos sin usuario/pack resoluble ({obj.get('id')})")
             return
-        credited = credit_purchase(
+        acreditado = credit_purchase(
             user_id, pack["credit_microusd"],
             stripe_ref=obj.get("id"),
             note=f"Pack {pack['name']}",
         )
-        if credited:
+        if acreditado:
             log_audit_event("credits_purchased", user_id=user_id,
                             pack_id=pack["id"], amount_microusd=pack["credit_microusd"])
         else:
             logger.info(f"[webhook] compra de créditos ya acreditada ({obj.get('id')})")
+
+    elif etype == "payment_method.detached":
+        # La tarjeta pudo borrarla el propio Stripe (caducada, disputa): la
+        # recarga automática que dependía de ella queda sin método.
+        usuario = get_user_by_stripe_customer(obj.get("customer"))
+        if usuario:
+            forget_autoreload_payment_method(usuario["id"], obj.get("id") or "")
 
     elif etype == "invoice.payment_failed":
         user = get_user_by_stripe_customer(obj.get("customer"))

@@ -295,6 +295,14 @@ async def send_payment_failed_email(to: str, plan_nombre: str, *,
     return await send_email(to, asunto, html, texto)
 
 
+async def send_autoreload_failed_email(to: str, pack_nombre: str) -> bool:
+    asunto, html, texto = plantillas.recarga_automatica_fallida(
+        pack_nombre=pack_nombre,
+        url_facturacion=f"{PUBLIC_BASE_URL}/account/facturacion",
+    )
+    return await send_email(to, asunto, html, texto)
+
+
 def importe_de_factura(centavos: int | None, moneda: str | None) -> str | None:
     if not centavos:
         return None

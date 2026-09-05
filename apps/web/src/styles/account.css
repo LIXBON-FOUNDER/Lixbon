@@ -917,9 +917,12 @@
   margin-bottom: 0;
 }
 
+/* La pill se ciñe a su texto: como hijo de un flex en columna se estiraba a
+   todo el ancho y el plan se leía como una barra de color. */
 .set-plan__info {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
 }
 

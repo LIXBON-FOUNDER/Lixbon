@@ -107,6 +107,13 @@ def init_db() -> None:
         "ALTER TABLE app_versions ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT 'desktop'",
         "ALTER TABLE app_versions DROP CONSTRAINT IF EXISTS app_versions_version_key",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_app_versions_product_version ON app_versions (product, version)",
+        # Pagos en casa: recarga automática del saldo de créditos
+        "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_threshold_microusd BIGINT NOT NULL DEFAULT 0",
+        "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_pack_id TEXT",
+        "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_payment_method TEXT",
+        "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_last_run TEXT",
+        "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_last_error TEXT",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

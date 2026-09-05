@@ -425,3 +425,54 @@ async def api_admin_audit(
     return {"events": list_audit_events(
         user_id=user_id, limit=limit, offset=offset, event_type=event_type,
     )}
+
+
+# ── Pagos ───────────────────────────────────────────────────────────────────
+
+def _pasarela_lista():
+    from core.billing import stripe_gateway as sg
+    if not sg.enabled():
+        raise HTTPException(status_code=503, detail={
+            "code": "billing_disabled",
+            "message": "La pasarela de pagos no está configurada.",
+        })
+    return sg
+
+
+@router.get("/payments/transactions")
+async def api_admin_transactions(
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=255),
+    q: str | None = Query(default=None, max_length=120),
+    _admin: dict[str, Any] = Depends(admin_required),
+):
+    """Intentos de cobro que pasaron por la pasarela."""
+    sg = _pasarela_lista()
+    try:
+        return sg.admin_transactions(limit=limit, starting_after=cursor, query=q)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la pasarela: {exc}")
+
+
+@router.get("/payments/payouts")
+async def api_admin_payouts(
+    limit: int = Query(default=12, ge=1, le=50),
+    _admin: dict[str, Any] = Depends(admin_required),
+):
+    """Depósitos de la pasarela en la cuenta del negocio."""
+    sg = _pasarela_lista()
+    try:
+        return sg.admin_payouts(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudieron leer las liquidaciones: {exc}")
+
+
+@router.get("/payments/gateway")
+async def api_admin_gateway(_admin: dict[str, Any] = Depends(admin_required)):
+    """Estado de la pasarela. De solo lectura: las claves viven en variables de
+    entorno, y editarlas desde aquí las guardaría en la base de datos."""
+    sg = _pasarela_lista()
+    try:
+        return sg.admin_gateway()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la pasarela: {exc}")

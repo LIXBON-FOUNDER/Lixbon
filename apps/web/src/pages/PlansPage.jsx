@@ -1,20 +1,21 @@
-// PlansPage.jsx — página de precios. Con Stripe habilitado (F7), los planes de
-// pago llevan al checkout; si no, muestran "Próximamente".
+// PlansPage.jsx — página de precios. Con los pagos activos, el plan se cobra en
+// un modal sin salir de lixbon; si no, las tarjetas muestran "Próximamente".
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
+import { PagoPlan } from '../components/pagos/PagoPlan';
 import { IconCheck, IconCard } from '../components/Icons';
 
 const fmtLimit = (v, suffix, noun) => (v === -1 ? `${noun} ilimitados` : `${v.toLocaleString()} ${suffix}`);
 
 export default function PlansPage() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const navigate = useNavigate();
   const [plans, setPlans] = useState([]);
   const [billingEnabled, setBillingEnabled] = useState(false);
-  const [busy, setBusy] = useState(null); // plan_id en proceso de checkout
+  const [pagando, setPagando] = useState(null); // plan cuyo modal está abierto
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -22,23 +23,16 @@ export default function PlansPage() {
     api.get('/api/billing/config').then((res) => setBillingEnabled(res.data.enabled)).catch(() => {});
   }, []);
 
-  const subscribe = async (planId) => {
+  const subscribe = (plan) => {
     if (!user) { navigate('/auth?mode=register'); return; }
     setError('');
-    setBusy(planId);
-    try {
-      const res = await api.post('/api/billing/checkout', { plan_id: planId });
-      if (res.data.upgraded) {
-        // Upgrade in-place (ya tenía suscripción): sin checkout, cobro prorrateado hecho
-        navigate('/account/facturacion?upgrade=success');
-        return;
-      }
-      window.location.href = res.data.url; // redirige al checkout de Stripe
-    } catch (err) {
-      const d = err.response?.data?.detail;
-      setError((d && d.message) || 'No se pudo iniciar el pago. Intenta de nuevo.');
-      setBusy(null);
-    }
+    setPagando(plan);
+  };
+
+  // El plan lo activa el webhook o la respuesta del cobro; releer /me evita que
+  // la pill del sidebar siga enseñando el plan viejo.
+  const cobrado = () => {
+    api.get('/api/auth/me').then((me) => setUser(me.data.user)).catch(() => {});
   };
 
   // Precio del plan actual del usuario (para distinguir upgrade de alta nueva)
@@ -84,17 +78,14 @@ export default function PlansPage() {
                 ) : billingEnabled ? (
                   <button
                     className="pill-btn pill-btn--primary plan-card__cta"
-                    onClick={() => subscribe(p.id)}
-                    disabled={busy === p.id}
+                    onClick={() => subscribe(p)}
                     title={currentPrice > 0 && p.price_monthly_cents > currentPrice
                       ? 'Se cobra solo la diferencia prorrateada del mes'
                       : undefined}
                   >
-                    {busy === p.id
-                      ? 'Procesando…'
-                      : currentPrice > 0 && p.price_monthly_cents > currentPrice
-                        ? `Mejorar a ${p.name}`
-                        : `Suscribirme a ${p.name}`}
+                    {currentPrice > 0 && p.price_monthly_cents > currentPrice
+                      ? `Mejorar a ${p.name}`
+                      : `Suscribirme a ${p.name}`}
                   </button>
                 ) : (
                   <span className="pill-btn pill-btn--primary plan-card__cta is-soon" title="Pagos disponibles pronto">
@@ -128,6 +119,15 @@ export default function PlansPage() {
           </p>
         </div>
       </main>
+
+      {pagando && (
+        <PagoPlan
+          plan={pagando}
+          planActual={plans.find((p) => p.id === user?.plan_id) || null}
+          onHecho={cobrado}
+          onCerrar={() => setPagando(null)}
+        />
+      )}
     </div>
   );
 }
