@@ -146,11 +146,12 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
         "changed": True,
         "upgrade": sube,
         "plan_name": plan["name"],
-        **_prorrateo_del_cambio(stripe, cambiada, sub.get("stripe_customer_id")),
+        **_prorrateo_del_cambio(stripe, cambiada, sub.get("stripe_customer_id"), plan),
     }
 
 
-def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None) -> dict[str, Any]:
+def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None,
+                          plan: dict[str, Any]) -> dict[str, Any]:
     """Qué pasó con el dinero al cambiar de plan.
 
     Subir factura la diferencia y la cobra ahí mismo. Bajar no devuelve dinero:
@@ -160,7 +161,6 @@ def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None) -> dict[
     if cobrado and cobrado.get("amount"):
         return {"charged": True, **cobrado}
 
-    siguiente = _factura_siguiente(stripe, customer_id)
     detalle: dict[str, Any] = {"charged": False, "amount": 0.0}
     if cobrado:
         detalle["receipt_url"] = cobrado.get("receipt_url")
@@ -168,7 +168,7 @@ def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None) -> dict[
     saldo = _saldo_a_favor(stripe, customer_id)
     if saldo:
         detalle["credit"] = saldo
-    detalle.update(siguiente)
+    detalle.update(_factura_siguiente(stripe, customer_id, suscripcion, plan, saldo))
     return detalle
 
 
@@ -193,25 +193,48 @@ def _saldo_a_favor(stripe, customer_id: str | None) -> float:
     return round(-balance / 100, 2) if balance < 0 else 0.0
 
 
-def _factura_siguiente(stripe, customer_id: str | None) -> dict[str, Any]:
-    """Stripe renombró `Invoice.upcoming` a `Invoice.create_preview`; se prueban
-    las dos porque cuál existe depende de la versión de la cuenta."""
-    if not customer_id:
+def _factura_siguiente(stripe, customer_id: str | None, suscripcion=None,
+                       plan: dict[str, Any] | None = None,
+                       saldo: float = 0.0) -> dict[str, Any]:
+    """Cuánto y cuándo se cobrará la próxima vez.
+
+    Stripe renombró `Invoice.upcoming` a `Invoice.create_preview` y cuál existe
+    depende de la versión; si no hay ninguna, el precio del plan menos lo que
+    quedó a favor en la fecha de renovación dice lo mismo con lo que ya sabemos."""
+    fallo = None
+    if customer_id:
+        for nombre in ("create_preview", "upcoming"):
+            metodo = getattr(stripe.Invoice, nombre, None)
+            if not callable(metodo):
+                continue
+            try:
+                previa = metodo(customer=customer_id)
+            except Exception as exc:
+                fallo = f"{nombre}: {exc}"
+                continue
+            return {
+                "next_amount": (getattr(previa, "amount_due", 0) or 0) / 100,
+                "next_date": _iso(getattr(previa, "next_payment_attempt", None)
+                                  or getattr(previa, "period_end", None)),
+            }
+    if fallo:
+        logger.info(f"Sin previsión de factura de Stripe ({fallo}); se estima")
+
+    if not plan or suscripcion is None:
         return {}
-    for nombre in ("create_preview", "upcoming"):
-        metodo = getattr(stripe.Invoice, nombre, None)
-        if not callable(metodo):
-            continue
-        try:
-            previa = metodo(customer=customer_id)
-        except Exception:
-            continue
-        return {
-            "next_amount": (getattr(previa, "amount_due", 0) or 0) / 100,
-            "next_date": _iso(getattr(previa, "next_payment_attempt", None)
-                              or getattr(previa, "period_end", None)),
-        }
-    return {}
+    precio = (plan.get("price_monthly_cents") or 0) / 100
+    return {"next_amount": max(0.0, round(precio - saldo, 2)),
+            "next_date": _fin_de_periodo(suscripcion)}
+
+
+def _fin_de_periodo(suscripcion) -> str | None:
+    """Igual que `_period_end_from_subscription` pero sobre el objeto vivo: en
+    las versiones nuevas el fin de ciclo bajó de la raíz a los items."""
+    ts = getattr(suscripcion, "current_period_end", None)
+    if not ts:
+        items = getattr(getattr(suscripcion, "items", None), "data", None) or []
+        ts = getattr(items[0], "current_period_end", None) if items else None
+    return _iso(ts)
 
 
 def list_invoices(user: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]:
@@ -538,7 +561,7 @@ def subscribe(user: dict[str, Any], plan_id: str, pm_id: str) -> dict[str, Any]:
         # tiene importe que enseñar: lo que le sirve al usuario es cuándo y
         # cuánto se le cobrará la primera vez.
         return {**exito, "charged": False, "amount": 0.0,
-                **_factura_siguiente(stripe, customer_id)}
+                **_factura_siguiente(stripe, customer_id, creada, plan)}
 
     if secreto:
         return {
