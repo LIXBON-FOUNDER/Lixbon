@@ -98,8 +98,10 @@ def _fallo(exc: Exception, generico: str) -> HTTPException:
             "message": getattr(exc, "user_message", None)
                        or "El banco rechazó el cobro. Prueba con otra tarjeta.",
         })
-    logger.error(f"{generico}: {exc}")
-    return HTTPException(status_code=502, detail={
+    # 502 no: el proxy lo sustituye por su propia página de error y el motivo
+    # nunca llega al navegador.
+    logger.exception(generico)
+    return HTTPException(status_code=503, detail={
         "code": "gateway_error", "message": generico,
     })
 

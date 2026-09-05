@@ -173,16 +173,7 @@ def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None) -> dict[
 
 
 def _cobro_del_cambio(stripe, suscripcion) -> dict[str, Any] | None:
-    factura = getattr(suscripcion, "latest_invoice", None)
-    if isinstance(factura, str):
-        try:
-            factura = stripe.Invoice.retrieve(factura)
-        except Exception as exc:
-            logger.warning(f"No se pudo leer la factura del cambio de plan: {exc}")
-            return None
-    if not factura:
-        return None
-    intento, _ = _cobro_de_factura(stripe, factura)
+    intento, _ = _cobro_de_factura(stripe, getattr(suscripcion, "latest_invoice", None))
     if not intento:
         return None
     cobro = _resultado(intento)
@@ -437,6 +428,13 @@ def _cobro_de_factura(stripe, factura) -> tuple[Any, str | None]:
     de la API, no un campo vacío."""
     if not factura:
         return None, None
+    # Según quién llame, la factura viene expandida o como id.
+    if isinstance(factura, str):
+        try:
+            factura = stripe.Invoice.retrieve(factura)
+        except Exception as exc:
+            logger.warning(f"No se pudo leer la factura {factura}: {exc}")
+            return None, None
 
     intento = getattr(factura, "payment_intent", None)
     if isinstance(intento, str):
@@ -524,21 +522,23 @@ def subscribe(user: dict[str, Any], plan_id: str, pm_id: str) -> dict[str, Any]:
     )
     log_audit_event("subscription_started", user_id=user["id"], plan_id=plan_id)
 
-    if creada.status in ("active", "trialing"):
-        sync_subscription(user)
-        return {"status": "succeeded", "succeeded": True, "requires_action": False,
-                "plan_name": plan["name"]}
-
     # El estado de la suscripción recién creada no basta: quien decide si hay
     # que pasar por el banco es el cobro de su primera factura.
     intento, secreto = _cobro_de_factura(stripe, creada.latest_invoice)
     estado = getattr(intento, "status", None) or creada.status
 
-    if estado == "succeeded":
+    if estado == "succeeded" or creada.status in ("active", "trialing"):
         sync_subscription(user)
         exito = {"status": "succeeded", "succeeded": True, "requires_action": False,
                  "plan_name": plan["name"]}
-        return {**_resultado(intento), **exito} if intento else exito
+        if intento:
+            cobro = _resultado(intento)
+            return {**cobro, **exito, "charged": bool(cobro.get("amount"))}
+        # Un alta que se activa sin cobrar (una factura de cero, un cupón) no
+        # tiene importe que enseñar: lo que le sirve al usuario es cuándo y
+        # cuánto se le cobrará la primera vez.
+        return {**exito, "charged": False, "amount": 0.0,
+                **_factura_siguiente(stripe, customer_id)}
 
     if secreto:
         return {
