@@ -569,6 +569,22 @@ def sync_subscription(user: dict[str, Any]) -> dict[str, Any] | None:
     return {"plan_id": plan["id"], "status": viva.status, "current_period_end": fin}
 
 
+def _meta(objeto) -> dict[str, Any]:
+    """`metadata` llega como StripeObject, que ya no es un dict y no tiene
+    `.get`; en los webhooks el evento se parsea con json y sí lo es."""
+    datos = (objeto.get("metadata") if isinstance(objeto, dict)
+             else getattr(objeto, "metadata", None))
+    if not datos:
+        return {}
+    if isinstance(datos, dict):
+        return datos
+    try:
+        return _a_dict(datos)
+    except Exception as exc:
+        logger.warning(f"No se pudo leer la metadata de Stripe: {exc}")
+        return {}
+
+
 def _a_dict(objeto) -> dict[str, Any]:
     """Los helpers del webhook leen dicts planos; los objetos que devuelve la
     librería ya no lo son."""
@@ -640,7 +656,7 @@ def resolve_payment(user: dict[str, Any], payment_intent_id: str) -> dict[str, A
     if getattr(intento, "customer", None) != customer_id:
         raise ValueError("cobro_ajeno")
 
-    meta = getattr(intento, "metadata", None) or {}
+    meta = _meta(intento)
     if intento.status == "succeeded" and meta.get("kind") == "credit_pack":
         pack = get_credit_pack(meta.get("pack_id") or "")
         if pack:
@@ -684,7 +700,7 @@ def list_charges(user: dict[str, Any], limit: int = 10) -> list[dict[str, Any]]:
 
     cobros = []
     for pi in intentos.data:
-        meta = getattr(pi, "metadata", None) or {}
+        meta = _meta(pi)
         cobros.append({
             "id": pi.id,
             "date": _iso(getattr(pi, "created", None)),
@@ -824,7 +840,7 @@ def admin_transactions(limit: int = 50, starting_after: str | None = None,
 
 
 def _transaccion_publica(pi) -> dict[str, Any]:
-    meta = getattr(pi, "metadata", None) or {}
+    meta = _meta(pi)
     uid = meta.get("lixbon_user_id")
     usuario = None
     if uid and str(uid).isdigit():
