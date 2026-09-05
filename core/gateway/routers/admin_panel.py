@@ -6,6 +6,7 @@ cluster, audit log global y dashboard de métricas.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,6 +50,8 @@ from core.persistence.queries import (
     upsert_model_role,
 )
 from core.security.auth import admin_required
+
+logger = logging.getLogger("lixbon.admin")
 
 router = APIRouter(prefix="/api/admin", tags=["admin-panel"])
 
@@ -451,7 +454,8 @@ async def api_admin_transactions(
     try:
         return sg.admin_transactions(limit=limit, starting_after=cursor, query=q)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo leer la pasarela: {exc}")
+        logger.exception("Fallo al leer las transacciones de la pasarela")
+        raise HTTPException(status_code=503, detail=f"No se pudo leer la pasarela: {exc}")
 
 
 @router.get("/payments/payouts")
@@ -464,7 +468,9 @@ async def api_admin_payouts(
     try:
         return sg.admin_payouts(limit=limit)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudieron leer las liquidaciones: {exc}")
+        logger.exception("Fallo al leer las liquidaciones de la pasarela")
+        raise HTTPException(status_code=503,
+                            detail=f"No se pudieron leer las liquidaciones: {exc}")
 
 
 @router.get("/payments/gateway")
@@ -475,4 +481,5 @@ async def api_admin_gateway(_admin: dict[str, Any] = Depends(admin_required)):
     try:
         return sg.admin_gateway()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo leer la pasarela: {exc}")
+        logger.exception("Fallo al leer el estado de la pasarela")
+        raise HTTPException(status_code=503, detail=f"No se pudo leer la pasarela: {exc}")

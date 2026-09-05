@@ -17,7 +17,7 @@ export function ConfirmDialog({
 }) {
   const [password, setPassword] = useState('');
   const canConfirm = !busy && (!requirePassword || password.length > 0);
-  const { cerrando, cerrar } = useCierreAnimado(onClose);
+  const { cerrando, cerrar } = useCierreAnimado(onClose, { bloqueado: busy });
 
   return (
     <div

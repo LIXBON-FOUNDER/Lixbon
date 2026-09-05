@@ -23,6 +23,7 @@ from typing import Any
 
 from core.config import (
     PUBLIC_BASE_URL,
+    STRIPE_PUBLISHABLE_KEY,
     STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET,
     stripe_configured,
@@ -651,6 +652,20 @@ def resolve_payment(user: dict[str, Any], payment_intent_id: str) -> dict[str, A
     return _resultado(intento)
 
 
+_CONCEPTOS_STRIPE = {
+    "Subscription creation": "Alta de la suscripción",
+    "Subscription update": "Cambio de plan",
+    "Subscription cycle": "Renovación del plan",
+}
+
+
+def _concepto(pi, meta: dict) -> str:
+    descripcion = (getattr(pi, "description", None) or "").strip()
+    if descripcion:
+        return _CONCEPTOS_STRIPE.get(descripcion, descripcion)
+    return "Recarga de créditos" if meta.get("kind") == "credit_pack" else "Suscripción"
+
+
 def list_charges(user: dict[str, Any], limit: int = 10) -> list[dict[str, Any]]:
     """Últimos cobros del usuario: renovaciones y recargas en una sola lista."""
     if not stripe_configured():
@@ -676,9 +691,7 @@ def list_charges(user: dict[str, Any], limit: int = 10) -> list[dict[str, Any]]:
             "amount": (pi.amount or 0) / 100,
             "currency": (pi.currency or "usd").upper(),
             "status": pi.status,
-            "concept": pi.description or ("Recarga de créditos"
-                                          if meta.get("kind") == "credit_pack"
-                                          else "Suscripción"),
+            "concept": _concepto(pi, meta),
             "last4": _tarjeta_de(pi),
         })
     return cobros
@@ -773,10 +786,16 @@ def admin_transactions(limit: int = 50, starting_after: str | None = None,
     """Intentos de cobro que pasaron por la pasarela. Las cifras del día se
     calculan sobre los cobros de hoy, no sobre la página que se muestra."""
     stripe = _client()
-    params: dict[str, Any] = {"limit": min(limit, 100), "expand": ["data.latest_charge"]}
+    params: dict[str, Any] = {"limit": min(limit, 100)}
     if starting_after:
         params["starting_after"] = starting_after
-    intentos = stripe.PaymentIntent.list(**params)
+    # El cargo colgaba de `charges` y ahora de `latest_charge`: si la versión de
+    # la cuenta no conoce el expand, la API falla en vez de ignorarlo.
+    try:
+        intentos = stripe.PaymentIntent.list(expand=["data.latest_charge"], **params)
+    except Exception as exc:
+        logger.warning(f"La pasarela no aceptó expand=data.latest_charge: {exc}")
+        intentos = stripe.PaymentIntent.list(**params)
     hoy = stripe.PaymentIntent.list(created={"gte": _inicio_del_dia()}, limit=100)
 
     aprobados = [p for p in hoy.data if p.status == "succeeded"]
@@ -819,8 +838,7 @@ def _transaccion_publica(pi) -> dict[str, Any]:
         "reference": pi.id,
         "email": (usuario or {}).get("email"),
         "user_id": (usuario or {}).get("id"),
-        "concept": pi.description or ("Recarga de créditos"
-                                      if meta.get("kind") == "credit_pack" else "Suscripción"),
+        "concept": _concepto(pi, meta),
         "automatic": meta.get("auto") == "1",
         "amount": (pi.amount or 0) / 100,
         "currency": (pi.currency or "usd").upper(),

@@ -78,6 +78,14 @@
   font-size: 13.5px;
 }
 
+.page__ok {
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: var(--ok-soft);
+  color: #8FB25A;
+  font-size: 13.5px;
+}
+
 /* ── Tarjetas ────────────────────────────────────────────────────────── */
 
 .card {

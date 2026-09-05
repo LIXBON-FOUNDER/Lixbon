@@ -157,7 +157,7 @@ export function SeccionFacturacion({ plan }) {
 
   return (
     <>
-      {aviso && <p className="admin-ok" role="status">{aviso}</p>}
+      {aviso && <p className="page__ok" role="status">{aviso}</p>}
       {error && <p className="page__error" role="alert">{error}</p>}
 
       <div className="set-card set-plan">
@@ -231,10 +231,13 @@ export function SeccionFacturacion({ plan }) {
         <div className="set-card">
           <h2 className="set-title">Cobros automáticos</h2>
           <Fila
-            titulo="Renovación del plan"
+            titulo={billing.cancel_at_period_end ? 'Fin del plan' : 'Renovación del plan'}
             sub={pagado && billing.current_period_end
-              ? `${plan.name} · ${fmtUSD(plan.price_monthly_cents / 100)} `
-                + `el ${fmtDia(billing.current_period_end)}`
+              ? (billing.cancel_at_period_end
+                ? `${plan.name} · sin más cobros; termina el `
+                  + `${fmtDia(billing.current_period_end)}`
+                : `${plan.name} · ${fmtUSD(plan.price_monthly_cents / 100)} `
+                  + `el ${fmtDia(billing.current_period_end)}`)
               : 'Sin plan de pago activo'}
           >
             <Link to="/planes" className="pill-btn pill-btn--outline set-btn">Cambiar plan</Link>

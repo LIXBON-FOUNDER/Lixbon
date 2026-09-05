@@ -86,7 +86,7 @@ export default function Liquidaciones() {
         )}
 
         <div className="adm-card adm-card--tabla">
-          {!data ? <Cargando /> : lotes.length === 0 ? (
+          {!data ? (error ? null : <Cargando />) : lotes.length === 0 ? (
             <Vacio>
               Todavía no hay ninguna liquidación. Aparecerán aquí en cuanto la pasarela
               haga el primer depósito.

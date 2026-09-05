@@ -45,7 +45,7 @@ export default function Pasarela() {
       <div className="adm__body">
         <Aviso error>{error}</Aviso>
 
-        {!data ? <Cargando /> : (
+        {!data ? (error ? null : <Cargando />) : (
           <>
             <div className="adm-rejilla-2">
               <Tarjeta titulo="Adquirente">

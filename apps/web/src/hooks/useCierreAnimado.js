@@ -7,7 +7,7 @@
 // `is-closing` (motion.css la anima) y solo después avisa al padre.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export function useCierreAnimado(onClose, ms = 200) {
+export function useCierreAnimado(onClose, { ms = 200, bloqueado = false } = {}) {
   const [cerrando, setCerrando] = useState(false);
   const temporizador = useRef(null);
 
@@ -24,6 +24,13 @@ export function useCierreAnimado(onClose, ms = 200) {
     setCerrando(true);
     temporizador.current = window.setTimeout(onClose, ms);
   }, [onClose, ms]);
+
+  useEffect(() => {
+    if (bloqueado) return undefined;
+    const alPulsar = (ev) => { if (ev.key === 'Escape') cerrar(); };
+    window.addEventListener('keydown', alPulsar);
+    return () => window.removeEventListener('keydown', alPulsar);
+  }, [cerrar, bloqueado]);
 
   return { cerrando, cerrar };
 }

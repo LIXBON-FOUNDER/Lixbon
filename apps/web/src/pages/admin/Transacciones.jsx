@@ -130,7 +130,7 @@ export default function Transacciones() {
         </form>
 
         <div className="adm-card adm-card--tabla">
-          {!data ? <Cargando /> : filas.length === 0 ? (
+          {!data ? (error ? null : <Cargando />) : filas.length === 0 ? (
             <Vacio>Ninguna transacción coincide con el filtro.</Vacio>
           ) : (
             <Tabla cols={COLS} cabeceras={CABECERAS} ancho={1100}>

@@ -137,11 +137,19 @@ function Aprobado({ resultado, concepto, onCerrar }) {
         <span className="pago__titular">Pago aprobado</span>
         <span className="pago__sub">{concepto}</span>
       </div>
-      <div className="pago__detalle">
-        <div><span>Importe</span><span>{fmtUSD(resultado.amount)}</span></div>
-        {resultado.last4 && <div><span>Tarjeta</span><span>•••• {resultado.last4}</span></div>}
-        <div><span>Referencia</span><span className="mono">{resultado.payment_intent}</span></div>
-      </div>
+      {(resultado.amount != null || resultado.last4 || resultado.payment_intent) && (
+        <div className="pago__detalle">
+          {resultado.amount != null
+            && <div><span>Importe</span><span>{fmtUSD(resultado.amount)}</span></div>}
+          {resultado.last4 && <div><span>Tarjeta</span><span>•••• {resultado.last4}</span></div>}
+          {resultado.payment_intent && (
+            <div>
+              <span>Referencia</span>
+              <span className="mono">{resultado.payment_intent}</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="pago__botones">
         <button className="pago__cta" onClick={onCerrar}>Volver a lixbon</button>
         {resultado.receipt_url && (
@@ -221,6 +229,7 @@ export function DialogoPago({
   onHecho,
   onCerrar,
 }) {
+  const [rotulo] = useState(titulo);
   const [stripe, setStripe] = useState(null);
   const [metodos, setMetodos] = useState(null);
   const [elegido, setElegido] = useState(null);
@@ -229,7 +238,7 @@ export function DialogoPago({
   const [fase, setFase] = useState('form');
   const [resultado, setResultado] = useState(null);
   const [error, setError] = useState('');
-  const { cerrando, cerrar } = useCierreAnimado(onCerrar);
+  const { cerrando, cerrar } = useCierreAnimado(onCerrar, { bloqueado: fase === 'banco' });
 
   useEffect(() => { cargarStripe().then(setStripe); }, []);
 
@@ -321,7 +330,7 @@ export function DialogoPago({
           <div className="pago__head">
             <div className="pago__marca">
               <LogoMark size={24} />
-              <span className="pago__nombre">{titulo}</span>
+              <span className="pago__nombre">{rotulo}</span>
             </div>
             {fase !== 'banco' && (
               <button className="icon-btn" onClick={cerrar} aria-label="Cerrar"><IconX /></button>
