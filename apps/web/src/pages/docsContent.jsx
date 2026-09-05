@@ -9,10 +9,10 @@ import { IconShield } from '../components/Icons';
 // Aviso dentro de la prosa: tinte de acento y su icono, sin marco.
 function Callout({ children }) {
   return (
-    <Callout>
+    <div className="docs__callout">
       <IconShield size={17} />
       <p>{children}</p>
-    </Callout>
+    </div>
   );
 }
 
