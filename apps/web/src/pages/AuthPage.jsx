@@ -1,4 +1,4 @@
-// AuthPage.jsx — login/registro con toggle segmentado animado (mockups 2.3 y 2.4).
+// AuthPage.jsx — acceso y registro sobre el fondo del clúster.
 // Incluye el modo "olvidé mi contraseña" (request-password-reset).
 // Botones OAuth Google/Apple: SOLO visuales por ahora (sin funcionalidad).
 import { useState } from 'react';
@@ -6,117 +6,34 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
+import { ClusterFondo } from '../components/ClusterFondo';
 import { api } from '../lib/api';
 
 function GoogleLogo() {
   return (
-    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
-      <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z" />
-      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z" />
-      <path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z" />
-      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z" />
+    <svg viewBox="0 0 48 48" width="17" height="17" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.2 17.6 9.5 24 9.5Z" />
+      <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.2-.4-4.7H24v9h12.4c-.5 2.9-2.1 5.4-4.6 7l7.6 5.9c4.4-4.1 6.7-10.1 6.7-17.2Z" />
+      <path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1Z" />
+      <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.8 2.3-8.3 2.3-6.4 0-11.7-3.7-13.6-9.9l-7.8 6.1C6.5 42.6 14.6 48 24 48Z" />
     </svg>
   );
 }
 
 function AppleLogo() {
   return (
-    <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true">
-      <path d="M16.36 12.79c-.03-2.53 2.07-3.74 2.16-3.8-1.18-1.72-3.01-1.96-3.66-1.99-1.56-.16-3.04.92-3.83.92-.79 0-2.01-.9-3.3-.87-1.7.02-3.27.99-4.14 2.5-1.77 3.07-.45 7.61 1.27 10.1.84 1.22 1.84 2.59 3.16 2.54 1.27-.05 1.75-.82 3.28-.82 1.53 0 1.96.82 3.3.79 1.36-.02 2.22-1.24 3.05-2.46.96-1.41 1.36-2.78 1.38-2.85-.03-.01-2.64-1.01-2.67-4.02zM13.84 5.35c.7-.85 1.17-2.03 1.04-3.21-1.01.04-2.23.67-2.95 1.52-.65.75-1.22 1.95-1.06 3.1 1.12.09 2.27-.57 2.97-1.41z" />
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="#141414" aria-hidden="true">
+      <path d="M16.7 12.8c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9s-1.8-.9-3-.8c-1.5 0-2.9.9-3.7 2.3-1.6 2.7-.4 6.7 1.1 8.9.8 1.1 1.7 2.3 2.9 2.2 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1.1 2.8-2.2c.9-1.2 1.2-2.4 1.2-2.5 0 0-2.4-.9-2.4-3.5Z" />
+      <path d="M14.6 5.9c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-.9 2.9 1 .1 2-.5 2.7-1.3Z" />
     </svg>
   );
 }
 
-// Estrella de 4 puntas (motivo "sparkle" de la ilustración animada)
-function Spark({ size = 18, color = 'var(--auth-accent)', style, delay }) {
-  return (
-    <span className="spark" style={{ color, animationDelay: delay, ...style }} aria-hidden="true">
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z" />
-      </svg>
-    </span>
-  );
-}
-
-function CoreSpark() {
-  return (
-    <svg width="52%" height="52%" viewBox="0 0 24 24" fill="var(--auth-on-ink)" aria-hidden="true">
-      <path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z" />
-    </svg>
-  );
-}
-
-// Ilustración de fondo (motion) del rediseño Claude Design "lixbon Login".
-// Decorativa: se anima con CSS y se oculta en pantallas estrechas.
-function AuthIllustration() {
-  return (
-    <div className="auth-illu" aria-hidden="true">
-      {/* Destellos ambientales */}
-      <Spark size={22} style={{ left: '14%', top: '20%' }} />
-      <Spark size={16} color="var(--auth-illu-soft)" style={{ left: '9%', bottom: '16%' }} delay="0.6s" />
-      <Spark size={18} style={{ right: '13%', top: '24%' }} delay="1.1s" />
-      <Spark size={14} color="var(--auth-illu-ink)" style={{ right: '17%', bottom: '22%' }} delay="1.6s" />
-
-      {/* Cluster izquierdo: núcleo de IA */}
-      <div className="auth-illu__cluster auth-illu__cluster--left">
-        <div className="auth-illu__stage auth-illu__stage--left">
-          <div className="auth-illu__glow" />
-
-          <div className="auth-illu__ring" style={{ width: '100%', height: '100%', border: '1.5px dashed var(--auth-illu-ring)', '--dur': '52s' }}>
-            <span className="auth-illu__ring-dot" style={{ width: 9, height: 9, background: 'var(--auth-accent)', top: -5 }} />
-          </div>
-          <div className="auth-illu__ring is-reverse" style={{ width: '74%', height: '74%', border: '1.5px solid var(--auth-illu-ring)', '--dur': '38s' }}>
-            <span className="auth-illu__ring-dot" style={{ width: 8, height: 8, background: 'var(--auth-illu-ink)' }} />
-          </div>
-          <div className="auth-illu__ring" style={{ width: '50%', height: '50%', border: '1.5px dashed var(--auth-illu-ring)', '--dur': '26s' }}>
-            <span className="auth-illu__ring-dot" style={{ width: 7, height: 7, background: 'var(--auth-illu-soft)' }} />
-          </div>
-
-          <div className="auth-illu__core">
-            <CoreSpark />
-          </div>
-
-          <div className="auth-illu__bubble auth-illu__bubble--dark" style={{ top: '6%', right: '10%' }}>
-            <span className="auth-illu__dot" />
-            <span className="auth-illu__dot" />
-            <span className="auth-illu__dot" />
-          </div>
-          <div className="auth-illu__bubble auth-illu__bubble--light" style={{ bottom: '8%', left: '-4%' }}>
-            <span className="auth-illu__bar" style={{ width: 56, background: 'var(--auth-illu-bar)' }} />
-            <span className="auth-illu__bar" style={{ width: 36, background: 'var(--auth-illu-bar-accent)' }} />
-          </div>
-
-          <Spark size={20} style={{ left: '2%', top: '0%' }} delay="0.3s" />
-          <Spark size={15} color="var(--auth-illu-ink)" style={{ right: '6%', bottom: '16%' }} delay="1.4s" />
-        </div>
-      </div>
-
-      {/* Cluster derecho: conversación flotante */}
-      <div className="auth-illu__cluster auth-illu__cluster--right">
-        <div className="auth-illu__stage auth-illu__stage--right">
-          <div style={{ position: 'absolute', top: '6%', left: '52%', transform: 'translateX(-50%)', width: '60%', aspectRatio: '1 / 1' }}>
-            <div className="auth-illu__ring is-reverse" style={{ width: '100%', height: '100%', border: '1.5px dashed var(--auth-illu-ring)', '--dur': '30s' }}>
-              <span className="auth-illu__ring-dot" style={{ width: 7, height: 7, background: 'var(--auth-accent)' }} />
-            </div>
-          </div>
-
-          <div className="auth-illu__bubble auth-illu__bubble--dark" style={{ top: '16%', right: '6%' }}>
-            <span className="auth-illu__dot" />
-            <span className="auth-illu__dot" />
-            <span className="auth-illu__dot" />
-          </div>
-          <div className="auth-illu__bubble auth-illu__bubble--light" style={{ bottom: '20%', left: '16%' }}>
-            <span className="auth-illu__bar" style={{ width: 60, background: 'var(--auth-illu-bar)' }} />
-            <span className="auth-illu__bar" style={{ width: 40, background: 'var(--auth-illu-bar-accent)' }} />
-          </div>
-
-          <Spark size={18} style={{ right: '2%', top: '52%' }} delay="0.9s" />
-          <Spark size={14} color="var(--auth-illu-soft)" style={{ left: '8%', bottom: '2%' }} delay="1.9s" />
-        </div>
-      </div>
-    </div>
-  );
-}
+const TITULOS = {
+  login: 'Iniciar sesión',
+  register: 'Crear cuenta',
+  forgot: 'Restablecer contraseña',
+};
 
 export default function AuthPage() {
   const [params] = useSearchParams();
@@ -172,112 +89,110 @@ export default function AuthPage() {
 
   return (
     <div className="auth">
-      <AuthIllustration />
+      <ClusterFondo />
 
-      <Link to="/" className="auth__logo" aria-label="Volver al chat">
-        <Logo size={28} />
-      </Link>
-
-      <form className="auth__card" onSubmit={handleSubmit}>
-        {mode !== 'forgot' && (
-          <div className="auth__toggle" role="tablist" data-mode={mode}>
-            <span className="auth__toggle-thumb" aria-hidden="true" />
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'login'}
-              className={mode === 'login' ? 'is-active' : ''}
-              onClick={() => switchMode('login')}
-            >
-              Iniciar Sesion
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'register'}
-              className={mode === 'register' ? 'is-active' : ''}
-              onClick={() => switchMode('register')}
-            >
-              Registrarse
-            </button>
+      <div className="auth__panel">
+        <span className="tab" aria-hidden="true" />
+        <form className="auth__card" onSubmit={handleSubmit}>
+          <div className="auth__head">
+            <Link to="/" className="auth__logo" aria-label="Volver al chat">
+              <Logo />
+            </Link>
+            <h1 className="auth__title">{TITULOS[mode]}</h1>
           </div>
-        )}
 
-        {/* key={mode}: remonta el bloque para animar la entrada al cambiar de modo */}
-        <div className="auth__fields" key={mode}>
-          {mode === 'forgot' && (
-            <h1 className="auth__title">Restablecer contraseña</h1>
-          )}
+          {/* key={mode}: remonta el bloque para animar la entrada al cambiar de modo */}
+          <div className="auth__fields" key={mode}>
+            {mode === 'register' && (
+              <div className="auth__row">
+                <FloatingField label="Nombre" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+                <FloatingField label="Apellido" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+              </div>
+            )}
 
-          {mode === 'register' && (
-            <div className="auth__row">
-              <FloatingField label="Nombre" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
-              <FloatingField label="Apellido" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
-            </div>
-          )}
-
-          <FloatingField label="Correo Electronico" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-
-          {mode !== 'forgot' && (
             <FloatingField
-              label="Contraseña"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              minLength={8}
+              label="Correo electrónico"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              placeholder="tu@correo.com"
             />
-          )}
 
-          {mode === 'register' && (
-            <FloatingField
-              label="Confirmar Contraseña"
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              autoComplete="new-password"
-              minLength={8}
-            />
-          )}
+            {mode !== 'forgot' && (
+              <FloatingField
+                label="Contraseña"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                minLength={8}
+              />
+            )}
+
+            {mode === 'register' && (
+              <FloatingField
+                label="Confirmar contraseña"
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+              />
+            )}
+
+            {mode === 'login' && (
+              <button type="button" className="auth__link auth__link--right" onClick={() => switchMode('forgot')}>
+                ¿Olvidaste tu contraseña?
+              </button>
+            )}
+          </div>
 
           {error && <p className="auth__error" role="alert">{error}</p>}
           {notice && <p className="auth__notice">{notice}</p>}
 
-          <button className="pill-btn pill-btn--primary auth__cta" type="submit" disabled={busy}>
-            {mode === 'login' && (busy ? 'Iniciando…' : 'Iniciar Sesion')}
-            {mode === 'register' && (busy ? 'Creando cuenta…' : 'Crear Cuenta')}
-            {mode === 'forgot' && (busy ? 'Enviando…' : 'Enviar enlace')}
-          </button>
+          <div className="auth__actions">
+            <button className="auth__cta" type="submit" disabled={busy}>
+              {mode === 'login' && (busy ? 'Iniciando…' : 'Iniciar sesión')}
+              {mode === 'register' && (busy ? 'Creando cuenta…' : 'Crear cuenta')}
+              {mode === 'forgot' && (busy ? 'Enviando…' : 'Enviar enlace')}
+            </button>
 
-          {mode === 'login' && (
-            <button type="button" className="auth__link" onClick={() => switchMode('forgot')}>
-              ¿Olvidaste tú contraseña?
-            </button>
-          )}
-          {mode === 'forgot' && (
-            <button type="button" className="auth__link" onClick={() => switchMode('login')}>
-              Volver a iniciar sesión
-            </button>
-          )}
+            {mode === 'login' && (
+              <p className="auth__switch">
+                ¿No tienes cuenta?{' '}
+                <button type="button" onClick={() => switchMode('register')}>Regístrate</button>
+              </p>
+            )}
+            {mode === 'register' && (
+              <p className="auth__switch">
+                ¿Ya tienes cuenta?{' '}
+                <button type="button" onClick={() => switchMode('login')}>Inicia sesión</button>
+              </p>
+            )}
+            {mode === 'forgot' && (
+              <p className="auth__switch">
+                <button type="button" onClick={() => switchMode('login')}>Volver a iniciar sesión</button>
+              </p>
+            )}
+          </div>
 
           {/* OAuth: solo visual por ahora (sin funcionalidad) */}
           {mode !== 'forgot' && (
             <>
-              <div className="auth__divider">
-                <span>{mode === 'login' ? 'O inicia sesion con' : 'O registrate con'}</span>
-              </div>
+              <div className="auth__divider"><span>O</span></div>
               <div className="auth__social">
-                <button type="button" className="auth__social-btn auth__social-btn--google">
+                <button type="button" className="auth__social-btn">
                   <GoogleLogo /> Google
                 </button>
-                <button type="button" className="auth__social-btn auth__social-btn--apple">
+                <button type="button" className="auth__social-btn">
                   <AppleLogo /> Apple
                 </button>
               </div>
             </>
           )}
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

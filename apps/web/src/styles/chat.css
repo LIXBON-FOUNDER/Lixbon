@@ -1,7 +1,12 @@
-/* chat.css — layout principal: sidebar + chat (mockups 2.1–2.2) */
+/* chat.css — el armazón: barra lateral flotante + chat.
+   El armazón es un fondo #0E0E0E con 12px de aire; encima flotan paneles
+   #131313 de esquinas 8px. Ninguna pieza lleva borde: la jerarquía la hace
+   el relleno. */
 
 .chat-shell {
   display: flex;
+  gap: var(--shell-gap);
+  padding: var(--shell-gap);
   height: 100%;
   height: 100dvh; /* en móvil la barra del navegador cambia el 100vh */
   height: var(--app-vh, 100dvh); /* …y el teclado de iOS tampoco lo cambia */
@@ -18,20 +23,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── Sidebar (ancho animado; __body = completo, __rail = colapsado) ──── */
+/* ── Barra lateral (ancho animado; __body = completa, __rail = colapsada) ─ */
 
 .sidebar {
   position: relative;
   width: var(--sidebar-w);
   flex-shrink: 0;
   overflow: hidden;
-  border-right: 1px solid var(--border-soft);
+  border-radius: var(--radius);
   background: var(--bg-sidebar);
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar.is-collapsed {
-  width: 58px;
+  width: 54px;
 }
 
 .sidebar__body {
@@ -55,8 +60,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 18px 0;
+  gap: 8px;
+  padding: 16px 0;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease;
@@ -72,7 +77,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 16px 12px;
+  padding: 16px 10px 12px 14px;
 }
 
 .sidebar__logo {
@@ -85,38 +90,50 @@
 }
 
 .sidebar__search {
-  width: calc(100% - 28px);
-  margin: 2px 14px 10px;
-  padding: 9px 15px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-pill);
+  width: calc(100% - 16px);
+  margin: 2px 8px 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  background: var(--field);
   outline: none;
-  font-size: 14px;
+  font-size: 13.5px;
+}
+
+.sidebar__search:focus {
+  background: var(--field-focus);
 }
 
 .sidebar__nav {
   display: flex;
   flex-direction: column;
-  padding: 4px 8px;
+  gap: 2px;
+  padding: 0 8px;
 }
 
 .sb-nav {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 10px;
-  border-radius: 12px;
-  font-size: 15px;
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 14px;
   text-align: left;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+/* La primera acción del panel es la que se quiere pulsar: va en tinta plena. */
+.sb-nav:first-child {
+  color: var(--ink);
 }
 
 .sb-nav:hover {
-  background: rgba(var(--ink-rgb), 0.05);
+  background: var(--surface-3);
+  color: var(--ink);
 }
 
 .sb-nav--soon {
-  color: var(--ink-soft);
+  color: var(--ink-muted);
 }
 
 /* Historial */
@@ -125,7 +142,7 @@
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain; /* el scroll no se propaga al hilo del chat */
-  padding: 10px 8px 8px;
+  padding: 0 8px 8px;
 }
 
 .sidebar__history-head {
@@ -133,41 +150,49 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 4px 10px;
-  font-size: 13px;
-  color: var(--ink-soft);
+  padding: 20px 10px 8px;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-label);
 }
 
 .sidebar__history-list {
   display: flex;
   flex-direction: column;
-  margin-top: 4px;
+  gap: 2px;
 }
 
 .sidebar__empty {
   padding: 8px 10px;
   font-size: 13px;
-  color: var(--ink-soft);
+  color: var(--ink-muted);
 }
 
 .sb-item {
   position: relative;
   display: flex;
   align-items: center;
-  border-radius: 10px;
-  transition: background 0.15s ease;
+  border-radius: var(--radius);
+  color: #A6A6A3;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.sb-item:hover,
+.sb-item:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
 .sb-item.is-active {
-  background: rgba(var(--ink-rgb), 0.06);
+  background: var(--bg-active);
+  color: var(--ink);
 }
 
 .sb-item__title {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: 13.5px;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -175,9 +200,9 @@
 }
 
 .sb-item__menu-btn {
-  width: 26px;
-  height: 26px;
-  margin-right: 4px;
+  width: 24px;
+  height: 24px;
+  margin-right: 5px;
   opacity: 0;
   flex-shrink: 0;
   transition: opacity 0.15s ease;
@@ -192,8 +217,8 @@
 @media (hover: none) {
   .sb-item__menu-btn {
     opacity: 1;
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
   }
 }
 
@@ -201,9 +226,9 @@
   width: 100%;
   margin: 2px;
   padding: 6px 8px;
-  font-size: 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  font-size: 13.5px;
+  border-radius: var(--radius);
+  background: var(--field-focus);
   outline: none;
 }
 
@@ -216,12 +241,11 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
-  min-width: 160px;
+  min-width: 168px;
   padding: 4px;
-  background: var(--bg);
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  box-shadow: 0 6px 24px rgba(var(--shadow-rgb), 0.12);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
   transform-origin: top right;
   animation: menu-in 0.16s ease;
 }
@@ -236,26 +260,33 @@
 .sb-menu button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 13.5px;
   text-align: left;
-  transition: background 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .sb-menu button:hover {
-  background: rgba(var(--ink-rgb), 0.06);
+  background: var(--surface-5);
+  color: var(--ink);
 }
 
 .sb-menu__danger {
-  color: var(--danger);
+  color: var(--danger-ink);
+}
+
+.sb-menu__danger:hover {
+  background: #2A1917 !important;
+  color: var(--danger-ink) !important;
 }
 
 /* El menú del perfil sí cabe dentro del panel: se ancla al pie y sube. */
 .sb-menu--profile {
   position: absolute;
-  right: 10px;
+  right: 0;
   top: auto;
   bottom: calc(100% + 6px);
   transform-origin: bottom right;
@@ -269,71 +300,99 @@
   }
 }
 
-/* Botón "Mejorar plan" (CTA destacado) */
+/* Botón "Mejorar plan" */
 
 .sidebar__upgrade {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin: 8px 12px;
-  padding: 11px 16px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 14.5px;
-  font-weight: 600;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  margin: 8px 10px 0;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background 0.15s ease;
 }
 
 .sidebar__upgrade:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 50%, transparent);
+  background: rgba(140, 160, 56, 0.24);
 }
 
 /* Item "próximamente" en el menú del perfil */
 
 .sb-menu__soon {
-  color: var(--ink-soft) !important;
+  color: var(--ink-muted) !important;
   cursor: default !important;
 }
 
 .sb-menu__tag {
   margin-left: auto;
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-secondary);
-  font-size: 11px;
-  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-5);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--ink-muted);
 }
 
-/* Footer de perfil */
+/* Pie de perfil: tarjeta con la pestaña asomando */
+
+.sidebar__foot {
+  display: flex;
+  flex-direction: column;
+  margin: 10px;
+  --tab-fill: var(--surface-3);
+}
 
 .sidebar__profile {
   position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 13px 14px;
-  background: var(--bg-secondary);
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
 }
 
 .sidebar__avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--primary);
-  color: var(--on-primary);
+  border-radius: var(--radius-round);
+  background: #33322F;
+  color: var(--ink);
+  font-size: 14px;
   font-weight: 500;
 }
 
 .sidebar__avatar--img {
   object-fit: cover;
-  background: var(--bg-secondary);
+  background: #33322F;
+}
+
+/* Sin sesión no hay inicial que mostrar: el hueco lo ocupa la silueta, y baja
+   de tono para que no compita con "Iniciar sesión". */
+.sidebar__avatar--guest {
+  background: #262626;
+  color: var(--ink-muted);
+}
+
+.sidebar__plan-link {
+  align-self: flex-start;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.sidebar__plan-link:hover {
+  color: var(--ink-soft);
 }
 
 .sidebar__profile-info {
@@ -341,36 +400,40 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  line-height: 1.25;
+  gap: 3px;
 }
 
 .sidebar__profile-name {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 13.5px;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-decoration: none;
 }
 
+/* Con sesión, el color lo pone planBadge() en línea; sin ella queda este chip
+   de acento, que es una invitación y no una etiqueta de plan. */
 .sidebar__plan {
   align-self: flex-start;
-  margin-top: 3px;
-  padding: 2px 11px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 12px;
-  font-weight: 500;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 1px 7px;
+  border-radius: var(--radius-chip);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
   text-decoration: none;
   transition: opacity 0.15s ease;
 }
 
 .sidebar__plan:hover {
-  opacity: 0.75;
+  opacity: 0.8;
 }
 
 /* ── Área principal ──────────────────────────────────────────────────── */
+/* Sin fondo propio: el chat respira sobre el #0E0E0E del armazón y solo los
+   bloques (código, compositor, mensaje del usuario) suben un peldaño. */
 
 .chat-main {
   position: relative;
@@ -385,7 +448,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 28px;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 10px 0 14px;
 }
 
 /* Abre el cajón lateral. Solo existe cuando el panel se vuelve cajón. */
@@ -397,27 +462,18 @@
 .chat-header__title {
   flex: 1;
   min-width: 0;
-  font-size: 18px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .chat-header__share {
-  padding: 9px 20px;
-  font-size: 14.5px;
-}
-
-.chat-header__auth {
-  display: flex;
-  gap: 10px;
-}
-
-.chat-header__auth .pill-btn {
-  padding: 9px 22px;
-  font-size: 14.5px;
-  text-decoration: none;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
 }
 
 /* Estado vacío: "¿Qué investigaremos hoy?" */
@@ -428,21 +484,32 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 28px;
+  gap: 30px;
   padding: 0 24px 10vh;
 }
 
 .chat-hero__title {
-  font-size: 36px;
+  font-size: 30px;
   font-weight: 500;
+  letter-spacing: -0.025em;
   text-align: center;
   animation: fade-up 0.4s ease;
 }
 
 .chat-hero__input {
   width: 100%;
-  max-width: 700px;
+  max-width: 720px;
   animation: fade-up 0.4s ease 0.08s backwards;
+}
+
+/* Sin sesión el encabezado no pregunta, explica el límite: es más largo, así
+   que baja de cuerpo y se le pone una medida de lectura. */
+.chat-hero__title--invitado {
+  max-width: 640px;
+  font-size: 29px;
+  line-height: 1.32;
+  letter-spacing: -0.02em;
+  text-wrap: pretty;
 }
 
 @keyframes fade-up {
@@ -461,12 +528,12 @@
 }
 
 .chat-thread {
-  max-width: 780px;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 8px 24px 24px;
+  padding: 14px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
 }
 
 .msg {
@@ -480,28 +547,32 @@
   }
 }
 
+/* El mensaje propio es un bloque, no una burbuja invertida: sube un peldaño
+   de superficie y ya se distingue de la respuesta. */
 .msg--user {
   align-self: flex-end;
-  max-width: 75%;
-  padding: 11px 19px;
-  background: var(--primary);
-  border-radius: var(--radius-box);
-  border-bottom-right-radius: 15px;
+  max-width: 78%;
+  padding: 11px 16px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  color: var(--on-primary);
 }
 
 .msg--assistant {
   align-self: stretch;
+  color: var(--ink-body);
+  font-size: 14.5px;
+  line-height: 1.68;
 }
 
 .msg--error {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .msg__thinking {
-  color: var(--ink-soft);
+  color: var(--ink-muted);
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -509,8 +580,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--ink-soft);
-  font-size: 14.5px;
+  color: var(--ink-muted);
+  font-size: 14px;
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -518,20 +589,18 @@
 .msg-sources {
   margin-bottom: 12px;
   padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-card);
 }
 
 .msg-sources__title {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-soft);
+  color: var(--ink-label);
 }
 
 .msg-sources__list {
@@ -543,68 +612,85 @@
 }
 
 .msg-sources__list a {
-  font-size: 13.5px;
-  color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: var(--border-soft);
+  font-size: 13px;
+  color: var(--ink-soft);
+  text-decoration: none;
 }
 
 .msg-sources__list a:hover {
-  text-decoration-color: var(--ink);
+  color: var(--accent);
 }
 
 @keyframes pulse {
   50% { opacity: 0.4; }
 }
 
-/* Markdown de las respuestas (títulos Semibold según diseño) */
+/* Markdown de las respuestas */
 
 .md h1, .md h2, .md h3, .md h4 {
-  font-weight: 600;
-  margin: 18px 0 8px;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 20px 0 8px;
 }
 
-.md h1 { font-size: 22px; }
-.md h2 { font-size: 19px; }
-.md h3 { font-size: 17px; }
+.md h1 { font-size: 21px; letter-spacing: -0.012em; }
+.md h2 { font-size: 17px; }
+.md h3 { font-size: 15px; }
 
 .md p {
-  margin: 8px 0;
+  margin: 10px 0;
+  text-wrap: pretty;
 }
 
 .md ul, .md ol {
-  margin: 8px 0;
-  padding-left: 24px;
+  margin: 10px 0;
+  padding-left: 22px;
 }
 
 .md li {
   margin: 4px 0;
 }
 
+.md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.md a:hover {
+  color: #CEDC85;
+}
+
 .md pre {
   overflow-x: auto;
-  padding: 14px 16px;
-  background: var(--bg-secondary);
-  border-radius: 14px;
-  font-size: 14px;
+  margin: 12px 0;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  font-size: 13px;
 }
 
 .md code {
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
 }
 
+.md pre code {
+  color: var(--code-ink);
+  line-height: 1.7;
+}
+
 .md :not(pre) > code {
-  background: var(--bg-secondary);
-  padding: 1px 6px;
-  border-radius: 6px;
+  padding: 2px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  color: var(--code-ink);
 }
 
 .md blockquote {
-  margin: 8px 0;
-  padding-left: 14px;
-  border-left: 2px solid var(--border-soft);
+  margin: 10px 0;
+  padding: 2px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
   color: var(--ink-soft);
 }
 
@@ -613,18 +699,18 @@
 
 .chat-jump {
   position: absolute;
-  bottom: calc(100% - 6px);
+  bottom: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 19px;
-  border-radius: var(--radius-pill);
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-round);
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 14px;
-  box-shadow: 0 4px 16px rgba(var(--shadow-rgb), 0.25);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
   animation: jump-in 0.25s ease;
 }
 
@@ -635,32 +721,42 @@
   }
 }
 
-/* Composer + caja de input */
+/* ── Compositor ──────────────────────────────────────────────────────── */
+/* La caja es el bloque; los iconos y el botón de enviar cuelgan por fuera de
+   sus esquinas, sobre el fondo del armazón. */
 
 .chat-composer {
   position: relative; /* ancla de .chat-jump */
-  padding: 8px 24px 22px;
-  max-width: 780px;
-  margin: 0 auto;
   width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 24px 30px;
+  flex-shrink: 0;
 }
 
 .chat-input {
-  background: var(--bg-input);
-  border-radius: var(--radius-box);
-  padding: 13px 15px 11px;
-  transition: box-shadow 0.2s ease;
+  position: relative;
 }
 
-.chat-input:focus-within {
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.18);
+.chat-input__box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 62px 20px 20px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  transition: background 0.2s ease;
+}
+
+.chat-input.is-dropping .chat-input__box {
+  background: var(--surface-3);
 }
 
 .chat-input__chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
 }
 
 .attach-chip {
@@ -668,10 +764,10 @@
   align-items: center;
   gap: 6px;
   max-width: 220px;
-  padding: 5px 8px 5px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--bg);
-  border: 1px solid var(--border-soft);
+  padding: 5px 8px 5px 5px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink-soft);
   font-size: 12.5px;
 }
 
@@ -682,15 +778,14 @@
 }
 
 .attach-chip__trunc {
-  color: var(--ink-soft);
+  color: var(--ink-muted);
   font-size: 11px;
-  font-style: italic;
 }
 
 .attach-chip__x {
   display: inline-flex;
   align-items: center;
-  color: var(--ink-soft);
+  color: var(--ink-muted);
   flex-shrink: 0;
 }
 
@@ -699,99 +794,221 @@
 }
 
 .chat-input__error {
-  margin-bottom: 8px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--field-error);
+  color: var(--danger-ink);
+  font-size: 12.5px;
 }
 
 .chat-input__text {
   width: 100%;
-  border: none;
   background: transparent;
   resize: none;
   outline: none;
-  padding: 2px 6px;
+  padding: 0;
+  font-size: 14.5px;
+  color: var(--ink);
   max-height: 180px;
 }
 
-.chat-input__text::placeholder {
+/* El modelo, como el chip de atajo del diseño: mismo sitio, mismo trato. */
+.chat-input__model {
+  align-self: flex-start;
+  max-width: 240px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
   color: var(--ink-soft);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  text-overflow: ellipsis;
 }
 
-.chat-input__bar {
+.chat-input__model:hover {
+  background: var(--surface-5);
+}
+
+.chat-input__model option {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+/* Los iconos cuelgan de la esquina inferior izquierda de la caja. */
+.chat-input__tools {
+  position: absolute;
+  left: -10px;
+  bottom: -14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 6px;
+  gap: 2px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
 }
 
-.chat-input__left {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.chat-input__tools .icon-btn {
+  width: 28px;
+  height: 28px;
+  color: var(--ink-muted);
 }
 
-.chat-input__left .icon-btn:disabled {
+.chat-input__tools .icon-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.chat-input__tools .icon-btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.chat-input__left .icon-btn.is-active {
-  background: var(--primary);
-  color: var(--on-primary);
+.chat-input__tools .icon-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
-.chat-input__model {
-  margin-left: 6px;
-  padding: 5px 13px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  font-size: 13px;
-  outline: none;
-  cursor: pointer;
-  max-width: 190px;
+/* Micrófono grabando: el punto rojo es el estado, la pulsación es que sigue vivo. */
+.chat-input__tools .icon-btn.is-recording {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+  animation: mic-pulse 1.4s ease-in-out infinite;
 }
 
+@keyframes mic-pulse {
+  50% { opacity: 0.55; }
+}
+
+/* Enviar: el único círculo de la interfaz, junto al avatar. */
 .chat-input__send {
+  position: absolute;
+  right: -12px;
+  bottom: -12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-round);
   background: var(--primary);
   color: var(--on-primary);
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 
 .chat-input__send:hover:not(:disabled) {
-  opacity: 0.85;
+  background: #FFFFFF;
   transform: scale(1.05);
 }
 
 .chat-input__send:disabled {
-  opacity: 0.45;
+  background: var(--field-focus);
+  color: var(--ink-label);
   cursor: not-allowed;
 }
 
-/* Toast (notificaciones) */
+/* Soltar un archivo: la zona cubre la caja entera, no un rectángulo pequeño. */
+.chat-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  animation: fade-in 0.14s ease;
+}
+
+.chat-drop__caja {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  pointer-events: none; /* el drop lo escucha la ventana: este cartel no debe tapar nada */
+}
+
+.chat-drop__caja small {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+/* La imagen encogida hace de icono: se reconoce lo que se adjuntó de un vistazo,
+   que con tres capturas seguidas es lo único que las distingue. */
+.attach-chip__thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-chip);
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+
+/* Mientras el modelo de visión mira la imagen (o el servidor lee el PDF). */
+.attach-chip {
+  position: relative;
+}
+
+.attach-chip.is-loading {
+  color: var(--ink-muted);
+}
+
+.attach-chip.is-loading::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--radius-round);
+  background: linear-gradient(90deg, transparent, var(--accent-deep), transparent);
+  animation: chip-reading 1.1s ease-in-out infinite;
+}
+
+@keyframes chip-reading {
+  from { transform: translateX(-40%) scaleX(0.4); }
+  to { transform: translateX(40%) scaleX(0.4); }
+}
+
+/* Nota al pie del compositor */
+
+.chat-disclaimer {
+  margin-top: 26px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* ── Aviso flotante ──────────────────────────────────────────────────── */
+/* Los tres avisos del chat son fallos, así que el color es el del error.
+   La pestaña sale de ::before para no tener que montarla en el JSX. */
 
 .chat-toast {
   position: absolute;
-  top: 18px;
+  top: 22px;
   left: 50%;
-  padding: 10px 22px;
-  border-radius: var(--radius-pill);
-  background: var(--primary);
-  color: var(--on-primary);
-  font-size: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: #7E2B22;
+  color: #FBEEEB;
+  font-size: 13.5px;
   z-index: 50;
   animation: toast-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   transform: translateX(-50%);
+}
+
+.chat-toast::before {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: 20px;
+  width: 78px;
+  height: 11px;
+  border-radius: 8px 8px 0 0;
+  background: #6B241C;
 }
 
 .chat-toast.is-leaving {
@@ -824,10 +1041,6 @@
 
 @media (pointer: coarse) {
   .sb-nav {
-    padding: 13px 10px;
-  }
-
-  .sidebar__history-head {
     padding: 12px 10px;
   }
 
@@ -841,12 +1054,7 @@
 
   /* Solo cuando es enlace (sesión cerrada); con sesión es un <span>. */
   a.sidebar__profile-name {
-    padding: 7px 0;
-  }
-
-  .sidebar__plan {
-    padding-top: 7px;
-    padding-bottom: 7px;
+    padding: 6px 0;
   }
 }
 
@@ -855,22 +1063,27 @@
    estando, a un toque del botón de la cabecera. */
 
 @media (max-width: 860px) {
+  .chat-shell {
+    gap: 0;
+    padding: 0;
+  }
+
   .sidebar {
     position: fixed;
     z-index: 40;
-    top: 0;
-    bottom: 0;
-    left: 0;
+    top: 8px;
+    bottom: 8px;
+    left: 8px;
     width: min(320px, 84vw);
     padding-left: var(--safe-l);
     padding-bottom: var(--safe-b);
-    transform: translateX(-100%);
+    transform: translateX(calc(-100% - 10px));
     transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
   }
 
   .sidebar.is-open {
     transform: none;
-    box-shadow: 0 0 70px rgba(var(--shadow-rgb), 0.28);
+    box-shadow: 0 0 70px rgba(0, 0, 0, 0.55);
   }
 
   /* El riel colapsado es una idea de escritorio: aquí el cajón está o no está. */
@@ -893,6 +1106,7 @@
 
   .chat-header {
     gap: 10px;
+    height: auto;
     padding: 10px 12px;
     padding-top: calc(10px + var(--safe-t));
     padding-right: calc(12px + var(--safe-r));
@@ -903,10 +1117,6 @@
     display: inline-flex;
   }
 
-  .chat-header__title {
-    font-size: 16px;
-  }
-
   .chat-toast {
     top: calc(14px + var(--safe-t));
     max-width: calc(100% - 32px);
@@ -914,8 +1124,8 @@
 
   .chat-thread,
   .sk-thread {
-    padding: 8px 16px 20px;
-    gap: 16px;
+    padding: 10px 16px 20px;
+    gap: 18px;
   }
 
   .msg--user {
@@ -923,7 +1133,7 @@
   }
 
   .chat-composer {
-    padding: 6px 12px calc(12px + var(--safe-b));
+    padding: 14px 16px calc(20px + var(--safe-b));
   }
 
   .chat-hero {
@@ -932,59 +1142,101 @@
   }
 
   .chat-hero__title {
-    font-size: 27px;
+    font-size: 25px;
   }
 
   /* 16px es el mínimo que evita que iOS haga zoom al enfocar un control. */
   .sidebar__search,
   .sb-item__edit,
-  .chat-input__model {
+  .chat-input__text {
     font-size: 16px;
-  }
-
-  /* Sin min-width:0 el <select> no encoge por debajo del nombre del modelo y
-     empuja al botón de enviar fuera de la caja. */
-  .chat-input__bar {
-    gap: 8px;
-  }
-
-  .chat-input__left {
-    min-width: 0;
-  }
-
-  .chat-input__model {
-    min-width: 0;
-    max-width: 150px;
-    text-overflow: ellipsis;
   }
 
   .md pre {
     /* El bloque de código se sale del ancho del hilo si no se le deja respirar. */
     padding: 12px;
-    font-size: 13px;
+    font-size: 12.5px;
   }
 }
 
-/* Teléfono (≤400px): la barra del compositor es lo primero que se rompe. */
+/* Teléfono (≤640px): el compositor cambia de forma. Con el dedo, un botón que
+   cuelga por fuera de la caja queda pegado al borde de la pantalla y los
+   iconos de 28px no se aciertan: los tres se meten dentro, en su propia barra,
+   y el enviar deja de ser círculo para ser un objetivo de 44px. */
+
+@media (max-width: 640px) {
+  /* El relleno pasa del bloque interior al contenedor, y las tres piezas se
+     reparten en dos filas: el texto arriba, la barra debajo. */
+  .chat-input {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 11px;
+    padding: 13px 13px 10px;
+    border-radius: var(--radius);
+    background: var(--bg-card);
+  }
+
+  .chat-input.is-dropping {
+    background: var(--surface-3);
+  }
+
+  .chat-input__box {
+    flex: 1 0 100%;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .chat-input.is-dropping .chat-input__box {
+    background: transparent;
+  }
+
+  .chat-input__tools,
+  .chat-input__send {
+    position: static;
+  }
+
+  /* Empuja el enviar al otro extremo de la fila. */
+  .chat-input__tools {
+    margin-right: auto;
+    padding: 0;
+    background: transparent;
+  }
+
+  .chat-input__tools .icon-btn,
+  .chat-input__send {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-input__send {
+    border-radius: var(--radius);
+  }
+
+  .chat-input__send:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .chat-hero__title--invitado {
+    font-size: 21px;
+  }
+}
+
+/* Teléfono estrecho (≤400px) */
 
 @media (max-width: 400px) {
   .chat-hero__title {
-    font-size: 23px;
-  }
-
-  .chat-input {
-    padding: 11px 12px 9px;
+    font-size: 22px;
   }
 
   .chat-input__model {
-    margin-left: 2px;
-    padding: 5px 10px;
-    max-width: 116px;
+    max-width: 150px;
   }
 
-  .chat-header__auth .pill-btn {
-    padding: 8px 14px;
-    font-size: 13.5px;
+  .chat-header__share {
+    padding: 0 12px;
+    font-size: 12.5px;
   }
 }
 
@@ -999,91 +1251,4 @@
   .chat-hero__title {
     font-size: 21px;
   }
-}
-
-/* ── Adjuntar: miniaturas, soltar y dictado ──────────────────────────── */
-
-.attach-chip {
-  position: relative;
-  padding-left: 5px;
-}
-
-/* La imagen encogida hace de icono: se reconoce lo que se adjuntó de un vistazo,
-   que con tres capturas seguidas es lo único que las distingue. */
-.attach-chip__thumb {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  object-fit: cover;
-  flex-shrink: 0;
-  display: block;
-}
-
-/* Mientras el modelo de visión mira la imagen (o el servidor lee el PDF). */
-.attach-chip.is-loading {
-  color: var(--ink-soft);
-}
-
-.attach-chip.is-loading::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, transparent, var(--accent-deep), transparent);
-  animation: chip-reading 1.1s ease-in-out infinite;
-}
-
-@keyframes chip-reading {
-  from { transform: translateX(-40%) scaleX(0.4); }
-  to { transform: translateX(40%) scaleX(0.4); }
-}
-
-/* Soltar un archivo: la zona cubre la caja entera, no un rectángulo pequeño. */
-.chat-input {
-  position: relative;
-}
-
-.chat-input.is-dropping {
-  box-shadow: 0 0 0 2px var(--accent-deep);
-}
-
-.chat-drop {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-box);
-  background: var(--bg-input);
-  animation: fade-in 0.14s ease;
-}
-
-.chat-drop__caja {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  color: var(--ink-soft);
-  font-size: 13.5px;
-  pointer-events: none; /* el drop lo escucha la ventana: este cartel no debe tapar nada */
-}
-
-.chat-drop__caja small {
-  font-size: 11.5px;
-  color: var(--ink-muted);
-}
-
-/* Micrófono grabando: el punto rojo es el estado, la pulsación es que sigue vivo. */
-.chat-input__left .icon-btn.is-recording {
-  background: var(--danger-soft);
-  color: var(--danger);
-  animation: mic-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes mic-pulse {
-  50% { opacity: 0.55; }
 }

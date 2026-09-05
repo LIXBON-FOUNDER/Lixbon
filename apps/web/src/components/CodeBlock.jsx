@@ -15,13 +15,17 @@ export function CodeBlock({ code, label }) {
 
   return (
     <div className="codeblock">
-      {label && <span className="codeblock__label">{label}</span>}
-      <div className="codeblock__row">
-        <code className="codeblock__code">{code}</code>
+      {/* Cabecera: el lenguaje a la izquierda y el copiar a la derecha, fuera
+          del camino del comando. */}
+      <div className="codeblock__head">
+        <span className="codeblock__label">{label}</span>
         <button className="codeblock__copy" onClick={copy} aria-label="Copiar comando">
-          {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
           <span>{copied ? 'Copiado' : 'Copiar'}</span>
         </button>
+      </div>
+      <div className="codeblock__row">
+        <code className="codeblock__code">{code}</code>
       </div>
     </div>
   );

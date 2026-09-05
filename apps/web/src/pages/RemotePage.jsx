@@ -40,9 +40,9 @@ export default function RemotePage() {
   }, [token, navigate]);
 
   return (
-    <div className="page page--cream remote-page">
+    <div className="page remote-page">
       <header className="pubnav">
-        <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
+        <Link to="/" className="pubnav__logo"><Logo /></Link>
         <span className="shared__badge">Control remoto</span>
         <div className="pubnav__actions">
           <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Ir al chat</Link>

@@ -176,16 +176,7 @@ export const IconChart = (p) => (
   <Svg {...p}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></Svg>
 );
 
-export const IconSun = (p) => (
-  <Svg {...p}>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-  </Svg>
-);
 
-export const IconMoon = (p) => (
-  <Svg {...p}><path d="M20 13A8 8 0 1 1 11 4a6.5 6.5 0 0 0 9 9Z" /></Svg>
-);
 
 export const IconMic = (p) => (
   <Svg {...p}>
@@ -206,5 +197,58 @@ export const IconFile = (p) => (
   <Svg {...p}>
     <path d="M14 2.5H7.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7Z" />
     <path d="M14 2.5V7h4.5" />
+  </Svg>
+);
+
+export const IconHome = (p) => (
+  <Svg {...p}>
+    <path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19v-8.5Z" />
+    <path d="M9.5 20.5V14h5v6.5" />
+  </Svg>
+);
+
+// Van rellenas, no de trazo: por eso no pasan por <Svg>.
+export const IconApps = ({ size = 18, ...p }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...p}>
+    {[6, 12, 18].map((cy) => [6, 12, 18].map((cx) => (
+      <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.5" />
+    )))}
+  </svg>
+);
+
+export const IconBag = (p) => (
+  <Svg {...p}>
+    <path d="M3.5 8h17l-1.2 11a2 2 0 0 1-2 1.8H6.7a2 2 0 0 1-2-1.8L3.5 8Z" />
+    <path d="M8.5 8V6.5a3.5 3.5 0 0 1 7 0V8" />
+  </Svg>
+);
+
+export const IconNodes = (p) => (
+  <Svg {...p}>
+    <circle cx="6" cy="7" r="2.2" /><circle cx="18" cy="7" r="2.2" /><circle cx="12" cy="17" r="2.2" />
+    <path d="M8.2 7h7.6M7.2 9l3.5 6M16.8 9l-3.5 6" />
+  </Svg>
+);
+
+export const IconTrend = (p) => (
+  <Svg {...p}><path d="M4 18 10 12l3.5 3.5L20 9" /><path d="M15 9h5v5" /></Svg>
+);
+
+export const IconUsers = (p) => (
+  <Svg {...p}>
+    <circle cx="9" cy="8" r="3.4" />
+    <path d="M3 20a6 6 0 0 1 12 0" />
+    <path d="M16 5.5a3.4 3.4 0 0 1 0 6.6M17.5 20a6 6 0 0 0-2.2-4.7" />
+  </Svg>
+);
+
+export const IconCaret = (p) => (
+  <Svg {...p}><path d="m9 6 6 6-6 6" /></Svg>
+);
+
+export const IconAlert = (p) => (
+  <Svg {...p} strokeWidth="1.7">
+    <path d="M12 8.5v4.5M12 16.2v.3" />
+    <path d="M10.3 4.2 2.8 17.4A1.9 1.9 0 0 0 4.5 20.3h15a1.9 1.9 0 0 0 1.7-2.9L13.7 4.2a1.9 1.9 0 0 0-3.4 0Z" />
   </Svg>
 );

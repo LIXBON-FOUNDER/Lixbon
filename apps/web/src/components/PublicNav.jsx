@@ -5,10 +5,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { useTheme } from '../lib/theme';
 import { useDismiss } from '../hooks/useDismiss';
 import { Logo } from './Logo';
-import { IconSun, IconMoon, IconMenu, IconX } from './Icons';
+import { IconMenu, IconX } from './Icons';
 
 const LINKS = [
   { to: '/docs', label: 'Documentación' },
@@ -21,7 +20,6 @@ const SUPPORT_EMAIL = 'soporte@lixbon.com';
 export function PublicNav() {
   const { pathname } = useLocation();
   const { user } = useAuth();
-  const [theme, toggleTheme] = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const navRef = useRef(null);
 
@@ -33,7 +31,7 @@ export function PublicNav() {
 
   return (
     <header className="pubnav" ref={navRef}>
-      <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
+      <Link to="/" className="pubnav__logo"><Logo /></Link>
 
       <nav className="pubnav__links">
         {LINKS.map((l) => (
@@ -48,13 +46,6 @@ export function PublicNav() {
       </nav>
 
       <div className="pubnav__actions">
-        <button
-          className="icon-btn"
-          onClick={toggleTheme}
-          aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-        >
-          {theme === 'dark' ? <IconSun /> : <IconMoon />}
-        </button>
         {/* Estos tres se recogen en .pubnav__menu al pasar a compacto. Van en
             su propio contenedor porque .pubnav__btn lo reusan otras páginas
             (la conversación compartida) que no tienen menú donde recogerlos. */}

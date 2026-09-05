@@ -29,7 +29,7 @@ export default function ReleasesPage() {
   }, [versions]);
 
   return (
-    <div className="page page--cream">
+    <div className="page">
       <PublicNav />
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">Novedades</h1>

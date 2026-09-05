@@ -205,8 +205,11 @@ export function ChatInput({ onSend, busy, models, model, onModelChange, webSearc
 
   const aviso = error || dictado.error;
 
+  // La caja es el bloque; los iconos y el botón de enviar cuelgan por fuera de
+  // sus esquinas, así que van fuera de __box y el ancla es .chat-input.
   return (
     <div className={arrastrando ? 'chat-input is-dropping' : 'chat-input'}>
+      <div className="chat-input__box">
       {arrastrando && (
         <div className="chat-drop" role="status">
           <div className="chat-drop__caja">
@@ -253,75 +256,78 @@ export function ChatInput({ onSend, busy, models, model, onModelChange, webSearc
       <textarea
         ref={ref}
         className="chat-input__text"
-        placeholder="Pregunta lo que quieras"
+        placeholder="Escribe tu mensaje…"
         rows={1}
         onKeyDown={onKeyDown}
         onInput={ajustarAlto}
         onPaste={alPegar}
         aria-label="Mensaje"
       />
-      <div className="chat-input__bar">
-        <div className="chat-input__left">
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            onChange={pickFiles}
-            style={{ display: 'none' }}
-          />
-          <button
-            className="icon-btn"
-            type="button"
-            title="Adjuntar imagen o documento (también puedes pegarlo o arrastrarlo)"
-            onClick={() => fileRef.current?.click()}
-          >
-            <IconClip />
-          </button>
-          {dictado.soportado && (
-            <button
-              className={dictado.escuchando ? 'icon-btn is-recording' : 'icon-btn'}
-              type="button"
-              title={dictado.escuchando ? 'Parar el dictado' : 'Dictar el mensaje'}
-              onClick={dictado.alternar}
-              aria-pressed={dictado.escuchando}
-            >
-              <IconMic />
-            </button>
-          )}
-          <button
-            className={webSearch ? 'icon-btn is-active' : 'icon-btn'}
-            type="button"
-            title={onToggleWeb ? (webSearch ? 'Búsqueda en internet activada' : 'Buscar en internet') : 'Buscar en la web (próximamente)'}
-            onClick={onToggleWeb}
-            disabled={!onToggleWeb}
-            aria-pressed={webSearch}
-          >
-            <IconGlobe />
-          </button>
-          {models.length > 0 && (
-            <select
-              className="chat-input__model"
-              value={model}
-              onChange={(e) => onModelChange(e.target.value)}
-              aria-label="Modelo"
-            >
-              {models.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          )}
-        </div>
-        <button
-          className="chat-input__send"
-          type="button"
-          onClick={send}
-          disabled={busy || leyendo}
-          aria-label="Enviar"
+
+      {/* El modelo ocupa la ranura baja de la caja, como un chip más. */}
+      {models.length > 0 && (
+        <select
+          className="chat-input__model"
+          value={model}
+          onChange={(e) => onModelChange(e.target.value)}
+          aria-label="Modelo"
         >
-          <IconSend size={16} />
+          {models.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      )}
+      </div>
+
+      <div className="chat-input__tools">
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept={ACCEPT}
+          onChange={pickFiles}
+          style={{ display: 'none' }}
+        />
+        <button
+          className="icon-btn"
+          type="button"
+          title="Adjuntar imagen o documento (también puedes pegarlo o arrastrarlo)"
+          onClick={() => fileRef.current?.click()}
+        >
+          <IconClip size={19} />
+        </button>
+        {dictado.soportado && (
+          <button
+            className={dictado.escuchando ? 'icon-btn is-recording' : 'icon-btn'}
+            type="button"
+            title={dictado.escuchando ? 'Parar el dictado' : 'Dictar el mensaje'}
+            onClick={dictado.alternar}
+            aria-pressed={dictado.escuchando}
+          >
+            <IconMic size={19} />
+          </button>
+        )}
+        <button
+          className={webSearch ? 'icon-btn is-active' : 'icon-btn'}
+          type="button"
+          title={onToggleWeb ? (webSearch ? 'Búsqueda en internet activada' : 'Buscar en internet') : 'Buscar en la web (próximamente)'}
+          onClick={onToggleWeb}
+          disabled={!onToggleWeb}
+          aria-pressed={webSearch}
+        >
+          <IconGlobe size={19} />
         </button>
       </div>
+
+      <button
+        className="chat-input__send"
+        type="button"
+        onClick={send}
+        disabled={busy || leyendo}
+        aria-label="Enviar"
+      >
+        <IconSend size={19} />
+      </button>
     </div>
   );
 }

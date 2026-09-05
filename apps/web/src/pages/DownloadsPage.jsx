@@ -32,7 +32,7 @@ export default function DownloadsPage() {
   const unixCmd = `curl -fsSL ${base}/install.sh | bash`;
 
   return (
-    <div className="page page--cream">
+    <div className="page">
       <PublicNav />
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">Aplicaciones</h1>
@@ -42,11 +42,15 @@ export default function DownloadsPage() {
           {/* ── Apps: escritorio + Android, dos cuadros iguales ── */}
           <div className="downloads__apps">
             <section className="dl-card dl-card--app">
-              <img src="/favicon.svg" alt="Icono de lixbon" className="dl-card__logo" draggable={false} />
-              <h2 className="dl-card__title">App de escritorio</h2>
-              <p className="dl-card__desc">
-                La experiencia completa de lixbon en una app nativa para Windows.
-              </p>
+              <div className="dl-card__head">
+                <img src="/favicon.svg" alt="" className="dl-card__logo" draggable={false} />
+                <div className="dl-card__heading">
+                  <h2 className="dl-card__title">App de escritorio</h2>
+                  <p className="dl-card__desc">
+                    La experiencia completa de lixbon en una app nativa para Windows.
+                  </p>
+                </div>
+              </div>
               <ul className="dl-card__features">
                 <li><IconCheck size={15} /> Editor de código con chat integrado</li>
                 <li><IconCheck size={15} /> Terminales, Git y explorador de archivos</li>
@@ -71,13 +75,17 @@ export default function DownloadsPage() {
             </section>
 
             <section className="dl-card dl-card--android">
-              <div className="dl-card__icon"><IconPhone size={26} /></div>
-              <h2 className="dl-card__title">App de Android</h2>
-              <p className="dl-card__desc">
-                Chatea con el cluster desde tu teléfono, con tu misma cuenta e historial.
-                Se instala directamente como APK (Android pedirá permitir «orígenes
-                desconocidos»: es lo normal fuera de Play Store).
-              </p>
+              <div className="dl-card__head">
+                <div className="dl-card__icon"><IconPhone size={19} /></div>
+                <div className="dl-card__heading">
+                  <h2 className="dl-card__title">App de Android</h2>
+                  <p className="dl-card__desc">
+                    Chatea con el cluster desde tu teléfono, con tu misma cuenta e historial.
+                    Se instala directamente como APK (Android pedirá permitir «orígenes
+                    desconocidos»: es lo normal fuera de Play Store).
+                  </p>
+                </div>
+              </div>
               <ul className="dl-card__features">
                 <li><IconCheck size={15} /> Chat con streaming y búsqueda web</li>
                 <li><IconCheck size={15} /> Historial compartido con la web</li>
@@ -104,14 +112,16 @@ export default function DownloadsPage() {
 
           {/* ── CLI ── */}
           <section className="dl-card dl-card--cli">
-            <div className="dl-card__icon"><IconTerminal size={26} /></div>
-            <h2 className="dl-card__title">Interfaz de línea de comandos (CLI)</h2>
-            <p className="dl-card__desc">
-              Chatea con el cluster desde tu terminal, con modo agente y contexto de
-              tu carpeta de trabajo. Requiere Python 3.10 o superior.
-            </p>
-
-            <div className="os-tabs" role="tablist">
+            <div className="dl-card__head">
+              <div className="dl-card__icon"><IconTerminal size={19} /></div>
+              <div className="dl-card__heading">
+                <h2 className="dl-card__title">Interfaz de línea de comandos (CLI)</h2>
+                <p className="dl-card__desc">
+                  Chatea con el cluster desde tu terminal, con modo agente y contexto de
+                  tu carpeta de trabajo. Requiere Python 3.10 o superior.
+                </p>
+              </div>
+              <div className="os-tabs" role="tablist">
               <button
                 role="tab" aria-selected={os === 'windows'}
                 className={`os-tab ${os === 'windows' ? 'is-active' : ''}`}
@@ -125,13 +135,14 @@ export default function DownloadsPage() {
                 onClick={() => setOs('unix')}
               >
                 Linux / macOS
-              </button>
+                </button>
+              </div>
             </div>
 
             {os === 'windows' ? (
               <>
                 <p className="dl-card__step">1. Abre <strong>PowerShell</strong> y ejecuta:</p>
-                <CodeBlock code={winCmd} />
+                <CodeBlock code={winCmd} label="powershell" />
                 <p className="dl-card__note">
                   Instala el CLI en <code>%USERPROFILE%\.lixbon</code> y agrega el comando{' '}
                   <code>lixbon</code> a tu PATH. Abre una terminal nueva después de instalar.
@@ -140,7 +151,7 @@ export default function DownloadsPage() {
             ) : (
               <>
                 <p className="dl-card__step">1. Abre tu <strong>terminal</strong> y ejecuta:</p>
-                <CodeBlock code={unixCmd} />
+                <CodeBlock code={unixCmd} label="bash" />
                 <p className="dl-card__note">
                   Instala el CLI en <code>~/.lixbon</code> y crea el comando{' '}
                   <code>lixbon</code> en <code>~/.local/bin</code>.

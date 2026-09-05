@@ -1,5 +1,6 @@
-/* public.css — páginas públicas (Descargas, Docs), barra de navegación
-   común y bloque de código con copiar. Reusa tokens de base.css. */
+/* public.css — páginas públicas (Aplicaciones, Documentación, Novedades, la
+   conversación compartida), la barra superior común, el bloque de código y los
+   diálogos. Todo sobre el mismo escalón de superficies, sin una sola línea. */
 
 /* ── Barra de navegación pública ─────────────────────────────────────── */
 
@@ -8,9 +9,10 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 16px 28px;
-  padding-top: calc(16px + var(--safe-t));
-  border-bottom: 1px solid var(--border-soft);
+  height: 60px;
+  flex-shrink: 0;
+  padding: 0 32px;
+  padding-top: var(--safe-t);
 }
 
 .pubnav__logo {
@@ -19,62 +21,59 @@
 
 .pubnav__links {
   display: flex;
-  gap: 6px;
-  margin-left: 8px;
+  gap: 4px;
+  margin-left: 12px;
   flex: 1;
 }
 
 .pubnav__link {
-  padding: 7px 16px;
-  border-radius: var(--radius-pill);
-  font-size: 14.5px;
-  font-weight: 500;
-  color: var(--ink-soft);
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  color: #8A8A88;
   text-decoration: none;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .pubnav__link:hover {
   color: var(--ink);
-  background: rgba(var(--ink-rgb), 0.05);
+  background: var(--surface-2);
 }
 
 .pubnav__link.is-active {
   color: var(--ink);
-  background: var(--bg-secondary);
+  background: var(--surface-3);
 }
 
 .pubnav__actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 /* Lo que se recoge en el menú compacto (ver PublicNav.jsx) */
 .pubnav__wide {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .pubnav__btn {
-  font-size: 14px;
-  padding: 8px 18px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
   text-decoration: none;
-  border: 1px solid var(--border-soft)
 }
 
 .pubnav__login {
-  font-size: 14.5px;
-  font-weight: 500;
-  color: var(--ink);
+  font-size: 13.5px;
+  color: var(--ink-soft);
   text-decoration: none;
   white-space: nowrap;
 }
 
 .pubnav__login:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: var(--ink);
 }
 
 /* ── Menú compacto de la barra pública ───────────────────────────────── */
@@ -88,15 +87,15 @@
   display: none;
   position: absolute;
   z-index: 50;
-  top: 100%;
-  left: 0;
-  right: 0;
+  top: calc(100% + 4px);
+  left: 12px;
+  right: 12px;
   flex-direction: column;
   gap: 2px;
-  padding: 10px 12px calc(14px + var(--safe-b));
-  background: var(--bg);
-  border-bottom: 1px solid var(--border-soft);
-  box-shadow: 0 16px 32px rgba(var(--shadow-rgb), 0.1);
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5);
 }
 
 .pubnav__menu.is-open {
@@ -112,22 +111,23 @@
 }
 
 .pubnav__menu-link {
-  padding: 13px 14px;
-  border-radius: 14px;
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--ink);
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  color: var(--ink-soft);
   text-decoration: none;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.pubnav__menu-link:active {
-  background: rgba(var(--ink-rgb), 0.06);
+.pubnav__menu-link:active,
+.pubnav__menu-link:hover {
+  background: var(--surface-5);
+  color: var(--ink);
 }
 
 .pubnav__menu-link.is-active {
-  background: var(--bg-secondary);
-  font-weight: 600;
+  background: var(--surface-5);
+  color: var(--ink);
 }
 
 .pubnav__menu-cta {
@@ -136,39 +136,53 @@
 }
 
 /* ── Bloque de código con copiar ─────────────────────────────────────── */
+/* Dos alturas: una cabecera con el lenguaje y el copiar, y el código debajo.
+   Sobre la página va en #131313; dentro de una tarjeta baja a #0E0E0E. */
 
 .codeblock {
+  display: flex;
+  flex-direction: column;
   margin: 12px 0;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.card .codeblock,
+.dl-card .codeblock {
+  background: var(--surface-0);
+}
+
+.codeblock__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px 0 13px;
+  min-height: 30px;
 }
 
 .codeblock__label {
-  display: inline-block;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-label);
 }
 
 .codeblock__row {
   display: flex;
   align-items: stretch;
-  gap: 8px;
-  background: var(--code-bg);
-  border-radius: 14px;
-  padding: 4px 4px 4px 16px;
+  padding: 4px 13px 12px;
 }
 
 .codeblock__code {
   flex: 1;
   min-width: 0;
   align-self: center;
-  padding: 8px 0;
   color: var(--code-ink);
-  font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
   white-space: pre;
   overflow-x: auto;
 }
@@ -178,21 +192,21 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  align-self: center;
-  padding: 8px 14px;
-  border-radius: 10px;
-  background: rgba(246, 247, 237, 0.12);
-  color: var(--code-ink);
-  font-size: 13px;
-  font-weight: 500;
-  transition: background 0.15s ease;
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-chip);
+  color: var(--ink-muted);
+  font-size: 12px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .codeblock__copy:hover {
-  background: rgba(246, 247, 237, 0.22);
+  background: var(--surface-3);
+  color: var(--ink);
 }
 
-/* ── Descargas ───────────────────────────────────────────────────────── */
+/* ── Aplicaciones ────────────────────────────────────────────────────── */
 
 /* Arriba las dos apps como cuadros gemelos (escritorio + Android) y debajo
    el CLI a todo el ancho. En pantallas angostas se apila todo. */
@@ -201,13 +215,13 @@
 .downloads {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
+  gap: 16px;
 }
 
 .downloads__apps {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -220,29 +234,49 @@
 .dl-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 28px 26px;
-  border-radius: var(--radius-box);
-  background: var(--bg);
-  border: 1px solid var(--border-soft);
+  gap: 14px;
+  padding: 22px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+/* Cabecera de la tarjeta: el icono a la izquierda y, apilados, el nombre y
+   para qué sirve. El CLI mete además su selector de sistema a la derecha. */
+.dl-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.dl-card__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-card__head .os-tabs {
+  flex-shrink: 0;
+  align-self: center;
 }
 
 .dl-card__logo {
-  width: 56px;
-  height: 56px;
-  margin-bottom: 6px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   user-select: none;
 }
 
 .dl-card__features {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  font-size: 14px;
-  color: var(--ink-soft);
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-muted);
 }
 
 .dl-card__features li {
@@ -253,13 +287,13 @@
 
 .dl-card__features svg {
   flex-shrink: 0;
-  color: var(--ink);
+  color: var(--ink-label);
 }
 
-/* Empuja la descarga al borde inferior: las dos cards quedan alineadas */
+/* Empuja la descarga al borde inferior: las dos tarjetas quedan alineadas. */
 .dl-card__bottom {
   margin-top: auto;
-  padding-top: 18px;
+  padding-top: 6px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -269,26 +303,30 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  background: var(--bg-secondary);
-  margin-bottom: 4px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  background: #1D1D1D;
+  color: var(--ink-soft);
 }
 
 .dl-card__title {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .dl-card__desc {
-  color: var(--ink-soft);
-  font-size: 14.5px;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  text-wrap: pretty;
 }
 
 .dl-card__cta {
   align-self: flex-start;
-  margin-top: 6px;
+  height: 38px;
+  padding: 0 14px;
   text-decoration: none;
 }
 
@@ -298,66 +336,68 @@
 }
 
 .dl-card__meta {
-  font-size: 13px;
-  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-label);
 }
 
 .dl-card__step {
-  margin-top: 8px;
-  font-size: 14.5px;
-  font-weight: 500;
+  font-size: 12.5px;
+  color: #8A8A88;
+}
+
+.dl-card__step code {
+  font-family: var(--font-mono);
+  color: var(--ink-soft);
 }
 
 .dl-card__note {
-  font-size: 13.5px;
-  color: var(--ink-soft);
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  text-wrap: pretty;
 }
 
 .dl-card__note code,
 .dl-card__desc code {
-  background: var(--bg-secondary);
   padding: 1px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
-/* Tabs de sistema operativo */
+/* Selector de sistema operativo */
 
 .os-tabs {
   display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius);
+  background: #1A1A1A;
   align-self: flex-start;
-  margin: 4px 0;
 }
 
 .os-tab {
-  padding: 6px 18px;
-  border-radius: var(--radius-pill);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ink-soft);
+  padding: 5px 13px;
+  border-radius: var(--radius-chip);
+  font-size: 12.5px;
+  color: #8A8A88;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .os-tab.is-active {
-  background: var(--primary);
-  color: var(--on-primary);
+  background: #2A2A2A;
+  color: var(--ink);
 }
 
 .dl-details {
-  margin-top: 10px;
-  border-top: 1px solid var(--border-soft);
-  padding-top: 12px;
+  margin-top: 4px;
 }
 
 .dl-details summary {
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ink-soft);
+  font-size: 12.5px;
+  color: var(--ink-muted);
 }
 
 .dl-details summary:hover {
@@ -366,12 +406,14 @@
 
 .downloads__foot {
   text-align: center;
-  margin-top: 26px;
-  color: var(--ink-soft);
-  font-size: 14.5px;
+  margin-top: 24px;
+  color: var(--ink-muted);
+  font-size: 13px;
 }
 
-/* ── Modal (compartir) ───────────────────────────────────────────────── */
+/* ── Diálogos ────────────────────────────────────────────────────────── */
+/* Claros sobre la aplicación oscura, con su pestaña: una decisión no es
+   una pantalla más, se lee de un vistazo y se responde. */
 
 .modal-overlay {
   position: fixed;
@@ -386,12 +428,26 @@
 }
 
 .modal {
+  position: relative;
   width: min(480px, 100%);
-  background: var(--bg);
-  border-radius: var(--radius-box);
-  padding: 22px 24px;
-  box-shadow: 0 20px 60px rgba(var(--shadow-rgb), 0.28);
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: #141414;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
   animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* La pestaña, sin tener que montarla en cada diálogo. */
+.modal::before {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: 24px;
+  width: 78px;
+  height: 11px;
+  border-radius: 8px 8px 0 0;
+  background: var(--primary);
 }
 
 @keyframes modal-pop {
@@ -402,17 +458,42 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.modal__head .icon-btn {
+  color: #5A5A57;
+}
+
+.modal__head .icon-btn:hover {
+  background: #D8D8D3;
+  color: #141414;
 }
 
 .modal__title {
-  font-size: 19px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 600;
+  color: #141414;
 }
 
 .modal__desc {
   margin-bottom: 16px;
+  font-size: 13px;
   line-height: 1.55;
+  color: #5A5A57;
+  text-wrap: pretty;
+}
+
+/* Dentro del diálogo claro, el texto y los avisos cambian de bando. */
+.modal .card__muted {
+  color: #5A5A57;
+}
+
+.modal .page__error {
+  margin-top: 12px;
+  background: #F3DCD6;
+  color: #8E3226;
 }
 
 .modal__cta {
@@ -423,13 +504,39 @@
   width: 100%;
   max-width: none;
   margin-bottom: 14px;
+  background: #E4E4DF;
+  color: #141414;
+}
+
+.modal__password:focus {
+  background: #DBDBD6;
 }
 
 .modal__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   margin-top: 6px;
+}
+
+/* Dentro del diálogo claro los botones cambian de bando. */
+.modal .pill-btn--primary {
+  background: #3C6420;
+  color: #F0F6E7;
+}
+
+.modal .pill-btn--outline {
+  background: #D8D8D3;
+  color: #141414;
+}
+
+.modal .pill-btn--outline:hover:not(:disabled) {
+  background: #CDCDC7;
+}
+
+.modal .pill-btn.is-danger {
+  background: #8E3226;
+  color: #FBEEEB;
 }
 
 .share-link {
@@ -440,19 +547,20 @@
 .share-link__input {
   flex: 1;
   min-width: 0;
-  padding: 10px 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-pill);
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: #E4E4DF;
+  color: #3A3A38;
+  font-size: 13px;
   outline: none;
-  font-size: 13.5px;
-  color: var(--ink-soft);
-  background: var(--bg-secondary);
 }
 
 .share-link__copy {
   flex-shrink: 0;
-  padding: 10px 18px;
-  font-size: 14px;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
 }
 
 .modal__revoke {
@@ -460,72 +568,71 @@
   align-items: center;
   gap: 6px;
   margin-top: 14px;
-  color: var(--danger);
-  font-size: 14px;
+  color: #8E3226;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .modal__revoke:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: #6B241C;
 }
 
 /* ── Conversación compartida (pública) ───────────────────────────────── */
 
 .shared__badge {
-  padding: 4px 14px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-soft);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-soft);
+  padding: 3px 10px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  font-size: 12px;
+  color: var(--ink-muted);
 }
 
 .shared {
-  width: min(780px, calc(100% - 40px));
+  width: min(720px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 24px 0 60px;
+  padding: 22px 0 60px;
 }
 
 .shared__title {
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
   margin-bottom: 20px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
 .shared__thread {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
 }
 
 .shared__cta {
-  margin-top: 40px;
-  padding-top: 24px;
-  border-top: 1px solid var(--border-soft);
-  text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 14px;
+  margin-top: 40px;
+  padding: 24px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  text-align: center;
 }
 
 .shared__cta p {
-  color: var(--ink-soft);
-  font-size: 14.5px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  text-wrap: pretty;
 }
 
-/* ── lixbon Docs ──────────────────────────────────────────────────────── */
+/* ── lixbon Docs ─────────────────────────────────────────────────────── */
 
 .docs {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 40px;
-  width: min(1080px, calc(100% - 48px));
+  grid-template-columns: 248px minmax(0, 1fr) 216px;
+  gap: 8px;
+  width: min(1320px, calc(100% - 64px));
   margin: 0 auto;
-  padding: 28px 0 80px;
+  padding: 24px 0 80px;
   align-items: start;
 }
 
@@ -538,7 +645,8 @@
   top: 24px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
+  padding: 0 12px;
 }
 
 .docs__nav-group {
@@ -548,73 +656,89 @@
 }
 
 .docs__nav-title {
-  font-size: 12px;
-  font-weight: 700;
+  padding: 4px 11px;
+  font-size: 11px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-  padding: 4px 12px;
+  color: var(--ink-label);
 }
 
 .docs__nav-link {
-  padding: 7px 12px;
-  border-radius: 10px;
-  font-size: 14.5px;
-  color: var(--ink-soft);
+  padding: 7px 11px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  color: #8A8A88;
   text-decoration: none;
   transition: background 0.14s ease, color 0.14s ease;
 }
 
 .docs__nav-link:hover {
   color: var(--ink);
-  background: rgba(var(--ink-rgb), 0.05);
+  background: var(--surface-2);
 }
 
 .docs__nav-link.is-active {
   color: var(--ink);
-  font-weight: 600;
-  background: var(--bg-secondary);
+  background: var(--surface-3);
 }
 
 /* Contenido */
 
 .docs__content {
   min-width: 0;
-  max-width: 720px;
+  max-width: 760px;
+  padding: 12px 32px 0;
   animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* De qué grupo del índice viene esta página, antes de decir cuál es. */
+.docs__eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+
 .docs__content h1 {
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  font-size: 29px;
+  font-weight: 500;
+  letter-spacing: -0.022em;
+  color: var(--ink);
+  scroll-margin-top: 24px;
 }
 
 .docs__content h2 {
-  font-size: 21px;
-  font-weight: 650;
-  margin: 32px 0 10px;
-  padding-top: 10px;
+  margin: 30px 0 10px;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--ink);
+  scroll-margin-top: 24px;
 }
 
 .docs__lead {
-  font-size: 17px;
-  color: var(--ink-soft);
-  line-height: 1.6;
   margin-bottom: 8px;
+  font-size: 15px;
+  color: #9A9A97;
+  line-height: 1.65;
+  text-wrap: pretty;
 }
 
 .docs__content p {
-  font-size: 15.5px;
-  line-height: 1.7;
   margin: 10px 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  text-wrap: pretty;
 }
 
 .docs__content ul {
   padding-left: 22px;
-  font-size: 15.5px;
+  font-size: 14px;
   line-height: 1.7;
+  color: var(--ink-soft);
 }
 
 .docs__content li {
@@ -622,22 +746,21 @@
 }
 
 .docs__content a {
-  color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: var(--border-soft);
+  color: var(--accent);
+  text-decoration: none;
 }
 
 .docs__content a:hover {
-  text-decoration-color: var(--ink);
+  color: #CEDC85;
 }
 
 .docs__content code {
-  background: var(--bg-secondary);
-  padding: 1px 6px;
-  border-radius: 6px;
-  font-size: 0.88em;
-  font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  padding: 2px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  color: var(--code-ink);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
 
 .docs__content pre code {
@@ -645,8 +768,8 @@
   padding: 0;
 }
 
-/* Dentro de Docs, el <code> del bloque conserva su color claro sobre el fondo
-   oscuro (la regla de código en línea de arriba, más específica, lo pisaba). */
+/* Dentro de Docs, el <code> del bloque conserva su tratamiento propio (la
+   regla de código en línea de arriba, más específica, lo pisaba). */
 .docs__content .codeblock__code {
   background: none;
   color: var(--code-ink);
@@ -654,58 +777,129 @@
 }
 
 .docs__callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
   margin: 22px 0;
-  padding: 14px 18px;
-  border-radius: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-soft);
-  font-size: 14.5px;
-  line-height: 1.6;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: rgba(140, 160, 56, 0.07);
+  color: #B6BE95;
+  font-size: 13px;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.docs__callout > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.docs__callout p {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.docs__callout strong {
+  color: #CEDC85;
+  font-weight: 500;
+}
+
+/* ── Índice de la página que se está leyendo ─────────────────────────── */
+
+.docs__toc {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 24px 24px 0;
+  min-width: 0;
+}
+
+.docs__toc-title {
+  padding-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+
+/* La barra de la izquierda es el único indicador de posición de la interfaz:
+   no es un borde de contenedor, es dónde estás. */
+.docs__toc-link {
+  padding: 4px 0 4px 11px;
+  border-left: 2px solid #212121;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.docs__toc-link:hover {
+  color: var(--ink-soft);
+}
+
+.docs__toc-link.is-active {
+  border-left-color: var(--accent-deep);
+  color: var(--ink-body);
 }
 
 .docs__table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0 2px;
   margin: 14px 0;
-  font-size: 14.5px;
-}
-
-.docs__table th,
-.docs__table td {
-  text-align: left;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border-soft);
+  font-size: 13.5px;
 }
 
 .docs__table th {
-  font-size: 12.5px;
+  text-align: left;
+  padding: 0 14px 6px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-soft);
+  color: var(--ink-label);
+}
+
+.docs__table td {
+  padding: 11px 14px;
+  background: var(--bg-row);
+  color: var(--ink-body);
+}
+
+.docs__table td:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.docs__table td:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .docs__pager {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   margin-top: 48px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border-soft);
 }
 
 .docs__pager-link {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 18px;
-  border-radius: 14px;
-  border: 1px solid var(--border-soft);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
   text-decoration: none;
-  transition: border-color 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .docs__pager-link:hover {
-  border-color: var(--ink);
+  background: var(--surface-3);
 }
 
 .docs__pager-link--next {
@@ -714,26 +908,118 @@
 }
 
 .docs__pager-link span {
-  font-size: 12.5px;
-  color: var(--ink-soft);
+  font-size: 12px;
+  color: var(--ink-muted);
 }
 
 .docs__pager-link strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* ── Novedades (/novedades) ──────────────────────────────────────────── */
+
+.releases {
+  list-style: none;
+  margin: 26px auto 0;
+  padding: 0;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.release {
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  scroll-margin-top: 90px;
+  transition: background 0.2s ease;
+}
+
+/* Llegar por enlace directo: la versión se señala sin dibujarle un marco. */
+.release:target {
+  background: var(--surface-3);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.release__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.release__title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.release__version {
+  padding: 2px 9px;
+  border-radius: var(--radius-chip);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.release__channel {
+  padding: 2px 9px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+.release__title {
+  margin: 0;
   font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.release__date {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.release__changelog {
+  margin: 14px 0 0;
+  padding-left: 20px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-body);
+}
+
+.release__changelog li {
+  margin-bottom: 4px;
+}
+
+.releases__empty {
+  text-align: center;
+  margin-top: 40px;
+  color: var(--ink-muted);
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 
 /* La barra pública se recoge a ≤980px: medido, su contenido completo (logo +
-   3 enlaces + tema + Soporte + Iniciar sesión + CTA) necesita 960px. Es un
-   punto de corte distinto al del índice de Docs a propósito: cada componente
-   rompe donde rompe su contenido. */
+   3 enlaces + Soporte + Iniciar sesión + CTA) necesita casi todo ese ancho.
+   Es un punto de corte distinto al del índice de Docs a propósito: cada
+   componente rompe donde rompe su contenido. */
 
 @media (max-width: 980px) {
   .pubnav {
     gap: 10px;
-    padding: 12px 16px;
-    padding-top: calc(12px + var(--safe-t));
+    padding: 0 16px;
     padding-right: calc(16px + var(--safe-r));
     padding-left: calc(16px + var(--safe-l));
   }
@@ -756,12 +1042,27 @@
 
 /* Compacto (≤860px): el índice lateral de Docs se pliega tras un botón. */
 
+@media (max-width: 1180px) {
+  .docs {
+    grid-template-columns: 248px minmax(0, 1fr);
+    width: min(1180px, calc(100% - 48px));
+  }
+
+  .docs__toc {
+    display: none;
+  }
+}
+
 @media (max-width: 860px) {
   .docs {
     grid-template-columns: 1fr;
-    gap: 16px;
-    width: min(1080px, calc(100% - 32px));
+    gap: 12px;
+    width: min(1180px, calc(100% - 32px));
     padding-top: 20px;
+  }
+
+  .docs__content {
+    padding: 4px 0 0;
   }
 
   .docs__menu-toggle {
@@ -770,12 +1071,10 @@
     justify-content: space-between;
     gap: 8px;
     width: 100%;
-    padding: 12px 18px;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--border-soft);
-    background: var(--bg-secondary);
-    font-size: 15px;
-    font-weight: 550;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    background: var(--surface-3);
+    font-size: 14px;
     text-align: left;
   }
 
@@ -783,8 +1082,8 @@
     position: static;
     display: none;
     padding: 8px;
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius-box);
+    border-radius: var(--radius);
+    background: var(--bg-card);
   }
 
   .docs__nav.is-open {
@@ -794,31 +1093,43 @@
 
   .docs__nav-link {
     padding: 11px 12px;
-    font-size: 15.5px;
+    font-size: 14.5px;
   }
 }
 
 /* Teléfono (≤640px) */
 
 @media (max-width: 640px) {
+  /* El selector de sistema no cabe junto al título: baja a su propia línea. */
+  .dl-card__head {
+    flex-wrap: wrap;
+  }
+
+  .dl-card__head .os-tabs {
+    align-self: flex-start;
+  }
+
   /* La barra de la conversación compartida lleva logo + distintivo + CTA y no
      tiene menú donde recogerlos: se reparten en dos líneas antes que desbordar. */
   .pubnav {
+    height: auto;
     flex-wrap: wrap;
     row-gap: 10px;
+    padding-top: calc(12px + var(--safe-t));
+    padding-bottom: 12px;
   }
 
   .docs__content h1 {
-    font-size: 26px;
+    font-size: 25px;
   }
 
   .docs__content h2 {
-    font-size: 19px;
+    font-size: 16px;
     margin-top: 26px;
   }
 
   .docs__lead {
-    font-size: 16px;
+    font-size: 14px;
   }
 
   /* Las tablas de 3-5 columnas no caben: se desplazan en horizontal dentro de
@@ -847,7 +1158,6 @@
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
-    padding: 12px 14px;
   }
 
   /* En columna, `align-self: center` (el valor de escritorio) deja al <code>
@@ -856,27 +1166,23 @@
     align-self: stretch;
   }
 
-  .codeblock__copy {
-    align-self: flex-end;
+  .codeblock__copy span {
+    display: none;
   }
 
   .dl-card {
-    padding: 22px 18px;
+    padding: 18px;
   }
 
   .shared {
-    width: min(780px, calc(100% - 32px));
-  }
-
-  .shared__title {
-    font-size: 22px;
+    width: min(720px, calc(100% - 32px));
   }
 
   .release {
     padding: 18px;
   }
 
-  /* Modal → hoja inferior: al alcance del pulgar y con más ancho útil. */
+  /* Diálogo → hoja inferior: al alcance del pulgar y con más ancho útil. */
   .modal-overlay {
     align-items: flex-end;
     padding: 0;
@@ -884,9 +1190,14 @@
 
   .modal {
     width: 100%;
-    border-radius: var(--radius-box) var(--radius-box) 0 0;
+    border-radius: var(--radius) var(--radius) 0 0;
     padding: 20px 18px calc(20px + var(--safe-b));
     animation: sheet-up 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* Pegado al borde inferior, la pestaña se saldría de la pantalla. */
+  .modal::before {
+    display: none;
   }
 
   @keyframes sheet-up {
@@ -908,93 +1219,4 @@
   .share-link__input {
     font-size: 16px; /* menos de 16px hace que iOS haga zoom al enfocar */
   }
-}
-
-/* ── Novedades (/novedades) ──────────────────────────────────────────── */
-
-.releases {
-  list-style: none;
-  margin: 34px auto 0;
-  padding: 0;
-  max-width: 720px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.release {
-  background: var(--bg);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-box);
-  padding: 22px 26px;
-  scroll-margin-top: 90px;
-}
-
-.release:target {
-  border-color: var(--ink);
-  box-shadow: 0 0 0 3px var(--accent);
-}
-
-.release__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.release__title-wrap {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.release__version {
-  font-weight: 700;
-  font-size: 15px;
-  padding: 3px 11px;
-  background: var(--accent);
-  border-radius: var(--radius-pill);
-  color: var(--on-accent);
-}
-
-.release__channel {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  padding: 2px 9px;
-}
-
-.release__title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.release__date {
-  color: var(--ink-soft);
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.release__changelog {
-  margin: 16px 0 0;
-  padding-left: 20px;
-  line-height: 1.6;
-  font-size: 15px;
-  color: var(--ink-soft);
-}
-
-.release__changelog li {
-  margin-bottom: 4px;
-}
-
-.releases__empty {
-  text-align: center;
-  margin-top: 40px;
-  color: var(--ink-soft);
 }

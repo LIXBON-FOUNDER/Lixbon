@@ -1,10 +1,11 @@
 // DocsPage.jsx — lixbon Docs (/docs y /docs/:section). Índice lateral por grupos +
 // contenido central. Pública. Estilo tipo code.claude.com.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PublicNav } from '../components/PublicNav';
 import { SECTIONS } from './docsContent';
 import { DocsSkeleton } from '../components/Skeleton';
+import { DocsToc } from '../components/DocsToc';
 import { IconChevron } from '../components/Icons';
 
 export default function DocsPage() {
@@ -13,6 +14,7 @@ export default function DocsPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [contentReady, setContentReady] = useState(false);
   const base = useMemo(() => window.location.origin, []);
+  const cuerpoRef = useRef(null);
 
   const current = SECTIONS.find((s) => s.id === section) || SECTIONS[0];
 
@@ -73,9 +75,10 @@ export default function DocsPage() {
           ))}
         </aside>
 
-        <article className="docs__content">
+        <article className="docs__content" ref={cuerpoRef}>
           {contentReady ? (
             <>
+              <span className="docs__eyebrow">{current.group}</span>
               <Body base={base} />
               <DocsFooter current={current} />
             </>
@@ -83,6 +86,8 @@ export default function DocsPage() {
             <DocsSkeleton />
           )}
         </article>
+
+        {contentReady && <DocsToc contenedor={cuerpoRef} deps={current.id} />}
       </div>
     </div>
   );

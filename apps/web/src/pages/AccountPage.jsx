@@ -6,12 +6,11 @@ import { FiCamera } from 'react-icons/fi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
-import { getThemePreference, setThemePreference } from '../lib/theme';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useReenvioVerificacion } from '../components/VerifyBanner';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
-import { planColor } from '../lib/planColors';
+import { planBadge } from '../lib/planColors';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconBolt, IconLogout,
@@ -168,12 +167,6 @@ function GeneralSection({ user, onSaved }) {
   const [last, setLast] = useState(user.last_name || '');
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState(false);
-  const [themePref, setThemePref] = useState(getThemePreference);
-
-  const changeTheme = (pref) => {
-    setThemePreference(pref);
-    setThemePref(pref);
-  };
 
   const dirty = first.trim() !== (user.first_name || '') || last.trim() !== (user.last_name || '');
 
@@ -192,8 +185,8 @@ function GeneralSection({ user, onSaved }) {
 
   return (
     <>
-      <h2 className="set-title">Perfil</h2>
       <div className="set-card">
+        <h2 className="set-title">Perfil</h2>
         <Row label="Avatar" hint="Se ve también en el IDE · PNG, JPG o WEBP, máx. 3 MB">
           <AvatarField user={user} onSaved={onSaved} />
         </Row>
@@ -214,26 +207,8 @@ function GeneralSection({ user, onSaved }) {
         </button>
       </div>
 
-      <h2 className="set-title">Preferencias</h2>
       <div className="set-card">
-        <Row label="Apariencia" hint="Tema de la interfaz">
-          <div className="set-seg" role="radiogroup" aria-label="Apariencia">
-            {[
-              { id: 'light', label: 'Claro' },
-              { id: 'dark', label: 'Oscuro' },
-              { id: 'system', label: 'Sistema' },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`set-seg__btn ${themePref === opt.id ? 'is-active' : ''}`}
-                onClick={() => changeTheme(opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </Row>
+        <h2 className="set-title">Preferencias</h2>
         <Row label="Idioma" hint="Idioma de la interfaz"><SoonTag /></Row>
       </div>
     </>
@@ -301,8 +276,8 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
 
   return (
     <>
-      <h2 className="set-title">Cuenta</h2>
       <div className="set-card">
+        <h2 className="set-title">Cuenta</h2>
         <Row
           label="Correo"
           hint={user.email_verified
@@ -334,9 +309,9 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
         </Row>
       </div>
 
-      <h2 className="set-title">API keys</h2>
-      {error && <p className="page__error" role="alert">{error}</p>}
       <div className="set-card">
+        <h2 className="set-title">API keys</h2>
+        {error && <p className="page__error" role="alert">{error}</p>}
         <div className="set-row set-row--head">
           <span className="card__muted">
             {activeKeys.length} activa(s) de {unlimited(plan.max_api_keys) ? 'ilimitadas' : plan.max_api_keys} en tu plan.
@@ -377,8 +352,8 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
         </ul>
       </div>
 
-      <h2 className="set-title">Sesión</h2>
       <div className="set-card">
+        <h2 className="set-title">Sesión</h2>
         <Row label="Cerrar sesión" hint="Cierra tu sesión en este navegador">
           <button className="pill-btn pill-btn--outline set-btn" onClick={onLogout}>
             <IconLogout size={14} /> Cerrar sesión
@@ -483,13 +458,13 @@ function PrivacidadSection({ user, onUserChange }) {
 
   return (
     <>
-      <h2 className="set-title">Privacidad</h2>
-      <p className="set-lead">
+      <div className="set-card">
+        <h2 className="set-title">Privacidad</h2>
+        <p className="set-lead">
         En lixbon tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
         clúster y no compartimos tus datos con terceros.
-      </p>
-      {error && <p className="page__error" role="alert">{error}</p>}
-      <div className="set-card">
+        </p>
+        {error && <p className="page__error" role="alert">{error}</p>}
         <Row label="Datos de uso anónimos" hint="Métricas agregadas para mejorar el servicio">
           {settings
             ? <Toggle label="Datos de uso anónimos" checked={settings.anonymous_usage}
@@ -506,8 +481,8 @@ function PrivacidadSection({ user, onUserChange }) {
         </Row>
       </div>
 
-      <h2 className="set-title">Tus datos</h2>
       <div className="set-card">
+        <h2 className="set-title">Tus datos</h2>
         <Row label="Exportar datos" hint="Descarga una copia de tus conversaciones y tu uso (JSON)">
           <button className="pill-btn pill-btn--outline set-btn" onClick={exportData} disabled={exporting}>
             {exporting ? 'Preparando…' : 'Exportar'}
@@ -613,10 +588,10 @@ function FacturacionSection({ plan }) {
       )}
       {error && <p className="page__error" role="alert">{error}</p>}
 
-      <h2 className="set-title">Plan</h2>
       <div className="set-card set-plan">
+        <h2 className="set-title">Plan</h2>
         <div className="set-plan__info">
-          <span className="plan-pill" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span>
+          <span className="plan-pill" style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}>Plan {plan.name}</span>
           <p className="card__muted">{plan.description}</p>
           <span className="set-plan__price">{price}</span>
           {paid && billing.current_period_end && (
@@ -638,18 +613,18 @@ function FacturacionSection({ plan }) {
         )}
       </div>
 
-      <h2 className="set-title">Créditos de API</h2>
-      {creditsOk && (
-        <p className="admin-ok" role="status">
-          ¡Recarga completada! El saldo puede tardar unos segundos en reflejarse.
-        </p>
-      )}
-      <p className="card__muted">
-        {paid
-          ? `Con tu plan ${plan.name}, el uso de la API ya está incluido en tu cuota mensual de tokens. Los créditos solo se descuentan si agotas esa cuota y quieres seguir usando la API el resto del mes.`
-          : 'Sin plan de pago, cada petición con tu API key se descuenta de este saldo según la tarifa del modelo.'}
-      </p>
       <div className="set-card">
+        <h2 className="set-title">Créditos de API</h2>
+        {creditsOk && (
+        <p className="admin-ok" role="status">
+        ¡Recarga completada! El saldo puede tardar unos segundos en reflejarse.
+        </p>
+        )}
+        <p className="card__muted">
+        {paid
+        ? `Con tu plan ${plan.name}, el uso de la API ya está incluido en tu cuota mensual de tokens. Los créditos solo se descuentan si agotas esa cuota y quieres seguir usando la API el resto del mes.`
+        : 'Sin plan de pago, cada petición con tu API key se descuenta de este saldo según la tarifa del modelo.'}
+        </p>
         <Row
           label="Saldo disponible"
           hint={paid ? 'Solo se usa si agotas la cuota de tu plan' : 'Se descuenta por tokens al usar tus API keys'}
@@ -684,8 +659,8 @@ function FacturacionSection({ plan }) {
 
       {purchases.length > 0 && (
         <>
-          <h2 className="set-title">Recargas</h2>
           <div className="set-card">
+            <h2 className="set-title">Recargas</h2>
             <ul className="keys">
               {purchases.map((p) => (
                 <li key={p.id} className="keys__item">
@@ -701,8 +676,8 @@ function FacturacionSection({ plan }) {
         </>
       )}
 
-      <h2 className="set-title">Pago</h2>
       <div className="set-card">
+        <h2 className="set-title">Pago</h2>
         {paid && billing.payment_method ? (
           <Row label="Método de pago" hint="Gestiónalo desde el portal">
             <span className="set-static">
@@ -716,8 +691,8 @@ function FacturacionSection({ plan }) {
         )}
       </div>
 
-      <h2 className="set-title">Facturas</h2>
       <div className="set-card">
+        <h2 className="set-title">Facturas</h2>
         {paid && billing.invoices?.length > 0 ? (
           <ul className="keys">
             {billing.invoices.map((inv) => (
@@ -737,8 +712,8 @@ function FacturacionSection({ plan }) {
         )}
       </div>
 
-      <h2 className="set-title">Cancelación</h2>
       <div className="set-card">
+        <h2 className="set-title">Cancelación</h2>
         {paid ? (
           <Row label="Cancelar plan" hint="Gestiona la cancelación desde el portal de facturación">
             <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={openPortal} disabled={busy}>
@@ -771,13 +746,13 @@ function UsoSection({ usage, daily, plan }) {
 
   return (
     <>
-      <h2 className="set-title">Uso del período <span className="set-plan-tag" style={{ background: planColor(plan.id), color: '#fff' }}>Plan {plan.name}</span></h2>
-      <p className="card__muted">
-        {paid
-          ? 'Tu plan se mide en tokens (la barra de abajo). El chat de la web, el IDE y el CLI, y también la API, se cubren con esa cuota mensual. Solo pagas créditos aparte si agotas la cuota.'
-          : 'Tu plan gratuito se mide en tokens (la barra de abajo) para el chat. El uso de la API con tu key se cobra por separado de tu saldo de créditos.'}
-      </p>
       <div className="set-card">
+        <h2 className="set-title">Uso del período <span className="set-plan-tag" style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}>Plan {plan.name}</span></h2>
+        <p className="card__muted">
+        {paid
+        ? 'Tu plan se mide en tokens (la barra de abajo). El chat de la web, el IDE y el CLI, y también la API, se cubren con esa cuota mensual. Solo pagas créditos aparte si agotas la cuota.'
+        : 'Tu plan gratuito se mide en tokens (la barra de abajo) para el chat. El uso de la API con tu key se cobra por separado de tu saldo de créditos.'}
+        </p>
         <QuotaBar
           label="Mensajes hoy"
           used={usage.messages_today}
@@ -792,13 +767,13 @@ function UsoSection({ usage, daily, plan }) {
         />
       </div>
 
-      <h2 className="set-title">Tokens por día — últimos 30 días</h2>
       <div className="set-card">
+        <h2 className="set-title">Tokens por día — últimos 30 días</h2>
         <UsageChart daily={daily} />
       </div>
 
-      <h2 className="set-title">Consumo de créditos de API — últimos 30 días</h2>
       <div className="set-card">
+        <h2 className="set-title">Consumo de créditos de API — últimos 30 días</h2>
         {paid && (
           <p className="card__muted">
             {withinQuota
@@ -891,7 +866,7 @@ export default function AccountPage() {
   if (loading || (!account && !error)) {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">LIXBON</span>
+        <span className="app-loading__logo"><Logo size={19} /></span>
         <span className="app-loading__bar"><span /></span>
       </div>
     );
@@ -900,9 +875,11 @@ export default function AccountPage() {
   return (
     <div className="page">
       <header className="page__bar">
-        <Link to="/" className="page__logo"><Logo size={30} /></Link>
+        <Link to="/" className="page__logo"><Logo /></Link>
         <Link to="/" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
       </header>
+
+      <h1 className="page__title settings__title">Ajustes</h1>
 
       <div className="settings">
         <button
@@ -915,7 +892,6 @@ export default function AccountPage() {
         </button>
 
         <aside id="settings-nav" className={`settings__nav ${menuOpen ? 'is-open' : ''}`}>
-          <span className="settings__nav-title">Ajustes</span>
           {SECTIONS.map((s) => (
             <button
               key={s.id}

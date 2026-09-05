@@ -23,33 +23,6 @@
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);  /* rebote corto: knobs */
 }
 
-/* ── Cambio de tema ──────────────────────────────────────────────────── */
-/* El salto de claro a oscuro era el corte más duro de la web: cambiaban de
-   golpe fondo, texto y bordes de todo lo visible. La clase la pone y la quita
-   theme.js alrededor del cambio, así que estas transiciones solo existen
-   durante ese tercio de segundo — dejarlas puestas encarecería cada hover de
-   la interfaz entera. */
-
-html.theme-anim,
-html.theme-anim *,
-html.theme-anim *::before,
-html.theme-anim *::after {
-  transition:
-    background-color var(--dur-3) var(--ease-in-out),
-    border-color var(--dur-3) var(--ease-in-out),
-    color var(--dur-3) var(--ease-in-out),
-    fill var(--dur-3) var(--ease-in-out),
-    box-shadow var(--dur-3) var(--ease-in-out) !important;
-}
-
-/* Donde el navegador la soporta, el cambio va por View Transitions: un
-   fundido real entre las dos pantallas en vez de propiedad por propiedad. */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: var(--dur-3);
-  animation-timing-function: var(--ease-in-out);
-}
-
 /* ── Cambio de página ────────────────────────────────────────────────── */
 /* Solo opacidad: un transform aquí convertiría este contenedor en el marco de
    referencia de todo lo `position: fixed` que hay dentro (el cajón lateral, el
@@ -80,6 +53,7 @@ html.theme-anim *::after {
 .pill-btn,
 .set-btn,
 .pubnav__btn,
+.auth__cta,
 .auth__social-btn,
 .card__cta,
 .plan-card__cta,
@@ -88,13 +62,13 @@ html.theme-anim *::after {
     opacity var(--dur-2) var(--ease-out),
     background var(--dur-2) var(--ease-out),
     color var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out),
     transform var(--dur-1) var(--ease-out);
 }
 
 .pill-btn:active:not(:disabled),
 .set-btn:active:not(:disabled),
 .pubnav__btn:active,
+.auth__cta:active:not(:disabled),
 .auth__social-btn:active:not(:disabled),
 .card__cta:active,
 .plan-card__cta:active:not(:disabled),
@@ -116,7 +90,7 @@ html.theme-anim *::after {
 /* Los iconos que giran o se voltean al cambiar de estado (chevrons de
    acordeón, flecha del panel plegable). */
 .docs__nav-group svg,
-.table__expand svg,
+.adm-link__caret,
 .sidebar__history-head svg {
   transition: transform var(--dur-2) var(--ease-out);
 }
@@ -124,23 +98,24 @@ html.theme-anim *::after {
 /* ── Superficies que reaccionan ──────────────────────────────────────── */
 
 .dl-card,
-.stat,
+.adm-stat,
+.adm-nodo,
 .release,
 .remote__card {
   transition:
     transform var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out),
-    box-shadow var(--dur-2) var(--ease-out);
+    background var(--dur-2) var(--ease-out);
 }
 
 /* Solo con ratón: en táctil el :hover se queda pegado después de tocar. */
 @media (hover: hover) {
   .dl-card:hover,
-  .stat:hover,
+  .adm-stat:hover,
+  .adm-nodo:hover,
   .release:hover,
   .remote__card:hover {
     transform: translateY(-2px);
-    border-color: var(--border);
+    background: var(--surface-3);
   }
 }
 
@@ -155,8 +130,7 @@ html.theme-anim *::after {
 .pubnav__menu-link {
   transition:
     background var(--dur-2) var(--ease-out),
-    color var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out);
+    color var(--dur-2) var(--ease-out);
 }
 
 /* ── Controles ───────────────────────────────────────────────────────── */
@@ -164,9 +138,7 @@ html.theme-anim *::after {
 /* El interruptor: la bolita sale con un rebote corto y el carril cambia de
    color un poco más despacio, para que se lea el recorrido y no el salto. */
 .set-toggle {
-  transition:
-    background var(--dur-2) var(--ease-in-out),
-    border-color var(--dur-2) var(--ease-in-out);
+  transition: background var(--dur-2) var(--ease-in-out);
 }
 
 .set-toggle__knob {
@@ -181,89 +153,21 @@ html.theme-anim *::after {
   width: 22px;
 }
 
-/* Selector segmentado (Claro / Oscuro / Sistema): el fondo del activo pasa a
-   ser una pastilla que se desliza entre las tres opciones en vez de aparecer
-   de golpe en la de destino. Los botones se reparten el ancho para que la
-   pastilla pueda ir a tercios exactos. */
-/* Rejilla y no flex: en un inline-flex cada botón se queda con el ancho de su
-   palabra ("Claro" 61px, "Sistema" 79px) y la pastilla, que mide un tercio, no
-   caería nunca encima del botón activo. Con columnas de 1fr los tres miden lo
-   mismo y los tercios son exactos. */
-.set-seg {
-  position: relative;
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: 0;
-  isolation: isolate;
-}
-
-.set-seg__btn {
-  position: relative;
-  z-index: 1;
-  transition: color var(--dur-2) var(--ease-out);
-}
-
-.set-seg::before {
-  content: '';
-  position: absolute;
-  z-index: 0;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: calc((100% - 6px) / 3);
-  border-radius: var(--radius-pill);
-  background: var(--ink);
-  opacity: 0;
-  transform: translateX(0);
-  transition:
-    transform var(--dur-3) var(--ease-out),
-    opacity var(--dur-2) var(--ease-out);
-}
-
-.set-seg:has(.set-seg__btn.is-active)::before {
-  opacity: 1;
-}
-
-.set-seg:has(.set-seg__btn:nth-child(2).is-active)::before {
-  transform: translateX(100%);
-}
-
-.set-seg:has(.set-seg__btn:nth-child(3).is-active)::before {
-  transform: translateX(200%);
-}
-
-/* El activo ya no pinta su propio fondo: lo pone la pastilla de detrás. */
-.set-seg__btn.is-active {
-  background: transparent;
-  color: var(--bg);
-}
-
-/* Sin :has() (navegadores viejos) la pastilla no se dibuja y vuelve el fondo
-   sólido de siempre: se pierde el deslizamiento, nunca la legibilidad. */
-@supports not selector(:has(*)) {
-  .set-seg::before { display: none; }
-  .set-seg__btn.is-active { background: var(--ink); }
-}
-
 /* Campos de texto: el foco entra en lugar de encenderse. */
 .set-input,
 .ffield__input,
 .chat-input__text,
-.admin-search__input,
-.plan-models__input,
+.adm-input,
+.adm-buscar input,
 .share-link__input {
   transition:
-    border-color var(--dur-2) var(--ease-out),
     background var(--dur-2) var(--ease-out),
     box-shadow var(--dur-2) var(--ease-out);
 }
 
-/* La barra de escritura del chat, al enfocarla. */
-.chat-input__bar {
-  transition:
-    border-color var(--dur-2) var(--ease-out),
-    box-shadow var(--dur-2) var(--ease-out);
+/* La caja del compositor, al enfocarla. */
+.chat-input__box {
+  transition: background var(--dur-2) var(--ease-out);
 }
 
 /* Escribir: la caja crecía a saltos de una línea entera. Ahora acompaña al
@@ -323,7 +227,8 @@ html.theme-anim *::after {
 .page__error,
 .chat-input__error,
 .set-ok,
-.admin-ok {
+.adm-ok,
+.adm-error {
   animation: soft-in var(--dur-3) var(--ease-out);
 }
 
@@ -336,21 +241,21 @@ html.theme-anim *::after {
    que no animar nada. */
 .plans .plan-card,
 .downloads__apps .dl-card,
-.stats .stat {
+.adm-stats .adm-stat {
   animation: card-in var(--dur-3) var(--ease-out) backwards;
 }
 
 .plans .plan-card:nth-child(2),
 .downloads__apps .dl-card:nth-child(2),
-.stats .stat:nth-child(2) { animation-delay: 60ms; }
+.adm-stats .adm-stat:nth-child(2) { animation-delay: 60ms; }
 
 .plans .plan-card:nth-child(3),
 .downloads__apps .dl-card:nth-child(3),
-.stats .stat:nth-child(3) { animation-delay: 120ms; }
+.adm-stats .adm-stat:nth-child(3) { animation-delay: 120ms; }
 
 .plans .plan-card:nth-child(n + 4),
 .downloads__apps .dl-card:nth-child(n + 4),
-.stats .stat:nth-child(n + 4) { animation-delay: 180ms; }
+.adm-stats .adm-stat:nth-child(n + 4) { animation-delay: 180ms; }
 
 @keyframes card-in {
   from { opacity: 0; transform: translateY(12px); }
@@ -364,7 +269,7 @@ html.theme-anim *::after {
   .route-fade.is-entering,
   .plans .plan-card,
   .downloads__apps .dl-card,
-  .stats .stat,
+  .adm-stats .adm-stat,
   .verify-bar,
   .modal-overlay.is-closing,
   .modal-overlay.is-closing .modal {
@@ -375,10 +280,22 @@ html.theme-anim *::after {
     transition: none;
   }
 
+  /* El clúster del acceso se queda quieto: la figura sigue contando lo mismo. */
+  .cluster__nodo,
+  .cluster__roto,
+  .cluster__viaje {
+    animation: none !important;
+  }
+
+  .cluster__viaje {
+    opacity: 0.9;
+  }
+
   .pill-btn:active:not(:disabled),
   .icon-btn:active:not(:disabled),
   .dl-card:hover,
-  .stat:hover,
+  .adm-stat:hover,
+  .adm-nodo:hover,
   .release:hover,
   .remote__card:hover {
     transform: none;

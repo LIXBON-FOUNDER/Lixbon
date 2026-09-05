@@ -19,9 +19,9 @@ export default function SharedPage() {
 
   if (error) {
     return (
-      <div className="page page--cream">
+      <div className="page">
         <header className="pubnav">
-          <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
+          <Link to="/" className="pubnav__logo"><Logo /></Link>
           <div className="pubnav__actions">
             <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
           </div>
@@ -36,16 +36,16 @@ export default function SharedPage() {
   if (!data) {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">LIXBON</span>
+        <span className="app-loading__logo"><Logo size={19} /></span>
         <span className="app-loading__bar"><span /></span>
       </div>
     );
   }
 
   return (
-    <div className="page page--cream">
+    <div className="page">
       <header className="pubnav">
-        <Link to="/" className="pubnav__logo"><Logo size={30} /></Link>
+        <Link to="/" className="pubnav__logo"><Logo /></Link>
         <span className="shared__badge">Conversación compartida</span>
         <div className="pubnav__actions">
           <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>

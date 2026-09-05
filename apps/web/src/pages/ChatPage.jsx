@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useIsCompact } from '../hooks/useMediaQuery';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
+import { Logo } from '../components/Logo';
 import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
@@ -262,7 +263,7 @@ export default function ChatPage() {
   if (loading) {
     return (
       <div className="app-loading">
-        <span className="brand app-loading__logo">LIXBON</span>
+        <span className="app-loading__logo"><Logo size={19} /></span>
         <span className="app-loading__bar"><span /></span>
       </div>
     );
@@ -313,10 +314,9 @@ export default function ChatPage() {
               </button>
             )
           ) : (
-            <div className="chat-header__auth">
-              <Link to="/auth" className="pill-btn pill-btn--outline">Inicia Sesion</Link>
-              <Link to="/auth?mode=register" className="pill-btn pill-btn--primary">Registrate</Link>
-            </div>
+            <Link to="/auth" className="pill-btn pill-btn--primary chat-header__share">
+              Iniciar sesión
+            </Link>
           )}
         </header>
 
@@ -333,7 +333,13 @@ export default function ChatPage() {
           </>
         ) : empty ? (
           <div className="chat-hero">
-            <h2 className="chat-hero__title">¿Qué investigaremos hoy?</h2>
+            {/* Sin sesión el encabezado explica el límite en vez de invitar a
+                escribir: es lo primero que hay que saber antes de empezar. */}
+            <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
+              {user
+                ? '¿Qué investigaremos hoy?'
+                : 'Solo tienes un chat disponible para usar. Inicia sesión para tener más chats y funciones'}
+            </h2>
             <div className="chat-hero__input">
               <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
@@ -372,6 +378,9 @@ export default function ChatPage() {
               )}
               <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
+              <p className="chat-disclaimer">
+                lixbon puede equivocarse. Verifica los comandos antes de ejecutarlos.
+              </p>
             </div>
           </>
         )}

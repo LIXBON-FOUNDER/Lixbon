@@ -7,14 +7,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
-import { planColor } from '../lib/planColors';
-import { useTheme } from '../lib/theme';
+import { planBadge } from '../lib/planColors';
 import { useDismiss } from '../hooks/useDismiss';
 import { HistorySkeleton } from './Skeleton';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
-  IconBook, IconBolt, IconGlobe, IconSun, IconMoon,
+  IconBook, IconBolt, IconGlobe, IconUser,
 } from './Icons';
 
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
@@ -115,7 +114,6 @@ export function Sidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [profileMenu, setProfileMenu] = useState(false);
-  const [theme, toggleTheme] = useTheme();
   const searchRef = useRef(null);
   const profileRef = useRef(null);
   const closeBtnRef = useRef(null);
@@ -177,16 +175,9 @@ export function Sidebar({
       <div className="sidebar__body" aria-hidden={collapsed && !compact}>
         <div className="sidebar__header">
           <Link to="/" className="sidebar__logo" onClick={compact ? onClose : undefined}>
-            <Logo size={30} />
+            <Logo />
           </Link>
           <div className="sidebar__header-actions">
-            <button
-              className="icon-btn"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-            >
-              {theme === 'dark' ? <IconSun /> : <IconMoon />}
-            </button>
             <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
               {searchOpen ? <IconX /> : <IconSearch />}
             </button>
@@ -270,6 +261,10 @@ export function Sidebar({
           </button>
         )}
 
+        <div className="sidebar__foot">
+        {/* La pestaña que asoma sobre la tarjeta: la misma pieza que llevan
+            los avisos y los diálogos. */}
+        <span className="tab" aria-hidden="true" />
         <div className="sidebar__profile" ref={profileRef}>
           {user ? (
             <>
@@ -288,9 +283,12 @@ export function Sidebar({
                   to="/planes"
                   className="sidebar__plan"
                   onClick={compact ? onClose : undefined}
-                  style={{ background: planColor(user.plan_id), color: '#fff' }}
+                  style={{
+                    background: planBadge(user.plan_id).bg,
+                    color: planBadge(user.plan_id).ink,
+                  }}
                 >
-                  Plan {user.plan_name || 'Gratuito'}
+                  {user.plan_name || 'Gratuito'}
                 </Link>
               </div>
               <button
@@ -326,17 +324,20 @@ export function Sidebar({
             </>
           ) : (
             <>
-              <span className="sidebar__avatar">?</span>
+              <span className="sidebar__avatar sidebar__avatar--guest">
+                <IconUser size={17} />
+              </span>
               <div className="sidebar__profile-info">
                 <Link to="/auth" className="sidebar__profile-name" onClick={compact ? onClose : undefined}>
-                  Iniciar sesion
+                  Iniciar sesión
                 </Link>
-                <Link to="/planes" className="sidebar__plan" onClick={compact ? onClose : undefined}>
+                <Link to="/planes" className="sidebar__plan-link" onClick={compact ? onClose : undefined}>
                   Ver planes
                 </Link>
               </div>
             </>
           )}
+        </div>
         </div>
       </div>
     </aside>

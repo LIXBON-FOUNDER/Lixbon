@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
+import { ClusterFondo } from '../components/ClusterFondo';
 import { api } from '../lib/api';
 
 export default function ResetPasswordPage() {
@@ -36,11 +37,17 @@ export default function ResetPasswordPage() {
   if (!token) {
     return (
       <div className="auth">
-        <Link to="/" className="auth__logo"><Logo size={26} /></Link>
-        <div className="auth__card">
-          <h1 className="auth__title">Enlace inválido</h1>
-          <p className="auth__notice">Este enlace no es válido. Solicita uno nuevo desde el inicio de sesión.</p>
-          <Link className="pill-btn pill-btn--primary auth__cta" to="/auth">Ir a iniciar sesión</Link>
+        <ClusterFondo />
+        <div className="auth__panel">
+          <span className="tab" aria-hidden="true" />
+          <div className="auth__card">
+            <div className="auth__head">
+              <Link to="/" className="auth__logo"><Logo /></Link>
+              <h1 className="auth__title">Enlace inválido</h1>
+            </div>
+            <p className="auth__notice">Este enlace no es válido. Solicita uno nuevo desde el inicio de sesión.</p>
+            <Link className="auth__cta" to="/auth">Ir a iniciar sesión</Link>
+          </div>
         </div>
       </div>
     );
@@ -48,16 +55,26 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="auth">
-      <Link to="/" className="auth__logo"><Logo size={26} /></Link>
-      <form className="auth__card" onSubmit={handleSubmit}>
-        <h1 className="auth__title">Nueva contraseña</h1>
-        <FloatingField label="Nueva Contraseña" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} />
-        <FloatingField label="Confirmar Contraseña" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} />
-        {error && <p className="auth__error" role="alert">{error}</p>}
-        <button className="pill-btn pill-btn--primary auth__cta" type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar contraseña'}
-        </button>
-      </form>
+      <ClusterFondo />
+      <div className="auth__panel">
+        <span className="tab" aria-hidden="true" />
+        <form className="auth__card" onSubmit={handleSubmit}>
+          <div className="auth__head">
+            <Link to="/" className="auth__logo"><Logo /></Link>
+            <h1 className="auth__title">Nueva contraseña</h1>
+          </div>
+          <div className="auth__fields">
+            <FloatingField label="Nueva contraseña" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} />
+            <FloatingField label="Confirmar contraseña" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} />
+          </div>
+          {error && <p className="auth__error" role="alert">{error}</p>}
+          <div className="auth__actions">
+            <button className="auth__cta" type="submit" disabled={busy}>
+              {busy ? 'Guardando…' : 'Guardar contraseña'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,17 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { CodeBlock } from '../components/CodeBlock';
+import { IconShield } from '../components/Icons';
+
+// Aviso dentro de la prosa: tinte de acento y su icono, sin marco.
+function Callout({ children }) {
+  return (
+    <Callout>
+      <IconShield size={17} />
+      <p>{children}</p>
+    </Callout>
+  );
+}
 
 export const SECTIONS = [
   {
@@ -83,9 +94,9 @@ function Introduccion() {
         <li><strong>API</strong> — integra los modelos en tus propias aplicaciones con endpoints compatibles con OpenAI.</li>
       </ul>
 
-      <div className="docs__callout">
+      <Callout>
         ¿Listo para empezar? Continúa con <a href="/docs/primeros-pasos">Primeros pasos</a>.
-      </div>
+      </Callout>
     </>
   );
 }
@@ -217,11 +228,11 @@ function Desktop() {
         estable solo recibe versiones estables.
       </p>
 
-      <div className="docs__callout">
+      <Callout>
         Si aún no ves un instalador en Aplicaciones, es que todavía no se ha publicado
         una versión — mientras tanto puedes usar el <a href="/docs/cli">CLI</a> o el
         <a href="/"> chat web</a>.
-      </div>
+      </Callout>
     </>
   );
 }
@@ -278,11 +289,11 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="")`}
       />
 
-      <div className="docs__callout">
+      <Callout>
         El uso de la API se paga con <strong>créditos prepago</strong> según los tokens
         que consumas — consulta <a href="/docs/precios-api">Precios de la API</a> y las
         recetas de integración en <a href="/docs/usar-api-key">Usar tu API key</a>.
-      </div>
+      </Callout>
     </>
   );
 }
@@ -388,11 +399,11 @@ console.log(resp.choices[0].message.content);`}
         Lista los modelos disponibles con <code>GET {base}/v1/models</code>.
       </p>
 
-      <div className="docs__callout">
+      <Callout>
         Consulta tu consumo detallado por día y modelo en{' '}
         <a href="/account/uso">Ajustes → Uso</a>, y el costo por modelo en{' '}
         <a href="/docs/precios-api">Precios de la API</a>.
-      </div>
+      </Callout>
     </>
   );
 }
@@ -472,10 +483,10 @@ function PreciosApi() {
         funcionar al instante — las keys nunca se bloquean por otra razón de pago.
       </p>
 
-      <div className="docs__callout">
+      <Callout>
         Tu consumo detallado (tokens y costo por día y modelo) está siempre visible en{' '}
         <a href="/account/uso">Ajustes → Uso</a>.
-      </div>
+      </Callout>
     </>
   );
 }

@@ -1,7 +1,43 @@
-/* base.css — fuentes self-hosted, design tokens y reset (docs/DISENO_WEB.md) */
+/* base.css — fuentes, design tokens y reset.
+   Interfaz oscura monocroma: la jerarquía la hace el relleno, nunca un borde. */
 
 /* ── Fuentes ─────────────────────────────────────────────────────────── */
+/* Las tres van self-hosted (subconjuntos latin y latin-ext): la interfaz se
+   pinta sin depender de un tercero y sin una petición extra a otro dominio.
+   Geist y Geist Mono son variables, así que un archivo cubre todos los pesos. */
 
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/geist-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/geist-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 @font-face {
   font-family: 'Bruno Ace SC';
   font-style: normal;
@@ -18,58 +54,87 @@
   src: url('/fonts/bruno-ace-sc-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-@font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('/fonts/bricolage-grotesque-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
 
 /* ── Tokens ──────────────────────────────────────────────────────────── */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --bg: #ffffff;
-  --bg-sidebar: #ffffff;
-  --bg-secondary: #F2F1E3;
-  --bg-input: #F2F1E3;
-  --ink: #171717;
-  --ink-rgb: 23, 23, 23; /* para alphas: hover, tracks, rejillas… */
-  --ink-soft: rgba(23, 23, 23, 0.62);
-  --ink-muted: rgba(23, 23, 23, 0.45);
-  --border: rgba(23, 23, 23, 0.9);
-  --border-soft: rgba(23, 23, 23, 0.16);
-  --accent: #d9e64a; /* verde-amarillo: etiqueta de plan */
-  --accent-deep: #6c7a46;
-  --accent-soft: rgba(217, 230, 74, 0.16);
-  --on-accent: #171717;
-  --primary: #171717; /* elementos invertidos: CTA, avatar, burbujas */
-  --on-primary: #ffffff;
-  --code-bg: #171717; /* bloques de código: oscuros en ambos temas */
-  --code-ink: #f6f7ed;
-  --scrim: rgba(23, 23, 23, 0.42);
-  --shadow-rgb: 23, 23, 23;
-  --danger: #c0392b;
-  --danger-soft: rgba(192, 57, 43, 0.1);
-  --ok: #4a7c1a;
+  /* Superficies. Cada peldaño es un relleno, no una línea. */
+  --surface-0: #0E0E0E; /* fondo de la aplicación */
+  --surface-1: #131313; /* tarjeta, barra lateral */
+  --surface-2: #181818; /* fila de tabla */
+  --surface-3: #1C1C1C; /* bloque, campo, botón secundario */
+  --surface-4: #232323; /* activo */
+  --surface-5: #2A2A2A; /* encima (hover) */
 
-  --font-brand: 'Bruno Ace SC', sans-serif;
-  --font-ui: 'Bricolage Grotesque', system-ui, sans-serif;
+  --bg: var(--surface-0);
+  --bg-sidebar: var(--surface-1);
+  --bg-card: var(--surface-1);
+  --bg-row: var(--surface-2);
+  --bg-secondary: var(--surface-3);
+  --bg-input: var(--surface-3);
+  --bg-active: var(--surface-4);
+  --bg-hover: var(--surface-5);
 
-  --radius-pill: 999px;
-  --radius-box: 22px;
-  --sidebar-w: 280px;
+  /* Texto */
+  --ink: #F2F2F0;           /* principal */
+  --ink-rgb: 242, 242, 240; /* para alphas: hover, tracks, rejillas… */
+  --ink-title: #E6E6E3;     /* título de tarjeta */
+  --ink-body: #D6D6D3;      /* cuerpo largo */
+  --ink-soft: #B0B0AD;      /* secundario */
+  --ink-muted: #7C7C79;     /* apagado */
+  --ink-label: #6E6E6C;     /* etiqueta en versalitas */
+  --ink-faint: #5E5E5C;     /* al margen */
+  --ink-disabled: #4A4A48;
+
+  /* Sin bordes en ninguna parte. Los dos tokens quedan transparentes para
+     que ninguna regla heredada vuelva a dibujar una línea. */
+  --border: transparent;
+  --border-soft: transparent;
+
+  /* Acento y estado. El acento se reserva para el estado, no decora. */
+  --accent: #B4C64E;
+  --accent-deep: #8CA038;
+  --accent-soft: rgba(140, 160, 56, 0.16);
+  --on-accent: #0E0E0E;
+  --ok: #6E9E3E;
+  --ok-soft: rgba(110, 158, 62, 0.16);
+  --warn: #C9A227;
+  --warn-soft: rgba(201, 162, 39, 0.14);
+  --danger: #C4553D;
+  --danger-ink: #D4785F;
+  --danger-soft: rgba(196, 85, 61, 0.14);
+
+  /* Invertido: CTA principal, botón de envío, avatar. */
+  --primary: #F2F2F0;
+  --on-primary: #0E0E0E;
+
+  --code-bg: #131313;
+  --code-ink: #CBD69B;
+  --scrim: rgba(0, 0, 0, 0.62);
+  --shadow-rgb: 0, 0, 0;
+
+  /* Campos: el estado se dice con el relleno y con texto, nunca con un borde. */
+  --field: #1C1C1C;
+  --field-focus: #242424;
+  --field-error: #241715;
+  --field-disabled: #141414;
+
+  --font-brand: 'Bruno Ace SC', 'Geist', sans-serif;
+  --font-ui: 'Geist', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* Radio de 8px en todo; 6px en chips. Redondo solo para el avatar y el
+     botón de envío, vía --radius-round. */
+  --radius: 8px;
+  --radius-box: 8px;
+  --radius-pill: 8px;
+  --radius-chip: 6px;
+  --radius-round: 999px;
+
+  --sidebar-w: 260px;
+  --shell-gap: 12px;
 
   /* Márgenes seguros del dispositivo (notch, barra de gestos). Fuera de móvil
      valen 0, así se pueden sumar sin condicionales. */
@@ -77,36 +142,6 @@
   --safe-r: env(safe-area-inset-right, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
-}
-
-/* Modo oscuro (docs/DISENO_WEB.md · paleta "Modo oscuro"):
-   cremas cálidas + olivo trasladados a superficies oscuras. */
-[data-theme='dark'] {
-  color-scheme: dark;
-
-  --bg: #1A1913;          /* canvas: área principal / chat */
-  --bg-sidebar: #141309;  /* barra lateral */
-  --bg-secondary: #211F17;/* surface: tarjetas, avatar, chips */
-  --bg-input: #201E16;    /* caja de composición */
-  --ink: #F3F0E2;         /* text-primary */
-  --ink-rgb: 243, 240, 226;
-  --ink-soft: #C3BCA6;    /* text-secondary */
-  --ink-muted: #8E876F;   /* text-muted */
-  --border: #33301F;      /* border-strong */
-  --border-soft: #2A2820; /* border-subtle */
-  --accent: #A9B86E;      /* olivo: activo, enlaces */
-  --accent-deep: #6C7A46; /* badge de plan */
-  --accent-soft: rgba(169, 184, 110, 0.1);
-  --on-accent: #1A1913;
-  --primary: #F0EBD9;     /* CTA invertido */
-  --on-primary: #1A1913;
-  --code-bg: #141309;
-  --code-ink: #C3BCA6;
-  --scrim: rgba(0, 0, 0, 0.6);
-  --shadow-rgb: 0, 0, 0;
-  --danger: #e0685a;
-  --danger-soft: rgba(224, 104, 90, 0.14);
-  --ok: #A9B86E;
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────── */
@@ -133,7 +168,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -152,6 +187,12 @@ textarea,
 select {
   font: inherit;
   color: inherit;
+  border: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-faint);
 }
 
 a {
@@ -165,78 +206,164 @@ p {
   margin: 0;
 }
 
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* Barras de scroll discretas: parte del relleno, no un elemento más. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2A2A2A transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-round);
+  background: #2A2A2A;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #383836;
+  background-clip: content-box;
+}
+
+/* Foco visible solo al navegar con teclado, y sin dibujar bordes: un halo
+   por fuera de la caja, que no empuja el layout. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ── Utilidades compartidas ──────────────────────────────────────────── */
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
 
 .brand {
   font-family: var(--font-brand);
-  letter-spacing: 0.04em;
-  font-size: 30px;
+  letter-spacing: 0.02em;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink);
 }
 
+/* La pestaña que asoma sobre una tarjeta, un aviso o un diálogo. Es la pieza
+   que da carácter al sistema; el contenedor le pasa su propio relleno con
+   --tab-fill para que se lean como una sola figura. */
+.tab {
+  display: block;
+  width: 86px;
+  height: 11px;
+  margin-left: 20px;
+  border-radius: 8px 8px 0 0;
+  background: var(--tab-fill, var(--surface-3));
+}
+
+/* Etiqueta en versalitas que encabeza un grupo. */
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ningún estado se dice con opacidad: cada uno tiene su propio relleno, que
+   es lo que mantiene legible el texto sobre fondo oscuro. */
 .pill-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 22px;
-  border-radius: var(--radius-pill);
-  font-weight: 500;
+  height: 36px;
+  padding: 0 15px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
   white-space: nowrap;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .pill-btn:disabled {
-  opacity: 0.45;
   cursor: not-allowed;
 }
 
 .pill-btn--primary {
   background: var(--primary);
   color: var(--on-primary);
+  font-weight: 500;
 }
 
 .pill-btn--primary:hover:not(:disabled) {
-  opacity: 0.85;
+  background: #FFFFFF;
 }
 
+.pill-btn--primary:disabled {
+  background: #2A2A2A;
+  color: var(--ink-label);
+}
+
+/* Antes era el botón con contorno; ahora se distingue por el relleno. */
 .pill-btn--outline {
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--ink-soft);
 }
 
 .pill-btn--outline:hover:not(:disabled) {
-  background: var(--bg-secondary);
+  background: var(--surface-5);
+  color: var(--ink);
 }
 
-/* Acción destructiva (eliminar cuenta, borrar historial…) */
-.pill-btn.is-danger {
-  background: var(--danger);
-  color: #fff;
-  border-color: var(--danger);
+.pill-btn--outline:disabled {
+  background: var(--field-disabled);
+  color: var(--ink-disabled);
 }
 
+/* Acción destructiva (eliminar cuenta, borrar historial…): sobre el fondo
+   oscuro va en rojo apagado, nunca en rojo sólido — ese se reserva para el
+   diálogo claro, donde sí hay contraste para llevarlo. */
+.pill-btn.is-danger,
 .pill-btn--outline.is-danger {
-  background: var(--bg);
-  color: var(--danger);
+  background: #2A1917;
+  color: var(--danger-ink);
 }
 
+.pill-btn.is-danger:hover:not(:disabled),
 .pill-btn--outline.is-danger:hover:not(:disabled) {
-  background: var(--danger-soft);
+  background: #3A211D;
 }
 
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  color: var(--ink);
-  transition: background 0.15s ease;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  color: var(--ink-muted);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .icon-btn:hover {
-  background: rgba(var(--ink-rgb), 0.07);
+  background: var(--surface-3);
+  color: var(--ink);
 }
 
 /* ── Puntero grueso (dedo, lápiz) ────────────────────────────────────── */
@@ -250,15 +377,15 @@ p {
 
   .icon-btn {
     position: relative;
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
   }
 
-  /* Amplía el área sensible sin agrandar el círculo visible. */
+  /* Amplía el área sensible sin agrandar el cuadro visible. */
   .icon-btn::after {
     content: '';
     position: absolute;
-    inset: -2px;
+    inset: -3px;
     border-radius: inherit;
   }
 }
@@ -297,19 +424,18 @@ p {
   align-items: center;
   justify-content: center;
   gap: 26px;
-  background: var(--bg-secondary);
+  background: var(--bg);
 }
 
 .app-loading__logo {
-  font-size: 30px;
   animation: loading-pulse 1.6s ease-in-out infinite;
 }
 
 .app-loading__bar {
   width: 150px;
   height: 3px;
-  border-radius: var(--radius-pill);
-  background: rgba(var(--ink-rgb), 0.12);
+  border-radius: var(--radius-round);
+  background: var(--surface-3);
   overflow: hidden;
 }
 
@@ -317,8 +443,8 @@ p {
   display: block;
   width: 40%;
   height: 100%;
-  border-radius: var(--radius-pill);
-  background: var(--ink);
+  border-radius: var(--radius-round);
+  background: var(--accent-deep);
   animation: loading-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
@@ -337,7 +463,8 @@ p {
   display: block;
   position: relative;
   overflow: hidden;
-  background: rgba(var(--ink-rgb), 0.07);
+  border-radius: var(--radius);
+  background: rgba(242, 242, 240, 0.07);
 }
 
 .skeleton::after {
@@ -348,7 +475,7 @@ p {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(var(--ink-rgb), 0.06),
+    rgba(242, 242, 240, 0.06),
     transparent
   );
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
@@ -361,24 +488,25 @@ p {
 .sk-history {
   display: flex;
   flex-direction: column;
-  padding: 4px 0;
+  gap: 14px;
+  padding: 9px 10px;
   animation: fade-in 0.2s ease;
 }
 
 .sk-thread {
-  max-width: 780px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 8px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
   animation: fade-in 0.2s ease;
 }
 
 .sk-msg {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
 
 .sk-msg--user {
@@ -413,20 +541,25 @@ p {
   justify-content: center;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 10px 20px;
-  background: var(--accent-soft);
-  border-bottom: 1px solid var(--border-soft);
-  font-size: 0.9rem;
+  margin: 0 var(--shell-gap) var(--shell-gap);
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: #241D0C;
+  font-size: 13px;
   animation: fade-in 0.2s ease;
 }
 
 /* El correo no llegó a salir: es un fallo nuestro, no un recordatorio. */
 .verify-bar.is-error {
-  background: var(--danger-soft);
+  background: #2A1917;
 }
 
 .verify-bar__text {
-  color: var(--ink-soft);
+  color: #D8C89A;
+}
+
+.verify-bar.is-error .verify-bar__text {
+  color: var(--danger-ink);
 }
 
 .verify-bar__text strong {
@@ -435,13 +568,23 @@ p {
 }
 
 .verify-bar__btn {
-  padding: 6px 16px;
-  font-size: 0.85rem;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: var(--warn);
+  color: #141414;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.verify-bar.is-error .verify-bar__btn {
+  background: var(--danger);
+  color: #FBEEEB;
 }
 
 @media (max-width: 640px) {
   .verify-bar {
     justify-content: flex-start;
-    padding: 10px 16px;
+    padding: 10px 14px;
   }
 }
