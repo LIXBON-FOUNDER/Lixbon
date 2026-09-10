@@ -17,8 +17,8 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("new", "", "Empezar una conversación nueva", "conversación"),
     ("compact", "", "Compactar la conversación para liberar contexto", "conversación"),
     ("history", "[mensajes]", "Ver y reabrir conversaciones anteriores", "conversación"),
-    ("image", "<ruta>", "Adjuntar una imagen al próximo mensaje (también @ruta)", "conversación"),
-    ("paste", "", "Pegar la imagen del portapapeles (atajo: Alt+V)", "conversación"),
+    ("image", "<ruta>", "Escribir una imagen en el mensaje (también @ruta)", "conversación"),
+    ("paste", "", "Escribir la imagen del portapapeles en el mensaje (Alt+V)", "conversación"),
     ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),
@@ -179,3 +179,22 @@ def fmt_size(num_bytes: int) -> str:
 def fmt_image_marker(index: int, num_bytes: int) -> str:
     """Marcador único de imagen adjunta: al pegar, al adjuntar y al enviar."""
     return f"-IMG#{index} {fmt_size(num_bytes).replace(' ', '').lower()}-"
+
+
+# El tamaño es opcional al leerlo: el usuario puede recortar el marcador a
+# mano («-IMG#1-») y sigue siendo una referencia válida a la imagen.
+_IMG_MARKER_RE = re.compile(r"-IMG#(\d+)(?:\s+[\d.]+\s*[KMG]?B)?-", re.IGNORECASE)
+
+
+def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
+    """Imágenes de `staged` referenciadas por los marcadores del texto.
+
+    El marcador ES el adjunto: si el usuario lo borra del mensaje, la imagen
+    no se envía. El orden lo marca el texto, no la cola.
+    """
+    images: list[Path] = []
+    for match in _IMG_MARKER_RE.finditer(text):
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(staged) and staged[index] not in images:
+            images.append(staged[index])
+    return images

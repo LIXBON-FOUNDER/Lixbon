@@ -14,6 +14,10 @@ import struct  # noqa: E402
 import zlib  # noqa: E402
 
 from lixbon_cli.clipboard import dib_to_png  # noqa: E402
+from lixbon_cli.commands import (  # noqa: E402
+    fmt_image_marker,
+    parse_image_markers,
+)
 from lixbon_cli.diffs import FileChange, diff_counts, diff_rows  # noqa: E402
 from lixbon_cli.inputq import InputQueue, suspend_input  # noqa: E402
 
@@ -220,3 +224,49 @@ def test_backspace_y_escape_editan_lo_tecleado():
         assert queue.typing == ""
     finally:
         queue.stop()
+
+
+# ── Marcadores de imagen ────────────────────────────────────────────────────
+
+def _staged(n: int) -> list[Path]:
+    return [Path(f"/tmp/img{i}.png") for i in range(1, n + 1)]
+
+
+def test_el_marcador_del_texto_decide_que_imagen_se_envia():
+    """El usuario borra el marcador -IMG#1- y esa imagen deja de adjuntarse:
+    el mensaje es la única fuente de verdad, no la cola de pegados."""
+    staged = _staged(2)
+    texto = "error en el perfil -IMG#2 63kb-"
+    assert parse_image_markers(texto, staged) == [staged[1]]
+
+
+def test_las_imagenes_llegan_en_el_orden_del_mensaje():
+    staged = _staged(2)
+    texto = "primero -IMG#2 1kb- y luego -IMG#1 2kb-"
+    assert parse_image_markers(texto, staged) == [staged[1], staged[0]]
+
+
+def test_el_marcador_recortado_a_mano_sigue_valiendo():
+    """El tamaño es decorativo: «-IMG#1-» tiene que seguir adjuntando."""
+    staged = _staged(1)
+    assert parse_image_markers("mira esto -IMG#1-", staged) == staged[:1]
+
+
+def test_un_marcador_repetido_no_duplica_la_imagen():
+    staged = _staged(1)
+    assert parse_image_markers("-IMG#1 5kb- y otra vez -IMG#1 5kb-", staged) == staged[:1]
+
+
+def test_un_indice_inexistente_se_ignora_sin_romper():
+    """El usuario puede teclear cualquier número; no puede tumbar el envío."""
+    assert parse_image_markers("-IMG#9 1kb-", _staged(2)) == []
+    assert parse_image_markers("-IMG#0 1kb-", _staged(2)) == []
+
+
+def test_el_marcador_generado_se_vuelve_a_leer():
+    """fmt_image_marker y parse_image_markers tienen que hablar el mismo
+    formato: si uno cambia sin el otro, el adjunto se pierde en silencio."""
+    staged = _staged(1)
+    marcador = fmt_image_marker(1, 83000)
+    assert marcador == "-IMG#1 81kb-"
+    assert parse_image_markers(f"revisa {marcador} por favor", staged) == staged[:1]

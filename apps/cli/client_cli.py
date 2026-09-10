@@ -1317,7 +1317,7 @@ def render_tips(console) -> None:
     console.print(
         f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
         f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
-        f"[lx.accent2]Alt+V[/] pega una imagen  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]Alt+V[/] pega una imagen en el mensaje  [lx.dim2]{g('sep')}[/]  "
         f"Ctrl+C dos veces para salir[/]"
     )
     console.print(
@@ -3999,8 +3999,8 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("new", "", "Empezar una conversación nueva", "conversación"),
     ("compact", "", "Compactar la conversación para liberar contexto", "conversación"),
     ("history", "[mensajes]", "Ver y reabrir conversaciones anteriores", "conversación"),
-    ("image", "<ruta>", "Adjuntar una imagen al próximo mensaje (también @ruta)", "conversación"),
-    ("paste", "", "Pegar la imagen del portapapeles (atajo: Alt+V)", "conversación"),
+    ("image", "<ruta>", "Escribir una imagen en el mensaje (también @ruta)", "conversación"),
+    ("paste", "", "Escribir la imagen del portapapeles en el mensaje (Alt+V)", "conversación"),
     ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),
@@ -4162,6 +4162,25 @@ def fmt_image_marker(index: int, num_bytes: int) -> str:
     """Marcador único de imagen adjunta: al pegar, al adjuntar y al enviar."""
     return f"-IMG#{index} {fmt_size(num_bytes).replace(' ', '').lower()}-"
 
+
+# El tamaño es opcional al leerlo: el usuario puede recortar el marcador a
+# mano («-IMG#1-») y sigue siendo una referencia válida a la imagen.
+_IMG_MARKER_RE = re.compile(r"-IMG#(\d+)(?:\s+[\d.]+\s*[KMG]?B)?-", re.IGNORECASE)
+
+
+def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
+    """Imágenes de `staged` referenciadas por los marcadores del texto.
+
+    El marcador ES el adjunto: si el usuario lo borra del mensaje, la imagen
+    no se envía. El orden lo marca el texto, no la cola.
+    """
+    images: list[Path] = []
+    for match in _IMG_MARKER_RE.finditer(text):
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(staged) and staged[index] not in images:
+            images.append(staged[index])
+    return images
+
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/app.py
 # ──────────────────────────────────────────────────────────────────────────
@@ -4242,6 +4261,7 @@ class ChatApp:
         # Se cachea en el config para que el arranque no dependa de la red.
         self.plan_name = self.cfg.get("plan_name", "")
         self.pending_images: list[Path] = []
+        self.prompt_prefill = ""  # marcadores de imagen que esperan al prompt
         self.web_search = bool(self.cfg.get("web_search", False))
         self.project_context = ""  # LIXBON.md del workspace, si lo hay
         self.session_tokens = 0
@@ -4481,6 +4501,7 @@ class ChatApp:
         self.conversation_id = str(uuid.uuid4())
         self.title = ""  # la nueva conversación se titulará sola al responder
         self.pending_images = []
+        self.prompt_prefill = ""
         self._set_tab_title()
         clear_screen()
         self._render_identity()
@@ -4500,6 +4521,7 @@ class ChatApp:
         self.title = record.get("title") or ""
         self.session_tokens = int(record.get("tokens") or 0)
         self.pending_images = []
+        self.prompt_prefill = ""
         self._set_tab_title()
         clear_screen()
         self._render_identity()
@@ -4765,12 +4787,17 @@ class ChatApp:
 
         @kb.add("escape", "v")
         def _paste(event):
-            # Alt+V llega como Esc+v. `run_in_terminal` suspende el prompt para
-            # imprimir por encima y lo restaura: escribir directo dejaría el
-            # mensaje pisado por el siguiente repintado de prompt_toolkit.
+            # Alt+V llega como Esc+v. El marcador se escribe en el buffer para
+            # que el usuario pueda moverlo o borrarlo (borrarlo = no enviar la
+            # imagen); el error, en cambio, va por `run_in_terminal`, que
+            # suspende el prompt: imprimir directo lo pisaría el repintado.
+            marker, error = self._stage_clipboard_image()
+            if marker:
+                event.current_buffer.insert_text(marker)
+                return
             from prompt_toolkit.application import run_in_terminal
 
-            run_in_terminal(self._paste_clipboard_image)
+            run_in_terminal(lambda: print_error(error))
 
         @kb.add("enter", filter=completion_is_selected)
         def _enter_selected(event):
@@ -4822,7 +4849,8 @@ class ChatApp:
                 # Lo que se quedó a medio escribir durante el turno reaparece
                 # en el prompt, listo para seguir.
                 partial = self.input_queue.take_partial() if self.input_queue else ""
-                text = session.prompt(default=partial).strip()
+                prefill, self.prompt_prefill = self.prompt_prefill, ""
+                text = session.prompt(default=f"{partial} {prefill}".strip()).strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
                 if now - self._interrupt_hint_at < 2.5:
@@ -4889,19 +4917,23 @@ class ChatApp:
     # ── envío de mensajes ────────────────────────────────────────────────
 
     def send_message(self, text: str, origin: str = "local") -> None:
+        if self.prompt_prefill:
+            # El prompt plano no admite texto precargado: el marcador se anexa
+            # aquí para que /paste y /image sigan adjuntando en esas terminales.
+            text = f"{text} {self.prompt_prefill}".strip()
+            self.prompt_prefill = ""
         clean, at_images, errors = parse_attachments(text, self.workspace)
         for err in errors:
             print_error(err)
         if errors and not clean:
             return
-        images = self.pending_images + at_images
+        images = parse_image_markers(clean, self.pending_images) + at_images
         self.pending_images = []
 
         encoded: list[str] = []
         for path in images:
             try:
                 encoded.append(encode_image(path))
-                print_note(fmt_image_marker(len(encoded), path.stat().st_size))
             except ValueError as exc:
                 print_error(str(exc))
 
@@ -5407,16 +5439,28 @@ class ChatApp:
         except ValueError as exc:
             print_error(str(exc))
             return True
-        self.pending_images.append(path.resolve())
-        print_note(fmt_image_marker(len(self.pending_images), path.stat().st_size))
+        self._queue_prefill(self._stage_image(path.resolve()))
         return True
 
     def cmd_paste(self, arg: str):
-        self._paste_clipboard_image()
+        marker, error = self._stage_clipboard_image()
+        if error:
+            print_error(error)
+        self._queue_prefill(marker)
         return True
 
-    def _paste_clipboard_image(self) -> bool:
-        """Adjunta la imagen del portapapeles. Devuelve si lo consiguió.
+    def _stage_image(self, path: Path) -> str | None:
+        """Encola la imagen y devuelve su marcador, o None si no sirve."""
+        try:
+            encode_image(path)  # valida formato y tamaño antes de prometer nada
+        except ValueError as exc:
+            print_error(str(exc))
+            return None
+        self.pending_images.append(path)
+        return fmt_image_marker(len(self.pending_images), path.stat().st_size)
+
+    def _stage_clipboard_image(self) -> tuple[str | None, str]:
+        """(marcador, error) de la imagen del portapapeles.
 
         Lo comparten `/paste` y el atajo Alt+V del prompt; el modelo la recibe
         igual que con `@ruta` (base64 en `ChatMessage.images`), así que solo
@@ -5424,16 +5468,17 @@ class ChatApp:
         """
         path, error = paste_image(CONFIG_DIR)
         if path is None:
-            print_error(error or "el portapapeles no tiene ninguna imagen")
-            return False
-        try:
-            encode_image(path)  # valida formato y tamaño antes de prometer nada
-        except ValueError as exc:
-            print_error(str(exc))
-            return False
-        self.pending_images.append(path)
-        print_note(fmt_image_marker(len(self.pending_images), path.stat().st_size))
-        return True
+            return None, error or "el portapapeles no tiene ninguna imagen"
+        return self._stage_image(path), ""
+
+    def _queue_prefill(self, marker: str | None) -> None:
+        """Deja el marcador escrito en el siguiente prompt, listo para editar.
+
+        Alt+V lo inserta donde está el cursor; `/paste` y `/image` no pueden
+        (su prompt ya se envió), así que el marcador espera al que viene.
+        """
+        if marker:
+            self.prompt_prefill = f"{self.prompt_prefill} {marker}".strip()
 
     def cmd_usage(self, arg: str):
         with spinner("consultando uso…"):

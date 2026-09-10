@@ -134,7 +134,7 @@ def render_tips(console) -> None:
     console.print(
         f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
         f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
-        f"[lx.accent2]Alt+V[/] pega una imagen  [lx.dim2]{g('sep')}[/]  "
+        f"[lx.accent2]Alt+V[/] pega una imagen en el mensaje  [lx.dim2]{g('sep')}[/]  "
         f"Ctrl+C dos veces para salir[/]"
     )
     console.print(
