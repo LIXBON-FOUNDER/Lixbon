@@ -25,7 +25,7 @@ from lixbon_cli.commands import (
     command_matches,
     common_command_prefix,
     encode_image,
-    fmt_size,
+    fmt_image_marker,
     make_completer,
     parse_attachments,
 )
@@ -811,9 +811,7 @@ class ChatApp:
         for path in images:
             try:
                 encoded.append(encode_image(path))
-                self.console.print(
-                    f"[lx.dim]{g('image')} {esc(path.name)} ({fmt_size(path.stat().st_size)})[/]"
-                )
+                print_note(fmt_image_marker(len(encoded), path.stat().st_size))
             except ValueError as exc:
                 print_error(str(exc))
 
@@ -1322,7 +1320,7 @@ class ChatApp:
             print_error(str(exc))
             return True
         self.pending_images.append(path.resolve())
-        print_ok(f"{g('image')} {path.name} se adjuntará al próximo mensaje")
+        print_note(fmt_image_marker(len(self.pending_images), path.stat().st_size))
         return True
 
     def cmd_paste(self, arg: str):
@@ -1346,8 +1344,7 @@ class ChatApp:
             print_error(str(exc))
             return False
         self.pending_images.append(path)
-        size = fmt_size(path.stat().st_size)
-        print_ok(f"{g('image')} imagen pegada ({size}); se enviará con el próximo mensaje")
+        print_note(fmt_image_marker(len(self.pending_images), path.stat().st_size))
         return True
 
     def cmd_usage(self, arg: str):

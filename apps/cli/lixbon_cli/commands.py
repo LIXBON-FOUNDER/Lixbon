@@ -174,3 +174,8 @@ def fmt_size(num_bytes: int) -> str:
     if num_bytes >= 1024 * 1024:
         return f"{num_bytes / (1024 * 1024):.1f} MB"
     return f"{num_bytes / 1024:.0f} KB"
+
+
+def fmt_image_marker(index: int, num_bytes: int) -> str:
+    """Marcador único de imagen adjunta: al pegar, al adjuntar y al enviar."""
+    return f"-IMG#{index} {fmt_size(num_bytes).replace(' ', '').lower()}-"

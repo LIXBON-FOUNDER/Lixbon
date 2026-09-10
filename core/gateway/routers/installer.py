@@ -1,6 +1,6 @@
 """
-installer.py — Endpoints para distribución del CLI de lixbon DTC.
-Sirve scripts de instalación para Linux/macOS y Windows,
+installer.py — Endpoints de distribución del Lixbon CLI.
+Sirve los scripts de instalación para Linux/macOS y Windows,
 y el archivo client_cli.py descargable.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ def _server_base(request: Request) -> str:
 
 @router.get("/install/client_cli.py")
 async def download_cli() -> FileResponse:
-    """Descarga el archivo client_cli.py (CLI de lixbon DTC)."""
+    """Descarga el archivo client_cli.py (Lixbon CLI)."""
     if not CLI_SOURCE_PATH.exists():
         raise HTTPException(status_code=404, detail="client_cli.py no encontrado en el servidor")
     return FileResponse(
@@ -36,7 +36,9 @@ async def download_cli() -> FileResponse:
 async def install_script(request: Request) -> PlainTextResponse:
     """Genera un script bash de instalación del CLI para Linux/macOS."""
     server_base = _server_base(request)
-    script = f"""#!/usr/bin/env bash
+    # rf-string: los \n y \033 tienen que llegar LITERALES al script; si Python
+    # los interpretara, printf recibiría saltos de línea reales y se rompería.
+    script = rf"""#!/usr/bin/env bash
 set -euo pipefail
 
 SERVER_URL="${{1:-{server_base}}}"
@@ -45,10 +47,11 @@ BIN_DIR="${{HOME}}/.local/bin"
 CLI_FILE="${{INSTALL_DIR}}/client_cli.py"
 LAUNCHER_FILE="${{BIN_DIR}}/lixbon"
 
-echo "╔══════════════════════════════════════╗"
-echo "║   Instalando lixbon DTC CLI...        ║"
-echo "╚══════════════════════════════════════╝"
-echo ""
+BOLD=$'\033[1m'; DIM=$'\033[2m'; GREEN=$'\033[32m'; RESET=$'\033[0m'
+
+printf '\n  %sLixbon CLI%s\n' "$BOLD" "$RESET"
+printf '  %sInstalador para Linux y macOS%s\n\n' "$DIM" "$RESET"
+printf '  %sDescargando el CLI...%s\n' "$DIM" "$RESET"
 
 mkdir -p "${{INSTALL_DIR}}" "${{BIN_DIR}}"
 curl -fsSL "${{SERVER_URL}}/install/client_cli.py" -o "${{CLI_FILE}}"
@@ -61,23 +64,23 @@ python3 "${{HOME}}/.lixbon/client_cli.py" "$@"
 LAUNCHER
 chmod +x "${{LAUNCHER_FILE}}"
 
+PATH_NOTE="ya configurado"
 for profile in "${{HOME}}/.bashrc" "${{HOME}}/.zshrc" "${{HOME}}/.profile"; do
-  if [ -f "$profile" ] && ! grep -q '\\.local/bin' "$profile"; then
+  if [ -f "$profile" ] && ! grep -q '\.local/bin' "$profile"; then
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$profile"
+    PATH_NOTE="añadido a ${{BIN_DIR}}"
   fi
 done
 
-echo ""
-echo "✓ CLI instalado en: ${{CLI_FILE}}"
-echo "✓ Comando creado:   ${{LAUNCHER_FILE}}"
-echo ""
-echo "Uso:"
-echo "  lixbon setup   — Configuración inicial"
-echo "  lixbon chat    — Chat interactivo"
-echo "  lixbon status  — Estado del gateway"
-echo ""
-echo "Si 'lixbon' no se reconoce en la sesión actual, ejecuta:"
-echo "  export PATH=\\"\\$HOME/.local/bin:\\$PATH\\""
+printf '\n  %sListo%s\n\n' "$GREEN" "$RESET"
+printf '    CLI        %s\n' "${{CLI_FILE}}"
+printf '    Comando    %s\n' "lixbon"
+printf '    PATH       %s\n' "${{PATH_NOTE}}"
+printf '\n  %sPara empezar, abre una terminal nueva:%s\n\n' "$DIM" "$RESET"
+printf '    lixbon setup     %sconfiguración inicial%s\n' "$DIM" "$RESET"
+printf '    lixbon chat      %schat interactivo%s\n' "$DIM" "$RESET"
+printf '    lixbon status    %sestado del gateway%s\n\n' "$DIM" "$RESET"
+printf '  %sSi el comando no se reconoce:%s export PATH="$HOME/.local/bin:$PATH"\n\n' "$DIM" "$RESET"
 """
     return PlainTextResponse(content=script)
 
@@ -86,7 +89,9 @@ echo "  export PATH=\\"\\$HOME/.local/bin:\\$PATH\\""
 async def install_script_windows(request: Request) -> PlainTextResponse:
     """Genera un script PowerShell de instalación del CLI para Windows."""
     server_base = _server_base(request)
-    script = f"""$ErrorActionPreference = "Stop"
+    # Los acentos viajan bien (existen en cp437/850), pero los checks y los
+    # guiones largos NO: la consola de Windows los degrada a otro glifo.
+    script = rf"""$ErrorActionPreference = "Stop"
 
 $ServerUrl = if ($args.Count -gt 0 -and $args[0]) {{ $args[0] }} else {{ "{server_base}" }}
 $InstallDir = Join-Path $env:USERPROFILE ".lixbon"
@@ -94,10 +99,10 @@ $CliFile = Join-Path $InstallDir "client_cli.py"
 $LauncherFile = Join-Path $InstallDir "lixbon.cmd"
 
 Write-Host ""
-Write-Host "╔══════════════════════════════════════╗"
-Write-Host "║   Instalando lixbon DTC CLI...        ║"
-Write-Host "╚══════════════════════════════════════╝"
+Write-Host "  Lixbon CLI" -ForegroundColor White
+Write-Host "  Instalador para Windows" -ForegroundColor DarkGray
 Write-Host ""
+Write-Host "  Descargando el CLI..." -ForegroundColor DarkGray
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Invoke-WebRequest -Uri "$ServerUrl/install/client_cli.py" -OutFile $CliFile
@@ -105,7 +110,7 @@ python $CliFile init --base-url "$ServerUrl/v1" | Out-Null
 
 @"
 @echo off
-python "%USERPROFILE%\\.lixbon\\client_cli.py" %*
+python "%USERPROFILE%\.lixbon\client_cli.py" %*
 "@ | Set-Content -Path $LauncherFile -Encoding Ascii
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -113,18 +118,26 @@ if (-not $userPath) {{ $userPath = "" }}
 if ($userPath -notlike "*$InstallDir*") {{
   $newPath = if ($userPath) {{ "$userPath;$InstallDir" }} else {{ $InstallDir }}
   [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-  Write-Host "✓ Agregado al PATH de usuario: $InstallDir"
+  $pathNote = "añadido a $InstallDir"
 }} else {{
-  Write-Host "✓ El PATH de usuario ya contiene: $InstallDir"
+  $pathNote = "ya configurado"
 }}
 
 Write-Host ""
-Write-Host "✓ CLI instalado en: $CliFile"
-Write-Host "✓ Comando creado:   lixbon"
+Write-Host "  Listo" -ForegroundColor Green
 Write-Host ""
-Write-Host "Uso (abre una nueva terminal):"
-Write-Host "  lixbon setup"
-Write-Host "  lixbon chat"
-Write-Host "  lixbon status"
+Write-Host "    CLI        $CliFile"
+Write-Host "    Comando    lixbon"
+Write-Host "    PATH       $pathNote"
+Write-Host ""
+Write-Host "  Para empezar, abre una terminal nueva:" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "    lixbon setup     " -NoNewline
+Write-Host "configuración inicial" -ForegroundColor DarkGray
+Write-Host "    lixbon chat      " -NoNewline
+Write-Host "chat interactivo" -ForegroundColor DarkGray
+Write-Host "    lixbon status    " -NoNewline
+Write-Host "estado del gateway" -ForegroundColor DarkGray
+Write-Host ""
 """
     return PlainTextResponse(content=script)
