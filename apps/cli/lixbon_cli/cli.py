@@ -16,6 +16,7 @@ from lixbon_cli.config import (
     CLI_VERSION,
     CONFIG_FILE,
     DEFAULT_BASE_URL,
+    USER_AGENT,
     load_config,
     mask_key,
     save_config,
@@ -144,7 +145,8 @@ def cmd_update(args: argparse.Namespace | None) -> int:
     try:
         req = request.Request(
             url=url,
-            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+            headers={"Cache-Control": "no-cache", "Pragma": "no-cache",
+                     "User-Agent": USER_AGENT},
             method="GET",
         )
         with request.urlopen(req, timeout=120) as resp:

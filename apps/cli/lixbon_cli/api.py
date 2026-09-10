@@ -2,7 +2,7 @@
 import json
 from urllib import error, request
 
-from lixbon_cli.config import DEFAULT_BASE_URL, server_base
+from lixbon_cli.config import DEFAULT_BASE_URL, USER_AGENT, server_base
 from lixbon_cli.sse import events_from_stream
 
 
@@ -14,6 +14,8 @@ class ApiError(RuntimeError):
 
 def _friendly_detail(body: str) -> str:
     """Extrae el detail legible de un error JSON de FastAPI."""
+    if "error code: 10" in body:  # bloqueo del WAF de Cloudflare, no del gateway
+        return f"Conexión bloqueada por el filtro del servidor ({body.strip()[:40]})."
     try:
         data = json.loads(body)
         detail = data.get("detail", body)
@@ -56,7 +58,7 @@ class ApiClient:
 
     def _open(self, method: str, url: str, payload: dict | None = None,
               timeout: int = 120, auth: bool = True):
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
         if auth and self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         data = None if payload is None else json.dumps(payload).encode("utf-8")

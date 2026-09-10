@@ -569,6 +569,9 @@ from pathlib import Path
 CLI_VERSION = "2.2.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
+# Cloudflare bloquea el User-Agent por defecto de urllib ("Python-urllib/x.y")
+# con un 403 "error code: 1010", así que el CLI se identifica con el suyo.
+USER_AGENT = f"Lixbon-CLI/{CLI_VERSION}"
 CONFIG_DIR = Path.home() / ".lixbon"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HISTORY_FILE = CONFIG_DIR / "history"
@@ -766,6 +769,8 @@ class ApiError(RuntimeError):
 
 def _friendly_detail(body: str) -> str:
     """Extrae el detail legible de un error JSON de FastAPI."""
+    if "error code: 10" in body:  # bloqueo del WAF de Cloudflare, no del gateway
+        return f"Conexión bloqueada por el filtro del servidor ({body.strip()[:40]})."
     try:
         data = json.loads(body)
         detail = data.get("detail", body)
@@ -808,7 +813,7 @@ class ApiClient:
 
     def _open(self, method: str, url: str, payload: dict | None = None,
               timeout: int = 120, auth: bool = True):
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
         if auth and self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -6345,7 +6350,8 @@ def cmd_update(args: argparse.Namespace | None) -> int:
     try:
         req = request.Request(
             url=url,
-            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+            headers={"Cache-Control": "no-cache", "Pragma": "no-cache",
+                     "User-Agent": USER_AGENT},
             method="GET",
         )
         with request.urlopen(req, timeout=120) as resp:

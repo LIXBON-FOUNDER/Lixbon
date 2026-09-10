@@ -5,6 +5,9 @@ from pathlib import Path
 CLI_VERSION = "2.2.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
+# Cloudflare bloquea el User-Agent por defecto de urllib ("Python-urllib/x.y")
+# con un 403 "error code: 1010", así que el CLI se identifica con el suyo.
+USER_AGENT = f"Lixbon-CLI/{CLI_VERSION}"
 CONFIG_DIR = Path.home() / ".lixbon"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HISTORY_FILE = CONFIG_DIR / "history"
