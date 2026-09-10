@@ -15,6 +15,7 @@ import zlib  # noqa: E402
 
 from lixbon_cli.clipboard import dib_to_png  # noqa: E402
 from lixbon_cli.commands import (  # noqa: E402
+    IMG_MARKER_AT_END_RE,
     fmt_image_marker,
     parse_image_markers,
 )
@@ -233,40 +234,41 @@ def _staged(n: int) -> list[Path]:
 
 
 def test_el_marcador_del_texto_decide_que_imagen_se_envia():
-    """El usuario borra el marcador -IMG#1- y esa imagen deja de adjuntarse:
+    """El usuario borra el marcador [IMG#1] y esa imagen deja de adjuntarse:
     el mensaje es la única fuente de verdad, no la cola de pegados."""
     staged = _staged(2)
-    texto = "error en el perfil -IMG#2 63kb-"
+    texto = "error en el perfil [IMG#2]"
     assert parse_image_markers(texto, staged) == [staged[1]]
 
 
 def test_las_imagenes_llegan_en_el_orden_del_mensaje():
     staged = _staged(2)
-    texto = "primero -IMG#2 1kb- y luego -IMG#1 2kb-"
+    texto = "primero [IMG#2] y luego [IMG#1]"
     assert parse_image_markers(texto, staged) == [staged[1], staged[0]]
 
 
-def test_el_marcador_recortado_a_mano_sigue_valiendo():
-    """El tamaño es decorativo: «-IMG#1-» tiene que seguir adjuntando."""
-    staged = _staged(1)
-    assert parse_image_markers("mira esto -IMG#1-", staged) == staged[:1]
+def test_el_backspace_reconoce_el_marcador_pegado_al_cursor():
+    """Solo cuenta el que toca el cursor: si hay texto después, Backspace
+    borra ese texto, no la imagen."""
+    assert IMG_MARKER_AT_END_RE.search("mira esto [IMG#1]").group(0) == "[IMG#1]"
+    assert IMG_MARKER_AT_END_RE.search("[IMG#1] mira esto") is None
 
 
 def test_un_marcador_repetido_no_duplica_la_imagen():
     staged = _staged(1)
-    assert parse_image_markers("-IMG#1 5kb- y otra vez -IMG#1 5kb-", staged) == staged[:1]
+    assert parse_image_markers("[IMG#1] y otra vez [IMG#1]", staged) == staged[:1]
 
 
 def test_un_indice_inexistente_se_ignora_sin_romper():
     """El usuario puede teclear cualquier número; no puede tumbar el envío."""
-    assert parse_image_markers("-IMG#9 1kb-", _staged(2)) == []
-    assert parse_image_markers("-IMG#0 1kb-", _staged(2)) == []
+    assert parse_image_markers("[IMG#9]", _staged(2)) == []
+    assert parse_image_markers("[IMG#0]", _staged(2)) == []
 
 
 def test_el_marcador_generado_se_vuelve_a_leer():
     """fmt_image_marker y parse_image_markers tienen que hablar el mismo
     formato: si uno cambia sin el otro, el adjunto se pierde en silencio."""
     staged = _staged(1)
-    marcador = fmt_image_marker(1, 83000)
-    assert marcador == "-IMG#1 81kb-"
+    marcador = fmt_image_marker(1)
+    assert marcador == "[IMG#1]"
     assert parse_image_markers(f"revisa {marcador} por favor", staged) == staged[:1]

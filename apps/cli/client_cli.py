@@ -4152,20 +4152,16 @@ def encode_image(path: Path) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def fmt_size(num_bytes: int) -> str:
-    if num_bytes >= 1024 * 1024:
-        return f"{num_bytes / (1024 * 1024):.1f} MB"
-    return f"{num_bytes / 1024:.0f} KB"
-
-
-def fmt_image_marker(index: int, num_bytes: int) -> str:
+def fmt_image_marker(index: int) -> str:
     """Marcador único de imagen adjunta: al pegar, al adjuntar y al enviar."""
-    return f"-IMG#{index} {fmt_size(num_bytes).replace(' ', '').lower()}-"
+    return f"[IMG#{index}]"
 
 
-# El tamaño es opcional al leerlo: el usuario puede recortar el marcador a
-# mano («-IMG#1-») y sigue siendo una referencia válida a la imagen.
-_IMG_MARKER_RE = re.compile(r"-IMG#(\d+)(?:\s+[\d.]+\s*[KMG]?B)?-", re.IGNORECASE)
+_IMG_MARKER_RE = re.compile(r"\[IMG#(\d+)\]", re.IGNORECASE)
+
+# Solo el marcador pegado al cursor: lo usa el Backspace del prompt para
+# borrarlo entero de una vez, en lugar de carácter a carácter.
+IMG_MARKER_AT_END_RE = re.compile(r"\[IMG#\d+\]$", re.IGNORECASE)
 
 
 def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
@@ -4723,7 +4719,7 @@ class ChatApp:
         el prefijo contra el catálogo es síncrono y no tiene esa carrera.
         """
         from prompt_toolkit.document import Document
-        from prompt_toolkit.filters import completion_is_selected
+        from prompt_toolkit.filters import completion_is_selected, has_selection
         from prompt_toolkit.key_binding import KeyBindings
 
         kb = KeyBindings()
@@ -4798,6 +4794,19 @@ class ChatApp:
             from prompt_toolkit.application import run_in_terminal
 
             run_in_terminal(lambda: print_error(error))
+
+        @kb.add("backspace", filter=~has_selection)
+        def _backspace(event):
+            # El marcador es UNA imagen, no ocho caracteres: si el cursor lo
+            # tiene detrás, Backspace lo borra entero. Con selección no llega
+            # aquí (el filtro deja pasar el binding de siempre).
+            buff = event.current_buffer
+            marker = IMG_MARKER_AT_END_RE.search(buff.document.text_before_cursor)
+            if marker:
+                buff.delete_before_cursor(count=len(marker.group(0)))
+                self._drop_staged_image(marker.group(0))
+                return
+            buff.delete_before_cursor(count=event.arg)
 
         @kb.add("enter", filter=completion_is_selected)
         def _enter_selected(event):
@@ -5457,7 +5466,7 @@ class ChatApp:
             print_error(str(exc))
             return None
         self.pending_images.append(path)
-        return fmt_image_marker(len(self.pending_images), path.stat().st_size)
+        return fmt_image_marker(len(self.pending_images))
 
     def _stage_clipboard_image(self) -> tuple[str | None, str]:
         """(marcador, error) de la imagen del portapapeles.
@@ -5470,6 +5479,16 @@ class ChatApp:
         if path is None:
             return None, error or "el portapapeles no tiene ninguna imagen"
         return self._stage_image(path), ""
+
+    def _drop_staged_image(self, marker: str) -> None:
+        """Descarta el adjunto al borrar su marcador, si era el último.
+
+        Borrar uno de en medio no puede descartarlo: los índices de los que
+        vienen detrás ya están escritos en el mensaje y se desplazarían.
+        """
+        index = int("".join(ch for ch in marker if ch.isdigit()))
+        if index == len(self.pending_images):
+            self.pending_images.pop()
 
     def _queue_prefill(self, marker: str | None) -> None:
         """Deja el marcador escrito en el siguiente prompt, listo para editar.

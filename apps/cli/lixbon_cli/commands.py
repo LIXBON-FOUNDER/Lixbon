@@ -170,20 +170,16 @@ def encode_image(path: Path) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def fmt_size(num_bytes: int) -> str:
-    if num_bytes >= 1024 * 1024:
-        return f"{num_bytes / (1024 * 1024):.1f} MB"
-    return f"{num_bytes / 1024:.0f} KB"
-
-
-def fmt_image_marker(index: int, num_bytes: int) -> str:
+def fmt_image_marker(index: int) -> str:
     """Marcador único de imagen adjunta: al pegar, al adjuntar y al enviar."""
-    return f"-IMG#{index} {fmt_size(num_bytes).replace(' ', '').lower()}-"
+    return f"[IMG#{index}]"
 
 
-# El tamaño es opcional al leerlo: el usuario puede recortar el marcador a
-# mano («-IMG#1-») y sigue siendo una referencia válida a la imagen.
-_IMG_MARKER_RE = re.compile(r"-IMG#(\d+)(?:\s+[\d.]+\s*[KMG]?B)?-", re.IGNORECASE)
+_IMG_MARKER_RE = re.compile(r"\[IMG#(\d+)\]", re.IGNORECASE)
+
+# Solo el marcador pegado al cursor: lo usa el Backspace del prompt para
+# borrarlo entero de una vez, en lugar de carácter a carácter.
+IMG_MARKER_AT_END_RE = re.compile(r"\[IMG#\d+\]$", re.IGNORECASE)
 
 
 def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
