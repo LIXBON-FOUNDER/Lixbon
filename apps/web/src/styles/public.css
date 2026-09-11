@@ -1009,6 +1009,152 @@
   color: var(--ink-muted);
 }
 
+/* ── Página no encontrada ────────────────────────────────────────────── */
+/* El clúster va detrás de todo (ClusterCaido) y el contenido se apoya en el
+   borde inferior; el 404 gigante es una superficie más, no un titular. */
+
+.notfound {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.notfound > .pubnav {
+  z-index: 1;
+}
+
+.notfound__body {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: min(1100px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 24px 0 96px;
+}
+
+.notfound__numeral {
+  font-size: clamp(132px, 23.6vw, 340px);
+  font-weight: 300;
+  letter-spacing: -0.07em;
+  line-height: 0.82;
+  color: var(--surface-3);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.notfound__row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 48px;
+  margin-top: 40px;
+}
+
+.notfound__text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.notfound__text .page__title {
+  font-size: 32px;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.notfound__lead {
+  font-size: 15px;
+  color: #8A8A88;
+  text-wrap: pretty;
+}
+
+.notfound__ruta {
+  font-size: 13px;
+  color: var(--code-ink);
+  overflow-wrap: anywhere;
+}
+
+.notfound__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.notfound__actions .pill-btn {
+  text-decoration: none;
+}
+
+/* La ilustración: las aristas se trazan una vez, los nodos aparecen después y
+   desde ahí respiran con el mismo latido que el clúster del acceso. */
+.caido__arista {
+  stroke-dasharray: 1;
+  animation: caido-trazar 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes caido-trazar {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Reposan en el punto bajo del latido para que el relevo entre aparecer y
+   respirar no dé un salto. */
+.caido__nodo {
+  opacity: 0.38;
+  animation:
+    caido-aparecer 0.6s ease-out backwards,
+    latido 7s ease-in-out infinite;
+}
+
+@keyframes caido-aparecer {
+  from { opacity: 0; }
+}
+
+/* El nodo caído tarda en caer lo mismo que en el acceso, pero espera a que el
+   grafo se haya dibujado; sus aristas se apagan con él. */
+.caido__roto {
+  animation-delay: 2s;
+}
+
+.caido__arista--j {
+  animation:
+    caido-trazar 1.4s cubic-bezier(0.22, 1, 0.36, 1) both,
+    caido-aislar 18s ease-in-out infinite;
+}
+
+@keyframes caido-aislar {
+  0%, 74%, 100% { opacity: 1; }
+  82%, 92% { opacity: 0.12; }
+}
+
+@keyframes caido-ab {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12%, 88% { opacity: 0.9; }
+  100% { transform: translate(220px, 90px); opacity: 0; }
+}
+
+@keyframes caido-cd {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12%, 88% { opacity: 0.9; }
+  100% { transform: translate(110px, 180px); opacity: 0; }
+}
+
+@keyframes caido-fe {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12%, 88% { opacity: 0.9; }
+  100% { transform: translate(-150px, -180px); opacity: 0; }
+}
+
+@keyframes caido-ka {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12%, 88% { opacity: 0.9; }
+  100% { transform: translate(220px, 30px); opacity: 0; }
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 
 /* La barra pública se recoge a ≤980px: medido, su contenido completo (logo +
@@ -1218,5 +1364,27 @@
 
   .share-link__input {
     font-size: 16px; /* menos de 16px hace que iOS haga zoom al enfocar */
+  }
+}
+
+@media (max-width: 640px) {
+  .notfound__body {
+    width: calc(100% - 32px);
+    padding-bottom: calc(40px + var(--safe-b));
+  }
+
+  .notfound__row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 24px;
+    margin-top: 28px;
+  }
+
+  .notfound__text .page__title {
+    font-size: 25px;
+  }
+
+  .notfound__actions .pill-btn {
+    flex: 1;
   }
 }

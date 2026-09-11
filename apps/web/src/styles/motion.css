@@ -264,6 +264,16 @@
   from { opacity: 0; transform: translateY(12px); }
 }
 
+/* La página no encontrada: el numeral y el texto entran con el clúster que
+   se está dibujando detrás, no antes que él. */
+.notfound__numeral {
+  animation: card-in var(--dur-3) var(--ease-out) 300ms backwards;
+}
+
+.notfound__row {
+  animation: card-in var(--dur-3) var(--ease-out) 900ms backwards;
+}
+
 /* ── Sin animaciones si el sistema lo pide ───────────────────────────── */
 /* base.css ya neutraliza duraciones globalmente; aquí se apagan además los
    recorridos propios de este archivo, que son los que más se notan. */
@@ -288,8 +298,18 @@
   /* El clúster del acceso se queda quieto: la figura sigue contando lo mismo. */
   .cluster__nodo,
   .cluster__roto,
-  .cluster__viaje {
+  .cluster__viaje,
+  .caido__arista,
+  .caido__arista--j,
+  .caido__nodo,
+  .notfound__numeral,
+  .notfound__row {
     animation: none !important;
+  }
+
+  /* Sin animación el nodo caído se queda caído: es lo que cuenta la página. */
+  .caido__roto {
+    opacity: 0.6;
   }
 
   .cluster__viaje {

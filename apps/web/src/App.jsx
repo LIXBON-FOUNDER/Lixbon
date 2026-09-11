@@ -27,6 +27,7 @@ import ReleasesPage from './pages/ReleasesPage';
 import DocsPage from './pages/DocsPage';
 import SharedPage from './pages/SharedPage';
 import RemotePage from './pages/RemotePage';
+import NotFoundPage from './pages/NotFoundPage';
 
 export default function App() {
   useViewportHeight(); // --app-vh: alto real del viewport (teclado móvil)
@@ -71,7 +72,7 @@ export default function App() {
             {/* Rutas legacy del dashboard viejo */}
             <Route path="/login" element={<Navigate to="/auth" replace />} />
             <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </RouteFade>
       </AuthProvider>
