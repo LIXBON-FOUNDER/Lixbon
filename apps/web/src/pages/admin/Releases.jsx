@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { IconCheck, IconDownload } from '../../components/Icons';
+import { Select } from '../../components/Select';
 import {
   Aviso, Cabecera, Celda, Chip, Fila, Tabla, Vacio, errMsg,
 } from './comunes';
@@ -91,25 +92,27 @@ export default function Releases() {
             <div className="adm-campos">
               <label className="adm-campo">
                 <span className="adm-campo__label">Producto</span>
-                <select
+                <Select
                   className="adm-select"
                   value={form.product}
-                  onChange={(e) => setForm({ ...form, product: e.target.value })}
-                >
-                  <option value="desktop">desktop (MSI)</option>
-                  <option value="android">android (APK)</option>
-                </select>
+                  onChange={(v) => setForm({ ...form, product: v })}
+                  options={[
+                    { value: 'desktop', label: 'desktop (MSI)' },
+                    { value: 'android', label: 'android (APK)' },
+                  ]}
+                />
               </label>
               <label className="adm-campo">
                 <span className="adm-campo__label">Canal</span>
-                <select
+                <Select
                   className="adm-select"
                   value={form.channel}
-                  onChange={(e) => setForm({ ...form, channel: e.target.value })}
-                >
-                  <option value="stable">stable</option>
-                  <option value="beta">beta</option>
-                </select>
+                  onChange={(v) => setForm({ ...form, channel: v })}
+                  options={[
+                    { value: 'stable', label: 'stable' },
+                    { value: 'beta', label: 'beta' },
+                  ]}
+                />
               </label>
               <label className="adm-campo adm-campo__ancho">
                 <span className="adm-campo__label">Versión</span>

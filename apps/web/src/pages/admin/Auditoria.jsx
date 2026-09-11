@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { IconDownload, IconSearch } from '../../components/Icons';
+import { Select } from '../../components/Select';
 import {
   Aviso, Boton, Cabecera, Cargando, Celda, Fila, Tabla, Vacio,
   errMsg, fmtFecha,
@@ -107,17 +108,16 @@ export default function Auditoria() {
               aria-label="Filtrar por tipo de evento"
             />
           </div>
-          <select
+          <Select
             className="adm-btn"
             value={nivel}
-            onChange={(e) => setNivel(e.target.value)}
+            onChange={setNivel}
             aria-label="Filtrar por severidad"
-          >
-            <option value="">Severidad: todas</option>
-            {LEYENDA.map((l) => (
-              <option key={l.nivel} value={l.nivel}>{l.label}</option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'Severidad: todas' },
+              ...LEYENDA.map((l) => ({ value: l.nivel, label: l.label })),
+            ]}
+          />
           <Boton type="submit" variante="primary">Filtrar</Boton>
         </form>
 

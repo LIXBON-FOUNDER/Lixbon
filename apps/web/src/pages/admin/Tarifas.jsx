@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { useConfirmar } from '../../hooks/useConfirmar';
 import { IconCheck, IconPlus, IconTrash } from '../../components/Icons';
 import {
   Aviso, Boton, Cabecera, Cargando, Celda, Chip, Fila, Tabla, Tarjeta, Vacio,
@@ -17,6 +18,7 @@ const CABECERAS = [
 const NUEVA = { model_prefix: '', display_name: '', input: '', output: '' };
 
 export default function Tarifas() {
+  const confirmar = useConfirmar();
   const [filas, setFilas] = useState(null);
   const [borrador, setBorrador] = useState({});
   const [nueva, setNueva] = useState(NUEVA);
@@ -78,9 +80,12 @@ export default function Tarifas() {
   };
 
   const eliminar = async (fila) => {
-    const aviso = `¿Eliminar la tarifa de "${fila.model_prefix}"? `
-      + 'Los modelos que la usaban pasarán a la tarifa por defecto (*).';
-    if (!window.confirm(aviso)) return;
+    const ok = await confirmar({
+      titulo: `¿Eliminar la tarifa de "${fila.model_prefix}"?`,
+      texto: 'Los modelos que la usaban pasarán a la tarifa por defecto (*).',
+      etiqueta: 'Eliminar tarifa',
+    });
+    if (!ok) return;
     setError('');
     try {
       await api.delete(`/api/admin/pricing/${fila.id}`);

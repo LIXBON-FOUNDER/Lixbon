@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconX,
 } from './Icons';
+import { Select } from './Select';
 import { useDictado } from '../hooks/useDictado';
 import {
   contextoDe, describirImagen, esAudioOVideo, esImagen, mensajeDeError,
@@ -266,16 +267,13 @@ export function ChatInput({ onSend, busy, models, model, onModelChange, webSearc
 
       {/* El modelo ocupa la ranura baja de la caja, como un chip más. */}
       {models.length > 0 && (
-        <select
+        <Select
           className="chat-input__model"
           value={model}
-          onChange={(e) => onModelChange(e.target.value)}
+          options={models.map((m) => ({ value: m, label: m }))}
+          onChange={onModelChange}
           aria-label="Modelo"
-        >
-          {models.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
+        />
       )}
       </div>
 

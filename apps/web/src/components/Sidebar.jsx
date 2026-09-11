@@ -255,7 +255,8 @@ export function Sidebar({
           </div>
         </div>
 
-        {user && user.plan_id !== 'advance' && (
+        {/* Solo la cuenta gratuita ve el atajo; en Pro/Advance se cambia de plan desde Ajustes. */}
+        {user && (!user.plan_id || user.plan_id === 'free') && (
           <button className="sidebar__upgrade" onClick={() => go('/planes')}>
             <IconBolt size={16} /> <span>Mejorar plan</span>
           </button>
@@ -318,7 +319,9 @@ export function Sidebar({
                       <IconGrid size={14} /> Panel admin
                     </button>
                   )}
-                  <button onClick={onLogout}><IconLogout size={14} /> Cerrar sesión</button>
+                  <button onClick={() => { setProfileMenu(false); onLogout(); }}>
+                    <IconLogout size={14} /> Cerrar sesión
+                  </button>
                 </div>
               )}
             </>

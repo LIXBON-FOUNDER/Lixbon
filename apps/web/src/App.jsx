@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './hooks/useAuth';
+import { ConfirmarProvider } from './hooks/useConfirmar';
 import { useViewportHeight } from './hooks/useViewportHeight';
 import { RouteFade } from './components/RouteFade';
 
@@ -35,46 +36,48 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <RouteFade>
-          <Routes>
-            <Route path="/" element={<ChatPage />} />
-            <Route path="/c/:id" element={<ChatPage />} />
-            <Route path="/auth" element={<AuthPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
-            <Route path="/account" element={<AccountPage />} />
-            <Route path="/account/:section" element={<AccountPage />} />
-            <Route path="/planes" element={<PlansPage />} />
-            <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<AdminInicio />} />
-              <Route path="ia" element={<Navigate to="/admin/ia/modelos" replace />} />
-              <Route path="ia/modelos" element={<AdminModelos />} />
-              <Route path="ia/roles" element={<AdminRoles />} />
-              <Route path="ia/tarifas" element={<AdminTarifas />} />
-              <Route path="proveedores" element={<AdminProveedores />} />
-              <Route path="nodos" element={<AdminNodos />} />
-              <Route path="ingresos" element={<AdminIngresos />} />
-              <Route path="pagos" element={<Navigate to="/admin/pagos/transacciones" replace />} />
-              <Route path="pagos/transacciones" element={<AdminTransacciones />} />
-              <Route path="pagos/liquidaciones" element={<AdminLiquidaciones />} />
-              <Route path="pagos/pasarela" element={<AdminPasarela />} />
-              <Route path="usuarios" element={<AdminUsuarios />} />
-              <Route path="releases" element={<AdminReleases />} />
-              <Route path="auditoria" element={<AdminAuditoria />} />
-            </Route>
-            <Route path="/aplicaciones" element={<DownloadsPage />} />
-            <Route path="/descargas" element={<Navigate to="/aplicaciones" replace />} />
-            <Route path="/novedades" element={<ReleasesPage />} />
-            <Route path="/docs" element={<DocsPage />} />
-            <Route path="/docs/:section" element={<DocsPage />} />
-            <Route path="/s/:token" element={<SharedPage />} />
-            <Route path="/remote" element={<RemotePage />} />
-            <Route path="/remote/:token" element={<RemotePage />} />
-            {/* Rutas legacy del dashboard viejo */}
-            <Route path="/login" element={<Navigate to="/auth" replace />} />
-            <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </RouteFade>
+        <ConfirmarProvider>
+          <RouteFade>
+            <Routes>
+              <Route path="/" element={<ChatPage />} />
+              <Route path="/c/:id" element={<ChatPage />} />
+              <Route path="/auth" element={<AuthPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/account" element={<AccountPage />} />
+              <Route path="/account/:section" element={<AccountPage />} />
+              <Route path="/planes" element={<PlansPage />} />
+              <Route path="/admin" element={<AdminLayout />}>
+                <Route index element={<AdminInicio />} />
+                <Route path="ia" element={<Navigate to="/admin/ia/modelos" replace />} />
+                <Route path="ia/modelos" element={<AdminModelos />} />
+                <Route path="ia/roles" element={<AdminRoles />} />
+                <Route path="ia/tarifas" element={<AdminTarifas />} />
+                <Route path="proveedores" element={<AdminProveedores />} />
+                <Route path="nodos" element={<AdminNodos />} />
+                <Route path="ingresos" element={<AdminIngresos />} />
+                <Route path="pagos" element={<Navigate to="/admin/pagos/transacciones" replace />} />
+                <Route path="pagos/transacciones" element={<AdminTransacciones />} />
+                <Route path="pagos/liquidaciones" element={<AdminLiquidaciones />} />
+                <Route path="pagos/pasarela" element={<AdminPasarela />} />
+                <Route path="usuarios" element={<AdminUsuarios />} />
+                <Route path="releases" element={<AdminReleases />} />
+                <Route path="auditoria" element={<AdminAuditoria />} />
+              </Route>
+              <Route path="/aplicaciones" element={<DownloadsPage />} />
+              <Route path="/descargas" element={<Navigate to="/aplicaciones" replace />} />
+              <Route path="/novedades" element={<ReleasesPage />} />
+              <Route path="/docs" element={<DocsPage />} />
+              <Route path="/docs/:section" element={<DocsPage />} />
+              <Route path="/s/:token" element={<SharedPage />} />
+              <Route path="/remote" element={<RemotePage />} />
+              <Route path="/remote/:token" element={<RemotePage />} />
+              {/* Rutas legacy del dashboard viejo */}
+              <Route path="/login" element={<Navigate to="/auth" replace />} />
+              <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </RouteFade>
+        </ConfirmarProvider>
       </AuthProvider>
     </BrowserRouter>
   );

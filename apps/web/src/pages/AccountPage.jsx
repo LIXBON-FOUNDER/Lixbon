@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useConfirmar } from '../hooks/useConfirmar';
 import { useReenvioVerificacion } from '../components/VerifyBanner';
 import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
@@ -218,7 +219,7 @@ function GeneralSection({ user, onSaved }) {
 
 // ── Cuenta ──────────────────────────────────────────────────────────────
 
-function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
+function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout }) {
   const [newKey, setNewKey] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -227,6 +228,7 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [delBusy, setDelBusy] = useState(false);
   const [delError, setDelError] = useState('');
+  const confirmar = useConfirmar();
 
   const deleteAccount = async (password) => {
     setDelBusy(true);
@@ -259,7 +261,12 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
   };
 
   const deleteKey = async (id) => {
-    if (!window.confirm('¿Desactivar esta API key? Las integraciones que la usen dejarán de funcionar.')) return;
+    const ok = await confirmar({
+      titulo: '¿Desactivar esta API key?',
+      texto: 'Las integraciones que la usen dejarán de funcionar.',
+      etiqueta: 'Desactivar',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/api/keys/${id}`);
       await onReloadKeys();
@@ -356,7 +363,7 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout }) {
       <div className="set-card">
         <h2 className="set-title">Sesión</h2>
         <Row label="Cerrar sesión" hint="Cierra tu sesión en este navegador">
-          <button className="pill-btn pill-btn--outline set-btn" onClick={onLogout}>
+          <button className="pill-btn pill-btn--outline set-btn" onClick={onPedirLogout}>
             <IconLogout size={14} /> Cerrar sesión
           </button>
         </Row>
@@ -649,7 +656,19 @@ export default function AccountPage() {
 
   useEffect(() => { setMenuOpen(false); }, [section]);
 
+  const confirmar = useConfirmar();
+
   const doLogout = async () => { await logout(); navigate('/'); };
+
+  const pedirLogout = async () => {
+    const ok = await confirmar({
+      titulo: '¿Cerrar sesión?',
+      texto: 'Se cerrará tu sesión en este navegador.',
+      etiqueta: 'Cerrar sesión',
+      peligro: false,
+    });
+    if (ok) doLogout();
+  };
 
   const plan = account?.plan;
 
@@ -703,7 +722,14 @@ export default function AccountPage() {
             <div className="settings__pane" key={current.id}>
               {current.id === 'general' && <GeneralSection user={user} onSaved={setUser} />}
               {current.id === 'cuenta' && (
-                <CuentaSection user={user} plan={plan} keys={keys} onReloadKeys={loadKeys} onLogout={doLogout} />
+                <CuentaSection
+                  user={user}
+                  plan={plan}
+                  keys={keys}
+                  onReloadKeys={loadKeys}
+                  onLogout={doLogout}
+                  onPedirLogout={pedirLogout}
+                />
               )}
               {current.id === 'privacidad' && <PrivacidadSection user={user} onUserChange={setUser} />}
               {current.id === 'facturacion' && <SeccionFacturacion plan={plan} />}

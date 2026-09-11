@@ -1,12 +1,14 @@
 // El acceso lo decide el backend en cada endpoint; esto solo evita pintar un
 // panel vacío a quien no es admin.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirmar } from '../../hooks/useConfirmar';
+import { useDismiss } from '../../hooks/useDismiss';
 import { Logo, LogoMark } from '../../components/Logo';
 import {
-  IconApps, IconBag, IconCard, IconCaret, IconChat, IconDownload, IconGear,
-  IconHome, IconNodes, IconShield, IconTrend, IconUsers,
+  IconApps, IconBag, IconBolt, IconBook, IconCard, IconCaret, IconChat, IconDownload,
+  IconGear, IconHome, IconLogout, IconNodes, IconShield, IconTrend, IconUsers,
 } from '../../components/Icons';
 import { inicialDe } from './comunes';
 
@@ -44,9 +46,15 @@ const claseLink = ({ isActive }) => `adm-link ${isActive ? 'is-active' : ''}`;
 const claseSub = ({ isActive }) => `adm-sublink ${isActive ? 'is-active' : ''}`;
 
 export default function AdminLayout() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const confirmar = useConfirmar();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const [menuPerfil, setMenuPerfil] = useState(false);
+  const perfilRef = useRef(null);
+
+  const cerrarMenu = useCallback(() => setMenuPerfil(false), []);
+  useDismiss(menuPerfil, perfilRef, cerrarMenu);
   // Un grupo se abre solo cuando estás dentro, y se puede plegar a mano.
   const [abiertos, setAbiertos] = useState(
     () => AREAS.filter((a) => a.grupo && pathname.startsWith(a.grupo)).map((a) => a.grupo),
@@ -60,6 +68,21 @@ export default function AdminLayout() {
   const alternar = (grupo) => setAbiertos(
     (v) => (v.includes(grupo) ? v.filter((g) => g !== grupo) : [...v, grupo]),
   );
+
+  const ir = (ruta) => { setMenuPerfil(false); navigate(ruta); };
+
+  const cerrarSesion = async () => {
+    setMenuPerfil(false);
+    const ok = await confirmar({
+      titulo: '¿Cerrar sesión?',
+      texto: 'Se cerrará tu sesión en este navegador.',
+      etiqueta: 'Cerrar sesión',
+      peligro: false,
+    });
+    if (!ok) return;
+    await logout();
+    navigate('/');
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -129,15 +152,33 @@ export default function AdminLayout() {
 
         <div className="adm__foot">
           <span className="tab" />
-          <div className="adm__who">
-            <span className="adm__avatar">{inicialDe(nombre)}</span>
+          <div className="adm__who" ref={perfilRef}>
+            {user.avatar_url ? (
+              <img className="adm__avatar adm__avatar--img" src={user.avatar_url} alt="" />
+            ) : (
+              <span className="adm__avatar">{inicialDe(nombre)}</span>
+            )}
             <div className="adm__id">
               <span className="adm__name">{nombre}</span>
               <span className="adm__role">Administrador</span>
             </div>
-            <Link to="/account" className="icon-btn" aria-label="Ajustes de la cuenta">
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setMenuPerfil((v) => !v)}
+              aria-label="Opciones de la cuenta"
+              aria-expanded={menuPerfil}
+            >
               <IconGear size={17} />
-            </Link>
+            </button>
+            {menuPerfil && (
+              <div className="sb-menu sb-menu--profile" role="menu">
+                <button onClick={() => ir('/planes')}><IconBolt size={14} /> Planes</button>
+                <button onClick={() => ir('/account')}><IconGear size={14} /> Ajustes</button>
+                <button onClick={() => ir('/docs')}><IconBook size={14} /> Documentación</button>
+                <button onClick={cerrarSesion}><IconLogout size={14} /> Cerrar sesión</button>
+              </div>
+            )}
           </div>
         </div>
       </aside>

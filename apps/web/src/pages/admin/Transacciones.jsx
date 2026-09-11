@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { IconDownload, IconRefresh, IconSearch } from '../../components/Icons';
+import { Select } from '../../components/Select';
 import {
   Aviso, Boton, Cabecera, Cargando, Celda, Chip, Fila, Stat, Tabla, Vacio,
   errMsg, fmtFecha, fmtNum, fmtUSD,
@@ -113,17 +114,16 @@ export default function Transacciones() {
               aria-label="Buscar transacciones"
             />
           </div>
-          <select
+          <Select
             className="adm-btn"
             value={estado}
-            onChange={(e) => setEstado(e.target.value)}
+            onChange={setEstado}
             aria-label="Filtrar por estado"
-          >
-            <option value="">Estado: todos</option>
-            {Object.entries(ESTADO).map(([k, v]) => (
-              <option key={k} value={k}>{v.texto}</option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'Estado: todos' },
+              ...Object.entries(ESTADO).map(([k, v]) => ({ value: k, label: v.texto })),
+            ]}
+          />
           <Boton type="submit" variante="primary" disabled={cargando}>
             {cargando ? 'Buscando…' : 'Buscar'}
           </Boton>

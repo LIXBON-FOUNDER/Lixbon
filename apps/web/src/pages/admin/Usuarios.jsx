@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
+import { useConfirmar } from '../../hooks/useConfirmar';
 import { useAuth } from '../../hooks/useAuth';
 import { planBadge, ROLE_BADGE } from '../../lib/planColors';
 import { IconChevron, IconDownload, IconSearch } from '../../components/Icons';
+import { Select } from '../../components/Select';
 import {
   Aviso, Boton, Cabecera, Cargando, Celda, Chip, Fila, Quien, Tabla, Tarjeta, Vacio,
   errMsg, fmtDia, fmtFecha, fmtNum, nombrePlan,
@@ -61,13 +63,13 @@ function Detalle({ u, plans, esYo, onPlan, onActivo }) {
       <div className="adm-campos">
         <label className="adm-campo">
           <span className="adm-campo__label">Plan</span>
-          <select
+          <Select
             className="adm-select"
             value={u.plan_id}
-            onChange={(e) => onPlan(u.id, e.target.value)}
-          >
-            {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+            onChange={(v) => onPlan(u.id, v)}
+            options={plans.map((p) => ({ value: p.id, label: p.name }))}
+            aria-label="Plan del usuario"
+          />
         </label>
         <div className="adm-campo">
           <span className="adm-campo__label">Acceso</span>
@@ -123,6 +125,7 @@ function Detalle({ u, plans, esYo, onPlan, onActivo }) {
 
 export default function Usuarios() {
   const { user: yo } = useAuth();
+  const confirmar = useConfirmar();
   const [users, setUsers] = useState(null);
   const [plans, setPlans] = useState([]);
   const [q, setQ] = useState('');
@@ -163,7 +166,15 @@ export default function Usuarios() {
 
   const alternarActivo = async (u) => {
     const verbo = u.is_active ? 'bloquear' : 'desbloquear';
-    if (!window.confirm(`¿Seguro que quieres ${verbo} a ${u.email || u.username}?`)) return;
+    const ok = await confirmar({
+      titulo: `¿Seguro que quieres ${verbo} a ${u.email || u.username}?`,
+      texto: u.is_active
+        ? 'No podrá iniciar sesión ni usar sus API keys hasta que lo desbloquees.'
+        : 'Recuperará el acceso a su cuenta y a sus API keys.',
+      etiqueta: u.is_active ? 'Bloquear' : 'Desbloquear',
+      peligro: u.is_active,
+    });
+    if (!ok) return;
     setError('');
     try {
       await api.post(`/api/admin/users/${u.id}/active`, { active: !u.is_active });
@@ -204,26 +215,28 @@ export default function Usuarios() {
               aria-label="Buscar usuarios"
             />
           </div>
-          <select
+          <Select
             className="adm-btn"
             value={plan}
-            onChange={(e) => setPlan(e.target.value)}
+            onChange={setPlan}
             aria-label="Filtrar por plan"
-          >
-            <option value="">Plan: todos</option>
-            {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <select
+            options={[
+              { value: '', label: 'Plan: todos' },
+              ...plans.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+          />
+          <Select
             className="adm-btn"
             value={estado}
-            onChange={(e) => setEstado(e.target.value)}
+            onChange={setEstado}
             aria-label="Filtrar por estado"
-          >
-            <option value="">Estado: todos</option>
-            <option value="activo">Activos</option>
-            <option value="sin-verificar">Sin verificar</option>
-            <option value="bloqueado">Bloqueados</option>
-          </select>
+            options={[
+              { value: '', label: 'Estado: todos' },
+              { value: 'activo', label: 'Activos' },
+              { value: 'sin-verificar', label: 'Sin verificar' },
+              { value: 'bloqueado', label: 'Bloqueados' },
+            ]}
+          />
           <Boton type="submit" variante="primary">Buscar</Boton>
         </form>
 

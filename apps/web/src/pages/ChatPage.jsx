@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useConfirmar } from '../hooks/useConfirmar';
 import { useIsCompact } from '../hooks/useMediaQuery';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
@@ -35,6 +36,7 @@ function Sources({ sources }) {
 
 export default function ChatPage() {
   const { user, loading, logout } = useAuth();
+  const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();
   const navigate = useNavigate();
 
@@ -243,7 +245,12 @@ export default function ChatPage() {
   };
 
   const deleteConversation = async (id) => {
-    if (!window.confirm('¿Eliminar esta conversación?')) return;
+    const ok = await confirmar({
+      titulo: '¿Eliminar esta conversación?',
+      texto: 'Se borrarán todos sus mensajes. Esta acción no se puede deshacer.',
+      etiqueta: 'Eliminar',
+    });
+    if (!ok) return;
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (id === routeConvId) navigate('/');
     try {
@@ -255,6 +262,13 @@ export default function ChatPage() {
   };
 
   const handleLogout = async () => {
+    const ok = await confirmar({
+      titulo: '¿Cerrar sesión?',
+      texto: 'Tendrás que volver a iniciar sesión para ver tu historial.',
+      etiqueta: 'Cerrar sesión',
+      peligro: false,
+    });
+    if (!ok) return;
     await logout();
     setConversations([]);
     navigate('/');

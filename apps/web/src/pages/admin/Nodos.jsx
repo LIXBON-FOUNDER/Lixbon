@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { useConfirmar } from '../../hooks/useConfirmar';
 import {
   IconCheck, IconPlus, IconRefresh, IconTrash, IconX,
 } from '../../components/Icons';
@@ -81,6 +82,7 @@ function TarjetaNodo({ nodo, st, onReintentar, onEditar, onEliminar, reintentand
 }
 
 export default function Nodos() {
+  const confirmar = useConfirmar();
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null); // null = cerrado; {} = alta
   const [token, setToken] = useState(null);
@@ -133,7 +135,12 @@ export default function Nodos() {
   };
 
   const eliminar = async (id) => {
-    if (!window.confirm(`¿Eliminar el nodo ${id}? El orquestador dejará de enrutarle tráfico.`)) return;
+    const ok = await confirmar({
+      titulo: `¿Eliminar el nodo ${id}?`,
+      texto: 'El orquestador dejará de enrutarle tráfico.',
+      etiqueta: 'Eliminar nodo',
+    });
+    if (!ok) return;
     setError('');
     try {
       await api.delete(`/api/admin/nodes/${id}`);

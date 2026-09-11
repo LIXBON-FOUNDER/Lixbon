@@ -10,6 +10,7 @@ export function ConfirmDialog({
   confirmLabel = 'Confirmar',
   busyLabel = 'Procesando…',
   requirePassword = false,
+  danger = true,
   error = '',
   busy = false,
   onConfirm,
@@ -54,7 +55,7 @@ export function ConfirmDialog({
             Cancelar
           </button>
           <button
-            className="pill-btn pill-btn--primary is-danger"
+            className={danger ? 'pill-btn pill-btn--primary is-danger' : 'pill-btn pill-btn--primary'}
             disabled={!canConfirm}
             onClick={() => onConfirm(password)}
           >

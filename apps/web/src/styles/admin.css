@@ -129,12 +129,17 @@
 }
 
 .adm__who {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px;
   border-radius: var(--radius);
   background: var(--surface-3);
+}
+
+.adm__avatar--img {
+  object-fit: cover;
 }
 
 .adm__avatar {
@@ -659,14 +664,11 @@ a.adm-btn {
 }
 
 .adm-select {
-  appearance: none;
-  padding-right: 32px;
-  background-image: linear-gradient(45deg, transparent 50%, #8a8a88 50%),
-    linear-gradient(135deg, #8a8a88 50%, transparent 50%);
-  background-position: calc(100% - 17px) 17px, calc(100% - 12px) 17px;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
   cursor: pointer;
+}
+
+.adm-select.is-open {
+  background: var(--field-focus);
 }
 
 .adm-file {
@@ -1466,6 +1468,19 @@ a.adm-btn {
     margin: 4px 8px 8px;
   }
 
+  /* La barra es cabecera: el menú del perfil baja en vez de subir, y la barra
+     deja de recortar para que no se corte. */
+  .adm__nav {
+    overflow: visible;
+  }
+
+  .adm__who .sb-menu--profile {
+    top: calc(100% + 6px);
+    bottom: auto;
+    transform-origin: top right;
+    animation: menu-in 0.16s ease;
+  }
+
   .adm__back {
     margin-top: 0;
   }
@@ -1492,20 +1507,14 @@ a.adm-btn {
 
 /* ── Complementos ────────────────────────────────────────────────────── */
 
-/* Un <select> con la piel del chip, para no reinventar el menú nativo. */
-select.adm-btn {
-  appearance: none;
-  height: 34px;
-  padding: 0 30px 0 13px;
-  border: 0;
-  font: inherit;
-  font-size: 13px;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 16px) 15px, calc(100% - 11px) 15px;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
-  cursor: pointer;
+/* El selector de filtro lleva la piel del chip. */
+.adm-btn.select__btn {
+  gap: 8px;
+}
+
+.adm-btn.is-open {
+  background: var(--surface-5);
+  color: var(--ink);
 }
 
 .adm-card--detalle {

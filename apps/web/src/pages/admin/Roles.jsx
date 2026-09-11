@@ -3,7 +3,9 @@
 // acabó resolviendo y de dónde salió.
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { useConfirmar } from '../../hooks/useConfirmar';
 import { IconCheck, IconRefresh } from '../../components/Icons';
+import { Select } from '../../components/Select';
 import {
   Aviso, Boton, Cabecera, Cargando, Chip, Tarjeta, errMsg,
 } from './comunes';
@@ -25,6 +27,7 @@ const ORIGEN = {
 };
 
 export default function Roles() {
+  const confirmar = useConfirmar();
   const [data, setData] = useState(null);
   const [borrador, setBorrador] = useState({});
   const [todos, setTodos] = useState({});
@@ -63,9 +66,13 @@ export default function Roles() {
     } catch (e) {
       const detalle = e.response?.data?.detail;
       if (detalle?.code === 'capability_mismatch') {
-        if (window.confirm(`${detalle.message}\n\n¿Asignarlo igualmente?`)) {
-          guardar(rol, { force: true });
-        }
+        const ok = await confirmar({
+          titulo: '¿Asignarlo igualmente?',
+          texto: detalle.message,
+          etiqueta: 'Asignar',
+          peligro: false,
+        });
+        if (ok) guardar(rol, { force: true });
         return;
       }
       setError(errMsg(e, 'No se pudo guardar el rol'));
@@ -121,21 +128,20 @@ export default function Roles() {
                     <div className="adm-campos">
                       <label className="adm-campo adm-campo__ancho">
                         <span className="adm-campo__label">Modelo</span>
-                        <select
+                        <Select
                           className="adm-select adm-input--mono"
                           value={d.model ?? ''}
-                          onChange={(e) => setBorrador({
-                            ...borrador, [r.role]: { ...d, model: e.target.value },
+                          onChange={(v) => setBorrador({
+                            ...borrador, [r.role]: { ...d, model: v },
                           })}
-                        >
-                          <option value="">— automático —</option>
-                          {opciones(r.role).map((m) => (
-                            <option key={m.id} value={m.id}>{m.id}</option>
-                          ))}
-                          {d.model && !modelos.some((m) => m.id === d.model) && (
-                            <option value={d.model}>{d.model} (no instalado)</option>
-                          )}
-                        </select>
+                          options={[
+                            { value: '', label: '— automático —' },
+                            ...opciones(r.role).map((m) => ({ value: m.id, label: m.id })),
+                            ...(d.model && !modelos.some((m) => m.id === d.model)
+                              ? [{ value: d.model, label: `${d.model} (no instalado)` }]
+                              : []),
+                          ]}
+                        />
                       </label>
                       <label className="adm-campo">
                         <span className="adm-campo__label">keep_alive</span>

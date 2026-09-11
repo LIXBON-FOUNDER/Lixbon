@@ -816,24 +816,16 @@
 .chat-input__model {
   align-self: flex-start;
   max-width: 240px;
-  padding: 4px 10px;
+  padding: 4px 8px 4px 10px;
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
   font-size: 12px;
-  outline: none;
-  cursor: pointer;
-  appearance: none;
-  text-overflow: ellipsis;
 }
 
-.chat-input__model:hover {
+.chat-input__model:hover,
+.chat-input__model.is-open {
   background: var(--surface-5);
-}
-
-.chat-input__model option {
-  background: var(--surface-3);
-  color: var(--ink);
 }
 
 /* Los iconos cuelgan de la esquina inferior izquierda de la caja. */
