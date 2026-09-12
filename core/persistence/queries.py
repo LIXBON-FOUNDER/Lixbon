@@ -1063,12 +1063,15 @@ def save_message(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     latency_ms: int = 0,
-) -> None:
+    record_usage: bool = True,
+) -> int:
+    """Guarda un mensaje y devuelve su id. `record_usage=False` para un
+    borrador que se completará con `update_message` (el uso se registra entonces)."""
     total_tokens = prompt_tokens + completion_tokens
     ts = now_iso()
     conv_user_id: int | None = None
     with get_session() as s:
-        s.add(Message(
+        msg = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
@@ -1078,13 +1081,51 @@ def save_message(
             total_tokens=total_tokens,
             latency_ms=latency_ms,
             created_at=ts,
-        ))
+        )
+        s.add(msg)
         conv = s.get(Conversation, conversation_id)
         if conv:
             conv.updated_at = ts
             conv_user_id = conv.user_id
-    if conv_user_id is not None:
+        s.flush()
+        message_id = msg.id
+    if record_usage and conv_user_id is not None:
         record_model_usage(conv_user_id, model, prompt_tokens, completion_tokens, latency_ms)
+    return message_id
+
+
+def update_message(
+    message_id: int,
+    content: str,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    latency_ms: int | None = None,
+    record_usage: bool = False,
+) -> None:
+    """Actualiza el contenido (y al cerrar, tokens/latencia) de un mensaje en
+    streaming: se guarda por tramos para que un reinicio del gateway no lo pierda."""
+    conv_user_id: int | None = None
+    model: str | None = None
+    with get_session() as s:
+        msg = s.get(Message, message_id)
+        if not msg:
+            return
+        msg.content = content
+        if prompt_tokens is not None:
+            msg.prompt_tokens = prompt_tokens
+        if completion_tokens is not None:
+            msg.completion_tokens = completion_tokens
+        if prompt_tokens is not None or completion_tokens is not None:
+            msg.total_tokens = msg.prompt_tokens + msg.completion_tokens
+        if latency_ms is not None:
+            msg.latency_ms = latency_ms
+        model = msg.model
+        conv = s.get(Conversation, msg.conversation_id)
+        if conv:
+            conv.updated_at = now_iso()
+            conv_user_id = conv.user_id
+    if record_usage and conv_user_id is not None:
+        record_model_usage(conv_user_id, model, prompt_tokens or 0, completion_tokens or 0, latency_ms or 0)
 
 
 # ─── Créditos prepago: tarifas, saldo y ledger (cobro por tokens de API) ───

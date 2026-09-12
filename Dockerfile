@@ -27,4 +27,7 @@ EXPOSE 8000
 # --proxy-headers + --forwarded-allow-ips=*: Railway/Cloudflare terminan el TLS
 # fuera y reenvían por http; sin esto request.url_for/base_url generan enlaces
 # http:// que el navegador bloquea por mixed content (descargas, redirects).
-CMD ["sh", "-c", "uvicorn core.gateway.app:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips=*"]
+# --timeout-graceful-shutdown: sin él uvicorn espera sin límite a los streams
+# en curso y Railway mata el proceso con SIGKILL; los `finally` que guardan la
+# respuesta del asistente nunca corren y en cada deploy se perdían respuestas.
+CMD ["sh", "-c", "uvicorn core.gateway.app:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips=* --timeout-graceful-shutdown 5"]

@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from core.gateway import deps
@@ -29,6 +30,7 @@ from core.persistence.queries import (
     get_user_settings,
     record_model_usage,
     save_message,
+    update_message,
     save_task_embedding,
 )
 from core.delegation.embeddings import classify_request, get_embedding, pick_classifier_model, route_request
@@ -174,18 +176,26 @@ async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = N
         raise HTTPException(status_code=502, detail=f"Sin nodos disponibles y sin Ollama local: {exc}") from exc
 
 
+# Cada cuántos segundos se vuelca a BD el texto parcial de una respuesta en
+# streaming. Un deploy (SIGTERM + SIGKILL) pierde como mucho este tramo.
+CHECKPOINT_SECONDS = 4.0
+
+
 def _persist_assistant(conv_id: str, model: str, text: str,
                        prompt_tokens: int, completion_tokens: int, latency_ms: int,
                        user_id: int | None = None, save_history: bool = True,
-                       bill_credits: bool = False) -> None:
+                       bill_credits: bool = False, message_id: int | None = None) -> None:
     if save_history:
-        save_message(
-            conv_id, "assistant", text,
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            latency_ms=latency_ms,
-        )
+        if message_id is not None:
+            update_message(message_id, text, prompt_tokens, completion_tokens, latency_ms, record_usage=True)
+        else:
+            save_message(
+                conv_id, "assistant", text,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                latency_ms=latency_ms,
+            )
     elif user_id is not None:
         # Privacidad: sin historial no se persiste contenido, pero el uso
         # (tokens por modelo) sí se contabiliza.
@@ -329,6 +339,33 @@ async def chat_completions(
         async def _stream_and_persist():
             collector: dict[str, Any] = {}
             streamed_something = False
+            message_id: int | None = None
+            guardado = ""
+            ultimo_checkpoint = time.perf_counter()
+
+            async def _checkpoint() -> None:
+                # Texto parcial a BD: si el gateway muere a mitad (deploy), la
+                # respuesta no desaparece del historial.
+                nonlocal message_id, guardado, ultimo_checkpoint
+                if not save_history:
+                    return
+                texto = "".join(collector.get("parts") or [])
+                if texto == guardado or not texto:
+                    return
+                if time.perf_counter() - ultimo_checkpoint < CHECKPOINT_SECONDS:
+                    return
+                try:
+                    if message_id is None:
+                        message_id = await run_in_threadpool(
+                            save_message, conv_id, "assistant", texto, model, 0, 0, 0, False,
+                        )
+                    else:
+                        await run_in_threadpool(update_message, message_id, texto)
+                    guardado = texto
+                    ultimo_checkpoint = time.perf_counter()
+                except Exception as exc:
+                    logger.warning(f"[stream] checkpoint del mensaje falló: {exc}")
+
             # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
             if web_queries:
                 import json as _json
@@ -341,6 +378,7 @@ async def chat_completions(
                                                           keep_alive=role.keep_alive, think=think):
                         streamed_something = True
                         yield chunk
+                        await _checkpoint()
                 except Exception as exc:
                     # Fallback local solo si el nodo falló ANTES de emitir contenido
                     # (reintentar a mitad de stream duplicaría texto en el cliente)
@@ -366,6 +404,7 @@ async def chat_completions(
                         user_id=user_data["id"],
                         save_history=save_history,
                         bill_credits=bill_credits,
+                        message_id=message_id,
                     )
 
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")

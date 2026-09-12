@@ -329,6 +329,8 @@ async def stream_chat_openai(
     chat_id = f"chatcmpl-{uuid.uuid4()}"
     parts: list[str] = []
     collected_tool_calls: list[dict] = []
+    if collector is not None:
+        collector["parts"] = parts   # texto parcial en vivo, para checkpoints del caller
 
     # El collector se rellena en el finally: si el cliente corta el stream
     # (botón de detener), el caller aún persiste lo generado hasta ahí.
