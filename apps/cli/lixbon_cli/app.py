@@ -3,6 +3,7 @@ import os
 import platform
 import queue
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -43,6 +44,7 @@ from lixbon_cli.commands import (
 )
 from lixbon_cli.clipboard import paste_image
 from lixbon_cli.inputq import InputQueue
+from lixbon_cli.mcp import McpRegistry, load_mcp_config
 from lixbon_cli.config import (
     CLI_VERSION,
     web_mode_from_config,
@@ -156,7 +158,9 @@ class ChatApp:
             # «pytest»); se guardan en config.json al elegir «siempre para…».
             "allowed_commands": list(self.cfg.get("allowed_commands") or []),
             "save_allowed_commands": self._save_allowed_commands,
+            "mcp": None,  # McpRegistry cuando hay servidores configurados
         }
+        self._start_mcp()
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
         # Razonamiento del último stream (modelos thinking); lo consume el loop
@@ -248,7 +252,10 @@ class ChatApp:
             sent = self.history
             extra = estimate_tokens([{"role": "system",
                                       "content": build_native_system_prompt(self.workspace)}])
-            extra += tools_tokens(TOOL_SCHEMAS) if self.session.get("native_tools", True) else 0
+            if self.session.get("native_tools", True):
+                extra += tools_tokens(TOOL_SCHEMAS)
+                if self.session.get("mcp") is not None:
+                    extra += tools_tokens(self.session["mcp"].tool_schemas())
         else:
             sent = self._context_messages()
             extra = 0
@@ -349,6 +356,8 @@ class ChatApp:
         finally:
             self._persist_session()  # salir del CLI no pierde la conversación
             stop_all_background()
+            if self.session.get("mcp") is not None:
+                self.session["mcp"].close_all()
             release_status_line()
 
     def _render_identity(self) -> None:
@@ -1152,6 +1161,40 @@ class ChatApp:
                     return
             except OSError:
                 return
+
+    def _start_mcp(self) -> None:
+        """Arranca los servidores MCP declarados en segundo plano: el modelo los
+        ve en cuanto responden; el arranque del CLI no espera."""
+        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        if not config:
+            return
+        registry = McpRegistry()
+
+        def arrancar():
+            registry.start_all(config)
+            self.session["mcp"] = registry
+
+        threading.Thread(target=arrancar, daemon=True, name="mcp-start").start()
+
+    def cmd_mcp(self, arg: str):
+        registry = self.session.get("mcp")
+        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        if not config:
+            print_note("Sin servidores MCP. Declara alguno en .lixbon/mcp.json (proyecto) o ~/.lixbon/mcp.json:")
+            print_note('{"servers": {"nombre": {"command": "npx", "args": ["-y", "@paquete/servidor"], "env": {}}}}')
+            return True
+        if registry is None:
+            print_note("Los servidores MCP todavía están arrancando…")
+            return True
+        for name, command, count, error in registry.summary():
+            if error:
+                print_error(f"{name}: {error}")
+            else:
+                print_ok(f"{name}: {count} herramienta{'s' if count != 1 else ''}  ({command})")
+        for schema in registry.tool_schemas():
+            fn = schema["function"]
+            print_note(f"{fn['name']}  {fn['description'][:90]}")
+        return True
 
     def _ask_user(self, question: str, options: list[str]) -> str | None:
         """La tool ask_user: un selector si hay opciones, texto libre si no."""

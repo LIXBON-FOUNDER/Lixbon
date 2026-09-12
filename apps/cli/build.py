@@ -36,6 +36,7 @@ MODULE_ORDER = [
     "remote",
     "context",
     "checks",
+    "mcp",
     "agent",
     "sessions",
     "commands",

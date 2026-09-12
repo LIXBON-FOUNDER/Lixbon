@@ -275,6 +275,17 @@ TOOL_SCHEMAS: list[dict] = [
         }, "required": ["question"]}}},
 ]
 
+def mcp_text_prompt(schemas: list[dict]) -> str:
+    """Las tools MCP para el protocolo de texto: nombre, descripción y argumentos."""
+    lines = ["\n\n=== HERRAMIENTAS EXTERNAS (MCP) ==="]
+    for schema in schemas[:40]:
+        fn = schema["function"]
+        props = (fn.get("parameters") or {}).get("properties") or {}
+        args = ", ".join(f'"{k}":…' for k in list(props)[:8])
+        lines.append(f'{{"tool":"{fn["name"]}","args":{{{args}}}}}  {fn.get("description", "")[:120]}')
+    return "\n".join(lines)
+
+
 PLAN_MODE_PROMPT = (
     "\n\n=== MODO PLAN ===\n"
     "Estás en modo plan: SOLO puedes leer, buscar y preguntar. No escribas, edites ni borres archivos "
@@ -1410,7 +1421,11 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
         if session.get("plan_mode"):
             system_content += PLAN_MODE_PROMPT
         system_msg = {"role": "system", "content": system_content}
-        tools = TOOL_SCHEMAS if native else None
+        mcp = session.get("mcp")
+        extra_tools = mcp.tool_schemas() if mcp is not None else []
+        tools = (TOOL_SCHEMAS + extra_tools) if native else None
+        if extra_tools and not native:
+            system_content += mcp_text_prompt(extra_tools)
 
         body = working if native else sanitize_for_plain_chat(working)
         # El prompt tiene que caber en la ventana CON el system prompt y las
@@ -1657,6 +1672,9 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         render_action(console, TOOL_VERB["ask_user"], str(args.get("question", ""))[:100], readonly=True)
         stats["actions"] += 1
         return tool_ask_user(session, args.get("question", ""), args.get("options"))
+    mcp = session.get("mcp")
+    if mcp is not None and mcp.is_mcp_tool(tool_name):
+        return _run_mcp_tool(console, session, mcp, tool_name, args)
     if session.get("plan_mode") and tool_name not in READ_ONLY_TOOLS:
         render_action(console, TOOL_VERB.get(tool_name, tool_name), _args_summary(tool_name, args))
         render_action_result(console, "bloqueado: modo plan", error=True)
@@ -1819,6 +1837,42 @@ def verify_after(workspace: Path, tool_name: str, args: dict, result: str) -> tu
     if errors:
         result += f"\n[verificación {tool}] el archivo tiene errores; corrígelos:\n{errors}"
     return tool, errors, result
+
+
+def _run_mcp_tool(console, session: dict, mcp, tool_name: str, args: dict) -> str:
+    """Una tool MCP no es del CLI: no hay diff que enseñar ni forma de saber si
+    escribe o solo lee, así que pide aprobación como una escritura (salvo
+    auto-aprobar) y muestra el nombre y los argumentos."""
+    remote = session.get("remote")
+    stats = turn_stats(session)
+    resumen = json.dumps(args, ensure_ascii=False)[:160]
+    etiqueta = tool_name.replace("mcp__", "", 1).replace("__", " › ", 1)
+    render_action(console, "MCP", f"{etiqueta}  {resumen}")
+    if remote:
+        remote.emit("tool_use", tool=tool_name, summary=resumen, readonly=False)
+    if session.get("plan_mode"):
+        render_action_result(console, "bloqueado: modo plan", error=True)
+        return "[modo plan] No puedes usar herramientas externas ahora; termina el plan."
+    if not session.get("auto_approve"):
+        if remote:
+            if remote.request_approval(tool_name, resumen, "edit") != "allow":
+                return "Ejecución cancelada por el usuario"
+        else:
+            decision = confirm3("¿Ejecutar esta herramienta externa?", detail=etiqueta)
+            if decision == "always":
+                session["auto_approve"] = True
+            elif decision in ("no", None):
+                render_action_result(console, "rechazado por el usuario", error=True)
+                return "Ejecución cancelada por el usuario"
+    stats["actions"] += 1
+    started = time.monotonic()
+    result = mcp.call(tool_name, args)
+    failed = result.startswith("[ERROR]")
+    render_action_result(console, result.split("\n", 1)[0][:120], error=failed,
+                         meta=f"{time.monotonic() - started:.1f} s")
+    if remote:
+        remote.emit("tool_result", tool=tool_name, result=result[:REMOTE_RESULT_CHARS], error=failed)
+    return result
 
 
 def _execute(workspace: Path, tool_name: str, args: dict, api=None) -> tuple[str, bool, float]:
