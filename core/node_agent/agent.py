@@ -444,7 +444,9 @@ class _Conexion:
             return
 
         cuerpo = msg.get("body")
-        timeout = httpx.Timeout(300.0, connect=10.0)
+        # Lectura larga: la petición puede esperar en la cola de Ollama detrás
+        # de otra generación y luego evaluar un prompt grande en silencio.
+        timeout = httpx.Timeout(900.0, connect=10.0)
         respondido = False
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:

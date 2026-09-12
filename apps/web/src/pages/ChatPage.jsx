@@ -19,6 +19,23 @@ import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Ico
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
+const AVISO_VACIO = 'El modelo no devolvió respuesta. Suele pasar cuando la conversación ya no cabe '
+  + 'en su ventana de contexto: prueba a repetir la pregunta o empieza una conversación nueva.';
+const AVISO_CORTADA = 'Respuesta cortada: el modelo alcanzó su límite de tokens.';
+
+// Razonamiento previo de los modelos thinking: plegado, y abierto mientras
+// el modelo aún no ha escrito nada para que se vea que está trabajando.
+function Razonamiento({ texto, activo }) {
+  return (
+    <details className="msg-razon" open={activo}>
+      <summary className={activo ? 'msg-razon__titulo is-activo' : 'msg-razon__titulo'}>
+        {activo ? 'Razonando…' : 'Razonamiento'}
+      </summary>
+      <div className="msg-razon__texto">{texto}</div>
+    </details>
+  );
+}
+
 function Sources({ sources, queries }) {
   return (
     <div className="msg-sources">
@@ -190,6 +207,12 @@ export default function ChatPage() {
     const abort = new AbortController();
     abortRef.current = abort;
 
+    const patchLast = (fn) => setMessages((prev) => {
+      const next = prev.slice();
+      next[next.length - 1] = fn(next[next.length - 1]);
+      return next;
+    });
+
     try {
       await streamChatCompletion({
         model: chosenModel,
@@ -208,14 +231,23 @@ export default function ChatPage() {
         },
         onDelta: (delta) => {
           setSearching(false);
-          setMessages((prev) => {
-            const next = prev.slice();
-            const last = next[next.length - 1];
-            next[next.length - 1] = { ...last, content: last.content + delta };
-            return next;
-          });
+          patchLast((last) => ({ ...last, content: last.content + delta }));
+        },
+        onReasoning: (delta) => {
+          setSearching(false);
+          patchLast((last) => ({ ...last, reasoning: (last.reasoning || '') + delta }));
+        },
+        onFinish: (reason, event) => {
+          if (event?.type === 'empty') {
+            patchLast((last) => ({ ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
+          } else if (reason === 'length') {
+            patchLast((last) => ({ ...last, aviso: AVISO_CORTADA }));
+          }
         },
       });
+      // Stream cerrado sin contenido ni aviso (p. ej. el gateway se reinició a
+      // mitad): que no quede "Pensando…" con el botón de enviar activo.
+      patchLast((last) => (last.content ? last : { ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
 
       if (isFirstExchange && saveHistory) {
         try {
@@ -400,9 +432,13 @@ export default function ChatPage() {
                           <IconGlobe size={14} /> Buscando en internet…
                         </span>
                       )}
+                      {m.reasoning && (
+                        <Razonamiento texto={m.reasoning} activo={busy && i === messages.length - 1 && !m.content} />
+                      )}
                       {m.content
                         ? <Markdown>{m.content}</Markdown>
-                        : (!searching && <span className="msg__thinking">Pensando…</span>)}
+                        : (!searching && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
+                      {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                     </div>
                   )
                 ))}

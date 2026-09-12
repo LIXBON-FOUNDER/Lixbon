@@ -35,6 +35,13 @@ ADMIN_TOKEN: Optional[str] = os.getenv("ADMIN_TOKEN") or None
 # Vacío ⇒ autodetectar. MODEL_ROLE_FIM va vacío a propósito: ningún modelo de
 # chat sirve para autocompletar, hace falta uno con capability `insert`.
 MODEL_ROLE_CHAT: str = os.getenv("MODEL_ROLE_CHAT", "deepseek-r1:8b")
+# Razonamiento previo en el chat con modelos thinking (qwen3, deepseek-r1…).
+# Apagado por defecto: en una GPU pequeña con num_ctx 4096, qwen3.5:4b gasta
+# ~1.500 tokens y 35 s razonando para decir "hola", y en conversaciones largas
+# el razonamiento agota la ventana y el modelo responde vacío. "1" lo activa;
+# "auto" deja decidir al modelo. Por petición se puede forzar con `think`.
+_think = os.getenv("CHAT_THINK", "0").strip().lower()
+CHAT_THINK: bool | None = None if _think == "auto" else _think in ("1", "true", "yes", "on")
 MODEL_ROLE_FIM: str = os.getenv("MODEL_ROLE_FIM", "")
 MODEL_ROLE_VISION: str = os.getenv("MODEL_ROLE_VISION", "moondream")
 MODEL_ROLE_EMBED: str = os.getenv("MODEL_ROLE_EMBED", "nomic-embed-text")

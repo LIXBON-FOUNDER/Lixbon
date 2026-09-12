@@ -28,7 +28,10 @@ logger = logging.getLogger("lixbon.inference")
 # que se manda un ping). No confundir con el `keep_alive` de Ollama, que es
 # cuánto se queda el modelo cargado en VRAM y viaja en el payload.
 KEEPALIVE_SECONDS = 5
-STREAM_TIMEOUT = httpx.Timeout(300.0, connect=15.0)
+# Lectura larga: en una GPU pequeña una petición puede esperar en la cola de
+# Ollama detrás de otra generación y luego evaluar un prompt grande sin emitir
+# nada. El cliente recibe keep-alives mientras tanto, así que no le afecta.
+STREAM_TIMEOUT = httpx.Timeout(900.0, connect=15.0)
 
 
 def coerce_keep_alive(value: str | int | None) -> str | int | None:
@@ -276,9 +279,12 @@ async def stream_chat_openai(
     tools: list[dict] | None = None,
     num_ctx: int | None = None,
     keep_alive: str | None = None,
+    think: bool | None = None,
 ) -> AsyncIterator[str]:
     """
     Chat en streaming, convertido a chunks SSE en formato OpenAI.
+    `think`: False apaga el razonamiento previo de los modelos thinking; None
+    deja que decida el modelo.
     Si se pasa `collector` (dict), al terminar contiene:
       content (texto completo), prompt_tokens, completion_tokens, tool_calls
     para que el caller persista el mensaje y el uso.
@@ -296,6 +302,8 @@ async def stream_chat_openai(
     ka = coerce_keep_alive(keep_alive)
     if ka is not None:
         payload["keep_alive"] = ka
+    if think is not None:
+        payload["think"] = think
     chat_id = f"chatcmpl-{uuid.uuid4()}"
     parts: list[str] = []
     collected_tool_calls: list[dict] = []
@@ -323,6 +331,7 @@ async def _stream_chat_openai(
 ) -> AsyncIterator[str]:
     model = payload["model"]
     num_ctx = (payload.get("options") or {}).get("num_ctx")
+    thinking_seen = False
     async with new_client(timeout=STREAM_TIMEOUT) as client:
         async with client.stream("POST", url, json=payload, headers=headers) as response:
             response.raise_for_status()
@@ -346,6 +355,8 @@ async def _stream_chat_openai(
                 done = data.get("done", False)
                 if content:
                     parts.append(content)
+                if thinking:
+                    thinking_seen = True
 
                 delta: dict = {}
                 if not done:
@@ -362,6 +373,9 @@ async def _stream_chat_openai(
                         delta["tool_calls"] = oa_calls
                         collected_tool_calls.extend(oa_calls)
 
+                # done_reason "length" de Ollama = se agotó num_predict o la
+                # ventana: el cliente debe saber que la respuesta quedó cortada.
+                cortada = done and data.get("done_reason") == "length"
                 openai_chunk = {
                     "id": chat_id,
                     "object": "chat.completion.chunk",
@@ -373,6 +387,7 @@ async def _stream_chat_openai(
                             "delta": delta,
                             "finish_reason": (
                                 "tool_calls" if (done and collected_tool_calls)
+                                else "length" if cortada
                                 else "stop" if done else None
                             ),
                         }
@@ -400,6 +415,15 @@ async def _stream_chat_openai(
                             f"[stream] el modelo no devolvió nada (model={model}, "
                             f"prompt={prompt_tokens} tokens, num_ctx={num_ctx})"
                         )
+                    if not parts and not collected_tool_calls:
+                        # Aviso explícito al cliente: sin esto la web se queda
+                        # en "Pensando…" con el botón de enviar ya activo.
+                        openai_chunk["lixbon_event"] = {
+                            "type": "empty",
+                            "prompt_tokens": prompt_tokens,
+                            "num_ctx": num_ctx or 4096,
+                            "reasoned": thinking_seen,
+                        }
                     openai_chunk["usage"] = {
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,

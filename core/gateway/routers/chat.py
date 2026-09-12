@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.gateway import deps
-from core.config import OLLAMA_BASE_URL
+from core.config import CHAT_THINK, OLLAMA_BASE_URL
 from core.billing import credits
 from core.billing.quota import ensure_can_chat, record_tokens
 from core.persistence.queries import (
@@ -47,6 +47,7 @@ from core.security.auth import (
 )
 from core.gateway.utils import fetch_models
 from core.gateway.model_router import model_for_request, target_or_503
+from core.inference.context import fit_messages
 from core.inference.roles import REQUIRED_CAPABILITY, resolve_all
 
 logger = logging.getLogger("lixbon.chat")
@@ -88,6 +89,9 @@ class ChatCompletionRequest(BaseModel):
     # None ⇒ comportamiento clásico (la web nunca las envía).
     tools: list[dict] | None = None
     tool_choice: Any | None = None
+    # Razonamiento previo de los modelos thinking (qwen3, deepseek-r1…).
+    # None ⇒ CHAT_THINK del entorno (apagado por defecto).
+    think: bool | None = None
     # Petición efímera (edición inline Ctrl+K del IDE): no crea conversación ni
     # guarda contenido, pero el uso se contabiliza/cobra igual. La web no lo envía.
     no_persist: bool = False
@@ -297,6 +301,7 @@ async def chat_completions(
 
     base, headers, origen = target_or_503(model)
     num_ctx = payload.num_ctx or role.num_ctx
+    think = payload.think if payload.think is not None else CHAT_THINK
 
     # "Modo investigar": el modelo decide qué buscar, se busca y se inyecta el
     # contexto antes de responder.
@@ -313,6 +318,8 @@ async def chat_completions(
         web_sources = await websearch.research(web_queries)
         context = websearch.build_context(messages[-1]["content"], web_sources, web_queries)
         messages.insert(len(messages) - 1, {"role": "system", "content": context})
+
+    messages = fit_messages(messages, num_ctx)
     started_at = time.perf_counter()
     logger.info(f"[chat] model='{model}' ({role.source}) stream={payload.stream} "
                 f"target={origen} web={payload.web_search}")
@@ -330,7 +337,7 @@ async def chat_completions(
                     async for chunk in stream_chat_openai(base, model, messages,
                                                           headers=headers, collector=collector,
                                                           tools=payload.tools, num_ctx=num_ctx,
-                                                          keep_alive=role.keep_alive):
+                                                          keep_alive=role.keep_alive, think=think):
                         streamed_something = True
                         yield chunk
                 except Exception as exc:
@@ -340,7 +347,8 @@ async def chat_completions(
                         logger.warning(f"[stream] Nodo '{origen}' falló ({exc}); fallback local")
                         async for chunk in stream_chat_openai(OLLAMA_BASE_URL, model, messages,
                                                               collector=collector, tools=payload.tools,
-                                                              num_ctx=num_ctx, keep_alive=role.keep_alive):
+                                                              num_ctx=num_ctx, keep_alive=role.keep_alive,
+                                                              think=think):
                             yield chunk
                     else:
                         logger.error(f"[stream] Falló el streaming ({exc})")
