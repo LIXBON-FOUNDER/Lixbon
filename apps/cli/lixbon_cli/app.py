@@ -147,6 +147,8 @@ class ChatApp:
             "ask": self._ask_quiet,
             "auto_check": bool(self.cfg.get("auto_check", True)),
             "undo_stack": [],  # checkpoints de los últimos turnos, para /undo
+            "ask_user": self._ask_user,
+            "plan_mode": False,
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
@@ -206,7 +208,7 @@ class ChatApp:
     def _refresh_status(self) -> None:
         self.status.model = self.model or "sin modelo"
         self.status.session_label = self._session_label()
-        self.status.mode = self.mode
+        self.status.mode = "plan" if self.session.get("plan_mode") else self.mode
         self.status.web = self.web_search == "on"
         self.status.project = bool(self.project_context)
         self.status.remote = self.remote is not None
@@ -1140,6 +1142,18 @@ class ChatApp:
             except OSError:
                 return
 
+    def _ask_user(self, question: str, options: list[str]) -> str | None:
+        """La tool ask_user: un selector si hay opciones, texto libre si no."""
+        self.console.print()
+        if options:
+            chosen = select(question, [Option(o, o) for o in options] + [Option("Otra respuesta…", "__otro__")],
+                            default=0, rail_mode=True)
+            if chosen is None:
+                return None
+            if chosen != "__otro__":
+                return chosen
+        return self._prompt_text(question[:80])
+
     def _ask_quiet(self, messages: list[dict]) -> str:
         """Chat sin streaming ni historial, para trabajo interno del CLI."""
         resp = self.api.chat(model=self.model, messages=messages, conversation_id=None,
@@ -1885,6 +1899,32 @@ class ChatApp:
             self.console.print()
             self.console.print(f"  [lx.dim]{esc(stat.strip().splitlines()[-1])}[/]")
         self.console.print()
+        return True
+
+    def cmd_plan(self, arg: str):
+        if arg in ("on", "off"):
+            self.session["plan_mode"] = arg == "on"
+        else:
+            self.session["plan_mode"] = not self.session.get("plan_mode")
+        if self.session["plan_mode"]:
+            if self.mode != "agent":
+                self.mode = "agent"
+                self.cfg["mode"] = "agent"
+                save_config(self.cfg)
+            print_ok("Modo plan: el agente explora y propone; no toca archivos ni ejecuta nada. "
+                     "/plan off para que ejecute el plan.")
+        else:
+            print_ok("Modo plan desactivado: el agente vuelve a poder editar y ejecutar.")
+        self._refresh_status()
+        return True
+
+    def cmd_todo(self, arg: str):
+        items = self.session.get("todo") or []
+        if not items:
+            print_note("El agente no tiene lista de pasos en este momento.")
+            return True
+        from lixbon_cli.agent import render_todo
+        render_todo(self.console, items)
         return True
 
     def cmd_undo(self, arg: str):

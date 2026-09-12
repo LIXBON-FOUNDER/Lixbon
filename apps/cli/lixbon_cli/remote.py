@@ -41,6 +41,8 @@ def _args_summary(tool: str, args: dict) -> str:
         return prefix + str(args.get("command", ""))[:200]
     if tool in ("read_output", "stop_command"):
         return str(args.get("id", ""))
+    if tool == "ask_user":
+        return str(args.get("question", ""))[:200]
     if tool == "rename_file":
         return f"{args.get('src', '?')} → {args.get('dst', '?')}"
     if tool == "search":

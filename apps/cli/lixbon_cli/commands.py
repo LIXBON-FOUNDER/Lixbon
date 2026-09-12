@@ -26,6 +26,8 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("clear", "", "Vaciar el contexto y empezar de cero", "conversación"),
     # ── agente ──────────────────────────────────────────────────────────
     ("approve", "[on|off]", "Auto-aprobar herramientas del agente", "agente"),
+    ("plan", "[on|off]", "Modo plan: el agente solo explora y propone, sin tocar nada", "agente"),
+    ("todo", "", "Ver la lista de pasos del agente", "agente"),
     ("tools", "", "Ver las herramientas que puede usar el agente", "agente"),
     ("diff", "[ruta]", "Ver los cambios sin confirmar del workspace", "agente"),
     ("undo", "", "Revertir los archivos que tocó el último turno del agente", "agente"),

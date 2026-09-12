@@ -174,10 +174,16 @@ def fit_history(messages: list[dict], budget_tokens: int,
         start += 1
 
     # Nada cabe con la cabecera: se salva lo último, que es lo que el modelo
-    # necesita para dar el siguiente paso.
+    # necesita para dar el siguiente paso. Sus resultados también se adelgazan
+    # (todos, no solo los antiguos) y, si aun así no cabe, se suelta por delante.
     tail = working[-keep_recent:] if len(working) > keep_recent else working
-    tail = tail[_safe_start(tail, 0):]
-    return ([{"role": "user", "content": PRUNE_NOTE}] + tail) if tail else working, True
+    tail = shrink_old_results(tail, keep_recent=0)
+    note = [{"role": "user", "content": PRUNE_NOTE}]
+    start = _safe_start(tail, 0)
+    while start < len(tail) and estimate_tokens(note + tail[start:]) > budget_tokens:
+        start = _safe_start(tail, start + 1)
+    tail = tail[start:] if start < len(tail) else tail[_safe_start(tail, 0):]
+    return (note + tail) if tail else working, True
 
 
 # Por encima de esta fracción de la ventana se compacta: el modelo resume lo

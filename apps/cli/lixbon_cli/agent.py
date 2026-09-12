@@ -64,8 +64,8 @@ MAX_AGENT_STEPS = 40
 # atascado repite la misma herramienta con los mismos argumentos indefinidamente.
 MAX_REPEATED_CALLS = 3
 
-READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "search", "fetch_url", "web_search",
-                   "read_output", "stop_command"}
+READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "outline", "search", "fetch_url",
+                   "web_search", "read_output", "stop_command", "todo", "ask_user"}
 MUTATING_TOOLS = {"write_file", "edit_file", "append_file", "delete_file", "rename_file"}
 
 # Tope de líneas que devuelve una búsqueda o un listado: por encima el modelo
@@ -79,6 +79,7 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("list_files", "path, recursive?", "Listar el contenido de una carpeta"),
     ("find_files", "pattern", "Buscar archivos por nombre o patrón glob"),
     ("read_file", "path, start_line?, end_line?", "Leer un archivo, PDF, Word o imagen"),
+    ("outline", "path", "Funciones, clases y secciones de un archivo con su línea"),
     ("search", "pattern, path?, glob?, ignore_case?, regex?", "Buscar texto en el workspace"),
     ("write_file", "path, content", "Crear o reemplazar un archivo entero"),
     ("edit_file", "path, old_text, new_text", "Sustituir un fragmento exacto de un archivo"),
@@ -91,6 +92,8 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("stop_command", "id", "Detener un comando en segundo plano"),
     ("fetch_url", "url", "Descargar una página web como texto"),
     ("web_search", "query, limit?", "Buscar en internet (vía el gateway)"),
+    ("todo", "items", "Lista de pasos del turno (pendiente / en curso / hecho)"),
+    ("ask_user", "question, options?", "Preguntar al usuario antes de seguir"),
 ]
 
 # Definiciones de funciones en formato OpenAI para tool-calling NATIVO. El
@@ -123,6 +126,14 @@ TOOL_SCHEMAS: list[dict] = [
             "path": _p("string", "Ruta relativa del archivo"),
             "start_line": _p("integer", "Primera línea (1-based), opcional"),
             "end_line": _p("integer", "Última línea, opcional"),
+        }, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "outline",
+        "description": ("Esqueleto de un archivo: funciones, clases, métodos y encabezados con su "
+                        "número de línea. Úsalo antes de read_file en archivos grandes para leer "
+                        "solo el rango que importa."),
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
         }, "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "search",
@@ -216,7 +227,40 @@ TOOL_SCHEMAS: list[dict] = [
             "query": _p("string", "Consulta de búsqueda, concreta y en el idioma de la fuente"),
             "limit": _p("integer", "Resultados máximos (por defecto 5)"),
         }, "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "todo",
+        "description": ("Tu lista de pasos para la tarea actual. Llámala al empezar una tarea de "
+                        "varios pasos y cada vez que completes uno (envía la lista completa "
+                        "actualizada). El usuario la ve; te evita olvidar partes de la petición."),
+        "parameters": {"type": "object", "properties": {
+            "items": {"type": "array", "description": "Pasos en orden", "items": {
+                "type": "object", "properties": {
+                    "text": _p("string", "Qué hay que hacer"),
+                    "status": {"type": "string", "enum": ["pending", "doing", "done"]},
+                }, "required": ["text", "status"]}},
+        }, "required": ["items"]}}},
+    {"type": "function", "function": {
+        "name": "ask_user",
+        "description": ("Pregunta al usuario cuando la petición es ambigua o hay que elegir entre "
+                        "alternativas que cambian el resultado. No la uses para confirmar cada paso."),
+        "parameters": {"type": "object", "properties": {
+            "question": _p("string", "Pregunta concreta"),
+            "options": {"type": "array", "items": {"type": "string"},
+                        "description": "Opciones cerradas (2 a 6); sin ellas la respuesta es texto libre"},
+        }, "required": ["question"]}}},
 ]
+
+PLAN_MODE_PROMPT = (
+    "\n\n=== MODO PLAN ===\n"
+    "Estás en modo plan: SOLO puedes leer, buscar y preguntar. No escribas, edites ni borres archivos "
+    "ni ejecutes comandos. Explora lo necesario y termina con un plan numerado, concreto (archivos y "
+    "cambios), para que el usuario lo apruebe. Cuando lo apruebe y salga del modo plan, ejecútalo."
+)
+TODO_PROMPT = (
+    "\n\nPara peticiones con varios pasos, empieza llamando a `todo` con la lista de pasos y "
+    "actualízala al completar cada uno. Si algo es ambiguo y cambia el resultado, usa `ask_user` "
+    "antes de tocar archivos."
+)
 
 
 def native_call_to_internal(call: dict) -> dict:
@@ -372,6 +416,7 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n"
         '{"tool":"list_files","args":{"path":".","recursive":false}}\n'
         '{"tool":"find_files","args":{"pattern":"*.py"}}\n'
+        '{"tool":"outline","args":{"path":"src/app.py"}}  (funciones y clases con su línea, para leer solo un rango)\n'
         '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes; '
         'un .pdf o .docx llega como texto y una imagen png/jpg/webp se te adjunta para que la veas)\n'
         '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n'
@@ -384,7 +429,9 @@ def build_agent_system_prompt(workspace: Path) -> str:
         '{"tool":"run_command","args":{"command":"npm install","timeout":60}}  (con "background":true devuelve un id; '
         'luego {"tool":"read_output","args":{"id":"p1","wait":5}} y {"tool":"stop_command","args":{"id":"p1"}})\n'
         '{"tool":"web_search","args":{"query":"fastapi lifespan deprecated on_event","limit":5}}\n'
-        '{"tool":"fetch_url","args":{"url":"https://ejemplo.com/docs"}}\n\n'
+        '{"tool":"fetch_url","args":{"url":"https://ejemplo.com/docs"}}\n'
+        '{"tool":"todo","args":{"items":[{"text":"leer app.py","status":"done"},{"text":"añadir la ruta","status":"doing"}]}}\n'
+        '{"tool":"ask_user","args":{"question":"¿SQLite o Postgres?","options":["SQLite","Postgres"]}}\n\n'
         "=== REGLAS OBLIGATORIAS ===\n"
         "1. Si el usuario pide crear, modificar, arreglar, eliminar o ejecutar algo, DEBES hacerlo "
         "con herramientas EN ESTA MISMA RESPUESTA. Tú ejecutas los cambios; el usuario no copia código.\n"
@@ -470,6 +517,83 @@ def tool_list_files(workspace: Path, rel_path: str = ".", recursive: bool = Fals
 
     walk(target, 1)
     return _cap_lines(lines) if lines else "(vacío)"
+
+
+_OUTLINE_PATTERNS = {
+    ".py": [re.compile(r"^(\s*)(?:async\s+)?(?:def|class)\s+\w+.*?(?::|$)")],
+    ".js": [re.compile(r"^(\s*)(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+\w+|class\s+\w+).*"),
+            re.compile(r"^(\s*)(?:export\s+)?(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>.*"),
+            re.compile(r"^(\s{2,})(?:static\s+|async\s+)*\w+\s*\([^)]*\)\s*\{\s*$")],
+    ".go": [re.compile(r"^(\s*)(?:func|type)\s+.*")],
+    ".rs": [re.compile(r"^(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|struct|enum|trait|impl|mod)\s+.*")],
+    ".java": [re.compile(r"^(\s*)(?:public|private|protected|static|final|abstract|\s)*\s*(?:class|interface|enum|record)\s+\w+.*"),
+              re.compile(r"^(\s{2,})(?:public|private|protected|static|final|synchronized|\s)+[\w<>\[\],\s]+\s+\w+\s*\([^)]*\)\s*(?:throws[^{]*)?\{?\s*$")],
+    ".md": [re.compile(r"^(#{1,6})\s+.*")],
+    ".css": [re.compile(r"^(\s*)[^\s{}/][^{}]*\{\s*$")],
+}
+for _ext in (".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+    _OUTLINE_PATTERNS[_ext] = _OUTLINE_PATTERNS[".js"]
+for _ext in (".kt", ".cs", ".scala"):
+    _OUTLINE_PATTERNS[_ext] = _OUTLINE_PATTERNS[".java"]
+
+
+def tool_outline(workspace: Path, rel_path: str) -> str:
+    target = resolve_safe_path(workspace, rel_path)
+    if not target.is_file():
+        return f"Archivo no encontrado: {rel_path}"
+    patterns = _OUTLINE_PATTERNS.get(target.suffix.lower())
+    if not patterns:
+        return f"(sin esqueleto para {target.suffix or 'este tipo'}; usa read_file)"
+    lines: list[str] = []
+    total = 0
+    for total, line in enumerate(target.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        if any(p.match(line) for p in patterns):
+            lines.append(f"{total:>5}  {line.rstrip()[:140]}")
+    if not lines:
+        return f"(sin funciones ni clases reconocibles en {total} líneas)"
+    return f"{rel_path}: {total} líneas\n" + _cap_lines(lines)
+
+
+def render_todo(console, items: list[dict]) -> None:
+    marks = {"done": g("check"), "doing": g("arrow"), "pending": g("dot_empty")}
+    styles = {"done": "lx.dim2", "doing": "lx.primary", "pending": "lx.dim"}
+    for item in items:
+        status = item.get("status", "pending")
+        render_log_line(console, f"{marks.get(status, '?')} {item.get('text', '')}", styles.get(status, "lx.dim"))
+
+
+def tool_todo(session: dict, console, items) -> str:
+    if not isinstance(items, list):
+        return "[ERROR] items debe ser una lista de {text, status}"
+    limpios = []
+    for it in items[:30]:
+        if isinstance(it, str):
+            it = {"text": it, "status": "pending"}
+        if not isinstance(it, dict) or not str(it.get("text", "")).strip():
+            continue
+        status = str(it.get("status", "pending")).lower()
+        limpios.append({"text": str(it["text"]).strip()[:200],
+                        "status": status if status in ("pending", "doing", "done") else "pending"})
+    session["todo"] = limpios
+    render_todo(console, limpios)
+    hechos = sum(1 for it in limpios if it["status"] == "done")
+    return f"Lista actualizada: {hechos}/{len(limpios)} hechos.\n" + "\n".join(
+        f"[{it['status']}] {it['text']}" for it in limpios)
+
+
+def tool_ask_user(session: dict, question: str, options) -> str:
+    preguntar = session.get("ask_user")
+    if preguntar is None or session.get("remote"):
+        return ("[ask_user no disponible en esta sesión] Termina el turno formulando la pregunta al "
+                "usuario en tu respuesta y espera su mensaje.")
+    question = str(question or "").strip()
+    if not question:
+        return "[ERROR] Falta question"
+    opciones = [str(o).strip() for o in (options or []) if str(o).strip()][:6]
+    respuesta = preguntar(question, opciones)
+    if respuesta is None:
+        return "El usuario no respondió (canceló). Sigue con tu mejor criterio o termina el turno."
+    return f"Respuesta del usuario: {respuesta}"
 
 
 def tool_find_files(workspace: Path, pattern: str) -> str:
@@ -910,6 +1034,8 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict, api=None) -> 
         return tool_list_files(workspace, args.get("path", "."), bool(args.get("recursive")))
     if tool_name == "find_files":
         return tool_find_files(workspace, str(args.get("pattern", "")))
+    if tool_name == "outline":
+        return tool_outline(workspace, str(args.get("path", "")))
     if tool_name == "fetch_url":
         return tool_fetch_url(str(args.get("url", "")))
     if tool_name == "web_search":
@@ -1212,9 +1338,11 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
         native = session.get("native_tools", True)
-        system_msg = {"role": "system", "content": (
-            build_native_system_prompt(workspace) if native
-            else build_agent_system_prompt(workspace))}
+        system_content = (build_native_system_prompt(workspace) if native
+                          else build_agent_system_prompt(workspace)) + TODO_PROMPT
+        if session.get("plan_mode"):
+            system_content += PLAN_MODE_PROMPT
+        system_msg = {"role": "system", "content": system_content}
         tools = TOOL_SCHEMAS if native else None
 
         body = working if native else sanitize_for_plain_chat(working)
@@ -1367,6 +1495,8 @@ def _read_meta(tool_name: str, result: str) -> str:
         return f"{lines} coincidencia" + ("" if lines == 1 else "s")
     if tool_name in ("list_files", "find_files"):
         return f"{lines} entrada" + ("" if lines == 1 else "s")
+    if tool_name == "outline":
+        return f"{max(0, lines - 1)} símbolo" + ("" if lines == 2 else "s")
     if tool_name == "web_search":
         n = len(re.findall(r"^\d+\. ", result, re.MULTILINE))
         return f"{n} resultado" + ("" if n == 1 else "s")
@@ -1449,6 +1579,22 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     remote = session.get("remote")
     stats = turn_stats(session)
 
+    if tool_name == "todo":
+        render_action(console, TOOL_VERB["todo"], "", readonly=True)
+        result = tool_todo(session, console, args.get("items"))
+        stats["actions"] += 1
+        if remote:
+            remote.emit("tool_use", tool="todo", summary=result[:REMOTE_RESULT_CHARS], readonly=True)
+        return result
+    if tool_name == "ask_user":
+        render_action(console, TOOL_VERB["ask_user"], str(args.get("question", ""))[:100], readonly=True)
+        stats["actions"] += 1
+        return tool_ask_user(session, args.get("question", ""), args.get("options"))
+    if session.get("plan_mode") and tool_name not in READ_ONLY_TOOLS:
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), _args_summary(tool_name, args))
+        render_action_result(console, "bloqueado: modo plan", error=True)
+        return ("[modo plan] No puedes modificar archivos ni ejecutar comandos ahora. Termina de "
+                "explorar y responde con el plan numerado para que el usuario lo apruebe.")
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or args.get("query") or args.get("url") or "."
