@@ -900,6 +900,16 @@
   cursor: not-allowed;
 }
 
+.chat-input__send.is-stop {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.chat-input__send.is-stop:hover {
+  background: var(--field-focus);
+  transform: scale(1.05);
+}
+
 /* Soltar un archivo: la zona cubre la caja entera, no un rectángulo pequeño. */
 .chat-drop {
   position: absolute;

@@ -25,6 +25,7 @@ from core.orchestration.orchestrator import NodeOrchestrator
 
 ENROLL = "enroll-token-de-prueba"
 NODOS: dict[str, dict] = {}
+ULTIMO: dict = {}   # collector del último /test/chat, rellenado en su finally
 
 
 def _get_node(node_id, mask_token=True):
@@ -58,24 +59,36 @@ def _app() -> FastAPI:
     @app.post("/fake-ollama/api/chat")
     async def chat(request: Request):
         payload = await request.json()
+        # "lento" en el prompt: muchos trozos espaciados, para poder cortar a mitad
+        lento = payload["messages"][-1]["content"] == "lento"
+        palabras = [f"p{i} " for i in range(200)] if lento else ["hola", " mundo"]
 
         async def gen():
-            for palabra in ("hola", " mundo"):
+            for palabra in palabras:
                 yield json.dumps({"model": payload["model"], "message": {"role": "assistant", "content": palabra}, "done": False}) + "\n"
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05 if lento else 0.01)
             yield json.dumps({"model": payload["model"], "message": {"role": "assistant", "content": ""}, "done": True,
                               "prompt_eval_count": 3, "eval_count": 2}) + "\n"
         return StreamingResponse(gen(), media_type="application/x-ndjson")
 
     @app.get("/test/chat/{node_id}")
-    async def test_chat(node_id: str):
+    async def test_chat(node_id: str, prompt: str = "hi"):
         collector: dict = {}
 
         async def sse():
-            async for chunk in ollama.stream_chat_openai(f"node://{node_id}", "fake:1b", [{"role": "user", "content": "hi"}], collector=collector):
-                yield chunk
-            yield "data: " + json.dumps({"collector": collector}) + "\n\n"
+            try:
+                async for chunk in ollama.stream_chat_openai(f"node://{node_id}", "fake:1b", [{"role": "user", "content": prompt}], collector=collector):
+                    yield chunk
+                yield "data: " + json.dumps({"collector": collector}) + "\n\n"
+            finally:
+                ULTIMO.clear()
+                ULTIMO.update(collector)
         return StreamingResponse(sse(), media_type="text/event-stream")
+
+    @app.get("/test/ultimo")
+    async def test_ultimo():
+        link = registro.get(next(iter(NODOS), ""))
+        return {"collector": ULTIMO, "pendientes": link.peticiones_en_curso if link else None}
 
     @app.get("/test/models/{node_id}")
     async def test_models(node_id: str):
@@ -168,6 +181,25 @@ def test_enrolar_conectar_e_inferir(servidor):
                 assert texto == "hola mundo"
                 assert eventos[-1]["collector"]["content"] == "hola mundo"
                 assert "data: [DONE]" in cuerpo
+
+                # Detener a mitad: el cliente cierra el stream. El gateway debe
+                # quedarse con el texto parcial y el nodo recibir el cancel.
+                ULTIMO.clear()
+                recibidos = 0
+                async with c.stream("GET", f"/test/chat/{nid}", params={"prompt": "lento"}) as r:
+                    async for linea in r.aiter_lines():
+                        if linea.startswith("data: "):
+                            recibidos += 1
+                            if recibidos >= 5:
+                                break
+                for _ in range(50):
+                    u = (await c.get("/test/ultimo")).json()
+                    if u["collector"].get("content") and u["pendientes"] == 0:
+                        break
+                    await asyncio.sleep(0.1)
+                assert u["pendientes"] == 0, "el nodo no canceló la petición"
+                parcial = u["collector"]["content"]
+                assert parcial.startswith("p0 p1 ") and len(parcial) < len("".join(f"p{i} " for i in range(200)))
 
             sesion.cancel()
             with pytest.raises(asyncio.CancelledError):

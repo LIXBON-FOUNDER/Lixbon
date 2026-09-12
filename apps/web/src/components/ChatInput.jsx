@@ -9,7 +9,7 @@
 // escribir está el micrófono, que dicta en el propio navegador.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconX,
+  IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconStop, IconX,
 } from './Icons';
 import { Select } from './Select';
 import { useDictado } from '../hooks/useDictado';
@@ -28,7 +28,7 @@ const ALTO_MAX = 180;
 
 let siguienteId = 0;
 
-export function ChatInput({ onSend, busy, models, model, onModelChange, webSearch, onToggleWeb }) {
+export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, webSearch, onToggleWeb }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -317,15 +317,27 @@ export function ChatInput({ onSend, busy, models, model, onModelChange, webSearc
         </button>
       </div>
 
-      <button
-        className="chat-input__send"
-        type="button"
-        onClick={send}
-        disabled={busy || leyendo}
-        aria-label="Enviar"
-      >
-        <IconSend size={19} />
-      </button>
+      {busy && onStop ? (
+        <button
+          className="chat-input__send is-stop"
+          type="button"
+          onClick={onStop}
+          aria-label="Detener la respuesta"
+          title="Detener la respuesta"
+        >
+          <IconStop size={19} />
+        </button>
+      ) : (
+        <button
+          className="chat-input__send"
+          type="button"
+          onClick={send}
+          disabled={busy || leyendo}
+          aria-label="Enviar"
+        >
+          <IconSend size={19} />
+        </button>
+      )}
     </div>
   );
 }

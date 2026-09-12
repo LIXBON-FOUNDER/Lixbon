@@ -48,6 +48,7 @@ export default function ChatPage() {
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
+  const abortRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
   // En compacto el panel es un cajón sobre el chat, no una columna.
   const compact = useIsCompact();
@@ -180,6 +181,8 @@ export default function ChatPage() {
     setMessages([...history, { role: 'assistant', content: '' }]);
     setBusy(true);
     if (webSearch) setSearching(true);
+    const abort = new AbortController();
+    abortRef.current = abort;
 
     try {
       await streamChatCompletion({
@@ -187,6 +190,7 @@ export default function ChatPage() {
         messages: history,
         conversationId: convId,
         webSearch,
+        signal: abort.signal,
         onSources: (sources) => {
           setSearching(false);
           setMessages((prev) => {
@@ -215,6 +219,17 @@ export default function ChatPage() {
       }
       if (saveHistory) loadConversations();
     } catch (err) {
+      // Detenido por el usuario: lo generado hasta ahí se queda tal cual
+      // (el gateway también lo persiste al cortarse el stream).
+      if (err.name === 'AbortError') {
+        setMessages((prev) => {
+          const next = prev.slice();
+          const last = next[next.length - 1];
+          if (!last.content) next.pop();
+          return next;
+        });
+        return;
+      }
       setMessages((prev) => {
         const next = prev.slice();
         const last = next[next.length - 1];
@@ -226,10 +241,13 @@ export default function ChatPage() {
         return next;
       });
     } finally {
+      abortRef.current = null;
       setSearching(false);
       setBusy(false);
     }
   };
+
+  const stop = () => abortRef.current?.abort();
 
   // ── Acciones del historial ───────────────────────────────────────────
   const renameConversation = async (id, newTitle) => {
@@ -355,7 +373,7 @@ export default function ChatPage() {
                 : 'Solo tienes un chat disponible para usar. Inicia sesión para tener más chats y funciones'}
             </h2>
             <div className="chat-hero__input">
-              <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
             </div>
           </div>
@@ -390,7 +408,7 @@ export default function ChatPage() {
                   más <IconArrowDown size={14} />
                 </button>
               )}
-              <ChatInput onSend={send} busy={busy} models={models} model={model} onModelChange={setModel}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
               <p className="chat-disclaimer">
                 lixbon puede equivocarse. Verifica los comandos antes de ejecutarlos.

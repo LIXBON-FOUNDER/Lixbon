@@ -289,6 +289,29 @@ async def stream_chat_openai(
     parts: list[str] = []
     collected_tool_calls: list[dict] = []
 
+    # El collector se rellena en el finally: si el cliente corta el stream
+    # (botón de detener), el caller aún persiste lo generado hasta ahí.
+    try:
+        async for chunk in _stream_chat_openai(url, payload, headers, chat_id, parts, collected_tool_calls, collector):
+            yield chunk
+    finally:
+        if collector is not None:
+            collector["content"] = "".join(parts)
+            if collected_tool_calls:
+                collector["tool_calls"] = collected_tool_calls
+
+
+async def _stream_chat_openai(
+    url: str,
+    payload: dict,
+    headers: dict | None,
+    chat_id: str,
+    parts: list[str],
+    collected_tool_calls: list[dict],
+    collector: dict | None,
+) -> AsyncIterator[str]:
+    model = payload["model"]
+    num_ctx = (payload.get("options") or {}).get("num_ctx")
     async with new_client(timeout=STREAM_TIMEOUT) as client:
         async with client.stream("POST", url, json=payload, headers=headers) as response:
             response.raise_for_status()
@@ -373,8 +396,4 @@ async def stream_chat_openai(
                     }
                 yield f"data: {json.dumps(openai_chunk)}\n\n"
 
-    if collector is not None:
-        collector["content"] = "".join(parts)
-        if collected_tool_calls:
-            collector["tool_calls"] = collected_tool_calls
     yield "data: [DONE]\n\n"
