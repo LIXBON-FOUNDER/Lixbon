@@ -5654,6 +5654,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("ps", "", "Comandos en segundo plano del agente (y pararlos)", "agente"),
     ("check", "[on|off]", "Verificar con el linter cada archivo que edita el agente", "agente"),
     ("allow", "[comando]", "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)", "agente"),
+    ("commit", "[mensaje]", "Commit de los cambios con mensaje redactado por el modelo", "agente"),
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
@@ -5685,7 +5686,39 @@ GROUP_CLASS = {
     "agente": "class:cmd.agente",
     "cuenta": "class:cmd.cuenta",
     "sistema": "class:cmd.sistema",
+    "propios": "class:cmd.agente",
 }
+
+# Comandos propios: un .md por comando en <workspace>/.lixbon/commands/ o en
+# ~/.lixbon/commands/. El archivo es el prompt; `$ARGUMENTS` se sustituye por
+# lo que siga al comando. La primera línea `# título` es la descripción.
+CUSTOM_COMMANDS_DIRNAME = "commands"
+
+
+def load_custom_commands(workspace: Path, home_dir: Path) -> dict[str, dict]:
+    found: dict[str, dict] = {}
+    for base in (home_dir / CUSTOM_COMMANDS_DIRNAME, workspace / ".lixbon" / CUSTOM_COMMANDS_DIRNAME):
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob("*.md")):
+            name = re.sub(r"[^a-z0-9-]", "-", path.stem.lower()).strip("-")
+            if not name or any(name == spec[0] for spec in COMMAND_SPECS):
+                continue  # nunca pisa un comando del CLI
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            lines = text.strip().splitlines()
+            desc = lines[0].lstrip("# ").strip()[:80] if lines and lines[0].startswith("#") else f"prompt de {path.name}"
+            body = "\n".join(lines[1:]).strip() if lines and lines[0].startswith("#") else text.strip()
+            found[name] = {"desc": desc, "body": body, "path": path}
+    return found
+
+
+def expand_custom_command(body: str, arguments: str) -> str:
+    if "$ARGUMENTS" in body:
+        return body.replace("$ARGUMENTS", arguments.strip())
+    return f"{body}\n\n{arguments.strip()}".strip() if arguments.strip() else body
 
 # Orden de presentación: por grupo (el del catálogo) y, dentro, alfabético.
 # El menú del prompt no puede pintar cabeceras, así que el orden es lo único
@@ -5882,7 +5915,9 @@ def make_completer(app):
             if " " in text:
                 return
             prefix = text[1:].lower()
-            for name, args, desc, group in COMMAND_ORDER:
+            custom = [(name, "[texto]", spec["desc"], "propios")
+                      for name, spec in sorted((getattr(app, "custom_commands", None) or {}).items())]
+            for name, args, desc, group in [*COMMAND_ORDER, *custom]:
                 if not name.startswith(prefix):
                     continue
                 # Dos columnas dentro del propio display: el nombre ocupa
@@ -6055,6 +6090,7 @@ class ChatApp:
         # El workspace es SIEMPRE la carpeta desde la que se lanzó el CLI
         # (como Claude Code); /workspace lo cambia solo para la sesión.
         self.workspace = Path.cwd().resolve()
+        self.custom_commands = load_custom_commands(self.workspace, CONFIG_DIR)
         self.session = {
             "auto_approve": bool(self.cfg.get("auto_approve_tools", False)),
             # Comandos de shell: flag aparte de auto_approve (irreversibles).
@@ -6855,6 +6891,10 @@ class ChatApp:
         name = parts[0].strip().lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
         handler = getattr(self, f"cmd_{name.replace('-', '_')}", None)
+        if handler is None and name in self.custom_commands:
+            spec = self.custom_commands[name]
+            render_command_echo(self.console, f"/{name}: {spec['desc']}")
+            return self._handle_input(expand_custom_command(spec["body"], arg))
         if handler is None:
             # Un prefijo ambiguo («/mod algo») llega aquí a propósito: la barra
             # de comandos no puede desambiguar cuando ya hay un argumento.
@@ -7820,6 +7860,66 @@ class ChatApp:
             self.console.print()
             self.console.print(f"  [lx.dim]{esc(stat.strip().splitlines()[-1])}[/]")
         self.console.print()
+        return True
+
+    def cmd_commit(self, arg: str):
+        """Commit de lo que hay en el workspace con un mensaje redactado por el
+        modelo (o el que se pase) tras revisar el diff."""
+        code, status = self._git("status", "--porcelain", timeout=10)
+        if code != 0:
+            print_error("El workspace no es un repositorio git.")
+            return True
+        if not status.strip():
+            print_note("No hay cambios que confirmar.")
+            return True
+        _code, diff = self._git("diff", "HEAD", "--stat", timeout=10)
+        _code, cuerpo = self._git("diff", "HEAD", timeout=20)
+        untracked = [l[3:] for l in status.splitlines() if l.startswith("??")]
+        for linea in diff.strip().splitlines()[-12:]:
+            print_note(linea.strip())
+        if untracked:
+            print_note(f"nuevos: {', '.join(untracked[:8])}{'…' if len(untracked) > 8 else ''}")
+        message = arg.strip()
+        if not message:
+            resumen = cuerpo[:12000] + ("\n…[diff recortado]" if len(cuerpo) > 12000 else "")
+            with spinner("redactando el mensaje…"):
+                try:
+                    message = self._ask_quiet([
+                        {"role": "system", "content": (
+                            "Escribe el mensaje de commit para este diff, en el idioma de los comentarios "
+                            "del código o en español. Primera línea: tipo(alcance): resumen en imperativo, "
+                            "máximo 72 caracteres. Después, si aporta, una línea en blanco y 1-4 viñetas "
+                            "con el porqué. Responde SOLO con el mensaje.")},
+                        {"role": "user", "content": f"Archivos nuevos: {', '.join(untracked) or 'ninguno'}\n\n{resumen}"},
+                    ]).strip().strip("`")
+                except ApiError as exc:
+                    self._report_api_error(exc)
+                    return True
+        if not message:
+            print_error("No se pudo redactar el mensaje; pásalo tú: /commit tu mensaje")
+            return True
+        self.console.print()
+        for linea in message.splitlines():
+            print_note(linea)
+        decision = select("¿Crear el commit con este mensaje?", [
+            Option("Sí", "yes", "git add -A && git commit"),
+            Option("Editar el mensaje", "edit", "escribirlo a mano"),
+            Option("No", "no", "cancelar"),
+        ], default=0)
+        if decision == "edit":
+            message = self._prompt_text("Mensaje") or ""
+            if not message:
+                return True
+        elif decision != "yes":
+            return True
+        code, out = self._git("add", "-A", timeout=20)
+        if code == 0:
+            code, out = self._git("commit", "-m", message, timeout=30)
+        if code != 0:
+            print_error(out.strip()[-400:] or "git commit falló")
+            return True
+        print_ok(out.strip().splitlines()[0] if out.strip() else "Commit creado.")
+        self._refresh_status()
         return True
 
     def _save_allowed_commands(self, prefixes: list[str]) -> None:

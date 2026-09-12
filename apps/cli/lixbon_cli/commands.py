@@ -34,6 +34,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("ps", "", "Comandos en segundo plano del agente (y pararlos)", "agente"),
     ("check", "[on|off]", "Verificar con el linter cada archivo que edita el agente", "agente"),
     ("allow", "[comando]", "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)", "agente"),
+    ("commit", "[mensaje]", "Commit de los cambios con mensaje redactado por el modelo", "agente"),
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
@@ -65,7 +66,39 @@ GROUP_CLASS = {
     "agente": "class:cmd.agente",
     "cuenta": "class:cmd.cuenta",
     "sistema": "class:cmd.sistema",
+    "propios": "class:cmd.agente",
 }
+
+# Comandos propios: un .md por comando en <workspace>/.lixbon/commands/ o en
+# ~/.lixbon/commands/. El archivo es el prompt; `$ARGUMENTS` se sustituye por
+# lo que siga al comando. La primera línea `# título` es la descripción.
+CUSTOM_COMMANDS_DIRNAME = "commands"
+
+
+def load_custom_commands(workspace: Path, home_dir: Path) -> dict[str, dict]:
+    found: dict[str, dict] = {}
+    for base in (home_dir / CUSTOM_COMMANDS_DIRNAME, workspace / ".lixbon" / CUSTOM_COMMANDS_DIRNAME):
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob("*.md")):
+            name = re.sub(r"[^a-z0-9-]", "-", path.stem.lower()).strip("-")
+            if not name or any(name == spec[0] for spec in COMMAND_SPECS):
+                continue  # nunca pisa un comando del CLI
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            lines = text.strip().splitlines()
+            desc = lines[0].lstrip("# ").strip()[:80] if lines and lines[0].startswith("#") else f"prompt de {path.name}"
+            body = "\n".join(lines[1:]).strip() if lines and lines[0].startswith("#") else text.strip()
+            found[name] = {"desc": desc, "body": body, "path": path}
+    return found
+
+
+def expand_custom_command(body: str, arguments: str) -> str:
+    if "$ARGUMENTS" in body:
+        return body.replace("$ARGUMENTS", arguments.strip())
+    return f"{body}\n\n{arguments.strip()}".strip() if arguments.strip() else body
 
 # Orden de presentación: por grupo (el del catálogo) y, dentro, alfabético.
 # El menú del prompt no puede pintar cabeceras, así que el orden es lo único
@@ -264,7 +297,9 @@ def make_completer(app):
             if " " in text:
                 return
             prefix = text[1:].lower()
-            for name, args, desc, group in COMMAND_ORDER:
+            custom = [(name, "[texto]", spec["desc"], "propios")
+                      for name, spec in sorted((getattr(app, "custom_commands", None) or {}).items())]
+            for name, args, desc, group in [*COMMAND_ORDER, *custom]:
                 if not name.startswith(prefix):
                     continue
                 # Dos columnas dentro del propio display: el nombre ocupa
