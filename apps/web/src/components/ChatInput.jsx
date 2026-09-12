@@ -28,7 +28,36 @@ const ALTO_MAX = 180;
 
 let siguienteId = 0;
 
-export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, webSearch, onToggleWeb }) {
+// Anillo que se llena con el contexto usado, como en Claude Desktop.
+function ContextRing({ uso }) {
+  if (!uso?.total) return null;
+  const frac = Math.min(1, uso.used / uso.total);
+  const r = 6.5;
+  const circ = 2 * Math.PI * r;
+  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+  const tono = frac >= 0.9 ? 'is-danger' : frac >= 0.75 ? 'is-warn' : '';
+  return (
+    <span
+      className={`chat-input__ctx ${tono}`}
+      title={`Contexto usado: ${k(uso.used)} de ${k(uso.total)} tokens (${Math.round(frac * 100)} %)${uso.estimado ? ' · estimado' : ''}`}
+      aria-label="Contexto usado"
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16">
+        <circle cx="8" cy="8" r={r} className="chat-input__ctx-fondo" />
+        <circle
+          cx="8" cy="8" r={r}
+          className="chat-input__ctx-uso"
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - frac)}
+          transform="rotate(-90 8 8)"
+        />
+      </svg>
+      <span className="chat-input__ctx-pct">{Math.round(frac * 100)}%</span>
+    </span>
+  );
+}
+
+export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, webSearch, onToggleWeb, contextUso }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -267,13 +296,16 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
 
       {/* El modelo ocupa la ranura baja de la caja, como un chip más. */}
       {models.length > 0 && (
-        <Select
-          className="chat-input__model"
-          value={model}
-          options={models.map((m) => ({ value: m, label: m }))}
-          onChange={onModelChange}
-          aria-label="Modelo"
-        />
+        <div className="chat-input__meta">
+          <Select
+            className="chat-input__model"
+            value={model}
+            options={models.map((m) => ({ value: m, label: m }))}
+            onChange={onModelChange}
+            aria-label="Modelo"
+          />
+          <ContextRing uso={contextUso} />
+        </div>
       )}
       </div>
 

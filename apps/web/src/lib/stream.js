@@ -55,7 +55,7 @@ export async function streamChatCompletion({
         if (delta) onDelta(delta);
         const reasoning = choice?.delta?.reasoning_content;
         if (reasoning && onReasoning) onReasoning(reasoning);
-        if (choice?.finish_reason && onFinish) onFinish(choice.finish_reason, chunk.lixbon_event || null);
+        if (choice?.finish_reason && onFinish) onFinish(choice.finish_reason, chunk);
       } catch { /* chunk malformado: se ignora */ }
     }
   }

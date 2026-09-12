@@ -1749,6 +1749,8 @@ def list_messages(conversation_id: str, user_id: int) -> list[dict[str, Any]] | 
                 "role": m.role,
                 "content": m.content,
                 "model": m.model,
+                "prompt_tokens": m.prompt_tokens,
+                "completion_tokens": m.completion_tokens,
                 "created_at": m.created_at,
             }
             for m in s.scalars(stmt).all()

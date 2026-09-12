@@ -884,6 +884,40 @@
   background: var(--surface-5);
 }
 
+.chat-input__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.chat-input__ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-label);
+  font-size: 11px;
+  cursor: default;
+}
+
+.chat-input__ctx-fondo {
+  fill: none;
+  stroke: var(--surface-5);
+  stroke-width: 2.5;
+}
+
+.chat-input__ctx-uso {
+  fill: none;
+  stroke: var(--ink-soft);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+.chat-input__ctx.is-warn .chat-input__ctx-uso { stroke: #d9a441; }
+.chat-input__ctx.is-danger .chat-input__ctx-uso { stroke: #d9534f; }
+.chat-input__ctx.is-danger { color: #d9534f; }
+
 /* Los iconos cuelgan de la esquina inferior izquierda de la caja. */
 .chat-input__tools {
   position: absolute;

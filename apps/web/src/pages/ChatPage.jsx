@@ -455,7 +455,7 @@ export default function ChatPage() {
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
               <p className="chat-disclaimer">
-                lixbon puede equivocarse. Verifica los comandos antes de ejecutarlos.
+                lixbon puede equivocarse. Verifica la informacion antes de usarla.
               </p>
             </div>
           </>

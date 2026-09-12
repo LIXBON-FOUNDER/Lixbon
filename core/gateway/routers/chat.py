@@ -212,7 +212,16 @@ def _persist_assistant(conv_id: str, model: str, text: str,
 
 @router.get("/v1/models")
 async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
-    return {"object": "list", "data": await fetch_models()}
+    """Catálogo + `num_ctx` efectivo por modelo (lo que la web usa para el
+    indicador de contexto)."""
+    catalog = await fetch_models()
+    chat_role = resolve_all(catalog)["chat"]
+    data = []
+    for entry in catalog:
+        if isinstance(entry, dict) and not str(entry.get("id", "")).startswith("error:"):
+            entry = {**entry, "num_ctx": resolve_num_ctx(None, chat_role.num_ctx, catalog, entry.get("id")) or 4096}
+        data.append(entry)
+    return {"object": "list", "data": data}
 
 
 @router.get("/api/model-roles")

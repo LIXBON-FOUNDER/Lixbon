@@ -448,6 +448,8 @@ async def _stream_chat_openai(
                             "num_ctx": num_ctx or 4096,
                             "reasoned": thinking_seen,
                         }
+                    # Ventana efectiva: con `usage` la web calcula cuánto contexto queda.
+                    openai_chunk["lixbon_context"] = {"num_ctx": int(num_ctx) if num_ctx else 4096}
                     openai_chunk["usage"] = {
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
