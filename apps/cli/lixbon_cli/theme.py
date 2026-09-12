@@ -92,11 +92,9 @@ RICH_STYLES = {
 
 _console = None
 
-# Respiro visual: margen izquierdo/derecho y ancho máximo de línea (leer texto
-# de borde a borde en una terminal ancha cansa).
+# Margen izquierdo/derecho; el ancho de línea es el de la terminal.
 PAD_LEFT = 2
 PAD_RIGHT = 2
-MAX_WIDTH = 100
 
 
 def pad(renderable):
@@ -110,8 +108,6 @@ def make_console():
     """Console rich compartida, con el tema Lixbon y márgenes registrados."""
     global _console
     if _console is None:
-        import shutil
-
         from rich.console import Console, ConsoleDimensions, NewLine
         from rich.control import Control
         from rich.padding import Padding
@@ -167,11 +163,11 @@ def make_console():
                     )
                 super().print(*objects, **kwargs)
 
-        cols = shutil.get_terminal_size((MAX_WIDTH, 24)).columns
+        # Sin `width` fijo: rich mide la terminal en cada render y el texto
+        # ocupa todo el ancho también tras redimensionar la ventana.
         _console = LixbonConsole(
             theme=Theme(RICH_STYLES),
             highlight=False,
-            width=min(cols, MAX_WIDTH),
             # Color base de la consola: sin él el Markdown de las respuestas
             # (que no lleva estilo propio) salía en el blanco por defecto de la
             # terminal, ajeno a la paleta. Con la base en crema, el cuerpo de la

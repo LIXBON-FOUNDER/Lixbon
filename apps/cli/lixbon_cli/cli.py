@@ -23,7 +23,7 @@ from lixbon_cli.config import (
     server_base,
 )
 
-REQUIRED_PACKAGES = ("prompt_toolkit", "rich")
+REQUIRED_PACKAGES = ("prompt_toolkit", "rich", "pypdf")
 
 
 def ensure_deps() -> bool:

@@ -32,9 +32,9 @@ def row_width(console) -> int:
 def inner_width() -> int:
     """El mismo ancho para lo que pinta prompt_toolkit (que no pasa por rich)."""
     from lixbon_cli.term import term_size
-    from lixbon_cli.theme import MAX_WIDTH, PAD_LEFT, PAD_RIGHT
+    from lixbon_cli.theme import PAD_LEFT, PAD_RIGHT
 
-    return max(24, min(term_size()[0], MAX_WIDTH) - PAD_LEFT - PAD_RIGHT)
+    return max(24, term_size()[0] - PAD_LEFT - PAD_RIGHT)
 
 
 def two_col(left, right, width: int):

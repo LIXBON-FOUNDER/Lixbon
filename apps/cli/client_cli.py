@@ -417,11 +417,9 @@ RICH_STYLES = {
 
 _console = None
 
-# Respiro visual: margen izquierdo/derecho y ancho máximo de línea (leer texto
-# de borde a borde en una terminal ancha cansa).
+# Margen izquierdo/derecho; el ancho de línea es el de la terminal.
 PAD_LEFT = 2
 PAD_RIGHT = 2
-MAX_WIDTH = 100
 
 
 def pad(renderable):
@@ -435,8 +433,6 @@ def make_console():
     """Console rich compartida, con el tema Lixbon y márgenes registrados."""
     global _console
     if _console is None:
-        import shutil
-
         from rich.console import Console, ConsoleDimensions, NewLine
         from rich.control import Control
         from rich.padding import Padding
@@ -491,11 +487,11 @@ def make_console():
                     )
                 super().print(*objects, **kwargs)
 
-        cols = shutil.get_terminal_size((MAX_WIDTH, 24)).columns
+        # Sin `width` fijo: rich mide la terminal en cada render y el texto
+        # ocupa todo el ancho también tras redimensionar la ventana.
         _console = LixbonConsole(
             theme=Theme(RICH_STYLES),
             highlight=False,
-            width=min(cols, MAX_WIDTH),
             # Color base de la consola: sin él el Markdown de las respuestas
             # (que no lleva estilo propio) salía en el blanco por defecto de la
             # terminal, ajeno a la paleta. Con la base en crema, el cuerpo de la
@@ -688,6 +684,64 @@ def mask_key(key: str) -> str:
     if not key:
         return "no configurada"
     return f"{key[:10]}{'…' if len(key) > 14 else ''}{key[-4:]}" if len(key) > 14 else "***"
+
+# ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/documents.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Lectura de archivos que no son texto plano: PDF (texto extraído) e imágenes
+(van al modelo como adjunto de visión, no como bytes)."""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+PDF_EXTS = {".pdf"}
+MAX_PDF_PAGES = 200
+
+
+def is_image(path: Path) -> bool:
+    return path.suffix.lower() in IMAGE_EXTS
+
+
+def is_pdf(path: Path) -> bool:
+    return path.suffix.lower() in PDF_EXTS
+
+
+def _ensure_pypdf():
+    try:
+        import pypdf
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "pypdf"])
+        import pypdf
+    return pypdf
+
+
+def pdf_text(path: Path) -> str:
+    """Texto de un PDF, página a página con un separador para que el modelo
+    pueda citar «página N». Un PDF escaneado (solo imágenes) devuelve vacío."""
+    pypdf = _ensure_pypdf()
+    reader = pypdf.PdfReader(str(path))
+    partes = []
+    for i, page in enumerate(reader.pages[:MAX_PDF_PAGES], 1):
+        try:
+            texto = (page.extract_text() or "").strip()
+        except Exception:
+            texto = ""
+        partes.append(f"── página {i} ──\n{texto}")
+    if len(reader.pages) > MAX_PDF_PAGES:
+        partes.append(f"…[{len(reader.pages) - MAX_PDF_PAGES} páginas más no extraídas]")
+    if not any(p.split("\n", 1)[1].strip() for p in partes):
+        return ("(el PDF no tiene texto extraíble: probablemente es un escaneo; "
+                "conviértelo a imagen para que el modelo lo vea)")
+    return "\n".join(partes)
+
+
+def describe_image(path: Path) -> str:
+    kb = path.stat().st_size // 1024
+    return (f"[imagen] {path.name} ({kb} kB): se te adjunta como imagen en el siguiente "
+            "mensaje para que la veas directamente.")
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/sse.py
@@ -1268,7 +1322,7 @@ def row_width(console) -> int:
 def inner_width() -> int:
     """El mismo ancho para lo que pinta prompt_toolkit (que no pasa por rich)."""
 
-    return max(24, min(term_size()[0], MAX_WIDTH) - PAD_LEFT - PAD_RIGHT)
+    return max(24, term_size()[0] - PAD_LEFT - PAD_RIGHT)
 
 
 def two_col(left, right, width: int):
@@ -3339,7 +3393,9 @@ TOOL_SCHEMAS: list[dict] = [
             "path": _p("string", 'Ruta relativa; "." para la raíz')}}}},
     {"type": "function", "function": {
         "name": "read_file",
-        "description": "Lee el contenido de un archivo. Admite rango de líneas.",
+        "description": "Lee el contenido de un archivo. Admite rango de líneas. "
+                       "Un PDF devuelve su texto por páginas; una imagen (png/jpg/webp) "
+                       "se te adjunta para que la veas.",
         "parameters": {"type": "object", "properties": {
             "path": _p("string", "Ruta relativa del archivo"),
             "start_line": _p("integer", "Primera línea (1-based), opcional"),
@@ -3558,7 +3614,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "=== HERRAMIENTAS DISPONIBLES ===\n"
         "Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n"
         '{"tool":"list_files","args":{"path":"."}}\n'
-        '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes)\n'
+        '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes; '
+        'un .pdf llega como texto por páginas y una imagen png/jpg/webp se te adjunta para que la veas)\n'
         '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n'
         '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n'
         '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n'
@@ -3628,7 +3685,9 @@ def tool_read_file(workspace: Path, rel_path: str, start_line: int = 0, end_line
     target = resolve_safe_path(workspace, rel_path)
     if not target.exists() or not target.is_file():
         return f"Archivo no encontrado: {rel_path}"
-    content = target.read_text(encoding="utf-8", errors="replace")
+    if is_image(target):
+        return describe_image(target)
+    content = pdf_text(target) if is_pdf(target) else target.read_text(encoding="utf-8", errors="replace")
     if start_line or end_line:
         lines = content.split("\n")
         s = max(1, int(start_line or 1))
@@ -4084,6 +4143,9 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                     "tool_call_id": str(call.get("id") or ""),
                     "name": tool_name,
                 })
+            images = pop_tool_images(session)
+            if images:
+                working.append({"role": "user", "content": TOOL_IMAGES_PROMPT, "images": images})
             continue
 
         tool_calls = extract_all_tool_calls(assistant)
@@ -4165,7 +4227,11 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 combined_results.append(
                     f"TOOL_RESULT {call.get('tool', '')}: {clip_tool_output(result)}")
 
-        working.append({"role": "user", "content": "\n".join(combined_results)})
+        results_msg = {"role": "user", "content": "\n".join(combined_results)}
+        images = pop_tool_images(session)
+        if images:
+            results_msg["images"] = images
+        working.append(results_msg)
 
     return (f"He llegado al tope de {MAX_AGENT_STEPS} pasos en un mismo turno y paro aquí "
             "para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba."), working
@@ -4206,6 +4272,26 @@ def _group_reads(tool_calls: list[dict]) -> list[list[dict]]:
     return groups
 
 
+def _stash_image(session: dict, workspace: Path, tool_name: str, args: dict, failed: bool):
+    """Una imagen leída con read_file no cabe en un TOOL_RESULT de texto: se
+    guarda y el bucle la adjunta al modelo (campo `images`) tras el resultado."""
+    if tool_name != "read_file" or failed:
+        return
+    try:
+        target = resolve_safe_path(workspace, str(args.get("path", "")))
+    except RuntimeError:
+        return
+    if target.is_file() and is_image(target):
+        session.setdefault("tool_images", []).append(encode_image(target))
+
+
+def pop_tool_images(session: dict) -> list[str]:
+    return session.pop("tool_images", [])
+
+
+TOOL_IMAGES_PROMPT = "Imágenes de los read_file anteriores, en el mismo orden. Continúa."
+
+
 def _run_read_group(console, workspace: Path, session: dict, calls: list[dict]) -> list[str]:
     remote = session.get("remote")
     stats = turn_stats(session)
@@ -4216,6 +4302,7 @@ def _run_read_group(console, workspace: Path, session: dict, calls: list[dict]) 
         args = call.get("args", {})
         label = str(args.get("path") or ".")
         result, failed, _elapsed = _execute(workspace, "read_file", args)
+        _stash_image(session, workspace, "read_file", args, failed)
         stats["actions"] += 1
         results.append(result)
         if failed:
@@ -4247,6 +4334,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
         result, failed, _elapsed = _execute(workspace, tool_name, args)
+        _stash_image(session, workspace, tool_name, args, failed)
         stats["actions"] += 1
         render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label),
                      readonly=True, meta="" if failed else _read_meta(tool_name, result))
@@ -4579,7 +4667,7 @@ import base64
 import re
 from pathlib import Path
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 # (nombre, argumentos, descripción, grupo) — los handlers viven en ChatApp
@@ -4900,6 +4988,12 @@ def parse_attachments(text: str, base_dir: Path) -> tuple[str, list[Path], list[
             return path.name  # el texto conserva el nombre para dar contexto al modelo
         if not path.is_file():
             return match.group(0)
+        if is_pdf(path):
+            try:
+                files.append((raw, pdf_text(path)))
+            except Exception as exc:
+                errors.append(f"No se pudo leer el PDF {raw}: {exc}")
+            return raw
         try:
             if path.stat().st_size > MAX_TEXT_ATTACHMENT_BYTES:
                 errors.append(f"{raw} supera los 64 kB: pide al agente que lo lea por partes")
@@ -7199,7 +7293,7 @@ from pathlib import Path
 from urllib import request
 
 
-REQUIRED_PACKAGES = ("prompt_toolkit", "rich")
+REQUIRED_PACKAGES = ("prompt_toolkit", "rich", "pypdf")
 
 
 def ensure_deps() -> bool:

@@ -26,6 +26,7 @@ from lixbon_cli.context import (
     shrink_old_results,
 )
 from lixbon_cli.diffs import compute_change, render_change
+from lixbon_cli.documents import describe_image, is_image, is_pdf, pdf_text
 from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
 from lixbon_cli.term import g
 from lixbon_cli.theme import make_console
@@ -82,7 +83,9 @@ TOOL_SCHEMAS: list[dict] = [
             "path": _p("string", 'Ruta relativa; "." para la raíz')}}}},
     {"type": "function", "function": {
         "name": "read_file",
-        "description": "Lee el contenido de un archivo. Admite rango de líneas.",
+        "description": "Lee el contenido de un archivo. Admite rango de líneas. "
+                       "Un PDF devuelve su texto por páginas; una imagen (png/jpg/webp) "
+                       "se te adjunta para que la veas.",
         "parameters": {"type": "object", "properties": {
             "path": _p("string", "Ruta relativa del archivo"),
             "start_line": _p("integer", "Primera línea (1-based), opcional"),
@@ -301,7 +304,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "=== HERRAMIENTAS DISPONIBLES ===\n"
         "Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n"
         '{"tool":"list_files","args":{"path":"."}}\n'
-        '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes)\n'
+        '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes; '
+        'un .pdf llega como texto por páginas y una imagen png/jpg/webp se te adjunta para que la veas)\n'
         '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n'
         '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n'
         '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n'
@@ -371,7 +375,9 @@ def tool_read_file(workspace: Path, rel_path: str, start_line: int = 0, end_line
     target = resolve_safe_path(workspace, rel_path)
     if not target.exists() or not target.is_file():
         return f"Archivo no encontrado: {rel_path}"
-    content = target.read_text(encoding="utf-8", errors="replace")
+    if is_image(target):
+        return describe_image(target)
+    content = pdf_text(target) if is_pdf(target) else target.read_text(encoding="utf-8", errors="replace")
     if start_line or end_line:
         lines = content.split("\n")
         s = max(1, int(start_line or 1))
@@ -827,6 +833,9 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                     "tool_call_id": str(call.get("id") or ""),
                     "name": tool_name,
                 })
+            images = pop_tool_images(session)
+            if images:
+                working.append({"role": "user", "content": TOOL_IMAGES_PROMPT, "images": images})
             continue
 
         tool_calls = extract_all_tool_calls(assistant)
@@ -908,7 +917,11 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                 combined_results.append(
                     f"TOOL_RESULT {call.get('tool', '')}: {clip_tool_output(result)}")
 
-        working.append({"role": "user", "content": "\n".join(combined_results)})
+        results_msg = {"role": "user", "content": "\n".join(combined_results)}
+        images = pop_tool_images(session)
+        if images:
+            results_msg["images"] = images
+        working.append(results_msg)
 
     return (f"He llegado al tope de {MAX_AGENT_STEPS} pasos en un mismo turno y paro aquí "
             "para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba."), working
@@ -949,6 +962,27 @@ def _group_reads(tool_calls: list[dict]) -> list[list[dict]]:
     return groups
 
 
+def _stash_image(session: dict, workspace: Path, tool_name: str, args: dict, failed: bool):
+    """Una imagen leída con read_file no cabe en un TOOL_RESULT de texto: se
+    guarda y el bucle la adjunta al modelo (campo `images`) tras el resultado."""
+    if tool_name != "read_file" or failed:
+        return
+    try:
+        target = resolve_safe_path(workspace, str(args.get("path", "")))
+    except RuntimeError:
+        return
+    if target.is_file() and is_image(target):
+        from lixbon_cli.commands import encode_image
+        session.setdefault("tool_images", []).append(encode_image(target))
+
+
+def pop_tool_images(session: dict) -> list[str]:
+    return session.pop("tool_images", [])
+
+
+TOOL_IMAGES_PROMPT = "Imágenes de los read_file anteriores, en el mismo orden. Continúa."
+
+
 def _run_read_group(console, workspace: Path, session: dict, calls: list[dict]) -> list[str]:
     remote = session.get("remote")
     stats = turn_stats(session)
@@ -959,6 +993,7 @@ def _run_read_group(console, workspace: Path, session: dict, calls: list[dict]) 
         args = call.get("args", {})
         label = str(args.get("path") or ".")
         result, failed, _elapsed = _execute(workspace, "read_file", args)
+        _stash_image(session, workspace, "read_file", args, failed)
         stats["actions"] += 1
         results.append(result)
         if failed:
@@ -990,6 +1025,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
         result, failed, _elapsed = _execute(workspace, tool_name, args)
+        _stash_image(session, workspace, tool_name, args, failed)
         stats["actions"] += 1
         render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label),
                      readonly=True, meta="" if failed else _read_meta(tool_name, result))

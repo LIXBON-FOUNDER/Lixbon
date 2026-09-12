@@ -3,7 +3,8 @@ import base64
 import re
 from pathlib import Path
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+from lixbon_cli.documents import IMAGE_EXTS, is_pdf, pdf_text
+
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 # (nombre, argumentos, descripción, grupo) — los handlers viven en ChatApp
@@ -326,6 +327,12 @@ def parse_attachments(text: str, base_dir: Path) -> tuple[str, list[Path], list[
             return path.name  # el texto conserva el nombre para dar contexto al modelo
         if not path.is_file():
             return match.group(0)
+        if is_pdf(path):
+            try:
+                files.append((raw, pdf_text(path)))
+            except Exception as exc:
+                errors.append(f"No se pudo leer el PDF {raw}: {exc}")
+            return raw
         try:
             if path.stat().st_size > MAX_TEXT_ATTACHMENT_BYTES:
                 errors.append(f"{raw} supera los 64 kB: pide al agente que lo lea por partes")

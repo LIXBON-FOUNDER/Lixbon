@@ -26,6 +26,7 @@ MODULE_ORDER = [
     "term",
     "theme",
     "config",
+    "documents",
     "sse",
     "api",
     "inputq",
