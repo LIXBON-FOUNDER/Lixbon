@@ -848,6 +848,7 @@ a.adm-btn {
   font-family: var(--font-mono);
   font-size: 12.5px;
   word-break: break-all;
+  white-space: pre-wrap;
 }
 
 /* ── Estados de la página ────────────────────────────────────────────── */

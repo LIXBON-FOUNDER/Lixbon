@@ -150,14 +150,18 @@ function PanelEnrolar({ onCerrar, onCreado }) {
           Solo se muestra completo ahora.
         </p>
         <Comando
-          titulo="Pod alquilado con la imagen de Lixbon (RunPod, Vast…): variables de entorno de la plantilla"
-          texto={commands.docker_env.replace('\\n', '\n')}
-        />
-        <Comando
-          titulo="Cualquier Linux con GPU: pega esto en la terminal (instala Ollama si falta y deja el agente como servicio)"
+          titulo="Linux con GPU (pod alquilado o servidor): pega esto en la terminal. Instala Ollama si falta y deja el agente como servicio."
           texto={commands.linux}
         />
-        <Comando titulo="Manual, con el repo clonado (Windows/Linux)" texto={commands.manual} />
+        <Comando
+          titulo="Windows con el repo clonado: PowerShell desde la raíz del repo. El token solo hace falta la primera vez."
+          texto={commands.windows}
+        />
+        <Comando titulo="Linux/macOS con el repo clonado" texto={commands.manual} />
+        <Comando
+          titulo="Imagen Docker de Lixbon (infra/node): no es un comando, son las variables de entorno de la plantilla del pod"
+          texto={commands.docker_env}
+        />
         <div className="adm-card__pie">
           <Boton onClick={onCerrar}>Cerrar</Boton>
         </div>
