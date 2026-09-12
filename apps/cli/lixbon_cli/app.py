@@ -99,6 +99,9 @@ from lixbon_cli.ui import (
 
 TOKENS_PER_IMAGE = 800  # estimación para la barra de contexto
 
+# Resultado del prompt cuando la terminal cambió de tamaño con la caja abierta.
+RESIZED = object()
+
 # Alto máximo de la vista viva del streaming. El Live es transitorio (se borra
 # al cerrarse y el texto íntegro se imprime después), así que si creciera hasta
 # llenar la pantalla taparía el turno anterior y al cerrarse daría un salto.
@@ -147,6 +150,7 @@ class ChatApp:
         # para saber si hace falta aire entre el registro y la respuesta.
         self._spoke = False
         self._turn_mark = 0
+        self._body_end = 0  # `writes` al cerrar la última prosa del turno
         # Medida del turno para el rótulo y el resumen: cuándo empezó y cuántos
         # tokens ha costado (session_tokens es acumulado y no sirve aquí).
         self._turn_started = 0.0
@@ -319,6 +323,7 @@ class ChatApp:
             print_note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos.")
         # Zona 3: a partir de aquí, todo es conversación.
         rule(self.console, "conversación")
+        self._body_end = self.console.writes
         try:
             return self._prompt_loop()
         finally:
@@ -455,6 +460,23 @@ class ChatApp:
         self._refresh_status()
         return True
 
+    def _redraw_for_new_size(self) -> None:
+        """Vuelve a pintar la sesión entera con el tamaño actual de la terminal:
+        región de scroll, cabecera y transcript (desde el historial)."""
+        release_status_line()
+        clear_screen()
+        if self.cfg.get("fixed_status_bar", True):
+            reserve_status_line()
+        self._render_identity()
+        if self.history:
+            rule(self.console, self.title or "conversación")
+            self._replay_transcript()
+        else:
+            render_tips(self.console)
+            rule(self.console, "conversación")
+        self._body_end = self.console.writes
+        self._refresh_status()
+
     def _replay_transcript(self) -> None:
         """Repinta una conversación cargada del historial.
 
@@ -482,6 +504,7 @@ class ChatApp:
                     self.console.print(Markdown(prose))
         self.console.print()
         rule(self.console, "continúa la conversación")
+        self._body_end = self.console.writes
 
     def _clear_session(self) -> None:
         """Olvida la sesión local (logout o clave rechazada por el servidor)."""
@@ -800,6 +823,20 @@ class ChatApp:
         # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
         # instante (erase_down del primer render): nunca llegaba a verse.
         attach_status_repaint(session.app)
+        # Al cambiar el tamaño de la ventana prompt_toolkit borra y repinta la
+        # caja donde cree que estaba, pero con la fila reservada (DECSTBM) y el
+        # repintado de ConPTY sus coordenadas ya no valen: la caja acababa en
+        # cualquier sitio y el texto tecleado en otro. Se cierra el prompt con
+        # lo escrito y el CLI vuelve a pintar todo con las medidas nuevas.
+        def on_resize():
+            app = session.app
+            if app.is_done:
+                return
+            self.prompt_prefill = app.current_buffer.text
+            app.exit(result=RESIZED)
+
+        session.app._on_resize = on_resize
+        session.app.terminal_size_polling_interval = 0.3
 
         while True:
             self._refresh_status()
@@ -815,7 +852,11 @@ class ChatApp:
                 # en el prompt, listo para seguir.
                 partial = self.input_queue.take_partial() if self.input_queue else ""
                 prefill, self.prompt_prefill = self.prompt_prefill, ""
-                text = session.prompt(default=f"{partial} {prefill}".strip()).strip()
+                raw = session.prompt(default=f"{partial} {prefill}".strip())
+                if raw is RESIZED:
+                    self._redraw_for_new_size()
+                    continue
+                text = raw.strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
                 repaint_status()
@@ -836,6 +877,8 @@ class ChatApp:
             if text.startswith("/"):
                 render_command_echo(self.console, text)
             elif text:
+                if self.console.writes > self._body_end:
+                    self.console.print()
                 render_user_message(self.console, text)
 
             if self._handle_input(text) is False:
@@ -1196,8 +1239,10 @@ class ChatApp:
             if self.mode == "agent":
                 # Paso intermedio del agente (solo tool calls): no hay prosa que
                 # mostrar — lo que sigue es el bloque de acciones, que ya se lee.
+                # El «OK» con el que contesta al recordatorio de aplicar código
+                # es fontanería: tampoco se muestra.
                 text = clean_prose(text)
-                if text:
+                if text and text.strip(". ").upper() != "OK":
                     blocks.append(markdown(text))
             elif text:
                 blocks.append(markdown(text))
@@ -1275,6 +1320,9 @@ class ChatApp:
                             f"{g('spark_alt')} pensó {reasoning_seconds:.1f} s", "lx.dim2")
         body = _final_body()
         if body is not None:
+            if self._spoke and self.console.writes > self._body_end:
+                # Segunda prosa del turno con registro en medio: aire propio.
+                self.console.print()
             self._speak_once()
             self.console.print(body)
             if sources:
@@ -1283,6 +1331,7 @@ class ChatApp:
                 self.console.print("[lx.dim2]fuentes  " + esc(f"  {g('sep')}  ".join(
                     str(s.get("url") or s.get("title") or "?") for s in sources[:5])) + "[/]")
             self.console.print()
+            self._body_end = self.console.writes
 
         if usage:
             self._register_usage(usage)
@@ -1662,10 +1711,28 @@ class ChatApp:
         return True
 
     def cmd_update(self, arg: str):
-        from lixbon_cli.cli import cmd_update
+        from lixbon_cli.cli import UpdateError, download_update, relaunch
 
-        cmd_update(None)
-        return True
+        with spinner("buscando actualización…"):
+            try:
+                updated = download_update()
+            except UpdateError as exc:
+                error = str(exc)
+            else:
+                error = ""
+        if error:
+            print_error(error)
+            return True
+        if updated is None:
+            print_ok(f"El CLI ya está al día (v{CLI_VERSION}).")
+            return True
+        # La sesión actual queda en el historial y el CLI nuevo arranca sobre
+        # una terminal limpia, sin la fila reservada del proceso viejo.
+        self._persist_session()
+        print_ok("CLI actualizado. Reiniciando…")
+        release_status_line()
+        clear_screen()
+        raise SystemExit(relaunch(updated, sys.argv[1:] or ["chat"]))
 
     # ── cuenta ───────────────────────────────────────────────────────────
 

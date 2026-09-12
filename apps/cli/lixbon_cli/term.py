@@ -81,8 +81,10 @@ _GLYPHS_UNICODE = {
     "bar_empty": "░",
     "ellipsis": "…",
     "arrow": "→",
-    "check": "✓",
-    "cross": "✗",
+    # Éxito y error comparten forma: el color (verde/rojo) es la señal, como
+    # en la barra de estado. Los signos ✓ ✗ desentonaban con el resto.
+    "check": "●",
+    "cross": "●",
     "sep": "·",
     "image": "🖼",
     # Ícono de marca: 2×2 celdas de bloque lleno, un color por faceta
@@ -109,8 +111,8 @@ _GLYPHS_ASCII = {
     "bar_empty": ".",
     "ellipsis": "...",
     "arrow": "->",
-    "check": "OK",
-    "cross": "X",
+    "check": "+",
+    "cross": "!",
     "sep": "-",
     "image": "[img]",
     "block": "#",

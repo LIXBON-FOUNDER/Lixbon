@@ -189,11 +189,15 @@ def render_tips(console) -> None:
     from rich.text import Text
 
     width = row_width(console)
-    column = max(22, (width - 2) // TIP_COLUMNS)
     key_width = max(len(key) for key, _desc in TIPS) + 2
-    for start in range(0, len(TIPS), TIP_COLUMNS):
+    # Celda = tecla + descripción más larga + hueco; menos columnas antes que
+    # dejar que dos atajos se pisen en una terminal estrecha.
+    cell_width = key_width + max(len(desc) for _key, desc in TIPS) + 3
+    columns = max(1, min(TIP_COLUMNS, (width - 2) // cell_width))
+    column = max(cell_width, (width - 2) // columns)
+    for start in range(0, len(TIPS), columns):
         line = Text("  ")
-        for key, desc in TIPS[start:start + TIP_COLUMNS]:
+        for key, desc in TIPS[start:start + columns]:
             cell = Text()
             cell.append(f"{key:<{key_width}}", style="lx.accent2")
             cell.append(desc, style="lx.dim")

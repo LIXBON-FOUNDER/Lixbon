@@ -90,8 +90,10 @@ _GLYPHS_UNICODE = {
     "bar_empty": "░",
     "ellipsis": "…",
     "arrow": "→",
-    "check": "✓",
-    "cross": "✗",
+    # Éxito y error comparten forma: el color (verde/rojo) es la señal, como
+    # en la barra de estado. Los signos ✓ ✗ desentonaban con el resto.
+    "check": "●",
+    "cross": "●",
     "sep": "·",
     "image": "🖼",
     # Ícono de marca: 2×2 celdas de bloque lleno, un color por faceta
@@ -118,8 +120,8 @@ _GLYPHS_ASCII = {
     "bar_empty": ".",
     "ellipsis": "...",
     "arrow": "->",
-    "check": "OK",
-    "cross": "X",
+    "check": "+",
+    "cross": "!",
     "sep": "-",
     "image": "[img]",
     "block": "#",
@@ -1530,11 +1532,15 @@ def render_tips(console) -> None:
     from rich.text import Text
 
     width = row_width(console)
-    column = max(22, (width - 2) // TIP_COLUMNS)
     key_width = max(len(key) for key, _desc in TIPS) + 2
-    for start in range(0, len(TIPS), TIP_COLUMNS):
+    # Celda = tecla + descripción más larga + hueco; menos columnas antes que
+    # dejar que dos atajos se pisen en una terminal estrecha.
+    cell_width = key_width + max(len(desc) for _key, desc in TIPS) + 3
+    columns = max(1, min(TIP_COLUMNS, (width - 2) // cell_width))
+    column = max(cell_width, (width - 2) // columns)
+    for start in range(0, len(TIPS), columns):
         line = Text("  ")
-        for key, desc in TIPS[start:start + TIP_COLUMNS]:
+        for key, desc in TIPS[start:start + columns]:
             cell = Text()
             cell.append(f"{key:<{key_width}}", style="lx.accent2")
             cell.append(desc, style="lx.dim")
@@ -5399,6 +5405,9 @@ from pathlib import Path
 
 TOKENS_PER_IMAGE = 800  # estimación para la barra de contexto
 
+# Resultado del prompt cuando la terminal cambió de tamaño con la caja abierta.
+RESIZED = object()
+
 # Alto máximo de la vista viva del streaming. El Live es transitorio (se borra
 # al cerrarse y el texto íntegro se imprime después), así que si creciera hasta
 # llenar la pantalla taparía el turno anterior y al cerrarse daría un salto.
@@ -5447,6 +5456,7 @@ class ChatApp:
         # para saber si hace falta aire entre el registro y la respuesta.
         self._spoke = False
         self._turn_mark = 0
+        self._body_end = 0  # `writes` al cerrar la última prosa del turno
         # Medida del turno para el rótulo y el resumen: cuándo empezó y cuántos
         # tokens ha costado (session_tokens es acumulado y no sirve aquí).
         self._turn_started = 0.0
@@ -5618,6 +5628,7 @@ class ChatApp:
             print_note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos.")
         # Zona 3: a partir de aquí, todo es conversación.
         rule(self.console, "conversación")
+        self._body_end = self.console.writes
         try:
             return self._prompt_loop()
         finally:
@@ -5754,6 +5765,23 @@ class ChatApp:
         self._refresh_status()
         return True
 
+    def _redraw_for_new_size(self) -> None:
+        """Vuelve a pintar la sesión entera con el tamaño actual de la terminal:
+        región de scroll, cabecera y transcript (desde el historial)."""
+        release_status_line()
+        clear_screen()
+        if self.cfg.get("fixed_status_bar", True):
+            reserve_status_line()
+        self._render_identity()
+        if self.history:
+            rule(self.console, self.title or "conversación")
+            self._replay_transcript()
+        else:
+            render_tips(self.console)
+            rule(self.console, "conversación")
+        self._body_end = self.console.writes
+        self._refresh_status()
+
     def _replay_transcript(self) -> None:
         """Repinta una conversación cargada del historial.
 
@@ -5781,6 +5809,7 @@ class ChatApp:
                     self.console.print(Markdown(prose))
         self.console.print()
         rule(self.console, "continúa la conversación")
+        self._body_end = self.console.writes
 
     def _clear_session(self) -> None:
         """Olvida la sesión local (logout o clave rechazada por el servidor)."""
@@ -6097,6 +6126,20 @@ class ChatApp:
         # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
         # instante (erase_down del primer render): nunca llegaba a verse.
         attach_status_repaint(session.app)
+        # Al cambiar el tamaño de la ventana prompt_toolkit borra y repinta la
+        # caja donde cree que estaba, pero con la fila reservada (DECSTBM) y el
+        # repintado de ConPTY sus coordenadas ya no valen: la caja acababa en
+        # cualquier sitio y el texto tecleado en otro. Se cierra el prompt con
+        # lo escrito y el CLI vuelve a pintar todo con las medidas nuevas.
+        def on_resize():
+            app = session.app
+            if app.is_done:
+                return
+            self.prompt_prefill = app.current_buffer.text
+            app.exit(result=RESIZED)
+
+        session.app._on_resize = on_resize
+        session.app.terminal_size_polling_interval = 0.3
 
         while True:
             self._refresh_status()
@@ -6112,7 +6155,11 @@ class ChatApp:
                 # en el prompt, listo para seguir.
                 partial = self.input_queue.take_partial() if self.input_queue else ""
                 prefill, self.prompt_prefill = self.prompt_prefill, ""
-                text = session.prompt(default=f"{partial} {prefill}".strip()).strip()
+                raw = session.prompt(default=f"{partial} {prefill}".strip())
+                if raw is RESIZED:
+                    self._redraw_for_new_size()
+                    continue
+                text = raw.strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
                 repaint_status()
@@ -6133,6 +6180,8 @@ class ChatApp:
             if text.startswith("/"):
                 render_command_echo(self.console, text)
             elif text:
+                if self.console.writes > self._body_end:
+                    self.console.print()
                 render_user_message(self.console, text)
 
             if self._handle_input(text) is False:
@@ -6491,8 +6540,10 @@ class ChatApp:
             if self.mode == "agent":
                 # Paso intermedio del agente (solo tool calls): no hay prosa que
                 # mostrar — lo que sigue es el bloque de acciones, que ya se lee.
+                # El «OK» con el que contesta al recordatorio de aplicar código
+                # es fontanería: tampoco se muestra.
                 text = clean_prose(text)
-                if text:
+                if text and text.strip(". ").upper() != "OK":
                     blocks.append(markdown(text))
             elif text:
                 blocks.append(markdown(text))
@@ -6570,6 +6621,9 @@ class ChatApp:
                             f"{g('spark_alt')} pensó {reasoning_seconds:.1f} s", "lx.dim2")
         body = _final_body()
         if body is not None:
+            if self._spoke and self.console.writes > self._body_end:
+                # Segunda prosa del turno con registro en medio: aire propio.
+                self.console.print()
             self._speak_once()
             self.console.print(body)
             if sources:
@@ -6578,6 +6632,7 @@ class ChatApp:
                 self.console.print("[lx.dim2]fuentes  " + esc(f"  {g('sep')}  ".join(
                     str(s.get("url") or s.get("title") or "?") for s in sources[:5])) + "[/]")
             self.console.print()
+            self._body_end = self.console.writes
 
         if usage:
             self._register_usage(usage)
@@ -6958,8 +7013,26 @@ class ChatApp:
 
     def cmd_update(self, arg: str):
 
-        cmd_update(None)
-        return True
+        with spinner("buscando actualización…"):
+            try:
+                updated = download_update()
+            except UpdateError as exc:
+                error = str(exc)
+            else:
+                error = ""
+        if error:
+            print_error(error)
+            return True
+        if updated is None:
+            print_ok(f"El CLI ya está al día (v{CLI_VERSION}).")
+            return True
+        # La sesión actual queda en el historial y el CLI nuevo arranca sobre
+        # una terminal limpia, sin la fila reservada del proceso viejo.
+        self._persist_session()
+        print_ok("CLI actualizado. Reiniciando…")
+        release_status_line()
+        clear_screen()
+        raise SystemExit(relaunch(updated, sys.argv[1:] or ["chat"]))
 
     # ── cuenta ───────────────────────────────────────────────────────────
 
@@ -7717,17 +7790,24 @@ def cmd_usage(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_update(args: argparse.Namespace | None) -> int:
-    """Descarga la última versión del archivo único y se re-ejecuta."""
+class UpdateError(RuntimeError):
+    pass
+
+
+def download_update() -> Path | None:
+    """Descarga la última versión del archivo único sobre el instalado.
+
+    Devuelve la ruta actualizada, o None si ya estaba al día. Lanza
+    UpdateError con el motivo cuando no se puede actualizar.
+    """
     target_path = Path(sys.argv[0]).resolve() if sys.argv else None
     module_path = Path(__file__).resolve()
     if module_path.name != "client_cli.py":
         # Ejecutando desde el paquete fuente (dev): el update sobreescribiría
         # un módulo del repo. El artefacto se regenera con apps/cli/build.py.
         if not target_path or target_path.name != "client_cli.py":
-            print("Estás ejecutando el CLI desde el código fuente.")
-            print("Regenera el artefacto con: python apps/cli/build.py")
-            return 1
+            raise UpdateError("Estás ejecutando el CLI desde el código fuente. "
+                              "Regenera el artefacto con: python apps/cli/build.py")
     real_target = module_path if module_path.name == "client_cli.py" else target_path
 
     cfg = load_config()
@@ -7735,10 +7815,8 @@ def cmd_update(args: argparse.Namespace | None) -> int:
     # El update descarga CÓDIGO que luego se ejecuta: nunca por http plano
     # (un MitM podría inyectar lo que quisiera). localhost queda exento (dev).
     if base.startswith("http://") and "//localhost" not in base and "//127.0.0.1" not in base:
-        print("Por seguridad el update requiere HTTPS (tu base_url es http://).")
-        return 1
+        raise UpdateError("Por seguridad el update requiere HTTPS (tu base_url es http://).")
     url = f"{base}/install/client_cli.py?ts={int(time.time() * 1000)}"
-    print(f"Actualizando CLI desde: {url}")
     try:
         req = request.Request(
             url=url,
@@ -7748,31 +7826,57 @@ def cmd_update(args: argparse.Namespace | None) -> int:
         )
         with request.urlopen(req, timeout=120) as resp:
             content = resp.read().decode("utf-8")
-        # Sanity check antes de sobreescribirnos: que sea Python válido y
-        # parezca el CLI (si el servidor devuelve un HTML de error o un
-        # archivo truncado, no nos autodestruimos).
-        try:
-            compile(content, "client_cli.py", "exec")
-        except SyntaxError:
-            print("La descarga no es un CLI válido (¿error del servidor?). No se actualizó nada.")
-            return 1
-        if "lixbon" not in content:
-            print("La descarga no parece el CLI de lixbon. No se actualizó nada.")
-            return 1
-        old_content = real_target.read_text(encoding="utf-8") if real_target.exists() else ""
-        old_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest() if old_content else ""
-        new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        if old_hash == new_hash:
-            print("El CLI ya está actualizado (sin cambios remotos).")
-            return 0
-        real_target.write_text(content, encoding="utf-8")
-        print("CLI actualizado correctamente. Recargando…")
-        sys.stdout.flush()  # os.execv descarta lo que quede en el buffer
-        os.execv(sys.executable, [sys.executable, str(real_target), *sys.argv[1:]])
     except Exception as exc:
-        print(f"No se pudo actualizar el CLI: {exc}")
+        raise UpdateError(f"No se pudo descargar el CLI: {exc}") from exc
+    # Sanity check antes de sobreescribirnos: que sea Python válido y
+    # parezca el CLI (si el servidor devuelve un HTML de error o un
+    # archivo truncado, no nos autodestruimos).
+    try:
+        compile(content, "client_cli.py", "exec")
+    except SyntaxError as exc:
+        raise UpdateError("La descarga no es un CLI válido (¿error del servidor?). "
+                          "No se actualizó nada.") from exc
+    if "lixbon" not in content:
+        raise UpdateError("La descarga no parece el CLI de lixbon. No se actualizó nada.")
+    old_content = real_target.read_text(encoding="utf-8") if real_target.exists() else ""
+    old_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest() if old_content else ""
+    new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if old_hash == new_hash:
+        return None
+    real_target.write_text(content, encoding="utf-8")
+    return real_target
+
+
+def relaunch(target: Path, argv: list[str]) -> int:
+    """Arranca el CLI recién descargado con los mismos argumentos.
+
+    En POSIX execv sustituye el proceso. En Windows execv NO: lanza un hijo y
+    el padre termina, así que el .cmd que lanzó `lixbon` acababa, cmd volvía a
+    mostrar su prompt encima del CLI nuevo y parecía que se había cerrado.
+    Ahí se espera al hijo y se sale con su código.
+    """
+    sys.stdout.flush()
+    cmd = [sys.executable, str(target), *argv]
+    if os.name == "nt":
+        import subprocess
+
+        return subprocess.call(cmd)
+    os.execv(sys.executable, cmd)
+    return 0  # pragma: no cover
+
+
+def cmd_update(args: argparse.Namespace | None) -> int:
+    """Descarga la última versión del archivo único y se re-ejecuta."""
+    try:
+        updated = download_update()
+    except UpdateError as exc:
+        print(str(exc))
         return 1
-    return 0
+    if updated is None:
+        print("El CLI ya está actualizado (sin cambios remotos).")
+        return 0
+    print("CLI actualizado correctamente. Recargando…")
+    return relaunch(updated, sys.argv[1:])
 
 
 # ── comandos interactivos ───────────────────────────────────────────────────

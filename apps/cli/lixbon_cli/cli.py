@@ -120,17 +120,24 @@ def cmd_usage(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_update(args: argparse.Namespace | None) -> int:
-    """Descarga la última versión del archivo único y se re-ejecuta."""
+class UpdateError(RuntimeError):
+    pass
+
+
+def download_update() -> Path | None:
+    """Descarga la última versión del archivo único sobre el instalado.
+
+    Devuelve la ruta actualizada, o None si ya estaba al día. Lanza
+    UpdateError con el motivo cuando no se puede actualizar.
+    """
     target_path = Path(sys.argv[0]).resolve() if sys.argv else None
     module_path = Path(__file__).resolve()
     if module_path.name != "client_cli.py":
         # Ejecutando desde el paquete fuente (dev): el update sobreescribiría
         # un módulo del repo. El artefacto se regenera con apps/cli/build.py.
         if not target_path or target_path.name != "client_cli.py":
-            print("Estás ejecutando el CLI desde el código fuente.")
-            print("Regenera el artefacto con: python apps/cli/build.py")
-            return 1
+            raise UpdateError("Estás ejecutando el CLI desde el código fuente. "
+                              "Regenera el artefacto con: python apps/cli/build.py")
     real_target = module_path if module_path.name == "client_cli.py" else target_path
 
     cfg = load_config()
@@ -138,10 +145,8 @@ def cmd_update(args: argparse.Namespace | None) -> int:
     # El update descarga CÓDIGO que luego se ejecuta: nunca por http plano
     # (un MitM podría inyectar lo que quisiera). localhost queda exento (dev).
     if base.startswith("http://") and "//localhost" not in base and "//127.0.0.1" not in base:
-        print("Por seguridad el update requiere HTTPS (tu base_url es http://).")
-        return 1
+        raise UpdateError("Por seguridad el update requiere HTTPS (tu base_url es http://).")
     url = f"{base}/install/client_cli.py?ts={int(time.time() * 1000)}"
-    print(f"Actualizando CLI desde: {url}")
     try:
         req = request.Request(
             url=url,
@@ -151,31 +156,57 @@ def cmd_update(args: argparse.Namespace | None) -> int:
         )
         with request.urlopen(req, timeout=120) as resp:
             content = resp.read().decode("utf-8")
-        # Sanity check antes de sobreescribirnos: que sea Python válido y
-        # parezca el CLI (si el servidor devuelve un HTML de error o un
-        # archivo truncado, no nos autodestruimos).
-        try:
-            compile(content, "client_cli.py", "exec")
-        except SyntaxError:
-            print("La descarga no es un CLI válido (¿error del servidor?). No se actualizó nada.")
-            return 1
-        if "lixbon" not in content:
-            print("La descarga no parece el CLI de lixbon. No se actualizó nada.")
-            return 1
-        old_content = real_target.read_text(encoding="utf-8") if real_target.exists() else ""
-        old_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest() if old_content else ""
-        new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        if old_hash == new_hash:
-            print("El CLI ya está actualizado (sin cambios remotos).")
-            return 0
-        real_target.write_text(content, encoding="utf-8")
-        print("CLI actualizado correctamente. Recargando…")
-        sys.stdout.flush()  # os.execv descarta lo que quede en el buffer
-        os.execv(sys.executable, [sys.executable, str(real_target), *sys.argv[1:]])
     except Exception as exc:
-        print(f"No se pudo actualizar el CLI: {exc}")
+        raise UpdateError(f"No se pudo descargar el CLI: {exc}") from exc
+    # Sanity check antes de sobreescribirnos: que sea Python válido y
+    # parezca el CLI (si el servidor devuelve un HTML de error o un
+    # archivo truncado, no nos autodestruimos).
+    try:
+        compile(content, "client_cli.py", "exec")
+    except SyntaxError as exc:
+        raise UpdateError("La descarga no es un CLI válido (¿error del servidor?). "
+                          "No se actualizó nada.") from exc
+    if "lixbon" not in content:
+        raise UpdateError("La descarga no parece el CLI de lixbon. No se actualizó nada.")
+    old_content = real_target.read_text(encoding="utf-8") if real_target.exists() else ""
+    old_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest() if old_content else ""
+    new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if old_hash == new_hash:
+        return None
+    real_target.write_text(content, encoding="utf-8")
+    return real_target
+
+
+def relaunch(target: Path, argv: list[str]) -> int:
+    """Arranca el CLI recién descargado con los mismos argumentos.
+
+    En POSIX execv sustituye el proceso. En Windows execv NO: lanza un hijo y
+    el padre termina, así que el .cmd que lanzó `lixbon` acababa, cmd volvía a
+    mostrar su prompt encima del CLI nuevo y parecía que se había cerrado.
+    Ahí se espera al hijo y se sale con su código.
+    """
+    sys.stdout.flush()
+    cmd = [sys.executable, str(target), *argv]
+    if os.name == "nt":
+        import subprocess
+
+        return subprocess.call(cmd)
+    os.execv(sys.executable, cmd)
+    return 0  # pragma: no cover
+
+
+def cmd_update(args: argparse.Namespace | None) -> int:
+    """Descarga la última versión del archivo único y se re-ejecuta."""
+    try:
+        updated = download_update()
+    except UpdateError as exc:
+        print(str(exc))
         return 1
-    return 0
+    if updated is None:
+        print("El CLI ya está actualizado (sin cambios remotos).")
+        return 0
+    print("CLI actualizado correctamente. Recargando…")
+    return relaunch(updated, sys.argv[1:])
 
 
 # ── comandos interactivos ───────────────────────────────────────────────────
