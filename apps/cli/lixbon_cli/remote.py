@@ -37,7 +37,10 @@ REMOTE_COMMANDS: list[tuple[str, str, str]] = [
 def _args_summary(tool: str, args: dict) -> str:
     """Resumen compacto y legible de los argumentos de una herramienta."""
     if tool == "run_command":
-        return str(args.get("command", ""))[:200]
+        prefix = "(fondo) " if args.get("background") else ""
+        return prefix + str(args.get("command", ""))[:200]
+    if tool in ("read_output", "stop_command"):
+        return str(args.get("id", ""))
     if tool == "rename_file":
         return f"{args.get('src', '?')} → {args.get('dst', '?')}"
     if tool == "search":

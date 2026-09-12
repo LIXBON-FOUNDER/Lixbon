@@ -35,6 +35,7 @@ MODULE_ORDER = [
     "clipboard",
     "remote",
     "context",
+    "checks",
     "agent",
     "sessions",
     "commands",

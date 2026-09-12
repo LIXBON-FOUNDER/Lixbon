@@ -287,6 +287,7 @@ TOOL_VERB = {
     "mkdir": "creó carpeta", "search": "buscó", "list_files": "listó",
     "find_files": "buscó archivos", "run_command": "ejecutó",
     "fetch_url": "descargó", "web_search": "buscó en la web",
+    "read_output": "leyó salida", "stop_command": "detuvo",
 }
 KIND_VERB = {
     "create": "creó", "update": "editó", "delete": "eliminó", "rename": "movió",

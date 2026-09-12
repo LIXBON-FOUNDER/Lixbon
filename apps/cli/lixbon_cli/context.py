@@ -180,6 +180,48 @@ def fit_history(messages: list[dict], budget_tokens: int,
     return ([{"role": "user", "content": PRUNE_NOTE}] + tail) if tail else working, True
 
 
+# Por encima de esta fracción de la ventana se compacta: el modelo resume lo
+# hablado y la conversación sigue con el resumen + los últimos mensajes.
+AUTO_COMPACT_RATIO = 0.7
+COMPACT_KEEP_RECENT = 4
+
+COMPACT_PROMPT = (
+    "Resume la conversación anterior para poder continuar el trabajo con el contexto "
+    "limpio. Sé concreto y breve (máximo 500 palabras). Incluye, en este orden:\n"
+    "1. Objetivo del usuario y qué pidió exactamente.\n"
+    "2. Decisiones tomadas y preferencias que expresó.\n"
+    "3. Archivos tocados y qué cambió en cada uno (rutas exactas).\n"
+    "4. Estado actual: qué ya funciona y qué falla (errores literales relevantes).\n"
+    "5. Qué queda pendiente.\n"
+    "Responde SOLO con el resumen."
+)
+
+
+def needs_compaction(messages: list[dict], context_window: int) -> bool:
+    return estimate_tokens(messages) > int(context_window * AUTO_COMPACT_RATIO)
+
+
+def compact_messages(messages: list[dict], ask, keep_recent: int = COMPACT_KEEP_RECENT) -> list[dict]:
+    """Sustituye lo antiguo por un resumen del modelo y conserva los últimos
+    mensajes intactos. `ask(messages) -> str` es un chat sin streaming."""
+    plain = [m for m in messages if m.get("role") != "tool"]
+    plain = [{k: v for k, v in m.items() if k != "tool_calls"} for m in plain]
+    plain = [m for m in plain if (m.get("content") or "").strip()]
+    if len(plain) <= keep_recent:
+        return messages
+    cut = _safe_start(plain, max(0, len(plain) - keep_recent))
+    old, recent = plain[:cut], plain[cut:]
+    summary = (ask(old + [{"role": "user", "content": COMPACT_PROMPT}]) or "").strip()
+    if not summary:
+        raise RuntimeError("el modelo no devolvió resumen")
+    return [
+        {"role": "user", "content": "Resumen de lo hablado hasta ahora (la conversación se "
+                                    f"compactó para liberar contexto):\n{summary}"},
+        {"role": "assistant", "content": "Entendido, sigo desde ahí."},
+        *recent,
+    ]
+
+
 def prompt_budget(context_window: int, tools: list[dict] | None = None,
                   system_tokens: int = 0) -> int:
     """Tokens disponibles para el HISTORIAL, descontando lo que ya ocupan el

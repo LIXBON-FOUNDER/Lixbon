@@ -8,6 +8,10 @@ import uuid
 from pathlib import Path
 
 from lixbon_cli.agent import (
+    background_processes,
+    stop_all_background,
+    tool_stop_command,
+    undo_checkpoints,
     TOOL_SCHEMAS,
     TOOL_SPECS,
     build_native_system_prompt,
@@ -17,7 +21,7 @@ from lixbon_cli.agent import (
     workspace_tree,
 )
 from lixbon_cli.api import ApiClient, ApiError
-from lixbon_cli.context import estimate_tokens, tools_tokens
+from lixbon_cli.context import compact_messages, estimate_tokens, needs_compaction, tools_tokens
 from lixbon_cli.remote import REMOTE_COMMANDS, RemoteLink
 from lixbon_cli.commands import (
     COMMAND_GROUPS,
@@ -139,6 +143,10 @@ class ChatApp:
             # coincidieran, el agente podaría de más o de menos.
             "context_window": int(self.cfg.get("context_window", 16384)),
             "api": self.api,
+            # Chat sin streaming para tareas internas (compactar el contexto).
+            "ask": self._ask_quiet,
+            "auto_check": bool(self.cfg.get("auto_check", True)),
+            "undo_stack": [],  # checkpoints de los últimos turnos, para /undo
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
@@ -331,6 +339,7 @@ class ChatApp:
             return self._prompt_loop()
         finally:
             self._persist_session()  # salir del CLI no pierde la conversación
+            stop_all_background()
             release_status_line()
 
     def _render_identity(self) -> None:
@@ -984,6 +993,8 @@ class ChatApp:
         self._turn_started = time.monotonic()
         self._turn_tokens = 0
         self.session["turn_stats"] = {"actions": 0, "files": set(), "adds": 0, "dels": 0}
+        self.session["checkpoints"] = []
+        self.session["undo_incomplete"] = False
         for name, body in files:
             # Abre el registro del turno: el adjunto es lo primero que "hizo".
             render_action(self.console, "adjuntó", name, readonly=True,
@@ -997,6 +1008,7 @@ class ChatApp:
                     self.history, self.workspace, self.session, self._stream_agent
                 )
             else:
+                self._auto_compact()
                 assistant = self._stream_assistant(self._context_messages())
                 self.history.append({"role": "assistant", "content": assistant})
         except ApiError:
@@ -1008,6 +1020,9 @@ class ChatApp:
                 self.remote.emit("status", state="idle")
         self._maybe_autotitle()
         self._persist_session()  # el historial se actualiza turno a turno
+        if self.session.get("checkpoints"):
+            self.session["undo_stack"].append(self.session["checkpoints"])
+            del self.session["undo_stack"][:-10]
         self._refresh_status()
 
     # ── teclado durante el turno ─────────────────────────────────────────
@@ -1124,6 +1139,25 @@ class ChatApp:
                     return
             except OSError:
                 return
+
+    def _ask_quiet(self, messages: list[dict]) -> str:
+        """Chat sin streaming ni historial, para trabajo interno del CLI."""
+        resp = self.api.chat(model=self.model, messages=messages, conversation_id=None,
+                             client_id=self.client_id, title="interno")
+        return (resp.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+
+    def _auto_compact(self) -> None:
+        """Modo ask: si el historial se acerca a la ventana, se compacta antes
+        de enviar (en agent lo hace el propio loop, paso a paso)."""
+        window = int(self.session.get("context_window") or 8192)
+        if not needs_compaction(self.history, window):
+            return
+        print_note("La conversación llena la ventana de contexto: compactando…")
+        try:
+            with spinner("compactando conversación…"):
+                self.history = compact_messages(self.history, self._ask_quiet)
+        except Exception as exc:
+            print_note(f"No se pudo compactar ({exc}).")
 
     def _context_messages(self) -> list[dict]:
         max_msgs = int(self.cfg.get("max_context_messages", 12))
@@ -1465,33 +1499,12 @@ class ChatApp:
             print_note("La conversación aún es corta; nada que compactar.")
             return True
         before_tokens, _ = self._estimate_context()
-        prompt = {
-            "role": "user",
-            "content": (
-                "Resume la conversación anterior en un único bloque conciso. "
-                "Preserva: decisiones tomadas, fragmentos de código relevantes, "
-                "datos concretos y tareas pendientes. Responde SOLO con el resumen."
-            ),
-        }
-        with spinner("compactando conversación…"):
-            resp = self.api.chat(
-                model=self.model,
-                # sin tools en la petición: el round-trip de herramientas del
-                # modo agent no puede viajar tal cual
-                messages=sanitize_for_plain_chat(self.history) + [prompt],
-                conversation_id=None,
-                client_id=self.client_id,
-                title="compactación",
-            )
-        summary = (resp.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
-        if not summary:
-            print_error("No se pudo generar el resumen.")
+        try:
+            with spinner("compactando conversación…"):
+                self.history = compact_messages(self.history, self._ask_quiet, keep_recent=2)
+        except Exception as exc:
+            print_error(f"No se pudo generar el resumen: {exc}")
             return True
-        keep = sanitize_for_plain_chat(self.history)[-2:]
-        self.history = [{
-            "role": "system",
-            "content": f"Resumen de la conversación previa:\n{summary}",
-        }] + keep
         after_tokens, _ = self._estimate_context()
         self._refresh_status()
         print_ok(
@@ -1872,6 +1885,66 @@ class ChatApp:
             self.console.print()
             self.console.print(f"  [lx.dim]{esc(stat.strip().splitlines()[-1])}[/]")
         self.console.print()
+        return True
+
+    def cmd_undo(self, arg: str):
+        stack = self.session.get("undo_stack") or []
+        if not stack:
+            print_note("No hay cambios del agente que revertir en esta sesión.")
+            return True
+        entries = stack[-1]
+        archivos = sorted({rel for rel, _ in entries})
+        decision = select(f"Revertir el último turno ({len(archivos)} archivo{'s' if len(archivos) != 1 else ''})", [
+            Option("Sí, revertir", "yes", ", ".join(archivos)[:120]),
+            Option("No", "no", "dejar los archivos como están"),
+        ], default=0)
+        if decision != "yes":
+            return True
+        try:
+            hechos = undo_checkpoints(self.workspace, entries)
+        except Exception as exc:
+            print_error(f"No se pudo revertir: {exc}")
+            return True
+        stack.pop()
+        for linea in hechos:
+            print_note(linea)
+        if self.session.get("undo_incomplete"):
+            print_warn("Ese turno también borró o movió carpetas enteras; eso no se revierte solo.")
+        print_ok("Cambios revertidos. El modelo no lo sabe: díselo si quieres que continúe desde aquí.")
+        self.history.append({"role": "user", "content": "[El usuario revirtió con /undo los archivos del último turno: "
+                             + ", ".join(archivos) + ". Vuelven a estar como antes de ese turno.]"})
+        return True
+
+    def cmd_ps(self, arg: str):
+        procs = background_processes()
+        if not procs:
+            print_note("No hay comandos en segundo plano.")
+            return True
+        for ident, command, alive in procs:
+            print_note(f"{ident}  {'en marcha' if alive else 'terminado'}  {command[:90]}")
+        chosen = select("Detener alguno", [
+            *[Option(f"{ident}  {command[:60]}", ident, "en marcha" if alive else "terminado")
+              for ident, command, alive in procs],
+            Option("Ninguno", "none", "volver"),
+        ], default=len(procs))
+        if chosen and chosen != "none":
+            print_ok(tool_stop_command(chosen))
+        return True
+
+    def cmd_check(self, arg: str):
+        if arg in ("on", "off"):
+            self.session["auto_check"] = arg == "on"
+        else:
+            chosen = select("Verificación tras editar", [
+                Option("on", "on", "ruff/eslint/py_compile sobre cada archivo que toca el agente"),
+                Option("off", "off", "solo cuando el modelo ejecute tests o build"),
+            ], default=0 if self.session.get("auto_check", True) else 1)
+            if chosen is None:
+                return True
+            self.session["auto_check"] = chosen == "on"
+        self.cfg["auto_check"] = self.session["auto_check"]
+        save_config(self.cfg)
+        print_ok(f"Verificación tras editar: {'on' if self.session['auto_check'] else 'off'}")
         return True
 
     def cmd_run(self, arg: str):

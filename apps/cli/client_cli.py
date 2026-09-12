@@ -1642,6 +1642,7 @@ TOOL_VERB = {
     "mkdir": "creó carpeta", "search": "buscó", "list_files": "listó",
     "find_files": "buscó archivos", "run_command": "ejecutó",
     "fetch_url": "descargó", "web_search": "buscó en la web",
+    "read_output": "leyó salida", "stop_command": "detuvo",
 }
 KIND_VERB = {
     "create": "creó", "update": "editó", "delete": "eliminó", "rename": "movió",
@@ -3019,7 +3020,10 @@ REMOTE_COMMANDS: list[tuple[str, str, str]] = [
 def _args_summary(tool: str, args: dict) -> str:
     """Resumen compacto y legible de los argumentos de una herramienta."""
     if tool == "run_command":
-        return str(args.get("command", ""))[:200]
+        prefix = "(fondo) " if args.get("background") else ""
+        return prefix + str(args.get("command", ""))[:200]
+    if tool in ("read_output", "stop_command"):
+        return str(args.get("id", ""))
     if tool == "rename_file":
         return f"{args.get('src', '?')} → {args.get('dst', '?')}"
     if tool == "search":
@@ -3396,12 +3400,133 @@ def fit_history(messages: list[dict], budget_tokens: int,
     return ([{"role": "user", "content": PRUNE_NOTE}] + tail) if tail else working, True
 
 
+# Por encima de esta fracción de la ventana se compacta: el modelo resume lo
+# hablado y la conversación sigue con el resumen + los últimos mensajes.
+AUTO_COMPACT_RATIO = 0.7
+COMPACT_KEEP_RECENT = 4
+
+COMPACT_PROMPT = (
+    "Resume la conversación anterior para poder continuar el trabajo con el contexto "
+    "limpio. Sé concreto y breve (máximo 500 palabras). Incluye, en este orden:\n"
+    "1. Objetivo del usuario y qué pidió exactamente.\n"
+    "2. Decisiones tomadas y preferencias que expresó.\n"
+    "3. Archivos tocados y qué cambió en cada uno (rutas exactas).\n"
+    "4. Estado actual: qué ya funciona y qué falla (errores literales relevantes).\n"
+    "5. Qué queda pendiente.\n"
+    "Responde SOLO con el resumen."
+)
+
+
+def needs_compaction(messages: list[dict], context_window: int) -> bool:
+    return estimate_tokens(messages) > int(context_window * AUTO_COMPACT_RATIO)
+
+
+def compact_messages(messages: list[dict], ask, keep_recent: int = COMPACT_KEEP_RECENT) -> list[dict]:
+    """Sustituye lo antiguo por un resumen del modelo y conserva los últimos
+    mensajes intactos. `ask(messages) -> str` es un chat sin streaming."""
+    plain = [m for m in messages if m.get("role") != "tool"]
+    plain = [{k: v for k, v in m.items() if k != "tool_calls"} for m in plain]
+    plain = [m for m in plain if (m.get("content") or "").strip()]
+    if len(plain) <= keep_recent:
+        return messages
+    cut = _safe_start(plain, max(0, len(plain) - keep_recent))
+    old, recent = plain[:cut], plain[cut:]
+    summary = (ask(old + [{"role": "user", "content": COMPACT_PROMPT}]) or "").strip()
+    if not summary:
+        raise RuntimeError("el modelo no devolvió resumen")
+    return [
+        {"role": "user", "content": "Resumen de lo hablado hasta ahora (la conversación se "
+                                    f"compactó para liberar contexto):\n{summary}"},
+        {"role": "assistant", "content": "Entendido, sigo desde ahí."},
+        *recent,
+    ]
+
+
 def prompt_budget(context_window: int, tools: list[dict] | None = None,
                   system_tokens: int = 0) -> int:
     """Tokens disponibles para el HISTORIAL, descontando lo que ya ocupan el
     system prompt y las definiciones de herramientas."""
     total = int(max(context_window, 1) * PROMPT_BUDGET_RATIO)
     return max(total - tools_tokens(tools) - system_tokens, 512)
+
+# ──────────────────────────────────────────────────────────────────────────
+# módulo: lixbon_cli/checks.py
+# ──────────────────────────────────────────────────────────────────────────
+"""Verificación automática tras editar: el linter o compilador del proyecto
+sobre el archivo tocado, para que el modelo vea el error en el mismo paso y
+lo corrija, en vez de enterarse (o no) al correr los tests."""
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CHECK_TIMEOUT = 20
+MAX_CHECK_CHARS = 2500
+
+
+def _run_check(cmd: list[str], cwd: Path) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return -1, f"(no se pudo verificar: {exc})"
+    return proc.returncode, (proc.stdout + proc.stderr).strip()
+
+
+def _node_bin(workspace: Path, name: str) -> str | None:
+    exe = workspace / "node_modules" / ".bin" / (f"{name}.cmd" if os.name == "nt" else name)
+    return str(exe) if exe.exists() else None
+
+
+def _check_python(workspace: Path, path: Path) -> tuple[str, str]:
+    if shutil.which("ruff"):
+        code, out = _run_check(["ruff", "check", "--no-fix", "--output-format", "concise", str(path)], workspace)
+        return "ruff", "" if code == 0 else out
+    code, out = _run_check([sys.executable, "-m", "py_compile", str(path)], workspace)
+    return "py_compile", "" if code == 0 else out
+
+
+def _check_js(workspace: Path, path: Path) -> tuple[str, str]:
+    eslint = _node_bin(workspace, "eslint")
+    if eslint:
+        code, out = _run_check([eslint, "--no-color", str(path)], workspace)
+        return "eslint", "" if code == 0 else out
+    if path.suffix in (".ts", ".tsx"):
+        return "", ""
+    node = shutil.which("node")
+    if not node or path.suffix == ".jsx":
+        return "", ""
+    code, out = _run_check([node, "--check", str(path)], workspace)
+    return "node --check", "" if code == 0 else out
+
+
+def _check_json(_workspace: Path, path: Path) -> tuple[str, str]:
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+        return "json", ""
+    except (OSError, ValueError) as exc:
+        return "json", str(exc)
+
+
+_CHECKERS = {
+    ".py": _check_python,
+    ".js": _check_js, ".jsx": _check_js, ".mjs": _check_js, ".cjs": _check_js,
+    ".ts": _check_js, ".tsx": _check_js,
+    ".json": _check_json,
+}
+
+
+def verify_file(workspace: Path, path: Path) -> tuple[str, str]:
+    """(herramienta, errores). Errores vacío = pasó (o no hay verificador)."""
+    checker = _CHECKERS.get(path.suffix.lower())
+    if checker is None or not path.is_file():
+        return "", ""
+    tool, errors = checker(workspace, path)
+    if len(errors) > MAX_CHECK_CHARS:
+        errors = errors[:MAX_CHECK_CHARS] + "\n…[recortado]"
+    return tool, errors
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/agent.py
@@ -3423,6 +3548,7 @@ En ambos casos se pide aprobación (con vista previa del diff) antes de ejecutar
 import json
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -3437,7 +3563,9 @@ MAX_AGENT_STEPS = 40
 # atascado repite la misma herramienta con los mismos argumentos indefinidamente.
 MAX_REPEATED_CALLS = 3
 
-READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "search", "fetch_url", "web_search"}
+READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "search", "fetch_url", "web_search",
+                   "read_output", "stop_command"}
+MUTATING_TOOLS = {"write_file", "edit_file", "append_file", "delete_file", "rename_file"}
 
 # Tope de líneas que devuelve una búsqueda o un listado: por encima el modelo
 # no lee nada útil y solo gasta contexto.
@@ -3457,7 +3585,9 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("mkdir", "path", "Crear una carpeta"),
     ("delete_file", "path", "Eliminar un archivo"),
     ("rename_file", "src, dst", "Mover o renombrar un archivo"),
-    ("run_command", "command, timeout?", "Ejecutar un comando de shell en el workspace"),
+    ("run_command", "command, timeout?, background?", "Ejecutar un comando de shell en el workspace"),
+    ("read_output", "id, wait?", "Leer la salida nueva de un comando en segundo plano"),
+    ("stop_command", "id", "Detener un comando en segundo plano"),
     ("fetch_url", "url", "Descargar una página web como texto"),
     ("web_search", "query, limit?", "Buscar en internet (vía el gateway)"),
 ]
@@ -3549,11 +3679,27 @@ TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "run_command",
         "description": ("Ejecuta un comando de shell en el workspace: inicializar proyectos "
-                        "(npm create, git init…), instalar dependencias, tests y builds."),
+                        "(npm create, git init…), instalar dependencias, tests y builds. "
+                        "Con background=true arranca un proceso largo (servidor de desarrollo, "
+                        "watcher) y devuelve un id para read_output/stop_command."),
         "parameters": {"type": "object", "properties": {
             "command": _p("string", "Comando a ejecutar"),
             "timeout": _p("integer", "Segundos máximos (por defecto 30, tope 600)"),
+            "background": _p("boolean", "No esperar: dejarlo corriendo y devolver un id"),
         }, "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "read_output",
+        "description": "Salida nueva (desde la última lectura) de un comando en segundo plano y si sigue vivo.",
+        "parameters": {"type": "object", "properties": {
+            "id": _p("string", "Id devuelto por run_command con background=true"),
+            "wait": _p("integer", "Segundos a esperar antes de leer (por defecto 0, tope 60)"),
+        }, "required": ["id"]}}},
+    {"type": "function", "function": {
+        "name": "stop_command",
+        "description": "Detiene un comando en segundo plano (y sus procesos hijos).",
+        "parameters": {"type": "object", "properties": {
+            "id": _p("string", "Id del comando"),
+        }, "required": ["id"]}}},
     {"type": "function", "function": {
         "name": "fetch_url",
         "description": "Descarga una página web (o un JSON/texto) y devuelve su contenido como texto.",
@@ -3734,7 +3880,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         '{"tool":"search","args":{"pattern":"texto a buscar","path":".","glob":"*.js","ignore_case":true}}\n'
         '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n'
         '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n'
-        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}\n'
+        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}  (con "background":true devuelve un id; '
+        'luego {"tool":"read_output","args":{"id":"p1","wait":5}} y {"tool":"stop_command","args":{"id":"p1"}})\n'
         '{"tool":"web_search","args":{"query":"fastapi lifespan deprecated on_event","limit":5}}\n'
         '{"tool":"fetch_url","args":{"url":"https://ejemplo.com/docs"}}\n\n'
         "=== REGLAS OBLIGATORIAS ===\n"
@@ -4091,6 +4238,107 @@ def tool_run_command(workspace: Path, command: str, timeout: int = 30) -> str:
     return f"[EXIT {proc.returncode}] " + (output or "(sin salida)")
 
 
+class _Background:
+    """Proceso lanzado con background=true: un hilo drena su salida a un
+    buffer y read_output devuelve solo lo nuevo desde la última lectura."""
+
+    def __init__(self, ident: str, command: str, proc: subprocess.Popen):
+        self.id = ident
+        self.command = command
+        self.proc = proc
+        self.buffer = bytearray()
+        self.lock = threading.Lock()
+        self.cursor = 0
+        threading.Thread(target=self._drain, daemon=True, name=f"bg-{ident}").start()
+
+    def _drain(self) -> None:
+        for chunk in iter(lambda: self.proc.stdout.read1(4096), b""):
+            with self.lock:
+                self.buffer += chunk
+                if len(self.buffer) > 400_000:  # cola de 400 kB: lo viejo se descarta
+                    dropped = len(self.buffer) - 400_000
+                    del self.buffer[:dropped]
+                    self.cursor = max(0, self.cursor - dropped)
+        self.proc.wait()
+
+    def read_new(self) -> str:
+        with self.lock:
+            fresh = bytes(self.buffer[self.cursor:])
+            self.cursor = len(self.buffer)
+        return _decode_output(fresh)
+
+    @property
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+
+_background: dict[str, _Background] = {}
+_background_seq = 0
+
+
+def _spawn_shell(workspace: Path, command: str) -> subprocess.Popen:
+    import os
+    # El shell arranca en su propio grupo: matarlo mata también a los hijos
+    # (npm, pytest…), que con subprocess.run seguían vivos comiendo CPU.
+    extra = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+             else {"start_new_session": True})
+    return subprocess.Popen(command, shell=True, cwd=str(workspace), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
+
+
+def tool_run_background(workspace: Path, command: str) -> str:
+    global _background_seq
+    if not command.strip():
+        return "[ERROR] Falta command"
+    try:
+        proc = _spawn_shell(workspace, command)
+    except Exception as exc:
+        return f"[ERROR] {exc}"
+    _background_seq += 1
+    ident = f"p{_background_seq}"
+    _background[ident] = _Background(ident, command, proc)
+    time.sleep(1.0)  # un fallo inmediato (comando inexistente) se ve ya en la primera lectura
+    bg = _background[ident]
+    salida = bg.read_new()
+    estado = "en marcha" if bg.alive else f"terminó con código {proc.returncode}"
+    return f"[background {ident}] {estado}" + (f"\n{salida}" if salida else "")
+
+
+def tool_read_output(ident: str, wait: int = 0) -> str:
+    bg = _background.get(ident)
+    if bg is None:
+        return f"[ERROR] No hay ningún proceso {ident}; los activos: {', '.join(_background) or 'ninguno'}"
+    wait = max(0, min(int(wait or 0), 60))
+    if wait:
+        try:
+            bg.proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            pass
+    salida = bg.read_new()
+    if len(salida) > MAX_COMMAND_OUTPUT:
+        salida = salida[:MAX_COMMAND_OUTPUT // 2] + "\n…[salida recortada]…\n" + salida[-MAX_COMMAND_OUTPUT // 2:]
+    estado = "sigue en marcha" if bg.alive else f"terminó con código {bg.proc.returncode}"
+    return f"[{ident}] {estado}" + (f"\n{salida}" if salida else "\n(sin salida nueva)")
+
+
+def tool_stop_command(ident: str) -> str:
+    bg = _background.pop(ident, None)
+    if bg is None:
+        return f"[ERROR] No hay ningún proceso {ident}"
+    if bg.alive:
+        _kill_tree(bg.proc)
+    return f"[{ident}] detenido ({bg.command[:80]})"
+
+
+def background_processes() -> list[tuple[str, str, bool]]:
+    return [(bg.id, bg.command, bg.alive) for bg in _background.values()]
+
+
+def stop_all_background() -> None:
+    for ident in list(_background):
+        tool_stop_command(ident)
+
+
 def _decode_output(raw: bytes) -> str:
     """Salida de consola: UTF-8 si lo es; si no, la página de códigos local
     (en Windows cmd habla cp850/cp1252)."""
@@ -4186,7 +4434,13 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict, api=None) -> 
     if tool_name == "rename_file":
         return tool_rename_file(workspace, args.get("src", ""), args.get("dst", ""))
     if tool_name == "run_command":
-        return tool_run_command(workspace, args.get("command", ""), int(args.get("timeout", 30)))
+        if args.get("background"):
+            return tool_run_background(workspace, args.get("command", ""))
+        return tool_run_command(workspace, args.get("command", ""), int(args.get("timeout") or 30))
+    if tool_name == "read_output":
+        return tool_read_output(str(args.get("id", "")), int(args.get("wait") or 0))
+    if tool_name == "stop_command":
+        return tool_stop_command(str(args.get("id", "")))
     raise RuntimeError(f"Herramienta no soportada: {tool_name}")
 
 
@@ -4444,6 +4698,16 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     pruned_warned = False
 
     for step in range(MAX_AGENT_STEPS):
+        ask = session.get("ask")
+        if ask is not None and needs_compaction(working, window):
+            # Antes de podar a ciegas: resumir. Lo que se pierde en la poda es
+            # justo lo que el agente necesita para no repetir trabajo.
+            print_note("La conversación llena la ventana de contexto: compactando…")
+            try:
+                working = compact_messages(working, ask)
+                print_note(f"Contexto compactado a ~{estimate_tokens(working)} tokens.")
+            except Exception as exc:
+                print_note(f"No se pudo compactar ({exc}); se recortarán los pasos antiguos.")
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
         native = session.get("native_tools", True)
@@ -4749,7 +5013,66 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         stats["files"].add(change.path)
         stats["adds"] += counts[0]
         stats["dels"] += counts[1]
-    return _run(console, workspace, tool_name, args, remote)
+    snapshot_before(session, workspace, tool_name, args)
+    result = _run(console, workspace, tool_name, args, remote)
+    if session.get("auto_check", True):
+        tool, errors, result = verify_after(workspace, tool_name, args, result)
+        if tool:
+            primera = errors.strip().splitlines()[0][:110] if errors else "sin errores"
+            render_action_result(console, f"{tool}: {primera}", error=bool(errors))
+    return result
+
+
+def snapshot_before(session: dict, workspace: Path, tool_name: str, args: dict) -> None:
+    """Guarda el estado previo de lo que va a tocar una herramienta, para /undo.
+    Cada entrada: (ruta relativa, bytes anteriores o None si no existía)."""
+    if tool_name not in MUTATING_TOOLS:
+        return
+    rutas = [args.get("src"), args.get("dst")] if tool_name == "rename_file" else [args.get("path")]
+    turno = session.setdefault("checkpoints", [])
+    for rel in rutas:
+        if not rel:
+            continue
+        try:
+            target = resolve_safe_path(workspace, str(rel))
+        except RuntimeError:
+            continue
+        if target.is_dir():
+            session["undo_incomplete"] = True  # carpetas: no se guarda su contenido
+            continue
+        before = target.read_bytes() if target.is_file() else None
+        turno.append((str(rel), before))
+
+
+def undo_checkpoints(workspace: Path, entries: list[tuple[str, bytes | None]]) -> list[str]:
+    """Deshace en orden inverso: restaura el contenido previo o borra lo creado."""
+    hechos: list[str] = []
+    for rel, before in reversed(entries):
+        target = resolve_safe_path(workspace, rel)
+        if before is None:
+            if target.is_file():
+                target.unlink()
+                hechos.append(f"eliminado {rel}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(before)
+            hechos.append(f"restaurado {rel}")
+    return hechos
+
+
+def verify_after(workspace: Path, tool_name: str, args: dict, result: str) -> tuple[str, str, str]:
+    """Tras escribir/editar, pasa el verificador del archivo. Devuelve
+    (herramienta, errores, resultado ampliado para el modelo)."""
+    if tool_name not in ("write_file", "edit_file", "append_file") or result.startswith("[ERROR]"):
+        return "", "", result
+    try:
+        target = resolve_safe_path(workspace, str(args.get("path", "")))
+        tool, errors = verify_file(workspace, target)
+    except Exception:
+        return "", "", result
+    if errors:
+        result += f"\n[verificación {tool}] el archivo tiene errores; corrígelos:\n{errors}"
+    return tool, errors, result
 
 
 def _execute(workspace: Path, tool_name: str, args: dict, api=None) -> tuple[str, bool, float]:
@@ -5044,6 +5367,9 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("approve", "[on|off]", "Auto-aprobar herramientas del agente", "agente"),
     ("tools", "", "Ver las herramientas que puede usar el agente", "agente"),
     ("diff", "[ruta]", "Ver los cambios sin confirmar del workspace", "agente"),
+    ("undo", "", "Revertir los archivos que tocó el último turno del agente", "agente"),
+    ("ps", "", "Comandos en segundo plano del agente (y pararlos)", "agente"),
+    ("check", "[on|off]", "Verificar con el linter cada archivo que edita el agente", "agente"),
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
@@ -5457,6 +5783,10 @@ class ChatApp:
             # coincidieran, el agente podaría de más o de menos.
             "context_window": int(self.cfg.get("context_window", 16384)),
             "api": self.api,
+            # Chat sin streaming para tareas internas (compactar el contexto).
+            "ask": self._ask_quiet,
+            "auto_check": bool(self.cfg.get("auto_check", True)),
+            "undo_stack": [],  # checkpoints de los últimos turnos, para /undo
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
@@ -5648,6 +5978,7 @@ class ChatApp:
             return self._prompt_loop()
         finally:
             self._persist_session()  # salir del CLI no pierde la conversación
+            stop_all_background()
             release_status_line()
 
     def _render_identity(self) -> None:
@@ -6299,6 +6630,8 @@ class ChatApp:
         self._turn_started = time.monotonic()
         self._turn_tokens = 0
         self.session["turn_stats"] = {"actions": 0, "files": set(), "adds": 0, "dels": 0}
+        self.session["checkpoints"] = []
+        self.session["undo_incomplete"] = False
         for name, body in files:
             # Abre el registro del turno: el adjunto es lo primero que "hizo".
             render_action(self.console, "adjuntó", name, readonly=True,
@@ -6312,6 +6645,7 @@ class ChatApp:
                     self.history, self.workspace, self.session, self._stream_agent
                 )
             else:
+                self._auto_compact()
                 assistant = self._stream_assistant(self._context_messages())
                 self.history.append({"role": "assistant", "content": assistant})
         except ApiError:
@@ -6323,6 +6657,9 @@ class ChatApp:
                 self.remote.emit("status", state="idle")
         self._maybe_autotitle()
         self._persist_session()  # el historial se actualiza turno a turno
+        if self.session.get("checkpoints"):
+            self.session["undo_stack"].append(self.session["checkpoints"])
+            del self.session["undo_stack"][:-10]
         self._refresh_status()
 
     # ── teclado durante el turno ─────────────────────────────────────────
@@ -6438,6 +6775,25 @@ class ChatApp:
                     return
             except OSError:
                 return
+
+    def _ask_quiet(self, messages: list[dict]) -> str:
+        """Chat sin streaming ni historial, para trabajo interno del CLI."""
+        resp = self.api.chat(model=self.model, messages=messages, conversation_id=None,
+                             client_id=self.client_id, title="interno")
+        return (resp.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+
+    def _auto_compact(self) -> None:
+        """Modo ask: si el historial se acerca a la ventana, se compacta antes
+        de enviar (en agent lo hace el propio loop, paso a paso)."""
+        window = int(self.session.get("context_window") or 8192)
+        if not needs_compaction(self.history, window):
+            return
+        print_note("La conversación llena la ventana de contexto: compactando…")
+        try:
+            with spinner("compactando conversación…"):
+                self.history = compact_messages(self.history, self._ask_quiet)
+        except Exception as exc:
+            print_note(f"No se pudo compactar ({exc}).")
 
     def _context_messages(self) -> list[dict]:
         max_msgs = int(self.cfg.get("max_context_messages", 12))
@@ -6778,33 +7134,12 @@ class ChatApp:
             print_note("La conversación aún es corta; nada que compactar.")
             return True
         before_tokens, _ = self._estimate_context()
-        prompt = {
-            "role": "user",
-            "content": (
-                "Resume la conversación anterior en un único bloque conciso. "
-                "Preserva: decisiones tomadas, fragmentos de código relevantes, "
-                "datos concretos y tareas pendientes. Responde SOLO con el resumen."
-            ),
-        }
-        with spinner("compactando conversación…"):
-            resp = self.api.chat(
-                model=self.model,
-                # sin tools en la petición: el round-trip de herramientas del
-                # modo agent no puede viajar tal cual
-                messages=sanitize_for_plain_chat(self.history) + [prompt],
-                conversation_id=None,
-                client_id=self.client_id,
-                title="compactación",
-            )
-        summary = (resp.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
-        if not summary:
-            print_error("No se pudo generar el resumen.")
+        try:
+            with spinner("compactando conversación…"):
+                self.history = compact_messages(self.history, self._ask_quiet, keep_recent=2)
+        except Exception as exc:
+            print_error(f"No se pudo generar el resumen: {exc}")
             return True
-        keep = sanitize_for_plain_chat(self.history)[-2:]
-        self.history = [{
-            "role": "system",
-            "content": f"Resumen de la conversación previa:\n{summary}",
-        }] + keep
         after_tokens, _ = self._estimate_context()
         self._refresh_status()
         print_ok(
@@ -7183,6 +7518,66 @@ class ChatApp:
             self.console.print()
             self.console.print(f"  [lx.dim]{esc(stat.strip().splitlines()[-1])}[/]")
         self.console.print()
+        return True
+
+    def cmd_undo(self, arg: str):
+        stack = self.session.get("undo_stack") or []
+        if not stack:
+            print_note("No hay cambios del agente que revertir en esta sesión.")
+            return True
+        entries = stack[-1]
+        archivos = sorted({rel for rel, _ in entries})
+        decision = select(f"Revertir el último turno ({len(archivos)} archivo{'s' if len(archivos) != 1 else ''})", [
+            Option("Sí, revertir", "yes", ", ".join(archivos)[:120]),
+            Option("No", "no", "dejar los archivos como están"),
+        ], default=0)
+        if decision != "yes":
+            return True
+        try:
+            hechos = undo_checkpoints(self.workspace, entries)
+        except Exception as exc:
+            print_error(f"No se pudo revertir: {exc}")
+            return True
+        stack.pop()
+        for linea in hechos:
+            print_note(linea)
+        if self.session.get("undo_incomplete"):
+            print_warn("Ese turno también borró o movió carpetas enteras; eso no se revierte solo.")
+        print_ok("Cambios revertidos. El modelo no lo sabe: díselo si quieres que continúe desde aquí.")
+        self.history.append({"role": "user", "content": "[El usuario revirtió con /undo los archivos del último turno: "
+                             + ", ".join(archivos) + ". Vuelven a estar como antes de ese turno.]"})
+        return True
+
+    def cmd_ps(self, arg: str):
+        procs = background_processes()
+        if not procs:
+            print_note("No hay comandos en segundo plano.")
+            return True
+        for ident, command, alive in procs:
+            print_note(f"{ident}  {'en marcha' if alive else 'terminado'}  {command[:90]}")
+        chosen = select("Detener alguno", [
+            *[Option(f"{ident}  {command[:60]}", ident, "en marcha" if alive else "terminado")
+              for ident, command, alive in procs],
+            Option("Ninguno", "none", "volver"),
+        ], default=len(procs))
+        if chosen and chosen != "none":
+            print_ok(tool_stop_command(chosen))
+        return True
+
+    def cmd_check(self, arg: str):
+        if arg in ("on", "off"):
+            self.session["auto_check"] = arg == "on"
+        else:
+            chosen = select("Verificación tras editar", [
+                Option("on", "on", "ruff/eslint/py_compile sobre cada archivo que toca el agente"),
+                Option("off", "off", "solo cuando el modelo ejecute tests o build"),
+            ], default=0 if self.session.get("auto_check", True) else 1)
+            if chosen is None:
+                return True
+            self.session["auto_check"] = chosen == "on"
+        self.cfg["auto_check"] = self.session["auto_check"]
+        save_config(self.cfg)
+        print_ok(f"Verificación tras editar: {'on' if self.session['auto_check'] else 'off'}")
         return True
 
     def cmd_run(self, arg: str):

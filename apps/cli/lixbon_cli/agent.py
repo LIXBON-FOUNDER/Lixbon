@@ -15,13 +15,17 @@ En ambos casos se pide aprobación (con vista previa del diff) antes de ejecutar
 import json
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
+from lixbon_cli.checks import verify_file
 from lixbon_cli.context import (
     clip_tool_output,
+    compact_messages,
     estimate_tokens,
     fit_history,
+    needs_compaction,
     prompt_budget,
     shrink_old_results,
 )
@@ -60,7 +64,9 @@ MAX_AGENT_STEPS = 40
 # atascado repite la misma herramienta con los mismos argumentos indefinidamente.
 MAX_REPEATED_CALLS = 3
 
-READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "search", "fetch_url", "web_search"}
+READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "search", "fetch_url", "web_search",
+                   "read_output", "stop_command"}
+MUTATING_TOOLS = {"write_file", "edit_file", "append_file", "delete_file", "rename_file"}
 
 # Tope de líneas que devuelve una búsqueda o un listado: por encima el modelo
 # no lee nada útil y solo gasta contexto.
@@ -80,7 +86,9 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("mkdir", "path", "Crear una carpeta"),
     ("delete_file", "path", "Eliminar un archivo"),
     ("rename_file", "src, dst", "Mover o renombrar un archivo"),
-    ("run_command", "command, timeout?", "Ejecutar un comando de shell en el workspace"),
+    ("run_command", "command, timeout?, background?", "Ejecutar un comando de shell en el workspace"),
+    ("read_output", "id, wait?", "Leer la salida nueva de un comando en segundo plano"),
+    ("stop_command", "id", "Detener un comando en segundo plano"),
     ("fetch_url", "url", "Descargar una página web como texto"),
     ("web_search", "query, limit?", "Buscar en internet (vía el gateway)"),
 ]
@@ -172,11 +180,27 @@ TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "run_command",
         "description": ("Ejecuta un comando de shell en el workspace: inicializar proyectos "
-                        "(npm create, git init…), instalar dependencias, tests y builds."),
+                        "(npm create, git init…), instalar dependencias, tests y builds. "
+                        "Con background=true arranca un proceso largo (servidor de desarrollo, "
+                        "watcher) y devuelve un id para read_output/stop_command."),
         "parameters": {"type": "object", "properties": {
             "command": _p("string", "Comando a ejecutar"),
             "timeout": _p("integer", "Segundos máximos (por defecto 30, tope 600)"),
+            "background": _p("boolean", "No esperar: dejarlo corriendo y devolver un id"),
         }, "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "read_output",
+        "description": "Salida nueva (desde la última lectura) de un comando en segundo plano y si sigue vivo.",
+        "parameters": {"type": "object", "properties": {
+            "id": _p("string", "Id devuelto por run_command con background=true"),
+            "wait": _p("integer", "Segundos a esperar antes de leer (por defecto 0, tope 60)"),
+        }, "required": ["id"]}}},
+    {"type": "function", "function": {
+        "name": "stop_command",
+        "description": "Detiene un comando en segundo plano (y sus procesos hijos).",
+        "parameters": {"type": "object", "properties": {
+            "id": _p("string", "Id del comando"),
+        }, "required": ["id"]}}},
     {"type": "function", "function": {
         "name": "fetch_url",
         "description": "Descarga una página web (o un JSON/texto) y devuelve su contenido como texto.",
@@ -357,7 +381,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         '{"tool":"search","args":{"pattern":"texto a buscar","path":".","glob":"*.js","ignore_case":true}}\n'
         '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n'
         '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n'
-        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}\n'
+        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}  (con "background":true devuelve un id; '
+        'luego {"tool":"read_output","args":{"id":"p1","wait":5}} y {"tool":"stop_command","args":{"id":"p1"}})\n'
         '{"tool":"web_search","args":{"query":"fastapi lifespan deprecated on_event","limit":5}}\n'
         '{"tool":"fetch_url","args":{"url":"https://ejemplo.com/docs"}}\n\n'
         "=== REGLAS OBLIGATORIAS ===\n"
@@ -714,6 +739,107 @@ def tool_run_command(workspace: Path, command: str, timeout: int = 30) -> str:
     return f"[EXIT {proc.returncode}] " + (output or "(sin salida)")
 
 
+class _Background:
+    """Proceso lanzado con background=true: un hilo drena su salida a un
+    buffer y read_output devuelve solo lo nuevo desde la última lectura."""
+
+    def __init__(self, ident: str, command: str, proc: subprocess.Popen):
+        self.id = ident
+        self.command = command
+        self.proc = proc
+        self.buffer = bytearray()
+        self.lock = threading.Lock()
+        self.cursor = 0
+        threading.Thread(target=self._drain, daemon=True, name=f"bg-{ident}").start()
+
+    def _drain(self) -> None:
+        for chunk in iter(lambda: self.proc.stdout.read1(4096), b""):
+            with self.lock:
+                self.buffer += chunk
+                if len(self.buffer) > 400_000:  # cola de 400 kB: lo viejo se descarta
+                    dropped = len(self.buffer) - 400_000
+                    del self.buffer[:dropped]
+                    self.cursor = max(0, self.cursor - dropped)
+        self.proc.wait()
+
+    def read_new(self) -> str:
+        with self.lock:
+            fresh = bytes(self.buffer[self.cursor:])
+            self.cursor = len(self.buffer)
+        return _decode_output(fresh)
+
+    @property
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+
+_background: dict[str, _Background] = {}
+_background_seq = 0
+
+
+def _spawn_shell(workspace: Path, command: str) -> subprocess.Popen:
+    import os
+    # El shell arranca en su propio grupo: matarlo mata también a los hijos
+    # (npm, pytest…), que con subprocess.run seguían vivos comiendo CPU.
+    extra = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+             else {"start_new_session": True})
+    return subprocess.Popen(command, shell=True, cwd=str(workspace), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
+
+
+def tool_run_background(workspace: Path, command: str) -> str:
+    global _background_seq
+    if not command.strip():
+        return "[ERROR] Falta command"
+    try:
+        proc = _spawn_shell(workspace, command)
+    except Exception as exc:
+        return f"[ERROR] {exc}"
+    _background_seq += 1
+    ident = f"p{_background_seq}"
+    _background[ident] = _Background(ident, command, proc)
+    time.sleep(1.0)  # un fallo inmediato (comando inexistente) se ve ya en la primera lectura
+    bg = _background[ident]
+    salida = bg.read_new()
+    estado = "en marcha" if bg.alive else f"terminó con código {proc.returncode}"
+    return f"[background {ident}] {estado}" + (f"\n{salida}" if salida else "")
+
+
+def tool_read_output(ident: str, wait: int = 0) -> str:
+    bg = _background.get(ident)
+    if bg is None:
+        return f"[ERROR] No hay ningún proceso {ident}; los activos: {', '.join(_background) or 'ninguno'}"
+    wait = max(0, min(int(wait or 0), 60))
+    if wait:
+        try:
+            bg.proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            pass
+    salida = bg.read_new()
+    if len(salida) > MAX_COMMAND_OUTPUT:
+        salida = salida[:MAX_COMMAND_OUTPUT // 2] + "\n…[salida recortada]…\n" + salida[-MAX_COMMAND_OUTPUT // 2:]
+    estado = "sigue en marcha" if bg.alive else f"terminó con código {bg.proc.returncode}"
+    return f"[{ident}] {estado}" + (f"\n{salida}" if salida else "\n(sin salida nueva)")
+
+
+def tool_stop_command(ident: str) -> str:
+    bg = _background.pop(ident, None)
+    if bg is None:
+        return f"[ERROR] No hay ningún proceso {ident}"
+    if bg.alive:
+        _kill_tree(bg.proc)
+    return f"[{ident}] detenido ({bg.command[:80]})"
+
+
+def background_processes() -> list[tuple[str, str, bool]]:
+    return [(bg.id, bg.command, bg.alive) for bg in _background.values()]
+
+
+def stop_all_background() -> None:
+    for ident in list(_background):
+        tool_stop_command(ident)
+
+
 def _decode_output(raw: bytes) -> str:
     """Salida de consola: UTF-8 si lo es; si no, la página de códigos local
     (en Windows cmd habla cp850/cp1252)."""
@@ -809,7 +935,13 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict, api=None) -> 
     if tool_name == "rename_file":
         return tool_rename_file(workspace, args.get("src", ""), args.get("dst", ""))
     if tool_name == "run_command":
-        return tool_run_command(workspace, args.get("command", ""), int(args.get("timeout", 30)))
+        if args.get("background"):
+            return tool_run_background(workspace, args.get("command", ""))
+        return tool_run_command(workspace, args.get("command", ""), int(args.get("timeout") or 30))
+    if tool_name == "read_output":
+        return tool_read_output(str(args.get("id", "")), int(args.get("wait") or 0))
+    if tool_name == "stop_command":
+        return tool_stop_command(str(args.get("id", "")))
     raise RuntimeError(f"Herramienta no soportada: {tool_name}")
 
 
@@ -1067,6 +1199,16 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     pruned_warned = False
 
     for step in range(MAX_AGENT_STEPS):
+        ask = session.get("ask")
+        if ask is not None and needs_compaction(working, window):
+            # Antes de podar a ciegas: resumir. Lo que se pierde en la poda es
+            # justo lo que el agente necesita para no repetir trabajo.
+            print_note("La conversación llena la ventana de contexto: compactando…")
+            try:
+                working = compact_messages(working, ask)
+                print_note(f"Contexto compactado a ~{estimate_tokens(working)} tokens.")
+            except Exception as exc:
+                print_note(f"No se pudo compactar ({exc}); se recortarán los pasos antiguos.")
         # El flag puede apagarse a mitad de turno (fallback si el modelo no
         # soporta tools), así que se relee en cada paso.
         native = session.get("native_tools", True)
@@ -1373,7 +1515,66 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         stats["files"].add(change.path)
         stats["adds"] += counts[0]
         stats["dels"] += counts[1]
-    return _run(console, workspace, tool_name, args, remote)
+    snapshot_before(session, workspace, tool_name, args)
+    result = _run(console, workspace, tool_name, args, remote)
+    if session.get("auto_check", True):
+        tool, errors, result = verify_after(workspace, tool_name, args, result)
+        if tool:
+            primera = errors.strip().splitlines()[0][:110] if errors else "sin errores"
+            render_action_result(console, f"{tool}: {primera}", error=bool(errors))
+    return result
+
+
+def snapshot_before(session: dict, workspace: Path, tool_name: str, args: dict) -> None:
+    """Guarda el estado previo de lo que va a tocar una herramienta, para /undo.
+    Cada entrada: (ruta relativa, bytes anteriores o None si no existía)."""
+    if tool_name not in MUTATING_TOOLS:
+        return
+    rutas = [args.get("src"), args.get("dst")] if tool_name == "rename_file" else [args.get("path")]
+    turno = session.setdefault("checkpoints", [])
+    for rel in rutas:
+        if not rel:
+            continue
+        try:
+            target = resolve_safe_path(workspace, str(rel))
+        except RuntimeError:
+            continue
+        if target.is_dir():
+            session["undo_incomplete"] = True  # carpetas: no se guarda su contenido
+            continue
+        before = target.read_bytes() if target.is_file() else None
+        turno.append((str(rel), before))
+
+
+def undo_checkpoints(workspace: Path, entries: list[tuple[str, bytes | None]]) -> list[str]:
+    """Deshace en orden inverso: restaura el contenido previo o borra lo creado."""
+    hechos: list[str] = []
+    for rel, before in reversed(entries):
+        target = resolve_safe_path(workspace, rel)
+        if before is None:
+            if target.is_file():
+                target.unlink()
+                hechos.append(f"eliminado {rel}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(before)
+            hechos.append(f"restaurado {rel}")
+    return hechos
+
+
+def verify_after(workspace: Path, tool_name: str, args: dict, result: str) -> tuple[str, str, str]:
+    """Tras escribir/editar, pasa el verificador del archivo. Devuelve
+    (herramienta, errores, resultado ampliado para el modelo)."""
+    if tool_name not in ("write_file", "edit_file", "append_file") or result.startswith("[ERROR]"):
+        return "", "", result
+    try:
+        target = resolve_safe_path(workspace, str(args.get("path", "")))
+        tool, errors = verify_file(workspace, target)
+    except Exception:
+        return "", "", result
+    if errors:
+        result += f"\n[verificación {tool}] el archivo tiene errores; corrígelos:\n{errors}"
+    return tool, errors, result
 
 
 def _execute(workspace: Path, tool_name: str, args: dict, api=None) -> tuple[str, bool, float]:
