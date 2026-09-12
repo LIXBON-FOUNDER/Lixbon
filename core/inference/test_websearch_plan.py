@@ -67,3 +67,35 @@ def test_build_context_menciona_lo_buscado():
     assert "[1] T" in ctx
     vacio = websearch.build_context("pregunta", [], ["q1"])
     assert '"q1"' in vacio
+
+
+def test_cadena_de_proveedores_salta_al_siguiente(monkeypatch):
+    llamadas = []
+
+    def falla(q, n):
+        llamadas.append("falla")
+        raise RuntimeError("429")
+
+    def vacio(q, n):
+        llamadas.append("vacio")
+        return []
+
+    def bueno(q, n):
+        llamadas.append("bueno")
+        return [{"url": "u", "title": "t", "snippet": ""}]
+
+    monkeypatch.setattr(websearch, "PROVIDERS", ["brave", "searxng", "duckduckgo"])
+    monkeypatch.setattr(websearch, "_PROVIDER_FN", {
+        "brave": (falla, lambda: True),
+        "searxng": (vacio, lambda: True),
+        "duckduckgo": (bueno, lambda: True),
+    })
+    assert websearch._search_sync("q", 5)[0]["url"] == "u"
+    assert llamadas == ["falla", "vacio", "bueno"]
+
+
+def test_proveedores_sin_clave_se_omiten(monkeypatch):
+    monkeypatch.setattr(websearch, "PROVIDERS", ["brave", "tavily", "duckduckgo"])
+    monkeypatch.setattr(websearch, "BRAVE_API_KEY", "")
+    monkeypatch.setattr(websearch, "TAVILY_API_KEY", "k")
+    assert websearch.providers_configured() == ["tavily", "duckduckgo"]

@@ -16,10 +16,14 @@ el contexto:
   - descarga el texto real de las primeras páginas (los snippets de DuckDuckGo
     suelen no traer el dato concreto: precios, cifras, etc.).
 
-Proveedor configurable por env `WEBSEARCH_PROVIDER`:
-  - "duckduckgo" (default, sin API key)
-  - "tavily"  (requiere TAVILY_API_KEY; ideal para agentes)
-  - "brave"   (requiere BRAVE_API_KEY)
+Proveedores por env `WEBSEARCH_PROVIDER` (lista separada por comas: se prueban en
+orden y se pasa al siguiente si uno falla o no devuelve nada):
+  - "brave"      (BRAVE_API_KEY; 2.000 consultas/mes gratis, índice propio)
+  - "tavily"     (TAVILY_API_KEY; devuelve contenido ya extraído)
+  - "serper"     (SERPER_API_KEY; resultados de Google)
+  - "searxng"    (SEARXNG_URL; metabuscador autoalojado, sin clave)
+  - "duckduckgo" (sin clave, pero hace scraping y en servidores acaba bloqueado)
+Ej.: WEBSEARCH_PROVIDER=brave,searxng,duckduckgo
 """
 from __future__ import annotations
 
@@ -33,9 +37,11 @@ from datetime import date
 
 logger = logging.getLogger("lixbon.websearch")
 
-PROVIDER = os.getenv("WEBSEARCH_PROVIDER", "duckduckgo").lower()
+PROVIDERS = [p.strip() for p in os.getenv("WEBSEARCH_PROVIDER", "duckduckgo").lower().split(",") if p.strip()]
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+SEARXNG_URL = os.getenv("SEARXNG_URL", "").rstrip("/")
 MAX_RESULTS = int(os.getenv("WEBSEARCH_MAX_RESULTS", "5"))
 MAX_QUERIES = int(os.getenv("WEBSEARCH_MAX_QUERIES", "3"))
 # Resultados totales tras unir las consultas (las fuentes se citan por número:
@@ -96,12 +102,66 @@ def _search_brave(query: str, limit: int) -> list[dict]:
     ]
 
 
+def _search_serper(query: str, limit: int) -> list[dict]:
+    import httpx
+    resp = httpx.post(
+        "https://google.serper.dev/search",
+        json={"q": query, "num": limit},
+        headers={"X-API-KEY": SERPER_API_KEY},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return [
+        {"title": r.get("title", ""), "url": r.get("link", ""), "snippet": r.get("snippet", "")}
+        for r in resp.json().get("organic", [])[:limit]
+    ]
+
+
+def _search_searxng(query: str, limit: int) -> list[dict]:
+    """SearXNG necesita `search.formats: [html, json]` en su settings.yml."""
+    import httpx
+    resp = httpx.get(
+        f"{SEARXNG_URL}/search",
+        params={"q": query, "format": "json", "language": "auto"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return [
+        {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")}
+        for r in resp.json().get("results", [])[:limit]
+    ]
+
+
+_PROVIDER_FN = {
+    "brave": (_search_brave, lambda: bool(BRAVE_API_KEY)),
+    "tavily": (_search_tavily, lambda: bool(TAVILY_API_KEY)),
+    "serper": (_search_serper, lambda: bool(SERPER_API_KEY)),
+    "searxng": (_search_searxng, lambda: bool(SEARXNG_URL)),
+    "duckduckgo": (_search_duckduckgo, lambda: True),
+}
+
+
+def providers_configured() -> list[str]:
+    return [p for p in PROVIDERS if p in _PROVIDER_FN and _PROVIDER_FN[p][1]()]
+
+
 def _search_sync(query: str, limit: int) -> list[dict]:
-    if PROVIDER == "tavily" and TAVILY_API_KEY:
-        return _search_tavily(query, limit)
-    if PROVIDER == "brave" and BRAVE_API_KEY:
-        return _search_brave(query, limit)
-    return _search_duckduckgo(query, limit)
+    """Prueba los proveedores en orden; el primero que devuelva resultados gana."""
+    ultimo_error: Exception | None = None
+    for nombre in providers_configured() or ["duckduckgo"]:
+        fn = _PROVIDER_FN[nombre][0]
+        try:
+            resultados = fn(query, limit)
+        except Exception as exc:
+            ultimo_error = exc
+            logger.warning(f"[websearch] {nombre} falló para '{query}': {exc}")
+            continue
+        if resultados:
+            return resultados
+        logger.info(f"[websearch] {nombre} sin resultados para '{query}'")
+    if ultimo_error:
+        raise ultimo_error
+    return []
 
 
 # ── Descarga del texto real de la página ────────────────────────────────────
@@ -187,7 +247,7 @@ async def _search_one(query: str, limit: int) -> list[dict]:
     try:
         return await asyncio.to_thread(_search_sync, query, limit)
     except Exception as exc:
-        logger.warning(f"Búsqueda web falló ({PROVIDER}) para '{query}': {exc}")
+        logger.warning(f"Búsqueda web falló para '{query}': {exc}")
         return []
 
 
