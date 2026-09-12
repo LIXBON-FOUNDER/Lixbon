@@ -51,6 +51,7 @@ $SUDO chmod 600 "$ENV_FILE"
 
 # Flash attention + KV q8_0: la mitad de VRAM por token de contexto (ventanas grandes).
 export OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-32768}"
+export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-4}" OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-3}"
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && $SUDO systemctl list-unit-files ollama.service >/dev/null 2>&1; then
   $SUDO mkdir -p /etc/systemd/system/ollama.service.d
   $SUDO tee /etc/systemd/system/ollama.service.d/lixbon.conf >/dev/null <<EOF
@@ -58,6 +59,8 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && $SUDO s
 Environment="OLLAMA_FLASH_ATTENTION=1"
 Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
 Environment="OLLAMA_CONTEXT_LENGTH=$OLLAMA_CONTEXT_LENGTH"
+Environment="OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL"
+Environment="OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS"
 EOF
   $SUDO systemctl daemon-reload
   $SUDO systemctl enable ollama >/dev/null 2>&1 || true
