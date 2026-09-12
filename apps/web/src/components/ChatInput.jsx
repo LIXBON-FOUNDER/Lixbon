@@ -30,8 +30,9 @@ let siguienteId = 0;
 
 // Anillo que se llena con el contexto usado, como en Claude Desktop.
 function ContextRing({ uso }) {
-  if (!uso?.total) return null;
-  const frac = Math.min(1, uso.used / uso.total);
+  if (!uso) return null;
+  const total = uso.total || 4096;
+  const frac = Math.min(1, uso.used / total);
   const r = 6.5;
   const circ = 2 * Math.PI * r;
   const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
@@ -39,7 +40,7 @@ function ContextRing({ uso }) {
   return (
     <span
       className={`chat-input__ctx ${tono}`}
-      title={`Contexto usado: ${k(uso.used)} de ${k(uso.total)} tokens (${Math.round(frac * 100)} %)${uso.estimado ? ' · estimado' : ''}`}
+      title={`Contexto usado: ${k(uso.used)} de ${k(total)} tokens (${Math.round(frac * 100)} %)${uso.estimado ? ' · estimado' : ''}`}
       aria-label="Contexto usado"
     >
       <svg width="16" height="16" viewBox="0 0 16 16">
@@ -235,8 +236,8 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
 
   const aviso = error || dictado.error;
 
-  // La caja es el bloque; los iconos y el botón de enviar cuelgan por fuera de
-  // sus esquinas, así que van fuera de __box y el ancla es .chat-input.
+  // Todo vive dentro de la caja: el texto arriba y, debajo, una barra con las
+  // herramientas, el modelo con su anillo de contexto y el botón de enviar.
   return (
     <div className={arrastrando ? 'chat-input is-dropping' : 'chat-input'}>
       <div className="chat-input__box">
@@ -294,21 +295,7 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
         aria-label="Mensaje"
       />
 
-      {/* El modelo ocupa la ranura baja de la caja, como un chip más. */}
-      {models.length > 0 && (
-        <div className="chat-input__meta">
-          <Select
-            className="chat-input__model"
-            value={model}
-            options={models.map((m) => ({ value: m, label: m }))}
-            onChange={onModelChange}
-            aria-label="Modelo"
-          />
-          <ContextRing uso={contextUso} />
-        </div>
-      )}
-      </div>
-
+      <div className="chat-input__bar">
       <div className="chat-input__tools">
         <input
           ref={fileRef}
@@ -349,6 +336,19 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
         </button>
       </div>
 
+      {models.length > 0 && (
+        <div className="chat-input__meta">
+          <Select
+            className="chat-input__model"
+            value={model}
+            options={models.map((m) => ({ value: m, label: m }))}
+            onChange={onModelChange}
+            aria-label="Modelo"
+          />
+          <ContextRing uso={contextUso} />
+        </div>
+      )}
+
       {busy && onStop ? (
         <button
           className="chat-input__send is-stop"
@@ -370,6 +370,8 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
           <IconSend size={19} />
         </button>
       )}
+      </div>
+      </div>
     </div>
   );
 }

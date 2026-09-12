@@ -799,10 +799,18 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px 62px 20px 20px;
+  padding: 16px 16px 12px 20px;
   border-radius: var(--radius);
   background: var(--bg-card);
   transition: background 0.2s ease;
+}
+
+/* Barra inferior: herramientas · modelo + contexto · … · enviar. */
+.chat-input__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .chat-input.is-dropping .chat-input__box {
@@ -888,7 +896,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  align-self: flex-start;
+  min-width: 0;
 }
 
 .chat-input__ctx {
@@ -918,17 +926,11 @@
 .chat-input__ctx.is-danger .chat-input__ctx-uso { stroke: #d9534f; }
 .chat-input__ctx.is-danger { color: #d9534f; }
 
-/* Los iconos cuelgan de la esquina inferior izquierda de la caja. */
 .chat-input__tools {
-  position: absolute;
-  left: -10px;
-  bottom: -14px;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 5px 8px;
-  border-radius: var(--radius);
-  background: var(--bg-card);
+  margin-left: -6px;
 }
 
 .chat-input__tools .icon-btn {
@@ -965,14 +967,13 @@
 
 /* Enviar: el único círculo de la interfaz, junto al avatar. */
 .chat-input__send {
-  position: absolute;
-  right: -12px;
-  bottom: -12px;
+  margin-left: auto;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius-round);
   background: var(--primary);
   color: var(--on-primary);
@@ -1251,49 +1252,11 @@
   }
 }
 
-/* Teléfono (≤640px): el compositor cambia de forma. Con el dedo, un botón que
-   cuelga por fuera de la caja queda pegado al borde de la pantalla y los
-   iconos de 28px no se aciertan: los tres se meten dentro, en su propia barra,
-   y el enviar deja de ser círculo para ser un objetivo de 44px. */
+/* Teléfono (≤640px): objetivos táctiles de 44px y enviar cuadrado. */
 
 @media (max-width: 640px) {
-  /* El relleno pasa del bloque interior al contenedor, y las tres piezas se
-     reparten en dos filas: el texto arriba, la barra debajo. */
-  .chat-input {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 11px;
-    padding: 13px 13px 10px;
-    border-radius: var(--radius);
-    background: var(--bg-card);
-  }
-
-  .chat-input.is-dropping {
-    background: var(--surface-3);
-  }
-
   .chat-input__box {
-    flex: 1 0 100%;
-    padding: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .chat-input.is-dropping .chat-input__box {
-    background: transparent;
-  }
-
-  .chat-input__tools,
-  .chat-input__send {
-    position: static;
-  }
-
-  /* Empuja el enviar al otro extremo de la fila. */
-  .chat-input__tools {
-    margin-right: auto;
-    padding: 0;
-    background: transparent;
+    padding: 12px 12px 10px 14px;
   }
 
   .chat-input__tools .icon-btn,
