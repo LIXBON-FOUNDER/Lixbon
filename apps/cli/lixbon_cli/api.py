@@ -126,6 +126,10 @@ class ApiClient:
                           f"{self.server}/api/conversations/{conversation_id}/generate-title",
                           {}, timeout=30)
 
+    def web_search(self, query: str, limit: int = 5) -> dict:
+        return self._json("POST", f"{self.server}/api/websearch",
+                          {"query": query, "limit": limit}, timeout=60)
+
     def delegate(self, user_input: str) -> dict:
         return self._json("POST", f"{self.server}/api/delegate",
                           {"user_input": user_input}, timeout=180)

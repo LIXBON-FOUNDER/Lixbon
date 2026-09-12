@@ -26,7 +26,17 @@ from lixbon_cli.context import (
     shrink_old_results,
 )
 from lixbon_cli.diffs import compute_change, render_change
-from lixbon_cli.documents import describe_image, is_image, is_pdf, pdf_text
+from lixbon_cli.documents import (
+    describe_image,
+    docx_text,
+    fmt_size,
+    html_to_text,
+    is_binary,
+    is_docx,
+    is_image,
+    is_pdf,
+    pdf_text,
+)
 from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
 from lixbon_cli.term import g
 from lixbon_cli.theme import make_console
@@ -50,15 +60,20 @@ MAX_AGENT_STEPS = 40
 # atascado repite la misma herramienta con los mismos argumentos indefinidamente.
 MAX_REPEATED_CALLS = 3
 
-READ_ONLY_TOOLS = {"list_files", "read_file", "search"}
+READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "search", "fetch_url", "web_search"}
+
+# Tope de líneas que devuelve una búsqueda o un listado: por encima el modelo
+# no lee nada útil y solo gasta contexto.
+MAX_RESULT_LINES = 300
 
 # Catálogo legible de lo que el agente puede hacer (lo muestra /tools). Es la
 # misma lista que se le describe al modelo en el system prompt, escrita para
 # personas: quien usa el CLI necesita saber qué puede tocar el agente.
 TOOL_SPECS: list[tuple[str, str, str]] = [
-    ("list_files", "path", "Listar el contenido de una carpeta"),
-    ("read_file", "path, start_line?, end_line?", "Leer un archivo (o un rango de líneas)"),
-    ("search", "pattern, path", "Buscar texto en el workspace"),
+    ("list_files", "path, recursive?", "Listar el contenido de una carpeta"),
+    ("find_files", "pattern", "Buscar archivos por nombre o patrón glob"),
+    ("read_file", "path, start_line?, end_line?", "Leer un archivo, PDF, Word o imagen"),
+    ("search", "pattern, path?, glob?, ignore_case?, regex?", "Buscar texto en el workspace"),
     ("write_file", "path, content", "Crear o reemplazar un archivo entero"),
     ("edit_file", "path, old_text, new_text", "Sustituir un fragmento exacto de un archivo"),
     ("append_file", "path, content", "Añadir texto al final de un archivo"),
@@ -66,6 +81,8 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("delete_file", "path", "Eliminar un archivo"),
     ("rename_file", "src, dst", "Mover o renombrar un archivo"),
     ("run_command", "command, timeout?", "Ejecutar un comando de shell en el workspace"),
+    ("fetch_url", "url", "Descargar una página web como texto"),
+    ("web_search", "query, limit?", "Buscar en internet (vía el gateway)"),
 ]
 
 # Definiciones de funciones en formato OpenAI para tool-calling NATIVO. El
@@ -78,13 +95,21 @@ def _p(kind: str, description: str) -> dict:
 TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "list_files",
-        "description": "Lista los archivos del workspace (o de una subcarpeta).",
+        "description": "Lista una carpeta del workspace con tamaños; con recursive ve el árbol completo.",
         "parameters": {"type": "object", "properties": {
-            "path": _p("string", 'Ruta relativa; "." para la raíz')}}}},
+            "path": _p("string", 'Ruta relativa; "." para la raíz'),
+            "recursive": _p("boolean", "Incluir subcarpetas (por defecto no)"),
+        }}}},
+    {"type": "function", "function": {
+        "name": "find_files",
+        "description": "Busca archivos por nombre con un patrón glob: '*.py', 'test_*', 'src/**/*.jsx'.",
+        "parameters": {"type": "object", "properties": {
+            "pattern": _p("string", "Patrón glob del nombre o de la ruta relativa"),
+        }, "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "read_file",
         "description": "Lee el contenido de un archivo. Admite rango de líneas. "
-                       "Un PDF devuelve su texto por páginas; una imagen (png/jpg/webp) "
+                       "Un PDF o .docx devuelve su texto; una imagen (png/jpg/webp) "
                        "se te adjunta para que la veas.",
         "parameters": {"type": "object", "properties": {
             "path": _p("string", "Ruta relativa del archivo"),
@@ -93,10 +118,13 @@ TOOL_SCHEMAS: list[dict] = [
         }, "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "search",
-        "description": "Busca un texto EXACTO en los archivos del workspace (grep).",
+        "description": "Busca texto en los archivos del workspace (grep): devuelve archivo:línea:contenido.",
         "parameters": {"type": "object", "properties": {
-            "pattern": _p("string", "Texto a buscar"),
-            "path": _p("string", 'Carpeta donde buscar; "." para todo el workspace'),
+            "pattern": _p("string", "Texto a buscar (literal, salvo regex=true)"),
+            "path": _p("string", 'Carpeta o archivo donde buscar; "." para todo el workspace'),
+            "glob": _p("string", "Solo archivos que cumplan el patrón, p. ej. '*.py'"),
+            "ignore_case": _p("boolean", "Ignorar mayúsculas/minúsculas"),
+            "regex": _p("boolean", "Interpretar pattern como expresión regular"),
         }, "required": ["pattern"]}}},
     {"type": "function", "function": {
         "name": "write_file",
@@ -147,8 +175,23 @@ TOOL_SCHEMAS: list[dict] = [
                         "(npm create, git init…), instalar dependencias, tests y builds."),
         "parameters": {"type": "object", "properties": {
             "command": _p("string", "Comando a ejecutar"),
-            "timeout": _p("integer", "Segundos máximos (por defecto 30)"),
+            "timeout": _p("integer", "Segundos máximos (por defecto 30, tope 600)"),
         }, "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "fetch_url",
+        "description": "Descarga una página web (o un JSON/texto) y devuelve su contenido como texto.",
+        "parameters": {"type": "object", "properties": {
+            "url": _p("string", "URL http(s) completa"),
+        }, "required": ["url"]}}},
+    {"type": "function", "function": {
+        "name": "web_search",
+        "description": ("Busca en internet y devuelve título, URL y resumen de cada resultado. "
+                        "Úsala para documentación, errores o datos que no estén en el workspace; "
+                        "luego fetch_url para leer una página entera."),
+        "parameters": {"type": "object", "properties": {
+            "query": _p("string", "Consulta de búsqueda, concreta y en el idioma de la fuente"),
+            "limit": _p("integer", "Resultados máximos (por defecto 5)"),
+        }, "required": ["query"]}}},
 ]
 
 
@@ -303,17 +346,20 @@ def build_agent_system_prompt(workspace: Path) -> str:
         "Rutas siempre RELATIVAS al workspace.\n\n"
         "=== HERRAMIENTAS DISPONIBLES ===\n"
         "Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n"
-        '{"tool":"list_files","args":{"path":"."}}\n'
+        '{"tool":"list_files","args":{"path":".","recursive":false}}\n'
+        '{"tool":"find_files","args":{"pattern":"*.py"}}\n'
         '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes; '
-        'un .pdf llega como texto por páginas y una imagen png/jpg/webp se te adjunta para que la veas)\n'
+        'un .pdf o .docx llega como texto y una imagen png/jpg/webp se te adjunta para que la veas)\n'
         '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n'
         '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n'
         '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n'
         '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n'
-        '{"tool":"search","args":{"pattern":"texto a buscar","path":"."}}\n'
+        '{"tool":"search","args":{"pattern":"texto a buscar","path":".","glob":"*.js","ignore_case":true}}\n'
         '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n'
         '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n'
-        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}\n\n'
+        '{"tool":"run_command","args":{"command":"npm install","timeout":60}}\n'
+        '{"tool":"web_search","args":{"query":"fastapi lifespan deprecated on_event","limit":5}}\n'
+        '{"tool":"fetch_url","args":{"url":"https://ejemplo.com/docs"}}\n\n'
         "=== REGLAS OBLIGATORIAS ===\n"
         "1. Si el usuario pide crear, modificar, arreglar, eliminar o ejecutar algo, DEBES hacerlo "
         "con herramientas EN ESTA MISMA RESPUESTA. Tú ejecutas los cambios; el usuario no copia código.\n"
@@ -357,18 +403,66 @@ def resolve_safe_path(workspace: Path, user_path: str) -> Path:
     return full
 
 
-def tool_list_files(workspace: Path, rel_path: str = ".") -> str:
+def _cap_lines(lines: list[str], total: int | None = None) -> str:
+    total = len(lines) if total is None else total
+    if total > MAX_RESULT_LINES:
+        return "\n".join(lines[:MAX_RESULT_LINES]) + f"\n…[{total - MAX_RESULT_LINES} líneas más]"
+    return "\n".join(lines)
+
+
+def _sorted_entries(directory: Path) -> list[Path]:
+    try:
+        return sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+    except OSError:
+        return []
+
+
+def tool_list_files(workspace: Path, rel_path: str = ".", recursive: bool = False) -> str:
     target = resolve_safe_path(workspace, rel_path)
     if not target.exists():
-        return f"No existe: {target}"
+        return f"No existe: {rel_path}"
     if target.is_file():
-        return str(target.relative_to(workspace))
-    items = sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
-    lines = []
-    for p in items[:200]:
-        marker = "F" if p.is_file() else "D"
-        lines.append(f"[{marker}] {p.relative_to(workspace)}")
-    return "\n".join(lines) if lines else "(vacio)"
+        return f"[F] {target.relative_to(workspace).as_posix()} ({fmt_size(target.stat().st_size)})"
+    lines: list[str] = []
+
+    def walk(directory: Path, depth: int) -> None:
+        for p in _sorted_entries(directory):
+            if len(lines) > MAX_RESULT_LINES:
+                return
+            rel = p.relative_to(workspace).as_posix()
+            if p.is_dir():
+                if p.name in IGNORED_TREE_DIRS:
+                    lines.append(f"[D] {rel}/ (omitida)")
+                    continue
+                lines.append(f"[D] {rel}/ ({len(_sorted_entries(p))} entradas)")
+                if recursive and depth < 6:
+                    walk(p, depth + 1)
+            else:
+                try:
+                    lines.append(f"[F] {rel} ({fmt_size(p.stat().st_size)})")
+                except OSError:
+                    lines.append(f"[F] {rel}")
+
+    walk(target, 1)
+    return _cap_lines(lines) if lines else "(vacío)"
+
+
+def tool_find_files(workspace: Path, pattern: str) -> str:
+    pattern = (pattern or "").strip().replace("\\", "/")
+    if not pattern:
+        return "[ERROR] Falta pattern"
+    if "/" not in pattern:
+        pattern = f"**/{pattern}"
+    hits: list[str] = []
+    for p in workspace.glob(pattern):
+        rel = p.relative_to(workspace)
+        if any(part in IGNORED_TREE_DIRS for part in rel.parts):
+            continue
+        hits.append(rel.as_posix() + ("/" if p.is_dir() else ""))
+        if len(hits) > MAX_RESULT_LINES:
+            break
+    hits.sort()
+    return _cap_lines(hits) if hits else "(sin resultados)"
 
 
 def tool_read_file(workspace: Path, rel_path: str, start_line: int = 0, end_line: int = 0) -> str:
@@ -377,7 +471,15 @@ def tool_read_file(workspace: Path, rel_path: str, start_line: int = 0, end_line
         return f"Archivo no encontrado: {rel_path}"
     if is_image(target):
         return describe_image(target)
-    content = pdf_text(target) if is_pdf(target) else target.read_text(encoding="utf-8", errors="replace")
+    if is_pdf(target):
+        content = pdf_text(target)
+    elif is_docx(target):
+        content = docx_text(target)
+    elif is_binary(target):
+        return (f"[binario] {target.name} ({fmt_size(target.stat().st_size)}): no es texto ni un "
+                "formato que sepa leer (pdf, docx, png/jpg/webp).")
+    else:
+        content = target.read_text(encoding="utf-8", errors="replace")
     if start_line or end_line:
         lines = content.split("\n")
         s = max(1, int(start_line or 1))
@@ -399,17 +501,59 @@ def tool_edit_file(workspace: Path, rel_path: str, old_text: str, new_text: str,
         return f"Archivo no encontrado: {rel_path}"
     if not old_text:
         return "[ERROR] Falta old_text (el fragmento exacto a reemplazar)"
-    content = target.read_text(encoding="utf-8", errors="replace")
+    # newline="" conserva los CRLF: el archivo se reescribe con sus finales de línea.
+    with target.open(encoding="utf-8", errors="replace", newline="") as f:
+        content = f.read()
     count = content.count(old_text)
     if count == 0:
-        return (f"[ERROR] No se encontró old_text en {rel_path}. Debe coincidir EXACTO "
-                "(espacios e indentación incluidos); usa read_file y copia el fragmento tal cual")
+        return _edit_loose(target, rel_path, content, old_text, new_text)
     if count > 1 and not replace_all:
         return (f"[ERROR] old_text aparece {count} veces en {rel_path}; añade más líneas de "
                 'contexto para que sea único, o pasa "all":true para reemplazar todas')
+    line = content[:content.index(old_text)].count("\n") + 1
     updated = content.replace(old_text, new_text) if replace_all else content.replace(old_text, new_text, 1)
-    target.write_text(updated, encoding="utf-8")
-    return f"Archivo editado: {rel_path} ({count} reemplazo{'s' if count > 1 else ''})"
+    target.write_text(updated, encoding="utf-8", newline="")
+    donde = f"{count} reemplazos" if count > 1 else f"1 reemplazo en la línea {line}"
+    return f"Archivo editado: {rel_path} ({donde})"
+
+
+def _leading_ws(line: str) -> str:
+    return line[:len(line) - len(line.lstrip())]
+
+
+def _find_block(lines: list[str], wanted: list[str], key) -> list[int]:
+    n = len(wanted)
+    target = [key(w) for w in wanted]
+    return [i for i in range(len(lines) - n + 1) if [key(l) for l in lines[i:i + n]] == target]
+
+
+def _edit_loose(target: Path, rel_path: str, content: str, old_text: str, new_text: str) -> str:
+    """old_text no coincide byte a byte: los modelos chicos pierden espacios
+    finales o copian el bloque con otra indentación. Se acepta si, ignorando
+    eso, el bloque es único; new_text hereda la indentación real del archivo."""
+    lines = content.split("\n")
+    old_lines = old_text.strip("\n").split("\n")
+    new_lines = new_text.split("\n")
+    for key, reindent in ((str.rstrip, False), (str.strip, True)):
+        hits = _find_block(lines, old_lines, key)
+        if len(hits) > 1:
+            return (f"[ERROR] old_text (salvo espacios) aparece {len(hits)} veces en {rel_path}; "
+                    "añade más líneas de contexto para que sea único")
+        if not hits:
+            continue
+        i = hits[0]
+        if reindent:
+            file_ws, old_ws = _leading_ws(lines[i]), _leading_ws(old_lines[0])
+            new_lines = [file_ws + l[len(old_ws):] if l.startswith(old_ws) and l.strip() else l
+                         for l in new_lines]
+        if "\r\n" in content:
+            new_lines = [l.rstrip("\r") + "\r" for l in new_lines]
+        lines[i:i + len(old_lines)] = new_lines
+        target.write_text("\n".join(lines), encoding="utf-8", newline="")
+        return (f"Archivo editado: {rel_path} (1 reemplazo en la línea {i + 1}; old_text "
+                "coincidió ignorando espacios e indentación)")
+    return (f"[ERROR] No se encontró old_text en {rel_path}. Debe coincidir con el archivo "
+            "(usa read_file y copia el fragmento tal cual, con sus líneas completas)")
 
 
 def tool_write_file(workspace: Path, rel_path: str, content: str) -> str:
@@ -435,34 +579,70 @@ def tool_mkdir(workspace: Path, rel_path: str) -> str:
     return f"Directorio creado/listo: {target.relative_to(workspace)}"
 
 
-def tool_search(workspace: Path, pattern: str, rel_path: str = ".") -> str:
-    target = resolve_safe_path(workspace, rel_path)
+def tool_search(workspace: Path, pattern: str, rel_path: str = ".", glob: str = "",
+                ignore_case: bool = False, regex: bool = False) -> str:
+    if not pattern:
+        return "[ERROR] Falta pattern"
+    target = resolve_safe_path(workspace, rel_path or ".")
+    if not target.exists():
+        return f"No existe: {rel_path}"
+    cmd = ["rg", "-n", "--hidden", "--no-messages", "--max-columns", "240"]
+    cmd += [f"--glob=!{d}" for d in IGNORED_TREE_DIRS]
+    if glob:
+        cmd += ["--glob", glob]
+    if ignore_case:
+        cmd.append("-i")
+    if not regex:
+        cmd.append("-F")
+    cmd += ["-e", pattern, str(target)]
     try:
-        cmd = ["rg", "-n", "--hidden", "--glob", "!.git", pattern, str(target)]
-        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
-        return out[:120000] if out else "(sin resultados)"
+        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", cwd=str(workspace))
     except FileNotFoundError:
-        return _search_python(workspace, target, pattern)
-    except subprocess.CalledProcessError as exc:
-        return (exc.output or "").strip() or "(sin resultados)"
+        return _search_python(workspace, target, pattern, glob, ignore_case, regex)
+    if out.returncode == 2:
+        return f"[ERROR] {(out.stderr or out.stdout).strip()[:500]}"
+    lines = [_relative_hit(workspace, l) for l in out.stdout.splitlines() if l]
+    return _cap_lines(lines) if lines else "(sin resultados)"
 
 
-def _search_python(workspace: Path, target: Path, pattern: str) -> str:
-    """Fallback sin ripgrep: búsqueda simple por substring."""
+def _relative_hit(workspace: Path, line: str) -> str:
+    prefix = str(workspace)
+    if line.startswith(prefix):
+        line = line[len(prefix):].lstrip("\\/")
+    return line.replace("\\", "/", 1) if ":" in line else line
+
+
+def _search_python(workspace: Path, target: Path, pattern: str, glob: str = "",
+                   ignore_case: bool = False, regex: bool = False) -> str:
+    """Fallback sin ripgrep, con las mismas opciones."""
+    import fnmatch
+
+    flags = re.IGNORECASE if ignore_case else 0
+    try:
+        matcher = re.compile(pattern if regex else re.escape(pattern), flags)
+    except re.error as exc:
+        return f"[ERROR] regex inválida: {exc}"
     hits: list[str] = []
     files = [target] if target.is_file() else [
-        p for p in target.rglob("*") if p.is_file() and ".git" not in p.parts
+        p for p in target.rglob("*")
+        if p.is_file() and not any(part in IGNORED_TREE_DIRS for part in p.parts)
     ]
-    for p in files[:2000]:
+    for p in files[:5000]:
+        rel = p.relative_to(workspace).as_posix()
+        if glob and not (fnmatch.fnmatch(p.name, glob) or fnmatch.fnmatch(rel, glob)):
+            continue
+        if is_binary(p):
+            continue
         try:
             for lineno, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-                if pattern in line:
-                    hits.append(f"{p.relative_to(workspace)}:{lineno}:{line.strip()[:200]}")
-                    if len(hits) >= 500:
-                        return "\n".join(hits)
-        except Exception:
+                if matcher.search(line):
+                    hits.append(f"{rel}:{lineno}:{line.strip()[:240]}")
+                    if len(hits) > MAX_RESULT_LINES:
+                        return _cap_lines(hits)
+        except OSError:
             continue
-    return "\n".join(hits) if hits else "(sin resultados)"
+    return _cap_lines(hits) if hits else "(sin resultados)"
 
 
 def tool_delete_file(workspace: Path, rel_path: str) -> str:
@@ -482,33 +662,132 @@ def tool_rename_file(workspace: Path, src: str, dst: str) -> str:
     dest = resolve_safe_path(workspace, dst)
     if not source.exists():
         return f"No encontrado: {src}"
+    if dest.exists():
+        return f"[ERROR] Ya existe el destino: {dst}"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    source.rename(dest)
+    import shutil
+    shutil.move(str(source), str(dest))
     return f"Movido: {src} {g('arrow')} {dst}"
 
 
+MAX_COMMAND_TIMEOUT = 600
+MAX_COMMAND_OUTPUT = 8000
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    import os
+    import signal
+
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def tool_run_command(workspace: Path, command: str, timeout: int = 30) -> str:
+    if not command.strip():
+        return "[ERROR] Falta command"
+    timeout = max(1, min(int(timeout or 30), MAX_COMMAND_TIMEOUT))
+    import os
+    # El shell arranca en su propio grupo: un timeout mata también a los hijos
+    # (npm, pytest…), que con subprocess.run seguían vivos comiendo CPU.
+    extra = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        output = (result.stdout + result.stderr).strip()
-        prefix = f"[EXIT {result.returncode}] "
-        return prefix + (output[:8000] if output else "(sin salida)")
-    except subprocess.TimeoutExpired:
-        return f"[TIMEOUT] Comando excedio {timeout}s"
+        proc = subprocess.Popen(command, shell=True, cwd=str(workspace), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **extra)
     except Exception as exc:
         return f"[ERROR] {exc}"
+    try:
+        raw, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        raw, _ = proc.communicate()
+        salida = _decode_output(raw)[-2000:]
+        return f"[TIMEOUT] El comando superó {timeout}s y se mató (con sus procesos hijos)." + (
+            f"\nÚltima salida:\n{salida}" if salida else "")
+    output = _decode_output(raw)
+    if len(output) > MAX_COMMAND_OUTPUT:
+        output = output[:MAX_COMMAND_OUTPUT // 2] + "\n…[salida recortada]…\n" + output[-MAX_COMMAND_OUTPUT // 2:]
+    return f"[EXIT {proc.returncode}] " + (output or "(sin salida)")
 
 
-def execute_tool_call(workspace: Path, tool_name: str, args: dict) -> str:
+def _decode_output(raw: bytes) -> str:
+    """Salida de consola: UTF-8 si lo es; si no, la página de códigos local
+    (en Windows cmd habla cp850/cp1252)."""
+    import locale
+
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode(locale.getpreferredencoding(False) or "utf-8", errors="replace")
+    return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text).strip()
+
+
+MAX_FETCH_CHARS = 12000
+
+
+def tool_fetch_url(url: str) -> str:
+    from urllib import error, request
+
+    url = (url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        return "[ERROR] La URL debe empezar por http:// o https://"
+    req = request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; lixbon-cli/1.0)",
+                                        "Accept": "text/html,application/json,text/plain,*/*"})
+    try:
+        with request.urlopen(req, timeout=20) as resp:
+            ctype = resp.headers.get("Content-Type", "")
+            raw = resp.read(4 * 1024 * 1024)
+    except error.HTTPError as exc:
+        return f"[ERROR] HTTP {exc.code} al descargar {url}"
+    except Exception as exc:
+        return f"[ERROR] No se pudo descargar {url}: {exc}"
+    charset = "utf-8"
+    m = re.search(r"charset=([\w-]+)", ctype)
+    if m:
+        charset = m.group(1)
+    text = raw.decode(charset, errors="replace")
+    if "html" in ctype or text.lstrip()[:15].lower().startswith(("<!doctype", "<html")):
+        text = html_to_text(text)
+    elif not any(t in ctype for t in ("text", "json", "xml", "javascript")):
+        return f"[ERROR] {url} no es texto ({ctype.split(';')[0] or 'tipo desconocido'})"
+    if len(text) > MAX_FETCH_CHARS:
+        text = text[:MAX_FETCH_CHARS] + f"\n…[recortado: {len(text) - MAX_FETCH_CHARS} caracteres más]"
+    return text or "(la página no tiene texto)"
+
+
+def tool_web_search(api, query: str, limit: int = 5) -> str:
+    if api is None:
+        return "[ERROR] La búsqueda web no está disponible en esta sesión"
+    query = (query or "").strip()
+    if not query:
+        return "[ERROR] Falta query"
+    try:
+        data = api.web_search(query, max(1, min(int(limit or 5), 10)))
+    except Exception as exc:
+        return f"[ERROR] Búsqueda web fallida: {exc}"
+    results = data.get("results") or []
+    if not results:
+        return "(sin resultados)"
+    parts = []
+    for i, r in enumerate(results, 1):
+        snippet = re.sub(r"\s+", " ", str(r.get("snippet") or "")).strip()[:1500]
+        parts.append(f"{i}. {r.get('title') or '(sin título)'}\n   {r.get('url', '')}\n   {snippet}")
+    return "\n\n".join(parts)
+
+
+def execute_tool_call(workspace: Path, tool_name: str, args: dict, api=None) -> str:
     if tool_name == "list_files":
-        return tool_list_files(workspace, args.get("path", "."))
+        return tool_list_files(workspace, args.get("path", "."), bool(args.get("recursive")))
+    if tool_name == "find_files":
+        return tool_find_files(workspace, str(args.get("pattern", "")))
+    if tool_name == "fetch_url":
+        return tool_fetch_url(str(args.get("url", "")))
+    if tool_name == "web_search":
+        return tool_web_search(api, str(args.get("query", "")), int(args.get("limit") or 5))
     if tool_name == "read_file":
         return tool_read_file(workspace, args.get("path", ""),
                               int(args.get("start_line") or 0), int(args.get("end_line") or 0))
@@ -522,7 +801,9 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict) -> str:
     if tool_name == "mkdir":
         return tool_mkdir(workspace, args.get("path", ""))
     if tool_name == "search":
-        return tool_search(workspace, args.get("pattern", ""), args.get("path", "."))
+        return tool_search(workspace, args.get("pattern", ""), args.get("path") or ".",
+                           str(args.get("glob") or ""), bool(args.get("ignore_case")),
+                           bool(args.get("regex")))
     if tool_name == "delete_file":
         return tool_delete_file(workspace, args.get("path", ""))
     if tool_name == "rename_file":
@@ -942,8 +1223,13 @@ def _read_meta(tool_name: str, result: str) -> str:
         return f"{lines} líneas"
     if tool_name == "search":
         return f"{lines} coincidencia" + ("" if lines == 1 else "s")
-    if tool_name == "list_files":
+    if tool_name in ("list_files", "find_files"):
         return f"{lines} entrada" + ("" if lines == 1 else "s")
+    if tool_name == "web_search":
+        n = len(re.findall(r"^\d+\. ", result, re.MULTILINE))
+        return f"{n} resultado" + ("" if n == 1 else "s")
+    if tool_name == "fetch_url":
+        return f"{len(result) // 1000} k caracteres" if len(result) >= 1000 else f"{len(result)} caracteres"
     return ""
 
 
@@ -1023,8 +1309,8 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
 
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
-        label = args.get("path") or args.get("pattern") or "."
-        result, failed, _elapsed = _execute(workspace, tool_name, args)
+        label = args.get("path") or args.get("pattern") or args.get("query") or args.get("url") or "."
+        result, failed, _elapsed = _execute(workspace, tool_name, args, session.get("api"))
         _stash_image(session, workspace, tool_name, args, failed)
         stats["actions"] += 1
         render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label),
@@ -1090,11 +1376,11 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     return _run(console, workspace, tool_name, args, remote)
 
 
-def _execute(workspace: Path, tool_name: str, args: dict) -> tuple[str, bool, float]:
+def _execute(workspace: Path, tool_name: str, args: dict, api=None) -> tuple[str, bool, float]:
     """Ejecuta una herramienta. Devuelve (resultado, ha fallado, segundos)."""
     started = time.monotonic()
     try:
-        result = execute_tool_call(workspace, tool_name, args)
+        result = execute_tool_call(workspace, tool_name, args, api)
     except Exception as exc:
         result = f"[ERROR] {exc}"
     failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")

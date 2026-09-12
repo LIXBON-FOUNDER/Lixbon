@@ -3,7 +3,7 @@ import base64
 import re
 from pathlib import Path
 
-from lixbon_cli.documents import IMAGE_EXTS, is_pdf, pdf_text
+from lixbon_cli.documents import IMAGE_EXTS, fmt_size, is_pdf, pdf_text
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -107,14 +107,6 @@ INDEX_TTL_SECONDS = 30.0
 _index_cache: dict[str, tuple[float, list[tuple[str, bool, int]]]] = {}
 
 
-def _fmt_size(size: int) -> str:
-    if size >= 1_000_000:
-        return f"{size / 1_000_000:.1f} MB"
-    if size >= 1000:
-        return f"{size / 1000:.1f} kB"
-    return f"{size} B"
-
-
 def workspace_index(workspace: Path) -> list[tuple[str, bool, int]]:
     """Entradas `(ruta relativa, es carpeta, bytes)` del workspace, cacheadas."""
     import time
@@ -185,7 +177,7 @@ def _path_completions(workspace: Path, token: str):
             meta = "carpeta"
         else:
             kind = rel.rsplit(".", 1)[-1].lower() if "." in rel.rsplit("/", 1)[-1] else "archivo"
-            meta = f"{_fmt_size(size)} {g('sep')} {kind}"
+            meta = f"{fmt_size(size)} {g('sep')} {kind}"
         text = f'"{rel}"' if " " in rel else rel  # el parser de @ admite comillas
         yield Completion(text, start_position=-len(token), display=rel, display_meta=meta)
 

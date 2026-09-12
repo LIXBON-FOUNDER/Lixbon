@@ -41,7 +41,11 @@ def _args_summary(tool: str, args: dict) -> str:
     if tool == "rename_file":
         return f"{args.get('src', '?')} → {args.get('dst', '?')}"
     if tool == "search":
-        return f"«{args.get('pattern', '')}» en {args.get('path', '.')}"
+        return f"«{args.get('pattern', '')}» en {args.get('path') or '.'}"
+    if tool == "web_search":
+        return f"«{args.get('query', '')}»"
+    if tool == "fetch_url":
+        return str(args.get("url", ""))[:200]
     if tool == "edit_file":
         old = str(args.get("old_text", ""))
         return f"{args.get('path', '?')} (reemplaza {len(old)} chars)"

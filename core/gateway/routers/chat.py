@@ -210,6 +210,27 @@ def _persist_assistant(conv_id: str, model: str, text: str,
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
+class WebSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=400)
+    limit: int = Field(5, ge=1, le=10)
+
+
+@router.post("/api/websearch")
+async def web_search_endpoint(
+    payload: WebSearchRequest,
+    user_data: dict[str, Any] = Depends(web_or_api_key_auth),
+):
+    """Búsqueda web para la herramienta `web_search` del CLI/IDE: mismos
+    proveedores que el modo investigar del chat, sin pasar por el modelo."""
+    results = await websearch.search(payload.query, payload.limit)
+    return {
+        "query": payload.query,
+        "results": [{"title": r.get("title", ""), "url": r.get("url", ""),
+                     "snippet": r.get("snippet", "")} for r in results],
+        "providers": websearch.providers_configured(),
+    }
+
+
 @router.get("/v1/models")
 async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     """Catálogo + `num_ctx` efectivo por modelo (lo que la web usa para el

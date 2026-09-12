@@ -281,7 +281,8 @@ TOOL_VERB = {
     "read_file": "leyó", "write_file": "escribió", "edit_file": "editó",
     "append_file": "añadió a", "delete_file": "eliminó", "rename_file": "movió",
     "mkdir": "creó carpeta", "search": "buscó", "list_files": "listó",
-    "run_command": "ejecutó",
+    "find_files": "buscó archivos", "run_command": "ejecutó",
+    "fetch_url": "descargó", "web_search": "buscó en la web",
 }
 KIND_VERB = {
     "create": "creó", "update": "editó", "delete": "eliminó", "rename": "movió",

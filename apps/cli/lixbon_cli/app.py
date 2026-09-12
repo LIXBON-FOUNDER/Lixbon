@@ -134,6 +134,7 @@ class ChatApp:
             # contexto. Es la misma que viaja como num_ctx a Ollama: si no
             # coincidieran, el agente podaría de más o de menos.
             "context_window": int(self.cfg.get("context_window", 16384)),
+            "api": self.api,
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
