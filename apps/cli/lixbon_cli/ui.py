@@ -176,7 +176,7 @@ TIPS = (
     ("/", "comandos"),
     ("@ruta", "adjuntar archivo"),
     ("Alt+V", "pegar imagen"),
-    ("Alt+↵", "nueva línea"),
+    ("Ctrl+J", "nueva línea (o \\ y ↵)"),
     ("Ctrl+C", "interrumpir"),
     ("Ctrl+C ×2", "salir"),
 )
@@ -1049,6 +1049,42 @@ def input_box_kwargs() -> dict:
         "complete_while_typing": False,
         "reserve_space_for_menu": 8,
     }
+
+
+def make_prompt_session(**kwargs):
+    """`PromptSession` con la caja sujeta a su alto natural.
+
+    El renderer de prompt_toolkit (sin pantalla completa) pinta el layout con
+    TODO el alto que queda bajo el cursor, y el `Frame` de `show_frame` se
+    estira para llenarlo: nada más arrancar, la caja llegaba hasta el pie de la
+    terminal. Se fija el alto del marco a lo que mide su contenido (una fila de
+    texto, o las del menú cuando está abierto) y el resto del layout queda en
+    blanco, como con el prompt de una línea de siempre.
+    """
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.application import get_app
+    from prompt_toolkit.layout.dimension import Dimension
+
+    class LixbonPrompt(PromptSession):
+        def _create_layout(self):
+            layout = super()._create_layout()
+            try:
+                # HSplit del Frame: [borde superior, VSplit(│, cuerpo, │), borde inferior]
+                frame = layout.container.children[0].content
+                body = frame.children[1].children[1]
+            except (AttributeError, IndexError):
+                self.show_frame = False  # la estructura cambió: mejor sin caja que a lo alto
+                return layout
+
+            def frame_height():
+                size = get_app().output.get_size()
+                rows = body.preferred_height(size.columns - 2, size.rows).preferred + 2
+                return Dimension(preferred=rows, max=rows)
+
+            frame.height = frame_height
+            return layout
+
+    return LixbonPrompt(**kwargs)
 
 
 def round_frame_border() -> None:

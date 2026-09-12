@@ -80,6 +80,7 @@ from lixbon_cli.ui import (
     render_action_result,
     render_command_echo,
     input_box_kwargs,
+    make_prompt_session,
     render_header,
     render_intro_line,
     render_log_line,
@@ -665,6 +666,10 @@ class ChatApp:
         @kb.add("enter")
         def _enter(event):
             buff = event.current_buffer
+            if buff.document.text_before_cursor.endswith("\\") and buff.document.cursor_position == len(buff.text):
+                buff.delete_before_cursor()
+                buff.insert_text("\n")
+                return
             text = buff.text.strip()
             if not text.startswith("/"):
                 buff.validate_and_handle()
@@ -714,10 +719,11 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
-        @kb.add("escape", "enter")
+        @kb.add("c-j")
         def _newline(event):
-            # Alt+Enter (Esc+Enter): salto de línea sin enviar. Shift+Enter no
-            # llega como tecla distinta a una terminal, así que este es el atajo.
+            # Salto de línea sin enviar. Shift+Enter no llega como tecla
+            # distinta y Alt+Enter se lo queda la consola de Windows (pantalla
+            # completa); `\` al final de la línea + Enter hace lo mismo.
             event.current_buffer.insert_text("\n")
 
         @kb.add("escape", "v")
@@ -770,12 +776,11 @@ class ChatApp:
             print_note("Para la experiencia completa usa Windows Terminal (o `winpty lixbon` en Git Bash).")
             return self._prompt_loop_plain()
 
-        from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         round_frame_border()  # antes de construir: el Frame lee los bordes al montar
-        session = PromptSession(
+        session = make_prompt_session(
             **input_box_kwargs(),
             style=pt_style(),
             completer=make_completer(self),

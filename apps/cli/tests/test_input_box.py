@@ -19,19 +19,30 @@ pytest.importorskip("prompt_toolkit")
 
 from lixbon_cli import ui  # noqa: E402
 from lixbon_cli.term import g  # noqa: E402
-from lixbon_cli.ui import INPUT_PLACEHOLDER, input_box_kwargs, round_frame_border  # noqa: E402
+from lixbon_cli.ui import (  # noqa: E402
+    INPUT_PLACEHOLDER,
+    input_box_kwargs,
+    make_prompt_session,
+    round_frame_border,
+)
+
+ROWS = 24
 
 
-def _box_height(**extra) -> int:
-    """Filas que pide la caja vacía.
+def _painted_box_rows(**extra) -> int:
+    """Filas que OCUPA la caja cuando el renderer le da la pantalla entera.
 
-    Se mide dentro de `pre_run`: el layout solo se puede consultar con la
-    aplicación en marcha (hay controles que registran tareas en el loop).
+    Lo que importa no es el alto preferido sino el pintado: prompt_toolkit
+    entrega al layout todo lo que queda bajo el cursor, y el marco se estiraba
+    hasta el pie. Se pinta en una `Screen` de 24 filas y se busca el borde
+    inferior. Se mide dentro de `pre_run`: el layout solo se puede consultar
+    con la aplicación en marcha.
     """
-    from prompt_toolkit import PromptSession
     from prompt_toolkit.application import create_app_session
     from prompt_toolkit.completion import WordCompleter
     from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+    from prompt_toolkit.layout.screen import Screen, WritePosition
     from prompt_toolkit.output import DummyOutput
 
     # show_frame se fuerza: en una consola sin unicode la caja se apaga sola y
@@ -39,10 +50,15 @@ def _box_height(**extra) -> int:
     options = {**input_box_kwargs(), "show_frame": True, **extra}
     measured = {}
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
-        session = PromptSession(completer=WordCompleter(["/model"]), **options)
+        session = make_prompt_session(completer=WordCompleter(["/model"]), **options)
 
         def pre_run():
-            measured["rows"] = session.app.layout.container.preferred_height(80, 24).preferred
+            screen = Screen()
+            session.app.layout.container.write_to_screen(
+                screen, MouseHandlers(), WritePosition(0, 0, 80, ROWS), "", True, None)
+            bottom = [y for y in range(ROWS)
+                      if screen.data_buffer[y][0].char in ("└", "╰")]
+            measured["rows"] = bottom[0] + 1 if bottom else ROWS
 
         pipe.send_text("\n")
         session.prompt(pre_run=pre_run)
@@ -50,13 +66,13 @@ def _box_height(**extra) -> int:
 
 
 def test_caja_en_reposo_mide_tres_filas():
-    """Borde, una línea de texto y borde. Ni una fila más."""
-    assert _box_height() == 3
+    """Borde, una línea de texto y borde, aunque el layout mida 24 filas."""
+    assert _painted_box_rows() == 3
 
 
 def test_complete_while_typing_dispararia_el_alto():
     """Guarda del motivo por el que la opción está apagada."""
-    assert _box_height(complete_while_typing=True) > 3
+    assert _painted_box_rows(complete_while_typing=True) > 3
 
 
 def test_el_prompt_es_un_punto_con_aire():

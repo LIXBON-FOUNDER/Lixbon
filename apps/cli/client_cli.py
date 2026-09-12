@@ -1410,7 +1410,7 @@ TIPS = (
     ("/", "comandos"),
     ("@ruta", "adjuntar archivo"),
     ("Alt+V", "pegar imagen"),
-    ("Alt+↵", "nueva línea"),
+    ("Ctrl+J", "nueva línea (o \\ y ↵)"),
     ("Ctrl+C", "interrumpir"),
     ("Ctrl+C ×2", "salir"),
 )
@@ -2280,6 +2280,42 @@ def input_box_kwargs() -> dict:
         "complete_while_typing": False,
         "reserve_space_for_menu": 8,
     }
+
+
+def make_prompt_session(**kwargs):
+    """`PromptSession` con la caja sujeta a su alto natural.
+
+    El renderer de prompt_toolkit (sin pantalla completa) pinta el layout con
+    TODO el alto que queda bajo el cursor, y el `Frame` de `show_frame` se
+    estira para llenarlo: nada más arrancar, la caja llegaba hasta el pie de la
+    terminal. Se fija el alto del marco a lo que mide su contenido (una fila de
+    texto, o las del menú cuando está abierto) y el resto del layout queda en
+    blanco, como con el prompt de una línea de siempre.
+    """
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.application import get_app
+    from prompt_toolkit.layout.dimension import Dimension
+
+    class LixbonPrompt(PromptSession):
+        def _create_layout(self):
+            layout = super()._create_layout()
+            try:
+                # HSplit del Frame: [borde superior, VSplit(│, cuerpo, │), borde inferior]
+                frame = layout.container.children[0].content
+                body = frame.children[1].children[1]
+            except (AttributeError, IndexError):
+                self.show_frame = False  # la estructura cambió: mejor sin caja que a lo alto
+                return layout
+
+            def frame_height():
+                size = get_app().output.get_size()
+                rows = body.preferred_height(size.columns - 2, size.rows).preferred + 2
+                return Dimension(preferred=rows, max=rows)
+
+            frame.height = frame_height
+            return layout
+
+    return LixbonPrompt(**kwargs)
 
 
 def round_frame_border() -> None:
@@ -5508,6 +5544,10 @@ class ChatApp:
         @kb.add("enter")
         def _enter(event):
             buff = event.current_buffer
+            if buff.document.text_before_cursor.endswith("\\") and buff.document.cursor_position == len(buff.text):
+                buff.delete_before_cursor()
+                buff.insert_text("\n")
+                return
             text = buff.text.strip()
             if not text.startswith("/"):
                 buff.validate_and_handle()
@@ -5557,10 +5597,11 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
-        @kb.add("escape", "enter")
+        @kb.add("c-j")
         def _newline(event):
-            # Alt+Enter (Esc+Enter): salto de línea sin enviar. Shift+Enter no
-            # llega como tecla distinta a una terminal, así que este es el atajo.
+            # Salto de línea sin enviar. Shift+Enter no llega como tecla
+            # distinta y Alt+Enter se lo queda la consola de Windows (pantalla
+            # completa); `\` al final de la línea + Enter hace lo mismo.
             event.current_buffer.insert_text("\n")
 
         @kb.add("escape", "v")
@@ -5612,12 +5653,11 @@ class ChatApp:
             print_note("Para la experiencia completa usa Windows Terminal (o `winpty lixbon` en Git Bash).")
             return self._prompt_loop_plain()
 
-        from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         round_frame_border()  # antes de construir: el Frame lee los bordes al montar
-        session = PromptSession(
+        session = make_prompt_session(
             **input_box_kwargs(),
             style=pt_style(),
             completer=make_completer(self),
