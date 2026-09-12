@@ -6,7 +6,7 @@ nodes_link.py — Lado gateway de los nodos por conexión inversa.
   la credencial.
 - WS   /api/nodes/ws     : el node_agent se autentica con `hello` y se queda
   conectado; por ese socket empuja métricas y atiende la inferencia.
-- GET  /install-node.sh, /node-agent.py : instalador de un comando y el agente
+- GET  /install-node.sh, /install-node.ps1, /node-agent.py : instaladores de un comando y el agente
   en sí, para que una máquina nueva no necesite clonar el repo.
 """
 from __future__ import annotations
@@ -41,6 +41,7 @@ METRICS_INTERVAL = 10
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 _RAIZ = Path(__file__).resolve().parents[3]
 _INSTALADOR = _RAIZ / "infra" / "node" / "install-node.sh"
+_INSTALADOR_PS = _RAIZ / "infra" / "node" / "install-node.ps1"
 _AGENTE = _RAIZ / "core" / "node_agent" / "agent.py"
 
 
@@ -67,6 +68,11 @@ def _ws_url(request: Request) -> str:
 async def install_script(request: Request) -> str:
     script = _INSTALADOR.read_text(encoding="utf-8").replace("\r\n", "\n")
     return script.replace("__GATEWAY__", _base(request))
+
+
+@router.get("/install-node.ps1", response_class=PlainTextResponse, include_in_schema=False)
+async def install_script_windows(request: Request) -> str:
+    return _INSTALADOR_PS.read_text(encoding="utf-8").replace("__GATEWAY__", _base(request))
 
 
 @router.get("/node-agent.py", response_class=PlainTextResponse, include_in_schema=False)

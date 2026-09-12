@@ -154,14 +154,10 @@ function PanelEnrolar({ onCerrar, onCreado }) {
           texto={commands.linux}
         />
         <Comando
-          titulo="Windows con el repo clonado (PowerShell, desde la raíz del repo). El token solo hace falta la primera vez."
+          titulo="Windows con GPU: pega esto en PowerShell. Instala Python y Ollama si faltan y deja el agente arrancando al iniciar sesión."
           texto={commands.windows}
         />
-        <Comando
-          titulo="Windows con el repo clonado (cmd / Símbolo del sistema, desde la raíz del repo)"
-          texto={commands.windows_cmd}
-        />
-        <Comando titulo="Linux/macOS con el repo clonado" texto={commands.manual} />
+        <Comando titulo="Desarrollo, con el repo clonado (desde su raíz)" texto={commands.manual} />
         <Comando
           titulo="Imagen Docker de Lixbon (infra/node): no es un comando, son las variables de entorno de la plantilla del pod"
           texto={commands.docker_env}

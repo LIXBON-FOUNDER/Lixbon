@@ -54,10 +54,7 @@ def _comando_instalacion(token: str, request: Request) -> dict[str, str]:
     return {
         "linux": f"curl -fsSL {base}/install-node.sh | LIXBON_ENROLL={token} bash",
         "docker_env": f"LIXBON_GATEWAY={base}\nLIXBON_ENROLL={token}",
-        "windows": (
-            f'$env:LIXBON_ENROLL="{token}"; python -m core.node_agent.agent --connect {base}'
-        ),
-        "windows_cmd": f"set LIXBON_ENROLL={token} && python -m core.node_agent.agent --connect {base}",
+        "windows": f'$env:LIXBON_ENROLL="{token}"; irm {base}/install-node.ps1 | iex',
         "manual": f"LIXBON_ENROLL={token} python -m core.node_agent.agent --connect {base}",
     }
 
