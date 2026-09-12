@@ -288,7 +288,7 @@ TOOL_VERB = {
     "find_files": "buscó archivos", "run_command": "ejecutó",
     "fetch_url": "descargó", "web_search": "buscó en la web",
     "read_output": "leyó salida", "stop_command": "detuvo", "outline": "esquematizó",
-    "todo": "planificó", "ask_user": "preguntó",
+    "todo": "planificó", "ask_user": "preguntó", "multi_edit": "editó", "insert_at_line": "editó",
 }
 KIND_VERB = {
     "create": "creó", "update": "editó", "delete": "eliminó", "rename": "movió",
@@ -830,6 +830,21 @@ def confirm3(question: str, detail: str = ""):
         rail_mode=True,
         hint=f"↑↓ mover {g('sep')} ↵ elegir {g('sep')} esc = No",
     )
+
+
+def confirm_command(detail: str, prefix: str):
+    """Aprobación de un comando: 'yes' | 'prefix' | 'always' | 'no' | None.
+    `prefix` es lo que quedaría permitido para el resto de sesiones."""
+    options = [Option("Sí", "yes", "ejecutar y seguir")]
+    if prefix:
+        options.append(Option(f"Sí, y siempre para «{prefix}»", "prefix",
+                              "se guarda: no volverá a preguntar por ese comando"))
+    options += [
+        Option("Sí, y no preguntar más", "always", "auto-ejecutar cualquier comando esta sesión"),
+        Option("No", "no", "rechazar y decirle al agente que no"),
+    ]
+    return select("¿Ejecutar este comando?", options, detail=detail, rail_mode=True,
+                  hint=f"↑↓ mover {g('sep')} ↵ elegir {g('sep')} esc = No")
 
 
 # ── Barra de estado ─────────────────────────────────────────────────────────

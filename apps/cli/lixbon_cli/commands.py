@@ -33,6 +33,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("undo", "", "Revertir los archivos que tocó el último turno del agente", "agente"),
     ("ps", "", "Comandos en segundo plano del agente (y pararlos)", "agente"),
     ("check", "[on|off]", "Verificar con el linter cada archivo que edita el agente", "agente"),
+    ("allow", "[comando]", "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)", "agente"),
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),

@@ -149,6 +149,10 @@ class ChatApp:
             "undo_stack": [],  # checkpoints de los últimos turnos, para /undo
             "ask_user": self._ask_user,
             "plan_mode": False,
+            # Prefijos de comando que no piden confirmación («npm test»,
+            # «pytest»); se guardan en config.json al elegir «siempre para…».
+            "allowed_commands": list(self.cfg.get("allowed_commands") or []),
+            "save_allowed_commands": self._save_allowed_commands,
         }
         # tool_calls nativos del último stream (los consume _stream_agent)
         self._last_tool_calls: list[dict] = []
@@ -1899,6 +1903,35 @@ class ChatApp:
             self.console.print()
             self.console.print(f"  [lx.dim]{esc(stat.strip().splitlines()[-1])}[/]")
         self.console.print()
+        return True
+
+    def _save_allowed_commands(self, prefixes: list[str]) -> None:
+        self.cfg["allowed_commands"] = sorted(set(prefixes))
+        save_config(self.cfg)
+
+    def cmd_allow(self, arg: str):
+        allowed = self.session.setdefault("allowed_commands", [])
+        arg = arg.strip()
+        if arg:
+            if arg in allowed:
+                allowed.remove(arg)
+                print_ok(f"«{arg}» vuelve a pedir confirmación.")
+            else:
+                allowed.append(arg)
+                print_ok(f"«{arg}» se ejecutará sin preguntar (también en sesiones futuras).")
+            self._save_allowed_commands(allowed)
+            return True
+        if not allowed:
+            print_note("Ningún comando permitido sin confirmación. Añade uno: /allow npm test")
+            return True
+        chosen = select("Comandos sin confirmación (elige uno para quitarlo)", [
+            *[Option(p, p, "se ejecuta sin preguntar") for p in allowed],
+            Option("Cerrar", "__close__", ""),
+        ], default=len(allowed))
+        if chosen and chosen != "__close__":
+            allowed.remove(chosen)
+            self._save_allowed_commands(allowed)
+            print_ok(f"«{chosen}» vuelve a pedir confirmación.")
         return True
 
     def cmd_plan(self, arg: str):

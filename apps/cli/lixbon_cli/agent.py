@@ -45,6 +45,7 @@ from lixbon_cli.remote import REMOTE_RESULT_CHARS, _args_summary
 from lixbon_cli.term import g
 from lixbon_cli.theme import make_console
 from lixbon_cli.ui import (
+    confirm_command,
     TOOL_VERB,
     VERB_WIDTH,
     confirm3,
@@ -66,7 +67,9 @@ MAX_REPEATED_CALLS = 3
 
 READ_ONLY_TOOLS = {"list_files", "find_files", "read_file", "outline", "search", "fetch_url",
                    "web_search", "read_output", "stop_command", "todo", "ask_user"}
-MUTATING_TOOLS = {"write_file", "edit_file", "append_file", "delete_file", "rename_file"}
+MUTATING_TOOLS = {"write_file", "edit_file", "multi_edit", "insert_at_line", "append_file",
+                  "delete_file", "rename_file"}
+EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "insert_at_line", "append_file"}
 
 # Tope de líneas que devuelve una búsqueda o un listado: por encima el modelo
 # no lee nada útil y solo gasta contexto.
@@ -83,6 +86,8 @@ TOOL_SPECS: list[tuple[str, str, str]] = [
     ("search", "pattern, path?, glob?, ignore_case?, regex?", "Buscar texto en el workspace"),
     ("write_file", "path, content", "Crear o reemplazar un archivo entero"),
     ("edit_file", "path, old_text, new_text", "Sustituir un fragmento exacto de un archivo"),
+    ("multi_edit", "path, edits", "Varias sustituciones en un archivo, en una llamada"),
+    ("insert_at_line", "path, line, content", "Insertar texto antes de una línea"),
     ("append_file", "path, content", "Añadir texto al final de un archivo"),
     ("mkdir", "path", "Crear una carpeta"),
     ("delete_file", "path", "Eliminar un archivo"),
@@ -164,6 +169,26 @@ TOOL_SCHEMAS: list[dict] = [
             "new_text": _p("string", "Texto nuevo"),
             "all": _p("boolean", "Reemplazar todas las apariciones (por defecto solo la primera)"),
         }, "required": ["path", "old_text", "new_text"]}}},
+    {"type": "function", "function": {
+        "name": "multi_edit",
+        "description": ("Varias sustituciones EXACTAS en un mismo archivo, en orden. Preferir a "
+                        "varios edit_file seguidos cuando el cambio toca varios sitios del archivo."),
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "edits": {"type": "array", "description": "Sustituciones en orden", "items": {
+                "type": "object", "properties": {
+                    "old_text": _p("string", "Fragmento actual, copiado exacto"),
+                    "new_text": _p("string", "Texto nuevo"),
+                }, "required": ["old_text", "new_text"]}},
+        }, "required": ["path", "edits"]}}},
+    {"type": "function", "function": {
+        "name": "insert_at_line",
+        "description": "Inserta texto ANTES de la línea indicada (1-based). line=0 o mayor que el total: al final.",
+        "parameters": {"type": "object", "properties": {
+            "path": _p("string", "Ruta relativa del archivo"),
+            "line": _p("integer", "Número de línea delante de la cual insertar"),
+            "content": _p("string", "Texto a insertar (con sus saltos de línea)"),
+        }, "required": ["path", "line", "content"]}}},
     {"type": "function", "function": {
         "name": "append_file",
         "description": "Añade texto al final de un archivo (lo crea si no existe).",
@@ -420,6 +445,8 @@ def build_agent_system_prompt(workspace: Path) -> str:
         '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes; '
         'un .pdf o .docx llega como texto y una imagen png/jpg/webp se te adjunta para que la veas)\n'
         '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n'
+        '{"tool":"multi_edit","args":{"path":"archivo.txt","edits":[{"old_text":"a","new_text":"b"},{"old_text":"c","new_text":"d"}]}}\n'
+        '{"tool":"insert_at_line","args":{"path":"archivo.txt","line":12,"content":"nueva línea\\n"}}\n'
         '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n'
         '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n'
         '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n'
@@ -703,6 +730,41 @@ def _edit_loose(target: Path, rel_path: str, content: str, old_text: str, new_te
                 "coincidió ignorando espacios e indentación)")
     return (f"[ERROR] No se encontró old_text en {rel_path}. Debe coincidir con el archivo "
             "(usa read_file y copia el fragmento tal cual, con sus líneas completas)")
+
+
+def tool_multi_edit(workspace: Path, rel_path: str, edits) -> str:
+    if not isinstance(edits, list) or not edits:
+        return "[ERROR] edits debe ser una lista de {old_text, new_text}"
+    hechos: list[str] = []
+    for i, edit in enumerate(edits, 1):
+        if not isinstance(edit, dict):
+            return f"[ERROR] La edición {i} no es un objeto {{old_text, new_text}}"
+        out = tool_edit_file(workspace, rel_path, str(edit.get("old_text", "")),
+                             str(edit.get("new_text", "")), bool(edit.get("all")))
+        if out.startswith("[ERROR]"):
+            aplicadas = f" Ya se aplicaron las {i - 1} anteriores." if i > 1 else ""
+            return f"[ERROR] Edición {i} de {len(edits)}: {out[8:]}.{aplicadas}"
+        hechos.append(out.split("(", 1)[-1].rstrip(")"))
+    return f"Archivo editado: {rel_path} ({len(edits)} ediciones: " + "; ".join(hechos) + ")"
+
+
+def tool_insert_at_line(workspace: Path, rel_path: str, line: int, content: str) -> str:
+    target = resolve_safe_path(workspace, rel_path)
+    if not target.is_file():
+        return f"Archivo no encontrado: {rel_path}"
+    with target.open(encoding="utf-8", errors="replace", newline="") as f:
+        original = f.read()
+    nl = "\r\n" if "\r\n" in original else "\n"
+    lines = original.split(nl)
+    if not content.endswith(("\n", "\r\n")):
+        content += nl
+    nuevas = content.replace("\r\n", "\n").split("\n")[:-1]
+    idx = len(lines) if line <= 0 or line > len(lines) else line - 1
+    if idx == len(lines) and lines and lines[-1] == "":
+        idx -= 1  # el archivo acaba en salto de línea: insertar antes del final vacío
+    lines[idx:idx] = nuevas
+    target.write_text(nl.join(lines), encoding="utf-8", newline="")
+    return f"Archivo editado: {rel_path} ({len(nuevas)} líneas insertadas en la línea {idx + 1})"
 
 
 def tool_write_file(workspace: Path, rel_path: str, content: str) -> str:
@@ -1048,6 +1110,11 @@ def execute_tool_call(workspace: Path, tool_name: str, args: dict, api=None) -> 
     if tool_name == "edit_file":
         return tool_edit_file(workspace, args.get("path", ""), args.get("old_text", ""),
                               args.get("new_text", ""), bool(args.get("all")))
+    if tool_name == "multi_edit":
+        return tool_multi_edit(workspace, args.get("path", ""), args.get("edits"))
+    if tool_name == "insert_at_line":
+        return tool_insert_at_line(workspace, args.get("path", ""), int(args.get("line") or 0),
+                                   str(args.get("content", "")))
     if tool_name == "append_file":
         return tool_append_file(workspace, args.get("path", ""), args.get("content", ""))
     if tool_name == "mkdir":
@@ -1627,16 +1694,23 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     # tienen su propio flag y NO los cubre auto_approve. Así, responder
     # "siempre" tras una edición de archivo no habilita ejecutar comandos.
     if tool_name == "run_command":
-        if not session.get("auto_run_commands"):
+        command = str(args.get("command", ""))
+        permitido = command_allowed(command, session.get("allowed_commands") or [])
+        if not session.get("auto_run_commands") and not permitido:
             if remote:
                 if remote.request_approval(tool_name, _args_summary(tool_name, args), "command") != "allow":
                     render_action_result(console, "rechazado desde el control remoto", error=True)
                     return "Ejecución cancelada por el usuario"
             else:
-                decision = confirm3("¿Ejecutar este comando?",
-                                    detail=_args_summary(tool_name, args))
+                prefix = command_prefix(command)
+                decision = confirm_command(_args_summary(tool_name, args), prefix)
                 if decision == "always":
                     session["auto_run_commands"] = True
+                elif decision == "prefix":
+                    session.setdefault("allowed_commands", []).append(prefix)
+                    guardar = session.get("save_allowed_commands")
+                    if guardar:
+                        guardar(session["allowed_commands"])
                 elif decision in ("no", None):
                     render_action_result(console, "rechazado por el usuario", error=True)
                     return "Ejecución cancelada por el usuario"
@@ -1669,6 +1743,30 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
             primera = errors.strip().splitlines()[0][:110] if errors else "sin errores"
             render_action_result(console, f"{tool}: {primera}", error=bool(errors))
     return result
+
+
+def command_prefix(command: str) -> str:
+    """Lo que se guarda al decir «siempre para este comando»: el programa y su
+    subcomando (`npm test`, `git status`, `pytest`), no la línea entera."""
+    words = command.strip().split()
+    if not words:
+        return ""
+    if len(words) >= 2 and re.fullmatch(r"[\w.-]+", words[1]) and not words[1].startswith("-"):
+        return f"{words[0]} {words[1]}"
+    return words[0]
+
+
+def command_allowed(command: str, allowed: list[str]) -> bool:
+    """Un comando encadenado (`&&`, `;`, `|`) solo pasa si TODOS sus tramos
+    están permitidos: «npm test» no debe cubrir «npm test && rm -rf x»."""
+    tramos = [t.strip() for t in re.split(r"&&|\|\||;|\|", command) if t.strip()]
+    if not tramos:
+        return False
+    for tramo in tramos:
+        words = tramo.split()
+        if not any(prefix and (words[:len(prefix.split())] == prefix.split()) for prefix in allowed):
+            return False
+    return True
 
 
 def snapshot_before(session: dict, workspace: Path, tool_name: str, args: dict) -> None:
@@ -1711,7 +1809,7 @@ def undo_checkpoints(workspace: Path, entries: list[tuple[str, bytes | None]]) -
 def verify_after(workspace: Path, tool_name: str, args: dict, result: str) -> tuple[str, str, str]:
     """Tras escribir/editar, pasa el verificador del archivo. Devuelve
     (herramienta, errores, resultado ampliado para el modelo)."""
-    if tool_name not in ("write_file", "edit_file", "append_file") or result.startswith("[ERROR]"):
+    if tool_name not in EDIT_TOOLS or result.startswith("[ERROR]"):
         return "", "", result
     try:
         target = resolve_safe_path(workspace, str(args.get("path", "")))

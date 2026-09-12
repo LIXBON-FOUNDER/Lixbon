@@ -54,6 +54,10 @@ def _args_summary(tool: str, args: dict) -> str:
     if tool == "edit_file":
         old = str(args.get("old_text", ""))
         return f"{args.get('path', '?')} (reemplaza {len(old)} chars)"
+    if tool == "multi_edit":
+        return f"{args.get('path', '?')} ({len(args.get('edits') or [])} ediciones)"
+    if tool == "insert_at_line":
+        return f"{args.get('path', '?')} (inserta en la línea {args.get('line', '?')})"
     if tool in ("write_file", "append_file"):
         content = str(args.get("content", ""))
         return f"{args.get('path', '?')} ({len(content)} chars)"
