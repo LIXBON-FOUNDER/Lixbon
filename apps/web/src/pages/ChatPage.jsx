@@ -23,6 +23,10 @@ const AVISO_VACIO = 'El modelo no devolvió respuesta. Suele pasar cuando la con
   + 'en su ventana de contexto: prueba a repetir la pregunta o empieza una conversación nueva.';
 const AVISO_CORTADA = 'Respuesta cortada: el modelo alcanzó su límite de tokens.';
 
+// Sin datos de tokens (conversación recién cargada o sin respuesta aún) el
+// contexto se estima por caracteres; el gateway manda el uso real al terminar.
+const estimarTokens = (msgs) => Math.round(msgs.reduce((n, m) => n + (m.content?.length || 0), 0) / 3.5);
+
 // Razonamiento previo de los modelos thinking: plegado, y abierto mientras
 // el modelo aún no ha escrito nada para que se vea que está trabajando.
 function Razonamiento({ texto, activo }) {
@@ -69,6 +73,8 @@ export default function ChatPage() {
   const [msgsLoading, setMsgsLoading] = useState(false);
   const [title, setTitle] = useState(null);
   const [models, setModels] = useState([]);
+  const [modelInfo, setModelInfo] = useState({});   // id → {num_ctx, context_length}
+  const [contextUso, setContextUso] = useState(null); // {used, total, estimado}
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const abortRef = useRef(null);
@@ -119,6 +125,7 @@ export default function ChatPage() {
       .map((m) => m.id)
       .filter((id) => !String(id).startsWith('error:'));
     setModels(ids);
+    setModelInfo(Object.fromEntries(res.data.data.map((m) => [m.id, { num_ctx: m.num_ctx, context_length: m.context_length }])));
     setModel((current) => current || ids[0] || '');
     return ids;
   }, []);
@@ -136,6 +143,7 @@ export default function ChatPage() {
       loadedConvRef.current = null;
       setMessages([]);
       setTitle(null);
+      setContextUso(null);
       return;
     }
     if (!user || loadedConvRef.current === routeConvId) return;
@@ -143,8 +151,15 @@ export default function ChatPage() {
     setMsgsLoading(true);
     api.get(`/api/conversations/${routeConvId}/messages`)
       .then((res) => {
-        setMessages(res.data.messages.map((m) => ({ role: m.role, content: m.content })));
+        const cargados = res.data.messages.map((m) => ({
+          role: m.role, content: m.content, prompt_tokens: m.prompt_tokens, completion_tokens: m.completion_tokens,
+        }));
+        setMessages(cargados);
         setTitle(res.data.conversation?.title || null);
+        const ultimo = [...cargados].reverse().find((m) => m.role === 'assistant' && m.prompt_tokens);
+        setContextUso(ultimo
+          ? { used: ultimo.prompt_tokens + ultimo.completion_tokens, total: null }
+          : { used: estimarTokens(cargados), total: null, estimado: true });
       })
       .catch(() => navigate('/', { replace: true }))
       .finally(() => setMsgsLoading(false));
@@ -202,6 +217,7 @@ export default function ChatPage() {
 
     stickToBottomRef.current = true;
     setMessages([...history, { role: 'assistant', content: '' }]);
+    setContextUso((prev) => ({ used: Math.max(prev?.used || 0, estimarTokens(history)), total: null, estimado: true }));
     setBusy(true);
     if (webSearch) setSearching(true);
     const abort = new AbortController();
@@ -237,7 +253,14 @@ export default function ChatPage() {
           setSearching(false);
           patchLast((last) => ({ ...last, reasoning: (last.reasoning || '') + delta }));
         },
-        onFinish: (reason, event) => {
+        onFinish: (reason, chunk) => {
+          const event = chunk?.lixbon_event;
+          if (chunk?.usage) {
+            setContextUso({
+              used: (chunk.usage.prompt_tokens || 0) + (chunk.usage.completion_tokens || 0),
+              total: chunk.lixbon_context?.num_ctx || null,
+            });
+          }
           if (event?.type === 'empty') {
             patchLast((last) => ({ ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
           } else if (reason === 'length') {
@@ -286,6 +309,10 @@ export default function ChatPage() {
   };
 
   const stop = () => abortRef.current?.abort();
+
+  // La ventana total viene con el `usage` de cada respuesta; hasta entonces,
+  // la del modelo elegido según /v1/models.
+  const usoCtx = contextUso && { ...contextUso, total: contextUso.total || modelInfo[model]?.num_ctx || null };
 
   // ── Acciones del historial ───────────────────────────────────────────
   const renameConversation = async (id, newTitle) => {
@@ -412,7 +439,7 @@ export default function ChatPage() {
             </h2>
             <div className="chat-hero__input">
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
-                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
+                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
             </div>
           </div>
         ) : (
@@ -453,7 +480,7 @@ export default function ChatPage() {
                 </button>
               )}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
-                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} />
+                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
               <p className="chat-disclaimer">
                 lixbon puede equivocarse. Verifica la informacion antes de usarla.
               </p>
