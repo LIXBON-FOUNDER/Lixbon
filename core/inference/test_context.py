@@ -34,3 +34,33 @@ def test_no_deja_un_tool_huerfano_al_principio():
     ]
     out = fit_messages(msgs, 3000)
     assert out[0]["role"] != "tool"
+
+
+# ── num_ctx global ───────────────────────────────────────────────────────────
+from core import config
+from core.inference.roles import context_length_of, resolve_num_ctx
+
+CATALOGO = [{"id": "qwen3.5:4b", "context_length": 262144}, {"id": "phi:latest"}]
+
+
+def test_prioridad_peticion_rol_global(monkeypatch):
+    monkeypatch.setattr(config, "MODEL_NUM_CTX", "16384")
+    assert resolve_num_ctx(2048, 8192, CATALOGO, "qwen3.5:4b") == 2048
+    assert resolve_num_ctx(None, 8192, CATALOGO, "qwen3.5:4b") == 8192
+    assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") == 16384
+
+
+def test_global_se_recorta_a_la_maxima_del_modelo(monkeypatch):
+    monkeypatch.setattr(config, "MODEL_NUM_CTX", "1000000")
+    assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") == 262144
+    assert resolve_num_ctx(None, None, CATALOGO, "phi") == 1000000   # máxima desconocida
+
+
+def test_global_max_y_vacio(monkeypatch):
+    monkeypatch.setattr(config, "MODEL_NUM_CTX", "max")
+    assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") == 262144
+    assert resolve_num_ctx(None, None, CATALOGO, "phi") is None
+    monkeypatch.setattr(config, "MODEL_NUM_CTX", "")
+    assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") is None
+    assert context_length_of(CATALOGO, "phi") is None
+    assert context_length_of([{"id": "m:latest", "context_length": 8192}], "m") == 8192

@@ -48,7 +48,7 @@ from core.security.auth import (
 from core.gateway.utils import fetch_models
 from core.gateway.model_router import model_for_request, target_or_503
 from core.inference.context import fit_messages
-from core.inference.roles import REQUIRED_CAPABILITY, resolve_all
+from core.inference.roles import REQUIRED_CAPABILITY, resolve_all, resolve_num_ctx
 
 logger = logging.getLogger("lixbon.chat")
 router = APIRouter()
@@ -241,7 +241,8 @@ async def api_chat(
 
     started_at = time.perf_counter()
     ollama_resp, origen = await _routed_chat(model, [{"role": "user", "content": payload.message}],
-                                            num_ctx=role.num_ctx, keep_alive=role.keep_alive)
+                                            num_ctx=resolve_num_ctx(None, role.num_ctx, await fetch_models(), model),
+                                            keep_alive=role.keep_alive)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
 
     assistant_text = ollama_resp.get("message", {}).get("content", "")
@@ -300,7 +301,7 @@ async def chat_completions(
         messages = _normalize_for_ollama(messages)
 
     base, headers, origen = target_or_503(model)
-    num_ctx = payload.num_ctx or role.num_ctx
+    num_ctx = resolve_num_ctx(payload.num_ctx, role.num_ctx, await fetch_models(), model)
     think = payload.think if payload.think is not None else CHAT_THINK
 
     # "Modo investigar": el modelo decide qué buscar, se busca y se inyecta el
@@ -425,7 +426,7 @@ async def completions(
     started_at = time.perf_counter()
     ollama_resp, origen = await _routed_chat(
         model, [{"role": "user", "content": payload.prompt}],
-        num_ctx=role.num_ctx, keep_alive=role.keep_alive,
+        num_ctx=resolve_num_ctx(None, role.num_ctx, await fetch_models(), model), keep_alive=role.keep_alive,
     )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
@@ -498,7 +499,7 @@ async def vision_describe(
         "images": payload.images,
     }]
     started_at = time.perf_counter()
-    resp, origen = await _routed_chat(model, messages, num_ctx=role.num_ctx,
+    resp, origen = await _routed_chat(model, messages, num_ctx=resolve_num_ctx(None, role.num_ctx, await fetch_models(), model),
                                       keep_alive=role.keep_alive)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     description = resp.get("message", {}).get("content", "").strip()
@@ -555,7 +556,7 @@ async def fim_complete(
         ensure_can_chat(user_data["id"], plan, model)
 
     options: dict[str, Any] = {"num_predict": max(1, min(int(payload.max_tokens), 512))}
-    num_ctx = payload.num_ctx or role.num_ctx
+    num_ctx = resolve_num_ctx(payload.num_ctx, role.num_ctx, await fetch_models(), model)
     if num_ctx:
         options["num_ctx"] = int(num_ctx)
     if payload.stop:

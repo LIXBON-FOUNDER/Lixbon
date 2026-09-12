@@ -29,6 +29,21 @@ if (-not (Test-Cmd ollama)) {
   $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 }
 
+# Flash attention + KV q8_0: la mitad de VRAM por token de contexto (ventanas grandes).
+# Variables de usuario: la app de Ollama las lee al arrancar, por eso se reinicia.
+[Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_KV_CACHE_TYPE", "q8_0", "User")
+if (-not [Environment]::GetEnvironmentVariable("OLLAMA_CONTEXT_LENGTH", "User")) {
+  [Environment]::SetEnvironmentVariable("OLLAMA_CONTEXT_LENGTH", "32768", "User")
+}
+$ollamaApp = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
+if (Get-Process -Name "ollama app" -ErrorAction SilentlyContinue) {
+  Stop-Process -Name "ollama app" -Force -ErrorAction SilentlyContinue
+  Stop-Process -Name "ollama" -Force -ErrorAction SilentlyContinue
+  Start-Sleep 2
+  if (Test-Path $ollamaApp) { Start-Process $ollamaApp }
+}
+
 Write-Host "> Dependencias de Python..."
 python -m pip install --quiet --user "httpx>=0.27" psutil "websockets>=13" fastapi
 

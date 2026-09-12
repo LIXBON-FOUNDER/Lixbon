@@ -11,7 +11,7 @@ import httpx
 
 from core.config import MODELS_CACHE_TTL_S, OLLAMA_BASE_URL
 from core.gateway import deps
-from core.inference.ollama import show_capabilities
+from core.inference.ollama import show_model
 
 # Caché corta del catálogo. La resolución de roles consulta el catálogo en cada
 # petición y /api/fim dispara una por pulsación de tecla: sin esto se martillea
@@ -21,7 +21,7 @@ _models_cache: dict[str, Any] = {"at": 0.0, "models": []}
 # Capabilities del Ollama local, cacheadas por (modelo, digest). Contra un nodo
 # esto ya viene resuelto por el node_agent en /metrics; este camino es el de
 # desarrollo, donde precisamente más falta hace la autodetección por capacidad.
-_local_caps: dict[str, tuple[str, list[str] | None]] = {}
+_local_caps: dict[str, tuple[str, list[str] | None, int | None]] = {}
 _LOCAL_CAPS_PER_CALL = 8
 
 
@@ -34,12 +34,12 @@ async def _local_models() -> list[dict[str, Any]]:
 
     pendientes = [
         m for m in crudos
-        if _local_caps.get(m.get("name", ""), ("", None))[0] != (m.get("digest") or "")
+        if _local_caps.get(m.get("name", ""), ("", None, None))[0] != (m.get("digest") or "")
     ][:_LOCAL_CAPS_PER_CALL]
     if pendientes:
         async def _resolver(m: dict) -> None:
-            caps = await show_capabilities(OLLAMA_BASE_URL, m["name"], client=client)
-            _local_caps[m["name"]] = (m.get("digest") or "", caps)
+            info = await show_model(OLLAMA_BASE_URL, m["name"], client=client)
+            _local_caps[m["name"]] = (m.get("digest") or "", info["capabilities"], info["context_length"])
 
         await asyncio.gather(*(_resolver(m) for m in pendientes if m.get("name")))
 
@@ -55,9 +55,11 @@ async def _local_models() -> list[dict[str, Any]]:
             "size": m.get("size", 0),
             "modified_at": m.get("modified_at"),
         }
-        caps = _local_caps.get(nombre, ("", None))[1]
+        _, caps, ctx = _local_caps.get(nombre, ("", None, None))
         if caps:   # clave omitida = capabilities desconocidas, no "ninguna"
             entrada["capabilities"] = caps
+        if ctx:
+            entrada["context_length"] = ctx
         salida.append(entrada)
     return salida
 

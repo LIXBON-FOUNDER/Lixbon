@@ -49,12 +49,21 @@ OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
 EOF
 $SUDO chmod 600 "$ENV_FILE"
 
-if ! curl -fs http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-  if command -v systemctl >/dev/null 2>&1 && $SUDO systemctl list-unit-files ollama.service >/dev/null 2>&1; then
-    $SUDO systemctl enable --now ollama >/dev/null 2>&1 || true
-  else
-    nohup ollama serve >/var/log/lixbon-ollama.log 2>&1 &
-  fi
+# Flash attention + KV q8_0: la mitad de VRAM por token de contexto (ventanas grandes).
+export OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-32768}"
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && $SUDO systemctl list-unit-files ollama.service >/dev/null 2>&1; then
+  $SUDO mkdir -p /etc/systemd/system/ollama.service.d
+  $SUDO tee /etc/systemd/system/ollama.service.d/lixbon.conf >/dev/null <<EOF
+[Service]
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+Environment="OLLAMA_CONTEXT_LENGTH=$OLLAMA_CONTEXT_LENGTH"
+EOF
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable ollama >/dev/null 2>&1 || true
+  $SUDO systemctl restart ollama
+elif ! curl -fs http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+  nohup ollama serve >/var/log/lixbon-ollama.log 2>&1 &
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then

@@ -35,13 +35,20 @@ ADMIN_TOKEN: Optional[str] = os.getenv("ADMIN_TOKEN") or None
 # Vacío ⇒ autodetectar. MODEL_ROLE_FIM va vacío a propósito: ningún modelo de
 # chat sirve para autocompletar, hace falta uno con capability `insert`.
 MODEL_ROLE_CHAT: str = os.getenv("MODEL_ROLE_CHAT", "deepseek-r1:8b")
-# Razonamiento previo en el chat con modelos thinking (qwen3, deepseek-r1…).
-# Apagado por defecto: en una GPU pequeña con num_ctx 4096, qwen3.5:4b gasta
-# ~1.500 tokens y 35 s razonando para decir "hola", y en conversaciones largas
-# el razonamiento agota la ventana y el modelo responde vacío. "1" lo activa;
-# "auto" deja decidir al modelo. Por petición se puede forzar con `think`.
-_think = os.getenv("CHAT_THINK", "0").strip().lower()
-CHAT_THINK: bool | None = None if _think == "auto" else _think in ("1", "true", "yes", "on")
+# Razonamiento previo en el chat con modelos thinking (qwen3, deepseek-r1…):
+# "auto" (default) lo decide el modelo, "1" lo fuerza, "0" lo apaga. Por
+# petición se puede forzar con `think`. Ojo: el razonamiento consume ventana
+# de contexto; con num_ctx 4096 y conversaciones largas el modelo se queda sin
+# sitio para responder (ver MODEL_NUM_CTX).
+_think = os.getenv("CHAT_THINK", "auto").strip().lower()
+CHAT_THINK: bool | None = None if _think in ("", "auto") else _think in ("1", "true", "yes", "on")
+
+# Ventana de contexto (num_ctx) para TODOS los roles y nodos. Ollama usa 4096
+# si no se le dice nada. "max" = la máxima que declara cada modelo (cuidado:
+# qwen3.5 declara 262144 y la caché KV no cabe en una GPU pequeña); un número
+# = ese valor, recortado a la máxima del modelo. Vacío = default de Ollama.
+# El num_ctx de un rol en el panel (tabla model_roles) tiene prioridad.
+MODEL_NUM_CTX: str = os.getenv("MODEL_NUM_CTX", "").strip().lower()
 MODEL_ROLE_FIM: str = os.getenv("MODEL_ROLE_FIM", "")
 MODEL_ROLE_VISION: str = os.getenv("MODEL_ROLE_VISION", "moondream")
 MODEL_ROLE_EMBED: str = os.getenv("MODEL_ROLE_EMBED", "nomic-embed-text")

@@ -184,18 +184,27 @@ async def list_models(base_url: str, headers: dict | None = None) -> list[dict]:
         return resp.json().get("models", [])
 
 
-async def show_capabilities(
+def context_length_from_show(datos: dict) -> int | None:
+    """Ventana máxima del modelo según /api/show: `model_info["<arch>.context_length"]`."""
+    info = datos.get("model_info") or {}
+    for clave, valor in info.items():
+        if clave.endswith(".context_length") and isinstance(valor, (int, float)) and valor > 0:
+            return int(valor)
+    return None
+
+
+async def show_model(
     base_url: str,
     model: str,
     headers: dict | None = None,
     client: httpx.AsyncClient | None = None,
-) -> list[str] | None:
-    """Capabilities que declara el modelo (completion / tools / thinking /
-    vision / embedding / insert), o None si no se pueden averiguar.
+) -> dict[str, Any]:
+    """{"capabilities": [...] | None, "context_length": int | None} desde /api/show.
 
-    Es lo que permite asignar los roles de inferencia por capacidad real en vez
-    de adivinando por el nombre del modelo. Contra un nodo esto lo resuelve el
-    propio node_agent (viaja en /metrics); aquí sirve para el Ollama local.
+    Las capabilities permiten asignar los roles por capacidad real en vez de
+    adivinando por el nombre; la ventana máxima acota `num_ctx`. Contra un nodo
+    esto lo resuelve el propio node_agent (viaja en /metrics); aquí sirve para
+    el Ollama local.
     """
     url = f"{base_url.rstrip('/')}/api/show"
     try:
@@ -205,11 +214,24 @@ async def show_capabilities(
             async with new_client(timeout=10.0) as own:
                 resp = await own.post(url, json={"model": model}, headers=headers)
         resp.raise_for_status()
-        caps = resp.json().get("capabilities")
-        return [str(c) for c in caps] if isinstance(caps, list) else None
+        datos = resp.json()
+        caps = datos.get("capabilities")
+        return {
+            "capabilities": [str(c) for c in caps] if isinstance(caps, list) else None,
+            "context_length": context_length_from_show(datos),
+        }
     except Exception as exc:
-        logger.debug(f"[capabilities] {model}: {exc}")
-        return None
+        logger.debug(f"[show] {model}: {exc}")
+        return {"capabilities": None, "context_length": None}
+
+
+async def show_capabilities(
+    base_url: str,
+    model: str,
+    headers: dict | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> list[str] | None:
+    return (await show_model(base_url, model, headers=headers, client=client))["capabilities"]
 
 
 # ── Streaming con keep-alive real ──────────────────────────────────────────

@@ -134,6 +134,44 @@ def _entries(catalog: Iterable[Any] | None) -> list[dict[str, Any]]:
     return [e for e in out if not str(e["id"]).startswith("error:")]
 
 
+def context_length_of(catalog: Iterable[Any] | None, model: str | None) -> int | None:
+    """Ventana máxima que declara el modelo en el catálogo, o None si no se sabe."""
+    objetivo = normalize(model)
+    if not objetivo:
+        return None
+    for entry in _entries(catalog):
+        if normalize(entry.get("id")) == objetivo:
+            ctx = entry.get("context_length")
+            return int(ctx) if ctx else None
+    return None
+
+
+def resolve_num_ctx(
+    explicit: int | None,
+    role_num_ctx: int | None,
+    catalog: Iterable[Any] | None,
+    model: str | None,
+) -> int | None:
+    """num_ctx efectivo: petición > rol (panel) > MODEL_NUM_CTX global > default de Ollama.
+    El global se recorta a la ventana máxima del modelo cuando se conoce."""
+    from core import config
+    if explicit:
+        return int(explicit)
+    if role_num_ctx:
+        return int(role_num_ctx)
+    cfg = config.MODEL_NUM_CTX
+    if not cfg:
+        return None
+    maximo = context_length_of(catalog, model)
+    if cfg == "max":
+        return maximo
+    try:
+        pedido = int(cfg)
+    except ValueError:
+        return None
+    return min(pedido, maximo) if maximo else pedido
+
+
 def capabilities_of(catalog: Iterable[Any] | None, model: str | None) -> list[str] | None:
     """Capabilities declaradas del modelo, o None si no se conocen."""
     target = normalize(model)

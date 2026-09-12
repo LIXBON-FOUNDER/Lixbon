@@ -182,6 +182,7 @@ class NodeOrchestrator:
             if m.get("name") and m.get("capabilities")
         }
         tamanos = {m["name"]: m.get("size", 0) for m in model_info if m.get("name")}
+        contextos = {m["name"]: int(m["context_length"]) for m in model_info if m.get("name") and m.get("context_length")}
         score = _calcular_score(metricas)
 
         with self._lock:
@@ -195,6 +196,7 @@ class NodeOrchestrator:
                 "modelos": modelos,
                 "capabilities": capabilities,
                 "tamanos": tamanos,
+                "contextos": contextos,
                 "agent_version": agent_version,
                 "hostname": hostname,
                 "score": score,
@@ -369,6 +371,7 @@ class NodeOrchestrator:
                 nid = est["config"]["id"]
                 caps_nodo = est.get("capabilities") or {}
                 tam_nodo = est.get("tamanos") or {}
+                ctx_nodo = est.get("contextos") or {}
                 for nombre in est["modelos"]:
                     entrada = vistos.get(nombre)
                     if entrada is None:
@@ -386,6 +389,8 @@ class NodeOrchestrator:
                         )
                     if tam_nodo.get(nombre):
                         entrada["size"] = max(entrada.get("size", 0), tam_nodo[nombre])
+                    if ctx_nodo.get(nombre):
+                        entrada["context_length"] = max(entrada.get("context_length", 0), ctx_nodo[nombre])
         return list(vistos.values())
 
     def reintentar_nodo(self, nid: str) -> bool:

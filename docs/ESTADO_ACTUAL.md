@@ -236,6 +236,12 @@ ode`, instala Python/Ollama con winget si faltan y registra tarea de usuario al 
 - **Tests**: `core/orchestration/test_node_link.py`, `test_orchestrator_link.py`, y E2E con red real y el agente de verdad en `core/gateway/test_nodes_link_e2e.py`.
 - **Pendiente**: publicar la imagen en GHCR (workflow), migrar `gpu-01` al modo conexión y retirar el túnel; purga automática de nodos link sin conexión en N días.
 
+### ✅ Ventana de contexto global y razonamiento (2026-09-12)
+- **`MODEL_NUM_CTX`** (Railway): `num_ctx` para todos los roles y nodos; un número se recorta a la ventana máxima que declara cada modelo (el node_agent la reporta en `model_info.context_length` desde `/api/show`); `max` usa la del modelo. Prioridad: `num_ctx` de la petición > rol en el panel > global > default de Ollama (4096). `core/inference/roles.py:resolve_num_ctx`.
+- **`CHAT_THINK`**: `auto` (default, decide el modelo) / `1` / `0`; por petición `think`. El razonamiento viaja como `reasoning_content` y la web lo muestra plegable.
+- El gateway recorta el historial a `num_ctx` reservando un 40 % para responder (`core/inference/context.py`); si aun así el modelo devuelve vacío o corta por longitud, lo señala (`lixbon_event`, `finish_reason=length`) y la web avisa.
+- **Medido en la RTX 3050 (6 GB) con qwen3.5:4b**: sin flash attention 16384 cabe al 100 % en GPU y 32768 ya se desborda; con `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0`, **32768 cabe al 100 %** (3,5 GB) y 65536 se desborda (72 %). Esas variables quedan como variables de usuario en la PC (la app de Ollama las lee al arrancar), en la imagen `infra/node/Dockerfile` y en ambos instaladores. Recomendado en Railway: `MODEL_NUM_CTX=32768`.
+
 ### ✅ F3 — Auth nuevo (completada, verificada en staging)
 - **Login por email**; registro con `first_name`/`last_name` (lo que exige el diseño). Username sigue funcionando para CLI/desktop legacy.
 - **Sesiones web** en tabla `sessions` (cookie `lixbon_session`, HttpOnly, SameSite=Lax, `COOKIE_SECURE=1` para prod) — separadas de las API keys.

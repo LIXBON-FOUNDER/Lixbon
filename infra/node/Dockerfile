@@ -15,10 +15,16 @@ COPY core/node_agent/agent.py ./agent.py
 COPY infra/node/entrypoint.sh ./entrypoint.sh
 RUN chmod +x entrypoint.sh
 
+# Flash attention + caché KV en 8 bits: la mitad de VRAM por token de contexto,
+# imprescindible para ventanas grandes. El num_ctx efectivo lo manda el gateway
+# (MODEL_NUM_CTX); OLLAMA_CONTEXT_LENGTH es solo el default si no lo manda.
 ENV LIXBON_STATE_FILE=/var/lib/lixbon/node.json \
     OLLAMA_HOST=0.0.0.0:11434 \
     OLLAMA_URL=http://127.0.0.1:11434 \
-    OLLAMA_KEEP_ALIVE=-1
+    OLLAMA_KEEP_ALIVE=-1 \
+    OLLAMA_FLASH_ATTENTION=1 \
+    OLLAMA_KV_CACHE_TYPE=q8_0 \
+    OLLAMA_CONTEXT_LENGTH=32768
 
 VOLUME ["/var/lib/lixbon", "/root/.ollama"]
 ENTRYPOINT ["/opt/lixbon/entrypoint.sh"]

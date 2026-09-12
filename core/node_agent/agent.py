@@ -124,14 +124,15 @@ def _gpu_metrics() -> dict:
 # timeout con el que el gateway nos consulta.
 # Este archivo NO importa nada de core/ a propósito (se despliega solo).
 
-_MODEL_CAPS: dict[str, tuple[str, list[str]]] = {}   # name → (digest, capabilities)
+# name → (digest, capabilities, context_length). Entradas viejas de 2 elementos se toleran.
+_MODEL_CAPS: dict[str, tuple] = {}
 _CAPS_PER_POLL = 8
 _CAPS_TIMEOUT = 3.0
 
 
 def merge_caps(
     tags: list[dict],
-    cache: dict[str, tuple[str, list[str]]],
+    cache: dict[str, tuple],
     budget: int,
 ) -> tuple[list[dict], list[str]]:
     """Cruza /api/tags con la caché. Función pura.
@@ -148,7 +149,9 @@ def merge_caps(
             continue
         digest = m.get("digest") or ""
         cached = cache.get(name)
-        caps = cached[1] if cached and cached[0] == digest else None
+        vigente = bool(cached) and cached[0] == digest
+        caps = cached[1] if vigente else None
+        ctx = cached[2] if vigente and len(cached) > 2 else None
         if caps is None and len(pendientes) < max(0, budget):
             pendientes.append(name)
         info.append({
@@ -156,6 +159,7 @@ def merge_caps(
             "digest": digest,
             "size": m.get("size", 0),
             "capabilities": caps,
+            "context_length": ctx,
         })
     return info, pendientes
 
@@ -177,9 +181,15 @@ async def _ollama_model_info() -> tuple[list[str], list[dict]]:
                     try:
                         r = await client.post(f"{OLLAMA_URL}/api/show", json={"model": name})
                         r.raise_for_status()
-                        caps = r.json().get("capabilities")
+                        datos = r.json()
+                        caps = datos.get("capabilities")
+                        ctx = next(
+                            (int(v) for k, v in (datos.get("model_info") or {}).items()
+                             if k.endswith(".context_length") and isinstance(v, (int, float)) and v > 0),
+                            None,
+                        )
                         if isinstance(caps, list):
-                            _MODEL_CAPS[name] = (digests.get(name, ""), [str(c) for c in caps])
+                            _MODEL_CAPS[name] = (digests.get(name, ""), [str(c) for c in caps], ctx)
                     except Exception:
                         pass  # se reintenta en el siguiente poll
 
