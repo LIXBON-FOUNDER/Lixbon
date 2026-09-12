@@ -295,15 +295,24 @@ async def chat_completions(
     if payload.tools:
         messages = _normalize_for_ollama(messages)
 
-    # "Modo investigar": busca en internet e inyecta el contexto antes de responder.
-    web_sources: list[dict] = []
-    if payload.web_search and messages and messages[-1]["role"] == "user":
-        web_sources = await websearch.search(messages[-1]["content"])
-        context = websearch.build_context(messages[-1]["content"], web_sources)
-        messages.insert(len(messages) - 1, {"role": "system", "content": context})
-
     base, headers, origen = target_or_503(model)
     num_ctx = payload.num_ctx or role.num_ctx
+
+    # "Modo investigar": el modelo decide qué buscar, se busca y se inyecta el
+    # contexto antes de responder.
+    web_sources: list[dict] = []
+    web_queries: list[str] = []
+    if payload.web_search and messages and messages[-1]["role"] == "user":
+        async def _preguntar(planner_messages: list[dict]) -> str:
+            resp = await ollama_chat(base, model, planner_messages, headers=headers,
+                                     client=deps.http_client_chat, keep_alive=role.keep_alive,
+                                     format="json", think=False)
+            return (resp.get("message") or {}).get("content", "")
+
+        web_queries = await websearch.plan_queries(messages, _preguntar)
+        web_sources = await websearch.research(web_queries)
+        context = websearch.build_context(messages[-1]["content"], web_sources, web_queries)
+        messages.insert(len(messages) - 1, {"role": "system", "content": context})
     started_at = time.perf_counter()
     logger.info(f"[chat] model='{model}' ({role.source}) stream={payload.stream} "
                 f"target={origen} web={payload.web_search}")
@@ -313,9 +322,9 @@ async def chat_completions(
             collector: dict[str, Any] = {}
             streamed_something = False
             # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
-            if web_sources:
+            if web_queries:
                 import json as _json
-                yield f"data: {_json.dumps({'lixbon_sources': web_sources})}\n\n"
+                yield f"data: {_json.dumps({'lixbon_sources': web_sources, 'lixbon_queries': web_queries})}\n\n"
             try:
                 try:
                     async for chunk in stream_chat_openai(base, model, messages,

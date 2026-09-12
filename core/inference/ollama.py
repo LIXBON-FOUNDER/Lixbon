@@ -61,15 +61,26 @@ async def chat(
     client: httpx.AsyncClient | None = None,
     num_ctx: int | None = None,
     keep_alive: str | None = None,
+    format: str | dict | None = None,
+    think: bool | None = None,
 ) -> dict[str, Any]:
     """Chat sin streaming. Retorna la respuesta cruda de Ollama. Lanza httpx.HTTPError si falla.
     `num_ctx`: ventana de contexto (Ollama usa 4096 por defecto aunque el modelo
     soporte más; súbela para archivos/conversaciones grandes — cuesta VRAM).
-    `keep_alive`: residencia en VRAM ("30m", "-1" permanente, "0" descargar ya)."""
+    `keep_alive`: residencia en VRAM ("30m", "-1" permanente, "0" descargar ya).
+    `format`: "json" o un JSON Schema para forzar salida estructurada.
+    `think`: False desactiva el razonamiento previo en modelos thinking."""
     url = f"{base_url.rstrip('/')}/api/chat"
     payload: dict = {"model": model, "messages": messages, "stream": False}
     if num_ctx:
         payload["options"] = {"num_ctx": int(num_ctx)}
+    if format:
+        payload["format"] = format
+    # think=False apaga el razonamiento en modelos thinking (qwen3, deepseek-r1…):
+    # para una salida corta y estructurada pasar de 100 s a 2 s. Ollama solo
+    # rechaza `think` cuando es True en un modelo sin esa capacidad.
+    if think is not None:
+        payload["think"] = think
     ka = coerce_keep_alive(keep_alive)
     if ka is not None:
         payload["keep_alive"] = ka           # TOP-LEVEL en la API de Ollama, no en options

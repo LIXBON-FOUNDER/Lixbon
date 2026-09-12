@@ -1,9 +1,12 @@
 """
 websearch.py — Búsqueda en internet para el chat ("modo investigar").
 
-Cuando el usuario activa el toggle de búsqueda, ejecutamos la consulta y le damos
-al modelo los resultados como contexto (con instrucción de citar). Es más fiable
-que el tool-calling nativo en modelos pequeños y funciona con cualquiera.
+Con el toggle activo, el propio modelo decide QUÉ buscar (`plan_queries`: 1-3
+consultas a partir de la conversación, resolviendo referencias a mensajes
+anteriores), se buscan en paralelo (`research`) y los resultados se le dan
+como contexto con instrucción de citar. Mandar el mensaje del usuario tal cual
+al buscador ("¿es mejor vivir en X que en Y?") devolvía basura; y es más fiable
+que el tool-calling nativo en modelos pequeños, funciona con cualquiera.
 
 Para que modelos pequeños (p. ej. llama3.2) no se excusen con su "fecha de corte",
 el contexto:
@@ -21,9 +24,11 @@ Proveedor configurable por env `WEBSEARCH_PROVIDER`:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from datetime import date
 
 logger = logging.getLogger("lixbon.websearch")
@@ -32,6 +37,10 @@ PROVIDER = os.getenv("WEBSEARCH_PROVIDER", "duckduckgo").lower()
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
 MAX_RESULTS = int(os.getenv("WEBSEARCH_MAX_RESULTS", "5"))
+MAX_QUERIES = int(os.getenv("WEBSEARCH_MAX_QUERIES", "3"))
+# Resultados totales tras unir las consultas (las fuentes se citan por número:
+# demasiadas confunden a un modelo pequeño).
+MAX_TOTAL = int(os.getenv("WEBSEARCH_MAX_TOTAL", "8"))
 # Cuántas páginas top descargamos para extraer su texto real (0 = desactivado).
 FETCH_PAGES = int(os.getenv("WEBSEARCH_FETCH_PAGES", "3"))
 FETCH_CHARS = int(os.getenv("WEBSEARCH_FETCH_CHARS", "1200"))
@@ -174,17 +183,20 @@ def _enrich_sync(results: list[dict], n: int) -> None:
             r["snippet"] = page
 
 
+async def _search_one(query: str, limit: int) -> list[dict]:
+    try:
+        return await asyncio.to_thread(_search_sync, query, limit)
+    except Exception as exc:
+        logger.warning(f"Búsqueda web falló ({PROVIDER}) para '{query}': {exc}")
+        return []
+
+
 async def search(query: str, limit: int | None = None) -> list[dict]:
-    """Busca en internet (en threadpool, sin bloquear el event loop)."""
+    """Busca una consulta (en threadpool, sin bloquear el event loop)."""
     query = (query or "").strip()
     if not query:
         return []
-    limit = limit or MAX_RESULTS
-    try:
-        results = await asyncio.to_thread(_search_sync, query, limit)
-    except Exception as exc:
-        logger.warning(f"Búsqueda web falló ({PROVIDER}): {exc}")
-        return []
+    results = await _search_one(query, limit or MAX_RESULTS)
     # Enriquecemos las primeras fuentes con el texto real de la página.
     if results and FETCH_PAGES > 0:
         try:
@@ -194,18 +206,116 @@ async def search(query: str, limit: int | None = None) -> list[dict]:
     return results
 
 
-def build_context(query: str, results: list[dict]) -> str:
+async def research(queries: list[str]) -> list[dict]:
+    """Busca varias consultas en paralelo y une los resultados sin URLs repetidas,
+    intercalados para que cada consulta aporte sus mejores fuentes."""
+    queries = [q.strip() for q in queries if q and q.strip()][:MAX_QUERIES]
+    if not queries:
+        return []
+    por_consulta = await asyncio.gather(*(_search_one(q, MAX_RESULTS) for q in queries))
+    vistos: set[str] = set()
+    unidos: list[dict] = []
+    for i in range(MAX_RESULTS):
+        for lista in por_consulta:
+            if i < len(lista):
+                r = lista[i]
+                url = (r.get("url") or "").strip()
+                if url and url not in vistos:
+                    vistos.add(url)
+                    unidos.append(r)
+    unidos = unidos[:MAX_TOTAL]
+    if unidos and FETCH_PAGES > 0:
+        try:
+            await asyncio.to_thread(_enrich_sync, unidos, FETCH_PAGES)
+        except Exception as exc:
+            logger.debug(f"Enriquecimiento de páginas falló: {exc}")
+    return unidos
+
+
+# ── El modelo decide qué buscar ──────────────────────────────────────────────
+
+_PLAN_HISTORY = 6          # mensajes previos que ve el planificador
+_PLAN_CHARS = 1500         # recorte por mensaje (adjuntos largos no aportan a la consulta)
+_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _plan_prompt() -> str:
+    today = date.today().strftime("%d/%m/%Y")
+    return (
+        f"Hoy es {today}. Eres el planificador de búsquedas de un asistente. Tu único trabajo es "
+        "decidir qué consultas hay que hacer en un buscador web para responder BIEN al último "
+        "mensaje del usuario, teniendo en cuenta la conversación.\n"
+        "Reglas:\n"
+        f"- Entre 1 y {MAX_QUERIES} consultas, cada una corta y concreta (palabras clave, no preguntas "
+        "completas ni saludos).\n"
+        "- Resuelve las referencias a mensajes anteriores: si el usuario dice \"¿y en Perú?\" tras "
+        "hablar del costo de vida en Ecuador, la consulta es \"costo de vida Perú 2026\".\n"
+        "- Si el tema depende del momento (precios, noticias, versiones, cifras), incluye el año actual.\n"
+        "- Usa el idioma del usuario; añade una variante en inglés solo si las mejores fuentes "
+        "probablemente están en inglés.\n"
+        "- Si son varias cosas distintas, una consulta por cada una.\n"
+        "Responde SOLO con JSON con esta forma: {\"queries\": [\"consulta 1\", \"consulta 2\"]}"
+    )
+
+
+def parse_plan(raw: str, fallback: str) -> list[str]:
+    """Extrae las consultas del JSON del modelo; si no hay nada usable, la pregunta tal cual."""
+    consultas: list[str] = []
+    m = _JSON_RE.search(raw or "")
+    if m:
+        try:
+            datos = json.loads(m.group(0))
+            crudas = datos.get("queries") if isinstance(datos, dict) else None
+            if isinstance(crudas, list):
+                consultas = [str(q).strip() for q in crudas if str(q).strip()]
+        except ValueError:
+            pass
+    vistas: set[str] = set()
+    limpias = []
+    for q in consultas:
+        clave = q.lower()
+        if clave not in vistas and len(q) <= 200:
+            vistas.add(clave)
+            limpias.append(q)
+    return limpias[:MAX_QUERIES] or [fallback.strip()[:200]]
+
+
+async def plan_queries(
+    messages: list[dict],
+    ask: Callable[[list[dict]], Awaitable[str]],
+) -> list[str]:
+    """Pide al modelo las consultas. `ask` ejecuta un chat sin streaming y
+    devuelve el texto; cualquier fallo cae a buscar el mensaje del usuario."""
+    pregunta = str(messages[-1].get("content") or "")
+    historial = [
+        {"role": m["role"], "content": str(m.get("content") or "")[:_PLAN_CHARS]}
+        for m in messages[-_PLAN_HISTORY:]
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+    try:
+        raw = await ask([{"role": "system", "content": _plan_prompt()}, *historial])
+    except Exception as exc:
+        logger.warning(f"El planificador de búsquedas falló ({exc}); se busca el mensaje tal cual")
+        return [pregunta.strip()[:200]]
+    consultas = parse_plan(raw, pregunta)
+    logger.info(f"[websearch] consultas: {consultas}")
+    return consultas
+
+
+def build_context(query: str, results: list[dict], queries: list[str] | None = None) -> str:
     """Arma el bloque de contexto con las fuentes para el modelo."""
     today = date.today().strftime("%d/%m/%Y")
+    buscado = "; ".join(queries) if queries else query
     if not results:
         return (
             f"[BÚSQUEDA EN INTERNET] Hoy es {today}. El usuario pidió buscar en internet, "
-            f'pero no se obtuvieron resultados para "{query}". Dilo con claridad y responde '
+            f'pero no se obtuvieron resultados para "{buscado}". Dilo con claridad y responde '
             "con lo que sepas, aclarando que no pudiste verificar en la web ahora mismo."
         )
     lines = [
-        f"[BÚSQUEDA EN INTERNET] Hoy es {today}. Estos son resultados ACTUALES obtenidos de "
-        "internet en tiempo real para responder la pregunta del usuario. INSTRUCCIONES OBLIGATORIAS:",
+        f"[BÚSQUEDA EN INTERNET] Hoy es {today}. Se buscó en internet: {buscado}. Estos son "
+        "resultados ACTUALES obtenidos en tiempo real para responder la pregunta del usuario. "
+        "INSTRUCCIONES OBLIGATORIAS:",
         "- Tienes acceso a información actual a través de estos resultados. Úsalos como tu "
         "fuente de verdad.",
         "- NO digas que tu conocimiento llega hasta 2023 ni que no puedes dar información "

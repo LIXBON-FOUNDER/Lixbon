@@ -603,6 +603,23 @@
   color: var(--ink-label);
 }
 
+.msg-sources__queries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-label);
+}
+
+.msg-sources__query {
+  padding: 2px 8px;
+  border-radius: var(--radius-round);
+  background: var(--surface-3);
+  color: var(--ink-soft);
+}
+
 .msg-sources__list {
   margin: 6px 0 0;
   padding-left: 22px;

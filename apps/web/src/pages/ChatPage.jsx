@@ -19,10 +19,16 @@ import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Ico
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
-function Sources({ sources }) {
+function Sources({ sources, queries }) {
   return (
     <div className="msg-sources">
       <span className="msg-sources__title"><IconGlobe size={13} /> Fuentes</span>
+      {queries?.length > 0 && (
+        <p className="msg-sources__queries">
+          Buscó: {queries.map((q, i) => <span key={i} className="msg-sources__query">{q}</span>)}
+        </p>
+      )}
+      {sources.length === 0 && <p className="msg-sources__queries">Sin resultados.</p>}
       <ol className="msg-sources__list">
         {sources.map((s, i) => (
           <li key={i}>
@@ -191,12 +197,12 @@ export default function ChatPage() {
         conversationId: convId,
         webSearch,
         signal: abort.signal,
-        onSources: (sources) => {
+        onSources: (sources, queries) => {
           setSearching(false);
           setMessages((prev) => {
             const next = prev.slice();
             const last = next[next.length - 1];
-            next[next.length - 1] = { ...last, sources };
+            next[next.length - 1] = { ...last, sources, queries };
             return next;
           });
         },
@@ -386,7 +392,9 @@ export default function ChatPage() {
                     <div key={i} className="msg msg--user">{m.content}</div>
                   ) : (
                     <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
-                      {m.sources?.length > 0 && <Sources sources={m.sources} />}
+                      {(m.sources?.length > 0 || m.queries?.length > 0) && (
+                        <Sources sources={m.sources || []} queries={m.queries} />
+                      )}
                       {searching && i === messages.length - 1 && !m.content && (
                         <span className="msg__searching">
                           <IconGlobe size={14} /> Buscando en internet…
