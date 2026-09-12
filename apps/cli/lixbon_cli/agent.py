@@ -15,6 +15,7 @@ En ambos casos se pide aprobación (con vista previa del diff) antes de ejecutar
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from lixbon_cli.context import (
@@ -30,10 +31,12 @@ from lixbon_cli.term import g
 from lixbon_cli.theme import make_console
 from lixbon_cli.ui import (
     TOOL_VERB,
+    VERB_WIDTH,
     confirm3,
     print_note,
     render_action,
     render_action_result,
+    render_log_line,
 )
 
 # Tope de pasos por turno. Es un cortafuegos contra bucles, NO un presupuesto de
@@ -894,11 +897,16 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                     "he parado. Dime cómo seguir."), working
 
         combined_results = []
-        for call in tool_calls:
-            tool_name = call.get("tool", "")
-            args = call.get("args", {})
-            result = _approve_and_run(console, workspace, session, tool_name, args)
-            combined_results.append(f"TOOL_RESULT {tool_name}: {clip_tool_output(result)}")
+        for group in _group_reads(tool_calls):
+            if len(group) > 1:
+                results = _run_read_group(console, workspace, session, group)
+            else:
+                call = group[0]
+                results = [_approve_and_run(console, workspace, session,
+                                            call.get("tool", ""), call.get("args", {}))]
+            for call, result in zip(group, results):
+                combined_results.append(
+                    f"TOOL_RESULT {call.get('tool', '')}: {clip_tool_output(result)}")
 
         working.append({"role": "user", "content": "\n".join(combined_results)})
 
@@ -906,26 +914,100 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
             "para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba."), working
 
 
+def turn_stats(session: dict) -> dict:
+    """Contadores del turno en curso, para el resumen que lo cierra."""
+    return session.setdefault(
+        "turn_stats", {"actions": 0, "files": set(), "adds": 0, "dels": 0})
+
+
+# Medida de una lectura: se saca del propio resultado, así que la acción se
+# imprime DESPUÉS de ejecutar. Una lectura no pide permiso, así que el orden en
+# pantalla es el mismo y a cambio la columna de la derecha dice algo.
+def _read_meta(tool_name: str, result: str) -> str:
+    lines = result.count("\n") + 1 if result else 0
+    if tool_name == "read_file":
+        return f"{lines} líneas"
+    if tool_name == "search":
+        return f"{lines} coincidencia" + ("" if lines == 1 else "s")
+    if tool_name == "list_files":
+        return f"{lines} entrada" + ("" if lines == 1 else "s")
+    return ""
+
+
+def _group_reads(tool_calls: list[dict]) -> list[list[dict]]:
+    """Parte las llamadas de un paso en grupos: las lecturas seguidas van juntas.
+
+    Cuando el modelo pide tres archivos de golpe, tres líneas iguales no dicen
+    más que una: `leyó  3 archivos` y los nombres debajo.
+    """
+    groups: list[list[dict]] = []
+    for call in tool_calls:
+        if call.get("tool") == "read_file" and groups and groups[-1][0].get("tool") == "read_file":
+            groups[-1].append(call)
+        else:
+            groups.append([call])
+    return groups
+
+
+def _run_read_group(console, workspace: Path, session: dict, calls: list[dict]) -> list[str]:
+    remote = session.get("remote")
+    stats = turn_stats(session)
+    results: list[str] = []
+    names: list[str] = []
+    lines = 0
+    for call in calls:
+        args = call.get("args", {})
+        label = str(args.get("path") or ".")
+        result, failed, _elapsed = _execute(workspace, "read_file", args)
+        stats["actions"] += 1
+        results.append(result)
+        if failed:
+            render_action(console, TOOL_VERB["read_file"], label, readonly=True)
+            render_action_result(console, result.split("\n", 1)[0][:120], error=True)
+        else:
+            names.append(label.rsplit("/", 1)[-1])
+            lines += result.count("\n") + 1
+        if remote:
+            remote.emit("tool_use", tool="read_file", summary=label, readonly=True)
+            remote.emit("tool_result", tool="read_file",
+                        result=result[:REMOTE_RESULT_CHARS], error=failed)
+    if names:
+        render_action(console, TOOL_VERB["read_file"], f"{len(names)} archivos",
+                      readonly=True, meta=f"{lines} líneas")
+        listed = f" {g('sep')} ".join(names)
+        render_log_line(console, " " * VERB_WIDTH + listed, "lx.dim2")
+    return results
+
+
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
     # Con /remote activo, la sesión se maneja desde el móvil/web: los eventos
     # de herramientas viajan al controller y las aprobaciones se piden allí
     # (localmente no hay nadie al teclado durante el takeover).
     remote = session.get("remote")
+    stats = turn_stats(session)
 
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
-        render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label), readonly=True)
+        result, failed, _elapsed = _execute(workspace, tool_name, args)
+        stats["actions"] += 1
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label),
+                     readonly=True, meta="" if failed else _read_meta(tool_name, result))
+        if failed:
+            render_action_result(console, result.split("\n", 1)[0][:120], error=True)
         if remote:
             remote.emit("tool_use", tool=tool_name, summary=str(label), readonly=True)
-        return _run(console, workspace, tool_name, args, remote)
+            remote.emit("tool_result", tool=tool_name,
+                        result=result[:REMOTE_RESULT_CHARS], error=failed)
+        return result
 
     try:
         change = compute_change(workspace, tool_name, args, resolve_safe_path)
     except Exception:
         change = None
+    counts = (0, 0)
     if change is not None:
-        render_change(console, change)
+        counts = render_change(console, change)
     else:
         render_action(console, TOOL_VERB.get(tool_name, tool_name), _args_summary(tool_name, args))
     if remote:
@@ -941,7 +1023,8 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
                     render_action_result(console, "rechazado desde el control remoto", error=True)
                     return "Ejecución cancelada por el usuario"
             else:
-                decision = confirm3("¿Ejecutar este comando?")
+                decision = confirm3("¿Ejecutar este comando?",
+                                    detail=_args_summary(tool_name, args))
                 if decision == "always":
                     session["auto_run_commands"] = True
                 elif decision in ("no", None):
@@ -953,25 +1036,44 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
                 render_action_result(console, "rechazado desde el control remoto", error=True)
                 return "Ejecución cancelada por el usuario"
         else:
-            decision = confirm3("¿Aplicar este cambio?")
+            detail = change.path if change is not None else _args_summary(tool_name, args)
+            if counts != (0, 0):
+                detail = f"{detail} {g('sep')} +{counts[0]} -{counts[1]}"
+            decision = confirm3("¿Aplicar este cambio?", detail=detail)
             if decision == "always":
                 session["auto_approve"] = True
             elif decision in ("no", None):
                 render_action_result(console, "rechazado por el usuario", error=True)
                 return "Ejecución cancelada por el usuario"
 
+    stats["actions"] += 1
+    if change is not None and change.kind != "command":
+        stats["files"].add(change.path)
+        stats["adds"] += counts[0]
+        stats["dels"] += counts[1]
     return _run(console, workspace, tool_name, args, remote)
 
 
-def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
+def _execute(workspace: Path, tool_name: str, args: dict) -> tuple[str, bool, float]:
+    """Ejecuta una herramienta. Devuelve (resultado, ha fallado, segundos)."""
+    started = time.monotonic()
     try:
         result = execute_tool_call(workspace, tool_name, args)
     except Exception as exc:
         result = f"[ERROR] {exc}"
     failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
               or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
+    return result, failed, time.monotonic() - started
+
+
+def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
+    result, failed, elapsed = _execute(workspace, tool_name, args)
     if tool_name not in READ_ONLY_TOOLS or failed:
-        render_action_result(console, result.split("\n", 1)[0][:120], error=failed)
+        # El tiempo va en el resultado y no en la acción: la línea de la acción
+        # se imprime antes de ejecutar, porque es la que se aprueba.
+        meta = f"{g('cross') if failed else g('check')} {elapsed:.1f} s" if elapsed >= 0.1 else ""
+        render_action_result(console, result.split("\n", 1)[0][:120],
+                            error=failed, meta=meta)
     if remote:
         remote.emit("tool_result", tool=tool_name,
                     result=result[:REMOTE_RESULT_CHARS], error=failed)

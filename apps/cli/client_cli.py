@@ -104,6 +104,9 @@ _GLYPHS_UNICODE = {
     # pesos del mismo juego de box-drawing ocupan una celda y alinean igual.
     "rail": "│",
     "rail_hot": "┃",
+    # Marca de la fila elegida en cualquier menú. El punto (●) queda reservado
+    # para el usuario, así que la selección necesita un signo propio.
+    "edge": "▌",
 }
 _GLYPHS_ASCII = {
     "spark": "*",
@@ -125,6 +128,7 @@ _GLYPHS_ASCII = {
     "corner": "`",
     "rail": "|",
     "rail_hot": "|",
+    "edge": ">",
 }
 
 
@@ -344,6 +348,11 @@ PALETTE = {
     "facet_bottom2": "#333A1C",
     "dim": "#8A8A80",     # secundario: metadatos, hints, barra de estado
     "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
+    # Fondos. `panel` viste todo lo que es superficie y no texto: la burbuja del
+    # usuario, la barra de estado, los menús y el código en línea. `sel` es un
+    # escalón por encima, solo para la fila marcada de un menú.
+    "panel": "#1E1E1A",
+    "sel": "#2A2A24",
     "ok": "#5FB85F",      # éxito, líneas + de diff
     "err": "#E05C5C",     # error, líneas - de diff
     # Diff: la fila entera se pinta con un fondo tenue (como en un editor) y el
@@ -375,13 +384,35 @@ RICH_STYLES = {
     "lx.ok": PALETTE["ok"],
     "lx.err": PALETTE["err"],
     "lx.warn": PALETTE["warn"],
-    "lx.diff.add": PALETTE["ok"],
-    "lx.diff.del": PALETTE["err"],
+    "lx.diff.add": PALETTE["diff_add_fg"],
+    "lx.diff.del": PALETTE["diff_del_fg"],
     "lx.diff.hunk": PALETTE["dim"],
+    # Burbuja del mensaje del usuario: el fondo la delimita, así que no hace
+    # falta borde y solo ocupa lo que ocupa el texto.
+    "lx.bubble": f"{PALETTE['cream']} on {PALETTE['panel']}",
+    "lx.bubble.dot": f"bold {PALETTE['accent']} on {PALETTE['panel']}",
+    "lx.code": f"{PALETTE['beige']} on {PALETTE['panel']}",
+    # Un error de herramienta se pinta como una fila de diff eliminado: es la
+    # única forma de que no se pierda entre veinte líneas de registro.
+    "lx.err.row": f"{PALETTE['diff_del_fg']} on {PALETTE['diff_del_bg']}",
+    # Markdown de las respuestas. Sin esto rich usa sus colores por defecto
+    # (azules de enlace, títulos en panel centrado) que no son de la marca.
+    "markdown.code": f"{PALETTE['beige']} on {PALETTE['panel']}",
+    "markdown.code_block": PALETTE["beige"],
+    "markdown.h1": f"bold {PALETTE['olive_lt']}",
+    "markdown.h2": f"bold {PALETTE['olive_lt']}",
+    "markdown.h3": f"bold {PALETTE['olive_lt']}",
+    "markdown.h4": f"bold {PALETTE['beige']}",
+    "markdown.item.bullet": PALETTE["accent"],
+    "markdown.item.number": PALETTE["accent"],
+    "markdown.link": PALETTE["accent"],
+    "markdown.link_url": PALETTE["dim2"],
+    "markdown.block_quote": PALETTE["dim"],
+    "markdown.hr": PALETTE["dim2"],
     # Fondo de la barra de estado fija. Va como estilo BASE del Text: los
     # spans de cada trozo solo fijan color de texto, así que el fondo
     # sobrevive por debajo y llega hasta el relleno del borde derecho.
-    "lx.bar": "on #1E1E1A",  # rich usa `on <color>`; el `bg:` es de prompt_toolkit
+    "lx.bar": f"on {PALETTE['panel']}",  # rich usa `on <color>`; `bg:` es de prompt_toolkit
 }
 
 _console = None
@@ -520,42 +551,65 @@ def pt_style():
     """Style de prompt_toolkit para prompts, selectores y barra de estado."""
     from prompt_toolkit.styles import Style
 
+    panel = PALETTE["panel"]
     return Style.from_dict({
-        # Prompt de entrada
+        # Prompt de entrada: el punto ● es el usuario, dentro de su caja.
         "prompt": f"bold {PALETTE['accent']}",
+        "placeholder": PALETTE["dim2"],
+        "img-marker": f"{PALETTE['beige']} bg:{panel}",
+        # Caja de entrada (show_frame de prompt_toolkit). `frame` no lleva fondo
+        # a propósito: la caja es un borde, no una superficie.
+        "frame.border": PALETTE["dim2"],
         # Selector interactivo
-        "sel.mark": PALETTE["accent"],
+        "sel.rail": PALETTE["dim2"],
         "sel.title": f"bold {PALETTE['cream']}",
+        "sel.detail": PALETTE["dim2"],
         "sel.hint": PALETTE["dim2"],
         "sel.count": PALETTE["dim2"],
         "sel.query": f"bold {PALETTE['accent']}",
         "sel.scroll": PALETTE["dim2"],
+        "sel.group": PALETTE["dim2"],
+        "sel.rule": PALETTE["dim2"],
         "sel.disabled": f"italic {PALETTE['dim2']}",
-        "sel.pointer": f"bold {PALETTE['accent']}",
-        "sel.active": f"bold {PALETTE['accent']}",
-        "sel.active.desc": PALETTE["dim"],
+        # Fila marcada: el canto en acento y la fila entera rellena. Las tres
+        # clases `sel.row*` comparten el fondo para que el bloque no se corte.
+        "sel.edge": f"bold {PALETTE['accent']}",
+        "sel.row": f"bg:{PALETTE['sel']}",
+        "sel.row.label": f"bold {PALETTE['cream']} bg:{PALETTE['sel']}",
+        "sel.row.desc": f"{PALETTE['dim']} bg:{PALETTE['sel']}",
+        "sel.row.badge": f"{PALETTE['beige']} bg:{PALETTE['sel']}",
         "sel.option": PALETTE["cream"],
         "sel.option.desc": PALETTE["dim2"],
         "sel.badge": PALETTE["beige"],
-        "sel.badge.active": f"bold {PALETTE['beige']}",
         # Barra de estado inferior (bottom_toolbar) — fondo propio sutil
-        "bottom-toolbar": f"{PALETTE['dim']} bg:#1E1E1A noinherit",
-        "bottom-toolbar.dot": f"{PALETTE['accent']} bg:#1E1E1A",
-        "bottom-toolbar.model": f"{PALETTE['beige']} bg:#1E1E1A",
-        "bottom-toolbar.sep": f"{PALETTE['dim2']} bg:#1E1E1A",
+        "bottom-toolbar": f"{PALETTE['dim']} bg:{panel} noinherit",
+        "bottom-toolbar.dot": f"{PALETTE['accent']} bg:{panel}",
+        "bottom-toolbar.ok": f"{PALETTE['ok']} bg:{panel}",
+        "bottom-toolbar.warn": f"{PALETTE['warn']} bg:{panel}",
+        "bottom-toolbar.err": f"{PALETTE['err']} bg:{panel}",
+        "bottom-toolbar.model": f"{PALETTE['beige']} bg:{panel}",
+        "bottom-toolbar.sep": f"{PALETTE['dim2']} bg:{panel}",
         # Menú de autocompletado de slash-commands
-        "completion-menu": f"bg:#1E1E1A {PALETTE['cream']}",
-        "completion-menu.completion": f"bg:#1E1E1A {PALETTE['cream']}",
-        "completion-menu.completion.current": f"bg:{PALETTE['accent']} {PALETTE['ink']}",
-        "completion-menu.meta.completion": f"bg:#1E1E1A {PALETTE['dim']}",
-        "completion-menu.meta.completion.current": f"bg:#2A2A24 {PALETTE['beige']}",
+        "completion-menu": f"bg:{panel} {PALETTE['cream']}",
+        "completion-menu.completion": f"bg:{panel} {PALETTE['cream']}",
+        "completion-menu.completion.current": f"bold bg:{PALETTE['accent']} {PALETTE['ink']}",
+        "completion-menu.meta.completion": f"bg:{panel} {PALETTE['dim']}",
+        # La meta de la fila marcada se queda en el mismo acento y baja a oliva:
+        # dos fondos distintos en una sola fila la partían en dos.
+        "completion-menu.meta.completion.current": f"bg:{PALETTE['accent']} {PALETTE['olive']}",
         # Columnas del display de cada comando. Reglas de 2 nombres: la fila
         # marcada (`completion-menu.completion.current`, 3 nombres) gana en
-        # especificidad y se pinta entera en tinta sobre oliva.
+        # especificidad y se pinta entera en tinta sobre acento.
         "cmd.name": PALETTE["cream"],
         "cmd.args": PALETTE["dim2"],
+        # El color del nombre dice a qué grupo pertenece el comando: el menú del
+        # prompt no puede pintar cabeceras, y el orden solo no agrupa a la vista.
+        "cmd.conversacion": PALETTE["cream"],
+        "cmd.agente": PALETTE["accent"],
+        "cmd.cuenta": PALETTE["beige"],
+        "cmd.sistema": PALETTE["dim"],
         # Barra de scroll del menú, para que se note que la lista sigue.
-        "scrollbar.background": "bg:#1E1E1A",
+        "scrollbar.background": f"bg:{panel}",
         "scrollbar.button": f"bg:{PALETTE['dim2']}",
     })
 
@@ -566,7 +620,7 @@ def pt_style():
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.2.0"
+CLI_VERSION = "2.3.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 # Cloudflare bloquea el User-Agent por defecto de urllib ("Python-urllib/x.y")
@@ -1197,6 +1251,39 @@ def esc(text: object) -> str:
     return escape(str(text))
 
 
+# ── Rejilla de una línea ────────────────────────────────────────────────────
+#
+# Casi todo el CLI son filas de dos columnas: a la izquierda lo que pasó y a la
+# derecha su medida (tiempo, líneas, tokens, +/-). La meta va SIEMPRE pegada al
+# margen derecho: así un turno largo se lee como una tabla y no como texto
+# irregular, sin tener que contar espacios en cada sitio que imprime.
+
+
+def row_width(console) -> int:
+    """Ancho útil de una fila impresa con `console.print` (sin márgenes)."""
+
+    return max(24, console.width - PAD_LEFT - PAD_RIGHT)
+
+
+def inner_width() -> int:
+    """El mismo ancho para lo que pinta prompt_toolkit (que no pasa por rich)."""
+
+    return max(24, min(term_size()[0], MAX_WIDTH) - PAD_LEFT - PAD_RIGHT)
+
+
+def two_col(left, right, width: int):
+    """Une dos `Text` rellenando el hueco: el derecho queda al margen."""
+    if right is None or not right.cell_len:
+        return left
+    limit = width - right.cell_len - 1
+    if left.cell_len > limit:
+        # Antes se cede la izquierda (una ruta larga) que la medida: la fila
+        # tiene que caber en una línea o el bloque deja de leerse como tabla.
+        left.truncate(max(6, limit), overflow="ellipsis")
+    left.pad_right(max(1, width - left.cell_len - right.cell_len))
+    return left.append_text(right)
+
+
 class Tail:
     """Renderable que muestra solo las últimas `max_height` líneas de otro.
 
@@ -1261,12 +1348,12 @@ def short_path(path, max_len: int = 60) -> str:
 
 
 def render_header(console, version: str, model: str = "", plan: str = "",
-                  workspace: object = None) -> None:
+                  workspace: object = None, branch: str = "", mode: str = "") -> None:
     """Bloque de identidad, arriba a la izquierda y sin cajas.
 
         ██  Lixbon CLI v2.1.0
         ██  modelo-demo · Lixbon Pro
-            ~/proyectos/api
+            ~/proyectos/api · master · modo agent
 
     Se imprime una vez al arrancar (y tras /clear): sube con el transcript en
     lugar de robar espacio permanente. Los datos vivos (contexto, tokens,
@@ -1289,7 +1376,11 @@ def render_header(console, version: str, model: str = "", plan: str = "",
         line2 += [(f" {g('sep')} ", "lx.dim2"), (f"Lixbon {plan}", "lx.dim")]
     console.print(Text.assemble(*line2))
     if workspace is not None:
-        console.print(Text(f"{indent}{short_path(workspace)}", style="lx.dim"))
+        line3 = [(indent, ""), (short_path(workspace), "lx.dim")]
+        for extra in (branch, f"modo {mode}" if mode else ""):
+            if extra:
+                line3 += [(f"  {g('sep')}  ", "lx.dim2"), (extra, "lx.dim2")]
+        console.print(Text.assemble(*line3))
     console.print()
 
 
@@ -1311,19 +1402,38 @@ def render_intro_line(console, version: str, note: str = "") -> None:
     console.print()
 
 
+# Atajos del arranque, en rejilla de tres columnas. En una sola frase con
+# separadores la línea hacía wrap por la mitad de un atajo ("Alt+V pega una
+# imagen en el / mensaje") y no había manera de localizar una tecla de un
+# vistazo. En columnas, la tecla y lo que hace quedan alineados.
+TIPS = (
+    ("/", "comandos"),
+    ("@ruta", "adjuntar archivo"),
+    ("Alt+V", "pegar imagen"),
+    ("Alt+↵", "nueva línea"),
+    ("Ctrl+C", "interrumpir"),
+    ("Ctrl+C ×2", "salir"),
+)
+TIP_COLUMNS = 3
+
+
 def render_tips(console) -> None:
-    """Consejos de arranque: texto suelto, sin panel (el panel era una caja
-    más que competía visualmente con el chat)."""
-    console.print(
-        f"[lx.dim]Pide un cambio en lenguaje natural  [lx.dim2]{g('sep')}[/]  "
-        f"[lx.accent2]/[/] para los comandos  [lx.dim2]{g('sep')}[/]  "
-        f"[lx.accent2]Alt+V[/] pega una imagen en el mensaje  [lx.dim2]{g('sep')}[/]  "
-        f"Ctrl+C dos veces para salir[/]"
-    )
-    console.print(
-        f"[lx.dim2]/help abre el menú de comandos  {g('sep')}  @ruta adjunta un archivo  "
-        f"{g('sep')}  /doctor revisa terminal y conexión[/]"
-    )
+    """Atajos de arranque en rejilla, sin panel (el panel era una caja más que
+    competía visualmente con el chat)."""
+    from rich.text import Text
+
+    width = row_width(console)
+    column = max(22, (width - 2) // TIP_COLUMNS)
+    key_width = max(len(key) for key, _desc in TIPS) + 2
+    for start in range(0, len(TIPS), TIP_COLUMNS):
+        line = Text("  ")
+        for key, desc in TIPS[start:start + TIP_COLUMNS]:
+            cell = Text()
+            cell.append(f"{key:<{key_width}}", style="lx.accent2")
+            cell.append(desc, style="lx.dim")
+            cell.pad_right(max(1, column - cell.cell_len))
+            line.append_text(cell)
+        console.print(line)
 
 
 def rule(console, label: str = "") -> None:
@@ -1341,26 +1451,49 @@ def rule(console, label: str = "") -> None:
     console.print()
 
 
-def render_speaker(console) -> None:
-    """Rótulo que abre la respuesta de Lixbon.
+def render_speaker(console, meta: str = "") -> None:
+    """Rótulo que abre la respuesta de Lixbon, con su medida a la derecha.
 
     Se imprime una sola vez por turno y JUSTO ENCIMA de lo que dice, no al
     empezar a trabajar: el registro de acciones queda por arriba, dentro de su
     canal, y el rótulo marca dónde empieza lo que hay que leer.
     """
-    console.print(f"[lx.accent2]{g('spark')}[/] [lx.brand]Lixbon[/]")
+    from rich.text import Text
+
+    left = Text.assemble((f"{g('spark')} ", "lx.accent2"), ("Lixbon", "lx.brand"))
+    right = Text(meta, style="lx.dim2") if meta else None
+    console.print(two_col(left, right, row_width(console)))
 
 
 def render_user_message(console, text: str) -> None:
-    """Eco de un mensaje del usuario, idéntico a como lo deja el prompt local.
+    """Eco de un mensaje del usuario: su burbuja.
 
-    Lo usa /remote: lo que llega del móvil tiene que verse en la terminal igual
-    que lo tecleado, o el transcript se lee como dos conversaciones distintas.
+    El fondo la delimita y solo llega hasta donde llega el texto, así que un
+    «sí» no dibuja una banda de punta a punta. Se imprime al enviar (el prompt
+    se borra a sí mismo) y también con /remote: lo que llega del móvil tiene
+    que verse igual que lo tecleado, o el transcript se lee como dos
+    conversaciones distintas.
     """
-    lines = (text or "").splitlines() or [""]
-    console.print(f"[lx.accent2]{g('prompt')}[/] [lx.primary]{esc(lines[0])}[/]")
-    for line in lines[1:]:
-        console.print(f"  [lx.primary]{esc(line)}[/]")
+    import textwrap
+
+    from rich.text import Text
+
+    width = max(20, row_width(console) - 6)
+    lines: list[str] = []
+    for raw in (text or "").splitlines() or [""]:
+        lines.extend(textwrap.wrap(raw, width) or [""])
+    block = max(len(line) for line in lines)
+    for index, line in enumerate(lines):
+        row = Text(" ", style="lx.bubble")
+        row.append(g("dot") if index == 0 else " ", style="lx.bubble.dot")
+        row.append(f"  {line.ljust(block)} ", style="lx.bubble")
+        console.print(row)
+
+
+def render_command_echo(console, text: str) -> None:
+    """Eco de un comando tecleado. No es una burbuja: un comando se lo dices al
+    CLI, no al modelo, y en el transcript basta con que quede el rastro."""
+    console.print(f"[lx.dim2]{g('dot')}[/]  [lx.accent2]{esc(text)}[/]")
 
 
 # ── Registro de trabajo del agente ──────────────────────────────────────────
@@ -1403,32 +1536,97 @@ def rail_text(hot: bool = False):
 
 
 def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
-                  readonly: bool = False) -> None:
-    """Una acción del agente dentro del canal: `┃ editó   src/app.py  +12 -3`.
+                  readonly: bool = False, meta: str = "") -> None:
+    """Una acción del agente dentro del canal:
+
+        │ leyó        src/app.py                          128 líneas
+        ┃ editó       src/app.py                              +12 -3
 
     El canal ES el marcador: las lecturas dejan rastro fino y apagado, las
     escrituras encienden el canal grueso en acento. Un solo signo por línea (el
-    `●` de antes sobraba al lado de la barra).
+    `●` de antes sobraba al lado de la barra, y ahora además es del usuario).
+    La medida va pegada al margen derecho, en su propia columna.
     """
+    from rich.text import Text
+
+    left = Text()
     padded = f"{verb:<{VERB_WIDTH}}"
     if readonly:
-        line = f"{rail()}[lx.dim]{padded}[/][lx.dim2]{esc(target)}[/]"
+        left.append(f"{g('rail')} ", style="lx.rule")
+        left.append(padded, style="lx.dim")
+        left.append(str(target), style="lx.dim2")
     else:
-        line = f"{rail(hot=True)}[bold lx.primary]{padded}[/][lx.beige]{esc(target)}[/]"
+        left.append(f"{g('rail_hot')} ", style="lx.accent2")
+        left.append(padded, style="bold lx.primary")
+        left.append(str(target), style="lx.beige")
+
+    right = Text()
     if adds or dels:
-        line += f"  [lx.diff.add]+{adds}[/] [lx.diff.del]-{dels}[/]"
-    console.print(line)
+        right.append(f"+{adds}", style="lx.diff.add")
+        right.append(" ")
+        right.append(f"-{dels}", style="lx.diff.del")
+    elif meta:
+        right.append(str(meta), style="lx.dim2")
+    console.print(two_col(left, right, row_width(console)))
 
 
-def render_action_result(console, text: str, error: bool = False) -> None:
+def render_action_result(console, text: str, error: bool = False, meta: str = "") -> None:
     """Resultado de una acción, colgando de ella dentro del canal."""
-    style = "lx.err" if error else "lx.dim2"
-    console.print(f"{rail()}[lx.dim2]{g('corner')}[/] [{style}]{esc(text)}[/]")
+    from rich.text import Text
+
+    if not error:
+        left = Text(f"{g('rail')} ", style="lx.rule")
+        left.append(f"{g('corner')} {text}", style="lx.dim2")
+        right = Text(meta, style="lx.dim2") if meta else None
+        console.print(two_col(left, right, row_width(console)))
+        return
+    # Un fallo se pinta como una fila de diff eliminado y llega hasta el margen:
+    # es lo único del registro que no puede pasar desapercibido.
+    width = row_width(console)
+    row = Text(f"{g('rail')} ", style="lx.rule")
+    body = Text(f"{g('corner')} {text}", style="lx.err.row")
+    tail = Text(f"{meta} " if meta else "", style="lx.err.row")
+    limit = max(6, width - 2 - tail.cell_len)
+    if body.cell_len > limit:
+        body.truncate(limit, overflow="ellipsis")
+    body.pad_right(max(0, limit - body.cell_len))
+    console.print(row.append_text(body).append_text(tail))
 
 
-def render_log_line(console, text: str, style: str = "lx.dim") -> None:
+def render_log_line(console, text: str, style: str = "lx.dim", meta: str = "") -> None:
     """Línea suelta del registro (salida de un comando, nota de una acción)."""
-    console.print(f"{rail()}[{style}]{esc(text)}[/]")
+    from rich.text import Text
+
+    left = Text(f"{g('rail')} ", style="lx.rule")
+    left.append(str(text), style=style)
+    right = Text(meta, style="lx.dim2") if meta else None
+    console.print(two_col(left, right, row_width(console)))
+
+
+def render_turn_summary(console, actions: int = 0, files: int = 0, adds: int = 0,
+                        dels: int = 0, seconds: float = 0.0, hint: str = "") -> None:
+    """Cierre del registro: qué ha pasado en el turno, en una línea.
+
+    Es lo que permite hojear una sesión larga sin leer cada acción.
+    """
+    if not actions:
+        return
+    from rich.text import Text
+
+    left = Text(f"{g('rail')} ", style="lx.rule")
+    left.append(f"{actions} {'acción' if actions == 1 else 'acciones'}", style="lx.dim")
+    if files:
+        left.append(f" {g('sep')} ", style="lx.dim2")
+        left.append(f"{files} {'archivo' if files == 1 else 'archivos'}", style="lx.dim")
+    if adds or dels:
+        left.append(f" {g('sep')} ", style="lx.dim2")
+        left.append(f"+{adds}", style="lx.diff.add")
+        left.append(" ")
+        left.append(f"-{dels}", style="lx.diff.del")
+    if seconds:
+        left.append(f" {g('sep')} {seconds:.1f} s", style="lx.dim2")
+    right = Text(hint, style="lx.dim2") if hint else None
+    console.print(two_col(left, right, row_width(console)))
 
 
 # ── Selector interactivo (flechas + mouse) ──────────────────────────────────
@@ -1454,13 +1652,18 @@ MAX_VISIBLE = 10  # filas de opciones antes de paginar
 
 
 def select(title: str, options: list, default: int = 0, hint: str = "",
-           searchable: bool | None = None, max_visible: int = MAX_VISIBLE):
+           searchable: bool | None = None, max_visible: int = MAX_VISIBLE,
+           detail: str = "", rail_mode: bool = False):
     """Selector inline de la marca. Devuelve Option.value o None (Esc).
 
     Navegación: ↑/↓ (Ctrl+P/Ctrl+N), PgUp/PgDn, Inicio/Fin. Enter confirma,
     Esc/Ctrl+C cancela. Mouse: hover mueve la selección, clic confirma y la
     rueda desplaza. En listas largas escribir filtra (Backspace borra).
     En terminales sin soporte (Git Bash/mintty) degrada a texto plano.
+
+    `detail` es la medida de la cabecera (a la derecha) y `rail_mode` mete el
+    menú dentro del canal del registro: lo usan las aprobaciones, que
+    pertenecen a la acción que las provoca y no al prompt.
     """
 
     options = [o if isinstance(o, Option) else Option(str(o)) for o in options]
@@ -1473,14 +1676,124 @@ def select(title: str, options: list, default: int = 0, hint: str = "",
         if not ui_capable():
             return _select_plain(title, options, default)
         try:
-            return _select_app(title, options, default, hint, searchable, max_visible)
+            return _select_app(title, options, default, hint, searchable,
+                               max_visible, detail, rail_mode)
         except Exception:
             # La terminal mintió sobre sus capacidades: degradar en caliente
             return _select_plain(title, options, default)
 
 
+@dataclass
+class SelectLayout:
+    """Todo lo que el selector necesita para maquetar, sin estado de teclado."""
+    title: str
+    hint: str
+    detail: str
+    searchable: bool
+    total: int
+    width: int
+    label_width: int
+    max_visible: int
+    rail_mode: bool = False
+
+
+def select_rows(options: list, state: dict, layout: SelectLayout,
+                handler_for=None) -> list:
+    """Las filas del selector como fragmentos de prompt_toolkit.
+
+    Función aparte (y no un closure del selector) para poder medirla: es la
+    maquetación compartida por /help, /model, /config y las aprobaciones, y lo
+    que la hace legible es que todo cuadre al carácter.
+    """
+    edge = g("edge")
+    width = layout.width
+
+    def prefix(handler=None) -> list:
+        cell = ("class:sel.rail", f"{g('rail')} ") if layout.rail_mode else ("", "  ")
+        return [(*cell, handler)] if handler else [cell]
+
+    def handler(position):
+        return handler_for(position) if handler_for is not None else None
+
+    count = len(state["matches"])
+    window = min(layout.max_visible, count)
+    out: list = []
+
+    # Cabecera: qué se está eligiendo y, al margen derecho, su medida.
+    head = prefix() + [("class:sel.title", layout.title)]
+    if state["query"]:
+        head += [("class:sel.hint", "  /"), ("class:sel.query", state["query"])]
+    if layout.detail:
+        measure = layout.detail
+    elif layout.searchable:
+        measure = f"{count} de {layout.total}"
+    else:
+        measure = f"{layout.total} opciones"
+    out += _fit(head, [("class:sel.count", measure)], width) + [("", "\n")]
+
+    if state["top"] > 0:
+        out += prefix() + [("class:sel.scroll",
+                            f"  {g('ellipsis')} {state['top']} arriba"), ("", "\n")]
+
+    for row in range(window):
+        position = state["top"] + row
+        opt = options[state["matches"][position]]
+        mouse = handler(position)
+        active = position == state["cursor"]
+        label = opt.label.ljust(layout.label_width)
+        badge = [("class:sel.badge", f"{opt.badge}  ", mouse)] if opt.badge else []
+        line = prefix(mouse)
+
+        if opt.disabled:
+            # Cabecera de grupo: el nombre y una regla hasta el margen. Es lo
+            # único que agrupa la lista, así que tiene que leerse como
+            # separador y no como una opción apagada.
+            line += [("class:sel.group", f"{opt.label} ", mouse)]
+            used = sum(len(text) for _style, text, *_ in line)
+            line += [("class:sel.rule", g("rule") * max(0, width - used), mouse)]
+            out += line + [("", "\n")]
+            continue
+
+        if active:
+            line += [("class:sel.edge", edge, mouse),
+                     ("class:sel.row.label", f" {label}", mouse)]
+            if opt.description:
+                line += [("class:sel.row.desc", opt.description, mouse)]
+            badge = [("class:sel.row.badge", f"{opt.badge}  ", mouse)] if opt.badge else []
+        else:
+            line += [("", " ", mouse), ("class:sel.option", f" {label}", mouse)]
+            if opt.description:
+                line += [("class:sel.option.desc", opt.description, mouse)]
+        out += _fit(line, badge, width) + [("", "\n")]
+
+    rest = count - state["top"] - window
+    if rest > 0:
+        out += prefix() + [("class:sel.scroll",
+                            f"  {g('ellipsis')} {rest} abajo"), ("", "\n")]
+    if not count:
+        out += prefix() + [("class:sel.disabled", "  sin coincidencias"), ("", "\n")]
+
+    out += prefix() + [("class:sel.hint", layout.hint), ("", "\n")]
+    return out
+
+
+def _fit(parts: list, right: list, width: int) -> list:
+    """Rellena entre `parts` y `right` para que lo de la derecha quede al margen.
+
+    El relleno hereda el estilo del último fragmento de la izquierda: en la fila
+    marcada eso es lo que mantiene el fondo de punta a punta en vez de cortarlo
+    donde acaba el texto.
+    """
+    used = sum(len(text) for _style, text, *_ in parts + right)
+    if used < width:
+        style = parts[-1][0] if parts else ""
+        parts = parts + [(style, " " * (width - used))]
+    return parts + right
+
+
 def _select_app(title: str, options: list, default: int, hint: str,
-                searchable: bool | None, max_visible: int):
+                searchable: bool | None, max_visible: int,
+                detail: str = "", rail_mode: bool = False):
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
@@ -1492,10 +1805,14 @@ def _select_app(title: str, options: list, default: int, hint: str,
     if searchable is None:
         searchable = total > SEARCH_THRESHOLD
     if not hint:
-        hint = ("escribe para filtrar  ↑↓ mover  ↵ elegir  esc salir"
-                if searchable else "↑↓ mover  ↵ elegir  esc salir")
+        hint = (f"escribe para filtrar {g('sep')} ↑↓ mover {g('sep')} ↵ elegir {g('sep')} esc salir"
+                if searchable else f"↑↓ mover {g('sep')} ↵ elegir {g('sep')} esc salir")
 
-    pointer = g("prompt")
+    width = inner_width()
+    # Columna de etiquetas: alinea las descripciones entre filas. Se mide sobre
+    # las opciones reales, no sobre las cabeceras de grupo (que no se eligen).
+    labels = [len(o.label) for o in options if not o.disabled] or [8]
+    label_width = min(max(labels) + 2, max(12, width // 3))
     state = {
         "matches": list(range(total)),
         "cursor": max(0, min(default, total - 1)),
@@ -1580,53 +1897,14 @@ def _select_app(title: str, options: list, default: int, hint: str,
                 return NotImplemented
         return handler
 
+    layout = SelectLayout(
+        title=title, hint=hint, detail=detail, searchable=searchable,
+        total=total, width=width, label_width=label_width,
+        max_visible=max_visible, rail_mode=rail_mode,
+    )
+
     def fragments():
-        count = len(state["matches"])
-        window = min(max_visible, count)
-        out: list = [("", "  "), ("class:sel.mark", f"{g('spark')} "),
-                     ("class:sel.title", title)]
-        if state["query"]:
-            out += [("class:sel.hint", "  /"), ("class:sel.query", state["query"])]
-        if searchable:
-            out.append(("class:sel.count", f"   {count}/{total}"))
-        out.append(("", "\n"))
-
-        if state["top"] > 0:
-            out += [("", "    "), ("class:sel.scroll", f"{g('ellipsis')} {state['top']} arriba\n")]
-
-        for row in range(window):
-            position = state["top"] + row
-            index = state["matches"][position]
-            opt = options[index]
-            handler = _mouse_handler_for(position)
-            active = position == state["cursor"]
-            out.append(("", "  "))
-            if opt.disabled:
-                out += [("", "  ", handler), ("class:sel.disabled", opt.label, handler)]
-                if opt.description:
-                    out.append(("class:sel.disabled", f"  {g('sep')} {opt.description}", handler))
-            elif active:
-                out += [("class:sel.pointer", f"{pointer} ", handler),
-                        ("class:sel.active", opt.label, handler)]
-                if opt.description:
-                    out.append(("class:sel.active.desc", f"  {g('sep')} {opt.description}", handler))
-            else:
-                out += [("", "  ", handler), ("class:sel.option", opt.label, handler)]
-                if opt.description:
-                    out.append(("class:sel.option.desc", f"  {g('sep')} {opt.description}", handler))
-            if opt.badge:
-                style = "class:sel.badge.active" if active and not opt.disabled else "class:sel.badge"
-                out.append((style, f"  {opt.badge}", handler))
-            out.append(("", "\n"))
-
-        rest = count - state["top"] - window
-        if rest > 0:
-            out += [("", "    "), ("class:sel.scroll", f"{g('ellipsis')} {rest} abajo\n")]
-        if not count:
-            out += [("", "    "), ("class:sel.disabled", "sin coincidencias\n")]
-
-        out += [("", "  "), ("class:sel.hint", hint), ("", "\n")]
-        return out
+        return select_rows(options, state, layout, _mouse_handler_for)
 
     kb = KeyBindings()
 
@@ -1712,14 +1990,17 @@ def _select_app(title: str, options: list, default: int, hint: str,
     repaint_status()  # erase_when_done borra hasta el pie: la barra vuelve
 
     console = make_console()
+    # Rastro de lo elegido. Sin el `✦` de antes: ese signo abre lo que dice
+    # Lixbon y aquí quien ha decidido es el usuario.
+    prefix = rail() if rail_mode else ""
     if state["accepted"] and state["matches"]:
         chosen = options[state["matches"][state["cursor"]]]
         console.print(
-            f"[lx.dim]{g('spark')}[/] [lx.primary]{esc(title)}[/] "
-            f"[lx.dim2]{g('sep')}[/] [lx.accent2]{esc(chosen.label)}[/]"
+            f"{prefix}[lx.dim]{esc(title)}[/]  [lx.dim2]{g('sep')}[/]  "
+            f"[lx.accent2]{esc(chosen.label.strip())}[/]"
         )
         return chosen.value
-    console.print(f"[lx.dim2]{g('spark')} {esc(title)} {g('sep')} cancelado[/]")
+    console.print(f"{prefix}[lx.dim2]{esc(title)}  {g('sep')}  cancelado[/]")
     return None
 
 
@@ -1757,15 +2038,22 @@ def _select_plain(title: str, options: list, default: int):
         console.print(f"[lx.warn]{'Varias coincidencias' if matches else 'Sin coincidencias'}; sé más específico.[/]")
 
 
-def confirm3(question: str):
-    """Aprobación de 3 vías estilo Claude Code: 'yes' | 'always' | 'no' | None."""
+def confirm3(question: str, detail: str = ""):
+    """Aprobación de 3 vías: 'yes' | 'always' | 'no' | None.
+
+    Va dentro del canal y con la acción a la que pertenece a la derecha: la
+    pregunta cuelga del cambio que la provoca, no del prompt.
+    """
     return select(
         question,
         [
-            Option("Sí", "yes", "aplicar este cambio"),
+            Option("Sí", "yes", "aplicar y seguir"),
             Option("Sí, y no preguntar más", "always", "auto-aprobar el resto de la sesión"),
             Option("No", "no", "rechazar y decirle al agente que no"),
         ],
+        detail=detail,
+        rail_mode=True,
+        hint=f"↑↓ mover {g('sep')} ↵ elegir {g('sep')} esc = No",
     )
 
 
@@ -1779,10 +2067,30 @@ def fmt_tokens(n: int) -> str:
     return str(n)
 
 
-def context_bar(pct: float, width: int = 10) -> str:
+CONTEXT_CELLS = 8
+
+
+def context_bar(pct: float, width: int = CONTEXT_CELLS) -> str:
     pct = max(0.0, min(100.0, pct))
     filled = round(width * pct / 100)
     return g("bar_full") * filled + g("bar_empty") * (width - filled)
+
+
+# Umbrales de la barra de contexto. El color avisa antes que el texto: cuando
+# la barra se pone ámbar aún hay margen para /compact; en rojo ya no.
+CTX_WARN = 60.0
+CTX_FULL = 85.0
+
+# Traducción de las clases de prompt_toolkit a estilos rich, para que la barra
+# se vea igual la pinte quien la pinte (el prompt o la fila reservada).
+_BAR_STYLES = {
+    "class:bottom-toolbar.dot": "lx.accent2",
+    "class:bottom-toolbar.ok": "lx.ok",
+    "class:bottom-toolbar.warn": "lx.warn",
+    "class:bottom-toolbar.err": "lx.err",
+    "class:bottom-toolbar.model": "lx.beige",
+    "class:bottom-toolbar.sep": "lx.dim2",
+}
 
 
 @dataclass
@@ -1796,52 +2104,76 @@ class StatusBar:
     extra: str = ""
     web: bool = False       # búsqueda web activa (/web)
     project: bool = False   # hay LIXBON.md cargado en el workspace
+    online: bool | None = None  # None: todavía sin saberlo
+    remote: bool = False        # /remote activo: manda el móvil
 
-    def _parts(self) -> list[tuple[str, str]]:
+    # La barra se lee en dos mitades: a la izquierda QUIÉN eres y con qué
+    # trabajas (no cambia casi nunca); a la derecha CUÁNTO llevas gastado (se
+    # mueve en cada turno). Antes todo iba apelotonado a la izquierda y el ojo
+    # tenía que recorrer la fila entera para encontrar el contexto.
+
+    def _dot_class(self) -> str:
+        if self.online is False:
+            return "class:bottom-toolbar.err"
+        if self.extra or self.online is None:
+            return "class:bottom-toolbar.dot"
+        return "class:bottom-toolbar.ok"
+
+    def _ctx_class(self) -> str:
+        if self.ctx_pct >= CTX_FULL:
+            return "class:bottom-toolbar.err"
+        if self.ctx_pct >= CTX_WARN:
+            return "class:bottom-toolbar.warn"
+        return "class:bottom-toolbar.dot"
+
+    def _left(self) -> list[tuple[str, str]]:
         sep = ("class:bottom-toolbar.sep", f"  {g('sep')}  ")
         parts = [
-            ("class:bottom-toolbar.dot", f" {g('dot')} "),
-            ("class:bottom-toolbar.model", self.model or "sin modelo"),
+            (self._dot_class(), f" {g('dot')}"),
+            ("class:bottom-toolbar.model", f" {self.model or 'sin modelo'}"),
             sep,
             ("class:bottom-toolbar", self.session_label),
         ]
         if self.mode and self.mode != "ask":
-            parts += [sep, ("class:bottom-toolbar.model", f"modo {self.mode}")]
-        parts += [
-            sep,
-            ("class:bottom-toolbar", f"contexto {context_bar(self.ctx_pct)} {self.ctx_pct:.0f}%"),
-            sep,
-            ("class:bottom-toolbar", f"{fmt_tokens(self.tokens)} tokens"),
-        ]
-        # Solo se anuncian los modos ACTIVOS: una barra llena de "off" es ruido.
-        flags = []
-        if self.web:
-            flags.append("web")
-        if self.project:
-            flags.append("LIXBON.md")
-        if flags:
-            parts += [sep, ("class:bottom-toolbar.model", " ".join(flags))]
-        parts += [sep, ("class:bottom-toolbar", self.encoding + " ")]
+            parts += [sep, ("class:bottom-toolbar.model", self.mode)]
+        if self.remote:
+            parts += [sep, ("class:bottom-toolbar.dot", "móvil conectado")]
         if self.extra:
             parts += [sep, ("class:bottom-toolbar.dot", self.extra)]
         return parts
 
-    def _compact_parts(self) -> list[tuple[str, str]]:
-        """Versión corta para el pie del stream: cabe en una línea y no repite
-        lo que ya está en la cabecera (sesión, encoding)."""
+    def _right(self, compact: bool = False) -> list[tuple[str, str]]:
         sep = ("class:bottom-toolbar.sep", f"  {g('sep')}  ")
-        return [
-            ("class:bottom-toolbar.dot", f"{g('dot')} "),
-            ("class:bottom-toolbar.model", self.model or "sin modelo"),
-            sep,
-            ("class:bottom-toolbar", f"contexto {context_bar(self.ctx_pct, 8)} {self.ctx_pct:.0f}%"),
+        parts = [
+            ("class:bottom-toolbar", "contexto "),
+            (self._ctx_class(), context_bar(self.ctx_pct)),
+            ("class:bottom-toolbar", f" {self.ctx_pct:.0f}%"),
             sep,
             ("class:bottom-toolbar", f"{fmt_tokens(self.tokens)} tokens"),
         ]
+        if compact:
+            return parts
+        # Solo se anuncian los modos ACTIVOS: una barra llena de "off" es ruido.
+        flags = [name for name, on in (("web", self.web), ("LIXBON.md", self.project)) if on]
+        if flags:
+            parts += [sep, ("class:bottom-toolbar.model", " ".join(flags))]
+        if self.ctx_pct >= CTX_FULL:
+            parts += [sep, ("class:bottom-toolbar.warn", "/compact")]
+        parts += [sep, ("class:bottom-toolbar", f"{self.encoding} ")]
+        return parts
+
+    def _parts(self, width: int = 0, compact: bool = False) -> list[tuple[str, str]]:
+        left, right = self._left(), self._right(compact)
+        if not width:
+            return left + [("class:bottom-toolbar.sep", f"  {g('sep')}  ")] + right
+        used = sum(len(text) for _style, text in left + right)
+        gap = max(2, width - used)
+        return left + [("class:bottom-toolbar", " " * gap)] + right
 
     def pt_toolbar(self):
         """Fragmentos para bottom_toolbar de prompt_toolkit."""
-        return self._parts()
+
+        return self._parts(width=term_size()[0])
 
     def rich_line(self, compact: bool = False, bar: bool = False, width: int = 0):
         """La misma barra como línea rich.
@@ -1853,19 +2185,120 @@ class StatusBar:
         from rich.text import Text
 
         text = Text(style="lx.bar" if bar else "")
-        for style_cls, chunk in (self._compact_parts() if compact else self._parts()):
-            if style_cls == "class:bottom-toolbar.dot":
-                text.append(chunk, style="lx.accent2")
-            elif style_cls == "class:bottom-toolbar.model":
-                text.append(chunk, style="lx.beige")
-            elif style_cls == "class:bottom-toolbar.sep":
-                text.append(chunk, style="lx.dim2")
-            else:
-                text.append(chunk, style="lx.dim")
+        for style_cls, chunk in self._parts(width=width, compact=compact):
+            text.append(chunk, style=_BAR_STYLES.get(style_cls, "lx.dim"))
         if width:
             # Relleno hasta el borde: sin él el fondo acabaría a media fila.
             text.pad_right(max(0, width - text.cell_len))
         return text
+
+
+# ── Markdown de las respuestas ──────────────────────────────────────────────
+#
+# rich trae su propio look: el h1 centrado, el código en monokai y los enlaces
+# en azul. Nada de eso es de la marca, así que se sustituyen los dos elementos
+# que se ven: los títulos (siempre a la izquierda, como el resto del CLI) y los
+# bloques de código (caja redonda en dim2 con el lenguaje sobre el borde).
+
+_markdown_class = None
+
+
+def _build_markdown_class():
+    from pygments.token import Comment, Keyword, Name, Number, Operator, String, Token
+    from rich.box import ROUNDED
+    from rich.markdown import CodeBlock, Heading, Markdown
+    from rich.panel import Panel
+    from rich.style import Style
+    from rich.syntax import ANSISyntaxTheme, Syntax
+
+    code_theme = ANSISyntaxTheme({
+        Token: Style(color=PALETTE["cream"]),
+        Comment: Style(color=PALETTE["dim2"], italic=True),
+        Keyword: Style(color=PALETTE["olive_lt"], bold=True),
+        Name.Builtin: Style(color=PALETTE["olive_lt"]),
+        Name.Class: Style(color=PALETTE["beige"]),
+        Name.Function: Style(color=PALETTE["cream"]),
+        Number: Style(color=PALETTE["beige"]),
+        String: Style(color=PALETTE["beige"]),
+        Operator: Style(color=PALETTE["dim"]),
+    })
+
+    class LixbonHeading(Heading):
+        LEVEL_ALIGN = {f"h{level}": "left" for level in range(1, 7)}
+
+    class LixbonCodeBlock(CodeBlock):
+        def __rich_console__(self, console, options):
+            code = str(self.text).rstrip()
+            syntax = Syntax(code, self.lexer_name, theme=code_theme,
+                            word_wrap=True, background_color=PALETTE["panel"])
+            language = self.lexer_name if self.lexer_name not in ("", "text") else ""
+            yield Panel(syntax, box=ROUNDED, border_style="lx.rule",
+                        title=language or None, title_align="left",
+                        padding=(0, 1), expand=True)
+
+    class LixbonMarkdown(Markdown):
+        elements = {**Markdown.elements,
+                    "heading_open": LixbonHeading,
+                    "fence": LixbonCodeBlock,
+                    "code_block": LixbonCodeBlock}
+
+    return LixbonMarkdown
+
+
+def markdown(text: str):
+    """El Markdown de una respuesta, con el look del CLI."""
+    global _markdown_class
+    if _markdown_class is None:
+        _markdown_class = _build_markdown_class()
+    return _markdown_class(text or "")
+
+
+# ── Caja de entrada ─────────────────────────────────────────────────────────
+
+INPUT_PLACEHOLDER = "escribe, o pulsa / para los comandos"
+
+
+def input_box_kwargs() -> dict:
+    """Opciones visuales de la caja de entrada, para `PromptSession`.
+
+    Viven aquí (y no sueltas en el loop) porque el alto de la caja depende de
+    la combinación exacta: con `complete_while_typing` prompt_toolkit reserva
+    SIEMPRE el hueco del menú y la caja pasa de tres filas a doce. El menú lo
+    abre el propio CLI cuando hay algo que completar.
+    """
+    return {
+        # El Frame no deja margen interior: el aire entre el borde y el punto
+        # lo pone el prompt, y la continuación lo repite para que una línea
+        # larga siga alineada con el texto y no con el borde.
+        "message": [("", " "), ("class:prompt", f"{g('dot')} ")],
+        "prompt_continuation": lambda width, line_number, wrap_count: "   ",
+        "placeholder": [("class:placeholder", INPUT_PLACEHOLDER)],
+        "show_frame": UNICODE_OK,
+        # Al enviar, la caja se borra sola y el CLI reimprime el mensaje como
+        # burbuja: lo que queda en el transcript no es el prompt, es el mensaje.
+        "erase_when_done": True,
+        "complete_while_typing": False,
+        "reserve_space_for_menu": 8,
+    }
+
+
+def round_frame_border() -> None:
+    """Esquinas redondas en la caja del prompt (`show_frame` de prompt_toolkit).
+
+    Su widget `Frame` tiene los caracteres de borde en atributos de clase y no
+    admite pasarlos, así que se cambian antes de construir la sesión: el Frame
+    los lee al montar el layout. Redondas para que la caja case con los bloques
+    de código, que usan el mismo juego.
+    """
+    if not UNICODE_OK:
+        return
+    try:
+        from prompt_toolkit.widgets.base import Border
+
+        Border.TOP_LEFT, Border.TOP_RIGHT = "╭", "╮"
+        Border.BOTTOM_LEFT, Border.BOTTOM_RIGHT = "╰", "╯"
+    except Exception:
+        pass  # sin esquinas redondas la caja sigue siendo una caja
 
 
 # ── Espera / errores ────────────────────────────────────────────────────────
@@ -1877,15 +2310,19 @@ def spinner(text: str):
 
 
 def print_error(message: str) -> None:
-    make_console().print(f"[lx.err]{g('cross')} {esc(message)}[/]")
+    make_console().print(f"  [lx.err]{g('cross')}[/] [lx.primary]{esc(message)}[/]")
 
 
 def print_ok(message: str) -> None:
-    make_console().print(f"[lx.ok]{g('check')} {esc(message)}[/]")
+    make_console().print(f"  [lx.ok]{g('check')}[/] [lx.primary]{esc(message)}[/]")
+
+
+def print_warn(message: str) -> None:
+    make_console().print(f"  [lx.warn]![/] [lx.primary]{esc(message)}[/]")
 
 
 def print_note(message: str) -> None:
-    make_console().print(f"[lx.dim]{esc(message)}[/]")
+    make_console().print(f"    [lx.dim2]{esc(message)}[/]")
 
 
 # ── Demo (comando dev oculto) ───────────────────────────────────────────────
@@ -1895,30 +2332,45 @@ def ui_demo() -> int:
     from pathlib import Path
 
     render_header(console, "2.0.0-demo", model="modelo-demo", plan="Pro",
-                  workspace=Path.cwd())
+                  workspace=Path.cwd(), branch="master", mode="agent")
     render_tips(console)
     rule(console, "conversación")
-    render_user_message(console, "arregla el parseo de comillas simples")
+    render_user_message(console, "arregla el parseo de comillas simples en el import")
     console.print()
     render_log_line(console, f"{g('spark_alt')} pensó 3.2 s", "lx.dim2")
-    render_action(console, "leyó", "src/app.py", readonly=True)
+    render_action(console, "leyó", "src/app.py", readonly=True, meta="128 líneas")
     render_action(console, "editó", "src/app.py", adds=12, dels=3)
     console.print(f"{rail()}[lx.diff.hunk]@@ -120,6 +120,8 @@[/]")
     console.print(f"{rail()}[lx.diff.add]+    return _loads_lenient(raw)[/]")
     console.print(f"{rail()}[lx.diff.del]-    return json.loads(raw)[/]")
-    render_action_result(console, "1 reemplazo aplicado")
+    render_action_result(console, "1 reemplazo aplicado", meta=f"{g('check')} 0.2 s")
+    render_action_result(console, "[ERROR] la ruta queda fuera del workspace", error=True)
+    render_turn_summary(console, actions=4, files=1, adds=12, dels=3, seconds=8.1,
+                       hint="/diff para revisarlo")
     console.print()
-    render_speaker(console)
-    console.print("El parser ya acepta las comillas simples que emite el modelo.")
+    render_speaker(console, meta=f"modelo-demo  {g('sep')}  8.1 s  {g('sep')}  1.4k tokens")
+    console.print(markdown(
+        "El parser ya acepta las comillas simples que emite el modelo.\n\n"
+        "## Qué cambié\n\n"
+        "- `parse()` captura `JSONDecodeError`\n"
+        "- `_loads_lenient()` normaliza y reintenta\n\n"
+        "```python\n"
+        "def parse(raw: str) -> dict:\n"
+        "    try:\n"
+        "        return json.loads(raw)\n"
+        "    except json.JSONDecodeError:\n"
+        "        return _loads_lenient(raw)\n"
+        "```\n"
+    ))
     console.print()
 
     choice = select("Método de acceso", [
-        Option("Credenciales", "creds", "correo y contraseña"),
-        Option("Clave de API", "key", "folax_sk_…"),
+        Option("Credenciales", "creds", "correo y contraseña", badge="actual"),
+        Option("Clave de API", "key", "lixbon_sk_…"),
     ])
     console.print(f"[lx.dim]elegido:[/] {choice!r}")
 
-    decision = confirm3("¿Aplicar este cambio?")
+    decision = confirm3("¿Aplicar este cambio?", detail=f"src/app.py {g('sep')} +12 -3")
     console.print(f"[lx.dim]decisión:[/] {decision!r}")
 
     console.print(f"\n[lx.ok]+ línea añadida[/]\n[lx.err]- línea eliminada[/]\n[lx.thinking]así se ve el thinking del modelo…[/]\n")
@@ -2070,21 +2522,27 @@ def diff_counts(change: FileChange) -> tuple[int, int]:
 
 # ── Pintado ─────────────────────────────────────────────────────────────────
 
-def render_change(console, change: FileChange, max_rows: int = DIFF_MAX_ROWS) -> None:
-    """Imprime la acción (`┃ editó  ruta  +12 -3`) y el diff con números."""
+def render_change(console, change: FileChange,
+                  max_rows: int = DIFF_MAX_ROWS) -> tuple[int, int]:
+    """Imprime la acción (`┃ editó  ruta  +12 -3`) y el diff con números.
+
+    Devuelve las líneas añadidas y eliminadas: quien llama las necesita para el
+    resumen del turno y recalcularlas cuesta otro diff completo del archivo.
+    """
     if change.kind == "command":
         render_action(console, change.verb, change.detail)
-        return
+        return (0, 0)
     if change.kind == "rename":
         render_action(console, change.verb, f"{change.path} {g('arrow')} {change.detail}")
-        return
+        return (0, 0)
     if change.kind == "mkdir":
         render_action(console, change.verb, change.path)
-        return
+        return (0, 0)
 
     adds, dels = diff_counts(change)
     render_action(console, change.verb, change.path, adds=adds, dels=dels)
     render_diff(console, diff_rows(change), max_rows=max_rows)
+    return (adds, dels)
 
 
 def render_diff(console, rows: list[tuple[str, int, int, str]],
@@ -2129,10 +2587,10 @@ def render_diff(console, rows: list[tuple[str, int, int, str]],
         console.print(line)
 
     if len(rows) > max_rows:
-        console.print(
-            f"{rail()}[lx.dim2]{' ' * (num_width + 2)}"
-            f"{g('ellipsis')} {len(rows) - max_rows} líneas más[/]"
-        )
+
+        left = Text(f"{g('rail')} {' ' * (num_width + 2)}{g('ellipsis')}", style=PALETTE["dim2"])
+        right = Text(f"{len(rows) - max_rows} líneas más", style=PALETTE["dim2"])
+        console.print(two_col(left, right, row_width(console)))
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/clipboard.py
@@ -2798,6 +3256,7 @@ En ambos casos se pide aprobación (con vista previa del diff) antes de ejecutar
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -3659,11 +4118,16 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
                     "he parado. Dime cómo seguir."), working
 
         combined_results = []
-        for call in tool_calls:
-            tool_name = call.get("tool", "")
-            args = call.get("args", {})
-            result = _approve_and_run(console, workspace, session, tool_name, args)
-            combined_results.append(f"TOOL_RESULT {tool_name}: {clip_tool_output(result)}")
+        for group in _group_reads(tool_calls):
+            if len(group) > 1:
+                results = _run_read_group(console, workspace, session, group)
+            else:
+                call = group[0]
+                results = [_approve_and_run(console, workspace, session,
+                                            call.get("tool", ""), call.get("args", {}))]
+            for call, result in zip(group, results):
+                combined_results.append(
+                    f"TOOL_RESULT {call.get('tool', '')}: {clip_tool_output(result)}")
 
         working.append({"role": "user", "content": "\n".join(combined_results)})
 
@@ -3671,26 +4135,100 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
             "para no seguir a ciegas. Dime «continúa» si quieres que siga desde donde iba."), working
 
 
+def turn_stats(session: dict) -> dict:
+    """Contadores del turno en curso, para el resumen que lo cierra."""
+    return session.setdefault(
+        "turn_stats", {"actions": 0, "files": set(), "adds": 0, "dels": 0})
+
+
+# Medida de una lectura: se saca del propio resultado, así que la acción se
+# imprime DESPUÉS de ejecutar. Una lectura no pide permiso, así que el orden en
+# pantalla es el mismo y a cambio la columna de la derecha dice algo.
+def _read_meta(tool_name: str, result: str) -> str:
+    lines = result.count("\n") + 1 if result else 0
+    if tool_name == "read_file":
+        return f"{lines} líneas"
+    if tool_name == "search":
+        return f"{lines} coincidencia" + ("" if lines == 1 else "s")
+    if tool_name == "list_files":
+        return f"{lines} entrada" + ("" if lines == 1 else "s")
+    return ""
+
+
+def _group_reads(tool_calls: list[dict]) -> list[list[dict]]:
+    """Parte las llamadas de un paso en grupos: las lecturas seguidas van juntas.
+
+    Cuando el modelo pide tres archivos de golpe, tres líneas iguales no dicen
+    más que una: `leyó  3 archivos` y los nombres debajo.
+    """
+    groups: list[list[dict]] = []
+    for call in tool_calls:
+        if call.get("tool") == "read_file" and groups and groups[-1][0].get("tool") == "read_file":
+            groups[-1].append(call)
+        else:
+            groups.append([call])
+    return groups
+
+
+def _run_read_group(console, workspace: Path, session: dict, calls: list[dict]) -> list[str]:
+    remote = session.get("remote")
+    stats = turn_stats(session)
+    results: list[str] = []
+    names: list[str] = []
+    lines = 0
+    for call in calls:
+        args = call.get("args", {})
+        label = str(args.get("path") or ".")
+        result, failed, _elapsed = _execute(workspace, "read_file", args)
+        stats["actions"] += 1
+        results.append(result)
+        if failed:
+            render_action(console, TOOL_VERB["read_file"], label, readonly=True)
+            render_action_result(console, result.split("\n", 1)[0][:120], error=True)
+        else:
+            names.append(label.rsplit("/", 1)[-1])
+            lines += result.count("\n") + 1
+        if remote:
+            remote.emit("tool_use", tool="read_file", summary=label, readonly=True)
+            remote.emit("tool_result", tool="read_file",
+                        result=result[:REMOTE_RESULT_CHARS], error=failed)
+    if names:
+        render_action(console, TOOL_VERB["read_file"], f"{len(names)} archivos",
+                      readonly=True, meta=f"{lines} líneas")
+        listed = f" {g('sep')} ".join(names)
+        render_log_line(console, " " * VERB_WIDTH + listed, "lx.dim2")
+    return results
+
+
 def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, args: dict) -> str:
     # Con /remote activo, la sesión se maneja desde el móvil/web: los eventos
     # de herramientas viajan al controller y las aprobaciones se piden allí
     # (localmente no hay nadie al teclado durante el takeover).
     remote = session.get("remote")
+    stats = turn_stats(session)
 
     if tool_name in READ_ONLY_TOOLS:
         # Solo lectura: se ejecuta sin preguntar, con rastro discreto.
         label = args.get("path") or args.get("pattern") or "."
-        render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label), readonly=True)
+        result, failed, _elapsed = _execute(workspace, tool_name, args)
+        stats["actions"] += 1
+        render_action(console, TOOL_VERB.get(tool_name, tool_name), str(label),
+                     readonly=True, meta="" if failed else _read_meta(tool_name, result))
+        if failed:
+            render_action_result(console, result.split("\n", 1)[0][:120], error=True)
         if remote:
             remote.emit("tool_use", tool=tool_name, summary=str(label), readonly=True)
-        return _run(console, workspace, tool_name, args, remote)
+            remote.emit("tool_result", tool=tool_name,
+                        result=result[:REMOTE_RESULT_CHARS], error=failed)
+        return result
 
     try:
         change = compute_change(workspace, tool_name, args, resolve_safe_path)
     except Exception:
         change = None
+    counts = (0, 0)
     if change is not None:
-        render_change(console, change)
+        counts = render_change(console, change)
     else:
         render_action(console, TOOL_VERB.get(tool_name, tool_name), _args_summary(tool_name, args))
     if remote:
@@ -3706,7 +4244,8 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
                     render_action_result(console, "rechazado desde el control remoto", error=True)
                     return "Ejecución cancelada por el usuario"
             else:
-                decision = confirm3("¿Ejecutar este comando?")
+                decision = confirm3("¿Ejecutar este comando?",
+                                    detail=_args_summary(tool_name, args))
                 if decision == "always":
                     session["auto_run_commands"] = True
                 elif decision in ("no", None):
@@ -3718,25 +4257,44 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
                 render_action_result(console, "rechazado desde el control remoto", error=True)
                 return "Ejecución cancelada por el usuario"
         else:
-            decision = confirm3("¿Aplicar este cambio?")
+            detail = change.path if change is not None else _args_summary(tool_name, args)
+            if counts != (0, 0):
+                detail = f"{detail} {g('sep')} +{counts[0]} -{counts[1]}"
+            decision = confirm3("¿Aplicar este cambio?", detail=detail)
             if decision == "always":
                 session["auto_approve"] = True
             elif decision in ("no", None):
                 render_action_result(console, "rechazado por el usuario", error=True)
                 return "Ejecución cancelada por el usuario"
 
+    stats["actions"] += 1
+    if change is not None and change.kind != "command":
+        stats["files"].add(change.path)
+        stats["adds"] += counts[0]
+        stats["dels"] += counts[1]
     return _run(console, workspace, tool_name, args, remote)
 
 
-def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
+def _execute(workspace: Path, tool_name: str, args: dict) -> tuple[str, bool, float]:
+    """Ejecuta una herramienta. Devuelve (resultado, ha fallado, segundos)."""
+    started = time.monotonic()
     try:
         result = execute_tool_call(workspace, tool_name, args)
     except Exception as exc:
         result = f"[ERROR] {exc}"
     failed = (result.startswith("[ERROR]") or result.startswith("[TIMEOUT]")
               or (result.startswith("[EXIT ") and not result.startswith("[EXIT 0]")))
+    return result, failed, time.monotonic() - started
+
+
+def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
+    result, failed, elapsed = _execute(workspace, tool_name, args)
     if tool_name not in READ_ONLY_TOOLS or failed:
-        render_action_result(console, result.split("\n", 1)[0][:120], error=failed)
+        # El tiempo va en el resultado y no en la acción: la línea de la acción
+        # se imprime antes de ejecutar, porque es la que se aprueba.
+        meta = f"{g('cross') if failed else g('check')} {elapsed:.1f} s" if elapsed >= 0.1 else ""
+        render_action_result(console, result.split("\n", 1)[0][:120],
+                            error=failed, meta=meta)
     if remote:
         remote.emit("tool_result", tool=tool_name,
                     result=result[:REMOTE_RESULT_CHARS], error=failed)
@@ -4032,6 +4590,16 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
 
 COMMAND_GROUPS = ("conversación", "agente", "cuenta", "sistema")
 
+# El menú del prompt no puede pintar cabeceras de grupo, así que el grupo se
+# codifica en el COLOR del nombre. Las clases van sin acentos: prompt_toolkit
+# usa el nombre de clase como selector de estilo.
+GROUP_CLASS = {
+    "conversación": "class:cmd.conversacion",
+    "agente": "class:cmd.agente",
+    "cuenta": "class:cmd.cuenta",
+    "sistema": "class:cmd.sistema",
+}
+
 # Orden de presentación: por grupo (el del catálogo) y, dentro, alfabético.
 # El menú del prompt no puede pintar cabeceras, así que el orden es lo único
 # que agrupa visualmente; sin él son 31 comandos en desorden.
@@ -4063,13 +4631,166 @@ def common_command_prefix(names: list[str]) -> str:
     return shared
 
 
+# ── Archivos del workspace tras un `@` ──────────────────────────────────────
+#
+# Se busca en TODO el árbol por trozo de ruta, no carpeta a carpeta: escribir
+# `@par` tiene que encontrar `src/utils/parser.py` sin saber dónde está. El
+# árbol se cachea unos segundos: se consulta en cada tecla y recorrerlo cada vez
+# se notaba al escribir en proyectos grandes.
+
+_AT_TOKEN_RE = re.compile(r'@([^\s"]*)$')
+MAX_PATH_COMPLETIONS = 30
+MAX_INDEX_ENTRIES = 5000
+INDEX_TTL_SECONDS = 30.0
+
+_index_cache: dict[str, tuple[float, list[tuple[str, bool, int]]]] = {}
+
+
+def _fmt_size(size: int) -> str:
+    if size >= 1_000_000:
+        return f"{size / 1_000_000:.1f} MB"
+    if size >= 1000:
+        return f"{size / 1000:.1f} kB"
+    return f"{size} B"
+
+
+def workspace_index(workspace: Path) -> list[tuple[str, bool, int]]:
+    """Entradas `(ruta relativa, es carpeta, bytes)` del workspace, cacheadas."""
+    import time
+
+
+    key = str(workspace)
+    cached = _index_cache.get(key)
+    if cached and time.monotonic() - cached[0] < INDEX_TTL_SECONDS:
+        return cached[1]
+
+    entries: list[tuple[str, bool, int]] = []
+
+    def walk(directory: Path, depth: int) -> None:
+        if depth > 8 or len(entries) >= MAX_INDEX_ENTRIES:
+            return
+        try:
+            items = sorted(directory.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except OSError:
+            return
+        for item in items:
+            if len(entries) >= MAX_INDEX_ENTRIES:
+                return
+            rel = item.relative_to(workspace).as_posix()
+            if item.is_dir():
+                if item.name in IGNORED_TREE_DIRS:
+                    continue
+                entries.append((rel + "/", True, 0))
+                walk(item, depth + 1)
+            else:
+                try:
+                    size = item.stat().st_size
+                except OSError:
+                    size = 0
+                entries.append((rel, False, size))
+
+    walk(workspace, 1)
+    _index_cache[key] = (time.monotonic(), entries)
+    return entries
+
+
+def search_workspace(workspace: Path, query: str,
+                     limit: int = MAX_PATH_COMPLETIONS) -> list[tuple[str, bool, int]]:
+    """Entradas cuyo camino contiene `query`; primero las que empiezan por él."""
+    needle = query.replace("\\", "/").lower()
+    show_hidden = needle.rsplit("/", 1)[-1].startswith(".")
+    ranked = []
+    for rel, is_dir, size in workspace_index(workspace):
+        name = rel.rstrip("/").rsplit("/", 1)[-1]
+        if name.startswith(".") and not show_hidden:
+            continue
+        lower = rel.lower()
+        if needle and needle not in lower:
+            continue
+        rank = 0 if name.lower().startswith(needle) else (1 if lower.startswith(needle) else 2)
+        ranked.append((rank, rel.count("/"), rel, is_dir, size))
+    ranked.sort()
+    return [(rel, is_dir, size) for _rank, _depth, rel, is_dir, size in ranked[:limit]]
+
+
+def _path_completions(workspace: Path, token: str):
+    from prompt_toolkit.completion import Completion
+
+
+    for rel, is_dir, size in search_workspace(workspace, token):
+        if is_dir:
+            meta = "carpeta"
+        else:
+            kind = rel.rsplit(".", 1)[-1].lower() if "." in rel.rsplit("/", 1)[-1] else "archivo"
+            meta = f"{_fmt_size(size)} {g('sep')} {kind}"
+        text = f'"{rel}"' if " " in rel else rel  # el parser de @ admite comillas
+        yield Completion(text, start_position=-len(token), display=rel, display_meta=meta)
+
+
+def wants_completion(text: str) -> bool:
+    """¿Hay algo que completar en lo escrito hasta el cursor?
+
+    Lo consulta el prompt para abrir el menú (y reservarle hueco) solo cuando
+    toca, en vez de dejar `complete_while_typing` reservándolo siempre.
+    """
+    if _AT_TOKEN_RE.search(text):
+        return True
+    if not text.startswith("/"):
+        return False
+    return " " not in text or text.startswith("/model ")
+
+
+def make_marker_lexer():
+    """Pinta los marcadores `[IMG#n]` del prompt como fichas.
+
+    Solo restyla: los fragmentos tienen que medir lo mismo que el texto o el
+    cursor deja de caer donde se escribe.
+    """
+    from prompt_toolkit.lexers import Lexer
+
+    class MarkerLexer(Lexer):
+        def lex_document(self, document):
+            lines = document.lines
+
+            def get_line(index: int) -> list:
+                line = lines[index]
+                fragments, position = [], 0
+                for match in _IMG_MARKER_RE.finditer(line):
+                    if match.start() > position:
+                        fragments.append(("", line[position:match.start()]))
+                    fragments.append(("class:img-marker", match.group(0)))
+                    position = match.end()
+                if position < len(line):
+                    fragments.append(("", line[position:]))
+                return fragments
+
+            return get_line
+
+    return MarkerLexer()
+
+
+def slash_rprompt():
+    """Recuento de comandos que casan con lo escrito, al margen derecho de la caja."""
+    from prompt_toolkit.application import get_app
+
+    text = get_app().current_buffer.text
+    if not text.startswith("/") or " " in text:
+        return ""
+    return [("class:placeholder", f"{len(command_matches(text[1:]))} de {len(COMMAND_SPECS)} ")]
+
+
 def make_completer(app):
-    """Completer de prompt_toolkit: menú al escribir `/` y modelos en `/model `."""
+    """Completer de prompt_toolkit: comandos con `/`, modelos y rutas con `@`."""
     from prompt_toolkit.completion import Completer, Completion
 
     class SlashCompleter(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
+            # El `@` va primero: puede aparecer en cualquier parte del mensaje.
+            at_token = _AT_TOKEN_RE.search(text)
+            if at_token:
+                yield from _path_completions(app.workspace, at_token.group(1))
+                return
             if not text.startswith("/"):
                 return
             # Autocompletar el argumento de /model con los modelos cargados
@@ -4089,7 +4810,8 @@ def make_completer(app):
                 # siempre lo mismo, así los argumentos quedan en vertical y la
                 # lista se lee como una tabla y no como texto irregular.
                 display = [
-                    ("class:cmd.name", f"/{name}".ljust(COMMAND_NAME_WIDTH + 1)),
+                    (GROUP_CLASS.get(group, "class:cmd.name"),
+                     f"/{name}".ljust(COMMAND_NAME_WIDTH + 1)),
                     ("class:cmd.args", args),
                 ]
                 # Con argumento: dejar espacio final para encadenar el
@@ -4105,39 +4827,68 @@ def make_completer(app):
     return SlashCompleter()
 
 
-# ── Adjuntos de imagen ──────────────────────────────────────────────────────
+# ── Adjuntos (@ruta) ────────────────────────────────────────────────────────
 
-_AT_PATH_RE = re.compile(r'@(?:"([^"]+)"|(\S+))')
+# La puntuación pegada («@logo.png,») no forma parte de la ruta.
+_AT_PATH_RE = re.compile(r'@(?:"([^"]+)"|(\S+?))(?=[.,;:!?)\]]*(?:\s|$))')
+MAX_TEXT_ATTACHMENT_BYTES = 64 * 1024
 
 
 def _looks_like_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTS
 
 
-def parse_attachments(text: str, base_dir: Path) -> tuple[str, list[Path], list[str]]:
-    """Extrae rutas de imagen `@ruta` del mensaje.
+def parse_attachments(text: str, base_dir: Path) -> tuple[str, list[Path], list[tuple[str, str]], list[str]]:
+    """Extrae los `@ruta` del mensaje.
 
-    Devuelve (texto_limpio, imágenes, errores). Solo se tratan como adjunto
-    los @tokens que apuntan a una imagen; el resto del texto queda intacto.
+    Devuelve (texto_limpio, imágenes, archivos de texto, errores). Una imagen
+    viaja aparte (ChatMessage.images); un archivo de texto se adjunta como
+    `(ruta, contenido)` para que el modelo lo tenga aunque esté en modo ask,
+    donde no puede leerlo él. Un @token que no apunta a nada del disco se deja
+    tal cual: puede ser un usuario o un handle.
     """
     images: list[Path] = []
+    files: list[tuple[str, str]] = []
     errors: list[str] = []
 
     def _replace(match: re.Match) -> str:
         raw = match.group(1) or match.group(2)
         path = Path(raw)
         if not path.is_absolute():
-            path = (base_dir / path)
-        if not _looks_like_image(path):
-            return match.group(0)  # no es imagen: se deja tal cual
-        if not path.exists():
-            errors.append(f"No existe la imagen: {raw}")
-            return ""
-        images.append(path.resolve())
-        return path.name  # el texto conserva el nombre para dar contexto al modelo
+            path = base_dir / path
+        if _looks_like_image(path):
+            if not path.exists():
+                errors.append(f"No existe la imagen: {raw}")
+                return ""
+            images.append(path.resolve())
+            return path.name  # el texto conserva el nombre para dar contexto al modelo
+        if not path.is_file():
+            return match.group(0)
+        try:
+            if path.stat().st_size > MAX_TEXT_ATTACHMENT_BYTES:
+                errors.append(f"{raw} supera los 64 kB: pide al agente que lo lea por partes")
+                return raw
+            content = path.read_bytes().decode("utf-8").replace("\r\n", "\n")
+        except UnicodeDecodeError:
+            errors.append(f"{raw} no es un archivo de texto")
+            return raw
+        except OSError as exc:
+            errors.append(f"No se pudo leer {raw}: {exc}")
+            return raw
+        files.append((raw, content))
+        return raw
 
     clean = _AT_PATH_RE.sub(_replace, text).strip()
-    return clean, images, errors
+    return clean, images, files, errors
+
+
+def attachments_block(files: list[tuple[str, str]]) -> str:
+    """Los archivos adjuntos, listos para ir detrás del mensaje."""
+    parts = []
+    for name, content in files:
+        fence = "````" if "```" in content else "```"
+        parts.append(f"Archivo adjunto `{name}`:\n{fence}\n{content.rstrip()}\n{fence}")
+    return "\n\n".join(parts)
 
 
 def encode_image(path: Path) -> str:
@@ -4239,6 +4990,10 @@ class ChatApp:
         # para saber si hace falta aire entre el registro y la respuesta.
         self._spoke = False
         self._turn_mark = 0
+        # Medida del turno para el rótulo y el resumen: cuándo empezó y cuántos
+        # tokens ha costado (session_tokens es acumulado y no sirve aquí).
+        self._turn_started = 0.0
+        self._turn_tokens = 0
         # Teclado durante el turno: se puede escribir mientras el agente
         # trabaja y lo escrito se ejecuta cuando termina (nunca a mitad).
         self.input_queue = InputQueue() if self.cfg.get("input_queue", True) else None
@@ -4282,6 +5037,7 @@ class ChatApp:
         self.status.mode = self.mode
         self.status.web = self.web_search
         self.status.project = bool(self.project_context)
+        self.status.remote = self.remote is not None
         tokens, pct = self._estimate_context()
         self.status.tokens = self.session_tokens or tokens
         self.status.ctx_pct = pct
@@ -4326,7 +5082,9 @@ class ChatApp:
         total = int(usage.get("total_tokens") or 0)
         if total:
             self.session_tokens += total
+            self._turn_tokens += total
         # Recalibra la estimación chars/token con datos reales del server
+        self.status.online = True  # ha respondido el servidor: hay red
         chars = sum(len(m.get("content", "")) for m in self.history)
         if prompt_tokens > 50 and chars > 200:
             self.chars_per_token = max(1.5, min(8.0, chars / prompt_tokens))
@@ -4412,7 +5170,14 @@ class ChatApp:
     def _render_identity(self) -> None:
         """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
         render_header(self.console, CLI_VERSION, model=self.model,
-                      plan=self.plan_name, workspace=self.workspace)
+                      plan=self.plan_name, workspace=self.workspace,
+                      branch=self._branch(), mode=self.mode)
+
+    def _branch(self) -> str:
+        """Rama de git del workspace, si es un repo. Vacío si no lo es."""
+        code, out = self._git("rev-parse", "--abbrev-ref", "HEAD", timeout=5)
+        branch = out.strip().splitlines()[0] if out.strip() else ""
+        return branch if code == 0 and branch != "HEAD" else ""
 
     def _set_tab_title(self) -> None:
         """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon.
@@ -4437,6 +5202,12 @@ class ChatApp:
             self._set_tab_title()
 
     def _load_account_quietly(self) -> str:
+        """Igual que `_probe_account`, y además deja el punto de la barra al día."""
+        state = self._probe_account()
+        self.status.online = state != "offline"
+        return state
+
+    def _probe_account(self) -> str:
         """Modelos disponibles y plan del usuario, sin ruido si el server falla.
 
         Devuelve el estado de la sesión: `ok`, `auth` (la clave ya no sirve:
@@ -4574,6 +5345,11 @@ class ChatApp:
         elif exc.status == 429:
             print_error("Demasiadas peticiones seguidas; espera unos segundos.")
         else:
+            # Sin código HTTP no hubo respuesta: es la red, y el punto de la
+            # barra tiene que decirlo hasta que algo vuelva a funcionar.
+            if exc.status is None:
+                self.status.online = False
+                self._paint_status()
             print_error(str(exc))
 
     def onboarding_flow(self) -> bool:
@@ -4781,6 +5557,12 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
+        @kb.add("escape", "enter")
+        def _newline(event):
+            # Alt+Enter (Esc+Enter): salto de línea sin enviar. Shift+Enter no
+            # llega como tecla distinta a una terminal, así que este es el atajo.
+            event.current_buffer.insert_text("\n")
+
         @kb.add("escape", "v")
         def _paste(event):
             # Alt+V llega como Esc+v. El marcador se escribe en el buffer para
@@ -4816,6 +5598,13 @@ class ChatApp:
 
         return kb
 
+    def _autocomplete(self, buff) -> None:
+        """Abre o cierra el menú según lo escrito (ver `_prompt_loop`)."""
+        if wants_completion(buff.document.text_before_cursor):
+            buff.start_completion(select_first=False)
+        elif buff.complete_state is not None:
+            buff.cancel_completion()
+
     def _prompt_loop(self) -> int:
 
         if not ui_capable():
@@ -4827,20 +5616,23 @@ class ChatApp:
         from prompt_toolkit.history import FileHistory
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        round_frame_border()  # antes de construir: el Frame lee los bordes al montar
         session = PromptSession(
-            message=[("", "  "), ("class:prompt", f"{g('prompt')} ")],
+            **input_box_kwargs(),
             style=pt_style(),
             completer=make_completer(self),
-            complete_while_typing=True,
+            complete_in_thread=True,  # el índice de @ recorre el workspace: fuera del hilo del teclado
+            lexer=make_marker_lexer(),
+            rprompt=slash_rprompt,
             key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
             # Con la fila reservada la barra la pinta el CLI y queda fija; el
             # bottom_toolbar de prompt_toolkit solo vive mientras hay prompt
             # (por eso desaparecía al enviar), así que sería un duplicado.
             bottom_toolbar=None if status_line_active() else (lambda: self.status.pt_toolbar()),
-            reserve_space_for_menu=9,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
+        session.default_buffer.on_text_changed += self._autocomplete
         # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
         # instante (erase_down del primer render): nunca llegaba a verse.
         attach_status_repaint(session.app)
@@ -4862,6 +5654,7 @@ class ChatApp:
                 text = session.prompt(default=f"{partial} {prefill}".strip()).strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
+                repaint_status()
                 if now - self._interrupt_hint_at < 2.5:
                     print_note("Hasta pronto.")
                     return 0
@@ -4872,6 +5665,15 @@ class ChatApp:
                 print_note("Hasta pronto.")
                 return 0
 
+            # La caja se borra al enviar (erase_when_done), así que el eco de lo
+            # escrito lo imprime el CLI: burbuja para un mensaje, rastro simple
+            # para un comando (eso se lo dices al CLI, no al modelo).
+            repaint_status()
+            if text.startswith("/"):
+                render_command_echo(self.console, text)
+            elif text:
+                render_user_message(self.console, text)
+
             if self._handle_input(text) is False:
                 return 0
 
@@ -4880,7 +5682,7 @@ class ChatApp:
         while True:
             self._refresh_status()
             try:
-                text = input(f"  {g('prompt')} ").strip()
+                text = input(f"  {g('dot')} ").strip()
             except KeyboardInterrupt:
                 print()
                 print_note("Hasta pronto.")
@@ -4931,7 +5733,7 @@ class ChatApp:
             # aquí para que /paste y /image sigan adjuntando en esas terminales.
             text = f"{text} {self.prompt_prefill}".strip()
             self.prompt_prefill = ""
-        clean, at_images, errors = parse_attachments(text, self.workspace)
+        clean, at_images, files, errors = parse_attachments(text, self.workspace)
         for err in errors:
             print_error(err)
         if errors and not clean:
@@ -4946,7 +5748,12 @@ class ChatApp:
             except ValueError as exc:
                 print_error(str(exc))
 
-        user_msg: dict = {"role": "user", "content": clean or text}
+        content = clean or text
+        if files:
+            # El contenido va al modelo, no al transcript: la burbuja ya
+            # muestra la ruta y el archivo entero solo sería ruido en pantalla.
+            content = f"{content}\n\n{attachments_block(files)}"
+        user_msg: dict = {"role": "user", "content": content}
         if encoded:
             user_msg["images"] = encoded
         self.history.append(user_msg)
@@ -4964,6 +5771,13 @@ class ChatApp:
         self.console.print()
         self._spoke = False
         self._turn_mark = self.console.writes
+        self._turn_started = time.monotonic()
+        self._turn_tokens = 0
+        self.session["turn_stats"] = {"actions": 0, "files": set(), "adds": 0, "dels": 0}
+        for name, body in files:
+            # Abre el registro del turno: el adjunto es lo primero que "hizo".
+            render_action(self.console, "adjuntó", name, readonly=True,
+                          meta=f"{body.count(chr(10)) + 1} líneas")
         self._start_input_queue()
         try:
             if self.mode == "delegate":
@@ -5015,7 +5829,7 @@ class ChatApp:
             return None
         parts = []
         if typed:
-            parts += [(f"{g('prompt')} ", "lx.accent2"), (typed, "lx.primary"),
+            parts += [(f"{g('dot')} ", "lx.accent2"), (typed, "lx.primary"),
                       (g("block"), "lx.dim2")]
         if pending:
             label = f"{pending} en cola" if pending > 1 else "1 en cola"
@@ -5049,19 +5863,37 @@ class ChatApp:
                 return False
         return len(lines)
 
+    def _turn_seconds(self) -> float:
+        return time.monotonic() - self._turn_started if self._turn_started else 0.0
+
     def _speak_once(self) -> None:
         """Abre la zona de respuesta: rótulo `✦ Lixbon`, una vez por turno.
 
         Va justo encima de la primera prosa del turno, no al empezar a trabajar.
-        Si el registro de acciones ya escribió algo, se separa con una línea en
-        blanco: la respuesta necesita aire propio para despegarse del canal.
+        Si el registro de acciones ya escribió algo, se cierra con el resumen
+        del trabajo y se separa con una línea en blanco: la respuesta necesita
+        aire propio para despegarse del canal.
         """
         if self._spoke:
             return
         self._spoke = True
+        seconds = self._turn_seconds()
+        stats = self.session.get("turn_stats") or {}
+        if stats.get("actions"):
+            files = stats.get("files") or set()
+            render_turn_summary(
+                self.console, actions=stats["actions"], files=len(files),
+                adds=stats.get("adds", 0), dels=stats.get("dels", 0),
+                seconds=seconds, hint="/diff para revisarlo" if files else "",
+            )
         if self.console.writes > self._turn_mark:
             self.console.print()
-        render_speaker(self.console)
+        meta = [self.model] if self.model else []
+        if seconds >= 0.1:
+            meta.append(f"{seconds:.1f} s")
+        if self._turn_tokens:
+            meta.append(f"{fmt_tokens(self._turn_tokens)} tokens")
+        render_speaker(self.console, meta=f"  {g('sep')}  ".join(meta))
 
     def _load_project_context(self) -> None:
         """LIXBON.md del workspace: contexto permanente del proyecto.
@@ -5119,7 +5951,6 @@ class ChatApp:
     def _stream_assistant(self, messages: list[dict], tools: list[dict] | None = None) -> str:
         """Streamea una respuesta con Live: thinking en gris, contenido en Markdown."""
         from rich.console import Group
-        from rich.markdown import Markdown
         from rich.text import Text
 
         self._last_tool_calls = []
@@ -5149,8 +5980,12 @@ class ChatApp:
                 # El razonamiento es trabajo, no respuesta: va en el canal, igual
                 # que las acciones, para que en vivo se distinga de lo que dirá.
                 tail = "".join(reasoning_parts).strip().splitlines()[-3:]
-                blocks.append(Text.assemble(
-                    rail_text(), (f"{g('spark_alt')} pensando…", "lx.dim")))
+                blocks.append(two_col(
+                    Text.assemble(rail_text(), (f"{g('spark_alt')} pensando…", "lx.dim")),
+                    Text(f"{reasoning_seconds:.0f} s  {g('sep')}  Ctrl+C interrumpe",
+                         style="lx.dim2"),
+                    row_width(self.console),
+                ))
                 for line in tail:
                     blocks.append(Text.assemble(rail_text(), (line, "lx.thinking")))
             if content_parts:
@@ -5159,10 +5994,10 @@ class ChatApp:
                     # En vivo se muestra la prosa, no el JSON de las llamadas:
                     # las herramientas aparecen luego en el bloque de acciones.
                     prose = clean_prose(raw)
-                    blocks.append(Markdown(prose) if prose
+                    blocks.append(markdown(prose) if prose
                                   else Text(f"{g('spark_alt')} preparando acciones…", style="lx.dim"))
                 else:
-                    blocks.append(Markdown(raw))
+                    blocks.append(markdown(raw))
             if not blocks:
                 blocks.append(Text(
                     f"{g('spark_alt')} preparando acciones…" if self._last_tool_calls
@@ -5197,11 +6032,20 @@ class ChatApp:
                 # mostrar — lo que sigue es el bloque de acciones, que ya se lee.
                 text = clean_prose(text)
                 if text:
-                    blocks.append(Markdown(text))
+                    blocks.append(markdown(text))
+            elif text:
+                blocks.append(markdown(text))
             else:
-                blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
+                blocks.append(Text.assemble(
+                    ("(sin respuesta)", "lx.dim2"),
+                    (f"  {g('sep')}  el modelo no devolvió texto; /doctor revisa la conexión",
+                     "lx.dim2"),
+                ))
             if interrupted:
-                blocks.append(Text(f"{g('sep')} interrumpido {g('sep')}", style="lx.dim"))
+                blocks.append(Text.assemble(
+                    ("— interrumpido —", "lx.warn"),
+                    ("  el contexto se conserva: escribe «continúa» para seguir", "lx.dim2"),
+                ))
             return Group(*blocks) if blocks else None
 
         from rich.live import Live
@@ -5270,7 +6114,7 @@ class ChatApp:
             if sources:
                 # Pie de la respuesta, no del registro: las fuentes son de lo
                 # que acaba de decir, así que se quedan con ella.
-                self.console.print("[lx.dim2]fuentes: " + esc("; ".join(
+                self.console.print("[lx.dim2]fuentes  " + esc(f"  {g('sep')}  ".join(
                     str(s.get("url") or s.get("title") or "?") for s in sources[:5])) + "[/]")
             self.console.print()
 
@@ -5308,10 +6152,8 @@ class ChatApp:
             for k, v in (("intent", "intent"), ("complejidad", "complexity"),
                          ("dominio", "domain"), ("riesgo", "riskLevel"))
         ), "lx.dim2")
-        from rich.markdown import Markdown
-
         self._speak_once()
-        self.console.print(Markdown(result.get("response", "(sin respuesta)")))
+        self.console.print(markdown(result.get("response", "(sin respuesta)")))
         self.console.print()
         self.history.append({"role": "assistant", "content": result.get("response", "")})
 
@@ -5332,14 +6174,17 @@ class ChatApp:
 
         options: list[Option] = []
         for group in COMMAND_GROUPS:
-            options.append(Option(group.upper(), None, disabled=True))
+            # Cabecera de grupo: en el menú del prompt no cabe, pero aquí sí, y
+            # es lo único que agrupa 31 comandos a la vista.
+            options.append(Option(group, None, disabled=True))
             for name, args, desc, grp in COMMAND_SPECS:
                 if grp != group:
                     continue
                 label = f"/{name} {args}".strip()
-                options.append(Option(f"{label:<26}", name, desc))
-        chosen = select("Comandos", options, hint="escribe para filtrar  ↑↓ mover  ↵ ejecutar  esc salir",
-                        searchable=True, max_visible=14)
+                options.append(Option(label, name, desc))
+        chosen = select(
+            "Comandos", options, searchable=True, max_visible=14,
+            hint=f"escribe para filtrar {g('sep')} ↑↓ mover {g('sep')} ↵ ejecutar {g('sep')} esc salir")
         if chosen is None:
             return True
         spec = next((s for s in COMMAND_SPECS if s[0] == chosen), None)
@@ -5525,24 +6370,30 @@ class ChatApp:
         return True
 
     def cmd_status(self, arg: str):
+        # Una ficha, no trece filas de una cosa cada una: lo que se consulta
+        # junto va junto (el modo con sus permisos, la sesión con su clave).
         self.console.print()
+        approve = "sin preguntar" if self.session.get("auto_approve") else "pide confirmación"
+        commands = "sin preguntar" if self.session.get("auto_run_commands") else "pide confirmación"
         rows = [
-            ("Modelo", self.model or "no configurado"),
-            ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido"),
-            ("Modo", self.mode),
-            ("Sesión", self._session_label()),
-            ("API key", mask_key(self.cfg.get("api_key", ""))),
-            ("Base URL", self.api.base_url),
-            ("Workspace", str(self.workspace)),
-            ("Auto-aprobar", "on" if self.session.get("auto_approve") else "off"),
-            ("Auto-run comandos", "on" if self.session.get("auto_run_commands") else "off"),
-            ("Búsqueda web", "on" if self.web_search else "off"),
-            ("Contexto del proyecto", "LIXBON.md cargado" if self.project_context else "sin LIXBON.md (/init)"),
-            ("Barra fija", "on" if status_line_active() else "off"),
-            ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
+            ("Modelo", self.model or "no configurado", ""),
+            ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido", ""),
+            ("Modo", self.mode, f"cambios {approve}  {g('sep')}  comandos {commands}"),
+            ("Sesión", self._session_label(), f"clave {mask_key(self.cfg.get('api_key', ''))}"),
+            ("Servidor", self.api.base_url, "conectado" if self.status.online else "sin conexión"),
+            ("Workspace", short_path(self.workspace),
+             "LIXBON.md cargado" if self.project_context else "sin LIXBON.md (/init)"),
+            ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens",
+             "se envía el turno entero" if self.mode == "agent"
+             else f"últimos {self.cfg.get('max_context_messages', 12)} mensajes"),
+            ("Extras", f"búsqueda web {'on' if self.web_search else 'off'}",
+             f"barra fija {'on' if status_line_active() else 'off'}"),
         ]
-        for label, value in rows:
-            self.console.print(f"  [lx.dim]{label:<20}[/] [lx.primary]{esc(value)}[/]")
+        for label, value, note in rows:
+            line = f"  [lx.dim]{label:<20}[/] [lx.primary]{esc(value)}[/]"
+            if note:
+                line += f"[lx.dim2]  {g('sep')}  {esc(note)}[/]"
+            self.console.print(line)
         self.console.print()
         return True
 
@@ -5690,7 +6541,7 @@ class ChatApp:
         for label, value in rows:
             self.console.print(f"  [lx.dim]{label:<26}[/] [lx.primary]{esc(value)}[/]")
         if pct > 75:
-            print_note("El contexto va lleno: /compact resume la conversación y libera espacio.")
+            print_warn("El contexto va lleno: /compact resume la conversación y libera espacio.")
         self.console.print()
         return True
 
@@ -5699,22 +6550,31 @@ class ChatApp:
     def cmd_tools(self, arg: str):
         """Qué puede hacer el agente, y con qué nivel de permiso."""
 
+        from rich.text import Text
+
+        approve = "sin preguntar" if self.session.get("auto_approve") else "pide confirmación"
+        commands = "sin preguntar" if self.session.get("auto_run_commands") else "siempre pregunta"
+
         self.console.print()
         self.console.print(f"  [lx.dim2]herramientas del modo agent {g('sep')} workspace {esc(short_path(self.workspace))}[/]")
         for name, args, desc in TOOL_SPECS:
             readonly = name in READ_ONLY_TOOLS
-            dot = f"[lx.dim2]{g('dot_empty')}[/]" if readonly else f"[lx.accent2]{g('dot')}[/]"
-            self.console.print(
-                f"  {dot} [bold lx.primary]{esc(f'{name:<14}')}[/][lx.dim2]{esc(args)}[/]"
-            )
+            # El permiso de cada herramienta va a la derecha, en su columna: es
+            # lo que se viene a mirar aquí, y antes había que deducirlo del pie.
+            if readonly:
+                left = Text("  ")
+                left.append(f"{g('dot_empty')} ", style="lx.dim2")
+                permission = Text("solo lectura", style="lx.dim2")
+            else:
+                left = Text("  ")
+                left.append(f"{g('dot')} ", style="lx.accent2")
+                permission = Text(commands if name == "run_command" else approve,
+                                  style="lx.warn" if name == "run_command" else "lx.beige")
+            left.append(f"{name:<14}", style="bold lx.primary")
+            left.append(args, style="lx.dim2")
+            self.console.print(two_col(left, permission, row_width(self.console)))
             self.console.print(f"      [lx.dim]{esc(desc)}[/]")
-        approve = "sin preguntar" if self.session.get("auto_approve") else "pidiendo confirmación"
-        commands = "sin preguntar" if self.session.get("auto_run_commands") else "pidiendo confirmación"
         self.console.print()
-        self.console.print(
-            f"  [lx.dim]Cambios en archivos:[/] [lx.beige]{approve}[/] "
-            f"[lx.dim2]{g('sep')}[/] [lx.dim]comandos de shell:[/] [lx.beige]{commands}[/]"
-        )
         self.console.print(f"  [lx.dim2]{g('dot_empty')} solo lectura   {g('dot')} modifica tu disco[/]")
         # El protocolo importa al diagnosticar: con modelos chicos, "el agente
         # no usa las herramientas" casi siempre es que van por texto y no nativas.
@@ -5972,7 +6832,7 @@ class ChatApp:
                         hint="escribe para filtrar  ↑↓ mover  ↵ reenviar  esc salir")
         if chosen is None:
             return True
-        self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(chosen)}[/]")
+        render_user_message(self.console, chosen)
         try:
             self.send_message(chosen)
         except ApiError as exc:
@@ -6128,6 +6988,7 @@ class ChatApp:
         link.snapshot_provider = self._remote_snapshot
         self.remote = link
         self.session["remote"] = link
+        self._refresh_status()
 
         self.console.print()
         self.console.print(f"  [bold lx.primary]{g('spark')} Control remoto activo[/]")
@@ -6146,6 +7007,7 @@ class ChatApp:
         finally:
             self.session.pop("remote", None)
             self.remote = None
+            self._refresh_status()
         return True
 
     def _remote_command(self, link: RemoteLink, text: str) -> None:
@@ -6258,10 +7120,13 @@ class ChatApp:
                 if not text:
                     continue
                 link.interrupt_requested = False
-                self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(text)}[/] [lx.dim]\\[remoto][/]")
                 if text.startswith("/"):
+                    render_command_echo(self.console, f"{text}  [remoto]")
                     self._remote_command(link, text)
                     continue
+                # El eco del mensaje lo pone send_message con origin != local:
+                # imprimirlo también aquí dejaba cada mensaje del móvil dos
+                # veces en el transcript.
                 try:
                     self.send_message(text, origin="remote")
                 except ApiError as exc:

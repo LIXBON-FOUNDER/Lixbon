@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-CLI_VERSION = "2.2.0"
+CLI_VERSION = "2.3.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"
 # Cloudflare bloquea el User-Agent por defecto de urllib ("Python-urllib/x.y")

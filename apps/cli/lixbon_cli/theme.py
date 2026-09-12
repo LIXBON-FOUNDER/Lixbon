@@ -23,6 +23,11 @@ PALETTE = {
     "facet_bottom2": "#333A1C",
     "dim": "#8A8A80",     # secundario: metadatos, hints, barra de estado
     "dim2": "#5C5C55",    # terciario: thinking, placeholders, colapsados, versión
+    # Fondos. `panel` viste todo lo que es superficie y no texto: la burbuja del
+    # usuario, la barra de estado, los menús y el código en línea. `sel` es un
+    # escalón por encima, solo para la fila marcada de un menú.
+    "panel": "#1E1E1A",
+    "sel": "#2A2A24",
     "ok": "#5FB85F",      # éxito, líneas + de diff
     "err": "#E05C5C",     # error, líneas - de diff
     # Diff: la fila entera se pinta con un fondo tenue (como en un editor) y el
@@ -54,13 +59,35 @@ RICH_STYLES = {
     "lx.ok": PALETTE["ok"],
     "lx.err": PALETTE["err"],
     "lx.warn": PALETTE["warn"],
-    "lx.diff.add": PALETTE["ok"],
-    "lx.diff.del": PALETTE["err"],
+    "lx.diff.add": PALETTE["diff_add_fg"],
+    "lx.diff.del": PALETTE["diff_del_fg"],
     "lx.diff.hunk": PALETTE["dim"],
+    # Burbuja del mensaje del usuario: el fondo la delimita, así que no hace
+    # falta borde y solo ocupa lo que ocupa el texto.
+    "lx.bubble": f"{PALETTE['cream']} on {PALETTE['panel']}",
+    "lx.bubble.dot": f"bold {PALETTE['accent']} on {PALETTE['panel']}",
+    "lx.code": f"{PALETTE['beige']} on {PALETTE['panel']}",
+    # Un error de herramienta se pinta como una fila de diff eliminado: es la
+    # única forma de que no se pierda entre veinte líneas de registro.
+    "lx.err.row": f"{PALETTE['diff_del_fg']} on {PALETTE['diff_del_bg']}",
+    # Markdown de las respuestas. Sin esto rich usa sus colores por defecto
+    # (azules de enlace, títulos en panel centrado) que no son de la marca.
+    "markdown.code": f"{PALETTE['beige']} on {PALETTE['panel']}",
+    "markdown.code_block": PALETTE["beige"],
+    "markdown.h1": f"bold {PALETTE['olive_lt']}",
+    "markdown.h2": f"bold {PALETTE['olive_lt']}",
+    "markdown.h3": f"bold {PALETTE['olive_lt']}",
+    "markdown.h4": f"bold {PALETTE['beige']}",
+    "markdown.item.bullet": PALETTE["accent"],
+    "markdown.item.number": PALETTE["accent"],
+    "markdown.link": PALETTE["accent"],
+    "markdown.link_url": PALETTE["dim2"],
+    "markdown.block_quote": PALETTE["dim"],
+    "markdown.hr": PALETTE["dim2"],
     # Fondo de la barra de estado fija. Va como estilo BASE del Text: los
     # spans de cada trozo solo fijan color de texto, así que el fondo
     # sobrevive por debajo y llega hasta el relleno del borde derecho.
-    "lx.bar": "on #1E1E1A",  # rich usa `on <color>`; el `bg:` es de prompt_toolkit
+    "lx.bar": f"on {PALETTE['panel']}",  # rich usa `on <color>`; `bg:` es de prompt_toolkit
 }
 
 _console = None
@@ -200,41 +227,64 @@ def pt_style():
     """Style de prompt_toolkit para prompts, selectores y barra de estado."""
     from prompt_toolkit.styles import Style
 
+    panel = PALETTE["panel"]
     return Style.from_dict({
-        # Prompt de entrada
+        # Prompt de entrada: el punto ● es el usuario, dentro de su caja.
         "prompt": f"bold {PALETTE['accent']}",
+        "placeholder": PALETTE["dim2"],
+        "img-marker": f"{PALETTE['beige']} bg:{panel}",
+        # Caja de entrada (show_frame de prompt_toolkit). `frame` no lleva fondo
+        # a propósito: la caja es un borde, no una superficie.
+        "frame.border": PALETTE["dim2"],
         # Selector interactivo
-        "sel.mark": PALETTE["accent"],
+        "sel.rail": PALETTE["dim2"],
         "sel.title": f"bold {PALETTE['cream']}",
+        "sel.detail": PALETTE["dim2"],
         "sel.hint": PALETTE["dim2"],
         "sel.count": PALETTE["dim2"],
         "sel.query": f"bold {PALETTE['accent']}",
         "sel.scroll": PALETTE["dim2"],
+        "sel.group": PALETTE["dim2"],
+        "sel.rule": PALETTE["dim2"],
         "sel.disabled": f"italic {PALETTE['dim2']}",
-        "sel.pointer": f"bold {PALETTE['accent']}",
-        "sel.active": f"bold {PALETTE['accent']}",
-        "sel.active.desc": PALETTE["dim"],
+        # Fila marcada: el canto en acento y la fila entera rellena. Las tres
+        # clases `sel.row*` comparten el fondo para que el bloque no se corte.
+        "sel.edge": f"bold {PALETTE['accent']}",
+        "sel.row": f"bg:{PALETTE['sel']}",
+        "sel.row.label": f"bold {PALETTE['cream']} bg:{PALETTE['sel']}",
+        "sel.row.desc": f"{PALETTE['dim']} bg:{PALETTE['sel']}",
+        "sel.row.badge": f"{PALETTE['beige']} bg:{PALETTE['sel']}",
         "sel.option": PALETTE["cream"],
         "sel.option.desc": PALETTE["dim2"],
         "sel.badge": PALETTE["beige"],
-        "sel.badge.active": f"bold {PALETTE['beige']}",
         # Barra de estado inferior (bottom_toolbar) — fondo propio sutil
-        "bottom-toolbar": f"{PALETTE['dim']} bg:#1E1E1A noinherit",
-        "bottom-toolbar.dot": f"{PALETTE['accent']} bg:#1E1E1A",
-        "bottom-toolbar.model": f"{PALETTE['beige']} bg:#1E1E1A",
-        "bottom-toolbar.sep": f"{PALETTE['dim2']} bg:#1E1E1A",
+        "bottom-toolbar": f"{PALETTE['dim']} bg:{panel} noinherit",
+        "bottom-toolbar.dot": f"{PALETTE['accent']} bg:{panel}",
+        "bottom-toolbar.ok": f"{PALETTE['ok']} bg:{panel}",
+        "bottom-toolbar.warn": f"{PALETTE['warn']} bg:{panel}",
+        "bottom-toolbar.err": f"{PALETTE['err']} bg:{panel}",
+        "bottom-toolbar.model": f"{PALETTE['beige']} bg:{panel}",
+        "bottom-toolbar.sep": f"{PALETTE['dim2']} bg:{panel}",
         # Menú de autocompletado de slash-commands
-        "completion-menu": f"bg:#1E1E1A {PALETTE['cream']}",
-        "completion-menu.completion": f"bg:#1E1E1A {PALETTE['cream']}",
-        "completion-menu.completion.current": f"bg:{PALETTE['accent']} {PALETTE['ink']}",
-        "completion-menu.meta.completion": f"bg:#1E1E1A {PALETTE['dim']}",
-        "completion-menu.meta.completion.current": f"bg:#2A2A24 {PALETTE['beige']}",
+        "completion-menu": f"bg:{panel} {PALETTE['cream']}",
+        "completion-menu.completion": f"bg:{panel} {PALETTE['cream']}",
+        "completion-menu.completion.current": f"bold bg:{PALETTE['accent']} {PALETTE['ink']}",
+        "completion-menu.meta.completion": f"bg:{panel} {PALETTE['dim']}",
+        # La meta de la fila marcada se queda en el mismo acento y baja a oliva:
+        # dos fondos distintos en una sola fila la partían en dos.
+        "completion-menu.meta.completion.current": f"bg:{PALETTE['accent']} {PALETTE['olive']}",
         # Columnas del display de cada comando. Reglas de 2 nombres: la fila
         # marcada (`completion-menu.completion.current`, 3 nombres) gana en
-        # especificidad y se pinta entera en tinta sobre oliva.
+        # especificidad y se pinta entera en tinta sobre acento.
         "cmd.name": PALETTE["cream"],
         "cmd.args": PALETTE["dim2"],
+        # El color del nombre dice a qué grupo pertenece el comando: el menú del
+        # prompt no puede pintar cabeceras, y el orden solo no agrupa a la vista.
+        "cmd.conversacion": PALETTE["cream"],
+        "cmd.agente": PALETTE["accent"],
+        "cmd.cuenta": PALETTE["beige"],
+        "cmd.sistema": PALETTE["dim"],
         # Barra de scroll del menú, para que se note que la lista sigue.
-        "scrollbar.background": "bg:#1E1E1A",
+        "scrollbar.background": f"bg:{panel}",
         "scrollbar.button": f"bg:{PALETTE['dim2']}",
     })

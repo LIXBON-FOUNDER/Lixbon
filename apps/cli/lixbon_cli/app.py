@@ -22,14 +22,18 @@ from lixbon_cli.remote import REMOTE_COMMANDS, RemoteLink
 from lixbon_cli.commands import (
     COMMAND_GROUPS,
     COMMAND_SPECS,
+    attachments_block,
     command_matches,
     common_command_prefix,
     encode_image,
     fmt_image_marker,
     IMG_MARKER_AT_END_RE,
     make_completer,
+    make_marker_lexer,
     parse_attachments,
+    slash_rprompt,
     parse_image_markers,
+    wants_completion,
 )
 from lixbon_cli.clipboard import paste_image
 from lixbon_cli.inputq import InputQueue
@@ -66,22 +70,30 @@ from lixbon_cli.ui import (
     esc,
     fmt_tokens,
     TOOL_VERB,
+    markdown,
     print_error,
     print_note,
     print_ok,
+    print_warn,
     rail_text,
     render_action,
     render_action_result,
+    render_command_echo,
+    input_box_kwargs,
     render_header,
     render_intro_line,
     render_log_line,
     render_speaker,
     render_tips,
+    render_turn_summary,
     render_user_message,
+    round_frame_border,
+    row_width,
     rule,
     select,
     short_path,
     spinner,
+    two_col,
 )
 
 TOKENS_PER_IMAGE = 800  # estimación para la barra de contexto
@@ -133,6 +145,10 @@ class ChatApp:
         # para saber si hace falta aire entre el registro y la respuesta.
         self._spoke = False
         self._turn_mark = 0
+        # Medida del turno para el rótulo y el resumen: cuándo empezó y cuántos
+        # tokens ha costado (session_tokens es acumulado y no sirve aquí).
+        self._turn_started = 0.0
+        self._turn_tokens = 0
         # Teclado durante el turno: se puede escribir mientras el agente
         # trabaja y lo escrito se ejecuta cuando termina (nunca a mitad).
         self.input_queue = InputQueue() if self.cfg.get("input_queue", True) else None
@@ -176,6 +192,7 @@ class ChatApp:
         self.status.mode = self.mode
         self.status.web = self.web_search
         self.status.project = bool(self.project_context)
+        self.status.remote = self.remote is not None
         tokens, pct = self._estimate_context()
         self.status.tokens = self.session_tokens or tokens
         self.status.ctx_pct = pct
@@ -221,7 +238,9 @@ class ChatApp:
         total = int(usage.get("total_tokens") or 0)
         if total:
             self.session_tokens += total
+            self._turn_tokens += total
         # Recalibra la estimación chars/token con datos reales del server
+        self.status.online = True  # ha respondido el servidor: hay red
         chars = sum(len(m.get("content", "")) for m in self.history)
         if prompt_tokens > 50 and chars > 200:
             self.chars_per_token = max(1.5, min(8.0, chars / prompt_tokens))
@@ -307,7 +326,14 @@ class ChatApp:
     def _render_identity(self) -> None:
         """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
         render_header(self.console, CLI_VERSION, model=self.model,
-                      plan=self.plan_name, workspace=self.workspace)
+                      plan=self.plan_name, workspace=self.workspace,
+                      branch=self._branch(), mode=self.mode)
+
+    def _branch(self) -> str:
+        """Rama de git del workspace, si es un repo. Vacío si no lo es."""
+        code, out = self._git("rev-parse", "--abbrev-ref", "HEAD", timeout=5)
+        branch = out.strip().splitlines()[0] if out.strip() else ""
+        return branch if code == 0 and branch != "HEAD" else ""
 
     def _set_tab_title(self) -> None:
         """La pestaña de la terminal deja de llamarse `cmd` y pasa a ser Lixbon.
@@ -332,6 +358,12 @@ class ChatApp:
             self._set_tab_title()
 
     def _load_account_quietly(self) -> str:
+        """Igual que `_probe_account`, y además deja el punto de la barra al día."""
+        state = self._probe_account()
+        self.status.online = state != "offline"
+        return state
+
+    def _probe_account(self) -> str:
         """Modelos disponibles y plan del usuario, sin ruido si el server falla.
 
         Devuelve el estado de la sesión: `ok`, `auth` (la clave ya no sirve:
@@ -469,6 +501,11 @@ class ChatApp:
         elif exc.status == 429:
             print_error("Demasiadas peticiones seguidas; espera unos segundos.")
         else:
+            # Sin código HTTP no hubo respuesta: es la red, y el punto de la
+            # barra tiene que decirlo hasta que algo vuelva a funcionar.
+            if exc.status is None:
+                self.status.online = False
+                self._paint_status()
             print_error(str(exc))
 
     def onboarding_flow(self) -> bool:
@@ -677,6 +714,12 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
+        @kb.add("escape", "enter")
+        def _newline(event):
+            # Alt+Enter (Esc+Enter): salto de línea sin enviar. Shift+Enter no
+            # llega como tecla distinta a una terminal, así que este es el atajo.
+            event.current_buffer.insert_text("\n")
+
         @kb.add("escape", "v")
         def _paste(event):
             # Alt+V llega como Esc+v. El marcador se escribe en el buffer para
@@ -712,6 +755,13 @@ class ChatApp:
 
         return kb
 
+    def _autocomplete(self, buff) -> None:
+        """Abre o cierra el menú según lo escrito (ver `_prompt_loop`)."""
+        if wants_completion(buff.document.text_before_cursor):
+            buff.start_completion(select_first=False)
+        elif buff.complete_state is not None:
+            buff.cancel_completion()
+
     def _prompt_loop(self) -> int:
         from lixbon_cli.term import ui_capable
 
@@ -724,20 +774,23 @@ class ChatApp:
         from prompt_toolkit.history import FileHistory
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        round_frame_border()  # antes de construir: el Frame lee los bordes al montar
         session = PromptSession(
-            message=[("", "  "), ("class:prompt", f"{g('prompt')} ")],
+            **input_box_kwargs(),
             style=pt_style(),
             completer=make_completer(self),
-            complete_while_typing=True,
+            complete_in_thread=True,  # el índice de @ recorre el workspace: fuera del hilo del teclado
+            lexer=make_marker_lexer(),
+            rprompt=slash_rprompt,
             key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
             # Con la fila reservada la barra la pinta el CLI y queda fija; el
             # bottom_toolbar de prompt_toolkit solo vive mientras hay prompt
             # (por eso desaparecía al enviar), así que sería un duplicado.
             bottom_toolbar=None if status_line_active() else (lambda: self.status.pt_toolbar()),
-            reserve_space_for_menu=9,
             mouse_support=False,  # el mouse queda libre para scroll/selección en el transcript
         )
+        session.default_buffer.on_text_changed += self._autocomplete
         # Sin esto la barra fija se pinta y prompt_toolkit la borra en el mismo
         # instante (erase_down del primer render): nunca llegaba a verse.
         attach_status_repaint(session.app)
@@ -759,6 +812,7 @@ class ChatApp:
                 text = session.prompt(default=f"{partial} {prefill}".strip()).strip()
             except KeyboardInterrupt:
                 now = time.monotonic()
+                repaint_status()
                 if now - self._interrupt_hint_at < 2.5:
                     print_note("Hasta pronto.")
                     return 0
@@ -769,6 +823,15 @@ class ChatApp:
                 print_note("Hasta pronto.")
                 return 0
 
+            # La caja se borra al enviar (erase_when_done), así que el eco de lo
+            # escrito lo imprime el CLI: burbuja para un mensaje, rastro simple
+            # para un comando (eso se lo dices al CLI, no al modelo).
+            repaint_status()
+            if text.startswith("/"):
+                render_command_echo(self.console, text)
+            elif text:
+                render_user_message(self.console, text)
+
             if self._handle_input(text) is False:
                 return 0
 
@@ -777,7 +840,7 @@ class ChatApp:
         while True:
             self._refresh_status()
             try:
-                text = input(f"  {g('prompt')} ").strip()
+                text = input(f"  {g('dot')} ").strip()
             except KeyboardInterrupt:
                 print()
                 print_note("Hasta pronto.")
@@ -828,7 +891,7 @@ class ChatApp:
             # aquí para que /paste y /image sigan adjuntando en esas terminales.
             text = f"{text} {self.prompt_prefill}".strip()
             self.prompt_prefill = ""
-        clean, at_images, errors = parse_attachments(text, self.workspace)
+        clean, at_images, files, errors = parse_attachments(text, self.workspace)
         for err in errors:
             print_error(err)
         if errors and not clean:
@@ -843,7 +906,12 @@ class ChatApp:
             except ValueError as exc:
                 print_error(str(exc))
 
-        user_msg: dict = {"role": "user", "content": clean or text}
+        content = clean or text
+        if files:
+            # El contenido va al modelo, no al transcript: la burbuja ya
+            # muestra la ruta y el archivo entero solo sería ruido en pantalla.
+            content = f"{content}\n\n{attachments_block(files)}"
+        user_msg: dict = {"role": "user", "content": content}
         if encoded:
             user_msg["images"] = encoded
         self.history.append(user_msg)
@@ -861,6 +929,13 @@ class ChatApp:
         self.console.print()
         self._spoke = False
         self._turn_mark = self.console.writes
+        self._turn_started = time.monotonic()
+        self._turn_tokens = 0
+        self.session["turn_stats"] = {"actions": 0, "files": set(), "adds": 0, "dels": 0}
+        for name, body in files:
+            # Abre el registro del turno: el adjunto es lo primero que "hizo".
+            render_action(self.console, "adjuntó", name, readonly=True,
+                          meta=f"{body.count(chr(10)) + 1} líneas")
         self._start_input_queue()
         try:
             if self.mode == "delegate":
@@ -913,7 +988,7 @@ class ChatApp:
             return None
         parts = []
         if typed:
-            parts += [(f"{g('prompt')} ", "lx.accent2"), (typed, "lx.primary"),
+            parts += [(f"{g('dot')} ", "lx.accent2"), (typed, "lx.primary"),
                       (g("block"), "lx.dim2")]
         if pending:
             label = f"{pending} en cola" if pending > 1 else "1 en cola"
@@ -947,19 +1022,37 @@ class ChatApp:
                 return False
         return len(lines)
 
+    def _turn_seconds(self) -> float:
+        return time.monotonic() - self._turn_started if self._turn_started else 0.0
+
     def _speak_once(self) -> None:
         """Abre la zona de respuesta: rótulo `✦ Lixbon`, una vez por turno.
 
         Va justo encima de la primera prosa del turno, no al empezar a trabajar.
-        Si el registro de acciones ya escribió algo, se separa con una línea en
-        blanco: la respuesta necesita aire propio para despegarse del canal.
+        Si el registro de acciones ya escribió algo, se cierra con el resumen
+        del trabajo y se separa con una línea en blanco: la respuesta necesita
+        aire propio para despegarse del canal.
         """
         if self._spoke:
             return
         self._spoke = True
+        seconds = self._turn_seconds()
+        stats = self.session.get("turn_stats") or {}
+        if stats.get("actions"):
+            files = stats.get("files") or set()
+            render_turn_summary(
+                self.console, actions=stats["actions"], files=len(files),
+                adds=stats.get("adds", 0), dels=stats.get("dels", 0),
+                seconds=seconds, hint="/diff para revisarlo" if files else "",
+            )
         if self.console.writes > self._turn_mark:
             self.console.print()
-        render_speaker(self.console)
+        meta = [self.model] if self.model else []
+        if seconds >= 0.1:
+            meta.append(f"{seconds:.1f} s")
+        if self._turn_tokens:
+            meta.append(f"{fmt_tokens(self._turn_tokens)} tokens")
+        render_speaker(self.console, meta=f"  {g('sep')}  ".join(meta))
 
     def _load_project_context(self) -> None:
         """LIXBON.md del workspace: contexto permanente del proyecto.
@@ -1017,7 +1110,6 @@ class ChatApp:
     def _stream_assistant(self, messages: list[dict], tools: list[dict] | None = None) -> str:
         """Streamea una respuesta con Live: thinking en gris, contenido en Markdown."""
         from rich.console import Group
-        from rich.markdown import Markdown
         from rich.text import Text
 
         self._last_tool_calls = []
@@ -1048,8 +1140,12 @@ class ChatApp:
                 # El razonamiento es trabajo, no respuesta: va en el canal, igual
                 # que las acciones, para que en vivo se distinga de lo que dirá.
                 tail = "".join(reasoning_parts).strip().splitlines()[-3:]
-                blocks.append(Text.assemble(
-                    rail_text(), (f"{g('spark_alt')} pensando…", "lx.dim")))
+                blocks.append(two_col(
+                    Text.assemble(rail_text(), (f"{g('spark_alt')} pensando…", "lx.dim")),
+                    Text(f"{reasoning_seconds:.0f} s  {g('sep')}  Ctrl+C interrumpe",
+                         style="lx.dim2"),
+                    row_width(self.console),
+                ))
                 for line in tail:
                     blocks.append(Text.assemble(rail_text(), (line, "lx.thinking")))
             if content_parts:
@@ -1058,10 +1154,10 @@ class ChatApp:
                     # En vivo se muestra la prosa, no el JSON de las llamadas:
                     # las herramientas aparecen luego en el bloque de acciones.
                     prose = clean_prose(raw)
-                    blocks.append(Markdown(prose) if prose
+                    blocks.append(markdown(prose) if prose
                                   else Text(f"{g('spark_alt')} preparando acciones…", style="lx.dim"))
                 else:
-                    blocks.append(Markdown(raw))
+                    blocks.append(markdown(raw))
             if not blocks:
                 blocks.append(Text(
                     f"{g('spark_alt')} preparando acciones…" if self._last_tool_calls
@@ -1096,11 +1192,20 @@ class ChatApp:
                 # mostrar — lo que sigue es el bloque de acciones, que ya se lee.
                 text = clean_prose(text)
                 if text:
-                    blocks.append(Markdown(text))
+                    blocks.append(markdown(text))
+            elif text:
+                blocks.append(markdown(text))
             else:
-                blocks.append(Markdown(text) if text else Text("(sin respuesta)", style="lx.dim"))
+                blocks.append(Text.assemble(
+                    ("(sin respuesta)", "lx.dim2"),
+                    (f"  {g('sep')}  el modelo no devolvió texto; /doctor revisa la conexión",
+                     "lx.dim2"),
+                ))
             if interrupted:
-                blocks.append(Text(f"{g('sep')} interrumpido {g('sep')}", style="lx.dim"))
+                blocks.append(Text.assemble(
+                    ("— interrumpido —", "lx.warn"),
+                    ("  el contexto se conserva: escribe «continúa» para seguir", "lx.dim2"),
+                ))
             return Group(*blocks) if blocks else None
 
         from rich.live import Live
@@ -1169,7 +1274,7 @@ class ChatApp:
             if sources:
                 # Pie de la respuesta, no del registro: las fuentes son de lo
                 # que acaba de decir, así que se quedan con ella.
-                self.console.print("[lx.dim2]fuentes: " + esc("; ".join(
+                self.console.print("[lx.dim2]fuentes  " + esc(f"  {g('sep')}  ".join(
                     str(s.get("url") or s.get("title") or "?") for s in sources[:5])) + "[/]")
             self.console.print()
 
@@ -1207,10 +1312,8 @@ class ChatApp:
             for k, v in (("intent", "intent"), ("complejidad", "complexity"),
                          ("dominio", "domain"), ("riesgo", "riskLevel"))
         ), "lx.dim2")
-        from rich.markdown import Markdown
-
         self._speak_once()
-        self.console.print(Markdown(result.get("response", "(sin respuesta)")))
+        self.console.print(markdown(result.get("response", "(sin respuesta)")))
         self.console.print()
         self.history.append({"role": "assistant", "content": result.get("response", "")})
 
@@ -1231,14 +1334,17 @@ class ChatApp:
 
         options: list[Option] = []
         for group in COMMAND_GROUPS:
-            options.append(Option(group.upper(), None, disabled=True))
+            # Cabecera de grupo: en el menú del prompt no cabe, pero aquí sí, y
+            # es lo único que agrupa 31 comandos a la vista.
+            options.append(Option(group, None, disabled=True))
             for name, args, desc, grp in COMMAND_SPECS:
                 if grp != group:
                     continue
                 label = f"/{name} {args}".strip()
-                options.append(Option(f"{label:<26}", name, desc))
-        chosen = select("Comandos", options, hint="escribe para filtrar  ↑↓ mover  ↵ ejecutar  esc salir",
-                        searchable=True, max_visible=14)
+                options.append(Option(label, name, desc))
+        chosen = select(
+            "Comandos", options, searchable=True, max_visible=14,
+            hint=f"escribe para filtrar {g('sep')} ↑↓ mover {g('sep')} ↵ ejecutar {g('sep')} esc salir")
         if chosen is None:
             return True
         spec = next((s for s in COMMAND_SPECS if s[0] == chosen), None)
@@ -1424,24 +1530,30 @@ class ChatApp:
         return True
 
     def cmd_status(self, arg: str):
+        # Una ficha, no trece filas de una cosa cada una: lo que se consulta
+        # junto va junto (el modo con sus permisos, la sesión con su clave).
         self.console.print()
+        approve = "sin preguntar" if self.session.get("auto_approve") else "pide confirmación"
+        commands = "sin preguntar" if self.session.get("auto_run_commands") else "pide confirmación"
         rows = [
-            ("Modelo", self.model or "no configurado"),
-            ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido"),
-            ("Modo", self.mode),
-            ("Sesión", self._session_label()),
-            ("API key", mask_key(self.cfg.get("api_key", ""))),
-            ("Base URL", self.api.base_url),
-            ("Workspace", str(self.workspace)),
-            ("Auto-aprobar", "on" if self.session.get("auto_approve") else "off"),
-            ("Auto-run comandos", "on" if self.session.get("auto_run_commands") else "off"),
-            ("Búsqueda web", "on" if self.web_search else "off"),
-            ("Contexto del proyecto", "LIXBON.md cargado" if self.project_context else "sin LIXBON.md (/init)"),
-            ("Barra fija", "on" if status_line_active() else "off"),
-            ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
+            ("Modelo", self.model or "no configurado", ""),
+            ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido", ""),
+            ("Modo", self.mode, f"cambios {approve}  {g('sep')}  comandos {commands}"),
+            ("Sesión", self._session_label(), f"clave {mask_key(self.cfg.get('api_key', ''))}"),
+            ("Servidor", self.api.base_url, "conectado" if self.status.online else "sin conexión"),
+            ("Workspace", short_path(self.workspace),
+             "LIXBON.md cargado" if self.project_context else "sin LIXBON.md (/init)"),
+            ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens",
+             "se envía el turno entero" if self.mode == "agent"
+             else f"últimos {self.cfg.get('max_context_messages', 12)} mensajes"),
+            ("Extras", f"búsqueda web {'on' if self.web_search else 'off'}",
+             f"barra fija {'on' if status_line_active() else 'off'}"),
         ]
-        for label, value in rows:
-            self.console.print(f"  [lx.dim]{label:<20}[/] [lx.primary]{esc(value)}[/]")
+        for label, value, note in rows:
+            line = f"  [lx.dim]{label:<20}[/] [lx.primary]{esc(value)}[/]"
+            if note:
+                line += f"[lx.dim2]  {g('sep')}  {esc(note)}[/]"
+            self.console.print(line)
         self.console.print()
         return True
 
@@ -1590,7 +1702,7 @@ class ChatApp:
         for label, value in rows:
             self.console.print(f"  [lx.dim]{label:<26}[/] [lx.primary]{esc(value)}[/]")
         if pct > 75:
-            print_note("El contexto va lleno: /compact resume la conversación y libera espacio.")
+            print_warn("El contexto va lleno: /compact resume la conversación y libera espacio.")
         self.console.print()
         return True
 
@@ -1600,22 +1712,31 @@ class ChatApp:
         """Qué puede hacer el agente, y con qué nivel de permiso."""
         from lixbon_cli.agent import READ_ONLY_TOOLS
 
+        from rich.text import Text
+
+        approve = "sin preguntar" if self.session.get("auto_approve") else "pide confirmación"
+        commands = "sin preguntar" if self.session.get("auto_run_commands") else "siempre pregunta"
+
         self.console.print()
         self.console.print(f"  [lx.dim2]herramientas del modo agent {g('sep')} workspace {esc(short_path(self.workspace))}[/]")
         for name, args, desc in TOOL_SPECS:
             readonly = name in READ_ONLY_TOOLS
-            dot = f"[lx.dim2]{g('dot_empty')}[/]" if readonly else f"[lx.accent2]{g('dot')}[/]"
-            self.console.print(
-                f"  {dot} [bold lx.primary]{esc(f'{name:<14}')}[/][lx.dim2]{esc(args)}[/]"
-            )
+            # El permiso de cada herramienta va a la derecha, en su columna: es
+            # lo que se viene a mirar aquí, y antes había que deducirlo del pie.
+            if readonly:
+                left = Text("  ")
+                left.append(f"{g('dot_empty')} ", style="lx.dim2")
+                permission = Text("solo lectura", style="lx.dim2")
+            else:
+                left = Text("  ")
+                left.append(f"{g('dot')} ", style="lx.accent2")
+                permission = Text(commands if name == "run_command" else approve,
+                                  style="lx.warn" if name == "run_command" else "lx.beige")
+            left.append(f"{name:<14}", style="bold lx.primary")
+            left.append(args, style="lx.dim2")
+            self.console.print(two_col(left, permission, row_width(self.console)))
             self.console.print(f"      [lx.dim]{esc(desc)}[/]")
-        approve = "sin preguntar" if self.session.get("auto_approve") else "pidiendo confirmación"
-        commands = "sin preguntar" if self.session.get("auto_run_commands") else "pidiendo confirmación"
         self.console.print()
-        self.console.print(
-            f"  [lx.dim]Cambios en archivos:[/] [lx.beige]{approve}[/] "
-            f"[lx.dim2]{g('sep')}[/] [lx.dim]comandos de shell:[/] [lx.beige]{commands}[/]"
-        )
         self.console.print(f"  [lx.dim2]{g('dot_empty')} solo lectura   {g('dot')} modifica tu disco[/]")
         # El protocolo importa al diagnosticar: con modelos chicos, "el agente
         # no usa las herramientas" casi siempre es que van por texto y no nativas.
@@ -1873,7 +1994,7 @@ class ChatApp:
                         hint="escribe para filtrar  ↑↓ mover  ↵ reenviar  esc salir")
         if chosen is None:
             return True
-        self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(chosen)}[/]")
+        render_user_message(self.console, chosen)
         try:
             self.send_message(chosen)
         except ApiError as exc:
@@ -2030,6 +2151,7 @@ class ChatApp:
         link.snapshot_provider = self._remote_snapshot
         self.remote = link
         self.session["remote"] = link
+        self._refresh_status()
 
         self.console.print()
         self.console.print(f"  [bold lx.primary]{g('spark')} Control remoto activo[/]")
@@ -2048,6 +2170,7 @@ class ChatApp:
         finally:
             self.session.pop("remote", None)
             self.remote = None
+            self._refresh_status()
         return True
 
     def _remote_command(self, link: RemoteLink, text: str) -> None:
@@ -2160,10 +2283,13 @@ class ChatApp:
                 if not text:
                     continue
                 link.interrupt_requested = False
-                self.console.print(f"  [lx.accent2]{g('prompt')}[/] [lx.primary]{esc(text)}[/] [lx.dim]\\[remoto][/]")
                 if text.startswith("/"):
+                    render_command_echo(self.console, f"{text}  [remoto]")
                     self._remote_command(link, text)
                     continue
+                # El eco del mensaje lo pone send_message con origin != local:
+                # imprimirlo también aquí dejaba cada mensaje del móvil dos
+                # veces en el transcript.
                 try:
                     self.send_message(text, origin="remote")
                 except ApiError as exc:

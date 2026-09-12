@@ -50,6 +50,16 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
 
 COMMAND_GROUPS = ("conversación", "agente", "cuenta", "sistema")
 
+# El menú del prompt no puede pintar cabeceras de grupo, así que el grupo se
+# codifica en el COLOR del nombre. Las clases van sin acentos: prompt_toolkit
+# usa el nombre de clase como selector de estilo.
+GROUP_CLASS = {
+    "conversación": "class:cmd.conversacion",
+    "agente": "class:cmd.agente",
+    "cuenta": "class:cmd.cuenta",
+    "sistema": "class:cmd.sistema",
+}
+
 # Orden de presentación: por grupo (el del catálogo) y, dentro, alfabético.
 # El menú del prompt no puede pintar cabeceras, así que el orden es lo único
 # que agrupa visualmente; sin él son 31 comandos en desorden.
@@ -81,13 +91,168 @@ def common_command_prefix(names: list[str]) -> str:
     return shared
 
 
+# ── Archivos del workspace tras un `@` ──────────────────────────────────────
+#
+# Se busca en TODO el árbol por trozo de ruta, no carpeta a carpeta: escribir
+# `@par` tiene que encontrar `src/utils/parser.py` sin saber dónde está. El
+# árbol se cachea unos segundos: se consulta en cada tecla y recorrerlo cada vez
+# se notaba al escribir en proyectos grandes.
+
+_AT_TOKEN_RE = re.compile(r'@([^\s"]*)$')
+MAX_PATH_COMPLETIONS = 30
+MAX_INDEX_ENTRIES = 5000
+INDEX_TTL_SECONDS = 30.0
+
+_index_cache: dict[str, tuple[float, list[tuple[str, bool, int]]]] = {}
+
+
+def _fmt_size(size: int) -> str:
+    if size >= 1_000_000:
+        return f"{size / 1_000_000:.1f} MB"
+    if size >= 1000:
+        return f"{size / 1000:.1f} kB"
+    return f"{size} B"
+
+
+def workspace_index(workspace: Path) -> list[tuple[str, bool, int]]:
+    """Entradas `(ruta relativa, es carpeta, bytes)` del workspace, cacheadas."""
+    import time
+
+    from lixbon_cli.agent import IGNORED_TREE_DIRS
+
+    key = str(workspace)
+    cached = _index_cache.get(key)
+    if cached and time.monotonic() - cached[0] < INDEX_TTL_SECONDS:
+        return cached[1]
+
+    entries: list[tuple[str, bool, int]] = []
+
+    def walk(directory: Path, depth: int) -> None:
+        if depth > 8 or len(entries) >= MAX_INDEX_ENTRIES:
+            return
+        try:
+            items = sorted(directory.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except OSError:
+            return
+        for item in items:
+            if len(entries) >= MAX_INDEX_ENTRIES:
+                return
+            rel = item.relative_to(workspace).as_posix()
+            if item.is_dir():
+                if item.name in IGNORED_TREE_DIRS:
+                    continue
+                entries.append((rel + "/", True, 0))
+                walk(item, depth + 1)
+            else:
+                try:
+                    size = item.stat().st_size
+                except OSError:
+                    size = 0
+                entries.append((rel, False, size))
+
+    walk(workspace, 1)
+    _index_cache[key] = (time.monotonic(), entries)
+    return entries
+
+
+def search_workspace(workspace: Path, query: str,
+                     limit: int = MAX_PATH_COMPLETIONS) -> list[tuple[str, bool, int]]:
+    """Entradas cuyo camino contiene `query`; primero las que empiezan por él."""
+    needle = query.replace("\\", "/").lower()
+    show_hidden = needle.rsplit("/", 1)[-1].startswith(".")
+    ranked = []
+    for rel, is_dir, size in workspace_index(workspace):
+        name = rel.rstrip("/").rsplit("/", 1)[-1]
+        if name.startswith(".") and not show_hidden:
+            continue
+        lower = rel.lower()
+        if needle and needle not in lower:
+            continue
+        rank = 0 if name.lower().startswith(needle) else (1 if lower.startswith(needle) else 2)
+        ranked.append((rank, rel.count("/"), rel, is_dir, size))
+    ranked.sort()
+    return [(rel, is_dir, size) for _rank, _depth, rel, is_dir, size in ranked[:limit]]
+
+
+def _path_completions(workspace: Path, token: str):
+    from prompt_toolkit.completion import Completion
+
+    from lixbon_cli.term import g
+
+    for rel, is_dir, size in search_workspace(workspace, token):
+        if is_dir:
+            meta = "carpeta"
+        else:
+            kind = rel.rsplit(".", 1)[-1].lower() if "." in rel.rsplit("/", 1)[-1] else "archivo"
+            meta = f"{_fmt_size(size)} {g('sep')} {kind}"
+        text = f'"{rel}"' if " " in rel else rel  # el parser de @ admite comillas
+        yield Completion(text, start_position=-len(token), display=rel, display_meta=meta)
+
+
+def wants_completion(text: str) -> bool:
+    """¿Hay algo que completar en lo escrito hasta el cursor?
+
+    Lo consulta el prompt para abrir el menú (y reservarle hueco) solo cuando
+    toca, en vez de dejar `complete_while_typing` reservándolo siempre.
+    """
+    if _AT_TOKEN_RE.search(text):
+        return True
+    if not text.startswith("/"):
+        return False
+    return " " not in text or text.startswith("/model ")
+
+
+def make_marker_lexer():
+    """Pinta los marcadores `[IMG#n]` del prompt como fichas.
+
+    Solo restyla: los fragmentos tienen que medir lo mismo que el texto o el
+    cursor deja de caer donde se escribe.
+    """
+    from prompt_toolkit.lexers import Lexer
+
+    class MarkerLexer(Lexer):
+        def lex_document(self, document):
+            lines = document.lines
+
+            def get_line(index: int) -> list:
+                line = lines[index]
+                fragments, position = [], 0
+                for match in _IMG_MARKER_RE.finditer(line):
+                    if match.start() > position:
+                        fragments.append(("", line[position:match.start()]))
+                    fragments.append(("class:img-marker", match.group(0)))
+                    position = match.end()
+                if position < len(line):
+                    fragments.append(("", line[position:]))
+                return fragments
+
+            return get_line
+
+    return MarkerLexer()
+
+
+def slash_rprompt():
+    """Recuento de comandos que casan con lo escrito, al margen derecho de la caja."""
+    from prompt_toolkit.application import get_app
+
+    text = get_app().current_buffer.text
+    if not text.startswith("/") or " " in text:
+        return ""
+    return [("class:placeholder", f"{len(command_matches(text[1:]))} de {len(COMMAND_SPECS)} ")]
+
+
 def make_completer(app):
-    """Completer de prompt_toolkit: menú al escribir `/` y modelos en `/model `."""
+    """Completer de prompt_toolkit: comandos con `/`, modelos y rutas con `@`."""
     from prompt_toolkit.completion import Completer, Completion
 
     class SlashCompleter(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
+            # El `@` va primero: puede aparecer en cualquier parte del mensaje.
+            at_token = _AT_TOKEN_RE.search(text)
+            if at_token:
+                yield from _path_completions(app.workspace, at_token.group(1))
+                return
             if not text.startswith("/"):
                 return
             # Autocompletar el argumento de /model con los modelos cargados
@@ -107,7 +272,8 @@ def make_completer(app):
                 # siempre lo mismo, así los argumentos quedan en vertical y la
                 # lista se lee como una tabla y no como texto irregular.
                 display = [
-                    ("class:cmd.name", f"/{name}".ljust(COMMAND_NAME_WIDTH + 1)),
+                    (GROUP_CLASS.get(group, "class:cmd.name"),
+                     f"/{name}".ljust(COMMAND_NAME_WIDTH + 1)),
                     ("class:cmd.args", args),
                 ]
                 # Con argumento: dejar espacio final para encadenar el
@@ -123,39 +289,68 @@ def make_completer(app):
     return SlashCompleter()
 
 
-# ── Adjuntos de imagen ──────────────────────────────────────────────────────
+# ── Adjuntos (@ruta) ────────────────────────────────────────────────────────
 
-_AT_PATH_RE = re.compile(r'@(?:"([^"]+)"|(\S+))')
+# La puntuación pegada («@logo.png,») no forma parte de la ruta.
+_AT_PATH_RE = re.compile(r'@(?:"([^"]+)"|(\S+?))(?=[.,;:!?)\]]*(?:\s|$))')
+MAX_TEXT_ATTACHMENT_BYTES = 64 * 1024
 
 
 def _looks_like_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTS
 
 
-def parse_attachments(text: str, base_dir: Path) -> tuple[str, list[Path], list[str]]:
-    """Extrae rutas de imagen `@ruta` del mensaje.
+def parse_attachments(text: str, base_dir: Path) -> tuple[str, list[Path], list[tuple[str, str]], list[str]]:
+    """Extrae los `@ruta` del mensaje.
 
-    Devuelve (texto_limpio, imágenes, errores). Solo se tratan como adjunto
-    los @tokens que apuntan a una imagen; el resto del texto queda intacto.
+    Devuelve (texto_limpio, imágenes, archivos de texto, errores). Una imagen
+    viaja aparte (ChatMessage.images); un archivo de texto se adjunta como
+    `(ruta, contenido)` para que el modelo lo tenga aunque esté en modo ask,
+    donde no puede leerlo él. Un @token que no apunta a nada del disco se deja
+    tal cual: puede ser un usuario o un handle.
     """
     images: list[Path] = []
+    files: list[tuple[str, str]] = []
     errors: list[str] = []
 
     def _replace(match: re.Match) -> str:
         raw = match.group(1) or match.group(2)
         path = Path(raw)
         if not path.is_absolute():
-            path = (base_dir / path)
-        if not _looks_like_image(path):
-            return match.group(0)  # no es imagen: se deja tal cual
-        if not path.exists():
-            errors.append(f"No existe la imagen: {raw}")
-            return ""
-        images.append(path.resolve())
-        return path.name  # el texto conserva el nombre para dar contexto al modelo
+            path = base_dir / path
+        if _looks_like_image(path):
+            if not path.exists():
+                errors.append(f"No existe la imagen: {raw}")
+                return ""
+            images.append(path.resolve())
+            return path.name  # el texto conserva el nombre para dar contexto al modelo
+        if not path.is_file():
+            return match.group(0)
+        try:
+            if path.stat().st_size > MAX_TEXT_ATTACHMENT_BYTES:
+                errors.append(f"{raw} supera los 64 kB: pide al agente que lo lea por partes")
+                return raw
+            content = path.read_bytes().decode("utf-8").replace("\r\n", "\n")
+        except UnicodeDecodeError:
+            errors.append(f"{raw} no es un archivo de texto")
+            return raw
+        except OSError as exc:
+            errors.append(f"No se pudo leer {raw}: {exc}")
+            return raw
+        files.append((raw, content))
+        return raw
 
     clean = _AT_PATH_RE.sub(_replace, text).strip()
-    return clean, images, errors
+    return clean, images, files, errors
+
+
+def attachments_block(files: list[tuple[str, str]]) -> str:
+    """Los archivos adjuntos, listos para ir detrás del mensaje."""
+    parts = []
+    for name, content in files:
+        fence = "````" if "```" in content else "```"
+        parts.append(f"Archivo adjunto `{name}`:\n{fence}\n{content.rstrip()}\n{fence}")
+    return "\n\n".join(parts)
 
 
 def encode_image(path: Path) -> str:

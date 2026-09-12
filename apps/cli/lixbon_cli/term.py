@@ -95,6 +95,9 @@ _GLYPHS_UNICODE = {
     # pesos del mismo juego de box-drawing ocupan una celda y alinean igual.
     "rail": "│",
     "rail_hot": "┃",
+    # Marca de la fila elegida en cualquier menú. El punto (●) queda reservado
+    # para el usuario, así que la selección necesita un signo propio.
+    "edge": "▌",
 }
 _GLYPHS_ASCII = {
     "spark": "*",
@@ -116,6 +119,7 @@ _GLYPHS_ASCII = {
     "corner": "`",
     "rail": "|",
     "rail_hot": "|",
+    "edge": ">",
 }
 
 

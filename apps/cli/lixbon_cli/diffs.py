@@ -137,21 +137,27 @@ def diff_counts(change: FileChange) -> tuple[int, int]:
 
 # ── Pintado ─────────────────────────────────────────────────────────────────
 
-def render_change(console, change: FileChange, max_rows: int = DIFF_MAX_ROWS) -> None:
-    """Imprime la acción (`┃ editó  ruta  +12 -3`) y el diff con números."""
+def render_change(console, change: FileChange,
+                  max_rows: int = DIFF_MAX_ROWS) -> tuple[int, int]:
+    """Imprime la acción (`┃ editó  ruta  +12 -3`) y el diff con números.
+
+    Devuelve las líneas añadidas y eliminadas: quien llama las necesita para el
+    resumen del turno y recalcularlas cuesta otro diff completo del archivo.
+    """
     if change.kind == "command":
         render_action(console, change.verb, change.detail)
-        return
+        return (0, 0)
     if change.kind == "rename":
         render_action(console, change.verb, f"{change.path} {g('arrow')} {change.detail}")
-        return
+        return (0, 0)
     if change.kind == "mkdir":
         render_action(console, change.verb, change.path)
-        return
+        return (0, 0)
 
     adds, dels = diff_counts(change)
     render_action(console, change.verb, change.path, adds=adds, dels=dels)
     render_diff(console, diff_rows(change), max_rows=max_rows)
+    return (adds, dels)
 
 
 def render_diff(console, rows: list[tuple[str, int, int, str]],
@@ -197,7 +203,8 @@ def render_diff(console, rows: list[tuple[str, int, int, str]],
         console.print(line)
 
     if len(rows) > max_rows:
-        console.print(
-            f"{rail()}[lx.dim2]{' ' * (num_width + 2)}"
-            f"{g('ellipsis')} {len(rows) - max_rows} líneas más[/]"
-        )
+        from lixbon_cli.ui import row_width, two_col
+
+        left = Text(f"{g('rail')} {' ' * (num_width + 2)}{g('ellipsis')}", style=PALETTE["dim2"])
+        right = Text(f"{len(rows) - max_rows} líneas más", style=PALETTE["dim2"])
+        console.print(two_col(left, right, row_width(console)))
