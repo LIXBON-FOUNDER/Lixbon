@@ -299,15 +299,24 @@ _PLAN_CHARS = 1500         # recorte por mensaje (adjuntos largos no aportan a l
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def _plan_prompt() -> str:
+def _plan_prompt(optional: bool = False) -> str:
     today = date.today().strftime("%d/%m/%Y")
+    decision = (
+        "- PRIMERO decide si hace falta internet. Si el mensaje es conversación, una petición sobre "
+        "el propio texto o código del usuario, matemáticas, o conocimiento general y estable que un "
+        "modelo ya sabe, NO busques: responde {\"queries\": []}. Busca solo cuando la respuesta "
+        "depende de datos actuales, cifras, precios, versiones, noticias, documentación concreta o "
+        "hechos que conviene verificar.\n"
+        if optional else ""
+    )
     return (
         f"Hoy es {today}. Eres el planificador de búsquedas de un asistente. Tu único trabajo es "
         "decidir qué consultas hay que hacer en un buscador web para responder BIEN al último "
         "mensaje del usuario, teniendo en cuenta la conversación.\n"
         "Reglas:\n"
-        f"- Entre 1 y {MAX_QUERIES} consultas, cada una corta y concreta (palabras clave, no preguntas "
-        "completas ni saludos).\n"
+        f"{decision}"
+        f"- {'Hasta' if optional else 'Entre 1 y'} {MAX_QUERIES} consultas, cada una corta y concreta "
+        "(palabras clave, no preguntas completas ni saludos).\n"
         "- Resuelve las referencias a mensajes anteriores: si el usuario dice \"¿y en Perú?\" tras "
         "hablar del costo de vida en Ecuador, la consulta es \"costo de vida Perú 2026\".\n"
         "- Si el tema depende del momento (precios, noticias, versiones, cifras), incluye el año actual.\n"
@@ -318,8 +327,10 @@ def _plan_prompt() -> str:
     )
 
 
-def parse_plan(raw: str, fallback: str) -> list[str]:
-    """Extrae las consultas del JSON del modelo; si no hay nada usable, la pregunta tal cual."""
+def parse_plan(raw: str, fallback: str, optional: bool = False) -> list[str]:
+    """Extrae las consultas del JSON del modelo; si no hay nada usable, la
+    pregunta tal cual. En modo opcional, una lista vacía (o nada parseable)
+    significa «no hace falta buscar»."""
     consultas: list[str] = []
     m = _JSON_RE.search(raw or "")
     if m:
@@ -330,6 +341,8 @@ def parse_plan(raw: str, fallback: str) -> list[str]:
                 consultas = [str(q).strip() for q in crudas if str(q).strip()]
         except ValueError:
             pass
+    if optional and not consultas:
+        return []
     vistas: set[str] = set()
     limpias = []
     for q in consultas:
@@ -343,9 +356,11 @@ def parse_plan(raw: str, fallback: str) -> list[str]:
 async def plan_queries(
     messages: list[dict],
     ask: Callable[[list[dict]], Awaitable[str]],
+    optional: bool = False,
 ) -> list[str]:
     """Pide al modelo las consultas. `ask` ejecuta un chat sin streaming y
-    devuelve el texto; cualquier fallo cae a buscar el mensaje del usuario."""
+    devuelve el texto; cualquier fallo cae a buscar el mensaje del usuario.
+    Con `optional` el modelo puede decidir que no hace falta buscar ([])."""
     pregunta = str(messages[-1].get("content") or "")
     historial = [
         {"role": m["role"], "content": str(m.get("content") or "")[:_PLAN_CHARS]}
@@ -353,11 +368,14 @@ async def plan_queries(
         if m.get("role") in ("user", "assistant") and m.get("content")
     ]
     try:
-        raw = await ask([{"role": "system", "content": _plan_prompt()}, *historial])
+        raw = await ask([{"role": "system", "content": _plan_prompt(optional)}, *historial])
     except Exception as exc:
+        if optional:
+            logger.warning(f"El planificador de búsquedas falló ({exc}); no se busca")
+            return []
         logger.warning(f"El planificador de búsquedas falló ({exc}); se busca el mensaje tal cual")
         return [pregunta.strip()[:200]]
-    consultas = parse_plan(raw, pregunta)
+    consultas = parse_plan(raw, pregunta, optional)
     logger.info(f"[websearch] consultas: {consultas}")
     return consultas
 

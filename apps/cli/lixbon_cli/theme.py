@@ -280,6 +280,11 @@ def pt_style():
         "cmd.agente": PALETTE["accent"],
         "cmd.cuenta": PALETTE["beige"],
         "cmd.sistema": PALETTE["dim"],
+        # En la fila marcada esas clases de grupo se seguían aplicando y pintaban
+        # el nombre en acento sobre acento (invisible) o con otro fondo. Una
+        # regla con las dos clases es más específica y fuerza tinta sobre acento.
+        **{f"completion-menu.completion.current {cls}": f"bold bg:{PALETTE['accent']} {PALETTE['ink']}"
+           for cls in ("cmd.name", "cmd.args", "cmd.conversacion", "cmd.agente", "cmd.cuenta", "cmd.sistema")},
         # Barra de scroll del menú, para que se note que la lista sigue.
         "scrollbar.background": f"bg:{panel}",
         "scrollbar.button": f"bg:{PALETTE['dim2']}",

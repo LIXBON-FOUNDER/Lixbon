@@ -14,7 +14,7 @@ export async function streamChatCompletion({
       messages,
       conversation_id: conversationId,
       stream: true,
-      web_search: webSearch,
+      web_search: webSearch ? true : 'auto',
     }),
     signal,
   });

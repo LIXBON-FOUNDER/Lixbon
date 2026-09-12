@@ -11,7 +11,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -80,7 +80,9 @@ class ChatCompletionRequest(BaseModel):
     title: str | None = None
     client_id: str | None = None
     stream: bool = False
-    web_search: bool = False  # "modo investigar": busca en internet e inyecta contexto
+    # Búsqueda web: True fuerza la investigación, "auto" deja que el modelo
+    # decida si hace falta (planificador), False no busca.
+    web_search: bool | Literal["auto"] = False
     # Origen (web/mobile/ide/cli): historial independiente por superficie.
     source: str | None = None
     # Ventana de contexto de Ollama. None ⇒ default de Ollama (4096). Subirla
@@ -348,17 +350,23 @@ async def chat_completions(
     # contexto antes de responder.
     web_sources: list[dict] = []
     web_queries: list[str] = []
-    if payload.web_search and messages and messages[-1]["role"] == "user":
+    web_mode = payload.web_search
+    if web_mode == "auto" and payload.tools:
+        # Con herramientas (agente) el modelo ya tiene `web_search` como tool
+        # y decide él; el planificador solo duplicaría la búsqueda.
+        web_mode = False
+    if web_mode and messages and messages[-1]["role"] == "user":
         async def _preguntar(planner_messages: list[dict]) -> str:
             resp = await ollama_chat(base, model, planner_messages, headers=headers,
                                      client=deps.http_client_chat, keep_alive=role.keep_alive,
                                      format="json", think=False)
             return (resp.get("message") or {}).get("content", "")
 
-        web_queries = await websearch.plan_queries(messages, _preguntar)
-        web_sources = await websearch.research(web_queries)
-        context = websearch.build_context(messages[-1]["content"], web_sources, web_queries)
-        messages.insert(len(messages) - 1, {"role": "system", "content": context})
+        web_queries = await websearch.plan_queries(messages, _preguntar, optional=web_mode == "auto")
+        if web_queries:
+            web_sources = await websearch.research(web_queries)
+            context = websearch.build_context(messages[-1]["content"], web_sources, web_queries)
+            messages.insert(len(messages) - 1, {"role": "system", "content": context})
 
     messages = fit_messages(messages, num_ctx)
     started_at = time.perf_counter()

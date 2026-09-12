@@ -5,14 +5,16 @@
 $ErrorActionPreference = "Stop"
 
 $Gateway = if ($env:LIXBON_GATEWAY) { $env:LIXBON_GATEWAY } else { "__GATEWAY__" }
-if (-not $env:LIXBON_ENROLL) {
+$Dir = Join-Path $env:LOCALAPPDATA "Lixbon\node"
+$Task = "Lixbon Node Agent"
+# Sin token pero con un nodo ya enrolado: es una actualizacion (agente, tarea,
+# lanzador); la identidad y el node.env se conservan.
+$Actualizar = (-not $env:LIXBON_ENROLL) -and (Test-Path (Join-Path $Dir "node.json"))
+if (-not $env:LIXBON_ENROLL -and -not $Actualizar) {
   Write-Host "Falta LIXBON_ENROLL: genera un token en el panel admin (Nodos -> Anadir GPU)" -ForegroundColor Red
   Write-Host '  $env:LIXBON_ENROLL="<token>"; irm ' + $Gateway + '/install-node.ps1 | iex'
   return
 }
-
-$Dir = Join-Path $env:LOCALAPPDATA "Lixbon\node"
-$Task = "Lixbon Node Agent"
 New-Item -ItemType Directory -Force $Dir | Out-Null
 Write-Host "> Lixbon node - gateway: $Gateway"
 
@@ -50,25 +52,48 @@ python -m pip install --quiet --user "httpx>=0.27" psutil "websockets>=13" fasta
 Write-Host "> Descargando el agente..."
 Invoke-WebRequest -UseBasicParsing "$Gateway/node-agent.py" -OutFile (Join-Path $Dir "agent.py")
 
-$envLines = @(
-  "LIXBON_GATEWAY=$Gateway",
-  "LIXBON_ENROLL=$($env:LIXBON_ENROLL)",
-  "LIXBON_STATE_FILE=$(Join-Path $Dir 'node.json')",
-  "LIXBON_NODE_NAME=$($env:LIXBON_NODE_NAME)",
-  "LIXBON_NODE_ID=$($env:LIXBON_NODE_ID)",
-  "LIXBON_PROVIDER=$($env:LIXBON_PROVIDER)",
-  "LIXBON_MODELS=$($env:LIXBON_MODELS)"
-)
-Set-Content -Path (Join-Path $Dir "node.env") -Value $envLines -Encoding utf8
+if (-not $Actualizar) {
+  $envLines = @(
+    "LIXBON_GATEWAY=$Gateway",
+    "LIXBON_ENROLL=$($env:LIXBON_ENROLL)",
+    "LIXBON_STATE_FILE=$(Join-Path $Dir 'node.json')",
+    "LIXBON_NODE_NAME=$($env:LIXBON_NODE_NAME)",
+    "LIXBON_NODE_ID=$($env:LIXBON_NODE_ID)",
+    "LIXBON_PROVIDER=$($env:LIXBON_PROVIDER)",
+    "LIXBON_MODELS=$($env:LIXBON_MODELS)"
+  )
+  Set-Content -Path (Join-Path $Dir "node.env") -Value $envLines -Encoding utf8
+}
 
-# run.ps1 carga node.env y lanza el agente; es lo que ejecuta la tarea programada.
+# run.ps1 carga node.env y SUPERVISA al agente: es lo que ejecuta la tarea
+# programada. Al iniciar sesion, Python (alias de la Store), la red u Ollama
+# pueden no estar listos y el primer arranque muere sin escribir nada; el
+# bucle lo reintenta hasta que engancha. Solo se rinde si el agente pide parar
+# (codigo 3: identidad invalida o nodo deshabilitado).
 $run = @'
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$log = Join-Path $dir "agent.log"
 Get-Content (Join-Path $dir "node.env") | ForEach-Object {
   if ($_ -match "^([^=]+)=(.*)$" -and $matches[2] -ne "") { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process") }
 }
 Set-Location $dir
-python -u (Join-Path $dir "agent.py") *>> (Join-Path $dir "agent.log")
+$seguidos = 0
+while ($true) {
+  $inicio = Get-Date
+  "[run.ps1] $(Get-Date -Format s) arrancando el agente" | Add-Content $log
+  $code = -1
+  try {
+    & python -u (Join-Path $dir "agent.py") *>> $log
+    $code = $LASTEXITCODE
+  } catch {
+    "[run.ps1] no se pudo lanzar python: $($_.Exception.Message)" | Add-Content $log
+  }
+  if ($code -eq 3) { "[run.ps1] el agente pidio parar (codigo 3); revisa el log" | Add-Content $log; break }
+  if (((Get-Date) - $inicio).TotalSeconds -gt 120) { $seguidos = 0 } else { $seguidos++ }
+  if ($seguidos -gt 60) { "[run.ps1] 60 arranques fallidos seguidos; me rindo" | Add-Content $log; break }
+  "[run.ps1] el agente termino (codigo $code); reintento en 15 s" | Add-Content $log
+  Start-Sleep -Seconds 15
+}
 '@
 Set-Content -Path (Join-Path $Dir "run.ps1") -Value $run -Encoding utf8
 
@@ -76,9 +101,12 @@ $args = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dir\run
 try {
   # schtasks /SC ONLOGON exige admin; los cmdlets registran la tarea del usuario sin elevar.
   Get-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue | Stop-ScheduledTask -ErrorAction SilentlyContinue
+  Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$Dir*agent.py*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $args
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-  $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+  $trigger.Delay = "PT20S"  # que la red, Ollama y los alias de la Store esten listos
+  $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
   Register-ScheduledTask -TaskName $Task -Action $action -Trigger $trigger -Settings $settings -Force -ErrorAction Stop | Out-Null
   Start-ScheduledTask -TaskName $Task
   Write-Host "OK. El agente corre en segundo plano y arranca solo al iniciar sesion." -ForegroundColor Green

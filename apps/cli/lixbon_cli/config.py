@@ -2,6 +2,14 @@
 import json
 from pathlib import Path
 
+def web_mode_from_config(value) -> str:
+    """`web_search` de config.json: "auto" | "on" | "off". True → on; False
+    (el antiguo default) → auto."""
+    if value in ("auto", "on", "off"):
+        return value
+    return "on" if value is True else "auto"
+
+
 CLI_VERSION = "2.3.0"
 
 DEFAULT_BASE_URL = "https://lixbon.com/v1"

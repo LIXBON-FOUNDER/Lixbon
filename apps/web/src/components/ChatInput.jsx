@@ -327,7 +327,7 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
         <button
           className={webSearch ? 'icon-btn is-active' : 'icon-btn'}
           type="button"
-          title={onToggleWeb ? (webSearch ? 'Búsqueda en internet activada' : 'Buscar en internet') : 'Buscar en la web (próximamente)'}
+          title={onToggleWeb ? (webSearch ? 'Buscar en internet en cada respuesta (activado)' : 'Buscar en internet siempre; sin activar, el modelo decide cuándo') : 'Buscar en la web (próximamente)'}
           onClick={onToggleWeb}
           disabled={!onToggleWeb}
           aria-pressed={webSearch}

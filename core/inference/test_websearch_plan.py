@@ -99,3 +99,23 @@ def test_proveedores_sin_clave_se_omiten(monkeypatch):
     monkeypatch.setattr(websearch, "BRAVE_API_KEY", "")
     monkeypatch.setattr(websearch, "TAVILY_API_KEY", "k")
     assert websearch.providers_configured() == ["tavily", "duckduckgo"]
+
+
+def test_modo_auto_permite_no_buscar():
+    assert websearch.parse_plan('{"queries": []}', "pregunta", optional=True) == []
+    assert websearch.parse_plan("no es json", "pregunta", optional=True) == []
+    assert websearch.parse_plan('{"queries": []}', "pregunta") == ["pregunta"]
+    assert websearch.parse_plan('{"queries": ["a"]}', "pregunta", optional=True) == ["a"]
+
+
+def test_prompt_auto_explica_cuando_no_buscar():
+    from core.inference.websearch import _plan_prompt
+    assert '{"queries": []}' in _plan_prompt(optional=True)
+    assert '{"queries": []}' not in _plan_prompt()
+
+
+def test_request_acepta_auto():
+    from core.gateway.routers.chat import ChatCompletionRequest
+    req = ChatCompletionRequest(messages=[{"role": "user", "content": "x"}], web_search="auto")
+    assert req.web_search == "auto"
+    assert ChatCompletionRequest(messages=[], web_search=True).web_search is True

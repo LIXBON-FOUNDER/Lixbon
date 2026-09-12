@@ -20,7 +20,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("history", "[mensajes]", "Ver y reabrir conversaciones anteriores", "conversación"),
     ("image", "<ruta>", "Escribir una imagen en el mensaje (también @ruta)", "conversación"),
     ("paste", "", "Escribir la imagen del portapapeles en el mensaje (Alt+V)", "conversación"),
-    ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
+    ("web", "[auto|on|off]", "Búsqueda web: el modelo decide, siempre o nunca", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),
     ("clear", "", "Vaciar el contexto y empezar de cero", "conversación"),

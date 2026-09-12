@@ -606,6 +606,11 @@ def pt_style():
         "cmd.agente": PALETTE["accent"],
         "cmd.cuenta": PALETTE["beige"],
         "cmd.sistema": PALETTE["dim"],
+        # En la fila marcada esas clases de grupo se seguían aplicando y pintaban
+        # el nombre en acento sobre acento (invisible) o con otro fondo. Una
+        # regla con las dos clases es más específica y fuerza tinta sobre acento.
+        **{f"completion-menu.completion.current {cls}": f"bold bg:{PALETTE['accent']} {PALETTE['ink']}"
+           for cls in ("cmd.name", "cmd.args", "cmd.conversacion", "cmd.agente", "cmd.cuenta", "cmd.sistema")},
         # Barra de scroll del menú, para que se note que la lista sigue.
         "scrollbar.background": f"bg:{panel}",
         "scrollbar.button": f"bg:{PALETTE['dim2']}",
@@ -617,6 +622,14 @@ def pt_style():
 """Configuración local del CLI (~/.lixbon/config.json)."""
 import json
 from pathlib import Path
+
+def web_mode_from_config(value) -> str:
+    """`web_search` de config.json: "auto" | "on" | "off". True → on; False
+    (el antiguo default) → auto."""
+    if value in ("auto", "on", "off"):
+        return value
+    return "on" if value is True else "auto"
+
 
 CLI_VERSION = "2.3.0"
 
@@ -1090,7 +1103,7 @@ class ApiClient:
 
     def chat_stream(self, model: str, messages: list[dict], conversation_id: str | None = None,
                     client_id: str = "cli", title: str | None = None,
-                    web_search: bool = False, num_ctx: int | None = None,
+                    web_search=False, num_ctx: int | None = None,
                     tools: list[dict] | None = None) -> ChatStream:
         payload = {
             "model": model,
@@ -5023,7 +5036,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("history", "[mensajes]", "Ver y reabrir conversaciones anteriores", "conversación"),
     ("image", "<ruta>", "Escribir una imagen en el mensaje (también @ruta)", "conversación"),
     ("paste", "", "Escribir la imagen del portapapeles en el mensaje (Alt+V)", "conversación"),
-    ("web", "[on|off]", "Búsqueda web durante las respuestas", "conversación"),
+    ("web", "[auto|on|off]", "Búsqueda web: el modelo decide, siempre o nunca", "conversación"),
     ("copy", "", "Copiar la última respuesta al portapapeles", "conversación"),
     ("save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"),
     ("clear", "", "Vaciar el contexto y empezar de cero", "conversación"),
@@ -5480,7 +5493,9 @@ class ChatApp:
         self.plan_name = self.cfg.get("plan_name", "")
         self.pending_images: list[Path] = []
         self.prompt_prefill = ""  # marcadores de imagen que esperan al prompt
-        self.web_search = bool(self.cfg.get("web_search", False))
+        # "auto" (el modelo decide si busca), "on" (siempre) u "off". Los
+        # valores booleanos de configuraciones antiguas se traducen.
+        self.web_search = web_mode_from_config(self.cfg.get("web_search"))
         self.project_context = ""  # LIXBON.md del workspace, si lo hay
         self.session_tokens = 0
         self.chars_per_token = 4.0
@@ -5502,7 +5517,7 @@ class ChatApp:
         self.status.model = self.model or "sin modelo"
         self.status.session_label = self._session_label()
         self.status.mode = self.mode
-        self.status.web = self.web_search
+        self.status.web = self.web_search == "on"
         self.status.project = bool(self.project_context)
         self.status.remote = self.remote is not None
         tokens, pct = self._estimate_context()
@@ -6470,7 +6485,7 @@ class ChatApp:
             conversation_id=self.conversation_id,
             client_id=self.client_id,
             title=self.title,
-            web_search=self.web_search,
+            web_search={"on": True, "off": False}.get(self.web_search, "auto"),
             num_ctx=self.cfg.get("context_window"),
             tools=tools,
         )
@@ -6902,7 +6917,7 @@ class ChatApp:
             ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens",
              "se envía el turno entero" if self.mode == "agent"
              else f"últimos {self.cfg.get('max_context_messages', 12)} mensajes"),
-            ("Extras", f"búsqueda web {'on' if self.web_search else 'off'}",
+            ("Extras", f"búsqueda web {self.web_search}",
              f"barra fija {'on' if status_line_active() else 'off'}"),
         ]
         for label, value, note in rows:
@@ -7251,20 +7266,22 @@ class ChatApp:
     # ── conversación ─────────────────────────────────────────────────────
 
     def cmd_web(self, arg: str):
-        if arg in ("on", "off"):
-            self.web_search = arg == "on"
+        modos = ("auto", "on", "off")
+        if arg in modos:
+            self.web_search = arg
         else:
             chosen = select("Búsqueda web", [
-                Option("on", "on", "el modelo consulta la web cuando le hace falta"),
+                Option("auto", "auto", "el modelo decide cuándo hace falta buscar"),
+                Option("on", "on", "investiga en internet en cada respuesta"),
                 Option("off", "off", "solo el conocimiento del modelo"),
-            ], default=0 if self.web_search else 1)
+            ], default=modos.index(self.web_search))
             if chosen is None:
                 return True
-            self.web_search = chosen == "on"
+            self.web_search = chosen
         self.cfg["web_search"] = self.web_search
         save_config(self.cfg)
         self._refresh_status()
-        print_ok(f"Búsqueda web: {'on' if self.web_search else 'off'}")
+        print_ok(f"Búsqueda web: {self.web_search}")
         return True
 
     def cmd_save(self, arg: str):
@@ -7406,7 +7423,7 @@ class ChatApp:
                 ("model", f"Modelo{'':<10}", self.model or "sin modelo"),
                 ("mode", "Modo de trabajo", self.mode),
                 ("approve", "Auto-aprobar cambios", "on" if self.session.get("auto_approve") else "off"),
-                ("web", "Búsqueda web", "on" if self.web_search else "off"),
+                ("web", "Búsqueda web", self.web_search),
                 ("bar", "Barra fija", "on" if status_line_active() else "off"),
                 ("context-window", "Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
                 ("messages", "Mensajes enviados", str(self.cfg.get("max_context_messages", 12))),

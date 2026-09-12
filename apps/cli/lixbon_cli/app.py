@@ -39,6 +39,7 @@ from lixbon_cli.clipboard import paste_image
 from lixbon_cli.inputq import InputQueue
 from lixbon_cli.config import (
     CLI_VERSION,
+    web_mode_from_config,
     CONFIG_DIR,
     CONFIG_FILE,
     HISTORY_FILE,
@@ -174,7 +175,9 @@ class ChatApp:
         self.plan_name = self.cfg.get("plan_name", "")
         self.pending_images: list[Path] = []
         self.prompt_prefill = ""  # marcadores de imagen que esperan al prompt
-        self.web_search = bool(self.cfg.get("web_search", False))
+        # "auto" (el modelo decide si busca), "on" (siempre) u "off". Los
+        # valores booleanos de configuraciones antiguas se traducen.
+        self.web_search = web_mode_from_config(self.cfg.get("web_search"))
         self.project_context = ""  # LIXBON.md del workspace, si lo hay
         self.session_tokens = 0
         self.chars_per_token = 4.0
@@ -196,7 +199,7 @@ class ChatApp:
         self.status.model = self.model or "sin modelo"
         self.status.session_label = self._session_label()
         self.status.mode = self.mode
-        self.status.web = self.web_search
+        self.status.web = self.web_search == "on"
         self.status.project = bool(self.project_context)
         self.status.remote = self.remote is not None
         tokens, pct = self._estimate_context()
@@ -1168,7 +1171,7 @@ class ChatApp:
             conversation_id=self.conversation_id,
             client_id=self.client_id,
             title=self.title,
-            web_search=self.web_search,
+            web_search={"on": True, "off": False}.get(self.web_search, "auto"),
             num_ctx=self.cfg.get("context_window"),
             tools=tools,
         )
@@ -1601,7 +1604,7 @@ class ChatApp:
             ("Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens",
              "se envía el turno entero" if self.mode == "agent"
              else f"últimos {self.cfg.get('max_context_messages', 12)} mensajes"),
-            ("Extras", f"búsqueda web {'on' if self.web_search else 'off'}",
+            ("Extras", f"búsqueda web {self.web_search}",
              f"barra fija {'on' if status_line_active() else 'off'}"),
         ]
         for label, value, note in rows:
@@ -1952,20 +1955,22 @@ class ChatApp:
     # ── conversación ─────────────────────────────────────────────────────
 
     def cmd_web(self, arg: str):
-        if arg in ("on", "off"):
-            self.web_search = arg == "on"
+        modos = ("auto", "on", "off")
+        if arg in modos:
+            self.web_search = arg
         else:
             chosen = select("Búsqueda web", [
-                Option("on", "on", "el modelo consulta la web cuando le hace falta"),
+                Option("auto", "auto", "el modelo decide cuándo hace falta buscar"),
+                Option("on", "on", "investiga en internet en cada respuesta"),
                 Option("off", "off", "solo el conocimiento del modelo"),
-            ], default=0 if self.web_search else 1)
+            ], default=modos.index(self.web_search))
             if chosen is None:
                 return True
-            self.web_search = chosen == "on"
+            self.web_search = chosen
         self.cfg["web_search"] = self.web_search
         save_config(self.cfg)
         self._refresh_status()
-        print_ok(f"Búsqueda web: {'on' if self.web_search else 'off'}")
+        print_ok(f"Búsqueda web: {self.web_search}")
         return True
 
     def cmd_save(self, arg: str):
@@ -2107,7 +2112,7 @@ class ChatApp:
                 ("model", f"Modelo{'':<10}", self.model or "sin modelo"),
                 ("mode", "Modo de trabajo", self.mode),
                 ("approve", "Auto-aprobar cambios", "on" if self.session.get("auto_approve") else "off"),
-                ("web", "Búsqueda web", "on" if self.web_search else "off"),
+                ("web", "Búsqueda web", self.web_search),
                 ("bar", "Barra fija", "on" if status_line_active() else "off"),
                 ("context-window", "Ventana de contexto", f"{self.cfg.get('context_window', 8192)} tokens"),
                 ("messages", "Mensajes enviados", str(self.cfg.get("max_context_messages", 12))),

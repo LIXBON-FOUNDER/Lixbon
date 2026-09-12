@@ -176,7 +176,7 @@ class ApiClient:
 
     def chat_stream(self, model: str, messages: list[dict], conversation_id: str | None = None,
                     client_id: str = "cli", title: str | None = None,
-                    web_search: bool = False, num_ctx: int | None = None,
+                    web_search=False, num_ctx: int | None = None,
                     tools: list[dict] | None = None) -> ChatStream:
         payload = {
             "model": model,
