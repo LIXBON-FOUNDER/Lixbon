@@ -154,8 +154,12 @@ function PanelEnrolar({ onCerrar, onCreado }) {
           texto={commands.linux}
         />
         <Comando
-          titulo="Windows con el repo clonado: PowerShell desde la raíz del repo. El token solo hace falta la primera vez."
+          titulo="Windows con el repo clonado (PowerShell, desde la raíz del repo). El token solo hace falta la primera vez."
           texto={commands.windows}
+        />
+        <Comando
+          titulo="Windows con el repo clonado (cmd / Símbolo del sistema, desde la raíz del repo)"
+          texto={commands.windows_cmd}
         />
         <Comando titulo="Linux/macOS con el repo clonado" texto={commands.manual} />
         <Comando

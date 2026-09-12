@@ -57,6 +57,7 @@ def _comando_instalacion(token: str, request: Request) -> dict[str, str]:
         "windows": (
             f'$env:LIXBON_ENROLL="{token}"; python -m core.node_agent.agent --connect {base}'
         ),
+        "windows_cmd": f"set LIXBON_ENROLL={token} && python -m core.node_agent.agent --connect {base}",
         "manual": f"LIXBON_ENROLL={token} python -m core.node_agent.agent --connect {base}",
     }
 
