@@ -690,8 +690,6 @@ def mask_key(key: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────
 """Lectura de archivos que no son texto plano: PDF y Word (texto extraído),
 imágenes (van al modelo como adjunto de visión) y páginas web (html → texto)."""
-from __future__ import annotations
-
 import re
 import subprocess
 import sys

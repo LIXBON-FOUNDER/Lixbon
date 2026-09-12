@@ -109,7 +109,7 @@ def generate() -> str:
         '\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
     )
     combined = "".join(parts)
-    ast.parse(combined)  # validación final de sintaxis
+    compile(combined, str(OUTPUT), "exec")  # validación final de sintaxis (ast.parse no ve un __future__ tardío)
     return combined
 
 
