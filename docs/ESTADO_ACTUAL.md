@@ -226,6 +226,15 @@ Con `STRIPE_SECRET_KEY` vacío, todo degrada: `/planes` y Facturación muestran 
 - **Bugs corregidos**: agente muerto = offline (antes score perfecto); `/api/chat` y `/api/delegate` enrutan por el orquestador; streaming persiste mensaje+tokens; keep-alive SSE real por tiempo (`core/inference/ollama.py` — única implementación de streaming); watchdog sin duplicados; `packaging.version` para updates.
 - **E2E validado**: chat desde la URL de producción → tunnel → GPU (respuesta real, `node: gpu-01`).
 
+### ✅ Nodos por conexión inversa (2026-09-12) — GPUs alquiladas sin túnel
+- **Problema**: registrar un nodo exigía túnel Cloudflare + DNS + `agent_url` + copiar el token a mano. Inviable para GPUs alquiladas (RunPod/Vast: contenedor efímero, sin puerto entrante, IP cambiante).
+- **Solución**: el nodo abre un **WebSocket saliente** a `wss://lixbon.com/api/nodes/ws` (`core/gateway/routers/nodes_link.py`) y por ahí empuja métricas y atiende inferencia. `agent_url` es ahora NULL para estos nodos (`mode: link`); los nodos por URL (`gpu-01`) siguen funcionando igual.
+- **Enrolamiento**: panel admin → Nodos → **Añadir GPU** genera un token (`node_enrollments`, multiuso hasta caducar) y muestra el comando. La máquina lo canjea en `POST /api/nodes/enroll`, recibe `node_id` + secreto y lo guarda en `~/.lixbon/node.json` (`LIXBON_STATE_FILE`). Un reinicio reconecta con la misma identidad. `LIXBON_NODE_ID` fija el id para que una plantilla de pods no deje nodos huérfanos.
+- **Tres formas de arrancar un nodo**: (1) `curl -fsSL https://lixbon.com/install-node.sh | LIXBON_ENROLL=<token> bash` (Linux, instala Ollama y deja servicio systemd o proceso en background); (2) imagen Docker `infra/node/Dockerfile` (Ollama + agente, variables `LIXBON_GATEWAY`, `LIXBON_ENROLL`, `LIXBON_MODELS`); (3) con el repo: `LIXBON_ENROLL=<token> python -m core.node_agent.agent --connect https://lixbon.com`.
+- **Piezas**: `core/orchestration/node_link.py` (registro de sockets + multiplexado por `id` de petición), `core/inference/node_transport.py` (transporte httpx para `node://<id>`: `ollama.py` no cambia), orquestador con `nodo_conectado/nodo_desconectado/actualizar_metricas`. El agente v4 conserva el modo servidor (`X-Node-Token`) para `gpu-01`.
+- **Tests**: `core/orchestration/test_node_link.py`, `test_orchestrator_link.py`, y E2E con red real y el agente de verdad en `core/gateway/test_nodes_link_e2e.py`.
+- **Pendiente**: publicar la imagen en GHCR (workflow), migrar `gpu-01` al modo conexión y retirar el túnel; purga automática de nodos link sin conexión en N días.
+
 ### ✅ F3 — Auth nuevo (completada, verificada en staging)
 - **Login por email**; registro con `first_name`/`last_name` (lo que exige el diseño). Username sigue funcionando para CLI/desktop legacy.
 - **Sesiones web** en tabla `sessions` (cookie `lixbon_session`, HttpOnly, SameSite=Lax, `COOKIE_SECURE=1` para prod) — separadas de las API keys.
@@ -520,7 +529,8 @@ Versión unificada **0.5.3** (package.json estaba en 0.5.2 con tauri.conf/Cargo 
 python -m uvicorn core.gateway.app:app --reload --port 8000
 
 # 2. Node agent (para probar inferencia local con la GPU)
-python -m core.node_agent.agent
+python -m core.node_agent.agent                                  # modo servidor (nodo por URL)
+LIXBON_ENROLL=<token> python -m core.node_agent.agent --connect http://127.0.0.1:8000   # modo conexión
 
 # 3. Web en dev (proxy al gateway)
 cd apps/web; npm run dev   # http://localhost:5173

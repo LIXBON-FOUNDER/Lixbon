@@ -2,8 +2,9 @@
 ollama.py — Cliente único de inferencia contra Ollama (directo o vía node_agent).
 Única implementación de chat y streaming SSE del proyecto.
 
-- `base_url` puede ser el Ollama local (http://127.0.0.1:11434) o el proxy del
-  node_agent (https://gpu-01.dominio/ollama); la API es la misma.
+- `base_url` puede ser el Ollama local (http://127.0.0.1:11434), el proxy del
+  node_agent (https://gpu-01.dominio/ollama) o un nodo conectado por WebSocket
+  (node://gpu-a1b2, ver core/inference/node_transport.py); la API es la misma.
 - El keep-alive del streaming es REAL: se basa en tiempo transcurrido sin chunks
   (cola async con timeout), no en la llegada de un chunk. Protege contra cortes
   de Cloudflare/Railway cuando el modelo tarda en producir el primer token.
@@ -18,6 +19,8 @@ import uuid
 from typing import Any, AsyncIterator
 
 import httpx
+
+from core.inference.node_transport import new_client
 
 logger = logging.getLogger("lixbon.inference")
 
@@ -74,7 +77,7 @@ async def chat(
         resp = await client.post(url, json=payload, headers=headers, timeout=STREAM_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
-    async with httpx.AsyncClient(timeout=STREAM_TIMEOUT) as own:
+    async with new_client(timeout=STREAM_TIMEOUT) as own:
         resp = await own.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()
@@ -107,7 +110,7 @@ async def generate(
         resp = await client.post(url, json=payload, headers=headers, timeout=STREAM_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
-    async with httpx.AsyncClient(timeout=STREAM_TIMEOUT) as own:
+    async with new_client(timeout=STREAM_TIMEOUT) as own:
         resp = await own.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()
@@ -126,7 +129,7 @@ async def embed(
     ka = coerce_keep_alive(keep_alive)
     if ka is not None:
         payload["keep_alive"] = ka
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with new_client(timeout=30.0) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         embeddings = resp.json().get("embeddings", [])
@@ -152,7 +155,7 @@ async def embed_many(
         resp = await client.post(url, json=payload, headers=headers, timeout=STREAM_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
-    async with httpx.AsyncClient(timeout=60.0) as own:
+    async with new_client(timeout=60.0) as own:
         resp = await own.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         return resp.json()
@@ -161,7 +164,7 @@ async def embed_many(
 async def list_models(base_url: str, headers: dict | None = None) -> list[dict]:
     """Lista los modelos instalados (/api/tags)."""
     url = f"{base_url.rstrip('/')}/api/tags"
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with new_client(timeout=10.0) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.json().get("models", [])
@@ -185,7 +188,7 @@ async def show_capabilities(
         if client is not None:
             resp = await client.post(url, json={"model": model}, headers=headers, timeout=10.0)
         else:
-            async with httpx.AsyncClient(timeout=10.0) as own:
+            async with new_client(timeout=10.0) as own:
                 resp = await own.post(url, json={"model": model}, headers=headers)
         resp.raise_for_status()
         caps = resp.json().get("capabilities")
@@ -286,7 +289,7 @@ async def stream_chat_openai(
     parts: list[str] = []
     collected_tool_calls: list[dict] = []
 
-    async with httpx.AsyncClient(timeout=STREAM_TIMEOUT) as client:
+    async with new_client(timeout=STREAM_TIMEOUT) as client:
         async with client.stream("POST", url, json=payload, headers=headers) as response:
             response.raise_for_status()
 

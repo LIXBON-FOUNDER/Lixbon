@@ -34,6 +34,7 @@ from core.persistence.models import (
     ModelPricing,
     ModelRole,
     Node,
+    NodeEnrollment,
     Plan,
     RemoteEvent,
     RemoteSession,
@@ -1968,8 +1969,12 @@ def _node_to_dict(n: Node, mask_token: bool = True) -> dict[str, Any]:
         "id": n.id,
         "name": n.name,
         "agent_url": n.agent_url,
+        "mode": "url" if n.agent_url else "link",
         "token": (n.token[:6] + "..." if n.token else None) if mask_token else n.token,
         "enabled": bool(n.enabled),
+        "provider": n.provider,
+        "hostname": n.hostname,
+        "last_seen_at": n.last_seen_at,
         "created_at": n.created_at,
     }
 
@@ -1982,7 +1987,16 @@ def list_nodes(enabled_only: bool = False, mask_token: bool = True) -> list[dict
         return [_node_to_dict(n, mask_token) for n in s.scalars(stmt).all()]
 
 
-def upsert_node(node_id: str, name: str, agent_url: str, token: str, enabled: bool = True) -> dict[str, Any]:
+def get_node(node_id: str, mask_token: bool = True) -> dict[str, Any] | None:
+    with get_session() as s:
+        node = s.get(Node, node_id)
+        return _node_to_dict(node, mask_token) if node else None
+
+
+def upsert_node(
+    node_id: str, name: str, agent_url: str | None, token: str, enabled: bool = True,
+    provider: str | None = None, hostname: str | None = None,
+) -> dict[str, Any]:
     with get_session() as s:
         node = s.get(Node, node_id)
         if node:
@@ -1990,20 +2004,91 @@ def upsert_node(node_id: str, name: str, agent_url: str, token: str, enabled: bo
             node.agent_url = agent_url
             node.token = token
             node.enabled = 1 if enabled else 0
+            if provider is not None:
+                node.provider = provider
+            if hostname is not None:
+                node.hostname = hostname
         else:
             node = Node(
-                id=node_id, name=name, agent_url=agent_url,
-                token=token, enabled=1 if enabled else 0, created_at=now_iso(),
+                id=node_id, name=name, agent_url=agent_url, token=token,
+                enabled=1 if enabled else 0, provider=provider, hostname=hostname,
+                created_at=now_iso(),
             )
             s.add(node)
         s.flush()
         return _node_to_dict(node, mask_token=False)
 
 
+def touch_node(node_id: str, hostname: str | None = None) -> None:
+    with get_session() as s:
+        node = s.get(Node, node_id)
+        if node:
+            node.last_seen_at = now_iso()
+            if hostname:
+                node.hostname = hostname
+
+
 def delete_node(node_id: str) -> bool:
     with get_session() as s:
         result = s.execute(delete(Node).where(Node.id == node_id))
         return result.rowcount > 0
+
+
+# ─── Enrolamiento de nodos ─────────────────────────────────────────────────
+
+def _enrollment_to_dict(e: NodeEnrollment, with_token: bool = False) -> dict[str, Any]:
+    return {
+        "id": e.id,
+        "token": e.token if with_token else e.token[:6] + "...",
+        "label": e.label,
+        "created_by": e.created_by,
+        "created_at": e.created_at,
+        "expires_at": e.expires_at,
+        "uses": e.uses,
+        "revoked": bool(e.revoked),
+        "active": not e.revoked and e.expires_at > now_iso(),
+    }
+
+
+def create_enrollment(label: str | None, created_by: int | None, ttl_hours: int) -> dict[str, Any]:
+    with get_session() as s:
+        e = NodeEnrollment(
+            id="enr_" + secrets.token_hex(6),
+            token=secrets.token_urlsafe(24),
+            label=label,
+            created_by=created_by,
+            created_at=now_iso(),
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=ttl_hours)).isoformat(),
+        )
+        s.add(e)
+        s.flush()
+        return _enrollment_to_dict(e, with_token=True)
+
+
+def list_enrollments() -> list[dict[str, Any]]:
+    with get_session() as s:
+        rows = s.scalars(select(NodeEnrollment).order_by(desc(NodeEnrollment.created_at))).all()
+        return [_enrollment_to_dict(e) for e in rows]
+
+
+def revoke_enrollment(enrollment_id: str) -> bool:
+    with get_session() as s:
+        e = s.get(NodeEnrollment, enrollment_id)
+        if not e:
+            return False
+        e.revoked = 1
+        return True
+
+
+def consume_enrollment(token: str) -> dict[str, Any] | None:
+    """Valida y cuenta un uso. Multiuso hasta caducar: una misma plantilla de
+    pods alquilados puede enrolar varias máquinas con el mismo token."""
+    with get_session() as s:
+        e = s.scalars(select(NodeEnrollment).where(NodeEnrollment.token == token)).first()
+        if not e or e.revoked or e.expires_at <= now_iso():
+            return None
+        e.uses += 1
+        return _enrollment_to_dict(e)
 
 
 # ─── Métricas diarias ──────────────────────────────────────────────────────

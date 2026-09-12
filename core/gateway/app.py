@@ -10,7 +10,6 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -18,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.gateway import deps
 from core.gateway.logging_setup import setup_logging
+from core.inference.node_transport import new_client
 from core.config import ALLOWED_ORIGINS, APP_DESCRIPTION, APP_TITLE, APP_VERSION, LOGS_DIR, WEB_DIST_DIR
 from core.persistence.queries import (
     archive_old_inactive_keys,
@@ -27,7 +27,7 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, installer, keys, nodes_admin, oauth, payments, remote, team, versions, ws_status, monitor
+from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, team, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -55,8 +55,8 @@ async def lifespan(app: FastAPI):
     init_db()
     versions.sync_versions_to_db()
 
-    deps.http_client_fast = httpx.AsyncClient(timeout=10.0)
-    deps.http_client_chat = httpx.AsyncClient(timeout=120.0)
+    deps.http_client_fast = new_client(timeout=10.0)
+    deps.http_client_chat = new_client(timeout=120.0)
 
     deps.orquestador.iniciar()
     _start_archiver_cron()
@@ -121,6 +121,7 @@ app.include_router(remote.router)
 app.include_router(ws_status.router)
 app.include_router(monitor.router)
 app.include_router(nodes_admin.router)
+app.include_router(nodes_link.router)
 app.include_router(admin.router)
 
 

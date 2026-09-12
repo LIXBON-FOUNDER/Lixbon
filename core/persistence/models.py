@@ -183,17 +183,40 @@ class AppVersion(Base):
 
 
 class Node(Base):
-    """PC con GPU registrada en el cluster. Reemplaza al antiguo nodes.json."""
+    """Máquina con GPU registrada en el cluster.
+
+    Dos modos: `agent_url` fijado = el gateway la consulta por HTTP (PC propia
+    con túnel); NULL = la máquina se conecta al gateway por WebSocket con su
+    `token` como secreto (GPU alquilada, sin puerto entrante).
+    """
     __tablename__ = "nodes"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)          # slug: "gpu-01"
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    agent_url: Mapped[str] = mapped_column(Text, nullable=False)     # https://gpu-01.lixbon.com
-    # Token que el gateway envía al node_agent (X-Node-Token). Credencial del gateway,
-    # se guarda en claro porque el gateway necesita enviarla, como cualquier client secret.
+    agent_url: Mapped[str | None] = mapped_column(Text)
+    # Secreto compartido con el node_agent. Se guarda en claro porque el gateway
+    # necesita enviarlo (modo URL), como cualquier client secret.
     token: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[int] = mapped_column(nullable=False, default=1)
+    provider: Mapped[str | None] = mapped_column(Text)               # runpod, vast, propio…
+    hostname: Mapped[str | None] = mapped_column(Text)
+    last_seen_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class NodeEnrollment(Base):
+    """Token de enrolamiento: lo genera el admin y lo canjea una máquina nueva
+    para obtener su id y su secreto sin tocar el panel."""
+    __tablename__ = "node_enrollments"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column()
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    uses: Mapped[int] = mapped_column(nullable=False, default=0)
+    revoked: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
 class Plan(Base):

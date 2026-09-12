@@ -1,0 +1,2 @@
+# Scripts que corren en Linux: nunca CRLF (bash y Docker los rompen)
+*.sh text eol=lf

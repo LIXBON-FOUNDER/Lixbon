@@ -114,6 +114,11 @@ def init_db() -> None:
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_payment_method TEXT",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_last_run TEXT",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_last_error TEXT",
+        # Nodos por conexión inversa: sin agent_url, se identifican al conectar
+        "ALTER TABLE nodes ALTER COLUMN agent_url DROP NOT NULL",
+        "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS provider TEXT",
+        "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS hostname TEXT",
+        "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_seen_at TEXT",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

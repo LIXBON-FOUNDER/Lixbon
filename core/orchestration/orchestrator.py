@@ -9,6 +9,12 @@ Cambios F2:
 - Sin fallback de métricas falsas: agente caído ⇒ nodo offline
   (antes un agente caído recibía score PERFECTO — bug de inversión de lógica)
 - ollama_target(): resuelve a qué URL/headers mandar cada petición de inferencia
+
+Dos modos de nodo:
+- `url`: el gateway hace polling a {agent_url}/metrics y proxya a {agent_url}/ollama.
+- `link`: el nodo se conecta por WebSocket (core/orchestration/node_link.py),
+  empuja métricas y atiende inferencia; el destino es `node://<id>` y lo
+  resuelve el transporte de core/inference/node_transport.py.
 """
 
 import logging
@@ -74,6 +80,7 @@ class NodeOrchestrator:
         self._hilo_poll: threading.Thread | None = None
         self._activo = False
         self._cliente = httpx.Client(timeout=8.0)
+        self._links_activos: set[str] = set()
 
     # ──────────────────────────────────────────
     # Carga de nodos (desde BD)
@@ -107,12 +114,16 @@ class NodeOrchestrator:
                         "capabilities": {},     # modelo → [capabilities] (node_agent ≥ 3.1)
                         "tamanos": {},          # modelo → bytes
                         "agent_version": None,
+                        "hostname": None,
                         "score": 0.0,
                         "ultimo_poll": None,
                         "config": nodo,
                     }
                 else:
                     self._estado[nid]["config"] = nodo
+                    # Un nodo link online sigue online: su socket no depende de la BD
+                    if not nodo.get("agent_url") and nid in self._links_activos:
+                        self._estado[nid]["online"] = True
 
         logger.info(f"Nodos cargados desde BD: {[n['id'] for n in nodos]}")
 
@@ -155,9 +166,48 @@ class NodeOrchestrator:
                     logger.error(f"Error inesperado en poll de {nodo.get('id')}: {exc}")
             time.sleep(POLL_INTERVAL)
 
+    def _aplicar_metricas(self, nid: str, metricas: dict) -> bool:
+        """Vuelca un payload de /metrics en el estado del nodo y lo marca online."""
+        metricas = dict(metricas)
+        modelos = metricas.pop("models", [])
+        # model_info solo lo manda el node_agent ≥ 3.1. Sin él, capabilities
+        # queda vacío = "desconocidas", que NO es lo mismo que "ninguna":
+        # los roles no descartan modelos por falta de datos.
+        model_info = metricas.pop("model_info", None) or []
+        agent_version = metricas.pop("agent_version", None)
+        hostname = metricas.get("hostname")
+        capabilities = {
+            m["name"]: list(m["capabilities"])
+            for m in model_info
+            if m.get("name") and m.get("capabilities")
+        }
+        tamanos = {m["name"]: m.get("size", 0) for m in model_info if m.get("name")}
+        score = _calcular_score(metricas)
+
+        with self._lock:
+            if nid not in self._estado:
+                return False
+            self._estado[nid].update({
+                "online": True,
+                "fallos": 0,
+                "next_retry": 0.0,
+                "metricas": metricas,
+                "modelos": modelos,
+                "capabilities": capabilities,
+                "tamanos": tamanos,
+                "agent_version": agent_version,
+                "hostname": hostname,
+                "score": score,
+                "ultimo_poll": time.time(),
+            })
+        logger.debug(f"[{nid}] score={score} modelos={len(modelos)}")
+        return True
+
     def _poll_nodo(self, nodo: dict) -> None:
         """Consulta /metrics del node_agent. Sin métricas reales ⇒ nodo offline (sin datos inventados)."""
         nid = nodo["id"]
+        if not nodo.get("agent_url"):
+            return
         now = time.time()
 
         with self._lock:
@@ -172,37 +222,7 @@ class NodeOrchestrator:
         try:
             resp = self._cliente.get(url, headers=self._headers_nodo(nodo))
             resp.raise_for_status()
-            metricas = resp.json()
-            modelos = metricas.pop("models", [])
-            # model_info solo lo manda el node_agent ≥ 3.1. Sin él, capabilities
-            # queda vacío = "desconocidas", que NO es lo mismo que "ninguna":
-            # los roles no descartan modelos por falta de datos.
-            model_info = metricas.pop("model_info", None) or []
-            agent_version = metricas.pop("agent_version", None)
-            capabilities = {
-                m["name"]: list(m["capabilities"])
-                for m in model_info
-                if m.get("name") and m.get("capabilities")
-            }
-            tamanos = {m["name"]: m.get("size", 0) for m in model_info if m.get("name")}
-            score = _calcular_score(metricas)
-
-            with self._lock:
-                if nid not in self._estado:
-                    return
-                self._estado[nid].update({
-                    "online": True,
-                    "fallos": 0,
-                    "next_retry": 0.0,
-                    "metricas": metricas,
-                    "modelos": modelos,
-                    "capabilities": capabilities,
-                    "tamanos": tamanos,
-                    "agent_version": agent_version,
-                    "score": score,
-                    "ultimo_poll": time.time(),
-                })
-            logger.debug(f"[{nid}] score={score} modelos={len(modelos)}")
+            self._aplicar_metricas(nid, resp.json())
 
         except Exception as exc:
             with self._lock:
@@ -226,6 +246,44 @@ class NodeOrchestrator:
                         logger.warning(f"[{nid}] Offline ({exc}). Reintento en {wait_seconds}s.")
                     else:
                         logger.warning(f"[{nid}] Offline ({exc})")
+
+    # ──────────────────────────────────────────
+    # Nodos por conexión inversa (WebSocket)
+    # ──────────────────────────────────────────
+
+    def nodo_conectado(self, nid: str, info: dict | None = None) -> bool:
+        """El nodo abrió su socket. Si aún no está cargado (recién enrolado), recarga la BD."""
+        if nid not in self._estado:
+            self.cargar_nodos()
+        with self._lock:
+            est = self._estado.get(nid)
+            if est is None or est["config"].get("agent_url"):
+                return False
+            self._links_activos.add(nid)
+            est.update({
+                "online": True,
+                "fallos": 0,
+                "next_retry": 0.0,
+                "agent_version": (info or {}).get("agent_version") or est.get("agent_version"),
+                "hostname": (info or {}).get("hostname") or est.get("hostname"),
+                "ultimo_poll": time.time(),
+            })
+        logger.info(f"[{nid}] conectado (link)")
+        return True
+
+    def nodo_desconectado(self, nid: str) -> None:
+        with self._lock:
+            self._links_activos.discard(nid)
+            est = self._estado.get(nid)
+            if est is None:
+                return
+            est["online"] = False
+            est["score"] = 0.0
+        logger.warning(f"[{nid}] desconectado (link)")
+
+    def actualizar_metricas(self, nid: str, metricas: dict) -> None:
+        if nid in self._links_activos:
+            self._aplicar_metricas(nid, metricas)
 
     # ──────────────────────────────────────────
     # Selección del mejor nodo
@@ -291,6 +349,8 @@ class NodeOrchestrator:
         else:
             nodo = self.best_node()
         if nodo:
+            if not nodo.get("agent_url"):
+                return f"node://{nodo['id']}", {}, nodo["id"]
             base = f"{nodo['agent_url'].rstrip('/')}/ollama"
             return base, self._headers_nodo(nodo), nodo["id"]
         return OLLAMA_BASE_URL, {}, "local"
@@ -338,6 +398,8 @@ class NodeOrchestrator:
             estado = self._estado.get(nid)
             if estado is None:
                 return False
+            if not estado["config"].get("agent_url"):
+                return estado["online"]
             estado["fallos"] = 0
             estado["next_retry"] = 0.0
             nodo = estado["config"]
@@ -366,6 +428,9 @@ class NodeOrchestrator:
                     "id": nid,
                     "name": est["config"].get("name", nid),
                     "agent_url": est["config"].get("agent_url"),
+                    "mode": "url" if est["config"].get("agent_url") else "link",
+                    "provider": est["config"].get("provider"),
+                    "hostname": est.get("hostname"),
                     "online": est["online"],
                     "score": est["score"],
                     "fallos": est["fallos"],
