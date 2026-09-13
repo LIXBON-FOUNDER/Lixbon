@@ -40,6 +40,8 @@ def inner_width() -> int:
 def two_col(left, right, width: int):
     """Une dos `Text` rellenando el hueco: el derecho queda al margen."""
     if right is None or not right.cell_len:
+        if left.cell_len > width:
+            left.truncate(max(6, width), overflow="ellipsis")
         return left
     limit = width - right.cell_len - 1
     if left.cell_len > limit:
@@ -309,6 +311,12 @@ def rail_text(hot: bool = False):
     return (f"{g('rail_hot') if hot else g('rail')} ", "lx.accent2" if hot else "lx.rule")
 
 
+def air(console) -> None:
+    """Una línea en blanco, salvo que ya la haya."""
+    if not getattr(console, "last_blank", False):
+        console.print()
+
+
 def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
                   readonly: bool = False, meta: str = "") -> None:
     """Una acción del agente dentro del canal:
@@ -319,10 +327,12 @@ def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int
     El canal ES el marcador: las lecturas dejan rastro fino y apagado, las
     escrituras encienden el canal grueso en acento. Un solo signo por línea (el
     `●` de antes sobraba al lado de la barra, y ahora además es del usuario).
-    La medida va pegada al margen derecho, en su propia columna.
+    La medida va pegada al margen derecho, en su propia columna. Cada acción
+    abre bloque: lleva una línea de aire por encima.
     """
     from rich.text import Text
 
+    air(console)
     left = Text()
     padded = f"{verb:<{VERB_WIDTH}}"
     if readonly:
@@ -377,6 +387,24 @@ def render_log_line(console, text: str, style: str = "lx.dim", meta: str = "") -
     console.print(two_col(left, right, row_width(console)))
 
 
+OUTPUT_HEAD = 3
+
+
+def render_output(console, text: str, head: int = OUTPUT_HEAD) -> str:
+    """Salida de un comando colgando de su acción: las primeras líneas y cuántas
+    quedan. Devuelve la última línea, que es la que resume (`35 passed`)."""
+    lines = [l.rstrip() for l in text.strip().splitlines() if l.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    body = lines[:-1]
+    for line in body[:head]:
+        render_log_line(console, f"{g('rail')} {line[:160]}", "lx.dim2")
+    if len(body) > head:
+        render_log_line(console, f"{g('rail')} {g('ellipsis')} {len(body) - head} líneas más", "lx.dim2")
+    return last[:160]
+
+
 def render_turn_summary(console, actions: int = 0, files: int = 0, adds: int = 0,
                         dels: int = 0, seconds: float = 0.0, hint: str = "") -> None:
     """Cierre del registro: qué ha pasado en el turno, en una línea.
@@ -387,6 +415,7 @@ def render_turn_summary(console, actions: int = 0, files: int = 0, adds: int = 0
         return
     from rich.text import Text
 
+    air(console)
     left = Text(f"{g('rail')} ", style="lx.rule")
     left.append(f"{actions} {'acción' if actions == 1 else 'acciones'}", style="lx.dim")
     if files:

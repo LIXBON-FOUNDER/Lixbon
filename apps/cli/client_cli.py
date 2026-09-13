@@ -450,6 +450,7 @@ def make_console():
             # banderas por medio código. Los Control del Live no cuentan: son
             # fontanería de repintado y dispararían el contador en cada frame.
             writes = 0
+            last_blank = True  # lo último impreso fue una línea vacía
 
             @property
             def size(self):
@@ -474,6 +475,10 @@ def make_console():
                     not isinstance(obj, (Control, NewLine)) for obj in objects
                 ):
                     self.writes += 1
+                if not objects or all(obj == "" or isinstance(obj, NewLine) for obj in objects):
+                    self.last_blank = True
+                elif any(not isinstance(obj, Control) for obj in objects):
+                    self.last_blank = False
                 if objects and not kwargs.pop("no_pad", False):
                     # Los Control (mover cursor, borrar línea) son la fontanería
                     # con la que Live/Status repintan y BORRAN su línea. Si se
@@ -1396,6 +1401,8 @@ def inner_width() -> int:
 def two_col(left, right, width: int):
     """Une dos `Text` rellenando el hueco: el derecho queda al margen."""
     if right is None or not right.cell_len:
+        if left.cell_len > width:
+            left.truncate(max(6, width), overflow="ellipsis")
         return left
     limit = width - right.cell_len - 1
     if left.cell_len > limit:
@@ -1664,6 +1671,12 @@ def rail_text(hot: bool = False):
     return (f"{g('rail_hot') if hot else g('rail')} ", "lx.accent2" if hot else "lx.rule")
 
 
+def air(console) -> None:
+    """Una línea en blanco, salvo que ya la haya."""
+    if not getattr(console, "last_blank", False):
+        console.print()
+
+
 def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int = 0,
                   readonly: bool = False, meta: str = "") -> None:
     """Una acción del agente dentro del canal:
@@ -1674,10 +1687,12 @@ def render_action(console, verb: str, target: str = "", adds: int = 0, dels: int
     El canal ES el marcador: las lecturas dejan rastro fino y apagado, las
     escrituras encienden el canal grueso en acento. Un solo signo por línea (el
     `●` de antes sobraba al lado de la barra, y ahora además es del usuario).
-    La medida va pegada al margen derecho, en su propia columna.
+    La medida va pegada al margen derecho, en su propia columna. Cada acción
+    abre bloque: lleva una línea de aire por encima.
     """
     from rich.text import Text
 
+    air(console)
     left = Text()
     padded = f"{verb:<{VERB_WIDTH}}"
     if readonly:
@@ -1732,6 +1747,24 @@ def render_log_line(console, text: str, style: str = "lx.dim", meta: str = "") -
     console.print(two_col(left, right, row_width(console)))
 
 
+OUTPUT_HEAD = 3
+
+
+def render_output(console, text: str, head: int = OUTPUT_HEAD) -> str:
+    """Salida de un comando colgando de su acción: las primeras líneas y cuántas
+    quedan. Devuelve la última línea, que es la que resume (`35 passed`)."""
+    lines = [l.rstrip() for l in text.strip().splitlines() if l.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    body = lines[:-1]
+    for line in body[:head]:
+        render_log_line(console, f"{g('rail')} {line[:160]}", "lx.dim2")
+    if len(body) > head:
+        render_log_line(console, f"{g('rail')} {g('ellipsis')} {len(body) - head} líneas más", "lx.dim2")
+    return last[:160]
+
+
 def render_turn_summary(console, actions: int = 0, files: int = 0, adds: int = 0,
                         dels: int = 0, seconds: float = 0.0, hint: str = "") -> None:
     """Cierre del registro: qué ha pasado en el turno, en una línea.
@@ -1742,6 +1775,7 @@ def render_turn_summary(console, actions: int = 0, files: int = 0, adds: int = 0
         return
     from rich.text import Text
 
+    air(console)
     left = Text(f"{g('rail')} ", style="lx.rule")
     left.append(f"{actions} {'acción' if actions == 1 else 'acciones'}", style="lx.dim")
     if files:
@@ -4371,12 +4405,23 @@ def tool_outline(workspace: Path, rel_path: str) -> str:
     return f"{rel_path}: {total} líneas\n" + _cap_lines(lines)
 
 
-def render_todo(console, items: list[dict]) -> None:
+def render_todo(console, items: list[dict], previous: list[dict] | None = None) -> None:
+    """La lista completa cuando cambia de forma; si solo avanzan los estados,
+    una línea con el progreso y el paso en curso (repetir la lista entera en
+    cada avance era la mitad del ruido de un turno largo)."""
+    done = sum(1 for it in items if it.get("status") == "done")
+    misma_lista = previous is not None and [it.get("text") for it in previous] == [it.get("text") for it in items]
+    if misma_lista:
+        doing = next((it["text"] for it in items if it.get("status") == "doing"), "")
+        detalle = f"{done}/{len(items)}" + (f"  {g('arrow')}  {doing}" if doing else "")
+        render_action(console, "pasos", detalle, readonly=True)
+        return
     marks = {"done": g("check"), "doing": g("arrow"), "pending": g("dot_empty")}
     styles = {"done": "lx.dim2", "doing": "lx.primary", "pending": "lx.dim"}
+    render_action(console, TOOL_VERB["todo"], f"{len(items)} pasos", readonly=True)
     for item in items:
         status = item.get("status", "pending")
-        render_log_line(console, f"{marks.get(status, '?')} {item.get('text', '')}", styles.get(status, "lx.dim"))
+        render_log_line(console, f"   {marks.get(status, '?')} {item.get('text', '')}", styles.get(status, "lx.dim"))
 
 
 def tool_todo(session: dict, console, items) -> str:
@@ -4391,8 +4436,8 @@ def tool_todo(session: dict, console, items) -> str:
         status = str(it.get("status", "pending")).lower()
         limpios.append({"text": str(it["text"]).strip()[:200],
                         "status": status if status in ("pending", "doing", "done") else "pending"})
+    render_todo(console, limpios, session.get("todo"))
     session["todo"] = limpios
-    render_todo(console, limpios)
     hechos = sum(1 for it in limpios if it["status"] == "done")
     return f"Lista actualizada: {hechos}/{len(limpios)} hechos.\n" + "\n".join(
         f"[{it['status']}] {it['text']}" for it in limpios)
@@ -5441,7 +5486,6 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
     stats = turn_stats(session)
 
     if tool_name == "todo":
-        render_action(console, TOOL_VERB["todo"], "", readonly=True)
         result = tool_todo(session, console, args.get("items"))
         stats["actions"] += 1
         if remote:
@@ -5533,13 +5577,7 @@ def _approve_and_run(console, workspace: Path, session: dict, tool_name: str, ar
         stats["adds"] += counts[0]
         stats["dels"] += counts[1]
     snapshot_before(session, workspace, tool_name, args)
-    result = _run(console, workspace, tool_name, args, remote)
-    if session.get("auto_check", True):
-        tool, errors, result = verify_after(workspace, tool_name, args, result)
-        if tool:
-            primera = errors.strip().splitlines()[0][:110] if errors else "sin errores"
-            render_action_result(console, f"{tool}: {primera}", error=bool(errors))
-    return result
+    return _run(console, workspace, session, tool_name, args, remote)
 
 
 def command_prefix(command: str) -> str:
@@ -5666,14 +5704,38 @@ def _execute(workspace: Path, tool_name: str, args: dict, api=None) -> tuple[str
     return result, failed, time.monotonic() - started
 
 
-def _run(console, workspace: Path, tool_name: str, args: dict, remote=None) -> str:
+_RESULT_PREFIX = re.compile(r"^Archivo (?:editado|creado|sobrescrito|actualizado): \S+ \((.*)\)$")
+
+
+def _result_summary(result: str) -> str:
+    """Lo que de verdad dice un resultado: `Archivo editado: x (1 reemplazo)`
+    → `1 reemplazo`. La ruta ya está en la línea de la acción."""
+    first = result.split("\n", 1)[0].strip()
+    m = _RESULT_PREFIX.match(first)
+    return (m.group(1) if m else first)[:120]
+
+
+def _run(console, workspace: Path, session: dict, tool_name: str, args: dict, remote=None) -> str:
+    """Ejecuta una acción que modifica y la cierra con UNA línea de resultado:
+    lo que pasó, la verificación (linter) y el tiempo."""
     result, failed, elapsed = _execute(workspace, tool_name, args)
-    if tool_name not in READ_ONLY_TOOLS or failed:
-        # El tiempo va en el resultado y no en la acción: la línea de la acción
-        # se imprime antes de ejecutar, porque es la que se aprueba.
-        meta = f"{g('cross') if failed else g('check')} {elapsed:.1f} s" if elapsed >= 0.1 else ""
-        render_action_result(console, result.split("\n", 1)[0][:120],
-                            error=failed, meta=meta)
+    check, check_failed = "", False
+    if session.get("auto_check", True):
+        tool, errors, result = verify_after(workspace, tool_name, args, result)
+        if tool:
+            check = f"{tool}: {errors.strip().splitlines()[0][:110] if errors else 'sin errores'}"
+            check_failed = bool(errors)
+    meta = f"{elapsed:.1f} s" if elapsed >= 0.1 else ""
+    if tool_name == "run_command":
+        m = re.match(r"^\[EXIT (-?\d+)\] ?", result)
+        code = m.group(1) if m else "?"
+        last = render_output(console, result[m.end():] if m else result)
+        summary = f"{last}  {g('sep')}  exit {code}" if last and last != "(sin salida)" else f"exit {code}"
+    else:
+        summary = _result_summary(result)
+    if check:
+        summary = f"{summary}  {g('sep')}  {check}"
+    render_action_result(console, summary, error=failed or check_failed, meta=meta)
     if remote:
         remote.emit("tool_result", tool=tool_name,
                     result=result[:REMOTE_RESULT_CHARS], error=failed)

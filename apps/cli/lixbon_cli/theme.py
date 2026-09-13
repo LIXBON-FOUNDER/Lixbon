@@ -124,6 +124,7 @@ def make_console():
             # banderas por medio código. Los Control del Live no cuentan: son
             # fontanería de repintado y dispararían el contador en cada frame.
             writes = 0
+            last_blank = True  # lo último impreso fue una línea vacía
 
             @property
             def size(self):
@@ -148,6 +149,10 @@ def make_console():
                     not isinstance(obj, (Control, NewLine)) for obj in objects
                 ):
                     self.writes += 1
+                if not objects or all(obj == "" or isinstance(obj, NewLine) for obj in objects):
+                    self.last_blank = True
+                elif any(not isinstance(obj, Control) for obj in objects):
+                    self.last_blank = False
                 if objects and not kwargs.pop("no_pad", False):
                     # Los Control (mover cursor, borrar línea) son la fontanería
                     # con la que Live/Status repintan y BORRAN su línea. Si se
