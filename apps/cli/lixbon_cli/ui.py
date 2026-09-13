@@ -909,6 +909,18 @@ _BAR_STYLES = {
     "class:bottom-toolbar.err": "lx.err",
     "class:bottom-toolbar.model": "lx.beige",
     "class:bottom-toolbar.sep": "lx.dim2",
+    "class:bottom-toolbar.mode.ask": "lx.mode.ask",
+    "class:bottom-toolbar.mode.agent": "lx.mode.agent",
+    "class:bottom-toolbar.mode.plan": "lx.mode.plan",
+    "class:bottom-toolbar.mode.delegate": "lx.mode.delegate",
+}
+
+MODE_CYCLE = ("ask", "agent", "plan")
+MODE_PLACEHOLDER = {
+    "ask": "pregunta lo que quieras, o / para los comandos",
+    "agent": "describe qué hacer en el workspace, o / para los comandos",
+    "plan": "modo plan: el agente explora y propone, sin tocar nada",
+    "delegate": "escribe, o pulsa / para los comandos",
 }
 
 
@@ -953,8 +965,7 @@ class StatusBar:
             sep,
             ("class:bottom-toolbar", self.session_label),
         ]
-        if self.mode and self.mode != "ask":
-            parts += [sep, ("class:bottom-toolbar.model", self.mode)]
+        parts += [sep, (f"class:bottom-toolbar.mode.{self.mode or 'ask'}", self.mode or "ask")]
         if self.remote:
             parts += [sep, ("class:bottom-toolbar.dot", "móvil conectado")]
         if self.extra:
@@ -1078,21 +1089,25 @@ def markdown(text: str):
 INPUT_PLACEHOLDER = "escribe, o pulsa / para los comandos"
 
 
-def input_box_kwargs() -> dict:
+def input_box_kwargs(mode=None) -> dict:
     """Opciones visuales de la caja de entrada, para `PromptSession`.
 
     Viven aquí (y no sueltas en el loop) porque el alto de la caja depende de
     la combinación exacta: con `complete_while_typing` prompt_toolkit reserva
     SIEMPRE el hueco del menú y la caja pasa de tres filas a doce. El menú lo
     abre el propio CLI cuando hay algo que completar.
+
+    `mode`: callable con el modo actual; el punto y el placeholder lo siguen
+    en vivo (Ctrl+Espacio lo cambia sin salir del prompt).
     """
+    current = mode or (lambda: "ask")
     return {
         # El Frame no deja margen interior: el aire entre el borde y el punto
         # lo pone el prompt, y la continuación lo repite para que una línea
         # larga siga alineada con el texto y no con el borde.
-        "message": [("", " "), ("class:prompt", f"{g('dot')} ")],
+        "message": lambda: [("", " "), (f"class:prompt.{current()}", f"{g('dot')} ")],
         "prompt_continuation": lambda width, line_number, wrap_count: "   ",
-        "placeholder": [("class:placeholder", INPUT_PLACEHOLDER)],
+        "placeholder": lambda: [("class:placeholder", MODE_PLACEHOLDER.get(current(), INPUT_PLACEHOLDER))],
         "show_frame": UNICODE_OK,
         # Al enviar, la caja se borra sola y el CLI reimprime el mensaje como
         # burbuja: lo que queda en el transcript no es el prompt, es el mensaje.
@@ -1100,6 +1115,52 @@ def input_box_kwargs() -> dict:
         "complete_while_typing": False,
         "reserve_space_for_menu": 8,
     }
+
+
+def mode_rprompt(mode, inner):
+    """Margen derecho de la caja: el modo y cómo cambiarlo mientras está vacía;
+    lo de `inner` (recuento de comandos) cuando se escribe."""
+    from prompt_toolkit.application import get_app
+
+    def rprompt():
+        if get_app().current_buffer.text:
+            return inner()
+        return [(f"class:prompt.{mode()}", f"{mode()} "), ("class:placeholder", "ctrl+espacio cambia ")]
+
+    return rprompt
+
+
+def input_box_lines(width: int, mode: str, typed: str, queued: int = 0) -> list[str]:
+    """La misma caja que pinta prompt_toolkit, como texto ANSI por filas, para
+    dejarla fija mientras el agente trabaja."""
+    from rich.text import Text
+
+    from lixbon_cli.theme import render_ansi
+
+    inner = max(width - 2, 10)
+    top = Text(f"{'╭' if UNICODE_OK else '+'}{('─' if UNICODE_OK else '-') * inner}{'╮' if UNICODE_OK else '+'}", style="lx.dim2")
+    bottom = Text(f"{'╰' if UNICODE_OK else '+'}{('─' if UNICODE_OK else '-') * inner}{'╯' if UNICODE_OK else '+'}", style="lx.dim2")
+    edge = "│" if UNICODE_OK else "|"
+    middle = Text(f"{edge} ", style="lx.dim2")
+    middle.append(f"{g('dot')} ", style=f"lx.mode.{mode}")
+    right = Text()
+    if queued:
+        right.append(f"{queued} en cola {g('sep')} se envía al terminar ", style="lx.dim2")
+    else:
+        right.append(f"{mode} ", style=f"lx.mode.{mode}")
+        right.append("ctrl+espacio cambia ", style="lx.dim2")
+    if typed:
+        middle.append(typed, style="lx.primary")
+        middle.append(g("block"), style="lx.dim2")
+    else:
+        middle.append(MODE_PLACEHOLDER.get(mode, INPUT_PLACEHOLDER), style="lx.dim2")
+    limit = width - right.cell_len - 1  # lo que queda hasta el borde derecho
+    if middle.cell_len > limit:
+        middle.truncate(max(6, limit), overflow="ellipsis")
+    middle.pad_right(max(1, limit - middle.cell_len))
+    middle.append_text(right)
+    middle.append(edge, style="lx.dim2")
+    return [render_ansi(line, width + 1) for line in (top, middle, bottom)]
 
 
 def make_prompt_session(**kwargs):

@@ -150,7 +150,7 @@ class DelegateRequest(BaseModel):
 # ── Helper: chat no-streaming con fallback local ───────────────────────────
 
 async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = None,
-                       keep_alive: str | None = None) -> tuple[dict[str, Any], str]:
+                       keep_alive: str | None = None, think: bool | None = None) -> tuple[dict[str, Any], str]:
     """
     Ejecuta un chat por el mejor nodo; si el nodo falla, fallback al Ollama local.
     Retorna (respuesta_ollama, origen).
@@ -159,7 +159,7 @@ async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = N
     base, headers, origen = target_or_503(model)
     try:
         resp = await ollama_chat(base, model, messages, headers=headers, client=deps.http_client_chat,
-                                 num_ctx=num_ctx, keep_alive=keep_alive)
+                                 num_ctx=num_ctx, keep_alive=keep_alive, think=think)
         return resp, origen
     except httpx.HTTPStatusError as exc:
         if origen == "local":
@@ -172,7 +172,7 @@ async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = N
 
     try:
         resp = await ollama_chat(OLLAMA_BASE_URL, model, messages, client=deps.http_client_chat,
-                                 num_ctx=num_ctx, keep_alive=keep_alive)
+                                 num_ctx=num_ctx, keep_alive=keep_alive, think=think)
         return resp, "local-fallback"
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Sin nodos disponibles y sin Ollama local: {exc}") from exc

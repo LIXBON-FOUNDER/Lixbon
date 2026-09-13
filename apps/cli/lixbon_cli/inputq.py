@@ -34,7 +34,8 @@ _active = None  # InputQueue en marcha, para que suspend_input() la encuentre
 class InputQueue:
     """Lector de teclado en segundo plano con una cola de líneas."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_change=None) -> None:
+        self.on_change = on_change  # se llama (desde el hilo lector) al cambiar el buffer
         self._lock = threading.Lock()
         self._buffer = ""
         self._lines: list[str] = []
@@ -190,6 +191,14 @@ class InputQueue:
             self._handle(char)
 
     def _handle(self, char: str) -> None:
+        self._apply(char)
+        if self.on_change is not None:
+            try:
+                self.on_change()
+            except Exception:
+                pass
+
+    def _apply(self, char: str) -> None:
         if char == "\x03":  # Ctrl+C
             self.interrupted = True
             with self._lock:

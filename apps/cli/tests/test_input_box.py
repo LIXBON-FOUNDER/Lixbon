@@ -19,7 +19,9 @@ pytest.importorskip("prompt_toolkit")
 
 from lixbon_cli import ui  # noqa: E402
 from lixbon_cli.term import g  # noqa: E402
-from lixbon_cli.ui import (  # noqa: E402
+from lixbon_cli.ui import (
+    MODE_PLACEHOLDER,
+    input_box_lines,
     INPUT_PLACEHOLDER,
     input_box_kwargs,
     make_prompt_session,
@@ -77,13 +79,31 @@ def test_complete_while_typing_dispararia_el_alto():
 
 def test_el_prompt_es_un_punto_con_aire():
     options = input_box_kwargs()
-    assert [text for _style, text in options["message"]] == [" ", f"{g('dot')} "]
+    assert [text for _style, text in options["message"]()] == [" ", f"{g('dot')} "]
     # La continuación ocupa lo mismo que el prompt: una línea larga sigue
     # alineada con el texto y no con el borde de la caja.
     assert len(options["prompt_continuation"](0, 1, 0)) == 3
-    assert options["placeholder"][0][1] == INPUT_PLACEHOLDER
-    # Al enviar, la caja se borra y el mensaje se reimprime como burbuja.
-    assert options["erase_when_done"] is True
+    assert options["placeholder"]()[0][1] == MODE_PLACEHOLDER["ask"]
+    # El punto y el texto de ayuda siguen al modo en vivo (Ctrl+Espacio).
+    modo = {"m": "plan"}
+    options = input_box_kwargs(mode=lambda: modo["m"])
+    assert options["message"]()[1][0] == "class:prompt.plan"
+    assert "plan" in options["placeholder"]()[0][1]
+
+
+def test_la_caja_fija_tiene_la_forma_de_la_de_prompt_toolkit():
+    import re
+
+    ansi = re.compile("\[[0-9;]*m")
+    lines = input_box_lines(60, "agent", "hola", queued=0)
+    plain = [ansi.sub("", l) for l in lines]
+    assert len(plain) == 3
+    assert plain[0].startswith("╭") and plain[0].endswith("╮") and len(plain[0]) == 60
+    assert plain[2].startswith("╰") and plain[2].endswith("╯")
+    assert plain[1].startswith("│ ") and plain[1].endswith("│") and len(plain[1]) == 60
+    assert "hola" in plain[1] and "agent" in plain[1]
+    en_cola = ansi.sub("", input_box_lines(60, "ask", "", queued=2)[1])
+    assert "2 en cola" in en_cola and MODE_PLACEHOLDER["ask"][:10] in en_cola
 
 
 def test_esquinas_redondas(monkeypatch):

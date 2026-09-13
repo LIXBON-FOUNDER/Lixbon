@@ -195,10 +195,11 @@ async def api_generate_title(
         # título no lo intenta generar un modelo de embeddings.
         model = pick_classifier_model(await fetch_models())
         if model:
+            # Un título no necesita razonar: con thinking tardaba decenas de segundos.
             resp, _ = await _routed_chat(model, [
                 {"role": "system", "content": TITLE_PROMPT},
                 {"role": "user", "content": excerpt},
-            ])
+            ], think=False)
             title = _clean_title(resp.get("message", {}).get("content") or "")
     except Exception as exc:
         logger.warning(f"[autotitle] Falló la generación ({exc}); se usa el primer mensaje")

@@ -9,6 +9,7 @@
 # ──────────────────────────────────────────────────────────────────────────
 """Compatibilidad de terminal: VT en Windows, encoding y glifos con fallback."""
 import os
+import re
 import sys
 
 IS_WINDOWS = os.name == "nt"
@@ -187,6 +188,8 @@ def clear_screen() -> None:
 # ~/.lixbon/config.json devuelve la barra al pie de prompt_toolkit.
 
 _status_rows = 0  # filas con las que se calculó la región activa (0 = inactiva)
+_reserved = 1     # filas fuera de la región: la barra, y la caja durante el turno
+BOX_ROWS = 3
 
 
 def term_size() -> tuple[int, int]:
@@ -208,13 +211,14 @@ def _write(seq: str) -> None:
 def reserve_status_line() -> bool:
     """Saca la última fila de la región de scroll. Solo tras limpiar la
     pantalla: DECSTBM manda el cursor a home y arrastraría lo ya escrito."""
-    global _status_rows
+    global _status_rows, _reserved
     if not is_interactive():
         return False
     _, rows = term_size()
     if rows < 6:  # terminal diminuta: no merece la pena robarle una fila
         return False
     _status_rows = rows
+    _reserved = 1
     _write(f"\033[1;{rows - 1}r\033[H")
     # Si el proceso muere por una excepción sin pasar por el finally, la región
     # quedaría puesta y la terminal seguiría confinando su salida a h-1 filas.
@@ -236,7 +240,8 @@ def release_status_line() -> None:
     rows = _status_rows
     _status_rows = 0
     # DECSTBM vuelve a mover el cursor a home, así que se guarda y restaura.
-    _write(f"\0337\033[{rows};1H\033[2K\0338\0337\033[r\0338")
+    limpiar = "".join(f"\033[{r};1H\033[2K" for r in range(rows - _reserved + 1, rows + 1))
+    _write(f"\0337{limpiar}\0338\0337\033[r\0338")
 
 
 def draw_status_line(ansi: str) -> None:
@@ -248,8 +253,100 @@ def draw_status_line(ansi: str) -> None:
     _, rows = term_size()
     if rows != _status_rows and rows >= 6:
         _status_rows = rows
-        _write(f"\0337\033[1;{rows - 1}r\0338")
+        _write(f"\0337\033[1;{rows - _reserved}r\0338")
     _write(f"\0337\033[{_status_rows};1H\033[2K{ansi}\033[0m\0338")
+
+
+def cursor_row() -> int | None:
+    """Fila (1-based, relativa a la ventana) en la que está el cursor.
+
+    En Windows se pregunta a la consola; en POSIX con DSR (ESC[6n), que la
+    terminal contesta por stdin. Solo se usa entre prompts, cuando nadie más
+    lee el teclado."""
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class COORD(ctypes.Structure):
+                _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+            class SMALL_RECT(ctypes.Structure):
+                _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
+                            ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+
+            class CSBI(ctypes.Structure):
+                _fields_ = [("dwSize", COORD), ("dwCursorPosition", COORD), ("wAttributes", wintypes.WORD),
+                            ("srWindow", SMALL_RECT), ("dwMaximumWindowSize", COORD)]
+
+            info = CSBI()
+            handle = ctypes.windll.kernel32.GetStdHandle(-11)
+            if ctypes.windll.kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
+                return info.dwCursorPosition.Y - info.srWindow.Top + 1
+        except Exception:
+            pass
+        return None
+    try:
+        import select
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        saved = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            _write("\033[6n")
+            buf = ""
+            while not buf.endswith("R"):
+                ready, _, _ = select.select([sys.stdin], [], [], 0.3)
+                if not ready:
+                    return None
+                buf += sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        m = re.search(r"\033\[(\d+);\d+R", buf)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def reserve_rows(n: int) -> None:
+    """Cambia cuántas filas del pie quedan fuera de la región de scroll (1 =
+    solo la barra; 1 + BOX_ROWS = barra y caja de entrada durante el turno).
+
+    Si el transcript ya ocupaba las filas que se reservan, se desplaza hacia
+    arriba lo justo para que nada quede debajo de la caja."""
+    global _reserved
+    if not _status_rows or n == _reserved:
+        return
+    _, rows = term_size()
+    bottom = rows - n
+    if n > _reserved:
+        row = cursor_row() or (rows - _reserved)
+        if row > bottom:
+            _write(f"\033[{rows - _reserved};1H" + "\n" * (row - bottom))
+            row = bottom
+        _reserved = n
+        _write(f"\033[1;{bottom}r\033[{row};1H")
+        return
+    # Encoger: se limpian las filas que deja de ocupar la caja
+    limpiar = "".join(f"\033[{r};1H\033[2K" for r in range(rows - _reserved + 1, bottom + 1))
+    _reserved = n
+    _write(f"\0337{limpiar}\033[1;{bottom}r\0338")
+
+
+def reserved_rows() -> int:
+    return _reserved if _status_rows else 0
+
+
+def draw_box_rows(lines: list[str]) -> None:
+    """Pinta las filas de la caja (justo encima de la barra) sin mover el cursor."""
+    if not _status_rows or _reserved <= 1:
+        return
+    _, rows = term_size()
+    first = rows - _reserved + 1
+    cuerpo = "".join(f"\033[{first + i};1H\033[2K{line}\033[0m" for i, line in enumerate(lines[:_reserved - 1]))
+    _write(f"\0337{cuerpo}\0338")
 
 
 # ── Repintado de la barra ──────────────────────────────────────────────────
@@ -365,6 +462,7 @@ PALETTE = {
     "diff_add_fg": "#8FE39B",
     "diff_del_fg": "#FF9E9E",
     "warn": "#D6B44C",    # avisos, confirmaciones delicadas
+    "plan": "#7FB8D8",    # modo plan: azul frío, lo contrario de tocar cosas
     "ink": "#171717",     # texto sobre acento (selección invertida)
 }
 
@@ -386,6 +484,12 @@ RICH_STYLES = {
     "lx.ok": PALETTE["ok"],
     "lx.err": PALETTE["err"],
     "lx.warn": PALETTE["warn"],
+    # El modo tiñe el punto del prompt y su chip en la barra: ask neutro,
+    # agent en acento (edita), plan en azul (solo mira).
+    "lx.mode.ask": PALETTE["beige"],
+    "lx.mode.agent": f"bold {PALETTE['accent']}",
+    "lx.mode.plan": f"bold {PALETTE['plan']}",
+    "lx.mode.delegate": PALETTE["beige"],
     "lx.diff.add": PALETTE["diff_add_fg"],
     "lx.diff.del": PALETTE["diff_del_fg"],
     "lx.diff.hunk": PALETTE["dim"],
@@ -558,6 +662,10 @@ def pt_style():
     return Style.from_dict({
         # Prompt de entrada: el punto ● es el usuario, dentro de su caja.
         "prompt": f"bold {PALETTE['accent']}",
+        "prompt.ask": f"bold {PALETTE['beige']}",
+        "prompt.agent": f"bold {PALETTE['accent']}",
+        "prompt.plan": f"bold {PALETTE['plan']}",
+        "prompt.delegate": f"bold {PALETTE['beige']}",
         "placeholder": PALETTE["dim2"],
         "img-marker": f"{PALETTE['beige']} bg:{panel}",
         # Caja de entrada (show_frame de prompt_toolkit). `frame` no lleva fondo
@@ -592,6 +700,10 @@ def pt_style():
         "bottom-toolbar.err": f"{PALETTE['err']} bg:{panel}",
         "bottom-toolbar.model": f"{PALETTE['beige']} bg:{panel}",
         "bottom-toolbar.sep": f"{PALETTE['dim2']} bg:{panel}",
+        "bottom-toolbar.mode.ask": f"{PALETTE['beige']} bg:{panel}",
+        "bottom-toolbar.mode.agent": f"bold {PALETTE['accent']} bg:{panel}",
+        "bottom-toolbar.mode.plan": f"bold {PALETTE['plan']} bg:{panel}",
+        "bottom-toolbar.mode.delegate": f"{PALETTE['beige']} bg:{panel}",
         # Menú de autocompletado de slash-commands
         "completion-menu": f"bg:{panel} {PALETTE['cream']}",
         "completion-menu.completion": f"bg:{panel} {PALETTE['cream']}",
@@ -1167,7 +1279,8 @@ _active = None  # InputQueue en marcha, para que suspend_input() la encuentre
 class InputQueue:
     """Lector de teclado en segundo plano con una cola de líneas."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_change=None) -> None:
+        self.on_change = on_change  # se llama (desde el hilo lector) al cambiar el buffer
         self._lock = threading.Lock()
         self._buffer = ""
         self._lines: list[str] = []
@@ -1323,6 +1436,14 @@ class InputQueue:
             self._handle(char)
 
     def _handle(self, char: str) -> None:
+        self._apply(char)
+        if self.on_change is not None:
+            try:
+                self.on_change()
+            except Exception:
+                pass
+
+    def _apply(self, char: str) -> None:
         if char == "\x03":  # Ctrl+C
             self.interrupted = True
             with self._lock:
@@ -2268,6 +2389,18 @@ _BAR_STYLES = {
     "class:bottom-toolbar.err": "lx.err",
     "class:bottom-toolbar.model": "lx.beige",
     "class:bottom-toolbar.sep": "lx.dim2",
+    "class:bottom-toolbar.mode.ask": "lx.mode.ask",
+    "class:bottom-toolbar.mode.agent": "lx.mode.agent",
+    "class:bottom-toolbar.mode.plan": "lx.mode.plan",
+    "class:bottom-toolbar.mode.delegate": "lx.mode.delegate",
+}
+
+MODE_CYCLE = ("ask", "agent", "plan")
+MODE_PLACEHOLDER = {
+    "ask": "pregunta lo que quieras, o / para los comandos",
+    "agent": "describe qué hacer en el workspace, o / para los comandos",
+    "plan": "modo plan: el agente explora y propone, sin tocar nada",
+    "delegate": "escribe, o pulsa / para los comandos",
 }
 
 
@@ -2312,8 +2445,7 @@ class StatusBar:
             sep,
             ("class:bottom-toolbar", self.session_label),
         ]
-        if self.mode and self.mode != "ask":
-            parts += [sep, ("class:bottom-toolbar.model", self.mode)]
+        parts += [sep, (f"class:bottom-toolbar.mode.{self.mode or 'ask'}", self.mode or "ask")]
         if self.remote:
             parts += [sep, ("class:bottom-toolbar.dot", "móvil conectado")]
         if self.extra:
@@ -2436,21 +2568,25 @@ def markdown(text: str):
 INPUT_PLACEHOLDER = "escribe, o pulsa / para los comandos"
 
 
-def input_box_kwargs() -> dict:
+def input_box_kwargs(mode=None) -> dict:
     """Opciones visuales de la caja de entrada, para `PromptSession`.
 
     Viven aquí (y no sueltas en el loop) porque el alto de la caja depende de
     la combinación exacta: con `complete_while_typing` prompt_toolkit reserva
     SIEMPRE el hueco del menú y la caja pasa de tres filas a doce. El menú lo
     abre el propio CLI cuando hay algo que completar.
+
+    `mode`: callable con el modo actual; el punto y el placeholder lo siguen
+    en vivo (Ctrl+Espacio lo cambia sin salir del prompt).
     """
+    current = mode or (lambda: "ask")
     return {
         # El Frame no deja margen interior: el aire entre el borde y el punto
         # lo pone el prompt, y la continuación lo repite para que una línea
         # larga siga alineada con el texto y no con el borde.
-        "message": [("", " "), ("class:prompt", f"{g('dot')} ")],
+        "message": lambda: [("", " "), (f"class:prompt.{current()}", f"{g('dot')} ")],
         "prompt_continuation": lambda width, line_number, wrap_count: "   ",
-        "placeholder": [("class:placeholder", INPUT_PLACEHOLDER)],
+        "placeholder": lambda: [("class:placeholder", MODE_PLACEHOLDER.get(current(), INPUT_PLACEHOLDER))],
         "show_frame": UNICODE_OK,
         # Al enviar, la caja se borra sola y el CLI reimprime el mensaje como
         # burbuja: lo que queda en el transcript no es el prompt, es el mensaje.
@@ -2458,6 +2594,51 @@ def input_box_kwargs() -> dict:
         "complete_while_typing": False,
         "reserve_space_for_menu": 8,
     }
+
+
+def mode_rprompt(mode, inner):
+    """Margen derecho de la caja: el modo y cómo cambiarlo mientras está vacía;
+    lo de `inner` (recuento de comandos) cuando se escribe."""
+    from prompt_toolkit.application import get_app
+
+    def rprompt():
+        if get_app().current_buffer.text:
+            return inner()
+        return [(f"class:prompt.{mode()}", f"{mode()} "), ("class:placeholder", "ctrl+espacio cambia ")]
+
+    return rprompt
+
+
+def input_box_lines(width: int, mode: str, typed: str, queued: int = 0) -> list[str]:
+    """La misma caja que pinta prompt_toolkit, como texto ANSI por filas, para
+    dejarla fija mientras el agente trabaja."""
+    from rich.text import Text
+
+
+    inner = max(width - 2, 10)
+    top = Text(f"{'╭' if UNICODE_OK else '+'}{('─' if UNICODE_OK else '-') * inner}{'╮' if UNICODE_OK else '+'}", style="lx.dim2")
+    bottom = Text(f"{'╰' if UNICODE_OK else '+'}{('─' if UNICODE_OK else '-') * inner}{'╯' if UNICODE_OK else '+'}", style="lx.dim2")
+    edge = "│" if UNICODE_OK else "|"
+    middle = Text(f"{edge} ", style="lx.dim2")
+    middle.append(f"{g('dot')} ", style=f"lx.mode.{mode}")
+    right = Text()
+    if queued:
+        right.append(f"{queued} en cola {g('sep')} se envía al terminar ", style="lx.dim2")
+    else:
+        right.append(f"{mode} ", style=f"lx.mode.{mode}")
+        right.append("ctrl+espacio cambia ", style="lx.dim2")
+    if typed:
+        middle.append(typed, style="lx.primary")
+        middle.append(g("block"), style="lx.dim2")
+    else:
+        middle.append(MODE_PLACEHOLDER.get(mode, INPUT_PLACEHOLDER), style="lx.dim2")
+    limit = width - right.cell_len - 1  # lo que queda hasta el borde derecho
+    if middle.cell_len > limit:
+        middle.truncate(max(6, limit), overflow="ellipsis")
+    middle.pad_right(max(1, limit - middle.cell_len))
+    middle.append_text(right)
+    middle.append(edge, style="lx.dim2")
+    return [render_ansi(line, width + 1) for line in (top, middle, bottom)]
 
 
 def make_prompt_session(**kwargs):
@@ -6520,6 +6701,7 @@ class ChatApp:
         # (tokens, chars) del último prompt real: la barra parte de ahí y solo
         # estima lo añadido después.
         self._ctx_anchor: tuple[int, int] | None = None
+        self._titling = False  # hay una petición de título en vuelo
         self.status = StatusBar(
             model=self.model or "sin modelo",
             session_label=self._session_label(),
@@ -6537,7 +6719,7 @@ class ChatApp:
     def _refresh_status(self) -> None:
         self.status.model = self.model or "sin modelo"
         self.status.session_label = self._session_label()
-        self.status.mode = "plan" if self.session.get("plan_mode") else self.mode
+        self.status.mode = self.mode_name()
         self.status.web = self.web_search == "on"
         self.status.project = bool(self.project_context)
         self.status.remote = self.remote is not None
@@ -6558,6 +6740,8 @@ class ChatApp:
             draw_status_line(render_ansi(line, width))
         except Exception:
             pass  # la barra nunca puede tumbar la sesión
+        # Los prompts de aprobación borran hasta el pie: la caja vuelve con la barra.
+        self._paint_input_box()
 
     def _estimate_context(self) -> tuple[int, float]:
         # Mide lo que se ENVIARÁ al modelo, que NO es lo mismo en cada modo: en
@@ -6709,13 +6893,25 @@ class ChatApp:
         """
         if self.title or len(self.history) < 2 or not self.conversation_id:
             return
-        try:
-            title = str(self.api.generate_title(self.conversation_id).get("title") or "").strip()
-        except Exception:
-            return  # el título nunca puede tumbar el turno
-        if title:
-            self.title = title
-            self._set_tab_title()
+        if self._titling:
+            return
+        self._titling = True
+        conversation_id = self.conversation_id
+
+        # En segundo plano: con un modelo grande el título tarda segundos y
+        # bloqueaba el prompt justo después de la primera respuesta.
+        def pedir():
+            try:
+                title = str(self.api.generate_title(conversation_id).get("title") or "").strip()
+            except Exception:
+                title = ""  # el título nunca puede tumbar el turno
+            finally:
+                self._titling = False
+            if title and not self.title and self.conversation_id == conversation_id:
+                self.title = title
+                self._set_tab_title()
+
+        threading.Thread(target=pedir, daemon=True, name="autotitle").start()
 
     def _load_account_quietly(self) -> str:
         """Igual que `_probe_account`, y además deja el punto de la barra al día."""
@@ -7097,6 +7293,13 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
+        @kb.add("c-space")
+        @kb.add("s-tab")
+        def _(event):
+            """Ctrl+Espacio (o Shift+Tab): ask → agent → plan → ask, sin salir del prompt."""
+            self.cycle_mode()
+            event.app.invalidate()
+
         @kb.add("c-j")
         def _newline(event):
             # Salto de línea sin enviar. Shift+Enter no llega como tecla
@@ -7146,6 +7349,22 @@ class ChatApp:
         elif buff.complete_state is not None:
             buff.cancel_completion()
 
+    def mode_name(self) -> str:
+        """El modo tal como se enseña: plan es agent con el freno puesto."""
+        if self.mode == "agent" and self.session.get("plan_mode"):
+            return "plan"
+        return self.mode
+
+    def cycle_mode(self) -> None:
+        current = self.mode_name()
+        nxt = MODE_CYCLE[(MODE_CYCLE.index(current) + 1) % len(MODE_CYCLE)] if current in MODE_CYCLE else "ask"
+        self.session["plan_mode"] = nxt == "plan"
+        self.mode = "agent" if nxt in ("agent", "plan") else "ask"
+        if self.cfg.get("mode") != self.mode:
+            self.cfg["mode"] = self.mode
+            save_config(self.cfg)
+        self._refresh_status()
+
     def _prompt_loop(self) -> int:
 
         if not ui_capable():
@@ -7158,12 +7377,12 @@ class ChatApp:
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         round_frame_border()  # antes de construir: el Frame lee los bordes al montar
         session = make_prompt_session(
-            **input_box_kwargs(),
+            **input_box_kwargs(mode=self.mode_name),
             style=pt_style(),
             completer=make_completer(self),
             complete_in_thread=True,  # el índice de @ recorre el workspace: fuera del hilo del teclado
             lexer=make_marker_lexer(),
-            rprompt=slash_rprompt,
+            rprompt=mode_rprompt(self.mode_name, slash_rprompt),
             key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
             # Con la fila reservada la barra la pinta el CLI y queda fija; el
@@ -7384,11 +7603,34 @@ class ChatApp:
 
         if self.input_queue is None or self.remote or not ui_capable():
             return
+        # La caja se queda fija encima de la barra mientras el agente trabaja,
+        # con lo que se va tecleando; la región se encoge para hacerle sitio.
+        reserve_rows(1 + BOX_ROWS)
+        self.input_queue.on_change = self._paint_input_box
         self.input_queue.start()
+        self._paint_input_box()
 
     def _stop_input_queue(self) -> None:
         if self.input_queue is not None:
             self.input_queue.stop()
+            self.input_queue.on_change = None
+        reserve_rows(1)
+
+    def _paint_input_box(self) -> None:
+        """Repinta la caja fija con lo tecleado. Puede llamarse desde el hilo
+        lector: se serializa con las impresiones de rich por su mismo lock."""
+        if not reserved_rows() > 1:
+            return
+        queue = self.input_queue
+        typed = queue.typing if queue is not None and queue.running else ""
+        queued = queue.queued if queue is not None and queue.running else 0
+        cols, _ = term_size()
+        try:
+            lines = input_box_lines(max(cols, 20), self.mode_name(), typed, queued)
+            with self.console._lock:
+                draw_box_rows(lines)
+        except Exception:
+            pass  # la caja nunca puede tumbar el turno
 
     def _typing_row(self):
         """Fila de la vista viva con lo tecleado y lo que ya está en cola."""
@@ -7651,7 +7893,8 @@ class ChatApp:
             # del bloque vivo (donde estaría el prompt) y el `Tail` lo conserva
             # aunque la respuesta desborde: escribir a ciegas sería peor que no
             # poder escribir.
-            typed_row = self._typing_row()
+            # (con la caja fija lo tecleado ya se ve ahí)
+            typed_row = None if reserved_rows() > 1 else self._typing_row()
             if typed_row is not None:
                 blocks.append(typed_row)
             # La vista viva se queda en la cola: una respuesta larga desbordaría

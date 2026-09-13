@@ -1,5 +1,6 @@
 """Compatibilidad de terminal: VT en Windows, encoding y glifos con fallback."""
 import os
+import re
 import sys
 
 IS_WINDOWS = os.name == "nt"
@@ -178,6 +179,8 @@ def clear_screen() -> None:
 # ~/.lixbon/config.json devuelve la barra al pie de prompt_toolkit.
 
 _status_rows = 0  # filas con las que se calculó la región activa (0 = inactiva)
+_reserved = 1     # filas fuera de la región: la barra, y la caja durante el turno
+BOX_ROWS = 3
 
 
 def term_size() -> tuple[int, int]:
@@ -199,13 +202,14 @@ def _write(seq: str) -> None:
 def reserve_status_line() -> bool:
     """Saca la última fila de la región de scroll. Solo tras limpiar la
     pantalla: DECSTBM manda el cursor a home y arrastraría lo ya escrito."""
-    global _status_rows
+    global _status_rows, _reserved
     if not is_interactive():
         return False
     _, rows = term_size()
     if rows < 6:  # terminal diminuta: no merece la pena robarle una fila
         return False
     _status_rows = rows
+    _reserved = 1
     _write(f"\033[1;{rows - 1}r\033[H")
     # Si el proceso muere por una excepción sin pasar por el finally, la región
     # quedaría puesta y la terminal seguiría confinando su salida a h-1 filas.
@@ -227,7 +231,8 @@ def release_status_line() -> None:
     rows = _status_rows
     _status_rows = 0
     # DECSTBM vuelve a mover el cursor a home, así que se guarda y restaura.
-    _write(f"\0337\033[{rows};1H\033[2K\0338\0337\033[r\0338")
+    limpiar = "".join(f"\033[{r};1H\033[2K" for r in range(rows - _reserved + 1, rows + 1))
+    _write(f"\0337{limpiar}\0338\0337\033[r\0338")
 
 
 def draw_status_line(ansi: str) -> None:
@@ -239,8 +244,100 @@ def draw_status_line(ansi: str) -> None:
     _, rows = term_size()
     if rows != _status_rows and rows >= 6:
         _status_rows = rows
-        _write(f"\0337\033[1;{rows - 1}r\0338")
+        _write(f"\0337\033[1;{rows - _reserved}r\0338")
     _write(f"\0337\033[{_status_rows};1H\033[2K{ansi}\033[0m\0338")
+
+
+def cursor_row() -> int | None:
+    """Fila (1-based, relativa a la ventana) en la que está el cursor.
+
+    En Windows se pregunta a la consola; en POSIX con DSR (ESC[6n), que la
+    terminal contesta por stdin. Solo se usa entre prompts, cuando nadie más
+    lee el teclado."""
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class COORD(ctypes.Structure):
+                _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+            class SMALL_RECT(ctypes.Structure):
+                _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
+                            ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+
+            class CSBI(ctypes.Structure):
+                _fields_ = [("dwSize", COORD), ("dwCursorPosition", COORD), ("wAttributes", wintypes.WORD),
+                            ("srWindow", SMALL_RECT), ("dwMaximumWindowSize", COORD)]
+
+            info = CSBI()
+            handle = ctypes.windll.kernel32.GetStdHandle(-11)
+            if ctypes.windll.kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
+                return info.dwCursorPosition.Y - info.srWindow.Top + 1
+        except Exception:
+            pass
+        return None
+    try:
+        import select
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        saved = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            _write("\033[6n")
+            buf = ""
+            while not buf.endswith("R"):
+                ready, _, _ = select.select([sys.stdin], [], [], 0.3)
+                if not ready:
+                    return None
+                buf += sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        m = re.search(r"\033\[(\d+);\d+R", buf)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def reserve_rows(n: int) -> None:
+    """Cambia cuántas filas del pie quedan fuera de la región de scroll (1 =
+    solo la barra; 1 + BOX_ROWS = barra y caja de entrada durante el turno).
+
+    Si el transcript ya ocupaba las filas que se reservan, se desplaza hacia
+    arriba lo justo para que nada quede debajo de la caja."""
+    global _reserved
+    if not _status_rows or n == _reserved:
+        return
+    _, rows = term_size()
+    bottom = rows - n
+    if n > _reserved:
+        row = cursor_row() or (rows - _reserved)
+        if row > bottom:
+            _write(f"\033[{rows - _reserved};1H" + "\n" * (row - bottom))
+            row = bottom
+        _reserved = n
+        _write(f"\033[1;{bottom}r\033[{row};1H")
+        return
+    # Encoger: se limpian las filas que deja de ocupar la caja
+    limpiar = "".join(f"\033[{r};1H\033[2K" for r in range(rows - _reserved + 1, bottom + 1))
+    _reserved = n
+    _write(f"\0337{limpiar}\033[1;{bottom}r\0338")
+
+
+def reserved_rows() -> int:
+    return _reserved if _status_rows else 0
+
+
+def draw_box_rows(lines: list[str]) -> None:
+    """Pinta las filas de la caja (justo encima de la barra) sin mover el cursor."""
+    if not _status_rows or _reserved <= 1:
+        return
+    _, rows = term_size()
+    first = rows - _reserved + 1
+    cuerpo = "".join(f"\033[{first + i};1H\033[2K{line}\033[0m" for i, line in enumerate(lines[:_reserved - 1]))
+    _write(f"\0337{cuerpo}\0338")
 
 
 # ── Repintado de la barra ──────────────────────────────────────────────────

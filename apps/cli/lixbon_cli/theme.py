@@ -38,6 +38,7 @@ PALETTE = {
     "diff_add_fg": "#8FE39B",
     "diff_del_fg": "#FF9E9E",
     "warn": "#D6B44C",    # avisos, confirmaciones delicadas
+    "plan": "#7FB8D8",    # modo plan: azul frío, lo contrario de tocar cosas
     "ink": "#171717",     # texto sobre acento (selección invertida)
 }
 
@@ -59,6 +60,12 @@ RICH_STYLES = {
     "lx.ok": PALETTE["ok"],
     "lx.err": PALETTE["err"],
     "lx.warn": PALETTE["warn"],
+    # El modo tiñe el punto del prompt y su chip en la barra: ask neutro,
+    # agent en acento (edita), plan en azul (solo mira).
+    "lx.mode.ask": PALETTE["beige"],
+    "lx.mode.agent": f"bold {PALETTE['accent']}",
+    "lx.mode.plan": f"bold {PALETTE['plan']}",
+    "lx.mode.delegate": PALETTE["beige"],
     "lx.diff.add": PALETTE["diff_add_fg"],
     "lx.diff.del": PALETTE["diff_del_fg"],
     "lx.diff.hunk": PALETTE["dim"],
@@ -232,6 +239,10 @@ def pt_style():
     return Style.from_dict({
         # Prompt de entrada: el punto ● es el usuario, dentro de su caja.
         "prompt": f"bold {PALETTE['accent']}",
+        "prompt.ask": f"bold {PALETTE['beige']}",
+        "prompt.agent": f"bold {PALETTE['accent']}",
+        "prompt.plan": f"bold {PALETTE['plan']}",
+        "prompt.delegate": f"bold {PALETTE['beige']}",
         "placeholder": PALETTE["dim2"],
         "img-marker": f"{PALETTE['beige']} bg:{panel}",
         # Caja de entrada (show_frame de prompt_toolkit). `frame` no lleva fondo
@@ -266,6 +277,10 @@ def pt_style():
         "bottom-toolbar.err": f"{PALETTE['err']} bg:{panel}",
         "bottom-toolbar.model": f"{PALETTE['beige']} bg:{panel}",
         "bottom-toolbar.sep": f"{PALETTE['dim2']} bg:{panel}",
+        "bottom-toolbar.mode.ask": f"{PALETTE['beige']} bg:{panel}",
+        "bottom-toolbar.mode.agent": f"bold {PALETTE['accent']} bg:{panel}",
+        "bottom-toolbar.mode.plan": f"bold {PALETTE['plan']} bg:{panel}",
+        "bottom-toolbar.mode.delegate": f"{PALETTE['beige']} bg:{panel}",
         # Menú de autocompletado de slash-commands
         "completion-menu": f"bg:{panel} {PALETTE['cream']}",
         "completion-menu.completion": f"bg:{panel} {PALETTE['cream']}",

@@ -65,7 +65,11 @@ from lixbon_cli.config import (
 )
 from lixbon_cli.sessions import SessionStore, relative_time
 from lixbon_cli.term import (
+    BOX_ROWS,
     attach_status_repaint,
+    draw_box_rows,
+    reserve_rows,
+    reserved_rows,
     clear_screen,
     draw_status_line,
     g,
@@ -97,6 +101,9 @@ from lixbon_cli.ui import (
     render_action_result,
     render_command_echo,
     input_box_kwargs,
+    input_box_lines,
+    mode_rprompt,
+    MODE_CYCLE,
     make_prompt_session,
     render_header,
     render_intro_line,
@@ -211,6 +218,7 @@ class ChatApp:
         # (tokens, chars) del último prompt real: la barra parte de ahí y solo
         # estima lo añadido después.
         self._ctx_anchor: tuple[int, int] | None = None
+        self._titling = False  # hay una petición de título en vuelo
         self.status = StatusBar(
             model=self.model or "sin modelo",
             session_label=self._session_label(),
@@ -228,7 +236,7 @@ class ChatApp:
     def _refresh_status(self) -> None:
         self.status.model = self.model or "sin modelo"
         self.status.session_label = self._session_label()
-        self.status.mode = "plan" if self.session.get("plan_mode") else self.mode
+        self.status.mode = self.mode_name()
         self.status.web = self.web_search == "on"
         self.status.project = bool(self.project_context)
         self.status.remote = self.remote is not None
@@ -250,6 +258,8 @@ class ChatApp:
             draw_status_line(render_ansi(line, width))
         except Exception:
             pass  # la barra nunca puede tumbar la sesión
+        # Los prompts de aprobación borran hasta el pie: la caja vuelve con la barra.
+        self._paint_input_box()
 
     def _estimate_context(self) -> tuple[int, float]:
         # Mide lo que se ENVIARÁ al modelo, que NO es lo mismo en cada modo: en
@@ -401,13 +411,25 @@ class ChatApp:
         """
         if self.title or len(self.history) < 2 or not self.conversation_id:
             return
-        try:
-            title = str(self.api.generate_title(self.conversation_id).get("title") or "").strip()
-        except Exception:
-            return  # el título nunca puede tumbar el turno
-        if title:
-            self.title = title
-            self._set_tab_title()
+        if self._titling:
+            return
+        self._titling = True
+        conversation_id = self.conversation_id
+
+        # En segundo plano: con un modelo grande el título tarda segundos y
+        # bloqueaba el prompt justo después de la primera respuesta.
+        def pedir():
+            try:
+                title = str(self.api.generate_title(conversation_id).get("title") or "").strip()
+            except Exception:
+                title = ""  # el título nunca puede tumbar el turno
+            finally:
+                self._titling = False
+            if title and not self.title and self.conversation_id == conversation_id:
+                self.title = title
+                self._set_tab_title()
+
+        threading.Thread(target=pedir, daemon=True, name="autotitle").start()
 
     def _load_account_quietly(self) -> str:
         """Igual que `_probe_account`, y además deja el punto de la barra al día."""
@@ -790,6 +812,13 @@ class ChatApp:
             buff.cancel_completion()
             buff.validate_and_handle()
 
+        @kb.add("c-space")
+        @kb.add("s-tab")
+        def _(event):
+            """Ctrl+Espacio (o Shift+Tab): ask → agent → plan → ask, sin salir del prompt."""
+            self.cycle_mode()
+            event.app.invalidate()
+
         @kb.add("c-j")
         def _newline(event):
             # Salto de línea sin enviar. Shift+Enter no llega como tecla
@@ -839,6 +868,22 @@ class ChatApp:
         elif buff.complete_state is not None:
             buff.cancel_completion()
 
+    def mode_name(self) -> str:
+        """El modo tal como se enseña: plan es agent con el freno puesto."""
+        if self.mode == "agent" and self.session.get("plan_mode"):
+            return "plan"
+        return self.mode
+
+    def cycle_mode(self) -> None:
+        current = self.mode_name()
+        nxt = MODE_CYCLE[(MODE_CYCLE.index(current) + 1) % len(MODE_CYCLE)] if current in MODE_CYCLE else "ask"
+        self.session["plan_mode"] = nxt == "plan"
+        self.mode = "agent" if nxt in ("agent", "plan") else "ask"
+        if self.cfg.get("mode") != self.mode:
+            self.cfg["mode"] = self.mode
+            save_config(self.cfg)
+        self._refresh_status()
+
     def _prompt_loop(self) -> int:
         from lixbon_cli.term import ui_capable
 
@@ -852,12 +897,12 @@ class ChatApp:
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         round_frame_border()  # antes de construir: el Frame lee los bordes al montar
         session = make_prompt_session(
-            **input_box_kwargs(),
+            **input_box_kwargs(mode=self.mode_name),
             style=pt_style(),
             completer=make_completer(self),
             complete_in_thread=True,  # el índice de @ recorre el workspace: fuera del hilo del teclado
             lexer=make_marker_lexer(),
-            rprompt=slash_rprompt,
+            rprompt=mode_rprompt(self.mode_name, slash_rprompt),
             key_bindings=self._completion_bindings(),
             history=FileHistory(str(HISTORY_FILE)),
             # Con la fila reservada la barra la pinta el CLI y queda fija; el
@@ -1079,11 +1124,34 @@ class ChatApp:
 
         if self.input_queue is None or self.remote or not ui_capable():
             return
+        # La caja se queda fija encima de la barra mientras el agente trabaja,
+        # con lo que se va tecleando; la región se encoge para hacerle sitio.
+        reserve_rows(1 + BOX_ROWS)
+        self.input_queue.on_change = self._paint_input_box
         self.input_queue.start()
+        self._paint_input_box()
 
     def _stop_input_queue(self) -> None:
         if self.input_queue is not None:
             self.input_queue.stop()
+            self.input_queue.on_change = None
+        reserve_rows(1)
+
+    def _paint_input_box(self) -> None:
+        """Repinta la caja fija con lo tecleado. Puede llamarse desde el hilo
+        lector: se serializa con las impresiones de rich por su mismo lock."""
+        if not reserved_rows() > 1:
+            return
+        queue = self.input_queue
+        typed = queue.typing if queue is not None and queue.running else ""
+        queued = queue.queued if queue is not None and queue.running else 0
+        cols, _ = term_size()
+        try:
+            lines = input_box_lines(max(cols, 20), self.mode_name(), typed, queued)
+            with self.console._lock:
+                draw_box_rows(lines)
+        except Exception:
+            pass  # la caja nunca puede tumbar el turno
 
     def _typing_row(self):
         """Fila de la vista viva con lo tecleado y lo que ya está en cola."""
@@ -1347,7 +1415,8 @@ class ChatApp:
             # del bloque vivo (donde estaría el prompt) y el `Tail` lo conserva
             # aunque la respuesta desborde: escribir a ciegas sería peor que no
             # poder escribir.
-            typed_row = self._typing_row()
+            # (con la caja fija lo tecleado ya se ve ahí)
+            typed_row = None if reserved_rows() > 1 else self._typing_row()
             if typed_row is not None:
                 blocks.append(typed_row)
             # La vista viva se queda en la cola: una respuesta larga desbordaría
