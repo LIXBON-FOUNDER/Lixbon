@@ -321,6 +321,24 @@ class ModelRole(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class ModelAlias(Base):
+    """Nombre público de un modelo: `lixbon-1` / "Lixbon 1" → qwen3.5:27b.
+
+    Los clientes ven el alias como id del catálogo; el gateway lo traduce al
+    modelo real al enrutar. Global, lo gestiona el panel admin."""
+    __tablename__ = "model_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alias: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class CreditAccount(Base):
     """Saldo prepago de créditos de API por usuario, en micro-USD.
 

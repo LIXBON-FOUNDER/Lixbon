@@ -126,7 +126,7 @@ export default function ChatPage() {
       .filter((id) => !String(id).startsWith('error:'));
     setModels(ids);
     setModelInfo(Object.fromEntries(res.data.data.map((m) => [m.id, {
-      num_ctx: m.num_ctx, context_length: m.context_length, capabilities: m.capabilities || [],
+      num_ctx: m.num_ctx, context_length: m.context_length, capabilities: m.capabilities || [], name: m.name || m.id,
     }])));
     setModel((current) => current || ids[0] || '');
     return ids;
@@ -431,7 +431,7 @@ export default function ChatPage() {
               <ThreadSkeleton />
             </div>
             <div className="chat-composer">
-              <ChatInput onSend={send} busy models={models} model={model} onModelChange={setModel} modelVision={modelVision} />
+              <ChatInput onSend={send} busy models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision} />
             </div>
           </>
         ) : empty ? (
@@ -444,7 +444,7 @@ export default function ChatPage() {
                 : 'Solo tienes un chat disponible para usar. Inicia sesión para tener más chats y funciones'}
             </h2>
             <div className="chat-hero__input">
-              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel} modelVision={modelVision}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
             </div>
           </div>
@@ -492,7 +492,7 @@ export default function ChatPage() {
                   más <IconArrowDown size={14} />
                 </button>
               )}
-              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel} modelVision={modelVision}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
               <p className="chat-disclaimer">
                 lixbon puede equivocarse. Verifica la informacion antes de usarla.

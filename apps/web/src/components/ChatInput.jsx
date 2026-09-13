@@ -58,7 +58,7 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false }) {
+export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -354,7 +354,7 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
           <Select
             className="chat-input__model"
             value={model}
-            options={models.map((m) => ({ value: m, label: m }))}
+            options={models.map((m) => ({ value: m, label: modelInfo[m]?.name || m }))}
             onChange={onModelChange}
             aria-label="Modelo"
           />

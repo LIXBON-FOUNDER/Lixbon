@@ -182,10 +182,13 @@ def admin_or_token(
     raise HTTPException(status_code=403, detail="Requiere administrador (sesión admin o X-Admin-Token)")
 
 
+from core.inference.aliases import to_public, to_real  # noqa: E402
+
+
 def validate_model_access(user_data: dict[str, Any], requested_model: str) -> None:
     """Lanza 403 si la key tiene modelo asignado y no coincide con el solicitado."""
     key_model = user_data.get("key_model")
-    if key_model and key_model != requested_model:
+    if key_model and requested_model not in (key_model, to_real(key_model), to_public(key_model)):
         raise HTTPException(
             status_code=403,
             detail=f"Esta API key solo permite el modelo '{key_model}'. Solicitud: '{requested_model}'",

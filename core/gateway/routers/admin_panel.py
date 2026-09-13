@@ -39,6 +39,8 @@ from core.persistence.queries import (
     get_user_by_id,
     list_audit_events,
     list_model_pricing,
+    delete_model_alias,
+    list_model_aliases,
     list_model_roles,
     list_plans,
     list_users_admin,
@@ -47,8 +49,10 @@ from core.persistence.queries import (
     set_user_plan,
     update_model_pricing,
     update_plan,
+    upsert_model_alias,
     upsert_model_role,
 )
+from core.inference.aliases import ALIAS_RE, invalidate_aliases_cache
 from core.security.auth import admin_required
 
 logger = logging.getLogger("lixbon.admin")
@@ -296,6 +300,49 @@ async def api_admin_pricing_delete(
         raise HTTPException(status_code=400, detail="No existe o es la tarifa por defecto (*)")
     invalidate_pricing_cache()
     log_audit_event("pricing_deleted", user_id=admin["id"], pricing_id=pricing_id)
+    return {"deleted": True}
+
+
+class ModelAliasPayload(BaseModel):
+    name: str
+    model: str
+    description: str | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+
+@router.get("/model-aliases")
+async def api_admin_model_aliases(_admin: dict[str, Any] = Depends(admin_required)):
+    return {"aliases": list_model_aliases(active_only=False), "models": await fetch_models()}
+
+
+@router.put("/model-aliases/{alias}")
+async def api_admin_model_alias_upsert(
+    alias: str,
+    payload: ModelAliasPayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    alias = alias.strip().lower()
+    if not ALIAS_RE.match(alias):
+        raise HTTPException(status_code=400, detail="Alias inválido: minúsculas, dígitos, punto, guion o guion bajo.")
+    if not payload.name.strip() or not payload.model.strip():
+        raise HTTPException(status_code=400, detail="Nombre y modelo son obligatorios.")
+    catalog = await fetch_models()
+    if any(isinstance(e, dict) and e.get("id") == alias for e in catalog):
+        raise HTTPException(status_code=409, detail="Ese alias coincide con el id de un modelo real.")
+    row = upsert_model_alias(alias, name=payload.name, model=payload.model, description=payload.description,
+                             sort_order=payload.sort_order, is_active=payload.is_active)
+    invalidate_aliases_cache()
+    log_audit_event("model_alias_updated", user_id=admin["id"], alias=alias, model=payload.model.strip())
+    return {"alias": row}
+
+
+@router.delete("/model-aliases/{alias}")
+async def api_admin_model_alias_delete(alias: str, admin: dict[str, Any] = Depends(admin_required)):
+    if not delete_model_alias(alias.strip().lower()):
+        raise HTTPException(status_code=404, detail="Alias no encontrado")
+    invalidate_aliases_cache()
+    log_audit_event("model_alias_deleted", user_id=admin["id"], alias=alias)
     return {"deleted": True}
 
 

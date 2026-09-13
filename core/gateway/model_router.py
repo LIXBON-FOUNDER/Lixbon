@@ -30,6 +30,7 @@ from core.inference.roles import (
     resolve_role,
 )
 from core.orchestration.orchestrator import ModelUnavailable
+from core.inference.aliases import to_real
 
 logger = logging.getLogger("lixbon.models")
 
@@ -48,6 +49,7 @@ async def model_for_request(
     if not pedido and role == "chat" and user_data:
         # API key atada a un modelo: es el default natural de esa key.
         pedido = (user_data.get("key_model") or "").strip()
+    pedido = to_real(pedido) or ""  # el cliente habla en alias; Ollama no
 
     catalog = await fetch_models()
     resolution = resolve_role(role, catalog)

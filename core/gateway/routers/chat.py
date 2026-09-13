@@ -49,6 +49,7 @@ from core.security.auth import (
 )
 from core.gateway.utils import fetch_models
 from core.gateway.model_router import model_for_request, target_or_503
+from core.inference.aliases import public_catalog, to_public
 from core.orchestration.orchestrator import ModelUnavailable
 from core.inference.context import fit_messages
 from core.inference.roles import REQUIRED_CAPABILITY, resolve_all, resolve_num_ctx
@@ -245,7 +246,7 @@ async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
         if isinstance(entry, dict) and not str(entry.get("id", "")).startswith("error:"):
             entry = {**entry, "num_ctx": resolve_num_ctx(None, chat_role.num_ctx, catalog, entry.get("id")) or 4096}
         data.append(entry)
-    return {"object": "list", "data": data}
+    return {"object": "list", "data": public_catalog(data, include_raw=user_data.get("role") == "admin")}
 
 
 @router.get("/api/model-roles")
@@ -258,8 +259,13 @@ async def model_roles(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     ahorrar un round-trip a /v1/models.
     """
     catalog = await fetch_models()
+    roles = {}
+    for r, res in resolve_all(catalog).items():
+        d = res.as_dict()
+        d["model"] = to_public(d.get("model"))
+        roles[r] = d
     return {
-        "roles": {r: res.as_dict() for r, res in resolve_all(catalog).items()},
+        "roles": roles,
         "capability_by_role": REQUIRED_CAPABILITY,
         "models": catalog,
     }
@@ -296,7 +302,7 @@ async def api_chat(
 
     return {
         "conversation_id": conv_id if save_history else None,
-        "model": model,
+        "model": to_public(model),
         "node": origen,
         "message": assistant_text,
         "usage": {
@@ -463,7 +469,7 @@ async def chat_completions(
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": model,
+        "model": to_public(model),
         "conversation_id": conv_id if save_history else None,
         "node": origen,
         "choices": [
@@ -518,7 +524,7 @@ async def completions(
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
         "object": "text_completion",
         "created": int(time.time()),
-        "model": model,
+        "model": to_public(model),
         "conversation_id": conv_id if save_history else None,
         "node": origen,
         "choices": [{"index": 0, "text": assistant_text, "finish_reason": "stop"}],
@@ -616,7 +622,7 @@ async def vision_describe(
 
     return {
         "description": description,
-        "model": model,
+        "model": to_public(model),
         "node": origen,
         "latency_ms": latency_ms,
         "usage": {
@@ -690,7 +696,7 @@ async def fim_complete(
 
     return {
         "completion": completion,
-        "model": model,
+        "model": to_public(model),
         "node": origen,
         "latency_ms": latency_ms,
         "usage": {
@@ -746,7 +752,7 @@ async def embed_texts(
         except Exception as exc:  # tarifa ausente para el modelo de embedding: no romper
             logger.warning(f"[embed] cobro omitido ({exc})")
 
-    return {"embeddings": embeddings, "model": model, "node": origen}
+    return {"embeddings": embeddings, "model": to_public(model), "node": origen}
 
 
 @router.post("/api/delegate")

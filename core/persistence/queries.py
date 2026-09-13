@@ -32,6 +32,7 @@ from core.persistence.models import (
     LoginDevice,
     Message,
     ModelPricing,
+    ModelAlias,
     ModelRole,
     Node,
     NodeEnrollment,
@@ -1254,6 +1255,50 @@ def upsert_model_role(role: str, **fields) -> dict[str, Any] | None:
         row.updated_at = ts
         s.flush()
         return _role_to_dict(row)
+
+
+def _alias_to_dict(r: ModelAlias) -> dict[str, Any]:
+    return {
+        "alias": r.alias, "name": r.name, "model": r.model, "description": r.description,
+        "sort_order": r.sort_order, "is_active": bool(r.is_active), "updated_at": r.updated_at,
+    }
+
+
+def list_model_aliases(active_only: bool = False) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = select(ModelAlias).order_by(ModelAlias.sort_order, ModelAlias.alias)
+        if active_only:
+            stmt = stmt.where(ModelAlias.is_active == 1)
+        return [_alias_to_dict(r) for r in s.scalars(stmt).all()]
+
+
+def upsert_model_alias(alias: str, **fields) -> dict[str, Any]:
+    allowed = {"name", "model", "description", "sort_order", "is_active"}
+    ts = now_iso()
+    with get_session() as s:
+        row = s.scalar(select(ModelAlias).where(ModelAlias.alias == alias))
+        if not row:
+            row = ModelAlias(alias=alias, name=alias, model="", sort_order=0, is_active=1,
+                             created_at=ts, updated_at=ts)
+            s.add(row)
+        for k, v in fields.items():
+            if k not in allowed or v is None:
+                continue
+            if k == "is_active":
+                v = 1 if v else 0
+            elif k == "sort_order":
+                v = int(v)
+            else:
+                v = str(v).strip()
+            setattr(row, k, v)
+        row.updated_at = ts
+        s.flush()
+        return _alias_to_dict(row)
+
+
+def delete_model_alias(alias: str) -> bool:
+    with get_session() as s:
+        return s.execute(delete(ModelAlias).where(ModelAlias.alias == alias)).rowcount > 0
 
 
 def get_credit_balance(user_id: int) -> int:

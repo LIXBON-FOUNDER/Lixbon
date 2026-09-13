@@ -21,6 +21,7 @@ const AREAS = [
     hijos: [
       { to: '/admin/ia/modelos', label: 'Modelos y costo' },
       { to: '/admin/ia/roles', label: 'Roles' },
+      { to: '/admin/ia/alias', label: 'Alias' },
       { to: '/admin/ia/tarifas', label: 'Tarifas' },
     ],
   },

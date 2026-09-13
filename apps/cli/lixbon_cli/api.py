@@ -98,9 +98,17 @@ class ApiClient:
     # ── datos ────────────────────────────────────────────────────────────
 
     def models(self) -> list[str]:
+        return [m["id"] for m in self.models_detail()]
+
+    def models_detail(self) -> list[dict]:
+        """[{id, name, capabilities…}] — `name` es el nombre público (alias)."""
         data = self._json("GET", f"{self.base_url}/models", timeout=20)
-        return [str(m.get("id")) for m in data.get("data", [])
-                if m.get("id") and not str(m.get("id")).startswith("error:")]
+        out = []
+        for m in data.get("data", []):
+            ident = str(m.get("id") or "")
+            if ident and not ident.startswith("error:"):
+                out.append({**m, "id": ident, "name": str(m.get("name") or ident)})
+        return out
 
     def model_roles(self) -> dict:
         """Mapa rol→modelo que resuelve el gateway. {} si no lo soporta.

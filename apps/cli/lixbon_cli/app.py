@@ -201,6 +201,7 @@ class ChatApp:
         # se puede reabrir con /history.
         self.sessions = SessionStore(CONFIG_DIR)
         self.models_cache: list[str] = []
+        self.model_names: dict[str, str] = {}  # id → nombre público
         # Modelo que el gateway asigna al rol `chat` (GET /api/model-roles). Sirve
         # para no preguntar cuál usar cuando el servidor ya lo tiene decidido.
         # "" = gateway antiguo o sin modelo de chat resuelto.
@@ -228,13 +229,18 @@ class ChatApp:
 
     # ── etiquetas y estado ───────────────────────────────────────────────
 
+    def model_label(self, model: str | None = None) -> str:
+        """Nombre público del modelo (alias) si el servidor lo da; si no, el id."""
+        ident = model if model is not None else self.model
+        return self.model_names.get(ident or "", ident or "")
+
     def _session_label(self) -> str:
         if not self.cfg.get("api_key"):
             return "sin sesión"
         return self.cfg.get("account_email") or "API key"
 
     def _refresh_status(self) -> None:
-        self.status.model = self.model or "sin modelo"
+        self.status.model = self.model_label() or "sin modelo"
         self.status.session_label = self._session_label()
         self.status.mode = self.mode_name()
         self.status.web = self.web_search == "on"
@@ -387,7 +393,7 @@ class ChatApp:
 
     def _render_identity(self) -> None:
         """Cabecera de identidad del CLI (sube con el transcript al chatear)."""
-        render_header(self.console, CLI_VERSION, model=self.model,
+        render_header(self.console, CLI_VERSION, model=self.model_label(),
                       plan=self.plan_name, workspace=self.workspace,
                       branch=self._branch(), mode=self.mode)
 
@@ -447,7 +453,9 @@ class ChatApp:
         """
         auth_failed = False
         try:
-            self.models_cache = self.api.models()
+            detail = self.api.models_detail()
+            self.models_cache = [m["id"] for m in detail]
+            self.model_names = {m["id"]: m["name"] for m in detail}
         except ApiError as exc:
             self.models_cache = []
             auth_failed = exc.status in (401, 403)
@@ -721,9 +729,10 @@ class ChatApp:
             self.model = self.role_chat_model
             self.cfg["model"] = self.model
             save_config(self.cfg)
-            print_ok(f"Modelo: {self.model} (el que el servidor usa para chat)")
+            print_ok(f"Modelo: {self.model_label()} (el que el servidor usa para chat)")
             return True
-        options = [Option(m, m, badge="actual" if m == self.model else "")
+        options = [Option(self.model_label(m), m, description=m if self.model_label(m) != m else "",
+                          badge="actual" if m == self.model else "")
                    for m in self.models_cache]
         default = self.models_cache.index(self.model) if self.model in self.models_cache else 0
         chosen = select("Modelo", options, default=default)
@@ -1616,7 +1625,8 @@ class ChatApp:
         if not arg:
             self.pick_model()
             return True
-        matches = [m for m in self.models_cache if arg.lower() in m.lower()]
+        matches = [m for m in self.models_cache
+                   if arg.lower() in m.lower() or arg.lower() in self.model_label(m).lower()]
         if len(matches) == 1:
             self.model = matches[0]
         elif len(matches) > 1:
@@ -1628,7 +1638,7 @@ class ChatApp:
             self.model = arg
         self.cfg["model"] = self.model
         save_config(self.cfg)
-        print_ok(f"Modelo: {self.model}")
+        print_ok(f"Modelo: {self.model_label()}")
         return True
 
     def cmd_mode(self, arg: str):

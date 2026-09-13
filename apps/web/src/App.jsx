@@ -14,6 +14,7 @@ import AdminInicio from './pages/admin/Inicio';
 import AdminUsuarios from './pages/admin/Usuarios';
 import AdminModelos from './pages/admin/Modelos';
 import AdminRoles from './pages/admin/Roles';
+import AdminAlias from './pages/admin/Alias';
 import AdminTarifas from './pages/admin/Tarifas';
 import AdminProveedores from './pages/admin/Proveedores';
 import AdminNodos from './pages/admin/Nodos';
@@ -51,6 +52,7 @@ export default function App() {
                 <Route path="ia" element={<Navigate to="/admin/ia/modelos" replace />} />
                 <Route path="ia/modelos" element={<AdminModelos />} />
                 <Route path="ia/roles" element={<AdminRoles />} />
+                <Route path="ia/alias" element={<AdminAlias />} />
                 <Route path="ia/tarifas" element={<AdminTarifas />} />
                 <Route path="proveedores" element={<AdminProveedores />} />
                 <Route path="nodos" element={<AdminNodos />} />
