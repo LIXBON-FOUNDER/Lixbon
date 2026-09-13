@@ -30,6 +30,11 @@ PROMPT_BUDGET_RATIO = 0.65
 # ratio que la prosa (~3 chars/token frente a ~4), y quedarse corto en la
 # estimación es lo que provoca el desbordamiento que este módulo evita.
 CHARS_PER_TOKEN = 3.2
+TOKENS_PER_IMAGE = 800
+
+# Relación medida contra el prompt_tokens real que devuelve Ollama; mientras
+# no hay medición vale la conservadora.
+_calibrated: float | None = None
 
 # Lo que un resultado de herramienta puede aportar al contexto del modelo.
 # Suficiente para que razone sobre un archivo o la salida de un comando, lejos
@@ -50,8 +55,24 @@ PRUNE_NOTE = ("[Nota del sistema: los pasos más antiguos de este turno se han "
               "algo de un archivo que ya leíste, vuelve a leerlo.]")
 
 
-def estimate_tokens(messages: list[dict]) -> int:
-    """Tokens aproximados que ocupa una lista de mensajes.
+def chars_per_token() -> float:
+    return _calibrated or CHARS_PER_TOKEN
+
+
+def calibrate(chars_sent: int, prompt_tokens: int) -> None:
+    """Ajusta chars/token con lo que se envió y lo que Ollama contó. Solo vale
+    si `chars_sent` se midió con `payload_chars` sobre el MISMO payload."""
+    global _calibrated
+    if prompt_tokens > 50 and chars_sent > 200:
+        _calibrated = max(1.5, min(8.0, chars_sent / prompt_tokens))
+
+
+def image_count(messages: list[dict]) -> int:
+    return sum(len(m.get("images") or []) for m in messages)
+
+
+def payload_chars(messages: list[dict], tools: list[dict] | None = None) -> int:
+    """Caracteres de texto que viajan al modelo (sin imágenes).
 
     Incluye el JSON de los `tool_calls`: en modo nativo el argumento `content`
     de un write_file viaja ahí y es lo más pesado del mensaje.
@@ -64,7 +85,14 @@ def estimate_tokens(messages: list[dict]) -> int:
             chars += sum(len(str(c)) for c in calls)
         # Cada mensaje paga además los tokens del template (rol, separadores).
         chars += 16
-    return int(chars / CHARS_PER_TOKEN)
+    if tools:
+        chars += len(str(tools))
+    return chars
+
+
+def estimate_tokens(messages: list[dict]) -> int:
+    """Tokens aproximados que ocupa una lista de mensajes."""
+    return int(payload_chars(messages) / chars_per_token()) + TOKENS_PER_IMAGE * image_count(messages)
 
 
 def tools_tokens(tools: list[dict] | None) -> int:
@@ -72,7 +100,7 @@ def tools_tokens(tools: list[dict] | None) -> int:
     template. Son ~700 tokens que hay que descontar del presupuesto."""
     if not tools:
         return 0
-    return int(len(str(tools)) / CHARS_PER_TOKEN)
+    return int(len(str(tools)) / chars_per_token())
 
 
 def clip_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:

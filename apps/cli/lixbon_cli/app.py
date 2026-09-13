@@ -22,7 +22,15 @@ from lixbon_cli.agent import (
     workspace_tree,
 )
 from lixbon_cli.api import ApiClient, ApiError
-from lixbon_cli.context import compact_messages, estimate_tokens, needs_compaction, tools_tokens
+from lixbon_cli.context import (
+    TOKENS_PER_IMAGE,
+    calibrate,
+    chars_per_token,
+    compact_messages,
+    image_count,
+    needs_compaction,
+    payload_chars,
+)
 from lixbon_cli.remote import REMOTE_COMMANDS, RemoteLink
 from lixbon_cli.commands import (
     expand_custom_command,
@@ -106,7 +114,6 @@ from lixbon_cli.ui import (
     two_col,
 )
 
-TOKENS_PER_IMAGE = 800  # estimación para la barra de contexto
 
 # Resultado del prompt cuando la terminal cambió de tamaño con la caja abierta.
 RESIZED = object()
@@ -201,7 +208,9 @@ class ChatApp:
         self.web_search = web_mode_from_config(self.cfg.get("web_search"))
         self.project_context = ""  # LIXBON.md del workspace, si lo hay
         self.session_tokens = 0
-        self.chars_per_token = 4.0
+        # (tokens, chars) del último prompt real: la barra parte de ahí y solo
+        # estima lo añadido después.
+        self._ctx_anchor: tuple[int, int] | None = None
         self.status = StatusBar(
             model=self.model or "sin modelo",
             session_label=self._session_label(),
@@ -246,37 +255,43 @@ class ChatApp:
         # Mide lo que se ENVIARÁ al modelo, que NO es lo mismo en cada modo: en
         # ask son los últimos max_context_messages, pero en agent viaja el turno
         # entero (con los resultados de las herramientas, que es lo que pesa) más
-        # el system prompt del agente. Medir solo el chat plano hacía que la
-        # barra marcara 20 % con la ventana ya desbordada.
+        # el system prompt y las tools. Con un turno en marcha lo que viaja es
+        # `working`, no history.
         if self.mode == "agent":
-            sent = self.history
-            extra = estimate_tokens([{"role": "system",
-                                      "content": build_native_system_prompt(self.workspace)}])
+            sent = [{"role": "system", "content": build_native_system_prompt(self.workspace)}]
+            sent += self.session.get("working") or self.history
+            tools = None
             if self.session.get("native_tools", True):
-                extra += tools_tokens(TOOL_SCHEMAS)
+                tools = TOOL_SCHEMAS
                 if self.session.get("mcp") is not None:
-                    extra += tools_tokens(self.session["mcp"].tool_schemas())
+                    tools = tools + self.session["mcp"].tool_schemas()
         else:
             sent = self._context_messages()
-            extra = 0
-        chars = sum(len(m.get("content", "")) for m in sent)
-        chars += sum(len(str(m.get("tool_calls") or "")) for m in sent)
-        tokens = int(chars / max(self.chars_per_token, 1.0)) + extra
-        tokens += TOKENS_PER_IMAGE * sum(len(m.get("images") or []) for m in sent)
+            tools = None
+        chars = payload_chars(sent, tools)
+        anchor = self._ctx_anchor
+        if anchor and chars >= anchor[1] * 0.8:
+            # Sobre el conteo real solo se estima lo que ha entrado después.
+            tokens = anchor[0] + int(max(0, chars - anchor[1]) / chars_per_token())
+        else:
+            tokens = int(chars / chars_per_token())
+        tokens += TOKENS_PER_IMAGE * image_count(sent)
         window = max(int(self.cfg.get("context_window", 16384)), 1)
         return tokens, min(100.0, tokens * 100.0 / window)
 
-    def _register_usage(self, usage: dict) -> None:
+    def _register_usage(self, usage: dict, sent_chars: int = 0, sent_images: int = 0,
+                        reply_chars: int = 0) -> None:
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
         total = int(usage.get("total_tokens") or 0)
         if total:
             self.session_tokens += total
             self._turn_tokens += total
-        # Recalibra la estimación chars/token con datos reales del server
         self.status.online = True  # ha respondido el servidor: hay red
-        chars = sum(len(m.get("content", "")) for m in self.history)
-        if prompt_tokens > 50 and chars > 200:
-            self.chars_per_token = max(1.5, min(8.0, chars / prompt_tokens))
+        if prompt_tokens and sent_chars:
+            calibrate(sent_chars, prompt_tokens - TOKENS_PER_IMAGE * sent_images)
+            # Tras responder, el contexto contiene el prompt y la respuesta.
+            self._ctx_anchor = (prompt_tokens + completion_tokens, sent_chars + reply_chars)
 
     # ── arranque ─────────────────────────────────────────────────────────
 
@@ -457,6 +472,7 @@ class ChatApp:
         """
         self._persist_session()  # lo anterior no se pierde: queda en /history
         self.history = []
+        self._ctx_anchor = None
         self.session_tokens = 0
         self.conversation_id = str(uuid.uuid4())
         self.title = ""  # la nueva conversación se titulará sola al responder
@@ -477,6 +493,7 @@ class ChatApp:
             return False
         self._persist_session()  # la actual se guarda antes de cambiar
         self.history = list(record.get("messages") or [])
+        self._ctx_anchor = None
         self.conversation_id = record.get("id") or session_id
         self.title = record.get("title") or ""
         self.session_tokens = int(record.get("tokens") or 0)
@@ -1026,9 +1043,12 @@ class ChatApp:
             if self.mode == "delegate":
                 self._delegate_turn(clean or text)
             elif self.mode == "agent":
-                assistant, self.history = run_agent_turn(
-                    self.history, self.workspace, self.session, self._stream_agent
-                )
+                try:
+                    assistant, self.history = run_agent_turn(
+                        self.history, self.workspace, self.session, self._stream_agent
+                    )
+                finally:
+                    self.session["working"] = None
             else:
                 self._auto_compact()
                 assistant = self._stream_assistant(self._context_messages())
@@ -1224,6 +1244,7 @@ class ChatApp:
         try:
             with spinner("compactando conversación…"):
                 self.history = compact_messages(self.history, self._ask_quiet)
+            self._ctx_anchor = None
         except Exception as exc:
             print_note(f"No se pudo compactar ({exc}).")
 
@@ -1267,6 +1288,8 @@ class ChatApp:
         from rich.text import Text
 
         self._last_tool_calls = []
+        sent_chars = payload_chars(messages, tools)
+        sent_images = image_count(messages)
         stream = self.api.chat_stream(
             model=self.model,
             messages=messages,
@@ -1439,7 +1462,8 @@ class ChatApp:
             self._body_end = self.console.writes
 
         if usage:
-            self._register_usage(usage)
+            self._register_usage(usage, sent_chars, sent_images,
+                                 len("".join(content_parts)) + len(str(self._last_tool_calls or "")))
         self._refresh_status()  # tokens/contexto nuevos → repinta la barra fija
         # El razonamiento no se muestra como respuesta, pero el loop del agente
         # lo necesita: los modelos thinking (qwen3.5…) a veces meten la llamada
@@ -1570,6 +1594,7 @@ class ChatApp:
         try:
             with spinner("compactando conversación…"):
                 self.history = compact_messages(self.history, self._ask_quiet, keep_recent=2)
+            self._ctx_anchor = None
         except Exception as exc:
             print_error(f"No se pudo generar el resumen: {exc}")
             return True
@@ -1854,7 +1879,7 @@ class ChatApp:
             ("Mensajes que se envían",
              "el turno entero (se poda al llenarse)" if self.mode == "agent"
              else f"últimos {self.cfg.get('max_context_messages', 12)}"),
-            ("Chars por token (medido)", f"{self.chars_per_token:.2f}"),
+            ("Chars por token (medido)", f"{chars_per_token():.2f}"),
         ]
         for label, value in rows:
             self.console.print(f"  [lx.dim]{label:<26}[/] [lx.primary]{esc(value)}[/]")

@@ -1403,6 +1403,7 @@ def run_agent_turn(history: list[dict], workspace: Path, session: dict,
     pruned_warned = False
 
     for step in range(MAX_AGENT_STEPS):
+        session["working"] = working  # la barra de contexto mide lo que viaja, no history
         ask = session.get("ask")
         if ask is not None and needs_compaction(working, window):
             # Antes de podar a ciegas: resumir. Lo que se pierde en la poda es

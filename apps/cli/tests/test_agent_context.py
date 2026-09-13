@@ -232,3 +232,29 @@ def test_el_tope_de_pasos_es_amplio_y_se_explica(tmp_path):
 
     assert len(stream.calls) == MAX_AGENT_STEPS
     assert "continúa" in answer.lower()
+
+
+# ── barra de contexto: calibración con el conteo real ───────────────────────
+
+def test_calibrar_ajusta_la_estimacion_al_conteo_real():
+    from lixbon_cli import context
+
+    context._calibrated = None
+    msgs = [{"role": "user", "content": "x" * 4000}]
+    before = estimate_tokens(msgs)
+    context.calibrate(context.payload_chars(msgs), 800)  # Ollama contó 800: 5 chars/token
+    assert estimate_tokens(msgs) < before
+    assert abs(estimate_tokens(msgs) - 800) < 20
+    context.calibrate(10, 5)  # medición ridícula: se ignora
+    assert abs(estimate_tokens(msgs) - 800) < 20
+    context._calibrated = None
+
+
+def test_payload_chars_cuenta_tools_e_imagenes_aparte():
+    from lixbon_cli.context import TOKENS_PER_IMAGE, image_count, payload_chars
+
+    msgs = [{"role": "user", "content": "hola", "images": ["AAAA"]}]
+    tools = [{"type": "function", "function": {"name": "t"}}]
+    assert payload_chars(msgs, tools) == payload_chars(msgs) + len(str(tools))
+    assert image_count(msgs) == 1
+    assert estimate_tokens(msgs) >= TOKENS_PER_IMAGE
