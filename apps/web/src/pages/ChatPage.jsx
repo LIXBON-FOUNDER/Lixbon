@@ -16,6 +16,7 @@ import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
 import { VerifyBanner } from '../components/VerifyBanner';
 import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Icons';
+import { MensajeError, Razonamiento } from '../components/Mensajes';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
@@ -27,18 +28,6 @@ const AVISO_CORTADA = 'Respuesta cortada: el modelo alcanzó su límite de token
 // contexto se estima por caracteres; el gateway manda el uso real al terminar.
 const estimarTokens = (msgs) => Math.round(msgs.reduce((n, m) => n + (m.content?.length || 0), 0) / 3.5);
 
-// Razonamiento previo de los modelos thinking: plegado, y abierto mientras
-// el modelo aún no ha escrito nada para que se vea que está trabajando.
-function Razonamiento({ texto, activo }) {
-  return (
-    <details className="msg-razon" open={activo}>
-      <summary className={activo ? 'msg-razon__titulo is-activo' : 'msg-razon__titulo'}>
-        {activo ? 'Razonando…' : 'Razonamiento'}
-      </summary>
-      <div className="msg-razon__texto">{texto}</div>
-    </details>
-  );
-}
 
 function Sources({ sources, queries }) {
   return (
@@ -268,7 +257,7 @@ export default function ChatPage() {
             });
           }
           if (event?.type === 'empty') {
-            patchLast((last) => ({ ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
+            patchLast((last) => ({ ...last, content: AVISO_VACIO, error: true }));
           } else if (reason === 'length') {
             patchLast((last) => ({ ...last, aviso: AVISO_CORTADA }));
           }
@@ -276,7 +265,7 @@ export default function ChatPage() {
       });
       // Stream cerrado sin contenido ni aviso (p. ej. el gateway se reinició a
       // mitad): que no quede "Pensando…" con el botón de enviar activo.
-      patchLast((last) => (last.content ? last : { ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
+      patchLast((last) => (last.content ? last : { ...last, content: AVISO_VACIO, error: true }));
 
       if (isFirstExchange && saveHistory) {
         try {
@@ -302,7 +291,7 @@ export default function ChatPage() {
         const last = next[next.length - 1];
         next[next.length - 1] = {
           ...last,
-          content: last.content || `⚠️ ${err.message}`,
+          content: last.content || err.message,
           error: !last.content,
         };
         return next;
@@ -475,7 +464,9 @@ export default function ChatPage() {
                       {m.reasoning && (
                         <Razonamiento texto={m.reasoning} activo={busy && i === messages.length - 1 && !m.content} />
                       )}
-                      {m.content
+                      {m.error
+                        ? <MensajeError>{m.content}</MensajeError>
+                        : m.content
                         ? <Markdown streaming={busy && i === messages.length - 1}>{m.content}</Markdown>
                         : (!searching && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
                       {m.aviso && <p className="msg__aviso">{m.aviso}</p>}

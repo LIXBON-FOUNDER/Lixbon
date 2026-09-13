@@ -20,7 +20,8 @@ import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
 import { DesignSystemPicker, Inspector } from '../components/VisualsPanels';
-import { IconCheck, IconCopy, IconDownload, IconMenu } from '../components/Icons';
+import { IconCheck, IconCopy, IconDownload, IconExternal, IconMenu } from '../components/Icons';
+import { MensajeError, Razonamiento } from '../components/Mensajes';
 
 const CONTEXT_WINDOW = 30;
 const AVISO_VACIO = 'El modelo no devolvió nada. Prueba a reformular o a cambiar de modelo.';
@@ -238,7 +239,7 @@ export default function VisualsPage() {
       const texto = (detalle && (detalle.message || detalle)) || err.message || 'No se pudo generar la imagen';
       setMessages((prev) => {
         const next = prev.slice();
-        next[next.length - 1] = { role: 'assistant', content: `⚠️ ${typeof texto === 'string' ? texto : JSON.stringify(texto)}`, error: true };
+        next[next.length - 1] = { role: 'assistant', content: typeof texto === 'string' ? texto : JSON.stringify(texto), error: true };
         return next;
       });
     } finally {
@@ -287,13 +288,21 @@ export default function VisualsPage() {
         system: promptVisuals(designSystem),
         source: 'visuals',
         webSearch: 'off',  // diseñar no necesita internet; ahorra la llamada del planificador
+        // Sin razonamiento previo: un HTML largo con thinking acababa entero
+        // dentro del razonamiento y el contenido llegaba vacío.
+        think: false,
         onDelta: (delta) => patchLast((last) => ({ ...last, content: last.content + delta })),
         onReasoning: (delta) => patchLast((last) => ({ ...last, reasoning: (last.reasoning || '') + delta })),
-        onFinish: (reason, chunk) => {
-          if (chunk?.lixbon_event?.type === 'empty') patchLast((last) => ({ ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
+        onFinish: (reason) => {
+          if (reason === 'length') patchLast((last) => ({ ...last, aviso: 'La respuesta se cortó por longitud: pide «continúa» o divide el encargo.' }));
         },
       });
-      patchLast((last) => (last.content ? last : { ...last, content: `⚠️ ${AVISO_VACIO}`, error: true }));
+      patchLast((last) => {
+        if (last.content.trim()) return last;
+        // El modelo lo escribió todo en el razonamiento: se rescata de ahí.
+        if (last.reasoning && extraerArchivos(last.reasoning).length) return { ...last, content: last.reasoning, reasoning: '' };
+        return { ...last, content: AVISO_VACIO, error: true };
+      });
       if (isFirst) {
         try {
           const res = await api.post(`/api/conversations/${convId}/generate-title`);
@@ -306,7 +315,7 @@ export default function VisualsPage() {
         setMessages((prev) => (prev[prev.length - 1]?.content ? prev : prev.slice(0, -1)));
         return;
       }
-      patchLast((last) => ({ ...last, content: last.content || `⚠️ ${err.message}`, error: !last.content }));
+      patchLast((last) => ({ ...last, content: last.content || err.message, error: !last.content }));
     } finally {
       abortRef.current = null;
       setBusy(false);
@@ -461,6 +470,7 @@ export default function VisualsPage() {
                         {(() => {
                           const n = versiones.findIndex((v) => v.indice === i);
                           if (m.generandoImagen) return <span className="msg__thinking">Generando la imagen… (la primera tarda más: carga el modelo)</span>;
+                          if (m.error) return <MensajeError>{m.content}</MensajeError>;
                           const imagen = extraerImagen(m.content);
                           if (imagen) {
                             return (
@@ -473,10 +483,13 @@ export default function VisualsPage() {
                           const archivos = extraerArchivos(m.content);
                           const cuerpo = sinArchivos(m.content);
                           const abierto = archivos.find((a) => !a.cerrado);
+                          const activo = busy && i === messages.length - 1;
                           return (
                             <>
-                              {cuerpo ? <Markdown streaming={busy && i === messages.length - 1}>{cuerpo}</Markdown>
-                                : (!archivos.length && <span className="msg__thinking">Pensando…</span>)}
+                              {m.reasoning && <Razonamiento texto={m.reasoning} activo={activo && !m.content} />}
+                              {cuerpo ? <Markdown streaming={activo}>{cuerpo}</Markdown>
+                                : (!archivos.length && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
+                              {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                               {n >= 0 && (
                                 <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setPanel('lienzo'); }}>
                                   v{n + 1} · {versiones[n].nuevas.join(', ')}
@@ -531,7 +544,7 @@ export default function VisualsPage() {
                   {!modoImagen && <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">Seleccionar</button>}
                   {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); }} disabled={!paginaActual}>Código</button>}
                   {!modoImagen && <button className="vis-tool" onClick={copiar} disabled={!paginaActual} title="Copiar código">{copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}</button>}
-                  <button className="vis-tool" onClick={abrir} disabled={!actual} title="Abrir en una pestaña">↗</button>
+                  <button className="vis-tool" onClick={abrir} disabled={!actual} title="Abrir en una pestaña"><IconExternal size={14} /></button>
                   <button className="vis-tool vis-tool--primary" onClick={descargar} disabled={!actual}><IconDownload size={14} /> Descargar{paginas.length > 1 ? ` (${paginas.length})` : ''}</button>
                 </div>
               </div>

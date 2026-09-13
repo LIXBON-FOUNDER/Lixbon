@@ -1450,3 +1450,12 @@
     font-size: 21px;
   }
 }
+
+.msg__error {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--err, #E05C5C);
+}
+
+.msg__error svg { flex-shrink: 0; margin-top: 2px; }

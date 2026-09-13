@@ -16,6 +16,7 @@ import { planBadge } from '../lib/planColors';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconLogout,
+  IconCheck,
 } from '../components/Icons';
 
 const unlimited = (v) => v === -1;
@@ -203,7 +204,7 @@ function GeneralSection({ user, onSaved }) {
         </Row>
       </div>
       <div className="set-actions">
-        {ok && <span className="set-ok">Guardado ✓</span>}
+        {ok && <span className="set-ok"><IconCheck size={13} /> Guardado</span>}
         <button className="pill-btn pill-btn--primary" disabled={!dirty || busy} onClick={save}>
           {busy ? 'Guardando…' : 'Guardar cambios'}
         </button>
@@ -312,7 +313,7 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
         </Row>
         <Row label="Contraseña" hint="Te enviamos un enlace por correo para cambiarla">
           {pwSent
-            ? <span className="set-ok">Enlace enviado ✓</span>
+            ? <span className="set-ok"><IconCheck size={13} /> Enlace enviado</span>
             : <button className="pill-btn pill-btn--outline set-btn" onClick={sendReset}>Cambiar contraseña</button>}
         </Row>
       </div>
@@ -498,7 +499,7 @@ function PrivacidadSection({ user, onUserChange }) {
         </Row>
         <Row label="Borrar historial" hint="Elimina todas tus conversaciones de forma permanente">
           {cleared
-            ? <span className="set-ok">Historial borrado ✓</span>
+            ? <span className="set-ok"><IconCheck size={13} /> Historial borrado</span>
             : (
               <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmClear(true)}>
                 Borrar historial

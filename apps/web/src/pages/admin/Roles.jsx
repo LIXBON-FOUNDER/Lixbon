@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useConfirmar } from '../../hooks/useConfirmar';
-import { IconCheck, IconRefresh } from '../../components/Icons';
+import { IconAlert, IconCheck, IconRefresh } from '../../components/Icons';
 import { Select } from '../../components/Select';
 import {
   Aviso, Boton, Cabecera, Cargando, Chip, Tarjeta, errMsg,
@@ -180,7 +180,7 @@ export default function Roles() {
                     </div>
 
                     {res.warning && (
-                      <p className="adm-card__nota" role="status">⚠ {res.warning}</p>
+                      <p className="adm-card__nota adm-card__nota--aviso" role="status"><IconAlert size={14} /> {res.warning}</p>
                     )}
 
                     <div className="adm-card__pie">

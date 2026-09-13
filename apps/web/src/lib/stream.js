@@ -6,7 +6,7 @@ import { FILE_PROMPT } from './archivos';
 
 export async function streamChatCompletion({
   model, messages, conversationId, signal, onDelta, onReasoning, onSources, onFinish, webSearch = false,
-  system = FILE_PROMPT, source = undefined,
+  system = FILE_PROMPT, source = undefined, think = undefined,
 }) {
   // El chat web no manda system prompt propio; el de archivos es la única
   // instrucción fija (no se persiste: viaja en cada petición). Visuals pasa el suyo.
@@ -22,6 +22,7 @@ export async function streamChatCompletion({
       stream: true,
       web_search: webSearch === 'off' ? false : (webSearch ? true : 'auto'),
       ...(source ? { source } : {}),
+      ...(think === false || think === true ? { think } : {}),
     }),
     signal,
   });

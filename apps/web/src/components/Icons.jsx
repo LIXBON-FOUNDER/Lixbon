@@ -257,6 +257,10 @@ export const IconAlert = (p) => (
   </Svg>
 );
 
+export const IconExternal = (p) => (
+  <Svg {...p}><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></Svg>
+);
+
 export const IconLayers = (p) => (
   <Svg {...p}>
     <path d="m12 3 9 5-9 5-9-5 9-5Z" />
