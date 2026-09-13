@@ -6,10 +6,11 @@ import { FILE_PROMPT } from './archivos';
 
 export async function streamChatCompletion({
   model, messages, conversationId, signal, onDelta, onReasoning, onSources, onFinish, webSearch = false,
+  system = FILE_PROMPT, source = undefined,
 }) {
   // El chat web no manda system prompt propio; el de archivos es la única
-  // instrucción fija (no se persiste: viaja en cada petición).
-  const conSistema = messages[0]?.role === 'system' ? messages : [{ role: 'system', content: FILE_PROMPT }, ...messages];
+  // instrucción fija (no se persiste: viaja en cada petición). Visuals pasa el suyo.
+  const conSistema = messages[0]?.role === 'system' ? messages : [{ role: 'system', content: system }, ...messages];
   const res = await fetch('/v1/chat/completions', {
     method: 'POST',
     credentials: 'include',
@@ -19,7 +20,8 @@ export async function streamChatCompletion({
       messages: conSistema,
       conversation_id: conversationId,
       stream: true,
-      web_search: webSearch ? true : 'auto',
+      web_search: webSearch === 'off' ? false : (webSearch ? true : 'auto'),
+      ...(source ? { source } : {}),
     }),
     signal,
   });

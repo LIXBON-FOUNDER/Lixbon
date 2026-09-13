@@ -5,6 +5,7 @@ import App from './App.jsx';
 import './styles/base.css';
 import './styles/auth.css';
 import './styles/chat.css';
+import './styles/visuals.css';
 import './styles/account.css';
 import './styles/admin.css';
 import './styles/pagos.css';

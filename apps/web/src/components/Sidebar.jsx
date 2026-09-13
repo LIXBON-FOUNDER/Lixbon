@@ -13,12 +13,12 @@ import { HistorySkeleton } from './Skeleton';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
-  IconBook, IconBolt, IconGlobe, IconUser,
+  IconBook, IconBolt, IconGlobe, IconUser, IconLayers,
 } from './Icons';
 
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
 
-function HistoryItem({ conv, active, onRename, onDelete, onNavigate }) {
+function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState(null); // { left, top } en coordenadas de viewport
   const [editing, setEditing] = useState(false);
@@ -81,7 +81,7 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate }) {
     <div className={`sb-item ${active ? 'is-active' : ''}`} ref={rootRef}>
       <button
         className="sb-item__title"
-        onClick={() => { navigate(`/c/${conv.id}`); onNavigate?.(); }}
+        onClick={() => { navigate(`${base}/${conv.id}`); onNavigate?.(); }}
       >
         {conv.title || 'Sin título'}
       </button>
@@ -109,6 +109,7 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate }) {
 export function Sidebar({
   user, conversations, loadingConversations, activeId, collapsed, onToggleCollapse,
   onRename, onDelete, onLogout, compact = false, open = false, onClose,
+  historyBase = '/c', newPath = '/', seccion = 'chat',
 }) {
   const [historyOpen, setHistoryOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -166,7 +167,7 @@ export function Sidebar({
         <button className="icon-btn" onClick={onToggleCollapse} aria-label="Abrir panel" tabIndex={collapsed ? 0 : -1}>
           <IconPanel />
         </button>
-        <button className="icon-btn" onClick={() => navigate('/')} aria-label="Nueva conversación" tabIndex={collapsed ? 0 : -1}>
+        <button className="icon-btn" onClick={() => navigate(newPath)} aria-label="Nueva conversación" tabIndex={collapsed ? 0 : -1}>
           <IconPlus />
         </button>
       </div>
@@ -207,17 +208,17 @@ export function Sidebar({
         </div>
 
         <nav className="sidebar__nav">
-          <button className="sb-nav" onClick={() => go('/')}>
-            <IconPlus /> <span>Nueva conversación</span>
+          <button className="sb-nav" onClick={() => go(newPath)}>
+            <IconPlus /> <span>{seccion === 'visuals' ? 'Nuevo diseño' : 'Nueva conversación'}</span>
           </button>
-          <button className="sb-nav" onClick={() => setHistoryOpen(true)}>
+          <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/'))}>
             <IconChat /> <span>Conversaciones</span>
+          </button>
+          <button className={`sb-nav ${seccion === 'visuals' ? 'is-active' : ''}`} onClick={() => (seccion === 'visuals' ? setHistoryOpen(true) : go('/visuals'))}>
+            <IconLayers /> <span>Visuals</span>
           </button>
           <button className="sb-nav" onClick={() => go('/aplicaciones')}>
             <IconGrid /> <span>Aplicaciones</span>
-          </button>
-          <button className="sb-nav sb-nav--soon" title="Próximamente">
-            <IconDots /> <span>Más</span>
           </button>
         </nav>
 
@@ -241,6 +242,7 @@ export function Sidebar({
                         onRename={onRename}
                         onDelete={onDelete}
                         onNavigate={compact ? onClose : undefined}
+                        base={historyBase}
                       />
                     ))}
                     {visible.length === 0 && (

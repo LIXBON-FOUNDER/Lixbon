@@ -256,3 +256,10 @@ export const IconAlert = (p) => (
     <path d="M10.3 4.2 2.8 17.4A1.9 1.9 0 0 0 4.5 20.3h15a1.9 1.9 0 0 0 1.7-2.9L13.7 4.2a1.9 1.9 0 0 0-3.4 0Z" />
   </Svg>
 );
+
+export const IconLayers = (p) => (
+  <Svg {...p}>
+    <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+    <path d="m3 12 9 5 9-5M3 16l9 5 9-5" />
+  </Svg>
+);

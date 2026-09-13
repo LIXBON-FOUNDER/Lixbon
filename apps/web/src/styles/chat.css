@@ -136,6 +136,11 @@
   color: var(--ink-muted);
 }
 
+.sb-nav.is-active {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
 /* Historial */
 
 .sidebar__history {

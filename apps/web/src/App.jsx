@@ -15,6 +15,7 @@ import AdminUsuarios from './pages/admin/Usuarios';
 import AdminModelos from './pages/admin/Modelos';
 import AdminRoles from './pages/admin/Roles';
 import AdminAlias from './pages/admin/Alias';
+import VisualsPage from './pages/VisualsPage';
 import AdminTarifas from './pages/admin/Tarifas';
 import AdminProveedores from './pages/admin/Proveedores';
 import AdminNodos from './pages/admin/Nodos';
@@ -42,6 +43,8 @@ export default function App() {
             <Routes>
               <Route path="/" element={<ChatPage />} />
               <Route path="/c/:id" element={<ChatPage />} />
+              <Route path="/visuals" element={<VisualsPage />} />
+              <Route path="/visuals/:id" element={<VisualsPage />} />
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/account" element={<AccountPage />} />

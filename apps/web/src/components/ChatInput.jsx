@@ -58,7 +58,7 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false }) {
+export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder = 'Escribe tu mensaje…' }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -300,7 +300,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       <textarea
         ref={ref}
         className="chat-input__text"
-        placeholder="Escribe tu mensaje…"
+        placeholder={placeholder}
         rows={1}
         onKeyDown={onKeyDown}
         onInput={ajustarAlto}
