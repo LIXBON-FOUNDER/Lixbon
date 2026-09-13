@@ -1,6 +1,7 @@
 // VisualsPage.jsx — diseño con el modelo: chat a la izquierda, lienzo a la
-// derecha. Cada respuesta con un archivo es una versión; el lienzo la pinta
-// en un iframe aislado (sin acceso a la sesión).
+// derecha. Cada respuesta con archivos es una versión (con una o varias
+// páginas); el lienzo la pinta en un iframe aislado (sin acceso a la sesión)
+// y permite seleccionar elementos y retocarlos sin pasar por el modelo.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -10,31 +11,37 @@ import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
 import { descargarBlob } from '../lib/archivos';
 import {
-  DISPOSITIVOS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, VISUALS_PROMPT, documentoPreview, esConversacionDeImagenes, esSvg,
-  extraerArchivo, extraerImagen,
+  DESIGN_SYSTEMS, DISPOSITIVOS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, designSystemPersonalizado,
+  documentoPreview, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerImagen, promptVisuals,
 } from '../lib/visuals';
 import { Logo } from '../components/Logo';
 import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
+import { DesignSystemPicker, Inspector } from '../components/VisualsPanels';
 import { IconCheck, IconCopy, IconDownload, IconMenu } from '../components/Icons';
 
 const CONTEXT_WINDOW = 30;
 const AVISO_VACIO = 'El modelo no devolvió nada. Prueba a reformular o a cambiar de modelo.';
 
-/** El texto de la respuesta sin el bloque del archivo (que vive en el lienzo). */
-function sinArchivo(texto) {
+/** El texto de la respuesta sin los bloques de archivo (que viven en el lienzo). */
+function sinArchivos(texto) {
   return (texto || '').replace(/```file:[^\n`]+\n[\s\S]*?(?:\n```|$)/g, '').trim();
 }
 
-function VersionChip({ n, name, activa, onClick }) {
-  return (
-    <button className={`vis-version ${activa ? 'is-active' : ''}`} onClick={onClick} title={name}>
-      v{n}
-    </button>
-  );
-}
+// Lo que no persiste el servidor (design system elegido, retoques manuales)
+// vive en el navegador, por conversación.
+const local = {
+  get(k, fallback) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } },
+};
+const dsDesde = (guardado) => {
+  if (!guardado) return DESIGN_SYSTEMS[0];
+  if (guardado.custom) return designSystemPersonalizado(guardado.form);
+  return DESIGN_SYSTEMS.find((d) => d.id === guardado.id) || DESIGN_SYSTEMS[0];
+};
+const dsGuardable = (ds) => (ds.custom ? { custom: true, form: ds.form } : { id: ds.id });
 
 export default function VisualsPage() {
   const { user, loading, logout } = useAuth();
@@ -55,15 +62,23 @@ export default function VisualsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tipo, setTipo] = useState(null);
   const [version, setVersion] = useState(null);   // índice en `versiones`; null = la última
+  const [pagina, setPagina] = useState(null);     // nombre de archivo dentro de la versión
+  const [vista, setVista] = useState('pagina');   // 'pagina' | 'todas'
   const [dispositivo, setDispositivo] = useState('escritorio');
   const [verCodigo, setVerCodigo] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [panel, setPanel] = useState('lienzo');   // móvil: 'chat' | 'lienzo'
   const [imagenes, setImagenes] = useState({ available: false, model: null });
   const [tamano, setTamano] = useState(TAMANOS_IMAGEN[0]);
+  const [designSystem, setDesignSystem] = useState(() => dsDesde(local.get('lixbon.visuals.ds', null)));
+  const [inspeccion, setInspeccion] = useState(false);
+  const [seleccion, setSeleccion] = useState(null);
+  const [ops, setOps] = useState({});             // `${indice}:${pagina}` → [{selector, text?, style?}]
+  const [prefill, setPrefill] = useState('');
   const abortRef = useRef(null);
   const loadedConvRef = useRef(null);
   const scrollRef = useRef(null);
+  const frameRef = useRef(null);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
@@ -94,14 +109,21 @@ export default function VisualsPage() {
     api.get('/api/images/status').then((r) => setImagenes(r.data)).catch(() => {});
   }, [user, loadConversations, loadModels]);
 
+  // ── Conversación según la ruta (+ lo guardado en el navegador) ────────
   useEffect(() => {
     if (!routeConvId) {
       loadedConvRef.current = null;
       setMessages([]);
       setTitle(null);
       setVersion(null);
+      setPagina(null);
+      setOps({});
+      setSeleccion(null);
       return;
     }
+    setOps(local.get(`lixbon.visuals.ops.${routeConvId}`, {}));
+    const ds = local.get(`lixbon.visuals.ds.${routeConvId}`, null);
+    if (ds) setDesignSystem(dsDesde(ds));
     if (!user || loadedConvRef.current === routeConvId) return;
     loadedConvRef.current = routeConvId;
     api.get(`/api/conversations/${routeConvId}/messages`)
@@ -109,6 +131,7 @@ export default function VisualsPage() {
         setMessages(res.data.messages.map((m) => ({ role: m.role, content: m.content })));
         setTitle(res.data.conversation?.title || null);
         setVersion(null);
+        setPagina(null);
       })
       .catch(() => navigate('/visuals', { replace: true }));
   }, [routeConvId, user, navigate]);
@@ -118,7 +141,13 @@ export default function VisualsPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // ── Versiones: cada respuesta con archivo (o imagen generada) ──────────
+  const elegirDesignSystem = (ds) => {
+    setDesignSystem(ds);
+    local.set('lixbon.visuals.ds', dsGuardable(ds));
+    if (routeConvId) local.set(`lixbon.visuals.ds.${routeConvId}`, dsGuardable(ds));
+  };
+
+  // ── Versiones: cada respuesta con archivos (o imagen generada) ─────────
   const modoImagen = tipo?.id === 'imagen' || esConversacionDeImagenes(messages);
   const versiones = useMemo(() => {
     const out = [];
@@ -126,16 +155,61 @@ export default function VisualsPage() {
       if (m.role !== 'assistant') return;
       const imagen = extraerImagen(m.content);
       if (imagen) { out.push({ kind: 'image', name: `${imagen.alt || 'imagen'}.jpg`, src: imagen.src, indice: i }); return; }
-      const archivo = extraerArchivo(m.content);
-      if (archivo && (archivo.cerrado || !(busy && i === messages.length - 1))) out.push({ kind: 'file', ...archivo, indice: i });
+      const enCurso = busy && i === messages.length - 1;
+      const archivos = extraerArchivos(m.content).filter((a) => a.cerrado || !enCurso);
+      if (!archivos.length) return;
+      // Las páginas que esta respuesta no reescribió se heredan de la versión anterior.
+      const previa = out.length ? out[out.length - 1] : null;
+      const heredadas = previa?.kind === 'file' ? previa.files.filter((f) => !archivos.some((a) => a.name === f.name)) : [];
+      const files = [...archivos, ...heredadas].sort((a, b) => (a.name === 'index.html' ? -1 : b.name === 'index.html' ? 1 : 0));
+      out.push({ kind: 'file', files, name: files[0].name, indice: i, nuevas: archivos.map((a) => a.name) });
     });
     return out;
   }, [messages, busy]);
 
-  const generando = busy && messages.length > 0 && !!extraerArchivo(messages[messages.length - 1]?.content)
-    && !extraerArchivo(messages[messages.length - 1]?.content).cerrado;
+  const ultimoContenido = messages[messages.length - 1]?.content;
+  const generando = busy && !!extraerArchivo(ultimoContenido) && !extraerArchivo(ultimoContenido).cerrado;
   const actual = versiones.length ? versiones[version == null ? versiones.length - 1 : Math.min(version, versiones.length - 1)] : null;
-  const doc = useMemo(() => documentoPreview(actual), [actual]);
+  const paginaActual = actual?.kind === 'file'
+    ? (actual.files.find((f) => f.name === pagina) || actual.files[0])
+    : null;
+  const claveOps = actual && paginaActual ? `${actual.indice}:${paginaActual.name}` : '';
+  const opsActuales = useMemo(() => ops[claveOps] || [], [ops, claveOps]);
+  const doc = useMemo(() => documentoPreview(paginaActual, opsActuales), [paginaActual, opsActuales]);
+
+  // ── Mensajes del iframe (selección, navegación entre páginas) ──────────
+  useEffect(() => {
+    const onMessage = (e) => {
+      const m = e.data || {};
+      if (m.type === 'lixbon:select') setSeleccion({ selector: m.selector, tag: m.tag, text: m.text, html: m.html, styles: m.styles });
+      if (m.type === 'lixbon:navigate' && actual?.kind === 'file' && actual.files.some((f) => f.name === m.page)) {
+        setPagina(m.page);
+        setVista('pagina');
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [actual]);
+
+  useEffect(() => {
+    frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*');
+    if (!inspeccion) setSeleccion(null);
+  }, [inspeccion, doc]);
+
+  const aplicarOp = (op) => {
+    frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:apply', ...op }, '*');
+    setOps((prev) => {
+      const next = { ...prev, [claveOps]: [...(prev[claveOps] || []), op] };
+      if (routeConvId) local.set(`lixbon.visuals.ops.${routeConvId}`, next);
+      return next;
+    });
+  };
+
+  const pedirAlModelo = (sel) => {
+    setPrefill(`Sobre este elemento de ${paginaActual?.name || 'la página'} (<${sel.tag}>): ${sel.html.slice(0, 300)}\n\nCambio: `);
+    setInspeccion(false);
+    setPanel('chat');
+  };
 
   // ── Imagen: una petición al nodo de difusión, sin stream ──────────────
   const generarImagen = async (prompt) => {
@@ -175,6 +249,7 @@ export default function VisualsPage() {
   // ── Enviar ─────────────────────────────────────────────────────────────
   const send = async (texto, images = []) => {
     if (!user) { navigate('/auth?mode=register'); return; }
+    setPrefill('');
     if (modoImagen) { await generarImagen(texto); return; }
     let chosenModel = model;
     if (!chosenModel) {
@@ -188,10 +263,13 @@ export default function VisualsPage() {
     if (!routeConvId) {
       loadedConvRef.current = convId;
       navigate(`/visuals/${convId}`, { replace: true });
+      local.set(`lixbon.visuals.ds.${convId}`, dsGuardable(designSystem));
     }
     setMessages([...history, { role: 'assistant', content: '' }]);
     setBusy(true);
     setVersion(null);
+    setVista('pagina');
+    setInspeccion(false);
     setPanel('lienzo');
     const abort = new AbortController();
     abortRef.current = abort;
@@ -206,7 +284,7 @@ export default function VisualsPage() {
         messages: history,
         conversationId: convId,
         signal: abort.signal,
-        system: VISUALS_PROMPT,
+        system: promptVisuals(designSystem),
         source: 'visuals',
         webSearch: 'off',  // diseñar no necesita internet; ahorra la llamada del planificador
         onDelta: (delta) => patchLast((last) => ({ ...last, content: last.content + delta })),
@@ -238,19 +316,22 @@ export default function VisualsPage() {
   const stop = () => abortRef.current?.abort();
 
   // ── Acciones del lienzo ────────────────────────────────────────────────
+  const codigoFinal = (archivo) => (esSvg(archivo.name) ? archivo.code : aplicarOps(archivo.code, ops[`${actual.indice}:${archivo.name}`] || []));
   const descargar = async () => {
     if (!actual) return;
     if (actual.kind === 'image') {
       descargarBlob(await (await fetch(actual.src)).blob(), actual.name);
       return;
     }
-    const mime = esSvg(actual.name) ? 'image/svg+xml' : 'text/html';
-    descargarBlob(new Blob([actual.code], { type: `${mime};charset=utf-8` }), actual.name);
+    for (const archivo of actual.files) {
+      const mime = esSvg(archivo.name) ? 'image/svg+xml' : 'text/html';
+      descargarBlob(new Blob([codigoFinal(archivo)], { type: `${mime};charset=utf-8` }), archivo.name);
+    }
   };
   const copiar = async () => {
-    if (!actual || actual.kind === 'image') return;
+    if (!paginaActual) return;
     try {
-      await navigator.clipboard.writeText(actual.code);
+      await navigator.clipboard.writeText(codigoFinal(paginaActual));
       setCopiado(true);
       setTimeout(() => setCopiado(false), 1800);
     } catch { /* sin portapapeles */ }
@@ -293,6 +374,7 @@ export default function VisualsPage() {
 
   const empty = messages.length === 0;
   const anchoDispositivo = DISPOSITIVOS.find((d) => d.id === dispositivo)?.ancho || 0;
+  const paginas = actual?.kind === 'file' ? actual.files : [];
 
   return (
     <div className="chat-shell vis-shell">
@@ -321,6 +403,7 @@ export default function VisualsPage() {
             <IconMenu />
           </button>
           <h1 className="chat-header__title">{title || (empty ? 'Visuals' : 'Diseño sin título')}</h1>
+          {!empty && !modoImagen && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
           {compact && !empty && (
             <div className="vis-panel-toggle">
               <button className={panel === 'chat' ? 'is-active' : ''} onClick={() => setPanel('chat')}>Chat</button>
@@ -335,7 +418,7 @@ export default function VisualsPage() {
           <div className="vis-hero">
             <div className="vis-hero__inner">
               <h2 className="vis-hero__title">¿Qué diseñamos?</h2>
-              <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él.</p>
+              <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él o tocándolo en el lienzo.</p>
               <div className="vis-tipos">
                 {[...TIPOS, TIPO_IMAGEN].map((t) => (
                   <button
@@ -349,13 +432,15 @@ export default function VisualsPage() {
                   </button>
                 ))}
               </div>
-              {tipo?.id === 'imagen' && (
+              {tipo?.id === 'imagen' ? (
                 <div className="vis-tamanos">
                   {TAMANOS_IMAGEN.map((t) => (
                     <button key={t.id} className={`vis-tool ${tamano.id === t.id ? 'is-active' : ''}`} onClick={() => setTamano(t)}>{t.label}</button>
                   ))}
                   <span className="vis-tamanos__modelo">{imagenes.model}</span>
                 </div>
+              ) : (
+                <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} />
               )}
               <div className="vis-hero__input">
                 <ChatInput onSend={send} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
@@ -385,18 +470,21 @@ export default function VisualsPage() {
                               </button>
                             );
                           }
-                          const archivo = extraerArchivo(m.content);
-                          const cuerpo = sinArchivo(m.content);
+                          const archivos = extraerArchivos(m.content);
+                          const cuerpo = sinArchivos(m.content);
+                          const abierto = archivos.find((a) => !a.cerrado);
                           return (
                             <>
                               {cuerpo ? <Markdown streaming={busy && i === messages.length - 1}>{cuerpo}</Markdown>
-                                : (!archivo && <span className="msg__thinking">Pensando…</span>)}
-                              {archivo && n >= 0 && (
-                                <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPanel('lienzo'); }}>
-                                  v{n + 1} · {archivo.name}
+                                : (!archivos.length && <span className="msg__thinking">Pensando…</span>)}
+                              {n >= 0 && (
+                                <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setPanel('lienzo'); }}>
+                                  v{n + 1} · {versiones[n].nuevas.join(', ')}
                                 </button>
                               )}
-                              {archivo && n < 0 && <span className="vis-version-chip is-building">construyendo {archivo.name}… {archivo.code.split('\n').length} líneas</span>}
+                              {abierto && busy && i === messages.length - 1 && (
+                                <span className="vis-version-chip is-building">construyendo {abierto.name}… {abierto.code.split('\n').length} líneas</span>
+                              )}
                             </>
                           );
                         })()}
@@ -413,7 +501,7 @@ export default function VisualsPage() {
                     ))}
                   </div>
                 )}
-                <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
+                <ChatInput key={prefill} initialText={prefill} onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
                   placeholder={modoImagen ? 'Otra imagen: describe qué cambia…' : 'Pide un cambio: «más aire en el hero», «versión oscura», «añade testimonios»…'} />
               </div>
             </section>
@@ -422,31 +510,50 @@ export default function VisualsPage() {
               <div className="vis-toolbar">
                 <div className="vis-toolbar__group">
                   {versiones.map((v, n) => (
-                    <VersionChip key={v.indice} n={n + 1} name={v.name} activa={actual?.indice === v.indice} onClick={() => setVersion(n)} />
+                    <button key={v.indice} className={`vis-version ${actual?.indice === v.indice ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); }} title={v.name}>v{n + 1}</button>
                   ))}
                   {generando && <span className="vis-version is-building">generando…</span>}
                 </div>
+                {paginas.length > 1 && (
+                  <div className="vis-toolbar__group vis-paginas">
+                    <button className={`vis-tool ${vista === 'todas' ? 'is-active' : ''}`} onClick={() => { setVista('todas'); setInspeccion(false); }}>Todas ({paginas.length})</button>
+                    {paginas.map((f) => (
+                      <button key={f.name} className={`vis-tool ${vista === 'pagina' && paginaActual?.name === f.name ? 'is-active' : ''}`} onClick={() => { setPagina(f.name); setVista('pagina'); }}>{f.name.replace(/\.html$/, '')}</button>
+                    ))}
+                  </div>
+                )}
                 <div className="vis-toolbar__group">
                   {!modoImagen && DISPOSITIVOS.map((d) => (
                     <button key={d.id} className={`vis-tool ${dispositivo === d.id ? 'is-active' : ''}`} onClick={() => setDispositivo(d.id)}>{d.label}</button>
                   ))}
                 </div>
                 <div className="vis-toolbar__group">
-                  {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => setVerCodigo((v) => !v)} disabled={!actual}>Código</button>}
-                  {!modoImagen && <button className="vis-tool" onClick={copiar} disabled={!actual} title="Copiar código">{copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}</button>}
+                  {!modoImagen && <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">Seleccionar</button>}
+                  {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); }} disabled={!paginaActual}>Código</button>}
+                  {!modoImagen && <button className="vis-tool" onClick={copiar} disabled={!paginaActual} title="Copiar código">{copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}</button>}
                   <button className="vis-tool" onClick={abrir} disabled={!actual} title="Abrir en una pestaña">↗</button>
-                  <button className="vis-tool vis-tool--primary" onClick={descargar} disabled={!actual}><IconDownload size={14} /> Descargar</button>
+                  <button className="vis-tool vis-tool--primary" onClick={descargar} disabled={!actual}><IconDownload size={14} /> Descargar{paginas.length > 1 ? ` (${paginas.length})` : ''}</button>
                 </div>
               </div>
-              <div className="vis-stage">
+              <div className={`vis-stage ${vista === 'todas' ? 'vis-stage--todas' : ''}`}>
                 {actual ? (
                   actual.kind === 'image' ? (
                     <img className="vis-imagen" src={actual.src} alt={actual.name} />
+                  ) : vista === 'todas' ? (
+                    <div className="vis-artboards">
+                      {paginas.map((f) => (
+                        <button key={f.name} className="vis-artboard" onClick={() => { setPagina(f.name); setVista('pagina'); }}>
+                          <span className="vis-artboard__name">{f.name}</span>
+                          <span className="vis-artboard__frame"><iframe title={f.name} sandbox="allow-scripts" srcDoc={documentoPreview(f, ops[`${actual.indice}:${f.name}`] || [])} tabIndex={-1} /></span>
+                        </button>
+                      ))}
+                    </div>
                   ) : verCodigo ? (
-                    <pre className="vis-code"><code>{actual.code}</code></pre>
+                    <pre className="vis-code"><code>{codigoFinal(paginaActual)}</code></pre>
                   ) : (
                     <div className="vis-frame" style={anchoDispositivo ? { width: anchoDispositivo } : undefined}>
-                      <iframe title="Vista previa" sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc} />
+                      <iframe ref={frameRef} title="Vista previa" sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
+                        onLoad={() => frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*')} />
                     </div>
                   )
                 ) : (
@@ -455,6 +562,10 @@ export default function VisualsPage() {
                   </div>
                 )}
                 {generando && actual && <div className="vis-stage__badge">Nueva versión en camino…</div>}
+                {inspeccion && (
+                  <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo} onCerrar={() => setSeleccion(null)} />
+                )}
+                {inspeccion && !seleccion && <div className="vis-stage__badge">Haz clic en un elemento para editarlo</div>}
               </div>
             </section>
           </div>

@@ -58,7 +58,7 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder = 'Escribe tu mensaje…' }) {
+export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder = 'Escribe tu mensaje…', initialText = '' }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -82,6 +82,15 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     el.style.height = `${objetivo}px`;
     el.style.overflowY = el.scrollHeight > ALTO_MAX ? 'auto' : 'hidden';
   }, []);
+
+  // Texto inicial (p. ej. Visuals rellena el prompt desde un elemento del lienzo).
+  useEffect(() => {
+    if (!initialText || !ref.current) return;
+    ref.current.value = initialText;
+    ajustarAlto();
+    ref.current.focus();
+    ref.current.setSelectionRange(initialText.length, initialText.length);
+  }, [initialText, ajustarAlto]);
 
   const dictado = useDictado(
     useCallback((texto) => {
