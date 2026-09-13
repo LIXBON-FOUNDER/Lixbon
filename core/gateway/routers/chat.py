@@ -49,6 +49,7 @@ from core.security.auth import (
 )
 from core.gateway.utils import fetch_models
 from core.gateway.model_router import model_for_request, target_or_503
+from core.orchestration.orchestrator import ModelUnavailable
 from core.inference.context import fit_messages
 from core.inference.roles import REQUIRED_CAPABILITY, resolve_all, resolve_num_ctx
 
@@ -544,6 +545,24 @@ DEFAULT_VISION_PROMPT = (
 )
 
 
+def available_vision_model(preferred: str, catalog: list[dict]) -> str | None:
+    """`preferred` si algún nodo online lo sirve; si no, el primer modelo del
+    catálogo con capacidad `vision` que sí esté servido."""
+    candidatos = [preferred] + [
+        str(e.get("id")) for e in catalog
+        if isinstance(e, dict) and "vision" in (e.get("capabilities") or []) and e.get("id") != preferred
+    ]
+    for candidato in candidatos:
+        try:
+            deps.orquestador.ollama_target(candidato, strict=True)
+            return candidato
+        except ModelUnavailable:
+            continue
+        except Exception:
+            return candidato  # sin nodos: Ollama local, que decida él
+    return None
+
+
 class VisionDescribeRequest(BaseModel):
     # Vacío = el del rol `vision` (autodetectado por capability `vision`).
     model: str | None = Field(None, description="Modelo de visión; vacío = el del rol vision")
@@ -562,6 +581,11 @@ async def vision_describe(
     if not payload.images:
         raise HTTPException(status_code=400, detail="No se adjuntaron imágenes")
     model, role = await model_for_request(payload.model, "vision")
+    if not payload.model:
+        # El rol suele apuntar a un modelo pequeño (moondream); si su nodo está
+        # apagado, cualquier modelo online que declare `vision` sirve mejor
+        # que un 503.
+        model = available_vision_model(model, await fetch_models()) or model
     validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False

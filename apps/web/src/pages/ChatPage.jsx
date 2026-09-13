@@ -125,7 +125,9 @@ export default function ChatPage() {
       .map((m) => m.id)
       .filter((id) => !String(id).startsWith('error:'));
     setModels(ids);
-    setModelInfo(Object.fromEntries(res.data.data.map((m) => [m.id, { num_ctx: m.num_ctx, context_length: m.context_length }])));
+    setModelInfo(Object.fromEntries(res.data.data.map((m) => [m.id, {
+      num_ctx: m.num_ctx, context_length: m.context_length, capabilities: m.capabilities || [],
+    }])));
     setModel((current) => current || ids[0] || '');
     return ids;
   }, []);
@@ -185,7 +187,9 @@ export default function ChatPage() {
   };
 
   // ── Enviar mensaje ───────────────────────────────────────────────────
-  const send = async (text) => {
+  const modelVision = Boolean(modelInfo[model]?.capabilities?.includes('vision'));
+
+  const send = async (text, images = []) => {
     if (!user) {
       navigate('/auth?mode=register');
       return;
@@ -208,7 +212,9 @@ export default function ChatPage() {
     const saveHistory = user?.settings?.save_history !== false;
     const convId = routeConvId || crypto.randomUUID();
     const isFirstExchange = messages.length === 0;
-    const history = [...messages.slice(-CONTEXT_WINDOW), { role: 'user', content: text }];
+    // Las imágenes viajan con el mensaje (modelo con visión); el historial
+    // guardado solo conserva el texto.
+    const history = [...messages.slice(-CONTEXT_WINDOW), { role: 'user', content: text, ...(images.length ? { images } : {}) }];
 
     if (!routeConvId && saveHistory) {
       loadedConvRef.current = convId; // evita el refetch al cambiar la URL
@@ -425,7 +431,7 @@ export default function ChatPage() {
               <ThreadSkeleton />
             </div>
             <div className="chat-composer">
-              <ChatInput onSend={send} busy models={models} model={model} onModelChange={setModel} />
+              <ChatInput onSend={send} busy models={models} model={model} onModelChange={setModel} modelVision={modelVision} />
             </div>
           </>
         ) : empty ? (
@@ -438,7 +444,7 @@ export default function ChatPage() {
                 : 'Solo tienes un chat disponible para usar. Inicia sesión para tener más chats y funciones'}
             </h2>
             <div className="chat-hero__input">
-              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
             </div>
           </div>
@@ -448,7 +454,14 @@ export default function ChatPage() {
               <div className="chat-thread">
                 {messages.map((m, i) => (
                   m.role === 'user' ? (
-                    <div key={i} className="msg msg--user">{m.content}</div>
+                    <div key={i} className="msg msg--user">
+                      {m.images?.length > 0 && (
+                        <div className="msg__images">
+                          {m.images.map((img, j) => <img key={j} src={`data:image/jpeg;base64,${img}`} alt="" />)}
+                        </div>
+                      )}
+                      {m.content}
+                    </div>
                   ) : (
                     <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
                       {(m.sources?.length > 0 || m.queries?.length > 0) && (
@@ -479,7 +492,7 @@ export default function ChatPage() {
                   más <IconArrowDown size={14} />
                 </button>
               )}
-              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
               <p className="chat-disclaimer">
                 lixbon puede equivocarse. Verifica la informacion antes de usarla.

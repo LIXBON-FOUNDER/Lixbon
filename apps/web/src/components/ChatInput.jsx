@@ -58,7 +58,7 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, webSearch, onToggleWeb, contextUso }) {
+export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -119,6 +119,15 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
           setError(mensajeDeError(err, nombre));
           continue;
         }
+        if (modelVision) {
+          // El modelo elegido ve: la imagen va tal cual con el mensaje, sin
+          // pasar por el sub-agente de descripción.
+          setAttachments((prev) => [...prev, {
+            id, kind: 'image', filename: nombre, preview: preparada.dataUrl,
+            base64: preparada.base64, text: '', estado: 'listo',
+          }]);
+          continue;
+        }
         setAttachments((prev) => [...prev, {
           id, kind: 'image', filename: nombre, preview: preparada.dataUrl,
           text: '', estado: 'leyendo',
@@ -148,7 +157,7 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
         setAttachments((prev) => prev.filter((a) => a.id !== id));
       }
     }
-  }, []);
+  }, [modelVision]);
 
   // Soltar en cualquier punto de la ventana, no solo sobre la caja: quien
   // arrastra un archivo apunta al chat, no a un rectángulo de 40 píxeles.
@@ -206,19 +215,23 @@ export function ChatInput({ onSend, onStop, busy, models, model, onModelChange, 
     if ((!text && listos.length === 0) || busy || leyendo) return;
 
     let payload = text;
-    if (listos.length > 0) {
-      const contexto = listos.map(contextoDe).join('\n\n');
-      const pregunta = text || (listos.some((a) => a.kind === 'image')
+    const nativas = listos.filter((a) => a.base64);
+    const descritos = listos.filter((a) => !a.base64);
+    if (descritos.length > 0) {
+      const contexto = descritos.map(contextoDe).join('\n\n');
+      const pregunta = text || (descritos.some((a) => a.kind === 'image')
         ? 'Analiza la imagen adjunta.'
         : 'Analiza el documento adjunto.');
       payload = `${contexto}\n\n---\n\n${pregunta}`;
+    } else if (!text && nativas.length > 0) {
+      payload = 'Analiza la imagen adjunta.';
     }
 
     el.value = '';
     el.style.height = '';
     el.style.overflowY = 'hidden';
     setAttachments([]);
-    onSend(payload);
+    onSend(payload, nativas.map((a) => a.base64));
   };
 
   const onKeyDown = (e) => {

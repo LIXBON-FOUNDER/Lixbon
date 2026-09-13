@@ -549,6 +549,20 @@
 
 /* El mensaje propio es un bloque, no una burbuja invertida: sube un peldaño
    de superficie y ya se distingue de la respuesta. */
+.msg__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.msg__images img {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: var(--radius);
+  object-fit: cover;
+}
+
 .msg--user {
   align-self: flex-end;
   max-width: 78%;
