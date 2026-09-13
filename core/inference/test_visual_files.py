@@ -1,3 +1,4 @@
+import pytest
 """Archivos de un diseño de Visuals a partir de los mensajes (parser tolerante)."""
 from core.inference.visual_files import extract_files, latest_version
 
@@ -27,3 +28,25 @@ def test_la_ultima_version_hereda_las_paginas_no_reescritas():
     assert versiones == 2
     assert [(f["name"], f["code"]) for f in files] == [("index.html", "<p>1</p>"), ("menu.html", "<p>m2</p>")]
     assert latest_version([{"role": "assistant", "content": "hola"}]) == ([], 0)
+
+
+def test_edicion_search_replace_sobre_la_version_anterior():
+    from core.inference.visual_files import apply_edits, extract_edits, latest_version
+
+    html = '<!doctype html>\n<html><body>\n  <h1 class="a">Hola</h1>\n  <p>uno</p>\n</body></html>'
+    msgs = [
+        {"role": "assistant", "content": "Hecho.\n```file:index.html\n" + html + "\n```"},
+        {"role": "assistant", "content": (
+            "Cambio el título.\n```edit:index.html\n<<<<<<< SEARCH\n<h1 class=\"a\">Hola</h1>\n=======\n"
+            "  <h1 class=\"b\">Adiós</h1>\n  <p>cero</p>\n>>>>>>> REPLACE\n"
+            "<<<<<<< SEARCH\n  <p>uno</p>\n=======\n  <p>dos</p>\n>>>>>>> REPLACE\n```")},
+        {"role": "assistant", "content": "Otra.\n```edit:index.html\n<<<<<<< SEARCH\n  <p>no existe</p>\n=======\n  <p>x</p>\n>>>>>>> REPLACE\n```"},
+    ]
+    assert len(extract_edits(msgs[1]["content"])[0]["pares"]) == 2
+    files, n = latest_version(msgs[:2])
+    assert n == 2
+    assert files[0]["code"] == '<!doctype html>\n<html><body>\n  <h1 class="b">Adiós</h1>\n  <p>cero</p>\n  <p>dos</p>\n</body></html>'
+    files3, n3 = latest_version(msgs)
+    assert n3 == 2 and files3 == files
+    with pytest.raises(ValueError):
+        apply_edits("a\nb", [("zzz", "y")])

@@ -663,3 +663,13 @@
 
 .vis-compartido__stage { flex: 1; }
 .vis-compartido__paginas { margin-left: 16px; margin-right: auto; }
+
+.vis-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

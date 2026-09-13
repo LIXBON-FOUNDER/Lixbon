@@ -20,12 +20,21 @@ export const TIPOS = [
 export const VISUALS_PROMPT = `Eres el diseñador de interfaces de Lixbon Visuals. Produces diseños reales, no maquetas genéricas.
 
 FORMATO (obligatorio):
-- Entrega SIEMPRE cada archivo COMPLETO dentro de un bloque de código cuyo lenguaje sea EXACTAMENTE file:nombre, así:
+- Un archivo NUEVO (o uno que rehaces de arriba abajo) va COMPLETO en un bloque de código cuyo lenguaje sea EXACTAMENTE file:nombre, así:
 \`\`\`file:index.html
 <!doctype html>
 ...
 \`\`\`
-  (file:logo.svg si piden un logo, icono o ilustración vectorial). El nombre va en la línea de apertura del bloque, nunca dentro del código. En cada cambio, por pequeño que sea, vuelve a entregar entero el archivo que cambia (los que no cambian puedes omitirlos).
+  (file:logo.svg si piden un logo, icono o ilustración vectorial). El nombre va en la línea de apertura del bloque, nunca dentro del código.
+- Un CAMBIO en un archivo que ya existe NO se entrega reescribiendo el archivo: se entrega como edición, en un bloque edit:nombre con uno o más pares SEARCH/REPLACE:
+\`\`\`edit:index.html
+<<<<<<< SEARCH
+  <h1 class="text-4xl">Casas pensadas para quien las habita</h1>
+=======
+  <h1 class="text-5xl">Casas hechas para vivirlas</h1>
+>>>>>>> REPLACE
+\`\`\`
+  El texto de SEARCH se copia EXACTO del archivo actual (líneas completas, con su indentación), lo justo para ser único; REPLACE lo sustituye. Varios cambios = varios pares en el mismo bloque. Para añadir, busca la línea junto a la que va y repítela en REPLACE con lo nuevo. Solo rehaz un archivo entero si cambia más de la mitad.
 - Un sitio o prototipo de varias pantallas va en VARIAS páginas: una por bloque (file:index.html, file:sitios.html, file:contacto.html…), enlazadas con <a href="sitios.html">. La primera siempre es index.html. Cada página repite su cabecera y pie.
 - Antes del bloque: una frase con lo que has hecho. Después: como mucho tres viñetas con opciones de cambio. Nunca expliques el código.
 
@@ -103,6 +112,51 @@ export function extraerArchivos(texto) {
 export function extraerArchivo(texto) {
   const todos = extraerArchivos(texto);
   return todos.length ? todos[todos.length - 1] : null;
+}
+
+// ── Ediciones SEARCH/REPLACE sobre un archivo ya existente ───────────────────
+
+const EDIT_INFO = /^(?:edit|patch|diff):\s*([\w./-]+\.(?:html?|svg))$/i;
+const PAR = /<{5,9} *(?:SEARCH|BUSCAR)\n([\s\S]*?)\n={5,9}\n([\s\S]*?)\n>{5,9} *(?:REPLACE|REEMPLAZAR)/g;
+
+/** Bloques edit:nombre de un texto, con sus pares; el último puede estar abierto. */
+export function extraerEdiciones(texto) {
+  if (!texto) return [];
+  const out = [];
+  for (const m of texto.matchAll(FENCE)) {
+    const info = EDIT_INFO.exec((m[3] || '').trim());
+    if (!info) continue;
+    const fin = m.index + m[0].length;
+    const cerrado = texto.slice(fin - 3, fin) === '```';
+    const pares = [...m[4].matchAll(PAR)].map((p) => ({ buscar: p[1], reemplazar: p[2] }));
+    out.push({ name: limpiarNombre(info[1]), pares, cerrado, lineas: m[4].split('\n').length });
+  }
+  return out;
+}
+
+function indiceDeVentana(lineas, buscadas) {
+  const norm = (l) => l.trim().replace(/\s+/g, ' ');
+  const objetivo = buscadas.map(norm);
+  for (let i = 0; i + objetivo.length <= lineas.length; i += 1) {
+    if (objetivo.every((l, k) => norm(lineas[i + k]) === l)) return i;
+  }
+  return -1;
+}
+
+/** Aplica pares SEARCH/REPLACE; lanza Error con el fragmento que no encaja. */
+export function aplicarEdiciones(code, pares) {
+  let out = code;
+  for (const { buscar, reemplazar } of pares) {
+    // Línea a línea y sin espacios sobrantes: el modelo suele alterar la
+    // indentación al copiar, y así REPLACE manda sobre la sangría.
+    const lineas = out.split('\n');
+    const buscadas = buscar.split('\n');
+    const i = buscar.trim() ? indiceDeVentana(lineas, buscadas) : -1;
+    if (i >= 0) { lineas.splice(i, buscadas.length, ...reemplazar.split('\n')); out = lineas.join('\n'); continue; }
+    if (buscar && out.includes(buscar)) { out = out.replace(buscar, () => reemplazar); continue; }
+    throw new Error(buscadas[0].trim().slice(0, 60) || '(vacío)');
+  }
+  return out;
 }
 
 // ── Design systems: reglas fijas que entran en el prompt ─────────────────────
@@ -238,11 +292,25 @@ export function construirVersiones(messages, enCursoIdx = -1) {
     const imagen = extraerImagen(m.content);
     if (imagen) { out.push({ kind: 'image', name: `${imagen.alt || 'imagen'}.jpg`, src: imagen.src, indice: i }); return; }
     const archivos = extraerArchivos(m.content).filter((a) => a.cerrado || i !== enCursoIdx);
-    if (!archivos.length) return;
+    const ediciones = extraerEdiciones(m.content).filter((e) => e.cerrado || i !== enCursoIdx);
+    if (!archivos.length && !ediciones.length) return;
     const previa = out.length ? out[out.length - 1] : null;
+    const fallos = [];
+    for (const e of ediciones) {
+      const base = archivos.find((a) => a.name === e.name) || (previa?.kind === 'file' && previa.files.find((f) => f.name === e.name));
+      if (!base) { fallos.push({ name: e.name, motivo: 'no existe ese archivo' }); continue; }
+      try {
+        const code = aplicarEdiciones(base.code, e.pares);
+        const k = archivos.findIndex((a) => a.name === e.name);
+        if (k >= 0) archivos[k] = { ...base, code }; else archivos.push({ name: e.name, code, cerrado: true });
+      } catch (err) {
+        fallos.push({ name: e.name, motivo: `no encontré «${err.message}»` });
+      }
+    }
+    if (!archivos.length) { if (fallos.length) out.push({ ...(previa || { kind: 'file', files: [], name: '' }), indice: i, nuevas: [], fallos }); return; }
     const heredadas = previa?.kind === 'file' ? previa.files.filter((f) => !archivos.some((a) => a.name === f.name)) : [];
     const files = [...archivos, ...heredadas].sort((a, b) => (a.name === 'index.html' ? -1 : b.name === 'index.html' ? 1 : 0));
-    out.push({ kind: 'file', files, name: files[0].name, indice: i, nuevas: archivos.map((a) => a.name) });
+    out.push({ kind: 'file', files, name: files[0].name, indice: i, nuevas: archivos.map((a) => a.name), fallos });
   });
   return out;
 }

@@ -13,7 +13,7 @@ import { descargarBlob } from '../lib/archivos';
 import { crearZip } from '../lib/zip';
 import {
   DESIGN_SYSTEMS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
-  documentoPreview, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerImagen, promptVisuals,
+  documentoPreview, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
   tiempoRelativo,
 } from '../lib/visuals';
 import { Logo } from '../components/Logo';
@@ -293,7 +293,7 @@ export default function VisualsPage() {
       });
       patchLast((last) => {
         if (last.content.trim()) return last;
-        if (last.reasoning && extraerArchivos(last.reasoning).length) return { ...last, content: last.reasoning, reasoning: '' };
+        if (last.reasoning && (extraerArchivos(last.reasoning).length || extraerEdiciones(last.reasoning).length)) return { ...last, content: last.reasoning, reasoning: '' };
         return { ...last, content: AVISO_VACIO, error: true };
       });
       if (isFirst) {
@@ -573,19 +573,35 @@ export default function VisualsPage() {
                         );
                       }
                       const archivos = extraerArchivos(m.content);
+                      const ediciones = extraerEdiciones(m.content);
                       const cuerpo = sinArchivos(m.content);
                       const abierto = archivos.find((a) => !a.cerrado);
+                      const editando = ediciones.find((e) => !e.cerrado);
                       const activo = busy && i === messages.length - 1;
+                      const fallos = n >= 0 ? versiones[n].fallos || [] : [];
                       return (
                         <>
                           {m.reasoning && <Razonamiento texto={m.reasoning} activo={activo && !m.content} />}
                           {cuerpo ? <Markdown streaming={activo}>{cuerpo}</Markdown>
                             : (!archivos.length && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
                           {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
-                          {n >= 0 && (
+                          {n >= 0 && versiones[n].nuevas.length > 0 && (
                             <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); }}>
                               v{n + 1} · {versiones[n].nuevas.join(', ')}
                             </button>
+                          )}
+                          {fallos.map((f) => (
+                            <p key={f.name} className="msg__aviso">
+                              La edición de {f.name} no encaja ({f.motivo}).{' '}
+                              <button className="vis-link" onClick={() => send(`El bloque edit de ${f.name} no encaja con el archivo actual. Entrega ${f.name} completo con el cambio aplicado.`)}>Pedir el archivo completo</button>
+                            </p>
+                          ))}
+                          {editando && activo && (
+                            <div className="vis-trabajo">
+                              <span className="vis-trabajo__dot" />
+                              <span>Editando <strong>{editando.name}</strong>…</span>
+                              <span className="vis-trabajo__meta">{editando.pares.length} cambio{editando.pares.length === 1 ? '' : 's'}</span>
+                            </div>
                           )}
                           {abierto && activo && (
                             <div className="vis-trabajo">
