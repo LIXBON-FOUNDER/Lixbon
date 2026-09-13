@@ -28,6 +28,17 @@ def _limpiar(nombre: str) -> str:
     return re.sub(r'[\\:*?"<>|]', "_", re.sub(r"^\.?/", "", nombre.strip()))
 
 
+def sanear_html(code: str) -> str:
+    """Mismos arreglos que `sanearHtml` en visuals.js: @apply en <style> sin
+    type="text/tailwindcss" y la clase .focus-visible en vez del pseudo-selector."""
+    if "cdn.tailwindcss.com" in code:
+        code = re.sub(
+            r"<style>(.*?)</style>",
+            lambda m: f'<style type="text/tailwindcss">{m.group(1)}</style>' if re.search(r"@apply|@layer|theme\(", m.group(1)) else m.group(0),
+            code, flags=re.S)
+    return re.sub(r"(^|[\s,}])\.focus-visible(\s*[{,:])", r"\1:focus-visible\2", code)
+
+
 def extract_files(texto: str) -> list[dict]:
     """Archivos de UNA respuesta, en orden."""
     out: list[dict] = []
@@ -65,7 +76,7 @@ def extract_files(texto: str) -> list[dict]:
                 t = TITULO.search(code)
                 name = "index.html" if anonimos == 0 else f"{_slug(t.group(1) if t else f'pagina-{anonimos + 1}')}.html"
             anonimos += 1
-        out.append({"name": _limpiar(name), "code": code})
+        out.append({"name": _limpiar(name), "code": sanear_html(code)})
     return out
 
 

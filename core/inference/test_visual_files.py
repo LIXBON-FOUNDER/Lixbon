@@ -50,3 +50,15 @@ def test_edicion_search_replace_sobre_la_version_anterior():
     assert n3 == 2 and files3 == files
     with pytest.raises(ValueError):
         apply_edits("a\nb", [("zzz", "y")])
+
+
+def test_sanear_html_arregla_apply_y_focus_visible():
+    from core.inference.visual_files import sanear_html
+
+    code = ('<script src="https://cdn.tailwindcss.com"></script>\n<style>\n  body { @apply bg-bg; }\n'
+            '  .focus-visible { outline: 2px solid red; }\n</style>\n<a class="px-3 focus-visible">x</a>')
+    out = sanear_html(code)
+    assert '<style type="text/tailwindcss">' in out
+    assert ":focus-visible { outline" in out and ".focus-visible {" not in out
+    assert 'class="px-3 focus-visible"' in out
+    assert sanear_html("<style>p{color:red}</style>") == "<style>p{color:red}</style>"

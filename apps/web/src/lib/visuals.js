@@ -41,6 +41,7 @@ FORMATO (obligatorio):
 HTML:
 - Un solo archivo autocontenido: <!doctype html>, <html lang>, <meta viewport>, <title>. Estilos en <style> y scripts en <script> dentro del archivo.
 - Puedes cargar Tailwind con <script src="https://cdn.tailwindcss.com"></script> y fuentes de Google Fonts. Ningún otro recurso externo.
+- Con Tailwind por CDN, dentro de <style> NO uses @apply ni @layer (el navegador los ignora y el elemento se queda sin estilo): escribe CSS normal o pon las clases en el HTML. Los estados de foco van como clases focus-visible:… o como selector :focus-visible en CSS; nunca una clase llamada "focus-visible".
 - Imágenes: SVG inline o https://picsum.photos/seed/<palabra>/<ancho>/<alto>. Iconos: SVG inline (no emojis).
 - Textos reales y coherentes con el encargo, en el idioma del usuario. Nada de lorem ipsum ni "Título aquí".
 - Responsive (móvil primero). Estados hover/focus/disabled donde toque. Accesible: contraste, alt, labels.
@@ -63,6 +64,18 @@ const NOMBRE_SUELTO = /^\s*([\w./-]+\.(?:html?|svg))\s*$/i;
 
 function limpiarNombre(raw) {
   return raw.trim().replace(/^\.?\//, '').replace(/[\\:*?"<>|]/g, '_');
+}
+
+/** Arregla errores deterministas que dejan la página sin estilo:
+ *  @apply en un <style> normal (Tailwind CDN solo lo procesa con
+ *  type="text/tailwindcss") y una clase .focus-visible en vez del
+ *  pseudo-selector (recuadro permanente en cada enlace). */
+export function sanearHtml(code) {
+  let out = code;
+  if (/cdn\.tailwindcss\.com/.test(out)) {
+    out = out.replace(/<style>([\s\S]*?)<\/style>/g, (m, css) => (/@apply|@layer|theme\(/.test(css) ? `<style type="text/tailwindcss">${css}</style>` : m));
+  }
+  return out.replace(/(^|[\s,}])\.focus-visible(\s*[{,:])/g, '$1:focus-visible$2');
 }
 
 /** Todos los archivos de un texto, en orden; el último puede estar abierto. */
@@ -103,7 +116,7 @@ export function extraerArchivos(texto) {
       }
       anonimos += 1;
     }
-    out.push({ name: limpiarNombre(name), code, cerrado });
+    out.push({ name: limpiarNombre(name), code: sanearHtml(code), cerrado });
   }
   return out;
 }
