@@ -2604,7 +2604,7 @@ def mode_rprompt(mode, inner):
     def rprompt():
         if get_app().current_buffer.text:
             return inner()
-        return [(f"class:prompt.{mode()}", f"{mode()} "), ("class:placeholder", "ctrl+espacio cambia ")]
+        return [(f"class:prompt.{mode()}", f"{mode()} "), ("class:placeholder", "ctrl + shift cambia ")]
 
     return rprompt
 
@@ -2626,7 +2626,7 @@ def input_box_lines(width: int, mode: str, typed: str, queued: int = 0) -> list[
         right.append(f"{queued} en cola {g('sep')} se envía al terminar ", style="lx.dim2")
     else:
         right.append(f"{mode} ", style=f"lx.mode.{mode}")
-        right.append("ctrl+espacio cambia ", style="lx.dim2")
+        right.append("ctrl + shift cambia ", style="lx.dim2")
     if typed:
         middle.append(typed, style="lx.primary")
         middle.append(g("block"), style="lx.dim2")

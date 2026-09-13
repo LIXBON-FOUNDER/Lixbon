@@ -2,16 +2,21 @@
 // El backend emite chunks en formato OpenAI, comentarios ": keep-alive" y
 // termina con "data: [DONE]". La cookie de sesión autentica (F4).
 
+import { FILE_PROMPT } from './archivos';
+
 export async function streamChatCompletion({
   model, messages, conversationId, signal, onDelta, onReasoning, onSources, onFinish, webSearch = false,
 }) {
+  // El chat web no manda system prompt propio; el de archivos es la única
+  // instrucción fija (no se persiste: viaja en cada petición).
+  const conSistema = messages[0]?.role === 'system' ? messages : [{ role: 'system', content: FILE_PROMPT }, ...messages];
   const res = await fetch('/v1/chat/completions', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      messages,
+      messages: conSistema,
       conversation_id: conversationId,
       stream: true,
       web_search: webSearch ? true : 'auto',

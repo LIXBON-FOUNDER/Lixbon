@@ -750,6 +750,130 @@
   color: var(--ink-soft);
 }
 
+/* Bloque de código con cabecera (lenguaje, copiar, descargar). */
+
+.md-code {
+  margin: 12px 0;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.md-code__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 6px 14px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.md-code__actions { display: flex; gap: 2px; }
+
+.md-code__btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.md-code__btn:hover { background: var(--bg-hover); color: var(--ink); }
+
+.md .md-code pre { margin: 0; border-radius: 0; }
+
+/* Archivo escrito por el modelo (```file:nombre.ext). */
+
+.filecard {
+  margin: 12px 0;
+  border: 1px solid rgba(var(--ink-rgb), 0.08);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.filecard__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.filecard__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.filecard__meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+
+.filecard__name {
+  font-weight: 600;
+  color: var(--ink-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filecard__info { font-size: 12px; color: var(--ink-muted); }
+
+.filecard__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #141414;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.filecard__btn:hover { background: var(--accent-deep); }
+.filecard__btn:disabled { opacity: 0.5; cursor: default; }
+
+.filecard__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 14px;
+  border: 0;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.06);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.filecard__toggle:hover { color: var(--ink); }
+
+.md .filecard__body {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 0;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.06);
+}
+
+@media (max-width: 560px) {
+  .filecard__head { flex-wrap: wrap; }
+  .filecard__btn { width: 100%; justify-content: center; }
+}
+
 /* Botón "más ↓" — vive dentro del compositor y se apoya en su borde superior,
    así sigue a la caja cuando crece (varias líneas, adjuntos, teclado abierto). */
 

@@ -463,7 +463,7 @@ export default function ChatPage() {
                         <Razonamiento texto={m.reasoning} activo={busy && i === messages.length - 1 && !m.content} />
                       )}
                       {m.content
-                        ? <Markdown>{m.content}</Markdown>
+                        ? <Markdown streaming={busy && i === messages.length - 1}>{m.content}</Markdown>
                         : (!searching && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
                       {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                     </div>
