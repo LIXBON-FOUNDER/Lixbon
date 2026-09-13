@@ -101,6 +101,7 @@ Diseño completo en `docs/PLAN_REMOTE.md` (fases R0–R6; **R0–R5 implementada
 - **Login interactivo**: Credenciales (email+password → `issue_api_key:true`, mismo flujo que la desktop), Crear cuenta, o pegar `lixbon_sk_...` (valida con `/api/key/info`).
 - **Modo agent**: diffs colapsados `● Update(archivo) +N -M` con aprobación de 3 vías (Sí / Sí y no preguntar más / No); herramientas de solo lectura no piden confirmación. `/compact` (resumen client-side), `/image ruta` y `@ruta.png` inline (imágenes base64).
 - **Gateway (cambios aditivos)**: `ChatMessage.images` passthrough a Ollama (multimodal), `delta.reasoning_content` desde `message.thinking`, y `usage` en el último chunk SSE antes de `[DONE]`.
+- **gpt-oss**: Ollama no deja apagarle el razonamiento; `think_param()` en `core/inference/ollama.py` convierte `think=False` en `"low"` para esa familia (títulos, Visuals, JSON estructurado). El resto de modelos no cambia.
 - Paleta del ícono: acento `#B4C13A`, crema `#F6F7ED`, beige `#CBC7A9`, oliva, grises `#8A8A80`/`#5C5C55`; glifos con fallback ASCII para conhost legacy.
 - Verificado: build/frescura, selector y confirm3 con input simulado, SSE completo (sources/reasoning/content/usage) contra server fake, turno agent E2E (aprobar/rechazar/always), `/compact`, login real contra gateway local (usuario de prueba `cli_test_*@test.local` quedó en staging), self-update E2E. **Pendiente manual**: probar mouse/colores en Windows Terminal real y chat con inferencia real (requiere Ollama local o túnel GPU).
 

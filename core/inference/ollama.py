@@ -57,6 +57,14 @@ def coerce_keep_alive(value: str | int | None) -> str | int | None:
         return texto               # "30m", "60s", "1h" → duración de Go
 
 
+# gpt-oss no permite apagar el razonamiento: Ollama rechaza `think: false` y
+# solo acepta niveles ("low"/"medium"/"high"). "low" es el equivalente barato.
+def think_param(model: str, think: bool | None) -> bool | str | None:
+    if think is False and "gpt-oss" in (model or "").lower():
+        return "low"
+    return think
+
+
 async def chat(
     base_url: str,
     model: str,
@@ -83,6 +91,7 @@ async def chat(
     # think=False apaga el razonamiento en modelos thinking (qwen3, deepseek-r1…):
     # para una salida corta y estructurada pasar de 100 s a 2 s. Ollama solo
     # rechaza `think` cuando es True en un modelo sin esa capacidad.
+    think = think_param(model, think)
     if think is not None:
         payload["think"] = think
     ka = coerce_keep_alive(keep_alive)
@@ -329,6 +338,7 @@ async def stream_chat_openai(
     ka = coerce_keep_alive(keep_alive)
     if ka is not None:
         payload["keep_alive"] = ka
+    think = think_param(model, think)
     if think is not None:
         payload["think"] = think
     chat_id = f"chatcmpl-{uuid.uuid4()}"
