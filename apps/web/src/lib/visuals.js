@@ -20,7 +20,12 @@ export const TIPOS = [
 export const VISUALS_PROMPT = `Eres el diseñador de interfaces de Lixbon Visuals. Produces diseños reales, no maquetas genéricas.
 
 FORMATO (obligatorio):
-- Entrega SIEMPRE cada archivo COMPLETO dentro de un bloque de código cuyo lenguaje sea file:nombre (file:index.html; file:logo.svg si piden un logo, icono o ilustración vectorial). En cada cambio, por pequeño que sea, vuelve a entregar entero el archivo que cambia (los que no cambian puedes omitirlos).
+- Entrega SIEMPRE cada archivo COMPLETO dentro de un bloque de código cuyo lenguaje sea EXACTAMENTE file:nombre, así:
+\`\`\`file:index.html
+<!doctype html>
+...
+\`\`\`
+  (file:logo.svg si piden un logo, icono o ilustración vectorial). El nombre va en la línea de apertura del bloque, nunca dentro del código. En cada cambio, por pequeño que sea, vuelve a entregar entero el archivo que cambia (los que no cambian puedes omitirlos).
 - Un sitio o prototipo de varias pantallas va en VARIAS páginas: una por bloque (file:index.html, file:sitios.html, file:contacto.html…), enlazadas con <a href="sitios.html">. La primera siempre es index.html. Cada página repite su cabecera y pie.
 - Antes del bloque: una frase con lo que has hecho. Después: como mucho tres viñetas con opciones de cambio. Nunca expliques el código.
 
@@ -40,15 +45,56 @@ DISEÑO:
 - Composición con intención: alineación a rejilla, anchos máximos de lectura, ritmo vertical.
 - Si el usuario da marca, colores o referencias, respétalos al pie de la letra.`;
 
-const FENCE = /```file:([^\n`]+)\n([\s\S]*?)(?:\n```|$)/g;
+// Cualquier bloque de código; el nombre puede venir en el lenguaje
+// (```file:menu.html), en la primera línea de dentro (file:menu.html o
+// <!-- file: menu.html -->), en la línea anterior al bloque, o no venir.
+const FENCE = /(^|\n)([^\n]*)\n?```([^\n`]*)\n([\s\S]*?)(?:\n```|$)/g;
+const NOMBRE = /(?:^|[\s`*_(:])file:\s*([\w./-]+\.(?:html?|svg))\b/i;
+const NOMBRE_SUELTO = /^\s*([\w./-]+\.(?:html?|svg))\s*$/i;
+
+function limpiarNombre(raw) {
+  return raw.trim().replace(/^\.?\//, '').replace(/[\\:*?"<>|]/g, '_');
+}
 
 /** Todos los archivos de un texto, en orden; el último puede estar abierto. */
 export function extraerArchivos(texto) {
   if (!texto) return [];
   const out = [];
+  let anonimos = 0;
   for (const m of texto.matchAll(FENCE)) {
-    const cerrado = texto.slice(m.index + m[0].length - 3, m.index + m[0].length) === '```';
-    out.push({ name: m[1].trim(), code: m[2], cerrado });
+    const previa = m[2] || '';
+    const info = (m[3] || '').trim();
+    let code = m[4];
+    const fin = m.index + m[0].length;
+    const cerrado = texto.slice(fin - 3, fin) === '```';
+    let name = null;
+    const enInfo = NOMBRE.exec(info) || NOMBRE.exec(` ${info}`);
+    if (enInfo) name = enInfo[1];
+    if (!name) {
+      // Primera línea (o dos) de dentro: `file:x.html`, `<!-- file: x.html -->`, `// x.html`
+      const lineas = code.split('\n');
+      for (let i = 0; i < Math.min(2, lineas.length); i += 1) {
+        const l = lineas[i];
+        const dentro = NOMBRE.exec(` ${l}`) || NOMBRE_SUELTO.exec(l.replace(/^\s*(<!--|\/\/|#)\s*|\s*-->\s*$/g, ''));
+        if (dentro) { name = dentro[1]; lineas.splice(i, 1); code = lineas.join('\n'); break; }
+        if (l.trim()) break;
+      }
+    }
+    if (!name) {
+      const antes = NOMBRE.exec(` ${previa}`);
+      if (antes) name = antes[1];
+    }
+    const esHtml = /^\s*(<!doctype|<html|<svg)/i.test(code) || /^(html|svg|xml)$/i.test(info);
+    if (!name && !esHtml) continue;  // un bloque de código normal, no un archivo
+    if (!name) {
+      if (/^\s*<svg/i.test(code) || info.toLowerCase() === 'svg') name = 'logo.svg';
+      else {
+        const titulo = /<title>([^<]{1,40})<\/title>/i.exec(code);
+        name = anonimos === 0 ? 'index.html' : `${(titulo ? titulo[1] : `pagina-${anonimos + 1}`).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.html`;
+      }
+      anonimos += 1;
+    }
+    out.push({ name: limpiarNombre(name), code, cerrado });
   }
   return out;
 }

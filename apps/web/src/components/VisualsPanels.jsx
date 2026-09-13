@@ -116,3 +116,81 @@ export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
     </aside>
   );
 }
+
+/** Lienzo libre: las páginas como artboards, con zoom y desplazamiento. */
+export function Board({ paginas, documento, onAbrir }) {
+  const ref = useRef(null);
+  const [vista, setVista] = useState({ x: 40, y: 40, z: 0.3 });
+  const arrastre = useRef(null);
+  const ANCHO = 1280;
+  const ALTO = 800;
+  const HUECO = 120;
+
+  const ajustar = () => {
+    const el = ref.current;
+    if (!el) return;
+    const total = paginas.length * ANCHO + (paginas.length - 1) * HUECO;
+    const z = Math.min(1, (el.clientWidth - 80) / total, (el.clientHeight - 120) / ALTO);
+    setVista({ x: (el.clientWidth - total * z) / 2, y: 60, z });
+  };
+  useEffect(ajustar, [paginas.length]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const rect = ref.current.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      setVista((v) => {
+        const z = Math.min(2, Math.max(0.08, v.z * factor));
+        return { z, x: px - (px - v.x) * (z / v.z), y: py - (py - v.y) * (z / v.z) };
+      });
+    } else {
+      setVista((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+    }
+  };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onPointerDown = (e) => {
+    if (e.button !== 0) return;
+    arrastre.current = { sx: e.clientX, sy: e.clientY, x: vista.x, y: vista.y, movido: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    const a = arrastre.current;
+    if (!a) return;
+    const dx = e.clientX - a.sx;
+    const dy = e.clientY - a.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) a.movido = true;
+    setVista((v) => ({ ...v, x: a.x + dx, y: a.y + dy }));
+  };
+  const onPointerUp = () => { arrastre.current = null; };
+  const zoom = (f) => setVista((v) => ({ ...v, z: Math.min(2, Math.max(0.08, v.z * f)) }));
+
+  return (
+    <div className="vis-board" ref={ref} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+      <div className="vis-board__capa" style={{ transform: `translate(${vista.x}px, ${vista.y}px) scale(${vista.z})` }}>
+        {paginas.map((f, i) => (
+          <div key={f.name} className="vis-board__artboard" style={{ left: i * (ANCHO + HUECO), width: ANCHO, height: ALTO }}
+            onDoubleClick={() => onAbrir(f.name)}>
+            <span className="vis-board__name" style={{ fontSize: Math.min(48, 14 / vista.z) }}>{f.name}</span>
+            <iframe title={f.name} sandbox="allow-scripts" srcDoc={documento(f)} tabIndex={-1} />
+          </div>
+        ))}
+      </div>
+      <div className="vis-board__zoom">
+        <button className="vis-tool" onClick={() => zoom(1 / 1.25)} title="Alejar">−</button>
+        <span>{Math.round(vista.z * 100)}%</span>
+        <button className="vis-tool" onClick={() => zoom(1.25)} title="Acercar">+</button>
+        <button className="vis-tool" onClick={ajustar}>Ajustar</button>
+        <span className="vis-board__hint">Arrastra para mover · Ctrl+rueda para zoom · doble clic abre la página</span>
+      </div>
+    </div>
+  );
+}

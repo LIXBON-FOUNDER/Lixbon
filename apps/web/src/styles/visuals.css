@@ -426,3 +426,104 @@
 .vis-inspector__grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-muted); }
 .vis-inspector__grid input[type="color"] { width: 100%; height: 28px; border: 0; border-radius: var(--radius-chip); background: transparent; cursor: pointer; }
 .vis-inspector__nota { margin: 0; font-size: 11px; color: var(--ink-muted); }
+
+/* ── Lienzo libre ─────────────────────────────────────────────────────── */
+
+.vis-board {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.vis-board:active { cursor: grabbing; }
+.vis-board__capa { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+
+.vis-board__artboard {
+  position: absolute;
+  top: 0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(var(--ink-rgb), 0.08), 0 40px 120px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.vis-board__artboard:hover { box-shadow: 0 0 0 3px var(--accent), 0 40px 120px rgba(0, 0, 0, 0.5); }
+.vis-board__artboard iframe { width: 100%; height: 100%; border: 0; pointer-events: none; display: block; }
+.vis-board__name {
+  position: absolute; left: 0; bottom: 100%; margin-bottom: 12px;
+  font-family: var(--font-mono); color: var(--ink-soft); white-space: nowrap;
+}
+
+.vis-board__zoom {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: default;
+}
+
+.vis-board__hint { margin-left: 8px; color: var(--ink-muted); }
+
+/* Carga del iframe */
+
+.vis-stage__loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(14, 14, 14, .55);
+  color: var(--ink-soft);
+  font-size: 13px;
+  backdrop-filter: blur(2px);
+  z-index: 5;
+}
+
+.vis-stage__loading::before {
+  content: '';
+  width: 22px; height: 22px;
+  margin-right: 10px;
+  border: 2px solid rgba(var(--ink-rgb), .2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: vis-spin .8s linear infinite;
+}
+
+.vis-stage__loading > span { display: inline-flex; align-items: center; }
+@keyframes vis-spin { to { transform: rotate(360deg); } }
+
+/* Trabajo del modelo (en vez del código) */
+
+.vis-trabajo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--ink-rgb), 0.08);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.vis-trabajo__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: vis-pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
+@keyframes vis-pulse { 50% { opacity: .3; } }
+.vis-trabajo__meta { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
+
+/* Disposición: chat y lienzo ocultables */
+
+.vis-split.is-solo-lienzo { grid-template-columns: 1fr; }
+.vis-split.is-solo-lienzo .vis-chat { display: none; }
+.vis-split.is-solo-chat { grid-template-columns: 1fr; }
+.vis-split.is-solo-chat .vis-canvas { display: none; }
+.vis-split.is-solo-chat .vis-thread, .vis-split.is-solo-chat .vis-composer { max-width: 760px; margin-inline: auto; width: 100%; }
