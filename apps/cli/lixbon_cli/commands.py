@@ -39,7 +39,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
-    ("visual", "<id o enlace>", "Traer al workspace un diseño hecho en Visuals (web)", "agente"),
+    ("visual", "<id o enlace> [stack]", "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)", "agente"),
     # ── cuenta ──────────────────────────────────────────────────────────
     ("status", "", "Ver estado de la sesión", "cuenta"),
     ("cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"),
@@ -431,3 +431,46 @@ def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
         if 0 <= index < len(staged) and staged[index] not in images:
             images.append(staged[index])
     return images
+
+
+STACKS = {
+    "react": "React 18 + Vite (JavaScript, sin TypeScript salvo que ya lo use el proyecto)",
+    "api": "API con Express (Node) en server/",
+}
+
+
+def visual_project_prompt(titulo: str, carpeta: str, paginas: list[str], stack: str) -> str:
+    """Encargo para que el agente replique un diseño de Visuals como proyecto."""
+    palabras = stack.lower().split()
+    partes = [STACKS[p] for p in ("react", "api") if p in palabras]
+    con_api = "api" in palabras
+    descripcion = " y ".join(partes) if partes and len(partes) == len(palabras) else stack
+    proyecto = f"{carpeta}-app"
+    lineas = [
+        f"Replica el diseño «{titulo}» como un proyecto pequeño en {proyecto}/ con {descripcion}.",
+        f"Las páginas originales están en {carpeta}/ ({', '.join(paginas)}): HTML autocontenido con "
+        "Tailwind por CDN. Léelas TODAS antes de escribir nada; el resultado tiene que verse igual "
+        "(mismos textos, colores, tipografías, espaciados y estados hover/responsive).",
+        "",
+        "Reglas:",
+        f"- Cada página del diseño es una ruta (react-router-dom); index.html es la ruta /. "
+        "Cabecera y pie compartidos en components/; el resto en pages/.",
+        "- Tailwind instalado por npm (no por CDN). Las fuentes de Google Fonts van en index.html.",
+        "- Sin lorem ipsum: conserva los textos del diseño. Los datos repetidos (tarjetas, listas) "
+        "salen de un array o del backend, no copiados a mano.",
+        "- Formularios funcionales con validación en el cliente.",
+    ]
+    if con_api:
+        lineas += [
+            "- Backend en server/ (Express): un endpoint por formulario del diseño (POST) y uno GET por "
+            "cada lista de datos; guarda en un JSON en disco. Vite hace proxy de /api al servidor "
+            "y `npm run dev` arranca los dos (concurrently).",
+        ]
+    lineas += [
+        "- README.md corto: cómo instalar, arrancar y dónde está cada cosa.",
+        "- Al terminar ejecuta `npm install` y `npm run build`; si falla, arréglalo antes de dar por hecho el trabajo.",
+        "",
+        "Empieza por el esqueleto (vite + dependencias), luego los componentes compartidos y después "
+        "una página por turno de trabajo, comprobando el build al final.",
+    ]
+    return "\n".join(lineas)

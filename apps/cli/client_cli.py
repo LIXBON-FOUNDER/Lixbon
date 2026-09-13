@@ -6214,7 +6214,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
-    ("visual", "<id o enlace>", "Traer al workspace un diseño hecho en Visuals (web)", "agente"),
+    ("visual", "<id o enlace> [stack]", "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)", "agente"),
     # ── cuenta ──────────────────────────────────────────────────────────
     ("status", "", "Ver estado de la sesión", "cuenta"),
     ("cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"),
@@ -6604,6 +6604,49 @@ def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
         if 0 <= index < len(staged) and staged[index] not in images:
             images.append(staged[index])
     return images
+
+
+STACKS = {
+    "react": "React 18 + Vite (JavaScript, sin TypeScript salvo que ya lo use el proyecto)",
+    "api": "API con Express (Node) en server/",
+}
+
+
+def visual_project_prompt(titulo: str, carpeta: str, paginas: list[str], stack: str) -> str:
+    """Encargo para que el agente replique un diseño de Visuals como proyecto."""
+    palabras = stack.lower().split()
+    partes = [STACKS[p] for p in ("react", "api") if p in palabras]
+    con_api = "api" in palabras
+    descripcion = " y ".join(partes) if partes and len(partes) == len(palabras) else stack
+    proyecto = f"{carpeta}-app"
+    lineas = [
+        f"Replica el diseño «{titulo}» como un proyecto pequeño en {proyecto}/ con {descripcion}.",
+        f"Las páginas originales están en {carpeta}/ ({', '.join(paginas)}): HTML autocontenido con "
+        "Tailwind por CDN. Léelas TODAS antes de escribir nada; el resultado tiene que verse igual "
+        "(mismos textos, colores, tipografías, espaciados y estados hover/responsive).",
+        "",
+        "Reglas:",
+        f"- Cada página del diseño es una ruta (react-router-dom); index.html es la ruta /. "
+        "Cabecera y pie compartidos en components/; el resto en pages/.",
+        "- Tailwind instalado por npm (no por CDN). Las fuentes de Google Fonts van en index.html.",
+        "- Sin lorem ipsum: conserva los textos del diseño. Los datos repetidos (tarjetas, listas) "
+        "salen de un array o del backend, no copiados a mano.",
+        "- Formularios funcionales con validación en el cliente.",
+    ]
+    if con_api:
+        lineas += [
+            "- Backend en server/ (Express): un endpoint por formulario del diseño (POST) y uno GET por "
+            "cada lista de datos; guarda en un JSON en disco. Vite hace proxy de /api al servidor "
+            "y `npm run dev` arranca los dos (concurrently).",
+        ]
+    lineas += [
+        "- README.md corto: cómo instalar, arrancar y dónde está cada cosa.",
+        "- Al terminar ejecuta `npm install` y `npm run build`; si falla, arréglalo antes de dar por hecho el trabajo.",
+        "",
+        "Empieza por el esqueleto (vite + dependencias), luego los componentes compartidos y después "
+        "una página por turno de trabajo, comprobando el build al final.",
+    ]
+    return "\n".join(lineas)
 
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/app.py
@@ -8772,13 +8815,19 @@ class ChatApp:
 
     def cmd_visual(self, arg: str):
         """Descarga al workspace las páginas de un diseño de Visuals (por id o
-        por el enlace /visuals/<id>) y se lo cuenta al modelo para seguir ahí."""
+        por el enlace /visuals/<id>) y, si se quiere, pone al agente a
+        replicarlo como proyecto real (React + Vite, con API…)."""
         import re as _re
 
         m = _re.search(r"([0-9a-f]{8}-[0-9a-f-]{27})", arg or "")
         if not m:
-            print_error("Uso: /visual <id o enlace de https://lixbon.com/visuals/...>")
+            print_error("Uso: /visual <id o enlace de https://lixbon.com/visuals/...> [stack]")
+            print_note("  /visual <id>                  elige qué hacer con el diseño en un menú")
+            print_note("  /visual <id> react            React + Vite")
+            print_note("  /visual <id> react api        React + Vite + API Express")
+            print_note("  /visual <id> vue + fastapi    cualquier stack, en tus palabras")
             return True
+        stack = (arg or "")[m.end():].strip()
         try:
             with spinner("trayendo el diseño…"):
                 data = self.api.visual_files(m.group(1))
@@ -8798,10 +8847,29 @@ class ChatApp:
                  f"({data.get('versions', 1)} versiones en la web)")
         for f in files:
             print_note(f"  {carpeta}/{f['name']}")
-        self.history.append({"role": "user", "content": (
-            f"[He traído al workspace el diseño «{data.get('title') or carpeta}» de Lixbon Visuals: "
-            + ", ".join(f"{carpeta}/{f['name']}" for f in files)
-            + ". Son páginas HTML autocontenidas (Tailwind por CDN). Cuando te pida cambios, edita esos archivos.]")})
+        rutas = ", ".join(f"{carpeta}/{f['name']}" for f in files)
+        titulo = data.get("title") or carpeta
+        if not stack:
+            stack = select("¿Qué hago con el diseño?", [
+                Option("Dejarlo en HTML", "", "solo los archivos; le pides cambios al agente"),
+                Option("Replicarlo en React + Vite", "react", f"proyecto en {carpeta}-app/ con una ruta por página"),
+                Option("React + Vite + API Express", "react api", "lo mismo, con backend para formularios y datos"),
+                Option("Otro stack", "otro", f"escríbelo: /visual {m.group(1)[:8]}… vue + fastapi"),
+            ], hint="↑↓ elegir · Enter confirmar · Esc dejarlo en HTML") or ""
+        if stack == "otro":
+            print_note(f"Repite el comando con el stack: /visual {m.group(1)} <stack>")
+            stack = ""
+        if not stack:
+            self.history.append({"role": "user", "content": (
+                f"[He traído al workspace el diseño «{titulo}» de Lixbon Visuals: {rutas}. "
+                "Son páginas HTML autocontenidas (Tailwind por CDN). Cuando te pida cambios, edita esos archivos.]")})
+            return True
+        self.mode = "agent"
+        self.cfg["mode"] = "agent"
+        save_config(self.cfg)
+        self.session["plan_mode"] = False
+        self._refresh_status()
+        self.send_message(visual_project_prompt(titulo, carpeta, [f["name"] for f in files], stack))
         return True
 
     def cmd_init(self, arg: str):
