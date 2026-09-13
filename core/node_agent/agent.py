@@ -37,6 +37,7 @@ import asyncio
 import json
 import os
 import platform
+import re
 import random
 import secrets as _secrets
 import subprocess
@@ -520,7 +521,7 @@ async def _sesion(ws_url: str, identidad: dict) -> str | None:
 async def _asegurar_modelos() -> None:
     """Descarga los LIXBON_MODELS que falten. En background: el nodo ya sirve
     los que tiene mientras bajan los demás."""
-    pedidos = [m.strip() for m in os.getenv("LIXBON_MODELS", "").split(",") if m.strip()]
+    pedidos = [m for m in re.split(r"[,\s]+", os.getenv("LIXBON_MODELS", "")) if m]
     if not pedidos:
         return
     try:

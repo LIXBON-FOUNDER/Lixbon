@@ -37,15 +37,17 @@ python3 -m pip install --quiet --break-system-packages "httpx>=0.27" psutil "web
 echo "▸ Descargando el agente…"
 $SUDO curl -fsSL "$GATEWAY/node-agent.py" -o "$DIR/agent.py"
 
+# Valores entre comillas: node.env se hace `source` y un espacio en LIXBON_MODELS
+# o en el nombre rompería el arranque.
 $SUDO tee "$ENV_FILE" >/dev/null <<EOF
-LIXBON_GATEWAY=$GATEWAY
-LIXBON_ENROLL=$LIXBON_ENROLL
-LIXBON_STATE_FILE=$STATE
-LIXBON_NODE_NAME=${LIXBON_NODE_NAME:-}
-LIXBON_NODE_ID=${LIXBON_NODE_ID:-}
-LIXBON_PROVIDER=${LIXBON_PROVIDER:-}
-LIXBON_MODELS=${LIXBON_MODELS:-}
-OLLAMA_URL=${OLLAMA_URL:-http://127.0.0.1:11434}
+LIXBON_GATEWAY='$GATEWAY'
+LIXBON_ENROLL='$LIXBON_ENROLL'
+LIXBON_STATE_FILE='$STATE'
+LIXBON_NODE_NAME='${LIXBON_NODE_NAME:-}'
+LIXBON_NODE_ID='${LIXBON_NODE_ID:-}'
+LIXBON_PROVIDER='${LIXBON_PROVIDER:-}'
+LIXBON_MODELS='${LIXBON_MODELS:-}'
+OLLAMA_URL='${OLLAMA_URL:-http://127.0.0.1:11434}'
 EOF
 $SUDO chmod 600 "$ENV_FILE"
 
