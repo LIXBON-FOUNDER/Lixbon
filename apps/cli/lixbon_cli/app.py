@@ -2277,6 +2277,40 @@ class ChatApp:
         self._refresh_status()
         return True
 
+    def cmd_visual(self, arg: str):
+        """Descarga al workspace las páginas de un diseño de Visuals (por id o
+        por el enlace /visuals/<id>) y se lo cuenta al modelo para seguir ahí."""
+        import re as _re
+
+        m = _re.search(r"([0-9a-f]{8}-[0-9a-f-]{27})", arg or "")
+        if not m:
+            print_error("Uso: /visual <id o enlace de https://lixbon.com/visuals/...>")
+            return True
+        try:
+            with spinner("trayendo el diseño…"):
+                data = self.api.visual_files(m.group(1))
+        except ApiError as exc:
+            self._report_api_error(exc)
+            return True
+        files = data.get("files") or []
+        if not files:
+            print_error("Ese diseño todavía no tiene páginas.")
+            return True
+        carpeta = _re.sub(r"[^a-z0-9]+", "-", (data.get("title") or "visual").lower()).strip("-") or "visual"
+        destino = self.workspace / carpeta
+        destino.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            (destino / f["name"]).write_text(f["code"], encoding="utf-8")
+        print_ok(f"{len(files)} archivo{'s' if len(files) != 1 else ''} en {carpeta}/  "
+                 f"({data.get('versions', 1)} versiones en la web)")
+        for f in files:
+            print_note(f"  {carpeta}/{f['name']}")
+        self.history.append({"role": "user", "content": (
+            f"[He traído al workspace el diseño «{data.get('title') or carpeta}» de Lixbon Visuals: "
+            + ", ".join(f"{carpeta}/{f['name']}" for f in files)
+            + ". Son páginas HTML autocontenidas (Tailwind por CDN). Cuando te pida cambios, edita esos archivos.]")})
+        return True
+
     def cmd_init(self, arg: str):
         """Genera LIXBON.md: el contexto del proyecto que el CLI carga solo."""
         target = self.workspace / "LIXBON.md"

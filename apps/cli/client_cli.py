@@ -1172,6 +1172,10 @@ class ApiClient:
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)
 
+    def visual_files(self, conversation_id: str) -> dict:
+        """Archivos de la última versión de un diseño de Visuals."""
+        return self._json("GET", f"{self.server}/api/conversations/{conversation_id}/files", timeout=30)
+
     def generate_title(self, conversation_id: str) -> dict:
         """Auto-título del servidor tras el primer intercambio (como la web)."""
         return self._json("POST",
@@ -6208,6 +6212,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
+    ("visual", "<id o enlace>", "Traer al workspace un diseño hecho en Visuals (web)", "agente"),
     # ── cuenta ──────────────────────────────────────────────────────────
     ("status", "", "Ver estado de la sesión", "cuenta"),
     ("cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"),
@@ -8758,6 +8763,40 @@ class ChatApp:
             "content": f"TOOL_RESULT run_command `{command}` (EXIT {code}):\n{output[:6000]}",
         })
         self._refresh_status()
+        return True
+
+    def cmd_visual(self, arg: str):
+        """Descarga al workspace las páginas de un diseño de Visuals (por id o
+        por el enlace /visuals/<id>) y se lo cuenta al modelo para seguir ahí."""
+        import re as _re
+
+        m = _re.search(r"([0-9a-f]{8}-[0-9a-f-]{27})", arg or "")
+        if not m:
+            print_error("Uso: /visual <id o enlace de https://lixbon.com/visuals/...>")
+            return True
+        try:
+            with spinner("trayendo el diseño…"):
+                data = self.api.visual_files(m.group(1))
+        except ApiError as exc:
+            self._report_api_error(exc)
+            return True
+        files = data.get("files") or []
+        if not files:
+            print_error("Ese diseño todavía no tiene páginas.")
+            return True
+        carpeta = _re.sub(r"[^a-z0-9]+", "-", (data.get("title") or "visual").lower()).strip("-") or "visual"
+        destino = self.workspace / carpeta
+        destino.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            (destino / f["name"]).write_text(f["code"], encoding="utf-8")
+        print_ok(f"{len(files)} archivo{'s' if len(files) != 1 else ''} en {carpeta}/  "
+                 f"({data.get('versions', 1)} versiones en la web)")
+        for f in files:
+            print_note(f"  {carpeta}/{f['name']}")
+        self.history.append({"role": "user", "content": (
+            f"[He traído al workspace el diseño «{data.get('title') or carpeta}» de Lixbon Visuals: "
+            + ", ".join(f"{carpeta}/{f['name']}" for f in files)
+            + ". Son páginas HTML autocontenidas (Tailwind por CDN). Cuando te pida cambios, edita esos archivos.]")})
         return True
 
     def cmd_init(self, arg: str):

@@ -267,3 +267,23 @@ export const IconLayers = (p) => (
     <path d="m3 12 9 5 9-5M3 16l9 5 9-5" />
   </Svg>
 );
+
+export const IconHistory = (p) => (
+  <Svg {...p}><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 8v4l3 2" /></Svg>
+);
+
+export const IconPointer = (p) => (
+  <Svg {...p}><path d="M5 3l14 8-6 2-3 6-5-16Z" /></Svg>
+);
+
+export const IconLink = (p) => (
+  <Svg {...p}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></Svg>
+);
+
+export const IconArrowLeft = (p) => (
+  <Svg {...p}><path d="M19 12H5M11 6l-6 6 6 6" /></Svg>
+);
+
+export const IconPlay = (p) => (
+  <Svg {...p}><path d="M7 5v14l11-7L7 5Z" /></Svg>
+);

@@ -128,6 +128,10 @@ class ApiClient:
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)
 
+    def visual_files(self, conversation_id: str) -> dict:
+        """Archivos de la última versión de un diseño de Visuals."""
+        return self._json("GET", f"{self.server}/api/conversations/{conversation_id}/files", timeout=30)
+
     def generate_title(self, conversation_id: str) -> dict:
         """Auto-título del servidor tras el primer intercambio (como la web)."""
         return self._json("POST",

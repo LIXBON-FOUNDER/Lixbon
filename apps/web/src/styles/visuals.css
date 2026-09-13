@@ -527,3 +527,139 @@
 .vis-split.is-solo-chat { grid-template-columns: 1fr; }
 .vis-split.is-solo-chat .vis-canvas { display: none; }
 .vis-split.is-solo-chat .vis-thread, .vis-split.is-solo-chat .vis-composer { max-width: 760px; margin-inline: auto; width: 100%; }
+
+/* ── Página y barra superior (editor y galería) ──────────────────────── */
+
+.vis-page {
+  display: flex;
+  flex-direction: column;
+  height: var(--app-vh, 100dvh);
+  background: var(--bg);
+}
+
+.vis-editor .vis-split { flex: 1; min-height: 0; }
+
+.vis-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
+}
+
+.vis-top__logo { display: inline-flex; align-items: center; margin-right: 4px; }
+.vis-top__seccion { font-weight: 600; color: var(--ink); }
+.vis-top__right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.vis-top .icon-btn.is-active { background: var(--surface-4); color: var(--ink); }
+
+.vis-avatar {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--ink); font-weight: 600; text-decoration: none;
+}
+
+.vis-tool--blanco { background: #F2F2F0; color: #141414; font-weight: 600; }
+.vis-tool--blanco:hover:not(:disabled) { background: #fff; color: #141414; }
+
+/* Título con desplegable de páginas */
+
+.vis-titulo { margin-left: 6px; }
+.vis-titulo__btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px; border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--ink); text-align: left; cursor: pointer;
+}
+.vis-titulo__btn:hover { background: var(--surface-3); }
+.vis-titulo__nombre { font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-titulo__sub { font-size: 12px; color: var(--ink-muted); }
+.vis-titulo__input {
+  padding: 6px 10px; border: 1px solid var(--accent); border-radius: var(--radius);
+  background: var(--surface-1); color: var(--ink); font-weight: 600; min-width: 260px;
+}
+
+/* Menús desplegables */
+
+.vis-menu { position: relative; }
+.vis-menu__panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  min-width: 260px; padding: 6px;
+  border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius);
+  background: var(--surface-2); box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+}
+.vis-menu__panel--derecha { left: auto; right: 0; min-width: 300px; }
+.vis-menu__panel--paginas { min-width: 300px; }
+.vis-menu__head { padding: 6px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); }
+.vis-menu__item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: 0; border-radius: var(--radius-chip);
+  background: transparent; color: var(--ink); text-align: left; cursor: pointer; text-decoration: none; font-size: 13px;
+}
+.vis-menu__item:hover { background: var(--surface-4); }
+.vis-menu__item.is-active { background: var(--accent-soft); }
+.vis-menu__item.is-danger { color: var(--err, #E05C5C); }
+.vis-menu__item:disabled { opacity: .5; cursor: default; }
+.vis-menu__item--sub { padding-top: 0; padding-left: 35px; }
+.vis-menu__item-text { display: flex; flex-direction: column; min-width: 0; }
+.vis-menu__item-text small { color: var(--ink-muted); font-size: 11.5px; white-space: normal; }
+.vis-menu__file { width: 14px; height: 18px; border: 1.5px solid var(--ink-muted); border-radius: 3px; flex-shrink: 0; }
+.vis-menu__sep { height: 1px; margin: 6px 4px; background: rgba(var(--ink-rgb), 0.08); }
+.vis-menu__vacio { margin: 0; padding: 8px 10px; color: var(--ink-muted); font-size: 12.5px; }
+
+.vis-stage__chat {
+  position: absolute; left: 16px; top: 16px; z-index: 6;
+  display: grid; place-items: center; width: 36px; height: 36px;
+  border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--ink-soft); cursor: pointer;
+}
+.vis-stage__chat:hover { color: var(--ink); background: var(--surface-3); }
+
+/* ── Galería ─────────────────────────────────────────────────────────── */
+
+.vis-galeria { flex: 1; overflow: auto; }
+.vis-hero--galeria { flex: 0 0 auto; padding: 56px 24px 32px; }
+.vis-galeria__lista { max-width: 1240px; margin: 0 auto; padding: 8px 24px 48px; }
+.vis-galeria__titulo { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--ink-soft); }
+.vis-galeria__vacio { padding: 24px; text-align: center; color: var(--ink-muted); }
+
+.vis-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.vis-card {
+  display: flex; flex-direction: column;
+  border: 1px solid rgba(var(--ink-rgb), 0.08); border-radius: var(--radius);
+  background: var(--surface-1); overflow: hidden;
+  transition: border-color .15s, transform .15s;
+}
+.vis-card:hover { border-color: rgba(var(--ink-rgb), 0.2); transform: translateY(-2px); }
+
+.vis-card__preview {
+  position: relative; display: block; width: 100%; aspect-ratio: 16 / 10;
+  padding: 0; border: 0; background: #fff; cursor: pointer; overflow: hidden;
+}
+.vis-card__preview iframe {
+  position: absolute; top: 0; left: 0; width: 1280px; height: 800px; border: 0;
+  transform-origin: 0 0; transform: scale(var(--escala, .2)); pointer-events: none;
+}
+.vis-card__preview { container-type: inline-size; }
+@container (min-width: 0px) { .vis-card__preview iframe { --escala: 0.2; } }
+@container (min-width: 300px) { .vis-card__preview iframe { --escala: 0.25; } }
+@container (min-width: 380px) { .vis-card__preview iframe { --escala: 0.3; } }
+.vis-card__sin { position: absolute; inset: 0; display: grid; place-items: center; background: var(--surface-3); color: var(--ink-muted); font-size: 12px; }
+
+.vis-card__body { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 12px 44px 12px 14px; }
+.vis-card__title {
+  padding: 0; border: 0; background: transparent; text-align: left;
+  color: var(--ink-title); font-weight: 600; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vis-card__input { padding: 4px 8px; border: 1px solid var(--accent); border-radius: var(--radius-chip); background: var(--surface-2); color: var(--ink); font-weight: 600; }
+.vis-card__meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--ink-muted); }
+.vis-card__menu { position: absolute; top: 10px; right: 8px; }
+
+.vis-compartido__stage { flex: 1; }
+.vis-compartido__paginas { margin-left: 16px; margin-right: auto; }

@@ -1,27 +1,31 @@
-// VisualsPage.jsx — diseño con el modelo: chat a la izquierda, lienzo a la
-// derecha. Cada respuesta con archivos es una versión (con una o varias
-// páginas); el lienzo la pinta en un iframe aislado (sin acceso a la sesión)
-// y permite seleccionar elementos y retocarlos sin pasar por el modelo.
+// VisualsPage.jsx — Visuals: galería de diseños (/visuals) y editor
+// (/visuals/:id). En el editor, el chat es un panel lateral plegable y el
+// lienzo pinta cada página en un iframe aislado; se puede seleccionar y
+// retocar elementos sin pasar por el modelo.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useConfirmar } from '../hooks/useConfirmar';
-import { useIsCompact } from '../hooks/useMediaQuery';
+import { useDismiss } from '../hooks/useDismiss';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
 import { descargarBlob } from '../lib/archivos';
+import { crearZip } from '../lib/zip';
 import {
-  DESIGN_SYSTEMS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, designSystemPersonalizado,
+  DESIGN_SYSTEMS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
   documentoPreview, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerImagen, promptVisuals,
+  tiempoRelativo,
 } from '../lib/visuals';
 import { Logo } from '../components/Logo';
-import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
 import { Board, DesignSystemPicker, Inspector } from '../components/VisualsPanels';
-import { IconCheck, IconCopy, IconDownload, IconExternal, IconMenu, IconPanel, IconLayers } from '../components/Icons';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
+import {
+  IconArrowLeft, IconCheck, IconChevron, IconCopy, IconDots, IconDownload, IconExternal, IconHistory, IconLayers,
+  IconLink, IconPanel, IconPencil, IconPointer, IconShare, IconTerminal, IconTrash,
+} from '../components/Icons';
 
 const CONTEXT_WINDOW = 30;
 const AVISO_VACIO = 'El modelo no devolvió nada. Prueba a reformular o a cambiar de modelo.';
@@ -45,12 +49,17 @@ const dsDesde = (guardado) => {
 };
 const dsGuardable = (ds) => (ds.custom ? { custom: true, form: ds.form } : { id: ds.id });
 
+function Menu({ abierto, onCerrar, children, className = '' }) {
+  const ref = useRef(null);
+  useDismiss(abierto, ref, onCerrar);
+  return <div className={`vis-menu ${className}`} ref={ref}>{children}</div>;
+}
+
 export default function VisualsPage() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();
   const navigate = useNavigate();
-  const compact = useIsCompact();
 
   const [conversations, setConversations] = useState([]);
   const [convsLoading, setConvsLoading] = useState(true);
@@ -60,17 +69,14 @@ export default function VisualsPage() {
   const [modelInfo, setModelInfo] = useState({});
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
-  const [collapsed, setCollapsed] = useState(true);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [tipo, setTipo] = useState(null);
   const [version, setVersion] = useState(null);   // índice en `versiones`; null = la última
   const [pagina, setPagina] = useState(null);     // nombre de archivo dentro de la versión
   const [vista, setVista] = useState('pagina');   // 'pagina' | 'lienzo'
-  const [disposicion, setDisposicion] = useState('ambos'); // 'ambos' | 'lienzo' | 'chat'
-  const [cargando, setCargando] = useState(false);
+  const [chatAbierto, setChatAbierto] = useState(true);
   const [verCodigo, setVerCodigo] = useState(false);
-  const [copiado, setCopiado] = useState(false);
-  const [panel, setPanel] = useState('lienzo');   // móvil: 'chat' | 'lienzo'
+  const [copiado, setCopiado] = useState('');
+  const [cargando, setCargando] = useState(false);
   const [imagenes, setImagenes] = useState({ available: false, model: null });
   const [tamano, setTamano] = useState(TAMANOS_IMAGEN[0]);
   const [designSystem, setDesignSystem] = useState(() => dsDesde(local.get('lixbon.visuals.ds', null)));
@@ -78,12 +84,13 @@ export default function VisualsPage() {
   const [seleccion, setSeleccion] = useState(null);
   const [ops, setOps] = useState({});             // `${indice}:${pagina}` → [{selector, text?, style?}]
   const [prefill, setPrefill] = useState('');
+  const [menu, setMenu] = useState(null);         // 'paginas' | 'historial' | 'compartir'
+  const [enlace, setEnlace] = useState(null);     // token de compartir
+  const [editandoTitulo, setEditandoTitulo] = useState(false);
   const abortRef = useRef(null);
   const loadedConvRef = useRef(null);
   const scrollRef = useRef(null);
   const frameRef = useRef(null);
-
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -114,6 +121,8 @@ export default function VisualsPage() {
 
   // ── Conversación según la ruta (+ lo guardado en el navegador) ────────
   useEffect(() => {
+    setMenu(null);
+    setEnlace(null);
     if (!routeConvId) {
       loadedConvRef.current = null;
       setMessages([]);
@@ -122,6 +131,7 @@ export default function VisualsPage() {
       setPagina(null);
       setOps({});
       setSeleccion(null);
+      setTipo(null);
       return;
     }
     setOps(local.get(`lixbon.visuals.ops.${routeConvId}`, {}));
@@ -150,32 +160,15 @@ export default function VisualsPage() {
     if (routeConvId) local.set(`lixbon.visuals.ds.${routeConvId}`, dsGuardable(ds));
   };
 
-  // ── Versiones: cada respuesta con archivos (o imagen generada) ─────────
+  // ── Versiones y página actual ──────────────────────────────────────────
   const modoImagen = tipo?.id === 'imagen' || esConversacionDeImagenes(messages);
-  const versiones = useMemo(() => {
-    const out = [];
-    messages.forEach((m, i) => {
-      if (m.role !== 'assistant') return;
-      const imagen = extraerImagen(m.content);
-      if (imagen) { out.push({ kind: 'image', name: `${imagen.alt || 'imagen'}.jpg`, src: imagen.src, indice: i }); return; }
-      const enCurso = busy && i === messages.length - 1;
-      const archivos = extraerArchivos(m.content).filter((a) => a.cerrado || !enCurso);
-      if (!archivos.length) return;
-      // Las páginas que esta respuesta no reescribió se heredan de la versión anterior.
-      const previa = out.length ? out[out.length - 1] : null;
-      const heredadas = previa?.kind === 'file' ? previa.files.filter((f) => !archivos.some((a) => a.name === f.name)) : [];
-      const files = [...archivos, ...heredadas].sort((a, b) => (a.name === 'index.html' ? -1 : b.name === 'index.html' ? 1 : 0));
-      out.push({ kind: 'file', files, name: files[0].name, indice: i, nuevas: archivos.map((a) => a.name) });
-    });
-    return out;
-  }, [messages, busy]);
-
+  const versiones = useMemo(() => construirVersiones(messages, busy ? messages.length - 1 : -1), [messages, busy]);
   const ultimoContenido = messages[messages.length - 1]?.content;
   const generando = busy && !!extraerArchivo(ultimoContenido) && !extraerArchivo(ultimoContenido).cerrado;
-  const actual = versiones.length ? versiones[version == null ? versiones.length - 1 : Math.min(version, versiones.length - 1)] : null;
-  const paginaActual = actual?.kind === 'file'
-    ? (actual.files.find((f) => f.name === pagina) || actual.files[0])
-    : null;
+  const indiceVersion = versiones.length ? (version == null ? versiones.length - 1 : Math.min(version, versiones.length - 1)) : -1;
+  const actual = indiceVersion >= 0 ? versiones[indiceVersion] : null;
+  const paginas = useMemo(() => (actual?.kind === 'file' ? actual.files : []), [actual]);
+  const paginaActual = paginas.length ? (paginas.find((f) => f.name === pagina) || paginas[0]) : null;
   const claveOps = actual && paginaActual ? `${actual.indice}:${paginaActual.name}` : '';
   const opsActuales = useMemo(() => ops[claveOps] || [], [ops, claveOps]);
   const doc = useMemo(() => documentoPreview(paginaActual, opsActuales), [paginaActual, opsActuales]);
@@ -186,14 +179,14 @@ export default function VisualsPage() {
     const onMessage = (e) => {
       const m = e.data || {};
       if (m.type === 'lixbon:select') setSeleccion({ selector: m.selector, tag: m.tag, text: m.text, html: m.html, styles: m.styles });
-      if (m.type === 'lixbon:navigate' && actual?.kind === 'file' && actual.files.some((f) => f.name === m.page)) {
+      if (m.type === 'lixbon:navigate' && paginas.some((f) => f.name === m.page)) {
         setPagina(m.page);
         setVista('pagina');
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [actual]);
+  }, [paginas]);
 
   useEffect(() => {
     frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*');
@@ -212,7 +205,7 @@ export default function VisualsPage() {
   const pedirAlModelo = (sel) => {
     setPrefill(`Sobre este elemento de ${paginaActual?.name || 'la página'} (<${sel.tag}>): ${sel.html.slice(0, 300)}\n\nCambio: `);
     setInspeccion(false);
-    setPanel('chat');
+    setChatAbierto(true);
   };
 
   // ── Imagen: una petición al nodo de difusión, sin stream ──────────────
@@ -225,7 +218,6 @@ export default function VisualsPage() {
     setMessages((prev) => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', generandoImagen: true }]);
     setBusy(true);
     setVersion(null);
-    setPanel('lienzo');
     try {
       const r = await api.post('/api/images/generate', {
         prompt, width: tamano.width, height: tamano.height, conversation_id: convId, source: 'visuals',
@@ -274,7 +266,6 @@ export default function VisualsPage() {
     setVersion(null);
     setVista('pagina');
     setInspeccion(false);
-    setPanel('lienzo');
     const abort = new AbortController();
     abortRef.current = abort;
     const patchLast = (fn) => setMessages((prev) => {
@@ -302,7 +293,6 @@ export default function VisualsPage() {
       });
       patchLast((last) => {
         if (last.content.trim()) return last;
-        // El modelo lo escribió todo en el razonamiento: se rescata de ahí.
         if (last.reasoning && extraerArchivos(last.reasoning).length) return { ...last, content: last.reasoning, reasoning: '' };
         return { ...last, content: AVISO_VACIO, error: true };
       });
@@ -327,39 +317,63 @@ export default function VisualsPage() {
 
   const stop = () => abortRef.current?.abort();
 
-  // ── Acciones del lienzo ────────────────────────────────────────────────
+  // ── Acciones: código final, compartir, descargar ───────────────────────
   const codigoFinal = (archivo) => (esSvg(archivo.name) ? archivo.code : aplicarOps(archivo.code, ops[`${actual.indice}:${archivo.name}`] || []));
+  const marcarCopiado = (que) => { setCopiado(que); setTimeout(() => setCopiado(''), 1800); };
   const descargar = async () => {
     if (!actual) return;
     if (actual.kind === 'image') {
       descargarBlob(await (await fetch(actual.src)).blob(), actual.name);
       return;
     }
-    for (const archivo of actual.files) {
-      const mime = esSvg(archivo.name) ? 'image/svg+xml' : 'text/html';
-      descargarBlob(new Blob([codigoFinal(archivo)], { type: `${mime};charset=utf-8` }), archivo.name);
+    const archivos = actual.files.map((f) => ({ name: f.name, code: codigoFinal(f) }));
+    if (archivos.length === 1) {
+      const mime = esSvg(archivos[0].name) ? 'image/svg+xml' : 'text/html';
+      descargarBlob(new Blob([archivos[0].code], { type: `${mime};charset=utf-8` }), archivos[0].name);
+    } else {
+      descargarBlob(crearZip(archivos), `${(title || 'diseño').replace(/[\\/:*?"<>|]/g, '_')}.zip`);
     }
+    setMenu(null);
   };
-  const copiar = async () => {
+  const copiarCodigo = async () => {
     if (!paginaActual) return;
-    try {
-      await navigator.clipboard.writeText(codigoFinal(paginaActual));
-      setCopiado(true);
-      setTimeout(() => setCopiado(false), 1800);
-    } catch { /* sin portapapeles */ }
+    try { await navigator.clipboard.writeText(codigoFinal(paginaActual)); marcarCopiado('codigo'); } catch { /* sin portapapeles */ }
   };
-  const abrir = () => {
+  const presentar = () => {
     if (!actual) return;
     if (actual.kind === 'image') { window.open(actual.src, '_blank', 'noopener'); return; }
     const url = URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' }));
     window.open(url, '_blank', 'noopener');
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   };
+  const copiarEnlace = async () => {
+    try {
+      const res = await api.post(`/api/conversations/${routeConvId}/share`);
+      const url = `${window.location.origin}/s/${res.data.token}`;
+      setEnlace(url);
+      await navigator.clipboard.writeText(url);
+      marcarCopiado('enlace');
+    } catch { /* sin permiso o sin sesión */ }
+  };
+  const quitarEnlace = async () => {
+    try { await api.delete(`/api/conversations/${routeConvId}/share`); setEnlace(null); } catch { /* nada */ }
+  };
+  const copiarComandoCli = async () => {
+    try { await navigator.clipboard.writeText(`/visual ${routeConvId}`); marcarCopiado('cli'); } catch { /* nada */ }
+  };
+  useEffect(() => {
+    if (menu !== 'compartir' || !routeConvId) return;
+    api.get(`/api/conversations/${routeConvId}/share`)
+      .then((r) => setEnlace(r.data.token ? `${window.location.origin}/s/${r.data.token}` : null))
+      .catch(() => {});
+  }, [menu, routeConvId]);
 
   const renameConversation = async (id, newTitle) => {
-    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)));
-    if (id === routeConvId) setTitle(newTitle);
-    try { await api.patch(`/api/conversations/${id}`, { title: newTitle }); } catch { loadConversations(); }
+    const limpio = (newTitle || '').trim();
+    if (!limpio) return;
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: limpio } : c)));
+    if (id === routeConvId) setTitle(limpio);
+    try { await api.patch(`/api/conversations/${id}`, { title: limpio }); } catch { loadConversations(); }
   };
   const deleteConversation = async (id) => {
     const ok = await confirmar({ titulo: '¿Eliminar este diseño?', texto: 'Se borrarán la conversación y sus versiones.', etiqueta: 'Eliminar' });
@@ -367,12 +381,6 @@ export default function VisualsPage() {
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (id === routeConvId) navigate('/visuals');
     try { await api.delete(`/api/conversations/${id}`); } catch { loadConversations(); }
-  };
-  const handleLogout = async () => {
-    const ok = await confirmar({ titulo: '¿Cerrar sesión?', texto: 'Tendrás que volver a iniciar sesión para ver tus diseños.', etiqueta: 'Cerrar sesión', peligro: false });
-    if (!ok) return;
-    await logout();
-    navigate('/');
   };
 
   if (loading) {
@@ -384,68 +392,30 @@ export default function VisualsPage() {
     );
   }
 
-  const empty = messages.length === 0;
-  const paginas = actual?.kind === 'file' ? actual.files : [];
-  const alternar = (que) => setDisposicion((d) => (d === que ? 'ambos' : que));
-
-  return (
-    <div className="chat-shell vis-shell">
-      <Sidebar
-        user={user}
-        conversations={conversations}
-        loadingConversations={convsLoading}
-        activeId={routeConvId}
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((v) => !v)}
-        onRename={renameConversation}
-        onDelete={deleteConversation}
-        onLogout={handleLogout}
-        compact={compact}
-        open={compact && drawerOpen}
-        onClose={closeDrawer}
-        historyBase="/visuals"
-        newPath="/visuals"
-        seccion="visuals"
-      />
-      {compact && drawerOpen && <div className="sidebar-scrim" onClick={closeDrawer} aria-hidden="true" />}
-
-      <main className="chat-main vis-main">
-        <header className="chat-header vis-header">
-          <button className="icon-btn chat-header__menu" onClick={() => setDrawerOpen(true)} aria-label="Abrir panel" aria-controls="sidebar-drawer">
-            <IconMenu />
-          </button>
-          <h1 className="chat-header__title">{title || (empty ? 'Visuals' : 'Diseño sin título')}</h1>
-          {!empty && !compact && (
-            <div className="vis-panel-toggle">
-              <button className={disposicion === 'chat' ? 'is-active' : ''} onClick={() => alternar('chat')} title="Solo el chat"><IconPanel size={14} /> Chat</button>
-              <button className={disposicion === 'lienzo' ? 'is-active' : ''} onClick={() => alternar('lienzo')} title="Solo el lienzo"><IconLayers size={14} /> Lienzo</button>
-            </div>
-          )}
-          {!empty && !modoImagen && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
-          {compact && !empty && (
-            <div className="vis-panel-toggle">
-              <button className={panel === 'chat' ? 'is-active' : ''} onClick={() => setPanel('chat')}>Chat</button>
-              <button className={panel === 'lienzo' ? 'is-active' : ''} onClick={() => setPanel('lienzo')}>Lienzo</button>
-            </div>
-          )}
-          {!user && <Link to="/auth" className="pill-btn pill-btn--primary chat-header__share">Iniciar sesión</Link>}
+  // ── Galería (sin conversación en la ruta) ──────────────────────────────
+  if (!routeConvId) {
+    return (
+      <div className="vis-page">
+        <header className="vis-top">
+          <Link to="/" className="vis-top__logo" title="Volver al chat"><Logo /></Link>
+          <span className="vis-top__seccion">Visuals</span>
+          <div className="vis-top__right">
+            {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>{(user.name || user.email || '?')[0].toUpperCase()}</Link>
+              : <Link to="/auth" className="pill-btn pill-btn--primary">Iniciar sesión</Link>}
+          </div>
         </header>
         <VerifyBanner />
-
-        {empty ? (
-          <div className="vis-hero">
+        <div className="vis-galeria">
+          <section className="vis-hero vis-hero--galeria">
             <div className="vis-hero__inner">
               <h2 className="vis-hero__title">¿Qué diseñamos?</h2>
               <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él o tocándolo en el lienzo.</p>
               <div className="vis-tipos">
                 {[...TIPOS, TIPO_IMAGEN].map((t) => (
-                  <button
-                    key={t.id}
-                    className={`vis-tipo ${tipo?.id === t.id ? 'is-active' : ''}`}
+                  <button key={t.id} className={`vis-tipo ${tipo?.id === t.id ? 'is-active' : ''}`}
                     disabled={t.id === 'imagen' && !imagenes.available}
                     title={t.id === 'imagen' && !imagenes.available ? 'Ningún nodo genera imágenes ahora mismo' : undefined}
-                    onClick={() => setTipo(tipo?.id === t.id ? null : t)}
-                  >
+                    onClick={() => setTipo(tipo?.id === t.id ? null : t)}>
                     {t.label}
                   </button>
                 ))}
@@ -465,130 +435,291 @@ export default function VisualsPage() {
                   placeholder={tipo ? tipo.hint : 'Una landing para mi cafetería, un dashboard de ventas, un logo para…'} />
               </div>
             </div>
-          </div>
-        ) : (
-          <div className={`vis-split ${compact ? `is-${panel}` : disposicion !== 'ambos' ? `is-solo-${disposicion}` : ''}`}>
-            <section className="vis-chat">
-              <div className="chat-scroll" ref={scrollRef}>
-                <div className="chat-thread vis-thread">
-                  {messages.map((m, i) => (
-                    m.role === 'user' ? (
-                      <div key={i} className="msg msg--user">{m.content}</div>
-                    ) : (
-                      <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
-                        {(() => {
-                          const n = versiones.findIndex((v) => v.indice === i);
-                          if (m.generandoImagen) return <span className="msg__thinking">Generando la imagen… (la primera tarda más: carga el modelo)</span>;
-                          if (m.error) return <MensajeError>{m.content}</MensajeError>;
-                          const imagen = extraerImagen(m.content);
-                          if (imagen) {
-                            return (
-                              <button className={`vis-thumb ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPanel('lienzo'); }}>
-                                <img src={imagen.src} alt={imagen.alt} />
-                                <span>v{n + 1}</span>
-                              </button>
-                            );
-                          }
-                          const archivos = extraerArchivos(m.content);
-                          const cuerpo = sinArchivos(m.content);
-                          const abierto = archivos.find((a) => !a.cerrado);
-                          const activo = busy && i === messages.length - 1;
-                          return (
-                            <>
-                              {m.reasoning && <Razonamiento texto={m.reasoning} activo={activo && !m.content} />}
-                              {cuerpo ? <Markdown streaming={activo}>{cuerpo}</Markdown>
-                                : (!archivos.length && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
-                              {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
-                              {n >= 0 && (
-                                <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setPanel('lienzo'); }}>
-                                  v{n + 1} · {versiones[n].nuevas.join(', ')}
-                                </button>
-                              )}
-                              {abierto && activo && (
-                                <div className="vis-trabajo">
-                                  <span className="vis-trabajo__dot" />
-                                  <span>Escribiendo <strong>{abierto.name}</strong>{archivos.length > 1 ? ` (${archivos.length - 1} lista${archivos.length > 2 ? 's' : ''})` : ''}…</span>
-                                  <span className="vis-trabajo__meta">{abierto.code.split('\n').length} líneas</span>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-                    )
-                  ))}
-                </div>
-              </div>
-              <div className="chat-composer vis-composer">
-                {modoImagen && (
-                  <div className="vis-tamanos vis-tamanos--compacto">
-                    {TAMANOS_IMAGEN.map((t) => (
-                      <button key={t.id} className={`vis-tool ${tamano.id === t.id ? 'is-active' : ''}`} onClick={() => setTamano(t)}>{t.label}</button>
-                    ))}
-                  </div>
-                )}
-                <ChatInput key={prefill} initialText={prefill} onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
-                  placeholder={modoImagen ? 'Otra imagen: describe qué cambia…' : 'Pide un cambio: «más aire en el hero», «versión oscura», «añade testimonios»…'} />
-              </div>
-            </section>
+          </section>
+          {user && (
+            <Galeria conversations={conversations} loading={convsLoading} user={user}
+              onRename={renameConversation} onDelete={deleteConversation} />
+          )}
+        </div>
+      </div>
+    );
+  }
 
-            <section className="vis-canvas">
-              <div className="vis-toolbar">
-                <div className="vis-toolbar__group">
-                  {versiones.map((v, n) => (
-                    <button key={v.indice} className={`vis-version ${actual?.indice === v.indice ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); }} title={v.name}>v{n + 1}</button>
-                  ))}
-                  {generando && <span className="vis-version is-building">generando…</span>}
-                </div>
-                {paginas.length > 1 && (
-                  <div className="vis-toolbar__group vis-paginas">
-                    <button className={`vis-tool ${vista === 'lienzo' ? 'is-active' : ''}`} onClick={() => { setVista('lienzo'); setInspeccion(false); }}><IconLayers size={13} /> Lienzo ({paginas.length})</button>
-                    {paginas.map((f) => (
-                      <button key={f.name} className={`vis-tool ${vista === 'pagina' && paginaActual?.name === f.name ? 'is-active' : ''}`} onClick={() => { setPagina(f.name); setVista('pagina'); }}>{f.name.replace(/\.html$/, '')}</button>
-                    ))}
-                  </div>
-                )}
-                <div className="vis-toolbar__group">
-                  {!modoImagen && <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">Seleccionar</button>}
-                  {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); }} disabled={!paginaActual}>Código</button>}
-                  {!modoImagen && <button className="vis-tool" onClick={copiar} disabled={!paginaActual} title="Copiar código">{copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}</button>}
-                  <button className="vis-tool" onClick={abrir} disabled={!actual} title="Abrir en una pestaña"><IconExternal size={14} /></button>
-                  <button className="vis-tool vis-tool--primary" onClick={descargar} disabled={!actual}><IconDownload size={14} /> Descargar{paginas.length > 1 ? ` (${paginas.length})` : ''}</button>
-                </div>
+  // ── Editor ─────────────────────────────────────────────────────────────
+  const tituloVisible = title || 'Diseño sin título';
+  return (
+    <div className="vis-page vis-editor">
+      <header className="vis-top">
+        <Link to="/visuals" className="icon-btn" title="Todos los diseños"><IconArrowLeft size={17} /></Link>
+        <button className={`icon-btn ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? 'Ocultar el chat' : 'Mostrar el chat'} aria-pressed={chatAbierto}>
+          <IconPanel size={17} />
+        </button>
+        {versiones.length > 0 && (
+          <Menu abierto={menu === 'historial'} onCerrar={() => setMenu(null)}>
+            <button className={`icon-btn ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title="Versiones">
+              <IconHistory size={17} />
+            </button>
+            {menu === 'historial' && (
+              <div className="vis-menu__panel">
+                <div className="vis-menu__head">Versiones</div>
+                {versiones.map((v, n) => (
+                  <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setMenu(null); }}>
+                    <span className="vis-menu__item-text"><strong>Versión {n + 1}</strong><small>{v.kind === 'image' ? 'imagen' : v.nuevas.join(', ')}</small></span>
+                    {indiceVersion === n && <IconCheck size={14} />}
+                  </button>
+                ))}
               </div>
-              <div className="vis-stage">
-                {actual ? (
-                  actual.kind === 'image' ? (
-                    <img className="vis-imagen" src={actual.src} alt={actual.name} />
-                  ) : vista === 'lienzo' ? (
-                    <Board paginas={paginas} documento={(f) => documentoPreview(f, ops[`${actual.indice}:${f.name}`] || [])}
-                      onAbrir={(name) => { setPagina(name); setVista('pagina'); }} />
-                  ) : verCodigo ? (
-                    <pre className="vis-code"><code>{codigoFinal(paginaActual)}</code></pre>
-                  ) : (
-                    <div className="vis-frame">
-                      <iframe ref={frameRef} title="Vista previa" sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
-                        onLoad={() => { setCargando(false); frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*'); }} />
-                      {cargando && <div className="vis-stage__loading"><span>Renderizando {paginaActual?.name}…</span></div>}
-                    </div>
-                  )
-                ) : (
-                  <div className="vis-stage__empty">
-                    {generando ? (
-                      <span className="vis-trabajo"><span className="vis-trabajo__dot" />El modelo está escribiendo el diseño… se renderizará al terminar</span>
-                    ) : busy && modoImagen ? 'Generando la imagen…' : 'La vista previa aparecerá aquí.'}
-                  </div>
-                )}
-                {generando && actual && <div className="vis-stage__badge">Nueva versión en camino…</div>}
-                {inspeccion && (
-                  <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo} onCerrar={() => setSeleccion(null)} />
-                )}
-                {inspeccion && !seleccion && <div className="vis-stage__badge">Haz clic en un elemento para editarlo</div>}
-              </div>
-            </section>
-          </div>
+            )}
+          </Menu>
         )}
-      </main>
+        <Menu abierto={menu === 'paginas'} onCerrar={() => { setMenu(null); setEditandoTitulo(false); }} className="vis-titulo">
+          {editandoTitulo ? (
+            <input className="vis-titulo__input" autoFocus defaultValue={title || ''} placeholder="Nombre del diseño"
+              onKeyDown={(e) => { if (e.key === 'Enter') { renameConversation(routeConvId, e.target.value); setEditandoTitulo(false); } if (e.key === 'Escape') setEditandoTitulo(false); }}
+              onBlur={(e) => { renameConversation(routeConvId, e.target.value); setEditandoTitulo(false); }} />
+          ) : (
+            <button className="vis-titulo__btn" onClick={() => setMenu(menu === 'paginas' ? null : 'paginas')}>
+              <span className="vis-titulo__nombre">{tituloVisible}</span>
+              <span className="vis-titulo__sub">
+                {modoImagen ? `${versiones.length} imagen${versiones.length === 1 ? '' : 'es'}`
+                  : paginas.length ? `${paginas.length} página${paginas.length === 1 ? '' : 's'}${vista === 'lienzo' ? ' · lienzo' : paginaActual ? ` · ${paginaActual.name}` : ''}` : 'sin páginas aún'}
+              </span>
+              <IconChevron size={13} open={menu === 'paginas'} />
+            </button>
+          )}
+          {menu === 'paginas' && (
+            <div className="vis-menu__panel vis-menu__panel--paginas">
+              <div className="vis-menu__head">Páginas</div>
+              {paginas.length > 1 && (
+                <button className={`vis-menu__item ${vista === 'lienzo' ? 'is-active' : ''}`} onClick={() => { setVista('lienzo'); setInspeccion(false); setMenu(null); }}>
+                  <IconLayers size={15} /><span className="vis-menu__item-text"><strong>Lienzo</strong><small>todas las páginas</small></span>
+                </button>
+              )}
+              {paginas.map((f) => (
+                <button key={f.name} className={`vis-menu__item ${vista === 'pagina' && paginaActual?.name === f.name ? 'is-active' : ''}`} onClick={() => { setPagina(f.name); setVista('pagina'); setMenu(null); }}>
+                  <span className="vis-menu__file" /><span className="vis-menu__item-text"><strong>{f.name.replace(/\.(html?|svg)$/, '')}</strong><small>{f.name}</small></span>
+                </button>
+              ))}
+              {!paginas.length && <p className="vis-menu__vacio">Todavía no hay páginas: pídele algo al modelo.</p>}
+              <div className="vis-menu__sep" />
+              <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>Renombrar</span></button>
+              <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>Todos los diseños</span></Link>
+            </div>
+          )}
+        </Menu>
+
+        <div className="vis-top__right">
+          {!modoImagen && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
+          {!modoImagen && (
+            <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">
+              <IconPointer size={14} /> Seleccionar
+            </button>
+          )}
+          {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }} disabled={!paginaActual}>Código</button>}
+          <button className="vis-tool" onClick={presentar} disabled={!actual} title="Abrir en una pestaña"><IconExternal size={14} /> Presentar</button>
+          <Menu abierto={menu === 'compartir'} onCerrar={() => setMenu(null)}>
+            <button className="vis-tool vis-tool--blanco" onClick={() => setMenu(menu === 'compartir' ? null : 'compartir')} disabled={!actual}><IconShare size={14} /> Compartir</button>
+            {menu === 'compartir' && (
+              <div className="vis-menu__panel vis-menu__panel--derecha">
+                <div className="vis-menu__head">Compartir</div>
+                <button className="vis-menu__item" onClick={copiarEnlace}>
+                  <IconLink size={15} />
+                  <span className="vis-menu__item-text"><strong>{copiado === 'enlace' ? 'Enlace copiado' : 'Copiar enlace'}</strong><small>{enlace ? 'cualquiera con el enlace puede verlo' : 'crea un enlace público de solo lectura'}</small></span>
+                </button>
+                {enlace && <button className="vis-menu__item vis-menu__item--sub" onClick={quitarEnlace}><span className="vis-menu__item-text"><small>Dejar de compartir</small></span></button>}
+                <button className="vis-menu__item" onClick={copiarComandoCli}>
+                  <IconTerminal size={15} />
+                  <span className="vis-menu__item-text"><strong>{copiado === 'cli' ? 'Comando copiado' : 'Enviar a Lixbon CLI'}</strong><small>pega <span className="mono">/visual {routeConvId.slice(0, 8)}…</span> en el CLI y lo replica en tu proyecto</small></span>
+                </button>
+                <div className="vis-menu__sep" />
+                <div className="vis-menu__head">Exportar</div>
+                <button className="vis-menu__item" onClick={descargar}>
+                  <IconDownload size={15} />
+                  <span className="vis-menu__item-text"><strong>Descargar</strong><small>{actual?.kind === 'image' ? 'JPEG' : paginas.length > 1 ? `.zip con ${paginas.length} páginas HTML` : 'HTML autocontenido'}</small></span>
+                </button>
+                {!modoImagen && (
+                  <button className="vis-menu__item" onClick={copiarCodigo} disabled={!paginaActual}>
+                    <IconCopy size={15} />
+                    <span className="vis-menu__item-text"><strong>{copiado === 'codigo' ? 'Código copiado' : 'Copiar el código'}</strong><small>{paginaActual?.name}</small></span>
+                  </button>
+                )}
+              </div>
+            )}
+          </Menu>
+        </div>
+      </header>
+      <VerifyBanner />
+
+      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'}`}>
+        <section className="vis-chat">
+          <div className="chat-scroll" ref={scrollRef}>
+            <div className="chat-thread vis-thread">
+              {messages.map((m, i) => (
+                m.role === 'user' ? (
+                  <div key={i} className="msg msg--user">{m.content}</div>
+                ) : (
+                  <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
+                    {(() => {
+                      const n = versiones.findIndex((v) => v.indice === i);
+                      if (m.generandoImagen) return <span className="msg__thinking">Generando la imagen… (la primera tarda más: carga el modelo)</span>;
+                      if (m.error) return <MensajeError>{m.content}</MensajeError>;
+                      const imagen = extraerImagen(m.content);
+                      if (imagen) {
+                        return (
+                          <button className={`vis-thumb ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => setVersion(n)}>
+                            <img src={imagen.src} alt={imagen.alt} />
+                            <span>v{n + 1}</span>
+                          </button>
+                        );
+                      }
+                      const archivos = extraerArchivos(m.content);
+                      const cuerpo = sinArchivos(m.content);
+                      const abierto = archivos.find((a) => !a.cerrado);
+                      const activo = busy && i === messages.length - 1;
+                      return (
+                        <>
+                          {m.reasoning && <Razonamiento texto={m.reasoning} activo={activo && !m.content} />}
+                          {cuerpo ? <Markdown streaming={activo}>{cuerpo}</Markdown>
+                            : (!archivos.length && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
+                          {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
+                          {n >= 0 && (
+                            <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); }}>
+                              v{n + 1} · {versiones[n].nuevas.join(', ')}
+                            </button>
+                          )}
+                          {abierto && activo && (
+                            <div className="vis-trabajo">
+                              <span className="vis-trabajo__dot" />
+                              <span>Escribiendo <strong>{abierto.name}</strong>{archivos.length > 1 ? ` (${archivos.length - 1} lista${archivos.length > 2 ? 's' : ''})` : ''}…</span>
+                              <span className="vis-trabajo__meta">{abierto.code.split('\n').length} líneas</span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )
+              ))}
+            </div>
+          </div>
+          <div className="chat-composer vis-composer">
+            {modoImagen && (
+              <div className="vis-tamanos vis-tamanos--compacto">
+                {TAMANOS_IMAGEN.map((t) => (
+                  <button key={t.id} className={`vis-tool ${tamano.id === t.id ? 'is-active' : ''}`} onClick={() => setTamano(t)}>{t.label}</button>
+                ))}
+              </div>
+            )}
+            <ChatInput key={prefill} initialText={prefill} onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
+              placeholder={modoImagen ? 'Otra imagen: describe qué cambia…' : 'Pide un cambio: «más aire en el hero», «versión oscura», «añade testimonios»…'} />
+          </div>
+        </section>
+
+        <section className="vis-canvas">
+          <div className="vis-stage">
+            {actual ? (
+              actual.kind === 'image' ? (
+                <img className="vis-imagen" src={actual.src} alt={actual.name} />
+              ) : vista === 'lienzo' ? (
+                <Board paginas={paginas} documento={(f) => documentoPreview(f, ops[`${actual.indice}:${f.name}`] || [])}
+                  onAbrir={(name) => { setPagina(name); setVista('pagina'); }} />
+              ) : verCodigo ? (
+                <pre className="vis-code"><code>{codigoFinal(paginaActual)}</code></pre>
+              ) : (
+                <div className="vis-frame">
+                  <iframe ref={frameRef} title="Vista previa" sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
+                    onLoad={() => { setCargando(false); frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*'); }} />
+                  {cargando && <div className="vis-stage__loading"><span>Renderizando {paginaActual?.name}…</span></div>}
+                </div>
+              )
+            ) : (
+              <div className="vis-stage__empty">
+                {generando ? (
+                  <span className="vis-trabajo"><span className="vis-trabajo__dot" />El modelo está escribiendo el diseño… se renderizará al terminar</span>
+                ) : busy && modoImagen ? 'Generando la imagen…' : 'La vista previa aparecerá aquí.'}
+              </div>
+            )}
+            {generando && actual && <div className="vis-stage__badge">Nueva versión en camino…</div>}
+            {inspeccion && (
+              <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo} onCerrar={() => setSeleccion(null)} />
+            )}
+            {inspeccion && !seleccion && <div className="vis-stage__badge">Haz clic en un elemento para editarlo</div>}
+            {!chatAbierto && (
+              <button className="vis-stage__chat" onClick={() => setChatAbierto(true)} title="Mostrar el chat"><IconPanel size={16} /></button>
+            )}
+          </div>
+        </section>
+      </div>
     </div>
+  );
+}
+
+/** Galería de diseños: miniatura de la última versión, última edición, autor. */
+function Galeria({ conversations, loading, user, onRename, onDelete }) {
+  const [miniaturas, setMiniaturas] = useState({}); // id → { files } | null
+  const [menuId, setMenuId] = useState(null);
+  const [renombrando, setRenombrando] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    conversations.slice(0, 24).forEach((c) => {
+      if (miniaturas[c.id] !== undefined) return;
+      setMiniaturas((prev) => ({ ...prev, [c.id]: null }));
+      api.get(`/api/conversations/${c.id}/files`)
+        .then((r) => setMiniaturas((prev) => ({ ...prev, [c.id]: r.data })))
+        .catch(() => setMiniaturas((prev) => ({ ...prev, [c.id]: { files: [] } })));
+    });
+  }, [conversations]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <div className="vis-galeria__vacio">Cargando tus diseños…</div>;
+  if (!conversations.length) return <div className="vis-galeria__vacio">Tus diseños aparecerán aquí.</div>;
+
+  return (
+    <section className="vis-galeria__lista">
+      <h3 className="vis-galeria__titulo">Tus diseños</h3>
+      <div className="vis-cards">
+        {conversations.map((c) => {
+          const mini = miniaturas[c.id];
+          const portada = mini?.files?.find((f) => f.name === 'index.html') || mini?.files?.[0];
+          return (
+            <article key={c.id} className="vis-card">
+              <button className="vis-card__preview" onClick={() => navigate(`/visuals/${c.id}`)} title="Abrir">
+                {portada ? (
+                  <iframe title={c.title || 'diseño'} sandbox="allow-scripts" srcDoc={documentoPreview(portada)} tabIndex={-1} />
+                ) : (
+                  <span className="vis-card__sin">{mini === null || mini === undefined ? '…' : 'Sin vista previa'}</span>
+                )}
+              </button>
+              <div className="vis-card__body">
+                {renombrando === c.id ? (
+                  <input className="vis-card__input" autoFocus defaultValue={c.title || ''}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { onRename(c.id, e.target.value); setRenombrando(null); } if (e.key === 'Escape') setRenombrando(null); }}
+                    onBlur={(e) => { onRename(c.id, e.target.value); setRenombrando(null); }} />
+                ) : (
+                  <button className="vis-card__title" onClick={() => navigate(`/visuals/${c.id}`)}>{c.title || 'Diseño sin título'}</button>
+                )}
+                <div className="vis-card__meta">
+                  <span>Editado {tiempoRelativo(c.updated_at)}</span>
+                  <span>·</span>
+                  <span>{user.name || user.email}</span>
+                  {mini?.files?.length > 0 && <><span>·</span><span>{mini.files.length} pág.</span></>}
+                </div>
+                <Menu abierto={menuId === c.id} onCerrar={() => setMenuId(null)} className="vis-card__menu">
+                  <button className="icon-btn" onClick={() => setMenuId(menuId === c.id ? null : c.id)} aria-label="Más opciones"><IconDots size={16} /></button>
+                  {menuId === c.id && (
+                    <div className="vis-menu__panel vis-menu__panel--derecha">
+                      <button className="vis-menu__item" onClick={() => navigate(`/visuals/${c.id}`)}><IconExternal size={15} /><span>Abrir</span></button>
+                      <button className="vis-menu__item" onClick={() => { setRenombrando(c.id); setMenuId(null); }}><IconPencil size={15} /><span>Renombrar</span></button>
+                      <div className="vis-menu__sep" />
+                      <button className="vis-menu__item is-danger" onClick={() => { setMenuId(null); onDelete(c.id); }}><IconTrash size={15} /><span>Eliminar</span></button>
+                    </div>
+                  )}
+                </Menu>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }

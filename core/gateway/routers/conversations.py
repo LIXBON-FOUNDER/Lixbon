@@ -25,7 +25,7 @@ from core.persistence.queries import (
     rename_conversation,
     set_conversation_share,
 )
-from core.security.auth import cookie_auth_required
+from core.security.auth import web_or_api_key_auth, cookie_auth_required
 
 logger = logging.getLogger("lixbon.conversations")
 router = APIRouter()
@@ -95,6 +95,24 @@ async def api_conversation_messages(
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
     conv = get_conversation(conversation_id, user_data["id"])
     return {"conversation": conv, "messages": messages}
+
+
+@router.get("/api/conversations/{conversation_id}/files")
+async def api_conversation_files(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(web_or_api_key_auth),
+):
+    """Archivos de la última versión de un diseño de Visuals (para la galería,
+    la descarga y `lixbon visual` en el CLI). Con API key también sirve."""
+    from core.inference.visual_files import latest_version
+
+    messages = list_messages(conversation_id, user_data["id"])
+    if messages is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    conv = get_conversation(conversation_id, user_data["id"]) or {}
+    files, versiones = latest_version(messages)
+    return {"id": conversation_id, "title": conv.get("title"), "updated_at": conv.get("updated_at"),
+            "source": conv.get("source"), "files": files, "versions": versiones}
 
 
 @router.patch("/api/conversations/{conversation_id}")

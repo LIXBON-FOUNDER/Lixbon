@@ -228,3 +228,31 @@ export const DISPOSITIVOS = [
   { id: 'tablet', label: 'Tablet', ancho: 820 },
   { id: 'escritorio', label: 'Escritorio', ancho: 0 },
 ];
+
+/** Versiones de una conversación: cada respuesta con archivos (o imagen).
+ *  Las páginas que una respuesta no reescribe se heredan de la anterior. */
+export function construirVersiones(messages, enCursoIdx = -1) {
+  const out = [];
+  messages.forEach((m, i) => {
+    if (m.role !== 'assistant') return;
+    const imagen = extraerImagen(m.content);
+    if (imagen) { out.push({ kind: 'image', name: `${imagen.alt || 'imagen'}.jpg`, src: imagen.src, indice: i }); return; }
+    const archivos = extraerArchivos(m.content).filter((a) => a.cerrado || i !== enCursoIdx);
+    if (!archivos.length) return;
+    const previa = out.length ? out[out.length - 1] : null;
+    const heredadas = previa?.kind === 'file' ? previa.files.filter((f) => !archivos.some((a) => a.name === f.name)) : [];
+    const files = [...archivos, ...heredadas].sort((a, b) => (a.name === 'index.html' ? -1 : b.name === 'index.html' ? 1 : 0));
+    out.push({ kind: 'file', files, name: files[0].name, indice: i, nuevas: archivos.map((a) => a.name) });
+  });
+  return out;
+}
+
+export function tiempoRelativo(iso) {
+  if (!iso) return '';
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'ahora mismo';
+  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
+  if (s < 86400 * 30) return `hace ${Math.floor(s / 86400)} d`;
+  return new Date(iso).toLocaleDateString();
+}

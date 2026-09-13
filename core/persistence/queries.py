@@ -1868,6 +1868,7 @@ def get_shared_conversation(token: str) -> dict[str, Any] | None:
         return {
             "title": conv.title or "Conversación",
             "created_at": conv.created_at,
+            "source": conv.source or "web",
             "messages": [{"role": m.role, "content": m.content} for m in msgs],
         }
 
