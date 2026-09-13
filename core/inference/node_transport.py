@@ -13,7 +13,14 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from core.orchestration.node_link import NodeLinkError, NodeUnavailable, RespuestaNodo, registro
+from core.orchestration.node_link import (
+    LOAD_TIMEOUT,
+    RUTAS_CON_CARGA,
+    NodeLinkError,
+    NodeUnavailable,
+    RespuestaNodo,
+    registro,
+)
 
 
 class _StreamNodo(httpx.AsyncByteStream):
@@ -44,12 +51,14 @@ class NodeTransport(httpx.AsyncBaseTransport):
         body = await request.aread()
         payload = json.loads(body) if body else None
         timeouts = request.extensions.get("timeout") or {}
+        path = request.url.raw_path.decode()
+        con_carga = path.split("?", 1)[0] in RUTAS_CON_CARGA
         try:
             resp = await link.request(
                 request.method,
-                request.url.raw_path.decode(),
+                path,
                 payload,
-                connect_timeout=timeouts.get("connect"),
+                connect_timeout=LOAD_TIMEOUT if con_carga else timeouts.get("connect"),
             )
         except NodeUnavailable as exc:
             raise httpx.ConnectError(str(exc), request=request) from exc

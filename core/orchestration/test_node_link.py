@@ -105,13 +105,46 @@ def test_cancelar_avisa_al_nodo():
     run(scenario())
 
 
-def test_sin_respuesta_a_tiempo():
+def test_sin_respuesta_a_tiempo_cancela_en_el_nodo():
     async def scenario():
-        link, _ = _link(lambda rid, msg: [])
+        link, ws = _link(lambda rid, msg: [])
         with pytest.raises(NodeUnavailable, match="no respondió"):
             await link.request("POST", "/api/chat", {}, connect_timeout=0.05)
         assert link.peticiones_en_curso == 0
+        assert ws.enviados[-1]["type"] == "cancel"  # la GPU no sigue generando sola
 
+    run(scenario())
+
+
+def test_transporte_espera_la_carga_del_modelo_solo_en_rutas_que_generan(monkeypatch):
+    """Ollama no manda cabeceras hasta cargar el modelo: /api/chat espera
+    LOAD_TIMEOUT aunque el cliente httpx tenga connect corto; /api/tags no."""
+    import core.orchestration.node_link as nl
+
+    monkeypatch.setattr(nl, "LOAD_TIMEOUT", 0.5)
+    monkeypatch.setattr("core.inference.node_transport.LOAD_TIMEOUT", 0.5)
+
+    def guion_lento(rid, _msg):
+        async def tarde():
+            await asyncio.sleep(0.2)
+            link.entregar({"type": "response", "id": rid, "status": 200, "headers": {"content-type": "application/json"}})
+            link.entregar({"type": "chunk", "id": rid, "data": "{}"})
+            link.entregar({"type": "end", "id": rid})
+        asyncio.get_running_loop().create_task(tarde())
+        return []
+
+    async def scenario():
+        registro.registrar(link)
+        try:
+            async with new_client(timeout=httpx.Timeout(5.0, connect=0.05)) as client:
+                r = await client.post("node://gpu-lento/api/chat", json={})
+                assert r.status_code == 200
+                with pytest.raises(httpx.ConnectError, match="no respondió"):
+                    await client.get("node://gpu-lento/api/tags")
+        finally:
+            registro.quitar(link)
+
+    link, _ = _link(guion_lento, nid="gpu-lento")
     run(scenario())
 
 

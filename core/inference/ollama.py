@@ -12,6 +12,7 @@ ollama.py — Cliente único de inferencia contra Ollama (directo o vía node_ag
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -272,6 +273,10 @@ async def _lines_with_keepalive(
             yield ("line", value)
     finally:
         pump_task.cancel()
+        # Esperar la cancelación cierra el stream de origen ahora (y con él la
+        # petición al nodo), no en una vuelta posterior del loop.
+        with contextlib.suppress(BaseException):
+            await pump_task
 
 
 def _ollama_tool_calls_to_openai(raw_calls: list[dict]) -> list[dict]:
@@ -356,105 +361,111 @@ async def _stream_chat_openai(
     model = payload["model"]
     num_ctx = (payload.get("options") or {}).get("num_ctx")
     thinking_seen = False
-    async with new_client(timeout=STREAM_TIMEOUT) as client:
-        async with client.stream("POST", url, json=payload, headers=headers) as response:
-            response.raise_for_status()
 
-            async for kind, line in _lines_with_keepalive(response.aiter_lines(), KEEPALIVE_SECONDS):
-                if kind == "keepalive":
-                    yield ": keep-alive\n\n"
-                    continue
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except Exception:
-                    logger.warning(f"Chunk no-JSON de Ollama ignorado: {line[:80]}")
-                    continue
+    async def _lines() -> AsyncIterator[str]:
+        async with new_client(timeout=STREAM_TIMEOUT) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    yield line
 
-                msg = data.get("message", {}) or {}
-                content = msg.get("content", "")
-                thinking = msg.get("thinking", "")
-                raw_tool_calls = msg.get("tool_calls") or []
-                done = data.get("done", False)
-                if content:
-                    parts.append(content)
-                if thinking:
-                    thinking_seen = True
+    # La apertura va dentro del bombeo: mientras Ollama carga el modelo (sin
+    # cabeceras aún) el cliente ya recibe keep-alives.
+    async for kind, line in _lines_with_keepalive(_lines(), KEEPALIVE_SECONDS):
+        if kind == "keepalive":
+            yield ": keep-alive\n\n"
+            continue
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except Exception:
+            logger.warning(f"Chunk no-JSON de Ollama ignorado: {line[:80]}")
+            continue
 
-                delta: dict = {}
-                if not done:
-                    delta["content"] = content
-                    if thinking:
-                        # Razonamiento del modelo (modelos thinking de Ollama):
-                        # se reenvía como reasoning_content para que el cliente
-                        # lo muestre en segundo plano.
-                        delta["reasoning_content"] = thinking
-                    if raw_tool_calls:
-                        # Tool-calling nativo: Ollama entrega los tool_calls
-                        # completos en un chunk (no incrementales como OpenAI).
-                        oa_calls = _ollama_tool_calls_to_openai(raw_tool_calls)
-                        delta["tool_calls"] = oa_calls
-                        collected_tool_calls.extend(oa_calls)
+        msg = data.get("message", {}) or {}
+        content = msg.get("content", "")
+        thinking = msg.get("thinking", "")
+        raw_tool_calls = msg.get("tool_calls") or []
+        done = data.get("done", False)
+        if content:
+            parts.append(content)
+        if thinking:
+            thinking_seen = True
 
-                # done_reason "length" de Ollama = se agotó num_predict o la
-                # ventana: el cliente debe saber que la respuesta quedó cortada.
-                cortada = done and data.get("done_reason") == "length"
-                openai_chunk = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": delta,
-                            "finish_reason": (
-                                "tool_calls" if (done and collected_tool_calls)
-                                else "length" if cortada
-                                else "stop" if done else None
-                            ),
-                        }
-                    ],
+        delta: dict = {}
+        if not done:
+            delta["content"] = content
+            if thinking:
+                # Razonamiento del modelo (modelos thinking de Ollama):
+                # se reenvía como reasoning_content para que el cliente
+                # lo muestre en segundo plano.
+                delta["reasoning_content"] = thinking
+            if raw_tool_calls:
+                # Tool-calling nativo: Ollama entrega los tool_calls
+                # completos en un chunk (no incrementales como OpenAI).
+                oa_calls = _ollama_tool_calls_to_openai(raw_tool_calls)
+                delta["tool_calls"] = oa_calls
+                collected_tool_calls.extend(oa_calls)
+
+        # done_reason "length" de Ollama = se agotó num_predict o la
+        # ventana: el cliente debe saber que la respuesta quedó cortada.
+        cortada = done and data.get("done_reason") == "length"
+        openai_chunk = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": (
+                        "tool_calls" if (done and collected_tool_calls)
+                        else "length" if cortada
+                        else "stop" if done else None
+                    ),
                 }
-                if done:
-                    prompt_tokens = int(data.get("prompt_eval_count") or 0)
-                    completion_tokens = int(data.get("eval_count") or 0)
-                    if collector is not None:
-                        collector["prompt_tokens"] = prompt_tokens
-                        collector["completion_tokens"] = completion_tokens
-                    # Ventana desbordada: Ollama no da error, descarta el
-                    # principio del prompt (system prompt y tools incluidos) y el
-                    # modelo responde vacío tras un rato largo de prompt-eval.
-                    # Sin esta traza el síntoma en el cliente es un agente que se
-                    # congela sin motivo aparente.
-                    if num_ctx and prompt_tokens >= int(num_ctx) * 0.9:
-                        logger.warning(
-                            f"[stream] prompt de {prompt_tokens} tokens contra num_ctx={num_ctx}: "
-                            "Ollama va a recortar el principio del prompt (system prompt y tools). "
-                            f"model={model} completion={completion_tokens}"
-                        )
-                    elif not parts and not collected_tool_calls:
-                        logger.warning(
-                            f"[stream] el modelo no devolvió nada (model={model}, "
-                            f"prompt={prompt_tokens} tokens, num_ctx={num_ctx})"
-                        )
-                    if not parts and not collected_tool_calls:
-                        # Aviso explícito al cliente: sin esto la web se queda
-                        # en "Pensando…" con el botón de enviar ya activo.
-                        openai_chunk["lixbon_event"] = {
-                            "type": "empty",
-                            "prompt_tokens": prompt_tokens,
-                            "num_ctx": num_ctx or 4096,
-                            "reasoned": thinking_seen,
-                        }
-                    # Ventana efectiva: con `usage` la web calcula cuánto contexto queda.
-                    openai_chunk["lixbon_context"] = {"num_ctx": int(num_ctx) if num_ctx else 4096}
-                    openai_chunk["usage"] = {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": prompt_tokens + completion_tokens,
-                    }
-                yield f"data: {json.dumps(openai_chunk)}\n\n"
+            ],
+        }
+        if done:
+            prompt_tokens = int(data.get("prompt_eval_count") or 0)
+            completion_tokens = int(data.get("eval_count") or 0)
+            if collector is not None:
+                collector["prompt_tokens"] = prompt_tokens
+                collector["completion_tokens"] = completion_tokens
+            # Ventana desbordada: Ollama no da error, descarta el
+            # principio del prompt (system prompt y tools incluidos) y el
+            # modelo responde vacío tras un rato largo de prompt-eval.
+            # Sin esta traza el síntoma en el cliente es un agente que se
+            # congela sin motivo aparente.
+            if num_ctx and prompt_tokens >= int(num_ctx) * 0.9:
+                logger.warning(
+                    f"[stream] prompt de {prompt_tokens} tokens contra num_ctx={num_ctx}: "
+                    "Ollama va a recortar el principio del prompt (system prompt y tools). "
+                    f"model={model} completion={completion_tokens}"
+                )
+            elif not parts and not collected_tool_calls:
+                logger.warning(
+                    f"[stream] el modelo no devolvió nada (model={model}, "
+                    f"prompt={prompt_tokens} tokens, num_ctx={num_ctx})"
+                )
+            if not parts and not collected_tool_calls:
+                # Aviso explícito al cliente: sin esto la web se queda
+                # en "Pensando…" con el botón de enviar ya activo.
+                openai_chunk["lixbon_event"] = {
+                    "type": "empty",
+                    "prompt_tokens": prompt_tokens,
+                    "num_ctx": num_ctx or 4096,
+                    "reasoned": thinking_seen,
+                }
+            # Ventana efectiva: con `usage` la web calcula cuánto contexto queda.
+            openai_chunk["lixbon_context"] = {"num_ctx": int(num_ctx) if num_ctx else 4096}
+            openai_chunk["usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+        yield f"data: {json.dumps(openai_chunk)}\n\n"
 
     yield "data: [DONE]\n\n"

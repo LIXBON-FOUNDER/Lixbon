@@ -25,6 +25,12 @@ logger = logging.getLogger("lixbon.node_link")
 
 CONNECT_TIMEOUT = 15.0
 READ_TIMEOUT = 300.0
+# Ollama no envía cabeceras hasta tener el modelo cargado: un modelo grande en
+# frío (decenas de GB + KV de una ventana larga) tarda minutos en un nodo
+# alquilado. Las rutas que generan esperan ese tiempo; el enlace WS ya detecta
+# si el nodo se cae.
+LOAD_TIMEOUT = 600.0
+RUTAS_CON_CARGA = ("/api/chat", "/api/generate", "/api/embed", "/api/embeddings")
 
 
 class NodeLinkError(RuntimeError):
@@ -102,7 +108,8 @@ class NodeLink:
             await self.enviar({"type": "request", "id": rid, "method": method, "path": path, "body": body})
             kind, data = await asyncio.wait_for(cola.get(), timeout=connect_timeout or CONNECT_TIMEOUT)
         except asyncio.TimeoutError:
-            self._pendientes.pop(rid, None)
+            # El nodo puede seguir generando: cancelar libera la GPU
+            await self.cancelar(rid)
             raise NodeUnavailable(f"Nodo '{self.node_id}' no respondió a tiempo")
         except Exception:
             self._pendientes.pop(rid, None)
