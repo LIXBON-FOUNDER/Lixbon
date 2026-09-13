@@ -68,6 +68,28 @@ export function documentoPreview(archivo) {
   return archivo.code;
 }
 
+export const TIPO_IMAGEN = {
+  id: 'imagen', label: 'Imagen', hint: 'Describe la imagen: sujeto, estilo, luz, encuadre…', prefijo: '',
+};
+
+export const TAMANOS_IMAGEN = [
+  { id: 'cuadrado', label: '1:1', width: 1024, height: 1024 },
+  { id: 'apaisado', label: '16:9', width: 1344, height: 768 },
+  { id: 'vertical', label: '9:16', width: 768, height: 1344 },
+];
+
+const IMG_MD = /!\[([^\]]*)\]\((data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)\)/;
+
+/** Imagen generada guardada como Markdown en un mensaje. */
+export function extraerImagen(texto) {
+  const m = IMG_MD.exec(texto || '');
+  return m ? { alt: m[1], src: m[2] } : null;
+}
+
+export function esConversacionDeImagenes(messages) {
+  return messages.some((m) => m.role === 'assistant' && extraerImagen(m.content));
+}
+
 export const DISPOSITIVOS = [
   { id: 'movil', label: 'Móvil', ancho: 390 },
   { id: 'tablet', label: 'Tablet', ancho: 820 },

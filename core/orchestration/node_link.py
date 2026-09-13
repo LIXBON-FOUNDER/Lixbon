@@ -30,7 +30,7 @@ READ_TIMEOUT = 300.0
 # alquilado. Las rutas que generan esperan ese tiempo; el enlace WS ya detecta
 # si el nodo se cae.
 LOAD_TIMEOUT = 600.0
-RUTAS_CON_CARGA = ("/api/chat", "/api/generate", "/api/embed", "/api/embeddings")
+RUTAS_CON_CARGA = ("/api/chat", "/api/generate", "/api/embed", "/api/embeddings", "/images/generate")
 
 
 class NodeLinkError(RuntimeError):

@@ -29,6 +29,10 @@ Variables de entorno:
   NODE_SHARED_SECRET  Modo servidor: token que debe enviar el gateway
   AGENT_PORT          Modo servidor: puerto HTTP (default: 8765)
   OLLAMA_URL          Ollama local (default: http://127.0.0.1:11434)
+  LIXBON_IMAGE_MODEL  Modelo de difusión (Hugging Face) para generar imágenes, p. ej.
+                      black-forest-labs/FLUX.1-schnell o stabilityai/sdxl-turbo. Vacío = sin imágenes.
+  LIXBON_IMAGE_OFFLOAD  '1' para descargar a CPU las partes que no se usan (menos VRAM, más lento)
+  LIXBON_IMAGE_IDLE_S   Segundos sin uso tras los que se libera la VRAM (default: 600)
   OLLAMA_WATCHDOG     '1' para reiniciar Ollama si cae (default: 1)
 """
 from __future__ import annotations
@@ -66,7 +70,10 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_WATCHDOG = os.getenv("OLLAMA_WATCHDOG", "1") == "1"
 NODE_SHARED_SECRET = os.getenv("NODE_SHARED_SECRET", "")
 TASK_NAME = "lixbon_NodeAgent"
-AGENT_VERSION = "4.0.0"
+AGENT_VERSION = "4.1.0"
+IMAGE_MODEL = os.getenv("LIXBON_IMAGE_MODEL", "").strip()
+IMAGE_OFFLOAD = os.getenv("LIXBON_IMAGE_OFFLOAD", "0") == "1"
+IMAGE_IDLE_S = int(os.getenv("LIXBON_IMAGE_IDLE_S", "600") or 600)
 STATE_FILE = Path(os.getenv("LIXBON_STATE_FILE") or Path.home() / ".lixbon" / "node.json")
 
 app = FastAPI(title="lixbon Node Agent", version=AGENT_VERSION)
@@ -79,6 +86,162 @@ def require_node_token(x_node_token: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=503, detail="Agente sin NODE_SHARED_SECRET configurado")
     if not x_node_token or not _secrets.compare_digest(x_node_token, NODE_SHARED_SECRET):
         raise HTTPException(status_code=401, detail="Token de nodo inválido")
+
+
+# ── Generación de imágenes (diffusers) ──────────────────────────────────────
+# Un solo pipeline por nodo, cargado en la primera petición y liberado tras
+# IMAGE_IDLE_S sin uso: la VRAM vuelve a estar disponible para los modelos de
+# chat. Las peticiones se serializan (una GPU, una imagen a la vez).
+
+class _ImageGen:
+    def __init__(self) -> None:
+        self._pipe = None
+        self._lock = threading.Lock()
+        self._last_use = 0.0
+        self._loading = False
+        self.error = ""
+
+    @property
+    def enabled(self) -> bool:
+        return bool(IMAGE_MODEL)
+
+    def _load(self):
+        import torch
+        from diffusers import AutoPipelineForText2Image
+
+        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        pipe = AutoPipelineForText2Image.from_pretrained(IMAGE_MODEL, torch_dtype=dtype)
+        if torch.cuda.is_available():
+            if IMAGE_OFFLOAD:
+                pipe.enable_model_cpu_offload()
+            else:
+                pipe.to("cuda")
+        pipe.set_progress_bar_config(disable=True)
+        return pipe
+
+    def generate(self, prompt: str, width: int, height: int, steps: int | None,
+                 seed: int | None, negative_prompt: str = "", guidance: float | None = None) -> dict:
+        import base64
+        import io
+
+        import torch
+
+        with self._lock:
+            if self._pipe is None:
+                self._loading = True
+                t0 = time.monotonic()
+                try:
+                    self._pipe = self._load()
+                    self.error = ""
+                finally:
+                    self._loading = False
+                print(f"[lixbon Agent] Imagen: {IMAGE_MODEL} cargado en {time.monotonic() - t0:.0f}s")
+            es_flux = "flux" in IMAGE_MODEL.lower()
+            es_turbo = "turbo" in IMAGE_MODEL.lower() or "schnell" in IMAGE_MODEL.lower()
+            pasos = int(steps) if steps else (4 if es_turbo else 28)
+            kwargs: dict = {
+                "prompt": prompt, "width": width, "height": height,
+                "num_inference_steps": max(1, min(pasos, 60)),
+            }
+            if guidance is not None:
+                kwargs["guidance_scale"] = float(guidance)
+            elif es_turbo:
+                kwargs["guidance_scale"] = 0.0
+            if negative_prompt and not es_flux:
+                kwargs["negative_prompt"] = negative_prompt
+            if es_flux:
+                kwargs["max_sequence_length"] = 256
+            semilla = int(seed) if seed is not None else random.randrange(2**31)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            kwargs["generator"] = torch.Generator(device=device).manual_seed(semilla)
+            t0 = time.monotonic()
+            imagen = self._pipe(**kwargs).images[0]
+            self._last_use = time.monotonic()
+            buf = io.BytesIO()
+            imagen.convert("RGB").save(buf, format="JPEG", quality=92)
+            return {
+                "image_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
+                "mime": "image/jpeg", "seed": semilla, "width": width, "height": height,
+                "model": IMAGE_MODEL, "steps": kwargs["num_inference_steps"],
+                "ms": int((time.monotonic() - t0) * 1000),
+            }
+
+    def unload_if_idle(self) -> None:
+        with self._lock:
+            if self._pipe is not None and time.monotonic() - self._last_use > IMAGE_IDLE_S:
+                self._pipe = None
+                try:
+                    import gc
+
+                    import torch
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                print("[lixbon Agent] Imagen: VRAM liberada por inactividad")
+
+    def prefetch(self) -> None:
+        """Descarga los pesos en segundo plano al arrancar (no los carga en VRAM)."""
+        if not self.enabled:
+            return
+
+        def bajar():
+            try:
+                from huggingface_hub import snapshot_download
+                snapshot_download(IMAGE_MODEL)
+                print(f"[lixbon Agent] Imagen: pesos de {IMAGE_MODEL} listos")
+            except Exception as exc:
+                self.error = f"{type(exc).__name__}: {exc}"
+                print(f"[lixbon Agent] Imagen: no se pudieron descargar los pesos ({exc})")
+
+        threading.Thread(target=bajar, daemon=True, name="image-prefetch").start()
+
+        def vigilar():
+            while True:
+                time.sleep(60)
+                try:
+                    self.unload_if_idle()
+                except Exception:
+                    pass
+
+        threading.Thread(target=vigilar, daemon=True, name="image-idle").start()
+
+
+imagegen = _ImageGen()
+
+
+def _image_request(cuerpo: dict | None) -> tuple[int, dict]:
+    """Valida y ejecuta una petición de imagen. Devuelve (status, json)."""
+    if not imagegen.enabled:
+        return 404, {"error": "Este nodo no genera imágenes (LIXBON_IMAGE_MODEL vacío)"}
+    cuerpo = cuerpo or {}
+    prompt = str(cuerpo.get("prompt") or "").strip()
+    if not prompt:
+        return 400, {"error": "Falta prompt"}
+
+    def lado(v, default):
+        try:
+            n = int(v or default)
+        except (TypeError, ValueError):
+            n = default
+        return max(256, min(2048, (n // 16) * 16))
+
+    try:
+        return 200, imagegen.generate(
+            prompt, lado(cuerpo.get("width"), 1024), lado(cuerpo.get("height"), 1024),
+            cuerpo.get("steps"), cuerpo.get("seed"), str(cuerpo.get("negative_prompt") or ""),
+            cuerpo.get("guidance"),
+        )
+    except Exception as exc:
+        return 500, {"error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+
+
+@app.post("/images/generate")
+async def images_generate(request: Request, _: None = Depends(require_node_token)):
+    status, data = await asyncio.to_thread(_image_request, await request.json())
+    if status != 200:
+        raise HTTPException(status_code=status, detail=data.get("error"))
+    return data
 
 
 # ── Métricas ───────────────────────────────────────────────────────────────
@@ -225,6 +388,8 @@ async def _recolectar_metricas() -> dict:
         "models": modelos,          # lista plana: contrato viejo, no tocar
         "model_info": model_info,   # + capabilities por modelo (gateway ≥ 2.5)
         "agent_version": AGENT_VERSION,
+        "image_model": IMAGE_MODEL or None,   # generación de imágenes (agente ≥ 4.1)
+        "image_error": imagegen.error or None,
         **_gpu_metrics(),
     }
 
@@ -448,6 +613,13 @@ class _Conexion:
     async def _atender(self, rid: str, msg: dict) -> None:
         path = str(msg.get("path") or "").split("?", 1)[0]
         metodo = str(msg.get("method") or "GET").upper()
+        if path == "/images/generate":
+            # No es Ollama: la imagen se genera aquí y va entera en un chunk.
+            status, data = await asyncio.to_thread(_image_request, msg.get("body"))
+            await self.enviar({"type": "response", "id": rid, "status": status, "headers": {"content-type": "application/json"}})
+            await self.enviar({"type": "chunk", "id": rid, "data": json.dumps(data)})
+            await self.enviar({"type": "end", "id": rid})
+            return
         if path not in _RUTAS_PERMITIDAS:
             await self.enviar({"type": "response", "id": rid, "status": 404, "headers": {"content-type": "application/json"}})
             await self.enviar({"type": "chunk", "id": rid, "data": json.dumps({"error": f"ruta no permitida: {path}"})})
@@ -555,6 +727,7 @@ def _modo_conexion(gateway: str) -> None:
 
     async def _bucle() -> None:
         asyncio.create_task(_asegurar_modelos())
+        imagegen.prefetch()
         espera = 2.0
         while True:
             inicio = time.monotonic()

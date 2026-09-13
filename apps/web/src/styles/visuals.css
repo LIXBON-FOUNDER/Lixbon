@@ -210,6 +210,44 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
 }
 
+.vis-tamanos {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+
+.vis-tamanos--compacto { justify-content: flex-start; margin-bottom: 6px; }
+.vis-tamanos__modelo { margin-left: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
+
+.vis-thumb {
+  display: block;
+  position: relative;
+  max-width: 260px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.vis-thumb img { display: block; width: 100%; height: auto; }
+.vis-thumb span {
+  position: absolute; left: 8px; bottom: 8px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(0,0,0,.6); color: #fff; font-family: var(--font-mono); font-size: 11px;
+}
+.vis-thumb.is-active { border-color: var(--accent); }
+
+.vis-imagen {
+  max-width: 100%;
+  max-height: 100%;
+  align-self: center;
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
 /* Móvil: un panel cada vez */
 
 .vis-panel-toggle {

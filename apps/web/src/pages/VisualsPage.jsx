@@ -9,7 +9,10 @@ import { useIsCompact } from '../hooks/useMediaQuery';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
 import { descargarBlob } from '../lib/archivos';
-import { DISPOSITIVOS, TIPOS, VISUALS_PROMPT, documentoPreview, esSvg, extraerArchivo } from '../lib/visuals';
+import {
+  DISPOSITIVOS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, VISUALS_PROMPT, documentoPreview, esConversacionDeImagenes, esSvg,
+  extraerArchivo, extraerImagen,
+} from '../lib/visuals';
 import { Logo } from '../components/Logo';
 import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
@@ -56,6 +59,8 @@ export default function VisualsPage() {
   const [verCodigo, setVerCodigo] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [panel, setPanel] = useState('lienzo');   // móvil: 'chat' | 'lienzo'
+  const [imagenes, setImagenes] = useState({ available: false, model: null });
+  const [tamano, setTamano] = useState(TAMANOS_IMAGEN[0]);
   const abortRef = useRef(null);
   const loadedConvRef = useRef(null);
   const scrollRef = useRef(null);
@@ -86,6 +91,7 @@ export default function VisualsPage() {
     if (!user) { setConvsLoading(false); return; }
     loadConversations();
     loadModels().catch(() => setModels([]));
+    api.get('/api/images/status').then((r) => setImagenes(r.data)).catch(() => {});
   }, [user, loadConversations, loadModels]);
 
   useEffect(() => {
@@ -112,13 +118,16 @@ export default function VisualsPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // ── Versiones: cada respuesta con archivo ─────────────────────────────
+  // ── Versiones: cada respuesta con archivo (o imagen generada) ──────────
+  const modoImagen = tipo?.id === 'imagen' || esConversacionDeImagenes(messages);
   const versiones = useMemo(() => {
     const out = [];
     messages.forEach((m, i) => {
       if (m.role !== 'assistant') return;
+      const imagen = extraerImagen(m.content);
+      if (imagen) { out.push({ kind: 'image', name: `${imagen.alt || 'imagen'}.jpg`, src: imagen.src, indice: i }); return; }
       const archivo = extraerArchivo(m.content);
-      if (archivo && (archivo.cerrado || !(busy && i === messages.length - 1))) out.push({ ...archivo, indice: i });
+      if (archivo && (archivo.cerrado || !(busy && i === messages.length - 1))) out.push({ kind: 'file', ...archivo, indice: i });
     });
     return out;
   }, [messages, busy]);
@@ -128,9 +137,45 @@ export default function VisualsPage() {
   const actual = versiones.length ? versiones[version == null ? versiones.length - 1 : Math.min(version, versiones.length - 1)] : null;
   const doc = useMemo(() => documentoPreview(actual), [actual]);
 
+  // ── Imagen: una petición al nodo de difusión, sin stream ──────────────
+  const generarImagen = async (prompt) => {
+    const convId = routeConvId || crypto.randomUUID();
+    if (!routeConvId) {
+      loadedConvRef.current = convId;
+      navigate(`/visuals/${convId}`, { replace: true });
+    }
+    setMessages((prev) => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', generandoImagen: true }]);
+    setBusy(true);
+    setVersion(null);
+    setPanel('lienzo');
+    try {
+      const r = await api.post('/api/images/generate', {
+        prompt, width: tamano.width, height: tamano.height, conversation_id: convId, source: 'visuals',
+      }, { timeout: 600000 });
+      const src = `data:${r.data.mime || 'image/jpeg'};base64,${r.data.image_base64}`;
+      setMessages((prev) => {
+        const next = prev.slice();
+        next[next.length - 1] = { role: 'assistant', content: `![${prompt.slice(0, 80)}](${src})` };
+        return next;
+      });
+      loadConversations();
+    } catch (err) {
+      const detalle = err.response?.data?.detail;
+      const texto = (detalle && (detalle.message || detalle)) || err.message || 'No se pudo generar la imagen';
+      setMessages((prev) => {
+        const next = prev.slice();
+        next[next.length - 1] = { role: 'assistant', content: `⚠️ ${typeof texto === 'string' ? texto : JSON.stringify(texto)}`, error: true };
+        return next;
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ── Enviar ─────────────────────────────────────────────────────────────
   const send = async (texto, images = []) => {
     if (!user) { navigate('/auth?mode=register'); return; }
+    if (modoImagen) { await generarImagen(texto); return; }
     let chosenModel = model;
     if (!chosenModel) {
       try { chosenModel = (await loadModels())[0] || ''; } catch { /* abajo */ }
@@ -193,13 +238,17 @@ export default function VisualsPage() {
   const stop = () => abortRef.current?.abort();
 
   // ── Acciones del lienzo ────────────────────────────────────────────────
-  const descargar = () => {
+  const descargar = async () => {
     if (!actual) return;
+    if (actual.kind === 'image') {
+      descargarBlob(await (await fetch(actual.src)).blob(), actual.name);
+      return;
+    }
     const mime = esSvg(actual.name) ? 'image/svg+xml' : 'text/html';
     descargarBlob(new Blob([actual.code], { type: `${mime};charset=utf-8` }), actual.name);
   };
   const copiar = async () => {
-    if (!actual) return;
+    if (!actual || actual.kind === 'image') return;
     try {
       await navigator.clipboard.writeText(actual.code);
       setCopiado(true);
@@ -207,7 +256,8 @@ export default function VisualsPage() {
     } catch { /* sin portapapeles */ }
   };
   const abrir = () => {
-    if (!doc) return;
+    if (!actual) return;
+    if (actual.kind === 'image') { window.open(actual.src, '_blank', 'noopener'); return; }
     const url = URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' }));
     window.open(url, '_blank', 'noopener');
     setTimeout(() => URL.revokeObjectURL(url), 30000);
@@ -287,12 +337,26 @@ export default function VisualsPage() {
               <h2 className="vis-hero__title">¿Qué diseñamos?</h2>
               <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él.</p>
               <div className="vis-tipos">
-                {TIPOS.map((t) => (
-                  <button key={t.id} className={`vis-tipo ${tipo?.id === t.id ? 'is-active' : ''}`} onClick={() => setTipo(tipo?.id === t.id ? null : t)}>
+                {[...TIPOS, TIPO_IMAGEN].map((t) => (
+                  <button
+                    key={t.id}
+                    className={`vis-tipo ${tipo?.id === t.id ? 'is-active' : ''}`}
+                    disabled={t.id === 'imagen' && !imagenes.available}
+                    title={t.id === 'imagen' && !imagenes.available ? 'Ningún nodo genera imágenes ahora mismo' : undefined}
+                    onClick={() => setTipo(tipo?.id === t.id ? null : t)}
+                  >
                     {t.label}
                   </button>
                 ))}
               </div>
+              {tipo?.id === 'imagen' && (
+                <div className="vis-tamanos">
+                  {TAMANOS_IMAGEN.map((t) => (
+                    <button key={t.id} className={`vis-tool ${tamano.id === t.id ? 'is-active' : ''}`} onClick={() => setTamano(t)}>{t.label}</button>
+                  ))}
+                  <span className="vis-tamanos__modelo">{imagenes.model}</span>
+                </div>
+              )}
               <div className="vis-hero__input">
                 <ChatInput onSend={send} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
                   placeholder={tipo ? tipo.hint : 'Una landing para mi cafetería, un dashboard de ventas, un logo para…'} />
@@ -310,8 +374,18 @@ export default function VisualsPage() {
                     ) : (
                       <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
                         {(() => {
-                          const archivo = extraerArchivo(m.content);
                           const n = versiones.findIndex((v) => v.indice === i);
+                          if (m.generandoImagen) return <span className="msg__thinking">Generando la imagen… (la primera tarda más: carga el modelo)</span>;
+                          const imagen = extraerImagen(m.content);
+                          if (imagen) {
+                            return (
+                              <button className={`vis-thumb ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPanel('lienzo'); }}>
+                                <img src={imagen.src} alt={imagen.alt} />
+                                <span>v{n + 1}</span>
+                              </button>
+                            );
+                          }
+                          const archivo = extraerArchivo(m.content);
                           const cuerpo = sinArchivo(m.content);
                           return (
                             <>
@@ -332,8 +406,15 @@ export default function VisualsPage() {
                 </div>
               </div>
               <div className="chat-composer vis-composer">
+                {modoImagen && (
+                  <div className="vis-tamanos vis-tamanos--compacto">
+                    {TAMANOS_IMAGEN.map((t) => (
+                      <button key={t.id} className={`vis-tool ${tamano.id === t.id ? 'is-active' : ''}`} onClick={() => setTamano(t)}>{t.label}</button>
+                    ))}
+                  </div>
+                )}
                 <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
-                  placeholder="Pide un cambio: «más aire en el hero», «versión oscura», «añade testimonios»…" />
+                  placeholder={modoImagen ? 'Otra imagen: describe qué cambia…' : 'Pide un cambio: «más aire en el hero», «versión oscura», «añade testimonios»…'} />
               </div>
             </section>
 
@@ -346,20 +427,22 @@ export default function VisualsPage() {
                   {generando && <span className="vis-version is-building">generando…</span>}
                 </div>
                 <div className="vis-toolbar__group">
-                  {DISPOSITIVOS.map((d) => (
+                  {!modoImagen && DISPOSITIVOS.map((d) => (
                     <button key={d.id} className={`vis-tool ${dispositivo === d.id ? 'is-active' : ''}`} onClick={() => setDispositivo(d.id)}>{d.label}</button>
                   ))}
                 </div>
                 <div className="vis-toolbar__group">
-                  <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => setVerCodigo((v) => !v)} disabled={!actual}>Código</button>
-                  <button className="vis-tool" onClick={copiar} disabled={!actual} title="Copiar código">{copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}</button>
+                  {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => setVerCodigo((v) => !v)} disabled={!actual}>Código</button>}
+                  {!modoImagen && <button className="vis-tool" onClick={copiar} disabled={!actual} title="Copiar código">{copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}</button>}
                   <button className="vis-tool" onClick={abrir} disabled={!actual} title="Abrir en una pestaña">↗</button>
                   <button className="vis-tool vis-tool--primary" onClick={descargar} disabled={!actual}><IconDownload size={14} /> Descargar</button>
                 </div>
               </div>
               <div className="vis-stage">
                 {actual ? (
-                  verCodigo ? (
+                  actual.kind === 'image' ? (
+                    <img className="vis-imagen" src={actual.src} alt={actual.name} />
+                  ) : verCodigo ? (
                     <pre className="vis-code"><code>{actual.code}</code></pre>
                   ) : (
                     <div className="vis-frame" style={anchoDispositivo ? { width: anchoDispositivo } : undefined}>
@@ -368,7 +451,7 @@ export default function VisualsPage() {
                   )
                 ) : (
                   <div className="vis-stage__empty">
-                    {generando ? 'El modelo está escribiendo el diseño…' : 'La vista previa aparecerá aquí.'}
+                    {generando ? 'El modelo está escribiendo el diseño…' : busy && modoImagen ? 'Generando la imagen…' : 'La vista previa aparecerá aquí.'}
                   </div>
                 )}
                 {generando && actual && <div className="vis-stage__badge">Nueva versión en camino…</div>}

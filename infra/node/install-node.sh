@@ -33,6 +33,14 @@ fi
 echo "▸ Dependencias de Python…"
 python3 -m pip install --quiet --break-system-packages "httpx>=0.27" psutil "websockets>=13" fastapi 2>/dev/null \
   || python3 -m pip install --quiet "httpx>=0.27" psutil "websockets>=13" fastapi
+if [ -n "${LIXBON_IMAGE_MODEL:-}" ]; then
+  # Generación de imágenes: diffusers sobre el torch de la imagen (Vast/RunPod
+  # lo traen; si no, pip lo baja y son ~2 GB).
+  echo "▸ Dependencias de imágenes (diffusers)…"
+  python3 -c "import torch" 2>/dev/null || python3 -m pip install --quiet --break-system-packages torch 2>/dev/null || python3 -m pip install --quiet torch
+  python3 -m pip install --quiet --break-system-packages "diffusers>=0.32" "transformers>=4.46" accelerate sentencepiece protobuf pillow 2>/dev/null \
+    || python3 -m pip install --quiet "diffusers>=0.32" "transformers>=4.46" accelerate sentencepiece protobuf pillow
+fi
 
 echo "▸ Descargando el agente…"
 $SUDO curl -fsSL "$GATEWAY/node-agent.py" -o "$DIR/agent.py"
@@ -47,6 +55,9 @@ LIXBON_NODE_NAME='${LIXBON_NODE_NAME:-}'
 LIXBON_NODE_ID='${LIXBON_NODE_ID:-}'
 LIXBON_PROVIDER='${LIXBON_PROVIDER:-}'
 LIXBON_MODELS='${LIXBON_MODELS:-}'
+LIXBON_IMAGE_MODEL='${LIXBON_IMAGE_MODEL:-}'
+LIXBON_IMAGE_OFFLOAD='${LIXBON_IMAGE_OFFLOAD:-0}'
+HF_TOKEN='${HF_TOKEN:-}'
 OLLAMA_URL='${OLLAMA_URL:-http://127.0.0.1:11434}'
 EOF
 $SUDO chmod 600 "$ENV_FILE"
