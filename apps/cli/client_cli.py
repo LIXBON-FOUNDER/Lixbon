@@ -1233,7 +1233,7 @@ class ApiClient:
     def chat_stream(self, model: str, messages: list[dict], conversation_id: str | None = None,
                     client_id: str = "cli", title: str | None = None,
                     web_search=False, num_ctx: int | None = None,
-                    tools: list[dict] | None = None) -> ChatStream:
+                    tools: list[dict] | None = None, think: str | bool | None = None) -> ChatStream:
         payload = {
             "model": model,
             "messages": messages,
@@ -1250,6 +1250,8 @@ class ApiClient:
             # Tool-calling nativo: el gateway se las pasa a Ollama, que las mete
             # en el template del modelo (modo agent).
             payload["tools"] = tools
+        if think is not None:
+            payload["think"] = think
         response = self._open("POST", f"{self.base_url}/chat/completions", payload, timeout=300)
         return ChatStream(response)
 
@@ -7868,6 +7870,9 @@ class ChatApp:
             web_search={"on": True, "off": False}.get(self.web_search, "auto"),
             num_ctx=self.cfg.get("context_window"),
             tools=tools,
+            # Depurar y planificar agradecen el razonamiento largo; en ask
+            # decide el modelo (nivel por defecto).
+            think="high" if self.mode_name() in ("agent", "plan") else None,
         )
 
         content_parts: list[str] = []

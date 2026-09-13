@@ -57,11 +57,18 @@ def coerce_keep_alive(value: str | int | None) -> str | int | None:
         return texto               # "30m", "60s", "1h" → duración de Go
 
 
+THINK_LEVELS = ("low", "medium", "high")
+
+
 # gpt-oss no permite apagar el razonamiento: Ollama rechaza `think: false` y
-# solo acepta niveles ("low"/"medium"/"high"). "low" es el equivalente barato.
-def think_param(model: str, think: bool | None) -> bool | str | None:
-    if think is False and "gpt-oss" in (model or "").lower():
-        return "low"
+# solo acepta niveles ("low"/"medium"/"high"). El resto de modelos thinking
+# solo entiende booleanos, así que un nivel se traduce a "encendido".
+def think_param(model: str, think: bool | str | None) -> bool | str | None:
+    es_gpt_oss = "gpt-oss" in (model or "").lower()
+    if isinstance(think, str):
+        return think if es_gpt_oss else True
+    if es_gpt_oss and think is not None:
+        return "medium" if think else "low"
     return think
 
 

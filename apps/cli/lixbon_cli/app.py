@@ -1376,6 +1376,9 @@ class ChatApp:
             web_search={"on": True, "off": False}.get(self.web_search, "auto"),
             num_ctx=self.cfg.get("context_window"),
             tools=tools,
+            # Depurar y planificar agradecen el razonamiento largo; en ask
+            # decide el modelo (nivel por defecto).
+            think="high" if self.mode_name() in ("agent", "plan") else None,
         )
 
         content_parts: list[str] = []

@@ -96,8 +96,9 @@ class ChatCompletionRequest(BaseModel):
     tools: list[dict] | None = None
     tool_choice: Any | None = None
     # Razonamiento previo de los modelos thinking (qwen3, deepseek-r1…).
-    # None ⇒ CHAT_THINK del entorno (apagado por defecto).
-    think: bool | None = None
+    # None ⇒ CHAT_THINK del entorno (apagado por defecto). Los niveles solo
+    # los distingue gpt-oss; para los demás equivalen a True.
+    think: bool | Literal["low", "medium", "high"] | None = None
     # Petición efímera (edición inline Ctrl+K del IDE): no crea conversación ni
     # guarda contenido, pero el uso se contabiliza/cobra igual. La web no lo envía.
     no_persist: bool = False
@@ -152,7 +153,7 @@ class DelegateRequest(BaseModel):
 # ── Helper: chat no-streaming con fallback local ───────────────────────────
 
 async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = None,
-                       keep_alive: str | None = None, think: bool | None = None) -> tuple[dict[str, Any], str]:
+                       keep_alive: str | None = None, think: bool | str | None = None) -> tuple[dict[str, Any], str]:
     """
     Ejecuta un chat por el mejor nodo; si el nodo falla, fallback al Ollama local.
     Retorna (respuesta_ollama, origen).
@@ -352,6 +353,10 @@ async def chat_completions(
     base, headers, origen = target_or_503(model)
     num_ctx = resolve_num_ctx(payload.num_ctx, role.num_ctx, await fetch_models(), model)
     think = payload.think if payload.think is not None else CHAT_THINK
+    # Visuals apaga el razonamiento porque qwen3.5 escribía el HTML dentro del
+    # thinking; gpt-oss separa bien ambos canales y diseña mejor razonando.
+    if payload.source == "visuals" and think is False and "gpt-oss" in model.lower():
+        think = "medium"
 
     # "Modo investigar": el modelo decide qué buscar, se busca y se inyecta el
     # contexto antes de responder.

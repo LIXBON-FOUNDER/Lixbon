@@ -22,7 +22,7 @@ export async function streamChatCompletion({
       stream: true,
       web_search: webSearch === 'off' ? false : (webSearch ? true : 'auto'),
       ...(source ? { source } : {}),
-      ...(think === false || think === true ? { think } : {}),
+      ...(think !== undefined && think !== null ? { think } : {}),
     }),
     signal,
   });
