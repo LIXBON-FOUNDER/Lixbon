@@ -282,7 +282,6 @@
 /* ── Design system ────────────────────────────────────────────────────── */
 
 .vis-ds { position: relative; }
-.vis-ds--compacto { margin-left: auto; }
 
 .vis-ds__btn {
   display: inline-flex;
@@ -314,6 +313,10 @@
 }
 
 .vis-ds--compacto .vis-ds__menu { left: auto; right: 0; }
+.vis-ds--compacto .vis-ds__btn { padding: 6px 10px; border: 0; border-radius: var(--radius-chip); }
+.vis-ds--compacto .vis-ds__btn:hover { background: var(--surface-3); }
+.vis-ds--compacto .vis-ds__swatch { width: 10px; height: 10px; }
+.chat-input__tools .vis-ds--compacto .vis-ds__menu { left: 0; right: auto; top: auto; bottom: calc(100% + 6px); }
 
 .vis-ds__item {
   display: flex;
@@ -563,17 +566,26 @@
 .vis-tool--blanco { background: #F2F2F0; color: #141414; font-weight: 600; }
 .vis-tool--blanco:hover:not(:disabled) { background: #fff; color: #141414; }
 
-/* Título con desplegable de páginas */
+/* Título, chip de página y chip de versión */
 
-.vis-titulo { margin-left: 6px; }
-.vis-titulo__btn {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 10px; border: 0; border-radius: var(--radius);
-  background: transparent; color: var(--ink); text-align: left; cursor: pointer;
+.vis-titulo { display: flex; align-items: center; gap: 2px; margin-left: 4px; min-width: 0; }
+.vis-titulo__nombre {
+  padding: 4px 8px; border: 0; border-radius: var(--radius-chip);
+  background: transparent; color: var(--ink); font-weight: 600; cursor: text;
+  max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.vis-titulo__btn:hover { background: var(--surface-3); }
-.vis-titulo__nombre { font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vis-titulo__sub { font-size: 12px; color: var(--ink-muted); }
+.vis-titulo__nombre:hover { background: var(--surface-3); }
+.vis-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 8px 5px 10px; border: 0; border-radius: var(--radius-chip);
+  background: transparent; color: var(--ink-soft); font-size: 12.5px; white-space: nowrap; cursor: pointer;
+}
+.vis-chip:hover, .vis-chip.is-active { background: var(--surface-3); color: var(--ink); }
+.vis-seg { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--radius); background: var(--surface-3); }
+.vis-seg .vis-tool { padding: 5px 10px; }
+.vis-seg .vis-tool:hover:not(:disabled) { background: var(--surface-4); }
+.vis-seg .vis-tool.is-active { background: var(--surface-5); }
+.vis-vdiv { width: 1px; height: 18px; margin: 0 4px; background: rgba(var(--ink-rgb), 0.1); }
 .vis-titulo__input {
   padding: 6px 10px; border: 1px solid var(--accent); border-radius: var(--radius);
   background: var(--surface-1); color: var(--ink); font-weight: 600; min-width: 260px;
@@ -600,12 +612,50 @@
 .vis-menu__item.is-active { background: var(--accent-soft); }
 .vis-menu__item.is-danger { color: var(--err, #E05C5C); }
 .vis-menu__item:disabled { opacity: .5; cursor: default; }
-.vis-menu__item--sub { padding-top: 0; padding-left: 35px; }
-.vis-menu__item-text { display: flex; flex-direction: column; min-width: 0; }
+.vis-menu__item-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.vis-menu__check { display: grid; place-items: center; width: 14px; flex-shrink: 0; }
 .vis-menu__item-text small { color: var(--ink-muted); font-size: 11.5px; white-space: normal; }
-.vis-menu__file { width: 14px; height: 18px; border: 1.5px solid var(--ink-muted); border-radius: 3px; flex-shrink: 0; }
 .vis-menu__sep { height: 1px; margin: 6px 4px; background: rgba(var(--ink-rgb), 0.08); }
 .vis-menu__vacio { margin: 0; padding: 8px 10px; color: var(--ink-muted); font-size: 12.5px; }
+
+/* Panel Compartir */
+
+.vis-share { display: flex; flex-direction: column; gap: 14px; width: 360px; padding: 14px; }
+.vis-share__head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.vis-share__sec { display: flex; flex-direction: column; gap: 8px; }
+.vis-share .vis-menu__head { padding: 0; }
+.vis-share__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.vis-share__hint { margin: 0; color: var(--ink-muted); font-size: 12px; }
+.vis-switch {
+  position: relative; width: 32px; height: 18px; flex-shrink: 0;
+  border: 0; border-radius: 999px; background: var(--surface-5); cursor: pointer; transition: background .15s;
+}
+.vis-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--ink-muted); transition: transform .15s, background .15s;
+}
+.vis-switch.is-on { background: var(--accent); }
+.vis-switch.is-on::after { transform: translateX(14px); background: var(--surface-0); }
+.vis-field {
+  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 4px 0 10px;
+  border-radius: var(--radius-chip); background: var(--surface-3); color: var(--ink-body); font-size: 12.5px;
+}
+.vis-field__valor { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-field__valor.mono { font-family: var(--font-mono); font-size: 12px; color: var(--code-ink); }
+.vis-field__btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px;
+  border: 0; border-radius: 5px; background: var(--surface-5); color: var(--ink); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
+}
+.vis-field__btn:hover { background: #333331; }
+.vis-share__tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vis-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px;
+  border: 0; border-radius: var(--radius-chip); background: var(--surface-3); color: var(--ink); text-align: left; cursor: pointer;
+}
+.vis-tile:hover:not(:disabled) { background: var(--surface-4); }
+.vis-tile:disabled { opacity: .5; cursor: default; }
+.vis-tile strong { font-size: 12.5px; font-weight: 600; }
+.vis-tile small { color: var(--ink-muted); font-size: 11.5px; }
 
 /* ── Galería ─────────────────────────────────────────────────────────── */
 
@@ -613,6 +663,7 @@
 .vis-hero--galeria { flex: 0 0 auto; padding: 56px 24px 32px; }
 .vis-galeria__lista { max-width: 1240px; margin: 0 auto; padding: 8px 24px 48px; }
 .vis-galeria__titulo { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--ink-soft); }
+.vis-galeria__titulo small { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--ink-label); }
 .vis-galeria__vacio { padding: 24px; text-align: center; color: var(--ink-muted); }
 
 .vis-cards {

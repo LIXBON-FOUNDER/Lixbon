@@ -58,7 +58,7 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder = 'Escribe tu mensaje…', initialText = '' }) {
+export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder = 'Escribe tu mensaje…', initialText = '', tools = null }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -356,6 +356,8 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         >
           <IconGlobe size={19} />
         </button>
+        {tools && <span className="chat-input__sep" />}
+        {tools}
       </div>
 
       {models.length > 0 && (

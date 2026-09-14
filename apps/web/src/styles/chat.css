@@ -1076,6 +1076,8 @@
   margin-left: -6px;
 }
 
+.chat-input__sep { width: 1px; height: 18px; margin: 0 6px 0 4px; background: rgba(var(--ink-rgb), 0.1); }
+
 .chat-input__tools .icon-btn {
   width: 28px;
   height: 28px;

@@ -23,8 +23,8 @@ import { VerifyBanner } from '../components/VerifyBanner';
 import { Board, DesignSystemPicker, Inspector } from '../components/VisualsPanels';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import {
-  IconArrowLeft, IconCheck, IconChevron, IconCopy, IconDots, IconDownload, IconExternal, IconHistory, IconLayers,
-  IconLink, IconPanel, IconPencil, IconPointer, IconShare, IconTerminal, IconTrash,
+  IconArrowLeft, IconCheck, IconChevron, IconCode, IconCopy, IconDots, IconDownload, IconExternal, IconFile, IconHistory,
+  IconLayers, IconPanel, IconPencil, IconPointer, IconShare, IconTrash, IconX,
 } from '../components/Icons';
 
 const CONTEXT_WINDOW = 30;
@@ -427,17 +427,16 @@ export default function VisualsPage() {
                   ))}
                   <span className="vis-tamanos__modelo">{imagenes.model}</span>
                 </div>
-              ) : (
-                <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} />
-              )}
+              ) : null}
               <div className="vis-hero__input">
                 <ChatInput onSend={send} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
+                  tools={tipo?.id !== 'imagen' && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
                   placeholder={tipo ? tipo.hint : 'Una landing para mi cafetería, un dashboard de ventas, un logo para…'} />
               </div>
             </div>
           </section>
           {user && (
-            <Galeria conversations={conversations} loading={convsLoading} user={user}
+            <Galeria conversations={conversations} loading={convsLoading}
               onRename={renameConversation} onDelete={deleteConversation} />
           )}
         </div>
@@ -454,95 +453,130 @@ export default function VisualsPage() {
         <button className={`icon-btn ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? 'Ocultar el chat' : 'Mostrar el chat'} aria-pressed={chatAbierto}>
           <IconPanel size={17} />
         </button>
-        {versiones.length > 0 && (
-          <Menu abierto={menu === 'historial'} onCerrar={() => setMenu(null)}>
-            <button className={`icon-btn ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title="Versiones">
-              <IconHistory size={17} />
-            </button>
-            {menu === 'historial' && (
-              <div className="vis-menu__panel">
-                <div className="vis-menu__head">Versiones</div>
-                {versiones.map((v, n) => (
-                  <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setMenu(null); }}>
-                    <span className="vis-menu__item-text"><strong>Versión {n + 1}</strong><small>{v.kind === 'image' ? 'imagen' : v.nuevas.join(', ')}</small></span>
-                    {indiceVersion === n && <IconCheck size={14} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </Menu>
-        )}
-        <Menu abierto={menu === 'paginas'} onCerrar={() => { setMenu(null); setEditandoTitulo(false); }} className="vis-titulo">
+        <div className="vis-titulo">
           {editandoTitulo ? (
             <input className="vis-titulo__input" autoFocus defaultValue={title || ''} placeholder="Nombre del diseño"
               onKeyDown={(e) => { if (e.key === 'Enter') { renameConversation(routeConvId, e.target.value); setEditandoTitulo(false); } if (e.key === 'Escape') setEditandoTitulo(false); }}
               onBlur={(e) => { renameConversation(routeConvId, e.target.value); setEditandoTitulo(false); }} />
           ) : (
-            <button className="vis-titulo__btn" onClick={() => setMenu(menu === 'paginas' ? null : 'paginas')}>
-              <span className="vis-titulo__nombre">{tituloVisible}</span>
-              <span className="vis-titulo__sub">
-                {modoImagen ? `${versiones.length} imagen${versiones.length === 1 ? '' : 'es'}`
-                  : paginas.length ? `${paginas.length} página${paginas.length === 1 ? '' : 's'}${vista === 'lienzo' ? ' · lienzo' : paginaActual ? ` · ${paginaActual.name}` : ''}` : 'sin páginas aún'}
-              </span>
-              <IconChevron size={13} open={menu === 'paginas'} />
-            </button>
+            <button className="vis-titulo__nombre" onClick={() => setEditandoTitulo(true)} title="Renombrar el diseño">{tituloVisible}</button>
           )}
-          {menu === 'paginas' && (
-            <div className="vis-menu__panel vis-menu__panel--paginas">
-              <div className="vis-menu__head">Páginas</div>
-              {paginas.length > 1 && (
-                <button className={`vis-menu__item ${vista === 'lienzo' ? 'is-active' : ''}`} onClick={() => { setVista('lienzo'); setInspeccion(false); setMenu(null); }}>
-                  <IconLayers size={15} /><span className="vis-menu__item-text"><strong>Lienzo</strong><small>todas las páginas</small></span>
-                </button>
+          {!modoImagen && (
+            <Menu abierto={menu === 'paginas'} onCerrar={() => setMenu(null)}>
+              <button className={`vis-chip ${menu === 'paginas' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'paginas' ? null : 'paginas')} title="Páginas">
+                <IconFile size={14} />
+                <span>{vista === 'lienzo' ? 'Lienzo' : paginaActual?.name || (paginas.length ? `${paginas.length} páginas` : 'sin páginas aún')}</span>
+                <IconChevron size={13} open={menu === 'paginas'} />
+              </button>
+              {menu === 'paginas' && (
+                <div className="vis-menu__panel vis-menu__panel--paginas">
+                  {paginas.length > 1 && (
+                    <>
+                      <div className="vis-menu__head">Vista</div>
+                      <button className={`vis-menu__item ${vista === 'lienzo' ? 'is-active' : ''}`} onClick={() => { setVista('lienzo'); setInspeccion(false); setMenu(null); }}>
+                        <IconLayers size={15} /><span className="vis-menu__item-text"><strong>Lienzo</strong><small>las {paginas.length} páginas a la vez</small></span>
+                        {vista === 'lienzo' && <IconCheck size={14} />}
+                      </button>
+                      <div className="vis-menu__sep" />
+                    </>
+                  )}
+                  <div className="vis-menu__head">Páginas</div>
+                  {paginas.map((f) => {
+                    const activa = vista === 'pagina' && paginaActual?.name === f.name;
+                    return (
+                      <button key={f.name} className={`vis-menu__item ${activa ? 'is-active' : ''}`} onClick={() => { setPagina(f.name); setVista('pagina'); setMenu(null); }}>
+                        <IconFile size={15} /><span className="vis-menu__item-text"><strong>{f.name.replace(/\.(html?|svg)$/, '')}</strong></span>
+                        {activa && <IconCheck size={14} />}
+                      </button>
+                    );
+                  })}
+                  {!paginas.length && <p className="vis-menu__vacio">Todavía no hay páginas: pídele algo al modelo.</p>}
+                  <div className="vis-menu__sep" />
+                  <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>Renombrar el diseño</span></button>
+                  <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>Todos los diseños</span></Link>
+                </div>
               )}
-              {paginas.map((f) => (
-                <button key={f.name} className={`vis-menu__item ${vista === 'pagina' && paginaActual?.name === f.name ? 'is-active' : ''}`} onClick={() => { setPagina(f.name); setVista('pagina'); setMenu(null); }}>
-                  <span className="vis-menu__file" /><span className="vis-menu__item-text"><strong>{f.name.replace(/\.(html?|svg)$/, '')}</strong><small>{f.name}</small></span>
-                </button>
-              ))}
-              {!paginas.length && <p className="vis-menu__vacio">Todavía no hay páginas: pídele algo al modelo.</p>}
-              <div className="vis-menu__sep" />
-              <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>Renombrar</span></button>
-              <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>Todos los diseños</span></Link>
-            </div>
+            </Menu>
           )}
-        </Menu>
+          {versiones.length > 0 && (
+            <Menu abierto={menu === 'historial'} onCerrar={() => setMenu(null)}>
+              <button className={`vis-chip ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title="Versiones">
+                <IconHistory size={14} /><span>v{indiceVersion + 1}</span><IconChevron size={13} open={menu === 'historial'} />
+              </button>
+              {menu === 'historial' && (
+                <div className="vis-menu__panel">
+                  <div className="vis-menu__head">Versiones</div>
+                  {versiones.map((v, n) => (
+                    <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setMenu(null); }}>
+                      <span className="vis-menu__check">{indiceVersion === n && <IconCheck size={14} />}</span>
+                      <span className="vis-menu__item-text"><strong>Versión {n + 1}</strong><small>{v.kind === 'image' ? 'imagen' : v.nuevas.join(', ')}</small></span>
+                    </button>
+                  )).reverse()}
+                </div>
+              )}
+            </Menu>
+          )}
+        </div>
 
         <div className="vis-top__right">
-          {!modoImagen && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
           {!modoImagen && (
-            <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">
-              <IconPointer size={14} /> Seleccionar
-            </button>
+            <div className="vis-seg">
+              <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">
+                <IconPointer size={14} /> Seleccionar
+              </button>
+              <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }} disabled={!paginaActual}>
+                <IconCode size={14} /> Código
+              </button>
+            </div>
           )}
-          {!modoImagen && <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }} disabled={!paginaActual}>Código</button>}
+          {!modoImagen && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
+          <span className="vis-vdiv" />
           <button className="vis-tool" onClick={presentar} disabled={!actual} title="Abrir en una pestaña"><IconExternal size={14} /> Presentar</button>
           <Menu abierto={menu === 'compartir'} onCerrar={() => setMenu(null)}>
             <button className="vis-tool vis-tool--blanco" onClick={() => setMenu(menu === 'compartir' ? null : 'compartir')} disabled={!actual}><IconShare size={14} /> Compartir</button>
             {menu === 'compartir' && (
-              <div className="vis-menu__panel vis-menu__panel--derecha">
-                <div className="vis-menu__head">Compartir</div>
-                <button className="vis-menu__item" onClick={copiarEnlace}>
-                  <IconLink size={15} />
-                  <span className="vis-menu__item-text"><strong>{copiado === 'enlace' ? 'Enlace copiado' : 'Copiar enlace'}</strong><small>{enlace ? 'cualquiera con el enlace puede verlo' : 'crea un enlace público de solo lectura'}</small></span>
-                </button>
-                {enlace && <button className="vis-menu__item vis-menu__item--sub" onClick={quitarEnlace}><span className="vis-menu__item-text"><small>Dejar de compartir</small></span></button>}
-                <button className="vis-menu__item" onClick={copiarComandoCli}>
-                  <IconTerminal size={15} />
-                  <span className="vis-menu__item-text"><strong>{copiado === 'cli' ? 'Comando copiado' : 'Enviar a Lixbon CLI'}</strong><small>pega <span className="mono">/visual {routeConvId.slice(0, 8)}…</span> en el CLI y lo replica en tu proyecto</small></span>
-                </button>
-                <div className="vis-menu__sep" />
-                <div className="vis-menu__head">Exportar</div>
-                <button className="vis-menu__item" onClick={descargar}>
-                  <IconDownload size={15} />
-                  <span className="vis-menu__item-text"><strong>Descargar</strong><small>{actual?.kind === 'image' ? 'JPEG' : paginas.length > 1 ? `.zip con ${paginas.length} páginas HTML` : 'HTML autocontenido'}</small></span>
-                </button>
-                {!modoImagen && (
-                  <button className="vis-menu__item" onClick={copiarCodigo} disabled={!paginaActual}>
-                    <IconCopy size={15} />
-                    <span className="vis-menu__item-text"><strong>{copiado === 'codigo' ? 'Código copiado' : 'Copiar el código'}</strong><small>{paginaActual?.name}</small></span>
-                  </button>
-                )}
+              <div className="vis-menu__panel vis-menu__panel--derecha vis-share">
+                <div className="vis-share__head">
+                  <strong>Compartir</strong>
+                  <button className="icon-btn" onClick={() => setMenu(null)} aria-label="Cerrar"><IconX size={15} /></button>
+                </div>
+                <div className="vis-share__sec">
+                  <div className="vis-share__row">
+                    <span className="vis-menu__item-text"><strong>Enlace público</strong><small>{enlace ? 'cualquiera con el enlace puede verlo' : 'crea un enlace de solo lectura'}</small></span>
+                    <button className={`vis-switch ${enlace ? 'is-on' : ''}`} role="switch" aria-checked={!!enlace} aria-label="Enlace público" onClick={enlace ? quitarEnlace : copiarEnlace} />
+                  </div>
+                  {enlace && (
+                    <div className="vis-field">
+                      <span className="vis-field__valor">{enlace.replace(/^https?:\/\//, '')}</span>
+                      <button className="vis-field__btn" onClick={copiarEnlace}><IconCopy size={13} /> {copiado === 'enlace' ? 'Copiado' : 'Copiar'}</button>
+                    </div>
+                  )}
+                </div>
+                <div className="vis-share__sec">
+                  <div className="vis-menu__head">Lixbon CLI</div>
+                  <p className="vis-share__hint">Pega el comando en el CLI y replica el diseño como proyecto (React + Vite, API…).</p>
+                  <div className="vis-field">
+                    <span className="vis-field__valor mono">/visual {routeConvId.slice(0, 8)}</span>
+                    <button className="vis-field__btn" onClick={copiarComandoCli}><IconCopy size={13} /> {copiado === 'cli' ? 'Copiado' : 'Copiar'}</button>
+                  </div>
+                </div>
+                <div className="vis-share__sec">
+                  <div className="vis-menu__head">Exportar</div>
+                  <div className="vis-share__tiles">
+                    <button className="vis-tile" onClick={descargar}>
+                      <IconDownload size={16} />
+                      <strong>{actual?.kind === 'image' ? 'Descargar' : paginas.length > 1 ? 'Descargar .zip' : 'Descargar HTML'}</strong>
+                      <small>{actual?.kind === 'image' ? 'JPEG' : paginas.length > 1 ? `${paginas.length} páginas HTML` : 'autocontenido'}</small>
+                    </button>
+                    {!modoImagen && (
+                      <button className="vis-tile" onClick={copiarCodigo} disabled={!paginaActual}>
+                        <IconCode size={16} />
+                        <strong>{copiado === 'codigo' ? 'Código copiado' : 'Copiar el código'}</strong>
+                        <small>{paginaActual?.name}</small>
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </Menu>
@@ -668,7 +702,7 @@ export default function VisualsPage() {
 }
 
 /** Galería de diseños: miniatura de la última versión, última edición, autor. */
-function Galeria({ conversations, loading, user, onRename, onDelete }) {
+function Galeria({ conversations, loading, onRename, onDelete }) {
   const [miniaturas, setMiniaturas] = useState({}); // id → { files } | null
   const [menuId, setMenuId] = useState(null);
   const [renombrando, setRenombrando] = useState(null);
@@ -689,7 +723,7 @@ function Galeria({ conversations, loading, user, onRename, onDelete }) {
 
   return (
     <section className="vis-galeria__lista">
-      <h3 className="vis-galeria__titulo">Tus diseños</h3>
+      <h3 className="vis-galeria__titulo">Tus diseños <small>{conversations.length}</small></h3>
       <div className="vis-cards">
         {conversations.map((c) => {
           const mini = miniaturas[c.id];
@@ -713,9 +747,7 @@ function Galeria({ conversations, loading, user, onRename, onDelete }) {
                 )}
                 <div className="vis-card__meta">
                   <span>Editado {tiempoRelativo(c.updated_at)}</span>
-                  <span>·</span>
-                  <span>{user.name || user.email}</span>
-                  {mini?.files?.length > 0 && <><span>·</span><span>{mini.files.length} pág.</span></>}
+                  {mini?.files?.length > 0 && <><span>·</span><span>{mini.files.length} página{mini.files.length === 1 ? '' : 's'}</span></>}
                 </div>
                 <Menu abierto={menuId === c.id} onCerrar={() => setMenuId(null)} className="vis-card__menu">
                   <button className="icon-btn" onClick={() => setMenuId(menuId === c.id ? null : c.id)} aria-label="Más opciones"><IconDots size={16} /></button>

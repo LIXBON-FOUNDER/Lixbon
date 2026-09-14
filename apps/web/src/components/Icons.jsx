@@ -284,6 +284,10 @@ export const IconArrowLeft = (p) => (
   <Svg {...p}><path d="M19 12H5M11 6l-6 6 6 6" /></Svg>
 );
 
+export const IconCode = (p) => (
+  <Svg {...p}><path d="M16 18l6-6-6-6M8 6l-6 6 6 6" /></Svg>
+);
+
 export const IconPlay = (p) => (
   <Svg {...p}><path d="M7 5v14l11-7L7 5Z" /></Svg>
 );
