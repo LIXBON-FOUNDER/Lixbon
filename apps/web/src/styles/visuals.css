@@ -607,14 +607,6 @@
 .vis-menu__sep { height: 1px; margin: 6px 4px; background: rgba(var(--ink-rgb), 0.08); }
 .vis-menu__vacio { margin: 0; padding: 8px 10px; color: var(--ink-muted); font-size: 12.5px; }
 
-.vis-stage__chat {
-  position: absolute; left: 16px; top: 16px; z-index: 6;
-  display: grid; place-items: center; width: 36px; height: 36px;
-  border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius);
-  background: var(--surface-2); color: var(--ink-soft); cursor: pointer;
-}
-.vis-stage__chat:hover { color: var(--ink); background: var(--surface-3); }
-
 /* ── Galería ─────────────────────────────────────────────────────────── */
 
 .vis-galeria { flex: 1; overflow: auto; }
@@ -632,23 +624,23 @@
 .vis-card {
   display: flex; flex-direction: column;
   border: 1px solid rgba(var(--ink-rgb), 0.08); border-radius: var(--radius);
-  background: var(--surface-1); overflow: hidden;
+  background: var(--surface-1);
   transition: border-color .15s, transform .15s;
 }
 .vis-card:hover { border-color: rgba(var(--ink-rgb), 0.2); transform: translateY(-2px); }
+.vis-card:has(.vis-menu__panel) { z-index: 2; }
 
 .vis-card__preview {
   position: relative; display: block; width: 100%; aspect-ratio: 16 / 10;
-  padding: 0; border: 0; background: #fff; cursor: pointer; overflow: hidden;
+  padding: 0; border: 0; border-radius: var(--radius) var(--radius) 0 0;
+  background: #fff; cursor: pointer; overflow: hidden;
 }
+/* 5× el tamaño de la tarjeta y escala 1/5: la página se renderiza a un
+   viewport de escritorio y llena el recuadro exacto, sea cual sea su ancho. */
 .vis-card__preview iframe {
-  position: absolute; top: 0; left: 0; width: 1280px; height: 800px; border: 0;
-  transform-origin: 0 0; transform: scale(var(--escala, .2)); pointer-events: none;
+  position: absolute; top: 0; left: 0; width: 500%; height: 500%; border: 0;
+  transform-origin: 0 0; transform: scale(.2); pointer-events: none;
 }
-.vis-card__preview { container-type: inline-size; }
-@container (min-width: 0px) { .vis-card__preview iframe { --escala: 0.2; } }
-@container (min-width: 300px) { .vis-card__preview iframe { --escala: 0.25; } }
-@container (min-width: 380px) { .vis-card__preview iframe { --escala: 0.3; } }
 .vis-card__sin { position: absolute; inset: 0; display: grid; place-items: center; background: var(--surface-3); color: var(--ink-muted); font-size: 12px; }
 
 .vis-card__body { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 12px 44px 12px 14px; }

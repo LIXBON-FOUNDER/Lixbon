@@ -660,9 +660,6 @@ export default function VisualsPage() {
               <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo} onCerrar={() => setSeleccion(null)} />
             )}
             {inspeccion && !seleccion && <div className="vis-stage__badge">Haz clic en un elemento para editarlo</div>}
-            {!chatAbierto && (
-              <button className="vis-stage__chat" onClick={() => setChatAbierto(true)} title="Mostrar el chat"><IconPanel size={16} /></button>
-            )}
           </div>
         </section>
       </div>
