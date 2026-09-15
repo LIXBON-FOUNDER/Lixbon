@@ -1468,3 +1468,70 @@
   .guias__lista, .guias--articulo { grid-template-columns: 1fr; }
   .guias__mas { position: static; }
 }
+
+/* ── Estado del servicio (/status) ───────────────────────────────────── */
+
+.status { gap: 22px; }
+.status__punto { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-round); background: var(--ink-faint); }
+.status__punto--grande { width: 12px; height: 12px; }
+.is-ok > .status__punto, .status__punto.is-ok { background: var(--ok); }
+.is-warn > .status__punto, .status__punto.is-warn { background: var(--warn); }
+.is-down > .status__punto, .status__punto.is-down { background: var(--danger); }
+.is-cargando > .status__punto { animation: status-late 1.2s ease-in-out infinite; }
+@keyframes status-late { 50% { opacity: 0.3; } }
+
+.status__cabecera {
+  display: flex; align-items: center; gap: 16px; margin-top: 8px; padding: 22px 26px;
+  border-radius: var(--radius); background: var(--surface-1); color: var(--ink);
+}
+.status__cabecera.is-ok { background: var(--ok-soft); }
+.status__cabecera.is-warn { background: var(--warn-soft); }
+.status__cabecera.is-down { background: var(--danger-soft); }
+.status__cabecera h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.status__cabecera p { margin: 3px 0 0; font-size: 13px; color: var(--ink-soft); }
+.status__cabecera svg { flex: 0 0 auto; color: var(--danger-ink); }
+
+.status__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.status__item { padding: 18px 22px 16px; border-radius: var(--radius); background: var(--bg-card); }
+.status__fila { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.status__nombre h3 { margin: 0; font-size: 15px; font-weight: 500; color: var(--ink); }
+.status__nombre p { margin: 3px 0 0; font-size: 13px; color: var(--ink-muted); }
+.status__estado {
+  display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 5px 11px 5px 9px;
+  border-radius: var(--radius-chip); background: var(--surface-3); font-size: 13px; color: var(--ink);
+}
+.status__estado small { color: var(--ink-muted); font-size: 12px; }
+.status__estado.is-ok { color: var(--ok); }
+.status__estado.is-warn { color: var(--warn); }
+.status__estado.is-down { color: var(--danger-ink); }
+.status__estado.is-off { color: var(--ink-muted); }
+
+.status__uptime { margin-top: 14px; }
+.status__barras { display: flex; gap: 2px; height: 26px; }
+.status__barra { flex: 1 1 0; min-width: 0; border-radius: 2px; background: var(--surface-4); }
+.status__barra.is-ok { background: var(--ok); }
+.status__barra.is-warn { background: var(--warn); }
+.status__barra.is-down { background: var(--danger); }
+.status__barra.is-off { background: var(--surface-5); }
+.status__barra.is-none { background: var(--surface-3); }
+.status__leyenda { display: flex; justify-content: space-between; margin-top: 7px; font-size: 11.5px; color: var(--ink-muted); }
+
+.status__seccion h2 { margin: 12px 0 14px; font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
+.status__vacio { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 20px; border-radius: var(--radius); background: var(--bg-card); font-size: 13.5px; color: var(--ink-soft); }
+.status__vacio svg { color: var(--ok); }
+.status__incidentes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
+.status__dia h4 { margin: 0 0 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-muted); }
+.status__dia ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.status__incidente { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--bg-card); font-size: 13.5px; color: var(--ink-body); }
+.status__incidente > .status__punto { margin-top: 6px; }
+.status__incidente strong { font-weight: 500; color: var(--ink); }
+.status__incidente small { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-muted); }
+.status__encurso { margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-chip); background: var(--danger-soft); color: var(--danger-ink); font-size: 11px; }
+.status__nota { margin: 8px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-muted); }
+.status__nota a, .status__cabecera a { color: var(--ink-soft); text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .status__fila { flex-direction: column; gap: 10px; }
+  .status__barras { gap: 1px; height: 22px; }
+  .status__barra { border-radius: 1px; }
+}

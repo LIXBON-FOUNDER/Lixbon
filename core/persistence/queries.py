@@ -40,6 +40,7 @@ from core.persistence.models import (
     RemoteEvent,
     RemoteSession,
     Session,
+    StatusSample,
     Subscription,
     TaskEmbedding,
     TokenUsageDaily,
@@ -2500,3 +2501,31 @@ def registrar_dispositivo(user_id: int, user_agent: str | None) -> bool:
             .values(last_seen=ahora)
         )
         return False
+
+
+# ─── Estado público (/status) ──────────────────────────────────────────────
+
+STATUS_HISTORY_DAYS = 90
+
+
+def add_status_sample(components: dict[str, str]) -> None:
+    with get_session() as s:
+        s.add(StatusSample(ts=now_iso(), components_json=_json.dumps(components)))
+
+
+def purge_status_samples() -> int:
+    limite = (datetime.now(timezone.utc) - timedelta(days=STATUS_HISTORY_DAYS + 2)).isoformat()
+    with get_session() as s:
+        return s.execute(delete(StatusSample).where(StatusSample.ts < limite)).rowcount
+
+
+def get_status_samples(days: int = STATUS_HISTORY_DAYS) -> list[tuple[str, dict[str, str]]]:
+    """(ts, {componente: estado}) de los últimos `days` días, en orden."""
+    desde = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_session() as s:
+        filas = s.execute(
+            select(StatusSample.ts, StatusSample.components_json)
+            .where(StatusSample.ts >= desde)
+            .order_by(StatusSample.ts)
+        ).all()
+    return [(ts, _json.loads(cj)) for ts, cj in filas]

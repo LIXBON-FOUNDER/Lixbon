@@ -12,6 +12,7 @@ export const RUTAS_PUBLICAS = [
   { path: '/visuals', priority: '0.8', changefreq: 'monthly' },
   { path: '/aplicaciones', priority: '0.8', changefreq: 'monthly' },
   { path: '/novedades', priority: '0.6', changefreq: 'weekly' },
+  { path: '/status', priority: '0.5', changefreq: 'hourly' },
   { path: '/docs', priority: '0.8', changefreq: 'weekly' },
   { path: '/guias', priority: '0.8', changefreq: 'weekly' },
   ...GUIAS_INDEX.map((s) => ({ path: `/guias/${s.id}`, priority: '0.7', changefreq: 'monthly' })),

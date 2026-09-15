@@ -11,6 +11,23 @@
 
 ---
 
+## 0.-4 Página pública /status (2026-09-15)
+
+- `core/gateway/routers/status.py`: `GET /api/status` sin sesión, cacheado 30 s.
+  Componentes: API y web, base de datos (latencia), modelos (nodos online/total),
+  imágenes (nodo con `image_model`), pagos (`Balance.retrieve` de Stripe) y
+  correo (`GET /v3/account` de Brevo); los dos externos se comprueban cada 5 min.
+  Estados: `operational | degraded | down | unavailable` (unavailable = no
+  configurado; gris, no cuenta como caída).
+- Hilo `status-sampler`: una muestra cada 5 min en `status_samples`
+  (`StatusSample`), purga a 90 días. `historial()` saca disponibilidad por día y
+  los incidentes (rachas fuera de operational; un hueco > 15 min entre muestras
+  es la API caída). Test: `core/gateway/test_status_endpoint.py`.
+- Web: `pages/StatusPage.jsx` en `/status` (barras de 90 días, incidentes por
+  día, refresco cada 60 s), en sitemap/prerender y en los pies de página.
+
+---
+
 ## 0.-3 Visuals solo en Pro y Advance (2026-09-15)
 
 - `core/billing/quota.py`: `PLANES_CON_VISUALS = ("pro", "advance")` y

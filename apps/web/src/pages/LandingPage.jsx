@@ -161,7 +161,7 @@ export default function LandingPage() {
         <footer className="landing__pie">
           <div><Logo /><p>Medellín, Colombia · © {new Date().getFullYear()}</p></div>
           <nav><Link to="/docs">Documentación</Link><Link to="/guias">Guías</Link><Link to="/aplicaciones">Aplicaciones</Link><Link to="/planes">Planes</Link></nav>
-          <nav><Link to="/legal/privacidad">Privacidad</Link><Link to="/legal/terminos">Términos</Link><Link to="/legal/reembolsos">Reembolsos</Link><a href="mailto:soporte@lixbon.com">Soporte</a></nav>
+          <nav><Link to="/legal/privacidad">Privacidad</Link><Link to="/legal/terminos">Términos</Link><Link to="/legal/reembolsos">Reembolsos</Link><Link to="/status">Estado</Link><a href="mailto:soporte@lixbon.com">Soporte</a></nav>
         </footer>
       </main>
     </div>

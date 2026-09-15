@@ -34,6 +34,7 @@ import SharedPage from './pages/SharedPage';
 import RemotePage from './pages/RemotePage';
 import NotFoundPage from './pages/NotFoundPage';
 import LegalPage from './pages/LegalPage';
+import StatusPage from './pages/StatusPage';
 
 export function AppRoutes() {
   return (
@@ -74,6 +75,7 @@ export function AppRoutes() {
               <Route path="/aplicaciones" element={<DownloadsPage />} />
               <Route path="/descargas" element={<Navigate to="/aplicaciones" replace />} />
               <Route path="/novedades" element={<ReleasesPage />} />
+              <Route path="/status" element={<StatusPage />} />
               <Route path="/docs" element={<DocsPage />} />
               <Route path="/docs/:section" element={<DocsPage />} />
               <Route path="/legal" element={<Navigate to="/legal/privacidad" replace />} />

@@ -7,6 +7,7 @@ export function PublicFooter() {
       <span className="pubfoot__marca">© {new Date().getFullYear()} lixbon</span>
       <nav className="pubfoot__links" aria-label="Legal">
         <Link to="/guias">Guías</Link>
+        <Link to="/status">Estado</Link>
         <Link to="/legal/privacidad">Privacidad</Link>
         <Link to="/legal/terminos">Términos</Link>
         <Link to="/legal/reembolsos">Reembolsos</Link>

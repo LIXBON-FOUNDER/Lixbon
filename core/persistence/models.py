@@ -140,6 +140,16 @@ class AuditEvent(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class StatusSample(Base):
+    """Una muestra del estado de los servicios (la toma el gateway cada pocos
+    minutos): alimenta la disponibilidad de 90 días de /status."""
+    __tablename__ = "status_samples"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ts: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    components_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class TaskEmbedding(Base):
     __tablename__ = "task_embeddings"
     __table_args__ = (
