@@ -18,7 +18,7 @@ const LINKS = [
 
 const SUPPORT_EMAIL = 'soporte@lixbon.com';
 
-export function PublicNav() {
+export function PublicNav({ extra = null }) {
   const { pathname } = useLocation();
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -50,6 +50,7 @@ export function PublicNav() {
         {/* Estos tres se recogen en .pubnav__menu al pasar a compacto. Van en
             su propio contenedor porque .pubnav__btn lo reusan otras páginas
             (la conversación compartida) que no tienen menú donde recogerlos. */}
+        {extra}
         <div className="pubnav__wide">
           <a href={`mailto:${SUPPORT_EMAIL}`} className="pill-btn pill-btn--outline pubnav__btn">
             Soporte
