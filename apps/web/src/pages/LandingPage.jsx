@@ -12,15 +12,15 @@ import { useAuth } from '../hooks/useAuth';
 
 const PRODUCTOS = [
   ['Chat', 'Conversaciones con streaming, historial, adjuntos (PDF, imágenes, código), dictado y búsqueda en internet. Los modelos que razonan enseñan su pensamiento.', '/docs/chat'],
-  ['Visuals', 'Describe una landing, un dashboard, un email o un prototipo y el modelo lo construye en HTML. Lo afinas hablando o tocando cada elemento, lo compartes por enlace y lo conviertes en un proyecto React.', '/docs/visuals'],
+  ['Visuals', 'Describe una landing, un dashboard, un email o un prototipo y el modelo lo construye en HTML. Lo afinas hablando o tocando cada elemento, lo compartes por enlace y lo conviertes en un proyecto React. Incluido en Pro y Advance.', '/docs/visuals'],
   ['CLI y app de escritorio', 'Un agente que lee y edita tu proyecto, ejecuta comandos y hace commits, con aprobación paso a paso. Modo plan para explorar sin tocar nada, y Remote para dirigirlo desde el móvil.', '/docs/cli'],
   ['API compatible con OpenAI', 'Cambia la URL base y la clave en el SDK que ya usas. Se paga por tokens con créditos prepago, sin suscripción, y con las tarifas publicadas.', '/docs/api'],
 ];
 
 const PLANES = [
-  ['Gratuito', '$0', null, ['30 mensajes al día', '150 000 tokens al mes', '1 API key']],
-  ['Pro', '$9.90', '/ mes', ['500 mensajes al día', '5 millones de tokens al mes', '5 API keys']],
-  ['Advance', '$24.90', '/ mes', ['Mensajes ilimitados', '20 millones de tokens al mes', '20 API keys']],
+  ['Gratuito', '$0', null, ['30 mensajes al día', '150 000 tokens al mes', 'Chat, CLI y API']],
+  ['Pro', '$9.90', '/ mes', ['500 mensajes al día', '5 millones de tokens al mes', 'Visuals y 5 API keys']],
+  ['Advance', '$24.90', '/ mes', ['Mensajes ilimitados', '20 millones de tokens al mes', 'Visuals y 20 API keys']],
 ];
 
 const FAQ = [
@@ -132,7 +132,7 @@ export default function LandingPage() {
         <section className="landing__bloque">
           <span className="landing__num">04 — Precios</span>
           <h2 className="landing__h2">Planes con límites claros. La API, por tokens.</h2>
-          <p className="landing__p">Todos los planes acceden a todos los modelos. Cancelas cuando quieras desde Ajustes.</p>
+          <p className="landing__p">Todos los planes acceden a todos los modelos; Visuals viene con Pro y Advance. Cancelas cuando quieras desde Ajustes.</p>
           <div className="landing__precios">
             {PLANES.map(([nombre, precio, periodo, lineas]) => (
               <div key={nombre} className="landing__precio">
@@ -154,7 +154,7 @@ export default function LandingPage() {
 
         <section className="landing__final">
           <h2 className="landing__h2">Empieza con el plan Gratuito.</h2>
-          <p className="landing__p">Treinta mensajes al día para probar el chat, Visuals y el CLI. Sin tarjeta.</p>
+          <p className="landing__p">Treinta mensajes al día para probar el chat y el CLI. Sin tarjeta.</p>
           <Link to={user ? '/chat' : '/auth?mode=register'} className="pill-btn pill-btn--primary landing__btn">{user ? 'Ir al chat' : 'Crear cuenta'}</Link>
         </section>
 

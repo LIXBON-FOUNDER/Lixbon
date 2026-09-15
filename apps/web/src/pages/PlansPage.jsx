@@ -1,5 +1,6 @@
 // PlansPage.jsx — página de precios. Con los pagos activos, el plan se cobra en
 // un modal sin salir de lixbon; si no, las tarjetas muestran "Próximamente".
+import { tieneVisuals } from '../lib/planes';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -137,6 +138,7 @@ export default function PlansPage() {
                     p.max_api_keys === -1 ? 'API keys ilimitadas' : `${p.max_api_keys} API key${p.max_api_keys === 1 ? '' : 's'}`,
                     `${p.rate_limit_per_min} peticiones por minuto`,
                     p.allowed_models ? 'Modelos pequeños del clúster' : 'Todos los modelos activos',
+                    ...(tieneVisuals({ plan_id: p.id }) ? ['Visuals: diseños web con IA'] : []),
                   ].map((texto) => (
                     <li key={texto}><IconCheck size={15} /> <span>{texto}</span></li>
                   ))}

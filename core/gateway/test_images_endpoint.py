@@ -42,12 +42,13 @@ class _WS:
 def cliente():
     Base.metadata.create_all(get_engine())
     with get_session() as s:
-        if not s.get(Plan, "free"):
-            s.add(Plan(id="free", name="Gratuito", description="", price_monthly_cents=0,
-                       currency="USD", messages_per_day=30, tokens_per_month=150000,
-                       max_api_keys=1, rate_limit_per_min=1000, allowed_models=None,
-                       priority=0, sort_order=0, is_active=1,
-                       created_at=q.now_iso(), updated_at=q.now_iso()))
+        for pid, nombre in (("free", "Gratuito"), ("pro", "Pro")):
+            if not s.get(Plan, pid):
+                s.add(Plan(id=pid, name=nombre, description="", price_monthly_cents=0,
+                           currency="USD", messages_per_day=30, tokens_per_month=150000,
+                           max_api_keys=1, rate_limit_per_min=1000, allowed_models=None,
+                           priority=0, sort_order=0, is_active=1,
+                           created_at=q.now_iso(), updated_at=q.now_iso()))
     app_mod.init_db = lambda: None
     app_mod.versions.sync_versions_to_db = lambda: None
     app_mod.deps.orquestador.iniciar = lambda: None
@@ -65,6 +66,18 @@ def cliente():
 
 def _nodos(monkeypatch, lista):
     monkeypatch.setattr(app_mod.deps.orquestador, "estado_nodos", lambda: lista)
+
+
+def _plan(email, plan_id):
+    q.set_user_plan(q.get_user_by_email(email)["id"], plan_id)
+
+
+def test_visuals_solo_pro_y_advance(cliente, monkeypatch):
+    _nodos(monkeypatch, [{"id": "gpu-a", "online": True, "score": 90, "metricas": {"image_model": "flux"}}])
+    _plan("images@lixbon.test", "free")
+    r = cliente.post("/api/images/generate", json={"prompt": "un café"})
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "visuals_requires_plan"
+    _plan("images@lixbon.test", "pro")
 
 
 def test_sin_nodos_de_imagen_503(cliente, monkeypatch):

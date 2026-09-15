@@ -58,6 +58,12 @@
 .vis-tipo.is-active { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
 
 .vis-hero__input { width: 100%; }
+.vis-hero__nota { margin: -6px 0 0; font-size: 13px; color: var(--ink-muted); }
+
+.vis-bloqueo { width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius); background: var(--surface-2); text-align: center; }
+.vis-bloqueo p { margin: 0 0 16px; color: var(--ink-soft); line-height: 1.5; }
+.vis-bloqueo strong { color: var(--ink); font-weight: 500; }
+.vis-bloqueo__acciones { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .vis-hero__input .chat-composer { padding: 0; }
 
 /* ── Vista dividida ───────────────────────────────────────────────────── */

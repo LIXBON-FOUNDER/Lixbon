@@ -23,6 +23,7 @@ from core.security.ratelimit import _get_redis, enforce_rate_limit
 logger = logging.getLogger("lixbon.quota")
 
 UNLIMITED = -1
+PLANES_CON_VISUALS = ("pro", "advance")
 
 
 # ── Períodos (UTC) ─────────────────────────────────────────────────────────
@@ -77,6 +78,17 @@ def model_allowed(plan: dict[str, Any], model: str | None) -> bool:
     if not allowed or not model:
         return True
     return any(model.startswith(prefix) for prefix in allowed)
+
+
+def ensure_can_use_visuals(user_data: dict[str, Any], plan: dict[str, Any]) -> None:
+    """Visuals es de Pro y Advance; los admins lo ven siempre."""
+    if user_data.get("role") == "admin" or plan.get("id") in PLANES_CON_VISUALS:
+        return
+    raise HTTPException(status_code=403, detail={
+        "code": "visuals_requires_plan",
+        "scope": "plan",
+        "message": "Visuals está incluido en los planes Pro y Advance. Mejora tu plan para usarlo.",
+    })
 
 
 def ensure_can_chat(user_id: int, plan: dict[str, Any], model: str | None = None) -> None:

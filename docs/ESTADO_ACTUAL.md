@@ -11,6 +11,22 @@
 
 ---
 
+## 0.-3 Visuals solo en Pro y Advance (2026-09-15)
+
+- `core/billing/quota.py`: `PLANES_CON_VISUALS = ("pro", "advance")` y
+  `ensure_can_use_visuals(user_data, plan)` → 403 `visuals_requires_plan`
+  (los admins pasan siempre). Se aplica en `/v1/chat/completions` con
+  `source == "visuals"` (sesión) y en `/api/images/generate` cuando el origen
+  es Visuals. Leer la galería, los archivos, compartir y `lixbon visual <id>`
+  siguen abiertos: un usuario que baja de plan conserva sus diseños.
+- Web: `lib/planes.js` (`tieneVisuals(user)`). La galería muestra un bloque
+  con enlace a `/planes` al usuario Gratuito, `send` redirige a `/planes`, el
+  menú lateral marca «Visuals · Pro» y la portada, `/planes` y `/docs/planes`
+  lo dicen. Los visitantes sin cuenta siguen viendo `/visuals` (es página
+  indexada) con la nota «Incluido en Pro y Advance».
+- De paso: el menú lateral enviaba «Conversaciones» y «Nueva conversación» a
+  `/` (la portada); ahora a `/chat`.
+
 ## 0.-2 Pasarela revisada, SEO y docs (2026-09-15)
 
 - **Pasarela (Stripe)**, tras revisar todos los flujos:

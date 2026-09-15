@@ -7,6 +7,7 @@ import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { tieneVisuals } from '../lib/planes';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { useDismiss } from '../hooks/useDismiss';
 import { api } from '../lib/api';
@@ -249,6 +250,7 @@ export default function VisualsPage() {
   // ── Enviar ─────────────────────────────────────────────────────────────
   const send = async (texto, images = []) => {
     if (!user) { navigate('/auth?mode=register'); return; }
+    if (!tieneVisuals(user)) { navigate('/planes'); return; }
     setPrefill('');
     if (modoImagen) { await generarImagen(texto); return; }
     let chosenModel = model;
@@ -416,6 +418,16 @@ export default function VisualsPage() {
             <div className="vis-hero__inner">
               <h2 className="vis-hero__title">¿Qué diseñamos?</h2>
               <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él o tocándolo en el lienzo.</p>
+              {user && !tieneVisuals(user) ? (
+                <div className="vis-bloqueo">
+                  <p>Visuals está incluido en los planes <strong>Pro</strong> y <strong>Advance</strong>. Tu cuenta tiene el plan {user.plan_name || 'Gratuito'}.</p>
+                  <div className="vis-bloqueo__acciones">
+                    <Link to="/planes" className="pill-btn pill-btn--primary">Ver los planes</Link>
+                    <Link to="/docs/visuals" className="pill-btn">Qué puede hacer Visuals</Link>
+                  </div>
+                </div>
+              ) : (
+              <>
               <div className="vis-tipos">
                 {[...TIPOS, TIPO_IMAGEN].map((t) => (
                   <button key={t.id} className={`vis-tipo ${tipo?.id === t.id ? 'is-active' : ''}`}
@@ -439,6 +451,9 @@ export default function VisualsPage() {
                   tools={tipo?.id !== 'imagen' && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
                   placeholder={tipo ? tipo.hint : 'Una landing para mi cafetería, un dashboard de ventas, un logo para…'} />
               </div>
+              {!user && <p className="vis-hero__nota">Incluido en los planes Pro y Advance.</p>}
+              </>
+              )}
             </div>
           </section>
           {user && (

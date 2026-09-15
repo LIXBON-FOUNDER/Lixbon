@@ -4,6 +4,7 @@
 // colapsado en __rail; ambos se funden con opacidad durante la transición.
 // En compacto (≤860px) el panel deja de ser columna y se comporta como cajón:
 // `compact` llega desde ChatPage y cambia el colapsar por un cerrar.
+import { tieneVisuals } from '../lib/planes';
 import { useTema } from '../hooks/useTema';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -111,7 +112,7 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
 export function Sidebar({
   user, conversations, loadingConversations, activeId, collapsed, onToggleCollapse,
   onRename, onDelete, onLogout, compact = false, open = false, onClose,
-  historyBase = '/c', newPath = '/', seccion = 'chat',
+  historyBase = '/c', newPath = '/chat', seccion = 'chat',
 }) {
   const [historyOpen, setHistoryOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -214,11 +215,12 @@ export function Sidebar({
           <button className="sb-nav" onClick={() => go(newPath)}>
             <IconPlus /> <span>{seccion === 'visuals' ? 'Nuevo diseño' : 'Nueva conversación'}</span>
           </button>
-          <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/'))}>
+          <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/chat'))}>
             <IconChat /> <span>Conversaciones</span>
           </button>
           <button className={`sb-nav ${seccion === 'visuals' ? 'is-active' : ''}`} onClick={() => (seccion === 'visuals' ? setHistoryOpen(true) : go('/visuals'))}>
             <IconLayers /> <span>Visuals</span>
+            {!tieneVisuals(user) && <span className="sb-menu__tag">Pro</span>}
           </button>
           <button className="sb-nav" onClick={() => go('/aplicaciones')}>
             <IconGrid /> <span>Aplicaciones</span>

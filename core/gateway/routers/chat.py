@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from core.gateway import deps
 from core.config import CHAT_THINK, OLLAMA_BASE_URL
 from core.billing import credits
-from core.billing.quota import ensure_can_chat, record_tokens
+from core.billing.quota import ensure_can_chat, ensure_can_use_visuals, record_tokens
 from core.persistence.queries import (
     ensure_conversation,
     find_similar_tasks,
@@ -332,6 +332,8 @@ async def chat_completions(
         # con lo que ya pagan); Gratuito o cuota agotada ⇒ prepago por créditos.
         bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     else:
+        if payload.source == "visuals":
+            ensure_can_use_visuals(user_data, plan)
         ensure_can_chat(user_data["id"], plan, model)  # F5: límites del plan
     save_history = get_user_settings(user_data["id"])["save_history"]
     if payload.no_persist:

@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core.billing.quota import ensure_can_chat, record_tokens
+from core.billing.quota import ensure_can_chat, ensure_can_use_visuals, record_tokens
 from core.gateway import deps
 from core.orchestration.node_link import LOAD_TIMEOUT, NodeLinkError, registro
 from core.persistence.queries import ensure_conversation, get_plan_for_user, save_message
@@ -73,6 +73,8 @@ async def api_images_generate(
             "message": "Ningún nodo online genera imágenes ahora mismo.",
         })
     plan = get_plan_for_user(user_data["id"])
+    if (payload.source or "visuals") == "visuals":
+        ensure_can_use_visuals(user_data, plan)
     ensure_can_chat(user_data["id"], plan)
 
     ultimo_error = "sin nodos"

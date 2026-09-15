@@ -197,8 +197,9 @@ function Visuals() {
       </ul>
 
       <Callout>
-        Visuals consume la cuota de tu plan igual que el chat. Los diseños largos
-        (varias páginas) gastan más tokens: el plan Pro o Advance da margen de sobra.
+        Visuals está incluido en los planes <strong>Pro</strong> y <strong>Advance</strong>
+        y consume la cuota de tu plan igual que el chat. Con el plan Gratuito puedes
+        ver la galería, pero no generar ni editar diseños.
       </Callout>
     </>
   );
@@ -680,12 +681,12 @@ function Planes() {
       <h2>Los tres planes</h2>
       <table className="docs__table">
         <thead>
-          <tr><th>Plan</th><th>Precio</th><th>Mensajes/día</th><th>Tokens/mes</th><th>API keys</th><th>Peticiones/min</th></tr>
+          <tr><th>Plan</th><th>Precio</th><th>Mensajes/día</th><th>Tokens/mes</th><th>API keys</th><th>Peticiones/min</th><th>Visuals</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>Gratuito</strong></td><td>$0</td><td>30</td><td>150 000</td><td>1</td><td>10</td></tr>
-          <tr><td><strong>Pro</strong></td><td>$9.90 / mes</td><td>500</td><td>5 000 000</td><td>5</td><td>60</td></tr>
-          <tr><td><strong>Advance</strong></td><td>$24.90 / mes</td><td>Ilimitados</td><td>20 000 000</td><td>20</td><td>120</td></tr>
+          <tr><td><strong>Gratuito</strong></td><td>$0</td><td>30</td><td>150 000</td><td>1</td><td>10</td><td>No</td></tr>
+          <tr><td><strong>Pro</strong></td><td>$9.90 / mes</td><td>500</td><td>5 000 000</td><td>5</td><td>60</td><td>Sí</td></tr>
+          <tr><td><strong>Advance</strong></td><td>$24.90 / mes</td><td>Ilimitados</td><td>20 000 000</td><td>20</td><td>120</td><td>Sí</td></tr>
         </tbody>
       </table>
       <p>
