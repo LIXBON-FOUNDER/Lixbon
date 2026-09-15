@@ -55,10 +55,14 @@ async def api_list_plans():
 async def api_pricing():
     """Público: tarifas por tokens de la API (para la página de precios y las docs).
     Precios en USD por millón de tokens."""
+    from core.inference.aliases import to_public
+
+    # El prefijo de un modelo con alias sale con su id público (lixbon-1), que es
+    # el que el cliente usa en `model` y el que ve en el catálogo.
     rows = list_model_pricing(active_only=True)
     return {"pricing": [
         {
-            "model_prefix": r["model_prefix"],
+            "model_prefix": to_public(r["model_prefix"]),
             "display_name": r["display_name"],
             "input_usd_per_mtok": r["input_microusd_per_mtok"] / 1_000_000,
             "output_usd_per_mtok": r["output_microusd_per_mtok"] / 1_000_000,
