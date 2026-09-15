@@ -62,3 +62,15 @@ def test_es_la_vigente_sin_registro_previo():
     assert sg._es_la_vigente(None, {"id": "sub_x"})
     assert sg._es_la_vigente({"stripe_subscription_id": None}, {"id": "sub_x"})
     assert not sg._es_la_vigente({"stripe_subscription_id": "sub_a"}, {"id": "sub_b"})
+
+
+def test_a_dict_con_objetos_de_stripe_nuevos():
+    class Nuevo:
+        def to_dict(self):
+            return {"id": "sub_1"}
+
+        def __iter__(self):
+            raise TypeError("Subscription is not iterable")
+
+    assert sg._a_dict(Nuevo()) == {"id": "sub_1"}
+    assert sg._a_dict({"id": "x"}) == {"id": "x"}

@@ -754,11 +754,15 @@ def _meta(objeto) -> dict[str, Any]:
 
 def _a_dict(objeto) -> dict[str, Any]:
     """Los helpers del webhook leen dicts planos; los objetos que devuelve la
-    librería ya no lo son."""
-    try:
-        return objeto.to_dict_recursive()
-    except AttributeError:
-        return dict(objeto)
+    librería ya no lo son. stripe-python ≥ 13 quitó `to_dict_recursive` y sus
+    objetos no se iteran (TypeError), así que se prueba `to_dict` antes."""
+    if isinstance(objeto, dict):
+        return objeto
+    for nombre in ("to_dict_recursive", "to_dict"):
+        metodo = getattr(objeto, nombre, None)
+        if callable(metodo):
+            return metodo()
+    return dict(objeto)
 
 
 # ── Créditos ────────────────────────────────────────────────────────────────
