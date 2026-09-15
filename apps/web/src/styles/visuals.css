@@ -64,6 +64,7 @@
 
 .vis-split {
   --chat-w: clamp(340px, 30vw, 420px);
+  --lienzo-w: calc(100vw - var(--chat-w));
   flex: 1;
   min-height: 0;
   display: grid;
@@ -173,7 +174,10 @@
   background: #fff;
   box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08), 0 20px 50px rgba(0, 0, 0, 0.35);
   flex-shrink: 0;
-  transition: width .2s ease;
+  /* Capa propia: sin ella el recorte redondeado obliga a repintar el iframe
+     en cada scroll. */
+  will-change: transform;
+  isolation: isolate;
 }
 
 .vis-frame iframe {
@@ -279,7 +283,7 @@
 .vis-panel-toggle button.is-active { background: var(--surface-5); color: var(--ink); }
 
 @media (max-width: 900px) {
-  .vis-split { grid-template-columns: 1fr; }
+  .vis-split { grid-template-columns: 1fr; --lienzo-w: 100vw; --stage-pad: 8px; }
   .vis-chat { border-right: 0; }
   .vis-chat > * { width: auto; }
   .vis-split.is-lienzo .vis-chat { display: none; }
@@ -537,7 +541,11 @@
 
 /* Disposición: chat y lienzo ocultables */
 
-.vis-split.is-solo-lienzo { grid-template-columns: 0px 1fr; }
+.vis-split.is-solo-lienzo { grid-template-columns: 0px 1fr; --lienzo-w: 100vw; }
+/* El marco toma su ancho final de golpe y la columna lo destapa al animarse:
+   así el iframe recalcula su layout una vez y no en cada fotograma. */
+.vis-editor .vis-stage { overflow: hidden auto; }
+.vis-editor .vis-frame { width: calc(var(--lienzo-w) - 2 * var(--stage-pad, 16px)); max-width: none; margin-inline: auto; }
 .vis-split.is-solo-lienzo .vis-chat { border-right-color: transparent; }
 .vis-split.is-solo-chat { grid-template-columns: 1fr; }
 .vis-split.is-solo-chat .vis-canvas { display: none; }
