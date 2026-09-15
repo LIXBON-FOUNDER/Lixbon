@@ -332,7 +332,7 @@ export default function ChatPage() {
     });
     if (!ok) return;
     setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (id === routeConvId) navigate('/');
+    if (id === routeConvId) navigate('/chat');
     try {
       await api.delete(`/api/conversations/${id}`);
     } catch {
@@ -351,7 +351,7 @@ export default function ChatPage() {
     if (!ok) return;
     await logout();
     setConversations([]);
-    navigate('/');
+    navigate('/chat');
   };
 
   if (loading) {

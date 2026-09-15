@@ -47,7 +47,7 @@ export default function RemotePage() {
         <Link to="/" className="pubnav__logo"><Logo /></Link>
         <span className="shared__badge">Control remoto</span>
         <div className="pubnav__actions">
-          <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Ir al chat</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Ir al chat</Link>
         </div>
       </header>
 

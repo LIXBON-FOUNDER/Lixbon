@@ -176,7 +176,7 @@ export function Sidebar({
       {/* Contenido completo */}
       <div className="sidebar__body" aria-hidden={collapsed && !compact}>
         <div className="sidebar__header">
-          <Link to="/" className="sidebar__logo" onClick={compact ? onClose : undefined}>
+          <Link to="/chat" className="sidebar__logo" onClick={compact ? onClose : undefined}>
             <Logo />
           </Link>
           <div className="sidebar__header-actions">

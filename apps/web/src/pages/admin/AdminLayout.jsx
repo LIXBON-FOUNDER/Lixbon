@@ -84,7 +84,7 @@ export default function AdminLayout() {
     });
     if (!ok) return;
     await logout();
-    navigate('/');
+    navigate('/chat');
   };
 
   useEffect(() => {
@@ -148,7 +148,7 @@ export default function AdminLayout() {
           })}
         </nav>
 
-        <Link to="/" className="adm__back">
+        <Link to="/chat" className="adm__back">
           <IconChat size={17} />
           <span>Volver al chat</span>
         </Link>

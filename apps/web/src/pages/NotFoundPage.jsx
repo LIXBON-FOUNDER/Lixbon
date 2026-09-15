@@ -28,7 +28,7 @@ export default function NotFoundPage() {
 
           <div className="notfound__actions">
             <Link to="/docs" className="pill-btn pill-btn--outline">Documentación</Link>
-            <Link to="/" className="pill-btn pill-btn--primary">Ir al chat</Link>
+            <Link to="/chat" className="pill-btn pill-btn--primary">Ir al chat</Link>
           </div>
         </div>
       </main>

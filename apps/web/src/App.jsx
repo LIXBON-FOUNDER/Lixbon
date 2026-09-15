@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import GuiasPage from './pages/GuiasPage';
-import { AuthProvider, useAuth } from './hooks/useAuth';
+import { AuthProvider } from './hooks/useAuth';
 import { ConfirmarProvider } from './hooks/useConfirmar';
 import { useViewportHeight } from './hooks/useViewportHeight';
 import { RouteFade } from './components/RouteFade';
@@ -35,22 +35,13 @@ import RemotePage from './pages/RemotePage';
 import NotFoundPage from './pages/NotFoundPage';
 import LegalPage from './pages/LegalPage';
 
-/** / es la portada para quien no tiene sesión y el chat para quien sí. En el
- *  prerender (sin window) siempre es la portada: es lo que ven los buscadores. */
-function Inicio() {
-  const { user, loading } = useAuth();
-  if (user) return <ChatPage />;
-  if (loading && typeof window !== 'undefined') return null;
-  return <LandingPage />;
-}
-
 export function AppRoutes() {
   return (
     <AuthProvider>
       <ConfirmarProvider>
         <RouteFade>
           <Routes>
-              <Route path="/" element={<Inicio />} />
+              <Route path="/" element={<LandingPage />} />
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/guias" element={<GuiasPage />} />
               <Route path="/guias/:slug" element={<GuiasPage />} />

@@ -26,7 +26,7 @@ export default function SharedPage() {
         <header className="pubnav">
           <Link to="/" className="pubnav__logo"><Logo /></Link>
           <div className="pubnav__actions">
-            <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
+            <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
           </div>
         </header>
         <main className="page__body">
@@ -53,7 +53,7 @@ export default function SharedPage() {
         <Link to="/" className="pubnav__logo"><Logo /></Link>
         <span className="shared__badge">Conversación compartida</span>
         <div className="pubnav__actions">
-          <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
         </div>
       </header>
 

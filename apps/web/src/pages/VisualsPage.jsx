@@ -401,7 +401,7 @@ export default function VisualsPage() {
     return (
       <div className="vis-page">
         <header className="vis-top">
-          <Link to="/" className="vis-top__logo" title="Volver al chat"><Logo /></Link>
+          <Link to="/chat" className="vis-top__logo" title="Volver al chat"><Logo /></Link>
           <span className="vis-top__seccion">Visuals</span>
           <div className="vis-top__right">
             {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>{(user.name || user.email || '?')[0].toUpperCase()}</Link>

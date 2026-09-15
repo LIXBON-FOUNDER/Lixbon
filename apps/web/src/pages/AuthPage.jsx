@@ -43,7 +43,7 @@ export default function AuthPage() {
   // Vuelta post-login (p.ej. /remote/<token> desde el QR). Solo rutas internas:
   // un next externo sería un open-redirect.
   const rawNext = params.get('next') || '';
-  const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+  const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/chat';
   const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'forgot'
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -97,7 +97,7 @@ export default function AuthPage() {
         <span className="tab" aria-hidden="true" />
         <form className="auth__card" onSubmit={handleSubmit}>
           <div className="auth__head">
-            <Link to="/" className="auth__logo" aria-label="Volver al chat">
+            <Link to="/" className="auth__logo" aria-label="Inicio">
               <Logo />
             </Link>
             <h1 className="auth__title">{TITULOS[mode]}</h1>

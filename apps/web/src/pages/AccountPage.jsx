@@ -687,8 +687,8 @@ export default function AccountPage() {
   return (
     <div className="page">
       <header className="page__bar">
-        <Link to="/" className="page__logo"><Logo /></Link>
-        <Link to="/" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
+        <Link to="/chat" className="page__logo"><Logo /></Link>
+        <Link to="/chat" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
       </header>
 
       <h1 className="page__title settings__title">Ajustes</h1>

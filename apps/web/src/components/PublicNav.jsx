@@ -57,7 +57,7 @@ export function PublicNav() {
           {!user && (
             <Link to="/auth" className="pubnav__login">Iniciar sesión</Link>
           )}
-          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{user ? 'Ir al chat' : 'Probar lixbon'}</Link>
         </div>
 
         <button
@@ -84,7 +84,7 @@ export function PublicNav() {
         ))}
         <a href={`mailto:${SUPPORT_EMAIL}`} className="pubnav__menu-link">Soporte</a>
         {!user && <Link to="/auth" className="pubnav__menu-link">Iniciar sesión</Link>}
-        <Link to="/" className="pill-btn pill-btn--primary pubnav__menu-cta">Probar lixbon</Link>
+        <Link to="/chat" className="pill-btn pill-btn--primary pubnav__menu-cta">{user ? 'Ir al chat' : 'Probar lixbon'}</Link>
       </div>
     </header>
   );

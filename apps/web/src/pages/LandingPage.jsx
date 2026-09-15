@@ -7,6 +7,7 @@ import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 import { IconArrowLeft, IconBolt, IconChat, IconCode, IconLayers, IconShield, IconTerminal } from '../components/Icons';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
+import { useAuth } from '../hooks/useAuth';
 
 const PRODUCTOS = [
   {
@@ -43,6 +44,7 @@ const FAQ = [
 ];
 
 export default function LandingPage() {
+  const { user } = useAuth();
   const jsonLd = useMemo(() => [
     ORGANIZACION,
     {
@@ -85,10 +87,16 @@ export default function LandingPage() {
             salgan a terceros y sin sorpresas en la factura.
           </p>
           <div className="landing__cta">
-            <Link to="/auth?mode=register" className="pill-btn pill-btn--primary landing__btn">Empezar gratis</Link>
-            <Link to="/chat" className="pill-btn pill-btn--outline landing__btn">Probar el chat sin cuenta</Link>
+            {user ? (
+              <Link to="/chat" className="pill-btn pill-btn--primary landing__btn">Ir al chat</Link>
+            ) : (
+              <>
+                <Link to="/auth?mode=register" className="pill-btn pill-btn--primary landing__btn">Empezar gratis</Link>
+                <Link to="/chat" className="pill-btn pill-btn--outline landing__btn">Probar el chat sin cuenta</Link>
+              </>
+            )}
           </div>
-          <p className="landing__nota">Plan Gratuito con 30 mensajes al día. Sin tarjeta.</p>
+          {!user && <p className="landing__nota">Plan Gratuito con 30 mensajes al día. Sin tarjeta.</p>}
         </section>
 
         <section className="landing__seccion" aria-labelledby="por-que">
@@ -183,7 +191,7 @@ print(resp.choices[0].message.content)`}</code></pre>
         <section className="landing__final">
           <h2 className="landing__h2">Empieza con el plan Gratuito</h2>
           <p className="landing__parrafo">Treinta mensajes al día para probar el chat, Visuals y el CLI. Sin tarjeta.</p>
-          <Link to="/auth?mode=register" className="pill-btn pill-btn--primary landing__btn">Crear cuenta</Link>
+          <Link to={user ? '/chat' : '/auth?mode=register'} className="pill-btn pill-btn--primary landing__btn">{user ? 'Ir al chat' : 'Crear cuenta'}</Link>
         </section>
       </main>
 

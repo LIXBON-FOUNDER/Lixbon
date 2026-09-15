@@ -205,7 +205,8 @@ if WEB_DIST_DIR.exists():
             return FileResponse(str(candidate))
         # Sin cookie de sesión (buscadores, visitantes nuevos) la página pública
         # va ya renderizada: texto y etiquetas SEO en el HTML, sin esperar al JS.
-        # Con sesión se sirve el shell de la SPA, que decide qué pintar.
+        # Con sesión se sirve el shell de la SPA: las páginas públicas cambian
+        # sus botones según el usuario y no conviene un primer pintado a ciegas.
         if auth.SESSION_COOKIE not in request.cookies:
             estatica = (_prerender_dir / path_name.strip("/") / "index.html").resolve()
             if estatica.is_file() and estatica.is_relative_to(_prerender_dir):
