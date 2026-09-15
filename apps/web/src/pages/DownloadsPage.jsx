@@ -6,6 +6,7 @@ import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
+import { PublicFooter } from '../components/PublicFooter';
 import { CodeBlock } from '../components/CodeBlock';
 import { IconDownload, IconTerminal, IconCheck, IconPhone } from '../components/Icons';
 
@@ -181,6 +182,7 @@ export default function DownloadsPage() {
           ¿Buscas cómo usarlo? Lee la <a href="/docs">documentación</a>.
         </p>
       </main>
+      <PublicFooter />
     </div>
   );
 }

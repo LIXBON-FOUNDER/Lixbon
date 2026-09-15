@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
+import { PublicFooter } from '../components/PublicFooter';
 import { PagoPlan } from '../components/pagos/PagoPlan';
 import { IconCheck, IconCard } from '../components/Icons';
 import { SITE_URL, useSeo } from '../lib/seo';
@@ -164,6 +165,7 @@ export default function PlansPage() {
           onCerrar={() => setPagando(null)}
         />
       )}
+      <PublicFooter />
     </div>
   );
 }

@@ -167,6 +167,12 @@ export default function AuthPage() {
               </p>
             )}
             {mode === 'register' && (
+              <p className="auth__switch auth__legal">
+                Al crear la cuenta aceptas los <Link to="/legal/terminos">términos</Link> y la{' '}
+                <Link to="/legal/privacidad">política de privacidad</Link>.
+              </p>
+            )}
+            {mode === 'register' && (
               <p className="auth__switch">
                 ¿Ya tienes cuenta?{' '}
                 <button type="button" onClick={() => switchMode('login')}>Inicia sesión</button>

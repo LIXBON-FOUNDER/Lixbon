@@ -66,8 +66,9 @@ def invalidate_pricing_cache() -> None:
 
 
 def resolve_pricing(model: str | None) -> dict[str, Any]:
-    """Tarifa aplicable al modelo: longest-prefix-match con fallback a '*'.
-    Sin tarifa aplicable → 503 (nunca inferir gratis por accidente)."""
+    """Tarifa aplicable al modelo: longest-prefix-match con fallback a '*' si
+    ese comodín está activo. Sin tarifa → 403: no se cobra un precio que no
+    está publicado, y el modelo queda fuera del cobro por créditos."""
     default = None
     best = None
     for row in _pricing_rows():
@@ -80,9 +81,11 @@ def resolve_pricing(model: str | None) -> dict[str, Any]:
                 best = row
     chosen = best or default
     if not chosen:
-        raise HTTPException(status_code=503, detail={
-            "code": "pricing_unavailable",
-            "message": "El precio de la API no está disponible ahora mismo. Intenta más tarde.",
+        raise HTTPException(status_code=403, detail={
+            "code": "model_not_priced",
+            "message": f"El modelo '{model}' no tiene tarifa publicada y no se puede usar "
+                       "con créditos. Elige uno de la tabla de precios de la API.",
+            "pricing_path": "/docs/precios-api",
         })
     return chosen
 
@@ -111,8 +114,7 @@ def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = N
                     pago (Gratuito) y a Pro/Advance que ya AGOTARON su cuota
                     mensual (recargar créditos para seguir usando la API).
 
-    Lanza 503 (sin tarifa), 429 (rate limit), 403 (modelo) o 402 (sin saldo)."""
-    resolve_pricing(model)  # 503 si no hay tarifas (necesarias para el cobro por créditos)
+    Lanza 429 (rate limit), 403 (modelo no incluido o sin tarifa) o 402 (sin saldo)."""
     enforce_rate_limit(f"user:{user_id}", limit=plan.get("rate_limit_per_min"))
 
     is_paid = plan.get("id") != "free" and int(plan.get("price_monthly_cents") or 0) > 0
@@ -130,6 +132,7 @@ def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = N
         if used < tok_limit:
             return "plan"  # aún dentro de la cuota mensual del plan
         # Cuota del plan agotada: seguir con créditos si tiene saldo
+        resolve_pricing(model)
         balance = get_credit_balance(user_id)
         if balance > CREDITS_MIN_START_MICROUSD:
             return "credits"
@@ -143,7 +146,8 @@ def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = N
             "topup_path": "/account/facturacion",
         })
 
-    # Sin plan de pago (Gratuito): prepago por créditos
+    # Sin plan de pago (Gratuito): prepago por créditos, solo de modelos con tarifa
+    resolve_pricing(model)
     balance = get_credit_balance(user_id)
     if balance <= CREDITS_MIN_START_MICROUSD:
         raise HTTPException(status_code=402, detail={

@@ -1400,3 +1400,43 @@
     flex: 1;
   }
 }
+
+/* ── Legal ───────────────────────────────────────────────────────────── */
+
+.legal {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 8px;
+  width: min(1100px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 24px 0 80px;
+  align-items: start;
+}
+
+.legal__nav { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
+.legal__link {
+  padding: 7px 11px; border-radius: var(--radius-chip);
+  color: var(--ink-soft); font-size: 13.5px; text-decoration: none;
+  transition: background .15s ease, color .15s ease;
+}
+.legal__link:hover { color: var(--ink); background: var(--surface-3); }
+.legal__link.is-active { color: var(--ink); background: var(--surface-4); }
+.legal__cuerpo li + li { margin-top: 6px; }
+
+@media (max-width: 900px) {
+  .legal { grid-template-columns: 1fr; width: calc(100% - 32px); }
+  .legal__nav { position: static; flex-direction: row; flex-wrap: wrap; padding: 0; }
+}
+
+/* ── Pie público ─────────────────────────────────────────────────────── */
+
+.pubfoot {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  width: min(1320px, calc(100% - 64px)); margin: 0 auto; padding: 28px 0 32px;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.06);
+  color: var(--ink-muted); font-size: 12.5px;
+}
+.pubfoot__links { display: flex; gap: 18px; flex-wrap: wrap; }
+.pubfoot__links a { color: var(--ink-soft); text-decoration: none; transition: color .15s ease; }
+.pubfoot__links a:hover { color: var(--ink); }
+@media (max-width: 900px) { .pubfoot { width: calc(100% - 32px); } }

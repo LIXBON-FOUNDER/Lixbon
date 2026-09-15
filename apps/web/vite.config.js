@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { DOCS_INDEX } from './src/pages/docsIndex.js'
+import { LEGAL_INDEX } from './src/pages/legalIndex.js'
 
 const SITE_URL = 'https://lixbon.com'
 
@@ -13,6 +14,7 @@ const RUTAS = [
   { path: '/novedades', priority: '0.6', changefreq: 'weekly' },
   { path: '/docs', priority: '0.8', changefreq: 'weekly' },
   ...DOCS_INDEX.map((s) => ({ path: `/docs/${s.id}`, priority: '0.7', changefreq: 'weekly' })),
+  ...LEGAL_INDEX.map((s) => ({ path: `/legal/${s.id}`, priority: '0.4', changefreq: 'yearly' })),
 ]
 
 function sitemap() {

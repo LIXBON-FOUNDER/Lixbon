@@ -349,3 +349,5 @@
     gap: 10px;
   }
 }
+
+.auth__legal a { color: inherit; text-decoration: underline; }

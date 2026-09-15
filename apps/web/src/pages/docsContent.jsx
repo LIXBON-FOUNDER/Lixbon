@@ -596,8 +596,9 @@ function PreciosApi() {
 
       <h2>Tarifas por modelo</h2>
       <p>
-        Precios en USD por <strong>millón de tokens</strong>. La tarifa se elige por el
-        prefijo del id del modelo; si ninguno coincide aplica la tarifa estándar (<code>*</code>).
+        Precios en USD por <strong>millón de tokens</strong>. Con créditos solo se pueden
+        usar los modelos de esta tabla: un modelo sin tarifa publicada responde{' '}
+        <code>403 model_not_priced</code> en vez de cobrarse a un precio que no conoces.
       </p>
       {error && (
         <p>No se pudieron cargar las tarifas ahora mismo. Intenta de nuevo en unos minutos.</p>
@@ -612,7 +613,7 @@ function PreciosApi() {
             {pricing.map((p) => (
               <tr key={p.model_prefix}>
                 <td>{p.display_name || p.model_prefix}</td>
-                <td><code>{p.model_prefix === '*' ? 'cualquier otro' : p.model_prefix}</code></td>
+                <td><code>{p.model_prefix}</code></td>
                 <td className="num">{fmt(p.input_usd_per_mtok)}</td>
                 <td className="num">{fmt(p.output_usd_per_mtok)}</td>
               </tr>
@@ -785,6 +786,11 @@ function Facturacion() {
         respuesta de Stripe y su webhook) y es idempotente, así que nunca se acredita ni
         se cobra dos veces.
       </p>
+
+      <Callout>
+        Las condiciones completas están en <a href="/legal/reembolsos">Cancelaciones y
+        reembolsos</a> y en los <a href="/legal/terminos">Términos</a>.
+      </Callout>
     </>
   );
 }
@@ -825,6 +831,12 @@ function Privacidad() {
         público; puedes dejar de compartirlo cuando quieras y el enlace deja de
         funcionar al instante.
       </p>
+
+      <Callout>
+        El texto completo está en la <a href="/legal/privacidad">Política de privacidad y
+        tratamiento de datos</a>; las condiciones del servicio, en los{' '}
+        <a href="/legal/terminos">Términos</a>.
+      </Callout>
     </>
   );
 }

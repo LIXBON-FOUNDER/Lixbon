@@ -31,6 +31,7 @@ import DocsPage from './pages/DocsPage';
 import SharedPage from './pages/SharedPage';
 import RemotePage from './pages/RemotePage';
 import NotFoundPage from './pages/NotFoundPage';
+import LegalPage from './pages/LegalPage';
 
 export default function App() {
   useViewportHeight(); // --app-vh: alto real del viewport (teclado móvil)
@@ -73,6 +74,8 @@ export default function App() {
               <Route path="/novedades" element={<ReleasesPage />} />
               <Route path="/docs" element={<DocsPage />} />
               <Route path="/docs/:section" element={<DocsPage />} />
+              <Route path="/legal" element={<Navigate to="/legal/privacidad" replace />} />
+              <Route path="/legal/:doc" element={<LegalPage />} />
               <Route path="/s/:token" element={<SharedPage />} />
               <Route path="/remote" element={<RemotePage />} />
               <Route path="/remote/:token" element={<RemotePage />} />

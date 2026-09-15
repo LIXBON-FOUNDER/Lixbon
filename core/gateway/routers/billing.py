@@ -59,7 +59,8 @@ async def api_pricing():
 
     # El prefijo de un modelo con alias sale con su id público (lixbon-1), que es
     # el que el cliente usa en `model` y el que ve en el catálogo.
-    rows = list_model_pricing(active_only=True)
+    # El comodín '*' es interno: la tabla pública solo lista precios concretos.
+    rows = [r for r in list_model_pricing(active_only=True) if r["model_prefix"] != "*"]
     return {"pricing": [
         {
             "model_prefix": to_public(r["model_prefix"]),

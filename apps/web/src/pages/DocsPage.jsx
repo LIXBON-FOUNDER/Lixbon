@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PublicNav } from '../components/PublicNav';
+import { PublicFooter } from '../components/PublicFooter';
 import { SECTIONS } from './docsContent';
 import { DocsSkeleton } from '../components/Skeleton';
 import { DocsToc } from '../components/DocsToc';
@@ -91,6 +92,7 @@ export default function DocsPage() {
 
         {contentReady && <DocsToc contenedor={cuerpoRef} deps={current.id} />}
       </div>
+      <PublicFooter />
     </div>
   );
 }

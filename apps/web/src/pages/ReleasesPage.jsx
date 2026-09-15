@@ -4,6 +4,7 @@ import { useSeo } from '../lib/seo';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
+import { PublicFooter } from '../components/PublicFooter';
 
 function formatDate(raw) {
   if (!raw) return '';
@@ -71,6 +72,7 @@ export default function ReleasesPage() {
           ¿Quieres instalarla? Ve a <a href="/aplicaciones">Aplicaciones</a>.
         </p>
       </main>
+      <PublicFooter />
     </div>
   );
 }

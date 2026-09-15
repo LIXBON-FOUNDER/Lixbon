@@ -166,12 +166,13 @@ def init_db() -> None:
 
     # ── Seed: tarifa por defecto y packs de créditos (cobro por tokens de la
     #    API). ON CONFLICT DO NOTHING: el admin los edita y nada los pisa.
-    #    Precios en micro-USD por millón de tokens ($0.20 in / $0.60 out). ──
+    #    El comodín '*' se siembra INACTIVO: cobrar un modelo sin tarifa
+    #    publicada no es legal; el admin lo activa a sabiendas si lo quiere. ──
     _pricing_seed = """
         INSERT INTO model_pricing (model_prefix, display_name,
                                    input_microusd_per_mtok, output_microusd_per_mtok,
                                    is_active, sort_order, created_at, updated_at)
-        VALUES ('*', 'Tarifa estándar', 200000, 600000, 1, 999, :ts, :ts)
+        VALUES ('*', 'Tarifa estándar', 300000, 900000, 0, 999, :ts, :ts)
         ON CONFLICT (model_prefix) DO NOTHING
     """
     _packs_seed = """
