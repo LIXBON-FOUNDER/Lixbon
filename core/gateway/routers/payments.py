@@ -101,8 +101,11 @@ def _fallo(exc: Exception, generico: str) -> HTTPException:
     # 502 no: el proxy lo sustituye por su propia página de error y el motivo
     # nunca llega al navegador.
     logger.exception(generico)
+    # El tipo y el texto del error (sin claves) permiten diagnosticar desde el
+    # navegador un fallo que solo ocurre contra la cuenta real de Stripe.
     return HTTPException(status_code=503, detail={
         "code": "gateway_error", "message": generico,
+        "error": f"{type(exc).__name__}: {str(exc)[:200]}",
     })
 
 
