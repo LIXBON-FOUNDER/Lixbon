@@ -268,6 +268,29 @@ export function documentoPreview(archivo, ops = []) {
   return conInspector(archivo.code, ops);
 }
 
+/** Documento autocontenido para «Presentar»: todas las páginas dentro, la
+ *  actual en un iframe y navegación por hash (atrás/adelante funcionan; un
+ *  <a href="otra.html"> llega como lixbon:navigate desde el bridge). */
+export function documentoPresentacion(paginas, inicial, titulo = 'Presentación') {
+  const docs = {};
+  for (const f of paginas) docs[f.name] = documentoPreview(f);
+  const json = JSON.stringify(docs).replace(/<\//g, '<\\/');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(titulo)}</title><style>
+html,body{margin:0;height:100%;background:#0E0E0E}iframe{display:block;width:100%;height:100%;border:0}
+</style></head><body><iframe id="p" sandbox="allow-scripts allow-forms allow-popups allow-modals"></iframe><script>
+var PAGES=${json},INICIAL=${JSON.stringify(inicial || paginas[0]?.name || '')},f=document.getElementById('p');
+function actual(){var h=decodeURIComponent(location.hash.slice(1));return PAGES[h]?h:INICIAL;}
+function render(){f.srcdoc=PAGES[actual()]||'';}
+window.addEventListener('hashchange',render);
+window.addEventListener('message',function(e){var m=e.data||{};if(m.type==='lixbon:navigate'&&PAGES[m.page]&&m.page!==actual())location.hash=m.page;});
+render();
+</script></body></html>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 export const TIPO_IMAGEN = {
   id: 'imagen', label: 'Imagen', hint: 'Describe la imagen: sujeto, estilo, luz, encuadre…', prefijo: '',
 };

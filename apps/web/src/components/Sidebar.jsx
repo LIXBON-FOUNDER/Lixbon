@@ -10,6 +10,7 @@ import { Logo } from './Logo';
 import { planBadge } from '../lib/planColors';
 import { useDismiss } from '../hooks/useDismiss';
 import { HistorySkeleton } from './Skeleton';
+import { Desplegable } from './Desplegable';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
@@ -94,13 +95,13 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
       >
         <IconDots size={14} />
       </button>
-      {menuOpen && menuPos && (
-        <div className="sb-menu" style={{ left: menuPos.left, top: menuPos.top }} role="menu">
+      {menuPos && (
+        <Desplegable abierto={menuOpen} className="sb-menu" style={{ left: menuPos.left, top: menuPos.top }} role="menu">
           <button onClick={startEdit}><IconPencil size={14} /> Renombrar</button>
           <button className="sb-menu__danger" onClick={() => { setMenuOpen(false); onDelete(conv.id); }}>
             <IconTrash size={14} /> Eliminar
           </button>
-        </div>
+        </Desplegable>
       )}
     </div>
   );
@@ -302,8 +303,7 @@ export function Sidebar({
               >
                 <IconGear />
               </button>
-              {profileMenu && (
-                <div className="sb-menu sb-menu--profile" role="menu">
+                <Desplegable abierto={profileMenu} className="sb-menu sb-menu--profile" role="menu">
                   <button onClick={() => { setProfileMenu(false); go('/planes'); }}>
                     <IconBolt size={14} /> Planes
                   </button>
@@ -324,8 +324,7 @@ export function Sidebar({
                   <button onClick={() => { setProfileMenu(false); onLogout(); }}>
                     <IconLogout size={14} /> Cerrar sesión
                   </button>
-                </div>
-              )}
+                </Desplegable>
             </>
           ) : (
             <>

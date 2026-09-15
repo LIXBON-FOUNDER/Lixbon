@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconCheck, IconChevron } from './Icons';
+import { useSalida } from '../hooks/useSalida';
 
 const MARGEN = 8;
 const MAX_ALTO = 280;
@@ -26,6 +27,7 @@ export function Select({
   const menuRef = useRef(null);
 
   const elegida = options.find((o) => o.value === value);
+  const salida = useSalida(abierto);
 
   const abrir = () => {
     if (disabled) return;
@@ -135,11 +137,11 @@ export function Select({
         <IconChevron size={14} open={abierto} className="select__chevron" />
       </button>
 
-      {abierto && createPortal(
+      {salida.montado && createPortal(
         <div
           ref={menuRef}
           id={`${id}-list`}
-          className="select-menu"
+          className={`select-menu ${salida.cerrando ? 'is-cerrando' : ''}`}
           role="listbox"
           aria-label={ariaLabel}
           style={pos || { visibility: 'hidden' }}

@@ -13,7 +13,7 @@ import { descargarBlob } from '../lib/archivos';
 import { crearZip } from '../lib/zip';
 import {
   DESIGN_SYSTEMS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
-  documentoPreview, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
+  documentoPreview, documentoPresentacion, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
   tiempoRelativo,
 } from '../lib/visuals';
 import { Logo } from '../components/Logo';
@@ -21,6 +21,7 @@ import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
 import { Board, DesignSystemPicker, Inspector } from '../components/VisualsPanels';
+import { Desplegable } from '../components/Desplegable';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import {
   IconArrowLeft, IconCheck, IconChevron, IconCode, IconCopy, IconDots, IconDownload, IconExternal, IconFile, IconHistory,
@@ -342,9 +343,10 @@ export default function VisualsPage() {
   const presentar = () => {
     if (!actual) return;
     if (actual.kind === 'image') { window.open(actual.src, '_blank', 'noopener'); return; }
-    const url = URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' }));
-    window.open(url, '_blank', 'noopener');
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    const html = documentoPresentacion(paginas, paginaActual?.name, tituloVisible);
+    // No se revoca: la pestaña navega entre páginas por hash y al volver atrás
+    // el blob tiene que seguir vivo.
+    window.open(URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), '_blank', 'noopener');
   };
   const copiarEnlace = async () => {
     try {
@@ -468,8 +470,7 @@ export default function VisualsPage() {
                 <span>{vista === 'lienzo' ? 'Lienzo' : paginaActual?.name || (paginas.length ? `${paginas.length} páginas` : 'sin páginas aún')}</span>
                 <IconChevron size={13} open={menu === 'paginas'} />
               </button>
-              {menu === 'paginas' && (
-                <div className="vis-menu__panel vis-menu__panel--paginas">
+              <Desplegable abierto={menu === 'paginas'} className="vis-menu__panel vis-menu__panel--paginas">
                   {paginas.length > 1 && (
                     <>
                       <div className="vis-menu__head">Vista</div>
@@ -494,8 +495,7 @@ export default function VisualsPage() {
                   <div className="vis-menu__sep" />
                   <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>Renombrar el diseño</span></button>
                   <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>Todos los diseños</span></Link>
-                </div>
-              )}
+              </Desplegable>
             </Menu>
           )}
           {versiones.length > 0 && (
@@ -503,8 +503,7 @@ export default function VisualsPage() {
               <button className={`vis-chip ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title="Versiones">
                 <IconHistory size={14} /><span>v{indiceVersion + 1}</span><IconChevron size={13} open={menu === 'historial'} />
               </button>
-              {menu === 'historial' && (
-                <div className="vis-menu__panel">
+              <Desplegable abierto={menu === 'historial'} className="vis-menu__panel">
                   <div className="vis-menu__head">Versiones</div>
                   {versiones.map((v, n) => (
                     <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setMenu(null); }}>
@@ -512,8 +511,7 @@ export default function VisualsPage() {
                       <span className="vis-menu__item-text"><strong>Versión {n + 1}</strong><small>{v.kind === 'image' ? 'imagen' : v.nuevas.join(', ')}</small></span>
                     </button>
                   )).reverse()}
-                </div>
-              )}
+              </Desplegable>
             </Menu>
           )}
         </div>
@@ -534,8 +532,7 @@ export default function VisualsPage() {
           <button className="vis-tool" onClick={presentar} disabled={!actual} title="Abrir en una pestaña"><IconExternal size={14} /> Presentar</button>
           <Menu abierto={menu === 'compartir'} onCerrar={() => setMenu(null)}>
             <button className="vis-tool vis-tool--blanco" onClick={() => setMenu(menu === 'compartir' ? null : 'compartir')} disabled={!actual}><IconShare size={14} /> Compartir</button>
-            {menu === 'compartir' && (
-              <div className="vis-menu__panel vis-menu__panel--derecha vis-share">
+            <Desplegable abierto={menu === 'compartir'} className="vis-menu__panel vis-menu__panel--derecha vis-share">
                 <div className="vis-share__head">
                   <strong>Compartir</strong>
                   <button className="icon-btn" onClick={() => setMenu(null)} aria-label="Cerrar"><IconX size={15} /></button>
@@ -577,8 +574,7 @@ export default function VisualsPage() {
                     )}
                   </div>
                 </div>
-              </div>
-            )}
+            </Desplegable>
           </Menu>
         </div>
       </header>
@@ -751,14 +747,12 @@ function Galeria({ conversations, loading, onRename, onDelete }) {
                 </div>
                 <Menu abierto={menuId === c.id} onCerrar={() => setMenuId(null)} className="vis-card__menu">
                   <button className="icon-btn" onClick={() => setMenuId(menuId === c.id ? null : c.id)} aria-label="Más opciones"><IconDots size={16} /></button>
-                  {menuId === c.id && (
-                    <div className="vis-menu__panel vis-menu__panel--derecha">
+                  <Desplegable abierto={menuId === c.id} className="vis-menu__panel vis-menu__panel--derecha">
                       <button className="vis-menu__item" onClick={() => navigate(`/visuals/${c.id}`)}><IconExternal size={15} /><span>Abrir</span></button>
                       <button className="vis-menu__item" onClick={() => { setRenombrando(c.id); setMenuId(null); }}><IconPencil size={15} /><span>Renombrar</span></button>
                       <div className="vis-menu__sep" />
                       <button className="vis-menu__item is-danger" onClick={() => { setMenuId(null); onDelete(c.id); }}><IconTrash size={15} /><span>Eliminar</span></button>
-                    </div>
-                  )}
+                  </Desplegable>
                 </Menu>
               </div>
             </article>

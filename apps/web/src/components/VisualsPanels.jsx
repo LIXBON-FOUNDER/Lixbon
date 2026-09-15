@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DESIGN_SYSTEMS, designSystemPersonalizado } from '../lib/visuals';
 import { IconChevron, IconX } from './Icons';
 import { useDismiss } from '../hooks/useDismiss';
+import { Desplegable } from './Desplegable';
 
 const FORM_VACIO = { nombre: '', primario: '#B4C64E', fondo: '#0E0E0E', texto: '#F2F2F0', fuenteTitulos: 'Inter', fuenteCuerpo: 'Inter', tono: '' };
 
@@ -26,8 +27,7 @@ export function DesignSystemPicker({ value, onChange, compacto = false }) {
         <span className="vis-ds__label">{compacto ? '' : 'Design system: '}{value?.label || 'Libre'}</span>
         <IconChevron size={13} open={abierto} />
       </button>
-      {abierto && (
-        <div className="vis-ds__menu">
+      <Desplegable abierto={abierto} className="vis-ds__menu">
           {!editando ? (
             <>
               {DESIGN_SYSTEMS.map((ds) => (
@@ -59,8 +59,7 @@ export function DesignSystemPicker({ value, onChange, compacto = false }) {
               <button className="vis-tool vis-tool--primary" onClick={guardarPropio}>Usar este</button>
             </div>
           )}
-        </div>
-      )}
+      </Desplegable>
     </div>
   );
 }
