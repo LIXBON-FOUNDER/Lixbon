@@ -251,6 +251,7 @@ textarea::placeholder {
 
 a {
   color: inherit;
+  text-decoration: none;
 }
 
 h1,
@@ -268,7 +269,7 @@ p {
 /* Barras de scroll discretas: parte del relleno, no un elemento más. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2A2A2A transparent;
+  scrollbar-color: var(--surface-5) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -283,12 +284,12 @@ p {
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: var(--radius-round);
-  background: #2A2A2A;
+  background: var(--surface-5);
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #383836;
+  background: var(--ink-faint);
   background-clip: content-box;
 }
 
@@ -366,11 +367,11 @@ p {
 }
 
 .pill-btn--primary:hover:not(:disabled) {
-  background: #FFFFFF;
+  background: var(--primary-hover);
 }
 
 .pill-btn--primary:disabled {
-  background: #2A2A2A;
+  background: var(--surface-5);
   color: var(--ink-label);
 }
 
@@ -395,13 +396,13 @@ p {
    diálogo claro, donde sí hay contraste para llevarlo. */
 .pill-btn.is-danger,
 .pill-btn--outline.is-danger {
-  background: #2A1917;
+  background: var(--danger-soft);
   color: var(--danger-ink);
 }
 
 .pill-btn.is-danger:hover:not(:disabled),
 .pill-btn--outline.is-danger:hover:not(:disabled) {
-  background: #3A211D;
+  background: var(--field-error);
 }
 
 .icon-btn {
@@ -702,18 +703,18 @@ p {
   margin: 0 var(--shell-gap) var(--shell-gap);
   padding: 10px 16px;
   border-radius: var(--radius);
-  background: #241D0C;
+  background: var(--warn-soft);
   font-size: 13px;
   animation: fade-in 0.2s ease;
 }
 
 /* El correo no llegó a salir: es un fallo nuestro, no un recordatorio. */
 .verify-bar.is-error {
-  background: #2A1917;
+  background: var(--danger-soft);
 }
 
 .verify-bar__text {
-  color: #D8C89A;
+  color: var(--warn);
 }
 
 .verify-bar.is-error .verify-bar__text {
@@ -730,7 +731,7 @@ p {
   padding: 0 12px;
   border-radius: var(--radius);
   background: var(--warn);
-  color: #141414;
+  color: var(--on-primary);
   font-size: 12.5px;
   font-weight: 500;
 }

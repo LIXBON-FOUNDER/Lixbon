@@ -60,10 +60,16 @@
 .vis-hero__input { width: 100%; }
 .vis-hero__nota { margin: -6px 0 0; font-size: 13px; color: var(--ink-muted); }
 
-.vis-bloqueo { width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius); background: var(--surface-2); text-align: center; }
-.vis-bloqueo p { margin: 0 0 16px; color: var(--ink-soft); line-height: 1.5; }
-.vis-bloqueo strong { color: var(--ink); font-weight: 500; }
-.vis-bloqueo__acciones { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.vis-bloqueo { display: flex; gap: 18px; width: 100%; max-width: 620px; margin-top: 10px; padding: 24px 26px; border-radius: var(--radius); background: var(--surface-2); text-align: left; }
+.vis-bloqueo__icono { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: var(--radius-round); background: var(--accent-soft); color: var(--accent); }
+.vis-bloqueo__cuerpo { min-width: 0; flex: 1; }
+.vis-bloqueo h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; color: var(--ink); }
+.vis-bloqueo p { margin: 0 0 12px; font-size: 14px; color: var(--ink-soft); line-height: 1.5; }
+.vis-bloqueo ul { margin: 0 0 18px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.vis-bloqueo li { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.45; color: var(--ink-body); }
+.vis-bloqueo li svg { flex: 0 0 auto; margin-top: 3px; color: var(--accent); }
+.vis-bloqueo__acciones { display: flex; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 640px) { .vis-bloqueo { flex-direction: column; gap: 12px; padding: 20px; } }
 .vis-hero__input .chat-composer { padding: 0; }
 
 /* ── Vista dividida ───────────────────────────────────────────────────── */

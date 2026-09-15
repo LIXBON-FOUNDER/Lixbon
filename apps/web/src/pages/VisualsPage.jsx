@@ -420,10 +420,19 @@ export default function VisualsPage() {
               <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él o tocándolo en el lienzo.</p>
               {user && !tieneVisuals(user) ? (
                 <div className="vis-bloqueo">
-                  <p>Visuals está incluido en los planes <strong>Pro</strong> y <strong>Advance</strong>. Tu cuenta tiene el plan {user.plan_name || 'Gratuito'}.</p>
-                  <div className="vis-bloqueo__acciones">
-                    <Link to="/planes" className="pill-btn pill-btn--primary">Ver los planes</Link>
-                    <Link to="/docs/visuals" className="pill-btn">Qué puede hacer Visuals</Link>
+                  <span className="vis-bloqueo__icono"><IconLayers size={20} /></span>
+                  <div className="vis-bloqueo__cuerpo">
+                    <h3>Incluido en Pro y Advance</h3>
+                    <p>Tu cuenta tiene el plan {user.plan_name || 'Gratuito'}. Con Pro o Advance, Visuals te deja:</p>
+                    <ul>
+                      <li><IconCheck size={14} /> Landings, dashboards, emails y prototipos en HTML, de una descripción.</li>
+                      <li><IconCheck size={14} /> Afinar cada elemento hablando con el modelo o tocándolo en el lienzo.</li>
+                      <li><IconCheck size={14} /> Compartir por enlace y convertirlo en un proyecto React desde el CLI.</li>
+                    </ul>
+                    <div className="vis-bloqueo__acciones">
+                      <Link to="/planes" className="pill-btn pill-btn--primary">Ver los planes</Link>
+                      <Link to="/docs/visuals" className="pill-btn pill-btn--outline">Cómo funciona</Link>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -456,7 +465,7 @@ export default function VisualsPage() {
               )}
             </div>
           </section>
-          {user && (
+          {user && (tieneVisuals(user) || conversations.length > 0) && (
             <Galeria conversations={conversations} loading={convsLoading}
               onRename={renameConversation} onDelete={deleteConversation} />
           )}
