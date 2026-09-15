@@ -125,6 +125,9 @@ def change_plan(user: dict[str, Any], new_plan_id: str,
     items = getattr(getattr(actual_stripe, "items", None), "data", None) or []
     if not items:
         raise ValueError("sin_suscripcion")
+    # Una bajada no factura: latest_invoice sigue siendo la del cobro anterior
+    # y no hay que enseñarla como si fuera de hoy.
+    factura_previa = _id_de(getattr(actual_stripe, "latest_invoice", None))
 
     # La tarjeta elegida en el diálogo pasa a ser la de la suscripción ANTES de
     # facturar la diferencia; si no, la prorrata se cobraba a la tarjeta
@@ -192,18 +195,24 @@ def change_plan(user: dict[str, Any], new_plan_id: str,
         "changed": True,
         "upgrade": sube,
         "plan_name": plan["name"],
-        **_prorrateo_del_cambio(stripe, cambiada, sub.get("stripe_customer_id"), plan),
+        **_prorrateo_del_cambio(stripe, cambiada, sub.get("stripe_customer_id"), plan,
+                                factura_previa),
     }
 
 
+def _id_de(objeto) -> str | None:
+    return objeto if isinstance(objeto, str) else getattr(objeto, "id", None)
+
+
 def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None,
-                          plan: dict[str, Any]) -> dict[str, Any]:
+                          plan: dict[str, Any], factura_previa: str | None = None) -> dict[str, Any]:
     """Qué pasó con el dinero al cambiar de plan.
 
     Subir factura la diferencia y la cobra ahí mismo. Bajar no devuelve dinero:
     deja a favor lo no consumido y lo descuenta de la siguiente factura. Decir
     solo "aprobado" deja al usuario sin saber cuál de las dos cosas ocurrió."""
-    cobrado = _cobro_del_cambio(stripe, suscripcion)
+    hay_factura_nueva = _id_de(getattr(suscripcion, "latest_invoice", None)) != factura_previa
+    cobrado = _cobro_del_cambio(stripe, suscripcion) if hay_factura_nueva else None
     if cobrado and cobrado.get("amount"):
         return {"charged": True, **cobrado}
 
@@ -221,8 +230,7 @@ def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None,
 def _cobro_del_cambio(stripe, suscripcion) -> dict[str, Any] | None:
     import time
 
-    factura = getattr(suscripcion, "latest_invoice", None)
-    factura_id = factura if isinstance(factura, str) else getattr(factura, "id", None)
+    factura_id = _id_de(getattr(suscripcion, "latest_invoice", None))
     intento = None
     # Con always_invoice el cobro de la prorrata se lanza al devolver la
     # suscripción y puede tardar un instante en colgar de la factura.
