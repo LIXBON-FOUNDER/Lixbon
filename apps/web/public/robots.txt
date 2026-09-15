@@ -5,6 +5,7 @@ Disallow: /admin
 Disallow: /auth
 Disallow: /reset-password
 Disallow: /c/
+Disallow: /chat
 Disallow: /s/
 Disallow: /remote
 Disallow: /visuals/

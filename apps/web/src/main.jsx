@@ -10,6 +10,7 @@ import './styles/account.css';
 import './styles/admin.css';
 import './styles/pagos.css';
 import './styles/public.css';
+import './styles/landing.css';
 import './styles/remote.css';
 // El último: solo añade movimiento a lo anterior (ver motion.css).
 import './styles/motion.css';

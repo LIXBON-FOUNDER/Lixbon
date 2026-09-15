@@ -31,11 +31,27 @@ function setJsonLd(datos) {
   el.textContent = JSON.stringify(datos);
 }
 
+function etiquetas({ title, description, path, noindex, jsonLd }) {
+  const titulo = title ? `${title} · ${SITE_NAME}` : `${SITE_NAME} — IA en tus propias GPUs`;
+  const url = `${SITE_URL}${path === '/' ? '' : path.replace(/\/$/, '')}`;
+  return { titulo, description, url, noindex, jsonLd };
+}
+
+// En el prerender no hay efectos: la página deja aquí lo que pidió y el
+// script lo inyecta en el <head> del HTML estático.
+let seoDelRender = null;
+export function tomarSeoDelRender() {
+  const s = seoDelRender;
+  seoDelRender = null;
+  return s;
+}
+
 export function useSeo({ title, description = DESCRIPCION_BASE, path, noindex = false, jsonLd = null } = {}) {
+  if (typeof window === 'undefined') {
+    seoDelRender = etiquetas({ title, description, path: path ?? '/', noindex, jsonLd });
+  }
   useEffect(() => {
-    const titulo = title ? `${title} · ${SITE_NAME}` : `${SITE_NAME} — IA en tus propias GPUs`;
-    const ruta = path ?? window.location.pathname;
-    const url = `${SITE_URL}${ruta === '/' ? '' : ruta.replace(/\/$/, '')}`;
+    const { titulo, url } = etiquetas({ title, description, path: path ?? window.location.pathname, noindex, jsonLd });
 
     document.title = titulo;
     meta('meta[name="description"]', { name: 'description', content: description });
@@ -57,10 +73,16 @@ export function useSeo({ title, description = DESCRIPCION_BASE, path, noindex = 
   }, [title, description, path, noindex, jsonLd]);
 }
 
+// Perfiles públicos de la marca (GitHub, LinkedIn, X…): Google los usa para
+// asociar el sitio a la entidad. Rellenar con las URL reales.
+export const PERFILES = [];
+
 export const ORGANIZACION = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
   name: SITE_NAME,
   url: SITE_URL,
   logo: `${SITE_URL}/icon-512.png`,
+  email: 'soporte@lixbon.com',
+  ...(PERFILES.length ? { sameAs: PERFILES } : {}),
 };

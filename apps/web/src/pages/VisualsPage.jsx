@@ -58,7 +58,7 @@ function Menu({ abierto, onCerrar, children, className = '' }) {
 }
 
 export default function VisualsPage() {
-  useSeo({ title: 'Visuals: diseña webs, dashboards y prototipos con IA', description: 'Describe una landing, un dashboard, un email, un logo o un prototipo y el modelo lo construye en HTML; afínalo en el lienzo, compártelo por enlace o conviértelo en un proyecto React.', path: '/visuals', noindex: window.location.pathname !== '/visuals' });
+  useSeo({ title: 'Visuals: diseña webs, dashboards y prototipos con IA', description: 'Describe una landing, un dashboard, un email, un logo o un prototipo y el modelo lo construye en HTML; afínalo en el lienzo, compártelo por enlace o conviértelo en un proyecto React.', path: '/visuals', noindex: typeof window !== 'undefined' && window.location.pathname !== '/visuals' });
   const { user, loading } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();

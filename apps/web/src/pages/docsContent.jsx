@@ -64,7 +64,7 @@ function PrimerosPasos() {
 
       <h2>1. Crea una cuenta</h2>
       <p>
-        Entra al <a href="/">chat</a> y regístrate con tu correo, nombre y una
+        Entra al <a href="/chat">chat</a> y regístrate con tu correo, nombre y una
         contraseña. Al registrarte recibes el plan <strong>Gratuito</strong>, suficiente
         para probar la plataforma: 30 mensajes al día y 150 000 tokens al mes.
       </p>
@@ -105,7 +105,7 @@ function ChatWeb() {
     <>
       <h1>Chat web</h1>
       <p className="docs__lead">
-        El chat de <a href="/">lixbon.com</a> es la puerta de entrada: conversaciones con
+        El chat de <a href="/chat">lixbon.com</a> es la puerta de entrada: conversaciones con
         streaming, historial, adjuntos y búsqueda web, sin instalar nada.
       </p>
 
@@ -357,7 +357,7 @@ function Desktop() {
       <Callout>
         Si aún no ves un instalador en Aplicaciones, es que todavía no se ha publicado
         una versión; mientras tanto puedes usar el <a href="/docs/cli">CLI</a> o el{' '}
-        <a href="/">chat web</a>.
+        <a href="/chat">chat web</a>.
       </Callout>
     </>
   );

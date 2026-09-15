@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './hooks/useAuth';
+import LandingPage from './pages/LandingPage';
+import GuiasPage from './pages/GuiasPage';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ConfirmarProvider } from './hooks/useConfirmar';
 import { useViewportHeight } from './hooks/useViewportHeight';
 import { RouteFade } from './components/RouteFade';
@@ -33,16 +35,25 @@ import RemotePage from './pages/RemotePage';
 import NotFoundPage from './pages/NotFoundPage';
 import LegalPage from './pages/LegalPage';
 
-export default function App() {
-  useViewportHeight(); // --app-vh: alto real del viewport (teclado móvil)
+/** / es la portada para quien no tiene sesión y el chat para quien sí. En el
+ *  prerender (sin window) siempre es la portada: es lo que ven los buscadores. */
+function Inicio() {
+  const { user, loading } = useAuth();
+  if (user) return <ChatPage />;
+  if (loading && typeof window !== 'undefined') return null;
+  return <LandingPage />;
+}
 
+export function AppRoutes() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <ConfirmarProvider>
-          <RouteFade>
-            <Routes>
-              <Route path="/" element={<ChatPage />} />
+    <AuthProvider>
+      <ConfirmarProvider>
+        <RouteFade>
+          <Routes>
+              <Route path="/" element={<Inicio />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/guias" element={<GuiasPage />} />
+              <Route path="/guias/:slug" element={<GuiasPage />} />
               <Route path="/c/:id" element={<ChatPage />} />
               <Route path="/visuals" element={<VisualsPage />} />
               <Route path="/visuals/:id" element={<VisualsPage />} />
@@ -83,10 +94,18 @@ export default function App() {
               <Route path="/login" element={<Navigate to="/auth" replace />} />
               <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />
               <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </RouteFade>
-        </ConfirmarProvider>
-      </AuthProvider>
+          </Routes>
+        </RouteFade>
+      </ConfirmarProvider>
+    </AuthProvider>
+  );
+}
+
+export default function App() {
+  useViewportHeight(); // --app-vh: alto real del viewport (teclado móvil)
+  return (
+    <BrowserRouter>
+      <AppRoutes />
     </BrowserRouter>
   );
 }

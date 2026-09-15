@@ -17,7 +17,7 @@ export default function DownloadsPage() {
   const [os, setOs] = useState('windows');
 
   // Origen del gateway (para los comandos de instalación del CLI)
-  const base = useMemo(() => window.location.origin, []);
+  const base = useMemo(() => (typeof window === 'undefined' ? 'https://lixbon.com' : window.location.origin), []);
 
   useEffect(() => {
     api.get('/api/updates/latest/stable')

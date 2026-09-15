@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -193,14 +193,23 @@ class _AssetsConHash(StaticFiles):
 if WEB_DIST_DIR.exists():
     app.mount("/assets", _AssetsConHash(directory=str(WEB_DIST_DIR / "assets")), name="assets")
 
+    _prerender_dir = WEB_DIST_DIR / "_prerender"
+
     @app.get("/{path_name:path}")
-    async def serve_frontend(path_name: str):
+    async def serve_frontend(path_name: str, request: Request):
         # /docs y /openapi.json ahora viven bajo /api/*, así que /docs es la SPA
-        if path_name.startswith(("api/", "v1/", "ws/")):
+        if path_name.startswith(("api/", "v1/", "ws/", "_prerender/")):
             raise HTTPException(status_code=404, detail="Not Found")
         candidate = (WEB_DIST_DIR / path_name).resolve()
         if path_name and candidate.is_file() and candidate.is_relative_to(WEB_DIST_DIR):
             return FileResponse(str(candidate))
+        # Sin cookie de sesión (buscadores, visitantes nuevos) la página pública
+        # va ya renderizada: texto y etiquetas SEO en el HTML, sin esperar al JS.
+        # Con sesión se sirve el shell de la SPA, que decide qué pintar.
+        if auth.SESSION_COOKIE not in request.cookies:
+            estatica = (_prerender_dir / path_name.strip("/") / "index.html").resolve()
+            if estatica.is_file() and estatica.is_relative_to(_prerender_dir):
+                return FileResponse(str(estatica), headers={"Cache-Control": "no-cache"})
         # El index es lo único que nombra los assets del despliegue actual. Sin
         # esto el navegador se queda con el de la versión anterior y pide unos
         # archivos que ya no existen: pantalla en blanco tras cada despliegue.

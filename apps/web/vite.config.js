@@ -1,21 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { DOCS_INDEX } from './src/pages/docsIndex.js'
-import { LEGAL_INDEX } from './src/pages/legalIndex.js'
+import { RUTAS_PUBLICAS, SITE_URL } from './src/rutasPublicas.js'
 
-const SITE_URL = 'https://lixbon.com'
-
-// Rutas públicas indexables; las privadas (cuenta, admin, chats) van en robots.txt.
-const RUTAS = [
-  { path: '/', priority: '1.0', changefreq: 'weekly' },
-  { path: '/planes', priority: '0.9', changefreq: 'monthly' },
-  { path: '/visuals', priority: '0.8', changefreq: 'monthly' },
-  { path: '/aplicaciones', priority: '0.8', changefreq: 'monthly' },
-  { path: '/novedades', priority: '0.6', changefreq: 'weekly' },
-  { path: '/docs', priority: '0.8', changefreq: 'weekly' },
-  ...DOCS_INDEX.map((s) => ({ path: `/docs/${s.id}`, priority: '0.7', changefreq: 'weekly' })),
-  ...LEGAL_INDEX.map((s) => ({ path: `/legal/${s.id}`, priority: '0.4', changefreq: 'yearly' })),
-]
+const RUTAS = RUTAS_PUBLICAS
 
 function sitemap() {
   return {

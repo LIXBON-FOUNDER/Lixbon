@@ -52,7 +52,7 @@ function Sources({ sources, queries }) {
 }
 
 export default function ChatPage() {
-  useSeo({ path: '/', noindex: window.location.pathname !== '/' });
+  useSeo({ title: 'Chat', path: '/chat', noindex: true });
   const { user, loading, logout } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();

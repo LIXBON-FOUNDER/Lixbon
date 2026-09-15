@@ -14,8 +14,10 @@ export default function DocsPage() {
   const { section } = useParams();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [contentReady, setContentReady] = useState(false);
-  const base = useMemo(() => window.location.origin, []);
+  // En el prerender no hay window ni efectos: el contenido va desde el principio.
+  const enServidor = typeof window === 'undefined';
+  const [contentReady, setContentReady] = useState(enServidor);
+  const base = useMemo(() => (enServidor ? 'https://lixbon.com' : window.location.origin), [enServidor]);
   const cuerpoRef = useRef(null);
 
   const current = SECTIONS.find((s) => s.id === section) || SECTIONS[0];

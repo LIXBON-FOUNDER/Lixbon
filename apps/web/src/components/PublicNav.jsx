@@ -11,6 +11,7 @@ import { IconMenu, IconX } from './Icons';
 
 const LINKS = [
   { to: '/docs', label: 'Documentación' },
+  { to: '/guias', label: 'Guías' },
   { to: '/aplicaciones', label: 'Aplicaciones' },
   { to: '/planes', label: 'Planes' },
 ];
@@ -31,7 +32,7 @@ export function PublicNav() {
 
   return (
     <header className="pubnav" ref={navRef}>
-      <Link to="/" className="pubnav__logo"><Logo /></Link>
+      <Link to="/" className="pubnav__logo" aria-label="Inicio"><Logo /></Link>
 
       <nav className="pubnav__links">
         {LINKS.map((l) => (
@@ -56,7 +57,7 @@ export function PublicNav() {
           {!user && (
             <Link to="/auth" className="pubnav__login">Iniciar sesión</Link>
           )}
-          <Link to="/" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
         </div>
 
         <button
