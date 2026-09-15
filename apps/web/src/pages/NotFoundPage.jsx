@@ -1,10 +1,12 @@
 // NotFoundPage.jsx — la ruta que no existe (comodín `*` en App.jsx).
 // El 404 gigante es relleno, no texto: la jerarquía la hace la superficie.
+import { useSeo } from '../lib/seo';
 import { Link, useLocation } from 'react-router-dom';
 import { PublicNav } from '../components/PublicNav';
 import { ClusterCaido } from '../components/ClusterCaido';
 
 export default function NotFoundPage() {
+  useSeo({ title: 'Página no encontrada', noindex: true });
   const { pathname } = useLocation();
 
   return (

@@ -110,6 +110,11 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
 
     actual = get_plan(sub["plan_id"]) if sub.get("plan_id") else None
     if actual and plan["id"] == actual["id"]:
+        if sub.get("cancel_at_period_end"):
+            resume_subscription(user)
+            return {"status": "succeeded", "succeeded": True, "requires_action": False,
+                    "changed": False, "resumed": True, "charged": False, "amount": 0.0,
+                    "plan_name": plan["name"]}
         raise ValueError("mismo_plan")
     sube = not actual or plan["price_monthly_cents"] > actual["price_monthly_cents"]
 
@@ -120,13 +125,44 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
     if not items:
         raise ValueError("sin_suscripcion")
 
+    # Subir: pending_if_incomplete deja el cambio en espera si el banco pide
+    # 3-D Secure (error_if_incomplete lo rechazaba sin más, y con esas tarjetas
+    # nadie podía mejorar de plan); el navegador confirma el cobro y Stripe
+    # aplica el cambio al pagarse la factura. No admite metadata.
     cambiada = stripe.Subscription.modify(
         sub_id,
         items=[{"id": items[0].id, "price": plan["stripe_price_id"]}],
         proration_behavior="always_invoice" if sube else "create_prorations",
-        payment_behavior="error_if_incomplete" if sube else "allow_incomplete",
-        metadata={"lixbon_user_id": str(user["id"]), "plan_id": new_plan_id},
+        payment_behavior="pending_if_incomplete" if sube else "allow_incomplete",
+        expand=["latest_invoice"],
     )
+    if getattr(cambiada, "pending_update", None):
+        intento, secreto = _cobro_de_factura(stripe, getattr(cambiada, "latest_invoice", None))
+        if secreto:
+            return {
+                "status": getattr(intento, "status", None) or "requires_action",
+                "succeeded": False,
+                "requires_action": True,
+                "client_secret": secreto,
+                "subscription_id": sub_id,
+                "changed": True,
+                "upgrade": True,
+                "plan_name": plan["name"],
+            }
+        logger.error(f"Cambio de plan pendiente en {sub_id} sin secreto para confirmar")
+        return {
+            "status": "pending", "succeeded": False, "requires_action": False,
+            "subscription_id": sub_id, "plan_name": plan["name"],
+            "titulo": "El cambio quedó a la espera",
+            "decline_message": "El banco pide confirmar el cobro y Stripe no devolvió "
+                               "con qué hacerlo desde aquí. Revisa Ajustes → Facturación "
+                               "en unos segundos antes de volver a intentarlo.",
+        }
+    try:
+        stripe.Subscription.modify(
+            sub_id, metadata={"lixbon_user_id": str(user["id"]), "plan_id": new_plan_id})
+    except Exception as exc:
+        logger.info(f"Sin metadata en la suscripción {sub_id}: {exc}")
     apply_stripe_subscription(
         user["id"], new_plan_id,
         customer_id=sub.get("stripe_customer_id"),
@@ -761,8 +797,29 @@ def resolve_payment(user: dict[str, Any], payment_intent_id: str) -> dict[str, A
             if meta.get("keep_pm") == "0":
                 _olvidar_tarjeta(stripe, user, getattr(intento, "payment_method", "") or "")
     else:
+        _esperar_cambio_pendiente(stripe, user)
         sync_subscription(user)
     return _resultado(intento)
+
+
+def _esperar_cambio_pendiente(stripe, user: dict[str, Any], intentos: int = 4) -> None:
+    """Tras confirmar el cobro de una mejora de plan, Stripe aplica el
+    pending_update al marcar pagada la factura, unos instantes después. Releer
+    antes de eso dejaría el plan viejo en la BD hasta que llegue el webhook."""
+    import time
+
+    sub = get_subscription(user["id"])
+    sub_id = (sub or {}).get("stripe_subscription_id")
+    if not sub_id:
+        return
+    for _ in range(intentos):
+        try:
+            if not getattr(stripe.Subscription.retrieve(sub_id), "pending_update", None):
+                return
+        except Exception as exc:
+            logger.warning(f"No se pudo releer la suscripción {sub_id}: {exc}")
+            return
+        time.sleep(0.75)
 
 
 _CONCEPTOS_STRIPE = {
@@ -1055,6 +1112,13 @@ def _user_id_from_subscription(stripe, subscription: dict[str, Any]) -> int | No
     return user["id"] if user else None
 
 
+def _es_la_vigente(anterior: dict[str, Any] | None, subscription: dict[str, Any]) -> bool:
+    """Un evento solo puede tumbar el plan si habla de la suscripción que la BD
+    tiene como vigente (o si no hay ninguna registrada)."""
+    vigente = (anterior or {}).get("stripe_subscription_id")
+    return not vigente or vigente == subscription.get("id")
+
+
 def _plan_from_subscription(subscription: dict[str, Any]) -> dict[str, Any] | None:
     items = (subscription.get("items") or {}).get("data") or []
     if not items:
@@ -1153,6 +1217,13 @@ def handle_event(event: dict[str, Any]) -> None:
         active = status in ("active", "trialing", "past_due")
         anterior = get_subscription(user_id)
         if not active:
+            # incomplete es un alta que aún no se ha pagado: no hay nada que
+            # degradar, y el evento puede llegar después de que el navegador ya
+            # confirmara el cobro. Y una suscripción distinta de la vigente
+            # (una vieja que caduca) tampoco toca el plan actual.
+            if status == "incomplete" or not _es_la_vigente(anterior, obj):
+                logger.info(f"[webhook] {etype} {status} ignorado para user {user_id}")
+                return
             downgrade_to_free(user_id)
         else:
             fin_de_ciclo = _period_end_from_subscription(obj)
@@ -1171,6 +1242,9 @@ def handle_event(event: dict[str, Any]) -> None:
         user_id = _user_id_from_subscription(stripe, obj)
         if user_id:
             anterior = get_subscription(user_id)  # qué plan termina, antes de perderlo
+            if not _es_la_vigente(anterior, obj):
+                logger.info(f"[webhook] deleted de otra suscripción ignorado (user {user_id})")
+                return
             downgrade_to_free(user_id)
             log_audit_event("subscription_canceled", user_id=user_id)
             _avisar_cancelacion(user_id, obj, anterior)
@@ -1197,6 +1271,13 @@ def handle_event(event: dict[str, Any]) -> None:
                             pack_id=pack["id"], amount_microusd=pack["credit_microusd"])
         else:
             logger.info(f"[webhook] compra de créditos ya acreditada ({obj.get('id')})")
+        # Quien no marcó «guardar» y cerró la pestaña antes de que la web
+        # llamara a /resolve se quedaría con la tarjeta guardada.
+        if meta.get("keep_pm") == "0" and not meta.get("auto"):
+            usuario = get_user_by_id(user_id)
+            pm = obj.get("payment_method")
+            if usuario and isinstance(pm, str):
+                _olvidar_tarjeta(stripe, usuario, pm)
 
     elif etype == "payment_method.detached":
         # La tarjeta pudo borrarla el propio Stripe (caducada, disputa): la

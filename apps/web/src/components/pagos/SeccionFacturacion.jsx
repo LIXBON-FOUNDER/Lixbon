@@ -174,6 +174,12 @@ export function SeccionFacturacion({ plan }) {
                 : `Se renueva el ${fmtFecha(billing.current_period_end)}`}
             </span>
           )}
+          {billing?.status === 'past_due' && (
+            <p className="set-aviso is-warn" role="alert">
+              El último cobro no entró. Stripe lo reintenta unos días; si sigue fallando, el plan
+              pasa a Gratuito. Cambia la tarjeta predeterminada o paga la factura desde el correo que te llegó.
+            </p>
+          )}
         </div>
         <Link to="/planes" className="pill-btn pill-btn--primary set-btn">
           <IconBolt size={15} /> {pagado ? 'Cambiar plan' : 'Mejorar plan'}

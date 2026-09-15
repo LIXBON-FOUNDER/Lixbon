@@ -1,5 +1,6 @@
 // ResetPasswordPage.jsx — establece la nueva contraseña desde el enlace del
 // email (/reset-password?token=...). El backend rota las API keys al cambiarla.
+import { useSeo } from '../lib/seo';
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { FloatingField } from '../components/FloatingField';
@@ -8,6 +9,7 @@ import { ClusterFondo } from '../components/ClusterFondo';
 import { api } from '../lib/api';
 
 export default function ResetPasswordPage() {
+  useSeo({ title: 'Restablecer contraseña', noindex: true });
   const [params] = useSearchParams();
   const token = params.get('token') || '';
   const [password, setPassword] = useState('');

@@ -1,5 +1,6 @@
 // AccountPage.jsx — "Ajustes": sección con sidebar interno (General, Cuenta,
 // Privacidad, Facturación, Uso). Reemplaza la antigua vista plana de Mi cuenta.
+import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FiCamera } from 'react-icons/fi';
@@ -625,6 +626,7 @@ function UsoSection({ usage, daily, plan }) {
 // ── Página ──────────────────────────────────────────────────────────────
 
 export default function AccountPage() {
+  useSeo({ title: 'Ajustes', noindex: true });
   const { user, setUser, loading, logout } = useAuth();
   const navigate = useNavigate();
   const { section } = useParams();

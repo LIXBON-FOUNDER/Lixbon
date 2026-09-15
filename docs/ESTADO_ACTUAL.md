@@ -11,6 +11,21 @@
 
 ---
 
+## 0.-2 Pasarela revisada, SEO y docs (2026-09-15)
+
+- **Pasarela (Stripe)**, tras revisar todos los flujos:
+  - `get_plan_for_user` aceptaba solo `status == active`: un `past_due` (Stripe reintentando el cobro) o `trialing` degradaba al Gratuito al instante. Ahora `active|trialing|past_due` conservan el plan; el webhook lo baja si Stripe cancela.
+  - **Mejora de plan con 3-D Secure**: `change_plan` usaba `error_if_incomplete`, que rechaza la mejora si el banco pide confirmar (nadie con esas tarjetas podía subir de plan). Ahora `pending_if_incomplete` + `expand=latest_invoice`: si queda `pending_update`, devuelve `requires_action` + `client_secret`; el navegador confirma y `/resolve` espera (`_esperar_cambio_pendiente`, ≤3 s) a que Stripe aplique el cambio antes de `sync_subscription`. `/resolve` pasó a endpoint síncrono (threadpool) para no bloquear el bucle. La metadata se pone en una segunda llamada (pending no la admite).
+  - **Webhook**: `customer.subscription.*` con `incomplete` ya no degrada (alta aún sin pagar; llegaba tarde y pisaba el plan recién confirmado), y ningún evento toca el plan si habla de otra suscripción distinta de la vigente en BD (`_es_la_vigente`). `payment_intent.succeeded` de un pack con `keep_pm=0` suelta la tarjeta aunque la web no llegara a `/resolve`.
+  - Mismo plan con `cancel_at_period_end` → `subscribe` lo reactiva en vez de fallar con `mismo_plan`.
+  - `GET /api/billing/status` devuelve `status`; Facturación avisa cuando es `past_due`.
+  - Web: `DialogoPago.reintentar` pide un SetupIntent nuevo y relee las tarjetas (el anterior ya estaba consumido y el formulario fallaba al reintentar).
+  - Tests: `core/billing/test_stripe_webhook_guards.py`.
+- **SEO**: `lib/seo.js` (`useSeo`: título, description, robots, canónica, OG/Twitter y JSON-LD por ruta; privadas con `noindex`), metas base en `index.html`, `public/robots.txt`, `sitemap.xml` generado en el build (`vite.config.js` a partir de `docsIndex.js`), `SoftwareApplication` con `Offer` por plan en `/planes`.
+- **Docs** (`/docs`) reescritas: índice en `pages/docsIndex.js` (13 secciones con descripción), contenido en `docsContent.jsx`. Nuevas: Chat web, Visuals, Remote, Facturación y pagos, Privacidad y datos; actualizadas CLI (modos, tabla completa de comandos, `/visual`), App de escritorio (IDE, Android), API (model opcional, errores), Precios (packs), Planes (precios y peticiones/min).
+
+---
+
 ## 0.-1 Mapa rol→modelo: se acabó «el modelo» como una sola cosa (2026-07-31)
 
 `docs/CUELLO_DE_BOTELLA_MODELOS.md` documentaba que Lixbon trataba «el modelo» como una

@@ -1078,3 +1078,13 @@
     min-height: 0;
   }
 }
+
+.set-aviso {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  color: var(--ink-body);
+  font-size: 13px;
+  line-height: 1.45;
+}

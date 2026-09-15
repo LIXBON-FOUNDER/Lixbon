@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /account
+Disallow: /admin
+Disallow: /auth
+Disallow: /reset-password
+Disallow: /c/
+Disallow: /s/
+Disallow: /remote
+Disallow: /visuals/
+Disallow: /api/
+
+Sitemap: https://lixbon.com/sitemap.xml

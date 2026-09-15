@@ -2,6 +2,7 @@
 // app de Android y CLI. Escritorio y Android van como dos cuadros iguales;
 // el CLI se instala con un comando (PowerShell en Windows, bash en
 // Linux/macOS) que baja e instala client_cli.py y crea el lanzador `lixbon`.
+import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
@@ -9,6 +10,7 @@ import { CodeBlock } from '../components/CodeBlock';
 import { IconDownload, IconTerminal, IconCheck, IconPhone } from '../components/Icons';
 
 export default function DownloadsPage() {
+  useSeo({ title: 'Aplicaciones: escritorio, Android y CLI', description: 'Descarga la app de escritorio de lixbon (IDE con autocompletado y agente), la app de Android o instala el CLI con un comando en Windows, Linux y macOS.', path: '/aplicaciones' });
   const [desktop, setDesktop] = useState(null);
   const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');

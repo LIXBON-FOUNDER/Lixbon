@@ -7,6 +7,7 @@ import { SECTIONS } from './docsContent';
 import { DocsSkeleton } from '../components/Skeleton';
 import { DocsToc } from '../components/DocsToc';
 import { IconChevron } from '../components/Icons';
+import { useSeo } from '../lib/seo';
 
 export default function DocsPage() {
   const { section } = useParams();
@@ -17,6 +18,7 @@ export default function DocsPage() {
   const cuerpoRef = useRef(null);
 
   const current = SECTIONS.find((s) => s.id === section) || SECTIONS[0];
+  useSeo({ title: `${current.title} · Docs`, description: current.description, path: `/docs/${current.id}` });
 
   // Agrupa las secciones por su `group`, conservando el orden de aparición
   const groups = useMemo(() => {

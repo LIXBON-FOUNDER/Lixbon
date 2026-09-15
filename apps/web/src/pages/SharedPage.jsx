@@ -1,5 +1,6 @@
 // SharedPage.jsx — vista pública de solo lectura de una conversación compartida
 // (/s/:token). Sin sesión; muestra el hilo y un CTA para probar lixbon.
+import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -8,6 +9,7 @@ import { Markdown } from '../components/Markdown';
 import { construirVersiones, documentoPreview, extraerImagen } from '../lib/visuals';
 
 export default function SharedPage() {
+  useSeo({ title: 'Diseño compartido', noindex: true });
   const { token } = useParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');

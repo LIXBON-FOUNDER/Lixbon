@@ -1,5 +1,6 @@
 // El acceso lo decide el backend en cada endpoint; esto solo evita pintar un
 // panel vacío a quien no es admin.
+import { useSeo } from '../../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -47,6 +48,7 @@ const claseLink = ({ isActive }) => `adm-link ${isActive ? 'is-active' : ''}`;
 const claseSub = ({ isActive }) => `adm-sublink ${isActive ? 'is-active' : ''}`;
 
 export default function AdminLayout() {
+  useSeo({ title: 'Administración', noindex: true });
   const { user, loading, logout } = useAuth();
   const confirmar = useConfirmar();
   const navigate = useNavigate();

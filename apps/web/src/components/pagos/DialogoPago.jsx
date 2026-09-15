@@ -261,15 +261,15 @@ export function DialogoPago({
 
   useEffect(() => { cargarStripe().then(setStripe); }, []);
 
-  useEffect(() => {
-    api.get('/api/billing/payment-methods')
-      .then((res) => {
-        const lista = res.data.payment_methods || [];
-        setMetodos(lista);
-        setElegido(lista.find((m) => m.is_default)?.id || lista[0]?.id || 'nueva');
-      })
-      .catch(() => { setMetodos([]); setElegido('nueva'); });
-  }, []);
+  const cargarMetodos = useCallback(() => api.get('/api/billing/payment-methods')
+    .then((res) => {
+      const lista = res.data.payment_methods || [];
+      setMetodos(lista);
+      setElegido(lista.find((m) => m.is_default)?.id || lista[0]?.id || 'nueva');
+    })
+    .catch(() => { setMetodos([]); setElegido('nueva'); }), []);
+
+  useEffect(() => { cargarMetodos(); }, [cargarMetodos]);
 
   const pedirTarjetaNueva = useCallback(() => {
     setElegido('nueva');
@@ -331,11 +331,15 @@ export function DialogoPago({
     setFase('rechazado');
   };
 
+  // El SetupIntent anterior ya se consumió al guardar la tarjeta rechazada:
+  // reutilizarlo haría fallar el formulario. Se pide otro y se relee la lista,
+  // que ahora incluye esa tarjeta por si el usuario quiere reintentar con ella.
   const reintentar = () => {
     setResultado(null);
     setError('');
+    setSecreto(null);
     setFase('form');
-    pedirTarjetaNueva();
+    cargarMetodos().then(() => setElegido('nueva'));
   };
 
   return (

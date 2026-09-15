@@ -1,5 +1,6 @@
 // ReleasesPage.jsx — novedades públicas (/novedades): historial de versiones de
 // la app de escritorio con su changelog. La app enlaza aquí con #v<version>.
+import { useSeo } from '../lib/seo';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
@@ -12,6 +13,7 @@ function formatDate(raw) {
 }
 
 export default function ReleasesPage() {
+  useSeo({ title: 'Novedades', description: 'Historial de versiones de la app de escritorio de lixbon con el detalle de cada cambio.', path: '/novedades' });
   const [versions, setVersions] = useState(null);
 
   useEffect(() => {

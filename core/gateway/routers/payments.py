@@ -190,11 +190,13 @@ async def resume(user_data: dict[str, Any] = Depends(cookie_auth_required)):
 
 
 @router.post("/resolve")
-async def resolve(
+def resolve(
     payload: ResolvePayload,
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
-    """Cierra un cobro que pasó por el banco sin esperar al webhook."""
+    """Cierra un cobro que pasó por el banco sin esperar al webhook. Síncrono a
+    propósito: puede esperar unos segundos a que Stripe aplique un cambio de
+    plan y no debe bloquear el bucle de eventos."""
     _require_enabled()
     try:
         return sg.resolve_payment(user_data, payload.payment_intent_id)
@@ -213,6 +215,7 @@ async def billing_status(user_data: dict[str, Any] = Depends(cookie_auth_require
         "enabled": sg.enabled(),
         "plan": plan,
         "is_paid": paid,
+        "status": sub.get("status") if paid else None,
         "current_period_end": sub.get("current_period_end") if sub else None,
         "cancel_at_period_end": sub.get("cancel_at_period_end") if sub else False,
         "payment_methods": sg.list_payment_methods(user_data),

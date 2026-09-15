@@ -706,7 +706,10 @@ def get_plan_for_user(user_id: int) -> dict[str, Any]:
     with get_session() as s:
         sub = s.scalars(select(Subscription).where(Subscription.user_id == user_id)).first()
         plan_id = DEFAULT_PLAN_ID
-        if sub and sub.status == "active":
+        # past_due: Stripe sigue reintentando el cobro unos días y la
+        # suscripción sigue viva; degradar aquí cortaría el plan al primer
+        # rechazo. El webhook la baja a canceled/unpaid si los reintentos fallan.
+        if sub and sub.status in ("active", "trialing", "past_due"):
             if not sub.expires_at or sub.expires_at > now_iso():
                 plan_id = sub.plan_id
         p = s.get(Plan, plan_id) or s.get(Plan, DEFAULT_PLAN_ID)

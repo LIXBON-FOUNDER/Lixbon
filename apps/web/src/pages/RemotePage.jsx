@@ -4,6 +4,7 @@
 //                    cuenta dueña (sin sesión web → /auth?next=… y vuelve)
 //   /remote        → lista de sesiones del usuario con sesión iniciada
 // Transcript en vivo (SSE), envío de prompts, interrupción y aprobaciones.
+import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -14,6 +15,7 @@ import { Markdown } from '../components/Markdown';
 const SOURCE_LABEL = { cli: 'CLI', ide: 'IDE' };
 
 export default function RemotePage() {
+  useSeo({ title: 'Remote', noindex: true });
   const { token } = useParams();
   const navigate = useNavigate();
   const [session, setSession] = useState(null);

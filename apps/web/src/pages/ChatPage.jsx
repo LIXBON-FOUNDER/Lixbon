@@ -1,6 +1,7 @@
 // ChatPage.jsx — pantalla principal (mockups 2.1 y 2.2).
 // Con sesión: chat con streaming SSE, memoria de conversación e historial.
 // Sin sesión: se VE la interfaz ("¿Qué investigaremos hoy?"); al enviar → registro.
+import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -51,6 +52,7 @@ function Sources({ sources, queries }) {
 }
 
 export default function ChatPage() {
+  useSeo({ path: '/', noindex: window.location.pathname !== '/' });
   const { user, loading, logout } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();

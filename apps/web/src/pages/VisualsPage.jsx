@@ -2,6 +2,7 @@
 // (/visuals/:id). En el editor, el chat es un panel lateral plegable y el
 // lienzo pinta cada página en un iframe aislado; se puede seleccionar y
 // retocar elementos sin pasar por el modelo.
+import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -57,6 +58,7 @@ function Menu({ abierto, onCerrar, children, className = '' }) {
 }
 
 export default function VisualsPage() {
+  useSeo({ title: 'Visuals: diseña webs, dashboards y prototipos con IA', description: 'Describe una landing, un dashboard, un email, un logo o un prototipo y el modelo lo construye en HTML; afínalo en el lienzo, compártelo por enlace o conviértelo en un proyecto React.', path: '/visuals', noindex: window.location.pathname !== '/visuals' });
   const { user, loading } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();

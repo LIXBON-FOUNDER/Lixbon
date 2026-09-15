@@ -1,6 +1,7 @@
 // AuthPage.jsx — acceso y registro sobre el fondo del clúster.
 // Incluye el modo "olvidé mi contraseña" (request-password-reset).
 // Botones OAuth Google/Apple: SOLO visuales por ahora (sin funcionalidad).
+import { useSeo } from '../lib/seo';
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -36,6 +37,7 @@ const TITULOS = {
 };
 
 export default function AuthPage() {
+  useSeo({ title: 'Iniciar sesión', noindex: true });
   const [params] = useSearchParams();
   const initialMode = params.get('mode') === 'register' ? 'register' : 'login';
   // Vuelta post-login (p.ej. /remote/<token> desde el QR). Solo rutas internas:

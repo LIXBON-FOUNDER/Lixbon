@@ -1,12 +1,13 @@
 // PlansPage.jsx — página de precios. Con los pagos activos, el plan se cobra en
 // un modal sin salir de lixbon; si no, las tarjetas muestran "Próximamente".
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
 import { PagoPlan } from '../components/pagos/PagoPlan';
 import { IconCheck, IconCard } from '../components/Icons';
+import { SITE_URL, useSeo } from '../lib/seo';
 
 const fmtLimit = (v, suffix, noun) => (v === -1 ? `${noun} ilimitados` : `${v.toLocaleString()} ${suffix}`);
 
@@ -17,6 +18,28 @@ export default function PlansPage() {
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [pagando, setPagando] = useState(null); // plan cuyo modal está abierto
   const [error, setError] = useState('');
+
+  const jsonLd = useMemo(() => (plans.length ? {
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'lixbon',
+    applicationCategory: 'DeveloperApplication',
+    operatingSystem: 'Web, Windows, Linux, macOS, Android',
+    url: SITE_URL,
+    offers: plans.map((p) => ({
+      '@type': 'Offer',
+      name: `Plan ${p.name}`,
+      price: (p.price_monthly_cents / 100).toFixed(2),
+      priceCurrency: p.currency || 'USD',
+      url: `${SITE_URL}/planes`,
+    })),
+  } : null), [plans]);
+  useSeo({
+    title: 'Planes y precios',
+    description: 'Gratuito, Pro ($9.90/mes) y Advance ($24.90/mes): chat con IA, Visuals, CLI con agente y app de escritorio sobre GPUs propias. La API se paga por tokens con créditos prepago.',
+    path: '/planes',
+    jsonLd,
+  });
 
   useEffect(() => {
     api.get('/api/plans').then((res) => setPlans(res.data.plans)).catch(() => setPlans([]));
