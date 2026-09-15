@@ -90,7 +90,8 @@ def _ensure_customer(stripe, user: dict[str, Any]) -> str:
     return customer.id
 
 
-def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
+def change_plan(user: dict[str, Any], new_plan_id: str,
+                pm_id: str | None = None) -> dict[str, Any]:
     """Cambia el plan de una suscripción viva, en cualquier dirección.
 
     Subir cobra la diferencia al instante (`always_invoice`): recién pagado Pro,
@@ -124,6 +125,15 @@ def change_plan(user: dict[str, Any], new_plan_id: str) -> dict[str, Any]:
     items = getattr(getattr(actual_stripe, "items", None), "data", None) or []
     if not items:
         raise ValueError("sin_suscripcion")
+
+    # La tarjeta elegida en el diálogo pasa a ser la de la suscripción ANTES de
+    # facturar la diferencia; si no, la prorrata se cobraba a la tarjeta
+    # anterior y la nueva quedaba guardada sin uso.
+    if pm_id:
+        customer_id = sub.get("stripe_customer_id") or _ensure_customer(stripe, user)
+        _pm_del_cliente(stripe, customer_id, pm_id)
+        stripe.Customer.modify(customer_id, invoice_settings={"default_payment_method": pm_id})
+        stripe.Subscription.modify(sub_id, default_payment_method=pm_id)
 
     # Subir: pending_if_incomplete deja el cambio en espera si el banco pide
     # 3-D Secure (error_if_incomplete lo rechazaba sin más, y con esas tarjetas
@@ -209,7 +219,18 @@ def _prorrateo_del_cambio(stripe, suscripcion, customer_id: str | None,
 
 
 def _cobro_del_cambio(stripe, suscripcion) -> dict[str, Any] | None:
-    intento, _ = _cobro_de_factura(stripe, getattr(suscripcion, "latest_invoice", None))
+    import time
+
+    factura = getattr(suscripcion, "latest_invoice", None)
+    factura_id = factura if isinstance(factura, str) else getattr(factura, "id", None)
+    intento = None
+    # Con always_invoice el cobro de la prorrata se lanza al devolver la
+    # suscripción y puede tardar un instante en colgar de la factura.
+    for _ in range(4):
+        intento, _ = _cobro_de_factura(stripe, factura_id)
+        if intento and getattr(intento, "status", None) not in (None, "processing"):
+            break
+        time.sleep(0.75)
     if not intento:
         return None
     cobro = _resultado(intento)
@@ -501,6 +522,9 @@ def _cobro_de_factura(stripe, factura) -> tuple[Any, str | None]:
     if getattr(intento, "client_secret", None):
         return intento, intento.client_secret
 
+    # Una factura ya pagada también trae confirmation_secret: el secreto solo
+    # no basta, hace falta el PaymentIntent para saber qué se cobró.
+    secreto = None
     for expandir in (None, "confirmation_secret"):
         actual = factura
         if expandir:
@@ -511,7 +535,7 @@ def _cobro_de_factura(stripe, factura) -> tuple[Any, str | None]:
         confirmacion = getattr(actual, "confirmation_secret", None)
         secreto = getattr(confirmacion, "client_secret", None) if confirmacion else None
         if secreto:
-            return intento, secreto
+            break
 
     try:
         cobros = stripe.Invoice.retrieve(factura.id, expand=["payments"])
@@ -520,8 +544,10 @@ def _cobro_de_factura(stripe, factura) -> tuple[Any, str | None]:
     for pago in getattr(getattr(cobros, "payments", None), "data", None) or []:
         ref = getattr(getattr(pago, "payment", None), "payment_intent", None)
         intento = _traer_intento(stripe, ref) if isinstance(ref, str) else ref
-        if getattr(intento, "client_secret", None):
-            return intento, intento.client_secret
+        if intento:
+            return intento, getattr(intento, "client_secret", None) or secreto
+    if secreto:
+        return intento, secreto
 
     # Este log es lo único que queda para diagnosticar una versión de la API que
     # no encaje en ninguna de las tres formas, así que no puede reventar él mismo.
@@ -558,7 +584,7 @@ def subscribe(user: dict[str, Any], plan_id: str, pm_id: str) -> dict[str, Any]:
 
     sub = get_subscription(user["id"])
     if sub and sub.get("stripe_subscription_id"):
-        return change_plan(user, plan_id)
+        return change_plan(user, plan_id, pm_id)
 
     customer_id = _ensure_customer(stripe, user)
     _pm_del_cliente(stripe, customer_id, pm_id)
