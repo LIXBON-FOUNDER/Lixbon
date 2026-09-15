@@ -4,6 +4,7 @@
 //                    cuenta dueña (sin sesión web → /auth?next=… y vuelve)
 //   /remote        → lista de sesiones del usuario con sesión iniciada
 // Transcript en vivo (SSE), envío de prompts, interrupción y aprobaciones.
+import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -47,6 +48,7 @@ export default function RemotePage() {
         <Link to="/" className="pubnav__logo"><Logo /></Link>
         <span className="shared__badge">Control remoto</span>
         <div className="pubnav__actions">
+          <TemaBoton />
           <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Ir al chat</Link>
         </div>
       </header>

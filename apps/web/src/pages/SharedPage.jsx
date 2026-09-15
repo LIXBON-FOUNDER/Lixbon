@@ -1,5 +1,6 @@
 // SharedPage.jsx — vista pública de solo lectura de una conversación compartida
 // (/s/:token). Sin sesión; muestra el hilo y un CTA para probar lixbon.
+import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -26,6 +27,7 @@ export default function SharedPage() {
         <header className="pubnav">
           <Link to="/" className="pubnav__logo"><Logo /></Link>
           <div className="pubnav__actions">
+          <TemaBoton />
             <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
           </div>
         </header>
@@ -53,6 +55,7 @@ export default function SharedPage() {
         <Link to="/" className="pubnav__logo"><Logo /></Link>
         <span className="shared__badge">Conversación compartida</span>
         <div className="pubnav__actions">
+          <TemaBoton />
           <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
         </div>
       </header>

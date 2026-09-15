@@ -1,6 +1,6 @@
 /* account.css — Ajustes y Planes.
-   Tres peldaños y ninguna línea: la página es #0E0E0E, la tarjeta #131313 y
-   la fila #181818. El control de cada fila vive un peldaño más arriba (#1C1C1C)
+   Tres peldaños y ninguna línea: la página es var(--surface-0), la tarjeta var(--surface-1) y
+   la fila var(--surface-2). El control de cada fila vive un peldaño más arriba (var(--surface-3))
    para que se lea como pulsable sin necesitar contorno. */
 
 /* ── Layout de página ────────────────────────────────────────────────── */
@@ -82,7 +82,7 @@
   padding: 12px 16px;
   border-radius: var(--radius);
   background: var(--ok-soft);
-  color: #8FB25A;
+  color: var(--ok);
   font-size: 13.5px;
 }
 
@@ -171,7 +171,7 @@
 .quota__track {
   height: 8px;
   border-radius: 4px;
-  background: #1E1E1E;
+  background: var(--surface-3);
   overflow: hidden;
 }
 
@@ -257,7 +257,7 @@
 .keys__masked {
   font-family: var(--font-mono);
   font-size: 12.5px;
-  color: #8A8A88;
+  color: var(--ink-muted);
 }
 
 .keys__meta {
@@ -330,7 +330,7 @@
   max-width: 640px;
   margin: 0 auto 12px;
   text-align: center;
-  color: #8A8A88;
+  color: var(--ink-muted);
   font-size: 15px;
   text-wrap: pretty;
 }
@@ -354,18 +354,18 @@
 }
 
 .plan-card:hover {
-  background: #171717;
+  background: var(--surface-2);
   transform: translateY(-2px);
 }
 
 /* El plan destacado no lleva contorno: su fondo se tiñe de olivo lo justo para
    que se vea distinto sin encender un marco. */
 .plan-card--featured {
-  background: #181A11;
+  background: var(--accent-soft);
 }
 
 .plan-card--featured:hover {
-  background: #1D2015;
+  background: var(--accent-soft);
 }
 
 .plan-card__head {
@@ -407,7 +407,7 @@
 }
 
 .plan-card__desc {
-  color: #8A8A88;
+  color: var(--ink-muted);
   font-size: 13px;
   min-height: 38px;
   text-wrap: pretty;
@@ -421,7 +421,7 @@
   flex-direction: column;
   gap: 10px;
   font-size: 13.5px;
-  color: #C9C9C6;
+  color: var(--ink-body);
   flex: 1;
 }
 
@@ -445,14 +445,14 @@
 
 .plan-card__cta.is-current {
   background: var(--surface-3);
-  color: #8A8A88;
+  color: var(--ink-muted);
   cursor: default;
 }
 
 /* En el plan destacado el primario es el blanco; en el resto, un secundario
    que no compite con él. */
 .plan-card:not(.plan-card--featured) .plan-card__cta.pill-btn--primary {
-  background: #1A1A1A;
+  background: var(--surface-2);
   color: var(--ink);
 }
 
@@ -485,12 +485,12 @@
 .plans__nota p {
   font-size: 13px;
   line-height: 1.65;
-  color: #8A8A88;
+  color: var(--ink-muted);
   text-wrap: pretty;
 }
 
 .plans__nota strong {
-  color: #C9C9C6;
+  color: var(--ink-body);
   font-weight: 500;
 }
 
@@ -500,7 +500,7 @@
 }
 
 .plans__nota a:hover {
-  color: #CEDC85;
+  color: var(--code-inline);
 }
 
 /* ── Ajustes (sección con índice propio) ─────────────────────────────── */
@@ -536,7 +536,7 @@
   padding: 9px 11px;
   border-radius: var(--radius);
   font-size: 13.5px;
-  color: #8A8A88;
+  color: var(--ink-muted);
   text-align: left;
   transition: background 0.14s ease, color 0.14s ease;
 }
@@ -652,7 +652,7 @@
   border-radius: var(--radius);
   background: var(--warn-soft);
   font-size: 11.5px;
-  color: #D2AE45;
+  color: var(--warn);
   white-space: nowrap;
 }
 
@@ -666,7 +666,7 @@
 
 .verify-chip.is-ok {
   background: rgba(110, 158, 62, 0.12);
-  color: #8FB25A;
+  color: var(--ok);
 }
 
 .verify-chip.is-ok::before {
@@ -692,7 +692,7 @@
 
 .set-static {
   font-size: 13.5px;
-  color: #8A8A88;
+  color: var(--ink-muted);
 }
 
 .set-avatar {
@@ -702,7 +702,7 @@
   width: 42px;
   height: 42px;
   border-radius: var(--radius-round);
-  background: #2A2A2A;
+  background: var(--surface-5);
   color: var(--ink);
   font-size: 16px;
   font-weight: 500;
@@ -720,7 +720,7 @@
 
 .set-avatar--img {
   object-fit: cover;
-  background: #2A2A2A;
+  background: var(--surface-5);
 }
 
 .set-avatar-field {
@@ -750,7 +750,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-round);
-  color: #F2F2F0;
+  color: var(--ink);
   background: rgba(0, 0, 0, 0.55);
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -766,7 +766,7 @@
   width: 16px;
   height: 16px;
   border: 2px solid rgba(242, 242, 240, 0.3);
-  border-top-color: #F2F2F0;
+  border-top-color: var(--ink);
   border-radius: var(--radius-round);
   animation: avatar-spin 0.7s linear infinite;
 }
@@ -808,7 +808,7 @@
 .set-soon {
   padding: 3px 10px;
   border-radius: var(--radius);
-  background: #1B1B1B;
+  background: var(--surface-2);
   color: var(--ink-muted);
   font-size: 12px;
   white-space: nowrap;

@@ -112,8 +112,10 @@
 
   --code-bg: #131313;
   --code-ink: #CBD69B;
+  --code-inline: #CBD69B;
   --scrim: rgba(0, 0, 0, 0.62);
   --shadow-rgb: 0, 0, 0;
+  --sombra-menu: 0 14px 34px rgba(0, 0, 0, 0.5);
 
   /* Campos: el estado se dice con el relleno y con texto, nunca con un borde. */
   --field: #1C1C1C;
@@ -133,6 +135,8 @@
   --radius-chip: 6px;
   --radius-round: 999px;
 
+  --primary-hover: #FFFFFF;
+
   --sidebar-w: 260px;
   --shell-gap: 12px;
 
@@ -142,6 +146,56 @@
   --safe-r: env(safe-area-inset-right, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
+}
+
+/* Tema claro: mismos escalones, sobre un blanco cálido. Se activa con
+   data-theme="light" en <html> (hooks/useTema.js). */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --surface-0: #F5F4EE;
+  --surface-1: #FBFAF6;
+  --surface-2: #F1EFE7;
+  --surface-3: #ECEAE1;
+  --surface-4: #E3E1D7;
+  --surface-5: #D9D7CC;
+
+  --ink: #191917;
+  --ink-rgb: 25, 25, 23;
+  --ink-title: #191917;
+  --ink-body: #2E2E2B;
+  --ink-soft: #5B5B55;
+  --ink-muted: #8A8A82;
+  --ink-label: #8A8A82;
+  --ink-faint: #A3A39B;
+  --ink-disabled: #BFBFB6;
+
+  --accent: #7E9430;
+  --accent-deep: #6A7D28;
+  --accent-soft: rgba(126, 148, 48, 0.14);
+  --on-accent: #F5F4EE;
+  --ok: #5E8A32;
+  --ok-soft: rgba(94, 138, 50, 0.14);
+  --warn: #A8842A;
+  --warn-soft: rgba(168, 132, 42, 0.14);
+  --danger: #B8462F;
+  --danger-ink: #A33D28;
+  --danger-soft: rgba(184, 70, 47, 0.12);
+
+  --primary: #191917;
+  --on-primary: #F5F4EE;
+  --primary-hover: #2E2E2B;
+
+  --code-bg: #191917;
+  --code-ink: #CBD69B;
+  --code-inline: #4F6320;
+  --scrim: rgba(0, 0, 0, 0.4);
+  --sombra-menu: 0 14px 34px rgba(25, 25, 23, 0.14);
+
+  --field: #ECEAE1;
+  --field-focus: #E3E1D7;
+  --field-error: #F6E3DF;
+  --field-disabled: #F1EFE7;
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────── */
@@ -414,7 +468,7 @@ p {
   overscroll-behavior: contain;
   border-radius: var(--radius);
   background: var(--surface-3);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--sombra-menu);
   animation: select-in 0.14s ease;
 }
 

@@ -2,6 +2,7 @@
 // (/visuals/:id). En el editor, el chat es un panel lateral plegable y el
 // lienzo pinta cada página en un iframe aislado; se puede seleccionar y
 // retocar elementos sin pasar por el modelo.
+import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
@@ -404,6 +405,7 @@ export default function VisualsPage() {
           <Link to="/chat" className="vis-top__logo" title="Volver al chat"><Logo /></Link>
           <span className="vis-top__seccion">Visuals</span>
           <div className="vis-top__right">
+            <TemaBoton />
             {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>{(user.name || user.email || '?')[0].toUpperCase()}</Link>
               : <Link to="/auth" className="pill-btn pill-btn--primary">Iniciar sesión</Link>}
           </div>
@@ -519,6 +521,7 @@ export default function VisualsPage() {
         </div>
 
         <div className="vis-top__right">
+          <TemaBoton />
           {!modoImagen && (
             <div className="vis-seg">
               <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">

@@ -37,7 +37,7 @@
   border-radius: var(--radius-chip);
   background: var(--surface-3);
   font-family: var(--font-mono);
-  color: var(--code-ink);
+  color: var(--code-inline);
 }
 
 /* ── Lista de sesiones ── */

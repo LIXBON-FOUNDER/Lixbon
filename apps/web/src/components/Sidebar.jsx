@@ -4,6 +4,7 @@
 // colapsado en __rail; ambos se funden con opacidad durante la transición.
 // En compacto (≤860px) el panel deja de ser columna y se comporta como cajón:
 // `compact` llega desde ChatPage y cambia el colapsar por un cerrar.
+import { useTema } from '../hooks/useTema';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Logo } from './Logo';
@@ -13,7 +14,7 @@ import { HistorySkeleton } from './Skeleton';
 import { Desplegable } from './Desplegable';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
-  IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX,
+  IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX, IconSun, IconMoon,
   IconBook, IconBolt, IconGlobe, IconUser, IconLayers,
 } from './Icons';
 
@@ -116,6 +117,7 @@ export function Sidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [profileMenu, setProfileMenu] = useState(false);
+  const { tema, alternar: alternarTema } = useTema();
   const searchRef = useRef(null);
   const profileRef = useRef(null);
   const closeBtnRef = useRef(null);
@@ -306,6 +308,9 @@ export function Sidebar({
                 <Desplegable abierto={profileMenu} className="sb-menu sb-menu--profile" role="menu">
                   <button onClick={() => { setProfileMenu(false); go('/planes'); }}>
                     <IconBolt size={14} /> Planes
+                  </button>
+                  <button onClick={alternarTema}>
+                    {tema === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />} {tema === 'dark' ? 'Tema claro' : 'Tema oscuro'}
                   </button>
                   <button className="sb-menu__soon" disabled title="Próximamente">
                     <IconGlobe size={14} /> Lenguaje <span className="sb-menu__tag">Pronto</span>

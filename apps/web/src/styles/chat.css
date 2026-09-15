@@ -1,6 +1,6 @@
 /* chat.css — el armazón: barra lateral flotante + chat.
-   El armazón es un fondo #0E0E0E con 12px de aire; encima flotan paneles
-   #131313 de esquinas 8px. Ninguna pieza lleva borde: la jerarquía la hace
+   El armazón es un fondo var(--surface-0) con 12px de aire; encima flotan paneles
+   var(--surface-1) de esquinas 8px. Ninguna pieza lleva borde: la jerarquía la hace
    el relleno. */
 
 .chat-shell {
@@ -179,7 +179,7 @@
   display: flex;
   align-items: center;
   border-radius: var(--radius);
-  color: #A6A6A3;
+  color: var(--ink-soft);
   transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -250,7 +250,7 @@
   padding: 4px;
   border-radius: var(--radius);
   background: var(--surface-3);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--sombra-menu);
   transform-origin: top right;
   animation: menu-in 0.16s ease;
 }
@@ -284,7 +284,7 @@
 }
 
 .sb-menu__danger:hover {
-  background: #2A1917 !important;
+  background: var(--field-error) !important;
   color: var(--danger-ink) !important;
 }
 
@@ -370,7 +370,7 @@
   height: 32px;
   flex-shrink: 0;
   border-radius: var(--radius-round);
-  background: #33322F;
+  background: var(--surface-5);
   color: var(--ink);
   font-size: 14px;
   font-weight: 500;
@@ -378,13 +378,13 @@
 
 .sidebar__avatar--img {
   object-fit: cover;
-  background: #33322F;
+  background: var(--surface-5);
 }
 
 /* Sin sesión no hay inicial que mostrar: el hueco lo ocupa la silueta, y baja
    de tono para que no compita con "Iniciar sesión". */
 .sidebar__avatar--guest {
-  background: #262626;
+  background: var(--surface-4);
   color: var(--ink-muted);
 }
 
@@ -437,7 +437,7 @@
 }
 
 /* ── Área principal ──────────────────────────────────────────────────── */
-/* Sin fondo propio: el chat respira sobre el #0E0E0E del armazón y solo los
+/* Sin fondo propio: el chat respira sobre el var(--surface-0) del armazón y solo los
    bloques (código, compositor, mensaje del usuario) suben un peldaño. */
 
 .chat-main {
@@ -732,7 +732,7 @@
 }
 
 .md a:hover {
-  color: #CEDC85;
+  color: var(--code-inline);
 }
 
 .md pre {
@@ -758,7 +758,7 @@
   padding: 2px 6px;
   border-radius: var(--radius-chip);
   background: var(--surface-3);
-  color: var(--code-ink);
+  color: var(--code-inline);
 }
 
 .md blockquote {
@@ -853,7 +853,7 @@
   border: 0;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #141414;
+  color: var(--on-accent);
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
@@ -1126,7 +1126,7 @@
 }
 
 .chat-input__send:hover:not(:disabled) {
-  background: #FFFFFF;
+  background: var(--primary-hover);
   transform: scale(1.05);
 }
 

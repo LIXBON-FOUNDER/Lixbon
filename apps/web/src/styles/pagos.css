@@ -1,8 +1,8 @@
 /* pagos.css — el modal de cobro y la sección de Facturación.
-   El diálogo se apoya en #161616, un escalón por encima del fondo, para
+   El diálogo se apoya en var(--surface-2), un escalón por encima del fondo, para
    despegarse del velo sin pedir borde. Sin bordes: la jerarquía la da el
    relleno.
-   #161616 diálogo · #1C1C1C bloque y campo · #242424 elegido */
+   var(--surface-2) diálogo · var(--surface-3) bloque y campo · var(--surface-4) elegido */
 
 .pago-overlay {
   position: fixed;
@@ -30,7 +30,7 @@
   height: 12px;
   margin-left: 34px;
   border-radius: 8px 8px 0 0;
-  background: #161616;
+  background: var(--surface-2);
 }
 
 .pago__caja {
@@ -40,7 +40,7 @@
   gap: 20px;
   padding: 26px 28px 24px;
   border-radius: var(--radius);
-  background: #161616;
+  background: var(--surface-2);
   box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
 }
 
@@ -115,7 +115,7 @@
 
 .pago__sub {
   font-size: 12.5px;
-  color: #8A8A88;
+  color: var(--ink-muted);
   text-wrap: pretty;
 }
 
@@ -129,7 +129,7 @@
 
 .pago__label {
   font-size: 12px;
-  color: #8A8A88;
+  color: var(--ink-muted);
 }
 
 .pago__metodos {

@@ -1,16 +1,14 @@
 // LandingPage.jsx — la portada pública de lixbon.com (/). Minimalista: una
 // columna, titulares grandes, secciones numeradas y dos dibujos de línea. Es
 // la página que posiciona: todo el texto va en HTML, con FAQPage.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { PublicNav } from '../components/PublicNav';
 import { Logo } from '../components/Logo';
-import { IconArrowLeft, IconMoon, IconSun } from '../components/Icons';
+import { IconArrowLeft } from '../components/Icons';
 import { IlustracionCluster, IlustracionPrivacidad } from '../components/IlustracionesLanding';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
 import { useAuth } from '../hooks/useAuth';
-
-const CLAVE_TEMA = 'lixbon-tema-portada';
 
 const PRODUCTOS = [
   ['Chat', 'Conversaciones con streaming, historial, adjuntos (PDF, imágenes, código), dictado y búsqueda en internet. Los modelos que razonan enseñan su pensamiento.', '/docs/chat'],
@@ -47,16 +45,10 @@ resp = client.chat.completions.create(
 )
 print(resp.choices[0].message.content)`;
 
-function temaGuardado() {
-  try { return localStorage.getItem(CLAVE_TEMA) === 'dark' ? 'dark' : 'light'; } catch { return 'light'; }
-}
-
 const Flecha = () => <IconArrowLeft size={15} style={{ transform: 'rotate(180deg)' }} />;
 
 export default function LandingPage() {
   const { user } = useAuth();
-  const [tema, setTema] = useState(() => (typeof window === 'undefined' ? 'light' : temaGuardado()));
-  useEffect(() => { try { localStorage.setItem(CLAVE_TEMA, tema); } catch { /* sin almacenamiento */ } }, [tema]);
 
   const jsonLd = useMemo(() => [
     ORGANIZACION,
@@ -75,16 +67,9 @@ export default function LandingPage() {
     jsonLd,
   });
 
-  const conmutador = (
-    <button className="icon-btn landing__tema" onClick={() => setTema((t) => (t === 'dark' ? 'light' : 'dark'))}
-      title={tema === 'dark' ? 'Tema claro' : 'Tema oscuro'} aria-label="Cambiar tema">
-      {tema === 'dark' ? <IconSun size={17} /> : <IconMoon size={17} />}
-    </button>
-  );
-
   return (
-    <div className="page landing" data-tema={tema}>
-      <PublicNav extra={conmutador} />
+    <div className="page landing">
+      <PublicNav />
 
       <main className="landing__wrap">
         <section className="landing__hero">

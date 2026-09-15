@@ -167,7 +167,7 @@
 
 .ffield__label {
   font-size: 12px;
-  color: #8A8A88;
+  color: var(--ink-muted);
 }
 
 .ffield__input {
@@ -233,7 +233,7 @@
 .auth__switch {
   font-size: 13px;
   text-align: center;
-  color: #8A8A88;
+  color: var(--ink-muted);
 }
 
 .auth__switch button {
@@ -242,7 +242,7 @@
 }
 
 .auth__switch button:hover {
-  color: #CEDC85;
+  color: var(--code-inline);
 }
 
 .auth__link {
@@ -294,7 +294,7 @@
   content: '';
   flex: 1;
   height: 1px;
-  background: #242424;
+  background: var(--surface-4);
 }
 
 .auth__social {
@@ -311,7 +311,7 @@
   height: 44px;
   border-radius: var(--radius);
   background: var(--primary);
-  color: #141414;
+  color: var(--on-primary);
   font-size: 13.5px;
   font-weight: 500;
   transition: opacity 0.15s ease;

@@ -1,5 +1,6 @@
 // El acceso lo decide el backend en cada endpoint; esto solo evita pintar un
 // panel vacío a quien no es admin.
+import { TemaBoton } from '../../components/TemaBoton';
 import { useSeo } from '../../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -152,6 +153,7 @@ export default function AdminLayout() {
           <IconChat size={17} />
           <span>Volver al chat</span>
         </Link>
+        <div className="adm__tema"><TemaBoton /></div>
 
         <div className="adm__foot">
           <span className="tab" />

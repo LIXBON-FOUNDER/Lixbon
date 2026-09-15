@@ -45,7 +45,7 @@ export function IlustracionCluster() {
         <path d="M590 180 C 680 180, 680 218, 760 218" />
         <path d="M590 188 C 680 188, 680 298, 760 298" strokeDasharray="4 5" />
       </g>
-      <Gpu x={760} y={26} titulo="GPU · chat" sub="qwen3.5:27b · lixbon-1" activo />
+      <Gpu x={760} y={26} titulo="GPU · chat" sub="lixbon-1" activo />
       <Gpu x={760} y={106} titulo="GPU · razonamiento" sub="gpt-oss:120b" />
       <Gpu x={760} y={186} titulo="GPU · visión" sub="moondream" />
       <Gpu x={760} y={266} titulo="GPU · código" sub="qwen2.5-coder" />

@@ -1,5 +1,6 @@
 // AccountPage.jsx — "Ajustes": sección con sidebar interno (General, Cuenta,
 // Privacidad, Facturación, Uso). Reemplaza la antigua vista plana de Mi cuenta.
+import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -688,6 +689,7 @@ export default function AccountPage() {
     <div className="page">
       <header className="page__bar">
         <Link to="/chat" className="page__logo"><Logo /></Link>
+        <TemaBoton />
         <Link to="/chat" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
       </header>
 

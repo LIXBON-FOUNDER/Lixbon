@@ -1,7 +1,7 @@
 /* admin.css — panel de administración: marco con barra lateral y una página
    por área. Sin bordes; la jerarquía la da el relleno.
-   #0E0E0E fondo · #131313 tarjeta y barra · #1A1A1A fila · #1C1C1C campo
-   #232323 activo · #242424 celda destacada */
+   var(--surface-0) fondo · var(--surface-1) tarjeta y barra · var(--surface-2) fila · var(--surface-3) campo
+   var(--surface-4) activo · var(--surface-4) celda destacada */
 
 /* ── Marco ───────────────────────────────────────────────────────────── */
 
@@ -35,8 +35,8 @@
 .adm__brand-tag {
   padding: 2px 7px;
   border-radius: var(--radius-chip);
-  background: #1f1f1f;
-  color: #8a8a88;
+  background: var(--surface-3);
+  color: var(--ink-muted);
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -57,7 +57,7 @@
   width: 100%;
   padding: 9px 10px;
   border-radius: var(--radius);
-  color: #a6a6a3;
+  color: var(--ink-soft);
   font-size: 14px;
   text-align: left;
   transition: background 0.18s ease, color 0.18s ease;
@@ -90,7 +90,7 @@
   display: block;
   padding: 7px 10px 7px 41px;
   border-radius: var(--radius);
-  color: #8a8a88;
+  color: var(--ink-muted);
   font-size: 13px;
   text-align: left;
   transition: background 0.18s ease, color 0.18s ease;
@@ -150,7 +150,7 @@
   height: 32px;
   flex-shrink: 0;
   border-radius: var(--radius-round);
-  background: #33322f;
+  background: var(--surface-5);
   color: var(--ink);
   font-size: 14px;
   font-weight: 500;
@@ -276,7 +276,7 @@
 }
 
 .adm-btn--primary:hover:not(:disabled) {
-  background: #ffffff;
+  background: var(--primary-hover);
   color: var(--on-primary);
 }
 
@@ -292,13 +292,13 @@
 }
 
 .adm-btn.is-danger {
-  background: #2a1917;
+  background: var(--field-error);
   color: var(--danger-ink);
 }
 
 .adm-btn.is-danger:hover:not(:disabled) {
-  background: #341d1a;
-  color: #e08a70;
+  background: var(--danger-soft);
+  color: var(--danger-ink);
 }
 
 /* ── Tarjetas ────────────────────────────────────────────────────────── */
@@ -406,12 +406,12 @@
 
 .adm-chip--ok {
   background: rgba(110, 158, 62, 0.12);
-  color: #8fb25a;
+  color: var(--ok);
 }
 
 .adm-chip--warn {
   background: rgba(201, 162, 39, 0.12);
-  color: #d2ae45;
+  color: var(--warn);
 }
 
 .adm-chip--bad {
@@ -421,11 +421,11 @@
 
 .adm-chip--off {
   background: rgba(154, 154, 151, 0.1);
-  color: #9a9a97;
+  color: var(--ink-muted);
 }
 
 .adm-chip--mono {
-  background: #1b1b1b;
+  background: var(--surface-2);
   color: var(--ink-soft);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -483,7 +483,7 @@ a.adm-btn {
 .adm-tabla__fila {
   padding: 11px 16px;
   border-radius: var(--radius);
-  background: #1a1a1a;
+  background: var(--surface-2);
   transition: background 0.18s ease;
 }
 
@@ -538,8 +538,8 @@ a.adm-btn {
   height: 28px;
   flex-shrink: 0;
   border-radius: var(--radius-round);
-  background: #222;
-  color: #c9c9c6;
+  background: var(--surface-4);
+  color: var(--ink-body);
   font-size: 12px;
 }
 
@@ -618,7 +618,7 @@ a.adm-btn {
 
 .adm-campo__label {
   font-size: 12px;
-  color: #8a8a88;
+  color: var(--ink-muted);
 }
 
 .adm-campo__ancho {
@@ -729,14 +729,14 @@ a.adm-btn {
 .adm-medida__valor {
   font-family: var(--font-mono);
   font-size: 11.5px;
-  color: #9a9a97;
+  color: var(--ink-muted);
 }
 
 .adm-medida__pista {
   display: flex;
   height: 6px;
   border-radius: 3px;
-  background: #1e1e1e;
+  background: var(--surface-3);
   overflow: hidden;
 }
 
@@ -792,12 +792,12 @@ a.adm-btn {
 
 .adm-aviso__titulo {
   font-size: 13.5px;
-  color: #e6c0b5;
+  color: var(--danger-ink);
 }
 
 .adm-aviso__sub {
   font-size: 12.5px;
-  color: #a88c85;
+  color: var(--ink-muted);
 }
 
 .adm-aviso--ok {
@@ -809,11 +809,11 @@ a.adm-btn {
 }
 
 .adm-aviso--ok .adm-aviso__titulo {
-  color: #b6be95;
+  color: var(--code-inline);
 }
 
 .adm-aviso--ok .adm-aviso__sub {
-  color: #8b9472;
+  color: var(--ink-muted);
 }
 
 .adm-token {
@@ -844,7 +844,7 @@ a.adm-btn {
   padding: 9px 11px;
   border-radius: var(--radius);
   background: var(--surface-0);
-  color: var(--code-ink);
+  color: var(--code-inline);
   font-family: var(--font-mono);
   font-size: 12.5px;
   word-break: break-all;
@@ -872,7 +872,7 @@ a.adm-btn {
   padding: 11px 14px;
   border-radius: var(--radius);
   background: rgba(110, 158, 62, 0.1);
-  color: #8fb25a;
+  color: var(--ok);
   font-size: 13.5px;
 }
 
@@ -976,7 +976,7 @@ a.adm-btn {
 .adm-precio__simbolo {
   font-size: 24px;
   font-weight: 400;
-  color: #8a8a88;
+  color: var(--ink-muted);
 }
 
 .adm-precio__cifra {
@@ -1006,7 +1006,7 @@ a.adm-btn {
 .adm-columnas__cifra {
   font-family: var(--font-mono);
   font-size: 11.5px;
-  color: #9a9a97;
+  color: var(--ink-muted);
 }
 
 .adm-columnas__barra {
@@ -1017,7 +1017,7 @@ a.adm-btn {
 
 .adm-columnas__label {
   font-size: 12px;
-  color: #8a8a88;
+  color: var(--ink-muted);
 }
 
 .adm-metrica {
@@ -1061,7 +1061,7 @@ a.adm-btn {
 }
 
 .adm-nodo.is-caido {
-  background: #191310;
+  background: var(--warn-soft);
 }
 
 .adm-nodo__top {
@@ -1135,7 +1135,7 @@ a.adm-btn {
   height: 34px;
   flex-shrink: 0;
   border-radius: var(--radius);
-  background: #1d1d1d;
+  background: var(--surface-3);
   color: var(--ink-soft);
 }
 
@@ -1161,10 +1161,10 @@ a.adm-btn {
   gap: 8px;
   padding: 8px 11px;
   border-radius: var(--radius);
-  background: #1a1a1a;
+  background: var(--surface-2);
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #9a9a97;
+  color: var(--ink-muted);
 }
 
 .adm-prov__url span {
@@ -1273,7 +1273,7 @@ a.adm-btn {
   height: 52px;
   padding: 0 14px;
   border-radius: var(--radius);
-  background: #1a1a1a;
+  background: var(--surface-2);
   transition: background 0.18s ease;
 }
 
@@ -1352,7 +1352,7 @@ a.adm-btn {
   height: 32px;
   flex-shrink: 0;
   border-radius: var(--radius);
-  background: #1d1d1d;
+  background: var(--surface-3);
 }
 
 .adm-detalle__nombre {
@@ -1623,3 +1623,5 @@ a.adm-btn {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.adm__tema { display: flex; padding: 4px 8px; }

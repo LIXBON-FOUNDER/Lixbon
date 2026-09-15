@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useDismiss } from '../hooks/useDismiss';
 import { Logo } from './Logo';
 import { IconMenu, IconX } from './Icons';
+import { TemaBoton } from './TemaBoton';
 
 const LINKS = [
   { to: '/docs', label: 'Documentación' },
@@ -18,7 +19,7 @@ const LINKS = [
 
 const SUPPORT_EMAIL = 'soporte@lixbon.com';
 
-export function PublicNav({ extra = null }) {
+export function PublicNav() {
   const { pathname } = useLocation();
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -50,7 +51,7 @@ export function PublicNav({ extra = null }) {
         {/* Estos tres se recogen en .pubnav__menu al pasar a compacto. Van en
             su propio contenedor porque .pubnav__btn lo reusan otras páginas
             (la conversación compartida) que no tienen menú donde recogerlos. */}
-        {extra}
+        <TemaBoton />
         <div className="pubnav__wide">
           <a href={`mailto:${SUPPORT_EMAIL}`} className="pill-btn pill-btn--outline pubnav__btn">
             Soporte

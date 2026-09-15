@@ -1,34 +1,9 @@
 /* Portada pública (/). Minimalista: una columna, titulares grandes, reglas
-   finas. Trae su propio tema claro, acotado a la portada: los tokens
-   globales siguen siendo oscuros para el resto de la app. */
+   finas. El tema claro/oscuro es el global (data-theme en <html>). */
 
 .landing { --trazo: var(--ink-soft); --relleno: var(--surface-3); }
 
-.landing[data-tema="light"] {
-  --bg: #F5F4EE;
-  --surface-1: #FBFAF6;
-  --surface-2: #F1EFE7;
-  --surface-3: #ECEAE1;
-  --surface-4: #E3E1D7;
-  --surface-5: #D9D7CC;
-  --ink: #191917;
-  --ink-rgb: 25, 25, 23;
-  --ink-title: #191917;
-  --ink-body: #2E2E2B;
-  --ink-soft: #5B5B55;
-  --ink-muted: #8A8A82;
-  --ink-label: #8A8A82;
-  --accent: #7E9430;
-  --accent-soft: rgba(126, 148, 48, 0.14);
-  --primary: #191917;
-  --on-primary: #F5F4EE;
-  --code-bg: #191917;
-  --code-ink: #CBD69B;
-  --trazo: #5B5B55;
-  --relleno: #ECEAE1;
-  color-scheme: light;
-}
-.landing[data-tema="light"] .pill-btn--primary:hover:not(:disabled) { background: #2E2E2B; }
+
 
 .landing { background: var(--bg); color: var(--ink); transition: background .25s ease, color .25s ease; }
 .landing .pubnav { padding-inline: max(32px, calc((100% - 1080px) / 2)); }
