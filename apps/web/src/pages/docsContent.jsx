@@ -604,24 +604,23 @@ function PreciosApi() {
       )}
       {pricing === null && !error && <p>Cargando tarifas…</p>}
       {pricing && (
-        <table className="docs__table">
+        <table className="docs__table docs__table--tarifas">
           <thead>
-            <tr><th>Modelo</th><th>Entrada ($/Mtok)</th><th>Salida ($/Mtok)</th></tr>
+            <tr><th>Modelo</th><th>Id en la API</th><th className="num">Entrada</th><th className="num">Salida</th></tr>
           </thead>
           <tbody>
             {pricing.map((p) => (
               <tr key={p.model_prefix}>
-                <td>
-                  <code>{p.model_prefix}</code>
-                  {p.display_name ? ` — ${p.display_name}` : ''}
-                </td>
-                <td>{fmt(p.input_usd_per_mtok)}</td>
-                <td>{fmt(p.output_usd_per_mtok)}</td>
+                <td>{p.display_name || p.model_prefix}</td>
+                <td><code>{p.model_prefix === '*' ? 'cualquier otro' : p.model_prefix}</code></td>
+                <td className="num">{fmt(p.input_usd_per_mtok)}</td>
+                <td className="num">{fmt(p.output_usd_per_mtok)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+      <p className="docs__nota">Precios por millón de tokens. Un id terminado en <code>:</code> cubre todas las variantes de esa familia.</p>
 
       <h2>Cómo se calcula el costo</h2>
       <p>
