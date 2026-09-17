@@ -326,9 +326,26 @@ export function Sidebar({
                   <button onClick={alternarTema}>
                     {tema === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />} {tema === 'dark' ? t('lightTheme') : t('darkTheme')}
                   </button>
-                  <button onClick={() => { setProfileMenu(false); rawNavigate(otherLocalePath(pathname)); }}>
-                    <IconGlobe size={14} /> {tn('language')} <span className="sb-menu__tag">{locale === 'es' ? 'EN' : 'ES'}</span>
-                  </button>
+                  <div className="sb-menu__lang">
+                    <span className="sb-menu__lang-label"><IconGlobe size={14} /> {tn('language')}</span>
+                    <span className="sb-menu__lang-opts" role="listbox" aria-label={tn('language')}>
+                      {[{ code: 'es', label: 'ES' }, { code: 'en', label: 'EN' }].map((o) => (
+                        <button
+                          key={o.code}
+                          type="button"
+                          role="option"
+                          aria-selected={locale === o.code}
+                          className={locale === o.code ? 'is-active' : ''}
+                          onClick={() => {
+                            setProfileMenu(false);
+                            if (locale !== o.code) rawNavigate(otherLocalePath(pathname));
+                          }}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
                   <button onClick={() => { setProfileMenu(false); go('/account'); }}>
                     <IconGear size={14} /> {tc('settings')}
                   </button>
