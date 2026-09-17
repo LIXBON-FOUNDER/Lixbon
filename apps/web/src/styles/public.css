@@ -717,10 +717,7 @@
   font-size: 15px;
   color: var(--ink-muted);
   line-height: 1.65;
-  text-align: justify;
   text-wrap: pretty;
-  -webkit-hyphens: auto;
-  hyphens: auto;
 }
 
 .docs__content p {
@@ -728,10 +725,7 @@
   font-size: 14px;
   line-height: 1.7;
   color: var(--ink-soft);
-  text-align: justify;
   text-wrap: pretty;
-  -webkit-hyphens: auto;
-  hyphens: auto;
 }
 
 .docs__content ul {
