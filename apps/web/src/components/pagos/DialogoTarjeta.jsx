@@ -4,11 +4,13 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { api } from '../../lib/api';
 import { apariencia, cargarStripe } from '../../lib/stripe';
 import { useCierreAnimado } from '../../hooks/useCierreAnimado';
+import { useT } from '../../i18n/useT';
 import { LogoMark } from '../Logo';
 import { IconShield, IconX } from '../Icons';
 import { errMsg } from './comunes';
 
 function Formulario({ onGuardada, onError }) {
+  const t = useT('account');
   const stripe = useStripe();
   const elements = useElements();
   const [enviando, setEnviando] = useState(false);
@@ -23,7 +25,7 @@ function Formulario({ onGuardada, onError }) {
       redirect: 'if_required',
     });
     if (error) {
-      onError(error.message || 'No se pudo guardar la tarjeta.');
+      onError(error.message || t('billing.addCardDialog.saveFailed'));
       setEnviando(false);
       return;
     }
@@ -34,13 +36,14 @@ function Formulario({ onGuardada, onError }) {
     <form className="pago__form" onSubmit={enviar}>
       <div className="pago__elements"><PaymentElement options={{ layout: 'tabs' }} /></div>
       <button className="pago__cta" type="submit" disabled={!stripe || enviando}>
-        {enviando ? 'Guardando…' : 'Guardar tarjeta'}
+        {enviando ? t('billing.addCardDialog.saving') : t('billing.addCardDialog.save')}
       </button>
     </form>
   );
 }
 
 export function DialogoTarjeta({ onGuardada, onCerrar }) {
+  const t = useT('account');
   const [stripe, setStripe] = useState(null);
   const [secreto, setSecreto] = useState(null);
   const [error, setError] = useState('');
@@ -51,7 +54,8 @@ export function DialogoTarjeta({ onGuardada, onCerrar }) {
   useEffect(() => {
     api.post('/api/billing/setup-intent')
       .then((res) => setSecreto(res.data.client_secret))
-      .catch((e) => setError(errMsg(e, 'No se pudo preparar el formulario de tarjeta.')));
+      .catch((e) => setError(errMsg(e, t('billing.addCardDialog.prepareFailed'))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const guardada = async (pmId) => {
@@ -67,9 +71,9 @@ export function DialogoTarjeta({ onGuardada, onCerrar }) {
           <div className="pago__head">
             <div className="pago__marca">
               <LogoMark size={24} />
-              <span className="pago__nombre">Añadir tarjeta</span>
+              <span className="pago__nombre">{t('billing.addCardDialog.title')}</span>
             </div>
-            <button className="icon-btn" onClick={cerrar} aria-label="Cerrar"><IconX /></button>
+            <button className="icon-btn" onClick={cerrar} aria-label={t('billing.addCardDialog.close')}><IconX /></button>
           </div>
 
           {error && <p className="pago__error" role="alert">{error}</p>}
@@ -79,13 +83,13 @@ export function DialogoTarjeta({ onGuardada, onCerrar }) {
               <Formulario onGuardada={guardada} onError={setError} />
             </Elements>
           ) : (
-            !error && <p className="pago__cargando">Preparando el formulario seguro…</p>
+            !error && <p className="pago__cargando">{t('billing.addCardDialog.preparing')}</p>
           )}
 
           <p className="pago__pie">
             <IconShield size={13} />
             <span>
-              No se cobra nada ahora. El número de tu tarjeta lo guarda Stripe, no lixbon.
+              {t('billing.addCardDialog.footer')}
             </span>
           </p>
         </div>

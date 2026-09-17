@@ -1,12 +1,15 @@
 // NotFoundPage.jsx — la ruta que no existe (comodín `*` en App.jsx).
 // El 404 gigante es relleno, no texto: la jerarquía la hace la superficie.
 import { useSeo } from '../lib/seo';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
+import { Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { ClusterCaido } from '../components/ClusterCaido';
 
 export default function NotFoundPage() {
-  useSeo({ title: 'Página no encontrada', noindex: true });
+  const t = useT('notFound');
+  useSeo({ title: t('seoTitle'), noindex: true });
   const { pathname } = useLocation();
 
   return (
@@ -19,16 +22,15 @@ export default function NotFoundPage() {
 
         <div className="notfound__row">
           <div className="notfound__text">
-            <h1 className="page__title">Esta página no existe</h1>
+            <h1 className="page__title">{t('title')}</h1>
             <p className="notfound__lead">
-              La dirección <code className="mono notfound__ruta">{pathname}</code> puede
-              estar mal escrita, o la página se movió a otro sitio.
+              {t('leadBefore')} <code className="mono notfound__ruta">{pathname}</code> {t('leadAfter')}
             </p>
           </div>
 
           <div className="notfound__actions">
-            <Link to="/docs" className="pill-btn pill-btn--outline">Documentación</Link>
-            <Link to="/chat" className="pill-btn pill-btn--primary">Ir al chat</Link>
+            <Link to="/docs" className="pill-btn pill-btn--outline">{t('docs')}</Link>
+            <Link to="/chat" className="pill-btn pill-btn--primary">{t('goToChat')}</Link>
           </div>
         </div>
       </main>

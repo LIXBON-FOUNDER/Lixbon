@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { IconX, IconCopy, IconCheck, IconTrash } from './Icons';
 import { useCierreAnimado } from '../hooks/useCierreAnimado';
+import { useT } from '../i18n/useT';
 
 export function ShareDialog({ conversationId, onClose }) {
+  const t = useT('dialogs');
+  const tc = useT('common');
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -17,9 +20,9 @@ export function ShareDialog({ conversationId, onClose }) {
   useEffect(() => {
     api.get(`/api/conversations/${conversationId}/share`)
       .then((res) => setToken(res.data.token))
-      .catch(() => setError('No se pudo cargar el estado de compartir.'))
+      .catch(() => setError(t('shareLoadError')))
       .finally(() => setLoading(false));
-  }, [conversationId]);
+  }, [conversationId, t]);
 
   const enable = async () => {
     setBusy(true);
@@ -28,7 +31,7 @@ export function ShareDialog({ conversationId, onClose }) {
       const res = await api.post(`/api/conversations/${conversationId}/share`);
       setToken(res.data.token);
     } catch {
-      setError('No se pudo crear el enlace.');
+      setError(t('shareCreateError'));
     } finally {
       setBusy(false);
     }
@@ -40,7 +43,7 @@ export function ShareDialog({ conversationId, onClose }) {
       await api.delete(`/api/conversations/${conversationId}/share`);
       setToken(null);
     } catch {
-      setError('No se pudo revocar el enlace.');
+      setError(t('shareRevokeError'));
     } finally {
       setBusy(false);
     }
@@ -58,37 +61,35 @@ export function ShareDialog({ conversationId, onClose }) {
     <div className={cerrando ? 'modal-overlay is-closing' : 'modal-overlay'} onClick={cerrar}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
-          <h2 className="modal__title">Compartir conversación</h2>
-          <button className="icon-btn" onClick={cerrar} aria-label="Cerrar"><IconX /></button>
+          <h2 className="modal__title">{t('shareTitle')}</h2>
+          <button className="icon-btn" onClick={cerrar} aria-label={tc('close')}><IconX /></button>
         </div>
 
         {loading ? (
-          <p className="card__muted">Cargando…</p>
+          <p className="card__muted">{tc('loading')}</p>
         ) : token ? (
           <>
             <p className="card__muted modal__desc">
-              Cualquiera con el enlace puede ver esta conversación (solo lectura).
-              Los mensajes que envíes después no se incluirán hasta que vuelvas a compartir.
+              {t('shareDescActive')}
             </p>
             <div className="share-link">
               <input className="share-link__input" value={link} readOnly onFocus={(e) => e.target.select()} />
               <button className="pill-btn pill-btn--primary share-link__copy" onClick={copy}>
                 {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
-                {copied ? 'Copiado' : 'Copiar'}
+                {copied ? tc('copied') : tc('copy')}
               </button>
             </div>
             <button className="modal__revoke" onClick={revoke} disabled={busy}>
-              <IconTrash size={14} /> Revocar enlace
+              <IconTrash size={14} /> {t('revokeLink')}
             </button>
           </>
         ) : (
           <>
             <p className="card__muted modal__desc">
-              Crea un enlace público de solo lectura para compartir esta conversación.
-              Podrás revocarlo cuando quieras.
+              {t('shareDescInactive')}
             </p>
             <button className="pill-btn pill-btn--primary modal__cta" onClick={enable} disabled={busy}>
-              {busy ? 'Creando…' : 'Crear enlace para compartir'}
+              {busy ? t('creating') : t('createShareLink')}
             </button>
           </>
         )}

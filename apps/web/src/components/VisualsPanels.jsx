@@ -5,10 +5,14 @@ import { DESIGN_SYSTEMS, designSystemPersonalizado } from '../lib/visuals';
 import { IconChevron, IconX } from './Icons';
 import { useDismiss } from '../hooks/useDismiss';
 import { Desplegable } from './Desplegable';
+import { useT } from '../i18n/useT';
+import { useLocale } from '../i18n/LocaleContext';
 
 const FORM_VACIO = { nombre: '', primario: '#B4C64E', fondo: '#0E0E0E', texto: '#F2F2F0', fuenteTitulos: 'Inter', fuenteCuerpo: 'Inter', tono: '' };
 
 export function DesignSystemPicker({ value, onChange, compacto = false }) {
+  const t = useT('visuals');
+  const locale = useLocale();
   const [abierto, setAbierto] = useState(false);
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState(value?.custom ? value.form : FORM_VACIO);
@@ -24,7 +28,7 @@ export function DesignSystemPicker({ value, onChange, compacto = false }) {
     <div className={`vis-ds ${compacto ? 'vis-ds--compacto' : ''}`} ref={ref}>
       <button className="vis-ds__btn" onClick={() => setAbierto((v) => !v)} aria-expanded={abierto}>
         <span className="vis-ds__swatch" style={{ background: swatchDe(value) }} />
-        <span className="vis-ds__label">{compacto ? '' : 'Design system: '}{value?.label || 'Libre'}</span>
+        <span className="vis-ds__label">{compacto ? '' : t('designSystemLabel')}{value?.label ? value.label[locale] : t('freeform')}</span>
         <IconChevron size={13} open={abierto} />
       </button>
       <Desplegable abierto={abierto} className="vis-ds__menu">
@@ -33,30 +37,30 @@ export function DesignSystemPicker({ value, onChange, compacto = false }) {
               {DESIGN_SYSTEMS.map((ds) => (
                 <button key={ds.id} className={`vis-ds__item ${value?.id === ds.id ? 'is-active' : ''}`} onClick={() => elegir(ds)}>
                   <span className="vis-ds__swatch" style={{ background: swatchDe(ds) }} />
-                  <span className="vis-ds__item-text"><strong>{ds.label}</strong><small>{ds.desc}</small></span>
+                  <span className="vis-ds__item-text"><strong>{ds.label[locale]}</strong><small>{ds.desc[locale]}</small></span>
                 </button>
               ))}
               {value?.custom && (
                 <button className="vis-ds__item is-active" onClick={() => setEditando(true)}>
                   <span className="vis-ds__swatch" style={{ background: value.form.primario }} />
-                  <span className="vis-ds__item-text"><strong>{value.label}</strong><small>propio · editar</small></span>
+                  <span className="vis-ds__item-text"><strong>{value.label[locale]}</strong><small>{t('ownEdit')}</small></span>
                 </button>
               )}
-              <button className="vis-ds__item vis-ds__item--nuevo" onClick={() => setEditando(true)}>+ Definir el mío</button>
+              <button className="vis-ds__item vis-ds__item--nuevo" onClick={() => setEditando(true)}>{t('defineMine')}</button>
             </>
           ) : (
             <div className="vis-ds__form">
-              <div className="vis-ds__form-head"><strong>Design system propio</strong><button className="icon-btn" onClick={() => setEditando(false)} aria-label="Cerrar"><IconX size={14} /></button></div>
-              <label>Nombre<input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Mi marca" /></label>
+              <div className="vis-ds__form-head"><strong>{t('ownDesignSystem')}</strong><button className="icon-btn" onClick={() => setEditando(false)} aria-label={t('close')}><IconX size={14} /></button></div>
+              <label>{t('name')}<input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder={t('myBrandPlaceholder')} /></label>
               <div className="vis-ds__colores">
-                <label>Acento<input type="color" value={form.primario} onChange={(e) => setForm({ ...form, primario: e.target.value })} /></label>
-                <label>Fondo<input type="color" value={form.fondo} onChange={(e) => setForm({ ...form, fondo: e.target.value })} /></label>
-                <label>Texto<input type="color" value={form.texto} onChange={(e) => setForm({ ...form, texto: e.target.value })} /></label>
+                <label>{t('accent')}<input type="color" value={form.primario} onChange={(e) => setForm({ ...form, primario: e.target.value })} /></label>
+                <label>{t('background')}<input type="color" value={form.fondo} onChange={(e) => setForm({ ...form, fondo: e.target.value })} /></label>
+                <label>{t('text')}<input type="color" value={form.texto} onChange={(e) => setForm({ ...form, texto: e.target.value })} /></label>
               </div>
-              <label>Fuente títulos<input value={form.fuenteTitulos} onChange={(e) => setForm({ ...form, fuenteTitulos: e.target.value })} placeholder="Inter, Fraunces, Space Grotesk…" /></label>
-              <label>Fuente cuerpo<input value={form.fuenteCuerpo} onChange={(e) => setForm({ ...form, fuenteCuerpo: e.target.value })} placeholder="Inter" /></label>
-              <label>Tono<input value={form.tono} onChange={(e) => setForm({ ...form, tono: e.target.value })} placeholder="sobrio, juguetón, lujo, técnico…" /></label>
-              <button className="vis-tool vis-tool--primary" onClick={guardarPropio}>Usar este</button>
+              <label>{t('headingFont')}<input value={form.fuenteTitulos} onChange={(e) => setForm({ ...form, fuenteTitulos: e.target.value })} placeholder={t('headingFontPlaceholder')} /></label>
+              <label>{t('bodyFont')}<input value={form.fuenteCuerpo} onChange={(e) => setForm({ ...form, fuenteCuerpo: e.target.value })} placeholder={t('bodyFontPlaceholder')} /></label>
+              <label>{t('tone')}<input value={form.tono} onChange={(e) => setForm({ ...form, tono: e.target.value })} placeholder={t('tonePlaceholder')} /></label>
+              <button className="vis-tool vis-tool--primary" onClick={guardarPropio}>{t('useThis')}</button>
             </div>
           )}
       </Desplegable>
@@ -72,6 +76,7 @@ function swatchDe(ds) {
 
 /** Panel del elemento seleccionado: texto y estilos básicos, o pedírselo al modelo. */
 export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
+  const t = useT('visuals');
   const [texto, setTexto] = useState(seleccion?.text || '');
   const [estilo, setEstilo] = useState({});
   useEffect(() => { setTexto(seleccion?.text || ''); setEstilo({}); }, [seleccion]);
@@ -93,31 +98,32 @@ export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
     <aside className="vis-inspector">
       <div className="vis-inspector__head">
         <span className="mono">&lt;{seleccion.tag}&gt;</span>
-        <button className="icon-btn" onClick={onCerrar} aria-label="Cerrar"><IconX size={14} /></button>
+        <button className="icon-btn" onClick={onCerrar} aria-label={t('close')}><IconX size={14} /></button>
       </div>
       {editable && (
-        <label className="vis-inspector__campo">Texto
+        <label className="vis-inspector__campo">{t('text')}
           <textarea rows={3} value={texto} onChange={(e) => setTexto(e.target.value)} onBlur={aplicarTexto} />
         </label>
       )}
       <div className="vis-inspector__grid">
-        <label>Color<input type="color" value={estilo.color || aRgbHex(seleccion.styles?.color)} onChange={(e) => cambiar('color', e.target.value)} /></label>
-        <label>Fondo<input type="color" value={estilo.backgroundColor || aRgbHex(seleccion.styles?.background)} onChange={(e) => cambiar('backgroundColor', e.target.value)} /></label>
-        <label>Tamaño<input type="text" defaultValue={seleccion.styles?.fontSize} onBlur={(e) => cambiar('fontSize', e.target.value)} /></label>
-        <label>Peso<select defaultValue={seleccion.styles?.fontWeight} onChange={(e) => cambiar('fontWeight', e.target.value)}>
+        <label>{t('color')}<input type="color" value={estilo.color || aRgbHex(seleccion.styles?.color)} onChange={(e) => cambiar('color', e.target.value)} /></label>
+        <label>{t('background')}<input type="color" value={estilo.backgroundColor || aRgbHex(seleccion.styles?.background)} onChange={(e) => cambiar('backgroundColor', e.target.value)} /></label>
+        <label>{t('size')}<input type="text" defaultValue={seleccion.styles?.fontSize} onBlur={(e) => cambiar('fontSize', e.target.value)} /></label>
+        <label>{t('weight')}<select defaultValue={seleccion.styles?.fontWeight} onChange={(e) => cambiar('fontWeight', e.target.value)}>
           {['300', '400', '500', '600', '700', '800'].map((w) => <option key={w} value={w}>{w}</option>)}
         </select></label>
-        <label>Padding<input type="text" defaultValue={seleccion.styles?.padding} onBlur={(e) => cambiar('padding', e.target.value)} /></label>
-        <label>Radio<input type="text" defaultValue={seleccion.styles?.borderRadius} onBlur={(e) => cambiar('borderRadius', e.target.value)} /></label>
+        <label>{t('padding')}<input type="text" defaultValue={seleccion.styles?.padding} onBlur={(e) => cambiar('padding', e.target.value)} /></label>
+        <label>{t('radius')}<input type="text" defaultValue={seleccion.styles?.borderRadius} onBlur={(e) => cambiar('borderRadius', e.target.value)} /></label>
       </div>
-      <button className="vis-tool" onClick={() => onPedir(seleccion)}>Pedir un cambio al modelo sobre este elemento</button>
-      <p className="vis-inspector__nota">Los cambios manuales se guardan con la versión y se aplican al descargar.</p>
+      <button className="vis-tool" onClick={() => onPedir(seleccion)}>{t('requestModelChange')}</button>
+      <p className="vis-inspector__nota">{t('manualChangesNote')}</p>
     </aside>
   );
 }
 
 /** Lienzo libre: las páginas como artboards, con zoom y desplazamiento. */
 export function Board({ paginas, documento, onAbrir }) {
+  const t = useT('visuals');
   const ref = useRef(null);
   const [vista, setVista] = useState({ x: 40, y: 40, z: 0.3 });
   const arrastre = useRef(null);
@@ -184,11 +190,11 @@ export function Board({ paginas, documento, onAbrir }) {
         ))}
       </div>
       <div className="vis-board__zoom">
-        <button className="vis-tool" onClick={() => zoom(1 / 1.25)} title="Alejar">−</button>
+        <button className="vis-tool" onClick={() => zoom(1 / 1.25)} title={t('zoomOut')}>−</button>
         <span>{Math.round(vista.z * 100)}%</span>
-        <button className="vis-tool" onClick={() => zoom(1.25)} title="Acercar">+</button>
-        <button className="vis-tool" onClick={ajustar}>Ajustar</button>
-        <span className="vis-board__hint">Arrastra para mover · Ctrl+rueda para zoom · doble clic abre la página</span>
+        <button className="vis-tool" onClick={() => zoom(1.25)} title={t('zoomIn')}>+</button>
+        <button className="vis-tool" onClick={ajustar}>{t('fit')}</button>
+        <span className="vis-board__hint">{t('boardHint')}</span>
       </div>
     </div>
   );

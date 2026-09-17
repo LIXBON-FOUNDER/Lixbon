@@ -7,7 +7,9 @@
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { Link, useNavigate } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { api } from '../lib/api';
 import { initialRemoteState, openEventStream, remoteReducer } from '../lib/remote';
 import { Logo } from '../components/Logo';
@@ -16,7 +18,9 @@ import { Markdown } from '../components/Markdown';
 const SOURCE_LABEL = { cli: 'CLI', ide: 'IDE' };
 
 export default function RemotePage() {
-  useSeo({ title: 'Remote', noindex: true });
+  const t = useT('remote');
+  const tc = useT('common');
+  useSeo({ title: t('seoTitle'), noindex: true });
   const { token } = useParams();
   const navigate = useNavigate();
   const [session, setSession] = useState(null);
@@ -37,30 +41,31 @@ export default function RemotePage() {
           navigate(`/auth?next=${encodeURIComponent(`/remote/${token}`)}`, { replace: true });
           return;
         }
-        setError('Este link no existe, expiró, fue revocado o no pertenece a tu cuenta.');
+        setError(t('claimError'));
         setClaiming(false);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, navigate]);
 
   return (
     <div className="page remote-page">
       <header className="pubnav">
         <Link to="/" className="pubnav__logo"><Logo /></Link>
-        <span className="shared__badge">Control remoto</span>
+        <span className="shared__badge">{t('badge')}</span>
         <div className="pubnav__actions">
           <TemaBoton />
-          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Ir al chat</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{tc('goToChat')}</Link>
         </div>
       </header>
 
       {claiming ? (
-        <main className="remote__center"><span className="remote__dim">Conectando…</span></main>
+        <main className="remote__center"><span className="remote__dim">{t('connecting')}</span></main>
       ) : error ? (
         <main className="remote__center"><p className="page__error" role="alert">{error}</p></main>
       ) : session ? (
-        <RemoteSession session={session} onExit={() => setSession(null)} />
+        <RemoteSession session={session} onExit={() => setSession(null)} t={t} tc={tc} />
       ) : (
-        <RemoteList onOpen={setSession} />
+        <RemoteList onOpen={setSession} t={t} tc={tc} />
       )}
     </div>
   );
@@ -68,7 +73,7 @@ export default function RemotePage() {
 
 // ── Lista (usuario con sesión web) ──────────────────────────────────────────
 
-function RemoteList({ onOpen }) {
+function RemoteList({ onOpen, t, tc }) {
   const [sessions, setSessions] = useState(null);
   const [error, setError] = useState('');
 
@@ -78,29 +83,30 @@ function RemoteList({ onOpen }) {
       .then((res) => { if (alive) setSessions(res.data.sessions || []); })
       .catch((err) => {
         if (!alive) return;
-        if (err.response?.status === 401) setError('Inicia sesión para ver tus sesiones remotas.');
-        else setError('No se pudieron cargar las sesiones.');
+        if (err.response?.status === 401) setError(t('listError401'));
+        else setError(t('listErrorGeneric'));
       });
     load();
     const timer = setInterval(load, 10000);
     return () => { alive = false; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (error) {
     return (
       <main className="remote__center">
         <p className="remote__dim">{error}</p>
-        <Link to="/auth" className="pill-btn pill-btn--primary">Iniciar sesión</Link>
+        <Link to="/auth" className="pill-btn pill-btn--primary">{tc('logIn')}</Link>
       </main>
     );
   }
-  if (!sessions) return <main className="remote__center"><span className="remote__dim">Cargando…</span></main>;
+  if (!sessions) return <main className="remote__center"><span className="remote__dim">{tc('loading')}</span></main>;
   if (!sessions.length) {
     return (
       <main className="remote__center">
-        <h1 className="remote__empty-title">Sin sesiones remotas</h1>
+        <h1 className="remote__empty-title">{t('emptyTitle')}</h1>
         <p className="remote__dim">
-          Ejecuta <code>/remote</code> en el IDE o el CLI de Lixbon y la sesión aparecerá aquí.
+          {t('emptyBodyBefore')} <code>/remote</code> {t('emptyBodyAfter')}
         </p>
       </main>
     );
@@ -118,12 +124,12 @@ function RemoteList({ onOpen }) {
         >
           <span className={`remote__dot ${s.status === 'online' ? 'is-online' : ''}`} />
           <span className="remote__card-body">
-            <strong>{s.title || 'Sesión remota'}</strong>
+            <strong>{s.title || t('defaultSessionTitle')}</strong>
             <span className="remote__dim">
               {s.machine || '—'} ·{' '}
               {s.status === 'ended'
-                ? s.transcript_events > 0 ? 'terminada · ver conversación' : 'terminada'
-                : s.status === 'online' ? 'en línea' : 'sin conexión'}
+                ? s.transcript_events > 0 ? t('endedWithTranscript') : t('ended')
+                : s.status === 'online' ? t('online') : t('offline')}
             </span>
           </span>
           <span className="remote__badge">{SOURCE_LABEL[s.source] || s.source}</span>
@@ -135,7 +141,7 @@ function RemoteList({ onOpen }) {
 
 // ── Sesión en vivo ──────────────────────────────────────────────────────────
 
-function RemoteSession({ session }) {
+function RemoteSession({ session, t, tc }) {
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
   const [input, setInput] = useState('');
   const seqRef = useRef(0);
@@ -161,7 +167,7 @@ function RemoteSession({ session }) {
         for (const ev of res.data.events || []) dispatch(ev);
       })
       .catch(() => {
-        if (alive) dispatch({ type: 'error', message: 'No se pudo cargar la conversación.' });
+        if (alive) dispatch({ type: 'error', message: t('transcriptError') });
       })
       .finally(() => { if (alive) dispatch({ type: 'session_ended' }); });
     return () => { alive = false; };
@@ -210,14 +216,14 @@ function RemoteSession({ session }) {
     setInput('');
   };
 
-  const title = state.meta?.title || session.title || 'Sesión remota';
+  const title = state.meta?.title || session.title || t('defaultSessionTitle');
   const statusLabel = state.ended
-    ? 'Sesión terminada'
+    ? t('sessionEndedStatus')
     : !state.hostConnected
-      ? 'Host sin conexión…'
+      ? t('hostOffline')
       : state.agentState === 'thinking'
-        ? 'El agente está trabajando…'
-        : 'Conectado';
+        ? t('agentThinking')
+        : t('connected');
 
   return (
     <main className="remote__session">
@@ -244,7 +250,7 @@ function RemoteSession({ session }) {
                 <span className="remote__tool-name">{item.tool}</span>
                 {item.summary && <span className="remote__tool-summary">{item.summary}</span>}
                 <span className="remote__tool-state">
-                  {item.running ? '…' : item.error ? 'falló' : 'ok'}
+                  {item.running ? '…' : item.error ? t('toolError') : t('toolOk')}
                 </span>
               </div>
             );
@@ -256,15 +262,13 @@ function RemoteSession({ session }) {
             <div key={item.key} className="msg msg--assistant">
               {item.text
                 ? <Markdown>{item.text}</Markdown>
-                : item.open ? <span className="remote__dim">Pensando…</span> : null}
+                : item.open ? <span className="remote__dim">{t('thinkingDim')}</span> : null}
             </div>
           );
         })}
         {!state.items.length && (
           <p className="remote__dim remote__hint">
-            {state.hostConnected
-              ? 'Sesión conectada. Escribe abajo para pedirle algo al agente.'
-              : 'Esperando al host…'}
+            {state.hostConnected ? t('hintConnected') : t('hintWaiting')}
           </p>
         )}
       </div>
@@ -272,15 +276,15 @@ function RemoteSession({ session }) {
       {state.approvals.map((a) => (
         <div key={a.id} className="remote__approval">
           <p>
-            <strong>{a.risk === 'command' ? 'El agente quiere ejecutar un comando' : 'El agente quiere aplicar un cambio'}</strong>
+            <strong>{a.risk === 'command' ? t('approvalCommand') : t('approvalChange')}</strong>
           </p>
           <code>{a.tool}{a.summary ? `  ${a.summary}` : ''}</code>
           <div className="remote__approval-actions">
             <button className="pill-btn pill-btn--outline" onClick={() => sendCommand({ type: 'approve', id: a.id, decision: 'deny' })}>
-              Denegar
+              {t('deny')}
             </button>
             <button className="pill-btn pill-btn--primary" onClick={() => sendCommand({ type: 'approve', id: a.id, decision: 'allow' })}>
-              Permitir
+              {t('allow')}
             </button>
           </div>
         </div>
@@ -290,16 +294,16 @@ function RemoteSession({ session }) {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={state.ended ? 'La sesión terminó' : state.hostConnected ? 'Pídele algo al agente…' : 'Host sin conexión…'}
+          placeholder={state.ended ? t('placeholderEnded') : state.hostConnected ? t('placeholderReady') : t('hostOffline')}
           disabled={state.ended || !state.hostConnected}
         />
         {state.agentState === 'thinking' && !state.ended ? (
           <button type="button" className="pill-btn pill-btn--outline" onClick={() => sendCommand({ type: 'interrupt' })}>
-            Detener
+            {t('stop')}
           </button>
         ) : (
           <button type="submit" className="pill-btn pill-btn--primary" disabled={!input.trim() || state.ended || !state.hostConnected}>
-            Enviar
+            {tc('send')}
           </button>
         )}
       </form>

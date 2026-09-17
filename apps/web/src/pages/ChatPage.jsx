@@ -3,7 +3,9 @@
 // Sin sesión: se VE la interfaz ("¿Qué investigaremos hoy?"); al enviar → registro.
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { useNavigate, Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { useIsCompact } from '../hooks/useMediaQuery';
@@ -21,25 +23,22 @@ import { MensajeError, Razonamiento } from '../components/Mensajes';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
-const AVISO_VACIO = 'El modelo no devolvió respuesta. Suele pasar cuando la conversación ya no cabe '
-  + 'en su ventana de contexto: prueba a repetir la pregunta o empieza una conversación nueva.';
-const AVISO_CORTADA = 'Respuesta cortada: el modelo alcanzó su límite de tokens.';
-
 // Sin datos de tokens (conversación recién cargada o sin respuesta aún) el
 // contexto se estima por caracteres; el gateway manda el uso real al terminar.
 const estimarTokens = (msgs) => Math.round(msgs.reduce((n, m) => n + (m.content?.length || 0), 0) / 3.5);
 
 
 function Sources({ sources, queries }) {
+  const t = useT('chat');
   return (
     <div className="msg-sources">
-      <span className="msg-sources__title"><IconGlobe size={13} /> Fuentes</span>
+      <span className="msg-sources__title"><IconGlobe size={13} /> {t('sourcesTitle')}</span>
       {queries?.length > 0 && (
         <p className="msg-sources__queries">
-          Buscó: {queries.map((q, i) => <span key={i} className="msg-sources__query">{q}</span>)}
+          {t('searchedLabel')} {queries.map((q, i) => <span key={i} className="msg-sources__query">{q}</span>)}
         </p>
       )}
-      {sources.length === 0 && <p className="msg-sources__queries">Sin resultados.</p>}
+      {sources.length === 0 && <p className="msg-sources__queries">{t('noResults')}</p>}
       <ol className="msg-sources__list">
         {sources.map((s, i) => (
           <li key={i}>
@@ -52,7 +51,9 @@ function Sources({ sources, queries }) {
 }
 
 export default function ChatPage() {
-  useSeo({ title: 'Chat', path: '/chat', noindex: true });
+  const t = useT('chat');
+  const tc = useT('common');
+  useSeo({ title: t('seoTitle'), path: '/chat', noindex: true });
   const { user, loading, logout } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();
@@ -193,7 +194,7 @@ export default function ChatPage() {
         chosenModel = (await loadModels())[0] || '';
       } catch { /* cae al toast de abajo */ }
       if (!chosenModel) {
-        showToast('No hay modelos disponibles ahora mismo');
+        showToast(t('noModelsAvailable'));
         return;
       }
     }
@@ -259,15 +260,15 @@ export default function ChatPage() {
             });
           }
           if (event?.type === 'empty') {
-            patchLast((last) => ({ ...last, content: AVISO_VACIO, error: true }));
+            patchLast((last) => ({ ...last, content: t('emptyResponseNotice'), error: true }));
           } else if (reason === 'length') {
-            patchLast((last) => ({ ...last, aviso: AVISO_CORTADA }));
+            patchLast((last) => ({ ...last, aviso: t('cutResponseNotice') }));
           }
         },
       });
       // Stream cerrado sin contenido ni aviso (p. ej. el gateway se reinició a
       // mitad): que no quede "Pensando…" con el botón de enviar activo.
-      patchLast((last) => (last.content ? last : { ...last, content: AVISO_VACIO, error: true }));
+      patchLast((last) => (last.content ? last : { ...last, content: t('emptyResponseNotice'), error: true }));
 
       if (isFirstExchange && saveHistory) {
         try {
@@ -319,16 +320,16 @@ export default function ChatPage() {
     try {
       await api.patch(`/api/conversations/${id}`, { title: newTitle });
     } catch {
-      showToast('No se pudo renombrar');
+      showToast(t('renameFailed'));
       loadConversations();
     }
   };
 
   const deleteConversation = async (id) => {
     const ok = await confirmar({
-      titulo: '¿Eliminar esta conversación?',
-      texto: 'Se borrarán todos sus mensajes. Esta acción no se puede deshacer.',
-      etiqueta: 'Eliminar',
+      titulo: t('deleteConvTitle'),
+      texto: t('deleteConvText'),
+      etiqueta: tc('delete'),
     });
     if (!ok) return;
     setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -336,16 +337,16 @@ export default function ChatPage() {
     try {
       await api.delete(`/api/conversations/${id}`);
     } catch {
-      showToast('No se pudo eliminar');
+      showToast(t('deleteFailed'));
       loadConversations();
     }
   };
 
   const handleLogout = async () => {
     const ok = await confirmar({
-      titulo: '¿Cerrar sesión?',
-      texto: 'Tendrás que volver a iniciar sesión para ver tu historial.',
-      etiqueta: 'Cerrar sesión',
+      titulo: t('logoutTitle'),
+      texto: t('logoutText'),
+      etiqueta: tc('logOut'),
       peligro: false,
     });
     if (!ok) return;
@@ -391,25 +392,25 @@ export default function ChatPage() {
           <button
             className="icon-btn chat-header__menu"
             onClick={() => setDrawerOpen(true)}
-            aria-label="Abrir panel de conversaciones"
+            aria-label={t('openConversationsPanel')}
             aria-controls="sidebar-drawer"
             aria-expanded={drawerOpen}
           >
             <IconMenu />
           </button>
-          <h1 className="chat-header__title">{title || (empty ? '' : 'Sin título')}</h1>
+          <h1 className="chat-header__title">{title || (empty ? '' : t('untitled'))}</h1>
           {user ? (
             !empty && routeConvId && (
               <button
                 className="pill-btn pill-btn--primary chat-header__share"
                 onClick={() => setShareOpen(true)}
               >
-                <IconShare size={15} /> Compartir
+                <IconShare size={15} /> {t('share')}
               </button>
             )
           ) : (
             <Link to="/auth" className="pill-btn pill-btn--primary chat-header__share">
-              Iniciar sesión
+              {tc('logIn')}
             </Link>
           )}
         </header>
@@ -430,9 +431,7 @@ export default function ChatPage() {
             {/* Sin sesión el encabezado explica el límite en vez de invitar a
                 escribir: es lo primero que hay que saber antes de empezar. */}
             <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
-              {user
-                ? '¿Qué investigaremos hoy?'
-                : 'Solo tienes un chat disponible para usar. Inicia sesión para tener más chats y funciones'}
+              {user ? t('emptyTitleUser') : t('emptyTitleGuest')}
             </h2>
             <div className="chat-hero__input">
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
@@ -460,7 +459,7 @@ export default function ChatPage() {
                       )}
                       {searching && i === messages.length - 1 && !m.content && (
                         <span className="msg__searching">
-                          <IconGlobe size={14} /> Buscando en internet…
+                          <IconGlobe size={14} /> {t('searchingWeb')}
                         </span>
                       )}
                       {m.reasoning && (
@@ -470,7 +469,7 @@ export default function ChatPage() {
                         ? <MensajeError>{m.content}</MensajeError>
                         : m.content
                         ? <Markdown streaming={busy && i === messages.length - 1}>{m.content}</Markdown>
-                        : (!searching && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
+                        : (!searching && !m.reasoning && <span className="msg__thinking">{t('thinking')}</span>)}
                       {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                     </div>
                   )
@@ -482,13 +481,13 @@ export default function ChatPage() {
                   cuando la caja crece o el teclado móvil la empuja. */}
               {showJump && (
                 <button className="chat-jump" onClick={jumpToBottom}>
-                  más <IconArrowDown size={14} />
+                  {t('jumpMore')} <IconArrowDown size={14} />
                 </button>
               )}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
               <p className="chat-disclaimer">
-                lixbon puede equivocarse. Verifica la informacion antes de usarla.
+                {t('disclaimer')}
               </p>
             </div>
           </>

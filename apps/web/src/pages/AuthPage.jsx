@@ -3,7 +3,9 @@
 // Botones OAuth Google/Apple: SOLO visuales por ahora (sin funcionalidad).
 import { useSeo } from '../lib/seo';
 import { useState } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+import { useNavigate, Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
@@ -30,14 +32,9 @@ function AppleLogo() {
   );
 }
 
-const TITULOS = {
-  login: 'Iniciar sesión',
-  register: 'Crear cuenta',
-  forgot: 'Restablecer contraseña',
-};
-
 export default function AuthPage() {
-  useSeo({ title: 'Iniciar sesión', noindex: true });
+  const t = useT('auth');
+  useSeo({ title: t('seoLogin'), noindex: true });
   const [params] = useSearchParams();
   const initialMode = params.get('mode') === 'register' ? 'register' : 'login';
   // Vuelta post-login (p.ej. /remote/<token> desde el QR). Solo rutas internas:
@@ -73,17 +70,17 @@ export default function AuthPage() {
         navigate(nextPath, { replace: true });
       } else if (mode === 'register') {
         if (password !== confirm) {
-          setError('Las contraseñas no coinciden');
+          setError(t('passwordsDontMatch'));
           return;
         }
         await register({ firstName, lastName, email, password });
         navigate(nextPath, { replace: true });
       } else {
         await api.post('/api/auth/request-password-reset', { email });
-        setNotice('Si el correo existe, te enviamos un enlace para restablecer la contraseña.');
+        setNotice(t('resetLinkNotice'));
       }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Algo salió mal. Intenta de nuevo.');
+      setError(err.response?.data?.detail || t('genericError'));
     } finally {
       setBusy(false);
     }
@@ -97,33 +94,33 @@ export default function AuthPage() {
         <span className="tab" aria-hidden="true" />
         <form className="auth__card" onSubmit={handleSubmit}>
           <div className="auth__head">
-            <Link to="/" className="auth__logo" aria-label="Inicio">
+            <Link to="/" className="auth__logo" aria-label={t('home')}>
               <Logo />
             </Link>
-            <h1 className="auth__title">{TITULOS[mode]}</h1>
+            <h1 className="auth__title">{t(`titles.${mode}`)}</h1>
           </div>
 
           {/* key={mode}: remonta el bloque para animar la entrada al cambiar de modo */}
           <div className="auth__fields" key={mode}>
             {mode === 'register' && (
               <div className="auth__row">
-                <FloatingField label="Nombre" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
-                <FloatingField label="Apellido" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+                <FloatingField label={t('firstName')} value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+                <FloatingField label={t('lastName')} value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
               </div>
             )}
 
             <FloatingField
-              label="Correo electrónico"
+              label={t('email')}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
-              placeholder="tu@correo.com"
+              placeholder={t('emailPlaceholder')}
             />
 
             {mode !== 'forgot' && (
               <FloatingField
-                label="Contraseña"
+                label={t('password')}
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -134,7 +131,7 @@ export default function AuthPage() {
 
             {mode === 'register' && (
               <FloatingField
-                label="Confirmar contraseña"
+                label={t('confirmPassword')}
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
@@ -145,7 +142,7 @@ export default function AuthPage() {
 
             {mode === 'login' && (
               <button type="button" className="auth__link auth__link--right" onClick={() => switchMode('forgot')}>
-                ¿Olvidaste tu contraseña?
+                {t('forgotPassword')}
               </button>
             )}
           </div>
@@ -155,32 +152,32 @@ export default function AuthPage() {
 
           <div className="auth__actions">
             <button className="auth__cta" type="submit" disabled={busy}>
-              {mode === 'login' && (busy ? 'Iniciando…' : 'Iniciar sesión')}
-              {mode === 'register' && (busy ? 'Creando cuenta…' : 'Crear cuenta')}
-              {mode === 'forgot' && (busy ? 'Enviando…' : 'Enviar enlace')}
+              {mode === 'login' && (busy ? t('loggingIn') : t('login'))}
+              {mode === 'register' && (busy ? t('creatingAccount') : t('createAccount'))}
+              {mode === 'forgot' && (busy ? t('sending') : t('sendLink'))}
             </button>
 
             {mode === 'login' && (
               <p className="auth__switch">
-                ¿No tienes cuenta?{' '}
-                <button type="button" onClick={() => switchMode('register')}>Regístrate</button>
+                {t('noAccount')}{' '}
+                <button type="button" onClick={() => switchMode('register')}>{t('signUp')}</button>
               </p>
             )}
             {mode === 'register' && (
               <p className="auth__switch auth__legal">
-                Al crear la cuenta aceptas los <Link to="/legal/terminos">términos</Link> y la{' '}
-                <Link to="/legal/privacidad">política de privacidad</Link>.
+                {t('legalNoticeBefore')} <Link to="/legal/terms">{t('terms')}</Link> {t('legalNoticeMiddle')}{' '}
+                <Link to="/legal/privacy">{t('privacyPolicy')}</Link>.
               </p>
             )}
             {mode === 'register' && (
               <p className="auth__switch">
-                ¿Ya tienes cuenta?{' '}
-                <button type="button" onClick={() => switchMode('login')}>Inicia sesión</button>
+                {t('haveAccount')}{' '}
+                <button type="button" onClick={() => switchMode('login')}>{t('logIn')}</button>
               </p>
             )}
             {mode === 'forgot' && (
               <p className="auth__switch">
-                <button type="button" onClick={() => switchMode('login')}>Volver a iniciar sesión</button>
+                <button type="button" onClick={() => switchMode('login')}>{t('backToLogin')}</button>
               </p>
             )}
           </div>
@@ -188,13 +185,13 @@ export default function AuthPage() {
           {/* OAuth: solo visual por ahora (sin funcionalidad) */}
           {mode !== 'forgot' && (
             <>
-              <div className="auth__divider"><span>O</span></div>
+              <div className="auth__divider"><span>{t('or')}</span></div>
               <div className="auth__social">
                 <button type="button" className="auth__social-btn">
-                  <GoogleLogo /> Google
+                  <GoogleLogo /> {t('google')}
                 </button>
                 <button type="button" className="auth__social-btn">
-                  <AppleLogo /> Apple
+                  <AppleLogo /> {t('apple')}
                 </button>
               </div>
             </>

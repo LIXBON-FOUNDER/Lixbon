@@ -1,4 +1,6 @@
 // Skeleton.jsx — placeholder con shimmer para estados de carga.
+import { useT } from '../i18n/useT';
+
 export function Skeleton({ w, h = 14, r = 8, className = '', style = {} }) {
   return (
     <span
@@ -11,8 +13,9 @@ export function Skeleton({ w, h = 14, r = 8, className = '', style = {} }) {
 
 // Skeleton del historial de conversaciones (sidebar).
 export function HistorySkeleton({ rows = 6 }) {
+  const t = useT('chat');
   return (
-    <div className="sk-history" aria-label="Cargando historial">
+    <div className="sk-history" aria-label={t('loadingHistory')}>
       {Array.from({ length: rows }).map((_, i) => (
         <Skeleton key={i} w={`${88 - (i % 3) * 14}%`} h={15} />
       ))}
@@ -22,8 +25,9 @@ export function HistorySkeleton({ rows = 6 }) {
 
 // Skeleton del hilo de mensajes (al abrir una conversación).
 export function ThreadSkeleton() {
+  const t = useT('chat');
   return (
-    <div className="sk-thread" aria-label="Cargando conversación">
+    <div className="sk-thread" aria-label={t('loadingConversation')}>
       <div className="sk-msg sk-msg--user">
         <Skeleton w="52%" h={16} />
       </div>
@@ -49,8 +53,9 @@ export function ThreadSkeleton() {
 
 // Skeleton del contenido de la documentación.
 export function DocsSkeleton() {
+  const t = useT('chat');
   return (
-    <div className="sk-docs" aria-label="Cargando documentación">
+    <div className="sk-docs" aria-label={t('loadingDocs')}>
       <Skeleton w="46%" h={30} />
       <Skeleton w="88%" h={16} style={{ marginTop: 14 }} />
       <Skeleton w="70%" h={16} />

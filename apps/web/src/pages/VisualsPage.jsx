@@ -5,7 +5,10 @@
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { useNavigate, Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
+import { useLocale } from '../i18n/LocaleContext';
 import { useAuth } from '../hooks/useAuth';
 import { tieneVisuals } from '../lib/planes';
 import { useConfirmar } from '../hooks/useConfirmar';
@@ -32,7 +35,6 @@ import {
 } from '../components/Icons';
 
 const CONTEXT_WINDOW = 30;
-const AVISO_VACIO = 'El modelo no devolvió nada. Prueba a reformular o a cambiar de modelo.';
 
 /** El texto de la respuesta sin bloques de código: los archivos viven en el
  *  lienzo y el chat solo cuenta qué está haciendo el modelo. */
@@ -60,7 +62,15 @@ function Menu({ abierto, onCerrar, children, className = '' }) {
 }
 
 export default function VisualsPage() {
-  useSeo({ title: 'Visuals: diseña webs, dashboards y prototipos con IA', description: 'Describe una landing, un dashboard, un email, un logo o un prototipo y el modelo lo construye en HTML; afínalo en el lienzo, compártelo por enlace o conviértelo en un proyecto React.', path: '/visuals', noindex: typeof window !== 'undefined' && window.location.pathname !== '/visuals' });
+  const t = useT('visuals');
+  const tc = useT('common');
+  const locale = useLocale();
+  useSeo({
+    title: t('seoTitle'),
+    description: t('seoDescription'),
+    path: '/visuals',
+    noindex: typeof window !== 'undefined' && !window.location.pathname.endsWith('/visuals'),
+  });
   const { user, loading } = useAuth();
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();
@@ -208,7 +218,7 @@ export default function VisualsPage() {
   };
 
   const pedirAlModelo = (sel) => {
-    setPrefill(`Sobre este elemento de ${paginaActual?.name || 'la página'} (<${sel.tag}>): ${sel.html.slice(0, 300)}\n\nCambio: `);
+    setPrefill(`${t('elementPrefillBefore')} ${paginaActual?.name || t('thePage')} (<${sel.tag}>): ${sel.html.slice(0, 300)}\n\n${t('elementPrefillMiddle')} `);
     setInspeccion(false);
     setChatAbierto(true);
   };
@@ -236,7 +246,7 @@ export default function VisualsPage() {
       loadConversations();
     } catch (err) {
       const detalle = err.response?.data?.detail;
-      const texto = (detalle && (detalle.message || detalle)) || err.message || 'No se pudo generar la imagen';
+      const texto = (detalle && (detalle.message || detalle)) || err.message || t('couldNotGenerateImage');
       setMessages((prev) => {
         const next = prev.slice();
         next[next.length - 1] = { role: 'assistant', content: typeof texto === 'string' ? texto : JSON.stringify(texto), error: true };
@@ -250,7 +260,7 @@ export default function VisualsPage() {
   // ── Enviar ─────────────────────────────────────────────────────────────
   const send = async (texto, images = []) => {
     if (!user) { navigate('/auth?mode=register'); return; }
-    if (!tieneVisuals(user)) { navigate('/planes'); return; }
+    if (!tieneVisuals(user)) { navigate('/plans'); return; }
     setPrefill('');
     if (modoImagen) { await generarImagen(texto); return; }
     let chosenModel = model;
@@ -258,7 +268,7 @@ export default function VisualsPage() {
       try { chosenModel = (await loadModels())[0] || ''; } catch { /* abajo */ }
       if (!chosenModel) return;
     }
-    const text = tipo && messages.length === 0 ? `${tipo.prefijo}${texto}` : texto;
+    const text = tipo && messages.length === 0 ? `${tipo.prefijo[locale]}${texto}` : texto;
     const convId = routeConvId || crypto.randomUUID();
     const isFirst = messages.length === 0;
     const history = [...messages.slice(-CONTEXT_WINDOW), { role: 'user', content: text, ...(images.length ? { images } : {}) }];
@@ -285,7 +295,7 @@ export default function VisualsPage() {
         messages: history,
         conversationId: convId,
         signal: abort.signal,
-        system: promptVisuals(designSystem),
+        system: promptVisuals(designSystem, locale),
         source: 'visuals',
         webSearch: 'off',  // diseñar no necesita internet; ahorra la llamada del planificador
         // Sin razonamiento previo: un HTML largo con thinking acababa entero
@@ -294,13 +304,13 @@ export default function VisualsPage() {
         onDelta: (delta) => patchLast((last) => ({ ...last, content: last.content + delta })),
         onReasoning: (delta) => patchLast((last) => ({ ...last, reasoning: (last.reasoning || '') + delta })),
         onFinish: (reason) => {
-          if (reason === 'length') patchLast((last) => ({ ...last, aviso: 'La respuesta se cortó por longitud: pide «continúa» o divide el encargo.' }));
+          if (reason === 'length') patchLast((last) => ({ ...last, aviso: t('truncatedResponse') }));
         },
       });
       patchLast((last) => {
         if (last.content.trim()) return last;
         if (last.reasoning && (extraerArchivos(last.reasoning).length || extraerEdiciones(last.reasoning).length)) return { ...last, content: last.reasoning, reasoning: '' };
-        return { ...last, content: AVISO_VACIO, error: true };
+        return { ...last, content: t('emptyModelResponse'), error: true };
       });
       if (isFirst) {
         try {
@@ -383,7 +393,7 @@ export default function VisualsPage() {
     try { await api.patch(`/api/conversations/${id}`, { title: limpio }); } catch { loadConversations(); }
   };
   const deleteConversation = async (id) => {
-    const ok = await confirmar({ titulo: '¿Eliminar este diseño?', texto: 'Se borrarán la conversación y sus versiones.', etiqueta: 'Eliminar' });
+    const ok = await confirmar({ titulo: t('deleteConfirmTitle'), texto: t('deleteConfirmText'), etiqueta: tc('delete') });
     if (!ok) return;
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (id === routeConvId) navigate('/visuals');
@@ -404,53 +414,53 @@ export default function VisualsPage() {
     return (
       <div className="vis-page">
         <header className="vis-top">
-          <Link to="/chat" className="vis-top__logo" title="Volver al chat"><Logo /></Link>
+          <Link to="/chat" className="vis-top__logo" title={t('backToChat')}><Logo /></Link>
           <span className="vis-top__seccion">Visuals</span>
           <div className="vis-top__right">
             <TemaBoton />
             {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>{(user.name || user.email || '?')[0].toUpperCase()}</Link>
-              : <Link to="/auth" className="pill-btn pill-btn--primary">Iniciar sesión</Link>}
+              : <Link to="/auth" className="pill-btn pill-btn--primary">{tc('logIn')}</Link>}
           </div>
         </header>
         <VerifyBanner />
         <div className="vis-galeria">
           <section className="vis-hero vis-hero--galeria">
             <div className="vis-hero__inner">
-              <h2 className="vis-hero__title">¿Qué diseñamos?</h2>
-              <p className="vis-hero__lead">Describe lo que quieres y el modelo lo construye; luego lo afinas hablando con él o tocándolo en el lienzo.</p>
+              <h2 className="vis-hero__title">{t('heroTitle')}</h2>
+              <p className="vis-hero__lead">{t('heroLead')}</p>
               {user && !tieneVisuals(user) ? (
                 <div className="vis-bloqueo">
                   <span className="vis-bloqueo__icono"><IconLayers size={20} /></span>
                   <div className="vis-bloqueo__cuerpo">
-                    <h3>Incluido en Pro y Advance</h3>
-                    <p>Tu cuenta tiene el plan {user.plan_name || 'Gratuito'}. Con Pro o Advance, Visuals te deja:</p>
+                    <h3>{t('lockedTitle')}</h3>
+                    <p>{t('lockedPlanBefore')} {user.plan_name || tc('freePlan')} {t('lockedPlanAfter')}</p>
                     <ul>
-                      <li><IconCheck size={14} /> Landings, dashboards, emails y prototipos en HTML, de una descripción.</li>
-                      <li><IconCheck size={14} /> Afinar cada elemento hablando con el modelo o tocándolo en el lienzo.</li>
-                      <li><IconCheck size={14} /> Compartir por enlace y convertirlo en un proyecto React desde el CLI.</li>
+                      <li><IconCheck size={14} /> {t('lockedFeature1')}</li>
+                      <li><IconCheck size={14} /> {t('lockedFeature2')}</li>
+                      <li><IconCheck size={14} /> {t('lockedFeature3')}</li>
                     </ul>
                     <div className="vis-bloqueo__acciones">
-                      <Link to="/planes" className="pill-btn pill-btn--primary">Ver los planes</Link>
-                      <Link to="/docs/visuals" className="pill-btn pill-btn--outline">Cómo funciona</Link>
+                      <Link to="/plans" className="pill-btn pill-btn--primary">{t('seePlans')}</Link>
+                      <Link to="/docs/visuals" className="pill-btn pill-btn--outline">{t('howItWorks')}</Link>
                     </div>
                   </div>
                 </div>
               ) : (
               <>
               <div className="vis-tipos">
-                {[...TIPOS, TIPO_IMAGEN].map((t) => (
-                  <button key={t.id} className={`vis-tipo ${tipo?.id === t.id ? 'is-active' : ''}`}
-                    disabled={t.id === 'imagen' && !imagenes.available}
-                    title={t.id === 'imagen' && !imagenes.available ? 'Ningún nodo genera imágenes ahora mismo' : undefined}
-                    onClick={() => setTipo(tipo?.id === t.id ? null : t)}>
-                    {t.label}
+                {[...TIPOS, TIPO_IMAGEN].map((tp) => (
+                  <button key={tp.id} className={`vis-tipo ${tipo?.id === tp.id ? 'is-active' : ''}`}
+                    disabled={tp.id === 'imagen' && !imagenes.available}
+                    title={tp.id === 'imagen' && !imagenes.available ? t('noImageNodes') : undefined}
+                    onClick={() => setTipo(tipo?.id === tp.id ? null : tp)}>
+                    {tp.label[locale]}
                   </button>
                 ))}
               </div>
               {tipo?.id === 'imagen' ? (
                 <div className="vis-tamanos">
-                  {TAMANOS_IMAGEN.map((t) => (
-                    <button key={t.id} className={`vis-tool ${tamano.id === t.id ? 'is-active' : ''}`} onClick={() => setTamano(t)}>{t.label}</button>
+                  {TAMANOS_IMAGEN.map((tm) => (
+                    <button key={tm.id} className={`vis-tool ${tamano.id === tm.id ? 'is-active' : ''}`} onClick={() => setTamano(tm)}>{tm.label}</button>
                   ))}
                   <span className="vis-tamanos__modelo">{imagenes.model}</span>
                 </div>
@@ -458,16 +468,16 @@ export default function VisualsPage() {
               <div className="vis-hero__input">
                 <ChatInput onSend={send} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
                   tools={tipo?.id !== 'imagen' && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
-                  placeholder={tipo ? tipo.hint : 'Una landing para mi cafetería, un dashboard de ventas, un logo para…'} />
+                  placeholder={tipo ? tipo.hint[locale] : t('inputPlaceholder')} />
               </div>
-              {!user && <p className="vis-hero__nota">Incluido en los planes Pro y Advance.</p>}
+              {!user && <p className="vis-hero__nota">{t('proAdvanceNote')}</p>}
               </>
               )}
             </div>
           </section>
           {user && (tieneVisuals(user) || conversations.length > 0) && (
             <Galeria conversations={conversations} loading={convsLoading}
-              onRename={renameConversation} onDelete={deleteConversation} />
+              onRename={renameConversation} onDelete={deleteConversation} t={t} tc={tc} />
           )}
         </div>
       </div>
@@ -475,41 +485,41 @@ export default function VisualsPage() {
   }
 
   // ── Editor ─────────────────────────────────────────────────────────────
-  const tituloVisible = title || 'Diseño sin título';
+  const tituloVisible = title || t('untitledDesign');
   return (
     <div className="vis-page vis-editor">
       <header className="vis-top">
-        <Link to="/visuals" className="icon-btn" title="Todos los diseños"><IconArrowLeft size={17} /></Link>
-        <button className={`icon-btn ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? 'Ocultar el chat' : 'Mostrar el chat'} aria-pressed={chatAbierto}>
+        <Link to="/visuals" className="icon-btn" title={t('allDesigns')}><IconArrowLeft size={17} /></Link>
+        <button className={`icon-btn ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? t('hideChat') : t('showChat')} aria-pressed={chatAbierto}>
           <IconPanel size={17} />
         </button>
         <div className="vis-titulo">
           {editandoTitulo ? (
-            <input className="vis-titulo__input" autoFocus defaultValue={title || ''} placeholder="Nombre del diseño"
+            <input className="vis-titulo__input" autoFocus defaultValue={title || ''} placeholder={t('designNamePlaceholder')}
               onKeyDown={(e) => { if (e.key === 'Enter') { renameConversation(routeConvId, e.target.value); setEditandoTitulo(false); } if (e.key === 'Escape') setEditandoTitulo(false); }}
               onBlur={(e) => { renameConversation(routeConvId, e.target.value); setEditandoTitulo(false); }} />
           ) : (
-            <button className="vis-titulo__nombre" onClick={() => setEditandoTitulo(true)} title="Renombrar el diseño">{tituloVisible}</button>
+            <button className="vis-titulo__nombre" onClick={() => setEditandoTitulo(true)} title={t('renameDesign')}>{tituloVisible}</button>
           )}
           {!modoImagen && (
             <Menu abierto={menu === 'paginas'} onCerrar={() => setMenu(null)}>
-              <button className={`vis-chip ${menu === 'paginas' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'paginas' ? null : 'paginas')} title="Páginas">
+              <button className={`vis-chip ${menu === 'paginas' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'paginas' ? null : 'paginas')} title={t('pages')}>
                 <IconFile size={14} />
-                <span>{vista === 'lienzo' ? 'Lienzo' : paginaActual?.name || (paginas.length ? `${paginas.length} páginas` : 'sin páginas aún')}</span>
+                <span>{vista === 'lienzo' ? t('canvas') : paginaActual?.name || (paginas.length ? t('pagesCountShort', { n: paginas.length }) : t('noPagesYet'))}</span>
                 <IconChevron size={13} open={menu === 'paginas'} />
               </button>
               <Desplegable abierto={menu === 'paginas'} className="vis-menu__panel vis-menu__panel--paginas">
                   {paginas.length > 1 && (
                     <>
-                      <div className="vis-menu__head">Vista</div>
+                      <div className="vis-menu__head">{t('view')}</div>
                       <button className={`vis-menu__item ${vista === 'lienzo' ? 'is-active' : ''}`} onClick={() => { setVista('lienzo'); setInspeccion(false); setMenu(null); }}>
-                        <IconLayers size={15} /><span className="vis-menu__item-text"><strong>Lienzo</strong><small>las {paginas.length} páginas a la vez</small></span>
+                        <IconLayers size={15} /><span className="vis-menu__item-text"><strong>{t('canvas')}</strong><small>{t('allPagesAtOnce', { n: paginas.length })}</small></span>
                         {vista === 'lienzo' && <IconCheck size={14} />}
                       </button>
                       <div className="vis-menu__sep" />
                     </>
                   )}
-                  <div className="vis-menu__head">Páginas</div>
+                  <div className="vis-menu__head">{t('pages')}</div>
                   {paginas.map((f) => {
                     const activa = vista === 'pagina' && paginaActual?.name === f.name;
                     return (
@@ -519,24 +529,24 @@ export default function VisualsPage() {
                       </button>
                     );
                   })}
-                  {!paginas.length && <p className="vis-menu__vacio">Todavía no hay páginas: pídele algo al modelo.</p>}
+                  {!paginas.length && <p className="vis-menu__vacio">{t('noPagesHint')}</p>}
                   <div className="vis-menu__sep" />
-                  <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>Renombrar el diseño</span></button>
-                  <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>Todos los diseños</span></Link>
+                  <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>{t('renameDesign')}</span></button>
+                  <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>{t('allDesigns')}</span></Link>
               </Desplegable>
             </Menu>
           )}
           {versiones.length > 0 && (
             <Menu abierto={menu === 'historial'} onCerrar={() => setMenu(null)}>
-              <button className={`vis-chip ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title="Versiones">
+              <button className={`vis-chip ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title={t('versions')}>
                 <IconHistory size={14} /><span>v{indiceVersion + 1}</span><IconChevron size={13} open={menu === 'historial'} />
               </button>
               <Desplegable abierto={menu === 'historial'} className="vis-menu__panel">
-                  <div className="vis-menu__head">Versiones</div>
+                  <div className="vis-menu__head">{t('versions')}</div>
                   {versiones.map((v, n) => (
                     <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setMenu(null); }}>
                       <span className="vis-menu__check">{indiceVersion === n && <IconCheck size={14} />}</span>
-                      <span className="vis-menu__item-text"><strong>Versión {n + 1}</strong><small>{v.kind === 'image' ? 'imagen' : v.nuevas.join(', ')}</small></span>
+                      <span className="vis-menu__item-text"><strong>{t('version', { n: n + 1 })}</strong><small>{v.kind === 'image' ? t('image') : v.nuevas.join(', ')}</small></span>
                     </button>
                   )).reverse()}
               </Desplegable>
@@ -548,56 +558,56 @@ export default function VisualsPage() {
           <TemaBoton />
           {!modoImagen && (
             <div className="vis-seg">
-              <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title="Seleccionar elementos en el lienzo">
-                <IconPointer size={14} /> Seleccionar
+              <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title={t('selectHint')}>
+                <IconPointer size={14} /> {t('select')}
               </button>
               <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }} disabled={!paginaActual}>
-                <IconCode size={14} /> Código
+                <IconCode size={14} /> {t('code')}
               </button>
             </div>
           )}
           {!modoImagen && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
           <span className="vis-vdiv" />
-          <button className="vis-tool" onClick={presentar} disabled={!actual} title="Abrir en una pestaña"><IconExternal size={14} /> Presentar</button>
+          <button className="vis-tool" onClick={presentar} disabled={!actual} title={t('presentHint')}><IconExternal size={14} /> {t('present')}</button>
           <Menu abierto={menu === 'compartir'} onCerrar={() => setMenu(null)}>
-            <button className="vis-tool vis-tool--blanco" onClick={() => setMenu(menu === 'compartir' ? null : 'compartir')} disabled={!actual}><IconShare size={14} /> Compartir</button>
+            <button className="vis-tool vis-tool--blanco" onClick={() => setMenu(menu === 'compartir' ? null : 'compartir')} disabled={!actual}><IconShare size={14} /> {t('share')}</button>
             <Desplegable abierto={menu === 'compartir'} className="vis-menu__panel vis-menu__panel--derecha vis-share">
                 <div className="vis-share__head">
-                  <strong>Compartir</strong>
-                  <button className="icon-btn" onClick={() => setMenu(null)} aria-label="Cerrar"><IconX size={15} /></button>
+                  <strong>{t('share')}</strong>
+                  <button className="icon-btn" onClick={() => setMenu(null)} aria-label={t('close')}><IconX size={15} /></button>
                 </div>
                 <div className="vis-share__sec">
                   <div className="vis-share__row">
-                    <span className="vis-menu__item-text"><strong>Enlace público</strong><small>{enlace ? 'cualquiera con el enlace puede verlo' : 'crea un enlace de solo lectura'}</small></span>
-                    <button className={`vis-switch ${enlace ? 'is-on' : ''}`} role="switch" aria-checked={!!enlace} aria-label="Enlace público" onClick={enlace ? quitarEnlace : copiarEnlace} />
+                    <span className="vis-menu__item-text"><strong>{t('publicLink')}</strong><small>{enlace ? t('publicLinkOn') : t('publicLinkOff')}</small></span>
+                    <button className={`vis-switch ${enlace ? 'is-on' : ''}`} role="switch" aria-checked={!!enlace} aria-label={t('publicLink')} onClick={enlace ? quitarEnlace : copiarEnlace} />
                   </div>
                   {enlace && (
                     <div className="vis-field">
                       <span className="vis-field__valor">{enlace.replace(/^https?:\/\//, '')}</span>
-                      <button className="vis-field__btn" onClick={copiarEnlace}><IconCopy size={13} /> {copiado === 'enlace' ? 'Copiado' : 'Copiar'}</button>
+                      <button className="vis-field__btn" onClick={copiarEnlace}><IconCopy size={13} /> {copiado === 'enlace' ? t('copied') : t('copy')}</button>
                     </div>
                   )}
                 </div>
                 <div className="vis-share__sec">
-                  <div className="vis-menu__head">Lixbon CLI</div>
-                  <p className="vis-share__hint">Pega el comando en el CLI y replica el diseño como proyecto (React + Vite, API…).</p>
+                  <div className="vis-menu__head">{t('cliTitle')}</div>
+                  <p className="vis-share__hint">{t('cliHint')}</p>
                   <div className="vis-field">
                     <span className="vis-field__valor mono">/visual {routeConvId.slice(0, 8)}</span>
-                    <button className="vis-field__btn" onClick={copiarComandoCli}><IconCopy size={13} /> {copiado === 'cli' ? 'Copiado' : 'Copiar'}</button>
+                    <button className="vis-field__btn" onClick={copiarComandoCli}><IconCopy size={13} /> {copiado === 'cli' ? t('copied') : t('copy')}</button>
                   </div>
                 </div>
                 <div className="vis-share__sec">
-                  <div className="vis-menu__head">Exportar</div>
+                  <div className="vis-menu__head">{t('export')}</div>
                   <div className="vis-share__tiles">
                     <button className="vis-tile" onClick={descargar}>
                       <IconDownload size={16} />
-                      <strong>{actual?.kind === 'image' ? 'Descargar' : paginas.length > 1 ? 'Descargar .zip' : 'Descargar HTML'}</strong>
-                      <small>{actual?.kind === 'image' ? 'JPEG' : paginas.length > 1 ? `${paginas.length} páginas HTML` : 'autocontenido'}</small>
+                      <strong>{actual?.kind === 'image' ? t('download') : paginas.length > 1 ? t('downloadZip') : t('downloadHtml')}</strong>
+                      <small>{actual?.kind === 'image' ? 'JPEG' : paginas.length > 1 ? t('pagesHtml', { n: paginas.length }) : t('selfContained')}</small>
                     </button>
                     {!modoImagen && (
                       <button className="vis-tile" onClick={copiarCodigo} disabled={!paginaActual}>
                         <IconCode size={16} />
-                        <strong>{copiado === 'codigo' ? 'Código copiado' : 'Copiar el código'}</strong>
+                        <strong>{copiado === 'codigo' ? t('codeCopied') : t('copyCode')}</strong>
                         <small>{paginaActual?.name}</small>
                       </button>
                     )}
@@ -620,7 +630,7 @@ export default function VisualsPage() {
                   <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
                     {(() => {
                       const n = versiones.findIndex((v) => v.indice === i);
-                      if (m.generandoImagen) return <span className="msg__thinking">Generando la imagen… (la primera tarda más: carga el modelo)</span>;
+                      if (m.generandoImagen) return <span className="msg__thinking">{t('generatingImage')}</span>;
                       if (m.error) return <MensajeError>{m.content}</MensajeError>;
                       const imagen = extraerImagen(m.content);
                       if (imagen) {
@@ -642,7 +652,7 @@ export default function VisualsPage() {
                         <>
                           {m.reasoning && <Razonamiento texto={m.reasoning} activo={activo && !m.content} />}
                           {cuerpo ? <Markdown streaming={activo}>{cuerpo}</Markdown>
-                            : (!archivos.length && !m.reasoning && <span className="msg__thinking">Pensando…</span>)}
+                            : (!archivos.length && !m.reasoning && <span className="msg__thinking">{t('thinking')}</span>)}
                           {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                           {n >= 0 && versiones[n].nuevas.length > 0 && (
                             <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); }}>
@@ -651,22 +661,22 @@ export default function VisualsPage() {
                           )}
                           {fallos.map((f) => (
                             <p key={f.name} className="msg__aviso">
-                              La edición de {f.name} no encaja ({f.motivo}).{' '}
-                              <button className="vis-link" onClick={() => send(`El bloque edit de ${f.name} no encaja con el archivo actual. Entrega ${f.name} completo con el cambio aplicado.`)}>Pedir el archivo completo</button>
+                              {t('editDoesntFit', { name: f.name, motivo: f.motivo })}{' '}
+                              <button className="vis-link" onClick={() => send(t('requestFullFileMessage', { name: f.name }))}>{t('requestFullFile')}</button>
                             </p>
                           ))}
                           {editando && activo && (
                             <div className="vis-trabajo">
                               <span className="vis-trabajo__dot" />
-                              <span>Editando <strong>{editando.name}</strong>…</span>
-                              <span className="vis-trabajo__meta">{editando.pares.length} cambio{editando.pares.length === 1 ? '' : 's'}</span>
+                              <span>{t('editingBefore')} <strong>{editando.name}</strong>{t('editingAfter')}</span>
+                              <span className="vis-trabajo__meta">{editando.pares.length} {editando.pares.length === 1 ? t('change') : t('changes')}</span>
                             </div>
                           )}
                           {abierto && activo && (
                             <div className="vis-trabajo">
                               <span className="vis-trabajo__dot" />
-                              <span>Escribiendo <strong>{abierto.name}</strong>{archivos.length > 1 ? ` (${archivos.length - 1} lista${archivos.length > 2 ? 's' : ''})` : ''}…</span>
-                              <span className="vis-trabajo__meta">{abierto.code.split('\n').length} líneas</span>
+                              <span>{t('writingBefore')} <strong>{abierto.name}</strong>{archivos.length > 1 ? t('readyCountSuffix', { n: archivos.length - 1 }) : ''}{t('writingAfter')}</span>
+                              <span className="vis-trabajo__meta">{abierto.code.split('\n').length} {t('lines')}</span>
                             </div>
                           )}
                         </>
@@ -686,7 +696,7 @@ export default function VisualsPage() {
               </div>
             )}
             <ChatInput key={prefill} initialText={prefill} onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
-              placeholder={modoImagen ? 'Otra imagen: describe qué cambia…' : 'Pide un cambio: «más aire en el hero», «versión oscura», «añade testimonios»…'} />
+              placeholder={modoImagen ? t('imagePlaceholder') : t('editPlaceholder')} />
           </div>
         </section>
 
@@ -702,23 +712,23 @@ export default function VisualsPage() {
                 <pre className="vis-code"><code>{codigoFinal(paginaActual)}</code></pre>
               ) : (
                 <div className="vis-frame">
-                  <iframe ref={frameRef} title="Vista previa" sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
+                  <iframe ref={frameRef} title={t('previewTitle')} sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
                     onLoad={() => { setCargando(false); frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*'); }} />
-                  {cargando && <div className="vis-stage__loading"><span>Renderizando {paginaActual?.name}…</span></div>}
+                  {cargando && <div className="vis-stage__loading"><span>{t('rendering', { name: paginaActual?.name })}</span></div>}
                 </div>
               )
             ) : (
               <div className="vis-stage__empty">
                 {generando ? (
-                  <span className="vis-trabajo"><span className="vis-trabajo__dot" />El modelo está escribiendo el diseño… se renderizará al terminar</span>
-                ) : busy && modoImagen ? 'Generando la imagen…' : 'La vista previa aparecerá aquí.'}
+                  <span className="vis-trabajo"><span className="vis-trabajo__dot" />{t('writingDesign')}</span>
+                ) : busy && modoImagen ? t('generatingImageShort') : t('previewWillAppear')}
               </div>
             )}
-            {generando && actual && <div className="vis-stage__badge">Nueva versión en camino…</div>}
+            {generando && actual && <div className="vis-stage__badge">{t('newVersionOnTheWay')}</div>}
             {inspeccion && (
               <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo} onCerrar={() => setSeleccion(null)} />
             )}
-            {inspeccion && !seleccion && <div className="vis-stage__badge">Haz clic en un elemento para editarlo</div>}
+            {inspeccion && !seleccion && <div className="vis-stage__badge">{t('clickToEdit')}</div>}
           </div>
         </section>
       </div>
@@ -727,7 +737,8 @@ export default function VisualsPage() {
 }
 
 /** Galería de diseños: miniatura de la última versión, última edición, autor. */
-function Galeria({ conversations, loading, onRename, onDelete }) {
+function Galeria({ conversations, loading, onRename, onDelete, t, tc }) {
+  const locale = useLocale();
   const [miniaturas, setMiniaturas] = useState({}); // id → { files } | null
   const [menuId, setMenuId] = useState(null);
   const [renombrando, setRenombrando] = useState(null);
@@ -743,23 +754,23 @@ function Galeria({ conversations, loading, onRename, onDelete }) {
     });
   }, [conversations]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <div className="vis-galeria__vacio">Cargando tus diseños…</div>;
-  if (!conversations.length) return <div className="vis-galeria__vacio">Tus diseños aparecerán aquí.</div>;
+  if (loading) return <div className="vis-galeria__vacio">{t('loadingDesigns')}</div>;
+  if (!conversations.length) return <div className="vis-galeria__vacio">{t('designsWillAppear')}</div>;
 
   return (
     <section className="vis-galeria__lista">
-      <h3 className="vis-galeria__titulo">Tus diseños <small>{conversations.length}</small></h3>
+      <h3 className="vis-galeria__titulo">{t('yourDesigns')} <small>{conversations.length}</small></h3>
       <div className="vis-cards">
         {conversations.map((c) => {
           const mini = miniaturas[c.id];
           const portada = mini?.files?.find((f) => f.name === 'index.html') || mini?.files?.[0];
           return (
             <article key={c.id} className="vis-card">
-              <button className="vis-card__preview" onClick={() => navigate(`/visuals/${c.id}`)} title="Abrir">
+              <button className="vis-card__preview" onClick={() => navigate(`/visuals/${c.id}`)} title={t('open')}>
                 {portada ? (
-                  <iframe title={c.title || 'diseño'} sandbox="allow-scripts" srcDoc={documentoPreview(portada)} tabIndex={-1} />
+                  <iframe title={c.title || t('untitledDesign')} sandbox="allow-scripts" srcDoc={documentoPreview(portada)} tabIndex={-1} />
                 ) : (
-                  <span className="vis-card__sin">{mini === null || mini === undefined ? '…' : 'Sin vista previa'}</span>
+                  <span className="vis-card__sin">{mini === null || mini === undefined ? '…' : t('noPreview')}</span>
                 )}
               </button>
               <div className="vis-card__body">
@@ -768,19 +779,19 @@ function Galeria({ conversations, loading, onRename, onDelete }) {
                     onKeyDown={(e) => { if (e.key === 'Enter') { onRename(c.id, e.target.value); setRenombrando(null); } if (e.key === 'Escape') setRenombrando(null); }}
                     onBlur={(e) => { onRename(c.id, e.target.value); setRenombrando(null); }} />
                 ) : (
-                  <button className="vis-card__title" onClick={() => navigate(`/visuals/${c.id}`)}>{c.title || 'Diseño sin título'}</button>
+                  <button className="vis-card__title" onClick={() => navigate(`/visuals/${c.id}`)}>{c.title || t('untitledDesign')}</button>
                 )}
                 <div className="vis-card__meta">
-                  <span>Editado {tiempoRelativo(c.updated_at)}</span>
-                  {mini?.files?.length > 0 && <><span>·</span><span>{mini.files.length} página{mini.files.length === 1 ? '' : 's'}</span></>}
+                  <span>{t('editedAt', { when: tiempoRelativo(c.updated_at, locale) })}</span>
+                  {mini?.files?.length > 0 && <><span>·</span><span>{mini.files.length} {mini.files.length === 1 ? t('page') : t('pagesPlural')}</span></>}
                 </div>
                 <Menu abierto={menuId === c.id} onCerrar={() => setMenuId(null)} className="vis-card__menu">
-                  <button className="icon-btn" onClick={() => setMenuId(menuId === c.id ? null : c.id)} aria-label="Más opciones"><IconDots size={16} /></button>
+                  <button className="icon-btn" onClick={() => setMenuId(menuId === c.id ? null : c.id)} aria-label={t('moreOptions')}><IconDots size={16} /></button>
                   <Desplegable abierto={menuId === c.id} className="vis-menu__panel vis-menu__panel--derecha">
-                      <button className="vis-menu__item" onClick={() => navigate(`/visuals/${c.id}`)}><IconExternal size={15} /><span>Abrir</span></button>
-                      <button className="vis-menu__item" onClick={() => { setRenombrando(c.id); setMenuId(null); }}><IconPencil size={15} /><span>Renombrar</span></button>
+                      <button className="vis-menu__item" onClick={() => navigate(`/visuals/${c.id}`)}><IconExternal size={15} /><span>{t('open')}</span></button>
+                      <button className="vis-menu__item" onClick={() => { setRenombrando(c.id); setMenuId(null); }}><IconPencil size={15} /><span>{tc('rename')}</span></button>
                       <div className="vis-menu__sep" />
-                      <button className="vis-menu__item is-danger" onClick={() => { setMenuId(null); onDelete(c.id); }}><IconTrash size={15} /><span>Eliminar</span></button>
+                      <button className="vis-menu__item is-danger" onClick={() => { setMenuId(null); onDelete(c.id); }}><IconTrash size={15} /><span>{tc('delete')}</span></button>
                   </Desplegable>
                 </Menu>
               </div>

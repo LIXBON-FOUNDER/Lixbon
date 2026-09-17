@@ -2,6 +2,7 @@
 // Una sola serie: color tinta uniforme (la identidad la da el título, no el color),
 // barras finas con extremo redondeado, tooltip por barra, labels selectivos.
 import { useMemo, useState } from 'react';
+import { useT } from '../i18n/useT';
 
 const W = 640;
 const H = 180;
@@ -20,6 +21,7 @@ function lastNDays(n) {
 const fmt = (n) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 export function UsageChart({ daily }) {
+  const t = useT('account');
   const [hover, setHover] = useState(null);
 
   const data = useMemo(() => {
@@ -46,15 +48,14 @@ export function UsageChart({ daily }) {
   if (vacio) {
     return (
       <p className="card__muted">
-        Todavía no hay consumo. Las barras aparecerán en cuanto uses el chat, el
-        IDE o tus API keys.
+        {t('usage.chartEmpty')}
       </p>
     );
   }
 
   return (
     <div className="uchart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Tokens usados por día, últimos 30 días">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t('usage.chartAriaLabel')}>
         {gridVals.map((v) => (
           <g key={v}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(v)} y2={y(v)} className="uchart__grid" />

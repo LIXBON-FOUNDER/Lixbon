@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { FileCard } from './FileCard';
 import { IconCheck, IconCopy, IconDownload } from './Icons';
 import { descargarBlob, extForLang, parseFileLang } from '../lib/archivos';
+import { useT } from '../i18n/useT';
 
 function textoDe(children) {
   if (typeof children === 'string') return children;
@@ -14,6 +15,7 @@ function textoDe(children) {
 }
 
 function Bloque({ lang, codigo }) {
+  const t = useT('common');
   const [copiado, setCopiado] = useState(false);
   const copiar = async () => {
     try {
@@ -26,10 +28,10 @@ function Bloque({ lang, codigo }) {
   return (
     <div className="md-code">
       <div className="md-code__head">
-        <span className="md-code__lang">{lang || 'texto'}</span>
+        <span className="md-code__lang">{lang || t('plainText')}</span>
         <span className="md-code__actions">
-          <button className="md-code__btn" onClick={descargar} title="Descargar como archivo"><IconDownload size={13} /></button>
-          <button className="md-code__btn" onClick={copiar} title="Copiar">
+          <button className="md-code__btn" onClick={descargar} title={t('downloadAsFile')}><IconDownload size={13} /></button>
+          <button className="md-code__btn" onClick={copiar} title={t('copy')}>
             {copiado ? <IconCheck size={13} /> : <IconCopy size={13} />}
           </button>
         </span>

@@ -16,6 +16,7 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
+import { useT } from '../i18n/useT';
 
 /** Reenvío del correo de verificación: 'reposo' | 'enviando' | 'enviado' | 'error'. */
 export function useReenvioVerificacion() {
@@ -39,6 +40,7 @@ export function useReenvioVerificacion() {
 export function VerifyBanner() {
   const { user, verificationSent } = useAuth();
   const { estado, reenviar } = useReenvioVerificacion();
+  const t = useT('chat');
 
   // Las cuentas heredadas sin correo no tienen nada que verificar.
   if (!user?.email || user.email_verified) return null;
@@ -48,11 +50,11 @@ export function VerifyBanner() {
   const fallo = estado === 'error' || (estado === 'reposo' && verificationSent === false);
 
   const texto = fallo ? (
-    <>No pudimos enviar el correo de verificación a <strong>{user.email}</strong>. No es cosa tuya: vuelve a intentarlo en unos minutos.</>
+    <>{t('verifyFailedBefore')} <strong>{user.email}</strong>{t('verifyFailedAfter')}</>
   ) : estado === 'enviado' || verificationSent === true ? (
-    <>Te enviamos un enlace a <strong>{user.email}</strong> para verificar tu cuenta. Revisa también la carpeta de spam.</>
+    <>{t('verifySentBefore')} <strong>{user.email}</strong> {t('verifySentAfter')}</>
   ) : (
-    <>Verifica tu correo electrónico para asegurar tu cuenta. Enviamos el enlace a <strong>{user.email}</strong>.</>
+    <>{t('verifyDefaultBefore')} <strong>{user.email}</strong>.</>
   );
 
   return (
@@ -64,7 +66,7 @@ export function VerifyBanner() {
           onClick={reenviar}
           disabled={estado === 'enviando'}
         >
-          {estado === 'enviando' ? 'Enviando…' : 'Reenviar correo'}
+          {estado === 'enviando' ? t('verifySending') : t('verifyResend')}
         </button>
       )}
     </div>

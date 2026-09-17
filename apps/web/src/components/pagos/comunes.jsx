@@ -1,8 +1,9 @@
 import { IconCard } from '../Icons';
+import { useT } from '../../i18n/useT';
 
 export const fmtUSD = (v) => `$${Number(v || 0).toFixed(2)}`;
 
-export const fmtDia = (iso) => (iso ? new Date(iso).toLocaleDateString('es', {
+export const fmtDia = (iso, locale = 'es') => (iso ? new Date(iso).toLocaleDateString(locale, {
   day: 'numeric', month: 'long',
 }) : '—');
 
@@ -22,7 +23,7 @@ const MARCAS = {
   unionpay: 'UnionPay',
 };
 
-export const nombreMarca = (m) => MARCAS[m] || (m ? m[0].toUpperCase() + m.slice(1) : 'Tarjeta');
+export const nombreMarca = (m, fallback) => MARCAS[m] || (m ? m[0].toUpperCase() + m.slice(1) : fallback);
 
 export const venceEn = (m) => (m.exp_month && m.exp_year
   ? `${String(m.exp_month).padStart(2, '0')}/${String(m.exp_year).slice(-2)}`
@@ -36,6 +37,7 @@ export const caducada = (m) => {
 };
 
 export function Tarjeta({ metodo, children, activa }) {
+  const t = useT('account');
   const vence = venceEn(metodo);
   const vencida = caducada(metodo);
   return (
@@ -44,12 +46,12 @@ export function Tarjeta({ metodo, children, activa }) {
       <span className="pago-tarjeta__datos">
         <span className="pago-tarjeta__linea">
           <span className="pago-tarjeta__num">•••• {metodo.last4}</span>
-          {vencida && <span className="pago-tarjeta__chip is-mala">Caducada</span>}
-          {metodo.is_default && <span className="pago-tarjeta__chip">Predeterminada</span>}
+          {vencida && <span className="pago-tarjeta__chip is-mala">{t('billing.cardExpired')}</span>}
+          {metodo.is_default && <span className="pago-tarjeta__chip">{t('billing.cardDefault')}</span>}
         </span>
         <span className="pago-tarjeta__pie">
-          {nombreMarca(metodo.brand)}
-          {vence && ` · Vence ${vence}`}
+          {nombreMarca(metodo.brand, t('billing.cardBrandFallback'))}
+          {vence && ` · ${t('billing.cardExpiresOn', { date: vence })}`}
           {metodo.name && ` · ${metodo.name}`}
         </span>
       </span>

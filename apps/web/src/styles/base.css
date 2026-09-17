@@ -426,6 +426,18 @@ p {
   color: var(--ink);
 }
 
+.icon-btn:has(.lang-switch__code) {
+  width: auto;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.lang-switch__code {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 /* ── Selector ────────────────────────────────────────────────────────── */
 /* El disparador hereda la piel de donde vive (chip del chat, campo del admin,
    botón de filtro); aquí solo va la estructura. La lista se pinta en un portal

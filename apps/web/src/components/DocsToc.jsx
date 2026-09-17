@@ -5,6 +5,7 @@
 // pintado, se les pone un ancla estable y se observa cuál está en pantalla.
 // Si la sección no tiene títulos, la columna no se dibuja.
 import { useEffect, useState } from 'react';
+import { useT } from '../i18n/useT';
 
 // "URL base y puertos" → "url-base-y-puertos"
 function anclaDe(texto, i) {
@@ -18,6 +19,7 @@ function anclaDe(texto, i) {
 }
 
 export function DocsToc({ contenedor, deps }) {
+  const t = useT('chat');
   const [titulos, setTitulos] = useState([]);
   const [activo, setActivo] = useState('');
 
@@ -53,20 +55,20 @@ export function DocsToc({ contenedor, deps }) {
   if (titulos.length === 0) return null;
 
   return (
-    <aside className="docs__toc" aria-label="En esta página">
-      <span className="docs__toc-title">En esta página</span>
-      {titulos.map((t) => (
+    <aside className="docs__toc" aria-label={t('onThisPage')}>
+      <span className="docs__toc-title">{t('onThisPage')}</span>
+      {titulos.map((titulo) => (
         <a
-          key={t.id}
-          href={`#${t.id}`}
-          className={`docs__toc-link ${t.id === activo ? 'is-active' : ''}`}
+          key={titulo.id}
+          href={`#${titulo.id}`}
+          className={`docs__toc-link ${titulo.id === activo ? 'is-active' : ''}`}
           onClick={(e) => {
             e.preventDefault();
-            document.getElementById(t.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            setActivo(t.id);
+            document.getElementById(titulo.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setActivo(titulo.id);
           }}
         >
-          {t.texto}
+          {titulo.texto}
         </a>
       ))}
     </aside>

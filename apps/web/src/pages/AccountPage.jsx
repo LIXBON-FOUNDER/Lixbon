@@ -1,9 +1,12 @@
-// AccountPage.jsx — "Ajustes": sección con sidebar interno (General, Cuenta,
+// AccountPage.jsx — "Ajustes": sección con sidebar interno (General, Perfil,
 // Privacidad, Facturación, Uso). Reemplaza la antigua vista plana de Mi cuenta.
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from '../i18n/link';
+import { useLocale } from '../i18n/LocaleContext';
+import { useT } from '../i18n/useT';
 import { FiCamera } from 'react-icons/fi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
@@ -15,6 +18,7 @@ import { Logo } from '../components/Logo';
 import { UsageChart } from '../components/UsageChart';
 import { SeccionFacturacion } from '../components/pagos/SeccionFacturacion';
 import { planBadge } from '../lib/planColors';
+import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconLogout,
@@ -23,15 +27,18 @@ import {
 
 const unlimited = (v) => v === -1;
 
-const SECTIONS = [
-  { id: 'general', label: 'General', Icon: IconUser },
-  { id: 'cuenta', label: 'Cuenta', Icon: IconGear },
-  { id: 'privacidad', label: 'Privacidad', Icon: IconShield },
-  { id: 'facturacion', label: 'Facturación', Icon: IconCard },
-  { id: 'uso', label: 'Uso', Icon: IconChart },
-];
+function useSections() {
+  const t = useT('account');
+  return [
+    { id: 'general', label: t('sections.general'), Icon: IconUser },
+    { id: 'profile', label: t('sections.profile'), Icon: IconGear },
+    { id: 'privacy', label: t('sections.privacy'), Icon: IconShield },
+    { id: 'billing', label: t('sections.billing'), Icon: IconCard },
+    { id: 'usage', label: t('sections.usage'), Icon: IconChart },
+  ];
+}
 
-function QuotaBar({ label, used, limit, resetHint }) {
+function QuotaBar({ label, used, limit, resetHint, unlimitedLabel }) {
   const pct = unlimited(limit) ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
   const full = !unlimited(limit) && used >= limit;
   return (
@@ -39,7 +46,7 @@ function QuotaBar({ label, used, limit, resetHint }) {
       <div className="quota__head">
         <span>{label}</span>
         <span className={full ? 'quota__count is-full' : 'quota__count'}>
-          {used.toLocaleString()} / {unlimited(limit) ? 'Ilimitado' : limit.toLocaleString()}
+          {used.toLocaleString()} / {unlimited(limit) ? unlimitedLabel : limit.toLocaleString()}
         </span>
       </div>
       {!unlimited(limit) && (
@@ -64,7 +71,10 @@ function Row({ label, hint, children }) {
   );
 }
 
-const SoonTag = () => <span className="set-soon">Próximamente</span>;
+function SoonTag() {
+  const tc = useT('common');
+  return <span className="set-soon">{tc('comingSoon')}</span>;
+}
 
 function Toggle({ checked, onChange, disabled, label }) {
   return (
@@ -85,6 +95,7 @@ function Toggle({ checked, onChange, disabled, label }) {
 // ── General ─────────────────────────────────────────────────────────────
 
 function AvatarField({ user, onSaved }) {
+  const t = useT('account');
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -116,7 +127,7 @@ function AvatarField({ user, onSaved }) {
       });
       await sync();
     } catch (err) {
-      setError(err?.response?.data?.detail?.message || 'No se pudo subir la imagen.');
+      setError(err?.response?.data?.detail?.message || t('general.uploadError'));
     } finally {
       setBusy(false);
     }
@@ -129,7 +140,7 @@ function AvatarField({ user, onSaved }) {
       await api.delete('/api/account/avatar');
       await sync();
     } catch {
-      setError('No se pudo quitar la imagen.');
+      setError(t('general.removeError'));
     } finally {
       setBusy(false);
     }
@@ -144,7 +155,7 @@ function AvatarField({ user, onSaved }) {
         className="avatar-edit"
         onClick={() => fileRef.current?.click()}
         disabled={busy}
-        title={user.avatar_url ? 'Cambiar foto' : 'Subir foto'}
+        title={user.avatar_url ? t('general.changePhoto') : t('general.uploadPhoto')}
       >
         {user.avatar_url ? (
           <img className="set-avatar set-avatar--img" src={user.avatar_url} alt="" />
@@ -158,7 +169,7 @@ function AvatarField({ user, onSaved }) {
 
       {user.avatar_url && (
         <button className="avatar-edit__remove" onClick={remove} disabled={busy}>
-          Quitar
+          {t('general.remove')}
         </button>
       )}
 
@@ -168,6 +179,7 @@ function AvatarField({ user, onSaved }) {
 }
 
 function GeneralSection({ user, onSaved }) {
+  const t = useT('account');
   const [first, setFirst] = useState(user.first_name || '');
   const [last, setLast] = useState(user.last_name || '');
   const [busy, setBusy] = useState(false);
@@ -191,38 +203,39 @@ function GeneralSection({ user, onSaved }) {
   return (
     <>
       <div className="set-card">
-        <h2 className="set-title">Perfil</h2>
-        <Row label="Avatar" hint="Se ve también en el IDE · PNG, JPG o WEBP, máx. 3 MB">
+        <h2 className="set-title">{t('general.profileTitle')}</h2>
+        <Row label={t('general.avatarLabel')} hint={t('general.avatarHint')}>
           <AvatarField user={user} onSaved={onSaved} />
         </Row>
-        <Row label="Nombre">
+        <Row label={t('general.firstName')}>
           <input className="set-input" value={first} onChange={(e) => setFirst(e.target.value)} />
         </Row>
-        <Row label="Apellido">
+        <Row label={t('general.lastName')}>
           <input className="set-input" value={last} onChange={(e) => setLast(e.target.value)} />
         </Row>
-        <Row label="Correo" hint="No se puede cambiar">
+        <Row label={t('general.email')} hint={t('general.emailHint')}>
           <span className="set-static">{user.email || user.username}</span>
         </Row>
       </div>
       <div className="set-actions">
-        {ok && <span className="set-ok"><IconCheck size={13} /> Guardado</span>}
+        {ok && <span className="set-ok"><IconCheck size={13} /> {t('general.saved')}</span>}
         <button className="pill-btn pill-btn--primary" disabled={!dirty || busy} onClick={save}>
-          {busy ? 'Guardando…' : 'Guardar cambios'}
+          {busy ? t('general.saving') : t('general.save')}
         </button>
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">Preferencias</h2>
-        <Row label="Idioma" hint="Idioma de la interfaz"><SoonTag /></Row>
+        <h2 className="set-title">{t('general.preferencesTitle')}</h2>
+        <Row label={t('general.language')} hint={t('general.languageHint')}><SoonTag /></Row>
       </div>
     </>
   );
 }
 
-// ── Cuenta ──────────────────────────────────────────────────────────────
+// ── Perfil (cuenta) ────────────────────────────────────────────────────
 
-function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout }) {
+function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout }) {
+  const t = useT('account');
   const [newKey, setNewKey] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -241,7 +254,7 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
       await onLogout(); // la sesión ya no existe; limpia el estado y navega
     } catch (err) {
       const d = err.response?.data?.detail;
-      setDelError(typeof d === 'string' ? d : 'No se pudo eliminar la cuenta. Intenta de nuevo.');
+      setDelError(typeof d === 'string' ? d : t('profile.deleteAccountError'));
       setDelBusy(false);
     }
   };
@@ -257,7 +270,7 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
       await onReloadKeys();
     } catch (err) {
       const d = err.response?.data?.detail;
-      setError((d && d.message) || d || 'No se pudo crear la key');
+      setError((d && d.message) || d || t('profile.createKeyError'));
     } finally {
       setBusy(false);
     }
@@ -265,16 +278,16 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
 
   const deleteKey = async (id) => {
     const ok = await confirmar({
-      titulo: '¿Desactivar esta API key?',
-      texto: 'Las integraciones que la usen dejarán de funcionar.',
-      etiqueta: 'Desactivar',
+      titulo: t('profile.deactivateKeyConfirm.title'),
+      texto: t('profile.deactivateKeyConfirm.text'),
+      etiqueta: t('profile.deactivateKeyConfirm.label'),
     });
     if (!ok) return;
     try {
       await api.delete(`/api/keys/${id}`);
       await onReloadKeys();
     } catch {
-      setError('No se pudo desactivar la key');
+      setError(t('profile.deactivateKeyError'));
     }
   };
 
@@ -288,20 +301,20 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
   return (
     <>
       <div className="set-card">
-        <h2 className="set-title">Cuenta</h2>
+        <h2 className="set-title">{t('profile.title')}</h2>
         <Row
-          label="Correo"
+          label={t('profile.email')}
           hint={user.email_verified
-            ? 'Nadie más puede reclamar esta dirección'
+            ? t('profile.emailHintVerified')
             : verifyState === 'enviado'
-              ? 'Te enviamos un enlace; revisa también la carpeta de spam'
+              ? t('profile.emailHintSent')
               : verifyState === 'error'
-                ? 'No se pudo enviar el correo; inténtalo en unos minutos'
-                : 'Verifícalo para poder recuperar la cuenta si pierdes la contraseña'}
+                ? t('profile.emailHintError')
+                : t('profile.emailHintUnverified')}
         >
           <span className="set-static">{user.email || user.username}</span>
           <span className={user.email_verified ? 'verify-chip is-ok' : 'verify-chip'}>
-            {user.email_verified ? 'Verificado' : 'Sin verificar'}
+            {user.email_verified ? t('profile.verified') : t('profile.unverified')}
           </span>
           {!user.email_verified && user.email && verifyState !== 'enviado' && (
             <button
@@ -309,36 +322,36 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
               onClick={resendVerify}
               disabled={verifyState === 'enviando'}
             >
-              {verifyState === 'enviando' ? 'Enviando…' : 'Reenviar verificación'}
+              {verifyState === 'enviando' ? t('profile.sending') : t('profile.resendVerification')}
             </button>
           )}
         </Row>
-        <Row label="Contraseña" hint="Te enviamos un enlace por correo para cambiarla">
+        <Row label={t('profile.password')} hint={t('profile.passwordHint')}>
           {pwSent
-            ? <span className="set-ok"><IconCheck size={13} /> Enlace enviado</span>
-            : <button className="pill-btn pill-btn--outline set-btn" onClick={sendReset}>Cambiar contraseña</button>}
+            ? <span className="set-ok"><IconCheck size={13} /> {t('profile.linkSent')}</span>
+            : <button className="pill-btn pill-btn--outline set-btn" onClick={sendReset}>{t('profile.changePassword')}</button>}
         </Row>
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">API keys</h2>
+        <h2 className="set-title">{t('profile.apiKeysTitle')}</h2>
         {error && <p className="page__error" role="alert">{error}</p>}
         <div className="set-row set-row--head">
           <span className="card__muted">
-            {activeKeys.length} activa(s) de {unlimited(plan.max_api_keys) ? 'ilimitadas' : plan.max_api_keys} en tu plan.
+            {t('profile.activeKeysOf', { active: activeKeys.length, max: unlimited(plan.max_api_keys) ? t('profile.unlimitedKeys') : plan.max_api_keys })}
           </span>
           <button className="pill-btn pill-btn--primary set-btn" onClick={createKey} disabled={busy}>
-            <IconPlus size={14} /> Nueva key
+            <IconPlus size={14} /> {t('profile.newKey')}
           </button>
         </div>
 
         {newKey && (
           <div className="key-reveal">
             <div>
-              <strong>Guárdala ahora — no se volverá a mostrar:</strong>
+              <strong>{t('profile.saveKeyNow')}</strong>
               <code>{newKey}</code>
             </div>
-            <button className="icon-btn" onClick={() => setNewKey(null)} aria-label="Cerrar"><IconX /></button>
+            <button className="icon-btn" onClick={() => setNewKey(null)} aria-label={t('profile.close')}><IconX /></button>
           </div>
         )}
 
@@ -350,47 +363,45 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
                 <code className="keys__masked">{k.masked_key}</code>
               </div>
               <span className="keys__meta">
-                {k.is_active ? (k.last_accessed ? `Usada ${new Date(k.last_accessed).toLocaleDateString()}` : 'Sin usar') : 'Inactiva'}
+                {k.is_active ? (k.last_accessed ? t('profile.usedOn', { date: new Date(k.last_accessed).toLocaleDateString() }) : t('profile.unused')) : t('profile.inactive')}
               </span>
               {k.is_active && (
-                <button className="icon-btn" onClick={() => deleteKey(k.id)} aria-label={`Desactivar ${k.name}`}>
+                <button className="icon-btn" onClick={() => deleteKey(k.id)} aria-label={t('profile.deactivateAria', { name: k.name })}>
                   <IconTrash size={15} />
                 </button>
               )}
             </li>
           ))}
-          {keys.length === 0 && <p className="card__muted">Aún no tienes API keys.</p>}
+          {keys.length === 0 && <p className="card__muted">{t('profile.noKeys')}</p>}
         </ul>
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">Sesión</h2>
-        <Row label="Cerrar sesión" hint="Cierra tu sesión en este navegador">
+        <h2 className="set-title">{t('profile.sessionTitle')}</h2>
+        <Row label={t('profile.logOut')} hint={t('profile.logOutHint')}>
           <button className="pill-btn pill-btn--outline set-btn" onClick={onPedirLogout}>
-            <IconLogout size={14} /> Cerrar sesión
+            <IconLogout size={14} /> {t('profile.logOut')}
           </button>
         </Row>
-        <Row label="Eliminar cuenta" hint="Borra tu cuenta y todos tus datos de forma permanente">
+        <Row label={t('profile.deleteAccount')} hint={t('profile.deleteAccountHint')}>
           <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmDelete(true)}>
-            Eliminar cuenta
+            {t('profile.deleteAccount')}
           </button>
         </Row>
       </div>
 
       {confirmDelete && (
         <ConfirmDialog
-          title="¿Eliminar tu cuenta?"
-          confirmLabel="Eliminar cuenta"
-          busyLabel="Eliminando…"
+          title={t('profile.deleteAccountConfirm.title')}
+          confirmLabel={t('profile.deleteAccountConfirm.confirmLabel')}
+          busyLabel={t('profile.deleteAccountConfirm.busyLabel')}
           requirePassword
           busy={delBusy}
           error={delError}
           onClose={() => setConfirmDelete(false)}
           onConfirm={deleteAccount}
         >
-          Se borrarán tu perfil, tus conversaciones, tus API keys y tu suscripción de
-          forma permanente. Esta acción no se puede deshacer. Escribe tu contraseña
-          para confirmar.
+          {t('profile.deleteAccountConfirm.body')}
         </ConfirmDialog>
       )}
     </>
@@ -399,7 +410,8 @@ function CuentaSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout
 
 // ── Privacidad ──────────────────────────────────────────────────────────
 
-function PrivacidadSection({ user, onUserChange }) {
+function PrivacySection({ user, onUserChange }) {
+  const t = useT('account');
   const [settings, setSettings] = useState(user.settings || null);
   const [busyKey, setBusyKey] = useState(null);
   const [error, setError] = useState('');
@@ -423,7 +435,7 @@ function PrivacidadSection({ user, onUserChange }) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch {
-      setError('No se pudieron exportar tus datos. Intenta de nuevo.');
+      setError(t('privacy.exportError'));
     } finally {
       setExporting(false);
     }
@@ -437,7 +449,7 @@ function PrivacidadSection({ user, onUserChange }) {
       setCleared(true);
       setConfirmClear(false);
     } catch {
-      setClearError('No se pudo borrar el historial. Intenta de nuevo.');
+      setClearError(t('privacy.clearError'));
     } finally {
       setClearBusy(false);
     }
@@ -447,7 +459,8 @@ function PrivacidadSection({ user, onUserChange }) {
     if (settings) return;
     api.get('/api/account/settings')
       .then((res) => setSettings(res.data.settings))
-      .catch(() => setError('No se pudieron cargar tus preferencias.'));
+      .catch(() => setError(t('privacy.settingsLoadError')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
   const toggle = async (key, value) => {
@@ -461,7 +474,7 @@ function PrivacidadSection({ user, onUserChange }) {
       onUserChange({ ...user, settings: res.data.settings });
     } catch {
       setSettings(prev);
-      setError('No se pudo guardar el cambio. Intenta de nuevo.');
+      setError(t('privacy.settingsSaveError'));
     } finally {
       setBusyKey(null);
     }
@@ -470,22 +483,21 @@ function PrivacidadSection({ user, onUserChange }) {
   return (
     <>
       <div className="set-card">
-        <h2 className="set-title">Privacidad</h2>
+        <h2 className="set-title">{t('privacy.title')}</h2>
         <p className="set-lead">
-        En lixbon tus conversaciones son tuyas. La inferencia ocurre en nuestro propio
-        clúster y no compartimos tus datos con terceros.
+          {t('privacy.lead')}
         </p>
         {error && <p className="page__error" role="alert">{error}</p>}
-        <Row label="Datos de uso anónimos" hint="Métricas agregadas para mejorar el servicio">
+        <Row label={t('privacy.anonymousUsage')} hint={t('privacy.anonymousUsageHint')}>
           {settings
-            ? <Toggle label="Datos de uso anónimos" checked={settings.anonymous_usage}
+            ? <Toggle label={t('privacy.anonymousUsage')} checked={settings.anonymous_usage}
                 disabled={busyKey === 'anonymous_usage'}
                 onChange={(v) => toggle('anonymous_usage', v)} />
             : <span className="set-static">…</span>}
         </Row>
-        <Row label="Historial de conversaciones" hint="Guardar el historial de tus chats. Desactivado, los chats nuevos no se guardan (el uso sí se contabiliza)">
+        <Row label={t('privacy.history')} hint={t('privacy.historyHint')}>
           {settings
-            ? <Toggle label="Historial de conversaciones" checked={settings.save_history}
+            ? <Toggle label={t('privacy.history')} checked={settings.save_history}
                 disabled={busyKey === 'save_history'}
                 onChange={(v) => toggle('save_history', v)} />
             : <span className="set-static">…</span>}
@@ -493,18 +505,18 @@ function PrivacidadSection({ user, onUserChange }) {
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">Tus datos</h2>
-        <Row label="Exportar datos" hint="Descarga una copia de tus conversaciones y tu uso (JSON)">
+        <h2 className="set-title">{t('privacy.dataTitle')}</h2>
+        <Row label={t('privacy.exportData')} hint={t('privacy.exportDataHint')}>
           <button className="pill-btn pill-btn--outline set-btn" onClick={exportData} disabled={exporting}>
-            {exporting ? 'Preparando…' : 'Exportar'}
+            {exporting ? t('privacy.preparing') : t('privacy.export')}
           </button>
         </Row>
-        <Row label="Borrar historial" hint="Elimina todas tus conversaciones de forma permanente">
+        <Row label={t('privacy.clearHistory')} hint={t('privacy.clearHistoryHint')}>
           {cleared
-            ? <span className="set-ok"><IconCheck size={13} /> Historial borrado</span>
+            ? <span className="set-ok"><IconCheck size={13} /> {t('privacy.historyCleared')}</span>
             : (
               <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmClear(true)}>
-                Borrar historial
+                {t('privacy.clearHistory')}
               </button>
             )}
         </Row>
@@ -512,16 +524,15 @@ function PrivacidadSection({ user, onUserChange }) {
 
       {confirmClear && (
         <ConfirmDialog
-          title="¿Borrar todo el historial?"
-          confirmLabel="Borrar historial"
-          busyLabel="Borrando…"
+          title={t('privacy.clearHistoryConfirm.title')}
+          confirmLabel={t('privacy.clearHistoryConfirm.confirmLabel')}
+          busyLabel={t('privacy.clearHistoryConfirm.busyLabel')}
           busy={clearBusy}
           error={clearError}
           onClose={() => setConfirmClear(false)}
           onConfirm={clearHistory}
         >
-          Se eliminarán todas tus conversaciones y sus mensajes de forma permanente.
-          Las estadísticas de uso se conservan. Esta acción no se puede deshacer.
+          {t('privacy.clearHistoryConfirm.body')}
         </ConfirmDialog>
       )}
     </>
@@ -530,7 +541,9 @@ function PrivacidadSection({ user, onUserChange }) {
 
 // ── Uso ─────────────────────────────────────────────────────────────────
 
-function UsoSection({ usage, daily, plan }) {
+function UsageSection({ usage, daily, plan }) {
+  const t = useT('account');
+  const locale = useLocale();
   const [apiUsage, setApiUsage] = useState(null);
 
   useEffect(() => {
@@ -547,46 +560,45 @@ function UsoSection({ usage, daily, plan }) {
   return (
     <>
       <div className="set-card">
-        <h2 className="set-title">Uso del período <span className="set-plan-tag" style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}>Plan {plan.name}</span></h2>
+        <h2 className="set-title">{t('usage.periodTitle')} <span className="set-plan-tag" style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}>{t('usage.plan', { name: plan.name })}</span></h2>
         <p className="card__muted">
-        {paid
-        ? 'Tu plan se mide en tokens (la barra de abajo). El chat de la web, el IDE y el CLI, y también la API, se cubren con esa cuota mensual. Solo pagas créditos aparte si agotas la cuota.'
-        : 'Tu plan gratuito se mide en tokens (la barra de abajo) para el chat. El uso de la API con tu key se cobra por separado de tu saldo de créditos.'}
+          {paid ? t('usage.paidDesc') : t('usage.freeDesc')}
         </p>
         <QuotaBar
-          label="Mensajes hoy"
+          label={t('usage.messagesToday')}
           used={usage.messages_today}
           limit={usage.messages_per_day}
-          resetHint={`Se reinicia ${new Date(usage.day_resets_at).toLocaleString()}`}
+          unlimitedLabel={t('unlimited')}
+          resetHint={t('usage.resetsAt', { date: new Date(usage.day_resets_at).toLocaleString(locale) })}
         />
         <QuotaBar
-          label="Tokens este mes"
+          label={t('usage.tokensThisMonth')}
           used={usage.tokens_month}
           limit={usage.tokens_per_month}
-          resetHint={`Se reinicia ${new Date(usage.month_resets_at).toLocaleDateString()}`}
+          unlimitedLabel={t('unlimited')}
+          resetHint={t('usage.resetsAt', { date: new Date(usage.month_resets_at).toLocaleDateString(locale) })}
         />
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">Tokens por día — últimos 30 días</h2>
+        <h2 className="set-title">{t('usage.dailyTokensTitle')}</h2>
         <UsageChart daily={daily} />
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">Consumo de créditos de API — últimos 30 días</h2>
+        <h2 className="set-title">{t('usage.apiCreditsTitle')}</h2>
         {paid && (
           <p className="card__muted">
             {withinQuota
-              ? `Estás dentro de la cuota de tu plan ${plan.name}, así que tu uso de la API está incluido y no gasta créditos. Solo verás cargos aquí si agotas la cuota.`
-              : `Agotaste la cuota mensual de tu plan ${plan.name}. A partir de ahí, el uso de la API se cobra de tus créditos, como se detalla abajo.`}
+              ? t('usage.withinQuota', { name: plan.name })
+              : t('usage.overQuota', { name: plan.name })}
           </p>
         )}
         {apiUsage === null ? (
-          <p className="card__muted">Cargando…</p>
+          <p className="card__muted">…</p>
         ) : apiUsage.length === 0 ? (
           <p className="card__muted">
-            No hay cargos de créditos. Las peticiones con tu API key que se cobren
-            del saldo aparecerán aquí desglosadas por día y modelo.
+            {t('usage.noCharges')}
           </p>
         ) : (
           <>
@@ -594,12 +606,12 @@ function UsoSection({ usage, daily, plan }) {
               <table className="set-table">
                 <thead>
                   <tr>
-                    <th>Día</th>
-                    <th>Modelo</th>
-                    <th>Tokens entrada</th>
-                    <th>Tokens salida</th>
-                    <th>Peticiones</th>
-                    <th>Costo</th>
+                    <th>{t('usage.tableDay')}</th>
+                    <th>{t('usage.tableModel')}</th>
+                    <th>{t('usage.tableInputTokens')}</th>
+                    <th>{t('usage.tableOutputTokens')}</th>
+                    <th>{t('usage.tableRequests')}</th>
+                    <th>{t('usage.tableCost')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -616,7 +628,7 @@ function UsoSection({ usage, daily, plan }) {
                 </tbody>
               </table>
             </div>
-            <p className="set-table-total">Total del período: <strong>${apiTotal.toFixed(4)}</strong></p>
+            <p className="set-table-total">{t('usage.periodTotal')} <strong>${apiTotal.toFixed(4)}</strong></p>
           </>
         )}
       </div>
@@ -627,7 +639,9 @@ function UsoSection({ usage, daily, plan }) {
 // ── Página ──────────────────────────────────────────────────────────────
 
 export default function AccountPage() {
-  useSeo({ title: 'Ajustes', noindex: true });
+  const t = useT('account');
+  const SECTIONS = useSections();
+  useSeo({ title: t('seoTitle'), noindex: true });
   const { user, setUser, loading, logout } = useAuth();
   const navigate = useNavigate();
   const { section } = useParams();
@@ -636,6 +650,7 @@ export default function AccountPage() {
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const legacyTarget = section && !SECTIONS.some((s) => s.id === section) ? LEGACY_ACCOUNT_SECTIONS[section] : null;
   const current = SECTIONS.find((s) => s.id === section) || SECTIONS[0];
 
   const loadKeys = useCallback(async () => {
@@ -655,8 +670,9 @@ export default function AccountPage() {
   useEffect(() => {
     if (loading) return;
     if (!user) { navigate('/auth', { replace: true }); return; }
-    load().catch(() => setError('No se pudo cargar tu cuenta. Intenta de nuevo.'));
-  }, [user, loading, navigate, load]);
+    load().catch(() => setError(t('loadError')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, loading, load]);
 
   useEffect(() => { setMenuOpen(false); }, [section]);
 
@@ -666,15 +682,19 @@ export default function AccountPage() {
 
   const pedirLogout = async () => {
     const ok = await confirmar({
-      titulo: '¿Cerrar sesión?',
-      texto: 'Se cerrará tu sesión en este navegador.',
-      etiqueta: 'Cerrar sesión',
+      titulo: t('logoutConfirm.title'),
+      texto: t('logoutConfirm.text'),
+      etiqueta: t('logoutConfirm.label'),
       peligro: false,
     });
     if (ok) doLogout();
   };
 
   const plan = account?.plan;
+
+  if (legacyTarget) {
+    return <Navigate to={`/account/${legacyTarget}`} replace />;
+  }
 
   if (loading || (!account && !error)) {
     return (
@@ -690,10 +710,10 @@ export default function AccountPage() {
       <header className="page__bar">
         <Link to="/chat" className="page__logo"><Logo /></Link>
         <TemaBoton />
-        <Link to="/chat" className="pill-btn pill-btn--outline page__back">Volver al chat</Link>
+        <Link to="/chat" className="pill-btn pill-btn--outline page__back">{t('backToChat')}</Link>
       </header>
 
-      <h1 className="page__title settings__title">Ajustes</h1>
+      <h1 className="page__title settings__title">{t('title')}</h1>
 
       <div className="settings">
         <button
@@ -726,8 +746,8 @@ export default function AccountPage() {
                antes sobreviviera. */
             <div className="settings__pane" key={current.id}>
               {current.id === 'general' && <GeneralSection user={user} onSaved={setUser} />}
-              {current.id === 'cuenta' && (
-                <CuentaSection
+              {current.id === 'profile' && (
+                <ProfileSection
                   user={user}
                   plan={plan}
                   keys={keys}
@@ -736,9 +756,9 @@ export default function AccountPage() {
                   onPedirLogout={pedirLogout}
                 />
               )}
-              {current.id === 'privacidad' && <PrivacidadSection user={user} onUserChange={setUser} />}
-              {current.id === 'facturacion' && <SeccionFacturacion plan={plan} />}
-              {current.id === 'uso' && <UsoSection usage={account.usage} daily={account.daily} plan={plan} />}
+              {current.id === 'privacy' && <PrivacySection user={user} onUserChange={setUser} />}
+              {current.id === 'billing' && <SeccionFacturacion plan={plan} />}
+              {current.id === 'usage' && <UsageSection usage={account.usage} daily={account.daily} plan={plan} />}
             </div>
           )}
         </main>

@@ -7,7 +7,11 @@
 import { tieneVisuals } from '../lib/planes';
 import { useTema } from '../hooks/useTema';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate as useRawNavigate } from 'react-router-dom';
+import { useNavigate, Link } from '../i18n/link';
+import { useLocale } from '../i18n/LocaleContext';
+import { otherLocalePath } from '../i18n/paths';
+import { useT } from '../i18n/useT';
 import { Logo } from './Logo';
 import { planBadge } from '../lib/planColors';
 import { useDismiss } from '../hooks/useDismiss';
@@ -22,6 +26,8 @@ import {
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
 
 function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c' }) {
+  const t = useT('sidebar');
+  const tc = useT('common');
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState(null); // { left, top } en coordenadas de viewport
   const [editing, setEditing] = useState(false);
@@ -86,22 +92,22 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
         className="sb-item__title"
         onClick={() => { navigate(`${base}/${conv.id}`); onNavigate?.(); }}
       >
-        {conv.title || 'Sin título'}
+        {conv.title || t('untitled')}
       </button>
       <button
         ref={btnRef}
         className="icon-btn sb-item__menu-btn"
         onClick={() => setMenuOpen((v) => !v)}
-        aria-label="Opciones de la conversación"
+        aria-label={t('conversationOptions')}
         aria-expanded={menuOpen}
       >
         <IconDots size={14} />
       </button>
       {menuPos && (
         <Desplegable abierto={menuOpen} className="sb-menu" style={{ left: menuPos.left, top: menuPos.top }} role="menu">
-          <button onClick={startEdit}><IconPencil size={14} /> Renombrar</button>
+          <button onClick={startEdit}><IconPencil size={14} /> {tc('rename')}</button>
           <button className="sb-menu__danger" onClick={() => { setMenuOpen(false); onDelete(conv.id); }}>
-            <IconTrash size={14} /> Eliminar
+            <IconTrash size={14} /> {tc('delete')}
           </button>
         </Desplegable>
       )}
@@ -114,6 +120,11 @@ export function Sidebar({
   onRename, onDelete, onLogout, compact = false, open = false, onClose,
   historyBase = '/c', newPath = '/chat', seccion = 'chat',
 }) {
+  const t = useT('sidebar');
+  const tc = useT('common');
+  const tn = useT('nav');
+  const locale = useLocale();
+  const { pathname } = useLocation();
   const [historyOpen, setHistoryOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -123,6 +134,7 @@ export function Sidebar({
   const profileRef = useRef(null);
   const closeBtnRef = useRef(null);
   const navigate = useNavigate();
+  const rawNavigate = useRawNavigate();
 
   const closeProfile = useCallback(() => setProfileMenu(false), []);
   useDismiss(profileMenu, profileRef, closeProfile);
@@ -162,16 +174,16 @@ export function Sidebar({
     <aside
       className={`sidebar ${collapsed && !compact ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}
       id="sidebar-drawer"
-      aria-label="Panel de conversaciones"
+      aria-label={t('conversationsPanel')}
       aria-hidden={drawerHidden || undefined}
       inert={drawerHidden || undefined}
     >
       {/* Modo colapsado: columna de iconos */}
       <div className="sidebar__rail" aria-hidden={!collapsed}>
-        <button className="icon-btn" onClick={onToggleCollapse} aria-label="Abrir panel" tabIndex={collapsed ? 0 : -1}>
+        <button className="icon-btn" onClick={onToggleCollapse} aria-label={t('openPanel')} tabIndex={collapsed ? 0 : -1}>
           <IconPanel />
         </button>
-        <button className="icon-btn" onClick={() => navigate(newPath)} aria-label="Nueva conversación" tabIndex={collapsed ? 0 : -1}>
+        <button className="icon-btn" onClick={() => navigate(newPath)} aria-label={t('newConversation')} tabIndex={collapsed ? 0 : -1}>
           <IconPlus />
         </button>
       </div>
@@ -183,15 +195,15 @@ export function Sidebar({
             <Logo />
           </Link>
           <div className="sidebar__header-actions">
-            <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label="Buscar conversaciones">
+            <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label={t('searchConversations')}>
               {searchOpen ? <IconX /> : <IconSearch />}
             </button>
             {compact ? (
-              <button ref={closeBtnRef} className="icon-btn" onClick={onClose} aria-label="Cerrar panel">
+              <button ref={closeBtnRef} className="icon-btn" onClick={onClose} aria-label={t('closePanel')}>
                 <IconX />
               </button>
             ) : (
-              <button className="icon-btn" onClick={onToggleCollapse} aria-label="Colapsar panel">
+              <button className="icon-btn" onClick={onToggleCollapse} aria-label={t('collapsePanel')}>
                 <IconPanel />
               </button>
             )}
@@ -203,7 +215,7 @@ export function Sidebar({
             <input
               ref={searchRef}
               className="sidebar__search"
-              placeholder="Buscar…"
+              placeholder={tc('search')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               tabIndex={searchOpen ? 0 : -1}
@@ -213,23 +225,23 @@ export function Sidebar({
 
         <nav className="sidebar__nav">
           <button className="sb-nav" onClick={() => go(newPath)}>
-            <IconPlus /> <span>{seccion === 'visuals' ? 'Nuevo diseño' : 'Nueva conversación'}</span>
+            <IconPlus /> <span>{seccion === 'visuals' ? t('newDesign') : t('newConversation')}</span>
           </button>
           <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/chat'))}>
-            <IconChat /> <span>Conversaciones</span>
+            <IconChat /> <span>{t('conversations')}</span>
           </button>
           <button className={`sb-nav ${seccion === 'visuals' ? 'is-active' : ''}`} onClick={() => (seccion === 'visuals' ? setHistoryOpen(true) : go('/visuals'))}>
-            <IconLayers /> <span>Visuals</span>
+            <IconLayers /> <span>{t('visuals')}</span>
             {!tieneVisuals(user) && <span className="sb-menu__tag">Pro</span>}
           </button>
-          <button className="sb-nav" onClick={() => go('/aplicaciones')}>
-            <IconGrid /> <span>Aplicaciones</span>
+          <button className="sb-nav" onClick={() => go('/apps')}>
+            <IconGrid /> <span>{t('apps')}</span>
           </button>
         </nav>
 
         <div className="sidebar__history">
           <button className="sidebar__history-head" onClick={() => setHistoryOpen((v) => !v)}>
-            <span>Historial</span>
+            <span>{t('history')}</span>
             <IconChevron size={14} open={historyOpen} />
           </button>
           <div className={`reveal ${historyOpen ? 'is-open' : ''}`}>
@@ -252,7 +264,7 @@ export function Sidebar({
                     ))}
                     {visible.length === 0 && (
                       <p className="sidebar__empty">
-                        {user ? 'Aún no hay conversaciones' : 'Inicia sesión para guardar tu historial'}
+                        {user ? t('noConversations') : t('logInToSaveHistory')}
                       </p>
                     )}
                   </>
@@ -264,8 +276,8 @@ export function Sidebar({
 
         {/* Solo la cuenta gratuita ve el atajo; en Pro/Advance se cambia de plan desde Ajustes. */}
         {user && (!user.plan_id || user.plan_id === 'free') && (
-          <button className="sidebar__upgrade" onClick={() => go('/planes')}>
-            <IconBolt size={16} /> <span>Mejorar plan</span>
+          <button className="sidebar__upgrade" onClick={() => go('/plans')}>
+            <IconBolt size={16} /> <span>{tc('upgrade')}</span>
           </button>
         )}
 
@@ -288,7 +300,7 @@ export function Sidebar({
                   {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
                 </span>
                 <Link
-                  to="/planes"
+                  to="/plans"
                   className="sidebar__plan"
                   onClick={compact ? onClose : undefined}
                   style={{
@@ -296,40 +308,40 @@ export function Sidebar({
                     color: planBadge(user.plan_id).ink,
                   }}
                 >
-                  {user.plan_name || 'Gratuito'}
+                  {user.plan_name || t('freePlan')}
                 </Link>
               </div>
               <button
                 className="icon-btn"
                 onClick={() => setProfileMenu((v) => !v)}
-                aria-label="Ajustes"
+                aria-label={tc('settings')}
                 aria-expanded={profileMenu}
               >
                 <IconGear />
               </button>
                 <Desplegable abierto={profileMenu} className="sb-menu sb-menu--profile" role="menu">
-                  <button onClick={() => { setProfileMenu(false); go('/planes'); }}>
-                    <IconBolt size={14} /> Planes
+                  <button onClick={() => { setProfileMenu(false); go('/plans'); }}>
+                    <IconBolt size={14} /> {tn('plans')}
                   </button>
                   <button onClick={alternarTema}>
-                    {tema === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />} {tema === 'dark' ? 'Tema claro' : 'Tema oscuro'}
+                    {tema === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />} {tema === 'dark' ? t('lightTheme') : t('darkTheme')}
                   </button>
-                  <button className="sb-menu__soon" disabled title="Próximamente">
-                    <IconGlobe size={14} /> Lenguaje <span className="sb-menu__tag">Pronto</span>
+                  <button onClick={() => { setProfileMenu(false); rawNavigate(otherLocalePath(pathname)); }}>
+                    <IconGlobe size={14} /> {tn('language')} <span className="sb-menu__tag">{locale === 'es' ? 'EN' : 'ES'}</span>
                   </button>
                   <button onClick={() => { setProfileMenu(false); go('/account'); }}>
-                    <IconGear size={14} /> Ajustes
+                    <IconGear size={14} /> {tc('settings')}
                   </button>
                   <button onClick={() => { setProfileMenu(false); go('/docs'); }}>
-                    <IconBook size={14} /> Documentación
+                    <IconBook size={14} /> {t('docs')}
                   </button>
                   {user.role === 'admin' && (
                     <button onClick={() => { setProfileMenu(false); go('/admin'); }}>
-                      <IconGrid size={14} /> Panel admin
+                      <IconGrid size={14} /> {t('adminPanel')}
                     </button>
                   )}
                   <button onClick={() => { setProfileMenu(false); onLogout(); }}>
-                    <IconLogout size={14} /> Cerrar sesión
+                    <IconLogout size={14} /> {tc('logOut')}
                   </button>
                 </Desplegable>
             </>
@@ -340,10 +352,10 @@ export function Sidebar({
               </span>
               <div className="sidebar__profile-info">
                 <Link to="/auth" className="sidebar__profile-name" onClick={compact ? onClose : undefined}>
-                  Iniciar sesión
+                  {tc('logIn')}
                 </Link>
-                <Link to="/planes" className="sidebar__plan-link" onClick={compact ? onClose : undefined}>
-                  Ver planes
+                <Link to="/plans" className="sidebar__plan-link" onClick={compact ? onClose : undefined}>
+                  {t('seePlans')}
                 </Link>
               </div>
             </>

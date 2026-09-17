@@ -10,5 +10,15 @@ Disallow: /s/
 Disallow: /remote
 Disallow: /visuals/
 Disallow: /api/
+Disallow: /en/account
+Disallow: /en/admin
+Disallow: /en/auth
+Disallow: /en/reset-password
+Disallow: /en/c/
+Disallow: /en/chat
+Disallow: /en/s/
+Disallow: /en/remote
+Disallow: /en/visuals/
+Disallow: /en/api/
 
 Sitemap: https://lixbon.com/sitemap.xml

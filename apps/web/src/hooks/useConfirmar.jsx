@@ -3,10 +3,12 @@
 // código que antes hacía `if (!window.confirm(...)) return` cambia solo el await.
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useT } from '../i18n/useT';
 
 const ConfirmarContext = createContext(() => Promise.resolve(false));
 
 export function ConfirmarProvider({ children }) {
+  const tc = useT('common');
   const [pedido, setPedido] = useState(null);
   const resolver = useRef(null);
 
@@ -28,7 +30,7 @@ export function ConfirmarProvider({ children }) {
       {pedido && (
         <ConfirmDialog
           title={pedido.titulo}
-          confirmLabel={pedido.etiqueta || 'Confirmar'}
+          confirmLabel={pedido.etiqueta || tc('confirm')}
           danger={pedido.peligro !== false}
           onConfirm={() => terminar(true)}
           onClose={() => terminar(false)}

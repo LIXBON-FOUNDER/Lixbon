@@ -3,60 +3,61 @@
 import { useEffect, useState } from 'react';
 import { useSeo } from '../lib/seo';
 import { api } from '../lib/api';
+import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 import { IconAlert, IconCheck } from '../components/Icons';
 
 const REFRESCO_MS = 60_000;
 
-const ESTADOS = {
-  operational: { label: 'Operativo', color: 'ok' },
-  degraded: { label: 'Degradado', color: 'warn' },
-  down: { label: 'Caído', color: 'down' },
-  unavailable: { label: 'No disponible', color: 'off' },
-};
-
-const CABECERA = {
-  operational: 'Todos los sistemas operativos',
-  degraded: 'Rendimiento degradado en parte del servicio',
-  down: 'Interrupción en curso',
-  unavailable: 'Todos los sistemas operativos',
-};
-
-const fechaCorta = (iso) => new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
-const fechaLarga = (iso) => {
-  const f = new Date(iso).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  return f.charAt(0).toUpperCase() + f.slice(1);
-};
-const hora = (iso) => new Date(iso).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-
-function duracion(min) {
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  if (h < 24) return m ? `${h} h ${m} min` : `${h} h`;
-  return `${Math.floor(h / 24)} d ${h % 24} h`;
+function useEstados() {
+  const t = useT('status');
+  return {
+    operational: { label: t('statusOperational'), color: 'ok' },
+    degraded: { label: t('statusDegraded'), color: 'warn' },
+    down: { label: t('statusDown'), color: 'down' },
+    unavailable: { label: t('statusUnavailable'), color: 'off' },
+  };
 }
 
-function Uptime({ dias, total }) {
+function useCabecera() {
+  const t = useT('status');
+  return {
+    operational: t('headerOperational'),
+    degraded: t('headerDegraded'),
+    down: t('headerDown'),
+    unavailable: t('headerOperational'),
+  };
+}
+
+function duracion(min, t) {
+  if (min < 60) return `${min} ${t('minUnit')}`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h < 24) return m ? `${h} ${t('hourUnit')} ${m} ${t('minUnit')}` : `${h} ${t('hourUnit')}`;
+  return `${Math.floor(h / 24)} ${t('dayUnit')} ${h % 24} ${t('hourUnit')}`;
+}
+
+function Uptime({ dias, total, t, ESTADOS }) {
+  const fechaCorta = (iso) => new Date(iso).toLocaleDateString(t('dateLocaleShort'), { day: 'numeric', month: 'short' });
   return (
     <div className="status__uptime">
       <div className="status__barras" aria-hidden="true">
         {dias.map((d) => (
           <span key={d.date} className={`status__barra ${d.status ? `is-${ESTADOS[d.status].color}` : 'is-none'}`}
-            title={d.status ? `${fechaCorta(d.date)}: ${d.uptime}%` : `${fechaCorta(d.date)}: sin datos`} />
+            title={d.status ? t('tooltipWithUptime', { date: fechaCorta(d.date), uptime: d.uptime }) : t('tooltipNoData', { date: fechaCorta(d.date) })} />
         ))}
       </div>
       <div className="status__leyenda">
-        <span>Hace {dias.length} días</span>
-        <span>{total == null ? 'Sin datos todavía' : `${total}% de disponibilidad`}</span>
-        <span>Hoy</span>
+        <span>{t('daysAgo', { n: dias.length })}</span>
+        <span>{total == null ? t('noDataYet') : t('availabilityPct', { pct: total })}</span>
+        <span>{t('today')}</span>
       </div>
     </div>
   );
 }
 
-function Componente({ c }) {
+function Componente({ c, t, ESTADOS }) {
   const e = ESTADOS[c.status] || ESTADOS.unavailable;
   return (
     <li className="status__item">
@@ -71,15 +72,21 @@ function Componente({ c }) {
           {c.detail && <small>{c.detail}</small>}
         </div>
       </div>
-      <Uptime dias={c.days} total={c.uptime} />
+      <Uptime dias={c.days} total={c.uptime} t={t} ESTADOS={ESTADOS} />
     </li>
   );
 }
 
-function Incidentes({ lista, componentes }) {
+function Incidentes({ lista, componentes, t, ESTADOS }) {
+  const fechaLarga = (iso) => {
+    const f = new Date(iso).toLocaleDateString(t('dateLocaleLong'), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    return f.charAt(0).toUpperCase() + f.slice(1);
+  };
+  const hora = (iso) => new Date(iso).toLocaleTimeString(t('dateLocaleShort'), { hour: '2-digit', minute: '2-digit' });
+
   if (lista.length === 0) {
     return (
-      <p className="status__vacio"><IconCheck size={15} /> Sin incidentes en los últimos 90 días.</p>
+      <p className="status__vacio"><IconCheck size={15} /> {t('noIncidents')}</p>
     );
   }
   const porDia = new Map();
@@ -102,10 +109,10 @@ function Incidentes({ lista, componentes }) {
                 <li key={`${i.component}-${i.started_at}`} className="status__incidente">
                   <span className={`status__punto is-${e.color}`} />
                   <div>
-                    <strong>{i.name}</strong> · {e.label.toLowerCase()} durante {duracion(i.duration_min)}
+                    <strong>{i.name}</strong> · {e.label.toLowerCase()} {t('during')} {duracion(i.duration_min, t)}
                     <small>
                       {hora(i.started_at)}{i.ended_at ? ` – ${hora(i.ended_at)}` : ''}
-                      {enCurso && <span className="status__encurso">En curso</span>}
+                      {enCurso && <span className="status__encurso">{t('ongoing')}</span>}
                     </small>
                   </div>
                 </li>
@@ -119,9 +126,12 @@ function Incidentes({ lista, componentes }) {
 }
 
 export default function StatusPage() {
+  const t = useT('status');
+  const ESTADOS = useEstados();
+  const CABECERA = useCabecera();
   useSeo({
-    title: 'Estado del servicio',
-    description: 'Estado en tiempo real de lixbon: API, modelos, base de datos, pagos y correo, con la disponibilidad de los últimos 90 días.',
+    title: t('seoTitle'),
+    description: t('seoDescription'),
     path: '/status',
   });
   const [data, setData] = useState(null);
@@ -134,9 +144,9 @@ export default function StatusPage() {
       .then((r) => { if (vivo) { setData(r.data); setError(false); } })
       .catch(() => { if (vivo) setError(true); });
     cargar();
-    const t = setInterval(cargar, REFRESCO_MS);
+    const t2 = setInterval(cargar, REFRESCO_MS);
     const reloj = setInterval(() => setAhora(Date.now()), 10_000);
-    return () => { vivo = false; clearInterval(t); clearInterval(reloj); };
+    return () => { vivo = false; clearInterval(t2); clearInterval(reloj); };
   }, []);
 
   const global = data ? (ESTADOS[data.status] || ESTADOS.operational) : null;
@@ -146,21 +156,21 @@ export default function StatusPage() {
     <div className="page">
       <PublicNav />
       <main className="page__body page__body--wide status">
-        <h1 className="page__title page__title--center">Estado del servicio</h1>
-        <p className="plans__sub">Lo que está funcionando ahora mismo y lo que ha pasado en los últimos 90 días.</p>
+        <h1 className="page__title page__title--center">{t('seoTitle')}</h1>
+        <p className="plans__sub">{t('subtitle')}</p>
 
         {error && !data ? (
           <div className="status__cabecera is-down">
             <IconAlert size={20} />
             <div>
-              <h2>No se puede consultar el estado</h2>
-              <p>El gateway no responde. Si el problema sigue, escríbenos a <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>.</p>
+              <h2>{t('cannotCheckTitle')}</h2>
+              <p>{t('cannotCheckBefore')} <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>.</p>
             </div>
           </div>
         ) : !data ? (
           <div className="status__cabecera is-cargando">
             <span className="status__punto" />
-            <div><h2>Consultando…</h2></div>
+            <div><h2>{t('checking')}</h2></div>
           </div>
         ) : (
           <div className={`status__cabecera is-${global.color}`}>
@@ -168,8 +178,8 @@ export default function StatusPage() {
             <div>
               <h2>{CABECERA[data.status]}</h2>
               <p>
-                Actualizado hace {haceSeg < 5 ? 'un momento' : `${haceSeg} s`}
-                {error && ' · sin conexión con el gateway, mostrando el último estado'}
+                {haceSeg < 5 ? t('updatedMoment') : t('updatedSeconds', { n: haceSeg })}
+                {error && ` · ${t('offlineNote')}`}
               </p>
             </div>
           </div>
@@ -178,18 +188,17 @@ export default function StatusPage() {
         {data && (
           <>
             <ul className="status__lista">
-              {data.components.map((c) => <Componente key={c.id} c={c} />)}
+              {data.components.map((c) => <Componente key={c.id} c={c} t={t} ESTADOS={ESTADOS} />)}
             </ul>
 
             <section className="status__seccion">
-              <h2>Incidentes</h2>
-              <Incidentes lista={data.incidents} componentes={data.components} />
+              <h2>{t('incidentsHeading')}</h2>
+              <Incidentes lista={data.incidents} componentes={data.components} t={t} ESTADOS={ESTADOS} />
             </section>
 
             <p className="status__nota">
-              El gateway toma una muestra de cada servicio cada {Math.round(data.sample_interval_s / 60)} minutos;
-              una interrupción más corta puede no aparecer aquí. Si algo te falla y esta página lo da por operativo,
-              escríbenos a <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>.
+              {t('sampleNoteBefore')} {Math.round(data.sample_interval_s / 60)} {t('sampleNoteMid')}{' '}
+              <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>{t('sampleNoteAfter')}
             </p>
           </>
         )}

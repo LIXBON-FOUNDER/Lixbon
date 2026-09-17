@@ -1,8 +1,10 @@
 import { api } from '../../lib/api';
+import { useT } from '../../i18n/useT';
 import { DialogoPago } from './DialogoPago';
 import { fmtUSD } from './comunes';
 
 export function PagoPlan({ plan, planActual, onHecho, onCerrar }) {
+  const t = useT('account');
   const precio = (plan.price_monthly_cents || 0) / 100;
   const cambia = Boolean(planActual && planActual.id !== plan.id
     && (planActual.price_monthly_cents || 0) > 0);
@@ -12,20 +14,17 @@ export function PagoPlan({ plan, planActual, onHecho, onCerrar }) {
   // Una bajada no cobra: Stripe acredita el tiempo que queda del plan caro.
   // Anunciar "primer cobro hoy" ahí sería decir que se cobra algo que no se cobra.
   const nota = sube
-    ? `Hoy se cobra solo la diferencia con tu plan ${planActual.name}; el mes que viene, `
-      + `${fmtUSD(precio)} completos.`
+    ? t('billing.planDialog.upgradeNote', { current: planActual.name, amount: fmtUSD(precio) })
     : baja
-      ? `Hoy no se cobra nada: lo que te queda pagado de ${planActual.name} se te descuenta `
-        + `de las próximas facturas. Desde la renovación pagarás ${fmtUSD(precio)} al mes.`
-      : 'Primer cobro hoy y luego cada mes. Puedes cancelar cuando quieras desde '
-        + 'Ajustes → Facturación.';
+      ? t('billing.planDialog.downgradeNote', { current: planActual.name, amount: fmtUSD(precio) })
+      : t('billing.planDialog.newSubNote');
 
   const resumen = (
     <div className="pago__resumen">
       <div className="pago__resumen-fila">
         <span className="pago__resumen-txt">
-          <span className="pago__resumen-nombre">Plan {plan.name}</span>
-          <span className="pago__sub">Mensual · se renueva solo</span>
+          <span className="pago__resumen-nombre">{t('billing.planDialog.planLine', { name: plan.name })}</span>
+          <span className="pago__sub">{t('billing.planDialog.monthlySub')}</span>
         </span>
         <span className="pago__resumen-precio">{fmtUSD(precio)}</span>
       </div>
@@ -39,13 +38,13 @@ export function PagoPlan({ plan, planActual, onHecho, onCerrar }) {
 
   return (
     <DialogoPago
-      titulo={sube ? 'Mejorar plan' : baja ? 'Cambiar de plan' : 'Pagar'}
-      concepto={`Tu plan ${plan.name} queda activo.`}
+      titulo={sube ? t('billing.planDialog.upgradeTitle') : baja ? t('billing.planDialog.changeTitle') : t('billing.planDialog.payTitle')}
+      concepto={t('billing.planDialog.concept', { name: plan.name })}
       resumen={resumen}
-      etiquetaAccion={sube ? `Mejorar a ${plan.name}`
-        : baja ? `Cambiar a ${plan.name}` : `Pagar ${fmtUSD(precio)}`}
+      etiquetaAccion={sube ? t('billing.planDialog.upgradeAction', { name: plan.name })
+        : baja ? t('billing.planDialog.changeAction', { name: plan.name }) : t('billing.planDialog.payAction', { amount: fmtUSD(precio) })}
       guardarFijo
-      notaGuardar="Se guarda esta tarjeta: es con la que se renovará tu plan cada mes."
+      notaGuardar={t('billing.planDialog.saveNote')}
       cobrar={cobrar}
       onHecho={onHecho}
       onCerrar={onCerrar}

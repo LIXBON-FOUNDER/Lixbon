@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { IconCheck, IconChevron } from './Icons';
 import { useSalida } from '../hooks/useSalida';
+import { useT } from '../i18n/useT';
 
 const MARGEN = 8;
 const MAX_ALTO = 280;
@@ -15,10 +16,11 @@ export function Select({
   options,
   onChange,
   className = '',
-  placeholder = 'Elegir…',
+  placeholder,
   disabled = false,
   'aria-label': ariaLabel,
 }) {
+  const t = useT('dialogs');
   const id = useId();
   const [abierto, setAbierto] = useState(false);
   const [pos, setPos] = useState(null);
@@ -132,7 +134,7 @@ export function Select({
         aria-label={ariaLabel}
       >
         <span className={`select__label ${elegida ? '' : 'is-placeholder'}`}>
-          {elegida ? elegida.label : placeholder}
+          {elegida ? elegida.label : (placeholder || t('selectPlaceholder'))}
         </span>
         <IconChevron size={14} open={abierto} className="select__chevron" />
       </button>
@@ -166,7 +168,7 @@ export function Select({
               {o.value === value && <IconCheck size={14} />}
             </div>
           ))}
-          {options.length === 0 && <div className="select-menu__vacio">Sin opciones</div>}
+          {options.length === 0 && <div className="select-menu__vacio">{t('noOptions')}</div>}
         </div>,
         document.body,
       )}

@@ -1,17 +1,20 @@
-// DownloadsPage.jsx — descargas públicas (/descargas): app de escritorio,
+// DownloadsPage.jsx — descargas públicas (/apps): app de escritorio,
 // app de Android y CLI. Escritorio y Android van como dos cuadros iguales;
 // el CLI se instala con un comando (PowerShell en Windows, bash en
 // Linux/macOS) que baja e instala client_cli.py y crea el lanzador `lixbon`.
 import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 import { CodeBlock } from '../components/CodeBlock';
 import { IconDownload, IconTerminal, IconCheck, IconPhone } from '../components/Icons';
 
 export default function DownloadsPage() {
-  useSeo({ title: 'Aplicaciones: escritorio, Android y CLI', description: 'Descarga la app de escritorio de lixbon (IDE con autocompletado y agente), la app de Android o instala el CLI con un comando en Windows, Linux y macOS.', path: '/aplicaciones' });
+  const t = useT('downloads');
+  useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/apps' });
   const [desktop, setDesktop] = useState(null);
   const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');
@@ -38,8 +41,8 @@ export default function DownloadsPage() {
     <div className="page">
       <PublicNav />
       <main className="page__body page__body--wide">
-        <h1 className="page__title page__title--center">Aplicaciones</h1>
-        <p className="plans__sub">Lleva lixbon a tu escritorio, a tu bolsillo y a tu terminal.</p>
+        <h1 className="page__title page__title--center">{t('title')}</h1>
+        <p className="plans__sub">{t('subtitle')}</p>
 
         <div className="downloads">
           {/* ── Apps: escritorio + Android, dos cuadros iguales ── */}
@@ -48,22 +51,20 @@ export default function DownloadsPage() {
               <div className="dl-card__head">
                 <img src="/favicon.svg" alt="" className="dl-card__logo" draggable={false} />
                 <div className="dl-card__heading">
-                  <h2 className="dl-card__title">App de escritorio</h2>
-                  <p className="dl-card__desc">
-                    La experiencia completa de lixbon en una app nativa para Windows.
-                  </p>
+                  <h2 className="dl-card__title">{t('desktopTitle')}</h2>
+                  <p className="dl-card__desc">{t('desktopDesc')}</p>
                 </div>
               </div>
               <ul className="dl-card__features">
-                <li><IconCheck size={15} /> Editor de código con chat integrado</li>
-                <li><IconCheck size={15} /> Terminales, Git y explorador de archivos</li>
-                <li><IconCheck size={15} /> Actualizaciones automáticas</li>
+                <li><IconCheck size={15} /> {t('desktopFeature1')}</li>
+                <li><IconCheck size={15} /> {t('desktopFeature2')}</li>
+                <li><IconCheck size={15} /> {t('desktopFeature3')}</li>
               </ul>
               <div className="dl-card__bottom">
                 {desktop?.available ? (
                   <>
                     <a href={desktop.download_url} className="pill-btn pill-btn--primary dl-card__cta">
-                      <IconDownload size={16} /> Descargar v{desktop.version}
+                      <IconDownload size={16} /> {t('download')} v{desktop.version}
                     </a>
                     <span className="dl-card__meta">
                       {desktop.title} · {desktop.release_date} · Windows 10/11 (64 bits)
@@ -71,7 +72,7 @@ export default function DownloadsPage() {
                   </>
                 ) : (
                   <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
-                    Próximamente
+                    {t('comingSoon')}
                   </span>
                 )}
               </div>
@@ -81,24 +82,20 @@ export default function DownloadsPage() {
               <div className="dl-card__head">
                 <div className="dl-card__icon"><IconPhone size={19} /></div>
                 <div className="dl-card__heading">
-                  <h2 className="dl-card__title">App de Android</h2>
-                  <p className="dl-card__desc">
-                    Chatea con el cluster desde tu teléfono, con tu misma cuenta e historial.
-                    Se instala directamente como APK (Android pedirá permitir «orígenes
-                    desconocidos»: es lo normal fuera de Play Store).
-                  </p>
+                  <h2 className="dl-card__title">{t('androidTitle')}</h2>
+                  <p className="dl-card__desc">{t('androidDesc')}</p>
                 </div>
               </div>
               <ul className="dl-card__features">
-                <li><IconCheck size={15} /> Chat con streaming y búsqueda web</li>
-                <li><IconCheck size={15} /> Historial compartido con la web</li>
-                <li><IconCheck size={15} /> Uso del plan y gestión de cuenta</li>
+                <li><IconCheck size={15} /> {t('androidFeature1')}</li>
+                <li><IconCheck size={15} /> {t('androidFeature2')}</li>
+                <li><IconCheck size={15} /> {t('androidFeature3')}</li>
               </ul>
               <div className="dl-card__bottom">
                 {android?.available ? (
                   <>
                     <a href={android.download_url} className="pill-btn pill-btn--primary dl-card__cta">
-                      <IconDownload size={16} /> Descargar v{android.version}
+                      <IconDownload size={16} /> {t('download')} v{android.version}
                     </a>
                     <span className="dl-card__meta">
                       {android.title} · {android.release_date} · APK · Android 7.0+
@@ -106,7 +103,7 @@ export default function DownloadsPage() {
                   </>
                 ) : (
                   <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
-                    Próximamente
+                    {t('comingSoon')}
                   </span>
                 )}
               </div>
@@ -118,11 +115,8 @@ export default function DownloadsPage() {
             <div className="dl-card__head">
               <div className="dl-card__icon"><IconTerminal size={19} /></div>
               <div className="dl-card__heading">
-                <h2 className="dl-card__title">Interfaz de línea de comandos (CLI)</h2>
-                <p className="dl-card__desc">
-                  Chatea con el cluster desde tu terminal, con modo agente y contexto de
-                  tu carpeta de trabajo. Requiere Python 3.10 o superior.
-                </p>
+                <h2 className="dl-card__title">{t('cliTitle')}</h2>
+                <p className="dl-card__desc">{t('cliDesc')}</p>
               </div>
               <div className="os-tabs" role="tablist">
               <button
@@ -144,33 +138,29 @@ export default function DownloadsPage() {
 
             {os === 'windows' ? (
               <>
-                <p className="dl-card__step">1. Abre <strong>PowerShell</strong> y ejecuta:</p>
+                <p className="dl-card__step">{t('step1Win')} <strong>PowerShell</strong> {t('step1WinRest')}</p>
                 <CodeBlock code={winCmd} label="powershell" />
                 <p className="dl-card__note">
-                  Instala el CLI en <code>%USERPROFILE%\.lixbon</code> y agrega el comando{' '}
-                  <code>lixbon</code> a tu PATH. Abre una terminal nueva después de instalar.
+                  {t('noteWin', { path: '%USERPROFILE%\\.lixbon', cmd: 'lixbon' })}
                 </p>
               </>
             ) : (
               <>
-                <p className="dl-card__step">1. Abre tu <strong>terminal</strong> y ejecuta:</p>
+                <p className="dl-card__step">{t('step1Unix')} <strong>terminal</strong> {t('step1UnixRest')}</p>
                 <CodeBlock code={unixCmd} label="bash" />
                 <p className="dl-card__note">
-                  Instala el CLI en <code>~/.lixbon</code> y crea el comando{' '}
-                  <code>lixbon</code> en <code>~/.local/bin</code>.
+                  {t('noteUnix', { home: '~/.lixbon', cmd: 'lixbon', bin: '~/.local/bin' })}
                 </p>
               </>
             )}
 
-            <p className="dl-card__step">
-              2. Ejecuta el CLI; la primera vez te pedirá iniciar sesión (correo o API key):
-            </p>
+            <p className="dl-card__step">{t('step2')}</p>
             <CodeBlock code={`lixbon`} />
 
             <details className="dl-details">
-              <summary>Instalación manual (sin script)</summary>
+              <summary>{t('manualInstall')}</summary>
               <p className="dl-card__note">
-                Descarga <a href={`${base}/install/client_cli.py`}>client_cli.py</a> y ejecútalo con Python:
+                {t('manualNote')} <a href={`${base}/install/client_cli.py`}>client_cli.py</a> {t('manualNoteRest')}
               </p>
               <CodeBlock code={`python client_cli.py init --base-url ${base}/v1`} />
               <CodeBlock code={`python client_cli.py chat`} />
@@ -179,7 +169,7 @@ export default function DownloadsPage() {
         </div>
 
         <p className="downloads__foot">
-          ¿Buscas cómo usarlo? Lee la <a href="/docs">documentación</a>.
+          {t('footPrompt')} <Link to="/docs">{t('footLink')}</Link>.
         </p>
       </main>
       <PublicFooter />

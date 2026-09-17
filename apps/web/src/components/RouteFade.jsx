@@ -13,7 +13,9 @@ import { useLocation } from 'react-router-dom';
 /** La sección a la que pertenece una ruta. El chat y una conversación concreta
  *  son la misma; /planes y /docs son distintas. */
 function seccionDe(pathname) {
-  const primero = pathname.split('/')[1] || '';
+  const partes = pathname.split('/').filter(Boolean);
+  if (partes[0] === 'en') partes.shift();
+  const primero = partes[0] || '';
   return primero === 'c' ? '' : primero;
 }
 

@@ -17,27 +17,32 @@ const plantilla = await readFile(resolve(dist, 'index.html'), 'utf8');
 const escapar = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const meta = (html, selector, valor) => html.replace(selector, (m) => m.replace(/content="[^"]*"/, `content="${escapar(valor)}"`));
 
-function conCabecera(html, seo) {
+function conCabecera(html, seo, locale) {
   if (!seo) return html;
-  let out = html.replace(/<title>[^<]*<\/title>/, `<title>${escapar(seo.titulo)}</title>`);
+  let out = html.replace(/<html lang="[^"]*"/, `<html lang="${locale}"`);
+  out = out.replace(/<title>[^<]*<\/title>/, `<title>${escapar(seo.titulo)}</title>`);
   out = meta(out, /<meta name="description"[^>]*>/, seo.description);
   out = meta(out, /<meta property="og:title"[^>]*>/, seo.titulo);
   out = meta(out, /<meta property="og:description"[^>]*>/, seo.description);
   out = meta(out, /<meta property="og:url"[^>]*>/, seo.url);
+  out = meta(out, /<meta property="og:locale"[^>]*>/, seo.ogLocale);
   out = meta(out, /<meta name="twitter:title"[^>]*>/, seo.titulo);
   out = meta(out, /<meta name="twitter:description"[^>]*>/, seo.description);
   out = out.replace(/<link rel="canonical" href="[^"]*" \/>/, `<link rel="canonical" href="${escapar(seo.url)}" />`);
   const extra = [
     `<meta name="robots" content="${seo.noindex ? 'noindex, nofollow' : 'index, follow'}" />`,
+    `<link rel="alternate" hreflang="es" href="${escapar(seo.alternates.es)}" />`,
+    `<link rel="alternate" hreflang="en" href="${escapar(seo.alternates.en)}" />`,
+    `<link rel="alternate" hreflang="x-default" href="${escapar(seo.alternates.es)}" />`,
     seo.jsonLd ? `<script type="application/ld+json">${JSON.stringify(seo.jsonLd).replace(/</g, '\\u003c')}</script>` : '',
   ].filter(Boolean).join('\n    ');
   return out.replace('</head>', `    ${extra}\n  </head>`);
 }
 
 let n = 0;
-for (const { path } of RUTAS_PUBLICAS) {
+for (const { path, locale } of RUTAS_PUBLICAS) {
   const { html, seo } = render(path);
-  const pagina = conCabecera(plantilla, seo).replace('<div id="root"></div>', `<div id="root">${html}</div>`);
+  const pagina = conCabecera(plantilla, seo, locale).replace('<div id="root"></div>', `<div id="root">${html}</div>`);
   const carpeta = resolve(dist, '_prerender', path === '/' ? '' : path.slice(1));
   await mkdir(carpeta, { recursive: true });
   await writeFile(resolve(carpeta, 'index.html'), pagina);

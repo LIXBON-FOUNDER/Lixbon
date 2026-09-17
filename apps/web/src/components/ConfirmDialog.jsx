@@ -3,12 +3,13 @@
 import { useState } from 'react';
 import { IconX } from './Icons';
 import { useCierreAnimado } from '../hooks/useCierreAnimado';
+import { useT } from '../i18n/useT';
 
 export function ConfirmDialog({
   title,
   children,
-  confirmLabel = 'Confirmar',
-  busyLabel = 'Procesando…',
+  confirmLabel,
+  busyLabel,
   requirePassword = false,
   danger = true,
   error = '',
@@ -16,6 +17,8 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
 }) {
+  const t = useT('dialogs');
+  const tc = useT('common');
   const [password, setPassword] = useState('');
   const canConfirm = !busy && (!requirePassword || password.length > 0);
   const { cerrando, cerrar } = useCierreAnimado(onClose, { bloqueado: busy });
@@ -28,7 +31,7 @@ export function ConfirmDialog({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <h2 className="modal__title">{title}</h2>
-          <button className="icon-btn" onClick={cerrar} aria-label="Cerrar" disabled={busy}>
+          <button className="icon-btn" onClick={cerrar} aria-label={tc('close')} disabled={busy}>
             <IconX />
           </button>
         </div>
@@ -39,7 +42,7 @@ export function ConfirmDialog({
           <input
             type="password"
             className="set-input modal__password"
-            placeholder="Tu contraseña"
+            placeholder={t('yourPassword')}
             value={password}
             autoFocus
             autoComplete="current-password"
@@ -52,14 +55,14 @@ export function ConfirmDialog({
 
         <div className="modal__actions">
           <button className="pill-btn pill-btn--outline" onClick={cerrar} disabled={busy}>
-            Cancelar
+            {tc('cancel')}
           </button>
           <button
             className={danger ? 'pill-btn pill-btn--primary is-danger' : 'pill-btn pill-btn--primary'}
             disabled={!canConfirm}
             onClick={() => onConfirm(password)}
           >
-            {busy ? busyLabel : confirmLabel}
+            {busy ? (busyLabel || t('processing')) : (confirmLabel || tc('confirm'))}
           </button>
         </div>
       </div>

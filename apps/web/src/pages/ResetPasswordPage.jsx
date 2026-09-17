@@ -2,14 +2,17 @@
 // email (/reset-password?token=...). El backend rota las API keys al cambiarla.
 import { useSeo } from '../lib/seo';
 import { useState } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+import { useNavigate, Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
 import { ClusterFondo } from '../components/ClusterFondo';
 import { api } from '../lib/api';
 
 export default function ResetPasswordPage() {
-  useSeo({ title: 'Restablecer contraseña', noindex: true });
+  const t = useT('auth');
+  useSeo({ title: t('resetSeoTitle'), noindex: true });
   const [params] = useSearchParams();
   const token = params.get('token') || '';
   const [password, setPassword] = useState('');
@@ -22,7 +25,7 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setError('');
     if (password !== confirm) {
-      setError('Las contraseñas no coinciden');
+      setError(t('passwordsDontMatch'));
       return;
     }
     setBusy(true);
@@ -30,7 +33,7 @@ export default function ResetPasswordPage() {
       await api.post('/api/auth/reset-password', { token, new_password: password });
       navigate('/auth?reset=1', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.detail || 'No se pudo restablecer la contraseña.');
+      setError(err.response?.data?.detail || t('resetFailed'));
     } finally {
       setBusy(false);
     }
@@ -45,10 +48,10 @@ export default function ResetPasswordPage() {
           <div className="auth__card">
             <div className="auth__head">
               <Link to="/" className="auth__logo"><Logo /></Link>
-              <h1 className="auth__title">Enlace inválido</h1>
+              <h1 className="auth__title">{t('invalidLinkTitle')}</h1>
             </div>
-            <p className="auth__notice">Este enlace no es válido. Solicita uno nuevo desde el inicio de sesión.</p>
-            <Link className="auth__cta" to="/auth">Ir a iniciar sesión</Link>
+            <p className="auth__notice">{t('invalidLinkNotice')}</p>
+            <Link className="auth__cta" to="/auth">{t('goToLogin')}</Link>
           </div>
         </div>
       </div>
@@ -63,16 +66,16 @@ export default function ResetPasswordPage() {
         <form className="auth__card" onSubmit={handleSubmit}>
           <div className="auth__head">
             <Link to="/" className="auth__logo"><Logo /></Link>
-            <h1 className="auth__title">Nueva contraseña</h1>
+            <h1 className="auth__title">{t('newPasswordTitle')}</h1>
           </div>
           <div className="auth__fields">
-            <FloatingField label="Nueva contraseña" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} />
-            <FloatingField label="Confirmar contraseña" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} />
+            <FloatingField label={t('newPassword')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} />
+            <FloatingField label={t('confirmPassword')} type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} />
           </div>
           {error && <p className="auth__error" role="alert">{error}</p>}
           <div className="auth__actions">
             <button className="auth__cta" type="submit" disabled={busy}>
-              {busy ? 'Guardando…' : 'Guardar contraseña'}
+              {busy ? t('saving') : t('savePassword')}
             </button>
           </div>
         </form>

@@ -3,18 +3,24 @@
 // sistema, los tipos de encargo y el parser del archivo.
 
 export const TIPOS = [
-  { id: 'landing', label: 'Landing page', hint: 'Una landing para… (producto, público, tono)',
-    prefijo: 'Diseña una landing page completa para: ' },
-  { id: 'componente', label: 'Componente', hint: 'Un componente de UI: tarjeta de precio, tabla, formulario…',
-    prefijo: 'Crea un componente de interfaz (HTML + Tailwind, con sus estados) para: ' },
-  { id: 'dashboard', label: 'Dashboard', hint: 'Un panel con métricas, tabla y gráficas…',
-    prefijo: 'Diseña un dashboard de aplicación para: ' },
-  { id: 'email', label: 'Email', hint: 'Una plantilla de correo (bienvenida, factura, newsletter…)',
-    prefijo: 'Diseña una plantilla de email HTML (tablas, estilos en línea, 600px) para: ' },
-  { id: 'logo', label: 'Logo / SVG', hint: 'Un logotipo, icono o ilustración vectorial',
-    prefijo: 'Dibuja en SVG (archivo logo.svg) un logotipo o ilustración para: ' },
-  { id: 'prototipo', label: 'Prototipo', hint: 'Varias pantallas enlazadas (app, flujo de registro…)',
-    prefijo: 'Crea un prototipo navegable de varias pantallas para: ' },
+  { id: 'landing', label: { es: 'Landing page', en: 'Landing page' },
+    hint: { es: 'Una landing para… (producto, público, tono)', en: 'A landing page for… (product, audience, tone)' },
+    prefijo: { es: 'Diseña una landing page completa para: ', en: 'Design a complete landing page for: ' } },
+  { id: 'componente', label: { es: 'Componente', en: 'Component' },
+    hint: { es: 'Un componente de UI: tarjeta de precio, tabla, formulario…', en: 'A UI component: pricing card, table, form…' },
+    prefijo: { es: 'Crea un componente de interfaz (HTML + Tailwind, con sus estados) para: ', en: 'Create a UI component (HTML + Tailwind, with its states) for: ' } },
+  { id: 'dashboard', label: { es: 'Dashboard', en: 'Dashboard' },
+    hint: { es: 'Un panel con métricas, tabla y gráficas…', en: 'A panel with metrics, a table and charts…' },
+    prefijo: { es: 'Diseña un dashboard de aplicación para: ', en: 'Design an application dashboard for: ' } },
+  { id: 'email', label: { es: 'Email', en: 'Email' },
+    hint: { es: 'Una plantilla de correo (bienvenida, factura, newsletter…)', en: 'An email template (welcome, invoice, newsletter…)' },
+    prefijo: { es: 'Diseña una plantilla de email HTML (tablas, estilos en línea, 600px) para: ', en: 'Design an HTML email template (tables, inline styles, 600px) for: ' } },
+  { id: 'logo', label: { es: 'Logo / SVG', en: 'Logo / SVG' },
+    hint: { es: 'Un logotipo, icono o ilustración vectorial', en: 'A logo, icon or vector illustration' },
+    prefijo: { es: 'Dibuja en SVG (archivo logo.svg) un logotipo o ilustración para: ', en: 'Draw in SVG (logo.svg file) a logo or illustration for: ' } },
+  { id: 'prototipo', label: { es: 'Prototipo', en: 'Prototype' },
+    hint: { es: 'Varias pantallas enlazadas (app, flujo de registro…)', en: 'Several linked screens (app, sign-up flow…)' },
+    prefijo: { es: 'Crea un prototipo navegable de varias pantallas para: ', en: 'Create a navigable multi-screen prototype for: ' } },
 ];
 
 export const VISUALS_PROMPT = `Eres el diseñador de interfaces de Lixbon Visuals. Produces diseños reales, no maquetas genéricas.
@@ -175,18 +181,18 @@ export function aplicarEdiciones(code, pares) {
 // ── Design systems: reglas fijas que entran en el prompt ─────────────────────
 
 export const DESIGN_SYSTEMS = [
-  { id: 'libre', label: 'Libre', desc: 'El modelo decide según el encargo', prompt: '' },
-  { id: 'lixbon', label: 'Lixbon', desc: 'Oscuro, acento oliva, Inter',
+  { id: 'libre', label: { es: 'Libre', en: 'Freeform' }, desc: { es: 'El modelo decide según el encargo', en: 'The model decides based on the request' }, prompt: '' },
+  { id: 'lixbon', label: { es: 'Lixbon', en: 'Lixbon' }, desc: { es: 'Oscuro, acento oliva, Inter', en: 'Dark, olive accent, Inter' },
     prompt: 'Fondo #0E0E0E, superficies #131313/#1C1C1C, texto #F2F2F0, secundario #B0B0AD, acento #B4C64E (solo en acciones y foco). Tipografía Inter (Google Fonts) para todo, títulos semibold con letter-spacing -0.02em. Radios 8 px, bordes rgba(255,255,255,.08), sin sombras salvo en elementos flotantes. Tono sobrio y técnico.' },
-  { id: 'editorial', label: 'Editorial', desc: 'Serif, blanco roto, mucho aire',
+  { id: 'editorial', label: { es: 'Editorial', en: 'Editorial' }, desc: { es: 'Serif, blanco roto, mucho aire', en: 'Serif, off-white, lots of air' },
     prompt: 'Fondo #FAF8F3, texto #1A1A1A, acento #B23A2E. Títulos en Fraunces o Playfair Display (Google Fonts), cuerpo en Source Serif 4 o Inter. Columnas de lectura de 60-70 caracteres, márgenes generosos, reglas finas de 1 px, imágenes grandes a sangre. Tono revista.' },
-  { id: 'minimal', label: 'Minimal', desc: 'Blanco, gris, una tinta',
+  { id: 'minimal', label: { es: 'Minimal', en: 'Minimal' }, desc: { es: 'Blanco, gris, una tinta', en: 'White, gray, one ink color' },
     prompt: 'Fondo #FFFFFF, texto #111111, gris #6B6B6B, líneas #E6E6E6, un solo acento #111111 (botones negros, texto blanco). Tipografía Inter o Geist. Sin sombras, sin degradados, radios 6 px, espaciado amplio en múltiplos de 8. Tono limpio y directo.' },
-  { id: 'corporativo', label: 'Corporativo', desc: 'Azul confianza, sans clásica',
+  { id: 'corporativo', label: { es: 'Corporativo', en: 'Corporate' }, desc: { es: 'Azul confianza, sans clásica', en: 'Trust blue, classic sans' },
     prompt: 'Fondo #FFFFFF y secciones #F5F7FA, texto #0F172A, acento #1D4ED8 con hover #1E40AF, éxito #15803D. Tipografía Inter o IBM Plex Sans. Tarjetas con borde #E2E8F0 y radio 12 px, sombra suave solo en hover. Tono claro y fiable, sin adornos.' },
-  { id: 'vibrante', label: 'Vibrante', desc: 'Color saturado, formas grandes',
+  { id: 'vibrante', label: { es: 'Vibrante', en: 'Vibrant' }, desc: { es: 'Color saturado, formas grandes', en: 'Saturated color, big shapes' },
     prompt: 'Fondo #FFF8E7, texto #1B1B1B, acentos #FF5A36 y #2E6CF6, amarillo #FFC53D en detalles. Tipografía display grande y pesada (Space Grotesk o Syne), cuerpo Inter. Botones pill, radios 20+ px, formas geométricas decorativas, contraste alto. Tono enérgico, para consumo.' },
-  { id: 'tech', label: 'Dark tech', desc: 'Negro azulado, mono en detalles',
+  { id: 'tech', label: { es: 'Dark tech', en: 'Dark tech' }, desc: { es: 'Negro azulado, mono en detalles', en: 'Bluish black, mono accents' },
     prompt: 'Fondo #0B0F19, superficies #111827, bordes #1F2937, texto #E5E7EB, secundario #9CA3AF, acento #22D3EE con brillo sutil. Tipografía Inter para el cuerpo y JetBrains Mono para etiquetas, números y código. Rejilla fina de fondo, badges y gráficos. Tono producto para desarrolladores.' },
 ];
 
@@ -200,12 +206,21 @@ export function designSystemPersonalizado(form) {
   if (fuenteTitulos) partes.push(`títulos en ${fuenteTitulos}`);
   if (fuenteCuerpo) partes.push(`cuerpo en ${fuenteCuerpo}`);
   if (tono) partes.push(`tono: ${tono}`);
-  return { id: 'custom', label: nombre || 'Personalizado', desc: 'definido por ti', prompt: `${partes.join('. ')}.`, custom: true, form };
+  const nombreFinal = nombre || { es: 'Personalizado', en: 'Custom' };
+  return {
+    id: 'custom',
+    label: typeof nombreFinal === 'string' ? { es: nombreFinal, en: nombreFinal } : nombreFinal,
+    desc: { es: 'definido por ti', en: 'defined by you' },
+    prompt: `${partes.join('. ')}.`,
+    custom: true,
+    form,
+  };
 }
 
-export function promptVisuals(designSystem) {
+export function promptVisuals(designSystem, locale = 'es') {
   if (!designSystem?.prompt) return VISUALS_PROMPT;
-  return `${VISUALS_PROMPT}\n\nDESIGN SYSTEM «${designSystem.label}» (obligatorio en todas las páginas y versiones): ${designSystem.prompt}`;
+  const label = typeof designSystem.label === 'object' ? designSystem.label[locale] : designSystem.label;
+  return `${VISUALS_PROMPT}\n\nDESIGN SYSTEM «${label}» (obligatorio en todas las páginas y versiones): ${designSystem.prompt}`;
 }
 
 // ── Inspector y navegación entre páginas dentro del iframe ───────────────────
@@ -292,7 +307,10 @@ function escapeHtml(s) {
 }
 
 export const TIPO_IMAGEN = {
-  id: 'imagen', label: 'Imagen', hint: 'Describe la imagen: sujeto, estilo, luz, encuadre…', prefijo: '',
+  id: 'imagen',
+  label: { es: 'Imagen', en: 'Image' },
+  hint: { es: 'Describe la imagen: sujeto, estilo, luz, encuadre…', en: 'Describe the image: subject, style, light, framing…' },
+  prefijo: { es: '', en: '' },
 };
 
 export const TAMANOS_IMAGEN = [
@@ -351,12 +369,18 @@ export function construirVersiones(messages, enCursoIdx = -1) {
   return out;
 }
 
-export function tiempoRelativo(iso) {
+const TIEMPO_RELATIVO = {
+  es: { ahora: 'ahora mismo', min: (n) => `hace ${n} min`, h: (n) => `hace ${n} h`, d: (n) => `hace ${n} d` },
+  en: { ahora: 'just now', min: (n) => `${n}m ago`, h: (n) => `${n}h ago`, d: (n) => `${n}d ago` },
+};
+
+export function tiempoRelativo(iso, locale = 'es') {
   if (!iso) return '';
+  const l = TIEMPO_RELATIVO[locale] || TIEMPO_RELATIVO.es;
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return 'ahora mismo';
-  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
-  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
-  if (s < 86400 * 30) return `hace ${Math.floor(s / 86400)} d`;
-  return new Date(iso).toLocaleDateString();
+  if (s < 60) return l.ahora;
+  if (s < 3600) return l.min(Math.floor(s / 60));
+  if (s < 86400) return l.h(Math.floor(s / 3600));
+  if (s < 86400 * 30) return l.d(Math.floor(s / 86400));
+  return new Date(iso).toLocaleDateString(locale);
 }

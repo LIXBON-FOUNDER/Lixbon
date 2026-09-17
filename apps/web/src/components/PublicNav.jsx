@@ -3,27 +3,32 @@
 // botones de la derecha según haya sesión.
 // En compacto los enlaces no desaparecen: se recogen en un menú desplegable.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
+import { Link } from '../i18n/link';
 import { useAuth } from '../hooks/useAuth';
 import { useDismiss } from '../hooks/useDismiss';
+import { useT } from '../i18n/useT';
 import { Logo } from './Logo';
 import { IconMenu, IconX } from './Icons';
 import { TemaBoton } from './TemaBoton';
-
-const LINKS = [
-  { to: '/docs', label: 'Documentación' },
-  { to: '/guias', label: 'Guías' },
-  { to: '/aplicaciones', label: 'Aplicaciones' },
-  { to: '/planes', label: 'Planes' },
-];
+import { LanguageSwitch } from './LanguageSwitch';
 
 const SUPPORT_EMAIL = 'soporte@lixbon.com';
 
 export function PublicNav() {
   const { pathname } = useLocation();
   const { user } = useAuth();
+  const t = useT('nav');
+  const tc = useT('common');
   const [menuOpen, setMenuOpen] = useState(false);
   const navRef = useRef(null);
+
+  const LINKS = [
+    { to: '/docs', label: t('docs') },
+    { to: '/guides', label: t('guides') },
+    { to: '/apps', label: t('apps') },
+    { to: '/plans', label: t('plans') },
+  ];
 
   const close = useCallback(() => setMenuOpen(false), []);
   useDismiss(menuOpen, navRef, close);
@@ -33,7 +38,7 @@ export function PublicNav() {
 
   return (
     <header className="pubnav" ref={navRef}>
-      <Link to="/" className="pubnav__logo" aria-label="Inicio"><Logo /></Link>
+      <Link to="/" className="pubnav__logo" aria-label={t('home')}><Logo /></Link>
 
       <nav className="pubnav__links">
         {LINKS.map((l) => (
@@ -48,24 +53,25 @@ export function PublicNav() {
       </nav>
 
       <div className="pubnav__actions">
-        {/* Estos tres se recogen en .pubnav__menu al pasar a compacto. Van en
+        {/* Estos se recogen en .pubnav__menu al pasar a compacto. Van en
             su propio contenedor porque .pubnav__btn lo reusan otras páginas
             (la conversación compartida) que no tienen menú donde recogerlos. */}
+        <LanguageSwitch />
         <TemaBoton />
         <div className="pubnav__wide">
           <a href={`mailto:${SUPPORT_EMAIL}`} className="pill-btn pill-btn--outline pubnav__btn">
-            Soporte
+            {tc('support')}
           </a>
           {!user && (
-            <Link to="/auth" className="pubnav__login">Iniciar sesión</Link>
+            <Link to="/auth" className="pubnav__login">{tc('logIn')}</Link>
           )}
-          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{user ? 'Ir al chat' : 'Probar lixbon'}</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
         </div>
 
         <button
           className="icon-btn pubnav__toggle"
           onClick={() => setMenuOpen((v) => !v)}
-          aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}
+          aria-label={menuOpen ? t('closeMenu') : t('openMenu')}
           aria-expanded={menuOpen}
           aria-controls="pubnav-menu"
         >
@@ -84,9 +90,9 @@ export function PublicNav() {
             {l.label}
           </Link>
         ))}
-        <a href={`mailto:${SUPPORT_EMAIL}`} className="pubnav__menu-link">Soporte</a>
-        {!user && <Link to="/auth" className="pubnav__menu-link">Iniciar sesión</Link>}
-        <Link to="/chat" className="pill-btn pill-btn--primary pubnav__menu-cta">{user ? 'Ir al chat' : 'Probar lixbon'}</Link>
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="pubnav__menu-link">{tc('support')}</a>
+        {!user && <Link to="/auth" className="pubnav__menu-link">{tc('logIn')}</Link>}
+        <Link to="/chat" className="pill-btn pill-btn--primary pubnav__menu-cta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
       </div>
     </header>
   );

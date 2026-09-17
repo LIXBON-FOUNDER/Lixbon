@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
+import { useT } from '../../i18n/useT';
 import { IconCheck } from '../Icons';
 import { DialogoPago } from './DialogoPago';
 import { fmtUSD } from './comunes';
@@ -7,6 +8,7 @@ import { fmtUSD } from './comunes';
 const UMBRAL_USD = 5;
 
 export function PagoCreditos({ packs, saldo, onHecho, onCerrar }) {
+  const t = useT('account');
   const [pack, setPack] = useState(packs[0]?.id || null);
   const [auto, setAuto] = useState(false);
   const elegido = packs.find((p) => p.id === pack) || packs[0];
@@ -14,7 +16,7 @@ export function PagoCreditos({ packs, saldo, onHecho, onCerrar }) {
   const resumen = (
     <>
       <div className="pago__campo">
-        <span className="pago__label">Cuánto quieres cargar</span>
+        <span className="pago__label">{t('billing.topupDialog.howMuch')}</span>
         <div className="pago__packs">
           {packs.map((p) => (
             <button
@@ -25,7 +27,7 @@ export function PagoCreditos({ packs, saldo, onHecho, onCerrar }) {
             >
               <span className="pago-pack__nombre">{p.name}</span>
               <span className="pago-pack__precio">{fmtUSD(p.price_usd)}</span>
-              <span className="pago-pack__nota">{fmtUSD(p.credit_usd)} de saldo</span>
+              <span className="pago-pack__nota">{t('billing.topupDialog.creditsOf', { amount: fmtUSD(p.credit_usd) })}</span>
             </button>
           ))}
         </div>
@@ -34,8 +36,8 @@ export function PagoCreditos({ packs, saldo, onHecho, onCerrar }) {
       <div className="pago__resumen">
         <div className="pago__resumen-fila">
           <span className="pago__resumen-txt">
-            <span className="pago__resumen-nombre">Saldo después de la recarga</span>
-            <span className="pago__sub">Ahora tienes {fmtUSD(saldo)}</span>
+            <span className="pago__resumen-nombre">{t('billing.topupDialog.balanceAfterTopup')}</span>
+            <span className="pago__sub">{t('billing.topupDialog.youHave', { amount: fmtUSD(saldo) })}</span>
           </span>
           <span className="pago__resumen-precio">
             {fmtUSD((saldo || 0) + (elegido?.credit_usd || 0))}
@@ -50,8 +52,7 @@ export function PagoCreditos({ packs, saldo, onHecho, onCerrar }) {
       <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
       <span className="pago__tick" aria-hidden="true"><IconCheck size={12} /></span>
       <span>
-        Recargar {fmtUSD(elegido?.price_usd)} automáticamente cuando el saldo baje
-        de {fmtUSD(UMBRAL_USD)}
+        {t('billing.topupDialog.autoReloadLabel', { amount: fmtUSD(elegido?.price_usd), threshold: fmtUSD(UMBRAL_USD) })}
       </span>
     </label>
   );
@@ -84,13 +85,13 @@ export function PagoCreditos({ packs, saldo, onHecho, onCerrar }) {
 
   return (
     <DialogoPago
-      titulo="Recargar saldo"
-      concepto={`Se sumaron ${fmtUSD(elegido?.credit_usd)} a tu saldo de créditos.`}
+      titulo={t('billing.topupDialog.title')}
+      concepto={t('billing.topupDialog.concept', { amount: fmtUSD(elegido?.credit_usd) })}
       resumen={resumen}
       extra={extra}
-      etiquetaAccion={`Recargar ${fmtUSD(elegido?.price_usd)}`}
+      etiquetaAccion={t('billing.topupDialog.actionLabel', { amount: fmtUSD(elegido?.price_usd) })}
       guardarFijo={auto}
-      notaGuardar="Se guarda esta tarjeta: es con la que se hará la recarga automática."
+      notaGuardar={t('billing.topupDialog.saveNote')}
       cobrar={cobrar}
       onHecho={hecho}
       onCerrar={onCerrar}

@@ -10,6 +10,8 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { api } from '../../lib/api';
 import { apariencia, cargarStripe } from '../../lib/stripe';
 import { useCierreAnimado } from '../../hooks/useCierreAnimado';
+import { useLocale } from '../../i18n/LocaleContext';
+import { useT } from '../../i18n/useT';
 import { LogoMark } from '../Logo';
 import { IconAlert, IconCheck, IconDownload, IconPlus, IconShield, IconX } from '../Icons';
 import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
@@ -19,6 +21,7 @@ function Cuerpo({
   metodos, elegido, setElegido, secreto, pedirTarjetaNueva,
   guardar, setGuardar, cobrar, onResultado, error, setError,
 }) {
+  const t = useT('account');
   const stripe = useStripe();
   const elements = useElements();
   const [enviando, setEnviando] = useState(false);
@@ -37,7 +40,7 @@ function Cuerpo({
           redirect: 'if_required',
         });
         if (fallo) {
-          setError(fallo.message || 'No se pudo guardar la tarjeta.');
+          setError(fallo.message || t('billing.payDialog.cardNotCollected'));
           setEnviando(false);
           return;
         }
@@ -53,9 +56,9 @@ function Cuerpo({
       onResultado({
         succeeded: false,
         status: delBanco ? 'requires_payment_method' : 'error',
-        titulo: delBanco ? undefined : 'No pudimos completar el cobro',
+        titulo: delBanco ? undefined : t('billing.payDialog.paymentFailed'),
         decline_message: (typeof d === 'string' ? d : d?.message)
-          || 'No se pudo completar el cobro.',
+          || t('billing.payDialog.genericChargeFailed'),
         decline_code: d?.decline_code,
       }, stripe);
     } finally {
@@ -70,7 +73,7 @@ function Cuerpo({
       {resumen}
 
       <div className="pago__campo">
-        <span className="pago__label">Con qué pagas</span>
+        <span className="pago__label">{t('billing.payDialog.payWith')}</span>
         <div className="pago__metodos">
           {(metodos || []).map((m) => (
             <button
@@ -90,7 +93,7 @@ function Cuerpo({
             onClick={pedirTarjetaNueva}
           >
             <IconPlus size={15} />
-            <span>{metodos?.length ? 'Usar otra tarjeta' : 'Añadir una tarjeta'}</span>
+            <span>{metodos?.length ? t('billing.payDialog.useOtherCard') : t('billing.payDialog.addACard')}</span>
           </button>
         </div>
       </div>
@@ -98,7 +101,7 @@ function Cuerpo({
       {nueva && (
         secreto
           ? <div className="pago__elements"><PaymentElement options={{ layout: 'tabs' }} /></div>
-          : <p className="pago__cargando">Preparando el formulario seguro…</p>
+          : <p className="pago__cargando">{t('billing.payDialog.preparing')}</p>
       )}
 
       {extra}
@@ -116,14 +119,14 @@ function Cuerpo({
             onChange={(e) => setGuardar(e.target.checked)}
           />
           <span className="pago__tick" aria-hidden="true"><IconCheck size={12} /></span>
-          <span>Guardar esta tarjeta para los próximos cobros</span>
+          <span>{t('billing.payDialog.saveThisCard')}</span>
         </label>
       )}
 
       {error && <p className="pago__error" role="alert">{error}</p>}
 
       <button className="pago__cta" type="submit" disabled={!puede || enviando}>
-        {enviando ? 'Procesando…' : etiquetaAccion}
+        {enviando ? t('billing.payDialog.processing') : etiquetaAccion}
       </button>
     </form>
   );
@@ -132,31 +135,33 @@ function Cuerpo({
 // Bajar de plan no cobra: deja a favor lo no consumido. Un "Pago aprobado" con
 // un importe de cero no dice nada de eso, así que el desenlace cuenta las dos
 // historias por separado: lo que se cobró, o lo que pasará en la próxima factura.
-function filasDelDesenlace(r) {
+function filasDelDesenlace(r, t, locale) {
   if (r.charged === false) {
     return [
-      ['Cobrado hoy', fmtUSD(0)],
-      r.credit ? ['A tu favor', fmtUSD(r.credit)] : null,
-      r.next_amount != null ? ['Próxima factura', r.next_date
-        ? `${fmtUSD(r.next_amount)} · ${fmtDia(r.next_date)}`
+      [t('billing.payDialog.chargedToday'), fmtUSD(0)],
+      r.credit ? [t('billing.payDialog.credited'), fmtUSD(r.credit)] : null,
+      r.next_amount != null ? [t('billing.payDialog.nextInvoice'), r.next_date
+        ? `${fmtUSD(r.next_amount)} · ${fmtDia(r.next_date, locale)}`
         : fmtUSD(r.next_amount)] : null,
     ].filter(Boolean);
   }
   return [
-    r.amount != null ? ['Importe', fmtUSD(r.amount)] : null,
-    r.last4 ? ['Tarjeta', `•••• ${r.last4}`] : null,
-    r.payment_intent ? ['Referencia', r.payment_intent, 'mono'] : null,
+    r.amount != null ? [t('billing.payDialog.amount'), fmtUSD(r.amount)] : null,
+    r.last4 ? [t('billing.payDialog.card'), `•••• ${r.last4}`] : null,
+    r.payment_intent ? [t('billing.payDialog.reference'), r.payment_intent, 'mono'] : null,
   ].filter(Boolean);
 }
 
 function Aprobado({ resultado, concepto, onCerrar }) {
+  const t = useT('account');
+  const locale = useLocale();
   const sinCobro = resultado.charged === false;
-  const filas = filasDelDesenlace(resultado);
+  const filas = filasDelDesenlace(resultado, t, locale);
   return (
     <div className="pago__desenlace">
       <span className="pago__icono is-ok"><IconCheck size={20} /></span>
       <div className="pago__titulo-grupo">
-        <span className="pago__titular">{sinCobro ? 'Plan actualizado' : 'Pago aprobado'}</span>
+        <span className="pago__titular">{sinCobro ? t('billing.payDialog.planUpdated') : t('billing.payDialog.paymentApproved')}</span>
         <span className="pago__sub">{concepto}</span>
       </div>
       {filas.length > 0 && (
@@ -170,10 +175,10 @@ function Aprobado({ resultado, concepto, onCerrar }) {
         </div>
       )}
       <div className="pago__botones">
-        <button className="pago__cta" onClick={onCerrar}>Volver a lixbon</button>
+        <button className="pago__cta" onClick={onCerrar}>{t('billing.payDialog.backToLixbon')}</button>
         {resultado.receipt_url && (
           <a className="pago__btn" href={resultado.receipt_url} target="_blank" rel="noreferrer">
-            <IconDownload size={15} /> Descargar recibo
+            <IconDownload size={15} /> {t('billing.payDialog.downloadReceipt')}
           </a>
         )}
       </div>
@@ -185,18 +190,19 @@ function Aprobado({ resultado, concepto, onCerrar }) {
 // el banco: dar por rechazado lo que no sabemos afirma algo que el emisor nunca
 // dijo, y manda al usuario a cambiar una tarjeta que estaba bien.
 function Rechazado({ resultado, onReintentar, onCerrar }) {
+  const t = useT('account');
   const rechazo = Boolean(resultado.decline_code || resultado.status === 'requires_payment_method');
   return (
     <div className="pago__desenlace">
       <span className="pago__icono is-bad"><IconAlert size={20} /></span>
       <div className="pago__titulo-grupo">
         <span className="pago__titular">
-          {resultado.titulo || (rechazo ? 'El banco rechazó el cobro' : 'No pudimos completar el cobro')}
+          {resultado.titulo || (rechazo ? t('billing.payDialog.bankDeclined') : t('billing.payDialog.paymentFailed'))}
         </span>
         <span className="pago__sub">
           {rechazo
-            ? 'No se cobró nada. Puedes intentarlo con otra tarjeta.'
-            : 'Si se llegó a cobrar, lo verás en Ajustes → Facturación.'}
+            ? t('billing.payDialog.noChargeMade')
+            : t('billing.payDialog.maybeChargedCheckBilling')}
         </span>
       </div>
       {resultado.decline_message && (
@@ -205,50 +211,53 @@ function Rechazado({ resultado, onReintentar, onCerrar }) {
           <span className="pago__motivo-txt">
             <span>{resultado.decline_message}</span>
             {resultado.decline_code && (
-              <span className="pago__sub">Motivo del emisor · {resultado.decline_code}</span>
+              <span className="pago__sub">{t('billing.payDialog.issuerReason', { code: resultado.decline_code })}</span>
             )}
           </span>
         </div>
       )}
       <div className="pago__botones">
         <button className="pago__cta" onClick={onReintentar}>
-          {rechazo ? 'Probar con otra tarjeta' : 'Volver a intentarlo'}
+          {rechazo ? t('billing.payDialog.tryAnotherCard') : t('billing.payDialog.tryAgain')}
         </button>
-        <button className="pago__btn" onClick={onCerrar}>Cancelar</button>
+        <button className="pago__btn" onClick={onCerrar}>{t('billing.payDialog.cancel')}</button>
       </div>
     </div>
   );
 }
 
 function Banco() {
+  const t = useT('account');
   return (
     <div className="pago__desenlace">
       <span className="pago__icono is-espera"><IconShield size={20} /></span>
       <div className="pago__titulo-grupo">
-        <span className="pago__titular">Confirma con tu banco</span>
+        <span className="pago__titular">{t('billing.payDialog.confirmWithBank')}</span>
         <span className="pago__sub">
-          Tu banco abrió su propia ventana para verificar que eres tú. Termínala ahí:
-          lixbon no ve ni recibe ese código.
+          {t('billing.payDialog.bankWindowNote')}
         </span>
       </div>
-      <p className="pago__sub">No cierres esta ventana: el cobro está en curso.</p>
+      <p className="pago__sub">{t('billing.payDialog.dontClose')}</p>
     </div>
   );
 }
 
 export function DialogoPago({
-  titulo = 'Pagar',
+  titulo,
   concepto,
   resumen,
   extra,
   etiquetaAccion,
   guardarFijo = false,
-  notaGuardar = 'Se guarda esta tarjeta: es con la que se renovará tu plan.',
+  notaGuardar,
   cobrar,
   onHecho,
   onCerrar,
 }) {
-  const [rotulo] = useState(titulo);
+  const t = useT('account');
+  const rotuloPorDefecto = t('billing.payDialog.title') || 'Pagar';
+  const notaGuardarFinal = notaGuardar || t('billing.payDialog.defaultSaveNote');
+  const [rotulo] = useState(titulo || rotuloPorDefecto);
   const [stripe, setStripe] = useState(null);
   const [metodos, setMetodos] = useState(null);
   const [elegido, setElegido] = useState(null);
@@ -276,7 +285,8 @@ export function DialogoPago({
     if (secreto) return;
     api.post('/api/billing/setup-intent')
       .then((res) => setSecreto(res.data.client_secret))
-      .catch((e) => setError(errMsg(e, 'No se pudo preparar el formulario de tarjeta.')));
+      .catch((e) => setError(errMsg(e, t('billing.addCardDialog.prepareFailed'))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secreto]);
 
   useEffect(() => {
@@ -295,9 +305,9 @@ export function DialogoPago({
     if (res.requires_action && !res.client_secret) {
       setResultado({
         ...res,
-        titulo: 'El cobro quedó a la espera',
+        titulo: t('billing.payDialog.pendingConfirmationTitle'),
         decline_message: res.decline_message
-          || 'La pasarela no devolvió con qué confirmar el cobro desde aquí.',
+          || t('billing.payDialog.pendingConfirmationDesc'),
       });
       setFase('rechazado');
       return;
@@ -322,7 +332,7 @@ export function DialogoPago({
         setFase(cerrado.data.succeeded ? 'aprobado' : 'rechazado');
         if (cerrado.data.succeeded) onHecho?.(cerrado.data);
       } catch (e) {
-        setResultado({ ...res, decline_message: errMsg(e, 'No se pudo confirmar el cobro.') });
+        setResultado({ ...res, decline_message: errMsg(e, t('billing.payDialog.confirmChargeFailed')) });
         setFase('rechazado');
       }
       return;
@@ -356,7 +366,7 @@ export function DialogoPago({
               <span className="pago__nombre">{rotulo}</span>
             </div>
             {fase !== 'banco' && (
-              <button className="icon-btn" onClick={cerrar} aria-label="Cerrar"><IconX /></button>
+              <button className="icon-btn" onClick={cerrar} aria-label={t('billing.addCardDialog.close')}><IconX /></button>
             )}
           </div>
 
@@ -373,7 +383,7 @@ export function DialogoPago({
                 extra={extra}
                 etiquetaAccion={etiquetaAccion}
                 guardarFijo={guardarFijo}
-                notaGuardar={notaGuardar}
+                notaGuardar={notaGuardarFinal}
                 metodos={metodos}
                 elegido={elegido}
                 setElegido={setElegido}
@@ -399,8 +409,7 @@ export function DialogoPago({
           <p className="pago__pie">
             <IconShield size={13} />
             <span>
-              Pago cifrado y procesado por Stripe. El número de tu tarjeta no pasa
-              por lixbon.
+              {t('billing.payDialog.footer')}
             </span>
           </p>
         </div>

@@ -1,7 +1,9 @@
 // SeccionFacturacion.jsx — Ajustes → Facturación: tarjetas guardadas, cobros
 // automáticos, saldo y últimos cobros. Todo se cobra desde aquí, sin salir.
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../../i18n/link';
+import { useLocale } from '../../i18n/LocaleContext';
+import { useT } from '../../i18n/useT';
 import { api } from '../../lib/api';
 import { planBadge } from '../../lib/planColors';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -9,21 +11,6 @@ import { IconBolt, IconPlus, IconTrash } from '../Icons';
 import { DialogoTarjeta } from './DialogoTarjeta';
 import { PagoCreditos } from './PagoCreditos';
 import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
-
-const fmtFecha = (iso) => (iso ? new Date(iso).toLocaleDateString('es', {
-  day: 'numeric', month: 'long', year: 'numeric',
-}) : '—');
-
-const ESTADO_FACTURA = {
-  paid: 'Pagada', open: 'Pendiente', draft: 'Borrador',
-  uncollectible: 'Incobrable', void: 'Anulada',
-};
-
-const ESTADO_COBRO = {
-  succeeded: 'Aprobado', processing: 'Procesando',
-  requires_action: 'Esperando al banco', requires_payment_method: 'Rechazado',
-  canceled: 'Cancelado',
-};
 
 function Fila({ titulo, sub, children }) {
   return (
@@ -54,6 +41,14 @@ function Interruptor({ activo, onChange, disabled, label }) {
 }
 
 export function SeccionFacturacion({ plan }) {
+  const t = useT('account');
+  const locale = useLocale();
+  const fmtFecha = (iso) => (iso ? new Date(iso).toLocaleDateString(locale, {
+    day: 'numeric', month: 'long', year: 'numeric',
+  }) : '—');
+  const ESTADO_FACTURA = t('billing.invoiceStatus');
+  const ESTADO_COBRO = t('billing.chargeStatus');
+
   const [billing, setBilling] = useState(null);
   const [credits, setCredits] = useState(null);
   const [packs, setPacks] = useState([]);
@@ -64,7 +59,7 @@ export function SeccionFacturacion({ plan }) {
 
   const cargarBilling = useCallback(() => api.get('/api/billing/status')
     .then((res) => setBilling(res.data))
-    .catch((e) => setError(errMsg(e, 'No se pudo cargar tu facturación.'))), []);
+    .catch((e) => setError(errMsg(e, t('billing.loadError')))), [t]);
 
   const cargarCreditos = useCallback(() => api.get('/api/credits')
     .then((res) => setCredits(res.data))
@@ -99,17 +94,17 @@ export function SeccionFacturacion({ plan }) {
   const hacerPredeterminada = (id) => conError(id, async () => {
     const res = await api.post('/api/billing/payment-methods/default', { payment_method_id: id });
     setBilling((b) => ({ ...b, payment_methods: res.data.payment_methods }));
-  }, 'No se pudo cambiar la tarjeta predeterminada.');
+  }, t('billing.defaultCardError'));
 
   const quitarTarjeta = (id) => conError(id, async () => {
     const res = await api.delete(`/api/billing/payment-methods/${id}`);
     setBilling((b) => ({ ...b, payment_methods: res.data.payment_methods }));
     cargarCreditos();
-  }, 'No se pudo quitar la tarjeta.');
+  }, t('billing.removeCardError'));
 
   const cambiarAuto = (activo) => conError('auto', async () => {
     if (activo && (!packAuto || !tarjetaAuto)) {
-      setError('Añade una tarjeta antes de activar la recarga automática.');
+      setError(t('billing.addCardBeforeAuto'));
       return;
     }
     const res = await api.put('/api/credits/autoreload', {
@@ -119,37 +114,37 @@ export function SeccionFacturacion({ plan }) {
       payment_method_id: activo ? tarjetaAuto.id : null,
     });
     setCredits((c) => ({ ...c, autoreload: res.data.autoreload }));
-  }, 'No se pudo guardar la recarga automática.');
+  }, t('billing.autoReloadSaveError'));
 
   const cancelar = () => conError('cancelar', async () => {
     await api.post('/api/billing/cancel');
     setDialogo(null);
-    setAviso('Tu plan queda activo hasta el final del periodo pagado.');
+    setAviso(t('billing.cancelNotice'));
     cargarBilling();
-  }, 'No se pudo cancelar la suscripción.');
+  }, t('billing.cancelError'));
 
   const reactivar = () => conError('cancelar', async () => {
     await api.post('/api/billing/resume');
-    setAviso('Tu plan vuelve a renovarse.');
+    setAviso(t('billing.resumeNotice'));
     cargarBilling();
-  }, 'No se pudo reactivar la suscripción.');
+  }, t('billing.resumeError'));
 
   const tarjetaGuardada = async () => {
     await cargarBilling();
-    setAviso('Tarjeta guardada.');
+    setAviso(t('billing.cardSaved'));
   };
 
   // No cierra el diálogo: el cobro aprobado tiene su propia pantalla y la cierra
   // el usuario. Aquí solo se refresca lo que el cobro cambió.
   const recargaHecha = () => {
-    setAviso('Recarga completada.');
+    setAviso(t('billing.topupDone'));
     cargarCreditos();
     cargarBilling();
   };
 
   const precio = plan.price_monthly_cents === 0
-    ? 'Gratis'
-    : `${fmtUSD(plan.price_monthly_cents / 100)} / mes`;
+    ? t('billing.free')
+    : `${fmtUSD(plan.price_monthly_cents / 100)} ${t('billing.perMonth')}`;
 
   return (
     <>
@@ -157,54 +152,50 @@ export function SeccionFacturacion({ plan }) {
       {error && <p className="page__error" role="alert">{error}</p>}
 
       <div className="set-card set-plan">
-        <h2 className="set-title">Plan</h2>
+        <h2 className="set-title">{t('billing.planTitle')}</h2>
         <div className="set-plan__info">
           <span
             className="plan-pill"
             style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}
           >
-            Plan {plan.name}
+            {t('usage.plan', { name: plan.name })}
           </span>
           <p className="card__muted">{plan.description}</p>
           <span className="set-plan__price">{precio}</span>
           {pagado && billing.current_period_end && (
             <span className="card__muted">
               {billing.cancel_at_period_end
-                ? `Se cancela el ${fmtFecha(billing.current_period_end)}`
-                : `Se renueva el ${fmtFecha(billing.current_period_end)}`}
+                ? t('billing.cancelsOn', { date: fmtFecha(billing.current_period_end) })
+                : t('billing.renewsOn', { date: fmtFecha(billing.current_period_end) })}
             </span>
           )}
           {billing?.status === 'past_due' && (
             <p className="set-aviso is-warn" role="alert">
-              El último cobro no entró. Stripe lo reintenta unos días; si sigue fallando, el plan
-              pasa a Gratuito. Cambia la tarjeta predeterminada o paga la factura desde el correo que te llegó.
+              {t('billing.pastDueWarning')}
             </p>
           )}
         </div>
-        <Link to="/planes" className="pill-btn pill-btn--primary set-btn">
-          <IconBolt size={15} /> {pagado ? 'Cambiar plan' : 'Mejorar plan'}
+        <Link to="/plans" className="pill-btn pill-btn--primary set-btn">
+          <IconBolt size={15} /> {pagado ? t('billing.changePlan') : t('billing.upgradePlan')}
         </Link>
       </div>
 
       <div className="set-card">
         <div className="set-row set-row--head">
-          <h2 className="set-title">Métodos de pago</h2>
+          <h2 className="set-title">{t('billing.paymentMethodsTitle')}</h2>
           <button
             className="pill-btn pill-btn--outline set-btn"
             disabled={!billing?.enabled}
             onClick={() => setDialogo('tarjeta')}
           >
-            <IconPlus size={15} /> Añadir tarjeta
+            <IconPlus size={15} /> {t('billing.addCard')}
           </button>
         </div>
         {!billing ? (
-          <p className="card__muted">Cargando…</p>
+          <p className="card__muted">{t('billing.loading')}</p>
         ) : metodos.length === 0 ? (
           <p className="card__muted">
-            {billing.enabled
-              ? 'Todavía no has guardado ninguna tarjeta. La que añadas se usará para tu '
-                + 'plan y para las recargas de saldo.'
-              : 'Los pagos en línea llegan pronto.'}
+            {billing.enabled ? t('billing.noCardsSaved') : t('billing.paymentsComingSoon')}
           </p>
         ) : metodos.map((m) => (
           <Tarjeta key={m.id} metodo={m}>
@@ -214,12 +205,12 @@ export function SeccionFacturacion({ plan }) {
                 disabled={busy === m.id}
                 onClick={() => hacerPredeterminada(m.id)}
               >
-                Predeterminada
+                {t('billing.default')}
               </button>
             )}
             <button
               className="icon-btn"
-              aria-label={`Quitar la tarjeta terminada en ${m.last4}`}
+              aria-label={t('billing.removeCardAria', { last4: m.last4 })}
               disabled={busy === m.id}
               onClick={() => setDialogo({ tipo: 'quitar', metodo: m })}
             >
@@ -231,31 +222,28 @@ export function SeccionFacturacion({ plan }) {
 
       <div className="pago-cols">
         <div className="set-card">
-          <h2 className="set-title">Cobros automáticos</h2>
+          <h2 className="set-title">{t('billing.autoChargesTitle')}</h2>
           <Fila
-            titulo={billing?.cancel_at_period_end ? 'Fin del plan' : 'Renovación del plan'}
+            titulo={billing?.cancel_at_period_end ? t('billing.planEnd') : t('billing.planRenewal')}
             sub={pagado && billing?.current_period_end
               ? (billing.cancel_at_period_end
-                ? `${plan.name} · sin más cobros; termina el `
-                  + `${fmtDia(billing.current_period_end)}`
-                : `${plan.name} · ${fmtUSD(plan.price_monthly_cents / 100)} `
-                  + `el ${fmtDia(billing.current_period_end)}`)
-              : 'Sin plan de pago activo'}
+                ? t('billing.noEndsOn', { plan: plan.name, date: fmtDia(billing.current_period_end, locale) })
+                : t('billing.renewsFor', { plan: plan.name, amount: fmtUSD(plan.price_monthly_cents / 100), date: fmtDia(billing.current_period_end, locale) }))
+              : t('billing.noActivePlan')}
           >
-            <Link to="/planes" className="pill-btn pill-btn--outline set-btn">Cambiar plan</Link>
+            <Link to="/plans" className="pill-btn pill-btn--outline set-btn">{t('billing.changePlan')}</Link>
           </Fila>
 
           <Fila
-            titulo="Recarga automática de saldo"
+            titulo={t('billing.autoReload')}
             sub={auto?.enabled && packAuto
-              ? `Carga ${fmtUSD(packAuto.price_usd)} cuando el saldo baje `
-                + `de ${fmtUSD(auto.threshold_usd)}`
+              ? t('billing.autoReloadOn', { amount: fmtUSD(packAuto.price_usd), threshold: fmtUSD(auto.threshold_usd) })
               : packAuto
-                ? `Cargaría ${fmtUSD(packAuto.price_usd)} cuando el saldo baje de ${fmtUSD(5)}`
-                : 'Sin packs de recarga configurados'}
+                ? t('billing.autoReloadWouldCharge', { amount: fmtUSD(packAuto.price_usd), threshold: fmtUSD(5) })
+                : t('billing.autoReloadNotConfigured')}
           >
             <Interruptor
-              label="Recarga automática de saldo"
+              label={t('billing.autoReload')}
               activo={Boolean(auto?.enabled)}
               disabled={busy === 'auto' || !billing?.enabled}
               onChange={cambiarAuto}
@@ -263,16 +251,16 @@ export function SeccionFacturacion({ plan }) {
           </Fila>
           {auto?.last_error && (
             <p className="card__muted">
-              La última recarga automática falló ({auto.last_error}) y se desactivó.
+              {t('billing.autoReloadFailed', { error: auto.last_error })}
             </p>
           )}
 
           {pagado && (
             <Fila
-              titulo={billing.cancel_at_period_end ? 'Reactivar la suscripción' : 'Cancelar la suscripción'}
+              titulo={billing.cancel_at_period_end ? t('billing.reactivateSubscription') : t('billing.cancelSubscription')}
               sub={billing.cancel_at_period_end
-                ? `Ahora mismo termina el ${fmtFecha(billing.current_period_end)}`
-                : 'Sigue activa hasta el final del periodo pagado'}
+                ? t('billing.reactivatesNowEndsOn', { date: fmtFecha(billing.current_period_end) })
+                : t('billing.activeUntilPaidPeriod')}
             >
               {billing.cancel_at_period_end ? (
                 <button
@@ -280,14 +268,14 @@ export function SeccionFacturacion({ plan }) {
                   disabled={busy === 'cancelar'}
                   onClick={reactivar}
                 >
-                  Reactivar
+                  {t('billing.reactivate')}
                 </button>
               ) : (
                 <button
                   className="pill-btn pill-btn--outline set-btn is-danger"
                   onClick={() => setDialogo('cancelar')}
                 >
-                  Cancelar
+                  {t('billing.cancel')}
                 </button>
               )}
             </Fila>
@@ -295,49 +283,49 @@ export function SeccionFacturacion({ plan }) {
         </div>
 
         <div className="set-card pago-saldo">
-          <span className="eyebrow">Saldo de créditos</span>
+          <span className="eyebrow">{t('billing.creditsBalance')}</span>
           <span className="pago-saldo__cifra">
             {credits ? fmtUSD(credits.balance_usd) : '…'}
           </span>
           <p className="card__muted">
-            Se descuenta por tokens al usar tus API keys, según la tarifa de cada modelo.
+            {t('billing.creditsBalanceHint')}
           </p>
           <button
             className="pill-btn pill-btn--primary set-btn"
             disabled={!billing?.enabled || packs.length === 0}
             onClick={() => setDialogo('recargar')}
           >
-            Recargar saldo
+            {t('billing.addCredits')}
           </button>
-          <Link to="/docs/precios-api" className="card__muted pago-saldo__enlace">
-            Ver los precios por modelo
+          <Link to="/docs/api-pricing" className="card__muted pago-saldo__enlace">
+            {t('billing.seeApiPricing')}
           </Link>
         </div>
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">Últimos cobros</h2>
+        <h2 className="set-title">{t('billing.recentChargesTitle')}</h2>
         {!billing ? (
-          <p className="card__muted">Cargando…</p>
+          <p className="card__muted">{t('billing.loading')}</p>
         ) : billing.charges?.length ? billing.charges.map((c) => (
           <Fila
             key={c.id}
             titulo={c.concept}
-            sub={`${ESTADO_COBRO[c.status] || c.status} el ${fmtDia(c.date)}`
+            sub={`${ESTADO_COBRO[c.status] || c.status} el ${fmtDia(c.date, locale)}`
               + (c.last4 ? ` · •••• ${c.last4}` : '')}
           >
             <span className="pago-monto">{fmtUSD(c.amount)}</span>
           </Fila>
         )) : (
           <p className="card__muted">
-            Aún no hay cobros. Aparecerán aquí en cuanto actives un plan o recargues saldo.
+            {t('billing.noCharges')}
           </p>
         )}
       </div>
 
       {billing?.invoices?.length > 0 && (
         <div className="set-card">
-          <h2 className="set-title">Facturas</h2>
+          <h2 className="set-title">{t('billing.invoicesTitle')}</h2>
           {billing.invoices.map((inv) => (
             <Fila
               key={inv.id}
@@ -352,7 +340,7 @@ export function SeccionFacturacion({ plan }) {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Ver
+                  {t('billing.viewInvoice')}
                 </a>
               )}
             </Fila>
@@ -373,28 +361,26 @@ export function SeccionFacturacion({ plan }) {
       )}
       {dialogo === 'cancelar' && (
         <ConfirmDialog
-          title="¿Cancelar la suscripción?"
-          confirmLabel="Cancelar suscripción"
-          busyLabel="Cancelando…"
+          title={t('billing.cancelSubscriptionConfirm.title')}
+          confirmLabel={t('billing.cancelSubscriptionConfirm.confirmLabel')}
+          busyLabel={t('billing.cancelSubscriptionConfirm.busyLabel')}
           busy={busy === 'cancelar'}
           onClose={() => setDialogo(null)}
           onConfirm={cancelar}
         >
-          Tu plan {plan.name} sigue activo hasta el {fmtFecha(billing?.current_period_end)}.
-          Después vuelves al plan Gratuito: no se borra nada, solo cambian los límites.
+          {t('billing.cancelSubscriptionConfirm.body', { plan: plan.name, date: fmtFecha(billing?.current_period_end) })}
         </ConfirmDialog>
       )}
       {dialogo?.tipo === 'quitar' && (
         <ConfirmDialog
-          title="¿Quitar esta tarjeta?"
-          confirmLabel="Quitar tarjeta"
-          busyLabel="Quitando…"
+          title={t('billing.removeCardConfirm.title')}
+          confirmLabel={t('billing.removeCardConfirm.confirmLabel')}
+          busyLabel={t('billing.removeCardConfirm.busyLabel')}
           busy={busy === dialogo.metodo.id}
           onClose={() => setDialogo(null)}
           onConfirm={async () => { await quitarTarjeta(dialogo.metodo.id); setDialogo(null); }}
         >
-          Dejará de estar disponible para tus cobros. La tarjeta terminada
-          en {dialogo.metodo.last4} se puede volver a añadir cuando quieras.
+          {t('billing.removeCardConfirm.body', { last4: dialogo.metodo.last4 })}
         </ConfirmDialog>
       )}
     </>

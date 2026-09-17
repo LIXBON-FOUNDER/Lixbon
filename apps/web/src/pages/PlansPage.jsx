@@ -2,7 +2,9 @@
 // un modal sin salir de lixbon; si no, las tarjetas muestran "Próximamente".
 import { tieneVisuals } from '../lib/planes';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from '../i18n/link';
+import { Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { PublicNav } from '../components/PublicNav';
@@ -11,15 +13,17 @@ import { PagoPlan } from '../components/pagos/PagoPlan';
 import { IconCheck, IconCard } from '../components/Icons';
 import { SITE_URL, useSeo } from '../lib/seo';
 
-const fmtLimit = (v, suffix, noun) => (v === -1 ? `${noun} ilimitados` : `${v.toLocaleString()} ${suffix}`);
-
 export default function PlansPage() {
+  const t = useT('plans');
+  const tc = useT('common');
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
   const [plans, setPlans] = useState([]);
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [pagando, setPagando] = useState(null); // plan cuyo modal está abierto
   const [error, setError] = useState('');
+
+  const fmtLimit = (v, suffix, noun) => (v === -1 ? t('unlimitedNoun', { noun }) : `${v.toLocaleString()} ${suffix}`);
 
   const jsonLd = useMemo(() => (plans.length ? {
     '@context': 'https://schema.org',
@@ -30,16 +34,16 @@ export default function PlansPage() {
     url: SITE_URL,
     offers: plans.map((p) => ({
       '@type': 'Offer',
-      name: `Plan ${p.name}`,
+      name: `${p.name}`,
       price: (p.price_monthly_cents / 100).toFixed(2),
       priceCurrency: p.currency || 'USD',
-      url: `${SITE_URL}/planes`,
+      url: `${SITE_URL}/plans`,
     })),
   } : null), [plans]);
   useSeo({
-    title: 'Planes y precios',
-    description: 'Gratuito, Pro ($9.90/mes) y Advance ($24.90/mes): chat con IA, Visuals, CLI con agente y app de escritorio sobre GPUs propias. La API se paga por tokens con créditos prepago.',
-    path: '/planes',
+    title: t('seoTitle'),
+    description: t('seoDescription'),
+    path: '/plans',
     jsonLd,
   });
 
@@ -70,9 +74,9 @@ export default function PlansPage() {
       <PublicNav />
 
       <main className="page__body page__body--wide">
-        <h1 className="page__title page__title--center">Planes</h1>
+        <h1 className="page__title page__title--center">{t('title')}</h1>
         <p className="plans__sub">
-          Elige cómo quieres usar lixbon.{!billingEnabled && ' Los pagos en línea llegan pronto.'}
+          {t('subtitle')}{!billingEnabled && t('onlinePaymentsSoon')}
         </p>
         {error && <p className="page__error" role="alert">{error}</p>}
 
@@ -84,30 +88,30 @@ export default function PlansPage() {
               <article key={p.id} className={`plan-card ${p.id === 'pro' ? 'plan-card--featured' : ''}`}>
                 <div className="plan-card__head">
                   <h2 className="plan-card__name">{p.name}</h2>
-                  {p.id === 'pro' && <span className="plan-card__tag">Más elegido</span>}
+                  {p.id === 'pro' && <span className="plan-card__tag">{t('mostChosen')}</span>}
                 </div>
                 <p className="plan-card__price">
                   {p.price_monthly_cents === 0
                     ? '$0'
                     : `$${(p.price_monthly_cents / 100).toFixed(2)} `}
-                  {paid && <span>/ mes</span>}
+                  {paid && <span>{t('perMonth')}</span>}
                 </p>
                 <p className="plan-card__desc">{p.description}</p>
 
                 {/* La acción va antes de la lista: quien ya sabe qué plan
                     quiere no tiene que leerse seis viñetas para llegar a ella. */}
                 {current ? (
-                  <span className="pill-btn pill-btn--outline plan-card__cta is-current">Tu plan actual</span>
+                  <span className="pill-btn pill-btn--outline plan-card__cta is-current">{t('currentPlan')}</span>
                 ) : !paid ? (
                   // Volver al gratuito desde un plan de pago es cancelar, no
                   // registrarse: mandar a /auth a quien ya tiene cuenta y plan
                   // le ofrece lo único que no necesita.
                   currentPrice > 0 ? (
-                    <Link to="/account/facturacion" className="pill-btn pill-btn--outline plan-card__cta">
-                      Cancelar la suscripción
+                    <Link to="/account/billing" className="pill-btn pill-btn--outline plan-card__cta">
+                      {t('cancelSubscription')}
                     </Link>
                   ) : (
-                    <Link to="/auth?mode=register" className="pill-btn pill-btn--outline plan-card__cta">Empieza gratis</Link>
+                    <Link to="/auth?mode=register" className="pill-btn pill-btn--outline plan-card__cta">{t('startFree')}</Link>
                   )
                 ) : billingEnabled ? (
                   <button
@@ -115,30 +119,30 @@ export default function PlansPage() {
                     onClick={() => subscribe(p)}
                     title={currentPrice > 0
                       ? (p.price_monthly_cents > currentPrice
-                        ? 'Se cobra solo la diferencia prorrateada del mes'
-                        : 'Hoy no se cobra nada: lo que queda pagado se te acredita')
+                        ? t('prorationTooltip')
+                        : t('creditedTooltip'))
                       : undefined}
                   >
                     {currentPrice > 0
                       ? (p.price_monthly_cents > currentPrice
-                        ? `Mejorar a ${p.name}`
-                        : `Cambiar a ${p.name}`)
-                      : `Suscribirme a ${p.name}`}
+                        ? t('upgradeTo', { name: p.name })
+                        : t('changeTo', { name: p.name }))
+                      : t('subscribeTo', { name: p.name })}
                   </button>
                 ) : (
-                  <span className="pill-btn pill-btn--primary plan-card__cta is-soon" title="Pagos disponibles pronto">
-                    Próximamente
+                  <span className="pill-btn pill-btn--primary plan-card__cta is-soon" title={t('comingSoonTooltip')}>
+                    {tc('comingSoon')}
                   </span>
                 )}
 
                 <ul className="plan-card__features">
                   {[
-                    fmtLimit(p.messages_per_day, 'mensajes al día', 'Mensajes'),
-                    fmtLimit(p.tokens_per_month, 'tokens al mes', 'Tokens'),
-                    p.max_api_keys === -1 ? 'API keys ilimitadas' : `${p.max_api_keys} API key${p.max_api_keys === 1 ? '' : 's'}`,
-                    `${p.rate_limit_per_min} peticiones por minuto`,
-                    p.allowed_models ? 'Modelos pequeños del clúster' : 'Todos los modelos activos',
-                    ...(tieneVisuals({ plan_id: p.id }) ? ['Visuals: diseños web con IA'] : []),
+                    fmtLimit(p.messages_per_day, t('messagesPerDay'), t('messagesNoun')),
+                    fmtLimit(p.tokens_per_month, t('tokensPerMonth'), t('tokensNoun')),
+                    p.max_api_keys === -1 ? t('unlimitedApiKeys') : t('apiKeyCount', { count: p.max_api_keys, plural: p.max_api_keys === 1 ? '' : 's' }),
+                    t('requestsPerMinute', { rate: p.rate_limit_per_min }),
+                    p.allowed_models ? t('smallModels') : t('allModels'),
+                    ...(tieneVisuals({ plan_id: p.id }) ? [t('visualsFeature')] : []),
                   ].map((texto) => (
                     <li key={texto}><IconCheck size={15} /> <span>{texto}</span></li>
                   ))}
@@ -151,10 +155,8 @@ export default function PlansPage() {
         <div className="plans__nota">
           <IconCard size={17} />
           <p>
-            Las peticiones hechas con una <strong>API key</strong> se cobran aparte, por
-            tokens y según la tarifa de cada modelo, contra tu saldo de créditos. Puedes
-            recargar saldo sin cambiar de plan desde{' '}
-            <Link to="/account/facturacion">Cuenta → Facturación</Link>.
+            {t('apiNoteBefore')} <strong>API key</strong> {t('apiNoteMiddle')}{' '}
+            <Link to="/account/billing">{t('accountBillingLink')}</Link>.
           </p>
         </div>
       </main>

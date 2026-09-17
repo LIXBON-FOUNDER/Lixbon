@@ -3,14 +3,18 @@
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { api } from '../lib/api';
 import { Logo } from '../components/Logo';
 import { Markdown } from '../components/Markdown';
 import { construirVersiones, documentoPreview, extraerImagen } from '../lib/visuals';
 
 export default function SharedPage() {
-  useSeo({ title: 'Diseño compartido', noindex: true });
+  const t = useT('shared');
+  const tc = useT('common');
+  useSeo({ title: t('seoTitle'), noindex: true });
   const { token } = useParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -18,7 +22,8 @@ export default function SharedPage() {
   useEffect(() => {
     api.get(`/api/shared/${token}`)
       .then((res) => setData(res.data))
-      .catch(() => setError('Este enlace no existe o fue revocado.'));
+      .catch(() => setError(t('linkGone')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   if (error) {
@@ -28,7 +33,7 @@ export default function SharedPage() {
           <Link to="/" className="pubnav__logo"><Logo /></Link>
           <div className="pubnav__actions">
           <TemaBoton />
-            <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
+            <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{tc('tryLixbon')}</Link>
           </div>
         </header>
         <main className="page__body">
@@ -47,16 +52,16 @@ export default function SharedPage() {
     );
   }
 
-  if (data.source === 'visuals') return <DisenoCompartido data={data} />;
+  if (data.source === 'visuals') return <DisenoCompartido data={data} t={t} />;
 
   return (
     <div className="page">
       <header className="pubnav">
         <Link to="/" className="pubnav__logo"><Logo /></Link>
-        <span className="shared__badge">Conversación compartida</span>
+        <span className="shared__badge">{t('conversationBadge')}</span>
         <div className="pubnav__actions">
           <TemaBoton />
-          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">Probar lixbon</Link>
+          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{tc('tryLixbon')}</Link>
         </div>
       </header>
 
@@ -72,8 +77,8 @@ export default function SharedPage() {
           ))}
         </div>
         <div className="shared__cta">
-          <p>Creado con lixbon — chat con IA sobre un clúster de GPUs propio.</p>
-          <Link to="/auth?mode=register" className="pill-btn pill-btn--primary">Crea tu cuenta gratis</Link>
+          <p>{t('ctaText')}</p>
+          <Link to="/auth?mode=register" className="pill-btn pill-btn--primary">{t('ctaButton')}</Link>
         </div>
       </main>
     </div>
@@ -81,7 +86,7 @@ export default function SharedPage() {
 }
 
 /** Un diseño de Visuals compartido: la última versión, página a página. */
-function DisenoCompartido({ data }) {
+function DisenoCompartido({ data, t }) {
   const versiones = useMemo(() => construirVersiones(data.messages), [data.messages]);
   const ultima = versiones[versiones.length - 1];
   const [pagina, setPagina] = useState(null);
@@ -111,13 +116,13 @@ function DisenoCompartido({ data }) {
           </div>
         )}
         <div className="vis-top__right">
-          <Link to="/visuals" className="pill-btn pill-btn--primary pubnav__btn">Crea el tuyo con Lixbon</Link>
+          <Link to="/visuals" className="pill-btn pill-btn--primary pubnav__btn">{t('createYours')}</Link>
         </div>
       </header>
       <div className="vis-stage vis-compartido__stage">
         {imagen ? <img className="vis-imagen" src={imagen.src} alt={imagen.alt} />
           : actual ? <div className="vis-frame"><iframe title={actual.name} sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={documentoPreview(actual)} /></div>
-          : <div className="vis-stage__empty">Este diseño no tiene páginas.</div>}
+          : <div className="vis-stage__empty">{t('noPages')}</div>}
       </div>
     </div>
   );

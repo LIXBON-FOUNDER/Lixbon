@@ -1,20 +1,24 @@
-// ReleasesPage.jsx — novedades públicas (/novedades): historial de versiones de
+// ReleasesPage.jsx — novedades públicas (/news): historial de versiones de
 // la app de escritorio con su changelog. La app enlaza aquí con #v<version>.
 import { useSeo } from '../lib/seo';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { Link } from '../i18n/link';
+import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 
-function formatDate(raw) {
+function formatDate(raw, dateLocale) {
   if (!raw) return '';
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString(dateLocale, { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 export default function ReleasesPage() {
-  useSeo({ title: 'Novedades', description: 'Historial de versiones de la app de escritorio de lixbon con el detalle de cada cambio.', path: '/novedades' });
+  const t = useT('releases');
+  const nav = useT('nav');
+  useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/news' });
   const [versions, setVersions] = useState(null);
 
   useEffect(() => {
@@ -35,13 +39,13 @@ export default function ReleasesPage() {
     <div className="page">
       <PublicNav />
       <main className="page__body page__body--wide">
-        <h1 className="page__title page__title--center">Novedades</h1>
-        <p className="plans__sub">Cada versión de lixbon, con sus cambios y mejoras.</p>
+        <h1 className="page__title page__title--center">{t('seoTitle')}</h1>
+        <p className="plans__sub">{t('subtitle')}</p>
 
         {versions === null ? (
-          <p className="releases__empty">Cargando novedades…</p>
+          <p className="releases__empty">{t('loading')}</p>
         ) : versions.length === 0 ? (
-          <p className="releases__empty">Aún no hay versiones publicadas.</p>
+          <p className="releases__empty">{t('empty')}</p>
         ) : (
           <ol className="releases">
             {versions.map((v) => (
@@ -54,7 +58,7 @@ export default function ReleasesPage() {
                     )}
                     <h2 className="release__title">{v.title}</h2>
                   </div>
-                  <span className="release__date">{formatDate(v.release_date)}</span>
+                  <span className="release__date">{formatDate(v.release_date, t('dateLocale'))}</span>
                 </div>
                 {Array.isArray(v.changelog) && v.changelog.length > 0 && (
                   <ul className="release__changelog">
@@ -69,7 +73,7 @@ export default function ReleasesPage() {
         )}
 
         <p className="downloads__foot">
-          ¿Quieres instalarla? Ve a <a href="/aplicaciones">Aplicaciones</a>.
+          {t('footBefore')} <Link to="/apps">{nav('apps')}</Link>{t('footAfter')}
         </p>
       </main>
       <PublicFooter />

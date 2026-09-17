@@ -13,6 +13,7 @@ import {
 } from './Icons';
 import { Select } from './Select';
 import { useDictado } from '../hooks/useDictado';
+import { useT } from '../i18n/useT';
 import {
   contextoDe, describirImagen, esAudioOVideo, esImagen, mensajeDeError,
   prepararImagen, subirDocumento,
@@ -30,6 +31,7 @@ let siguienteId = 0;
 
 // Anillo que se llena con el contexto usado, como en Claude Desktop.
 function ContextRing({ uso }) {
+  const t = useT('chat');
   if (!uso) return null;
   const total = uso.total || 4096;
   const frac = Math.min(1, uso.used / total);
@@ -37,11 +39,12 @@ function ContextRing({ uso }) {
   const circ = 2 * Math.PI * r;
   const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
   const tono = frac >= 0.9 ? 'is-danger' : frac >= 0.75 ? 'is-warn' : '';
+  const titulo = t('contextUsedTitle', { used: k(uso.used), total: k(total), pct: Math.round(frac * 100) }) + (uso.estimado ? t('estimatedSuffix') : '');
   return (
     <span
       className={`chat-input__ctx ${tono}`}
-      title={`Contexto usado: ${k(uso.used)} de ${k(total)} tokens (${Math.round(frac * 100)} %)${uso.estimado ? ' · estimado' : ''}`}
-      aria-label="Contexto usado"
+      title={titulo}
+      aria-label={t('contextUsedAria')}
     >
       <svg width="16" height="16" viewBox="0 0 16 16">
         <circle cx="8" cy="8" r={r} className="chat-input__ctx-fondo" />
@@ -58,7 +61,8 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder = 'Escribe tu mensaje…', initialText = '', tools = null }) {
+export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder, initialText = '', tools = null }) {
+  const t = useT('chat');
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
@@ -111,7 +115,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
 
     for (const file of lista) {
       if (esAudioOVideo(file)) {
-        setError('Todavía no se puede adjuntar audio ni vídeo: usa el micrófono para dictar.');
+        setError(t('audioVideoError'));
         continue;
       }
 
@@ -166,7 +170,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         setAttachments((prev) => prev.filter((a) => a.id !== id));
       }
     }
-  }, [modelVision]);
+  }, [modelVision, t]);
 
   // Soltar en cualquier punto de la ventana, no solo sobre la caja: quien
   // arrastra un archivo apunta al chat, no a un rectángulo de 40 píxeles.
@@ -229,11 +233,11 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     if (descritos.length > 0) {
       const contexto = descritos.map(contextoDe).join('\n\n');
       const pregunta = text || (descritos.some((a) => a.kind === 'image')
-        ? 'Analiza la imagen adjunta.'
-        : 'Analiza el documento adjunto.');
+        ? t('analyzeImage')
+        : t('analyzeDocument'));
       payload = `${contexto}\n\n---\n\n${pregunta}`;
     } else if (!text && nativas.length > 0) {
-      payload = 'Analiza la imagen adjunta.';
+      payload = t('analyzeImage');
     }
 
     el.value = '';
@@ -267,8 +271,8 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         <div className="chat-drop" role="status">
           <div className="chat-drop__caja">
             <IconClip size={22} />
-            <span>Suelta para adjuntar</span>
-            <small>Imágenes, PDF, Word, texto y código</small>
+            <span>{t('dropHint')}</span>
+            <small>{t('dropHintSmall')}</small>
           </div>
         </div>
       )}
@@ -279,7 +283,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
             <span
               key={a.id}
               className={a.estado === 'leyendo' ? 'attach-chip is-loading' : 'attach-chip'}
-              title={a.truncated ? 'Documento recortado por longitud' : a.filename}
+              title={a.truncated ? t('truncatedTitle') : a.filename}
             >
               {a.kind === 'image' && a.preview
                 ? <img className="attach-chip__thumb" src={a.preview} alt="" />
@@ -287,16 +291,16 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
               <span className="attach-chip__name">{a.filename}</span>
               {a.estado === 'leyendo' && (
                 <span className="attach-chip__trunc">
-                  {a.kind === 'image' ? 'leyendo imagen…' : 'leyendo…'}
+                  {a.kind === 'image' ? t('readingImage') : t('reading')}
                 </span>
               )}
               {a.truncated && a.estado === 'listo' && (
-                <span className="attach-chip__trunc">recortado</span>
+                <span className="attach-chip__trunc">{t('truncated')}</span>
               )}
               <button
                 className="attach-chip__x"
                 onClick={() => quitar(a.id)}
-                aria-label={`Quitar ${a.filename}`}
+                aria-label={t('removeAttachment', { name: a.filename })}
               >
                 <IconX size={12} />
               </button>
@@ -309,12 +313,12 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       <textarea
         ref={ref}
         className="chat-input__text"
-        placeholder={placeholder}
+        placeholder={placeholder || t('inputPlaceholder')}
         rows={1}
         onKeyDown={onKeyDown}
         onInput={ajustarAlto}
         onPaste={alPegar}
-        aria-label="Mensaje"
+        aria-label={t('messageAriaLabel')}
       />
 
       <div className="chat-input__bar">
@@ -330,7 +334,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         <button
           className="icon-btn"
           type="button"
-          title="Adjuntar imagen o documento (también puedes pegarlo o arrastrarlo)"
+          title={t('attachTitle')}
           onClick={() => fileRef.current?.click()}
         >
           <IconClip size={19} />
@@ -339,7 +343,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           <button
             className={dictado.escuchando ? 'icon-btn is-recording' : 'icon-btn'}
             type="button"
-            title={dictado.escuchando ? 'Parar el dictado' : 'Dictar el mensaje'}
+            title={dictado.escuchando ? t('dictateStop') : t('dictateStart')}
             onClick={dictado.alternar}
             aria-pressed={dictado.escuchando}
           >
@@ -349,7 +353,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         <button
           className={webSearch ? 'icon-btn is-active' : 'icon-btn'}
           type="button"
-          title={onToggleWeb ? (webSearch ? 'Buscar en internet en cada respuesta (activado)' : 'Buscar en internet siempre; sin activar, el modelo decide cuándo') : 'Buscar en la web (próximamente)'}
+          title={onToggleWeb ? (webSearch ? t('webSearchOnTitle') : t('webSearchOffTitle')) : t('webSearchSoonTitle')}
           onClick={onToggleWeb}
           disabled={!onToggleWeb}
           aria-pressed={webSearch}
@@ -367,7 +371,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
             value={model}
             options={models.map((m) => ({ value: m, label: modelInfo[m]?.name || m }))}
             onChange={onModelChange}
-            aria-label="Modelo"
+            aria-label={t('modelAriaLabel')}
           />
           <ContextRing uso={contextUso} />
         </div>
@@ -378,8 +382,8 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           className="chat-input__send is-stop"
           type="button"
           onClick={onStop}
-          aria-label="Detener la respuesta"
-          title="Detener la respuesta"
+          aria-label={t('stopResponse')}
+          title={t('stopResponse')}
         >
           <IconStop size={19} />
         </button>
@@ -389,7 +393,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           type="button"
           onClick={send}
           disabled={busy || leyendo}
-          aria-label="Enviar"
+          aria-label={t('sendAriaLabel')}
         >
           <IconSend size={19} />
         </button>
