@@ -186,8 +186,8 @@
   --on-primary: #F5F4EE;
   --primary-hover: #2E2E2B;
 
-  --code-bg: #191917;
-  --code-ink: #CBD69B;
+  --code-bg: var(--surface-3);
+  --code-ink: var(--ink-body);
   --code-inline: #4F6320;
   --scrim: rgba(0, 0, 0, 0.4);
   --sombra-menu: 0 14px 34px rgba(25, 25, 23, 0.14);
@@ -308,11 +308,16 @@ p {
   gap: 9px;
 }
 
+/* Bruno Ace SC trae bastante aire por debajo de la letra dentro de su propia
+   caja de línea: al lado del isotipo se ve más chica y corrida hacia arriba.
+   Logo.jsx ya manda un font-size mayor que el del isotipo; aquí solo se
+   corrige el nudge óptico vertical. */
 .brand {
   font-family: var(--font-brand);
   letter-spacing: 0.02em;
-  font-size: 15px;
   line-height: 1;
+  position: relative;
+  top: 0.05em;
   color: var(--ink);
 }
 

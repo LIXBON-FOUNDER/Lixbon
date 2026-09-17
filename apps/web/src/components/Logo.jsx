@@ -21,11 +21,14 @@ export function LogoMark({ size = 26 }) {
 }
 
 // `mark={false}` deja solo el wordmark (pie de página, correos embebidos).
+// Bruno Ace SC es una versalita angosta: a igual `size` que el isotipo se ve
+// más chica, así que el wordmark usa un tamaño mayor para que ambos pesen
+// lo mismo en la barra.
 export function Logo({ size = 15, mark = true }) {
   return (
     <span className="logo">
       {mark && <LogoMark size={Math.round(size * 1.73)} />}
-      <span className="brand" style={{ fontSize: size }}>
+      <span className="brand" style={{ fontSize: Math.round(size * 1.3) }}>
         LIXBON
       </span>
     </span>
