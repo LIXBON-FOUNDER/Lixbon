@@ -1,11 +1,11 @@
-> **Retirada.** La app de escritorio de lixbon es ahora **Lixbon IDE**, que vive
-> en su propio repositorio (`Gabriel-Dmrl/lixbon-IDE`) y publica en el producto
-> `desktop` de la página de aplicaciones. Esta carpeta se queda como referencia:
-> ya no se compila ni se publica, y su workflow (`.github/workflows/tauri.yml`)
-> se retiró para que no vuelva a ocupar ese hueco por accidente.
->
-> Si alguna vez hiciera falta resucitarla, el workflow está en el historial:
-> `git show f2498a3:.github/workflows/tauri.yml`.
+> **De vuelta como la app oficial.** Esta carpeta volvió a ser la app de
+> escritorio de lixbon (rediseño de sidebar, git, GitHub y equipos; se quitó el
+> editor de código). Reemplaza a **Lixbon IDE** (`Gabriel-Dmrl/lixbon-IDE`),
+> que quedó descontinuada — el pipeline (`.github/workflows/tauri.yml`) volvió
+> a publicar bajo el producto `desktop` de la página de aplicaciones a partir
+> de la v1.1.0. Si Lixbon IDE llegara a publicar algo después de esta fecha,
+> revisa cuál de los dos pipelines sigue activo antes de taguear una versión
+> nueva aquí.
 
 # Tauri + React
 
