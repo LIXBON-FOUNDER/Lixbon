@@ -2,7 +2,7 @@
 // a las rutas internas cuando el idioma activo es inglés. Los componentes de
 // la app deben importar estos en vez de los de react-router-dom directamente
 // (excepto para /admin, que no está traducido).
-import { forwardRef } from 'react';
+import { forwardRef, useCallback } from 'react';
 import {
   Link as RouterLink,
   Navigate as RouterNavigate,
@@ -30,5 +30,15 @@ export function Navigate({ to, ...props }) {
 export function useNavigate() {
   const locale = useLocale();
   const navigate = useRouterNavigate();
-  return (to, options) => (typeof to === 'number' ? navigate(to) : navigate(localizeTo(to, locale), options));
+  // Estable a propósito: react-router-dom garantiza que su useNavigate() no
+  // cambia de identidad entre renders, y varios efectos de la app (ver
+  // ChatPage.jsx) meten esta función en su array de dependencias. Devolver
+  // una arrow function nueva en cada render rompía esa garantía y disparaba
+  // un bucle infinito (el efecto se re-ejecutaba en cada render, llamaba a
+  // setState con un array/objeto nuevo, eso volvía a renderizar, etc.) que
+  // dejaba a React sin oportunidad de pintar la ruta real tras navegar.
+  return useCallback(
+    (to, options) => (typeof to === 'number' ? navigate(to) : navigate(localizeTo(to, locale), options)),
+    [navigate, locale],
+  );
 }
