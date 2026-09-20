@@ -12,19 +12,22 @@ import { ApiException } from '../api';
 import { useApi } from '../state';
 import { FONTS, RADIUS_PILL } from '../theme';
 
-function fmt(n) {
-  if (typeof n !== 'number') return '—';
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
-}
-
 function fmtDate(iso) {
   if (typeof iso !== 'string') return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const pad = (x) => String(x).padStart(2, '0');
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+// La sesión dura 4h, así que el reset puede caer el mismo día — sin hora no
+// se distingue "se reinicia en 20 min" de "se reinicia mañana".
+function fmtDateTime(iso) {
+  if (typeof iso !== 'string') return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (x) => String(x).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default function UsageScreen({ onBack }) {
@@ -50,7 +53,7 @@ export default function UsageScreen({ onBack }) {
   }, []);
 
   const plan = data?.plan;
-  const usage = data?.usage;
+  const buckets = data?.buckets;
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bgSecondary }}>
@@ -112,19 +115,21 @@ export default function UsageScreen({ onBack }) {
             </Card>
           )}
 
-          {usage && typeof usage === 'object' && (
+          {buckets && typeof buckets === 'object' && (
             <Card style={{ gap: 18 }}>
               <Quota
-                label="Mensajes de hoy"
-                used={usage.messages_today}
-                limit={usage.messages_per_day}
-                resetsAt={usage.day_resets_at}
+                label="Sesión actual"
+                hint="Se reinicia cada 4h"
+                percent={buckets.session.unlimited ? null : buckets.session.percent}
+                resetsAt={buckets.session.reset_at}
+                fmtReset={fmtDateTime}
               />
               <Quota
-                label="Tokens del mes"
-                used={usage.tokens_month}
-                limit={usage.tokens_per_month}
-                resetsAt={usage.month_resets_at}
+                label="Esta semana"
+                hint="El mismo cupo en todas tus apps"
+                percent={buckets.week.unlimited ? null : buckets.week.percent}
+                resetsAt={buckets.week.reset_at}
+                fmtReset={fmtDateTime}
               />
             </Card>
           )}
@@ -141,14 +146,14 @@ export default function UsageScreen({ onBack }) {
   );
 }
 
-// Cuota (.quota): cabecera etiqueta + contador, pista redondeada y relleno
-// de tinta que pasa a danger al llenarse.
-function Quota({ label, used, limit, resetsAt }) {
+// Cuota (.quota): cabecera etiqueta + %, pista redondeada y relleno de tinta
+// que pasa a danger al llenarse. Muestra % en vez de números crudos porque el
+// crédito ponderado de sesión/semana es una unidad interna, no algo que el
+// usuario deba interpretar en cifras absolutas.
+function Quota({ label, hint, percent, resetsAt, fmtReset = fmtDate }) {
   const c = useColors();
-  const usedN = typeof used === 'number' ? used : 0;
-  const limitN = typeof limit === 'number' ? limit : 0;
-  const unlimited = limitN <= 0;
-  const ratio = unlimited ? 0 : Math.min(1, Math.max(0, usedN / limitN));
+  const unlimited = percent == null;
+  const ratio = unlimited ? 0 : Math.min(1, Math.max(0, percent / 100));
   const full = !unlimited && ratio >= 1;
   return (
     <View style={{ gap: 7 }}>
@@ -162,7 +167,7 @@ function Quota({ label, used, limit, resetsAt }) {
             fontVariant: ['tabular-nums'],
           }}
         >
-          {fmt(usedN)} de {unlimited ? 'ilimitado' : fmt(limitN)}
+          {unlimited ? 'ilimitado' : `${Math.round(percent)}%`}
         </Text>
       </View>
       <View
@@ -182,9 +187,12 @@ function Quota({ label, used, limit, resetsAt }) {
           }}
         />
       </View>
+      {hint != null && (
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkSoft }}>{hint}</Text>
+      )}
       {resetsAt != null && (
         <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkSoft }}>
-          Se reinicia el {fmtDate(resetsAt)}
+          Se reinicia el {fmtReset(resetsAt)}
         </Text>
       )}
     </View>

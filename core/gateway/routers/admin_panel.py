@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core.billing.credits import invalidate_pricing_cache, microusd_to_usd
-from core.billing.quota import usage_snapshot
+from core.billing.quota import credit_buckets_snapshot, invalidate_weights_cache, usage_snapshot
 from core.gateway import deps
 from core.gateway.utils import fetch_models
 from core.inference.roles import (
@@ -29,16 +29,20 @@ from core.persistence.queries import (
     admin_credits_summary,
     count_active_keys,
     create_model_pricing,
+    create_model_weight,
     credit_purchase,
     delete_model_pricing,
+    delete_model_weight,
     get_credit_balance,
     get_daily_metrics,
     get_global_stats,
     get_plan_for_user,
+    get_usage_policy,
     get_user_by_email,
     get_user_by_id,
     list_audit_events,
     list_model_pricing,
+    list_model_weights,
     delete_model_alias,
     list_model_aliases,
     list_model_roles,
@@ -48,7 +52,9 @@ from core.persistence.queries import (
     set_user_active,
     set_user_plan,
     update_model_pricing,
+    update_model_weight,
     update_plan,
+    update_usage_policy,
     upsert_model_alias,
     upsert_model_role,
 )
@@ -73,8 +79,10 @@ class PlanUpdatePayload(BaseModel):
     name: str | None = None
     description: str | None = None
     price_monthly_cents: int | None = None
-    messages_per_day: int | None = None
-    tokens_per_month: int | None = None
+    messages_per_day: int | None = None       # DEPRECADO: ya no aplica, solo lectura (F8)
+    tokens_per_month: int | None = None       # sigue vivo: lo usa credits.ensure_can_use_api
+    session_credit_multiplier: float | None = None  # F8: × usage_policy.session_base_credits
+    week_credit_multiplier: float | None = None     # F8: × usage_policy.week_base_credits
     max_api_keys: int | None = None
     rate_limit_per_min: int | None = None
     allowed_models: list[str] | None = None   # [] o null explícito ⇒ todos
@@ -123,6 +131,7 @@ async def api_admin_user_detail(
         "user": user,
         "plan": plan,
         "usage": usage_snapshot(user_id, plan),
+        "buckets": credit_buckets_snapshot(user_id, plan),
         "active_keys": count_active_keys(user_id),
         "daily": get_daily_metrics(user_id, days_limit=30),
         "events": list_audit_events(user_id=user_id, limit=20),
@@ -188,6 +197,98 @@ async def api_admin_update_plan(
     log_audit_event("plan_updated", user_id=admin["id"],
                     plan_id=plan_id, fields=sorted(fields))
     return {"plan": plan}
+
+
+# ── Pool de créditos: sesión (4h) + semana (F8) ─────────────────────────────
+
+class UsagePolicyUpdatePayload(BaseModel):
+    session_window_hours: float | None = None
+    session_base_credits: int | None = None
+    week_base_credits: int | None = None
+
+
+@router.get("/usage-policy")
+async def api_admin_get_usage_policy(_admin: dict[str, Any] = Depends(admin_required)):
+    return {"usage_policy": get_usage_policy()}
+
+
+@router.patch("/usage-policy")
+async def api_admin_update_usage_policy(
+    payload: UsagePolicyUpdatePayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    policy = update_usage_policy(fields)
+    log_audit_event("usage_policy_updated", user_id=admin["id"], fields=sorted(fields))
+    return {"usage_policy": policy}
+
+
+class ModelWeightCreatePayload(BaseModel):
+    model_prefix: str
+    display_name: str | None = None
+    input_credits_per_mtok: int = 1_000_000
+    output_credits_per_mtok: int = 4_000_000
+    sort_order: int = 0
+
+
+class ModelWeightUpdatePayload(BaseModel):
+    display_name: str | None = None
+    input_credits_per_mtok: int | None = None
+    output_credits_per_mtok: int | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
+@router.get("/model-weights")
+async def api_admin_model_weights(_admin: dict[str, Any] = Depends(admin_required)):
+    return {"model_weights": list_model_weights(active_only=False)}
+
+
+@router.post("/model-weights")
+async def api_admin_model_weights_create(
+    payload: ModelWeightCreatePayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    prefix = payload.model_prefix.strip()
+    if not prefix:
+        raise HTTPException(status_code=400, detail="Falta el prefijo del modelo")
+    row = create_model_weight(
+        prefix, payload.display_name,
+        payload.input_credits_per_mtok, payload.output_credits_per_mtok,
+        payload.sort_order,
+    )
+    if not row:
+        raise HTTPException(status_code=409, detail="Ya existe un peso con ese prefijo")
+    invalidate_weights_cache()
+    log_audit_event("model_weight_created", user_id=admin["id"], model_prefix=prefix)
+    return {"model_weight": row}
+
+
+@router.patch("/model-weights/{weight_id}")
+async def api_admin_model_weights_update(
+    weight_id: int,
+    payload: ModelWeightUpdatePayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    row = update_model_weight(weight_id, **fields)
+    if not row:
+        raise HTTPException(status_code=404, detail="Peso no encontrado")
+    invalidate_weights_cache()
+    log_audit_event("model_weight_updated", user_id=admin["id"], weight_id=weight_id)
+    return {"model_weight": row}
+
+
+@router.delete("/model-weights/{weight_id}")
+async def api_admin_model_weights_delete(
+    weight_id: int,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    if not delete_model_weight(weight_id):
+        raise HTTPException(status_code=404, detail="Peso no encontrado (o es el default '*')")
+    invalidate_weights_cache()
+    log_audit_event("model_weight_deleted", user_id=admin["id"], weight_id=weight_id)
+    return {"deleted": True}
 
 
 # ── Modelos del cluster ─────────────────────────────────────────────────────

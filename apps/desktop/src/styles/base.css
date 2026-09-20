@@ -44,62 +44,81 @@
 
   --bg: #ffffff;
   --bg-secondary: #f6f7ed;
+  --bg-tertiary: #ececdb; /* hover/activo sobre bg-secondary (paneles, filas) */
+  --bg-quaternary: #e4e4cf; /* un tono más para popovers sobre bg-tertiary */
+  --bg-quinary: #d8d8bd; /* popovers anclados (cuenta, menú de comandos) */
   --ink: #171717;
   --ink-rgb: 23, 23, 23; /* para alphas: hover, tracks, rejillas… */
-  --ink-soft: rgba(23, 23, 23, 0.62);
+  --ink-soft: rgba(23, 23, 23, 0.5); /* tono "secundario" por defecto (= --ink-50) */
+  --ink-70: rgba(23, 23, 23, 0.7);
+  --ink-50: rgba(23, 23, 23, 0.5);
+  --ink-35: rgba(23, 23, 23, 0.35);
   --border: rgba(23, 23, 23, 0.9);
   --border-soft: rgba(23, 23, 23, 0.16);
   --accent: #d9e64a; /* verde-amarillo: etiqueta de plan */
   --accent-deep: #6c7a46;
-  --accent-soft: rgba(217, 230, 74, 0.16);
+  --accent-soft: rgba(108, 122, 70, 0.12);
   --on-accent: #171717;
   --primary: #171717; /* elementos invertidos: CTA, burbujas, toggles */
   --on-primary: #ffffff;
   --run-ink: #3f5410; /* botón Run (pariente oscuro del accent) */
-  --scrim: rgba(23, 23, 23, 0.18);
+  --scrim: rgba(23, 23, 23, 0.14);
   --shadow-rgb: 23, 23, 23;
   --danger: #c0392b;
   --danger-soft: rgba(192, 57, 43, 0.1);
+  --good: #2f8f49;
+  --good-soft: rgba(47, 143, 73, 0.12);
+  --warn: #a97a1f;
+  --warn-soft: rgba(169, 122, 31, 0.12);
 
   --font-brand: 'Bruno Ace SC', sans-serif;
   --font-ui: 'Bricolage Grotesque', system-ui, sans-serif;
 
   --radius-pill: 999px;
-  --radius-box: 22px;
+  --radius-box: 20px;
   --sidebar-w: 280px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ── Tokens IDE (solo desktop) ── */
   --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
-  --activitybar-w: 48px;
-  --statusbar-h: 26px;
-  --panel-w: 260px;
-  --editor-font-size: 14px;
+  --panel-w: 264px; /* ancho del sidebar único (logo, rama, nav, cuenta) */
 }
 
-/* Modo oscuro (docs/DISENO_WEB.md · paleta "Modo oscuro"):
-   cremas cálidas + olivo trasladados a superficies oscuras. Un tema de VSCode
-   activo pisa estos tokens con estilos inline (extStore.setAppColors). */
+/* Modo oscuro "carbon": negro neutro (no el cálido de antes) + olivo/crema
+   como únicos acentos. Cuatro niveles de superficie (bg → bg-quaternary)
+   porque los popovers anclados (cuenta, comandos) necesitan distinguirse del
+   panel que los contiene sin usar sombra ni borde — solo tono. */
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #1A1913;          /* canvas: editor / paneles */
-  --bg-secondary: #211F17;/* surface: tabs activas, statusbar, chips */
-  --ink: #F3F0E2;         /* text-primary */
-  --ink-rgb: 243, 240, 226;
-  --ink-soft: #C3BCA6;    /* text-secondary */
-  --border: #33301F;      /* border-strong */
-  --border-soft: #2A2820; /* border-subtle */
-  --accent: #A9B86E;      /* olivo */
-  --accent-deep: #6C7A46;
-  --accent-soft: rgba(169, 184, 110, 0.12);
-  --on-accent: #1A1913;
-  --primary: #F0EBD9;     /* CTA invertido */
-  --on-primary: #1A1913;
+  --bg: #0B0B0C;           /* canvas de la app */
+  --bg-secondary: #19191B; /* paneles: sidebar, chat, GitHub */
+  --bg-tertiary: #222225;  /* hover/activo sobre bg-secondary; filas */
+  --bg-quaternary: #2B2B2E;/* chips, composer, filas dentro de filas */
+  --bg-quinary: #37373B;   /* popovers anclados (cuenta, menú de comandos) */
+  --ink: #F2F1EC;          /* text-primary */
+  --ink-rgb: 242, 241, 236;
+  --ink-soft: rgba(242, 241, 236, 0.5); /* tono "secundario" por defecto (= --ink-50) */
+  --ink-70: rgba(242, 241, 236, 0.72);
+  --ink-50: rgba(242, 241, 236, 0.5);
+  --ink-35: rgba(242, 241, 236, 0.32);
+  --border: #2E2E31;       /* border-strong (sin uso visual; reservado) */
+  --border-soft: #222225;  /* border-subtle (sin uso visual; reservado) */
+  --accent: #A9B86E;       /* olivo */
+  --accent-deep: #C3CE96;
+  --accent-soft: rgba(169, 184, 110, 0.16);
+  --on-accent: #171713;
+  --primary: #F0EBD9;      /* CTA invertido */
+  --on-primary: #171713;
   --run-ink: #C9D69B;
   --scrim: rgba(0, 0, 0, 0.35);
   --shadow-rgb: 0, 0, 0;
-  --danger: #e0685a;
+  --danger: #E0685A;
   --danger-soft: rgba(224, 104, 90, 0.14);
+  --good: #5FB37D;
+  --good-soft: rgba(95, 179, 125, 0.16);
+  --warn: #D8A34A;
+  --warn-soft: rgba(216, 163, 74, 0.14);
 }
 
 /* ── Error boundary (evita la pantalla en blanco) ────────────────────── */

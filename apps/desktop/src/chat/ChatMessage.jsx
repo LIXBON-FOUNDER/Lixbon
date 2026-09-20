@@ -3,6 +3,18 @@
 import { ChatMarkdown } from './ChatMarkdown';
 import { IconGlobe, IconFileCode } from '../components/Icons';
 
+/** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
+    cursor parpadeante, como la última línea del mockup. */
+function LiveStatus({ text }) {
+  return (
+    <div className="msg__live">
+      <span className="activity-row__dot" aria-hidden />
+      <span className="msg__live-text">{text}</span>
+      <span className="msg__caret" aria-hidden="true" />
+    </div>
+  );
+}
+
 export function ChatMessage({ message, streaming }) {
   if (message.role === 'user') {
     return (
@@ -39,6 +51,10 @@ export function ChatMessage({ message, streaming }) {
 
   return (
     <div className="msg msg--assistant">
+      <div className="msg__agent">
+        <img src="/favicon.svg" alt="" className="msg__agent-logo" draggable={false} />
+        <span className="msg__agent-name">Agente</span>
+      </div>
       {message.thinking && (
         <details className="msg-think">
           <summary className="msg-think__summary">✻ Pensamiento</summary>
@@ -56,15 +72,16 @@ export function ChatMessage({ message, streaming }) {
         </div>
       )}
       {message.content ? (
-        <ChatMarkdown>{message.content}</ChatMarkdown>
+        <>
+          <ChatMarkdown>{message.content}</ChatMarkdown>
+          {streaming && <span className="msg__caret" aria-hidden="true" />}
+        </>
       ) : message.vision ? (
-        <span className="msg__thinking">👁 Analizando la imagen…</span>
+        <LiveStatus text="Analizando la imagen…" />
       ) : message.generating ? (
-        <span className="msg__thinking">
-          ✍️ Generando cambio… ({(message.generating / 1000).toFixed(1)}k caracteres)
-        </span>
+        <LiveStatus text={`Generando cambio… (${(message.generating / 1000).toFixed(1)}k caracteres)`} />
       ) : (
-        streaming && <span className="msg__thinking">Pensando…</span>
+        streaming && <LiveStatus text="Pensando…" />
       )}
     </div>
   );

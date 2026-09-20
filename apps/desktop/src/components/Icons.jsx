@@ -245,3 +245,30 @@ export const IconPuzzle = (p) => (
     <path d="M10 4a2 2 0 1 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 1 1 0 4h-1v3a1 1 0 0 1-1 1h-3v1a2 2 0 1 1-4 0v-1H7a1 1 0 0 1-1-1v-3H5a2 2 0 1 1 0-4h1V6a1 1 0 0 1 1-1h3V4Z" />
   </Svg>
 );
+
+/* ── Tema claro/oscuro ───────────────────────────────────────────────── */
+
+export const IconSun = (p) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4.5" />
+    <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+  </Svg>
+);
+
+export const IconMoon = (p) => (
+  <Svg {...p}><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" /></Svg>
+);
+
+/* ── Colapsar panel lateral ──────────────────────────────────────────── */
+
+export const IconChevronLeft = (p) => (
+  <Svg {...p}><path d="M14 6l-6 6 6 6" /></Svg>
+);
+
+export const IconExternal = (p) => (
+  <Svg {...p}><path d="M14 5h5v5M19 5l-8 8M8 5H5v14h14v-3" /></Svg>
+);
+
+export const IconHistory = (p) => (
+  <Svg {...p}><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></Svg>
+);

@@ -1,17 +1,15 @@
 // FileTree.jsx — explorador de archivos del workspace (panel izquierdo).
-// Clic en un archivo → abre pestaña en el editor. Clic derecho → menú
-// contextual (nuevo, renombrar, duplicar, copiar ruta, revelar, eliminar).
-// La carpeta raíz vive en appStore.workspaceRoot (la fija openWorkspace).
+// Clic en un archivo → vista rápida de solo lectura (FileQuickView). Clic
+// derecho → menú contextual (nuevo, renombrar, duplicar, copiar ruta, revelar,
+// eliminar). La carpeta raíz vive en appStore.workspaceRoot (la fija openWorkspace).
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ask } from '@tauri-apps/plugin-dialog';
 import {
   readDir, createNewEntry, renameEntry, deleteEntry, duplicateEntry,
   moveEntry, revealInOs, pickDirectory,
 } from '../../lib/tauri';
-import { useEditorStore } from '../../store/editorStore';
+import { useFileViewStore } from '../../store/fileViewStore';
 import { useAppStore } from '../../store/appStore';
-import { useExtStore } from '../../store/extStore';
-import { loadIconTheme, unloadIconTheme, iconDefIdFor, iconDataUrl } from '../../editor/iconTheme';
 import {
   IconFolder,
   IconFolderOpen,
@@ -34,41 +32,12 @@ function fileIcon(name) {
   return CODE_EXTS.has(ext) ? <IconFileCode size={15} /> : <IconFile size={15} />;
 }
 
-/** Icono del tema de iconos de VSCode activo (SVG → data-URL); si el tema no
-    tiene icono para la entrada (o no hay tema) cae al icono propio. */
-function ExtIcon({ name, isDir = false, expanded = false, fallback }) {
-  const active = useExtStore((s) => s.activeIconTheme);
-  const [url, setUrl] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!active) {
-      unloadIconTheme();
-      setUrl(null);
-      return undefined;
-    }
-    (async () => {
-      try {
-        await loadIconTheme(active);
-        const u = await iconDataUrl(iconDefIdFor(name, isDir, expanded));
-        if (!cancelled) setUrl(u);
-      } catch {
-        if (!cancelled) setUrl(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [active, name, isDir, expanded]);
-
-  if (!url) return fallback;
-  return <img className="filetree__exticon" src={url} alt="" width={15} height={15} />;
-}
-
 function baseName(path) {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 }
 
 export function FileTree() {
-  const { openFile, activePath } = useEditorStore();
+  const { peek, remap, clearUnder, peekedPath: activePath } = useFileViewStore();
   const rootPath = useAppStore((s) => s.workspaceRoot);
   const openWorkspace = useAppStore((s) => s.openWorkspace);
 
@@ -197,13 +166,7 @@ export function FileTree() {
     if (!isExpanded) await refreshDirectory(path);
   };
 
-  const handleSelectFile = async (path, name) => {
-    try {
-      await openFile(path, name);
-    } catch (e) {
-      alert('Error abriendo el archivo: ' + e);
-    }
-  };
+  const handleSelectFile = (path, name) => peek(path, name);
 
   // Destino de "Nuevo archivo/carpeta" de la barra: la carpeta seleccionada,
   // la carpeta que contiene el archivo seleccionado, o la raíz si no hay nada
@@ -254,7 +217,7 @@ export function FileTree() {
     if (!current || !next || next === current.name) return;
     try {
       const newPath = await renameEntry(current.path, next);
-      useEditorStore.getState().remapPaths(current.path, newPath);
+      remap(current.path, newPath);
       await refreshParent(current.parent);
     } catch (err) {
       alert('Error renombrando: ' + err);
@@ -269,7 +232,7 @@ export function FileTree() {
     if (!confirmed) return;
     try {
       await deleteEntry(entry.path);
-      useEditorStore.getState().closeUnder(entry.path);
+      clearUnder(entry.path);
       setSelected(null);
       await refreshParent(parent);
     } catch (err) {
@@ -311,7 +274,7 @@ export function FileTree() {
     if (src.entry.path === destDir) return;  // soltar sobre sí misma
     try {
       const newPath = await moveEntry(src.entry.path, destDir);
-      useEditorStore.getState().remapPaths(src.entry.path, newPath);
+      remap(src.entry.path, newPath);
       setSelected(null);
       setExpandedDirs((p) => ({ ...p, [destDir]: true }));
       await refreshParent(src.parent);
@@ -481,12 +444,7 @@ export function FileTree() {
               onContextMenu={(e) => { setSelected({ entry, parent: parentPath }); openCtxMenu(e, entry, parentPath); }}
             >
               {isExpanded ? <IconChevron size={13} open /> : <IconChevronRight size={13} />}
-              <ExtIcon
-                name={entry.name}
-                isDir
-                expanded={isExpanded}
-                fallback={isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />}
-              />
+              {isExpanded ? <IconFolderOpen size={15} /> : <IconFolder size={15} />}
               <span className="filetree__label">{entry.name}</span>
               <span className="filetree__node-actions">
                 <button
@@ -521,7 +479,7 @@ export function FileTree() {
           onClick={() => { setSelected({ entry, parent: parentPath }); handleSelectFile(entry.path, entry.name); }}
           onContextMenu={(e) => { setSelected({ entry, parent: parentPath }); openCtxMenu(e, entry, parentPath); }}
         >
-          <ExtIcon name={entry.name} fallback={fileIcon(entry.name)} />
+          {fileIcon(entry.name)}
           <span className="filetree__label">{entry.name}</span>
         </div>
       );
@@ -531,7 +489,7 @@ export function FileTree() {
     return (
       <div className="filetree">
         <div className="filetree__empty">
-          <p>Abre una carpeta para explorar y editar sus archivos.</p>
+          <p>Abre una carpeta para que el agente trabaje en ella.</p>
           <button className="pill-btn pill-btn--primary" onClick={handleOpenFolder}>
             Abrir carpeta
           </button>

@@ -20,9 +20,15 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from core.gateway import deps
+from core.gateway.routers.auth import DESKTOP_CLI_KEY_NAMES, FIRST_PARTY_KEY_NAMES
 from core.config import CHAT_THINK, OLLAMA_BASE_URL
 from core.billing import credits
-from core.billing.quota import ensure_can_chat, ensure_can_use_visuals, record_tokens
+from core.billing.quota import (
+    ensure_can_chat,
+    ensure_can_use_visuals,
+    record_session_week_tokens,
+    record_tokens,
+)
 from core.persistence.queries import (
     ensure_conversation,
     find_similar_tasks,
@@ -56,6 +62,29 @@ from core.inference.roles import REQUIRED_CAPABILITY, resolve_all, resolve_num_c
 
 logger = logging.getLogger("lixbon.chat")
 router = APIRouter()
+
+
+def _is_external_api(user_data: dict[str, Any], plan: dict[str, Any]) -> bool:
+    """True cuando el tráfico debe seguir cobrándose con créditos prepago
+    (credits.ensure_can_use_api) en vez de con el pool de sesión/semana:
+
+    - Cualquier API key creada a mano (Ajustes → API keys, uso externo o
+      programable): siempre créditos, sin importar el plan.
+    - Las keys que desktop/CLI se emiten a sí mismas (DESKTOP_CLI_KEY_NAMES):
+      créditos SOLO en el plan Free — decisión de negocio: el chat gratis sin
+      comprar créditos es de web y móvil, no de desktop/CLI. Pro/Advance en
+      esas mismas apps sí comparten el pool de sesión/semana.
+    - La key de la app móvil: siempre el pool de sesión/semana, en cualquier
+      plan (igual que la sesión web, que ni siquiera pasa por aquí).
+    """
+    if user_data.get("auth_via") != "api_key":
+        return False
+    key_name = user_data.get("key_name")
+    if key_name not in FIRST_PARTY_KEY_NAMES:
+        return True  # key externa genuina
+    if key_name in DESKTOP_CLI_KEY_NAMES:
+        return plan.get("id") == "free"
+    return False  # móvil: siempre el pool de sesión/semana
 
 
 # ── Modelos Pydantic ───────────────────────────────────────────────────────
@@ -207,10 +236,12 @@ def _persist_assistant(conv_id: str, model: str, text: str,
         record_model_usage(user_id, model, prompt_tokens, completion_tokens, latency_ms)
     if user_id is not None:
         if bill_credits:
-            # Tráfico Bearer: se cobra del saldo prepago, no de la cuota del plan
+            # Tráfico de API key externa: se cobra del saldo prepago, no del pool de plan
             credits.debit_usage(user_id, model, prompt_tokens, completion_tokens)
         else:
-            record_tokens(user_id, prompt_tokens + completion_tokens)  # cuota mensual (F5)
+            # Sesión web o app de primera parte: cuenta contra el pool de la cuenta
+            record_tokens(user_id, prompt_tokens + completion_tokens)  # F5 legacy (stats + credits.py)
+            record_session_week_tokens(user_id, model, prompt_tokens, completion_tokens)  # F8: gate real
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -325,7 +356,7 @@ async def chat_completions(
     model, role = await model_for_request(payload.model, "chat", user_data)
     validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
-    is_api = user_data.get("auth_via") == "api_key"
+    is_api = _is_external_api(user_data, plan)
     bill_credits = False
     if is_api:
         # Pro/Advance usan su cuota del plan (no se cobra crédito, evita redundar
@@ -334,7 +365,7 @@ async def chat_completions(
     else:
         if payload.source == "visuals":
             ensure_can_use_visuals(user_data, plan)
-        ensure_can_chat(user_data["id"], plan, model)  # F5: límites del plan
+        ensure_can_chat(user_data["id"], plan, model)  # sesión/semana (F8) + rate limit
     save_history = get_user_settings(user_data["id"])["save_history"]
     if payload.no_persist:
         save_history = False  # edición inline: sin historial, pero se cobra el uso
@@ -602,7 +633,7 @@ async def vision_describe(
     validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False
-    if user_data.get("auth_via") == "api_key":
+    if _is_external_api(user_data, plan):
         bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     else:
         ensure_can_chat(user_data["id"], plan, model)
@@ -626,6 +657,7 @@ async def vision_describe(
             credits.debit_usage(user_data["id"], model, prompt_tokens, completion_tokens)
         else:
             record_tokens(user_data["id"], prompt_tokens + completion_tokens)
+            record_session_week_tokens(user_data["id"], model, prompt_tokens, completion_tokens)
 
     return {
         "description": description,
@@ -664,7 +696,7 @@ async def fim_complete(
     validate_model_access(user_data, model)
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False
-    if user_data.get("auth_via") == "api_key":
+    if _is_external_api(user_data, plan):
         bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
     else:
         ensure_can_chat(user_data["id"], plan, model)
@@ -700,6 +732,7 @@ async def fim_complete(
             credits.debit_usage(user_data["id"], model, prompt_tokens, completion_tokens)
         else:
             record_tokens(user_data["id"], prompt_tokens + completion_tokens)
+            record_session_week_tokens(user_data["id"], model, prompt_tokens, completion_tokens)
 
     return {
         "completion": completion,
@@ -733,7 +766,7 @@ async def embed_texts(
     model, role = await model_for_request(payload.model, "embed")
     plan = get_plan_for_user(user_data["id"])
     bill_credits = False
-    if user_data.get("auth_via") == "api_key":
+    if _is_external_api(user_data, plan):
         bill_credits = credits.ensure_can_use_api(user_data["id"], plan, model) == "credits"
 
     base, headers, origen = target_or_503(model)
@@ -756,6 +789,7 @@ async def embed_texts(
                 credits.debit_usage(user_data["id"], model, prompt_tokens, 0)
             else:
                 record_tokens(user_data["id"], prompt_tokens)
+                record_session_week_tokens(user_data["id"], model, prompt_tokens, 0)
         except Exception as exc:  # tarifa ausente para el modelo de embedding: no romper
             logger.warning(f"[embed] cobro omitido ({exc})")
 

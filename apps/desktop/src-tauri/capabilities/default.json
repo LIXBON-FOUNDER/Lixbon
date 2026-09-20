@@ -15,7 +15,6 @@
     "core:window:allow-destroy",
     "opener:default",
     "store:default",
-    "http:default",
     "updater:default",
     "process:default",
     "notification:default",

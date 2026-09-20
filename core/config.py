@@ -126,6 +126,13 @@ LOGS_DIR: Path = PROJECT_ROOT / "logs"
 # única forma de desbloquearse es recibir un correo.
 REQUIRE_EMAIL_VERIFICATION: bool = os.getenv("REQUIRE_EMAIL_VERIFICATION", "0") == "1"
 
+# ── Límites de sesión (4h) + semana ─────────────────────────────────────────
+# "0" (default): el pool de créditos de sesión/semana se calcula y se escribe
+# en cada chat, pero no bloquea a nadie — permite ver en producción si las
+# cifras de usage_policy/model_weights son razonables antes de cortar tráfico
+# real. "1": ensure_can_chat empieza a devolver 429 cuando se agota.
+SESSION_QUOTA_ENFORCE: bool = os.getenv("SESSION_QUOTA_ENFORCE", "0") == "1"
+
 # ── Seguridad de claves ─────────────────────────────────────────────────────
 KEY_EXPIRY_DAYS: int = int(os.getenv("KEY_EXPIRY_DAYS", "90"))
 SESSION_EXPIRY_HOURS: int = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))

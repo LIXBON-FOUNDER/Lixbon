@@ -55,6 +55,16 @@ router = APIRouter()
 
 SESSION_COOKIE = "lixbon_session"
 DESKTOP_KEY_NAME = "lixbon Desktop"
+CLI_KEY_NAME = "lixbon CLI"        # apps/cli/lixbon_cli/api.py lo manda explícito
+MOBILE_KEY_NAME = "Lixbon Mobile"  # debe coincidir exactamente con apps/mobile/src/state.js
+# Nombres de las API keys que las propias apps se emiten a sí mismas al hacer
+# login (issue_api_key=True). Cualquier otra API key (creada a mano en
+# Ajustes → API keys para uso externo/programable) sigue con el sistema de
+# créditos prepago sin cambios — ver core.gateway.routers.chat._is_external_api,
+# que además distingue Free (desktop/CLI se quedan en créditos; móvil no) de
+# Pro/Advance (las 4 apps comparten el pool de sesión/semana).
+FIRST_PARTY_KEY_NAMES = frozenset({DESKTOP_KEY_NAME, CLI_KEY_NAME, MOBILE_KEY_NAME})
+DESKTOP_CLI_KEY_NAMES = frozenset({DESKTOP_KEY_NAME, CLI_KEY_NAME})
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"   # "1" en Railway (HTTPS)
 SESSION_MAX_AGE = int(os.getenv("SESSION_EXPIRY_HOURS", "168")) * 3600
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

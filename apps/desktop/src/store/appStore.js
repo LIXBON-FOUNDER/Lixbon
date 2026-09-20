@@ -1,21 +1,11 @@
 import { create } from 'zustand';
 import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
-import { setIndentConfig, setAutoSaveConfig, useEditorStore } from './editorStore';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
 import { detectVisionModel, modelId } from '../lib/vision';
 import { fetchModelRoles, roleModel } from '../lib/modelRoles';
-import { setGhostConfig } from '../editor/ghostText';
 import { resetIndexCache } from '../lib/codebaseIndex';
-
-// Aplica los ajustes de indentación persistidos al arrancar (antes de abrir archivos).
-setIndentConfig(
-  parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
-  (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
-);
-setAutoSaveConfig((localStorage.getItem('lixbon_auto_save') ?? 'true') === 'true');
-// Autocompletado fantasma (B1): OFF por defecto (coste de VRAM/latencia).
-setGhostConfig({ enabled: (localStorage.getItem('lixbon_ghost') ?? 'false') === 'true' });
+import { fetchMe } from '../lib/account';
 
 export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
@@ -24,15 +14,6 @@ export const useAppStore = create((set, get) => ({
   apiKey: '',
   user: null,
 
-  editorFontSize: parseInt(
-    localStorage.getItem('lixbon_editor_font_size') ||
-    localStorage.getItem('lixbon_terminal_font_size') || '14',
-    10
-  ),
-  tabSize: parseInt(localStorage.getItem('lixbon_tab_size') || '2', 10),
-  insertSpaces: (localStorage.getItem('lixbon_insert_spaces') ?? 'true') === 'true',
-  autoSave: (localStorage.getItem('lixbon_auto_save') ?? 'true') === 'true',
-  formatOnSave: (localStorage.getItem('lixbon_format_on_save') ?? 'false') === 'true',
   connectionStatus: 'disconnected', // 'connected' | 'disconnected' | 'connecting'
 
   // Carpeta de trabajo (canónica). '' = sin carpeta abierta.
@@ -43,32 +24,24 @@ export const useAppStore = create((set, get) => ({
   // Carpetas abiertas recientemente (para la pantalla de bienvenida, D4).
   recentFolders: JSON.parse(localStorage.getItem('lixbon_recents') || '[]'),
 
-  // Layout del IDE
-  centerView: 'editor', // 'editor' | 'diff' — el centro es SIEMPRE el área de trabajo
+  // Layout: un único sidebar (logo, rama, nav, contenido de la vista activa,
+  // cuenta). El nav decide qué se ve dentro del sidebar y, para 'git', también
+  // reemplaza el chat por la vista de GitHub en el panel central.
   diffData: null, // { title, patch } para el visor de diff (Git)
-  leftView: localStorage.getItem('lixbon_left_view') || 'explorer', // 'explorer' | 'search' | 'outline' | 'git' | 'extensions'
-  // Ventana flotante sobre el área de trabajo: null | 'settings' | 'metrics'.
-  // Ajustes y Consumo no son documentos: no deben ocupar el sitio del editor.
+  leftView: localStorage.getItem('lixbon_left_view') || 'chat', // 'chat' | 'explorer' | 'git' | 'extensions'
+  sidebarOpen: (localStorage.getItem('lixbon_sidebar_open') ?? 'true') === 'true',
+  // Ventana flotante: null | 'settings' | 'remote' | 'diff'.
   modalView: null,
   modalSection: null, // categoría inicial de Ajustes (null = la última/por defecto)
-  // Panel inferior (como el de VSCode): 'terminal' | 'problems'.
-  // Su visibilidad sigue siendo panels.terminal (clave persistida desde antes).
-  bottomView: localStorage.getItem('lixbon_bottom_view') || 'terminal',
-  quickOpen: false, // overlay Ctrl+P
+  quickOpen: false, // overlay Ctrl+P (ir a archivo)
   commandPalette: false, // overlay Ctrl+Mayús+P
-  inlineEditOpen: false, // widget de edición inline con IA (Ctrl+K)
-  previewOpen: false, // vista previa Markdown/HTML junto al editor (D3)
-  panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"explorer":true,"chat":true,"terminal":false}'),
-  panelWidths: JSON.parse(localStorage.getItem('lixbon_panel_widths') || '{"explorer":260,"chat":360}'),
+  panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"terminal":false}'),
   panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
 
   currentModel: localStorage.getItem('lixbon_current_model') || '',
   // Modelo de visión (sub-agente que describe imágenes para el modelo de texto).
   // '' = autodetectar de los modelos disponibles.
   visionModel: localStorage.getItem('lixbon_vision_model') || '',
-  // Autocompletado fantasma (B1): activado y modelo (vacío = autodetectar coder).
-  ghostText: (localStorage.getItem('lixbon_ghost') ?? 'false') === 'true',
-  ghostModel: localStorage.getItem('lixbon_ghost_model') || '',
   // Modelo de embeddings para el índice del codebase (B3). '' = autodetectar.
   embedModel: localStorage.getItem('lixbon_embed_model') || '',
   // Inyectar contexto relevante del codebase (RAG) en el chat automáticamente.
@@ -91,79 +64,62 @@ export const useAppStore = create((set, get) => ({
     try {
       const { serverUrl, apiKey, user } = await loadSettings();
       set({ serverUrl, apiKey, user, hydrated: true });
+      // La sesión (apiKey) y el perfil (user) se guardan por separado: si uno
+      // quedó sin el otro (login viejo, borrado parcial…), el sidebar se
+      // queda sin tarjeta de cuenta aunque la app arranque bien. Se repara
+      // solo, sin bloquear el arranque.
+      if (apiKey && !user) {
+        fetchMe(serverUrl, apiKey)
+          .then((fresh) => { get().setUser(fresh); })
+          .catch(() => {}); // sesión inválida: se verá al primer request real
+      }
     } catch (e) {
       console.error('[store] Error hidratando configuración:', e);
       set({ hydrated: true }); // no bloquear la app: quedará en pantalla de auth
     }
   },
 
-  setCenterView: (centerView) => set({ centerView }),
+  /** Abre el visor de diff como ventana flotante con un patch unified. */
+  openDiff: (title, patch) => set({ diffData: { title, patch }, modalView: 'diff', modalSection: null }),
 
-  /** Abre el visor de diff en el centro con un patch unified. */
-  openDiff: (title, patch) => set({ diffData: { title, patch }, centerView: 'diff' }),
-
-  /** Ventana flotante (Ajustes / Consumo): no desplaza el editor.
-      `section` abre Ajustes directamente en esa categoría (barra de estado). */
+  /** Ventana flotante (Ajustes / Consumo / Diff / Control remoto).
+      `section` abre Ajustes directamente en esa categoría. */
   openModal: (modalView, section = null) => set({ modalView, modalSection: section }),
   closeModal: () => set({ modalView: null, modalSection: null }),
 
-  /** Muestra `view` en el panel inferior; clic sobre la vista ya activa lo pliega. */
-  openBottomPanel: (view) => {
-    const { panels, bottomView } = get();
-    if (panels.terminal && bottomView === view) {
-      get().togglePanel('terminal');
-      return;
-    }
-    get().showBottomPanel(view);
-  },
+  /** Muestra u oculta la Terminal (único panel del dock inferior). */
+  toggleTerminal: () => get().togglePanel('terminal'),
+  showTerminal: () => { if (!get().panels.terminal) get().togglePanel('terminal'); },
 
-  /** Igual que openBottomPanel pero sin plegar: lo usan Run/Build y Git, que
-      siempre necesitan el terminal a la vista. */
-  showBottomPanel: (view) => {
-    localStorage.setItem('lixbon_bottom_view', view);
-    set({ bottomView: view });
-    if (!get().panels.terminal) get().togglePanel('terminal');
-  },
-
-  /** Muestra `view` en el panel izquierdo; clic sobre la vista ya activa lo pliega.
-      (panels.explorer sigue siendo el flag de "panel izquierdo visible".) */
-  openLeftPanel: (view) => {
-    const { panels, leftView } = get();
-    if (panels.explorer && leftView === view) {
-      get().togglePanel('explorer');
-      return;
-    }
+  /** Cambia la vista activa del sidebar (Chat/Archivos/Git/Extensiones) y lo
+      abre si estaba plegado — el plegado en sí lo controla solo la barrita. */
+  selectNav: (view) => {
     localStorage.setItem('lixbon_left_view', view);
     set({ leftView: view });
-    if (!panels.explorer) get().togglePanel('explorer');
+    if (!get().sidebarOpen) get().toggleSidebar();
+  },
+
+  /** Plegar/desplegar el sidebar (la barrita entre el sidebar y el chat). */
+  toggleSidebar: () => {
+    const sidebarOpen = !get().sidebarOpen;
+    localStorage.setItem('lixbon_sidebar_open', sidebarOpen ? 'true' : 'false');
+    set({ sidebarOpen });
   },
 
   setQuickOpen: (quickOpen) => set({ quickOpen }),
 
   setCommandPalette: (commandPalette) => set({ commandPalette }),
 
-  setInlineEditOpen: (inlineEditOpen) => set({ inlineEditOpen }),
-
-  setPreviewOpen: (previewOpen) => set({ previewOpen }),
-
   /** Fija la carpeta de trabajo (sandbox Rust incluido) y refresca Git.
       Devuelve la ruta canónica. */
   openWorkspace: async (path) => {
     const canonical = await setWorkspaceRoot(path);
-    // Guardar la sesión de la carpeta previa antes de cambiar (bajo su propia raíz).
-    const prevRoot = localStorage.getItem('lixbon_workspace_root');
-    if (prevRoot && prevRoot !== canonical) useEditorStore.getState().persistSession();
     localStorage.setItem('lixbon_workspace_root', canonical);
     const recents = [canonical, ...get().recentFolders.filter((p) => p !== canonical)].slice(0, 8);
     localStorage.setItem('lixbon_recents', JSON.stringify(recents));
     set({ workspaceRoot: canonical, recentFolders: recents });
     resetIndexCache(); // el índice RAG es por-workspace
-    // Los servidores de lenguaje se lanzan con una raíz fija: al cambiar de
-    // carpeta hay que matarlos (el siguiente archivo abierto los relanza).
-    import('./lspStore').then(({ useLspStore }) => useLspStore.getState().stopAll()).catch(() => {});
     useGitStore.getState().refresh();
-    // Reabrir las pestañas guardadas de esta carpeta (cierra las de la anterior).
-    await useEditorStore.getState().restoreSession(canonical);
     return canonical;
   },
 
@@ -194,27 +150,10 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
-  setAutoSave: (autoSave) => {
-    localStorage.setItem('lixbon_auto_save', autoSave ? 'true' : 'false');
-    setAutoSaveConfig(autoSave);
-    set({ autoSave });
-  },
-
-  setFormatOnSave: (formatOnSave) => {
-    localStorage.setItem('lixbon_format_on_save', formatOnSave ? 'true' : 'false');
-    set({ formatOnSave });
-  },
-
   togglePanel: (name) => {
     const panels = { ...get().panels, [name]: !get().panels[name] };
     localStorage.setItem('lixbon_panels', JSON.stringify(panels));
     set({ panels });
-  },
-
-  setPanelWidth: (name, width) => {
-    const panelWidths = { ...get().panelWidths, [name]: width };
-    localStorage.setItem('lixbon_panel_widths', JSON.stringify(panelWidths));
-    set({ panelWidths });
   },
 
   setPanelHeight: (name, height) => {
@@ -228,23 +167,6 @@ export const useAppStore = create((set, get) => ({
     const normalized = url.trim().replace(/\/+$/, '');
     saveSetting('serverUrl', normalized);
     set({ serverUrl: normalized });
-  },
-
-  setEditorFontSize: (size) => {
-    localStorage.setItem('lixbon_editor_font_size', size.toString());
-    set({ editorFontSize: size });
-  },
-
-  setTabSize: (tabSize) => {
-    localStorage.setItem('lixbon_tab_size', tabSize.toString());
-    setIndentConfig(tabSize, get().insertSpaces);
-    set({ tabSize });
-  },
-
-  setInsertSpaces: (insertSpaces) => {
-    localStorage.setItem('lixbon_insert_spaces', insertSpaces ? 'true' : 'false');
-    setIndentConfig(get().tabSize, insertSpaces);
-    set({ insertSpaces });
   },
 
   setUser: (user) => {
@@ -280,37 +202,6 @@ export const useAppStore = create((set, get) => ({
     localStorage.setItem('lixbon_vision_model', model || '');
     set({ visionModel: model || '' });
   },
-
-  setGhostText: (ghostText) => {
-    localStorage.setItem('lixbon_ghost', ghostText ? 'true' : 'false');
-    setGhostConfig({ enabled: ghostText });
-    set({ ghostText });
-  },
-
-  setGhostModel: (model) => {
-    localStorage.setItem('lixbon_ghost_model', model || '');
-    set({ ghostModel: model || '' });
-  },
-
-  /** Modelo del ghost text: el elegido a mano, o el que el gateway asigna al
-      rol `fim`, o (solo con gateway antiguo) un heurístico por nombre.
-
-      Deliberadamente NO cae al modelo de chat: ese fallback hacía que el
-      autocompletado disparara el modelo de razonamiento activo —5 GB y salida
-      con `<think>`— en cada pulsación de tecla. Sin modelo con FIM la respuesta
-      correcta es '' (requestFimCompletion aborta) y avisar en Ajustes. */
-  effectiveGhostModel: () => {
-    const { ghostModel, availableModels, modelRoles } = get();
-    const ids = availableModels.map(modelId);
-    if (ghostModel && ids.includes(ghostModel)) return ghostModel;
-    if (modelRoles) return roleModel(modelRoles, 'fim'); // '' si ninguno sirve
-    const coder = ids.find((id) => /coder|code/i.test(id));
-    return coder || '';
-  },
-
-  /** ¿Se puede autocompletar? Falso cuando el gateway dice que ningún modelo
-      declara `insert` y el usuario no ha forzado uno a mano. */
-  ghostAvailable: () => !!get().effectiveGhostModel(),
 
   setEmbedModel: (model) => {
     localStorage.setItem('lixbon_embed_model', model || '');

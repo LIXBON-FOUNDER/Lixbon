@@ -1,11 +1,53 @@
-// ToolGroup.jsx — agrupa las acciones del agente (tool calls) de un turno en un
-// bloque plegable de "segundo plano", para que la respuesta importante destaque.
-// Colapsado por defecto; al desplegarlo se ven las herramientas y sus diffs.
+// ToolGroup.jsx — actividad del agente: cada tool call es su propia fila,
+// siempre visible (icono → check, verbo en español, ruta, +N/−N), como en
+// el mockup. Nada queda oculto detrás de un "N acciones" plegado.
+import { useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 
-function ToolRow({ message, index }) {
+const VERB = {
+  read_file: 'leyó', write_file: 'escribió', edit_file: 'editó', append_file: 'añadió a',
+  delete_file: 'eliminó', rename_file: 'movió', mkdir: 'creó carpeta', search: 'buscó',
+  list_files: 'listó', run_command: 'ejecutó',
+};
+
+const VERB_GERUND = {
+  read_file: 'leyendo', write_file: 'escribiendo', edit_file: 'editando', append_file: 'añadiendo a',
+  delete_file: 'eliminando', rename_file: 'moviendo', mkdir: 'creando carpeta', search: 'buscando',
+  list_files: 'listando', run_command: 'ejecutando',
+};
+
+const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+function ActivityIcon({ pending, failed }) {
+  return (
+    <span className="activity-row__icon" aria-hidden>
+      <span className={`activity-row__spinner ${pending ? 'is-visible' : ''}`} />
+      <span className={`activity-row__check ${pending ? '' : 'is-visible'}`} />
+    </span>
+  );
+}
+
+/** La acción en curso se lee como una línea "en vivo": el mockup no muestra
+    una tool call corriendo como una fila más, sino como texto que se
+    escribe (punto pulsante + mono + cursor). Solo aplica al último tool
+    call pendiente del turno — el resto de filas pendientes usa el spinner. */
+function LiveRow({ message }) {
   const a = message.args || {};
-  const target = a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
+  const status = message.content?.trim() || a.command || a.path || (VERB_GERUND[message.tool] || message.tool);
+  return (
+    <div className="activity-row activity-row--live">
+      <span className="activity-row__dot" aria-hidden />
+      <span className="activity-row__live-text">{status}</span>
+      <span className="msg__caret" aria-hidden="true" />
+    </div>
+  );
+}
+
+function ActivityRow({ message, index, delay, live }) {
+  const [showDiff, setShowDiff] = useState(false);
+  const a = message.args || {};
+  const target = a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
+  const pending = !!message.pending;
   const failed = message.ok === false;
   const change = message.change;
   const hasDiff = change && (change.sampleOld?.length > 0 || change.sampleNew?.length > 0);
@@ -14,21 +56,30 @@ function ToolRow({ message, index }) {
       Math.max(0, change.added - (change.sampleNew?.length || 0))
     : 0;
 
+  if (live) return <LiveRow message={message} />;
+
+  const verb = capitalize(pending ? (VERB_GERUND[message.tool] || message.tool) : (VERB[message.tool] || message.tool));
+
   return (
-    <div className={`toolrow ${failed ? 'is-err' : ''}`}>
-      <div className="toolrow__line">
-        <span className="toolrow__dot" aria-hidden>●</span>
-        <span className="toolrow__name">{message.tool}</span>
-        {target && <span className="toolrow__target">{target}</span>}
+    <div className={`activity-row ${failed ? 'is-err' : ''}`} style={{ animationDelay: `${delay}ms` }}>
+      <div className="activity-row__line">
+        <ActivityIcon pending={pending} failed={failed} />
+        <span className="activity-row__verb">{verb}</span>
+        {target && <span className="activity-row__target">{target}</span>}
         {change && (change.added > 0 || change.removed > 0) && (
-          <span className="toolrow__counts">
-            {change.added > 0 && <em className="toolrow__add">+{change.added}</em>}
-            {change.removed > 0 && <em className="toolrow__del">−{change.removed}</em>}
+          <span className="activity-row__counts">
+            {change.added > 0 && <span className="activity-row__add">+{change.added}</span>}
+            {change.removed > 0 && <span className="activity-row__del">−{change.removed}</span>}
           </span>
         )}
+        {hasDiff && (
+          <button className="activity-row__toggle" onClick={() => setShowDiff((v) => !v)}>
+            {showDiff ? 'Ocultar' : 'Ver'}
+          </button>
+        )}
       </div>
-      {failed && <p className="toolrow__err">{message.content}</p>}
-      {hasDiff && (
+      {failed && message.content && <p className="toolrow__err">{message.content}</p>}
+      {showDiff && hasDiff && (
         <pre className="toolrow__diff">
           {change.sampleOld.map((line, i) => (
             <span key={`o${i}`} className="diffline diffline--del">- {line}{'\n'}</span>
@@ -41,7 +92,7 @@ function ToolRow({ message, index }) {
           )}
         </pre>
       )}
-      {!failed && message.content && !hasDiff && (
+      {!failed && !pending && message.content && !hasDiff && message.tool === 'run_command' && (
         <p className="toolrow__result">{message.content}</p>
       )}
       {message.snapshot && !failed && (
@@ -58,37 +109,19 @@ function ToolRow({ message, index }) {
   );
 }
 
-const VERB = {
-  read_file: 'leyó', write_file: 'escribió', edit_file: 'editó', append_file: 'añadió a',
-  delete_file: 'eliminó', rename_file: 'movió', mkdir: 'creó carpeta', search: 'buscó',
-  list_files: 'listó', run_command: 'ejecutó',
-};
-
 export function ToolGroup({ messages, startIndex }) {
-  const failed = messages.some((m) => m.ok === false);
-  // Resumen legible: "leyó app.js, editó app.js" (máx 3, luego "…")
-  const parts = messages.slice(0, 3).map((m) => {
-    const a = m.args || {};
-    const what = a.path || a.pattern || a.command || a.src || '';
-    return `${VERB[m.tool] || m.tool} ${what}`.trim();
-  });
-  const label = parts.join(', ') + (messages.length > 3 ? '…' : '');
-  const count = messages.length;
-
+  const lastPendingIdx = messages.reduce((acc, m, i) => (m.pending ? i : acc), -1);
   return (
-    <details className={`toolgroup ${failed ? 'is-err' : ''}`}>
-      <summary className="toolgroup__summary">
-        <span className="toolgroup__chevron" aria-hidden>▸</span>
-        <span className="toolgroup__icon" aria-hidden>⚙</span>
-        <span className="toolgroup__count">{count} {count === 1 ? 'acción' : 'acciones'}</span>
-        <span className="toolgroup__label">{label}</span>
-        {failed && <span className="toolgroup__err">· con errores</span>}
-      </summary>
-      <div className="toolgroup__body">
-        {messages.map((m, k) => (
-          <ToolRow key={k} message={m} index={startIndex + k} />
-        ))}
-      </div>
-    </details>
+    <div className="activity-group">
+      {messages.map((m, k) => (
+        <ActivityRow
+          key={k}
+          message={m}
+          index={startIndex + k}
+          delay={Math.min(k, 6) * 60}
+          live={m.tool === 'run_command' && k === lastPendingIdx}
+        />
+      ))}
+    </div>
   );
 }

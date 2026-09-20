@@ -1,4 +1,6 @@
-// SourceControl.jsx — panel de Git: rama, cambios (stage/commit) y red (pull/push/fetch/clone).
+// SourceControl.jsx — Git en el sidebar: rama (cambiar/crear), cambios
+// (stage/commit) y red (pull/push/fetch/clone). El PR de GitHub ya no vive
+// aquí: ocupa el panel central completo (GitHubView), a la derecha.
 import { useEffect, useState } from 'react';
 import { useGitStore } from '../../store/gitStore';
 import { useAppStore } from '../../store/appStore';
@@ -186,9 +188,10 @@ export function SourceControl() {
   return (
     <div className="scm">
       <div className="scm__head">
-        <span className="scm__title">Control de código</span>
-        <button className="icon-btn" onClick={refresh} title="Refrescar" disabled={loading}>
-          <IconRefresh size={16} />
+        <span className="scm__title">Cambios locales</span>
+        <span className="scm__title-count">{changes.length}</span>
+        <button className="iconbtn scm__head-refresh" onClick={refresh} title="Refrescar" disabled={loading}>
+          <IconRefresh size={14} />
         </button>
       </div>
 

@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { listFiles } from '../lib/tauri';
 import { useAppStore } from '../store/appStore';
-import { useEditorStore } from '../store/editorStore';
+import { useFileViewStore } from '../store/fileViewStore';
 import { IconFileCode, IconSearch } from './Icons';
 
 function fuzzyScore(text, q) {
@@ -62,14 +62,11 @@ export function QuickOpen() {
 
   const close = () => setQuickOpen(false);
 
-  const openFile = async (file) => {
+  const openFile = (file) => {
     close();
-    useAppStore.getState().setCenterView('editor');
-    try {
-      await useEditorStore.getState().openFile(file.path, file.name);
-    } catch (e) {
-      alert('Error abriendo el archivo: ' + e);
-    }
+    const app = useAppStore.getState();
+    app.selectNav('explorer');
+    useFileViewStore.getState().peek(file.path, file.name);
   };
 
   const onKeyDown = (e) => {

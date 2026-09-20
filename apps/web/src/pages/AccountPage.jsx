@@ -38,7 +38,7 @@ function useSections() {
   ];
 }
 
-function QuotaBar({ label, used, limit, resetHint, unlimitedLabel }) {
+function QuotaBar({ label, used, limit, resetHint, unlimitedLabel, showPercent }) {
   const pct = unlimited(limit) ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
   const full = !unlimited(limit) && used >= limit;
   return (
@@ -46,7 +46,9 @@ function QuotaBar({ label, used, limit, resetHint, unlimitedLabel }) {
       <div className="quota__head">
         <span>{label}</span>
         <span className={full ? 'quota__count is-full' : 'quota__count'}>
-          {used.toLocaleString()} / {unlimited(limit) ? unlimitedLabel : limit.toLocaleString()}
+          {unlimited(limit)
+            ? unlimitedLabel
+            : showPercent ? `${Math.round(pct)}%` : `${used.toLocaleString()} / ${limit.toLocaleString()}`}
         </span>
       </div>
       {!unlimited(limit) && (
@@ -541,7 +543,7 @@ function PrivacySection({ user, onUserChange }) {
 
 // ── Uso ─────────────────────────────────────────────────────────────────
 
-function UsageSection({ usage, daily, plan }) {
+function UsageSection({ usage, buckets, daily, plan }) {
   const t = useT('account');
   const locale = useLocale();
   const [apiUsage, setApiUsage] = useState(null);
@@ -565,18 +567,20 @@ function UsageSection({ usage, daily, plan }) {
           {paid ? t('usage.paidDesc') : t('usage.freeDesc')}
         </p>
         <QuotaBar
-          label={t('usage.messagesToday')}
-          used={usage.messages_today}
-          limit={usage.messages_per_day}
+          showPercent
+          label={t('usage.sessionTitle')}
+          used={buckets.session.used}
+          limit={buckets.session.unlimited ? -1 : buckets.session.limit}
           unlimitedLabel={t('unlimited')}
-          resetHint={t('usage.resetsAt', { date: new Date(usage.day_resets_at).toLocaleString(locale) })}
+          resetHint={`${t('usage.sessionHint')} ${t('usage.resetsAt', { date: new Date(buckets.session.reset_at).toLocaleString(locale) })}`}
         />
         <QuotaBar
-          label={t('usage.tokensThisMonth')}
-          used={usage.tokens_month}
-          limit={usage.tokens_per_month}
+          showPercent
+          label={t('usage.weekTitle')}
+          used={buckets.week.used}
+          limit={buckets.week.unlimited ? -1 : buckets.week.limit}
           unlimitedLabel={t('unlimited')}
-          resetHint={t('usage.resetsAt', { date: new Date(usage.month_resets_at).toLocaleDateString(locale) })}
+          resetHint={`${t('usage.weekHint')} ${t('usage.resetsAt', { date: new Date(buckets.week.reset_at).toLocaleString(locale) })}`}
         />
       </div>
 
@@ -758,7 +762,7 @@ export default function AccountPage() {
               )}
               {current.id === 'privacy' && <PrivacySection user={user} onUserChange={setUser} />}
               {current.id === 'billing' && <SeccionFacturacion plan={plan} />}
-              {current.id === 'usage' && <UsageSection usage={account.usage} daily={account.daily} plan={plan} />}
+              {current.id === 'usage' && <UsageSection usage={account.usage} buckets={account.buckets} daily={account.daily} plan={plan} />}
             </div>
           )}
         </main>

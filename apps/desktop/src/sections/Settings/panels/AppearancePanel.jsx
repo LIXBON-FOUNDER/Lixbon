@@ -1,9 +1,7 @@
-// AppearancePanel.jsx — tema de la app y tamaño de letra del editor.
-import { useAppStore } from '../../../store/appStore';
+// AppearancePanel.jsx — tema de la app.
 import { useTheme } from '../../../lib/theme';
 
 export function AppearancePanel() {
-  const { editorFontSize, setEditorFontSize } = useAppStore();
   const [theme, setThemeMode] = useTheme();
 
   return (
@@ -22,25 +20,6 @@ export function AppearancePanel() {
               {label}
             </button>
           ))}
-        </span>
-      </div>
-
-      <p className="settings__hint">
-        Un tema de VSCode activo (panel de extensiones) tiene prioridad sobre
-        este modo mientras esté aplicado.
-      </p>
-
-      <div className="settings__inline settings__inline--spread">
-        <span className="settings__row-label">Tamaño de letra del editor</span>
-        <span className="settings__slider">
-          <input
-            type="range"
-            min="12"
-            max="20"
-            value={editorFontSize}
-            onChange={(e) => setEditorFontSize(parseInt(e.target.value, 10))}
-          />
-          <span className="settings__slider-value">{editorFontSize}px</span>
         </span>
       </div>
     </section>

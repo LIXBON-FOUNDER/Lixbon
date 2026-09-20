@@ -23,7 +23,15 @@ export default function PlansPage() {
   const [pagando, setPagando] = useState(null); // plan cuyo modal está abierto
   const [error, setError] = useState('');
 
-  const fmtLimit = (v, suffix, noun) => (v === -1 ? t('unlimitedNoun', { noun }) : `${v.toLocaleString()} ${suffix}`);
+  // Cupo semanal expresado como múltiplo del plan Gratuito, no en créditos
+  // crudos (la unidad interna no es un número que el usuario deba interpretar).
+  const freeWeekMult = plans.find((pl) => pl.id === 'free')?.week_credit_multiplier || 1;
+  const weekQuotaLabel = (p) => {
+    const multiple = p.week_credit_multiplier / freeWeekMult;
+    return p.id === 'free' || multiple <= 1
+      ? t('weekBase')
+      : t('weekMultiple', { count: Number.isInteger(multiple) ? multiple : multiple.toFixed(1) });
+  };
 
   const jsonLd = useMemo(() => (plans.length ? {
     '@context': 'https://schema.org',
@@ -137,8 +145,8 @@ export default function PlansPage() {
 
                 <ul className="plan-card__features">
                   {[
-                    fmtLimit(p.messages_per_day, t('messagesPerDay'), t('messagesNoun')),
-                    fmtLimit(p.tokens_per_month, t('tokensPerMonth'), t('tokensNoun')),
+                    t('sessionWindow'),
+                    weekQuotaLabel(p),
                     p.max_api_keys === -1 ? t('unlimitedApiKeys') : t('apiKeyCount', { count: p.max_api_keys, plural: p.max_api_keys === 1 ? '' : 's' }),
                     t('requestsPerMinute', { rate: p.rate_limit_per_min }),
                     p.allowed_models ? t('smallModels') : t('allModels'),

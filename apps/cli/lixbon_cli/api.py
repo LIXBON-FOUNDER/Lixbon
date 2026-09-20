@@ -1,5 +1,6 @@
 """Cliente HTTP del gateway Lixbon (urllib stdlib, sin dependencias)."""
 import json
+from datetime import datetime, timezone
 from urllib import error, request
 
 from lixbon_cli.config import DEFAULT_BASE_URL, USER_AGENT, server_base
@@ -10,6 +11,26 @@ class ApiError(RuntimeError):
     def __init__(self, message: str, status: int = 0):
         super().__init__(message)
         self.status = status
+
+
+def reset_in(iso: str | None) -> str:
+    """"en 2h 14min" / "en 3 días" — cuánto falta para un reset_at (ISO UTC) de
+    buckets.session/buckets.week. Espejo de _human_wait en core/billing/quota.py."""
+    if not iso:
+        return ""
+    try:
+        target = datetime.fromisoformat(iso)
+    except ValueError:
+        return ""
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=timezone.utc)
+    delta = max(0, int((target - datetime.now(timezone.utc)).total_seconds()))
+    if delta < 3600:
+        return f"en {max(1, delta // 60)} min"
+    if delta < 86400:
+        return f"en {delta // 3600}h {(delta % 3600) // 60}min"
+    days = delta // 86400
+    return f"en {days} día{'s' if days != 1 else ''}"
 
 
 def _friendly_detail(body: str) -> str:
@@ -81,9 +102,12 @@ class ApiClient:
 
     def login(self, email: str, password: str) -> dict:
         """Login con credenciales. issue_api_key hace que el server entregue
-        una API key propia y rotable (mismo flujo que la app desktop)."""
+        una API key propia y rotable (mismo flujo que la app desktop).
+        key_name="lixbon CLI" evita que este login desactive la key de la app
+        desktop de la misma cuenta (issue_named_api_key rota por nombre)."""
         return self._json("POST", f"{self.server}/api/auth/login",
-                          {"email": email, "password": password, "issue_api_key": True},
+                          {"email": email, "password": password, "issue_api_key": True,
+                           "key_name": "lixbon CLI"},
                           auth=False)
 
     def register(self, email: str, password: str, first_name: str = "", last_name: str = "") -> dict:
@@ -123,7 +147,9 @@ class ApiClient:
             return {}
 
     def usage(self) -> dict:
-        return self._json("GET", f"{self.server}/api/usage", timeout=20)
+        """Plan vigente + buckets.session/buckets.week (F8) — mismo endpoint y
+        contrato que desktop/web/móvil, así los cuatro leen la misma cuenta."""
+        return self._json("GET", f"{self.server}/api/account/usage", timeout=20)
 
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)

@@ -16,7 +16,6 @@
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-top: 1px solid var(--border-soft);
 }
 
 .dock__resizer {
@@ -40,7 +39,7 @@
   height: 34px;
   padding: 0 8px 0 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
 }
 
 .dock__tabs {
@@ -50,6 +49,15 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.dock__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: 0 4px;
 }
 
 .dock__tab {
@@ -126,7 +134,7 @@
   flex-shrink: 0;
   padding: 0 6px;
   gap: 2px;
-  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
   overflow-x: auto;
   scrollbar-width: thin;
 }

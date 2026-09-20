@@ -1046,6 +1046,7 @@ def events_from_stream(response):
 # ──────────────────────────────────────────────────────────────────────────
 """Cliente HTTP del gateway Lixbon (urllib stdlib, sin dependencias)."""
 import json
+from datetime import datetime, timezone
 from urllib import error, request
 
 
@@ -1054,6 +1055,26 @@ class ApiError(RuntimeError):
     def __init__(self, message: str, status: int = 0):
         super().__init__(message)
         self.status = status
+
+
+def reset_in(iso: str | None) -> str:
+    """"en 2h 14min" / "en 3 días" — cuánto falta para un reset_at (ISO UTC) de
+    buckets.session/buckets.week. Espejo de _human_wait en core/billing/quota.py."""
+    if not iso:
+        return ""
+    try:
+        target = datetime.fromisoformat(iso)
+    except ValueError:
+        return ""
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=timezone.utc)
+    delta = max(0, int((target - datetime.now(timezone.utc)).total_seconds()))
+    if delta < 3600:
+        return f"en {max(1, delta // 60)} min"
+    if delta < 86400:
+        return f"en {delta // 3600}h {(delta % 3600) // 60}min"
+    days = delta // 86400
+    return f"en {days} día{'s' if days != 1 else ''}"
 
 
 def _friendly_detail(body: str) -> str:
@@ -1125,9 +1146,12 @@ class ApiClient:
 
     def login(self, email: str, password: str) -> dict:
         """Login con credenciales. issue_api_key hace que el server entregue
-        una API key propia y rotable (mismo flujo que la app desktop)."""
+        una API key propia y rotable (mismo flujo que la app desktop).
+        key_name="lixbon CLI" evita que este login desactive la key de la app
+        desktop de la misma cuenta (issue_named_api_key rota por nombre)."""
         return self._json("POST", f"{self.server}/api/auth/login",
-                          {"email": email, "password": password, "issue_api_key": True},
+                          {"email": email, "password": password, "issue_api_key": True,
+                           "key_name": "lixbon CLI"},
                           auth=False)
 
     def register(self, email: str, password: str, first_name: str = "", last_name: str = "") -> dict:
@@ -1167,7 +1191,9 @@ class ApiClient:
             return {}
 
     def usage(self) -> dict:
-        return self._json("GET", f"{self.server}/api/usage", timeout=20)
+        """Plan vigente + buckets.session/buckets.week (F8) — mismo endpoint y
+        contrato que desktop/web/móvil, así los cuatro leen la misma cuenta."""
+        return self._json("GET", f"{self.server}/api/account/usage", timeout=20)
 
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)
@@ -8289,10 +8315,24 @@ class ChatApp:
     def cmd_usage(self, arg: str):
         with spinner("consultando uso…"):
             data = self.api.usage()
+        plan = data.get("plan") or {}
+        buckets = data.get("buckets") or {}
+        session = buckets.get("session") or {}
+        week = buckets.get("week") or {}
+
+        def _bucket_str(b: dict) -> str:
+            if b.get("unlimited"):
+                return "ilimitado"
+            return f"{min(100, round(b.get('percent', 0)))}%"
+
         self.console.print(
-            f"[lx.dim]Uso global:[/] conversaciones {data.get('conversations', 0)} {g('sep')} "
-            f"mensajes {data.get('messages', 0)} {g('sep')} tokens {fmt_tokens(int(data.get('total_tokens', 0)))}"
+            f"[lx.dim]Plan {esc(plan.get('name', ''))}:[/] "
+            f"sesión {_bucket_str(session)} {g('sep')} semana {_bucket_str(week)}"
         )
+        if not session.get("unlimited") and session.get("reset_at"):
+            self.console.print(f"  [lx.dim2]Sesión se reinicia {reset_in(session['reset_at'])}[/]")
+        if not week.get("unlimited") and week.get("reset_at"):
+            self.console.print(f"  [lx.dim2]Semana se reinicia {reset_in(week['reset_at'])}[/]")
         return True
 
     def cmd_nodes(self, arg: str):
@@ -8317,9 +8357,22 @@ class ChatApp:
         self.console.print()
         approve = "sin preguntar" if self.session.get("auto_approve") else "pide confirmación"
         commands = "sin preguntar" if self.session.get("auto_run_commands") else "pide confirmación"
+
+        def _bucket_pct(b: dict) -> str:
+            return "∞" if b.get("unlimited") else f"{min(100, round(b.get('percent', 0)))}%"
+
+        cuota_note = ""
+        try:
+            buckets = (self.api.usage() or {}).get("buckets") or {}
+            session_b, week_b = buckets.get("session") or {}, buckets.get("week") or {}
+            cuota_note = f"sesión {_bucket_pct(session_b)}  {g('sep')}  semana {_bucket_pct(week_b)}"
+        except ApiError:
+            cuota_note = "sin conexión"
+
         rows = [
             ("Modelo", self.model or "no configurado", ""),
             ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido", ""),
+            ("Cuota", cuota_note, ""),
             ("Modo", self.mode, f"cambios {approve}  {g('sep')}  comandos {commands}"),
             ("Sesión", self._session_label(), f"clave {mask_key(self.cfg.get('api_key', ''))}"),
             ("Servidor", self.api.base_url, "conectado" if self.status.online else "sin conexión"),
@@ -9436,6 +9489,10 @@ def cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bucket_pct(bucket: dict) -> str:
+    return "ilimitado" if bucket.get("unlimited") else f"{min(100, round(bucket.get('percent', 0)))}%"
+
+
 def cmd_usage(args: argparse.Namespace) -> int:
     cfg = load_config()
     api = ApiClient(cfg["base_url"], cfg.get("api_key", ""))
@@ -9444,10 +9501,14 @@ def cmd_usage(args: argparse.Namespace) -> int:
     except ApiError as exc:
         print(f"No se pudo obtener el uso. Verifica tu sesión. Error: {exc}")
         return 1
-    print(
-        f"Uso global: conversaciones={data.get('conversations', 0)} "
-        f"mensajes={data.get('messages', 0)} tokens={data.get('total_tokens', 0)}"
-    )
+    plan = data.get("plan") or {}
+    buckets = data.get("buckets") or {}
+    session, week = buckets.get("session") or {}, buckets.get("week") or {}
+    print(f"Plan: {plan.get('name', '-')}")
+    print(f"- Sesión (4h): {_bucket_pct(session)}"
+          + (f", se reinicia {reset_in(session.get('reset_at'))}" if not session.get("unlimited") else ""))
+    print(f"- Semana:      {_bucket_pct(week)}"
+          + (f", se reinicia {reset_in(week.get('reset_at'))}" if not week.get("unlimited") else ""))
     return 0
 
 

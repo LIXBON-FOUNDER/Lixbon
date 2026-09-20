@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from urllib import request
 
-from lixbon_cli.api import ApiClient, ApiError
+from lixbon_cli.api import ApiClient, ApiError, reset_in
 from lixbon_cli.config import (
     CLI_VERSION,
     CONFIG_FILE,
@@ -105,6 +105,10 @@ def cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bucket_pct(bucket: dict) -> str:
+    return "ilimitado" if bucket.get("unlimited") else f"{min(100, round(bucket.get('percent', 0)))}%"
+
+
 def cmd_usage(args: argparse.Namespace) -> int:
     cfg = load_config()
     api = ApiClient(cfg["base_url"], cfg.get("api_key", ""))
@@ -113,10 +117,14 @@ def cmd_usage(args: argparse.Namespace) -> int:
     except ApiError as exc:
         print(f"No se pudo obtener el uso. Verifica tu sesión. Error: {exc}")
         return 1
-    print(
-        f"Uso global: conversaciones={data.get('conversations', 0)} "
-        f"mensajes={data.get('messages', 0)} tokens={data.get('total_tokens', 0)}"
-    )
+    plan = data.get("plan") or {}
+    buckets = data.get("buckets") or {}
+    session, week = buckets.get("session") or {}, buckets.get("week") or {}
+    print(f"Plan: {plan.get('name', '-')}")
+    print(f"- Sesión (4h): {_bucket_pct(session)}"
+          + (f", se reinicia {reset_in(session.get('reset_at'))}" if not session.get("unlimited") else ""))
+    print(f"- Semana:      {_bucket_pct(week)}"
+          + (f", se reinicia {reset_in(week.get('reset_at'))}" if not week.get("unlimited") else ""))
     return 0
 
 

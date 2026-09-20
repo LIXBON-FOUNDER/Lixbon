@@ -4,15 +4,12 @@
 import { useMemo, useState } from 'react';
 import { AccountPanel } from './panels/AccountPanel';
 import { AppearancePanel } from './panels/AppearancePanel';
-import { EditorPanel } from './panels/EditorPanel';
-import { AiPanel } from './panels/AiPanel';
-import { LanguagePanel } from './panels/LanguagePanel';
 import { AgentPanel } from './panels/AgentPanel';
 import { IndexPanel } from './panels/IndexPanel';
 import { AdvancedPanel } from './panels/AdvancedPanel';
 import { Keybindings } from './Keybindings';
 import {
-  IconUser, IconEye, IconFileCode, IconChat, IconPuzzle, IconBook, IconGear, IconTerminal, IconList,
+  IconUser, IconEye, IconPuzzle, IconGear, IconTerminal, IconList,
 } from '../../components/Icons';
 
 const SECTIONS = [
@@ -22,19 +19,7 @@ const SECTIONS = [
   },
   {
     id: 'appearance', label: 'Apariencia', icon: IconEye, Panel: AppearancePanel,
-    keywords: 'tema claro oscuro fuente tamaño letra',
-  },
-  {
-    id: 'editor', label: 'Editor', icon: IconFileCode, Panel: EditorPanel,
-    keywords: 'autoguardado formatear tabulador espacios indentacion',
-  },
-  {
-    id: 'lsp', label: 'Lenguajes', icon: IconBook, Panel: LanguagePanel,
-    keywords: 'lsp servidor lenguaje pyright rust-analyzer gopls definicion hover',
-  },
-  {
-    id: 'ai', label: 'IA', icon: IconChat, Panel: AiPanel,
-    keywords: 'autocompletado ghost fim vision modelo contexto',
+    keywords: 'tema claro oscuro',
   },
   {
     id: 'agent', label: 'Agente', icon: IconPuzzle, Panel: AgentPanel,

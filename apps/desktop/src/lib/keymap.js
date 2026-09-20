@@ -10,17 +10,10 @@ import { runCommand } from './commands';
 export const DEFAULT_KEYMAP = {
   'ctrl+shift+p': 'workbench.commandPalette',
   'ctrl+p': 'workbench.quickOpen',
-  'ctrl+s': 'editor.save',
-  'ctrl+shift+s': 'editor.saveAll',
-  'ctrl+w': 'editor.closeTab',
-  'ctrl+tab': 'editor.nextTab',
-  'ctrl+shift+tab': 'editor.prevTab',
-  'ctrl+k': 'editor.inlineEdit',
-  'shift+alt+f': 'editor.format',
-  'ctrl+shift+f': 'workbench.findInFiles',
   'ctrl+`': 'workbench.toggleTerminal',
   'ctrl+ñ': 'workbench.toggleTerminal',
   'ctrl+b': 'workbench.toggleExplorer',
+  'ctrl+n': 'chat.newConversation',
 };
 
 let activeKeymap = { ...DEFAULT_KEYMAP };

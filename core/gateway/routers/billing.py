@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from core.billing import stripe_gateway
-from core.billing.quota import usage_snapshot
+from core.billing.quota import credit_buckets_snapshot, usage_snapshot
 from core.persistence.queries import (
     check_user_password,
     delete_all_conversations,
@@ -74,12 +74,18 @@ async def api_pricing():
 
 @router.get("/api/account/usage")
 async def api_account_usage(user_data: dict[str, Any] = Depends(cookie_auth_required)):
-    """Mi cuenta: plan vigente, uso del período y serie diaria para la gráfica."""
+    """Mi cuenta: plan vigente, uso del período y serie diaria para la gráfica.
+
+    `buckets` (sesión 4h + semana, F8) es el shape nuevo y el gate real del
+    chat; `usage` (mensajes/día, tokens/mes, F5) se mantiene por compatibilidad
+    mientras los 4 clientes migran a leer `buckets` — ver rollout en quota.py.
+    """
     user_id = user_data["id"]
     plan = get_plan_for_user(user_id)
     return {
         "plan": plan,
         "usage": usage_snapshot(user_id, plan),
+        "buckets": credit_buckets_snapshot(user_id, plan),
         "daily": get_daily_metrics(user_id, days_limit=30),
     }
 

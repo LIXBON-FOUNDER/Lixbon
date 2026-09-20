@@ -32,7 +32,6 @@ import {
   splitThinking,
   truncateFabricated,
 } from '../lib/agent';
-import { useEditorStore } from './editorStore';
 import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
 import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib/agentContext';
 import { describeImages } from '../lib/vision';
@@ -45,7 +44,6 @@ export const useChatStore = create((set, get) => ({
   conversationId: null,
   conversationTitle: '', // lo pone el auto-título; se ve en la cabecera del panel
   streaming: false,
-  view: 'chat', // 'chat' | 'history'
   agentMode: (localStorage.getItem('lixbon_agent_mode') ?? 'true') === 'true',
   // Por defecto el agente escribe directo (petición del diseño); en Ajustes
   // se puede exigir aprobación por cambio.
@@ -65,8 +63,6 @@ export const useChatStore = create((set, get) => ({
     } catch { return DEFAULT_CMD_ALLOWLIST; }
   })(),
   pendingApproval: null, // { tool, args, change, resolve }
-
-  setView: (view) => set({ view }),
 
   setAgentMode: (agentMode) => {
     localStorage.setItem('lixbon_agent_mode', agentMode ? 'true' : 'false');
@@ -103,7 +99,7 @@ export const useChatStore = create((set, get) => ({
 
   newConversation: () => {
     get().stop();
-    set({ messages: [], conversationId: null, conversationTitle: '', view: 'chat' });
+    set({ messages: [], conversationId: null, conversationTitle: '' });
   },
 
   loadConversation: async (id) => {
@@ -113,7 +109,6 @@ export const useChatStore = create((set, get) => ({
       res = await api.get(`/api/conversations/${id}/messages`);
     } catch (err) {
       set({
-        view: 'chat',
         messages: [...get().messages, {
           role: 'error',
           content: `No se pudo cargar la conversación: ${err?.message || err}`,
@@ -143,7 +138,6 @@ export const useChatStore = create((set, get) => ({
       conversationId: id,
       conversationTitle: res.conversation?.title || '',
       messages,
-      view: 'chat',
     });
   },
 
@@ -290,12 +284,7 @@ export const useChatStore = create((set, get) => ({
       { role: 'user', content: modelText },
     ];
     if (agentActive) {
-      // El archivo abierto le da al modelo el referente de "este archivo"
-      const activePath = useEditorStore.getState().activePath || '';
-      const activeRel = activePath.startsWith(workspaceRoot)
-        ? activePath.slice(workspaceRoot.length).replace(/^[\\/]+/, '').replace(/\\/g, '/')
-        : '';
-      modelMessages.unshift({ role: 'system', content: await buildAgentSystemPrompt(workspaceRoot, activeRel) });
+      modelMessages.unshift({ role: 'system', content: await buildAgentSystemPrompt(workspaceRoot) });
     }
 
     abortController = new AbortController();
@@ -504,11 +493,17 @@ export const useChatStore = create((set, get) => ({
         const results = [];
         for (const call of calls) {
           if (signal.aborted) break;
+          // Fila "en curso" (spinner) que se resuelve in-place al terminar:
+          // es la animación de "el agente está ejecutando una acción".
+          const pendingIndex = get().messages.length;
+          pushMsg({ role: 'tool', tool: call.tool, args: call.args, pending: true });
           const result = await get()._runTool(workspaceRoot, call);
-          pushMsg({
-            role: 'tool', tool: call.tool, args: call.args, ok: result.ok,
-            content: result.display, change: result.change, snapshot: result.snapshot,
-            full: (result.output || '').slice(0, 4000), // para replay del historial
+          set({
+            messages: get().messages.map((m, i) => (i === pendingIndex ? {
+              ...m, pending: false, ok: result.ok,
+              content: result.display, change: result.change, snapshot: result.snapshot,
+              full: (result.output || '').slice(0, 4000), // para replay del historial
+            } : m)),
           });
           // Al modelo le va una versión acotada; el usuario ve la salida
           // completa en su fila. Un read_file de 100 000 caracteres desbordaba

@@ -8,7 +8,6 @@ import {
   listFiles, readDir, readFileContent, writeFileContent, createNewEntry,
   renameEntry, deleteEntry, searchInFiles, runCommand,
 } from './tauri';
-import { useEditorStore } from '../store/editorStore';
 import { diffCounts, normalizeRel } from './agentProtocol';
 import { searchIndex } from './codebaseIndex';
 
@@ -75,16 +74,6 @@ function notifyFsChanged() {
   window.dispatchEvent(new CustomEvent('lixbon:fs-changed'));
 }
 
-/** Tras una edición del agente: recarga la pestaña abierta, la abre/enfoca y
-    pinta el diff inline (verde/rojo con Aceptar/Rechazar) saltando al cambio. */
-async function revealEdit(abs, name, oldContent) {
-  const store = useEditorStore.getState();
-  try {
-    await store.reloadFromDisk(abs);
-    await store.showAgentDiff(abs, name, oldContent ?? '');
-  } catch { /* la UI no debe romper la herramienta */ }
-}
-
 // ── Herramientas ───────────────────────────────────────────────────────
 
 async function toolListFiles(root, relPath) {
@@ -139,7 +128,6 @@ async function toolEditFile(root, relPath, oldText, newText, all = false) {
     ? content.split(oldText).join(newText ?? '')
     : content.replace(oldText, newText ?? '');
   await writeFileContent(abs, updated);
-  await revealEdit(abs, rel.split('/').pop(), content); // content = versión previa
   notifyFsChanged();
   return `Archivo editado: ${rel} (${count > 1 ? `${count} reemplazos` : '1 reemplazo'})`;
 }
@@ -173,14 +161,8 @@ async function toolWriteFile(root, relPath, content) {
   const parentAbs = await ensureDirs(root, segments.join('/'));
   const abs = joinPath(root, rel);
   const isNew = !(await fileExists(root, rel));
-  let oldContent = '';
-  if (isNew) {
-    await createNewEntry(parentAbs, name, false);
-  } else {
-    try { oldContent = await readFileContent(abs); } catch { oldContent = ''; }
-  }
+  if (isNew) await createNewEntry(parentAbs, name, false);
   await writeFileContent(abs, content);
-  await revealEdit(abs, name, oldContent);
   notifyFsChanged();
   return `Archivo ${isNew ? 'creado' : 'actualizado'}: ${rel} (${content.length} chars)`;
 }
@@ -236,9 +218,6 @@ async function toolDeleteFile(root, relPath) {
   if (!rel) throw new Error('Falta la ruta');
   const abs = joinPath(root, rel);
   await deleteEntry(abs);
-  try {
-    useEditorStore.getState().closeUnder(abs);
-  } catch { /* ídem */ }
   notifyFsChanged();
   return `Eliminado: ${rel}`;
 }
@@ -253,8 +232,7 @@ async function toolRenameFile(root, srcRel, dstRel) {
   const dstName = dst.split('/').pop();
 
   if (srcParent === dstParent) {
-    const newAbs = await renameEntry(absSrc, dstName);
-    useEditorStore.getState().remapPaths(absSrc, newAbs);
+    await renameEntry(absSrc, dstName);
     notifyFsChanged();
     return `Movido: ${src} → ${dst}`;
   }
@@ -266,7 +244,6 @@ async function toolRenameFile(root, srcRel, dstRel) {
   const absDst = joinPath(root, dst);
   await writeFileContent(absDst, content);
   await deleteEntry(absSrc);
-  useEditorStore.getState().remapPaths(absSrc, absDst);
   notifyFsChanged();
   return `Movido: ${src} → ${dst}`;
 }
@@ -323,16 +300,9 @@ export async function revertSnapshot(root, snapshot) {
     // El archivo no existía: revertir = eliminarlo
     return toolDeleteFile(root, snapshot.path);
   }
-  // Revertir escribe el contenido previo y LIMPIA el diff inline (no deja uno
-  // nuevo del propio revert), a diferencia de una edición normal del agente.
   const rel = normalizeRel(snapshot.path);
   const abs = joinPath(root, rel);
   await writeFileContent(abs, snapshot.oldContent);
-  const store = useEditorStore.getState();
-  try {
-    await store.reloadFromDisk(abs);
-    store.clearAgentDiff(abs);
-  } catch { /* la UI no debe romper el revert */ }
   notifyFsChanged();
   return `Revertido: ${rel}`;
 }
@@ -392,7 +362,7 @@ export async function computeChangePreview(root, tool, args = {}) {
 
 // ── System prompt ──────────────────────────────────────────────────────
 
-export async function buildAgentSystemPrompt(root, activeFile = '') {
+export async function buildAgentSystemPrompt(root) {
   let tree = '(no se pudo listar el workspace)';
   try {
     const files = await listFiles();
@@ -403,14 +373,11 @@ export async function buildAgentSystemPrompt(root, activeFile = '') {
     }
   } catch { /* sin árbol: el agente puede usar list_files */ }
 
-  const activeLine = activeFile
-    ? `Archivo abierto en el editor ahora mismo: ${activeFile} (si el usuario dice "este archivo", es este).\n`
-    : '';
-
   return (
-    'Eres un agente de código experto que trabaja DIRECTAMENTE sobre los archivos del usuario dentro del IDE Lixbon.\n' +
+    'Eres un agente de código experto que trabaja DIRECTAMENTE sobre los archivos del usuario dentro de Lixbon, ' +
+    'una app centrada en el chat: el usuario no tiene un editor de código abierto, así que tus resúmenes deben ' +
+    'ser claros por sí mismos.\n' +
     `Workspace: ${root}\n` +
-    activeLine +
     'Rutas siempre RELATIVAS al workspace.\n\n' +
     '=== HERRAMIENTAS DISPONIBLES ===\n' +
     'Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n' +

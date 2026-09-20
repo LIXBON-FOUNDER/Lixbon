@@ -1,5 +1,5 @@
 // ModelPicker.jsx — selector de modelo. Carga el catálogo y el mapa rol→modelo.
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
 import { fetchModelRoles, roleModel } from '../lib/modelRoles';
@@ -9,6 +9,16 @@ export function ModelPicker() {
     currentModel, setCurrentModel, availableModels, setAvailableModels,
     setModelRoles, connectionStatus,
   } = useAppStore();
+  const selectRef = useRef(null);
+
+  // El comando /model (menú "/" del composer) dispara este evento: no hay API
+  // para abrir un <select> nativo por JS, así que al menos se enfoca y se
+  // intenta el click (funciona en Chromium/WebView2 con foco previo).
+  useEffect(() => {
+    const onFocusRequest = () => { selectRef.current?.focus(); selectRef.current?.click(); };
+    window.addEventListener('lixbon:focus-model-picker', onFocusRequest);
+    return () => window.removeEventListener('lixbon:focus-model-picker', onFocusRequest);
+  }, []);
 
   useEffect(() => {
     if (connectionStatus !== 'connected' || availableModels.length > 0) return;
@@ -49,6 +59,7 @@ export function ModelPicker() {
 
   return (
     <select
+      ref={selectRef}
       className="modelpicker"
       value={currentModel}
       onChange={(e) => setCurrentModel(e.target.value)}

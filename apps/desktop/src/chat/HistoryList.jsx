@@ -1,13 +1,25 @@
-// HistoryList.jsx — historial de conversaciones (buscar, abrir, renombrar, borrar).
+// HistoryList.jsx — "Recientes": conversaciones del workspace, siempre
+// visibles bajo el nav de Chat en el sidebar (buscar, abrir, renombrar, borrar).
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useChatStore } from '../store/chatStore';
 import { IconPencil, IconTrash, IconSearch } from '../components/Icons';
 
+function relTime(iso) {
+  if (!iso) return '';
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return 'ahora';
+  if (secs < 3600) return `hace ${Math.floor(secs / 60)} min`;
+  if (secs < 86400) return `hace ${Math.floor(secs / 3600)} h`;
+  if (secs < 86400 * 30) return `hace ${Math.floor(secs / 86400)} d`;
+  return new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+}
+
 export function HistoryList() {
-  const { loadConversation } = useChatStore();
+  const { loadConversation, conversationId } = useChatStore();
   const [items, setItems] = useState(null); // null = cargando
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -57,35 +69,49 @@ export function HistoryList() {
   };
 
   return (
-    <div className="history">
-      <div className="history__search">
-        <IconSearch size={14} />
-        <input
-          type="text"
-          placeholder="Buscar conversaciones…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          spellCheck={false}
-        />
+    <div className="recent">
+      <div className="sidebar__section-head">
+        <span>Recientes</span>
+        <button
+          className="iconbtn"
+          onClick={() => setSearchOpen((v) => !v)}
+          title="Buscar conversaciones"
+        >
+          <IconSearch size={12} />
+        </button>
       </div>
 
-      <div className="history__list">
+      {searchOpen && (
+        <div className="recent__search">
+          <IconSearch size={12} />
+          <input
+            type="text"
+            placeholder="Buscar…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            spellCheck={false}
+            autoFocus
+          />
+        </div>
+      )}
+
+      <div className="recent__list">
         {items === null ? (
           <>
-            <span className="skeleton history__skeleton" />
-            <span className="skeleton history__skeleton" />
-            <span className="skeleton history__skeleton" />
+            <span className="skeleton recent__skeleton" />
+            <span className="skeleton recent__skeleton" />
+            <span className="skeleton recent__skeleton" />
           </>
         ) : items.length === 0 ? (
-          <p className="history__empty">
-            {query ? 'Sin resultados para esa búsqueda.' : 'Aún no tienes conversaciones.'}
+          <p className="recent__empty">
+            {query ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}
           </p>
         ) : (
           items.map((c) => (
-            <div key={c.id} className="history__item">
+            <div key={c.id} className={`recent__item ${c.id === conversationId ? 'is-active' : ''}`}>
               {renamingId === c.id ? (
                 <input
-                  className="history__rename"
+                  className="recent__rename"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onBlur={() => handleRename(c.id)}
@@ -96,19 +122,20 @@ export function HistoryList() {
                   autoFocus
                 />
               ) : (
-                <button className="history__title" onClick={() => handleOpen(c.id)} title={c.title}>
-                  {c.title || 'Sin título'}
+                <button className="subitem recent__btn" onClick={() => handleOpen(c.id)} title={c.title}>
+                  <span className="recent__title">{c.title || 'Sin título'}</span>
+                  <span className="recent__time">{relTime(c.updated_at)}</span>
                 </button>
               )}
-              <span className="history__actions">
+              <span className="recent__actions">
                 <button
                   title="Renombrar"
                   onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}
                 >
-                  <IconPencil size={13} />
+                  <IconPencil size={12} />
                 </button>
                 <button title="Eliminar" onClick={() => handleDelete(c.id, c.title)}>
-                  <IconTrash size={13} />
+                  <IconTrash size={12} />
                 </button>
               </span>
             </div>

@@ -56,6 +56,7 @@ export const useGitStore = create((set, get) => ({
   branch: '',
   changes: [],
   hasRemote: false, // sin remoto no hay nada que sincronizar: hay que publicar
+  remoteUrl: '',    // URL de origin (para casar el repo con un proyecto de Lixbon Team)
   ahead: 0,         // commits locales sin subir (se acumulan: Push (2), (3)…)
   behind: 0,        // commits del remoto sin traer
   netBusy: '',      // '' | 'fetch' | 'pull' | 'push' | 'sync'
@@ -72,21 +73,22 @@ export const useGitStore = create((set, get) => ({
       const status = await gitRun(['status', '--porcelain=v1']);
       if (status.code !== 0) {
         const notRepo = /not a git repository/i.test(status.stderr);
-        set({ isRepo: !notRepo, changes: [], branch: '', hasRemote: false,
+        set({ isRepo: !notRepo, changes: [], branch: '', hasRemote: false, remoteUrl: '',
               ahead: 0, behind: 0, loading: false,
               error: notRepo ? '' : status.stderr.trim() });
         return;
       }
-      // Las tres consultas son independientes: en paralelo el refresh tarda
+      // Las cuatro consultas son independientes: en paralelo el refresh tarda
       // lo que la más lenta, no la suma (se nota en repos grandes).
       // `branch --show-current` da el nombre incluso sin commits (HEAD naciente),
       // donde `rev-parse --abbrev-ref HEAD` falla y dejaba un "(sin commits)".
-      const [branch, remotes, counts] = await Promise.all([
+      const [branch, remotes, counts, originUrl] = await Promise.all([
         gitRun(['branch', '--show-current']),
         gitRun(['remote']),
         // Cuánto nos separa del upstream. Falla (y da 0/0) si la rama no tiene
         // upstream todavía: es justo el caso de un repo recién publicado.
         gitRun(['rev-list', '--left-right', '--count', 'HEAD...@{u}']),
+        gitRun(['remote', 'get-url', 'origin']),
       ]);
       const name = branch.code === 0 ? branch.stdout.trim() : '';
       const hasRemote = remotes.code === 0 && !!remotes.stdout.trim();
@@ -104,6 +106,7 @@ export const useGitStore = create((set, get) => ({
         branch: name || '(HEAD suelto)',
         changes: parseStatus(status.stdout),
         hasRemote,
+        remoteUrl: originUrl.code === 0 ? originUrl.stdout.trim() : '',
         ahead,
         behind,
         loading: false,

@@ -21,7 +21,7 @@ from lixbon_cli.agent import (
     sanitize_for_plain_chat,
     workspace_tree,
 )
-from lixbon_cli.api import ApiClient, ApiError
+from lixbon_cli.api import ApiClient, ApiError, reset_in
 from lixbon_cli.context import (
     TOKENS_PER_IMAGE,
     calibrate,
@@ -1754,10 +1754,24 @@ class ChatApp:
     def cmd_usage(self, arg: str):
         with spinner("consultando uso…"):
             data = self.api.usage()
+        plan = data.get("plan") or {}
+        buckets = data.get("buckets") or {}
+        session = buckets.get("session") or {}
+        week = buckets.get("week") or {}
+
+        def _bucket_str(b: dict) -> str:
+            if b.get("unlimited"):
+                return "ilimitado"
+            return f"{min(100, round(b.get('percent', 0)))}%"
+
         self.console.print(
-            f"[lx.dim]Uso global:[/] conversaciones {data.get('conversations', 0)} {g('sep')} "
-            f"mensajes {data.get('messages', 0)} {g('sep')} tokens {fmt_tokens(int(data.get('total_tokens', 0)))}"
+            f"[lx.dim]Plan {esc(plan.get('name', ''))}:[/] "
+            f"sesión {_bucket_str(session)} {g('sep')} semana {_bucket_str(week)}"
         )
+        if not session.get("unlimited") and session.get("reset_at"):
+            self.console.print(f"  [lx.dim2]Sesión se reinicia {reset_in(session['reset_at'])}[/]")
+        if not week.get("unlimited") and week.get("reset_at"):
+            self.console.print(f"  [lx.dim2]Semana se reinicia {reset_in(week['reset_at'])}[/]")
         return True
 
     def cmd_nodes(self, arg: str):
@@ -1782,9 +1796,22 @@ class ChatApp:
         self.console.print()
         approve = "sin preguntar" if self.session.get("auto_approve") else "pide confirmación"
         commands = "sin preguntar" if self.session.get("auto_run_commands") else "pide confirmación"
+
+        def _bucket_pct(b: dict) -> str:
+            return "∞" if b.get("unlimited") else f"{min(100, round(b.get('percent', 0)))}%"
+
+        cuota_note = ""
+        try:
+            buckets = (self.api.usage() or {}).get("buckets") or {}
+            session_b, week_b = buckets.get("session") or {}, buckets.get("week") or {}
+            cuota_note = f"sesión {_bucket_pct(session_b)}  {g('sep')}  semana {_bucket_pct(week_b)}"
+        except ApiError:
+            cuota_note = "sin conexión"
+
         rows = [
             ("Modelo", self.model or "no configurado", ""),
             ("Plan", f"Lixbon {self.plan_name}" if self.plan_name else "desconocido", ""),
+            ("Cuota", cuota_note, ""),
             ("Modo", self.mode, f"cambios {approve}  {g('sep')}  comandos {commands}"),
             ("Sesión", self._session_label(), f"clave {mask_key(self.cfg.get('api_key', ''))}"),
             ("Servidor", self.api.base_url, "conectado" if self.status.online else "sin conexión"),

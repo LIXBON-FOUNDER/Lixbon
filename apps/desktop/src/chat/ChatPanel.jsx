@@ -1,11 +1,12 @@
-// ChatPanel.jsx — panel derecho del IDE: conversación con streaming + historial.
+// ChatPanel.jsx — panel central: conversación con streaming. El historial
+// vive siempre visible en el sidebar (Recientes); nueva conversación es
+// Ctrl+N o /clear — aquí no hay cabecera flotante, como en el diseño.
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { ChatMessage } from './ChatMessage';
 import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
-import { HistoryList } from './HistoryList';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
     el resto se renderiza como mensajes normales. */
@@ -31,10 +32,8 @@ function renderMessages(messages, streaming) {
   }
   return out;
 }
-import { IconPlus, IconChevron, IconDots } from '../components/Icons';
-
 export function ChatPanel() {
-  const { messages, streaming, view, setView, newConversation, conversationTitle } = useChatStore();
+  const { messages, streaming } = useChatStore();
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
 
@@ -54,48 +53,22 @@ export function ChatPanel() {
 
   return (
     <div className="chatpanel">
-      <div className="chatpanel__header">
-        {/* La conversación se titula sola tras el primer intercambio: verlo
-            aquí evita el "¿cuál de todas era esta?" al volver del historial. */}
-        <span className="chatpanel__title" title={conversationTitle || 'Chat'}>
-          {view === 'history' ? 'Historial' : conversationTitle || 'Chat'}
-        </span>
-        <span className="chatpanel__actions">
-          <button className="icon-btn" title="Nueva conversación" onClick={newConversation}>
-            <IconPlus size={16} />
-          </button>
-          <button
-            className={`icon-btn ${view === 'history' ? 'is-active' : ''}`}
-            title={view === 'history' ? 'Volver al chat' : 'Historial'}
-            onClick={() => setView(view === 'history' ? 'chat' : 'history')}
-          >
-            {view === 'history' ? <IconChevron size={16} open /> : <IconDots size={16} />}
-          </button>
-        </span>
-      </div>
-
-      {view === 'history' ? (
-        <HistoryList />
-      ) : (
-        <>
-          <div className="chatpanel__feed" ref={feedRef} onScroll={onScroll}>
-            {messages.length === 0 ? (
-              <div className="chatpanel__empty">
-                <p>¿En qué trabajamos hoy?</p>
-                <p className="chatpanel__empty-hint">
-                  Con el agente activo, el modelo puede crear y editar archivos de tu
-                  carpeta de trabajo (cada cambio te pide aprobación). El archivo abierto
-                  se adjunta como contexto automáticamente.
-                </p>
-              </div>
-            ) : (
-              renderMessages(messages, streaming)
-            )}
+      <div className="chatpanel__feed" ref={feedRef} onScroll={onScroll}>
+        {messages.length === 0 ? (
+          <div className="chatpanel__empty">
+            <p>¿En qué trabajamos hoy?</p>
+            <p className="chatpanel__empty-hint">
+              Con el agente activo, el modelo puede crear y editar archivos de tu
+              carpeta de trabajo (cada cambio te pide aprobación). Menciona un
+              archivo con @ para dárselo como referencia.
+            </p>
           </div>
-          <ApprovalCard />
-          <ChatInputBar />
-        </>
-      )}
+        ) : (
+          renderMessages(messages, streaming)
+        )}
+      </div>
+      <ApprovalCard />
+      <ChatInputBar />
     </div>
   );
 }

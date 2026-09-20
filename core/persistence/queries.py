@@ -34,6 +34,7 @@ from core.persistence.models import (
     ModelPricing,
     ModelAlias,
     ModelRole,
+    ModelWeight,
     Node,
     NodeEnrollment,
     Plan,
@@ -44,6 +45,8 @@ from core.persistence.models import (
     Subscription,
     TaskEmbedding,
     TokenUsageDaily,
+    UsageCreditWindow,
+    UsagePolicy,
     UsageQuota,
     User,
 )
@@ -158,6 +161,10 @@ def create_user(
                 role="admin" if email in admin_emails else "user",
                 email_verified=0,
                 password_hash=hash_password(password),
+                # Ancla del ciclo semanal de créditos (0-167, hora UTC): fijada
+                # una vez aquí, nunca se deriva de la fecha de alta para no
+                # concentrar los resets semanales de todas las cuentas juntos.
+                week_anchor_slot=secrets.randbelow(168),
                 created_at=now_iso(),
             )
             s.add(user)
@@ -535,7 +542,7 @@ def validate_api_key(raw_key: str, ip_address: str | None = None) -> dict[str, A
         user = s.get(User, row.user_id)
         if not user or not user.is_active:
             return None  # usuario bloqueado: sus keys dejan de funcionar
-        result = {**_user_to_dict(user), "key_model": row.model, "auth_via": "api_key"}
+        result = {**_user_to_dict(user), "key_model": row.model, "key_name": row.name, "auth_via": "api_key"}
         row.last_accessed = now
         row.last_used_ip = ip_address
         return result
@@ -678,6 +685,8 @@ def _plan_to_dict(p: Plan) -> dict[str, Any]:
         "currency": p.currency,
         "messages_per_day": p.messages_per_day,
         "tokens_per_month": p.tokens_per_month,
+        "session_credit_multiplier": p.session_credit_multiplier,
+        "week_credit_multiplier": p.week_credit_multiplier,
         "max_api_keys": p.max_api_keys,
         "rate_limit_per_min": p.rate_limit_per_min,
         "allowed_models": _json.loads(p.allowed_models) if p.allowed_models else None,
@@ -881,6 +890,213 @@ def get_usage_quota(user_id: int, period_type: str, period_start: str) -> dict[s
         return {"messages": row.messages if row else 0, "tokens": row.tokens if row else 0}
 
 
+# ─── Pool de créditos: sesión (4h) + semana ─────────────────────────────────
+
+def get_week_anchor_slot(user_id: int) -> int:
+    """Hora de la semana (0-167 UTC) donde arranca el ciclo semanal de esta
+    cuenta. Nunca debería faltar (create_user la asigna, init_db rellena las
+    cuentas viejas), pero 0 es un fallback razonable si acaso."""
+    with get_session() as s:
+        user = s.get(User, user_id)
+        return int(user.week_anchor_slot) if user and user.week_anchor_slot is not None else 0
+
+
+_USAGE_POLICY_DEFAULTS = {
+    "id": 1, "session_window_hours": 4.0,
+    "session_base_credits": 100_000, "week_base_credits": 350_000,
+}
+
+
+def get_usage_policy() -> dict[str, Any]:
+    """Fila única de configuración del pool de créditos. init_db la siembra
+    siempre; los defaults de aquí son solo para no romper si faltara."""
+    with get_session() as s:
+        row = s.get(UsagePolicy, 1)
+        if not row:
+            return dict(_USAGE_POLICY_DEFAULTS)
+        return {
+            "id": row.id,
+            "session_window_hours": row.session_window_hours,
+            "session_base_credits": row.session_base_credits,
+            "week_base_credits": row.week_base_credits,
+            "updated_at": row.updated_at,
+        }
+
+
+def update_usage_policy(fields: dict[str, Any]) -> dict[str, Any]:
+    """Actualiza (o crea) la fila única de política. Admin-only."""
+    editable = {"session_window_hours", "session_base_credits", "week_base_credits"}
+    values = {k: v for k, v in fields.items() if k in editable and v is not None}
+    ts = now_iso()
+    with get_session() as s:
+        row = s.get(UsagePolicy, 1)
+        if not row:
+            defaults = {k: v for k, v in _USAGE_POLICY_DEFAULTS.items() if k != "id"}
+            row = UsagePolicy(id=1, updated_at=ts, **defaults)
+            s.add(row)
+        for k, v in values.items():
+            setattr(row, k, v)
+        row.updated_at = ts
+        s.flush()
+        return {
+            "id": row.id, "session_window_hours": row.session_window_hours,
+            "session_base_credits": row.session_base_credits,
+            "week_base_credits": row.week_base_credits, "updated_at": row.updated_at,
+        }
+
+
+def _model_weight_to_dict(w: ModelWeight) -> dict[str, Any]:
+    return {
+        "id": w.id,
+        "model_prefix": w.model_prefix,
+        "display_name": w.display_name,
+        "input_credits_per_mtok": w.input_credits_per_mtok,
+        "output_credits_per_mtok": w.output_credits_per_mtok,
+        "is_active": bool(w.is_active),
+        "sort_order": w.sort_order,
+        "updated_at": w.updated_at,
+    }
+
+
+def list_model_weights(active_only: bool = False) -> list[dict[str, Any]]:
+    with get_session() as s:
+        stmt = select(ModelWeight).order_by(ModelWeight.sort_order, ModelWeight.model_prefix)
+        if active_only:
+            stmt = stmt.where(ModelWeight.is_active == 1)
+        return [_model_weight_to_dict(w) for w in s.scalars(stmt).all()]
+
+
+def create_model_weight(
+    model_prefix: str,
+    display_name: str | None,
+    input_credits_per_mtok: int,
+    output_credits_per_mtok: int,
+    sort_order: int = 0,
+) -> dict[str, Any] | None:
+    """Crea un peso por modelo. None si el prefijo ya existe."""
+    ts = now_iso()
+    try:
+        with get_session() as s:
+            row = ModelWeight(
+                model_prefix=model_prefix.strip(),
+                display_name=(display_name or "").strip() or None,
+                input_credits_per_mtok=max(0, int(input_credits_per_mtok)),
+                output_credits_per_mtok=max(0, int(output_credits_per_mtok)),
+                sort_order=sort_order,
+                created_at=ts,
+                updated_at=ts,
+            )
+            s.add(row)
+            s.flush()
+            return _model_weight_to_dict(row)
+    except IntegrityError:
+        return None
+
+
+def update_model_weight(weight_id: int, **fields) -> dict[str, Any] | None:
+    allowed = {"display_name", "input_credits_per_mtok", "output_credits_per_mtok",
+               "is_active", "sort_order"}
+    with get_session() as s:
+        row = s.get(ModelWeight, weight_id)
+        if not row:
+            return None
+        for k, v in fields.items():
+            if k in allowed and v is not None:
+                if k in ("input_credits_per_mtok", "output_credits_per_mtok"):
+                    v = max(0, int(v))
+                if k == "is_active":
+                    v = 1 if v else 0
+                setattr(row, k, v)
+        row.updated_at = now_iso()
+        s.flush()
+        return _model_weight_to_dict(row)
+
+
+def delete_model_weight(weight_id: int) -> bool:
+    """Borra un peso. La fila '*' (default) no se puede borrar."""
+    with get_session() as s:
+        row = s.get(ModelWeight, weight_id)
+        if not row or row.model_prefix == "*":
+            return False
+        s.delete(row)
+        return True
+
+
+def get_latest_credit_window(user_id: int, bucket: str) -> dict[str, Any] | None:
+    """La fila más reciente de ese bucket para el usuario (para 'session': la
+    que decide si sigue vigente o si hay que abrir una nueva; 'week' no la usa,
+    calcula su period_key por fórmula)."""
+    with get_session() as s:
+        row = s.scalars(
+            select(UsageCreditWindow)
+            .where(UsageCreditWindow.user_id == user_id, UsageCreditWindow.bucket == bucket)
+            .order_by(desc(UsageCreditWindow.id))
+        ).first()
+        if not row:
+            return None
+        return {
+            "id": row.id, "period_key": row.period_key, "started_at": row.started_at,
+            "expires_at": row.expires_at, "credits_used": row.credits_used,
+            "messages": row.messages,
+        }
+
+
+def get_or_create_credit_window(
+    user_id: int, bucket: str, period_key: str, started_at: str, expires_at: str,
+) -> dict[str, Any]:
+    """Get-or-create atómico de la fila (user_id, bucket, period_key). No pisa
+    started_at/expires_at si la fila ya existía (ON CONFLICT DO NOTHING + select)."""
+    ts = now_iso()
+    with get_session() as s:
+        stmt = pg_insert(UsageCreditWindow).values(
+            user_id=user_id, bucket=bucket, period_key=period_key,
+            started_at=started_at, expires_at=expires_at,
+            credits_used=0, messages=0, updated_at=ts,
+        ).on_conflict_do_nothing(constraint="uq_usage_credit_windows_period")
+        s.execute(stmt)
+        row = s.scalars(
+            select(UsageCreditWindow).where(
+                UsageCreditWindow.user_id == user_id,
+                UsageCreditWindow.bucket == bucket,
+                UsageCreditWindow.period_key == period_key,
+            )
+        ).one()
+        return {
+            "id": row.id, "period_key": row.period_key, "started_at": row.started_at,
+            "expires_at": row.expires_at, "credits_used": row.credits_used,
+            "messages": row.messages,
+        }
+
+
+def bump_credit_window(
+    user_id: int, bucket: str, period_key: str, started_at: str, expires_at: str,
+    credits_inc: int = 0, messages_inc: int = 0,
+) -> dict[str, Any]:
+    """Incrementa (atómico, upsert) los créditos/mensajes de la ventana.
+    started_at/expires_at solo se usan si hay que CREAR la fila; en un
+    conflicto (fila ya existente) no se tocan, por si la ventana expiró entre
+    el pre-check y este bump (edge case aceptado: el consumo real de esa
+    última petición queda contado en la ventana vieja, no se pierde)."""
+    ts = now_iso()
+    with get_session() as s:
+        stmt = pg_insert(UsageCreditWindow).values(
+            user_id=user_id, bucket=bucket, period_key=period_key,
+            started_at=started_at, expires_at=expires_at,
+            credits_used=credits_inc, messages=messages_inc, updated_at=ts,
+        ).on_conflict_do_update(
+            constraint="uq_usage_credit_windows_period",
+            set_={
+                "credits_used": UsageCreditWindow.credits_used + credits_inc,
+                "messages": UsageCreditWindow.messages + messages_inc,
+                "updated_at": ts,
+            },
+        ).returning(UsageCreditWindow.credits_used, UsageCreditWindow.messages,
+                    UsageCreditWindow.expires_at)
+        row = s.execute(stmt).one()
+        return {"credits_used": int(row.credits_used), "messages": int(row.messages),
+                "expires_at": row.expires_at}
+
+
 def count_active_keys(user_id: int) -> int:
     with get_session() as s:
         return int(s.execute(
@@ -922,7 +1138,8 @@ def update_plan(plan_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
     """Actualiza campos editables de un plan (F6). Retorna el plan o None si no existe."""
     editable = {
         "name", "description", "price_monthly_cents", "messages_per_day",
-        "tokens_per_month", "max_api_keys", "rate_limit_per_min",
+        "tokens_per_month", "session_credit_multiplier", "week_credit_multiplier",
+        "max_api_keys", "rate_limit_per_min",
         "allowed_models", "is_active", "stripe_price_id",
     }
     values = {k: v for k, v in fields.items() if k in editable}

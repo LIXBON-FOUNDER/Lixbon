@@ -99,35 +99,6 @@ export function listFiles() {
   return invoke('list_files');
 }
 
-// ── Extensiones (soporte declarativo de VSCode vía Open VSX) ──────────
-
-/** Busca en el registro Open VSX. Devuelve el JSON crudo de la API. */
-export function extSearch(query) {
-  return invoke('ext_search', { query });
-}
-
-/** Descarga el .vsix y extrae todo lo declarativo. Devuelve el manifest
-    {id, display_name, themes, grammars, languages, snippets, icon_themes,
-     has_code, warnings}. */
-export function extInstall(url, id) {
-  return invoke('ext_install', { url, id });
-}
-
-/** Contenido JSON de un tema instalado. */
-export function extReadTheme(id, file) {
-  return invoke('ext_read_theme', { id, file });
-}
-
-/** Contenido de cualquier archivo de una extensión (gramáticas, snippets,
-    iconos…), confinado a su carpeta. */
-export function extReadFile(id, relPath) {
-  return invoke('ext_read_file', { id, relPath });
-}
-
-export function extUninstall(id) {
-  return invoke('ext_uninstall', { id });
-}
-
 // ── Terminales PTY ────────────────────────────────────────────────────
 
 /** Abre una sesión de terminal (shell: 'powershell' | 'cmd' | 'bash'). Devuelve el id. */
@@ -147,46 +118,6 @@ export function termClose(id) {
   return invoke('term_close', { id });
 }
 
-// ── LSP (servidores de lenguaje) ──────────────────────────────────────
-// Rust solo transporta: desenmarca el framing y emite cada mensaje JSON por
-// `lsp:msg:{id}` (logs por `lsp:err:{id}`, muerte por `lsp:exit:{id}`).
-// Quien habla JSON-RPC es lib/lspClient.js.
-
-/** Lanza el servidor `id` (= lenguaje) en la carpeta de trabajo. */
-export function lspStart(id, command, args = []) {
-  return invoke('lsp_start', { id, command, args });
-}
-
-/** Envía un mensaje JSON-RPC ya serializado. */
-export function lspSend(id, message) {
-  return invoke('lsp_send', { id, message });
-}
-
-export function lspStop(id) {
-  return invoke('lsp_stop', { id });
-}
-
-/** Ruta del ejecutable del servidor: primero el instalado por lixbon, luego el
-    PATH del sistema. null = no está. */
-export function lspResolve(id, bin) {
-  return invoke('lsp_resolve', { id, bin });
-}
-
-/** Instala un servidor de npm dentro del app-data (sin permisos de admin ni
-    tocar el PATH). Devuelve la ruta del ejecutable. Requiere Node.js. */
-export function lspInstallNpm(id, pkg, bin) {
-  return invoke('lsp_install_npm', { id, package: pkg, bin });
-}
-
-/** Descarga y extrae un servidor publicado como .zip (releases de GitHub). */
-export function lspInstallArchive(id, url, bin) {
-  return invoke('lsp_install_archive', { id, url, bin });
-}
-
-export function lspUninstallServer(id) {
-  return invoke('lsp_uninstall_server', { id });
-}
-
 // ── Git (CLI del sistema) ─────────────────────────────────────────────
 
 /** Ejecuta `git args...` en cwd (o la carpeta de trabajo). Devuelve {stdout, stderr, code}. */
@@ -204,17 +135,6 @@ export function gitClone(url, destParent) {
     Devuelve {stdout, stderr, code, timed_out}. */
 export function runCommand(command, timeoutMs, cwd) {
   return invoke('run_command', { command, timeoutMs: timeoutMs ?? null, cwd: cwd ?? null });
-}
-
-/** Ruta del binario que trae el proyecto (node_modules/.bin), subiendo desde
-    `startDir` hasta la raíz. null si el proyecto no lo tiene. */
-export function resolveProjectBin(startDir, bin) {
-  return invoke('resolve_project_bin', { startDir, bin });
-}
-
-/** Ruta del config por defecto de ESLint de lixbon (lo crea si no existe). */
-export function eslintDefaultConfig() {
-  return invoke('eslint_default_config');
 }
 
 // ── Plugins ───────────────────────────────────────────────────────────

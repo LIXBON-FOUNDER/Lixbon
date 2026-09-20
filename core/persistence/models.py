@@ -28,6 +28,10 @@ class User(Base):
     avatar_key: Mapped[str | None] = mapped_column(Text)
     # Preferencias del usuario (JSON parcial; los defaults viven en queries.SETTINGS_DEFAULTS)
     settings_json: Mapped[str | None] = mapped_column(Text)
+    # Hora de la semana (0-167, UTC) donde arranca el ciclo semanal de créditos
+    # de esta cuenta. Asignada UNA VEZ al crear el usuario, pseudo-aleatoria:
+    # así los resets semanales de todas las cuentas no caen en el mismo instante.
+    week_anchor_slot: Mapped[int | None] = mapped_column()
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -239,8 +243,17 @@ class Plan(Base):
     description: Mapped[str | None] = mapped_column(Text)
     price_monthly_cents: Mapped[int] = mapped_column(nullable=False, default=0)
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="USD")
+    # DEPRECADO (sesión+semana los reemplaza como gate, ver UsageCreditWindow):
+    # solo lectura para el shape legacy de /api/account/usage y para
+    # credits.ensure_can_use_api, que sigue usando tokens_per_month para decidir
+    # cuándo el tráfico de API key externa pasa de "cubierto por el plan" a
+    # "prepago por créditos" — ese camino no se tocó.
     messages_per_day: Mapped[int] = mapped_column(nullable=False, default=30)
     tokens_per_month: Mapped[int] = mapped_column(nullable=False, default=150_000)
+    # Multiplicador del presupuesto de créditos (UsagePolicy.session_base_credits /
+    # week_base_credits) de este plan. 0.5/2.0/5.0 en free/pro/advance por defecto.
+    session_credit_multiplier: Mapped[float] = mapped_column(nullable=False, default=1.0)
+    week_credit_multiplier: Mapped[float] = mapped_column(nullable=False, default=1.0)
     max_api_keys: Mapped[int] = mapped_column(nullable=False, default=1)
     rate_limit_per_min: Mapped[int] = mapped_column(nullable=False, default=10)
     # JSON con lista de prefijos de modelos permitidos; NULL = todos los modelos
@@ -291,6 +304,64 @@ class UsageQuota(Base):
     period_start: Mapped[str] = mapped_column(Text, nullable=False)    # YYYY-MM-DD | YYYY-MM
     messages: Mapped[int] = mapped_column(nullable=False, default=0)
     tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UsagePolicy(Base):
+    """Fila única (id=1): parámetros del pool de créditos de sesión+semana.
+    Editable en caliente desde el panel admin, igual que `plans`."""
+    __tablename__ = "usage_policy"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    session_window_hours: Mapped[float] = mapped_column(nullable=False, default=4.0)
+    session_base_credits: Mapped[int] = mapped_column(BigInteger, nullable=False, default=100_000)
+    week_base_credits: Mapped[int] = mapped_column(BigInteger, nullable=False, default=350_000)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ModelWeight(Base):
+    """Peso en créditos por millón de tokens, por modelo (longest-prefix match,
+    '*' es el default). Separada de `model_pricing` a propósito: esa tabla es
+    para el cobro en USD de los créditos prepago (inactiva por defecto); esta
+    es el costo ponderado del pool de sesión/semana, obligatorio desde el
+    día uno, así que su fila '*' se siembra ACTIVA."""
+    __tablename__ = "model_weights"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    model_prefix: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # "*" = default
+    display_name: Mapped[str | None] = mapped_column(Text)
+    input_credits_per_mtok: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1_000_000)
+    output_credits_per_mtok: Mapped[int] = mapped_column(BigInteger, nullable=False, default=4_000_000)
+    is_active: Mapped[int] = mapped_column(nullable=False, default=1)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UsageCreditWindow(Base):
+    """Contador de créditos consumidos en la ventana de sesión (4h, inicio
+    dinámico) o de semana (fija, anclada por cuenta) — los dos relojes que
+    reemplazan a messages_per_day/tokens_per_month como gate del chat.
+
+    `period_key` identifica el ciclo: en 'session' es el propio `started_at`
+    (no hay fórmula, cada sesión arranca con el primer mensaje que la abre);
+    en 'week' es el `started_at` del ciclo calculado desde
+    `User.week_anchor_slot` (determinista, cambia solo al cruzar el ancla).
+    """
+    __tablename__ = "usage_credit_windows"
+    __table_args__ = (
+        UniqueConstraint("user_id", "bucket", "period_key", name="uq_usage_credit_windows_period"),
+        Index("idx_usage_credit_windows_lookup", "user_id", "bucket", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    bucket: Mapped[str] = mapped_column(Text, nullable=False)       # "session" | "week"
+    period_key: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    credits_used: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    messages: Mapped[int] = mapped_column(nullable=False, default=0)  # desglose informativo
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 

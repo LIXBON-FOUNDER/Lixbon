@@ -119,10 +119,25 @@ def init_db() -> None:
         "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS provider TEXT",
         "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS hostname TEXT",
         "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_seen_at TEXT",
+        # Límites por sesión (4h) + semana, en reemplazo de messages_per_day/
+        # tokens_per_month como gate del chat (esas columnas quedan de solo
+        # lectura para compat, ver comentario en models.Plan).
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS session_credit_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS week_credit_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS week_anchor_slot INTEGER",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:
             conn.execute(text(stmt))
+
+    # Ancla semanal pseudo-aleatoria para cuentas creadas antes de este cambio
+    # (las nuevas la reciben en create_user). random() vive en Postgres para no
+    # traer todas las filas a Python solo para asignarles un número.
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE users SET week_anchor_slot = floor(random()*168)::int "
+            "WHERE week_anchor_slot IS NULL"
+        ))
 
     # ── Seed: los 3 planes (F5). ON CONFLICT DO NOTHING: los límites se editan
     #    en la BD y ningún redeploy los pisa. -1 = ilimitado. ──
@@ -159,10 +174,25 @@ def init_db() -> None:
            AND allowed_models LIKE '%llama3.2%'
            AND allowed_models LIKE '%qwen2.5:0.5b%'
     """
+    # ── Multiplicadores de créditos por plan: 0.5x (free) / 2x (pro) / 5x
+    #    (advance) de la unidad base en usage_policy. El AND final evita pisar
+    #    un valor que un admin ya haya ajustado a mano (mismo espíritu que
+    #    _free_plan_fix: un UPDATE dirigido, no un seed que se repita a ciegas). ──
+    _plan_multipliers_seed = """
+        UPDATE plans SET session_credit_multiplier = 0.5, week_credit_multiplier = 0.5
+         WHERE id = 'free' AND session_credit_multiplier = 1.0 AND week_credit_multiplier = 1.0;
+        UPDATE plans SET session_credit_multiplier = 2.0, week_credit_multiplier = 2.0
+         WHERE id = 'pro' AND session_credit_multiplier = 1.0 AND week_credit_multiplier = 1.0;
+        UPDATE plans SET session_credit_multiplier = 5.0, week_credit_multiplier = 5.0
+         WHERE id = 'advance' AND session_credit_multiplier = 1.0 AND week_credit_multiplier = 1.0;
+    """
     from datetime import datetime, timezone
     with engine.begin() as conn:
         conn.execute(text(_plans_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_free_plan_fix))
+        for stmt in _plan_multipliers_seed.strip().split(";"):
+            if stmt.strip():
+                conn.execute(text(stmt))
 
     # ── Seed: tarifa por defecto y packs de créditos (cobro por tokens de la
     #    API). ON CONFLICT DO NOTHING: el admin los edita y nada los pisa.
@@ -198,10 +228,30 @@ def init_db() -> None:
           ('route',  NULL, NULL, NULL, 1, 'Clasificador de delegación y títulos', :ts, :ts)
         ON CONFLICT (role) DO NOTHING
     """
+    # ── Seed: política del pool de créditos (fila única) y peso estándar por
+    #    token. A diferencia de model_pricing, la fila '*' aquí nace ACTIVA:
+    #    el gate de sesión/semana no es opt-in. Las cifras base son un punto de
+    #    partida deliberadamente conservador — se recalibran desde el panel
+    #    admin con datos reales, sin redeploy. ──
+    _usage_policy_seed = """
+        INSERT INTO usage_policy (id, session_window_hours, session_base_credits,
+                                  week_base_credits, updated_at)
+        VALUES (1, 4.0, 100000, 350000, :ts)
+        ON CONFLICT (id) DO NOTHING
+    """
+    _model_weights_seed = """
+        INSERT INTO model_weights (model_prefix, display_name, input_credits_per_mtok,
+                                   output_credits_per_mtok, is_active, sort_order,
+                                   created_at, updated_at)
+        VALUES ('*', 'Peso estándar', 1000000, 4000000, 1, 999, :ts, :ts)
+        ON CONFLICT (model_prefix) DO NOTHING
+    """
     with engine.begin() as conn:
         conn.execute(text(_pricing_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_packs_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_roles_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+        conn.execute(text(_usage_policy_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+        conn.execute(text(_model_weights_seed), {"ts": datetime.now(timezone.utc).isoformat()})
 
     # ── Seed: promover admins definidos por entorno ──
     import os
