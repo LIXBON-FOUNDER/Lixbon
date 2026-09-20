@@ -186,11 +186,28 @@ def init_db() -> None:
         UPDATE plans SET session_credit_multiplier = 5.0, week_credit_multiplier = 5.0
          WHERE id = 'advance' AND session_credit_multiplier = 1.0 AND week_credit_multiplier = 1.0;
     """
+    # ── Ajuste F8 #2: Pro/Advance necesitaban más cupo por sesión para el uso
+    #    agéntico real (un turno pesado de escritura de archivo se comía el
+    #    cupo en pocos turnos); Free se deja EXACTAMENTE igual, así que en vez
+    #    de tocar la base compartida (que también habría subido a Free) se
+    #    triplica el multiplicador de esos dos planes — misma base, mismo 20×
+    #    semana/sesión, cupo absoluto solo de Pro/Advance. Guardado por el
+    #    valor viejo: si el admin ya lo tocó a mano desde /admin/tarifas, no
+    #    se pisa. ──
+    _plan_multipliers_bump = """
+        UPDATE plans SET session_credit_multiplier = 6.0, week_credit_multiplier = 6.0
+         WHERE id = 'pro' AND session_credit_multiplier = 2.0 AND week_credit_multiplier = 2.0;
+        UPDATE plans SET session_credit_multiplier = 15.0, week_credit_multiplier = 15.0
+         WHERE id = 'advance' AND session_credit_multiplier = 5.0 AND week_credit_multiplier = 5.0;
+    """
     from datetime import datetime, timezone
     with engine.begin() as conn:
         conn.execute(text(_plans_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_free_plan_fix))
         for stmt in _plan_multipliers_seed.strip().split(";"):
+            if stmt.strip():
+                conn.execute(text(stmt))
+        for stmt in _plan_multipliers_bump.strip().split(";"):
             if stmt.strip():
                 conn.execute(text(stmt))
 
@@ -232,12 +249,24 @@ def init_db() -> None:
     #    token. A diferencia de model_pricing, la fila '*' aquí nace ACTIVA:
     #    el gate de sesión/semana no es opt-in. Las cifras base son un punto de
     #    partida deliberadamente conservador — se recalibran desde el panel
-    #    admin con datos reales, sin redeploy. ──
+    #    admin con datos reales, sin redeploy.
+    #    week_base_credits = 20× session_base_credits: con sesiones de 4h una
+    #    cuenta activa puede agotar su cupo de sesión varias veces al día, así
+    #    que la semana tiene que aguantar bastante más que un solo día de eso
+    #    (hasta ~3 sesiones a tope cada día durante 7 días) o el pool semanal
+    #    se vacía en horas y deja de significar "una semana". ──
     _usage_policy_seed = """
         INSERT INTO usage_policy (id, session_window_hours, session_base_credits,
                                   week_base_credits, updated_at)
-        VALUES (1, 4.0, 100000, 350000, :ts)
+        VALUES (1, 4.0, 100000, 2000000, :ts)
         ON CONFLICT (id) DO NOTHING
+    """
+    # Corrige la fila ya sembrada en despliegues anteriores (350000 = 3.5× la
+    # sesión, se agotaba en menos de un día). Guardada por el valor viejo: si
+    # el admin ya la recalibró a mano desde /admin/tarifas, no se toca.
+    _usage_policy_week_fix = """
+        UPDATE usage_policy SET week_base_credits = 2000000, updated_at = :ts
+         WHERE id = 1 AND week_base_credits = 350000
     """
     _model_weights_seed = """
         INSERT INTO model_weights (model_prefix, display_name, input_credits_per_mtok,
@@ -251,6 +280,7 @@ def init_db() -> None:
         conn.execute(text(_packs_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_roles_seed), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_usage_policy_seed), {"ts": datetime.now(timezone.utc).isoformat()})
+        conn.execute(text(_usage_policy_week_fix), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_model_weights_seed), {"ts": datetime.now(timezone.utc).isoformat()})
 
     # ── Seed: promover admins definidos por entorno ──

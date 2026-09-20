@@ -215,10 +215,10 @@ def _credit_limit(policy: dict[str, Any], plan: dict[str, Any], bucket: str) -> 
 
 def ensure_session_week_credits(user_id: int, plan: dict[str, Any]) -> None:
     """Gate real del chat (F8). Evalúa sesión y semana como CONJUNTO: si
-    SESSION_QUOTA_ENFORCE está activo y cualquiera de los dos está agotado,
-    429 nombrando cuál y su reset_at. Sin el flag, solo abre/lee las ventanas
-    (para que credit_buckets_snapshot tenga datos reales) sin bloquear —
-    fase de rollout con escritura en paralelo antes de cortar tráfico."""
+    cualquiera de los dos está agotado, 429 nombrando cuál y su reset_at.
+    SESSION_QUOTA_ENFORCE=0 desactiva el bloqueo (solo abre/lee las ventanas,
+    para que credit_buckets_snapshot tenga datos reales) — vía de escape para
+    verificar en producción sin cortar tráfico real."""
     policy = get_usage_policy()
     session = _session_window(user_id, policy)
     week = _week_window(user_id, policy)

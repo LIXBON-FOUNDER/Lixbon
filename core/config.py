@@ -127,11 +127,11 @@ LOGS_DIR: Path = PROJECT_ROOT / "logs"
 REQUIRE_EMAIL_VERIFICATION: bool = os.getenv("REQUIRE_EMAIL_VERIFICATION", "0") == "1"
 
 # ── Límites de sesión (4h) + semana ─────────────────────────────────────────
-# "0" (default): el pool de créditos de sesión/semana se calcula y se escribe
-# en cada chat, pero no bloquea a nadie — permite ver en producción si las
-# cifras de usage_policy/model_weights son razonables antes de cortar tráfico
-# real. "1": ensure_can_chat empieza a devolver 429 cuando se agota.
-SESSION_QUOTA_ENFORCE: bool = os.getenv("SESSION_QUOTA_ENFORCE", "0") == "1"
+# "1" (default): ensure_session_week_credits devuelve 429 cuando el pool de
+# sesión o semana se agota. Puesto en "0" solo se calcula y se escribe en cada
+# chat sin bloquear — útil para verificar en producción que las cifras de
+# usage_policy/model_weights son razonables antes de cortar tráfico real.
+SESSION_QUOTA_ENFORCE: bool = os.getenv("SESSION_QUOTA_ENFORCE", "1") == "1"
 
 # ── Seguridad de claves ─────────────────────────────────────────────────────
 KEY_EXPIRY_DAYS: int = int(os.getenv("KEY_EXPIRY_DAYS", "90"))
