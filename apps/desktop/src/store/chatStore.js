@@ -27,6 +27,7 @@ import {
   displayableText,
   executeToolCall,
   extractToolCalls,
+  hasInvalidCall,
   hasUnclosedCall,
   revertSnapshot,
   splitThinking,
@@ -130,10 +131,13 @@ export const useChatStore = create((set, get) => ({
       }
       if (m.role === 'assistant') {
         const { thinking, visible } = splitThinking(m.content || '');
-        return { role: 'assistant', content: cleanProse(visible) || m.content, thinking };
+        // Nunca caer de vuelta a `m.content`: si cleanProse lo deja vacío es
+        // porque el turno entero era un tool-call (ya persistido como fila
+        // TOOL_RESULT aparte); mostrar el crudo filtraba el JSON al chat.
+        return { role: 'assistant', content: cleanProse(visible), thinking };
       }
       return { role: 'user', content: m.content };
-    });
+    }).filter((m) => m.role !== 'assistant' || m.content || m.thinking);
     set({
       conversationId: id,
       conversationTitle: res.conversation?.title || '',
@@ -448,6 +452,22 @@ export const useChatStore = create((set, get) => ({
 
         patchLast({ content: prose, thinking: fullThinking, generating: null });
         if (!calls.length) {
+          // JSON de tool-call cerrado pero ilegible (comillas sin escapar
+          // dentro de un valor largo, típico al generar CSS/HTML): pedir que
+          // lo repita en vez de dar el turno por terminado en silencio.
+          if (!nudged && hasInvalidCall(spoken)) {
+            nudged = true;
+            modelMessages.push({ role: 'assistant', content: cleanProse(spoken) || '(llamada a herramienta inválida)' });
+            modelMessages.push({
+              role: 'user',
+              content: 'La llamada a herramienta anterior traía JSON inválido (probablemente una comilla '
+                + 'doble o un salto de línea sin escapar dentro de un valor largo, como el "content" de '
+                + 'write_file). Repite ÚNICAMENTE esa llamada con el JSON bien formado: escapa con \\ '
+                + 'cualquier comilla doble o salto de línea que vaya DENTRO de un string.',
+            });
+            pushMsg({ role: 'assistant', content: '', sources: null });
+            continue;
+          }
           // Salida truncada a mitad de un tool-call (archivo demasiado grande):
           // empujar a edit_file, que emite fragmentos pequeños.
           if (!nudged && hasUnclosedCall(spoken)) {

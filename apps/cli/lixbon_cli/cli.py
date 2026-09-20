@@ -105,8 +105,25 @@ def cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
-def _bucket_pct(bucket: dict) -> str:
-    return "ilimitado" if bucket.get("unlimited") else f"{min(100, round(bucket.get('percent', 0)))}%"
+_USAGE_BAR_WIDTH = 24
+
+
+def _usage_bar(pct: float, width: int = _USAGE_BAR_WIDTH) -> str:
+    pct = max(0.0, min(100.0, pct))
+    filled = round(width * pct / 100)
+    return "#" * filled + "." * (width - filled)
+
+
+def _print_bucket(label: str, bucket: dict) -> None:
+    print(label)
+    if bucket.get("unlimited"):
+        print(f"  [{'#' * _USAGE_BAR_WIDTH}]  ilimitado")
+        return
+    pct = min(100, round(bucket.get("percent", 0)))
+    print(f"  [{_usage_bar(pct)}]  {pct}% usado")
+    reset = bucket.get("reset_at")
+    if reset:
+        print(f"  Se reinicia {reset_in(reset)}")
 
 
 def cmd_usage(args: argparse.Namespace) -> int:
@@ -120,11 +137,11 @@ def cmd_usage(args: argparse.Namespace) -> int:
     plan = data.get("plan") or {}
     buckets = data.get("buckets") or {}
     session, week = buckets.get("session") or {}, buckets.get("week") or {}
-    print(f"Plan: {plan.get('name', '-')}")
-    print(f"- Sesión (4h): {_bucket_pct(session)}"
-          + (f", se reinicia {reset_in(session.get('reset_at'))}" if not session.get("unlimited") else ""))
-    print(f"- Semana:      {_bucket_pct(week)}"
-          + (f", se reinicia {reset_in(week.get('reset_at'))}" if not week.get("unlimited") else ""))
+    print(f"Plan {plan.get('name', '-')}")
+    print()
+    _print_bucket("Sesion (4h)", session)
+    print()
+    _print_bucket("Semana (todos los modelos)", week)
     return 0
 
 

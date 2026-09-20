@@ -21,6 +21,30 @@ export const TOOL_SCHEMAS = [
   {
     type: 'function',
     function: {
+      name: 'find_files',
+      description: "Busca archivos por nombre con un patrón glob: '*.py', 'test_*', 'src/**/*.jsx'.",
+      parameters: {
+        type: 'object',
+        properties: { pattern: p('string', 'Patrón glob del nombre o de la ruta relativa') },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'outline',
+      description: 'Esqueleto de un archivo: funciones, clases y encabezados con su línea. Úsalo antes de read_file en archivos grandes.',
+      parameters: {
+        type: 'object',
+        properties: { path: p('string', 'Ruta relativa del archivo') },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_file',
       description: 'Lee el contenido de un archivo. Admite rango de líneas.',
       parameters: {
@@ -48,6 +72,48 @@ export const TOOL_SCHEMAS = [
           all: p('boolean', 'Reemplazar todas las apariciones (por defecto solo la primera)'),
         },
         required: ['path', 'old_text', 'new_text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'multi_edit',
+      description: 'Varias sustituciones EXACTAS en un mismo archivo, en orden. Preferir a varios edit_file seguidos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: p('string', 'Ruta relativa del archivo'),
+          edits: {
+            type: 'array',
+            description: 'Sustituciones en orden',
+            items: {
+              type: 'object',
+              properties: {
+                old_text: p('string', 'Fragmento actual, copiado exacto'),
+                new_text: p('string', 'Texto nuevo'),
+              },
+              required: ['old_text', 'new_text'],
+            },
+          },
+        },
+        required: ['path', 'edits'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'insert_at_line',
+      description: 'Inserta texto ANTES de la línea indicada (1-based). line=0 o mayor que el total: al final.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: p('string', 'Ruta relativa del archivo'),
+          line: p('integer', 'Número de línea delante de la cual insertar'),
+          content: p('string', 'Texto a insertar (con sus saltos de línea)'),
+        },
+        required: ['path', 'line', 'content'],
       },
     },
   },
@@ -156,6 +222,33 @@ export const TOOL_SCHEMAS = [
           timeout: p('integer', 'Segundos máximos (por defecto 30)'),
         },
         required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_url',
+      description: 'Descarga una página web y devuelve su texto (el HTML se limpia de etiquetas).',
+      parameters: {
+        type: 'object',
+        properties: { url: p('string', 'URL http(s) a descargar') },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Busca en internet vía el gateway (mismos proveedores que la búsqueda web del chat).',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: p('string', 'Qué buscar'),
+          limit: p('integer', 'Máximo de resultados (por defecto 5)'),
+        },
+        required: ['query'],
       },
     },
   },

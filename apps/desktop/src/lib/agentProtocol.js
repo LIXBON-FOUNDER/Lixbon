@@ -11,7 +11,10 @@ export const MAX_AGENT_STEPS = 40;
 // Tandas de llamadas idénticas seguidas que se toleran: un modelo atascado
 // repite la misma herramienta con los mismos argumentos indefinidamente.
 export const MAX_REPEATED_CALLS = 3;
-export const READ_ONLY_TOOLS = new Set(['list_files', 'read_file', 'search', 'search_codebase']);
+export const READ_ONLY_TOOLS = new Set([
+  'list_files', 'read_file', 'search', 'search_codebase',
+  'find_files', 'outline', 'fetch_url', 'web_search',
+]);
 
 // ── Seguridad de run_command (B4) ──────────────────────────────────────
 // Prefijos de comandos considerados seguros: se ejecutan sin pedir aprobación
@@ -78,8 +81,43 @@ export function normalizeRel(rel) {
   return clean;
 }
 
-/** JSON.parse tolerante: escapa saltos de línea reales dentro de strings
-    (JSON inválido pero frecuente en LLMs pequeños). */
+// `{` + cualquier espacio + `"tool"` (nuestro formato) o `"name"` (formato
+// función de OpenAI, que emiten los modelos primados con tools, p.ej.
+// qwen2.5-coder). Los modelos suelen indentar el JSON ({\n  "tool": …).
+const TOOL_START_RE = /\{\s*"(tool|name)"/g;
+
+/** Escanea el objeto JSON candidato que empieza en `start` (debe ser '{').
+    Toggle simple de comillas (JSON bien formado): funciona para la inmensa
+    mayoría de las llamadas. Devuelve el índice tras el '}' de cierre, o -1
+    si no cierra en el texto. */
+function scanBalanced(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+  for (let j = start; j < text.length; j++) {
+    const ch = text[j];
+    if (escapeNext) {
+      escapeNext = false;
+    } else if (ch === '\\' && inString) {
+      escapeNext = true;
+    } else if (ch === '"') {
+      inString = !inString;
+    } else if (!inString) {
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) return j + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+/** JSON.parse tolerante: solo escapa saltos de línea reales dentro de
+    strings (JSON inválido pero frecuente en LLMs pequeños). No intenta
+    arreglar comillas sueltas: eso lo hace repairBySchema, que conoce la
+    forma exacta de cada herramienta y no se confunde con el propio JSON
+    (o CSS) que vaya dentro de un valor largo. */
 function parseLoose(candidate) {
   try {
     return JSON.parse(candidate);
@@ -110,11 +148,6 @@ function parseLoose(candidate) {
   }
 }
 
-// `{` + cualquier espacio + `"tool"` (nuestro formato) o `"name"` (formato
-// función de OpenAI, que emiten los modelos primados con tools, p.ej.
-// qwen2.5-coder). Los modelos suelen indentar el JSON ({\n  "tool": …).
-const TOOL_START_RE = /\{\s*"(tool|name)"/g;
-
 /** Normaliza un objeto a {tool, args}. Acepta {tool,args} y {name,arguments}
     (formato función OpenAI). Devuelve null si no parece una llamada. */
 function normalizeCall(data) {
@@ -132,6 +165,102 @@ function normalizeCall(data) {
   return null;
 }
 
+// Campos de `args` por herramienta, en el orden del system prompt. Solo se
+// usa para reparar llamadas con JSON roto (ver repairBySchema); espejo del
+// switch de executeToolCall en agent.js.
+const TOOL_ARG_KEYS = {
+  list_files: ['path'],
+  find_files: ['pattern'],
+  outline: ['path'],
+  read_file: ['path', 'start_line', 'end_line'],
+  write_file: ['path', 'content'],
+  edit_file: ['path', 'old_text', 'new_text', 'all'],
+  insert_at_line: ['path', 'line', 'content'],
+  append_file: ['path', 'content'],
+  mkdir: ['path'],
+  search: ['pattern'],
+  search_codebase: ['query'],
+  delete_file: ['path'],
+  rename_file: ['src', 'dst'],
+  run_command: ['command', 'timeout'],
+  fetch_url: ['url'],
+  web_search: ['query', 'limit'],
+  // multi_edit queda fuera: `edits` es un array anidado, no un campo de texto
+  // plano — cae al escaneo genérico (scanBalanced + parseLoose).
+};
+
+function unescapeBasic(s) {
+  return s.replace(/\\(["\\/nrt])/g, (_, c) => (
+    { '"': '"', '\\': '\\', '/': '/', n: '\n', r: '\r', t: '\t' }[c]
+  ));
+}
+
+/** Repara {"tool":"...","args":{...}} campo a campo cuando el modelo dejó
+    comillas o backslashes sin escapar DENTRO de un valor largo (el caso
+    típico: CSS/HTML con `font-family: "Segoe UI"` metido tal cual en el
+    `content` de un write_file). El conteo de llaves genérico no puede
+    distinguir esas comillas de las que de verdad cierran el string —el CSS
+    trae sus propias llaves y comillas—, así que en vez de adivinar se busca,
+    para cada campo, el siguiente delimitador que SÍ conocemos: el nombre
+    literal de otra clave de esta misma herramienta (`,"content":`) o el
+    cierre del objeto (`"}`). Null si `tool` no es de los nuestros o el JSON
+    no sigue esta forma exacta — así el llamador cae al escaneo genérico. */
+function repairBySchema(text, start) {
+  const head = /^\{\s*"tool"\s*:\s*"([^"]*)"\s*,\s*"args"\s*:\s*\{/.exec(text.slice(start, start + 200));
+  if (!head) return null;
+  const tool = head[1];
+  const keys = TOOL_ARG_KEYS[tool];
+  if (!keys) return null;
+  let i = start + head[0].length;
+  const args = {};
+  const remaining = new Set(keys);
+  for (;;) {
+    while (i < text.length && /[\s,]/.test(text[i])) i++;
+    if (text[i] === '}') { i++; break; }
+    const keyM = /^"([a-zA-Z_]+)"\s*:\s*/.exec(text.slice(i));
+    if (!keyM || !remaining.has(keyM[1])) return null;
+    const key = keyM[1];
+    i += keyM[0].length;
+    remaining.delete(key);
+    if (text[i] === '"') {
+      i += 1; // dentro del valor string
+      const otherKeys = [...remaining].map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const stopRe = otherKeys.length
+        ? new RegExp(`"\\s*,\\s*"(?:${otherKeys.join('|')})"\\s*:|"\\s*\\}`)
+        : /"\s*\}/;
+      const rest = text.slice(i);
+      const stopM = stopRe.exec(rest);
+      if (!stopM) return null; // el valor sigue abierto: streaming a medias
+      args[key] = unescapeBasic(rest.slice(0, stopM.index));
+      i += stopM.index + 1;
+    } else {
+      const valM = /^(true|false|null|-?\d+(?:\.\d+)?)/.exec(text.slice(i));
+      if (!valM) return null;
+      args[key] = JSON.parse(valM[0]);
+      i += valM[0].length;
+    }
+  }
+  while (i < text.length && /\s/.test(text[i])) i++;
+  if (text[i] !== '}') return null;
+  return { call: { tool, args }, end: i + 1 };
+}
+
+/** Localiza el final de la llamada que empieza en `start` (debe apuntar a
+    su '{'). Primero intenta la reparación consciente del esquema (robusta
+    ante comillas/llaves sin escapar en valores largos); si no aplica, cae al
+    escaneo genérico de llaves + parseLoose. Null si el JSON sigue abierto. */
+function findToolCallEnd(text, start) {
+  const fixed = repairBySchema(text, start);
+  if (fixed) return fixed;
+  const end = scanBalanced(text, start);
+  return end === -1 ? null : { call: normalizeCall(parseLoose(text.slice(start, end))), end };
+}
+
+/** Encuentra los objetos con forma de tool-call en el texto. Se incluyen
+    también los que cierran pero cuyo JSON no se pudo interpretar (`call:
+    null`): un intento de llamada roto NUNCA debe mostrarse crudo en el chat,
+    aunque no se pueda ejecutar — stripToolCalls los quita a todos, y solo
+    extractToolCalls filtra los válidos. */
 function iterToolCallSpans(text) {
   const spans = [];
   let i = 0;
@@ -140,40 +269,16 @@ function iterToolCallSpans(text) {
     const m = TOOL_START_RE.exec(text);
     if (!m) break;
     const start = m.index;
-    let depth = 0;
-    let inString = false;
-    let escapeNext = false;
-    let closed = false;
-    let j = start;
-    for (; j < text.length; j++) {
-      const ch = text[j];
-      if (escapeNext) {
-        escapeNext = false;
-      } else if (ch === '\\' && inString) {
-        escapeNext = true;
-      } else if (ch === '"') {
-        inString = !inString;
-      } else if (!inString) {
-        if (ch === '{') depth++;
-        else if (ch === '}') {
-          depth--;
-          if (depth === 0) {
-            const call = normalizeCall(parseLoose(text.slice(start, j + 1)));
-            if (call) spans.push({ call, start, end: j + 1 });
-            i = j + 1;
-            closed = true;
-            break;
-          }
-        }
-      }
-    }
-    if (!closed) break; // JSON sin cerrar (stream a medias): se deja
+    const found = findToolCallEnd(text, start);
+    if (!found) break; // JSON sin cerrar (stream a medias): se deja
+    spans.push({ call: found.call, start, end: found.end });
+    i = found.end;
   }
   return spans;
 }
 
 export function extractToolCalls(text) {
-  return iterToolCallSpans(text).map((s) => s.call);
+  return iterToolCallSpans(text).filter((s) => s.call).map((s) => s.call);
 }
 
 export function stripToolCalls(text) {
@@ -182,6 +287,13 @@ export function stripToolCalls(text) {
     text = text.slice(0, spans[k].start) + text.slice(spans[k].end);
   }
   return text;
+}
+
+/** ¿Hubo un intento de tool-call cuyo JSON no se pudo interpretar (comillas
+    o escapes rotos)? Sirve para pedirle al modelo que lo repita en vez de
+    terminar el turno en silencio como si no hubiera pasado nada. */
+export function hasInvalidCall(text) {
+  return iterToolCallSpans(text).some((s) => !s.call);
 }
 
 /** Corta la salida donde el modelo empieza a fabricar resultados de
@@ -203,21 +315,7 @@ export function cutUnclosedCall(text) {
   let lastStart = -1;
   while ((m = TOOL_START_RE.exec(text)) !== null) lastStart = m.index;
   if (lastStart === -1) return text;
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  let closed = false;
-  for (let j = lastStart; j < text.length; j++) {
-    const ch = text[j];
-    if (esc) esc = false;
-    else if (ch === '\\' && inStr) esc = true;
-    else if (ch === '"') inStr = !inStr;
-    else if (!inStr) {
-      if (ch === '{') depth++;
-      else if (ch === '}') { depth--; if (depth === 0) { closed = true; break; } }
-    }
-  }
-  return closed ? text : text.slice(0, lastStart);
+  return findToolCallEnd(text, lastStart) ? text : text.slice(0, lastStart);
 }
 
 /** ¿El texto termina con un tool-call truncado (iniciado sin cerrar)? */

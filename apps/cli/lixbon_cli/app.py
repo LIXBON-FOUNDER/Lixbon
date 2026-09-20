@@ -86,9 +86,12 @@ from lixbon_cli.term import (
 )
 from lixbon_cli.theme import make_console, pt_style
 from lixbon_cli.ui import (
+    CTX_FULL,
+    CTX_WARN,
     Option,
     StatusBar,
     Tail,
+    context_bar,
     esc,
     fmt_tokens,
     TOOL_VERB,
@@ -1751,6 +1754,27 @@ class ChatApp:
         if marker:
             self.prompt_prefill = f"{self.prompt_prefill} {marker}".strip()
 
+    def _usage_bar_cls(self, pct: float) -> str:
+        if pct >= CTX_FULL:
+            return "lx.err"
+        if pct >= CTX_WARN:
+            return "lx.warn"
+        return "lx.ok"
+
+    def _print_usage_bucket(self, label: str, bucket: dict) -> None:
+        self.console.print(f"[lx.primary]{label}[/]")
+        if bucket.get("unlimited"):
+            self.console.print(f"  [lx.dim2]{g('bar_full') * 24}[/]  [lx.ok]ilimitado[/]")
+            self.console.print()
+            return
+        pct = min(100, round(bucket.get("percent", 0)))
+        cls = self._usage_bar_cls(pct)
+        self.console.print(f"  [{cls}]{context_bar(pct, 24)}[/]  {pct}% usado")
+        reset = bucket.get("reset_at")
+        if reset:
+            self.console.print(f"  [lx.dim2]Se reinicia {reset_in(reset)}[/]")
+        self.console.print()
+
     def cmd_usage(self, arg: str):
         with spinner("consultando uso…"):
             data = self.api.usage()
@@ -1759,19 +1783,9 @@ class ChatApp:
         session = buckets.get("session") or {}
         week = buckets.get("week") or {}
 
-        def _bucket_str(b: dict) -> str:
-            if b.get("unlimited"):
-                return "ilimitado"
-            return f"{min(100, round(b.get('percent', 0)))}%"
-
-        self.console.print(
-            f"[lx.dim]Plan {esc(plan.get('name', ''))}:[/] "
-            f"sesión {_bucket_str(session)} {g('sep')} semana {_bucket_str(week)}"
-        )
-        if not session.get("unlimited") and session.get("reset_at"):
-            self.console.print(f"  [lx.dim2]Sesión se reinicia {reset_in(session['reset_at'])}[/]")
-        if not week.get("unlimited") and week.get("reset_at"):
-            self.console.print(f"  [lx.dim2]Semana se reinicia {reset_in(week['reset_at'])}[/]")
+        self.console.print(f"\n[lx.dim]Plan[/] [lx.primary]{esc(plan.get('name', '-'))}[/]\n")
+        self._print_usage_bucket("Sesión (4h)", session)
+        self._print_usage_bucket("Semana (todos los modelos)", week)
         return True
 
     def cmd_nodes(self, arg: str):

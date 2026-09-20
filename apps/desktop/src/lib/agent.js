@@ -10,6 +10,7 @@ import {
 } from './tauri';
 import { diffCounts, normalizeRel } from './agentProtocol';
 import { searchIndex } from './codebaseIndex';
+import { api } from './api';
 
 // La parte pura del protocolo (parseo de tool calls, diff, límites) vive en
 // agentProtocol.js para poder testearse sin Tauri; se re-exporta desde aquí.
@@ -24,6 +25,7 @@ export {
   cleanProse,
   displayableText,
   extractToolCalls,
+  hasInvalidCall,
   hasUnclosedCall,
   splitThinking,
   stripToolCalls,
@@ -213,6 +215,184 @@ async function toolSearchCodebase(root, query) {
     .join('\n\n---\n\n');
 }
 
+// Carpetas que find_files/outline nunca deben ofrecer: espejo de
+// IGNORED_TREE_DIRS en apps/cli/lixbon_cli/agent.py.
+const IGNORED_TREE_DIRS = new Set([
+  '.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build',
+  'target', '.next', '.idea', '.vscode', '.mypy_cache', '.pytest_cache',
+]);
+
+/** Glob simple (`*`, `**`, `?`) a RegExp. Sin librería: alcanza con lo que
+    escribe un modelo ('*.py', 'src/**\/*.jsx', 'test_*'). */
+function globToRegExp(pattern) {
+  let re = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '*') {
+      if (pattern[i + 1] === '*') {
+        re += '.*';
+        i++;
+        if (pattern[i + 1] === '/') i++;
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else if ('.+^$()|{}[]\\'.includes(c)) {
+      re += `\\${c}`;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+async function toolFindFiles(root, pattern) {
+  let pat = String(pattern ?? '').trim().replace(/\\/g, '/');
+  if (!pat) throw new Error('Falta pattern');
+  if (!pat.includes('/')) pat = `**/${pat}`;
+  const re = globToRegExp(pat);
+  const files = await listFiles();
+  const hits = files
+    .map((f) => f.rel.replace(/\\/g, '/'))
+    .filter((r) => !r.split('/').some((seg) => IGNORED_TREE_DIRS.has(seg)))
+    .filter((r) => re.test(r))
+    .sort();
+  if (!hits.length) return '(sin resultados)';
+  const shown = hits.slice(0, MAX_LIST_LINES);
+  const extra = hits.length - shown.length;
+  return shown.join('\n') + (extra > 0 ? `\n… (${extra} más)` : '');
+}
+
+// Esqueleto reconocible por extensión: espejo de _OUTLINE_PATTERNS en
+// apps/cli/lixbon_cli/agent.py (misma intención, un lenguaje por bloque).
+const OUTLINE_PATTERNS = {
+  '.py': [/^(?:\s*)(?:async\s+)?(?:def|class)\s+\w+.*?(?::|$)/],
+  '.js': [
+    /^(?:\s*)(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+\w+|class\s+\w+).*/,
+    /^(?:\s*)(?:export\s+)?(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>.*/,
+    /^(?:\s{2,})(?:static\s+|async\s+)*\w+\s*\([^)]*\)\s*\{\s*$/,
+  ],
+  '.go': [/^(?:\s*)(?:func|type)\s+.*/],
+  '.rs': [/^(?:\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|struct|enum|trait|impl|mod)\s+.*/],
+  '.java': [
+    /^(?:\s*)(?:public|private|protected|static|final|abstract|\s)*\s*(?:class|interface|enum|record)\s+\w+.*/,
+    /^(?:\s{2,})(?:public|private|protected|static|final|synchronized|\s)+[\w<>[\],\s]+\s+\w+\s*\([^)]*\)\s*(?:throws[^{]*)?\{?\s*$/,
+  ],
+  '.md': [/^#{1,6}\s+.*/],
+  '.css': [/^(?:\s*)[^\s{}/][^{}]*\{\s*$/],
+};
+for (const ext of ['.jsx', '.ts', '.tsx', '.mjs', '.cjs']) OUTLINE_PATTERNS[ext] = OUTLINE_PATTERNS['.js'];
+for (const ext of ['.kt', '.cs', '.scala']) OUTLINE_PATTERNS[ext] = OUTLINE_PATTERNS['.java'];
+
+async function toolOutline(root, relPath) {
+  const rel = normalizeRel(relPath);
+  if (!rel) throw new Error('Falta la ruta del archivo');
+  const dot = rel.lastIndexOf('.');
+  const ext = dot === -1 ? '' : rel.slice(dot).toLowerCase();
+  const patterns = OUTLINE_PATTERNS[ext];
+  if (!patterns) return `(sin esqueleto para ${ext || 'este tipo'}; usa read_file)`;
+  const content = await readFileContent(joinPath(root, rel));
+  const lines = content.split('\n');
+  const hits = [];
+  lines.forEach((line, i) => {
+    if (patterns.some((p) => p.test(line))) {
+      hits.push(`${String(i + 1).padStart(5)}  ${line.trimEnd().slice(0, 140)}`);
+    }
+  });
+  if (!hits.length) return `(sin funciones ni clases reconocibles en ${lines.length} líneas)`;
+  const shown = hits.slice(0, MAX_LIST_LINES);
+  const extra = hits.length - shown.length;
+  return `${rel}: ${lines.length} líneas\n` + shown.join('\n') + (extra > 0 ? `\n… (${extra} más)` : '');
+}
+
+async function toolMultiEdit(root, relPath, edits) {
+  if (!Array.isArray(edits) || !edits.length) {
+    throw new Error('edits debe ser una lista de {old_text, new_text}');
+  }
+  const done = [];
+  for (let i = 0; i < edits.length; i++) {
+    const e = edits[i] || {};
+    try {
+      const out = await toolEditFile(root, relPath, e.old_text, e.new_text, !!e.all);
+      done.push(out.slice(out.indexOf('(') + 1, out.lastIndexOf(')')));
+    } catch (err) {
+      const aplicadas = i > 0 ? ` Ya se aplicaron las ${i} anteriores.` : '';
+      throw new Error(`Edición ${i + 1} de ${edits.length}: ${err.message}.${aplicadas}`);
+    }
+  }
+  return `Archivo editado: ${normalizeRel(relPath)} (${edits.length} ediciones: ${done.join('; ')})`;
+}
+
+async function toolInsertAtLine(root, relPath, lineArg, content) {
+  const rel = normalizeRel(relPath);
+  if (!rel) throw new Error('Falta la ruta del archivo');
+  const abs = joinPath(root, rel);
+  const original = await readFileContent(abs);
+  const nl = original.includes('\r\n') ? '\r\n' : '\n';
+  const lines = original.split(nl);
+  let text = String(content ?? '');
+  if (!text.endsWith('\n') && !text.endsWith('\r\n')) text += nl;
+  const nuevas = text.replace(/\r\n/g, '\n').split('\n');
+  nuevas.pop(); // cola vacía por el \n final
+  const line = parseInt(lineArg, 10) || 0;
+  let idx = line <= 0 || line > lines.length ? lines.length : line - 1;
+  if (idx === lines.length && lines.length && lines[lines.length - 1] === '') idx -= 1;
+  lines.splice(idx, 0, ...nuevas);
+  await writeFileContent(abs, lines.join(nl));
+  notifyFsChanged();
+  return `Archivo editado: ${rel} (${nuevas.length} línea(s) insertada(s) en la línea ${idx + 1})`;
+}
+
+const MAX_FETCH_CHARS = 12000;
+
+function htmlToText(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script,style,noscript').forEach((el) => el.remove());
+  return (doc.body?.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
+}
+
+async function toolFetchUrl(url) {
+  const target = String(url ?? '').trim();
+  if (!/^https?:\/\//i.test(target)) throw new Error('La URL debe empezar por http:// o https://');
+  let res;
+  try {
+    res = await fetch(target, { headers: { Accept: 'text/html,application/json,text/plain,*/*' } });
+  } catch (err) {
+    throw new Error(`No se pudo descargar ${target}: ${err.message || err}`);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} al descargar ${target}`);
+  const ctype = res.headers.get('content-type') || '';
+  const raw = await res.text();
+  let text = raw;
+  if (ctype.includes('html') || /^\s*<!doctype|^\s*<html/i.test(raw.slice(0, 200))) {
+    text = htmlToText(raw);
+  } else if (!/text|json|xml|javascript/.test(ctype)) {
+    throw new Error(`${target} no es texto (${ctype.split(';')[0] || 'tipo desconocido'})`);
+  }
+  if (text.length > MAX_FETCH_CHARS) {
+    text = `${text.slice(0, MAX_FETCH_CHARS)}\n…[recortado: ${text.length - MAX_FETCH_CHARS} caracteres más]`;
+  }
+  return text || '(la página no tiene texto)';
+}
+
+async function toolWebSearch(query, limit) {
+  const q = String(query ?? '').trim();
+  if (!q) throw new Error('Falta query');
+  let data;
+  try {
+    data = await api.post('/api/websearch', { query: q, limit: Math.max(1, Math.min(parseInt(limit, 10) || 5, 10)) });
+  } catch (err) {
+    throw new Error(`Búsqueda web fallida: ${err.message || err}`);
+  }
+  const results = data?.results || [];
+  if (!results.length) return '(sin resultados)';
+  return results
+    .map((r, i) => `${i + 1}. ${r.title || '(sin título)'}\n   ${r.url || ''}\n   `
+      + `${String(r.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 1500)}`)
+    .join('\n\n');
+}
+
 async function toolDeleteFile(root, relPath) {
   const rel = normalizeRel(relPath);
   if (!rel) throw new Error('Falta la ruta');
@@ -251,9 +431,13 @@ async function toolRenameFile(root, srcRel, dstRel) {
 export async function executeToolCall(root, tool, args = {}) {
   switch (tool) {
     case 'list_files': return toolListFiles(root, args.path ?? '.');
+    case 'find_files': return toolFindFiles(root, args.pattern);
+    case 'outline': return toolOutline(root, args.path);
     case 'read_file': return toolReadFile(root, args.path, args.start_line, args.end_line);
     case 'write_file': return toolWriteFile(root, args.path, String(args.content ?? ''));
     case 'edit_file': return toolEditFile(root, args.path, args.old_text, args.new_text, !!args.all);
+    case 'multi_edit': return toolMultiEdit(root, args.path, args.edits);
+    case 'insert_at_line': return toolInsertAtLine(root, args.path, args.line, String(args.content ?? ''));
     case 'append_file': return toolAppendFile(root, args.path, String(args.content ?? ''));
     case 'mkdir': return toolMkdir(root, args.path);
     case 'search': return toolSearch(root, args.pattern);
@@ -261,6 +445,8 @@ export async function executeToolCall(root, tool, args = {}) {
     case 'delete_file': return toolDeleteFile(root, args.path);
     case 'rename_file': return toolRenameFile(root, args.src, args.dst);
     case 'run_command': return toolRunCommand(root, args.command, args.timeout);
+    case 'fetch_url': return toolFetchUrl(args.url);
+    case 'web_search': return toolWebSearch(args.query, args.limit);
     default: throw new Error(`Herramienta no soportada en el IDE: ${tool}`);
   }
 }
@@ -273,7 +459,8 @@ const MAX_SNAPSHOT_CHARS = 300000;
     ejecutarla. null = no reversible (mkdir, comandos, archivos enormes). */
 export async function captureSnapshot(root, tool, args = {}) {
   try {
-    if (tool === 'write_file' || tool === 'append_file' || tool === 'edit_file' || tool === 'delete_file') {
+    if (tool === 'write_file' || tool === 'append_file' || tool === 'edit_file' || tool === 'delete_file'
+      || tool === 'multi_edit' || tool === 'insert_at_line') {
       const rel = normalizeRel(args.path);
       if (!rel) return null;
       let oldContent = null; // null = el archivo no existía
@@ -336,6 +523,27 @@ export async function computeChangePreview(root, tool, args = {}) {
     const d = diffCounts(oldText, newText);
     return { kind: 'update', path: rel, ...d };
   }
+  if (tool === 'multi_edit') {
+    const rel = normalizeRel(args.path);
+    const empty = { kind: 'update', path: rel, added: 0, removed: 0, sampleOld: [], sampleNew: [] };
+    let oldText = null;
+    try {
+      oldText = await readFileContent(joinPath(root, rel));
+    } catch { /* no existe: el error real saldrá al ejecutar */ }
+    if (oldText === null) return empty;
+    let newText = oldText;
+    for (const e of (Array.isArray(args.edits) ? args.edits : [])) {
+      if (!e?.old_text || !newText.includes(e.old_text)) continue;
+      newText = e.all ? newText.split(e.old_text).join(e.new_text ?? '') : newText.replace(e.old_text, e.new_text ?? '');
+    }
+    const d = diffCounts(oldText, newText);
+    return { kind: 'update', path: rel, ...d };
+  }
+  if (tool === 'insert_at_line') {
+    const rel = normalizeRel(args.path);
+    const added = String(args.content ?? '').split('\n').filter((l, i, arr) => i < arr.length - 1 || l !== '').length;
+    return { kind: 'update', path: rel, added, removed: 0, sampleOld: [], sampleNew: String(args.content ?? '').split('\n').slice(0, 10) };
+  }
   if (tool === 'run_command') {
     return { kind: 'command', path: String(args.command ?? ''), added: 0, removed: 0, sampleOld: [], sampleNew: [] };
   }
@@ -382,8 +590,12 @@ export async function buildAgentSystemPrompt(root) {
     '=== HERRAMIENTAS DISPONIBLES ===\n' +
     'Para usar una herramienta escribe una línea que contenga SOLO su JSON:\n' +
     '{"tool":"list_files","args":{"path":"."}}\n' +
+    '{"tool":"find_files","args":{"pattern":"*.py"}}  (glob por nombre o ruta: "src/**/*.jsx", "test_*")\n' +
     '{"tool":"read_file","args":{"path":"archivo.txt"}}  (opcional: "start_line" y "end_line" para archivos grandes)\n' +
+    '{"tool":"outline","args":{"path":"archivo.js"}}  (funciones/clases con su línea; úsalo antes de read_file en archivos grandes)\n' +
     '{"tool":"edit_file","args":{"path":"archivo.txt","old_text":"fragmento EXACTO actual","new_text":"fragmento nuevo"}}\n' +
+    '{"tool":"multi_edit","args":{"path":"archivo.txt","edits":[{"old_text":"a","new_text":"b"},{"old_text":"c","new_text":"d"}]}}  (varias sustituciones EXACTAS en una llamada)\n' +
+    '{"tool":"insert_at_line","args":{"path":"archivo.txt","line":10,"content":"texto a insertar\\n"}}  (line=0 o mayor que el total: al final)\n' +
     '{"tool":"write_file","args":{"path":"archivo.txt","content":"contenido completo"}}\n' +
     '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n' +
     '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n' +
@@ -391,7 +603,9 @@ export async function buildAgentSystemPrompt(root) {
     '{"tool":"search_codebase","args":{"query":"qué hace o dónde está X (búsqueda semántica)"}}\n' +
     '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n' +
     '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n' +
-    '{"tool":"run_command","args":{"command":"npm test","timeout":60}}\n\n' +
+    '{"tool":"run_command","args":{"command":"npm test","timeout":60}}\n' +
+    '{"tool":"fetch_url","args":{"url":"https://…"}}  (descarga una página web como texto)\n' +
+    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n\n' +
     '=== REGLAS OBLIGATORIAS ===\n' +
     '1. Si el usuario pide crear, modificar, arreglar o eliminar algo, DEBES hacerlo con herramientas EN ESTA MISMA RESPUESTA. ' +
     'Tú ejecutas los cambios; el usuario no copia código.\n' +

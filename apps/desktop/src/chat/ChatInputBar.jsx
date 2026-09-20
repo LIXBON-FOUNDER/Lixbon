@@ -15,16 +15,19 @@ import { ModelPicker } from './ModelPicker';
 import {
   IconSend, IconStop, IconX, IconFileCode, IconHammer, IconClip,
   IconPlus, IconTerminal, IconHistory, IconFolder, IconSun,
-  IconGitCommit, IconChart, IconList, IconCheck,
+  IconGitCommit, IconChart, IconList, IconCheck, IconUser,
+  IconPuzzle, IconGear,
 } from '../components/Icons';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-/** Comandos "/" del composer: acciones instantáneas, no texto para el modelo
-    (subconjunto del CLI — apps/cli/lixbon_cli/commands.py — que ya tiene
-    equivalente funcional aquí; el resto vive en botones físicos). */
+/** Comandos "/" del composer: acciones instantáneas, no texto para el modelo.
+    Espejo de apps/cli/lixbon_cli/commands.py::COMMAND_SPECS — mismo nombre
+    de comando para quien viene del CLI. Lo que allí es solo de terminal
+    (doctor, ps, nodes, bar…) no tiene equivalente aquí y se omite. */
 const SLASH_COMMANDS = [
-  { cmd: 'clear', desc: 'Nueva conversación', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
+  { cmd: 'new', desc: 'Nueva conversación', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
+  { cmd: 'clear', desc: 'Vaciar el contexto y empezar de cero', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
   { cmd: 'mode', desc: 'Modo del agente (auto-aplicar, auto-run)', Icon: IconHammer, run: () => runCommand('chat.toggleAgentMenu') },
   { cmd: 'approve', desc: 'Auto-aprobar cambios del agente', Icon: IconCheck, run: () => runCommand('chat.toggleApprove') },
   { cmd: 'undo', desc: 'Revertir el último cambio', Icon: IconHistory, run: () => runCommand('chat.undoLast') },
@@ -32,6 +35,17 @@ const SLASH_COMMANDS = [
   { cmd: 'commit', desc: 'Confirmar cambios en Git', Icon: IconGitCommit, run: () => runCommand('git.open') },
   { cmd: 'model', desc: 'Cambiar de modelo', Icon: IconSun, run: () => runCommand('chat.focusModelPicker') },
   { cmd: 'usage', desc: 'Ver consumo de la cuenta', Icon: IconChart, run: () => runCommand('chat.openUsage') },
+  { cmd: 'copy', desc: 'Copiar la última respuesta', Icon: IconClip, run: () => runCommand('chat.copyLast') },
+  { cmd: 'save', desc: 'Guardar la conversación en Markdown', Icon: IconFileCode, run: () => runCommand('chat.saveMarkdown') },
+  { cmd: 'history', desc: 'Ver conversaciones anteriores', Icon: IconHistory, run: () => runCommand('chat.showHistory') },
+  { cmd: 'workspace', desc: 'Cambiar la carpeta de trabajo', Icon: IconFolder, run: () => runCommand('chat.openWorkspace') },
+  { cmd: 'init', desc: 'Generar LIXBON.md con el contexto del proyecto', Icon: IconFileCode, run: () => runCommand('chat.init') },
+  { cmd: 'tools', desc: 'Herramientas y permisos del agente', Icon: IconPuzzle, run: () => runCommand('settings.openAgent') },
+  { cmd: 'allow', desc: 'Comandos que el agente ejecuta sin preguntar', Icon: IconPuzzle, run: () => runCommand('settings.openAgent') },
+  { cmd: 'login', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
+  { cmd: 'logout', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
+  { cmd: 'key', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
+  { cmd: 'config', desc: 'Ajustes', Icon: IconGear, run: () => runCommand('workbench.openSettings') },
   { cmd: 'remote', desc: 'Control remoto por QR', Icon: IconTerminal, run: () => runCommand('remote.open') },
   { cmd: 'help', desc: 'Ver todos los comandos', Icon: IconList, run: () => runCommand('workbench.commandPalette') },
 ];

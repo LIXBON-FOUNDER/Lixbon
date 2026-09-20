@@ -5313,10 +5313,123 @@ def _loads_lenient(candidate: str):
         return json.loads(_quotes_to_json(candidate), strict=False)
 
 
-def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
+# Campos de `args` por herramienta, en el orden del system prompt. Solo se
+# usa para reparar llamadas con JSON roto (ver _repair_by_schema); espejo del
+# despacho de execute_tool_call. Las que no aparecen (multi_edit, con `edits`
+# anidado) caen al escaneo genérico: no vale la pena reparar esa forma.
+_TOOL_ARG_KEYS = {
+    "list_files": ("path", "recursive"),
+    "find_files": ("pattern",),
+    "outline": ("path",),
+    "fetch_url": ("url",),
+    "web_search": ("query", "limit"),
+    "read_file": ("path", "start_line", "end_line"),
+    "write_file": ("path", "content"),
+    "edit_file": ("path", "old_text", "new_text", "all"),
+    "insert_at_line": ("path", "line", "content"),
+    "append_file": ("path", "content"),
+    "mkdir": ("path",),
+    "search": ("pattern", "path", "glob", "ignore_case", "regex"),
+    "delete_file": ("path",),
+    "rename_file": ("src", "dst"),
+    "run_command": ("command", "timeout", "background"),
+    "read_output": ("id", "wait"),
+    "stop_command": ("id",),
+}
+
+_ESCAPE_MAP = {'"': '"', "\\": "\\", "/": "/", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _unescape_basic(s: str) -> str:
+    return re.sub(r'\\(["\\/nrt])', lambda m: _ESCAPE_MAP[m.group(1)], s)
+
+
+_REPAIR_HEAD = re.compile(r'^\{\s*"tool"\s*:\s*"([^"]*)"\s*,\s*"args"\s*:\s*\{')
+_REPAIR_KEY = re.compile(r'^"([a-zA-Z_]+)"\s*:\s*')
+_REPAIR_PRIMITIVE = re.compile(r"^(true|false|null|-?\d+(?:\.\d+)?)")
+
+
+def _repair_by_schema(text: str, start: int) -> tuple[dict, int] | None:
+    """Repara {"tool":"...","args":{...}} campo a campo cuando el modelo dejó
+    comillas sin escapar DENTRO de un valor largo (CSS/HTML tal cual metido en
+    el `content` de un write_file, por ejemplo). El conteo de llaves genérico
+    (_scan_object) no puede distinguir esas comillas de las que de verdad
+    cierran el string, así que en vez de adivinar se busca, para cada campo,
+    el siguiente delimitador que SÍ conocemos: el nombre literal de otra clave
+    de esta misma herramienta (`,"content":`) o el cierre del objeto (`"}`).
+    None si `tool` no es de los nuestros o el JSON no sigue esta forma exacta
+    — así el llamador cae al escaneo genérico."""
+    head = _REPAIR_HEAD.match(text[start:start + 200])
+    if not head:
+        return None
+    tool = head.group(1)
+    keys = _TOOL_ARG_KEYS.get(tool)
+    if not keys:
+        return None
+    i = start + len(head.group(0))
+    args: dict = {}
+    remaining = set(keys)
+    n = len(text)
+    while True:
+        while i < n and text[i] in " \t\r\n,":
+            i += 1
+        if i < n and text[i] == "}":
+            i += 1
+            break
+        key_m = _REPAIR_KEY.match(text[i:])
+        if not key_m or key_m.group(1) not in remaining:
+            return None
+        key = key_m.group(1)
+        i += key_m.end()
+        remaining.discard(key)
+        if i < n and text[i] == '"':
+            i += 1
+            other_keys = [re.escape(k) for k in remaining]
+            stop_re = re.compile(r'"\s*,\s*"(?:' + "|".join(other_keys) + r')"\s*:|"\s*\}') \
+                if other_keys else re.compile(r'"\s*\}')
+            stop_m = stop_re.search(text, i)
+            if not stop_m:
+                return None  # el valor sigue abierto: streaming a medias
+            args[key] = _unescape_basic(text[i:stop_m.start()])
+            i = stop_m.start() + 1
+        else:
+            val_m = _REPAIR_PRIMITIVE.match(text[i:])
+            if not val_m:
+                return None
+            args[key] = json.loads(val_m.group(1))
+            i += val_m.end()
+    while i < n and text[i] in " \t\r\n":
+        i += 1
+    if i >= n or text[i] != "}":
+        return None
+    return {"tool": tool, "args": args}, i + 1
+
+
+def _find_tool_call_end(text: str, start: int) -> tuple[dict | None, int] | None:
+    """Localiza el final de la llamada que empieza en `start`. Primero intenta
+    la reparación consciente del esquema (robusta ante comillas sin escapar en
+    valores largos); si no aplica, cae al escaneo genérico + _loads_lenient.
+    None si el JSON sigue abierto (streaming a medias)."""
+    fixed = _repair_by_schema(text, start)
+    if fixed:
+        return fixed
+    end = _scan_object(text, start)
+    if end == -1:
+        return None
+    try:
+        data = _validate_tool_dict(_loads_lenient(text[start:end]))
+    except Exception:
+        data = None
+    return data, end
+
+
+def _iter_tool_call_spans(text: str) -> list[tuple[dict | None, int, int]]:
     """Localiza los JSON `{"tool":...}` embebidos: (call, inicio, fin_exclusivo).
 
-    Cuenta llaves para soportar JSON anidado (write_file con content largo).
+    Incluye también los que cierran pero cuyo JSON no se pudo interpretar
+    (`call is None`): un intento de llamada roto NUNCA debe mostrarse crudo en
+    el chat, aunque no se pueda ejecutar — strip_tool_calls los quita a todos,
+    y solo extract_all_tool_calls filtra los válidos.
     """
     results = []
     i = 0
@@ -5325,22 +5438,25 @@ def _iter_tool_call_spans(text: str) -> list[tuple[dict, int, int]]:
         if not m:
             break
         start = m.start()
-        end = _scan_object(text, start)
-        if end == -1:  # objeto sin cerrar: no hay más llamadas completas
+        found = _find_tool_call_end(text, start)
+        if found is None:  # objeto sin cerrar: no hay más llamadas completas
             break
-        try:
-            data = _validate_tool_dict(_loads_lenient(text[start:end]))
-            if data:
-                results.append((data, start, end))
-        except Exception:
-            pass
+        data, end = found
+        results.append((data, start, end))
         i = end
     return results
 
 
 def extract_all_tool_calls(text: str) -> list[dict]:
     """Extrae todos los JSON `{"tool":...}` embebidos en texto mixto."""
-    return [call for call, _, _ in _iter_tool_call_spans(text)]
+    return [call for call, _, _ in _iter_tool_call_spans(text) if call]
+
+
+def has_invalid_call(text: str) -> bool:
+    """¿Hubo un intento de tool-call cuyo JSON no se pudo interpretar (comillas
+    o escapes rotos)? Sirve para pedirle al modelo que lo repita en vez de
+    terminar el turno en silencio como si no hubiera pasado nada."""
+    return any(call is None for call, _, _ in _iter_tool_call_spans(text))
 
 
 def strip_tool_calls(text: str) -> str:
@@ -5371,7 +5487,7 @@ def cut_unclosed_call(text: str) -> str:
     if not starts:
         return text
     last = starts[-1]
-    return text if _scan_object(text, last) != -1 else text[:last]
+    return text if _find_tool_call_end(text, last) is not None else text[:last]
 
 
 def has_unclosed_call(text: str) -> bool:
@@ -8312,6 +8428,27 @@ class ChatApp:
         if marker:
             self.prompt_prefill = f"{self.prompt_prefill} {marker}".strip()
 
+    def _usage_bar_cls(self, pct: float) -> str:
+        if pct >= CTX_FULL:
+            return "lx.err"
+        if pct >= CTX_WARN:
+            return "lx.warn"
+        return "lx.ok"
+
+    def _print_usage_bucket(self, label: str, bucket: dict) -> None:
+        self.console.print(f"[lx.primary]{label}[/]")
+        if bucket.get("unlimited"):
+            self.console.print(f"  [lx.dim2]{g('bar_full') * 24}[/]  [lx.ok]ilimitado[/]")
+            self.console.print()
+            return
+        pct = min(100, round(bucket.get("percent", 0)))
+        cls = self._usage_bar_cls(pct)
+        self.console.print(f"  [{cls}]{context_bar(pct, 24)}[/]  {pct}% usado")
+        reset = bucket.get("reset_at")
+        if reset:
+            self.console.print(f"  [lx.dim2]Se reinicia {reset_in(reset)}[/]")
+        self.console.print()
+
     def cmd_usage(self, arg: str):
         with spinner("consultando uso…"):
             data = self.api.usage()
@@ -8320,19 +8457,9 @@ class ChatApp:
         session = buckets.get("session") or {}
         week = buckets.get("week") or {}
 
-        def _bucket_str(b: dict) -> str:
-            if b.get("unlimited"):
-                return "ilimitado"
-            return f"{min(100, round(b.get('percent', 0)))}%"
-
-        self.console.print(
-            f"[lx.dim]Plan {esc(plan.get('name', ''))}:[/] "
-            f"sesión {_bucket_str(session)} {g('sep')} semana {_bucket_str(week)}"
-        )
-        if not session.get("unlimited") and session.get("reset_at"):
-            self.console.print(f"  [lx.dim2]Sesión se reinicia {reset_in(session['reset_at'])}[/]")
-        if not week.get("unlimited") and week.get("reset_at"):
-            self.console.print(f"  [lx.dim2]Semana se reinicia {reset_in(week['reset_at'])}[/]")
+        self.console.print(f"\n[lx.dim]Plan[/] [lx.primary]{esc(plan.get('name', '-'))}[/]\n")
+        self._print_usage_bucket("Sesión (4h)", session)
+        self._print_usage_bucket("Semana (todos los modelos)", week)
         return True
 
     def cmd_nodes(self, arg: str):
@@ -9489,8 +9616,25 @@ def cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
-def _bucket_pct(bucket: dict) -> str:
-    return "ilimitado" if bucket.get("unlimited") else f"{min(100, round(bucket.get('percent', 0)))}%"
+_USAGE_BAR_WIDTH = 24
+
+
+def _usage_bar(pct: float, width: int = _USAGE_BAR_WIDTH) -> str:
+    pct = max(0.0, min(100.0, pct))
+    filled = round(width * pct / 100)
+    return "#" * filled + "." * (width - filled)
+
+
+def _print_bucket(label: str, bucket: dict) -> None:
+    print(label)
+    if bucket.get("unlimited"):
+        print(f"  [{'#' * _USAGE_BAR_WIDTH}]  ilimitado")
+        return
+    pct = min(100, round(bucket.get("percent", 0)))
+    print(f"  [{_usage_bar(pct)}]  {pct}% usado")
+    reset = bucket.get("reset_at")
+    if reset:
+        print(f"  Se reinicia {reset_in(reset)}")
 
 
 def cmd_usage(args: argparse.Namespace) -> int:
@@ -9504,11 +9648,11 @@ def cmd_usage(args: argparse.Namespace) -> int:
     plan = data.get("plan") or {}
     buckets = data.get("buckets") or {}
     session, week = buckets.get("session") or {}, buckets.get("week") or {}
-    print(f"Plan: {plan.get('name', '-')}")
-    print(f"- Sesión (4h): {_bucket_pct(session)}"
-          + (f", se reinicia {reset_in(session.get('reset_at'))}" if not session.get("unlimited") else ""))
-    print(f"- Semana:      {_bucket_pct(week)}"
-          + (f", se reinicia {reset_in(week.get('reset_at'))}" if not week.get("unlimited") else ""))
+    print(f"Plan {plan.get('name', '-')}")
+    print()
+    _print_bucket("Sesion (4h)", session)
+    print()
+    _print_bucket("Semana (todos los modelos)", week)
     return 0
 
 
