@@ -103,4 +103,4 @@ jobs:
             -F "title=Lixbon Android v$VERSION" \
             -F "changelog=$CHANGELOG" \
             -F "file=@build/Lixbon-$VERSION.apk" \
-            "${{ vars.LIXBON_SERVER_URL || 'https://llm-datacent-production.up.railway.app' }}/api/versions/upload"
+            "${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}/api/versions/upload"

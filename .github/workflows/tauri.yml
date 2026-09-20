@@ -116,7 +116,7 @@ jobs:
               -F "changelog=$ChangelogJson" `
               -F "checksum_sha256=$Signature" `
               -F "file=@$($MSI_PATH.FullName)" `
-              "${{ vars.LIXBON_SERVER_URL || 'https://llm-datacent-production.up.railway.app' }}/api/versions/upload"
+              "${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}/api/versions/upload"
             if ($LASTEXITCODE -ne 0) {
               Write-Error "La subida del instalador al servidor falló (exit $LASTEXITCODE)."
               exit 1
