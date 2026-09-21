@@ -8,6 +8,8 @@
 | [RAMAS_Y_RELEASES.md](RAMAS_Y_RELEASES.md) | Modelo de ramas (`master` / `desktop` / `cli` / `mobile`), convención de commits, cómo publicar cada producto |
 | [ESTADO_ACTUAL.md](ESTADO_ACTUAL.md) | Estado del proyecto para retomar el trabajo |
 | [../PRODUCT.md](../PRODUCT.md) | Brief de producto: usuarios, personalidad de marca, principios de diseño |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Cómo contribuir: entorno por producto, rama correcta, commits, checklist de PR |
+| [../SECURITY.md](../SECURITY.md) | Cómo reportar vulnerabilidades y prácticas de seguridad del proyecto |
 
 ## Diseño
 
