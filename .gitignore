@@ -38,3 +38,5 @@ Thumbs.db
 
 .claude/skills/*
 .github/skills/impeccable
+# ── Pytest ──────────────────────────────────────────────────────
+.pytest_cache/

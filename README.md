@@ -1,112 +1,79 @@
-# lixbon DTC — Data & Task Center v2.0
+# lixbon
 
-Orquestador corporativo y pasarela API para exponer y coordinar modelos de `Ollama` en una red LAN, con balanceo de carga, circuit breaker y delegación inteligente.
+Plataforma SaaS de modelos LLM auto-hospedados sobre un clúster GPU distribuido.
+Un gateway central (FastAPI) expone los modelos con API compatible con OpenAI,
+límites por plan y cuentas de usuario; alrededor de él hay cuatro clientes:
+web, escritorio, CLI y móvil.
 
-- **Orquestación & Balanceo de Carga**: Selección automática del mejor nodo de la red local según uso de CPU, RAM y GPU.
-- **Circuit Breaker Inteligente**: Aislamiento temporal de nodos caídos con backoff exponencial.
-- **Seguridad Robusta**: Hashing de contraseñas con `scrypt` y rate limiting configurable.
-- **Delegación Inteligente**: Enrutamiento automático de solicitudes usando embeddings de historial.
-- **Lanzador Unificado**: Control del stack completo desde un único menú interactivo (`lixbon.bat` / `lixbon.sh`).
-- **Dashboard Web**: Panel de administración premium para monitorizar el estado del cluster, audit logs y API keys.
+| Producto | Carpeta | Stack | Rama de trabajo | Release |
+|---|---|---|---|---|
+| **Gateway** + node agent | `core/`, `BD/`, `infra/` | Python 3.12 · FastAPI · SQLAlchemy · Postgres | `master` | Railway despliega `master` |
+| **Web** (lixbon.com) | `apps/web` | React 19 · Vite | `master` | Se compila dentro de la imagen del gateway |
+| **Desktop** | `apps/desktop` | Tauri 2 · React | `desktop` | Tag `desktop-vX.Y.Z` → CI → MSI |
+| **CLI** | `apps/cli` | Python 3 (sin dependencias) | `cli` | `python apps/cli/build.py` → el gateway lo sirve |
+| **Móvil** (Android) | `apps/mobile` | React Native · Expo | `mobile` | Tag `mobile-vX.Y.Z` → CI → APK |
 
----
+El flujo de ramas está en [`docs/RAMAS_Y_RELEASES.md`](docs/RAMAS_Y_RELEASES.md);
+la arquitectura completa en [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
-## 🚀 Instalación y Despliegue Rápido
+## Estructura del repositorio
 
-### 1. Clonar e Instalar Dependencias
+```
+.
+├── core/            gateway FastAPI, inferencia, orquestación, billing, node agent
+├── BD/              esquema Postgres, migraciones Alembic, seeds y scripts de BD
+├── infra/           Docker del nodo, lanzadores locales (.bat/.sh) y scripts de operación
+├── apps/
+│   ├── web/         lixbon.com (chat, cuenta, planes, docs, panel admin)
+│   ├── desktop/     app de escritorio (Tauri)
+│   ├── cli/         lixbon CLI (fuente en lixbon_cli/, artefacto client_cli.py)
+│   └── mobile/      app Android (Expo)
+├── assets/brand/    iconos y favicon oficiales
+├── docs/            documentación técnica y de producto
+├── .github/         workflows de CI/CD y plantilla de PR
+├── Dockerfile       imagen del gateway (incluye la web compilada y el CLI)
+├── railway.toml     despliegue en Railway
+├── alembic.ini      migraciones (apunta a BD/migrations)
+└── .env.example     todas las variables de entorno del gateway, documentadas
+```
+
+## Arranque rápido (gateway + web en local)
+
 ```bash
-# Crear entorno virtual
-python3 -m venv .venv
-source .venv/bin/activate  # o .venv\Scripts\activate en Windows
-
-# Instalar dependencias
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env                                  # editar DATABASE_URL, etc.
+
+# Gateway — SIEMPRE desde la raíz del repo (import de `core`)
+python -m uvicorn core.gateway.app:app --port 8000
+
+# Web (otra terminal) — proxy /api y /v1 → :8000
+cd apps/web && npm install && npm run dev            # http://localhost:5173
 ```
 
-### 2. Configurar Entorno
-Copia el archivo `.env.example` como `.env` y edita los valores si es necesario:
+- Salud: `GET http://127.0.0.1:8000/health`
+- Inferencia local: Ollama en `127.0.0.1:11434` (el orquestador cae a él si no hay nodos)
+- Lanzador con menú para gateway + node agent + Ollama LAN + túnel: `infra/scripts/lixbon.bat` / `lixbon.sh`
+
+Cada app tiene su propio README con instrucciones de desarrollo y release:
+[`apps/web`](apps/web/README.md) · [`apps/desktop`](apps/desktop/README.md) ·
+[`apps/cli`](apps/cli/README.md) · [`apps/mobile`](apps/mobile/README.md).
+
+## Tests
+
 ```bash
-cp .env.example .env
+python -m pytest core            # gateway (los tests viven junto al módulo que prueban)
+python -m pytest apps/cli/tests  # CLI (incluye la verificación de que client_cli.py está al día)
 ```
 
-### 3. Iniciar con el Lanzador Unificado
-En lugar de abrir múltiples terminales, usa el script maestro:
+## API compatible con OpenAI
 
-- **Windows**: Ejecuta `lixbon.bat`
-- **Linux / macOS**: Ejecuta `./lixbon.sh`
-
-El menú interactivo te permitirá arrancar el Gateway, el Node Agent local, Ollama en modo LAN y el túnel de Cloudflare de forma unificada.
-
-- **Dashboard**: `http://localhost:8000/`
-- **Health**: `http://localhost:8000/health`
-
----
-
-## 💻 Cliente CLI de lixbon DTC
-
-Se incluye un potente cliente CLI en `client_cli.py` para chatear y ejecutar comandos de agente desde cualquier máquina de la red.
-
-### Instalación en Equipos Remotos
-
-Con el Gateway activo, ejecuta en la máquina cliente:
-
-#### Linux / macOS
 ```bash
-curl -fsSL "http://IP_DEL_SERVIDOR:8000/install.sh" | bash
-```
-
-#### Windows (PowerShell)
-```powershell
-irm "http://IP_DEL_SERVIDOR:8000/install.ps1" | iex
-```
-
-### Comandos del CLI
-
-Abre una nueva terminal y ejecuta:
-
-1. **Configuración inicial**:
-   ```bash
-   lixbon setup
-   ```
-2. **Iniciar chat interactivo**:
-   ```bash
-   lixbon chat
-   ```
-3. **Ver estado del cluster**:
-   ```bash
-   lixbon status
-   ```
-
-#### Slash Commands dentro del Chat del CLI
-- `/nodes` — Muestra el estado en tiempo real de todos los nodos del cluster, su score y si están en circuit breaker.
-- `/model <nombre>` — Cambia el modelo en caliente.
-- `/mode ask|agent` — Cambia entre modo chat y modo agente autónomo.
-- `/workspace <ruta>` — Define el directorio de trabajo para edición de código local.
-- `/approve on|off` — Activa/desactiva aprobación manual de herramientas.
-- `/usage` — Muestra el consumo global de tokens y mensajes.
-- `/update` — Actualiza el CLI directamente desde el servidor.
-- `/exit` — Salir del chat.
-
----
-
-## 🛠️ Integraciones API (Formato OpenAI)
-
-El Gateway es 100% compatible con la especificación de API de OpenAI:
-
-### curl
-```bash
-curl -X POST "http://IP_DEL_SERVIDOR:8000/v1/chat/completions" \
-  -H "Authorization: Bearer TU_API_KEY" \
+curl -X POST "https://lixbon.com/v1/chat/completions" \
+  -H "Authorization: Bearer lixbon_sk_..." \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "llama3.1:8b",
-    "messages": [{"role": "user", "content": "Hola"}],
-    "client_id": "pc-diseno-01"
-  }'
+  -d '{"model": "llama3.1:8b", "messages": [{"role": "user", "content": "Hola"}]}'
 ```
 
-### n8n
-- **Nodo**: `OpenAI Chat Model`
-- **Base URL**: `http://IP_DEL_SERVIDOR:8000/v1`
-- **API Key**: Generada desde el dashboard
-- **Modelo**: Nombre exacto de Ollama
+Cualquier cliente OpenAI (n8n, SDKs, LangChain) funciona con `base_url = https://lixbon.com/v1`
+y una API key creada desde la cuenta.

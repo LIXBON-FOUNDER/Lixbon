@@ -4,9 +4,9 @@ con suposiciones. No toca la base de datos ni crea cuentas.
 
 Uso (en Railway, que inyecta las variables de producción):
 
-    railway run python scripts/probar_correo.py                    # solo diagnóstico
-    railway run python scripts/probar_correo.py tu@correo.com      # + envía una prueba
-    railway run python scripts/probar_correo.py tu@correo.com --plantilla bienvenida
+    railway run python infra/ops/probar_correo.py                    # solo diagnóstico
+    railway run python infra/ops/probar_correo.py tu@correo.com      # + envía una prueba
+    railway run python infra/ops/probar_correo.py tu@correo.com --plantilla bienvenida
 
 Comprueba, en este orden:
 
@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # La consola de Windows no habla UTF-8 por defecto y este informe va lleno de
 # acentos: sin esto, el diagnóstico se lee peor que el problema que diagnostica.

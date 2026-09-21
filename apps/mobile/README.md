@@ -5,6 +5,8 @@ historial compartido con la web, uso del plan y gestión de cuenta. Mismo
 diseño que la web (tokens de `docs/DISENO_WEB.md`, Bruno Ace SC + Bricolage
 Grotesque embebidas en `assets/fonts/`, temas claro/oscuro).
 
+Rama de trabajo: **`mobile`** (ver `docs/RAMAS_Y_RELEASES.md`).
+
 ## Filosofía de compilación
 
 Igual que el Rust del desktop: **la app compila solo en CI** — no hace falta
@@ -13,7 +15,7 @@ genera `npx expo prebuild --platform android` en GitHub Actions
 (`.github/workflows/mobile.yml`) y el APK sale firmado con la keystore de
 debug (instalable, no Play Store).
 
-- **Release**: subir la versión en `package.json` (única fuente: `app.config.js`
+- **Release**: PR de `mobile` a `master`, subir la versión en `package.json` (única fuente: `app.config.js`
   la lee de ahí) y empujar el tag `mobile-vX.Y.Z` (el CI comprueba que
   coincidan). Sale: artifact `lixbon-android`, release borrador en GitHub y
   subida a `/api/versions/upload` (tarjeta Android de `/aplicaciones`).

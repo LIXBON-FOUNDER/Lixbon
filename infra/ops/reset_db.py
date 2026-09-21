@@ -3,8 +3,8 @@ reset_db.py — Vacía datos de la BD (Postgres) de forma controlada y segura.
 
 Uso (en Railway, que inyecta DATABASE_URL):
 
-    railway run python scripts/reset_db.py --scope billing        # ver qué borraría
-    railway run python scripts/reset_db.py --scope billing --yes  # ejecutar
+    railway run python infra/ops/reset_db.py --scope billing        # ver qué borraría
+    railway run python infra/ops/reset_db.py --scope billing --yes  # ejecutar
 
 Alcances (--scope):
   billing  (recomendado)  Facturación y uso: credit_ledger, credit_accounts,
@@ -27,9 +27,9 @@ import argparse
 import os
 import sys
 
-# Permite ejecutar tanto `python scripts/reset_db.py` como `python -m scripts.reset_db`:
+# Permite ejecutar tanto `python infra/ops/reset_db.py` como `python -m infra.ops.reset_db`:
 # añade la raíz del repo al path para que `import core...` resuelva.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from sqlalchemy import text
 
