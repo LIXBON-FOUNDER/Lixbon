@@ -1529,3 +1529,11 @@
   .status__barras { gap: 1px; height: 22px; }
   .status__barra { border-radius: 1px; }
 }
+
+/* Beta del escritorio: debajo de la estable, sin competir con ella. */
+.dl-card__beta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
