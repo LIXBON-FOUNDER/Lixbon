@@ -14,6 +14,20 @@ export const DEFAULT_KEYMAP = {
   'ctrl+ñ': 'workbench.toggleTerminal',
   'ctrl+b': 'workbench.toggleExplorer',
   'ctrl+n': 'chat.newConversation',
+  'ctrl+s': 'file.save',
+  'ctrl+shift+s': 'file.saveAll',
+  'ctrl+w': 'file.close',
+  'ctrl+shift+f': 'workbench.search',
+  'ctrl+shift+e': 'workbench.showFiles',
+  'ctrl+shift+x': 'workbench.showExtensions',
+  'ctrl+shift+g': 'git.open',
+  'ctrl+alt+b': 'workbench.toggleAgent',
+  'ctrl+1': 'mode.agent',
+  'ctrl+2': 'mode.editor',
+  'ctrl+3': 'mode.design',
+  'ctrl+4': 'mode.git',
+  'ctrl+k': 'workbench.focusSearch',
+  'ctrl+,': 'workbench.openSettings',
 };
 
 let activeKeymap = { ...DEFAULT_KEYMAP };
@@ -98,6 +112,8 @@ export function dispatchKeydown(e) {
   // Solo chords con un modificador "de comando" (ctrl/meta/alt): no interferir
   // con el tecleo normal. Alt permite atajos como Shift+Alt+F (formatear).
   if (!(e.ctrlKey || e.metaKey || e.altKey)) return false;
+  // CodeMirror ya lo resolvió (Ctrl+S, Ctrl+F dentro del editor…).
+  if (e.defaultPrevented) return false;
   const chord = chordFromEvent(e);
   if (!chord) return false;
   const id = activeKeymap[chord];

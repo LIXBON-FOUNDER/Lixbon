@@ -16,11 +16,11 @@ import { IconX, IconPlus } from '../components/Icons';
 // siempre oscuro y en modo claro chocaba con el resto del IDE.
 const XTERM_THEMES = {
   dark: {
-    background: '#171717',
-    foreground: '#e7e7de',
-    cursor: '#d9e64a',
-    cursorAccent: '#171717',
-    selectionBackground: 'rgba(217, 230, 74, 0.30)',
+    background: '#111111',
+    foreground: '#DCDCD6',
+    cursor: '#C6D66E',
+    cursorAccent: '#111111',
+    selectionBackground: 'rgba(198, 214, 110, 0.25)',
   },
   light: {
     background: '#f6f7ed',
@@ -153,7 +153,7 @@ export function TerminalPanel() {
   // Y solo cuando el panel está a la vista: el componente ahora vive montado
   // (oculto) siempre, y no queremos un shell corriendo que nadie pidió.
   useEffect(() => {
-    if (workspaceReady && terminalVisible && sessions.length === 0) addSession('powershell');
+    if (workspaceReady && terminalVisible && sessions.length === 0) addSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceReady, terminalVisible]);
 
@@ -180,7 +180,7 @@ export function TerminalPanel() {
         <div className="terminal-tabs__actions">
           <button
             className="icon-btn"
-            onClick={() => addSession('powershell')}
+            onClick={() => addSession()}
             title="Nuevo terminal"
           >
             <IconPlus size={15} />

@@ -1,6 +1,5 @@
-/* base.css — fuentes self-hosted, design tokens y reset.
-   Copia sincronizada de apps/web/src/styles/base.css — fuente de verdad: docs/DISENO_WEB.md.
-   Los tokens de la sección "Tokens IDE" son exclusivos de la app desktop. */
+/* base.css — fuente de marca, design tokens y reset del IDE.
+   Hanken Grotesk y JetBrains Mono llegan self-hosted vía @fontsource (main.jsx). */
 
 /* ── Fuentes ─────────────────────────────────────────────────────────── */
 
@@ -20,105 +19,74 @@
   src: url('/fonts/bruno-ace-sc-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-@font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('/fonts/bricolage-grotesque-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('/fonts/bricolage-grotesque-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
 
 /* ── Tokens ──────────────────────────────────────────────────────────── */
+/* Solo tema oscuro. La jerarquía la dan seis peldaños de relleno y la
+   elevación del panel con foco: sin bordes ni sombras. Los nombres heredados
+   (--bg-secondary, --ink-50…) se mantienen porque todo el CSS legacy los usa. */
 
-:root {
-  color-scheme: light;
-
-  --bg: #ffffff;
-  --bg-secondary: #f6f7ed;
-  --bg-tertiary: #ececdb; /* hover/activo sobre bg-secondary (paneles, filas) */
-  --bg-quaternary: #e4e4cf; /* un tono más para popovers sobre bg-tertiary */
-  --bg-quinary: #d8d8bd; /* popovers anclados (cuenta, menú de comandos) */
-  --ink: #171717;
-  --ink-rgb: 23, 23, 23; /* para alphas: hover, tracks, rejillas… */
-  --ink-soft: rgba(23, 23, 23, 0.5); /* tono "secundario" por defecto (= --ink-50) */
-  --ink-70: rgba(23, 23, 23, 0.7);
-  --ink-50: rgba(23, 23, 23, 0.5);
-  --ink-35: rgba(23, 23, 23, 0.35);
-  --border: rgba(23, 23, 23, 0.9);
-  --border-soft: rgba(23, 23, 23, 0.16);
-  --accent: #d9e64a; /* verde-amarillo: etiqueta de plan */
-  --accent-deep: #6c7a46;
-  --accent-soft: rgba(108, 122, 70, 0.12);
-  --on-accent: #171717;
-  --primary: #171717; /* elementos invertidos: CTA, burbujas, toggles */
-  --on-primary: #ffffff;
-  --run-ink: #3f5410; /* botón Run (pariente oscuro del accent) */
-  --scrim: rgba(23, 23, 23, 0.14);
-  --shadow-rgb: 23, 23, 23;
-  --danger: #c0392b;
-  --danger-soft: rgba(192, 57, 43, 0.1);
-  --good: #2f8f49;
-  --good-soft: rgba(47, 143, 73, 0.12);
-  --warn: #a97a1f;
-  --warn-soft: rgba(169, 122, 31, 0.12);
-
-  --font-brand: 'Bruno Ace SC', sans-serif;
-  --font-ui: 'Bricolage Grotesque', system-ui, sans-serif;
-
-  --radius-pill: 999px;
-  --radius-box: 20px;
-  --sidebar-w: 280px;
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
-
-  /* ── Tokens IDE (solo desktop) ── */
-  --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
-  --panel-w: 264px; /* ancho del sidebar único (logo, rama, nav, cuenta) */
-}
-
-/* Modo oscuro "carbon": negro neutro (no el cálido de antes) + olivo/crema
-   como únicos acentos. Cuatro niveles de superficie (bg → bg-quaternary)
-   porque los popovers anclados (cuenta, comandos) necesitan distinguirse del
-   panel que los contiene sin usar sombra ni borde — solo tono. */
-[data-theme='dark'] {
+:root,
+[data-theme='dark'],
+[data-theme='light'] {
   color-scheme: dark;
 
-  --bg: #0B0B0C;           /* canvas de la app */
-  --bg-secondary: #19191B; /* paneles: sidebar, chat, GitHub */
-  --bg-tertiary: #222225;  /* hover/activo sobre bg-secondary; filas */
-  --bg-quaternary: #2B2B2E;/* chips, composer, filas dentro de filas */
-  --bg-quinary: #37373B;   /* popovers anclados (cuenta, menú de comandos) */
-  --ink: #F2F1EC;          /* text-primary */
-  --ink-rgb: 242, 241, 236;
-  --ink-soft: rgba(242, 241, 236, 0.5); /* tono "secundario" por defecto (= --ink-50) */
-  --ink-70: rgba(242, 241, 236, 0.72);
-  --ink-50: rgba(242, 241, 236, 0.5);
-  --ink-35: rgba(242, 241, 236, 0.32);
-  --border: #2E2E31;       /* border-strong (sin uso visual; reservado) */
-  --border-soft: #222225;  /* border-subtle (sin uso visual; reservado) */
-  --accent: #A9B86E;       /* olivo */
-  --accent-deep: #C3CE96;
-  --accent-soft: rgba(169, 184, 110, 0.16);
-  --on-accent: #171713;
-  --primary: #F0EBD9;      /* CTA invertido */
-  --on-primary: #171713;
-  --run-ink: #C9D69B;
-  --scrim: rgba(0, 0, 0, 0.35);
+  --surface-0: #070707;
+  --surface-1: #111111;
+  --surface-2: #161616;
+  --surface-3: #1C1C1C;
+  --surface-4: #222222;
+  --surface-5: #2A2A2A;
+  --surface-6: #333330;
+  --code-bg: #0B0B0B;
+
+  --bg: var(--surface-0);
+  --bg-secondary: var(--surface-1);
+  --bg-tertiary: var(--surface-3);
+  --bg-quaternary: var(--surface-4);
+  --bg-quinary: var(--surface-5);
+
+  --ink: #F2F2EE;
+  --ink-rgb: 242, 242, 238;
+  --ink-body: #DCDCD6;
+  --ink-soft: #9A9A94;
+  --ink-70: #B5B5AF;
+  --ink-50: #85857F;
+  --ink-35: #5E5E59;
+  --ink-faint: #44443F;
+
+  --border: transparent;
+  --border-soft: transparent;
+
+  --accent: #C6D66E;
+  --accent-deep: #D4E37E;
+  --accent-soft: rgba(198, 214, 110, 0.14);
+  --on-accent: #0B0B0B;
+  --primary: #F2F2EE;
+  --on-primary: #0B0B0B;
+  --run-ink: #D4E37E;
+  --info: #8EC5FF;
+  --scrim: rgba(4, 4, 4, 0.62);
   --shadow-rgb: 0, 0, 0;
-  --danger: #E0685A;
-  --danger-soft: rgba(224, 104, 90, 0.14);
-  --good: #5FB37D;
-  --good-soft: rgba(95, 179, 125, 0.16);
-  --warn: #D8A34A;
-  --warn-soft: rgba(216, 163, 74, 0.14);
+  --danger: #F08C7C;
+  --danger-strong: #D9584A;
+  --danger-soft: rgba(240, 140, 124, 0.12);
+  --good: #86D694;
+  --good-soft: rgba(134, 214, 148, 0.12);
+  --warn: #E8C872;
+  --warn-soft: rgba(232, 200, 114, 0.14);
+
+  --font-brand: 'Bruno Ace SC', sans-serif;
+  --font-ui: 'Hanken Grotesk Variable', 'Hanken Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+
+  --radius: 7px;
+  --radius-pill: 7px;
+  --radius-box: 7px;
+  --sidebar-w: 280px;
+  --panel-w: 264px;
+  --gap: 6px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring: cubic-bezier(0.3, 1.25, 0.5, 1);
 }
 
 /* ── Error boundary (evita la pantalla en blanco) ────────────────────── */
@@ -136,8 +104,7 @@
 .errboundary__card {
   max-width: 720px;
   width: 100%;
-  border: 1px solid var(--border-soft);
-  border-radius: 14px;
+  border-radius: 7px;
   padding: 20px 22px;
   background: var(--bg-secondary);
 }
@@ -161,8 +128,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: var(--bg);
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 7px;
   padding: 10px 12px;
   margin: 0 0 10px;
 }
@@ -184,7 +150,6 @@
   font-size: 13px;
   padding: 6px 14px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
   color: var(--ink);
   cursor: pointer;
 }
@@ -214,8 +179,8 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 16px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow: hidden; /* ventana de app: el scroll vive en los paneles */
 }
@@ -283,7 +248,6 @@ p {
 
 .pill-btn--outline {
   background: var(--bg);
-  border: 1px solid var(--border);
 }
 
 .pill-btn--outline:hover:not(:disabled) {

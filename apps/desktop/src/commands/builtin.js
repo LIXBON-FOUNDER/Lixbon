@@ -8,7 +8,11 @@ import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useIndexStore } from '../store/indexStore';
 import { useChatStore } from '../store/chatStore';
-import { pickDirectory, createNewEntry, writeFileContent } from '../lib/tauri';
+import { pickDirectory, createNewEntry, writeFileContent, openExternal } from '../lib/tauri';
+import { showConfirm } from '../lib/confirm';
+import { githubSlug } from '../lib/githubSlug';
+import { useWorkbenchStore } from '../store/workbenchStore';
+import { useFileViewStore } from '../store/fileViewStore';
 
 /** Markdown de una conversación completa (para /save): mismo criterio que
     apps/cli/lixbon_cli/app.py::cmd_save — un encabezado por turno, sin las
@@ -52,6 +56,9 @@ export function registerBuiltinCommands() {
 
   const app = () => useAppStore.getState();
   const git = () => useGitStore.getState();
+  const wb = () => useWorkbenchStore.getState();
+  const tabs = () => useFileViewStore.getState();
+  const inEditor = () => { if (wb().mode !== 'editor') wb().setMode('editor'); };
 
   registerCommands([
     // ── Vistas / paneles ────────────────────────────────────────────────
@@ -71,14 +78,56 @@ export function registerBuiltinCommands() {
       run: () => useChatStore.getState().newConversation(),
     },
     {
-      id: 'workbench.toggleExplorer', title: 'Archivos',
-      category: 'Ver', keywords: 'archivos explorer sidebar',
-      run: () => app().selectNav('explorer'),
+      id: 'workbench.toggleExplorer', title: 'Mostrar u ocultar la barra lateral',
+      category: 'Ver', keywords: 'archivos explorer sidebar barra lateral',
+      run: () => { if (wb().mode !== 'editor') { inEditor(); wb().showSide('files'); } else wb().toggleSide(); },
+    },
+    {
+      id: 'workbench.showFiles', title: 'Archivos',
+      category: 'Ver', keywords: 'archivos explorer arbol',
+      run: () => { inEditor(); wb().showSide('files'); },
+    },
+    {
+      id: 'workbench.search', title: 'Buscar en el proyecto',
+      category: 'Ver', keywords: 'buscar search reemplazar replace grep semantica',
+      run: () => { inEditor(); wb().showSide('search'); },
+    },
+    {
+      id: 'workbench.focusSearch', title: 'Buscar archivos, código o comandos',
+      category: 'Ver', keywords: 'buscador barra superior',
+      run: () => wb().setSearchOpen(true),
+    },
+    {
+      id: 'workbench.toggleAgent', title: 'Mostrar u ocultar el panel del agente',
+      category: 'Ver', keywords: 'agente panel derecho chat',
+      run: () => { inEditor(); wb().toggleAgent(); },
     },
     {
       id: 'workbench.toggleTerminal', title: 'Alternar terminal',
       category: 'Ver', keywords: 'terminal consola shell',
-      run: () => app().toggleTerminal(),
+      run: () => {
+        if (wb().mode !== 'editor') { inEditor(); app().showTerminal(); } else app().toggleTerminal();
+      },
+    },
+    { id: 'mode.agent', title: 'Modo Agente', category: 'Ver', keywords: 'agente chat pantalla completa', run: () => wb().setMode('agent') },
+    { id: 'mode.editor', title: 'Modo Editor', category: 'Ver', keywords: 'editor codigo', run: () => wb().setMode('editor') },
+    { id: 'mode.design', title: 'Modo Diseño', category: 'Ver', keywords: 'diseno vista previa emulador movil responsive', run: () => wb().setMode('design') },
+    { id: 'mode.git', title: 'Modo Git', category: 'Ver', keywords: 'git cambios commit github', run: () => wb().setMode('git') },
+
+    // ── Archivos ────────────────────────────────────────────────────────
+    {
+      id: 'file.save', title: 'Guardar', category: 'Archivo', keywords: 'guardar save',
+      when: () => !!tabs().activePath,
+      run: () => tabs().save(),
+    },
+    {
+      id: 'file.saveAll', title: 'Guardar todo', category: 'Archivo', keywords: 'guardar todo save all',
+      run: () => tabs().saveAll(),
+    },
+    {
+      id: 'file.close', title: 'Cerrar pestaña', category: 'Archivo', keywords: 'cerrar pestana close tab',
+      when: () => wb().mode === 'editor' && !!tabs().activePath,
+      run: () => tabs().close(tabs().activePath),
     },
     {
       id: 'workbench.showExtensions', title: 'Extensiones',
@@ -179,7 +228,7 @@ export function registerBuiltinCommands() {
     {
       id: 'chat.showHistory', title: 'Ver conversaciones anteriores',
       category: 'Chat', keywords: 'history historial conversaciones recientes',
-      run: () => app().selectNav('chat'),
+      run: () => wb().setMode('agent'),
     },
     {
       id: 'chat.openWorkspace', title: 'Cambiar la carpeta de trabajo',
@@ -236,6 +285,41 @@ export function registerBuiltinCommands() {
     {
       id: 'git.fetch', title: 'Git: fetch', category: 'Git',
       keywords: 'git fetch', run: () => git().fetch(),
+    },
+    {
+      id: 'git.createBranch', title: 'Git: crear rama…', category: 'Git',
+      keywords: 'git branch nueva rama checkout',
+      run: async () => {
+        const { choice, value } = await showConfirm({
+          title: 'Crear rama',
+          message: `Se crea a partir de ${git().branch || 'la rama actual'} y pasas a ella.`,
+          input: { placeholder: 'feat/nombre-de-la-rama', value: '' },
+          options: [{ id: 'ok', label: 'Crear', kind: 'primary' }, { id: 'cancel', label: 'Cancelar' }],
+        });
+        if (choice === 'ok' && value?.trim()) await git().checkout(value.trim(), true);
+      },
+    },
+    {
+      id: 'git.stash', title: 'Git: guardar cambios en stash', category: 'Git',
+      keywords: 'git stash guardar', run: () => git().stash('push'),
+    },
+    {
+      id: 'git.stashPop', title: 'Git: recuperar el último stash', category: 'Git',
+      keywords: 'git stash pop recuperar', run: () => git().stash('pop'),
+    },
+    {
+      id: 'git.generateMessage', title: 'Git: generar mensaje de commit', category: 'Git',
+      keywords: 'git commit mensaje ia agente',
+      run: () => { useWorkbenchStore.getState().setMode('git'); git().generateMessage(); },
+    },
+    {
+      id: 'github.openPr', title: 'GitHub: abrir pull request de esta rama', category: 'GitHub',
+      keywords: 'github pr pull request crear comparar',
+      run: () => {
+        const { remoteUrl, branch } = git();
+        const slug = githubSlug(remoteUrl || '');
+        if (slug && branch) openExternal(`https://github.com/${slug}/compare/${encodeURIComponent(branch)}?expand=1`);
+      },
     },
   ]);
 }

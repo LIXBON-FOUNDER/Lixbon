@@ -12,8 +12,10 @@ import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
 import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
+import { Switch } from '../components/Switch';
+import { ProgressRing } from '../components/Ring';
 import {
-  IconSend, IconStop, IconX, IconFileCode, IconHammer, IconClip,
+  IconStop, IconX, IconFileCode, IconHammer, IconClip, IconChevronDown, IconAt, IconArrowUp,
   IconPlus, IconTerminal, IconHistory, IconFolder, IconSun,
   IconGitCommit, IconChart, IconList, IconCheck, IconUser,
   IconPuzzle, IconGear,
@@ -100,7 +102,28 @@ export function ChatInputBar() {
     autoApprove, setAutoApprove, autoRunCommands, setAutoRunCommands,
   } = useChatStore();
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
+  const contextWindow = useAppStore((s) => s.contextWindow);
+  const messages = useChatStore((s) => s.messages);
   const agentActive = agentMode && !!workspaceRoot;
+
+  // Estimación gruesa (≈4 caracteres por token): basta para avisar antes de
+  // que el modelo empiece a recortar la conversación.
+  const contextPct = useMemo(() => {
+    const chars = messages.reduce((n, m) => n + (m.content?.length || 0), 0) + text.length;
+    return Math.min(100, Math.round((chars / 4 / contextWindow) * 100));
+  }, [messages, text, contextWindow]);
+
+  // Otros paneles (Diseño, búsqueda…) pueden dejar texto preparado aquí.
+  useEffect(() => {
+    const onCompose = (e) => {
+      if (!barRef.current || barRef.current.offsetParent === null) return; // instancia oculta
+      const add = e.detail?.text || '';
+      setText((prev) => (prev ? `${prev}\n${add}` : add));
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener('lixbon:compose', onCompose);
+    return () => window.removeEventListener('lixbon:compose', onCompose);
+  }, []);
 
   // La lista de @-menciones es del workspace ABIERTO: si se cambia de
   // carpeta, la caché vieja no vale — sin esto, mencionar mostraba archivos
@@ -220,6 +243,13 @@ export function ChatInputBar() {
     requestAnimationFrame(() => el?.focus());
   };
 
+  const insertAt = () => {
+    const next = text && !/\s$/.test(text) ? `${text} @` : `${text}@`;
+    setText(next);
+    detectMention(next, next.length);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const handleSend = () => {
     if (streaming || (!text.trim() && !images.length)) return;
     // /remote con argumentos extra (el menú "/" solo cubre el token solo):
@@ -326,63 +356,52 @@ export function ChatInputBar() {
         onChange={(e) => { addFiles([...e.target.files]); e.target.value = ''; }}
       />
 
-      {/* Una sola fila, minimalista: adjuntar, opciones del agente (un botón
-          que abre el resto), el texto (crece hasta 6 líneas), modelo y enviar. */}
-      <div className="chat-inputbar__row">
-        <button
-          className="chat-inputbar__attach"
-          onClick={() => fileInputRef.current?.click()}
-          title="Adjuntar imagen (o pega con Ctrl+V)"
-        >
-          <IconClip size={15} />
-        </button>
+      <textarea
+        ref={textareaRef}
+        className="chat-inputbar__textarea"
+        placeholder={agentActive ? 'Pide algo, @ para mencionar un archivo, / para comandos' : 'Pregunta lo que quieras, / para comandos'}
+        rows={1}
+        value={text}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onPaste={onPaste}
+        disabled={streaming}
+      />
 
+      <div className="chat-inputbar__row">
         <div className="agentmenu-wrap">
           <button
             ref={agentBtnRef}
-            className={`chat-inputbar__opts ${agentActive ? 'is-on' : ''}`}
-            disabled={!workspaceRoot}
+            className={`chat-inputbar__mode ${agentActive ? 'is-on' : ''}`}
             onClick={() => setAgentMenuOpen((v) => !v)}
             title={workspaceRoot ? 'Opciones del agente (/mode)' : 'Abre una carpeta de trabajo para usar el agente'}
           >
-            <IconHammer size={14} />
+            {agentActive ? 'Agente' : 'Chat'}
+            <IconChevronDown size={12} className={`chev ${agentMenuOpen ? 'is-flipped' : ''}`} />
           </button>
 
           {agentMenuOpen && agentMenuPos && createPortal(
             <div className="agentmenu" ref={agentPopRef} style={agentMenuPos}>
               <div className="agentmenu__row">
                 <span>Agente</span>
-                <button
-                  className={`settings__toggle ${agentMode ? 'is-on' : ''}`}
-                  onClick={() => setAgentMode(!agentMode)}
-                >
-                  <span className="settings__toggle-knob" />
-                </button>
+                <Switch checked={agentMode} onChange={setAgentMode} label="Agente" disabled={!workspaceRoot} />
               </div>
               <p className="agentmenu__hint">
                 {agentActive
                   ? 'Puede crear y editar archivos de tu carpeta de trabajo.'
-                  : 'Actívalo para que el modelo edite archivos (con tu aprobación).'}
+                  : workspaceRoot
+                    ? 'Actívalo para que el modelo edite archivos (con tu aprobación).'
+                    : 'Abre una carpeta de trabajo para usar el agente.'}
               </p>
               {agentActive && (
                 <>
                   <div className="agentmenu__row">
-                    <span>Auto-aplicar cambios</span>
-                    <button
-                      className={`settings__toggle ${autoApprove ? 'is-on' : ''}`}
-                      onClick={() => setAutoApprove(!autoApprove)}
-                    >
-                      <span className="settings__toggle-knob" />
-                    </button>
+                    <span>Aplicar cambios sin preguntar</span>
+                    <Switch checked={autoApprove} onChange={setAutoApprove} label="Aplicar cambios sin preguntar" />
                   </div>
                   <div className="agentmenu__row">
-                    <span>Comandos sin preguntar</span>
-                    <button
-                      className={`settings__toggle ${autoRunCommands ? 'is-on' : ''}`}
-                      onClick={() => setAutoRunCommands(!autoRunCommands)}
-                    >
-                      <span className="settings__toggle-knob" />
-                    </button>
+                    <span>Ejecutar comandos sin preguntar</span>
+                    <Switch checked={autoRunCommands} onChange={setAutoRunCommands} label="Ejecutar comandos sin preguntar" />
                   </div>
                 </>
               )}
@@ -391,23 +410,27 @@ export function ChatInputBar() {
           )}
         </div>
 
-        <textarea
-          ref={textareaRef}
-          className="chat-inputbar__textarea"
-          placeholder="Escríbele al agente…  (@ para mencionar un archivo)"
-          rows={1}
-          value={text}
-          onChange={onChange}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          disabled={streaming}
-        />
-
         <ModelPicker />
+
+        <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
+          <IconClip size={15} />
+        </button>
+        {workspaceRoot && (
+          <button className="ic" onClick={insertAt} title="Mencionar un archivo (@)">
+            <IconAt size={15} />
+          </button>
+        )}
+
+        <div className="chat-inputbar__fill" />
+
+        <span className="tipw chat-inputbar__ctx">
+          <ProgressRing value={contextPct} size={20} />
+          <span className="tip mono">Contexto {contextPct}% · {contextWindow.toLocaleString('es')} tokens</span>
+        </span>
 
         {streaming ? (
           <button className="chat-inputbar__send" onClick={stop} title="Detener">
-            <IconStop size={15} />
+            <IconStop size={14} />
           </button>
         ) : (
           <button
@@ -416,7 +439,7 @@ export function ChatInputBar() {
             disabled={!text.trim() && !images.length}
             title="Enviar (Enter)"
           >
-            <IconSend size={16} />
+            <IconArrowUp size={16} />
           </button>
         )}
       </div>

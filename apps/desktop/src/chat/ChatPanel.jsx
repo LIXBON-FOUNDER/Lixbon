@@ -7,6 +7,7 @@ import { ChatMessage } from './ChatMessage';
 import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
+import { LogoMark } from '../components/Logo';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
     el resto se renderiza como mensajes normales. */
@@ -32,7 +33,7 @@ function renderMessages(messages, streaming) {
   }
   return out;
 }
-export function ChatPanel() {
+export function ChatPanel({ wide = false }) {
   const { messages, streaming } = useChatStore();
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
@@ -52,15 +53,15 @@ export function ChatPanel() {
   };
 
   return (
-    <div className="chatpanel">
+    <div className={`chatpanel ${wide ? 'chatpanel--wide' : ''}`}>
       <div className="chatpanel__feed" ref={feedRef} onScroll={onScroll}>
         {messages.length === 0 ? (
           <div className="chatpanel__empty">
+            <LogoMark size={28} />
             <p>¿En qué trabajamos hoy?</p>
             <p className="chatpanel__empty-hint">
-              Con el agente activo, el modelo puede crear y editar archivos de tu
-              carpeta de trabajo (cada cambio te pide aprobación). Menciona un
-              archivo con @ para dárselo como referencia.
+              El agente puede leer, buscar y editar tu carpeta de trabajo, y ejecutar
+              comandos con tu permiso. Menciona archivos con @ y usa / para comandos.
             </p>
           </div>
         ) : (

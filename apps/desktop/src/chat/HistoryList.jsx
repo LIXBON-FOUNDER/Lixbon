@@ -1,34 +1,49 @@
-// HistoryList.jsx — "Recientes": conversaciones del workspace, siempre
-// visibles bajo el nav de Chat en el sidebar (buscar, abrir, renombrar, borrar).
-import { useEffect, useState } from 'react';
+// HistoryList.jsx — conversaciones del IDE agrupadas por fecha, con la que
+// está en curso arriba: buscar, abrir, renombrar y borrar.
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { useChatStore } from '../store/chatStore';
+import { showConfirm } from '../lib/confirm';
+import { useChatStore, useOpenSessions, useSessionsStore } from '../store/chatStore';
+import { SpinRing } from '../components/Ring';
 import { IconPencil, IconTrash, IconSearch } from '../components/Icons';
 
 function relTime(iso) {
   if (!iso) return '';
   const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (secs < 60) return 'ahora';
-  if (secs < 3600) return `hace ${Math.floor(secs / 60)} min`;
-  if (secs < 86400) return `hace ${Math.floor(secs / 3600)} h`;
-  if (secs < 86400 * 30) return `hace ${Math.floor(secs / 86400)} d`;
+  if (secs < 3600) return `${Math.floor(secs / 60)} min`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)} h`;
   return new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
 }
 
+function groupOf(iso) {
+  const d = new Date(iso || 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = (today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000;
+  if (diff <= 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  if (diff < 7) return 'Esta semana';
+  return 'Anteriores';
+}
+
 export function HistoryList() {
-  const { loadConversation, conversationId } = useChatStore();
-  const [items, setItems] = useState(null); // null = cargando
+  const { loadConversation, conversationId, conversationTitle, streaming } = useChatStore();
+  const [items, setItems] = useState(null);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
+  const [error, setError] = useState('');
+  const open = useOpenSessions();
+  const running = open.filter((o) => o.streaming || o.waiting || (!o.active && !o.seen && o.hasMessages));
+  const runningKey = running.map((o) => `${o.key}:${o.streaming}:${o.conversationId}`).join('|');
 
   const fetchList = async (q = '') => {
     try {
       const res = await api.get(`/api/conversations?source=ide&limit=50${q ? `&q=${encodeURIComponent(q)}` : ''}`);
       setItems(res.conversations || []);
-    } catch (e) {
-      console.error('[history] Error cargando historial:', e);
+    } catch {
       setItems([]);
     }
   };
@@ -36,17 +51,34 @@ export function HistoryList() {
   useEffect(() => {
     const t = setTimeout(() => fetchList(query.trim()), query ? 250 : 0);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, conversationId, conversationTitle, streaming, runningKey]);
 
-  const handleOpen = async (id) => {
-    try {
-      await loadConversation(id);
-    } catch (e) {
-      alert('No se pudo cargar la conversación: ' + e.message);
+  const groups = useMemo(() => {
+    const out = [];
+    const liveIds = new Set(running.map((o) => o.conversationId).filter(Boolean));
+    if (running.length) {
+      out.push({
+        label: running.length > 1 ? `En curso · ${running.length} agentes` : 'En curso',
+        items: running.map((o) => ({ id: o.conversationId || o.key, key: o.key, title: o.title, live: true, streaming: o.streaming, waiting: o.waiting })),
+      });
     }
+    for (const c of items || []) {
+      if (liveIds.has(c.id)) continue;
+      const label = groupOf(c.updated_at);
+      const g = out.find((x) => x.label === label) || (out.push({ label, items: [] }), out[out.length - 1]);
+      g.items.push(c);
+    }
+    return out;
+  }, [items, runningKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openItem = async (c) => {
+    if (c.live) { useSessionsStore.getState().activate(c.key); return; }
+    setError('');
+    const id = c.id;
+    try { await loadConversation(id); } catch (e) { setError(`No se pudo abrir: ${e.message}`); }
   };
 
-  const handleRename = async (id) => {
+  const rename = async (id) => {
     const title = renameValue.trim();
     setRenamingId(null);
     if (!title) return;
@@ -54,93 +86,75 @@ export function HistoryList() {
       await api.patch(`/api/conversations/${id}`, { title });
       setItems((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
     } catch (e) {
-      alert('No se pudo renombrar: ' + e.message);
+      setError(`No se pudo renombrar: ${e.message}`);
     }
   };
 
-  const handleDelete = async (id, title) => {
-    if (!window.confirm(`¿Eliminar "${title || 'esta conversación'}"? No se puede deshacer.`)) return;
+  const remove = async (id, title) => {
+    const { choice } = await showConfirm({
+      title: 'Eliminar conversación',
+      message: `«${title || 'Sin título'}» se borrará para siempre, también en la web y el móvil.`,
+      options: [{ id: 'yes', label: 'Eliminar', kind: 'danger' }, { id: 'cancel', label: 'Cancelar' }],
+    });
+    if (choice !== 'yes') return;
     try {
       await api.delete(`/api/conversations/${id}`);
       setItems((prev) => prev.filter((c) => c.id !== id));
     } catch (e) {
-      alert('No se pudo eliminar: ' + e.message);
+      setError(`No se pudo eliminar: ${e.message}`);
     }
   };
 
   return (
-    <div className="recent">
-      <div className="sidebar__section-head">
-        <span>Recientes</span>
-        <button
-          className="iconbtn"
-          onClick={() => setSearchOpen((v) => !v)}
-          title="Buscar conversaciones"
-        >
-          <IconSearch size={12} />
-        </button>
-      </div>
-
-      {searchOpen && (
-        <div className="recent__search">
-          <IconSearch size={12} />
-          <input
-            type="text"
-            placeholder="Buscar…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            spellCheck={false}
-            autoFocus
-          />
-        </div>
-      )}
-
-      <div className="recent__list">
-        {items === null ? (
-          <>
-            <span className="skeleton recent__skeleton" />
-            <span className="skeleton recent__skeleton" />
-            <span className="skeleton recent__skeleton" />
-          </>
-        ) : items.length === 0 ? (
-          <p className="recent__empty">
-            {query ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}
-          </p>
+    <div className="hist">
+      <div className="hist__search">
+        {searchOpen ? (
+          <div className="field drop-in">
+            <IconSearch size={12} />
+            <input autoFocus value={query} placeholder="Buscar conversaciones" spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearchOpen(false); } }} />
+          </div>
         ) : (
-          items.map((c) => (
-            <div key={c.id} className={`recent__item ${c.id === conversationId ? 'is-active' : ''}`}>
-              {renamingId === c.id ? (
-                <input
-                  className="recent__rename"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => handleRename(c.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRename(c.id);
-                    if (e.key === 'Escape') setRenamingId(null);
-                  }}
-                  autoFocus
-                />
-              ) : (
-                <button className="subitem recent__btn" onClick={() => handleOpen(c.id)} title={c.title}>
-                  <span className="recent__title">{c.title || 'Sin título'}</span>
-                  <span className="recent__time">{relTime(c.updated_at)}</span>
-                </button>
-              )}
-              <span className="recent__actions">
-                <button
-                  title="Renombrar"
-                  onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}
-                >
-                  <IconPencil size={12} />
-                </button>
-                <button title="Eliminar" onClick={() => handleDelete(c.id, c.title)}>
-                  <IconTrash size={12} />
-                </button>
-              </span>
-            </div>
-          ))
+          <button className="lk hist__searchbtn" onClick={() => setSearchOpen(true)}><IconSearch size={12} /> Buscar</button>
         )}
+      </div>
+      {error && <span className="hist__error">{error}</span>}
+
+      <div className="hist__list scroll">
+        {items === null && [0, 1, 2].map((i) => <span key={i} className="skeleton hist__skeleton" />)}
+        {items && groups.length === 0 && <span className="hist__empty">{query ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}</span>}
+        {groups.map((g) => (
+          <section key={g.label} className="hist__group">
+            <span className="hist__label">{g.label}</span>
+            {g.items.map((c, i) => (
+              <div key={c.key || c.id} className={`hist__item ${(c.key ? open.find((o) => o.key === c.key)?.active : c.id === conversationId) ? 'is-active' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 20}ms` }}>
+                {renamingId === c.id ? (
+                  <input
+                    className="hist__rename"
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => rename(c.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') rename(c.id); if (e.key === 'Escape') setRenamingId(null); }}
+                  />
+                ) : (
+                  <button className="hist__btn" onClick={() => openItem(c)} title={c.title}>
+                    {c.streaming && !c.waiting && <SpinRing size={11} />}
+                    {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
+                    {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
+                    <span className="hist__title">{c.title || 'Nueva conversación'}</span>
+                    <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
+                  </button>
+                )}
+                {!c.live && renamingId !== c.id && (
+                  <span className="hist__acts">
+                    <button className="ic" title="Renombrar" onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}><IconPencil size={12} /></button>
+                    <button className="ic" title="Eliminar" onClick={() => remove(c.id, c.title)}><IconTrash size={12} /></button>
+                  </span>
+                )}
+              </div>
+            ))}
+          </section>
+        ))}
       </div>
     </div>
   );

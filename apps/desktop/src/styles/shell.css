@@ -26,111 +26,10 @@
 .app-frame__body > * {
   flex: 1;
   min-height: 0;
-}
-
-/* ── Barra de título propia ──────────────────────────────────────────── */
-
-.titlebar {
-  height: 44px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  gap: 10px;
-  background: var(--bg);
-  user-select: none;
-  position: relative;
-  z-index: 200;
-}
-
-.titlebar__left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.titlebar__logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.titlebar__brand {
-  font-family: var(--font-brand);
-  font-size: 13.5px;
-  letter-spacing: 0.04em;
-  color: var(--ink);
-}
-
-.titlebar__drag {
-  flex: 1;
-  min-width: 40px; /* siempre queda zona para arrastrar la ventana */
-  align-self: stretch;
-}
-
-.titlebar__right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
+}/* ── Barra de título propia ──────────────────────────────────────────── */
 /* ── Control remoto activo (sesión por QR) ────────────────────────────── */
-
-.remotebtn {
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease;
-}
-
-.remotebtn:hover { background: var(--bg-secondary); }
-
-.remotebtn__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--good);
-  animation: remote-pulse 1.6s ease-in-out infinite;
-}
-
 /* ── Interruptor de tema (sol/luna) ───────────────────────────────────── */
 
-.theme-toggle {
-  width: 44px;
-  height: 25px;
-  border-radius: 999px;
-  background: var(--bg-secondary);
-  padding: 3px;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  transition: background 0.15s ease;
-}
-
-.theme-toggle:hover { background: var(--bg-tertiary); }
-
-.theme-toggle__thumb {
-  width: 19px;
-  height: 19px;
-  border-radius: 999px;
-  background: var(--primary);
-  color: var(--on-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.18s ease;
-}
-
-.theme-toggle__thumb.is-dark {
-  transform: translateX(19px);
-}
 
 /* ── Lixbon Team ──────────────────────────────────────────────────────── */
 
@@ -144,7 +43,7 @@
   align-items: center;
   gap: 8px;
   padding: 5px 14px 5px 6px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--bg-secondary);
   color: var(--ink);
   font-size: 12.5px;
@@ -186,7 +85,7 @@
   bottom: -1px;
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--good);
   outline: 1.5px solid var(--bg-secondary);
   animation: team-dot-pulse 2.2s ease-in-out infinite;
@@ -204,7 +103,7 @@
   right: 0;
   width: 336px;
   background: var(--bg);
-  border-radius: 20px;
+  border-radius: 7px;
   padding: 18px;
   z-index: 300;
   animation: team-drop-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -237,7 +136,7 @@
   display: inline-block;
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: #4c9a4c;
   margin-right: 5px;
 }
@@ -255,7 +154,7 @@
   align-items: center;
   gap: 10px;
   padding: 6px 4px;
-  border-radius: 10px;
+  border-radius: 7px;
 }
 
 .team__member:hover { background: var(--bg-secondary); }
@@ -271,7 +170,7 @@
   bottom: -1px;
   width: 9px;
   height: 9px;
-  border-radius: 999px;
+  border-radius: 7px;
   outline: 2px solid var(--bg);
   background: rgba(var(--ink-rgb), 0.3);
 }
@@ -311,11 +210,6 @@
 
 .team__invite .settings__input {
   flex: 1;
-}
-
-.titlebar__controls {
-  display: flex;
-  align-items: stretch;
 }
 
 /* ── Cuenta (foto de perfil + menú) ──────────────────────────────────── */
@@ -407,32 +301,6 @@
   line-height: 1.4;
 }
 
-.titlebar__win-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-50);
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.titlebar__win-btn:hover {
-  background: var(--bg-secondary);
-  color: var(--ink);
-}
-
-.titlebar__win-btn--close:hover {
-  background: #e81123;
-  color: #fff;
-}
-
-.menubar__item-label {
-  flex: 1;
-  white-space: nowrap;
-}
-
 /* ── Menú contextual (explorador y menús de la titlebar) ─────────────── */
 
 .ctx-menu {
@@ -440,7 +308,7 @@
   z-index: 400;
   min-width: 215px;
   background: var(--bg);
-  border-radius: 14px;
+  border-radius: 7px;
   padding: 6px;
 }
 
@@ -451,7 +319,7 @@
   gap: 8px;
   padding: 7px 12px;
   font-size: 13px;
-  border-radius: 8px;
+  border-radius: 7px;
   text-align: left;
   color: var(--ink);
   transition: background 0.1s ease;
@@ -492,7 +360,7 @@
 .quickopen {
   width: min(620px, 90vw);
   background: var(--bg);
-  border-radius: 18px;
+  border-radius: 7px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -530,7 +398,7 @@
   align-items: center;
   gap: 9px;
   padding: 7px 12px;
-  border-radius: 9px;
+  border-radius: 7px;
   font-size: 13.5px;
   cursor: pointer;
   color: var(--ink);
@@ -588,199 +456,15 @@
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
+}/* ── Sidebar único (logo, rama, nav, vista activa, cuenta) ────────────── */
 
-.shell {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  position: relative; /* ancla el modal de actualización (centro-superior) */
-}
-
-.shell__body {
-  flex: 1;
-  display: flex;
-  min-height: 0; /* permite scroll interno de los paneles */
-  padding: 0 14px 14px;
-  gap: 10px;
-}
-
-/* ── Sidebar único (logo, rama, nav, vista activa, cuenta) ────────────── */
-
-.panel { animation: panel-in 0.45s var(--ease) both; }
 
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(6px); }
-}
-
-.sidebar {
-  /* flex-basis:auto (el 0 0 es solo no-crecer/no-encoger) para que el ancho
-     real lo mande `width` — así SÍ es la misma propiedad que anima. Si el
-     tamaño lo pusiera flex-basis, transicionar `width` no tendría ningún
-     efecto visual (flex-basis manda sobre width en el layout). */
-  flex: 0 0 auto;
-  width: var(--panel-w);
-  background: var(--bg-secondary);
-  border-radius: 22px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: width 0.32s var(--ease), opacity 0.22s var(--ease);
-}
-
-.sidebar.is-collapsed {
-  width: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Los hijos no encogen con el contenedor: así se pliega como una cortina que
+}/* Los hijos no encogen con el contenedor: así se pliega como una cortina que
    tapa el contenido (limpio) en vez de exprimir el texto y hacerlo saltar
    de línea a medio camino de la animación. */
-.sidebar > * {
-  min-width: var(--panel-w);
-}
 
-.sidebar__brand {
-  padding: 18px 20px 4px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.sidebar__logo {
-  width: 27px;
-  height: 27px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.sidebar__brandname {
-  font-family: var(--font-brand);
-  font-size: 13.5px;
-  letter-spacing: 0.04em;
-  color: var(--ink);
-}
-
-.sidebar__branch {
-  padding: 14px 14px 12px;
-  flex-shrink: 0;
-}
-
-.branchcard {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: 12px;
-  background: var(--bg-tertiary);
-  transition: background 0.15s ease;
-}
-
-.branchcard:hover:not(:disabled) { background: var(--bg-quaternary); }
-.branchcard:disabled { cursor: default; }
-
-.branchcard__icon { flex-shrink: 0; color: var(--accent-deep); }
-
-.branchcard__text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  text-align: left;
-}
-
-.branchcard__name {
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.branchcard__sub {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--ink-35);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.branchcard__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-
-.branchcard__dot--good { background: var(--good); }
-.branchcard__dot--warn { background: var(--warn); }
-.branchcard__dot--bad { background: var(--danger); }
-
-.sidebar__nav {
-  padding: 0 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.navitem {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 10px 13px;
-  border-radius: 12px;
-  color: var(--ink-50);
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  transition: background 0.16s var(--ease), color 0.16s var(--ease), transform 0.16s var(--ease);
-}
-
-.navitem:hover { background: var(--bg-tertiary); color: var(--ink); transform: translateX(2px); }
-
-.navitem.is-active { color: var(--on-primary); background: var(--accent-deep); font-weight: 700; }
-.navitem.is-active svg { color: var(--on-primary); }
-.navitem svg { flex-shrink: 0; transition: color 0.16s ease; }
-
-.sidebar__section {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  margin-top: 12px;
-}
-
-.sidebar__section-head {
-  padding: 6px 20px 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-}
-
-.sidebar__section-head span:first-child {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--ink-35);
-}
-
-.sidebar__section-head .iconbtn {
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  color: var(--ink-35);
-}
 
 .subitem {
   display: flex;
@@ -788,7 +472,7 @@
   gap: 10px;
   width: 100%;
   padding: 9px 13px;
-  border-radius: 11px;
+  border-radius: 7px;
   color: var(--ink-70);
   text-align: left;
   font-size: 12.5px;
@@ -796,11 +480,6 @@
 }
 
 .subitem:hover { background: var(--bg-tertiary); color: var(--ink); }
-
-.sidebar__terminal {
-  padding: 8px 10px;
-  flex-shrink: 0;
-}
 
 .iconbtn {
   display: inline-flex;
@@ -810,7 +489,7 @@
   height: 24px;
   flex-shrink: 0;
   color: var(--ink-50);
-  border-radius: 999px;
+  border-radius: 7px;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -818,7 +497,7 @@
 
 .pillbtn {
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--primary);
   color: var(--on-primary);
   font-size: 11px;
@@ -828,11 +507,6 @@
 }
 
 .pillbtn:hover { opacity: 0.85; transform: translateY(-1px); }
-
-.sidebar__foot {
-  padding: 8px 10px 10px;
-  flex-shrink: 0;
-}
 
 /* ── Tarjeta de cuenta + popover anclado (perfil/consumo) ─────────────── */
 
@@ -846,7 +520,7 @@
   gap: 10px;
   width: 100%;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 7px;
   background: var(--bg-tertiary);
   cursor: pointer;
   transition: background 0.15s ease;
@@ -886,7 +560,7 @@
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   background: var(--bg-quinary);
-  border-radius: 18px;
+  border-radius: 7px;
   padding: 18px;
   z-index: 300;
   animation: menu-pop 0.16s var(--ease) both;
@@ -942,7 +616,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 11px 13px;
-  border-radius: 12px;
+  border-radius: 7px;
   background: var(--bg-quaternary);
   margin: 12px 0 10px;
 }
@@ -957,7 +631,7 @@
   align-items: center;
   gap: 8px;
   padding: 9px 8px 9px 12px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--bg-quaternary);
   margin-bottom: 12px;
 }
@@ -995,7 +669,7 @@
 
 .acctpop__quota {
   padding: 13px;
-  border-radius: 14px;
+  border-radius: 7px;
   background: var(--bg-quaternary);
 }
 
@@ -1014,7 +688,7 @@
   display: block;
   width: 100%;
   height: 6px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--bg-quinary);
   overflow: hidden;
 }
@@ -1022,44 +696,12 @@
 .acctpop__meter-fill {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--accent-deep);
   transition: width 0.4s var(--ease);
-}
-
-/* ── Barrita de plegado del sidebar ────────────────────────────────────── */
-
-.handle {
-  flex: 0 0 14px;
-  width: 14px;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-.handle__bar {
-  width: 4px;
-  height: 56px;
-  border-radius: 4px;
-  background: var(--bg-tertiary);
-  transition: width 0.18s var(--ease), height 0.18s var(--ease), background 0.18s var(--ease);
-}
-
-.handle:hover .handle__bar { width: 6px; height: 100px; background: var(--accent-deep); }
-
+}/* ── Barrita de plegado del sidebar ────────────────────────────────────── */
 /* ── Centro ──────────────────────────────────────────────────────────── */
 
-.shell__center {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-secondary);
-  border-radius: 22px;
-}
 
 /* Barra de estado inferior: eliminada en el rediseño — Git vive en la
    tarjeta de rama del sidebar; Consumo/versión, en el popover de la cuenta. */

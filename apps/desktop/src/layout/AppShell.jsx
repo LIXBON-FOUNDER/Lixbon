@@ -1,21 +1,25 @@
-// AppShell.jsx — cascarón de Lixbon: sidebar único (logo, rama, nav, cuenta) +
-// panel central que muestra el chat, salvo en Git y GitHub, donde el PR de la
-// rama actual ocupa el panel central y el sidebar pasa a cambios/commit.
-// Terminal bajo demanda. Ajustes y Control remoto se abren como ventana
-// flotante para no desplazar el chat.
-import { useEffect } from 'react';
+// AppShell.jsx — cuerpo del IDE: el modo activo (Agente, Editor, Diseño, Git),
+// la barra de estado y las capas flotantes (paleta, Quick Open, ajustes…).
+// El modo Editor se queda montado siempre: ahí viven los PTY del terminal y el
+// estado de CodeMirror, que se perderían al desmontarlo.
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
+import { useChatStore } from '../store/chatStore';
+import { useWorkbenchStore } from '../store/workbenchStore';
+import { useFileViewStore } from '../store/fileViewStore';
+import { useMcpStore } from '../store/mcpStore';
+import { useProblemsStore } from '../store/problemsStore';
 
-import { Sidebar } from './Sidebar';
-import { BottomPanel } from './BottomPanel';
+import { StatusBar } from './StatusBar';
 import { UpdateModal } from '../components/UpdateModal';
-
-import { FileQuickView } from '../sections/Workspace/FileQuickView';
+import { EditorMode } from '../modes/EditorMode';
+import { AgentMode } from '../modes/AgentMode';
+import { DesignMode } from '../modes/DesignMode';
+import { GitMode } from '../modes/GitMode';
+import { Welcome } from '../modes/Welcome';
 import { DiffView } from '../sections/SourceControl/DiffView';
-import { GitHubView } from '../sections/SourceControl/GitHubView';
-import { ChatPanel } from '../chat/ChatPanel';
-import { Settings } from '../sections/Settings/Settings';
+import { SettingsPage } from '../modes/SettingsPage';
 import { QuickOpen } from '../components/QuickOpen';
 import { CommandPalette } from '../components/CommandPalette';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -27,36 +31,33 @@ import { dispatchKeydown } from '../lib/keymap';
 
 export function AppShell() {
   const {
-    panels, sidebarOpen, leftView, diffData,
-    serverUrl, quickOpen, commandPalette,
-    modalView, modalSection, closeModal,
+    diffData, serverUrl, quickOpen, commandPalette, workspaceRoot, workspaceReady,
+    modalView, closeModal,
   } = useAppStore();
+  const mode = useWorkbenchStore((s) => s.mode);
+  const page = useWorkbenchStore((s) => s.page);
   const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate } = useVersion();
+  const [skipWelcome, setSkipWelcome] = useState(false);
 
-  // Reabrir la última carpeta de trabajo (el sandbox Rust no persiste)
   useEffect(() => {
     useAppStore.getState().restoreWorkspace();
-    // Sin consultar al remoto no hay forma de saber que hay commits nuevos:
-    // el botón de Git no podría ofrecer "Pull" nunca.
     useGitStore.getState().startAutoFetch();
   }, []);
 
-  // Vigilancia de disco: el backend emite `fs:changed` con las rutas cambiadas
-  // (edición externa, git, build tools…). Se reenvía como evento de ventana
-  // para que el árbol de Archivos (y quien más lo necesite) se refresque.
+  // `fs:changed` llega del vigilante de disco (agente, git, editores
+  // externos): refresca el árbol y recarga las pestañas limpias.
   useEffect(() => {
     let unlisten;
     (async () => {
       const { listen } = await import('@tauri-apps/api/event');
       unlisten = await listen('fs:changed', () => {
         window.dispatchEvent(new CustomEvent('lixbon:fs-changed'));
+        useFileViewStore.getState().syncFromDisk(useChatStore.getState().streaming);
       });
     })();
     return () => { if (unlisten) unlisten(); };
   }, []);
 
-  // Atajos globales: se resuelven contra el keymap central, que dispara
-  // comandos del registro.
   useEffect(() => {
     registerBuiltinCommands();
     const onKeyDown = (e) => dispatchKeydown(e);
@@ -64,7 +65,29 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const showGitHub = sidebarOpen && leftView === 'git';
+  useEffect(() => {
+    if (workspaceReady) useProblemsStore.getState().detect();
+  }, [workspaceRoot, workspaceReady]);
+
+  // Al acabar un turno del agente se comprueba de nuevo lo que haya tocado.
+  const streaming = useChatStore((s) => s.streaming);
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    if (wasStreaming.current && !streaming) useProblemsStore.getState().scheduleAfterSave();
+    wasStreaming.current = streaming;
+  }, [streaming]);
+
+  // Los servidores MCP dependen del proyecto (.lixbon/mcp.json).
+  useEffect(() => {
+    if (workspaceReady) useMcpStore.getState().load(workspaceRoot).catch(() => {});
+  }, [workspaceRoot, workspaceReady]);
+
+  // En el modo Git el diff se ve en el panel central, no en ventana flotante.
+  useEffect(() => {
+    if (mode === 'git' && modalView === 'diff') closeModal();
+  }, [mode, modalView, closeModal]);
+
+  const showWelcome = workspaceReady && !workspaceRoot && !skipWelcome;
 
   return (
     <div className="shell">
@@ -80,38 +103,27 @@ export function AppShell() {
           />
         </div>
       )}
+
       <div className="shell__body">
-        <Sidebar />
-
-        <main className="shell__center panel" style={{ animationDelay: '0.05s' }}>
-          {showGitHub ? (
-            <GitHubView />
-          ) : (
-            <div className="shell__center-main">
-              {sidebarOpen && leftView === 'explorer' && <FileQuickView />}
-              <ChatPanel />
-            </div>
-          )}
-
-          {/* Montado SIEMPRE y oculto con display: si se desmontara al plegar
-              la Terminal, los PTY quedarían huérfanos en Rust (el shell seguiría
-              vivo sin nadie que lo cierre) y al reabrir se crearía otro shell
-              duplicado perdiendo además el buffer del terminal. */}
-          <div style={{ display: panels.terminal ? 'contents' : 'none' }}>
-            <BottomPanel />
-          </div>
-        </main>
+        {showWelcome ? (
+          <Welcome onSkip={() => setSkipWelcome(true)} />
+        ) : (
+          <>
+            <EditorMode active={!page && mode === 'editor'} />
+            {page === 'settings' && <SettingsPage />}
+            {!page && mode === 'agent' && <AgentMode />}
+            {!page && mode === 'design' && <DesignMode />}
+            {!page && mode === 'git' && <GitMode />}
+          </>
+        )}
       </div>
+
+      {!showWelcome && <StatusBar />}
 
       {quickOpen && <QuickOpen />}
       {commandPalette && <CommandPalette />}
       <ConfirmDialog />
 
-      {modalView === 'settings' && (
-        <Modal title="Ajustes" onClose={closeModal} size="lg">
-          <Settings initialSection={modalSection} />
-        </Modal>
-      )}
       {modalView === 'remote' && (
         <Modal
           title="Control remoto"
@@ -122,7 +134,7 @@ export function AppShell() {
           <RemoteModal />
         </Modal>
       )}
-      {modalView === 'diff' && (
+      {modalView === 'diff' && mode !== 'git' && (
         <Modal title={diffData?.title || 'Diferencias'} onClose={closeModal} size="lg">
           <DiffView />
         </Modal>

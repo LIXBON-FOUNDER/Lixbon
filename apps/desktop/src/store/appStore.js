@@ -6,6 +6,7 @@ import { detectVisionModel, modelId } from '../lib/vision';
 import { fetchModelRoles, roleModel } from '../lib/modelRoles';
 import { resetIndexCache } from '../lib/codebaseIndex';
 import { fetchMe } from '../lib/account';
+import { useWorkbenchStore } from './workbenchStore';
 
 export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
@@ -24,12 +25,7 @@ export const useAppStore = create((set, get) => ({
   // Carpetas abiertas recientemente (para la pantalla de bienvenida, D4).
   recentFolders: JSON.parse(localStorage.getItem('lixbon_recents') || '[]'),
 
-  // Layout: un único sidebar (logo, rama, nav, contenido de la vista activa,
-  // cuenta). El nav decide qué se ve dentro del sidebar y, para 'git', también
-  // reemplaza el chat por la vista de GitHub en el panel central.
   diffData: null, // { title, patch } para el visor de diff (Git)
-  leftView: localStorage.getItem('lixbon_left_view') || 'chat', // 'chat' | 'explorer' | 'git' | 'extensions'
-  sidebarOpen: (localStorage.getItem('lixbon_sidebar_open') ?? 'true') === 'true',
   // Ventana flotante: null | 'settings' | 'remote' | 'diff'.
   modalView: null,
   modalSection: null, // categoría inicial de Ajustes (null = la última/por defecto)
@@ -80,31 +76,37 @@ export const useAppStore = create((set, get) => ({
   },
 
   /** Abre el visor de diff como ventana flotante con un patch unified. */
-  openDiff: (title, patch) => set({ diffData: { title, patch }, modalView: 'diff', modalSection: null }),
+  openDiff: (title, patch, meta = null) => set({ diffData: { title, patch, meta }, modalView: 'diff', modalSection: null }),
 
   /** Ventana flotante (Ajustes / Consumo / Diff / Control remoto).
       `section` abre Ajustes directamente en esa categoría. */
-  openModal: (modalView, section = null) => set({ modalView, modalSection: section }),
+  openModal: (modalView, section = null) => {
+    if (modalView === 'settings') {
+      const legacy = { account: 'profile', appearance: 'editor', index: 'editor', advanced: 'editor' };
+      useWorkbenchStore.getState().openSettings(legacy[section] || section);
+      return;
+    }
+    set({ modalView, modalSection: section });
+  },
   closeModal: () => set({ modalView: null, modalSection: null }),
 
   /** Muestra u oculta la Terminal (único panel del dock inferior). */
   toggleTerminal: () => get().togglePanel('terminal'),
   showTerminal: () => { if (!get().panels.terminal) get().togglePanel('terminal'); },
 
-  /** Cambia la vista activa del sidebar (Chat/Archivos/Git/Extensiones) y lo
-      abre si estaba plegado — el plegado en sí lo controla solo la barrita. */
+  /** Nombres heredados de la navegación (chat/explorer/git/extensions)
+      traducidos a los modos y paneles del workbench. */
   selectNav: (view) => {
-    localStorage.setItem('lixbon_left_view', view);
-    set({ leftView: view });
-    if (!get().sidebarOpen) get().toggleSidebar();
+    const wb = useWorkbenchStore.getState();
+    if (view === 'chat') wb.setMode('agent');
+    else if (view === 'git') wb.setMode('git');
+    else {
+      wb.setMode('editor');
+      wb.showSide(view === 'extensions' ? 'extensions' : view === 'search' ? 'search' : 'files');
+    }
   },
 
-  /** Plegar/desplegar el sidebar (la barrita entre el sidebar y el chat). */
-  toggleSidebar: () => {
-    const sidebarOpen = !get().sidebarOpen;
-    localStorage.setItem('lixbon_sidebar_open', sidebarOpen ? 'true' : 'false');
-    set({ sidebarOpen });
-  },
+  toggleSidebar: () => useWorkbenchStore.getState().toggleSide(),
 
   setQuickOpen: (quickOpen) => set({ quickOpen }),
 

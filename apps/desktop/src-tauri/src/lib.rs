@@ -15,11 +15,15 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn hide_console(cmd: &mut Command) -> &mut Command {
+pub(crate) fn hide_console(cmd: &mut Command) -> &mut Command {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
 }
+
+mod mcp;
+mod auth_loopback;
+mod preview_proxy;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1229,6 +1233,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
+        .manage(mcp::McpServers::default())
+        .manage(preview_proxy::PreviewProxy::default())
         .manage(FsWatchState {
             watcher: Mutex::new(None),
             pending: Arc::new(Mutex::new(HashSet::new())),
@@ -1238,6 +1244,13 @@ pub fn run() {
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Los servidores MCP son procesos hijos: sin esto quedaban vivos
+            // al cerrar la ventana.
+            if let tauri::WindowEvent::Destroyed = event {
+                window.state::<mcp::McpServers>().stop_all();
+            }
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -1271,7 +1284,15 @@ pub fn run() {
             run_command,
             secret_set,
             secret_get,
-            secret_delete
+            secret_delete,
+            auth_loopback::auth_loopback_start,
+            preview_proxy::preview_proxy_start,
+            mcp::vscode_user_file,
+            mcp::mcp_start,
+            mcp::mcp_send,
+            mcp::mcp_stop,
+            mcp::mcp_user_config,
+            mcp::mcp_save_user_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

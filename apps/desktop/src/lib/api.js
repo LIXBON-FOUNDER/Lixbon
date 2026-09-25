@@ -37,7 +37,8 @@ async function request(endpoint, options = {}) {
       let errorDetail = 'API Request Failed';
       try {
         const errorJson = await response.json();
-        errorDetail = errorJson.detail || errorDetail;
+        const d = errorJson.detail;
+        errorDetail = (d && typeof d === 'object' ? d.message : d) || errorDetail;
       } catch (e) {
         // No es JSON
       }

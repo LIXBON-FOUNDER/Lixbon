@@ -148,3 +148,42 @@ export function pickDirectory(options = {}) {
 export function openExternal(url) {
   return openUrl(url);
 }
+
+// ── Servidores MCP (stdio) ─────────────────────────────────────────────
+
+/** Lanza un servidor MCP. Sus líneas de stdout llegan por `mcp:line:{id}`
+    y el cierre por `mcp:exit:{id}`. */
+export function mcpStart(id, command, args = [], env = {}, cwd = null) {
+  return invoke('mcp_start', { id, command, args, env, cwd });
+}
+
+export function mcpSend(id, line) {
+  return invoke('mcp_send', { id, line });
+}
+
+export function mcpStop(id) {
+  return invoke('mcp_stop', { id });
+}
+
+/** Contenido de ~/.lixbon/mcp.json, o null si no existe. */
+export function mcpUserConfig() {
+  return invoke('mcp_user_config');
+}
+
+/** Guarda ~/.lixbon/mcp.json (valida que sea JSON). Devuelve la ruta. */
+export function mcpSaveUserConfig(content) {
+  return invoke('mcp_save_user_config', { content });
+}
+
+/** Servidor de un solo uso en 127.0.0.1 para la vuelta del navegador en el
+    login con lixbon.com. Devuelve el puerto; el resultado llega como evento
+    `auth:callback` o `auth:timeout`. */
+export function authLoopbackStart() {
+  return invoke('auth_loopback_start');
+}
+
+/** Proxy de la vista previa (modo Diseño) que inyecta el inspector.
+    Devuelve el puerto local; `url` es el servidor de desarrollo. */
+export function previewProxyStart(url) {
+  return invoke('preview_proxy_start', { url });
+}

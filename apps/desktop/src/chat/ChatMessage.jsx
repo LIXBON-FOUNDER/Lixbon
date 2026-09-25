@@ -57,7 +57,9 @@ export function ChatMessage({ message, streaming }) {
       </div>
       {message.thinking && (
         <details className="msg-think">
-          <summary className="msg-think__summary">✻ Pensamiento</summary>
+          <summary className="msg-think__summary">
+            {message.thinkMs != null ? `Pensó ${Math.max(1, Math.round(message.thinkMs / 1000))} s` : 'Pensando…'}
+          </summary>
           <div className="msg-think__body">{message.thinking}</div>
         </details>
       )}

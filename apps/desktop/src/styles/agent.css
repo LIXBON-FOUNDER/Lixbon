@@ -1,0 +1,294 @@
+/* agent.css — chat del agente dentro del workbench. Se carga después de
+   chat.css/views.css/shell.css y ajusta sus piezas al nuevo lenguaje: sin
+   tarjetas pesadas en los pasos, anillos girando para lo que está en curso. */
+
+/* ── Feed ────────────────────────────────────────────────────────────── */
+
+.chatpanel__feed {
+  max-width: none;
+  gap: 16px;
+  padding: 8px 18px 16px;
+  scroll-behavior: smooth;
+}
+.chatpanel--wide .chatpanel__feed {
+  max-width: 720px;
+  gap: 22px;
+  padding: 16px 24px 24px;
+}
+.chatpanel--wide .msg { font-size: 14px; }
+
+.chatpanel__empty { gap: 12px; }
+.chatpanel__empty p:first-of-type { font-size: 15px; font-weight: 600; margin-top: 4px; }
+.chatpanel__empty-hint { max-width: 300px; font-size: 12.5px; color: var(--ink-50); }
+
+.msg { font-size: 13px; line-height: 1.6; animation: lx-rise 0.4s var(--ease) both; }
+
+.msg--user {
+  max-width: 82%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: #262626;
+}
+.chatpanel--wide .msg--user { max-width: 70%; padding: 12px 14px; }
+
+.msg--assistant { color: var(--ink-body); }
+.msg__agent { gap: 8px; margin-bottom: 6px; }
+.msg__agent-logo { width: 16px; height: 16px; border-radius: 4px; }
+.msg__agent-name { font-size: 12px; color: var(--ink-50); font-weight: 500; }
+
+.msg--error { border-radius: var(--radius); }
+.msg--note { border-left: none; padding: 0; color: var(--ink-50); }
+.msg__caret { width: 7px; height: 14px; border-radius: 1px; }
+.msg__live-text { font-size: 12px; color: var(--ink-70); }
+
+.msg-think__summary { font-size: 12px; color: var(--ink-50); opacity: 1; transition: color 0.15s ease; }
+.msg-think__summary:hover { color: var(--ink); }
+.msg-think__body { border-left: none; padding: 6px 0 0 14px; color: var(--ink-50); }
+.msg-think[open] .msg-think__body { animation: lx-drop 0.24s var(--ease) both; }
+
+.msg-sources { border-radius: var(--radius); background: var(--surface-3); }
+.md-inline-code { background: rgba(142, 197, 255, 0.12); color: var(--info); border-radius: 5px; font-size: 0.92em; }
+.chatcode { border-radius: var(--radius); background: var(--code-bg); }
+.chatcode__bar { background: transparent; }
+.chatcode__pre { background: transparent; }
+
+/* ── Pasos del agente ────────────────────────────────────────────────── */
+
+.activity-group { gap: 6px; }
+
+.activity-row {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  animation: lx-rise 0.35s var(--ease) both;
+}
+.activity-row__line { gap: 10px; min-height: 22px; }
+.activity-row__icon { width: 14px; height: 14px; flex: 0 0 14px; }
+.activity-row__spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  border: 2px solid var(--surface-6);
+  border-top-color: var(--accent);
+}
+.activity-row__spinner.is-visible { animation: lx-spin 0.9s linear infinite; }
+.activity-row__check { width: 14px; height: 14px; border-radius: 0; background: transparent; }
+.activity-row__check::after {
+  left: 4px;
+  top: 0;
+  width: 5px;
+  height: 10px;
+  border-color: var(--good);
+  border-width: 0 2px 2px 0;
+}
+.activity-row.is-err .activity-row__check { background: transparent; }
+.activity-row.is-err .activity-row__check::after { border-color: var(--danger); }
+.activity-row__verb { font-size: 12.5px; color: var(--ink-50); }
+.activity-row__target { font-size: 12px; color: var(--ink-70); }
+.activity-row__add, .activity-row__del { padding: 0; background: transparent; font-size: 11.5px; }
+.activity-row__toggle { padding: 0; font-size: 11.5px; color: var(--ink-50); }
+.activity-row__toggle:hover { background: transparent; color: var(--ink); }
+.activity-row__dot { border-radius: 999px; background: var(--accent); }
+.activity-row--live { padding: 0; }
+.activity-row--live .activity-row__live-text { font-size: 12px; color: var(--ink-70); }
+
+.toolrow__diff { margin-top: 8px; border-radius: var(--radius); background: var(--code-bg); animation: lx-drop 0.24s var(--ease) both; }
+.toolrow__result { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-50); white-space: pre-wrap; max-height: 120px; overflow: auto; }
+.toolrow__revert { margin-top: 4px; padding: 0; background: transparent; color: var(--ink-50); }
+.toolrow__revert:hover:not(:disabled) { background: transparent; color: var(--danger); }
+
+/* ── Aprobación ──────────────────────────────────────────────────────── */
+
+.approval {
+  width: calc(100% - 20px);
+  max-width: none;
+  margin: 0 10px 8px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: #222222;
+  animation: lx-rise 0.3s var(--ease) both;
+}
+.chatpanel--wide .approval { max-width: 700px; margin: 0 auto 10px; }
+.approval__kind { font-size: 12.5px; color: var(--ink-70); }
+.approval__diff { border-radius: var(--radius); background: #111111; }
+.approval__command { color: var(--ink); }
+.approval__line--add { color: var(--good); }
+.approval__actions { gap: 16px; margin-top: 12px; }
+.approval__btn { padding: 0; background: transparent; color: var(--ink-soft); font-size: 12.5px; transition: color 0.15s ease, transform 0.12s var(--ease); }
+.approval__btn:hover { background: transparent; color: var(--ink); }
+.approval__btn:active { transform: scale(0.96); }
+.approval__btn--primary {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+.approval__btn--primary:hover { background: var(--primary); color: var(--on-primary); opacity: 1; filter: brightness(1.1); }
+.approval__btn--danger { margin-left: auto; color: var(--ink-50); }
+.approval__btn--danger:hover { color: var(--danger); }
+
+/* ── Composer ────────────────────────────────────────────────────────── */
+
+.chat-inputbar {
+  width: calc(100% - 20px);
+  max-width: none;
+  margin: 0 10px 10px;
+  padding: 10px 10px 8px 12px;
+  border-radius: var(--radius);
+  background: #222222;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: background-color 0.25s ease;
+}
+.chat-inputbar:focus-within { background: #262626; }
+.chatpanel--wide .chat-inputbar { max-width: 700px; margin: 0 auto 18px; padding: 14px 12px 10px 16px; }
+
+.chat-inputbar__textarea {
+  width: 100%;
+  min-height: 22px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--ink);
+}
+.chatpanel--wide .chat-inputbar__textarea { font-size: 14px; }
+.chat-inputbar__textarea::placeholder { color: #6A6A65; }
+
+.chat-inputbar__row { display: flex; align-items: center; gap: 10px; }
+.chat-inputbar__fill { flex: 1; }
+.chat-inputbar__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-70);
+  transition: color 0.15s ease;
+}
+.chat-inputbar__mode:hover { color: var(--ink); }
+.chat-inputbar__mode.is-on { color: var(--ink); }
+.chat-inputbar__ctx { cursor: default; }
+
+.chat-inputbar__send {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  transition: transform 0.12s var(--ease), filter 0.15s ease, opacity 0.2s ease;
+}
+.chat-inputbar__send:hover:not(:disabled) { filter: brightness(1.1); }
+.chat-inputbar__send:active:not(:disabled) { transform: scale(0.92); }
+.chat-inputbar__send:disabled { opacity: 0.35; cursor: default; }
+
+.chat-inputbar__chips { gap: 6px; }
+.ctx-chip { border-radius: var(--radius); background: var(--surface-6); font-family: var(--font-mono); font-size: 11.5px; color: var(--info); }
+.img-chip { border-radius: var(--radius); }
+
+.modelpicker, .modelpicker .select__btn { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-50); background: transparent; }
+
+.agentmenu { width: 280px; padding: 14px; border-radius: var(--radius); background: var(--surface-5); animation: lx-pop 0.2s var(--ease) both; }
+.agentmenu__row { gap: 16px; font-size: 12.5px; }
+.agentmenu__hint { color: var(--ink-50); }
+
+.cmdmenu, .mention-menu { border-radius: var(--radius); background: var(--surface-5); padding: 6px; }
+.cmdrow { padding: 7px 10px; border-radius: var(--radius); }
+.cmdrow:hover, .cmdrow.is-sel { background: var(--surface-6); }
+.cmdrow.is-sel .cmdrow__name, .cmdrow.is-sel .cmdrow__desc { color: inherit; }
+.cmdrow.is-sel .cmdrow__desc { color: var(--ink-50); }
+.cmdrow__icon, .cmdrow.is-sel .cmdrow__icon { background: transparent; color: var(--ink-50); width: 18px; }
+.cmdrow__name { font-family: var(--font-mono); }
+.mention-menu__item { border-radius: var(--radius); }
+.mention-menu__item.is-selected { background: var(--surface-6); }
+
+/* ── Historial (conversaciones) ──────────────────────────────────────── */
+
+.recent { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 8px 8px; }
+.recent__item { border-radius: var(--radius); transition: background-color 0.2s ease; }
+.recent__item.is-active { background: rgba(242, 242, 238, 0.07); }
+.recent__item:hover:not(.is-active) { background: transparent; }
+.recent__btn { color: var(--ink-soft); transition: color 0.15s ease; }
+.recent__item:hover .recent__btn, .recent__item.is-active .recent__btn { color: var(--ink); }
+.recent__time { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-35); }
+.recent__actions button { color: var(--ink-35); transition: color 0.15s ease; }
+.recent__actions button:hover { color: var(--ink); }
+
+/* ── Árbol de archivos ───────────────────────────────────────────────── */
+
+.filetree__toolbar { height: 40px; padding: 0 10px 0 14px; }
+.filetree__root-name { font-size: 12px; color: var(--ink-soft); font-weight: 500; }
+.filetree__node { border-radius: var(--radius); color: var(--ink-70); transition: color 0.12s ease; }
+.filetree__node:hover { background: transparent; color: var(--ink); }
+.filetree__node.is-active { background: rgba(242, 242, 238, 0.07); color: var(--ink); }
+.icon-btn { border-radius: var(--radius); color: #8A8A84; transition: color 0.15s ease, transform 0.12s var(--ease); }
+.icon-btn:hover { background: transparent; color: var(--ink); }
+.icon-btn:active { transform: scale(0.88); }
+
+/* ── Terminal ────────────────────────────────────────────────────────── */
+
+.terminal-tabs { background: transparent; height: 36px; padding-left: 10px; gap: 2px; }
+.terminal-tab { border-radius: var(--radius); color: var(--ink-50); background: transparent; transition: color 0.15s ease, background-color 0.2s ease; }
+.terminal-tab:hover { color: var(--ink); background: transparent; }
+.terminal-tab.is-active { color: var(--ink); background: rgba(242, 242, 238, 0.05); }
+.terminal-body { background: transparent; }
+
+/* ── Circulares que sí deben serlo ───────────────────────────────────── */
+
+.team__stack-dot, .team__conn.is-on::before, .team__dot, .ghview__checkicon, .avatar { border-radius: 999px; }
+.acctavatar .avatar { border-radius: var(--radius); }
+
+/* ── Modal, confirmación y paleta ────────────────────────────────────── */
+
+.modal__overlay, .confirm__overlay, .quickopen__overlay { background: var(--scrim); }
+.modal, .confirm, .quickopen__box { background: #1C1C1C; animation: lx-pop 0.24s var(--ease) both; }
+.confirm__btn--primary { background: var(--primary); color: var(--on-primary); }
+.confirm__btn--danger { color: var(--danger); }
+
+/* ── Diff (modo Git y ventana flotante) ──────────────────────────────── */
+
+.diffview__line--add { background: rgba(134, 214, 148, 0.1); color: var(--good); }
+.diffview__line--del { background: rgba(240, 140, 124, 0.1); color: var(--danger); }
+.diffview__line--hunk { background: transparent; color: var(--ink-50); }
+.gitmain .diffview { background: transparent; }
+
+.activity-row__ms { margin-left: auto; padding-left: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-35); flex-shrink: 0; }
+.toolrow__retry { margin-left: 10px; font-size: 12px; font-weight: 600; color: var(--ink-70); transition: color 0.15s ease; }
+.toolrow__retry:hover { color: var(--ink); }
+
+/* Conversaciones */
+.hist { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.hist__search { padding: 0 10px 6px; }
+.hist__searchbtn { gap: 6px; padding: 4px 6px; font-size: 12px; }
+.hist__error { padding: 0 16px 6px; font-size: 11.5px; color: var(--danger); }
+.hist__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
+.hist__group + .hist__group { margin-top: 12px; }
+.hist__label { display: block; padding: 4px 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-35); }
+.hist__item { position: relative; display: flex; align-items: center; border-radius: var(--radius); animation: lx-rise 0.3s var(--ease) both; }
+.hist__item:hover { background: rgba(242, 242, 238, 0.04); }
+.hist__item.is-active { background: var(--surface-4); }
+.hist__btn { flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; text-align: left; font-size: 12.5px; }
+.hist__title { flex: 1; min-width: 0; color: var(--ink-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist__item.is-active .hist__title { color: var(--ink); }
+.hist__time { flex-shrink: 0; font-size: 10.5px; color: var(--ink-35); transition: opacity 0.15s ease; }
+.hist__acts { position: absolute; right: 4px; display: flex; gap: 1px; opacity: 0; transition: opacity 0.15s ease; }
+.hist__acts .ic { width: 24px; height: 24px; }
+.hist__item:hover .hist__acts { opacity: 1; }
+.hist__item:hover .hist__time { opacity: 0; }
+.hist__rename { flex: 1; height: 30px; margin: 1px 4px; padding: 0 8px; border: 0; outline: none; border-radius: var(--radius); background: var(--surface-5); color: var(--ink); font: inherit; font-size: 12.5px; }
+.hist__skeleton { display: block; height: 28px; margin: 4px 6px; border-radius: var(--radius); }
+.hist__empty { display: block; padding: 8px 12px; font-size: 12px; color: var(--ink-50); }
+
+.quota { flex-shrink: 0; display: flex; align-items: center; gap: 10px; margin: 0 8px 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-3); text-align: left; transition: background-color 0.2s ease; }
+.quota:hover { background: var(--surface-4); }
+.quota__text { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.quota__sub { font-size: 11px; color: var(--ink-50); }

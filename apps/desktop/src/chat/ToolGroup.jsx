@@ -18,6 +18,14 @@ const VERB_GERUND = {
 
 const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
+export const fmtMs = (ms) => (ms < 10000 ? `${(ms / 1000).toFixed(1).replace('.', ',')} s` : `${Math.round(ms / 1000)} s`);
+
+/** `mcp__github__create_issue` → { server: 'github', tool: 'create_issue' } */
+const mcpParts = (tool) => {
+  const m = /^mcp__(.+?)__(.+)$/.exec(tool || '');
+  return m ? { server: m[1], tool: m[2] } : null;
+};
+
 function ActivityIcon({ pending, failed }) {
   return (
     <span className="activity-row__icon" aria-hidden>
@@ -46,7 +54,8 @@ function LiveRow({ message }) {
 function ActivityRow({ message, index, delay, live }) {
   const [showDiff, setShowDiff] = useState(false);
   const a = message.args || {};
-  const target = a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
+  const mcp = mcpParts(message.tool);
+  const target = mcp ? mcp.tool : a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
   const pending = !!message.pending;
   const failed = message.ok === false;
   const change = message.change;
@@ -58,7 +67,9 @@ function ActivityRow({ message, index, delay, live }) {
 
   if (live) return <LiveRow message={message} />;
 
-  const verb = capitalize(pending ? (VERB_GERUND[message.tool] || message.tool) : (VERB[message.tool] || message.tool));
+  const verb = mcp
+    ? `MCP · ${mcp.server}`
+    : capitalize(pending ? (VERB_GERUND[message.tool] || message.tool) : (VERB[message.tool] || message.tool));
 
   return (
     <div className={`activity-row ${failed ? 'is-err' : ''}`} style={{ animationDelay: `${delay}ms` }}>
@@ -77,8 +88,16 @@ function ActivityRow({ message, index, delay, live }) {
             {showDiff ? 'Ocultar' : 'Ver'}
           </button>
         )}
+        {!pending && message.ms >= 100 && <span className="activity-row__ms">{fmtMs(message.ms)}</span>}
       </div>
-      {failed && message.content && <p className="toolrow__err">{message.content}</p>}
+      {failed && message.content && (
+        <p className="toolrow__err">
+          {message.content}
+          {message.content !== 'rechazado por el usuario' && (
+            <button className="toolrow__retry" onClick={() => useChatStore.getState().retryTool(index)}>Reintentar</button>
+          )}
+        </p>
+      )}
       {showDiff && hasDiff && (
         <pre className="toolrow__diff">
           {change.sampleOld.map((line, i) => (
@@ -92,10 +111,11 @@ function ActivityRow({ message, index, delay, live }) {
           )}
         </pre>
       )}
-      {!failed && !pending && message.content && !hasDiff && message.tool === 'run_command' && (
+      {!failed && !pending && message.content && !hasDiff && (message.tool === 'run_command' || mcp) && (
         <p className="toolrow__result">{message.content}</p>
       )}
-      {message.snapshot && !failed && (
+      {message.snapshot && !failed && message.accepted && !message.reverted && <span className="toolrow__revert is-done">Aceptado ✓</span>}
+      {message.snapshot && !failed && !message.accepted && (
         <button
           className="toolrow__revert"
           disabled={message.reverted}
