@@ -16,6 +16,7 @@ export default function DownloadsPage() {
   const t = useT('downloads');
   useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/apps' });
   const [desktop, setDesktop] = useState(null);
+  const [desktopBeta, setDesktopBeta] = useState(null);
   const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');
 
@@ -26,6 +27,9 @@ export default function DownloadsPage() {
     api.get('/api/updates/latest/stable')
       .then((res) => setDesktop(res.data))
       .catch(() => setDesktop({ available: false }));
+    api.get('/api/updates/latest/beta')
+      .then((res) => setDesktopBeta(res.data))
+      .catch(() => setDesktopBeta(null));
     api.get('/api/updates/latest/stable?product=android')
       .then((res) => setAndroid(res.data))
       .catch(() => setAndroid({ available: false }));
@@ -70,10 +74,18 @@ export default function DownloadsPage() {
                       {desktop.title} · {desktop.release_date} · Windows 10/11 (64 bits)
                     </span>
                   </>
-                ) : (
+                ) : desktopBeta?.available ? null : (
                   <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
                     {t('comingSoon')}
                   </span>
+                )}
+                {desktopBeta?.available && desktopBeta.version !== desktop?.version && (
+                  <div className="dl-card__beta">
+                    <a href={desktopBeta.download_url} className="pill-btn pill-btn--outline dl-card__cta">
+                      <IconDownload size={16} /> {t('tryBeta')} v{desktopBeta.version}
+                    </a>
+                    <span className="dl-card__meta">{t('betaNote')} · {desktopBeta.release_date}</span>
+                  </div>
                 )}
               </div>
             </section>
