@@ -22,7 +22,7 @@ const GAP = 6;
 
 function AgentRail({ visible, onOpen }) {
   const streaming = useChatStore((s) => s.streaming);
-  const waiting = useChatStore((s) => !!s.pendingApproval);
+  const waiting = useChatStore((s) => !!s.pendingApproval || !!s.pendingQuestion);
   return (
     <div className={`agentrail ${visible ? 'is-visible' : ''}`}>
       <button className="agentrail__btn" onClick={onOpen} title="Abrir el agente (Ctrl Alt B)">

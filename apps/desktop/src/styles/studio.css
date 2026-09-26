@@ -716,7 +716,6 @@ kbd {
 .termdock { position: relative; flex-shrink: 0; }
 .termdock__close { position: absolute; top: 6px; right: 8px; z-index: 2; }
 .termdock .terminal-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.termdock .terminal-tabs { padding-right: 44px; }
 
 /* ── Barra de estado ─────────────────────────────────────────────────── */
 
@@ -1361,8 +1360,6 @@ body.is-resizing-x .collapse, body.is-resizing-y .collapse { transition: none; }
 .dock2__body { flex: 1; min-height: 0; display: flex; }
 .dock2__pane { flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
 .dock2__pane .terminal-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.dock2__pane .terminal-tabs { height: 30px; }
-.termdock .terminal-tabs { padding-right: 10px; }
 .count--danger { background: var(--danger-soft); color: var(--danger); }
 .count--warn { background: var(--warn-soft); color: var(--warn); }
 
@@ -1504,3 +1501,31 @@ body.is-resizing-x .collapse, body.is-resizing-y .collapse { transition: none; }
 .insp__swatch { width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; }
 .insp__text { margin: 0; font-size: 12px; color: var(--ink-70); }
 .insp__ask { gap: 8px; height: 34px; }
+
+/* ── Avisos flotantes ─────────────────────────────────────────────────── */
+
+.toasts { position: fixed; right: 16px; bottom: 36px; z-index: 900; display: flex; flex-direction: column; gap: 6px; max-width: min(420px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 6px 6px 14px; border-radius: var(--radius); background: var(--surface-6, #2a2a2a); font-size: 12px; color: var(--ink-body); animation: lx-fade 0.2s ease both; }
+.toast--danger { color: var(--danger); }
+.toast__text { flex: 1; min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.toast__action { flex-shrink: 0; height: 26px; padding: 0 10px; border-radius: var(--radius); font-size: 12px; font-weight: 600; color: var(--accent); }
+.toast__action:hover { background: rgba(242, 242, 238, 0.06); }
+.toast__x { flex-shrink: 0; }
+
+/* ── Menú de la aplicación (tras la marca) ───────────────────────────── */
+
+.appmenu__btn { height: 30px; margin-left: -8px; padding: 0 8px; border-radius: var(--radius); color: var(--ink); transition: background-color 0.15s ease; }
+.appmenu__btn:hover, .appmenu__btn.is-open { background: rgba(242, 242, 238, 0.05); }
+.appmenu__chev { color: var(--ink-35); margin-left: -2px; transition: transform 0.2s var(--ease), color 0.15s ease; }
+.appmenu__btn:hover .appmenu__chev { color: var(--ink-70); }
+.appmenu__btn.is-open .appmenu__chev { transform: rotate(180deg); }
+
+.appmenu { position: fixed; z-index: 400; display: flex; gap: 4px; padding: 6px; border-radius: var(--radius); background: var(--surface-5); animation: lx-pop 0.18s var(--ease) both; transform-origin: top left; }
+.appmenu__top { width: 150px; display: flex; flex-direction: column; gap: 1px; }
+.appmenu__sub { width: 280px; max-height: calc(100vh - 80px); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-left: 4px; animation: lx-fade 0.12s ease both; }
+.appmenu__item { width: 100%; height: 30px; display: flex; align-items: center; gap: 12px; padding: 0 10px; border-radius: var(--radius); text-align: left; font-size: 12.5px; color: var(--ink-70); transition: color 0.1s ease, background-color 0.1s ease; }
+.appmenu__item:hover, .appmenu__root.is-active { color: var(--ink); background: var(--surface-6); }
+.appmenu__root svg { margin-left: auto; color: var(--ink-35); }
+.appmenu__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appmenu__kbd { flex-shrink: 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-35); }
+.appmenu__sep { height: 1px; margin: 4px 10px; background: rgba(242, 242, 238, 0.06); }

@@ -17,7 +17,7 @@ export function StatusBar() {
   const { connectionStatus, latency, workspaceRoot } = useAppStore();
   const { branch, ahead, behind, changes, isRepo } = useGitStore();
   const streaming = useChatStore((s) => s.streaming);
-  const waiting = useChatStore((s) => !!s.pendingApproval);
+  const waiting = useChatStore((s) => !!s.pendingApproval || !!s.pendingQuestion);
   const activePath = useFileViewStore((s) => s.activePath);
   const cursor = useFileViewStore((s) => s.cursor);
   const mode = useWorkbenchStore((s) => s.mode);
@@ -50,7 +50,7 @@ export function StatusBar() {
       {(streaming || waiting) && (
         <button className="statusbar__item statusbar__item--agent" onClick={() => setMode('agent')}>
           {waiting ? <span className="dot dot--pulse" /> : <SpinRing size={11} />}
-          {waiting ? 'El agente espera tu permiso' : title ? `${title} · trabajando` : 'Agente trabajando'}
+          {waiting ? 'El agente espera tu respuesta' : title ? `${title} · trabajando` : 'Agente trabajando'}
         </button>
       )}
       {checker && (

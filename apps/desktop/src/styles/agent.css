@@ -236,11 +236,6 @@
 
 /* ── Terminal ────────────────────────────────────────────────────────── */
 
-.terminal-tabs { background: transparent; height: 36px; padding-left: 10px; gap: 2px; }
-.terminal-tab { border-radius: var(--radius); color: var(--ink-50); background: transparent; transition: color 0.15s ease, background-color 0.2s ease; }
-.terminal-tab:hover { color: var(--ink); background: transparent; }
-.terminal-tab.is-active { color: var(--ink); background: rgba(242, 242, 238, 0.05); }
-.terminal-body { background: transparent; }
 
 /* ── Circulares que sí deben serlo ───────────────────────────────────── */
 
@@ -292,3 +287,75 @@
 .quota:hover { background: var(--surface-4); }
 .quota__text { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
 .quota__sub { font-size: 11px; color: var(--ink-50); }
+
+/* ── Modos del chat ──────────────────────────────────────────────────── */
+
+.mode--agent { --mode: var(--accent); }
+.mode--plan { --mode: var(--info, #7aa7e0); }
+.mode--ask { --mode: var(--ink-50); }
+.modedot { width: 6px; height: 6px; border-radius: 50%; background: var(--mode); flex-shrink: 0; transition: background-color 0.2s ease; }
+.chat-inputbar__mode { height: 24px; padding: 0 8px; margin-left: -8px; border-radius: var(--radius); gap: 7px; outline: none; }
+.chat-inputbar__mode:focus-visible { background: var(--surface-5); }
+
+.agentmenu { width: 290px; padding: 6px; }
+.agentmenu__title { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px; font-size: 11px; color: var(--ink-35); }
+.agentmenu__kbd { display: inline-flex; gap: 3px; }
+.agentmenu__kbd kbd { padding: 1px 5px; border-radius: 4px; background: var(--surface-6); font-family: var(--font-mono); font-size: 10px; color: var(--ink-50); }
+.modeopt { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 8px; border-radius: var(--radius); text-align: left; color: var(--ink-70); transition: background-color 0.15s ease, color 0.15s ease; }
+.modeopt .modedot { margin-top: 6px; }
+.modeopt:hover { background: rgba(242, 242, 238, 0.05); color: var(--ink); }
+.modeopt.is-active { color: var(--ink); }
+.modeopt > svg { margin-top: 3px; color: var(--ink-50); }
+.modeopt__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.modeopt__label { font-size: 12.5px; font-weight: 500; }
+.modeopt__desc { font-size: 11px; line-height: 1.4; color: var(--ink-50); }
+.agentmenu__opts { margin-top: 4px; padding: 8px 8px 4px; border-radius: var(--radius); background: rgba(0, 0, 0, 0.18); }
+.agentmenu > .agentmenu__hint { padding: 8px; margin: 0; }
+
+/* ── Preguntas del agente (ask_user) ─────────────────────────────────── */
+
+.askq { width: calc(100% - 20px); margin: 0 10px 8px; padding: 14px 14px 10px; border-radius: var(--radius); background: #222222; outline: none; animation: lx-rise 0.3s var(--ease) both; }
+.chatpanel--wide .askq { max-width: 700px; margin: 0 auto 10px; }
+.askq__head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.askq__eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.askq__tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+.askq__tab { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: var(--radius); font-size: 11.5px; color: var(--ink-50); transition: color 0.15s ease, background-color 0.15s ease; }
+.askq__tab:hover { color: var(--ink-body); }
+.askq__tab.is-active { background: var(--surface-6); color: var(--ink); }
+.askq__tab.is-done svg { color: var(--accent); }
+.askq__question { font-size: 13.5px; font-weight: 500; line-height: 1.45; color: var(--ink); }
+.askq__hint { margin-top: 2px; font-size: 11px; color: var(--ink-35); }
+.askq__opts { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.askq__opt { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: var(--radius); text-align: left; color: var(--ink-70); cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease; }
+.askq__opt:hover { background: rgba(242, 242, 238, 0.04); color: var(--ink); }
+.askq__opt.is-on { background: rgba(198, 214, 110, 0.09); color: var(--ink); }
+.askq__num { flex-shrink: 0; width: 18px; height: 18px; display: grid; place-items: center; margin-top: 1px; border-radius: 5px; background: var(--surface-6); font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-50); }
+.askq__opt.is-on .askq__num { background: var(--accent); color: #111111; }
+.askq__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.askq__label { font-size: 12.5px; line-height: 1.45; }
+.askq__label--dim { color: var(--ink-50); }
+.askq__desc { font-size: 11.5px; line-height: 1.45; color: var(--ink-50); }
+.askq__opt--other { align-items: center; }
+.askq__input { flex: 1; min-width: 0; height: 22px; background: transparent; font-size: 12.5px; color: var(--ink); outline: none; }
+.askq__input::placeholder { color: var(--ink-35); }
+.askq__foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.askq__fill { flex: 1; }
+.askq__link { font-size: 12px; color: var(--ink-50); transition: color 0.15s ease; }
+.askq__link:hover { color: var(--danger); }
+.askq__nav { display: inline-flex; align-items: center; gap: 2px; }
+.askq__count { min-width: 28px; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--ink-35); }
+.askq__send { height: 28px; padding: 0 14px; font-size: 12px; }
+
+.toolrow__answers { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px 24px; font-size: 12px; }
+.toolrow__answers div { display: flex; gap: 8px; min-width: 0; }
+.toolrow__answers dt { color: var(--ink-50); flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolrow__answers dt::after { content: ' →'; }
+.toolrow__answers dd { color: var(--ink); flex-shrink: 0; max-width: 60%; }
+
+/* ── Plan listo para ejecutar ────────────────────────────────────────── */
+
+.planbar { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 8px 8px 8px 14px; border-radius: var(--radius); background: var(--surface-4); animation: lx-rise 0.3s var(--ease) both; }
+.planbar__text { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-50); }
+.planbar__alt { font-size: 12px; color: var(--ink-70); transition: color 0.15s ease; }
+.planbar__alt:hover { color: var(--ink); }
+.planbar__go { height: 28px; padding: 0 14px; font-size: 12px; }

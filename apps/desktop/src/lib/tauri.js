@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 
 // ── Comandos Rust (src-tauri/src/lib.rs) ──────────────────────────────
 
@@ -34,6 +34,11 @@ export function readFileContent(path) {
     de pisarlo. Devuelve el mtime nuevo (ms). */
 export function writeFileContent(path, content, expectedMtime) {
   return invoke('write_file_content', { path, content, expectedMtime: expectedMtime ?? null });
+}
+
+/** Diálogo nativo "Guardar como" + escritura. Devuelve la ruta o null si se canceló. */
+export function saveTextAs(defaultName, content) {
+  return invoke('save_text_as', { defaultName, content });
 }
 
 /** mtime del archivo en ms (la "versión" que el editor guarda al abrirlo). */
@@ -147,6 +152,10 @@ export function pickDirectory(options = {}) {
 /** Abre una URL en el navegador del sistema. */
 export function openExternal(url) {
   return openUrl(url);
+}
+
+export function revealInDir(path) {
+  return revealItemInDir(path);
 }
 
 // ── Servidores MCP (stdio) ─────────────────────────────────────────────

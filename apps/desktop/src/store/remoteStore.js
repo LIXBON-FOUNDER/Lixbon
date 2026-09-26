@@ -142,7 +142,7 @@ function startChannel(sessionId) {
     source: 'ide',
     title: useRemoteStore.getState().session?.title || 'IDE',
     machine: 'Lixbon IDE',
-    mode: chat.agentMode ? 'agent' : 'ask',
+    mode: chat.chatMode === 'agent' ? 'agent' : 'ask',
     model: app.currentModel,
   });
   emit('snapshot', { messages: mapSnapshot(chat.messages) });

@@ -1,7 +1,7 @@
 // AgentPage.jsx — Ajustes → Agente y permisos: modo con el que empieza cada
 // conversación, un preajuste de autonomía y el permiso por tipo de herramienta.
 import { useState } from 'react';
-import { useChatStore } from '../../../store/chatStore';
+import { useChatStore, CHAT_MODES } from '../../../store/chatStore';
 import { useMcpStore } from '../../../store/mcpStore';
 import { Segmented } from '../../../components/Segmented';
 import { Switch } from '../../../components/Switch';
@@ -29,7 +29,7 @@ const POLICY_OPTIONS = [
 
 export function AgentPage() {
   const {
-    agentMode, setAgentMode, nativeTools, setNativeTools,
+    chatMode, setChatMode, nativeTools, setNativeTools,
     toolPolicy, setToolPolicy, commandAllowlist, setCommandAllowlist,
   } = useChatStore();
   const mcpTools = useMcpStore((s) => s.agentTools().length);
@@ -50,13 +50,13 @@ export function AgentPage() {
         <div className="srow">
           <div className="srow__text">
             <span className="srow__label">Modo por defecto</span>
-            <span className="srow__hint">Cómo empieza cada conversación nueva.</span>
+            <span className="srow__hint">Se alterna en el chat con Shift+Tab o Ctrl+.</span>
           </div>
           <Segmented
             width={96}
-            value={agentMode ? 'agent' : 'chat'}
-            onChange={(v) => setAgentMode(v === 'agent')}
-            options={[{ value: 'agent', label: 'Agente' }, { value: 'chat', label: 'Solo chat' }]}
+            value={chatMode}
+            onChange={setChatMode}
+            options={CHAT_MODES.map((m) => ({ value: m.id, label: m.label }))}
           />
         </div>
         <div className="srow">

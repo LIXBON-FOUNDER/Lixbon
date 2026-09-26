@@ -25,6 +25,7 @@ import { CommandPalette } from '../components/CommandPalette';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Modal } from '../components/Modal';
 import { RemoteModal } from '../components/RemoteModal';
+import { Toasts } from '../components/Toasts';
 import { useVersion } from '../hooks/useVersion';
 import { registerBuiltinCommands } from '../commands/builtin';
 import { dispatchKeydown } from '../lib/keymap';
@@ -123,13 +124,13 @@ export function AppShell() {
       {quickOpen && <QuickOpen />}
       {commandPalette && <CommandPalette />}
       <ConfirmDialog />
+      <Toasts />
 
       {modalView === 'remote' && (
         <Modal
           title="Control remoto"
-          subtitle="Maneja esta sesión desde tu app móvil o la web"
           onClose={closeModal}
-          size="md"
+          size="sm"
         >
           <RemoteModal />
         </Modal>

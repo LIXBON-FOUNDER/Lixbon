@@ -1,113 +1,23 @@
-/* terminal.css — dock inferior del IDE (pestañas Problemas/Terminal) y el
-   panel de terminales integrados (xterm). */
-/* ── Dock inferior ───────────────────────────────────────────────────── */
-/* Ambas vistas quedan montadas (display:none al ocultarlas) para no matar
-   las sesiones de PTY al cambiar de pestaña. */
+/* terminal.css — terminales integrados (xterm). Las pestañas de sesión viven
+   en la barra del panel inferior (BottomDock). */
 
+.terminal-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-/* ── Panel de terminales (pestañas de sesión + cuerpo) ───────────────── */
+.terminal-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; margin-right: 6px; overflow-x: auto; scrollbar-width: none; }
+.terminal-tab { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 10px; border-radius: var(--radius); font-size: 11.5px; color: var(--ink-50); white-space: nowrap; transition: color 0.15s ease, background-color 0.2s ease; }
+.terminal-tab:hover { color: var(--ink-body); }
+.terminal-tab.is-active { color: var(--ink); background: var(--surface-4); }
+.terminal-tab__label { display: inline-flex; align-items: center; gap: 5px; }
+.terminal-tab__n { font-family: var(--font-mono); font-size: 10px; color: var(--ink-35); }
+.terminal-tab__close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; color: var(--ink-35); opacity: 0; transition: opacity 0.15s ease; }
+.terminal-tab:hover .terminal-tab__close, .terminal-tab.is-active .terminal-tab__close { opacity: 1; }
+.terminal-tab__close:hover { color: var(--ink); background: rgba(242, 242, 238, 0.08); }
+.terminal-tabs__shell { flex-shrink: 0; }
 
-.terminal-panel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
+.terminal-body { flex: 1; min-height: 0; position: relative; margin: 0 8px 8px; border-radius: var(--radius); background: #111111; overflow: hidden; }
+:root[data-theme="light"] .terminal-body { background: #f6f7ed; }
+.terminal-instance { position: absolute; inset: 0; padding: 10px 6px 6px 14px; }
+.terminal-instance .xterm, .terminal-instance .xterm-viewport { height: 100% !important; }
+.terminal-instance .xterm-viewport { background: transparent !important; scrollbar-width: thin; }
 
-.terminal-tabs {
-  display: flex;
-  align-items: center;
-  height: 30px;
-  flex-shrink: 0;
-  padding: 0 6px;
-  gap: 2px;
-  background: var(--bg-secondary);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.terminal-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 22px;
-  padding: 0 6px 0 10px;
-  font-size: 12px;
-  color: var(--ink-soft);
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.12s ease, background 0.12s ease;
-}
-
-.terminal-tab:hover {
-  color: var(--ink);
-  background: rgba(var(--ink-rgb), 0.05);
-}
-
-.terminal-tab.is-active {
-  color: var(--ink);
-  background: var(--bg-secondary);
-}
-
-.terminal-tab__close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  color: var(--ink-soft);
-}
-
-.terminal-tab__close:hover {
-  color: var(--ink);
-  background: rgba(var(--ink-rgb), 0.12);
-}
-
-.terminal-tabs__actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  padding-left: 6px;
-}
-
-.terminal-tabs__actions .icon-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-}
-
-/* ── Cuerpo con las instancias xterm ─────────────────────────────────── */
-/* Fondo oscuro fijo: es el mismo de XTERM_THEME (TerminalPanel.jsx), así el
-   área de consola se lee igual en tema claro y oscuro. */
-
-.terminal-body {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  background: #171717;
-}
-
-.terminal-instance {
-  position: absolute;
-  inset: 0;
-  padding: 6px 4px 6px 10px;
-}
-
-.terminal-instance .xterm,
-.terminal-instance .xterm-viewport {
-  height: 100% !important;
-}
-
-.terminal-empty {
-  display: flex;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: rgba(231, 231, 222, 0.4);
-}
+.terminal-empty { display: flex; height: 100%; align-items: center; justify-content: center; font-size: 12px; color: var(--ink-35); }

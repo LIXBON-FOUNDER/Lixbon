@@ -44,7 +44,7 @@ export async function loadMcpConfig(root) {
     try {
       project = parseServers(await readFileContent(`${root}${sep}.lixbon${sep}mcp.json`), 'proyecto');
     } catch (e) {
-      if (!/no existe|not found|No such file|cannot find|no se encuentra/i.test(String(e))) errors.push(`.lixbon/mcp.json: ${e.message || e}`);
+      if (!/no existe|no encontrad|not found|No such file|cannot find|no se encuentra/i.test(String(e))) errors.push(`.lixbon/mcp.json: ${e.message || e}`);
     }
   }
   return { servers: { ...user, ...project }, errors };

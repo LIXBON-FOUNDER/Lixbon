@@ -7,7 +7,7 @@ import { useAppStore } from '../store/appStore';
 import { useFileViewStore } from '../store/fileViewStore';
 import { useProblemsStore, problemCounts } from '../store/problemsStore';
 import { useOutputStore, CHANNELS } from '../store/outputStore';
-import { TerminalPanel } from './TerminalPanel';
+import { TerminalPanel, TerminalTabs } from './TerminalPanel';
 import { SpinRing } from '../components/Ring';
 import { Switch } from '../components/Switch';
 import { IconX, IconRefresh, IconTrash } from '../components/Icons';
@@ -113,6 +113,7 @@ export function BottomDock({ onClose }) {
           </button>
         ))}
         <div className="panelhead__fill" />
+        {tab === 'terminal' && <TerminalTabs />}
         <button className="ic" onClick={onClose} title="Ocultar panel (Ctrl `)"><IconX size={14} /></button>
       </div>
       <div className="dock2__body">

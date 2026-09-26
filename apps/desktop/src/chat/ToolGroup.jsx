@@ -7,13 +7,13 @@ import { useChatStore } from '../store/chatStore';
 const VERB = {
   read_file: 'leyó', write_file: 'escribió', edit_file: 'editó', append_file: 'añadió a',
   delete_file: 'eliminó', rename_file: 'movió', mkdir: 'creó carpeta', search: 'buscó',
-  list_files: 'listó', run_command: 'ejecutó',
+  list_files: 'listó', run_command: 'ejecutó', ask_user: 'preguntó',
 };
 
 const VERB_GERUND = {
   read_file: 'leyendo', write_file: 'escribiendo', edit_file: 'editando', append_file: 'añadiendo a',
   delete_file: 'eliminando', rename_file: 'moviendo', mkdir: 'creando carpeta', search: 'buscando',
-  list_files: 'listando', run_command: 'ejecutando',
+  list_files: 'listando', run_command: 'ejecutando', ask_user: 'esperando tu respuesta',
 };
 
 const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
@@ -55,7 +55,7 @@ function ActivityRow({ message, index, delay, live }) {
   const [showDiff, setShowDiff] = useState(false);
   const a = message.args || {};
   const mcp = mcpParts(message.tool);
-  const target = mcp ? mcp.tool : a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
+  const target = message.tool === 'ask_user' ? '' : mcp ? mcp.tool : a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
   const pending = !!message.pending;
   const failed = message.ok === false;
   const change = message.change;
@@ -110,6 +110,13 @@ function ActivityRow({ message, index, delay, live }) {
             <span className="diffline diffline--more">… +{hiddenLines} líneas más{'\n'}</span>
           )}
         </pre>
+      )}
+      {message.answers?.length > 0 && (
+        <dl className="toolrow__answers">
+          {message.answers.map((p, i) => (
+            <div key={i}><dt>{p.question}</dt><dd>{p.answer}</dd></div>
+          ))}
+        </dl>
       )}
       {!failed && !pending && message.content && !hasDiff && (message.tool === 'run_command' || mcp) && (
         <p className="toolrow__result">{message.content}</p>

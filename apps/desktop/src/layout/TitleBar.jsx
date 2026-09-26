@@ -18,6 +18,7 @@ import { LogoMark } from '../components/Logo';
 import { Popover } from '../components/Popover';
 import { TeamButton } from './TeamButton';
 import { AccountMenu } from './AccountMenu';
+import { AppMenu } from './AppMenu';
 import {
   IconSearch, IconChevronDown, IconLayoutLeft, IconLayoutBottom, IconLayoutRight,
   IconFolderOpen, IconFileCode, IconTerminal,
@@ -300,10 +301,12 @@ export function TitleBar({ minimal = false }) {
 
   return (
     <header className="titlebar">
-      <div className="titlebar__brand" data-tauri-drag-region>
-        <LogoMark size={18} />
-        <span className="titlebar__word">lixbon</span>
-      </div>
+      {minimal ? (
+        <div className="titlebar__brand" data-tauri-drag-region>
+          <LogoMark size={18} />
+          <span className="titlebar__word">lixbon</span>
+        </div>
+      ) : <AppMenu />}
 
       {!minimal && <ProjectMenu />}
       <div className="titlebar__drag" data-tauri-drag-region />

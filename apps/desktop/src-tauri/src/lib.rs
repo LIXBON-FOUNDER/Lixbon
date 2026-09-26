@@ -256,6 +256,28 @@ fn read_file_content(path: String, root: State<WorkspaceRoot>) -> Result<String,
         .map_err(|_| "El archivo no es texto (¿binario?) o no se pudo leer".to_string())
 }
 
+/// Guarda texto donde el usuario elija en un diálogo nativo. La ruta la pone
+/// el diálogo, nunca el frontend: así no es una escritura arbitraria fuera del
+/// workspace. Devuelve la ruta, o None si canceló.
+#[tauri::command]
+async fn save_text_as(app: AppHandle, default_name: String, content: String) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_file_name(&default_name).add_filter("Markdown", &["md"]);
+    if let Some(dir) = dirs_documents() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(picked) = dialog.blocking_save_file() else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    write_atomic(&path, content.as_bytes())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+fn dirs_documents() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    let docs = PathBuf::from(home).join("Documents");
+    docs.is_dir().then_some(docs)
+}
+
 #[tauri::command]
 fn write_file_content(
     path: String,
@@ -1288,6 +1310,7 @@ pub fn run() {
             auth_loopback::auth_loopback_start,
             preview_proxy::preview_proxy_start,
             mcp::vscode_user_file,
+            save_text_as,
             mcp::mcp_start,
             mcp::mcp_send,
             mcp::mcp_stop,

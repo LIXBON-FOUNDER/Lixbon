@@ -1,9 +1,11 @@
-// TerminalPanel.jsx — panel inferior de terminales integrados (xterm + PTY Rust).
-// Cada sesión monta su propia Terminal de xterm; se ocultan (no se desmontan) al
-// cambiar de pestaña para preservar el buffer. El PTY vive en el backend.
+// TerminalPanel.jsx — terminales integrados (xterm + PTY Rust). Cada sesión
+// monta su propia Terminal; se ocultan (no se desmontan) al cambiar de
+// pestaña para preservar el buffer. El PTY vive en el backend.
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { listen } from '@tauri-apps/api/event';
 
 import { useTerminalStore } from '../store/terminalStore';
@@ -12,8 +14,6 @@ import { termOpen, termWrite, termResize, termClose } from '../lib/tauri';
 import { Select } from '../components/Select';
 import { IconX, IconPlus } from '../components/Icons';
 
-// Temas del terminal según el modo de la app (<html data-theme>): antes era
-// siempre oscuro y en modo claro chocaba con el resto del IDE.
 const XTERM_THEMES = {
   dark: {
     background: '#111111',
@@ -21,6 +21,14 @@ const XTERM_THEMES = {
     cursor: '#C6D66E',
     cursorAccent: '#111111',
     selectionBackground: 'rgba(198, 214, 110, 0.25)',
+    black: '#1c1c1c', brightBlack: '#6b6b66',
+    red: '#e5766b', brightRed: '#f09289',
+    green: '#9fc46a', brightGreen: '#c6d66e',
+    yellow: '#e2b85c', brightYellow: '#f0cd7c',
+    blue: '#7aa7e0', brightBlue: '#9cc0ef',
+    magenta: '#c39ae0', brightMagenta: '#d6b5ee',
+    cyan: '#6fc2c0', brightCyan: '#92d8d5',
+    white: '#dcdcd6', brightWhite: '#f5f5f0',
   },
   light: {
     background: '#f6f7ed',
@@ -31,11 +39,10 @@ const XTERM_THEMES = {
   },
 };
 
-function currentXtermTheme() {
-  return document.documentElement.dataset.theme === 'dark'
-    ? XTERM_THEMES.dark
-    : XTERM_THEMES.light;
-}
+const currentXtermTheme = () =>
+  document.documentElement.dataset.theme === 'dark' ? XTERM_THEMES.dark : XTERM_THEMES.light;
+
+const FONT = "'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace";
 
 const SHELLS = [
   { id: 'powershell', label: 'PowerShell' },
@@ -43,7 +50,6 @@ const SHELLS = [
   { id: 'bash', label: 'bash' },
 ];
 
-// Instancia individual: mantiene su xterm mientras la sesión exista.
 function TerminalInstance({ session, active }) {
   const hostRef = useRef(null);
   const fitRef = useRef(null);
@@ -53,29 +59,54 @@ function TerminalInstance({ session, active }) {
   useEffect(() => {
     const term = new Terminal({
       theme: currentXtermTheme(),
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-      fontSize: 13,
+      fontFamily: FONT,
+      fontSize: 12.5,
+      lineHeight: 1.2,
+      letterSpacing: 0,
+      fontWeight: 400,
+      fontWeightBold: 700,
       cursorBlink: true,
+      cursorStyle: 'bar',
       scrollback: 5000,
+      allowProposedApi: true,
+      // Dibuja bloques y líneas (logo de Claude Code, separadores ─) como
+      // formas en vez de glifos de la fuente: con la fuente quedan huecos.
+      customGlyphs: true,
+      rescaleOverlappingGlyphs: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(hostRef.current);
+    const unicode = new Unicode11Addon();
+    term.loadAddon(unicode);
+    term.unicode.activeVersion = '11';
     fitRef.current = fit;
-
-    // Si el usuario cambia el modo claro/oscuro con el terminal abierto,
-    // re-aplicar el tema en vivo (el modo vive en <html data-theme>).
-    const themeObserver = new MutationObserver(() => {
-      term.options.theme = currentXtermTheme();
-    });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
     let disposed = false;
     let unlistenOut = null;
     let unlistenExit = null;
 
+    // xterm mide la celda al abrir: si la fuente aún no cargó, mide la de
+    // reserva y las columnas quedan desalineadas.
+    const opened = document.fonts.load(`12.5px ${FONT}`).catch(() => {}).then(() => {
+      if (disposed) return;
+      term.open(hostRef.current);
+      // customGlyphs solo aplica con el renderer WebGL; el DOM usa la fuente.
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch { /* sin WebGL: renderer DOM */ }
+    });
+
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = currentXtermTheme();
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
     (async () => {
       try {
+        await opened;
+        if (disposed) return;
         // cwd explícito: el PTY nace con él y ya no se puede cambiar.
         const id = await termOpen(session.shell, useAppStore.getState().workspaceRoot || null);
         if (disposed) { termClose(id).catch(() => {}); return; }
@@ -85,7 +116,6 @@ function TerminalInstance({ session, active }) {
         try { fit.fit(); } catch { /* aún sin tamaño */ }
         termResize(id, term.cols, term.rows).catch(() => {});
 
-        // Si Run/Build o Git dejaron un comando encolado, ejecutarlo ya.
         const pending = useTerminalStore.getState().takePending(session.key);
         if (pending) termWrite(id, pending + '\r').catch(() => {});
 
@@ -116,11 +146,10 @@ function TerminalInstance({ session, active }) {
       if (unlistenExit) unlistenExit();
       term.dispose();
     };
-    // Solo al montar/desmontar la sesión.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.key]);
 
-  // Al volver a estar visible hay que reajustar (un div oculto no se puede medir).
+  // Un div oculto no se puede medir: al volver a mostrarse hay que reajustar.
   useEffect(() => {
     if (!active || !fitRef.current || !idRef.current) return;
     const t = setTimeout(() => {
@@ -133,25 +162,52 @@ function TerminalInstance({ session, active }) {
     return () => clearTimeout(t);
   }, [active]);
 
+  return <div className="terminal-instance" style={{ display: active ? 'block' : 'none' }} ref={hostRef} />;
+}
+
+/** Pestañas de sesión y acciones; BottomDock las coloca en su propia barra. */
+export function TerminalTabs() {
+  const { sessions, activeKey, addSession, closeSession, setActive } = useTerminalStore();
   return (
-    <div
-      className="terminal-instance"
-      style={{ display: active ? 'block' : 'none' }}
-      ref={hostRef}
-    />
+    <div className="terminal-tabs">
+      {sessions.map((s, i) => (
+        <button
+          key={s.key}
+          className={`terminal-tab ${s.key === activeKey ? 'is-active' : ''}`}
+          onClick={() => setActive(s.key)}
+        >
+          <span className="terminal-tab__label">{s.title}{sessions.length > 1 && <span className="terminal-tab__n">{i + 1}</span>}</span>
+          <span
+            className="terminal-tab__close"
+            onClick={(e) => { e.stopPropagation(); closeSession(s.key); }}
+            title="Cerrar terminal"
+          >
+            <IconX size={12} />
+          </span>
+        </button>
+      ))}
+      <button className="ic" onClick={() => addSession()} title="Nuevo terminal (Ctrl Shift `)">
+        <IconPlus size={14} />
+      </button>
+      <Select
+        className="select--compact terminal-tabs__shell"
+        up
+        value=""
+        placeholder="Shell"
+        title="Abrir un terminal con otra shell"
+        options={SHELLS.map((sh) => ({ value: sh.id, label: sh.label }))}
+        onChange={(shell) => addSession(shell)}
+      />
+    </div>
   );
 }
 
 export function TerminalPanel() {
-  const { sessions, activeKey, addSession, closeSession, setActive } = useTerminalStore();
+  const { sessions, activeKey, addSession } = useTerminalStore();
   const workspaceReady = useAppStore((s) => s.workspaceReady);
   const terminalVisible = useAppStore((s) => s.panels.terminal);
 
-  // Sesión por defecto, pero NO antes de saber cuál es la carpeta de trabajo:
-  // el PTY hereda el cwd al nacer y ya no se puede cambiar. Si se abría antes,
-  // caía en la carpeta del usuario y `git push` fallaba con "not a git repository".
-  // Y solo cuando el panel está a la vista: el componente ahora vive montado
-  // (oculto) siempre, y no queremos un shell corriendo que nadie pidió.
+  // No antes de conocer la carpeta de trabajo: el PTY hereda el cwd al nacer.
   useEffect(() => {
     if (workspaceReady && terminalVisible && sessions.length === 0) addSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,51 +215,11 @@ export function TerminalPanel() {
 
   return (
     <div className="terminal-panel">
-      <div className="terminal-tabs">
-        {sessions.map((s) => (
-          <button
-            key={s.key}
-            className={`terminal-tab ${s.key === activeKey ? 'is-active' : ''}`}
-            onClick={() => setActive(s.key)}
-          >
-            <span className="terminal-tab__label">{s.title}</span>
-            <span
-              className="terminal-tab__close"
-              onClick={(e) => { e.stopPropagation(); closeSession(s.key); }}
-              title="Cerrar terminal"
-            >
-              <IconX size={13} />
-            </span>
-          </button>
-        ))}
-
-        <div className="terminal-tabs__actions">
-          <button
-            className="icon-btn"
-            onClick={() => addSession()}
-            title="Nuevo terminal"
-          >
-            <IconPlus size={15} />
-          </button>
-          <Select
-            className="select--compact"
-            up
-            value=""
-            placeholder="Shell…"
-            title="Abrir un terminal con otra shell"
-            options={SHELLS.map((sh) => ({ value: sh.id, label: sh.label }))}
-            onChange={(shell) => addSession(shell)}
-          />
-        </div>
-      </div>
-
       <div className="terminal-body">
         {sessions.map((s) => (
           <TerminalInstance key={s.key} session={s} active={s.key === activeKey} />
         ))}
-        {sessions.length === 0 && (
-          <div className="terminal-empty">Sin terminales abiertos.</div>
-        )}
+        {sessions.length === 0 && <div className="terminal-empty">Sin terminales abiertos.</div>}
       </div>
     </div>
   );

@@ -176,6 +176,7 @@ const handlers = {
     return hits;
   },
   replace_in_files: () => ({ files: 0, replacements: 0 }),
+  save_text_as: ({ defaultName, content }) => { console.log('[mock] save_text_as', defaultName, content.length); return `C:/Users/demo/Documents/${defaultName}`; },
   git_run: ({ args }) => git(args),
   term_open: () => `t${nextId++}`,
   term_write: () => null,
@@ -275,7 +276,17 @@ function mockCompletion(body) {
   const last = body.messages.at(-1)?.content || '';
   const frag = last.match(/<<<[^\n]*\n([\s\S]*?)\nFRAGMENTO>>>/);
   const fence = '```';
-  const text = frag ? `${fence}\n// editado por el mock\n${frag[1]}\n${fence}` : 'Hola, soy el modelo simulado del modo dev.';
+  const system = body.messages[0]?.role === 'system' ? body.messages[0].content : '';
+  const ask = JSON.stringify({ tool: 'ask_user', args: { questions: [
+    { question: '¿Qué base de datos quieres usar?', header: 'Base de datos', options: [{ label: 'PostgreSQL', description: 'Ya está en docker-compose.yml' }, { label: 'SQLite', description: 'Un archivo, sin servidor' }] },
+    { question: '¿Qué pantallas incluyo?', header: 'Pantallas', multiSelect: true, options: [{ label: 'Login' }, { label: 'Dashboard' }, { label: 'Ajustes' }] },
+  ] } });
+  const text = frag ? `${fence}\n// editado por el mock\n${frag[1]}\n${fence}`
+    : last.startsWith('TOOL_RESULT ask_user') ? (system.includes('MODO PLAN')
+      ? `Gracias. Con eso:\n\n## Plan\n1. Crear \`src/db.ts\` con la conexión.\n2. Añadir las pantallas elegidas en \`src/pages\`.\n3. Probar con \`npm test\`.\n\n**Riesgos:** migraciones de datos existentes.`
+      : 'Perfecto, sigo con esas opciones.')
+      : last.includes('pregunta') ? ask
+        : 'Hola, soy el modelo simulado del modo dev.';
   const enc = new TextEncoder();
   const stream = new ReadableStream({
     async start(ctrl) {

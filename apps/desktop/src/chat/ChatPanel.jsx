@@ -7,6 +7,7 @@ import { ChatMessage } from './ChatMessage';
 import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
+import { QuestionCard } from './QuestionCard';
 import { LogoMark } from '../components/Logo';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
@@ -69,6 +70,7 @@ export function ChatPanel({ wide = false }) {
         )}
       </div>
       <ApprovalCard />
+      <QuestionCard />
       <ChatInputBar />
     </div>
   );

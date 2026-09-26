@@ -80,7 +80,7 @@ export function Onboarding({ onDone }) {
   const finish = async () => {
     if (vscode && importIt) await importVsCode().catch(() => {});
     const preset = LEVELS.find((l) => l.id === level).apply;
-    chat.setAgentMode(true);
+    chat.setChatMode('agent');
     chat.setAutoApprove(preset.autoApprove);
     chat.setAutoRunCommands(preset.autoRunCommands);
     try { localStorage.setItem(ONBOARDED_KEY, '1'); } catch { /* sin almacenamiento: se repetirá */ }

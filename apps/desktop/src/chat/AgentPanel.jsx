@@ -12,7 +12,7 @@ import { IconChevronDown, IconExpand, IconPlus, IconX } from '../components/Icon
 export function AgentHeaderTitle() {
   const title = useChatStore((s) => s.conversationTitle);
   const streaming = useChatStore((s) => s.streaming);
-  const waiting = useChatStore((s) => !!s.pendingApproval);
+  const waiting = useChatStore((s) => !!s.pendingApproval || !!s.pendingQuestion);
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const close = useCallback(() => setOpen(false), []);

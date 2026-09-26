@@ -51,6 +51,58 @@ export function toolCategory(tool) {
   return READ_ONLY_TOOLS.has(tool) ? 'read' : 'edit';
 }
 
+/** Modos del chat. Plan y Preguntar solo leen: las herramientas que cambian
+    algo se bloquean aunque el modelo las pida. */
+export const CHAT_MODES = [
+  { id: 'agent', label: 'Agente', desc: 'Edita archivos y ejecuta comandos.' },
+  { id: 'plan', label: 'Plan', desc: 'Investiga y propone un plan antes de tocar nada.' },
+  { id: 'ask', label: 'Preguntar', desc: 'Responde sobre el código sin modificarlo.' },
+];
+const MODE_KEY = 'lixbon_chat_mode';
+function initialMode() {
+  const saved = localStorage.getItem(MODE_KEY);
+  if (CHAT_MODES.some((m) => m.id === saved)) return saved;
+  return localStorage.getItem('lixbon_agent_mode') === 'false' ? 'ask' : 'agent';
+}
+export const isReadOnlyTool = (tool) => READ_ONLY_TOOLS.has(tool);
+
+function modePrompt(mode) {
+  if (mode === 'plan') {
+    return '\n\n=== MODO PLAN (manda sobre las reglas anteriores) ===\n'
+      + 'El usuario quiere un PLAN, no cambios. Solo puedes usar herramientas de lectura (read_file, list_files, find_files, '
+      + 'outline, search, search_codebase, fetch_url, web_search) y ask_user. Cualquier otra herramienta será rechazada.\n'
+      + 'Si algo es ambiguo o hay varias opciones razonables, pregunta con ask_user ANTES de cerrar el plan.\n'
+      + 'Termina con el plan en markdown bajo "## Plan": pasos numerados, archivos que cambiarían y riesgos. '
+      + 'Puedes incluir fragmentos de código cortos para ilustrar. No digas que ya hiciste cambios.';
+  }
+  if (mode === 'ask') {
+    return '\n\n=== MODO PREGUNTAR (manda sobre las reglas anteriores) ===\n'
+      + 'El usuario hace preguntas: responde explicando. Solo puedes usar herramientas de lectura y ask_user; '
+      + 'no modifiques archivos ni ejecutes comandos. Aquí SÍ puedes mostrar código en bloques ``` para explicar o sugerir.';
+  }
+  return '';
+}
+
+/** Acepta la forma que pide el protocolo y los atajos que usan los modelos
+    chicos (una sola pregunta suelta, opciones como strings). */
+function normalizeQuestions(args = {}) {
+  const list = Array.isArray(args.questions) ? args.questions : args.question ? [args] : [];
+  return list.slice(0, 4).map((q) => {
+    const options = (Array.isArray(q.options) ? q.options : [])
+      .map((o) => (typeof o === 'string'
+        ? { label: o, description: '' }
+        : { label: String(o?.label || ''), description: o?.description ? String(o.description) : '' }))
+      .filter((o) => o.label.trim())
+      .slice(0, 6);
+    return {
+      question: String(q.question || '').trim(),
+      header: String(q.header || '').trim().slice(0, 24),
+      multiSelect: !!(q.multiSelect ?? q.multi_select),
+      options,
+    };
+  }).filter((q) => q.question);
+}
+
 const POLICY_KEY = 'lixbon_tool_policy';
 function initialPolicy() {
   let saved = {};
@@ -125,7 +177,7 @@ function makeChatStore() {
     conversationId: null,
     conversationTitle: '', // lo pone el auto-título; se ve en la cabecera del panel
     streaming: false,
-    agentMode: (localStorage.getItem('lixbon_agent_mode') ?? 'true') === 'true',
+    chatMode: initialMode(),
     // Por defecto el agente escribe directo (petición del diseño); en Ajustes
     // se puede exigir aprobación por cambio.
     autoApprove: (localStorage.getItem('lixbon_agent_auto') ?? 'true') === 'true',
@@ -144,6 +196,7 @@ function makeChatStore() {
       } catch { return DEFAULT_CMD_ALLOWLIST; }
     })(),
     pendingApproval: null, // { tool, args, change, resolve }
+    pendingQuestion: null, // { questions, resolve } de ask_user
     toolPolicy: initialPolicy(), // categoría → 'allow' | 'ask' | 'never'
 
     setToolPolicy: (cat, value) => {
@@ -160,9 +213,22 @@ function makeChatStore() {
       }
     },
 
-    setAgentMode: (agentMode) => {
-      localStorage.setItem('lixbon_agent_mode', agentMode ? 'true' : 'false');
-      share({ agentMode });
+    setChatMode: (chatMode) => {
+      if (!CHAT_MODES.some((m) => m.id === chatMode)) return;
+      localStorage.setItem(MODE_KEY, chatMode);
+      share({ chatMode });
+    },
+
+    cycleChatMode: () => {
+      const i = CHAT_MODES.findIndex((m) => m.id === get().chatMode);
+      get().setChatMode(CHAT_MODES[(i + 1) % CHAT_MODES.length].id);
+    },
+
+    answerQuestion: (answers) => {
+      const pending = get().pendingQuestion;
+      if (!pending) return;
+      set({ pendingQuestion: null });
+      pending.resolve(answers);
     },
 
     setAutoApprove: (autoApprove) => get().setToolPolicy('edit', autoApprove ? 'allow' : 'ask'),
@@ -190,7 +256,7 @@ function makeChatStore() {
     /** Con un agente trabajando, la conversación nueva se abre al lado y la
         otra sigue; si no, se reutiliza esta. */
     newConversation: () => {
-      if (get().streaming || get().pendingApproval) { spawnSession(); return; }
+      if (get().streaming || get().pendingApproval || get().pendingQuestion) { spawnSession(); return; }
       set({ messages: [], conversationId: null, conversationTitle: '' });
     },
 
@@ -246,6 +312,11 @@ function makeChatStore() {
         set({ pendingApproval: null });
         pending.resolve('no');
       }
+      const question = get().pendingQuestion;
+      if (question) {
+        set({ pendingQuestion: null });
+        question.resolve(null);
+      }
       if (abortController) {
         abortController.abort();
         abortController = null;
@@ -259,7 +330,7 @@ function makeChatStore() {
      * pero en la UI solo se muestra el chip.
      */
     send: async (text, context = null, images = [], mentions = []) => {
-      const { messages, conversationId, streaming, agentMode } = get();
+      const { messages, conversationId, streaming, chatMode } = get();
       const hasImages = Array.isArray(images) && images.length > 0;
       if (streaming || (!text.trim() && !hasImages)) return;
 
@@ -274,7 +345,7 @@ function makeChatStore() {
       const convId = conversationId || crypto.randomUUID();
       // Solo el primer intercambio pide título: después ya lo tiene.
       const isFirstExchange = !conversationId;
-      const agentActive = agentMode && !!workspaceRoot;
+      const agentActive = !!workspaceRoot;
 
       // ── Sub-agente de visión: si hay imágenes, un modelo multimodal las
       //    describe en texto para que el modelo de texto (qwen…) las entienda. ──
@@ -383,7 +454,8 @@ function makeChatStore() {
         { role: 'user', content: modelText },
       ];
       if (agentActive) {
-        modelMessages.unshift({ role: 'system', content: (await buildAgentSystemPrompt(workspaceRoot)) + mcpPromptSection() });
+        const mcp = chatMode === 'agent' ? mcpPromptSection() : '';
+        modelMessages.unshift({ role: 'system', content: (await buildAgentSystemPrompt(workspaceRoot)) + mcp + modePrompt(chatMode) });
       }
 
       abortController = new AbortController();
@@ -436,7 +508,10 @@ function makeChatStore() {
           // pocos minutos de trabajo. Se poda el historial, nunca el system.
           const policy = get().toolPolicy;
           const tools = useNative
-            ? [...TOOL_SCHEMAS, ...mcpToolSchemas()].filter((t) => policy[toolCategory(t.function?.name || '')] !== 'never')
+            ? [...TOOL_SCHEMAS, ...mcpToolSchemas()].filter((t) => {
+              const name = t.function?.name || '';
+              return policy[toolCategory(name)] !== 'never' && (chatMode === 'agent' || isReadOnlyTool(name));
+            })
             : null;
           const systemMsg = modelMessages[0]?.role === 'system' ? [modelMessages[0]] : [];
           const body = modelMessages.slice(systemMsg.length);
@@ -591,7 +666,7 @@ function makeChatStore() {
               pushMsg({ role: 'assistant', content: '', sources: null });
               continue;
             }
-            if (!nudged && /```/.test(spoken)) {
+            if (!nudged && chatMode === 'agent' && /```/.test(spoken)) {
               // Mostró código en vez de aplicarlo: una oportunidad de corregirse
               nudged = true;
               modelMessages.push({ role: 'assistant', content: spoken });
@@ -627,11 +702,11 @@ function makeChatStore() {
             const pendingIndex = get().messages.length;
             pushMsg({ role: 'tool', tool: call.tool, args: call.args, pending: true });
             const startedAt = Date.now();
-            const result = await get()._runTool(workspaceRoot, call);
+            const result = await get()._runTool(workspaceRoot, call, chatMode);
             set({
               messages: get().messages.map((m, i) => (i === pendingIndex ? {
                 ...m, pending: false, ok: result.ok, ms: Date.now() - startedAt,
-                content: result.display, change: result.change, snapshot: result.snapshot,
+                content: result.display, change: result.change, snapshot: result.snapshot, answers: result.answers,
                 full: (result.output || '').slice(0, 4000), // para replay del historial
               } : m)),
             });
@@ -662,15 +737,29 @@ function makeChatStore() {
         }
       } finally {
         abortController = null;
-        set({ streaming: false, pendingApproval: null });
+        set({ streaming: false, pendingApproval: null, pendingQuestion: null });
         // Burbuja vacía sobrante (cancelación entre pasos, tope de pasos…)
         const msgs = get().messages;
         const last = msgs[msgs.length - 1];
         if (last?.role === 'assistant' && !(last.content || '').trim() && !last.sources && !last.thinking) {
           set({ messages: msgs.slice(0, -1) });
         }
+        if (chatMode === 'plan' && agentActive && !signal.aborted) {
+          const end = get().messages;
+          const i = end.length - 1;
+          if (end[i]?.role === 'assistant' && (end[i].content || '').trim()) {
+            set({ messages: end.map((m, k) => (k === i ? { ...m, plan: true } : m)) });
+          }
+        }
         if (isFirstExchange) get()._autoTitle(convId);
       }
+    },
+
+    /** Pasa a modo Agente y le pide ejecutar el plan que acaba de proponer. */
+    runPlan: () => {
+      get().setChatMode('agent');
+      set({ messages: get().messages.map((m) => (m.plan ? { ...m, plan: false, planRun: true } : m)) });
+      get().send('Ejecuta el plan que propusiste, paso a paso.');
     },
 
     /** Auto-título tras el primer intercambio (igual que la web y la app).
@@ -705,12 +794,20 @@ function makeChatStore() {
     },
 
     /** Ejecuta una herramienta del agente con aprobación previa (interno). */
-    _runTool: async (root, call) => {
+    _runTool: async (root, call, mode = 'agent') => {
       const tool = call.tool;
       const args = call.args || {};
       const isCommand = tool === 'run_command';
       let change = null;
       let snapshot = null;
+      if (tool === 'ask_user') return get()._askUser(args);
+      if (mode !== 'agent' && !isReadOnlyTool(tool)) {
+        const label = CHAT_MODES.find((m) => m.id === mode)?.label;
+        return {
+          ok: false, display: `bloqueado en modo ${label}`, change: null,
+          output: `Estás en modo ${label}: solo lectura. No puedes usar ${tool}. Sigue investigando o termina tu respuesta.`,
+        };
+      }
       const need = get()._needsApproval(tool, args);
       if (need === 'never') {
         return {
@@ -747,6 +844,23 @@ function makeChatStore() {
         const message = String(err?.message || err);
         return { ok: false, display: message.slice(0, 160), output: `[ERROR] ${message}`, change };
       }
+    },
+
+    /** ask_user: muestra las preguntas sobre el composer y espera respuesta. */
+    _askUser: async (args) => {
+      const questions = normalizeQuestions(args);
+      if (!questions.length) {
+        return { ok: false, display: 'preguntas inválidas', output: '[ERROR] ask_user necesita "questions": [{"question","options":[{"label"}]}]' };
+      }
+      const answers = await new Promise((resolve) => set({ pendingQuestion: { questions, resolve } }));
+      if (!answers) return { ok: false, display: 'sin respuesta', output: 'El usuario no respondió y paró el turno.' };
+      const pairs = questions.map((q, i) => ({ question: q.question, answer: answers[i]?.length ? answers[i].join(', ') : '(sin respuesta)' }));
+      return {
+        ok: true,
+        display: pairs.map((p) => p.answer).join(' · ').slice(0, 160),
+        output: `El usuario respondió:\n${pairs.map((p) => `- ${p.question} → ${p.answer}`).join('\n')}`,
+        answers: pairs,
+      };
     },
 
     /** Deshace el cambio de una fila de herramienta (checkpoint estilo Cursor). */
@@ -829,7 +943,7 @@ export function useOpenSessions() {
   return order.map((key) => {
     const s = sessions[key].getState();
     return {
-      key, active: key === activeKey, streaming: s.streaming, waiting: !!s.pendingApproval,
+      key, active: key === activeKey, streaming: s.streaming, waiting: !!s.pendingApproval || !!s.pendingQuestion,
       title: s.conversationTitle || (s.messages.find((m) => m.role === 'user')?.content || '').slice(0, 60), conversationId: s.conversationId, hasMessages: s.messages.length > 0, seen: !!seen[key],
     };
   });

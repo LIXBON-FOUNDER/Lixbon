@@ -28,6 +28,7 @@ export const DEFAULT_KEYMAP = {
   'ctrl+4': 'mode.git',
   'ctrl+k': 'workbench.focusSearch',
   'ctrl+,': 'workbench.openSettings',
+  'ctrl+.': 'chat.cycleMode',
 };
 
 let activeKeymap = { ...DEFAULT_KEYMAP };

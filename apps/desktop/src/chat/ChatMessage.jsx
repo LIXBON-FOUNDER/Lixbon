@@ -1,6 +1,7 @@
 // ChatMessage.jsx — una burbuja del chat (usuario / asistente / error).
 // Las filas de herramienta se agrupan aparte en ToolGroup (las llama ChatPanel).
 import { ChatMarkdown } from './ChatMarkdown';
+import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode } from '../components/Icons';
 
 /** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
@@ -11,6 +12,19 @@ function LiveStatus({ text }) {
       <span className="activity-row__dot" aria-hidden />
       <span className="msg__live-text">{text}</span>
       <span className="msg__caret" aria-hidden="true" />
+    </div>
+  );
+}
+
+function PlanActions() {
+  const runPlan = useChatStore((s) => s.runPlan);
+  const busy = useChatStore((s) => s.streaming);
+  const focus = () => document.querySelector('.chat-inputbar__textarea')?.focus();
+  return (
+    <div className="planbar">
+      <span className="planbar__text">¿Lo ejecuto? Pasará a modo Agente.</span>
+      <button className="planbar__alt" onClick={focus}>Ajustar el plan</button>
+      <button className="pill-btn pill-btn--primary planbar__go" disabled={busy} onClick={runPlan}>Ejecutar plan</button>
     </div>
   );
 }
@@ -85,6 +99,7 @@ export function ChatMessage({ message, streaming }) {
       ) : (
         streaming && <LiveStatus text="Pensando…" />
       )}
+      {message.plan && !streaming && <PlanActions />}
     </div>
   );
 }

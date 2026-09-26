@@ -202,6 +202,12 @@ export function FileTree() {
     }
   };
 
+  useEffect(() => {
+    const onCreate = (e) => startCreateIn(createParent(), e.detail?.type === 'dir' ? 'dir' : 'file');
+    window.addEventListener('lixbon:explorer-create', onCreate);
+    return () => window.removeEventListener('lixbon:explorer-create', onCreate);
+  });
+
   // ── Acciones del menú contextual ─────────────────────────────────────
 
   const startRename = (entry, parent) => {

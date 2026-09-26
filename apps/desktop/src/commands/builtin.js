@@ -7,23 +7,39 @@ import { registerCommands } from '../lib/commands';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useIndexStore } from '../store/indexStore';
-import { useChatStore } from '../store/chatStore';
-import { pickDirectory, createNewEntry, writeFileContent, openExternal } from '../lib/tauri';
+import { useChatStore, CHAT_MODES } from '../store/chatStore';
+import { pickDirectory, openExternal, saveTextAs, revealInDir, readDir } from '../lib/tauri';
+import { toast } from '../store/toastStore';
 import { showConfirm } from '../lib/confirm';
 import { githubSlug } from '../lib/githubSlug';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useFileViewStore } from '../store/fileViewStore';
+import { useTerminalStore } from '../store/terminalStore';
+import { useProblemsStore } from '../store/problemsStore';
+import { getActiveView } from '../editor/CodeEditor';
+import { detectRunConfig } from '../lib/runConfigs';
+import { undo, redo, selectAll } from '@codemirror/commands';
+import { openSearchPanel } from '@codemirror/search';
 
-/** Markdown de una conversación completa (para /save): mismo criterio que
-    apps/cli/lixbon_cli/app.py::cmd_save — un encabezado por turno, sin las
-    filas de herramienta (esas quedan en el workspace, no en la bitácora). */
+const TOOL_VERB = { read_file: 'Leyó', write_file: 'Creó', edit_file: 'Editó', multi_edit: 'Editó', delete_file: 'Eliminó', rename_file: 'Renombró', run_command: 'Ejecutó', ask_user: 'Preguntó' };
+
+/** Markdown de una conversación completa (para /save). Las herramientas van
+    como una línea cada una, sin su salida. */
 function conversationMarkdown(state) {
-  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-  const lines = [`# Conversación Lixbon — ${state.conversationTitle || 'sin título'}`, '', `- Fecha: ${stamp}`, ''];
+  const stamp = new Date().toLocaleString();
+  const lines = [`# ${state.conversationTitle || 'Conversación con Lixbon'}`, '', `_Exportada el ${stamp}_`, ''];
+  let inTools = false;
   for (const m of state.messages) {
+    if (m.role === 'tool') {
+      const target = m.args?.command || m.args?.path || m.args?.src || m.args?.query || '';
+      lines.push(`- ${TOOL_VERB[m.tool] || m.tool}${target ? ` \`${target}\`` : ''}${m.ok === false ? ' (falló)' : ''}`);
+      inTools = true;
+      continue;
+    }
     if (m.role !== 'user' && m.role !== 'assistant') continue;
     const content = (m.content || '').trim();
     if (!content) continue;
+    if (inTools) { lines.push(''); inTools = false; }
     lines.push(m.role === 'user' ? '## Tú' : '## Lixbon', '', content, '');
   }
   return lines.join('\n');
@@ -60,7 +76,48 @@ export function registerBuiltinCommands() {
   const tabs = () => useFileViewStore.getState();
   const inEditor = () => { if (wb().mode !== 'editor') wb().setMode('editor'); };
 
+  // Menú Editar: actúa sobre el editor de código abierto; en un campo de
+  // texto normal se cae al comando nativo del navegador.
+  const onEditor = (cmd, fallback) => () => {
+    const view = getActiveView();
+    if (view && wb().mode === 'editor') { view.focus(); cmd(view); return; }
+    if (fallback) document.execCommand(fallback);
+  };
+  const newFile = (type) => () => {
+    if (!app().workspaceRoot) return;
+    inEditor();
+    wb().showSide('files');
+    setTimeout(() => window.dispatchEvent(new CustomEvent('lixbon:explorer-create', { detail: { type } })), 60);
+  };
+  const runProject = (kind) => async () => {
+    const root = app().workspaceRoot;
+    if (!root) return;
+    const config = detectRunConfig(await readDir(root).catch(() => []));
+    const cmd = config?.[kind];
+    if (!cmd) { toast(kind === 'build' ? 'No sé cómo compilar este proyecto.' : 'No sé cómo ejecutar este proyecto.'); return; }
+    inEditor();
+    wb().setDockTab('terminal');
+    app().showTerminal();
+    useTerminalStore.getState().runCommand(cmd);
+  };
+  const openDock = (tab) => () => { inEditor(); wb().setDockTab(tab); app().showTerminal(); };
+
   registerCommands([
+    { id: 'file.newFile', title: 'Nuevo archivo', category: 'Archivo', keywords: 'nuevo archivo crear file', run: newFile('file') },
+    { id: 'file.newFolder', title: 'Nueva carpeta', category: 'Archivo', keywords: 'nueva carpeta crear folder', run: newFile('dir') },
+    { id: 'edit.undo', title: 'Deshacer', category: 'Editar', keywords: 'undo deshacer', run: onEditor(undo, 'undo') },
+    { id: 'edit.redo', title: 'Rehacer', category: 'Editar', keywords: 'redo rehacer', run: onEditor(redo, 'redo') },
+    { id: 'edit.selectAll', title: 'Seleccionar todo', category: 'Editar', keywords: 'select all seleccionar', run: onEditor(selectAll, 'selectAll') },
+    { id: 'edit.find', title: 'Buscar en el archivo', category: 'Editar', keywords: 'find buscar archivo', run: onEditor(openSearchPanel) },
+    { id: 'terminal.new', title: 'Nuevo terminal', category: 'Terminal', keywords: 'terminal nuevo shell', run: () => { openDock('terminal')(); useTerminalStore.getState().addSession(); } },
+    { id: 'terminal.run', title: 'Ejecutar el proyecto', category: 'Terminal', keywords: 'run ejecutar dev start', run: runProject('run') },
+    { id: 'terminal.build', title: 'Compilar el proyecto', category: 'Terminal', keywords: 'build compilar', run: runProject('build') },
+    { id: 'terminal.check', title: 'Comprobar problemas', category: 'Terminal', keywords: 'check problemas tsc cargo ruff lint', run: () => { openDock('problems')(); useProblemsStore.getState().run(); } },
+    { id: 'view.problems', title: 'Problemas', category: 'Ver', keywords: 'problemas errores warnings', run: openDock('problems') },
+    { id: 'view.output', title: 'Salida', category: 'Ver', keywords: 'salida output log', run: openDock('output') },
+    { id: 'help.keybindings', title: 'Atajos de teclado', category: 'Ayuda', keywords: 'atajos teclado keybindings shortcuts', run: () => wb().openSettings('keys') },
+    { id: 'help.docs', title: 'Documentación', category: 'Ayuda', keywords: 'docs documentacion ayuda', run: () => openExternal('https://lixbon.com/docs') },
+    { id: 'help.downloads', title: 'Descargas y novedades', category: 'Ayuda', keywords: 'version descargas novedades changelog', run: () => openExternal('https://lixbon.com/apps') },
     // ── Vistas / paneles ────────────────────────────────────────────────
     {
       id: 'workbench.commandPalette', title: 'Mostrar todos los comandos',
@@ -182,10 +239,20 @@ export function registerBuiltinCommands() {
       },
     },
     {
-      id: 'chat.toggleAgentMenu', title: 'Opciones del agente (modo, auto-aplicar, auto-run)',
+      id: 'chat.toggleAgentMenu', title: 'Modo y opciones del agente',
       category: 'Chat', keywords: 'mode modo agente auto aplicar run comandos',
       run: () => window.dispatchEvent(new CustomEvent('lixbon:toggle-agent-menu')),
     },
+    {
+      id: 'chat.cycleMode', title: 'Alternar modo del chat (Agente → Plan → Preguntar)',
+      category: 'Chat', keywords: 'mode modo plan ask preguntar agente alternar',
+      run: () => useChatStore.getState().cycleChatMode(),
+    },
+    ...CHAT_MODES.map((m) => ({
+      id: `chat.mode.${m.id}`, title: `Modo ${m.label}`,
+      category: 'Chat', keywords: `mode modo ${m.id} ${m.label}`,
+      run: () => useChatStore.getState().setChatMode(m.id),
+    })),
     {
       id: 'chat.toggleApprove', title: 'Auto-aprobar cambios del agente',
       category: 'Chat', keywords: 'approve aprobar auto aplicar',
@@ -206,23 +273,24 @@ export function registerBuiltinCommands() {
       },
     },
     {
-      id: 'chat.saveMarkdown', title: 'Guardar la conversación en Markdown',
+      id: 'chat.saveMarkdown', title: 'Exportar la conversación a Markdown',
       category: 'Chat', keywords: 'save guardar markdown bitacora exportar',
       run: async () => {
-        const a = app();
-        if (!a.workspaceRoot) return;
         const chat = useChatStore.getState();
-        if (!chat.messages.length) return;
-        const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').slice(0, 12);
-        const name = `lixbon-${stamp}.md`;
-        try {
-          await createNewEntry(a.workspaceRoot, name, false);
-        } catch (e) {
-          if (!String(e).includes('Ya existe')) throw e;
+        if (!chat.messages.some((m) => m.role === 'user' || m.role === 'assistant')) {
+          toast('No hay nada que exportar todavía.');
+          return;
         }
-        const sep = a.workspaceRoot.includes('\\') ? '\\' : '/';
-        await writeFileContent(`${a.workspaceRoot}${sep}${name}`, conversationMarkdown(chat));
-        window.dispatchEvent(new CustomEvent('lixbon:fs-changed'));
+        const slug = (chat.conversationTitle || 'conversacion').toLowerCase()
+          .normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
+        try {
+          const path = await saveTextAs(`${slug || 'conversacion'}.md`, conversationMarkdown(chat));
+          if (!path) return;
+          toast(`Guardada en ${path}`, { action: { label: 'Mostrar', run: () => revealInDir(path).catch(() => {}) }, ms: 6000 });
+          window.dispatchEvent(new CustomEvent('lixbon:fs-changed'));
+        } catch (e) {
+          toast(`No se pudo exportar: ${e?.message || e}`, { tone: 'danger' });
+        }
       },
     },
     {

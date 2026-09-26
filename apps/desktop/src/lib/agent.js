@@ -605,7 +605,10 @@ export async function buildAgentSystemPrompt(root) {
     '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n' +
     '{"tool":"run_command","args":{"command":"npm test","timeout":60}}\n' +
     '{"tool":"fetch_url","args":{"url":"https://…"}}  (descarga una página web como texto)\n' +
-    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n\n' +
+    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n' +
+    '{"tool":"ask_user","args":{"questions":[{"question":"¿Qué base de datos uso?","header":"Base de datos","options":[{"label":"PostgreSQL","description":"Ya está en docker-compose"},{"label":"SQLite"}],"multiSelect":false}]}}  ' +
+    '(pregunta al usuario con opciones: hasta 4 preguntas de 2 a 6 opciones; siempre podrá escribir otra respuesta. ' +
+    'Úsala solo cuando una decisión dependa del usuario y no puedas deducirla del código)\n\n' +
     '=== REGLAS OBLIGATORIAS ===\n' +
     '1. Si el usuario pide crear, modificar, arreglar o eliminar algo, DEBES hacerlo con herramientas EN ESTA MISMA RESPUESTA. ' +
     'Tú ejecutas los cambios; el usuario no copia código.\n' +

@@ -6,7 +6,7 @@
 // (lo necesita el panel redondeado) y eso los recortaba — igual que Select.jsx.
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useChatStore } from '../store/chatStore';
+import { useChatStore, CHAT_MODES } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
 import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
@@ -30,7 +30,10 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const SLASH_COMMANDS = [
   { cmd: 'new', desc: 'Nueva conversación', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
   { cmd: 'clear', desc: 'Vaciar el contexto y empezar de cero', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
-  { cmd: 'mode', desc: 'Modo del agente (auto-aplicar, auto-run)', Icon: IconHammer, run: () => runCommand('chat.toggleAgentMenu') },
+  { cmd: 'mode', desc: 'Modo: Agente, Plan o Preguntar', Icon: IconHammer, run: () => runCommand('chat.toggleAgentMenu') },
+  { cmd: 'agent', desc: 'Modo Agente: edita y ejecuta', Icon: IconHammer, run: () => runCommand('chat.mode.agent') },
+  { cmd: 'plan', desc: 'Modo Plan: investiga y propone antes de tocar nada', Icon: IconList, run: () => runCommand('chat.mode.plan') },
+  { cmd: 'ask', desc: 'Modo Preguntar: solo lectura', Icon: IconUser, run: () => runCommand('chat.mode.ask') },
   { cmd: 'approve', desc: 'Auto-aprobar cambios del agente', Icon: IconCheck, run: () => runCommand('chat.toggleApprove') },
   { cmd: 'undo', desc: 'Revertir el último cambio', Icon: IconHistory, run: () => runCommand('chat.undoLast') },
   { cmd: 'diff', desc: 'Ver el último cambio', Icon: IconFolder, run: () => runCommand('chat.viewLastDiff') },
@@ -38,7 +41,7 @@ const SLASH_COMMANDS = [
   { cmd: 'model', desc: 'Cambiar de modelo', Icon: IconSun, run: () => runCommand('chat.focusModelPicker') },
   { cmd: 'usage', desc: 'Ver consumo de la cuenta', Icon: IconChart, run: () => runCommand('chat.openUsage') },
   { cmd: 'copy', desc: 'Copiar la última respuesta', Icon: IconClip, run: () => runCommand('chat.copyLast') },
-  { cmd: 'save', desc: 'Guardar la conversación en Markdown', Icon: IconFileCode, run: () => runCommand('chat.saveMarkdown') },
+  { cmd: 'save', desc: 'Exportar la conversación a Markdown', Icon: IconFileCode, run: () => runCommand('chat.saveMarkdown') },
   { cmd: 'history', desc: 'Ver conversaciones anteriores', Icon: IconHistory, run: () => runCommand('chat.showHistory') },
   { cmd: 'workspace', desc: 'Cambiar la carpeta de trabajo', Icon: IconFolder, run: () => runCommand('chat.openWorkspace') },
   { cmd: 'init', desc: 'Generar LIXBON.md con el contexto del proyecto', Icon: IconFileCode, run: () => runCommand('chat.init') },
@@ -98,13 +101,14 @@ export function ChatInputBar() {
   const agentPopRef = useRef(null);
 
   const {
-    send, stop, streaming, agentMode, setAgentMode,
+    send, stop, streaming, chatMode, setChatMode, cycleChatMode,
     autoApprove, setAutoApprove, autoRunCommands, setAutoRunCommands,
   } = useChatStore();
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const contextWindow = useAppStore((s) => s.contextWindow);
   const messages = useChatStore((s) => s.messages);
-  const agentActive = agentMode && !!workspaceRoot;
+  const agentActive = !!workspaceRoot;
+  const mode = CHAT_MODES.find((m) => m.id === chatMode) || CHAT_MODES[0];
 
   // Estimación gruesa (≈4 caracteres por token): basta para avisar antes de
   // que el modelo empiece a recortar la conversación.
@@ -278,6 +282,11 @@ export function ChatInputBar() {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionMatches[mentionSel]); return; }
       if (e.key === 'Escape') { e.preventDefault(); setMentionQuery(null); return; }
     }
+    if (e.key === 'Tab' && e.shiftKey && workspaceRoot) {
+      e.preventDefault();
+      cycleChatMode();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -359,7 +368,10 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={agentActive ? 'Pide algo, @ para mencionar un archivo, / para comandos' : 'Pregunta lo que quieras, / para comandos'}
+        placeholder={!agentActive ? 'Pregunta lo que quieras, / para comandos'
+          : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
+            : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
+              : 'Pide algo, @ para mencionar un archivo, / para comandos'}
         rows={1}
         value={text}
         onChange={onChange}
@@ -372,38 +384,52 @@ export function ChatInputBar() {
         <div className="agentmenu-wrap">
           <button
             ref={agentBtnRef}
-            className={`chat-inputbar__mode ${agentActive ? 'is-on' : ''}`}
+            className={`chat-inputbar__mode ${agentActive ? `is-on mode--${mode.id}` : ''}`}
             onClick={() => setAgentMenuOpen((v) => !v)}
-            title={workspaceRoot ? 'Opciones del agente (/mode)' : 'Abre una carpeta de trabajo para usar el agente'}
+            title={workspaceRoot ? 'Modo del chat (Shift+Tab para alternar)' : 'Abre una carpeta de trabajo para usar el agente'}
           >
-            {agentActive ? 'Agente' : 'Chat'}
+            {agentActive && <span className="modedot" />}
+            {agentActive ? mode.label : 'Chat'}
             <IconChevronDown size={12} className={`chev ${agentMenuOpen ? 'is-flipped' : ''}`} />
           </button>
 
           {agentMenuOpen && agentMenuPos && createPortal(
             <div className="agentmenu" ref={agentPopRef} style={agentMenuPos}>
-              <div className="agentmenu__row">
-                <span>Agente</span>
-                <Switch checked={agentMode} onChange={setAgentMode} label="Agente" disabled={!workspaceRoot} />
-              </div>
-              <p className="agentmenu__hint">
-                {agentActive
-                  ? 'Puede crear y editar archivos de tu carpeta de trabajo.'
-                  : workspaceRoot
-                    ? 'Actívalo para que el modelo edite archivos (con tu aprobación).'
-                    : 'Abre una carpeta de trabajo para usar el agente.'}
-              </p>
-              {agentActive && (
+              {workspaceRoot ? (
                 <>
-                  <div className="agentmenu__row">
-                    <span>Aplicar cambios sin preguntar</span>
-                    <Switch checked={autoApprove} onChange={setAutoApprove} label="Aplicar cambios sin preguntar" />
+                  <div className="agentmenu__title">
+                    <span>Modo</span>
+                    <span className="agentmenu__kbd"><kbd>Shift</kbd><kbd>Tab</kbd></span>
                   </div>
-                  <div className="agentmenu__row">
-                    <span>Ejecutar comandos sin preguntar</span>
-                    <Switch checked={autoRunCommands} onChange={setAutoRunCommands} label="Ejecutar comandos sin preguntar" />
-                  </div>
+                  {CHAT_MODES.map((m) => (
+                    <button
+                      key={m.id}
+                      className={`modeopt mode--${m.id} ${m.id === chatMode ? 'is-active' : ''}`}
+                      onClick={() => { setChatMode(m.id); setAgentMenuOpen(false); textareaRef.current?.focus(); }}
+                    >
+                      <span className="modedot" />
+                      <span className="modeopt__text">
+                        <span className="modeopt__label">{m.label}</span>
+                        <span className="modeopt__desc">{m.desc}</span>
+                      </span>
+                      {m.id === chatMode && <IconCheck size={13} />}
+                    </button>
+                  ))}
+                  {chatMode === 'agent' && (
+                    <div className="agentmenu__opts">
+                      <div className="agentmenu__row">
+                        <span>Aplicar cambios sin preguntar</span>
+                        <Switch checked={autoApprove} onChange={setAutoApprove} label="Aplicar cambios sin preguntar" />
+                      </div>
+                      <div className="agentmenu__row">
+                        <span>Ejecutar comandos sin preguntar</span>
+                        <Switch checked={autoRunCommands} onChange={setAutoRunCommands} label="Ejecutar comandos sin preguntar" />
+                      </div>
+                    </div>
+                  )}
                 </>
+              ) : (
+                <p className="agentmenu__hint">Abre una carpeta de trabajo para usar los modos Agente, Plan y Preguntar.</p>
               )}
             </div>,
             document.body,
