@@ -32,6 +32,7 @@ function groupOf(iso) {
 
 export function HistoryList() {
   const { loadConversation, conversationId, conversationTitle, streaming } = useChatStore();
+  const engine = useChatStore((s) => s.engine) || 'lixbon';
   const [items, setItems] = useState(null);
   const [ccItems, setCcItems] = useState([]);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
@@ -75,7 +76,9 @@ export function HistoryList() {
       });
     }
     const q = query.trim().toLowerCase();
-    const all = [...(items || []), ...ccItems.filter((c) => !q || c.title.toLowerCase().includes(q))]
+    // Cada agente ve solo su historial: mezclarlos confundía de qué agente era cada conversación.
+    const pool = engine === 'claude' ? ccItems.filter((c) => !q || c.title.toLowerCase().includes(q)) : (items || []);
+    const all = [...pool]
       .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
     for (const c of all) {
       if (liveIds.has(c.id)) continue;
@@ -84,7 +87,7 @@ export function HistoryList() {
       g.items.push(c);
     }
     return out;
-  }, [items, ccItems, runningKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, ccItems, runningKey, engine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openItem = async (c) => {
     if (c.live) { useSessionsStore.getState().activate(c.key); return; }

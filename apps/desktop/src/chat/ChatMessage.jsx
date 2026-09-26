@@ -1,5 +1,6 @@
 // ChatMessage.jsx — una burbuja del chat (usuario / asistente / error).
 // Las filas de herramienta se agrupan aparte en ToolGroup (las llama ChatPanel).
+import { useEffect, useState } from 'react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode } from '../components/Icons';
@@ -13,6 +14,28 @@ function LiveStatus({ text }) {
       <span className="activity-row__dot" aria-hidden />
       <span className="msg__live-text">{text}</span>
       <span className="msg__caret" aria-hidden="true" />
+    </div>
+  );
+}
+
+const CLAUDE_VERBS = ['Pensando', 'Cavilando', 'Tramando', 'Hilando', 'Maquinando', 'Rumiando', 'Destilando', 'Cocinando', 'Descifrando', 'Tejiendo'];
+
+// El indicador de Claude Code en su propio estilo: asterisco que late y un
+// verbo que va cambiando, como en su terminal.
+function ClaudeLive() {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.floor((now - start) / 1000);
+  const verb = CLAUDE_VERBS[Math.floor(secs / 3) % CLAUDE_VERBS.length];
+  return (
+    <div className="msg__live msg__live--claude">
+      <ClaudeMark size={13} className="claudemark--live" />
+      <span className="msg__live-text">{verb}…</span>
+      {secs >= 3 && <span className="msg__live-secs mono">{secs} s</span>}
     </div>
   );
 }
@@ -100,7 +123,7 @@ export function ChatMessage({ message, streaming }) {
       ) : message.generating ? (
         <LiveStatus text={`Generando cambio… (${(message.generating / 1000).toFixed(1)}k caracteres)`} />
       ) : (
-        streaming && <LiveStatus text="Pensando…" />
+        streaming && (message.engine === 'claude' ? <ClaudeLive /> : <LiveStatus text="Pensando…" />)
       )}
       {message.plan && !streaming && <PlanActions />}
     </div>

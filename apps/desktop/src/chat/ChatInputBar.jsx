@@ -15,6 +15,7 @@ import { ModelPicker } from './ModelPicker';
 import { Select } from '../components/Select';
 import { CLAUDE_MODELS } from '../lib/claudeCode';
 import { Switch } from '../components/Switch';
+import { ClaudeMark } from '../components/Logo';
 import { ProgressRing } from '../components/Ring';
 import {
   IconStop, IconX, IconFileCode, IconHammer, IconClip, IconChevronDown, IconAt, IconArrowUp,
@@ -56,6 +57,19 @@ const SLASH_COMMANDS = [
   { cmd: 'remote', desc: 'Control remoto por QR', Icon: IconTerminal, run: () => runCommand('remote.open') },
   { cmd: 'help', desc: 'Ver todos los comandos', Icon: IconList, run: () => runCommand('workbench.commandPalette') },
 ];
+
+// En una sesión de Claude Code solo valen las acciones del IDE que tienen
+// sentido para él; el resto de "/" son los comandos del propio Claude Code.
+const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'agent', 'plan', 'ask', 'approve', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace']);
+
+function claudeSlashCommands(names = []) {
+  const local = SLASH_COMMANDS.filter((c) => CLAUDE_LOCAL.has(c.cmd));
+  const taken = new Set(local.map((c) => c.cmd));
+  const remote = names
+    .filter((n) => n && !taken.has(n))
+    .map((n) => ({ cmd: n, desc: 'Comando de Claude Code', Icon: IconTerminal, insert: true }));
+  return [...local, ...remote];
+}
 
 /** Fuzzy match por subsecuencia (igual que QuickOpen). -1 = no coincide. */
 function fuzzyScore(text, q) {
@@ -113,6 +127,7 @@ export function ChatInputBar() {
   const ccContext = useChatStore((s) => s.ccContext);
   const ccModel = useChatStore((s) => s.ccModel);
   const setCcModel = useChatStore((s) => s.setCcModel);
+  const ccSlash = useChatStore((s) => s.ccSlash);
   const isClaude = engine === 'claude';
   const agentActive = !!workspaceRoot;
   const mode = CHAT_MODES.find((m) => m.id === chatMode) || CHAT_MODES[0];
@@ -227,11 +242,12 @@ export function ChatInputBar() {
   // Menú "/": solo cuando TODO el mensaje es un token "/algo" sin espacios —
   // en cuanto se completa la frase (aparece un espacio) el menú se cierra solo.
   const slashMatches = useMemo(() => {
-    const m = /^\/(\w*)$/.exec(text);
+    const m = /^\/([\w:-]*)$/.exec(text);
     if (!m) return [];
     const q = m[1].toLowerCase();
-    return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(q));
-  }, [text]);
+    const list = isClaude ? claudeSlashCommands(ccSlash) : SLASH_COMMANDS;
+    return list.filter((c) => c.cmd.toLowerCase().startsWith(q)).slice(0, 40);
+  }, [text, isClaude, ccSlash]);
   const slashOpen = slashMatches.length > 0;
   const menuOpen = mentionQuery !== null && mentionMatches.length > 0;
   const cmdmenuPos = useAnchoredAbove(barRef, slashOpen, { matchWidth: true });
@@ -239,6 +255,11 @@ export function ChatInputBar() {
 
   const pickSlash = (entry) => {
     if (!entry) return;
+    if (entry.insert) {
+      setText(`/${entry.cmd} `);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
     setText('');
     entry.run();
   };
@@ -303,7 +324,7 @@ export function ChatInputBar() {
   };
 
   return (
-    <div className="chat-inputbar" ref={barRef}>
+    <div className={`chat-inputbar ${isClaude ? 'chat-inputbar--claude' : ''}`} ref={barRef}>
       {slashOpen && cmdmenuPos && createPortal(
         <div className="cmdmenu" style={cmdmenuPos}>
           {slashMatches.map((c, i) => (
@@ -391,6 +412,11 @@ export function ChatInputBar() {
       />
 
       <div className="chat-inputbar__row">
+        {isClaude && (
+          <span className="chat-inputbar__engine" title="Estás hablando con Claude Code">
+            <ClaudeMark size={12} />Claude Code
+          </span>
+        )}
         <div className="agentmenu-wrap">
           <button
             ref={agentBtnRef}

@@ -165,8 +165,8 @@ kbd {
   padding: 1px 6px;
   border-radius: var(--radius);
 }
-.tag--good { background: var(--good-soft); color: var(--good); }
-.tag--danger { background: var(--danger-soft); color: var(--danger); }
+.tag--good { color: var(--good); }
+.tag--danger { color: var(--danger); }
 
 .chip {
   height: 24px;

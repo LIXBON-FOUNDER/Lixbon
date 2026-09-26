@@ -16,6 +16,13 @@ import {
 
 const MODEL_KEY = 'lixbon_claude_model';
 const USAGE_KEY = 'lixbon_claude_usage';
+const SLASH_KEY = 'lixbon_claude_slash';
+
+// Claude Code solo anuncia sus comandos en el init, que llega con el primer
+// mensaje: se guardan para ofrecerlos en el menú "/" desde el principio.
+const cachedSlash = () => {
+  try { const v = JSON.parse(localStorage.getItem(SLASH_KEY) || 'null'); return Array.isArray(v) ? v : null; } catch { return null; }
+};
 
 /** Cupo del plan de Claude (ventana de 5 h y semanal), tal como lo cuenta el
     propio Claude Code en cada turno. Compartido por todas las sesiones. */
@@ -132,7 +139,11 @@ export function makeClaudeStore() {
         case 'system':
           if (ev.subtype === 'init') {
             gotInit = true;
+            if (Array.isArray(ev.slash_commands)) {
+              try { localStorage.setItem(SLASH_KEY, JSON.stringify(ev.slash_commands)); } catch { /* sin almacenamiento */ }
+            }
             set({
+              ccSlash: Array.isArray(ev.slash_commands) ? ev.slash_commands : get().ccSlash,
               conversationId: ev.session_id,
               ccInfo: { model: ev.model, version: ev.claude_code_version, mcp: ev.mcp_servers || [], tools: (ev.tools || []).length, cwd: ev.cwd },
             });
@@ -271,6 +282,7 @@ export function makeClaudeStore() {
       ccContext: { used: 0, window: 200000 },
       ccCost: 0,
       ccMsgId: null,
+      ccSlash: cachedSlash() || ['compact', 'init', 'review', 'security-review', 'pr-comments'],
       nativeTools: false,
       ...shared,
 

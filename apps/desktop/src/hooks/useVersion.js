@@ -1,17 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { check as checkUpdater } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
-import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
 import { getAppVersion } from '../lib/tauri';
 
 export function useVersion() {
-  const { serverUrl, connectionStatus } = useAppStore();
   const [currentVersion, setCurrentVersion] = useState('');
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const pendingRef = useRef(null);
 
   const dismissUpdate = () => setDismissed(true);
 
@@ -42,25 +41,30 @@ export function useVersion() {
     }
   };
 
+  // Se pregunta al updater de Tauri, no al servidor conectado: el manifiesto
+  // firmado vive en lixbon.com y así el aviso llega aunque el IDE esté
+  // apuntando a otro servidor o todavía no haya conectado.
   const checkForUpdates = async () => {
-    if (!serverUrl || connectionStatus !== 'connected') return;
-
     try {
-      // 1. Preguntar al backend de Rust la versión instalada real
       const current = await fetchTauriVersion();
-
-      // 2. Comprobar contra el endpoint del servidor si hay actualización.
-      //    Además del veredicto del servidor se re-verifica aquí que la versión
-      //    ofrecida sea realmente mayor que la instalada: un release mal
-      //    registrado en el servidor no debe provocar un bucle de aviso.
-      const res = await api.get(`/api/updates/check?v=${current}`);
-      const cmp = res ? compareVersions(res.latest_version, current) : null;
-      if (res && res.update_available && (cmp === null || cmp > 0)) {
-        setUpdateInfo(res);
-        setDismissed(false); // una versión nueva vuelve a mostrar el aviso
-      } else {
+      const update = await checkUpdater();
+      const cmp = update ? compareVersions(update.version, current) : null;
+      if (!update || (cmp !== null && cmp <= 0)) {
+        pendingRef.current = null;
         setUpdateInfo(null);
+        return;
       }
+      let extra = null;
+      try { extra = await api.get(`/api/updates/check?v=${current}`); } catch { /* solo son las notas */ }
+      const notes = String(update.body || '').split('\n').map((l) => l.replace(/^\s*-\s*/, '').trim()).filter(Boolean);
+      pendingRef.current = update;
+      setUpdateInfo({
+        ...(extra?.latest_version === update.version ? extra : {}),
+        latest_version: update.version,
+        release_date: extra?.release_date || update.date,
+        changelog: extra?.latest_version === update.version && extra?.changelog?.length ? extra.changelog : notes,
+      });
+      setDismissed(false);
     } catch (e) {
       console.error('[updater] Error al verificar actualizaciones:', e);
     }
@@ -69,7 +73,7 @@ export function useVersion() {
   const installUpdate = async () => {
     try {
       setIsDownloading(true);
-      const update = await checkUpdater();
+      const update = pendingRef.current || await checkUpdater();
       if (update) {
         let downloaded = 0;
         let contentLength = 0;
@@ -110,7 +114,7 @@ export function useVersion() {
     checkForUpdates();
     const interval = setInterval(checkForUpdates, 30 * 60 * 1000); // Cada 30 minutos
     return () => clearInterval(interval);
-  }, [serverUrl, connectionStatus]);
+  }, []);
 
   return {
     currentVersion,

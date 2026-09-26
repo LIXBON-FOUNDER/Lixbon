@@ -144,6 +144,22 @@
   transition: background-color 0.25s ease;
 }
 .chat-inputbar:focus-within { background: #262626; }
+.chat-inputbar--claude { background: #26211F; }
+.chat-inputbar--claude:focus-within { background: #2B2522; }
+.chat-inputbar__engine {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  margin-right: 4px;
+  border-radius: var(--radius);
+  background: rgba(217, 119, 87, 0.14);
+  color: #E8A38B;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
 .chatpanel--wide .chat-inputbar { max-width: 700px; margin: 0 auto 18px; padding: 14px 12px 10px 16px; }
 
 .chat-inputbar__textarea {

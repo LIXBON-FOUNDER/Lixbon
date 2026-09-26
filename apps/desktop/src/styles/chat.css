@@ -143,6 +143,15 @@
   font-size: 13px;
   color: var(--ink);
 }
+.msg__live--claude { gap: 8px; }
+.msg__live--claude .msg__live-text { color: #E8A38B; }
+.msg__live-secs { font-size: 12px; color: var(--ink-50); }
+.claudemark--live { animation: claude-live 1.8s ease-in-out infinite; transform-origin: center; }
+@keyframes claude-live {
+  0%, 100% { transform: rotate(0deg) scale(0.82); opacity: 0.7; }
+  50% { transform: rotate(90deg) scale(1.08); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .claudemark--live { animation: none; } }
 
 .msg__caret {
   display: inline-block;
