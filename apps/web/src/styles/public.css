@@ -1530,10 +1530,41 @@
   .status__barra { border-radius: 1px; }
 }
 
-/* Beta del escritorio: debajo de la estable, sin competir con ella. */
-.dl-card__beta {
+/* Selector de versión del escritorio: una lista y un solo botón. */
+.dl-picker {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
+  gap: 8px;
+  align-items: center;
 }
+
+.dl-picker__select {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 300px;
+  display: flex;
+  align-items: center;
+}
+
+.dl-picker__select select {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  appearance: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dl-picker__select select:hover,
+.dl-picker__select select:focus-visible { background: var(--surface-4); outline: none; }
+.dl-picker__select select option { background: var(--surface-4); color: var(--ink); }
+.dl-picker__select svg { position: absolute; right: 12px; color: var(--ink-muted); pointer-events: none; }
+.dl-picker .dl-card__cta { align-self: auto; flex-shrink: 0; }
+
