@@ -10,7 +10,7 @@ import { useOutputStore } from './outputStore';
 import { initialMode, initialPolicy, useSessionsStore, agentSettings } from './chatStore';
 import { computeChangePreview, revertSnapshot, DEFAULT_CMD_ALLOWLIST } from '../lib/agent';
 import {
-  startClaude, userMessage, mapTool, changeOf, resultText,
+  startClaude, userMessage, mapTool, changeOf, resultText, compactSummaryOf,
   claudeTranscript, transcriptToMessages, claudeVersion, HIDDEN_TOOLS, CLAUDE_MODES,
 } from '../lib/claudeCode';
 
@@ -116,7 +116,21 @@ export function makeClaudeStore() {
     const finishTurn = () => {
       flush();
       dropEmptyTail();
-      set({ streaming: false, pendingApproval: null, pendingQuestion: null });
+      set({ streaming: false, pendingApproval: null, pendingQuestion: null, ccCompacting: null });
+    };
+    // Mientras compacta, Claude Code no habla con el usuario: lo que llegue es
+    // la propia compactación y no debe pintarse como respuesta.
+    const startCompact = () => {
+      if (get().ccCompacting) return;
+      flush();
+      dropEmptyTail();
+      set({ ccCompacting: Date.now() });
+    };
+    const endCompact = (meta = {}) => {
+      const started = get().ccCompacting;
+      set({ ccCompacting: null });
+      dropEmptyTail();
+      push({ role: 'compact', ms: started ? Date.now() - started : null, ...meta });
     };
 
     async function decide(req) {
@@ -165,6 +179,16 @@ export function makeClaudeStore() {
       const root = useAppStore.getState().workspaceRoot;
       switch (ev.type) {
         case 'system':
+          if (ev.subtype === 'status') {
+            if (ev.status === 'compacting') startCompact();
+            break;
+          }
+          if (ev.subtype === 'compact_boundary') {
+            const m = ev.compact_metadata || {};
+            endCompact({ trigger: m.trigger, preTokens: m.pre_tokens });
+            set({ ccContext: { ...get().ccContext, used: 0 } });
+            break;
+          }
           if (ev.subtype === 'init') {
             gotInit = true;
             set({
@@ -174,6 +198,7 @@ export function makeClaudeStore() {
           }
           break;
         case 'stream_event': {
+          if (get().ccCompacting) break;
           const e = ev.event || {};
           if (e.type === 'message_start') set({ ccMsgId: e.message?.id });
           if (e.type === 'content_block_delta') {
@@ -184,6 +209,7 @@ export function makeClaudeStore() {
           break;
         }
         case 'assistant': {
+          if (get().ccCompacting) break;
           const m = ev.message || {};
           const u = m.usage;
           if (u) set({ ccContext: { ...get().ccContext, used: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) } });
@@ -200,6 +226,13 @@ export function makeClaudeStore() {
           break;
         }
         case 'user': {
+          const summary = compactSummaryOf(ev);
+          if (summary != null) {
+            const i = msgs().findLastIndex((m) => m.role === 'compact');
+            if (i >= 0) patchAt(i, { summary });
+            else push({ role: 'compact', summary });
+            break;
+          }
           for (const b of ev.message?.content || []) {
             if (b.type !== 'tool_result' || !rows.has(b.tool_use_id)) continue;
             const i = rows.get(b.tool_use_id);
@@ -228,6 +261,7 @@ export function makeClaudeStore() {
             ccContext: { ...get().ccContext, window: mu?.contextWindow || get().ccContext.window },
             ccCost: (get().ccCost || 0) + (ev.total_cost_usd || 0),
           });
+          if (get().ccCompacting) endCompact();
           // Los comandos "/" locales de Claude Code solo dejan su salida aquí.
           if (!ev.is_error && ev.result) {
             const last = msgs()[msgs().length - 1];
@@ -335,6 +369,7 @@ export function makeClaudeStore() {
       ccContext: { used: 0, window: 200000 },
       ccCost: 0,
       ccMsgId: null,
+      ccCompacting: null,
       ccMode: initialCcMode(),
       ccEffort: localStorage.getItem(EFFORT_KEY) || 'auto',
       ccPrevMode: 'default',
@@ -449,9 +484,11 @@ export function makeClaudeStore() {
         if (context?.path) prompt = `(Tengo abierto \`${context.path}\` en el editor${context.isSelection ? ', con una selección' : ''}.)\n\n${prompt}`;
         if (mentions?.length) prompt = `(Archivos mencionados: ${mentions.map((m) => `\`${m.rel || m.path}\``).join(', ')})\n\n${prompt}`;
 
+        const compacting = /^\/compact(\s|$)/i.test(text.trim());
         set({
-          messages: [...msgs(), shown, { role: 'assistant', content: '', engine: 'claude' }],
+          messages: [...msgs(), shown, ...(compacting ? [] : [{ role: 'assistant', content: '', engine: 'claude' }])],
           streaming: true,
+          ccCompacting: compacting ? Date.now() : null,
           conversationTitle: get().conversationTitle || shown.content.slice(0, 60),
         });
         try {

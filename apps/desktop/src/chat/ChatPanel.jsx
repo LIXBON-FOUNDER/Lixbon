@@ -3,7 +3,7 @@
 // Ctrl+N o /clear — aquí no hay cabecera flotante, como en el diseño.
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useChatStore, useSessionsStore } from '../store/chatStore';
-import { ChatMessage } from './ChatMessage';
+import { ChatMessage, CompactLive } from './ChatMessage';
 import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
@@ -47,6 +47,7 @@ const jumpTo = (el, top) => {
 
 export function ChatPanel({ wide = false }) {
   const { messages, streaming, engine } = useChatStore();
+  const compacting = useChatStore((s) => s.ccCompacting);
   const activeKey = useSessionsStore((s) => s.activeKey);
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
@@ -65,7 +66,7 @@ export function ChatPanel({ wide = false }) {
   useEffect(() => {
     const el = feedRef.current;
     if (el && stickToBottom.current && restoredKey.current === activeKey) jumpTo(el, el.scrollHeight);
-  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [messages, compacting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = () => {
     const el = feedRef.current;
@@ -90,6 +91,7 @@ export function ChatPanel({ wide = false }) {
         ) : (
           renderMessages(messages, streaming)
         )}
+        {compacting && <CompactLive since={compacting} />}
       </div>
       <ApprovalCard />
       <QuestionCard />

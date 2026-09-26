@@ -183,6 +183,18 @@ const HIDDEN_USER = /^(<command-|<local-command|<system-reminder|Caveat:)/;
 
 /** Transcripción guardada de Claude Code → mensajes del chat. Los cambios del
     historial ya están hechos: se marcan aceptados para no pedir revisión. */
+const COMPACT_SUMMARY = /^This session is being continued from a previous conversation/;
+
+/** Texto del resumen que Claude Code inyecta tras compactar, o null. Llega como
+    mensaje de usuario, pero no lo escribió el usuario. */
+export function compactSummaryOf(ev) {
+  const content = ev?.message?.content;
+  const text = typeof content === 'string' ? content
+    : Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text || '').join('\n') : '';
+  if (ev?.isCompactSummary || COMPACT_SUMMARY.test(text.trim())) return text;
+  return null;
+}
+
 export function transcriptToMessages(text, root) {
   const out = [];
   const rows = new Map();
@@ -200,7 +212,21 @@ export function transcriptToMessages(text, root) {
     try { ev = JSON.parse(line); } catch { continue; }
     if (ev.type === 'custom-title' && ev.customTitle) title = ev.customTitle;
     if (ev.type === 'summary' && ev.summary && !title) title = ev.summary;
+    if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
+      const m = ev.compactMetadata || ev.compact_metadata || {};
+      out.push({ role: 'compact', trigger: m.trigger, preTokens: m.preTokens ?? m.pre_tokens });
+      continue;
+    }
     if ((ev.type !== 'user' && ev.type !== 'assistant') || ev.isSidechain || ev.isMeta) continue;
+    if (ev.type === 'user') {
+      const summary = compactSummaryOf(ev);
+      if (summary != null) {
+        const last = out[out.length - 1];
+        if (last?.role === 'compact') last.summary = summary;
+        else out.push({ role: 'compact', summary });
+        continue;
+      }
+    }
     const content = ev.message?.content;
     if (ev.type === 'assistant') {
       for (const b of Array.isArray(content) ? content : []) {

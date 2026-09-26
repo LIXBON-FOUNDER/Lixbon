@@ -40,6 +40,48 @@ function ClaudeLive() {
   );
 }
 
+export function CompactLive({ since }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.max(0, Math.floor((now - since) / 1000));
+  return (
+    <div className="compact compact--live" role="status">
+      <div className="compact__head">
+        <ClaudeMark size={13} className="claudemark--live" />
+        <span className="compact__label">Compactando la conversación…</span>
+        {secs >= 2 && <span className="msg__live-secs mono">{secs} s</span>}
+      </div>
+      <div className="compact__bar"><span /></div>
+    </div>
+  );
+}
+
+const fmtTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
+function CompactDivider({ message }) {
+  const bits = [
+    message.trigger === 'auto' ? 'automáticamente' : null,
+    message.preTokens ? `${fmtTokens(message.preTokens)} tokens resumidos` : null,
+    message.ms ? `${Math.max(1, Math.round(message.ms / 1000))} s` : null,
+  ].filter(Boolean);
+  return (
+    <div className="compact">
+      <div className="compact__rule">
+        <span>Conversación compactada{bits.length ? ` · ${bits.join(' · ')}` : ''}</span>
+      </div>
+      {message.summary && (
+        <details className="compact__summary">
+          <summary>Ver resumen</summary>
+          <div className="compact__body"><ChatMarkdown>{message.summary}</ChatMarkdown></div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function PlanActions() {
   const runPlan = useChatStore((s) => s.runPlan);
   const busy = useChatStore((s) => s.streaming);
@@ -83,6 +125,8 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
   // Aviso del propio IDE (contexto recortado, tope de pasos…): no es del
   // modelo ni un error, pero el usuario tiene que verlo — sin esto el agente
   // se paraba y no había ninguna pista de por qué.
+  if (message.role === 'compact') return <CompactDivider message={message} />;
+
   if (message.role === 'note') {
     return <div className="msg msg--note">{message.content}</div>;
   }

@@ -510,6 +510,8 @@ export function ChatInputBar() {
           <EffortSlider levels={effortLevels} value={ccEffort} onChange={setCcEffort} />
         )}
 
+        <div className="chat-inputbar__fill" />
+
         <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
           <IconClip size={15} />
         </button>
@@ -518,8 +520,6 @@ export function ChatInputBar() {
             <IconAt size={15} />
           </button>
         )}
-
-        <div className="chat-inputbar__fill" />
 
         <span className="tipw chat-inputbar__ctx">
           <ProgressRing value={contextPct} size={20} />

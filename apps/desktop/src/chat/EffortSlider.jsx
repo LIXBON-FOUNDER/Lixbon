@@ -1,47 +1,96 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useAnchoredAbove } from '../lib/useAnchoredPopover';
+import { IconCheck } from '../components/Icons';
 
-const LABELS = { auto: 'Auto', low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo' };
+const LEVELS = {
+  auto: { label: 'Auto', desc: 'Claude decide cuánto pensar' },
+  low: { label: 'Bajo', desc: 'Respuestas rápidas, poco razonamiento' },
+  medium: { label: 'Medio', desc: 'Equilibrio entre velocidad y calidad' },
+  high: { label: 'Alto', desc: 'Piensa más antes de actuar' },
+  xhigh: { label: 'Muy alto', desc: 'Razonamiento profundo' },
+  max: { label: 'Máximo', desc: 'Todo el razonamiento posible; más lento' },
+};
+
+function Bars({ level, total }) {
+  return (
+    <span className="effort__bars" aria-hidden>
+      {Array.from({ length: total }, (_, i) => (
+        <span key={i} className={i < level ? 'is-on' : ''} style={{ height: `${35 + (65 * (i + 1)) / total}%` }} />
+      ))}
+    </span>
+  );
+}
 
 export function EffortSlider({ levels, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
   const stops = ['auto', ...levels];
-  const idx = Math.max(0, stops.indexOf(value));
-  const pct = stops.length > 1 ? idx / (stops.length - 1) : 0;
-  // Alterna entre dos animaciones idénticas para que el "pop" se repita en
-  // cada cambio sin desmontar el pulgar (eso cortaría su transición).
-  const [pop, setPop] = useState(0);
-  const first = useRef(true);
-  useEffect(() => {
-    if (first.current) { first.current = false; return; }
-    setPop((n) => n + 1);
-  }, [value]);
+  const current = stops.includes(value) ? value : 'auto';
+  const rank = (s) => (s === 'auto' ? 0 : levels.indexOf(s) + 1);
+  const pos = useAnchoredAbove(btnRef, open, { align: 'left' });
 
-  const label = LABELS[stops[idx]] || stops[idx];
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      if (btnRef.current?.contains(e.target) || popRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const step = (d) => {
+    const i = Math.min(stops.length - 1, Math.max(0, stops.indexOf(current) + d));
+    if (stops[i] !== current) onChange(stops[i]);
+  };
+
   return (
-    <div
-      className={`effort ${stops[idx] === 'max' ? 'is-max' : ''}`}
-      style={{ '--pos': pct }}
-      title="Cuánto razona Claude antes de responder"
-    >
-      <span className="effort__name">Effort</span>
-      <span className="effort__track">
-        <span className="effort__fill" />
-        {stops.map((s, i) => (
-          <span key={s} className={`effort__stop ${i <= idx ? 'is-on' : ''}`} style={{ left: `${(i / (stops.length - 1)) * 100}%` }} />
-        ))}
-        <span className={`effort__thumb ${pop ? (pop % 2 ? 'pop-a' : 'pop-b') : ''}`} />
-        <input
-          type="range"
-          className="effort__input"
-          min={0}
-          max={stops.length - 1}
-          step={1}
-          value={idx}
-          onChange={(e) => onChange(stops[Number(e.target.value)])}
-          aria-label="Effort de Claude"
-          aria-valuetext={label}
-        />
-      </span>
-      <span className="effort__value">{label}</span>
-    </div>
+    <>
+      <button
+        ref={btnRef}
+        className={`effort is-${current} ${open ? 'is-open' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+          if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+        }}
+        title="Effort: cuánto razona Claude antes de responder"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Bars level={rank(current)} total={levels.length} />
+        <span className="effort__value">{LEVELS[current]?.label || current}</span>
+      </button>
+
+      {open && pos && createPortal(
+        <div className="agentmenu effortmenu" ref={popRef} style={pos} role="menu">
+          <div className="agentmenu__title"><span>Effort</span></div>
+          {stops.map((s) => (
+            <button
+              key={s}
+              role="menuitemradio"
+              aria-checked={s === current}
+              className={`modeopt effortopt effortopt--${s} ${s === current ? 'is-active' : ''}`}
+              onClick={() => { onChange(s); setOpen(false); }}
+            >
+              <Bars level={rank(s)} total={levels.length} />
+              <span className="modeopt__text">
+                <span className="modeopt__label">{LEVELS[s]?.label || s}</span>
+                <span className="modeopt__desc">{LEVELS[s]?.desc || ''}</span>
+              </span>
+              {s === current && <IconCheck size={13} />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

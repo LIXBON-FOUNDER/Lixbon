@@ -214,6 +214,13 @@
 .img-chip { border-radius: var(--radius); }
 
 .modelpicker, .modelpicker .select__btn { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-50); background: transparent; }
+.modelpicker--claude { max-width: none; padding: 0; }
+.modelpicker--claude .select__btn { min-width: 0; max-width: 170px; height: 24px; padding: 0 6px 0 8px; gap: 5px; border-radius: var(--radius); color: var(--ink-70); }
+.modelpicker--claude .select__btn:hover:not(:disabled), .modelpicker--claude.is-open .select__btn { background: rgba(255, 255, 255, 0.05); color: var(--ink); }
+.chat-inputbar--claude .chat-inputbar__row { gap: 4px; }
+.chat-inputbar--claude .chat-inputbar__engine { margin-right: 2px; }
+.chat-inputbar--claude .chat-inputbar__mode { margin-left: 0; }
+.chat-inputbar--claude .chat-inputbar__ctx { margin: 0 4px; }
 
 .agentmenu { width: 280px; padding: 14px; border-radius: var(--radius); background: var(--surface-5); animation: lx-pop 0.2s var(--ease) both; }
 .agentmenu__row { gap: 16px; font-size: 12.5px; }
@@ -386,84 +393,49 @@
 .mode--danger { --mode: var(--danger, #e5484d); }
 
 .effort {
-  --claude: #D97757;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 26px;
+  gap: 7px;
+  height: 24px;
   padding: 0 8px;
   border-radius: var(--radius);
   font-size: 12px;
   color: var(--ink-70);
   flex-shrink: 0;
-  transition: background-color 0.2s ease;
+  outline: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.effort:hover { background: rgba(255, 255, 255, 0.04); }
-.effort__name { color: var(--ink-50); }
-.effort__value {
-  min-width: 52px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: color-mix(in srgb, var(--claude) calc(var(--pos) * 100%), var(--ink-70));
-  transition: color 0.3s ease;
+.effort:hover, .effort.is-open, .effort:focus-visible { background: rgba(255, 255, 255, 0.05); color: var(--ink); }
+.effort__value { font-family: var(--font-mono); font-size: 11.5px; }
+.effort.is-high .effort__value, .effort.is-xhigh .effort__value, .effort.is-max .effort__value { color: #E8A38B; }
+.effort__bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
+.effort__bars span {
+  width: 3px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background-color 0.25s ease;
 }
-.effort__track { position: relative; width: 76px; height: 14px; display: flex; align-items: center; }
-.effort__track::before {
-  content: '';
-  position: absolute;
-  inset: 5px 0;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.1);
-}
-.effort__fill {
-  position: absolute;
-  left: 0;
-  top: 5px;
-  height: 4px;
-  width: calc(var(--pos) * 100%);
-  border-radius: 7px;
-  background: linear-gradient(90deg, #8C6A5E, var(--claude));
-  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.effort__stop {
-  position: absolute;
-  top: 50%;
-  width: 4px;
-  height: 4px;
-  margin: -2px 0 0 -2px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.28);
-  transition: background-color 0.3s ease;
-}
-.effort__stop.is-on { background: rgba(255, 255, 255, 0.75); }
-.effort__thumb {
-  position: absolute;
-  top: 50%;
-  left: calc(var(--pos) * 100%);
-  width: 12px;
-  height: 12px;
-  margin: -6px 0 0 -6px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--claude) calc(35% + var(--pos) * 65%), #F2F2EE);
-  transition: left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease;
-  pointer-events: none;
-}
-.effort__thumb.pop-a { animation: effort-pop-a 0.35s ease; }
-.effort__thumb.pop-b { animation: effort-pop-b 0.35s ease; }
-@keyframes effort-pop-a { 40% { transform: scale(1.35); } }
-@keyframes effort-pop-b { 40% { transform: scale(1.35); } }
-.effort.is-max .effort__thumb { animation: effort-breathe 1.4s ease-in-out infinite; }
-@keyframes effort-breathe { 50% { transform: scale(1.22); } }
-.effort__input {
-  position: absolute;
-  inset: -6px -6px;
-  width: calc(100% + 12px);
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.effort:focus-within .effort__thumb { outline: 2px solid rgba(217, 119, 87, 0.6); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) {
-  .effort__fill, .effort__thumb { transition: none; }
-  .effort__thumb.pop-a, .effort__thumb.pop-b, .effort.is-max .effort__thumb { animation: none; }
-}
+.effort__bars span.is-on { background: #D97757; }
+.effort.is-auto .effort__bars span, .effortopt--auto .effort__bars span { background: rgba(255, 255, 255, 0.28); }
+.effortmenu { width: 260px; }
+.effortopt { align-items: center; }
+.effortopt .effort__bars { flex-shrink: 0; width: 22px; }
+.effortopt > svg { margin-top: 0; }
+
+
+/* ── Compactación de Claude Code ─────────────────────────────────────── */
+
+.compact { align-self: stretch; display: flex; flex-direction: column; gap: 6px; margin: 6px 0; animation: lx-rise 0.3s var(--ease) both; }
+.compact__head { display: flex; align-items: center; gap: 8px; }
+.compact__label { font-family: var(--font-mono); font-size: 12.5px; color: #E8A38B; }
+.compact__bar { position: relative; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(217, 119, 87, 0.14); }
+.compact__bar span { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: 2px; background: linear-gradient(90deg, transparent, #D97757, transparent); animation: compact-slide 1.4s ease-in-out infinite; }
+@keyframes compact-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.compact__rule { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--ink-50); }
+.compact__rule::before, .compact__rule::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, 0.08); }
+.compact__summary { align-self: center; max-width: 100%; font-size: 12px; }
+.compact__summary > summary { list-style: none; cursor: pointer; text-align: center; color: var(--ink-35); transition: color 0.15s ease; }
+.compact__summary > summary::-webkit-details-marker { display: none; }
+.compact__summary > summary:hover, .compact__summary[open] > summary { color: var(--ink-70); }
+.compact__body { margin-top: 8px; padding: 10px 14px; max-height: 320px; overflow-y: auto; border-radius: var(--radius); background: rgba(255, 255, 255, 0.03); color: var(--ink-70); font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { .compact__bar span { animation: none; width: 100%; opacity: 0.5; } }
