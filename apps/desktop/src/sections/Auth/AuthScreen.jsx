@@ -1,14 +1,35 @@
-// AuthScreen.jsx — entrada de la app: cuenta de lixbon.com (email o el
-// navegador del sistema) o una API key lixbon_sk_ creada en la web.
-import { useRef, useState } from 'react';
+// AuthScreen.jsx — entrada de la app: GitHub o Google, la cuenta de
+// lixbon.com (email o el navegador del sistema) o una API key lixbon_sk_.
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { DEFAULT_SERVER_URL } from '../../lib/settings';
 import { openExternal } from '../../lib/tauri';
-import { browserLogin } from '../../lib/browserLogin';
+import { browserLogin, oauthLogin, oauthProviders, PROVIDER_NAMES } from '../../lib/browserLogin';
 import { LogoMark } from '../../components/Logo';
 import { SpinRing } from '../../components/Ring';
 import { IconEye, IconEyeOff, IconGlobe } from '../../components/Icons';
 import '../../styles/auth.css';
+
+function GitHubLogo() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+      <path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.7.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5Z" />
+    </svg>
+  );
+}
+
+function GoogleLogo() {
+  return (
+    <svg viewBox="0 0 48 48" width="16" height="16" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.2 17.6 9.5 24 9.5Z" />
+      <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.2-.4-4.7H24v9h12.4c-.5 2.9-2.1 5.4-4.6 7l7.6 5.9c4.4-4.1 6.7-10.1 6.7-17.2Z" />
+      <path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1Z" />
+      <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.8 2.3-8.3 2.3-6.4 0-11.7-3.7-13.6-9.9l-7.8 6.1C6.5 42.6 14.6 48 24 48Z" />
+    </svg>
+  );
+}
+
+const PROVIDER_LOGOS = { github: GitHubLogo, google: GoogleLogo };
 
 function normalizeUrl(raw) {
   let url = (raw || '').trim().replace(/\/+$/, '');
@@ -70,7 +91,8 @@ export function AuthScreen() {
   const [keyInput, setKeyInput] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [waitingBrowser, setWaitingBrowser] = useState(false);
+  const [waiting, setWaiting] = useState(null); // 'browser' | 'github' | 'google'
+  const [providers, setProviders] = useState([]);
   const browserAbort = useRef(null);
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -78,6 +100,13 @@ export function AuthScreen() {
   const [urlStatus, setUrlStatus] = useState(null); // { ok, text }
 
   const effectiveUrl = () => normalizeUrl(urlInput) || DEFAULT_SERVER_URL;
+  const serverForProviders = effectiveUrl();
+
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => oauthProviders(serverForProviders).then((p) => alive && setProviders(p)), 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [serverForProviders]);
 
   const enter = (url, session) => {
     setServerUrl(url);
@@ -110,22 +139,23 @@ export function AuthScreen() {
     }
   };
 
-  const handleBrowser = async () => {
-    if (waitingBrowser) {
+  const viaBrowser = async (kind) => {
+    if (waiting) {
       browserAbort.current?.abort();
-      return;
+      if (waiting === kind) return;
     }
     setError('');
-    setWaitingBrowser(true);
+    setWaiting(kind);
     const ctrl = new AbortController();
     browserAbort.current = ctrl;
     const url = effectiveUrl();
     try {
-      enter(url, await browserLogin(url, ctrl.signal));
+      const session = kind === 'browser' ? await browserLogin(url, ctrl.signal) : await oauthLogin(url, kind, ctrl.signal);
+      enter(url, session);
     } catch (err) {
       if (err.name !== 'AbortError') setError(err.message);
     } finally {
-      setWaitingBrowser(false);
+      if (browserAbort.current === ctrl) setWaiting(null);
     }
   };
 
@@ -171,6 +201,23 @@ export function AuthScreen() {
             <span className="auth__sub">Entra con tu cuenta de lixbon.com</span>
           </div>
 
+          {providers.length > 0 && (
+            <>
+              <div className="auth__social rise rise--1">
+                {providers.map((p) => {
+                  const Logo = PROVIDER_LOGOS[p];
+                  return (
+                    <button key={p} type="button" className="btn btn--ghost auth__cta auth__social-btn" onClick={() => viaBrowser(p)} disabled={busy}>
+                      {waiting === p ? <SpinRing size={14} /> : <Logo />}
+                      {waiting === p ? 'Esperando · Cancelar' : `Continuar con ${PROVIDER_NAMES[p]}`}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="auth__or rise rise--1"><span>o con tu cuenta de lixbon</span></div>
+            </>
+          )}
+
           <div className="seg auth__seg rise rise--1">
             <span className="seg__thumb auth__segthumb" style={{ transform: mode === 'key' ? 'translateX(100%)' : 'none' }} />
             <button type="button" className={`seg__opt ${mode === 'login' ? 'is-active' : ''}`} onClick={() => switchMode('login')}>Email</button>
@@ -213,13 +260,13 @@ export function AuthScreen() {
           {error && <p className="spage__error">{error}</p>}
 
           <div className="auth__actions rise rise--2">
-            <button type="submit" className="btn btn--primary auth__cta" disabled={busy || waitingBrowser}>
+            <button type="submit" className="btn btn--primary auth__cta" disabled={busy || !!waiting}>
               {busy && <SpinRing size={14} color="var(--on-primary)" />}
               {busy ? 'Entrando' : mode === 'login' ? 'Iniciar sesión' : 'Conectar'}
             </button>
-            <button type="button" className="btn btn--ghost auth__cta" onClick={handleBrowser} disabled={busy}>
-              {waitingBrowser ? <SpinRing size={14} /> : <IconGlobe size={15} />}
-              {waitingBrowser ? 'Esperando al navegador · Cancelar' : 'Continuar con el navegador'}
+            <button type="button" className="btn btn--ghost auth__cta" onClick={() => viaBrowser('browser')} disabled={busy}>
+              {waiting === 'browser' ? <SpinRing size={14} /> : <IconGlobe size={15} />}
+              {waiting === 'browser' ? 'Esperando al navegador · Cancelar' : 'Continuar con el navegador'}
             </button>
           </div>
 

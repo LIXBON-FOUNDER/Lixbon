@@ -11,9 +11,10 @@ import { IconChevronDown, IconChevronRight } from '../components/Icons';
 const MENUS = [
   { label: 'Archivo', items: ['file.newFile', 'file.newFolder', '-', 'chat.openWorkspace', '-', 'file.save', 'file.saveAll', 'file.close', '-', 'chat.saveMarkdown', '-', 'workbench.openSettings'] },
   { label: 'Editar', items: ['edit.undo', 'edit.redo', '-', 'edit.selectAll', '-', 'edit.find', 'workbench.search'] },
-  { label: 'Ver', items: ['workbench.commandPalette', 'workbench.quickOpen', '-', 'mode.agent', 'mode.editor', 'mode.design', 'mode.git', '-', 'workbench.showFiles', 'workbench.search', 'workbench.showExtensions', '-', 'workbench.toggleExplorer', 'workbench.toggleAgent', 'workbench.toggleTerminal', 'view.problems', 'view.output'] },
+  { label: 'Ver', items: ['workbench.commandPalette', 'workbench.quickOpen', '-', 'mode.agent', 'mode.editor', 'mode.design', 'mode.git', '-', 'workbench.showFiles', 'workbench.search', 'workbench.showExtensions', '-', 'workbench.toggleExplorer', 'workbench.toggleAgent', 'workbench.toggleTerminal', 'view.problems', 'view.output', '-', 'editor.togglePreview', 'editor.splitPreview'] },
   { label: 'Terminal', items: ['terminal.new', '-', 'terminal.run', 'terminal.build', 'terminal.check'] },
   { label: 'Agente', items: ['chat.newConversation', 'chat.showHistory', '-', 'chat.mode.agent', 'chat.mode.plan', 'chat.mode.ask', 'chat.cycleMode', '-', 'chat.undoLast', 'chat.viewLastDiff', '-', 'remote.open', 'chat.init', 'settings.openAgent'] },
+  { label: 'Team', items: ['team.open', 'team.dock', '-', 'team.shareSelection'] },
   { label: 'Git', items: ['git.open', '-', 'git.pull', 'git.push', 'git.fetch', '-', 'git.createBranch', 'git.stash', 'git.stashPop'] },
   { label: 'Ayuda', items: ['workbench.commandPalette', 'help.keybindings', '-', 'help.docs', 'help.downloads'] },
 ];

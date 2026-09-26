@@ -18,6 +18,14 @@ export const useFileViewStore = create((set, get) => ({
   agentTouched: {},
   cursor: null, // { line, col, selected } de la pestaña activa
   reveal: null, // { path, line, ts }: el editor salta a esa línea al verlo
+  views: {}, // path → 'code' | 'split' | 'preview' (archivos con vista previa)
+
+  setView: (path, view) => set({ views: { ...get().views, [path]: view } }),
+
+  openPreview: async (path, name) => {
+    get().setView(path, 'preview');
+    await get().open(path, name);
+  },
 
   setCursor: (cursor) => set({ cursor }),
 
@@ -51,9 +59,9 @@ export const useFileViewStore = create((set, get) => ({
 
   /** Pestaña que no es un archivo (detalle de un servidor MCP…): `path` con
       esquema propio, p. ej. `mcp://github`. */
-  openVirtual: (path, name) => {
+  openVirtual: (path, name, extra = {}) => {
     if (!get().tabs.some((t) => t.path === path)) {
-      set({ tabs: [...get().tabs, { path, name, content: '', saved: '', mtime: null, loading: false, error: '', virtual: true }] });
+      set({ tabs: [...get().tabs, { path, name, content: '', saved: '', mtime: null, loading: false, error: '', virtual: true, ...extra }] });
     }
     get()._activate(path);
   },

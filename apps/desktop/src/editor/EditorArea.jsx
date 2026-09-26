@@ -16,6 +16,16 @@ import { LogoMark } from '../components/Logo';
 import { IconX, IconChevronRight, IconChevronUp, IconChevronDown, IconFolderOpen } from '../components/Icons';
 import { runCommand } from '../lib/commands';
 import { McpDetail } from '../sections/Extensions/McpDetail';
+import { FilePreview, VisualFrame } from './FilePreview';
+import { Segmented } from '../components/Segmented';
+import { previewKind, viewOf } from '../lib/preview';
+
+const VIEWS = [
+  { value: 'code', label: 'Código', title: 'Solo el código' },
+  { value: 'split', label: 'Dividido', title: 'Código y vista previa' },
+  { value: 'preview', label: 'Vista', title: 'Solo la vista previa (Ctrl Mayús V)' },
+];
+
 
 const AGENT_MARK_MS = 20000;
 
@@ -117,7 +127,7 @@ function EmptyEditor() {
 }
 
 export function EditorArea() {
-  const { tabs, activePath, update, save, setCursor, reveal } = useFileViewStore();
+  const { tabs, activePath, update, save, setCursor, reveal, views, setView } = useFileViewStore();
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const options = useWorkbenchStore((s) => s.editor);
   const streaming = useChatStore((s) => s.streaming);
@@ -128,6 +138,10 @@ export function EditorArea() {
   const diagnostics = useMemo(() => (tab ? problems.filter((p) => p.path === tab.path) : []), [problems, tab?.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (!activePath) setCursor(null); }, [activePath, setCursor]);
+
+  const view = viewOf(tab, views, baseline !== undefined);
+  const canPreview = tab && !tab.virtual && !!previewKind(tab.path);
+  const showEditor = tab && !tab.virtual && !tab.loading && !(tab.error && !tab.content);
 
   const crumbs = tab && !tab.virtual ? relPath(workspaceRoot, tab.path).split(/[\\/]/) : [];
 
@@ -147,6 +161,9 @@ export function EditorArea() {
               {c}
             </span>
           ))}
+          {canPreview && (
+            <Segmented className="crumbs__views" size="sm" width={64} options={VIEWS} value={view} onChange={(v) => setView(tab.path, v)} />
+          )}
         </div>
       )}
       {tab && !tab.virtual && !tab.loading && baseline !== undefined && (
@@ -154,7 +171,8 @@ export function EditorArea() {
       )}
       <div className="editorarea__body">
         {!tab && <EmptyEditor />}
-        {tab?.virtual && <McpDetail path={tab.path} />}
+        {tab?.virtual && tab.path.startsWith('visual://') && <VisualFrame url={tab.url} label={tab.name} />}
+        {tab?.virtual && !tab.path.startsWith('visual://') && <McpDetail path={tab.path} />}
         {tab && tab.loading && (
           <div className="edloading">
             <span className="skeleton" style={{ width: '42%' }} />
@@ -163,20 +181,26 @@ export function EditorArea() {
           </div>
         )}
         {tab && !tab.loading && tab.error && !tab.content && <div className="ederror">{tab.error}</div>}
-        {tab && !tab.virtual && !tab.loading && !(tab.error && !tab.content) && (
-          <CodeEditor
-            path={tab.path}
-            content={tab.content}
-            options={options}
-            reveal={reveal}
-            onChange={(text) => update(tab.path, text)}
-            onSave={() => save(tab.path)}
-            onCursor={setCursor}
-            onInlineEdit={() => setInlinePath(tab.path)}
-            baseline={baseline}
-            diagnostics={diagnostics}
-            onReview={(action, index) => onReview(tab.path, action, index)}
-          />
+        {showEditor && view === 'preview' && <FilePreview tab={tab} />}
+        {showEditor && view !== 'preview' && (
+          <div className={view === 'split' ? 'edsplit' : 'edsingle'}>
+            <div className="edsplit__pane">
+              <CodeEditor
+                path={tab.path}
+                content={tab.content}
+                options={options}
+                reveal={reveal}
+                onChange={(text) => update(tab.path, text)}
+                onSave={() => save(tab.path)}
+                onCursor={setCursor}
+                onInlineEdit={() => setInlinePath(tab.path)}
+                baseline={baseline}
+                diagnostics={diagnostics}
+                onReview={(action, index) => onReview(tab.path, action, index)}
+              />
+            </div>
+            {view === 'split' && <div className="edsplit__pane edsplit__pane--preview"><FilePreview tab={tab} /></div>}
+          </div>
         )}
         {tab && inlinePath === tab.path && (
           <InlineEdit key={tab.path} path={tab.path} relPath={relPath(workspaceRoot, tab.path)} onClose={() => setInlinePath(null)} />

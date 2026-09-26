@@ -177,6 +177,8 @@ const handlers = {
   },
   replace_in_files: () => ({ files: 0, replacements: 0 }),
   save_text_as: ({ defaultName, content }) => { console.log('[mock] save_text_as', defaultName, content.length); return `C:/Users/demo/Documents/${defaultName}`; },
+  visual_base: () => 'about:blank#',
+  visual_snippet: ({ content, ext }) => URL.createObjectURL(new Blob([content], { type: ext === 'svg' ? 'image/svg+xml' : 'text/html' })),
   git_run: ({ args }) => git(args),
   term_open: () => `t${nextId++}`,
   term_write: () => null,
@@ -253,6 +255,51 @@ const GATEWAY = {
   },
   'PATCH /api/account/profile': (body) => ({ user: { ...store.get('user'), ...body } }),
 };
+// Lixbon Team en modo dev: un proyecto, dos canales, un directo y mensajes.
+const U = (id, first_name, username) => ({ id, first_name, last_name: '', username, email: `${username}@demo.dev` });
+const YO = U(1, 'Demo', 'demo');
+const LU = U(2, 'Lucía', 'lucia');
+const MA = U(3, 'Marco', 'marco');
+const hace = (min) => new Date(Date.now() - min * 60000).toISOString();
+const teamMsgs = {
+  c1: [
+    { id: 'm1', seq: 1, canal_id: 'c1', autor_id: 2, texto: 'Subí la rama `feat/sesion-token`. El login ya no pide la contraseña cada hora.', creado_en: hace(60), adjuntos: [], respuestas: 2, ultima_respuesta_en: hace(20), respondientes: [3, 1] },
+    { id: 'm2', seq: 2, canal_id: 'c1', autor_id: 3, texto: '¿Alguien mira el test que falla en CI?\n```\nFAIL src/lib/auth.test.ts\n  ✕ refresca el token caducado (41 ms)\n```', creado_en: hace(45), adjuntos: [] },
+    { id: 'm3', seq: 3, canal_id: 'c1', autor_id: 1, texto: 'Me lo quedo, ya lo tengo abierto.', creado_en: hace(42), adjuntos: [] },
+  ],
+  d1: [{ id: 'm9', seq: 1, canal_id: 'd1', autor_id: 3, texto: '¿Revisas conmigo el PR del gateway?', creado_en: hace(300), adjuntos: [] }],
+};
+const teamHilo = { m1: [
+  { id: 'm4', seq: 4, canal_id: 'c1', autor_id: 3, texto: '¿El refresh se hace en el cliente o en el gateway?', creado_en: hace(30), responde_a: 'm1', adjuntos: [] },
+  { id: 'm5', seq: 5, canal_id: 'c1', autor_id: 1, texto: 'En el gateway; el cliente solo reintenta una vez.', creado_en: hace(20), responde_a: 'm1', adjuntos: [] },
+] };
+const TEAM = {
+  'GET /api/team/bootstrap': () => ({
+    yo: YO, presencia: 'en_linea',
+    proyectos: [{
+      id: 'p1', nombre: 'orbita-web', rol: 'lider', github_repo: '', linear_team_id: '',
+      miembros: [{ usuario: YO, rol: 'lider', estado: 'en_linea' }, { usuario: LU, rol: 'integrante', estado: 'en_linea' }, { usuario: MA, rol: 'integrante', estado: 'no_molestar' }],
+      canales: [{ id: 'c1', nombre: 'general', tipo: 'publico', tema: 'Lo que pasa en orbita-web', proyecto_id: 'p1' }, { id: 'c2', nombre: 'producto', tipo: 'privado', tema: '', proyecto_id: 'p1' }],
+    }],
+    directos: [{ id: 'd1', tipo: 'directo', con: MA, estado: 'no_molestar' }],
+    amigos: [], solicitudes: [{ usuario: U(4, 'Sofía', 'sofia'), direccion: 'recibida' }],
+  }),
+};
+function teamFetch(method, url, init) {
+  const m = url.pathname.match(/^\/api\/team\/channels\/([^/]+)\/messages$/);
+  if (m && method === 'GET') {
+    const hilo = url.searchParams.get('hilo_de');
+    return { mensajes: hilo ? teamHilo[hilo] || [] : teamMsgs[m[1]] || [], hay_mas: false };
+  }
+  if (m && method === 'POST') {
+    const b = JSON.parse(init.body);
+    return { id: `m${Date.now()}`, seq: Date.now(), canal_id: m[1], client_id: b.client_id, autor_id: 1, texto: b.texto, creado_en: new Date().toISOString(), responde_a: b.responde_a, adjuntos: [] };
+  }
+  const h = TEAM[`${method} ${url.pathname}`];
+  return h ? h() : undefined;
+}
+if (typeof window.WebSocket === 'function') window.WebSocket = class { constructor() { setTimeout(() => this.onclose?.(), 10); } send() {} close() {} };
+
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === 'string' ? input : input.url, location.href);
@@ -264,6 +311,9 @@ window.fetch = async (input, init = {}) => {
     return new Response('{}', { headers: { 'content-type': 'application/json' } });
   }
   if (method === 'POST' && url.pathname === '/v1/chat/completions') return mockCompletion(JSON.parse(init.body));
+  const t = url.pathname.startsWith('/api/team/') ? teamFetch(method, url, init)
+    : url.pathname === '/api/auth/me' ? { user: store.get('user') || YO } : undefined;
+  if (t !== undefined) return new Response(JSON.stringify(t), { headers: { 'content-type': 'application/json' } });
   const h = GATEWAY[`${method} ${url.pathname}`];
   if (!h) return realFetch(input, init);
   const body = init.body ? JSON.parse(init.body) : {};

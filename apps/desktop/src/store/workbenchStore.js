@@ -41,6 +41,7 @@ export const useWorkbenchStore = create((set, get) => ({
   sideOpen: read('lx_side_open', true),
   sideView: read('lx_side_view', 'files'), // 'files' | 'search' | 'extensions'
   agentOpen: read('lx_agent_open', true),
+  rightView: read('lx_right_view', 'agent'), // 'agent' | 'team'
   modePanels: { ...DEFAULT_MODE_PANELS, ...read('lx_mode_panels', {}) },
   sizes: { ...DEFAULT_SIZES, ...read('lx_sizes', {}) },
   // Panel con foco: se eleva un peldaño. No se persiste.
@@ -92,6 +93,12 @@ export const useWorkbenchStore = create((set, get) => ({
     write('lx_side_view', view);
     write('lx_side_open', true);
     set({ sideView: view, sideOpen: true, focus: 'side' });
+  },
+
+  setRightView: (rightView) => {
+    write('lx_right_view', rightView);
+    write('lx_agent_open', true);
+    set({ rightView, agentOpen: true, focus: 'agent' });
   },
 
   toggleAgent: () => {

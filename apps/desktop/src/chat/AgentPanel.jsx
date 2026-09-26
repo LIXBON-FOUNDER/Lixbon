@@ -7,7 +7,7 @@ import { Popover } from '../components/Popover';
 import { SpinRing } from '../components/Ring';
 import { ChatPanel } from './ChatPanel';
 import { HistoryList } from './HistoryList';
-import { IconChevronDown, IconExpand, IconPlus, IconX } from '../components/Icons';
+import { IconChat, IconChevronDown, IconExpand, IconPlus, IconX } from '../components/Icons';
 
 export function AgentHeaderTitle() {
   const title = useChatStore((s) => s.conversationTitle);
@@ -36,12 +36,14 @@ export function AgentHeaderTitle() {
 export function AgentPanel({ onClose }) {
   const newConversation = useChatStore((s) => s.newConversation);
   const setMode = useWorkbenchStore((s) => s.setMode);
+  const setRightView = useWorkbenchStore((s) => s.setRightView);
 
   return (
     <div className="agentpanel">
       <div className="panelhead">
         <AgentHeaderTitle />
         <div className="panelhead__fill" />
+        <button className="ic" onClick={() => setRightView('team')} title="Lixbon Team en este panel"><IconChat size={15} /></button>
         <button className="ic" onClick={() => setMode('agent')} title="Agente a pantalla completa (Ctrl 1)"><IconExpand size={15} /></button>
         <button className="ic" onClick={newConversation} title="Nueva conversación (Ctrl N)"><IconPlus size={16} /></button>
         {onClose && <button className="ic" onClick={onClose} title="Cerrar panel (Ctrl Alt B)"><IconX size={15} /></button>}

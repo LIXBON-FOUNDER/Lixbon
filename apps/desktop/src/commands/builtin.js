@@ -15,8 +15,12 @@ import { githubSlug } from '../lib/githubSlug';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useFileViewStore } from '../store/fileViewStore';
 import { useTerminalStore } from '../store/terminalStore';
+import { previewKind, viewOf } from '../lib/preview';
 import { useProblemsStore } from '../store/problemsStore';
 import { getActiveView } from '../editor/CodeEditor';
+import { useTeamStore } from '../team/store/teamStore';
+import { useMensajesStore } from '../team/store/mensajesStore';
+import { invoke } from '@tauri-apps/api/core';
 import { detectRunConfig } from '../lib/runConfigs';
 import { undo, redo, selectAll } from '@codemirror/commands';
 import { openSearchPanel } from '@codemirror/search';
@@ -100,6 +104,40 @@ export function registerBuiltinCommands() {
     app().showTerminal();
     useTerminalStore.getState().runCommand(cmd);
   };
+  const setPreview = (mode) => () => {
+    const s = tabs();
+    const tab = s.tabs.find((t) => t.path === s.activePath);
+    if (!tab || tab.virtual || !previewKind(tab.path)) { toast('Este archivo no tiene vista previa.'); return; }
+    inEditor();
+    const current = viewOf(tab, s.views, false);
+    s.setView(tab.path, mode === 'split' ? (current === 'split' ? 'code' : 'split') : (current === 'preview' ? 'code' : 'preview'));
+  };
+  // Manda la selección del editor a la conversación abierta en el panel de Team,
+  // como bloque de código con su ruta y líneas.
+  const shareSelection = () => {
+    const view = getActiveView();
+    const path = tabs().activePath;
+    const team = useTeamStore.getState();
+    if (!view || !path) { toast('Abre un archivo y selecciona el código que quieres compartir.'); return; }
+    if (team.sesion !== 'ok' || !team.canalId) {
+      wb().setRightView('team');
+      toast('Elige una conversación en el panel de Team y vuelve a intentarlo.');
+      return;
+    }
+    const { from, to } = view.state.selection.main;
+    const doc = view.state.doc;
+    const desde = doc.lineAt(from).number;
+    const hasta = doc.lineAt(to).number;
+    const code = from === to ? doc.line(desde).text : doc.sliceString(from, to);
+    const root = app().workspaceRoot;
+    const rel = root && path.startsWith(root) ? path.slice(root.length + 1).replace(/\\/g, '/') : path.split(/[\\/]/).pop();
+    const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1] || '';
+    const lineas = desde === hasta ? `${desde}` : `${desde}-${hasta}`;
+    const fence = '```';
+    useMensajesStore.getState().enviar(team.canalId, `\`${rel}:${lineas}\`\n${fence}${ext}\n${code}\n${fence}`, team.usuario?.id);
+    wb().setRightView('team');
+    toast(`Enviado a ${team.canalActivo()?.nombre ? `#${team.canalActivo().nombre}` : 'la conversación'}.`);
+  };
   const openDock = (tab) => () => { inEditor(); wb().setDockTab(tab); app().showTerminal(); };
 
   registerCommands([
@@ -115,6 +153,11 @@ export function registerBuiltinCommands() {
     { id: 'terminal.check', title: 'Comprobar problemas', category: 'Terminal', keywords: 'check problemas tsc cargo ruff lint', run: () => { openDock('problems')(); useProblemsStore.getState().run(); } },
     { id: 'view.problems', title: 'Problemas', category: 'Ver', keywords: 'problemas errores warnings', run: openDock('problems') },
     { id: 'view.output', title: 'Salida', category: 'Ver', keywords: 'salida output log', run: openDock('output') },
+    { id: 'team.open', title: 'Abrir Lixbon Team', category: 'Team', keywords: 'team equipo chat canales', run: () => invoke('team_abrir').catch(() => {}) },
+    { id: 'team.dock', title: 'Lixbon Team en el panel derecho', category: 'Team', keywords: 'team equipo chat acoplar panel', run: () => { inEditor(); wb().setRightView('team'); } },
+    { id: 'team.shareSelection', title: 'Enviar la selección a Team', category: 'Team', keywords: 'team compartir codigo seleccion enviar chat', run: shareSelection },
+    { id: 'editor.togglePreview', title: 'Alternar vista previa', category: 'Ver', keywords: 'markdown md html svg vista previa preview visual', run: setPreview('toggle') },
+    { id: 'editor.splitPreview', title: 'Vista previa al lado', category: 'Ver', keywords: 'markdown md html vista previa dividido split', run: setPreview('split') },
     { id: 'help.keybindings', title: 'Atajos de teclado', category: 'Ayuda', keywords: 'atajos teclado keybindings shortcuts', run: () => wb().openSettings('keys') },
     { id: 'help.docs', title: 'Documentación', category: 'Ayuda', keywords: 'docs documentacion ayuda', run: () => openExternal('https://lixbon.com/docs') },
     { id: 'help.downloads', title: 'Descargas y novedades', category: 'Ayuda', keywords: 'version descargas novedades changelog', run: () => openExternal('https://lixbon.com/apps') },

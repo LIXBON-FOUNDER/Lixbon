@@ -196,3 +196,11 @@ export function authLoopbackStart() {
 export function previewProxyStart(url) {
   return invoke('preview_proxy_start', { url });
 }
+
+export function visualBase() {
+  return invoke('visual_base');
+}
+
+export function visualSnippet(content, ext) {
+  return invoke('visual_snippet', { content, ext });
+}

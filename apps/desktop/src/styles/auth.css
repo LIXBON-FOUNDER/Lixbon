@@ -92,6 +92,11 @@
 .auth__hint { font-size: 12px; color: var(--ink-35); line-height: 1.5; }
 
 .auth__actions { display: flex; flex-direction: column; gap: 10px; }
+.auth__social { display: flex; flex-direction: column; gap: 8px; }
+.auth .auth__social-btn { background: var(--surface-3); color: var(--ink); }
+.auth .auth__social-btn:hover:not(:disabled) { background: var(--surface-4); }
+.auth__or { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--ink-35); }
+.auth__or::before, .auth__or::after { content: ''; flex: 1; height: 1px; background: var(--surface-4); }
 .auth .auth__cta { height: 42px; justify-content: center; gap: 10px; font-size: 13.5px; }
 .auth__signup { font-size: 12.5px; color: var(--ink-50); text-align: center; }
 .auth .auth__signup .lk { display: inline; font-size: inherit; }

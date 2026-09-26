@@ -16,6 +16,7 @@ export const DEFAULT_KEYMAP = {
   'ctrl+n': 'chat.newConversation',
   'ctrl+s': 'file.save',
   'ctrl+shift+s': 'file.saveAll',
+  'ctrl+shift+v': 'editor.togglePreview',
   'ctrl+w': 'file.close',
   'ctrl+shift+f': 'workbench.search',
   'ctrl+shift+e': 'workbench.showFiles',

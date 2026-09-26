@@ -24,6 +24,8 @@ pub(crate) fn hide_console(cmd: &mut Command) -> &mut Command {
 mod mcp;
 mod auth_loopback;
 mod preview_proxy;
+mod visual_server;
+mod team;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1257,6 +1259,7 @@ pub fn run() {
         .manage(Terminals(Mutex::new(HashMap::new())))
         .manage(mcp::McpServers::default())
         .manage(preview_proxy::PreviewProxy::default())
+        .manage(visual_server::VisualServer::default())
         .manage(FsWatchState {
             watcher: Mutex::new(None),
             pending: Arc::new(Mutex::new(HashSet::new())),
@@ -1271,7 +1274,10 @@ pub fn run() {
             // Los servidores MCP son procesos hijos: sin esto quedaban vivos
             // al cerrar la ventana.
             if let tauri::WindowEvent::Destroyed = event {
-                window.state::<mcp::McpServers>().stop_all();
+                if window.label() == "main" {
+                    window.state::<mcp::McpServers>().stop_all();
+                    team::apagar(window.app_handle());
+                }
             }
         })
         .plugin(tauri_plugin_opener::init())
@@ -1280,6 +1286,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
             get_app_version,
             set_workspace_root,
@@ -1311,6 +1318,9 @@ pub fn run() {
             preview_proxy::preview_proxy_start,
             mcp::vscode_user_file,
             save_text_as,
+            visual_server::visual_base,
+            visual_server::visual_snippet,
+            team::team_abrir,
             mcp::mcp_start,
             mcp::mcp_send,
             mcp::mcp_stop,

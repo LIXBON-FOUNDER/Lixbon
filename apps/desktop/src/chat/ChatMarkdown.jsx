@@ -1,7 +1,11 @@
 // ChatMarkdown.jsx — markdown de las respuestas con bloques de código copiables.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { IconCopy, IconCheck } from '../components/Icons';
+import remarkGfm from 'remark-gfm';
+import { IconCopy, IconCheck, IconEye } from '../components/Icons';
+import { openSnippet } from '../lib/preview';
+
+const VISUAL_LANGS = new Set(['html', 'svg']);
 
 function CodeFence({ language, code }) {
   const [copied, setCopied] = useState(false);
@@ -19,6 +23,12 @@ function CodeFence({ language, code }) {
       <div className="chatcode__bar">
         <span className="chatcode__lang">{language || 'código'}</span>
         <span className="chatcode__actions">
+          {VISUAL_LANGS.has(language) && (
+            <button onClick={() => openSnippet(code, language).catch(() => {})} title="Abrir el visual en una pestaña">
+              <IconEye size={13} />
+              Ver
+            </button>
+          )}
           <button onClick={copy} title="Copiar">
             {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
             {copied ? 'Copiado' : 'Copiar'}
@@ -30,7 +40,7 @@ function CodeFence({ language, code }) {
   );
 }
 
-const components = {
+export const markdownComponents = {
   code({ className, children }) {
     // react-markdown v10: los bloques ``` llegan como <pre><code class="language-x">.
     // El inline code no trae salto de línea ni language-.
@@ -46,10 +56,12 @@ const components = {
   },
 };
 
+export const REMARK = [remarkGfm];
+
 export function ChatMarkdown({ children }) {
   return (
     <div className="md">
-      <ReactMarkdown components={components}>{children}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={REMARK} components={markdownComponents}>{children}</ReactMarkdown>
     </div>
   );
 }

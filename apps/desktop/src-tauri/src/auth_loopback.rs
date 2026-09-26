@@ -1,7 +1,8 @@
 //! Vuelta del navegador en el inicio de sesión con lixbon.com
 //! (`core/gateway/routers/ide_auth.py`): un servidor efímero en 127.0.0.1
 //! recibe `/callback?token=…&state=…` una sola vez y lo pasa al frontend, que
-//! hace el canje con el verificador.
+//! hace el canje con el verificador. El login con Google o GitHub
+//! (`core/gateway/routers/oauth.py`) vuelve al mismo sitio con `lixbon_code`.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -54,7 +55,7 @@ fn respond(stream: &mut TcpStream, status: &str, body: &str) {
 }
 
 /// Devuelve el puerto; el resultado llega como evento `auth:callback`
-/// ({ token, state }) o `auth:timeout` si nadie vuelve en 5 minutos.
+/// ({ token, state, code, error }) o `auth:timeout` si nadie vuelve en 5 minutos.
 #[tauri::command]
 pub fn auth_loopback_start(app: AppHandle) -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -82,7 +83,12 @@ pub fn auth_loopback_start(app: AppHandle) -> Result<u16, String> {
             respond(&mut stream, "200 OK", DONE_PAGE);
             let _ = app.emit(
                 "auth:callback",
-                serde_json::json!({ "token": param(query, "token"), "state": param(query, "state") }),
+                serde_json::json!({
+                    "token": param(query, "token"),
+                    "state": param(query, "state"),
+                    "code": param(query, "lixbon_code"),
+                    "error": param(query, "lixbon_error"),
+                }),
             );
             return;
         }

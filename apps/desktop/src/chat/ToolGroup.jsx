@@ -3,6 +3,20 @@
 // el mockup. Nada queda oculto detrás de un "N acciones" plegado.
 import { useState } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { useAppStore } from '../store/appStore';
+import { absFromRoot, openFilePreview, previewKind } from '../lib/preview';
+
+const WRITES = new Set(['write_file', 'edit_file', 'multi_edit', 'append_file', 'insert_at_line']);
+
+function PreviewButton({ path }) {
+  const root = useAppStore((s) => s.workspaceRoot);
+  const kind = previewKind(path);
+  return (
+    <button className="activity-row__toggle activity-row__open" onClick={() => openFilePreview(absFromRoot(root, path))}>
+      {kind === 'markdown' ? 'Vista previa' : 'Ver visual'}
+    </button>
+  );
+}
 
 const VERB = {
   read_file: 'leyó', write_file: 'escribió', edit_file: 'editó', append_file: 'añadió a',
@@ -88,6 +102,7 @@ function ActivityRow({ message, index, delay, live }) {
             {showDiff ? 'Ocultar' : 'Ver'}
           </button>
         )}
+        {!pending && !failed && WRITES.has(message.tool) && previewKind(a.path) && <PreviewButton path={a.path} />}
         {!pending && message.ms >= 100 && <span className="activity-row__ms">{fmtMs(message.ms)}</span>}
       </div>
       {failed && message.content && (

@@ -17,6 +17,9 @@ import { SearchPanel } from '../sections/Search/SearchPanel';
 import { McpList } from '../sections/Extensions/McpList';
 import { LogoMark } from '../components/Logo';
 import { SpinRing } from '../components/Ring';
+import { lazy, Suspense } from 'react';
+
+const TeamDock = lazy(() => import('../team/dock/TeamDock'));
 
 const GAP = 6;
 
@@ -35,7 +38,7 @@ function AgentRail({ visible, onOpen }) {
 }
 
 export function EditorMode({ active }) {
-  const { sideOpen, sideView, agentOpen, sizes, toggleAgent, toggleSide, setSize, persistSizes } = useWorkbenchStore();
+  const { sideOpen, sideView, agentOpen, rightView, sizes, toggleAgent, toggleSide, setSize, persistSizes } = useWorkbenchStore();
   const terminalOpen = useAppStore((s) => s.panels.terminal);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
 
@@ -67,7 +70,9 @@ export function EditorMode({ active }) {
       <Collapse open={agentOpen} size={sizes.agent + GAP} from="end">
         <Gutter sizeKey="agent" invert onDoubleClick={toggleAgent} />
         <Panel id="agent">
-          <AgentPanel onClose={toggleAgent} />
+          {rightView === 'team'
+            ? <Suspense fallback={null}><TeamDock onClose={toggleAgent} /></Suspense>
+            : <AgentPanel onClose={toggleAgent} />}
         </Panel>
       </Collapse>
       <AgentRail visible={!agentOpen} onOpen={toggleAgent} />

@@ -1529,3 +1529,42 @@ body.is-resizing-x .collapse, body.is-resizing-y .collapse { transition: none; }
 .appmenu__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .appmenu__kbd { flex-shrink: 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-35); }
 .appmenu__sep { height: 1px; margin: 4px 10px; background: rgba(242, 242, 238, 0.06); }
+
+/* ── Vista previa de Markdown / HTML / SVG y visuales ───────────────── */
+
+.crumbs__views { margin-left: auto; padding: 2px; font-family: var(--font-ui); }
+.crumbs__views .seg__opt { height: 18px; font-size: 11px; }
+.crumbs:has(.crumbs__views) { padding-right: 10px; }
+
+.edsingle, .edsplit { position: absolute; inset: 0; }
+.edsplit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.edsplit__pane { position: relative; min-width: 0; min-height: 0; height: 100%; }
+.edsingle > .edsplit__pane { position: absolute; inset: 0; }
+.edsplit__pane--preview { padding: 0 8px 8px 0; }
+.edsplit__pane--preview .mdview { border-radius: var(--radius); background: var(--bg-secondary, var(--code-bg)); }
+
+.mdview { position: absolute; inset: 0; overflow: auto; }
+.mdview__doc { max-width: 780px; margin: 0 auto; padding: 28px 40px 80px; font-size: 14.5px; line-height: 1.65; }
+.mdview__doc h1 { font-size: 26px; margin-top: 8px; }
+.mdview__doc h2 { font-size: 20px; margin-top: 28px; }
+.mdview__doc h3 { font-size: 16.5px; margin-top: 22px; }
+.mdview__doc img { max-width: 100%; border-radius: var(--radius); }
+.mdview__doc hr { height: 1px; margin: 24px 0; border: 0; background: rgba(var(--ink-rgb), 0.1); }
+.mdview__doc table { width: 100%; margin: 12px 0; border-collapse: collapse; font-size: 13.5px; }
+.mdview__doc th, .mdview__doc td { padding: 7px 10px; text-align: left; vertical-align: top; }
+.mdview__doc th { font-weight: 600; background: var(--bg-tertiary); }
+.mdview__doc tr:nth-child(even) td { background: rgba(var(--ink-rgb), 0.03); }
+.mdview__doc input[type='checkbox'] { margin: 0 6px 0 0; vertical-align: -1px; accent-color: var(--accent); }
+.mdview__doc li:has(> input[type='checkbox']) { list-style: none; margin-left: -18px; }
+.mdview__missing { color: var(--ink-50); font-style: italic; }
+.md table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.md th, .md td { padding: 5px 9px; text-align: left; }
+.md th { background: var(--bg-tertiary); font-weight: 600; }
+
+.visual { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.edsplit__pane--preview .visual { position: absolute; inset: 0 8px 8px 0; }
+.visual__bar { height: 30px; flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 14px; font-size: 12px; color: var(--ink-50); }
+.visual__label { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.visual__hint { font-size: 11px; color: var(--ink-50); opacity: 0.8; }
+.visual__frame { flex: 1; min-height: 0; width: 100%; border: 0; border-radius: var(--radius); background: #fff; }
+.visual__empty { flex: 1; display: grid; place-items: center; color: var(--ink-50); font-size: 13px; }

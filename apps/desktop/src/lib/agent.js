@@ -609,6 +609,12 @@ export async function buildAgentSystemPrompt(root) {
     '{"tool":"ask_user","args":{"questions":[{"question":"¿Qué base de datos uso?","header":"Base de datos","options":[{"label":"PostgreSQL","description":"Ya está en docker-compose"},{"label":"SQLite"}],"multiSelect":false}]}}  ' +
     '(pregunta al usuario con opciones: hasta 4 preguntas de 2 a 6 opciones; siempre podrá escribir otra respuesta. ' +
     'Úsala solo cuando una decisión dependa del usuario y no puedas deducirla del código)\n\n' +
+    '=== VISUALES ===\n' +
+    'El IDE muestra archivos .html, .svg y .md en una pestaña de vista previa. Si el usuario pide un diagrama, ' +
+    'un dashboard, un mockup, un prototipo o cualquier cosa visual que no sea parte del proyecto, crea UN archivo HTML ' +
+    'autónomo (CSS y JS en línea; librerías solo por CDN https) en .lixbon/visuals/<nombre>.html con write_file ' +
+    'y dile que puede abrirlo con «Ver visual». Sin carpeta de trabajo o en modo Preguntar/Plan, devuélvelo en un ' +
+    'único bloque ```html y el usuario lo abrirá con el botón «Ver» del bloque.\n\n' +
     '=== REGLAS OBLIGATORIAS ===\n' +
     '1. Si el usuario pide crear, modificar, arreglar o eliminar algo, DEBES hacerlo con herramientas EN ESTA MISMA RESPUESTA. ' +
     'Tú ejecutas los cambios; el usuario no copia código.\n' +
