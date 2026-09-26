@@ -118,7 +118,7 @@ export function Mensajes({ canal, compacto = false }) {
         return (
           <div key={m.id}>
             {nuevoDia && <div className="tdia mono"><span>{etiquetaDia(fecha)}</span><i /></div>}
-            <MessageItem mensaje={m} autor={quien(m.autor_id)} propio={m.autor_id === usuario?.id} seguido={seguido} compacto={compacto} />
+            <MessageItem mensaje={m} autor={quien(m.autor_id)} propio={m.autor_id === usuario?.id} seguido={seguido} directo={esDirecto} compacto={compacto} />
           </div>
         );
       })}

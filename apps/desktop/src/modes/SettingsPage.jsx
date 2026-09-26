@@ -17,7 +17,7 @@ const SECTIONS = [
   { id: 'usage', label: 'Uso y límites', keywords: 'uso consumo cupo sesion semana tokens plan', Page: UsagePage },
   { id: 'agent', label: 'Agente y permisos', keywords: 'agente permisos aprobar comandos herramientas nativas autonomia modo', Page: AgentPage },
   { id: 'models', label: 'Modelos', keywords: 'modelos roles vision contexto ventana chat embeddings', Page: ModelsPage },
-  { id: 'editor', label: 'Editor y avanzado', keywords: 'editor fuente tabulacion ajuste linea terminal shell indice rag servidor gateway actualizaciones version', Page: EditorAdvancedPage },
+  { id: 'editor', label: 'Editor y avanzado', keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell indice rag servidor gateway actualizaciones version', Page: EditorAdvancedPage },
   { id: 'keys', label: 'Atajos de teclado', keywords: 'atajos teclado keybindings', Page: Keybindings, legacy: true, title: 'Atajos de teclado' },
 ];
 const ROW_H = 34;

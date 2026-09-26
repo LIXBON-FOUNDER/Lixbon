@@ -14,10 +14,12 @@ import "./styles/views.css";
 import "./styles/studio.css";
 import "./styles/agent.css";
 import "./styles/settings.css";
+import { initUiScale } from "./lib/uiScale";
 
 async function start() {
   // Fuera de Tauri (navegador en `npm run dev`) se simula la API nativa.
   if (import.meta.env.DEV && !window.__TAURI_INTERNALS__) await import("./dev/tauriMock");
+  initUiScale();
   ReactDOM.createRoot(document.getElementById("root")).render(
     <React.StrictMode>
       <ErrorBoundary>

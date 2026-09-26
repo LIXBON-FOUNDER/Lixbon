@@ -1,5 +1,5 @@
-// MessageItem.jsx — un mensaje. El nombre de quien habla ocupa el canalón,
-// el mismo hueco donde el editor pone el número de línea.
+// MessageItem.jsx — un mensaje: los de los demás a la izquierda con su cara,
+// los tuyos a la derecha.
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { openExternal } from '../../lib/tauri';
 import { useMensajesStore } from '../store/mensajesStore';
@@ -78,7 +78,7 @@ function BarraHilo({ mensaje, nuevas, abierta, onAbrir }) {
   );
 }
 
-export function MessageItem({ mensaje, autor, propio, seguido, enHilo = false, compacto = false }) {
+export function MessageItem({ mensaje, autor, propio, seguido, directo = false, enHilo = false, compacto = false }) {
   const reintentar = useMensajesStore((s) => s.reintentar);
   const editarMsg = useMensajesStore((s) => s.editar);
   const borrarMsg = useMensajesStore((s) => s.borrar);
@@ -93,7 +93,6 @@ export function MessageItem({ mensaje, autor, propio, seguido, enHilo = false, c
   const firme = !mensaje.pendiente && !borrado;
   const mio = propio && firme;
   const tieneHilo = !enHilo && !mensaje.responde_a && mensaje.respuestas > 0;
-  const nombre = propio ? 'Tú' : nombreDe(autor);
 
   const intentar = async (fn) => {
     setQueja('');
@@ -101,42 +100,40 @@ export function MessageItem({ mensaje, autor, propio, seguido, enHilo = false, c
   };
 
   const clases = [
-    'tmsg', seguido && 'is-seguido', mensaje.pendiente && 'is-pendiente', mensaje.fallido && 'is-fallido',
-    borrado && 'is-borrado', mensaje.borrandose && 'is-yendose', hiloId === mensaje.id && !enHilo && 'is-en-hilo',
-    (enHilo || compacto) && 'tmsg--apilado',
+    'tmsg', propio ? 'is-mio' : 'is-otro', seguido && 'is-seguido', mensaje.pendiente && 'is-pendiente',
+    mensaje.fallido && 'is-fallido', borrado && 'is-borrado', mensaje.borrandose && 'is-yendose',
+    hiloId === mensaje.id && !enHilo && 'is-en-hilo', compacto && 'is-compacto',
   ].filter(Boolean).join(' ');
 
-  const cabecera = (enHilo || compacto)
-    ? !seguido && (
-      <div className="tmsg__cab">
-        <span className="tmsg__autor" style={{ color: tintaDe(mensaje.autor_id, propio) }}>{nombre}</span>
-        <time className="mono" dateTime={mensaje.creado_en}>{hora(mensaje.creado_en)}</time>
-      </div>
-    )
-    : (
-      <div className="tmsg__canalon">
-        {!seguido && <span className="tmsg__autor" style={{ color: tintaDe(mensaje.autor_id, propio) }} title={nombreDe(autor)}>{nombre}</span>}
-        <time className="mono" dateTime={mensaje.creado_en}>{hora(mensaje.creado_en)}</time>
-      </div>
-    );
+  const meta = (
+    <span className="tmsg__meta mono">
+      {mensaje.editado_en && <span title={`Editado ${hace(mensaje.editado_en)}`}>editado · </span>}
+      <time dateTime={mensaje.creado_en}>{mensaje.pendiente ? 'enviando…' : hora(mensaje.creado_en)}</time>
+    </span>
+  );
 
   return (
     <article className={clases}>
-      {cabecera}
-      <div className="tmsg__cuerpo">
+      {!propio && (
+        <div className="tmsg__lado">{!seguido && <Cara usuario={autor} size={compacto ? 24 : 28} />}</div>
+      )}
+      <div className="tmsg__col">
+        {!propio && !seguido && !directo && (
+          <span className="tmsg__autor" style={{ color: tintaDe(mensaje.autor_id) }}>{nombreDe(autor)}</span>
+        )}
         {borrado ? (
-          <p className="tmsg__lapida">Mensaje borrado por su autor.</p>
+          <div className="tmsg__burbuja is-lapida"><p className="tmsg__lapida">Mensaje borrado por su autor.</p>{meta}</div>
         ) : editando ? (
           <Editor inicial={mensaje.texto} onCancelar={() => setEditando(false)} onGuardar={(t) => { setEditando(false); intentar(() => editarMsg(mensaje.canal_id, mensaje.id, t)); }} />
         ) : (
           <>
-            {mensaje.texto && <Texto texto={mensaje.texto} />}
-            {mensaje.editado_en && <span className="tmsg__editado" title={`Editado ${hace(mensaje.editado_en)}`}>(editado)</span>}
+            {mensaje.texto && <div className="tmsg__burbuja"><Texto texto={mensaje.texto} />{meta}</div>}
             {mensaje.adjuntos?.length > 0 && (
               <div className={`tmsg__adjuntos ${enRejilla(mensaje.adjuntos) ? 'is-rejilla' : ''}`}>
                 {mensaje.adjuntos.map((a) => <Adjunto key={a.id} adjunto={a} compacto={enRejilla(mensaje.adjuntos)} />)}
               </div>
             )}
+            {!mensaje.texto && meta}
           </>
         )}
         {tieneHilo && <BarraHilo mensaje={mensaje} nuevas={nuevas} abierta={hiloId === mensaje.id} onAbrir={() => abrirHilo(mensaje.id)} />}

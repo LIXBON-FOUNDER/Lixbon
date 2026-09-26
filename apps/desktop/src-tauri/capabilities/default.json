@@ -9,6 +9,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-set-focus",
+    "core:webview:allow-set-webview-zoom",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",

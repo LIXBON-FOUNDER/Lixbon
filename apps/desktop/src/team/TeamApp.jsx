@@ -71,10 +71,8 @@ function Estado() {
 }
 
 export function TeamApp() {
-  const { sesion, errorSesion, hidratar, zoom, cargando, proyectos } = useTeamStore();
+  const { sesion, errorSesion, hidratar, cargando, proyectos } = useTeamStore();
   useEffect(() => { hidratar(); }, [hidratar]);
-  // En <html> y no en el chasis: así Chromium recalcula vh con el zoom y el scroll no se pierde.
-  useEffect(() => { document.documentElement.style.zoom = zoom === 1 ? '' : String(zoom); }, [zoom]);
 
   const listo = sesion === 'ok';
   const esperando = sesion === 'cargando' || (listo && cargando && !proyectos.length);

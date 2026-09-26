@@ -6,6 +6,12 @@ const SECRET = 'linear.token';
 const STORE_KEY = 'linearToken';
 const API = 'https://api.linear.app/graphql';
 
+// Linear identifica equipos y proyectos por UUID; cualquier otra cosa (la clave
+// de equipo «ENG», o una API key pegada en el campo) le da «Argument Validation Error».
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const esEquipoLinear = (id) => UUID.test(String(id || '').trim());
+export const pareceClave = (valor) => /^lin_(api|oauth)_/i.test(String(valor || '').trim());
+
 export const KEY_URL = 'https://linear.app/settings/account/security';
 
 let storePromise = null;
@@ -57,7 +63,11 @@ async function gql(token, query, variables = {}) {
   }
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(body?.message || `Linear respondió ${res.status}.`);
-  if (body?.errors?.length) throw new Error(body.errors[0].message || 'Linear rechazó la consulta.');
+  if (body?.errors?.length) {
+    const msg = body.errors[0].message || '';
+    if (/argument validation/i.test(msg)) throw new Error('Linear no reconoce el equipo o el proyecto vinculado. Vuelve a elegirlo en Ajustes → General.');
+    throw new Error(msg || 'Linear rechazó la consulta.');
+  }
   return body?.data;
 }
 

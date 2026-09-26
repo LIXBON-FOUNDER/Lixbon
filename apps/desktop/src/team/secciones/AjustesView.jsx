@@ -9,8 +9,10 @@ import { TPanel, Cara, nombreDe } from '../ui/Panel';
 import { inicialesDe } from '../layout/TeamTitleBar';
 import { IconTrash, IconPlus, IconX, IconCheck, IconChevronLeft } from '../../components/Icons';
 import { IconGitHub, IconLinear, IconHash, IconLock } from '../ui/icons';
+import { useIssuesStore } from '../store/issuesStore';
+import { esEquipoLinear, pareceClave } from '../lib/linear';
+import { UI_SCALES, readUiScale, setUiScale } from '../../lib/uiScale';
 
-const ZOOMS = [0.9, 1, 1.1, 1.25];
 
 function pistaRepo(valor) {
   const limpio = String(valor || '').trim();
@@ -24,14 +26,20 @@ function General({ proyecto, lider }) {
   const editarProyecto = useTeamStore((s) => s.editarProyecto);
   const [nombre, setNombre] = useState(proyecto.nombre);
   const [repo, setRepo] = useState(proyecto.github_repo || '');
-  const [equipo, setEquipo] = useState(proyecto.linear_team_id || '');
-  const [plinear, setPlinear] = useState(proyecto.linear_project_id || '');
+  const [equipo, setEquipo] = useState(esEquipoLinear(proyecto.linear_team_id) ? proyecto.linear_team_id : '');
+  const [plinear, setPlinear] = useState(esEquipoLinear(proyecto.linear_project_id) ? proyecto.linear_project_id : '');
+  const linear = useIssuesStore();
+  const conClave = linear.estado === 'lista';
+  const elegido = linear.equipos.find((e) => e.id === equipo);
+  const vinculoRoto = !!proyecto.linear_team_id && !esEquipoLinear(proyecto.linear_team_id);
+  useEffect(() => { linear.mirarClave(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (conClave) linear.cargarEquipos(); }, [conClave]); // eslint-disable-line react-hooks/exhaustive-deps
   const [guardado, setGuardado] = useState('');
   useEffect(() => {
     setNombre(proyecto.nombre);
     setRepo(proyecto.github_repo || '');
-    setEquipo(proyecto.linear_team_id || '');
-    setPlinear(proyecto.linear_project_id || '');
+    setEquipo(esEquipoLinear(proyecto.linear_team_id) ? proyecto.linear_team_id : '');
+    setPlinear(esEquipoLinear(proyecto.linear_project_id) ? proyecto.linear_project_id : '');
     setGuardado('');
   }, [proyecto.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -39,6 +47,7 @@ function General({ proyecto, lider }) {
     e.preventDefault();
     const normal = normalizeRepo(repo.trim());
     if (repo.trim() && !normal) { setGuardado('Ese repositorio no se entiende. Pon «owner/repo».'); return; }
+    if (pareceClave(equipo) || pareceClave(plinear)) { setGuardado('Eso es una API key: va en Issues → Conectar, no aquí. Aquí se elige el equipo.'); return; }
     const fallo = await editarProyecto(proyecto.id, {
       nombre: nombre.trim() || proyecto.nombre,
       github_repo: normal || null,
@@ -73,15 +82,30 @@ function General({ proyecto, lider }) {
       <div className="ttarjeta">
         <IconLinear size={18} className="tlinear" />
         <div className="tcampos tfill">
-          <label className="tcampo">Equipo de Linear
-            <input className="tinput mono" value={equipo} onChange={(e) => setEquipo(e.target.value)} placeholder="identificador del equipo" spellCheck={false} disabled={!lider} />
-          </label>
-          <label className="tcampo">Proyecto de Linear (opcional)
-            <input className="tinput mono" value={plinear} onChange={(e) => setPlinear(e.target.value)} placeholder="opcional" spellCheck={false} disabled={!lider} />
-          </label>
-          <span className="tnota">Desde Issues también puedes vincularlo eligiendo el equipo de una lista.</span>
+          {conClave ? (
+            <>
+              <label className="tcampo">Equipo de Linear
+                <select className="tinput" value={equipo} onChange={(e) => { setEquipo(e.target.value); setPlinear(''); }} disabled={!lider}>
+                  <option value="">Sin vincular</option>
+                  {linear.equipos.map((e) => <option key={e.id} value={e.id}>{e.key} · {e.name}</option>)}
+                </select>
+              </label>
+              {elegido?.projects?.nodes?.length > 0 && (
+                <label className="tcampo">Proyecto de Linear (opcional)
+                  <select className="tinput" value={plinear} onChange={(e) => setPlinear(e.target.value)} disabled={!lider}>
+                    <option value="">Todo el equipo</option>
+                    {elegido.projects.nodes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {!linear.equiposCargados && <span className="tnota">Pidiendo tus equipos a Linear…</span>}
+            </>
+          ) : (
+            <span className="tnota">Conecta tu API key de Linear en la pestaña Issues y aquí podrás elegir el equipo de una lista.</span>
+          )}
+          {vinculoRoto && <span className="terror">El vínculo guardado no es un equipo de Linear válido. Elige el equipo y guarda.</span>}
         </div>
-        <span className={`tvinculo ${proyecto.linear_team_id ? 'is-on' : ''}`}><span className="tpunto" />{proyecto.linear_team_id ? 'Vinculado' : 'Sin vincular'}</span>
+        <span className={`tvinculo ${esEquipoLinear(proyecto.linear_team_id) ? 'is-on' : ''}`}><span className="tpunto" />{esEquipoLinear(proyecto.linear_team_id) ? 'Vinculado' : 'Sin vincular'}</span>
       </div>
       <p className="tnota">El proyecto guarda a qué apunta, nunca una credencial: cada integrante consulta con su propia clave.</p>
       {lider && (
@@ -169,8 +193,12 @@ function Canales({ proyecto, lider }) {
 }
 
 function Interfaz() {
-  const zoom = useTeamStore((s) => s.zoom);
-  const setZoom = useTeamStore((s) => s.setZoom);
+  const [zoom, setZoom] = useState(readUiScale);
+  useEffect(() => {
+    const alCambiar = (e) => setZoom(e.detail);
+    window.addEventListener('lixbon:ui-scale', alCambiar);
+    return () => window.removeEventListener('lixbon:ui-scale', alCambiar);
+  }, []);
   const { ids, alternar } = useAcopladosStore();
   const directos = useTeamStore((s) => s.directos);
   const proyectos = useTeamStore((s) => s.proyectos);
@@ -179,14 +207,14 @@ function Interfaz() {
     const d = directos.find((x) => x.id === id);
     return d ? nombreDe(d.con) : null;
   };
-  const idx = Math.max(0, ZOOMS.indexOf(zoom));
+  const idx = Math.max(0, UI_SCALES.indexOf(zoom));
   return (
     <div className="tajustes__sec">
-      <div className="tajustes__cab"><h1>Interfaz</h1><p>Afecta solo a esta ventana. El IDE tiene su propio ajuste.</p></div>
+      <div className="tajustes__cab"><h1>Interfaz</h1><p>Es el mismo ajuste que el del IDE: cambia las dos ventanas. También con Ctrl + y Ctrl −.</p></div>
       <span className="tajustes__h2">Tamaño de la interfaz</span>
       <div className="seg seg--md tajustes__seg">
         <span className="seg__thumb" style={{ width: 72, transform: `translateX(${idx * 72}px)` }} />
-        {ZOOMS.map((z) => <button key={z} className={`seg__opt mono ${z === zoom ? 'is-active' : ''}`} style={{ width: 72 }} onClick={() => setZoom(z)}>{Math.round(z * 100)} %</button>)}
+        {UI_SCALES.map((z) => <button key={z} className={`seg__opt mono ${z === zoom ? 'is-active' : ''}`} style={{ width: 72 }} onClick={() => setUiScale(z)}>{Math.round(z * 100)} %</button>)}
       </div>
       <span className="tajustes__h2">Acoplados al IDE</span>
       <p className="tnota">Estas conversaciones aparecen en el panel derecho del IDE, junto al editor.</p>

@@ -6,7 +6,7 @@ import { useTeamStore } from '../store/teamStore';
 import { useIssuesStore } from '../store/issuesStore';
 import { Conectar, Aviso } from './Conectar';
 import { TPanel, TGutter, tintaDe } from '../ui/Panel';
-import { KEY_URL, PRIORITIES, fecha } from '../lib/linear';
+import { KEY_URL, PRIORITIES, fecha, esEquipoLinear } from '../lib/linear';
 import { hace } from '../lib/tiempo';
 import { openExternal } from '../../lib/tauri';
 import { IconRefresh, IconPlus, IconExternal, IconLogout, IconX, IconWarn, IconChevronDown, IconArrowUp } from '../../components/Icons';
@@ -196,7 +196,7 @@ export function IssuesView() {
   const { estado, error, token, viewer, mirarClave, conectar, desconectar, cargar, del, abierta, cargandoAbierta, abrir, crear } = useIssuesStore();
   const [filtro, setFiltro] = useState('todas');
   const proyecto = proyectoActivo();
-  const vinculado = proyecto?.linear_team_id || '';
+  const vinculado = esEquipoLinear(proyecto?.linear_team_id) ? proyecto.linear_team_id : '';
 
   useEffect(() => { mirarClave(); }, [mirarClave]);
   useEffect(() => { if (token && proyecto && vinculado) cargar(proyecto); }, [token, proyecto?.id, vinculado]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -10,9 +10,11 @@ import '../styles/shell.css';
 import '../styles/studio.css';
 import './styles/team.css';
 import './styles/team-window.css';
+import { initUiScale } from '../lib/uiScale';
 
 async function start() {
   if (import.meta.env.DEV && !window.__TAURI_INTERNALS__) await import('../dev/tauriMock');
+  initUiScale();
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <ErrorBoundary>

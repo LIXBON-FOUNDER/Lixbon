@@ -45,7 +45,7 @@ export function HiloPanel({ canal, raizId }) {
       <div className="tmensajes tmensajes--hilo" ref={scroll.ref} onScroll={scroll.onScroll}>
         {raiz ? (
           <div className="thilo__raiz">
-            <MessageItem mensaje={raiz} autor={quien(raiz.autor_id)} propio={raiz.autor_id === usuario?.id} seguido={false} enHilo />
+            <MessageItem mensaje={raiz} autor={quien(raiz.autor_id)} propio={raiz.autor_id === usuario?.id} seguido={false} directo={canal.tipo === 'directo'} enHilo />
           </div>
         ) : (
           <p className="testado">El mensaje ya no está en la parte cargada del canal.</p>
@@ -55,7 +55,7 @@ export function HiloPanel({ canal, raizId }) {
         {lista.map((m, i) => {
           const anterior = lista[i - 1];
           const seguido = anterior?.autor_id === m.autor_id && new Date(m.creado_en) - new Date(anterior.creado_en) < AGRUPA_MS;
-          return <MessageItem key={m.id} mensaje={m} autor={quien(m.autor_id)} propio={m.autor_id === usuario?.id} seguido={Boolean(seguido)} enHilo />;
+          return <MessageItem key={m.id} mensaje={m} autor={quien(m.autor_id)} propio={m.autor_id === usuario?.id} seguido={Boolean(seguido)} directo={canal.tipo === 'directo'} enHilo />;
         })}
       </div>
       <Composer canal={canal} desconectado={conexion !== 'conectado'} hiloDe={raizId} />

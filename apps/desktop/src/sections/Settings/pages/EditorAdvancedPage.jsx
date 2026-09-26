@@ -1,5 +1,6 @@
 // EditorAdvancedPage.jsx — Ajustes → Editor y avanzado: editor, terminal,
 // índice del código, servidor y actualizaciones.
+import { useEffect, useState } from 'react';
 import { useWorkbenchStore } from '../../../store/workbenchStore';
 import { useTerminalStore, SHELL_OPTIONS } from '../../../store/terminalStore';
 import { Segmented } from '../../../components/Segmented';
@@ -7,11 +8,19 @@ import { Switch } from '../../../components/Switch';
 import { Select } from '../../../components/Select';
 import { IndexPanel } from '../panels/IndexPanel';
 import { AdvancedPanel } from '../panels/AdvancedPanel';
+import { UI_SCALES, readUiScale, setUiScale } from '../../../lib/uiScale';
 
 export function EditorAdvancedPage() {
   const editor = useWorkbenchStore((s) => s.editor);
   const setOption = useWorkbenchStore((s) => s.setEditorOption);
   const { defaultShell, setDefaultShell } = useTerminalStore();
+  const [scale, setScale] = useState(readUiScale);
+
+  useEffect(() => {
+    const onScale = (e) => setScale(e.detail);
+    window.addEventListener('lixbon:ui-scale', onScale);
+    return () => window.removeEventListener('lixbon:ui-scale', onScale);
+  }, []);
 
   return (
     <div className="spage">
@@ -21,6 +30,19 @@ export function EditorAdvancedPage() {
           <span className="spage__sub">Cómo se ve el código, el terminal y la conexión con el clúster.</span>
         </div>
       </div>
+
+      <section className="ssec rise rise--1">
+        <span className="ssec__label">Interfaz</span>
+        <div className="ssec ssec--card">
+          <div className="srow">
+            <div className="srow__text">
+              <span className="srow__label">Tamaño de la interfaz</span>
+              <span className="srow__hint">Todo el IDE y Lixbon Team. También con Ctrl + y Ctrl −; Ctrl 0 vuelve al predeterminado.</span>
+            </div>
+            <Segmented size="sm" width={48} value={scale} onChange={setUiScale} options={UI_SCALES.map((n) => ({ value: n, label: `${Math.round(n * 100)}%` }))} />
+          </div>
+        </div>
+      </section>
 
       <section className="ssec rise rise--1">
         <span className="ssec__label">Editor</span>

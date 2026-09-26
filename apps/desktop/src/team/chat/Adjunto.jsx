@@ -1,5 +1,6 @@
 // Adjunto.jsx — imágenes, vídeos, notas de voz y archivos dentro de un mensaje.
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { openExternal } from '../../lib/tauri';
 import { renovarUrl, formatDuracion } from '../lib/adjuntos';
@@ -59,7 +60,8 @@ export function Visor() {
     return () => window.removeEventListener('keydown', alPulsar);
   }, [abierto, cerrar]);
   if (!abierto) return null;
-  return (
+  // Al body: dentro del panel del IDE un ancestro con transform encierra el position: fixed.
+  return createPortal(
     <div className="tvisor" onClick={cerrar} role="presentation">
       <div className="tvisor__barra" onClick={(e) => e.stopPropagation()} role="presentation">
         <span className="tvisor__nombre">{abierto.nombre}</span>
@@ -71,7 +73,8 @@ export function Visor() {
           ? <video className="tvisor__medio" src={abierto.url} controls autoPlay />
           : <img className="tvisor__medio" src={abierto.url} alt={abierto.nombre} />}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -63,21 +63,10 @@ export const useTeamStore = create((set, get) => ({
     }
   })(),
 
-  zoom: (() => {
-    const n = Number(localStorage.getItem('lixbon-team-zoom'));
-    return Number.isFinite(n) && n >= 0.85 && n <= 1.4 ? n : 1;
-  })(),
-
   foco: 'chat',
   enfocar: (foco) => { if (get().foco !== foco) set({ foco }); },
   infoAbierta: true,
   alternarInfo: () => set({ infoAbierta: !get().infoAbierta }),
-
-  setZoom: (valor) => {
-    const zoom = Math.min(1.4, Math.max(0.85, Math.round(valor * 100) / 100));
-    try { localStorage.setItem('lixbon-team-zoom', String(zoom)); } catch { /* da igual */ }
-    set({ zoom });
-  },
 
   setAncho: (cual, px) => {
     const anchos = { ...get().anchos, [cual]: Math.round(px) };

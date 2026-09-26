@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import {
   loadToken, saveToken, deleteToken, getViewer, getWorkspace, listIssues,
-  getIssue, addComment, createIssue, setIssueState,
+  getIssue, addComment, createIssue, setIssueState, esEquipoLinear,
 } from '../lib/linear';
 
 const vacio = () => ({ issues: [], cargando: false, error: '', cargado: false });
@@ -89,7 +89,7 @@ export const useIssuesStore = create((set, get) => ({
 
   cargar: async (proyecto, { forzar = false } = {}) => {
     const { token } = get();
-    if (!token || !proyecto?.linear_team_id) return;
+    if (!token || !esEquipoLinear(proyecto?.linear_team_id)) return;
     const actual = get().del(proyecto.id);
     if (actual.cargando || (actual.cargado && !forzar)) return;
     get()._actualizar(proyecto.id, { cargando: true, error: '' });
