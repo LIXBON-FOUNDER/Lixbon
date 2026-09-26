@@ -34,7 +34,7 @@ export const useAppStore = create((set, get) => ({
   panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"terminal":false}'),
   panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
 
-  currentModel: localStorage.getItem('lixbon_current_model') || '',
+  currentModel: (localStorage.getItem('lixbon_current_model') || '').replace(/^error:.*/, ''),
   // Modelo de visión (sub-agente que describe imágenes para el modelo de texto).
   // '' = autodetectar de los modelos disponibles.
   visionModel: localStorage.getItem('lixbon_vision_model') || '',
