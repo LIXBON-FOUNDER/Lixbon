@@ -2,7 +2,7 @@
 // marca, proyecto, secciones en el centro y los controles de ventana.
 import { useEffect, useRef, useState } from 'react';
 import { useTeamStore } from '../store/teamStore';
-import { LogoMark } from '../../components/Logo';
+import { TeamMark } from '../../components/Logo';
 import { WindowControls } from '../../layout/WindowControls';
 import { Cara } from '../ui/Panel';
 import { IconChevronDown, IconPlus, IconSliders, IconCheck } from '../../components/Icons';
@@ -81,7 +81,7 @@ export function TeamTitleBar({ minimal = false }) {
   return (
     <header className="titlebar">
       <div className="titlebar__brand" data-tauri-drag-region>
-        <LogoMark size={18} />
+        <TeamMark size={18} />
         <span className="titlebar__word">lixbon</span>
         <span className="ttitle__team">team</span>
       </div>

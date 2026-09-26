@@ -707,3 +707,10 @@
    tarjeta de rama del sidebar; Consumo/versión, en el popover de la cuenta. */
 
 .team__badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-size: 10px; }
+
+.teammark { flex-shrink: 0; }
+.teammark__cut { fill: var(--teammark-cut, var(--surface-1)); stroke: var(--teammark-cut, var(--surface-1)); stroke-width: 3; stroke-linejoin: round; }
+.wbpanel.is-focused .teammark { --teammark-cut: var(--surface-2); }
+.titlebar .teammark, .team__btn .teammark { --teammark-cut: var(--bg); }
+.team__menu .teammark { --teammark-cut: var(--bg); }
+.team__menu-title { display: inline-flex; align-items: center; gap: 8px; }

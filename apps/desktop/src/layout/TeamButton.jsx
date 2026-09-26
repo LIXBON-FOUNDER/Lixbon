@@ -8,7 +8,7 @@ import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { Avatar } from '../components/Avatar';
-import { IconUser } from '../components/Icons';
+import { TeamMark } from '../components/Logo';
 import { githubSlug } from '../lib/githubSlug';
 import { estadoDef } from '../team/lib/presencia';
 
@@ -71,7 +71,7 @@ export function TeamButton() {
               {i === arr.length - 1 && enLinea > 0 && <span className="team__stack-dot" />}
             </span>
           ))}
-          {miembros.length === 0 && <IconUser size={14} />}
+          {miembros.length === 0 && <TeamMark size={16} />}
         </span>
         <span className="team__label">{proyecto ? proyecto.nombre : 'Team'}</span>
         {pendientes > 0 && <span className="team__badge mono">{pendientes > 99 ? '99+' : pendientes}</span>}
@@ -80,7 +80,7 @@ export function TeamButton() {
       {open && (
         <div className="team__menu">
           <div className="team__menu-head">
-            <span className="team__menu-title">{proyecto ? proyecto.nombre : 'Lixbon Team'}</span>
+            <span className="team__menu-title"><TeamMark size={15} />{proyecto ? proyecto.nombre : 'Lixbon Team'}</span>
             <span className={`team__conn ${conexion === 'conectado' ? 'is-on' : ''}`}>
               {sesion === 'error' ? 'Sin conexión' : conexion === 'conectado' ? `${enLinea} en línea` : 'Conectando…'}
             </span>
