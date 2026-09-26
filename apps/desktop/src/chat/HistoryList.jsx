@@ -161,10 +161,18 @@ export function HistoryList() {
                   />
                 ) : (
                   <button className="hist__btn" onClick={() => openItem(c)} title={c.title}>
-                    {c.streaming && !c.waiting && <SpinRing size={11} />}
-                    {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
-                    {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
-                    {(c.engine === 'claude' || open.find((o) => o.key === c.key)?.engine === 'claude') && <ClaudeMark size={11} />}
+                    {(() => {
+                      const claude = c.engine === 'claude' || open.find((o) => o.key === c.key)?.engine === 'claude';
+                      const working = c.streaming && !c.waiting;
+                      return (
+                        <>
+                          {working && (claude ? <ClaudeMark size={12} className="claudemark--live" /> : <SpinRing size={11} />)}
+                          {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
+                          {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
+                          {claude && !working && <ClaudeMark size={11} />}
+                        </>
+                      );
+                    })()}
                     <span className="hist__title">{c.title || 'Nueva conversación'}</span>
                     <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
                   </button>

@@ -6,16 +6,17 @@
 // (lo necesita el panel redondeado) y eso los recortaba — igual que Select.jsx.
 import { useRef, useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useChatStore, CHAT_MODES } from '../store/chatStore';
+import { useChatStore, useSessionsStore, CHAT_MODES } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
 import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
 import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
 import { Select } from '../components/Select';
-import { CLAUDE_MODELS } from '../lib/claudeCode';
+import { CLAUDE_MODES, claudeModelOptions } from '../lib/claudeCode';
 import { Switch } from '../components/Switch';
 import { ClaudeMark } from '../components/Logo';
+import { EffortSlider } from './EffortSlider';
 import { ProgressRing } from '../components/Ring';
 import {
   IconStop, IconX, IconFileCode, IconHammer, IconClip, IconChevronDown, IconAt, IconArrowUp,
@@ -59,15 +60,16 @@ const SLASH_COMMANDS = [
 ];
 
 // En una sesión de Claude Code solo valen las acciones del IDE que tienen
-// sentido para él; el resto de "/" son los comandos del propio Claude Code.
-const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'agent', 'plan', 'ask', 'approve', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace']);
+// sentido para él (las que cambian lo que el IDE muestra: conversación nueva,
+// modelo, modo); el resto de "/" son los comandos del propio Claude Code.
+const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace']);
 
-function claudeSlashCommands(names = []) {
+function claudeSlashCommands(commands = []) {
   const local = SLASH_COMMANDS.filter((c) => CLAUDE_LOCAL.has(c.cmd));
   const taken = new Set(local.map((c) => c.cmd));
-  const remote = names
-    .filter((n) => n && !taken.has(n))
-    .map((n) => ({ cmd: n, desc: 'Comando de Claude Code', Icon: IconTerminal, insert: true }));
+  const remote = commands
+    .filter((c) => c?.name && !taken.has(c.name) && !c.name.startsWith('__'))
+    .map((c) => ({ cmd: c.name, desc: c.description || 'Comando de Claude Code', hint: c.hint, Icon: IconTerminal, claude: true }));
   return [...local, ...remote];
 }
 
@@ -127,10 +129,30 @@ export function ChatInputBar() {
   const ccContext = useChatStore((s) => s.ccContext);
   const ccModel = useChatStore((s) => s.ccModel);
   const setCcModel = useChatStore((s) => s.setCcModel);
-  const ccSlash = useChatStore((s) => s.ccSlash);
+  const ccCommands = useChatStore((s) => s.ccCommands);
+  const ccModels = useChatStore((s) => s.ccModels);
+  const ccMode = useChatStore((s) => s.ccMode);
+  const setCcMode = useChatStore((s) => s.setCcMode);
+  const ccEffort = useChatStore((s) => s.ccEffort);
+  const setCcEffort = useChatStore((s) => s.setCcEffort);
+  const activeKey = useSessionsStore((s) => s.activeKey);
   const isClaude = engine === 'claude';
   const agentActive = !!workspaceRoot;
-  const mode = CHAT_MODES.find((m) => m.id === chatMode) || CHAT_MODES[0];
+  const modes = isClaude ? CLAUDE_MODES : CHAT_MODES;
+  const currentMode = isClaude ? ccMode : chatMode;
+  const mode = modes.find((m) => m.id === currentMode) || modes[0];
+  const pickMode = isClaude ? setCcMode : setChatMode;
+  const modelOptions = useMemo(() => claudeModelOptions(ccModels), [ccModels]);
+  const effortLevels = useMemo(() => {
+    const m = (ccModels || []).find((x) => (ccModel ? x.value === ccModel : x.value === 'default'));
+    return m?.supportsEffort && Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels : [];
+  }, [ccModels, ccModel]);
+
+  // Claude Code arranca al abrir su sesión: así anuncia modelos y comandos
+  // antes del primer mensaje y la primera respuesta no espera al arranque.
+  useEffect(() => {
+    if (isClaude && workspaceRoot) useChatStore.getState().warmup?.();
+  }, [isClaude, workspaceRoot, activeKey]);
 
   // Estimación gruesa (≈4 caracteres por token): basta para avisar antes de
   // que el modelo empiece a recortar la conversación.
@@ -200,12 +222,12 @@ export function ChatInputBar() {
     }
   };
 
-  // Autocrecer el textarea hasta 6 líneas
+  // Autocrecer: se ve todo lo escrito hasta ~45% de la ventana, luego scroll.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 132) + 'px';
+    el.style.height = Math.min(el.scrollHeight, Math.min(window.innerHeight * 0.45, 360)) + 'px';
   }, [text]);
 
   // ── @-menciones: detecta "@token" ANTES del cursor y abre el menú ────────
@@ -245,19 +267,28 @@ export function ChatInputBar() {
     const m = /^\/([\w:-]*)$/.exec(text);
     if (!m) return [];
     const q = m[1].toLowerCase();
-    const list = isClaude ? claudeSlashCommands(ccSlash) : SLASH_COMMANDS;
-    return list.filter((c) => c.cmd.toLowerCase().startsWith(q)).slice(0, 40);
-  }, [text, isClaude, ccSlash]);
+    const list = isClaude ? claudeSlashCommands(ccCommands) : SLASH_COMMANDS;
+    return list.filter((c) => c.cmd.toLowerCase().startsWith(q)).slice(0, 60);
+  }, [text, isClaude, ccCommands]);
   const slashOpen = slashMatches.length > 0;
+  useEffect(() => {
+    if (slashOpen) document.querySelector('.cmdmenu .cmdrow.is-sel')?.scrollIntoView({ block: 'nearest' });
+  }, [slashSel, slashOpen]);
   const menuOpen = mentionQuery !== null && mentionMatches.length > 0;
   const cmdmenuPos = useAnchoredAbove(barRef, slashOpen, { matchWidth: true });
   const mentionMenuPos = useAnchoredAbove(barRef, menuOpen, { matchWidth: true });
 
   const pickSlash = (entry) => {
     if (!entry) return;
-    if (entry.insert) {
-      setText(`/${entry.cmd} `);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+    if (entry.claude) {
+      // Con argumentos se deja escrito para completarlo; sin ellos va directo.
+      if (entry.hint) {
+        setText(`/${entry.cmd} `);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+        return;
+      }
+      setText('');
+      send(`/${entry.cmd}`, null, [], []);
       return;
     }
     setText('');
@@ -335,7 +366,7 @@ export function ChatInputBar() {
               onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}
             >
               <span className="cmdrow__icon"><c.Icon size={13} /></span>
-              <span className="cmdrow__name">/{c.cmd}</span>
+              <span className="cmdrow__name">/{c.cmd}{c.hint ? <span className="cmdrow__hint"> {c.hint}</span> : null}</span>
               <span className="cmdrow__desc">{c.desc}</span>
             </div>
           ))}
@@ -420,7 +451,7 @@ export function ChatInputBar() {
         <div className="agentmenu-wrap">
           <button
             ref={agentBtnRef}
-            className={`chat-inputbar__mode ${agentActive ? `is-on mode--${mode.id}` : ''}`}
+            className={`chat-inputbar__mode ${agentActive ? `is-on mode--${mode.tone || mode.id}` : ''}`}
             onClick={() => setAgentMenuOpen((v) => !v)}
             title={workspaceRoot ? 'Modo del chat (Shift+Tab para alternar)' : 'Abre una carpeta de trabajo para usar el agente'}
           >
@@ -437,21 +468,21 @@ export function ChatInputBar() {
                     <span>Modo</span>
                     <span className="agentmenu__kbd"><kbd>Shift</kbd><kbd>Tab</kbd></span>
                   </div>
-                  {CHAT_MODES.map((m) => (
+                  {modes.map((m) => (
                     <button
                       key={m.id}
-                      className={`modeopt mode--${m.id} ${m.id === chatMode ? 'is-active' : ''}`}
-                      onClick={() => { setChatMode(m.id); setAgentMenuOpen(false); textareaRef.current?.focus(); }}
+                      className={`modeopt mode--${m.tone || m.id} ${m.id === currentMode ? 'is-active' : ''}`}
+                      onClick={() => { pickMode(m.id); setAgentMenuOpen(false); textareaRef.current?.focus(); }}
                     >
                       <span className="modedot" />
                       <span className="modeopt__text">
                         <span className="modeopt__label">{m.label}</span>
                         <span className="modeopt__desc">{m.desc}</span>
                       </span>
-                      {m.id === chatMode && <IconCheck size={13} />}
+                      {m.id === currentMode && <IconCheck size={13} />}
                     </button>
                   ))}
-                  {chatMode === 'agent' && (
+                  {!isClaude && chatMode === 'agent' && (
                     <div className="agentmenu__opts">
                       <div className="agentmenu__row">
                         <span>Aplicar cambios sin preguntar</span>
@@ -473,8 +504,11 @@ export function ChatInputBar() {
         </div>
 
         {isClaude
-          ? <Select up className="modelpicker modelpicker--claude" value={ccModel} onChange={setCcModel} options={CLAUDE_MODELS} title="Modelo de Claude Code" />
+          ? <Select up className="modelpicker modelpicker--claude" value={ccModel} onChange={setCcModel} options={modelOptions} title="Modelo de Claude Code" />
           : <ModelPicker />}
+        {isClaude && effortLevels.length > 0 && (
+          <EffortSlider levels={effortLevels} value={ccEffort} onChange={setCcEffort} />
+        )}
 
         <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
           <IconClip size={15} />

@@ -7,21 +7,27 @@ import { createStore } from 'zustand/vanilla';
 import { useAppStore } from './appStore';
 import { useFileViewStore } from './fileViewStore';
 import { useOutputStore } from './outputStore';
-import { toolCategory, initialMode, initialPolicy, CHAT_MODES, useSessionsStore, agentSettings } from './chatStore';
-import { computeChangePreview, isAllowedCommand, isNeverAutoCommand, revertSnapshot, DEFAULT_CMD_ALLOWLIST } from '../lib/agent';
+import { initialMode, initialPolicy, useSessionsStore, agentSettings } from './chatStore';
+import { computeChangePreview, revertSnapshot, DEFAULT_CMD_ALLOWLIST } from '../lib/agent';
 import {
-  startClaude, userMessage, permissionModeOf, mapTool, changeOf, resultText,
-  claudeTranscript, transcriptToMessages, claudeVersion, HIDDEN_TOOLS,
+  startClaude, userMessage, mapTool, changeOf, resultText,
+  claudeTranscript, transcriptToMessages, claudeVersion, HIDDEN_TOOLS, CLAUDE_MODES,
 } from '../lib/claudeCode';
 
 const MODEL_KEY = 'lixbon_claude_model';
 const USAGE_KEY = 'lixbon_claude_usage';
-const SLASH_KEY = 'lixbon_claude_slash';
+const MODE_KEY = 'lixbon_claude_mode';
+const EFFORT_KEY = 'lixbon_claude_effort';
+const CATALOG_KEY = 'lixbon_claude_catalog';
 
-// Claude Code solo anuncia sus comandos en el init, que llega con el primer
-// mensaje: se guardan para ofrecerlos en el menú "/" desde el principio.
-const cachedSlash = () => {
-  try { const v = JSON.parse(localStorage.getItem(SLASH_KEY) || 'null'); return Array.isArray(v) ? v : null; } catch { return null; }
+// Modelos y comandos salen del `initialize` de Claude Code; se guardan para
+// que el selector y el menú "/" estén completos antes de que arranque.
+const cachedCatalog = () => {
+  try { const v = JSON.parse(localStorage.getItem(CATALOG_KEY) || 'null'); return v && typeof v === 'object' ? v : {}; } catch { return {}; }
+};
+const initialCcMode = () => {
+  const v = localStorage.getItem(MODE_KEY);
+  return CLAUDE_MODES.some((m) => m.id === v) ? v : 'default';
 };
 
 /** Cupo del plan de Claude (ventana de 5 h y semanal), tal como lo cuenta el
@@ -42,6 +48,7 @@ export const useClaudeUsage = create((set) => ({
 }));
 
 let nextProc = 1;
+const FLUSH_MS = 50;
 
 function normalizeQuestions(input = {}) {
   return (Array.isArray(input.questions) ? input.questions : []).map((q) => ({
@@ -63,6 +70,9 @@ export function makeClaudeStore() {
   let starting = null;
   let appliedMode = null;
   let appliedModel = null;
+  let appliedEffort = null;
+  // Turnos que el IDE manda por su cuenta (`/effort`): su salida no se muestra.
+  let hiddenTurns = 0;
   let streamedMsgs = new Set();
   let rows = new Map();
   let stderr = '';
@@ -78,9 +88,25 @@ export function makeClaudeStore() {
       push({ role: 'assistant', content: '', engine: 'claude' });
       return msgs().length - 1;
     };
-    const appendText = (field, text) => {
+    // Los fragmentos llegan cada ~25 ms: se juntan y se pintan cada FLUSH_MS
+    // para no re-renderizar el chat entero por cada uno.
+    let buffered = { content: '', thinking: '' };
+    let flushTimer = null;
+    const flush = () => {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      if (!buffered.content && !buffered.thinking) return;
+      const add = buffered;
+      buffered = { content: '', thinking: '' };
       const i = bubbleIndex();
-      patchAt(i, { [field]: (msgs()[i][field] || '') + text });
+      const cur = msgs()[i];
+      patchAt(i, {
+        ...(add.content ? { content: (cur.content || '') + add.content } : {}),
+        ...(add.thinking ? { thinking: (cur.thinking || '') + add.thinking } : {}),
+      });
+    };
+    const appendText = (field, text) => {
+      buffered[field] += text;
+      if (!flushTimer) flushTimer = setTimeout(flush, FLUSH_MS);
     };
     const dropEmptyTail = () => {
       const list = msgs();
@@ -88,6 +114,7 @@ export function makeClaudeStore() {
       if (last?.role === 'assistant' && !(last.content || '').trim() && !last.thinking && !last.plan) set({ messages: list.slice(0, -1) });
     };
     const finishTurn = () => {
+      flush();
       dropEmptyTail();
       set({ streaming: false, pendingApproval: null, pendingQuestion: null });
     };
@@ -110,40 +137,37 @@ export function makeClaudeStore() {
         return { behavior: 'deny', message: 'El usuario va a revisar el plan en el IDE. Termina el turno y espera su respuesta.' };
       }
 
+      // Claude Code solo pregunta lo que su modo y sus reglas no cubren: aquí
+      // no se aplica la política del agente de Lixbon, se le pregunta al usuario.
       const { tool, args } = mapTool(name, input, root);
-      const cat = toolCategory(tool);
-      const policy = get().toolPolicy[cat] || 'ask';
-      if (policy === 'never') return { behavior: 'deny', message: 'El usuario no permite esta herramienta en Ajustes → Agente y permisos.' };
-      const cmd = args.command || '';
-      const needs = cat === 'command'
-        ? (policy === 'allow' ? isNeverAutoCommand(cmd) : !isAllowedCommand(cmd, get().commandAllowlist))
-        : policy !== 'allow';
-      if (!needs) return { behavior: 'allow', updatedInput: input };
-
       let change = null;
       if (tool === 'write_file' || tool === 'edit_file') {
         try { change = await computeChangePreview(root, tool, args); } catch { /* sin vista previa */ }
-      } else if (cat === 'command') {
-        change = { kind: 'command', path: cmd };
+      } else if (tool === 'run_command') {
+        change = { kind: 'command', path: args.command || '' };
       }
       const decision = await new Promise((resolve) => set({ pendingApproval: { tool, args, change, resolve } }));
-      if (decision === 'always') get().setToolPolicy(cat, 'allow');
-      else if (decision !== 'yes') return { behavior: 'deny', message: 'El usuario lo rechazó desde el IDE.' };
+      if (decision === 'always') {
+        const rules = Array.isArray(req.permission_suggestions) ? req.permission_suggestions : [];
+        return { behavior: 'allow', updatedInput: input, ...(rules.length ? { updatedPermissions: rules } : {}) };
+      }
+      if (decision !== 'yes') return { behavior: 'deny', message: 'El usuario lo rechazó desde el IDE.' };
       return { behavior: 'allow', updatedInput: input };
     }
 
     function onEvent(ev) {
       if (ev.parent_tool_use_id) return;
+      if (hiddenTurns > 0 && ev.type !== 'system' && ev.type !== 'control_request' && ev.type !== 'rate_limit_event') {
+        if (ev.type === 'result') hiddenTurns -= 1;
+        return;
+      }
+      if (ev.type !== 'stream_event') flush();
       const root = useAppStore.getState().workspaceRoot;
       switch (ev.type) {
         case 'system':
           if (ev.subtype === 'init') {
             gotInit = true;
-            if (Array.isArray(ev.slash_commands)) {
-              try { localStorage.setItem(SLASH_KEY, JSON.stringify(ev.slash_commands)); } catch { /* sin almacenamiento */ }
-            }
             set({
-              ccSlash: Array.isArray(ev.slash_commands) ? ev.slash_commands : get().ccSlash,
               conversationId: ev.session_id,
               ccInfo: { model: ev.model, version: ev.claude_code_version, mcp: ev.mcp_servers || [], tools: (ev.tools || []).length, cwd: ev.cwd },
             });
@@ -185,6 +209,9 @@ export function makeClaudeStore() {
             patchAt(i, {
               pending: false, ok: !b.is_error, ms: Date.now() - (row.startedAt || Date.now()),
               content: txt.split('\n')[0].slice(0, 160), full: txt.slice(0, 4000), change, snapshot,
+              // Claude Code ya lo escribió en disco (por su modo o por el permiso
+              // dado): no queda nada que revisar, solo se puede revertir.
+              ...(change ? { accepted: true } : {}),
             });
             if (row.tool === 'run_command') useOutputStore.getState().append('Claude Code', `$ ${row.args?.command}\n${txt}`);
             if (change) refreshEditor();
@@ -201,6 +228,11 @@ export function makeClaudeStore() {
             ccContext: { ...get().ccContext, window: mu?.contextWindow || get().ccContext.window },
             ccCost: (get().ccCost || 0) + (ev.total_cost_usd || 0),
           });
+          // Los comandos "/" locales de Claude Code solo dejan su salida aquí.
+          if (!ev.is_error && ev.result) {
+            const last = msgs()[msgs().length - 1];
+            if (last?.role === 'assistant' && !(last.content || '').trim()) patchAt(msgs().length - 1, { content: String(ev.result) });
+          }
           if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
             if (!get().interrupted) {
               const text = String(ev.result || ev.subtype || 'Claude Code terminó con un error.');
@@ -246,16 +278,37 @@ export function makeClaudeStore() {
         try { await claudeVersion(); } catch (e) { throw new Error(`${e?.message || e} Instálalo desde claude.com/code y ejecuta \`claude\` una vez en una terminal para iniciar sesión.`); }
         stderr = '';
         gotInit = false;
-        appliedMode = permissionModeOf(get().chatMode);
+        appliedMode = get().ccMode;
         appliedModel = get().ccModel;
+        appliedEffort = get().ccEffort;
+        hiddenTurns = 0;
         const p = await startClaude({
-          procId, cwd: root, resume: get().conversationId, model: appliedModel, permissionMode: appliedMode,
+          procId, cwd: root, resume: get().conversationId, model: appliedModel, effort: appliedEffort, permissionMode: appliedMode,
           onEvent, onStderr: (t) => { stderr += t; }, onExit,
         });
         proc = p;
+        const info = await p.control({ subtype: 'initialize' }).catch(() => null);
+        if (info) {
+          const catalog = {
+            models: Array.isArray(info.models) ? info.models : get().ccModels,
+            commands: Array.isArray(info.commands)
+              ? info.commands.map((c) => ({ name: c.name, description: c.description || '', hint: c.argumentHint || '' }))
+              : get().ccCommands,
+          };
+          try { localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog)); } catch { /* sin almacenamiento */ }
+          set({ ccModels: catalog.models, ccCommands: catalog.commands });
+        }
         return p;
       })();
       try { return await starting; } finally { starting = null; }
+    }
+
+    async function applyEffort(p) {
+      const level = get().ccEffort;
+      if (level === appliedEffort) return;
+      appliedEffort = level;
+      hiddenTurns += 1;
+      await p.send(userMessage(`/effort ${level}`));
     }
 
     const shared = {
@@ -282,15 +335,41 @@ export function makeClaudeStore() {
       ccContext: { used: 0, window: 200000 },
       ccCost: 0,
       ccMsgId: null,
-      ccSlash: cachedSlash() || ['compact', 'init', 'review', 'security-review', 'pr-comments'],
+      ccMode: initialCcMode(),
+      ccEffort: localStorage.getItem(EFFORT_KEY) || 'auto',
+      ccPrevMode: 'default',
+      ccModels: cachedCatalog().models || [],
+      ccCommands: cachedCatalog().commands || [],
       nativeTools: false,
       ...shared,
 
       setToolPolicy: (cat, value) => agentSettings.setToolPolicy(get().toolPolicy, cat, value),
-      setChatMode: (mode) => agentSettings.setChatMode(mode),
+      // Los comandos del IDE hablan en modos de Lixbon: se traducen a los de Claude.
+      setChatMode: (mode) => get().setCcMode(mode === 'agent' ? (get().ccPrevMode || 'default') : 'plan'),
       cycleChatMode: () => {
-        const i = CHAT_MODES.findIndex((m) => m.id === get().chatMode);
-        get().setChatMode(CHAT_MODES[(i + 1) % CHAT_MODES.length].id);
+        const cycle = CLAUDE_MODES.filter((m) => m.cycle);
+        const i = cycle.findIndex((m) => m.id === get().ccMode);
+        get().setCcMode(cycle[(i + 1) % cycle.length].id);
+      },
+      setCcMode: (ccMode) => {
+        if (!CLAUDE_MODES.some((m) => m.id === ccMode) || ccMode === get().ccMode) return;
+        localStorage.setItem(MODE_KEY, ccMode);
+        set({ ccMode, ...(get().ccMode !== 'plan' ? { ccPrevMode: get().ccMode } : {}) });
+        if (proc && ccMode !== appliedMode) {
+          const p = proc;
+          p.control({ subtype: 'set_permission_mode', mode: ccMode })
+            .then(() => { if (proc === p) appliedMode = ccMode; })
+            .catch((err) => push({ role: 'error', content: `Claude Code no aceptó el modo: ${err?.message || err}` }));
+        }
+      },
+      warmup: () => { ensureProc().catch(() => {}); },
+
+      // `/effort` es un comando local de Claude Code (no gasta tokens) y es la
+      // forma fiable de cambiarlo con la sesión abierta; al arrancar va en --effort.
+      setCcEffort: (ccEffort) => {
+        localStorage.setItem(EFFORT_KEY, ccEffort);
+        set({ ccEffort });
+        if (proc && !get().streaming) applyEffort(proc).catch(() => {});
       },
       setAutoApprove: (v) => get().setToolPolicy('edit', v ? 'allow' : 'ask'),
       setAutoRunCommands: (v) => get().setToolPolicy('command', v ? 'allow' : 'ask'),
@@ -377,8 +456,9 @@ export function makeClaudeStore() {
         });
         try {
           const p = await ensureProc();
-          const mode = permissionModeOf(get().chatMode);
+          const mode = get().ccMode;
           if (mode !== appliedMode) { await p.control({ subtype: 'set_permission_mode', mode }); appliedMode = mode; }
+          if (get().ccEffort !== appliedEffort) await applyEffort(p);
           if (get().ccModel !== appliedModel) { await p.control({ subtype: 'set_model', model: get().ccModel || 'default' }); appliedModel = get().ccModel; }
           await p.send(userMessage(prompt, hasImages ? images : []));
         } catch (err) {
@@ -389,7 +469,7 @@ export function makeClaudeStore() {
       },
 
       runPlan: () => {
-        get().setChatMode('agent');
+        get().setCcMode(get().ccPrevMode && get().ccPrevMode !== 'plan' ? get().ccPrevMode : 'default');
         set({ messages: msgs().map((m) => (m.plan ? { ...m, plan: false, planRun: true } : m)) });
         get().send('Adelante: ejecuta el plan que propusiste, paso a paso.');
       },

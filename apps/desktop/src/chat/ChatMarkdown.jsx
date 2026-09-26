@@ -1,5 +1,5 @@
 // ChatMarkdown.jsx — markdown de las respuestas con bloques de código copiables.
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { IconCopy, IconCheck, IconEye } from '../components/Icons';
@@ -58,10 +58,12 @@ export const markdownComponents = {
 
 export const REMARK = [remarkGfm];
 
-export function ChatMarkdown({ children }) {
+// Memo: al llegar tokens solo cambia el último mensaje; sin esto se volvía a
+// parsear el markdown de toda la conversación en cada fragmento.
+export const ChatMarkdown = memo(function ChatMarkdown({ children }) {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={REMARK} components={markdownComponents}>{children}</ReactMarkdown>
     </div>
   );
-}
+});

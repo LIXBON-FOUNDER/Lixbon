@@ -5,11 +5,31 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
+// Hasta el primer `initialize` (y su caché) no se sabe qué ofrece la cuenta.
 export const CLAUDE_MODELS = [
   { value: '', label: 'Predeterminado' },
   { value: 'opus', label: 'Opus' },
   { value: 'sonnet', label: 'Sonnet' },
   { value: 'haiku', label: 'Haiku' },
+];
+
+/** Opciones del selector a partir de los modelos que anuncia Claude Code. */
+export function claudeModelOptions(models) {
+  if (!Array.isArray(models) || !models.length) return CLAUDE_MODELS;
+  const byId = new Map(models.filter((m) => m.value !== 'default').map((m) => [m.resolvedModel || m.value, m.displayName]));
+  return models.map((m) => (m.value === 'default'
+    ? { value: '', label: `Predeterminado${byId.get(m.resolvedModel) ? ` · ${byId.get(m.resolvedModel)}` : ''}` }
+    : { value: m.value, label: m.displayName || m.value }));
+}
+
+/** Modos de permisos del propio Claude Code; `tone` reutiliza los colores de
+    los modos de Lixbon. `cycle` son los que recorre Shift+Tab, como en su CLI. */
+export const CLAUDE_MODES = [
+  { id: 'default', label: 'Preguntar', desc: 'Pide permiso antes de editar o ejecutar', tone: 'ask', cycle: true },
+  { id: 'acceptEdits', label: 'Aceptar ediciones', desc: 'Edita sin preguntar; los comandos sí preguntan', tone: 'agent', cycle: true },
+  { id: 'plan', label: 'Plan', desc: 'Solo lectura: investiga y propone un plan', tone: 'plan', cycle: true },
+  { id: 'auto', label: 'Auto', desc: 'Claude decide qué es seguro y solo pregunta lo arriesgado', tone: 'agent', cycle: true },
+  { id: 'bypassPermissions', label: 'Sin permisos', desc: 'Todo sin preguntar. Úsalo solo en carpetas desechables', tone: 'danger', cycle: false },
 ];
 
 export const claudeVersion = () => invoke('cc_version');
@@ -19,11 +39,21 @@ export const claudeTranscript = (cwd, id) => invoke('cc_session_read', { cwd, id
 /** Plan y Preguntar son solo lectura: los dos van al modo plan de Claude Code. */
 export const permissionModeOf = (chatMode) => (chatMode === 'agent' ? 'default' : 'plan');
 
-export async function startClaude({ procId, cwd, resume, model, permissionMode, onEvent, onStderr, onExit }) {
+const CONTROL_TIMEOUT_MS = 20000;
+
+export async function startClaude({ procId, cwd, resume, model, effort, permissionMode, onEvent, onStderr, onExit }) {
+  const waiting = new Map();
   const unlisten = await Promise.all([
     listen(`cc:line:${procId}`, (e) => {
       let ev;
       try { ev = JSON.parse(e.payload); } catch { return; }
+      const w = ev.type === 'control_response' && waiting.get(ev.response?.request_id);
+      if (w) {
+        waiting.delete(ev.response.request_id);
+        if (ev.response.subtype === 'error') w.reject(new Error(ev.response.error || 'Claude Code rechazó la petición'));
+        else w.resolve(ev.response.response || {});
+        return;
+      }
       onEvent(ev);
     }),
     listen(`cc:stderr:${procId}`, (e) => onStderr(String(e.payload || ''))),
@@ -32,8 +62,9 @@ export async function startClaude({ procId, cwd, resume, model, permissionMode, 
   const args = [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--include-partial-messages', '--permission-prompt-tool', 'stdio',
-    '--permission-mode', permissionMode,
+    '--permission-mode', permissionMode, '--allow-dangerously-skip-permissions',
     ...(model ? ['--model', model] : []),
+    ...(effort && effort !== 'auto' ? ['--effort', effort] : []),
     ...(resume ? ['--resume', resume] : []),
   ];
   try {
@@ -46,10 +77,19 @@ export async function startClaude({ procId, cwd, resume, model, permissionMode, 
   const send = (obj) => invoke('cc_send', { id: procId, line: JSON.stringify(obj) });
   return {
     send,
-    control: (request) => send({ type: 'control_request', request_id: `ide-${Date.now()}-${reqN++}`, request }),
+    control: (request) => {
+      const id = `ide-${Date.now()}-${reqN++}`;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { waiting.delete(id); reject(new Error('Claude Code no respondió')); }, CONTROL_TIMEOUT_MS);
+        waiting.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
+        send({ type: 'control_request', request_id: id, request }).catch((e) => { waiting.delete(id); clearTimeout(timer); reject(e); });
+      });
+    },
     respond: (requestId, response) => send({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } }),
     close: async () => {
       unlisten.forEach((u) => u());
+      for (const w of waiting.values()) w.reject(new Error('Claude Code se cerró'));
+      waiting.clear();
       await invoke('cc_stop', { id: procId }).catch(() => {});
     },
   };

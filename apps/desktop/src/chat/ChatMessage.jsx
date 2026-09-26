@@ -1,6 +1,6 @@
 // ChatMessage.jsx — una burbuja del chat (usuario / asistente / error).
 // Las filas de herramienta se agrupan aparte en ToolGroup (las llama ChatPanel).
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode } from '../components/Icons';
@@ -53,7 +53,7 @@ function PlanActions() {
   );
 }
 
-export function ChatMessage({ message, streaming }) {
+export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
   if (message.role === 'user') {
     return (
       <div className="msg msg--user">
@@ -128,4 +128,4 @@ export function ChatMessage({ message, streaming }) {
       {message.plan && !streaming && <PlanActions />}
     </div>
   );
-}
+});

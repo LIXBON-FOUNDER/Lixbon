@@ -1,8 +1,8 @@
 // ChatPanel.jsx — panel central: conversación con streaming. El historial
 // vive siempre visible en el sidebar (Recientes); nueva conversación es
 // Ctrl+N o /clear — aquí no hay cabecera flotante, como en el diseño.
-import { useEffect, useRef } from 'react';
-import { useChatStore } from '../store/chatStore';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useChatStore, useSessionsStore } from '../store/chatStore';
 import { ChatMessage } from './ChatMessage';
 import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
@@ -34,23 +34,44 @@ function renderMessages(messages, streaming) {
   }
   return out;
 }
+// Posición de lectura de cada sesión: al cambiar de pestaña (Editor, Git…)
+// el panel se desmonta, y al volver tiene que quedar donde estaba.
+const scrollMemory = new Map();
+
+const jumpTo = (el, top) => {
+  // Sin esto el `scroll-behavior: smooth` recorría toda la sesión desde arriba.
+  el.style.scrollBehavior = 'auto';
+  el.scrollTop = top;
+  el.style.scrollBehavior = '';
+};
+
 export function ChatPanel({ wide = false }) {
   const { messages, streaming, engine } = useChatStore();
+  const activeKey = useSessionsStore((s) => s.activeKey);
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
+  const restoredKey = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = feedRef.current;
+    if (!el || restoredKey.current === activeKey) return;
+    restoredKey.current = activeKey;
+    const saved = scrollMemory.get(activeKey);
+    stickToBottom.current = !saved || saved.atBottom;
+    jumpTo(el, saved && !saved.atBottom ? saved.top : el.scrollHeight);
+  }, [activeKey, messages]);
 
   // Autoscroll solo si el usuario ya estaba abajo
   useEffect(() => {
     const el = feedRef.current;
-    if (el && stickToBottom.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages]);
+    if (el && stickToBottom.current && restoredKey.current === activeKey) jumpTo(el, el.scrollHeight);
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = () => {
     const el = feedRef.current;
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    scrollMemory.set(activeKey, { top: el.scrollTop, atBottom: stickToBottom.current });
   };
 
   return (

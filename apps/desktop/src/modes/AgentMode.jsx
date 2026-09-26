@@ -87,7 +87,10 @@ export function AgentMode() {
   const { workspaceRoot, currentModel, openModal } = useAppStore();
   const branch = useGitStore((s) => s.branch);
   const { conversationTitle, engine } = useChatStore();
-  const ccModel = useChatStore((s) => s.ccInfo?.model || s.ccModel);
+  const ccModel = useChatStore((s) => {
+    const id = s.ccInfo?.model || s.ccModel;
+    return (s.ccModels || []).find((m) => m.value !== 'default' && (m.resolvedModel === id || m.value === id))?.displayName || id;
+  });
   const model = engine === 'claude' ? `Claude Code${ccModel ? ` · ${ccModel}` : ''}` : currentModel;
   const meta = [baseName(workspaceRoot), branch, model].filter(Boolean).join(' · ');
 
