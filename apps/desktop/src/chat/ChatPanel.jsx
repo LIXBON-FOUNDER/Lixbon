@@ -8,7 +8,7 @@ import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
 import { QuestionCard } from './QuestionCard';
-import { LogoMark } from '../components/Logo';
+import { LogoMark, ClaudeMark } from '../components/Logo';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
     el resto se renderiza como mensajes normales. */
@@ -35,7 +35,7 @@ function renderMessages(messages, streaming) {
   return out;
 }
 export function ChatPanel({ wide = false }) {
-  const { messages, streaming } = useChatStore();
+  const { messages, streaming, engine } = useChatStore();
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
 
@@ -58,11 +58,12 @@ export function ChatPanel({ wide = false }) {
       <div className="chatpanel__feed" ref={feedRef} onScroll={onScroll}>
         {messages.length === 0 ? (
           <div className="chatpanel__empty">
-            <LogoMark size={28} />
-            <p>¿En qué trabajamos hoy?</p>
+            {engine === 'claude' ? <ClaudeMark size={28} /> : <LogoMark size={28} />}
+            <p>{engine === 'claude' ? 'Claude Code' : '¿En qué trabajamos hoy?'}</p>
             <p className="chatpanel__empty-hint">
-              El agente puede leer, buscar y editar tu carpeta de trabajo, y ejecutar
-              comandos con tu permiso. Menciona archivos con @ y usa / para comandos.
+              {engine === 'claude'
+                ? 'Usa tu instalación y tu cuenta de Claude Code sobre esta carpeta. Sus cambios, lecturas y comandos aparecen en los paneles de la derecha, y los permisos se piden aquí.'
+                : 'El agente puede leer, buscar y editar tu carpeta de trabajo, y ejecutar comandos con tu permiso. Menciona archivos con @ y usa / para comandos.'}
             </p>
           </div>
         ) : (

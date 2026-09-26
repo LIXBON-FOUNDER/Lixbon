@@ -12,6 +12,8 @@ import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
 import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
+import { Select } from '../components/Select';
+import { CLAUDE_MODELS } from '../lib/claudeCode';
 import { Switch } from '../components/Switch';
 import { ProgressRing } from '../components/Ring';
 import {
@@ -107,15 +109,22 @@ export function ChatInputBar() {
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const contextWindow = useAppStore((s) => s.contextWindow);
   const messages = useChatStore((s) => s.messages);
+  const engine = useChatStore((s) => s.engine);
+  const ccContext = useChatStore((s) => s.ccContext);
+  const ccModel = useChatStore((s) => s.ccModel);
+  const setCcModel = useChatStore((s) => s.setCcModel);
+  const isClaude = engine === 'claude';
   const agentActive = !!workspaceRoot;
   const mode = CHAT_MODES.find((m) => m.id === chatMode) || CHAT_MODES[0];
 
   // Estimación gruesa (≈4 caracteres por token): basta para avisar antes de
   // que el modelo empiece a recortar la conversación.
+  const ctxWindow = isClaude ? ccContext.window : contextWindow;
   const contextPct = useMemo(() => {
+    if (isClaude) return Math.min(100, Math.round((ccContext.used / ccContext.window) * 100));
     const chars = messages.reduce((n, m) => n + (m.content?.length || 0), 0) + text.length;
     return Math.min(100, Math.round((chars / 4 / contextWindow) * 100));
-  }, [messages, text, contextWindow]);
+  }, [messages, text, contextWindow, isClaude, ccContext]);
 
   // Otros paneles (Diseño, búsqueda…) pueden dejar texto preparado aquí.
   useEffect(() => {
@@ -368,7 +377,8 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={!agentActive ? 'Pregunta lo que quieras, / para comandos'
+        placeholder={isClaude ? (agentActive ? 'Pídele algo a Claude Code, @ para mencionar un archivo' : 'Abre una carpeta de trabajo para usar Claude Code')
+          : !agentActive ? 'Pregunta lo que quieras, / para comandos'
           : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
             : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
               : 'Pide algo, @ para mencionar un archivo, / para comandos'}
@@ -436,7 +446,9 @@ export function ChatInputBar() {
           )}
         </div>
 
-        <ModelPicker />
+        {isClaude
+          ? <Select up className="modelpicker modelpicker--claude" value={ccModel} onChange={setCcModel} options={CLAUDE_MODELS} title="Modelo de Claude Code" />
+          : <ModelPicker />}
 
         <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
           <IconClip size={15} />
@@ -451,7 +463,7 @@ export function ChatInputBar() {
 
         <span className="tipw chat-inputbar__ctx">
           <ProgressRing value={contextPct} size={20} />
-          <span className="tip mono">Contexto {contextPct}% · {contextWindow.toLocaleString('es')} tokens</span>
+          <span className="tip mono">Contexto {contextPct}% · {ctxWindow.toLocaleString('es')} tokens</span>
         </span>
 
         {streaming ? (

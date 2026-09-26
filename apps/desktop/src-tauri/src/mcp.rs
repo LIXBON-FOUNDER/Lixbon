@@ -20,7 +20,7 @@ struct McpProc {
 #[derive(Default)]
 pub struct McpServers(Mutex<HashMap<String, McpProc>>);
 
-fn kill_tree(child: &mut Child) {
+pub(crate) fn kill_tree(child: &mut Child) {
     // En Windows el servidor corre bajo `cmd /C` (npx, uvx… son .cmd): matar
     // solo cmd dejaría vivo el node/python hijo.
     #[cfg(windows)]

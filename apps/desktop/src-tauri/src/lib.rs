@@ -26,6 +26,7 @@ mod auth_loopback;
 mod preview_proxy;
 mod visual_server;
 mod team;
+mod claude_code;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1258,6 +1259,7 @@ pub fn run() {
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
         .manage(mcp::McpServers::default())
+        .manage(claude_code::ClaudeSessions::default())
         .manage(preview_proxy::PreviewProxy::default())
         .manage(visual_server::VisualServer::default())
         .manage(FsWatchState {
@@ -1276,6 +1278,7 @@ pub fn run() {
             if let tauri::WindowEvent::Destroyed = event {
                 if window.label() == "main" {
                     window.state::<mcp::McpServers>().stop_all();
+                    window.state::<claude_code::ClaudeSessions>().stop_all();
                     team::apagar(window.app_handle());
                 }
             }
@@ -1325,7 +1328,13 @@ pub fn run() {
             mcp::mcp_send,
             mcp::mcp_stop,
             mcp::mcp_user_config,
-            mcp::mcp_save_user_config
+            mcp::mcp_save_user_config,
+            claude_code::cc_version,
+            claude_code::cc_start,
+            claude_code::cc_send,
+            claude_code::cc_stop,
+            claude_code::cc_sessions,
+            claude_code::cc_session_read
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

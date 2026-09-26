@@ -152,8 +152,31 @@ function ChangesTab() {
   );
 }
 
+function ClaudeContext() {
+  const info = useChatStore((s) => s.ccInfo);
+  const ctx = useChatStore((s) => s.ccContext);
+  const cost = useChatStore((s) => s.ccCost);
+  const pct = Math.min(100, Math.round((ctx.used / ctx.window) * 100));
+  return (
+    <div className="ccctx">
+      <div className="ccctx__row"><span>Contexto</span><span className="mono">{ctx.used.toLocaleString('es')} / {ctx.window.toLocaleString('es')} · {pct}%</span></div>
+      <div className="ccctx__bar"><i style={{ width: `${pct}%` }} /></div>
+      {info && (
+        <>
+          <div className="ccctx__row"><span>Modelo</span><span className="mono">{info.model}</span></div>
+          <div className="ccctx__row"><span>Herramientas</span><span className="mono">{info.tools}</span></div>
+          {info.mcp.length > 0 && <div className="ccctx__row"><span>MCP</span><span className="mono ccctx__mcp">{info.mcp.map((m) => `${m.name}${m.status === 'connected' ? '' : ` (${m.status})`}`).join(', ')}</span></div>}
+          {cost > 0 && <div className="ccctx__row"><span>Coste de la sesión</span><span className="mono">{cost.toFixed(2)} US$</span></div>}
+          <div className="ccctx__row"><span>Versión</span><span className="mono">{info.version}</span></div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ContextTab() {
   const messages = useChatStore((s) => s.messages);
+  const isClaude = useChatStore((s) => s.engine === 'claude');
   const items = useMemo(() => {
     const seen = new Map();
     for (const m of messages) {
@@ -167,9 +190,17 @@ function ContextTab() {
     return [...seen.values()];
   }, [messages]);
 
-  if (!items.length) return <div className="changes__empty">Aquí verás los archivos que el agente lee y lo que busca para responder.</div>;
+  if (!items.length) {
+    return (
+      <>
+        {isClaude && <ClaudeContext />}
+        <div className="changes__empty">Aquí verás los archivos que el agente lee y lo que busca para responder.</div>
+      </>
+    );
+  }
   return (
     <div className="ctxlist scroll">
+      {isClaude && <ClaudeContext />}
       {items.map((it) => (
         <div key={`${it.tool}:${it.label}`} className={`ctxrow ${it.ok ? '' : 'is-failed'}`}>
           <span className="ctxrow__kind">{CONTEXT_TOOLS[it.tool]}</span>

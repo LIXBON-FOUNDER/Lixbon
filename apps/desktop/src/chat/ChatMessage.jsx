@@ -3,6 +3,7 @@
 import { ChatMarkdown } from './ChatMarkdown';
 import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode } from '../components/Icons';
+import { ClaudeMark } from '../components/Logo';
 
 /** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
     cursor parpadeante, como la última línea del mockup. */
@@ -66,8 +67,10 @@ export function ChatMessage({ message, streaming }) {
   return (
     <div className="msg msg--assistant">
       <div className="msg__agent">
-        <img src="/favicon.svg" alt="" className="msg__agent-logo" draggable={false} />
-        <span className="msg__agent-name">Agente</span>
+        {message.engine === 'claude'
+          ? <ClaudeMark size={16} className="msg__agent-logo" />
+          : <img src="/favicon.svg" alt="" className="msg__agent-logo" draggable={false} />}
+        <span className="msg__agent-name">{message.engine === 'claude' ? 'Claude Code' : 'Agente'}</span>
       </div>
       {message.thinking && (
         <details className="msg-think">

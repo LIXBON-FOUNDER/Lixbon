@@ -7,7 +7,7 @@ import { registerCommands } from '../lib/commands';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useIndexStore } from '../store/indexStore';
-import { useChatStore, CHAT_MODES } from '../store/chatStore';
+import { useChatStore, CHAT_MODES, newSession } from '../store/chatStore';
 import { pickDirectory, openExternal, saveTextAs, revealInDir, readDir } from '../lib/tauri';
 import { toast } from '../store/toastStore';
 import { showConfirm } from '../lib/confirm';
@@ -176,6 +176,11 @@ export function registerBuiltinCommands() {
       id: 'chat.newConversation', title: 'Nueva conversación',
       category: 'Chat', keywords: 'nuevo chat conversacion agente',
       run: () => useChatStore.getState().newConversation(),
+    },
+    {
+      id: 'chat.newClaude', title: 'Nueva sesión de Claude Code',
+      category: 'Chat', keywords: 'claude code anthropic agente nuevo',
+      run: () => { useWorkbenchStore.getState().setMode('agent'); newSession('claude'); },
     },
     {
       id: 'workbench.toggleExplorer', title: 'Mostrar u ocultar la barra lateral',

@@ -41,6 +41,7 @@ import { useMcpStore, mcpToolSchemas, mcpPromptSection } from './mcpStore';
 import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib/agentContext';
 import { describeImages } from '../lib/vision';
 import { roleWarning } from '../lib/modelRoles';
+import { makeClaudeStore } from './claudeSession';
 
 /** Categoría de permisos de una herramienta (Ajustes → Agente y permisos). */
 export function toolCategory(tool) {
@@ -59,7 +60,7 @@ export const CHAT_MODES = [
   { id: 'ask', label: 'Preguntar', desc: 'Responde sobre el código sin modificarlo.' },
 ];
 const MODE_KEY = 'lixbon_chat_mode';
-function initialMode() {
+export function initialMode() {
   const saved = localStorage.getItem(MODE_KEY);
   if (CHAT_MODES.some((m) => m.id === saved)) return saved;
   return localStorage.getItem('lixbon_agent_mode') === 'false' ? 'ask' : 'agent';
@@ -104,7 +105,7 @@ function normalizeQuestions(args = {}) {
 }
 
 const POLICY_KEY = 'lixbon_tool_policy';
-function initialPolicy() {
+export function initialPolicy() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(POLICY_KEY) || '{}') || {}; } catch { /* corrupto: por defecto */ }
   const auto = (localStorage.getItem('lixbon_agent_auto') ?? 'true') === 'true';
@@ -158,21 +159,61 @@ const allStores = () => Object.values(useSessionsStore.getState().sessions);
 /** Ajustes del agente: iguales en todas las sesiones abiertas. */
 const share = (patch) => { for (const st of allStores()) st.setState(patch); };
 
+/** Los ajustes que valen para todas las sesiones (Lixbon y Claude Code). */
+export const agentSettings = {
+  setToolPolicy: (current, cat, value) => {
+    const toolPolicy = { ...current, [cat]: value };
+    localStorage.setItem(POLICY_KEY, JSON.stringify(toolPolicy));
+    share({ toolPolicy });
+    if (cat === 'edit') {
+      localStorage.setItem('lixbon_agent_auto', value === 'allow' ? 'true' : 'false');
+      share({ autoApprove: value === 'allow' });
+    }
+    if (cat === 'command') {
+      localStorage.setItem('lixbon_agent_autorun', value === 'allow' ? 'true' : 'false');
+      share({ autoRunCommands: value === 'allow' });
+    }
+  },
+  setChatMode: (chatMode) => {
+    if (!CHAT_MODES.some((m) => m.id === chatMode)) return;
+    localStorage.setItem(MODE_KEY, chatMode);
+    share({ chatMode });
+  },
+  setCommandAllowlist: (list) => {
+    const arr = Array.isArray(list) ? list.map((s) => String(s).trim()).filter(Boolean) : [];
+    localStorage.setItem('lixbon_agent_cmd_allowlist', JSON.stringify(arr));
+    share({ commandAllowlist: arr });
+  },
+};
+
 /** Abre una sesión nueva y la activa. Las sesiones sin nada (ni mensajes ni
     stream) que queden detrás se descartan para no acumular vacías. */
-function spawnSession() {
+function spawnSession(engine = 'lixbon') {
   for (const [key, st] of Object.entries(useSessionsStore.getState().sessions)) {
     const s = st.getState();
     if (!s.streaming && !s.pendingApproval && s.messages.length === 0) useSessionsStore.getState().remove(key);
   }
-  const store = makeChatStore();
+  const store = engine === 'claude' ? makeClaudeStore() : makeChatStore();
   useSessionsStore.getState().add(store);
   return store;
+}
+export const spawnSessionOf = spawnSession;
+
+/** Conversación nueva con el agente elegido: reutiliza la activa si ya es de
+    ese agente y está vacía. */
+export function newSession(engine = 'lixbon') {
+  const cur = activeStore()?.getState();
+  if (cur && (cur.engine || 'lixbon') === engine && !cur.streaming && !cur.pendingApproval && !cur.pendingQuestion) {
+    cur.newConversation();
+    return;
+  }
+  spawnSession(engine);
 }
 
 function makeChatStore() {
   let abortController = null;
   return createStore((set, get) => ({
+    engine: 'lixbon',
     messages: [], // { role: 'user'|'assistant'|'error'|'tool', content, sources?, tool?, args?, ok?, change? }
     conversationId: null,
     conversationTitle: '', // lo pone el auto-título; se ve en la cabecera del panel
@@ -199,25 +240,9 @@ function makeChatStore() {
     pendingQuestion: null, // { questions, resolve } de ask_user
     toolPolicy: initialPolicy(), // categoría → 'allow' | 'ask' | 'never'
 
-    setToolPolicy: (cat, value) => {
-      const toolPolicy = { ...get().toolPolicy, [cat]: value };
-      localStorage.setItem(POLICY_KEY, JSON.stringify(toolPolicy));
-      share({ toolPolicy });
-      if (cat === 'edit') {
-        localStorage.setItem('lixbon_agent_auto', value === 'allow' ? 'true' : 'false');
-        share({ autoApprove: value === 'allow' });
-      }
-      if (cat === 'command') {
-        localStorage.setItem('lixbon_agent_autorun', value === 'allow' ? 'true' : 'false');
-        share({ autoRunCommands: value === 'allow' });
-      }
-    },
+    setToolPolicy: (cat, value) => agentSettings.setToolPolicy(get().toolPolicy, cat, value),
 
-    setChatMode: (chatMode) => {
-      if (!CHAT_MODES.some((m) => m.id === chatMode)) return;
-      localStorage.setItem(MODE_KEY, chatMode);
-      share({ chatMode });
-    },
+    setChatMode: (chatMode) => agentSettings.setChatMode(chatMode),
 
     cycleChatMode: () => {
       const i = CHAT_MODES.findIndex((m) => m.id === get().chatMode);
@@ -240,11 +265,7 @@ function makeChatStore() {
 
     setAutoRunCommands: (autoRunCommands) => get().setToolPolicy('command', autoRunCommands ? 'allow' : 'ask'),
 
-    setCommandAllowlist: (list) => {
-      const arr = Array.isArray(list) ? list.map((s) => String(s).trim()).filter(Boolean) : [];
-      localStorage.setItem('lixbon_agent_cmd_allowlist', JSON.stringify(arr));
-      share({ commandAllowlist: arr });
-    },
+    setCommandAllowlist: (list) => agentSettings.setCommandAllowlist(list),
 
     resolveApproval: (decision) => {
       const pending = get().pendingApproval;
@@ -944,7 +965,7 @@ export function useOpenSessions() {
     const s = sessions[key].getState();
     return {
       key, active: key === activeKey, streaming: s.streaming, waiting: !!s.pendingApproval || !!s.pendingQuestion,
-      title: s.conversationTitle || (s.messages.find((m) => m.role === 'user')?.content || '').slice(0, 60), conversationId: s.conversationId, hasMessages: s.messages.length > 0, seen: !!seen[key],
+      title: s.conversationTitle || (s.messages.find((m) => m.role === 'user')?.content || '').slice(0, 60), conversationId: s.conversationId, hasMessages: s.messages.length > 0, seen: !!seen[key], engine: s.engine,
     };
   });
 }

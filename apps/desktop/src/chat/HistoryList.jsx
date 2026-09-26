@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { showConfirm } from '../lib/confirm';
-import { useChatStore, useOpenSessions, useSessionsStore } from '../store/chatStore';
+import { useChatStore, useOpenSessions, useSessionsStore, spawnSessionOf } from '../store/chatStore';
+import { useAppStore } from '../store/appStore';
+import { claudeSessions } from '../lib/claudeCode';
+import { ClaudeMark } from '../components/Logo';
 import { SpinRing } from '../components/Ring';
 import { IconPencil, IconTrash, IconSearch } from '../components/Icons';
 
@@ -30,6 +33,8 @@ function groupOf(iso) {
 export function HistoryList() {
   const { loadConversation, conversationId, conversationTitle, streaming } = useChatStore();
   const [items, setItems] = useState(null);
+  const [ccItems, setCcItems] = useState([]);
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
@@ -53,6 +58,13 @@ export function HistoryList() {
     return () => clearTimeout(t);
   }, [query, conversationId, conversationTitle, streaming, runningKey]);
 
+  useEffect(() => {
+    if (!workspaceRoot) { setCcItems([]); return; }
+    claudeSessions(workspaceRoot)
+      .then((list) => setCcItems(list.map((s) => ({ id: s.id, title: s.title, updated_at: new Date(s.updated_ms).toISOString(), engine: 'claude' }))))
+      .catch(() => setCcItems([]));
+  }, [workspaceRoot, conversationId, streaming, runningKey]);
+
   const groups = useMemo(() => {
     const out = [];
     const liveIds = new Set(running.map((o) => o.conversationId).filter(Boolean));
@@ -62,20 +74,28 @@ export function HistoryList() {
         items: running.map((o) => ({ id: o.conversationId || o.key, key: o.key, title: o.title, live: true, streaming: o.streaming, waiting: o.waiting })),
       });
     }
-    for (const c of items || []) {
+    const q = query.trim().toLowerCase();
+    const all = [...(items || []), ...ccItems.filter((c) => !q || c.title.toLowerCase().includes(q))]
+      .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    for (const c of all) {
       if (liveIds.has(c.id)) continue;
       const label = groupOf(c.updated_at);
       const g = out.find((x) => x.label === label) || (out.push({ label, items: [] }), out[out.length - 1]);
       g.items.push(c);
     }
     return out;
-  }, [items, runningKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, ccItems, runningKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openItem = async (c) => {
     if (c.live) { useSessionsStore.getState().activate(c.key); return; }
     setError('');
     const id = c.id;
-    try { await loadConversation(id); } catch (e) { setError(`No se pudo abrir: ${e.message}`); }
+    try {
+      const cur = useChatStore.getState();
+      const same = (cur.engine || 'lixbon') === (c.engine || 'lixbon');
+      if (same) await loadConversation(id);
+      else await spawnSessionOf(c.engine || 'lixbon').getState().loadConversation(id);
+    } catch (e) { setError(`No se pudo abrir: ${e.message || e}`); }
   };
 
   const rename = async (id) => {
@@ -141,11 +161,12 @@ export function HistoryList() {
                     {c.streaming && !c.waiting && <SpinRing size={11} />}
                     {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
                     {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
+                    {(c.engine === 'claude' || open.find((o) => o.key === c.key)?.engine === 'claude') && <ClaudeMark size={11} />}
                     <span className="hist__title">{c.title || 'Nueva conversación'}</span>
                     <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
                   </button>
                 )}
-                {!c.live && renamingId !== c.id && (
+                {!c.live && c.engine !== 'claude' && renamingId !== c.id && (
                   <span className="hist__acts">
                     <button className="ic" title="Renombrar" onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}><IconPencil size={12} /></button>
                     <button className="ic" title="Eliminar" onClick={() => remove(c.id, c.title)}><IconTrash size={12} /></button>
