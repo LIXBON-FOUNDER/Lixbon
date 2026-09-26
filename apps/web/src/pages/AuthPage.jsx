@@ -1,6 +1,6 @@
 // AuthPage.jsx — acceso y registro sobre el fondo del clúster.
 // Incluye el modo "olvidé mi contraseña" (request-password-reset).
-// Botones OAuth Google/Apple: SOLO visuales por ahora (sin funcionalidad).
+// Botones OAuth Google/GitHub: SOLO visuales por ahora (sin funcionalidad).
 import { useSeo } from '../lib/seo';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -23,11 +23,10 @@ function GoogleLogo() {
   );
 }
 
-function AppleLogo() {
+function GitHubLogo() {
   return (
     <svg viewBox="0 0 24 24" width="17" height="17" fill="#141414" aria-hidden="true">
-      <path d="M16.7 12.8c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9s-1.8-.9-3-.8c-1.5 0-2.9.9-3.7 2.3-1.6 2.7-.4 6.7 1.1 8.9.8 1.1 1.7 2.3 2.9 2.2 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1.1 2.8-2.2c.9-1.2 1.2-2.4 1.2-2.5 0 0-2.4-.9-2.4-3.5Z" />
-      <path d="M14.6 5.9c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-.9 2.9 1 .1 2-.5 2.7-1.3Z" />
+      <path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.7.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5Z" />
     </svg>
   );
 }
@@ -191,7 +190,7 @@ export default function AuthPage() {
                   <GoogleLogo /> {t('google')}
                 </button>
                 <button type="button" className="auth__social-btn">
-                  <AppleLogo /> {t('apple')}
+                  <GitHubLogo /> {t('github')}
                 </button>
               </div>
             </>
