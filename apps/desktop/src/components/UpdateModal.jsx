@@ -10,7 +10,7 @@ function formatDate(raw) {
   return d.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-export function UpdateModal({ updateInfo, serverUrl, onInstall, onDismiss, isDownloading, downloadProgress }) {
+export function UpdateModal({ updateInfo, serverUrl, onInstall, onDismiss, isDownloading, downloadProgress, error }) {
   if (!updateInfo) return null;
 
   const version = updateInfo.latest_version || updateInfo.version || '';
@@ -62,6 +62,7 @@ export function UpdateModal({ updateInfo, serverUrl, onInstall, onDismiss, isDow
         </div>
       ) : (
         <>
+          {error && <p className="update-modal__error" role="alert">{error}</p>}
           <p className="update-modal__question">¿Deseas descargar e instalar la actualización ahora?</p>
           <div className="update-modal__actions">
             <button type="button" className="pill-btn pill-btn--outline" onClick={onDismiss}>

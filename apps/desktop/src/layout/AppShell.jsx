@@ -37,7 +37,7 @@ export function AppShell() {
   } = useAppStore();
   const mode = useWorkbenchStore((s) => s.mode);
   const page = useWorkbenchStore((s) => s.page);
-  const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate } = useVersion();
+  const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate, error: updateError } = useVersion();
   const [skipWelcome, setSkipWelcome] = useState(false);
 
   useEffect(() => {
@@ -101,6 +101,7 @@ export function AppShell() {
             onDismiss={dismissUpdate}
             isDownloading={isDownloading}
             downloadProgress={downloadProgress}
+            error={updateError}
           />
         </div>
       )}
