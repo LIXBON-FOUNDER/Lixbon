@@ -31,6 +31,8 @@ export default {
     or: 'O',
     google: 'Google',
     github: 'GitHub',
+    oauthCancelled: 'Cancelaste el inicio de sesión.',
+    oauthWorking: 'Entrando…',
 
     resetSeoTitle: 'Restablecer contraseña',
     invalidLinkTitle: 'Enlace inválido',
@@ -74,6 +76,8 @@ export default {
     or: 'OR',
     google: 'Google',
     github: 'GitHub',
+    oauthCancelled: 'You cancelled the sign-in.',
+    oauthWorking: 'Signing in…',
 
     resetSeoTitle: 'Reset password',
     invalidLinkTitle: 'Invalid link',

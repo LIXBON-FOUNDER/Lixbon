@@ -10,13 +10,30 @@ import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 import { CodeBlock } from '../components/CodeBlock';
-import { IconDownload, IconTerminal, IconCheck, IconPhone } from '../components/Icons';
+import { IconDownload, IconTerminal, IconCheck, IconPhone, IconChevron } from '../components/Icons';
+
+const MAX_VERSIONES = 8;
+
+// Las versiones del escritorio, de la más nueva a la más vieja, sin repetir.
+// La primera estable es la recomendada; si aún no hay estable, la primera beta.
+function versionesEscritorio(lista) {
+  const vistas = new Set();
+  return lista
+    .filter((v) => (v.product || 'desktop') === 'desktop')
+    .filter((v) => {
+      const k = `${v.version}@${v.channel}`;
+      if (vistas.has(k)) return false;
+      vistas.add(k);
+      return true;
+    })
+    .slice(0, MAX_VERSIONES);
+}
 
 export default function DownloadsPage() {
   const t = useT('downloads');
   useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/apps' });
-  const [desktop, setDesktop] = useState(null);
-  const [desktopBeta, setDesktopBeta] = useState(null);
+  const [versiones, setVersiones] = useState(null);
+  const [elegida, setElegida] = useState('');
   const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');
 
@@ -24,12 +41,14 @@ export default function DownloadsPage() {
   const base = useMemo(() => (typeof window === 'undefined' ? 'https://lixbon.com' : window.location.origin), []);
 
   useEffect(() => {
-    api.get('/api/updates/latest/stable')
-      .then((res) => setDesktop(res.data))
-      .catch(() => setDesktop({ available: false }));
-    api.get('/api/updates/latest/beta')
-      .then((res) => setDesktopBeta(res.data))
-      .catch(() => setDesktopBeta(null));
+    api.get('/api/versions')
+      .then((res) => {
+        const lista = versionesEscritorio(Array.isArray(res.data) ? res.data : []);
+        setVersiones(lista);
+        const recomendada = lista.find((v) => v.channel === 'stable') || lista[0];
+        if (recomendada) setElegida(`${recomendada.version}@${recomendada.channel}`);
+      })
+      .catch(() => setVersiones([]));
     api.get('/api/updates/latest/stable?product=android')
       .then((res) => setAndroid(res.data))
       .catch(() => setAndroid({ available: false }));
@@ -37,6 +56,8 @@ export default function DownloadsPage() {
       setOs('unix');
     }
   }, []);
+
+  const sel = versiones?.find((v) => `${v.version}@${v.channel}` === elegida);
 
   const winCmd = `irm ${base}/install.ps1 | iex`;
   const unixCmd = `curl -fsSL ${base}/install.sh | bash`;
@@ -65,27 +86,41 @@ export default function DownloadsPage() {
                 <li><IconCheck size={15} /> {t('desktopFeature3')}</li>
               </ul>
               <div className="dl-card__bottom">
-                {desktop?.available ? (
+                {versiones?.length ? (
                   <>
-                    <a href={desktop.download_url} className="pill-btn pill-btn--primary dl-card__cta">
-                      <IconDownload size={16} /> {t('download')} v{desktop.version}
-                    </a>
-                    <span className="dl-card__meta">
-                      {desktop.title} · {desktop.release_date} · Windows 10/11 (64 bits)
-                    </span>
+                    <div className="dl-picker">
+                      <label className="dl-picker__select">
+                        <select aria-label={t('version')} value={elegida} onChange={(e) => setElegida(e.target.value)}>
+                          {versiones.map((v, i) => {
+                            const recomendada = v.channel === 'stable' && versiones.findIndex((x) => x.channel === 'stable') === i;
+                            return (
+                              <option key={`${v.version}@${v.channel}`} value={`${v.version}@${v.channel}`}>
+                                v{v.version} · {v.channel === 'stable' ? t('stable') : t('beta')}{recomendada ? ` · ${t('recommended')}` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <IconChevron size={14} />
+                      </label>
+                      {sel && (
+                        <a href={`/api/updates/download/${encodeURIComponent(sel.version)}/${sel.channel}`} className="pill-btn pill-btn--primary dl-card__cta">
+                          <IconDownload size={16} /> {t('download')}
+                        </a>
+                      )}
+                    </div>
+                    {sel && (
+                      <span className="dl-card__meta">
+                        {sel.release_date} · Windows 10/11 (64 bits)
+                        {sel.channel !== 'stable' && ` · ${t('betaNote')}`}
+                      </span>
+                    )}
                   </>
-                ) : desktopBeta?.available ? null : (
+                ) : versiones === null ? (
+                  <span className="dl-card__meta">{t('loading')}</span>
+                ) : (
                   <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
                     {t('comingSoon')}
                   </span>
-                )}
-                {desktopBeta?.available && desktopBeta.version !== desktop?.version && (
-                  <div className="dl-card__beta">
-                    <a href={desktopBeta.download_url} className="pill-btn pill-btn--outline dl-card__cta">
-                      <IconDownload size={16} /> {t('tryBeta')} v{desktopBeta.version}
-                    </a>
-                    <span className="dl-card__meta">{t('betaNote')} · {desktopBeta.release_date}</span>
-                  </div>
                 )}
               </div>
             </section>
