@@ -5,6 +5,7 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode, IconCheck } from '../components/Icons';
 import { ClaudeMark } from '../components/Logo';
+import { IdeCard } from './ClaudeCards';
 
 /** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
     cursor parpadeante, como la última línea del mockup. */
@@ -185,28 +186,131 @@ function ContextCard({ context }) {
 const looksMarkdown = (t) => /^(#{1,4} |\|.*\|)/m.test(t);
 const plain = (t) => t.replace(/`([^`\n]+)`/g, '$1');
 
-function CommandCard({ message }) {
-  const send = useChatStore((s) => s.send);
-  const { name, args, output, choices } = message;
+function McpCard({ servers }) {
+  if (!servers.length) return <div className="cccmd__out cccmd__out--empty">No hay servidores MCP configurados.</div>;
+  const ok = servers.filter((s) => s.tone === 'ok').length;
   return (
-    <div className="msg cccmd">
-      {message.usage ? <UsageCard usage={message.usage} />
-        : message.context ? <ContextCard context={message.context} />
-          : output ? (
-            <div className="cccmd__out">
-              {looksMarkdown(output) ? <ChatMarkdown>{output}</ChatMarkdown> : <pre>{plain(output)}</pre>}
-            </div>
-          ) : <div className="cccmd__out cccmd__out--empty">Hecho, sin salida.</div>}
+    <div className="cccard">
+      <div className="ccusage__row">
+        <span className="ccusage__label">Servidores MCP</span>
+        <span className="ccusage__pct">{ok} de {servers.length} conectados</span>
+      </div>
+      <ul className="cccard__list">
+        {servers.map((s) => (
+          <li key={s.name}>
+            <i className={`ccdot ccdot--${s.tone}`} />
+            <span className="cccard__name">{s.name}</span>
+            <span className="cccard__meta">{[s.kind, s.scope].filter(Boolean).join(' · ')}</span>
+            <span className={`cccard__status is-${s.tone}`}>{s.status}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function AgentsCard({ agents }) {
+  return (
+    <div className="cccard">
+      <div className="ccusage__row">
+        <span className="ccusage__label">Sesiones de Claude abiertas</span>
+        <span className="ccusage__pct">{agents.others.length + 1}</span>
+      </div>
+      <ul className="cccard__list">
+        <li>
+          <i className="ccdot ccdot--ok" />
+          <span className="cccard__name">{agents.self}</span>
+          <span className="cccard__meta">esta sesión</span>
+        </li>
+        {agents.others.map((a) => (
+          <li key={a.name}>
+            <i className={`ccdot ccdot--${a.tone}`} />
+            <span className="cccard__name">{a.name}</span>
+            <span className="cccard__meta" title={a.cwd}>{a.cwd.split(/[\\/]/).pop()} · {a.started}</span>
+            <span className={`cccard__status is-${a.tone}`}>{a.status}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function TableCard({ table }) {
+  return (
+    <div className="cccard cccard--wide">
+      {table.title && <div className="ccusage__label">{table.title}</div>}
+      <div className="cccard__scroll">
+        <table className="cccard__table">
+          <thead><tr>{table.header.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>
+            {table.rows.map((r, i) => (
+              <tr key={i} className={/^never$/i.test(r[r.length - 1]) ? 'is-idle' : ''}>
+                {r.map((c, k) => <td key={k}>{c}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {table.notes && (
+        <details className="ccusage__more">
+          <summary>Cómo leer la tabla</summary>
+          <pre className="cccard__notes">{table.notes}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function SettingCard({ setting }) {
+  return (
+    <div className="cccard">
+      <div className="ccusage__row">
+        <span className="ccusage__label">{setting.key}</span>
+        <span className="ccusage__pct cccard__value">{setting.value}</span>
+      </div>
+      {setting.body && <p className="cccard__body">{setting.body}</p>}
+    </div>
+  );
+}
+
+/** Salida de un "/" de Claude Code con su tarjeta; la comparten el chat y la
+    respuesta al margen de la caja. */
+export function CommandOutput({ card, onChoose }) {
+  const { name, output, choices } = card;
+  const ide = IdeCard({ card, onChoose });
+  return (
+    <>
+      {ide || (card.usage ? <UsageCard usage={card.usage} />
+        : card.context ? <ContextCard context={card.context} />
+          : card.mcp ? <McpCard servers={card.mcp} />
+            : card.agents ? <AgentsCard agents={card.agents} />
+              : card.table ? <TableCard table={card.table} />
+                : card.setting ? <SettingCard setting={card.setting} />
+                  : output ? (
+                    <div className="cccmd__out">
+                      {looksMarkdown(output) ? <ChatMarkdown>{output}</ChatMarkdown> : <pre>{plain(output)}</pre>}
+                    </div>
+                  ) : <div className="cccmd__out cccmd__out--empty">Hecho, sin salida.</div>)}
       {choices?.length > 0 && (
         <div className="cccmd__choices">
           {choices.map((c) => (
-            <button key={c.value} className={`cccmd__choice${c.current ? ' is-current' : ''}`} title={c.desc || `/${name} ${c.value}`} onClick={() => send(`/${name} ${c.value}`)}>
+            <button key={c.value} className={`cccmd__choice${c.current ? ' is-current' : ''}`} title={c.desc || `/${name} ${c.value}`} onClick={() => onChoose(`/${name} ${c.value}`)}>
               {c.value}{c.current && <IconCheck size={11} />}
             </button>
           ))}
         </div>
       )}
-      <div className="cccmd__foot">/{name}{args ? ` ${args}` : ''} · local, sin gastar tokens</div>
+    </>
+  );
+}
+
+function CommandCard({ message }) {
+  const send = useChatStore((s) => s.send);
+  const { name, args } = message;
+  return (
+    <div className="msg cccmd">
+      <CommandOutput card={message} onChoose={send} />
+      <div className="cccmd__foot">/{name}{args ? ` ${args}` : ''} · {message.ide ? 'resuelto por Lixbon' : 'local'}, sin gastar tokens</div>
     </div>
   );
 }

@@ -93,20 +93,6 @@ export function AppShell() {
 
   return (
     <div className="shell">
-      {updateInfo && !dismissed && (
-        <div className="update-modal__anchor">
-          <UpdateModal
-            updateInfo={updateInfo}
-            serverUrl={serverUrl}
-            onInstall={installUpdate}
-            onDismiss={dismissUpdate}
-            isDownloading={isDownloading}
-            downloadProgress={downloadProgress}
-            error={updateError}
-          />
-        </div>
-      )}
-
       <div className="shell__body">
         {showWelcome ? (
           <Welcome onSkip={() => setSkipWelcome(true)} />
@@ -127,7 +113,19 @@ export function AppShell() {
       {quickOpen && <QuickOpen />}
       {commandPalette && <CommandPalette />}
       <ConfirmDialog />
-      <Toasts />
+      <Toasts>
+        {updateInfo && !dismissed && (
+          <UpdateModal
+            updateInfo={updateInfo}
+            serverUrl={serverUrl}
+            onInstall={installUpdate}
+            onDismiss={dismissUpdate}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+            error={updateError}
+          />
+        )}
+      </Toasts>
 
       {modalView === 'remote' && (
         <Modal

@@ -14,6 +14,7 @@ import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
+const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
 const ago = (ms) => {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
   if (s < 60) return 'ahora';
@@ -39,25 +40,100 @@ function pendingQuestions(messages = []) {
   return messages.filter((m) => m.kind === 'question' && !answered.has(m.id));
 }
 
-function StatusDot({ status }) {
-  return <span className={`orch__dot orch__dot--${status}`} title={STATUS_LABELS[status] || status} />;
+const duration = (ms) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+};
+
+// Vuelve a pintar cada pocos segundos lo que muestra tiempo transcurrido.
+function useNow(active, ms = 5000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    const t = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(t);
+  }, [active, ms]);
+  return now;
 }
 
-function TaskRow({ task, selected, onSelect, asking }) {
-  const phase = task.phases?.[task.phases.length - 1];
+const elapsed = (task, now) => duration((isFinal(task.status) ? task.updated : now) - task.created);
+
+export function StatusIcon({ status, size = 14 }) {
+  const busy = status === 'running' || status === 'starting';
   return (
-    <button className={`orch__task ${selected ? 'is-active' : ''}`} style={{ paddingLeft: 12 + task.depth * 16 }} onClick={() => onSelect(task.id)}>
-      <StatusDot status={task.status} />
+    <span className={`orchst orchst--${status}`} style={{ width: size, height: size }} title={STATUS_LABELS[status] || status}>
+      <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden>
+        {busy && (
+          <>
+            <circle className="orchst__track" cx="8" cy="8" r="6.2" />
+            <circle className="orchst__arc" cx="8" cy="8" r="6.2" />
+            {status === 'running' && <circle className="orchst__core" cx="8" cy="8" r="2.3" />}
+          </>
+        )}
+        {status === 'waiting' && (
+          <>
+            <circle className="orchst__ping" cx="8" cy="8" r="3" />
+            <circle className="orchst__core" cx="8" cy="8" r="3" />
+          </>
+        )}
+        {status === 'done' && (
+          <>
+            <circle className="orchst__fill" cx="8" cy="8" r="7" />
+            <path className="orchst__check" d="M4.9 8.2l2.1 2.1 4.2-4.5" />
+          </>
+        )}
+        {(status === 'failed' || status === 'exited') && (
+          <>
+            <circle className="orchst__fill" cx="8" cy="8" r="7" />
+            <path className="orchst__mark" d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" />
+          </>
+        )}
+        {status === 'stopped' && (
+          <>
+            <circle className="orchst__track" cx="8" cy="8" r="6.2" />
+            <rect className="orchst__stop" x="5.6" y="5.6" width="4.8" height="4.8" rx="1" />
+          </>
+        )}
+      </svg>
+    </span>
+  );
+}
+
+function TaskRow({ task, selected, onSelect, asking, now }) {
+  const phase = task.phases?.[task.phases.length - 1];
+  const final = isFinal(task.status);
+  return (
+    <button className={`orch__task orch__task--${task.status} ${selected ? 'is-active' : ''}`} style={{ paddingLeft: 12 + task.depth * 16 }} onClick={() => onSelect(task.id)}>
+      <StatusIcon status={task.status} />
       <span className="orch__task-main">
         <span className="orch__task-title">{task.title || task.id}</span>
         <span className="orch__task-meta">
-          <span className="mono">{task.id}</span> · {agentLabel(task.agent)}
-          {phase ? ` · ${phase.name}${phase.done ? ' ✓' : '…'}` : ''}
+          {agentLabel(task.agent)}{task.model ? ` · ${task.model}` : ''}
+          {phase && !final ? <> · <span className="orch__task-phase">{phase.name}</span></> : ''}
         </span>
       </span>
       {asking && <span className="orch__badge orch__badge--ask" title="Tiene una pregunta sin responder">?</span>}
-      {task.merged && <span className="orch__badge" title="Fusionada en su padre">✓</span>}
+      {task.merged && <span className="orch__badge" title="Fusionada en su padre">fusionada</span>}
+      <span className="orch__task-time mono">{elapsed(task, now)}</span>
     </button>
+  );
+}
+
+function RunProgress({ tasks }) {
+  const kids = tasks.filter((t) => t.parent);
+  if (!kids.length) return null;
+  const done = kids.filter((t) => t.status === 'done').length;
+  const bad = kids.filter((t) => t.status === 'failed' || t.status === 'exited').length;
+  return (
+    <div className="orch__progress" title={`${done} de ${kids.length} tareas terminadas${bad ? `, ${bad} con problemas` : ''}`}>
+      <div className="orch__progress-bar">
+        <span className="is-done" style={{ width: `${(done / kids.length) * 100}%` }} />
+        <span className="is-bad" style={{ width: `${(bad / kids.length) * 100}%` }} />
+      </div>
+      <span className="orch__progress-text mono">{done}/{kids.length}</span>
+    </div>
   );
 }
 
@@ -122,13 +198,17 @@ function Activity({ task, messages, tasks }) {
         <span className="ssec__label">Fases</span>
         {task.phases?.length ? (
           <ol className="orch__phases">
-            {task.phases.map((p, i) => (
-              <li key={i} className={p.done ? 'is-done' : ''}>
-                <span className="orch__phase-name">{p.name}</span>
-                <span className="orch__phase-state">{p.done ? 'terminada' : 'empezada'} · {ago(p.at)}</span>
-                {p.note && <span className="orch__phase-note">{p.note}</span>}
-              </li>
-            ))}
+            {task.phases.map((p, i) => {
+              const state = p.done ? 'done' : isFinal(task.status) ? 'stopped' : 'running';
+              return (
+                <li key={i} className={`is-${state}`}>
+                  <StatusIcon status={state} size={13} />
+                  <span className="orch__phase-name">{p.name}</span>
+                  <span className="orch__phase-state">{p.done ? 'terminada' : state === 'running' ? 'en curso' : 'sin cerrar'} · {ago(p.at)}</span>
+                  {p.note && <span className="orch__phase-note">{p.note}</span>}
+                </li>
+              );
+            })}
           </ol>
         ) : <span className="orch__hint">Aún no ha informado de ninguna fase.</span>}
       </section>
@@ -139,7 +219,7 @@ function Activity({ task, messages, tasks }) {
           <ul className="orch__msgs">
             {mine.slice().reverse().map((m) => (
               <li key={m.id} className={`orch__msg orch__msg--${m.kind}`}>
-                <span className="orch__msg-head">{m.kind} · {name(m.from)} → {name(m.to)} · {ago(m.at)}</span>
+                <span className="orch__msg-head"><span className="orch__msg-kind">{KIND_LABELS[m.kind] || m.kind}</span>{name(m.from)} → {name(m.to)} · {ago(m.at)}</span>
                 <span>{m.body}</span>
               </li>
             ))}
@@ -180,17 +260,19 @@ function TaskView({ task, snap }) {
   const live = snap.live.includes(task.id);
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
+  const now = useNow(!final, 1000);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
 
   return (
     <>
       <div className="panelhead orch__head">
-        <StatusDot status={task.status} />
+        <StatusIcon status={task.status} size={18} />
         <div className="orch__head-text">
           <span className="panelhead__title">{task.title || task.id}</span>
           <span className="panelhead__meta">
-            <span className="mono">{task.id}</span> · {agentLabel(task.agent)}{task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''} · {STATUS_LABELS[task.status] || task.status}
+            <span className={`orch__state orch__state--${task.status}`}>{STATUS_LABELS[task.status] || task.status} · {elapsed(task, now)}</span>
+            <span className="mono">{task.id}</span> · {agentLabel(task.agent)}{task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''}
             {parent ? ` · hija de ${parent.title || parent.id}` : ' · coordinador'}
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>
@@ -256,6 +338,8 @@ export function OrchestratorMode() {
   const hidden = allRuns.length - runs.length;
   const asking = useMemo(() => new Set(pendingQuestions(snap?.messages).map((q) => q.from)), [snap]);
   const task = selected && snap?.tasks?.[selected];
+  const anyLive = useMemo(() => Object.values(snap?.tasks || {}).some((t) => !isFinal(t.status)), [snap]);
+  const now = useNow(anyLive);
 
   if (!snap) return <div className="wb"><div className="changes__empty">Cargando el orquestador…</div></div>;
   if (!snap.settings?.enabled) return <div className="wb wb--orch"><Disabled /></div>;
@@ -273,10 +357,11 @@ export function OrchestratorMode() {
               <section key={r.id} className="orch__run">
                 <div className="orch__run-head">
                   <span className="orch__run-title" title={r.objective}>{r.objective}</span>
+                  <RunProgress tasks={taskTree(snap.tasks, r.id)} />
                   <button className="ic" title="Quitar este run de la lista (no borra ramas)" onClick={() => call('remove_run', { run: r.id })}><IconTrash size={12} /></button>
                 </div>
                 {taskTree(snap.tasks, r.id).map((t) => (
-                  <TaskRow key={t.id} task={t} selected={t.id === selected} asking={asking.has(t.id)} onSelect={select} />
+                  <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={select} />
                 ))}
               </section>
             ))}

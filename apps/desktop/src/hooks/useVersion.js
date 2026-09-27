@@ -5,8 +5,12 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { api } from '../lib/api';
 import { getAppVersion } from '../lib/tauri';
 
-const CHECK_EVERY_MS = 30 * 60 * 1000;
+const CHECK_EVERY_MS = 10 * 60 * 1000;
 const RETRY_MS = 60 * 1000;
+// Al volver a la ventana o recuperar la red también se mira, pero no más a menudo.
+const MIN_GAP_MS = 3 * 60 * 1000;
+// "Ahora no" calla esa versión un rato, no para siempre.
+const SNOOZE_MS = 6 * 60 * 60 * 1000;
 
 // Compara "x.y.z[-pre]" numéricamente. >0 si a > b, 0 si iguales, <0 si a < b,
 // o null si alguna no es parseable (en ese caso no se decide aquí).
@@ -35,9 +39,10 @@ const useUpdateStore = create((set, get) => ({
   isDownloading: false,
   downloadProgress: 0,
   dismissed: false,
+  dismissedAt: 0,
   error: '',
 
-  dismissUpdate: () => set({ dismissed: true }),
+  dismissUpdate: () => set({ dismissed: true, dismissedAt: Date.now() }),
 
   fetchVersion: async () => {
     try {
@@ -74,7 +79,8 @@ const useUpdateStore = create((set, get) => ({
       changelog: same && extra?.changelog?.length ? extra.changelog : notes,
     };
     const known = get().updateInfo?.latest_version === update.version;
-    set({ updateInfo: info, ...(known ? {} : { dismissed: false, error: '' }) });
+    const snoozed = known && get().dismissed && Date.now() - get().dismissedAt < SNOOZE_MS;
+    set({ updateInfo: info, ...(known ? {} : { error: '' }), ...(snoozed ? {} : { dismissed: false }) });
     return info;
   },
 
@@ -105,16 +111,27 @@ const useUpdateStore = create((set, get) => ({
   },
 }));
 
+let timer = null;
+let lastCheck = 0;
+
 async function runCheck() {
+  clearTimeout(timer);
+  lastCheck = Date.now();
   try {
     await useUpdateStore.getState().checkForUpdates();
-    setTimeout(runCheck, CHECK_EVERY_MS);
+    timer = setTimeout(runCheck, CHECK_EVERY_MS);
   } catch (e) {
     // Al arrancar la red a veces no está lista: se reintenta pronto.
     console.error('[updater] Error al verificar actualizaciones:', e);
-    setTimeout(runCheck, RETRY_MS);
+    timer = setTimeout(runCheck, RETRY_MS);
   }
 }
+
+// Con el equipo suspendido los temporizadores se congelan: al volver a la
+// ventana se mira enseguida en lugar de esperar al siguiente ciclo.
+const checkSoon = () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastCheck > MIN_GAP_MS && !useUpdateStore.getState().isDownloading) runCheck();
+};
 
 export function useVersion() {
   const state = useUpdateStore();
@@ -122,6 +139,9 @@ export function useVersion() {
     if (started) return;
     started = true;
     runCheck();
+    window.addEventListener('focus', checkSoon);
+    window.addEventListener('online', checkSoon);
+    document.addEventListener('visibilitychange', checkSoon);
   }, []);
   return state;
 }

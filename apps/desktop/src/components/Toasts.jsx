@@ -1,11 +1,14 @@
 import { useToastStore } from '../store/toastStore';
 import { IconX } from './Icons';
 
-export function Toasts() {
+/** Avisos abajo a la derecha. `children` va encima de los toasts (el aviso de
+    actualización), en la misma pila para que no se tapen entre sí. */
+export function Toasts({ children }) {
   const { toasts, dismiss } = useToastStore();
-  if (!toasts.length) return null;
+  if (!toasts.length && !children) return null;
   return (
     <div className="toasts" role="status">
+      {children}
       {toasts.map((t) => (
         <div key={t.id} className={`toast toast--${t.tone}`}>
           <span className="toast__text">{t.text}</span>

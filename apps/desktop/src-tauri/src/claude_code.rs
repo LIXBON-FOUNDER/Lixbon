@@ -274,6 +274,90 @@ pub fn cc_session_read(cwd: String, id: String) -> Result<String, String> {
     fs::read_to_string(dir.join(format!("{id}.jsonl"))).map_err(|e| e.to_string())
 }
 
+fn user_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(PathBuf::from(home).join(".claude"))
+}
+
+/// Solo estos archivos: son los que Claude Code lee como ajustes y memoria.
+fn config_files(cwd: &str) -> Vec<(&'static str, &'static str, PathBuf)> {
+    let mut out = vec![];
+    if let Some(u) = user_dir() {
+        out.push(("user", "settings", u.join("settings.json")));
+        out.push(("user", "memory", u.join("CLAUDE.md")));
+    }
+    if !cwd.is_empty() {
+        let p = Path::new(cwd);
+        out.push(("project", "settings", p.join(".claude").join("settings.json")));
+        out.push(("local", "settings", p.join(".claude").join("settings.local.json")));
+        out.push(("project", "memory", p.join("CLAUDE.md")));
+        out.push(("project", "memory", p.join(".claude").join("CLAUDE.md")));
+        out.push(("local", "memory", p.join("CLAUDE.local.md")));
+    }
+    out
+}
+
+#[derive(Serialize)]
+pub struct CcConfigFile {
+    scope: &'static str,
+    kind: &'static str,
+    path: String,
+    exists: bool,
+    content: Option<String>,
+}
+
+#[tauri::command(async)]
+pub fn cc_config(cwd: String) -> Vec<CcConfigFile> {
+    config_files(&cwd)
+        .into_iter()
+        .map(|(scope, kind, path)| {
+            let content = fs::read_to_string(&path).ok();
+            CcConfigFile { scope, kind, path: path.to_string_lossy().into_owned(), exists: content.is_some(), content }
+        })
+        .collect()
+}
+
+/// Abre con la app del sistema un archivo de configuración de Claude Code que
+/// queda fuera de la carpeta de trabajo (el editor solo abre los de dentro).
+#[tauri::command(async)]
+pub fn cc_config_open(cwd: String, path: String) -> Result<(), String> {
+    let (_, kind, target) = config_files(&cwd)
+        .into_iter()
+        .find(|(_, _, p)| p.to_string_lossy() == path)
+        .ok_or("archivo no permitido")?;
+    if !target.exists() {
+        if let Some(dir) = target.parent() {
+            fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        // Un settings.json vacío no es JSON válido y Claude Code lo rechazaría.
+        fs::write(&target, if kind == "settings" { "{}
+" } else { "" }).map_err(|e| e.to_string())?;
+    }
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("start").arg("").arg(&target);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(&target);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(&target);
+        c
+    };
+    crate::hide_console(&mut cmd);
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{slug, valid_id};

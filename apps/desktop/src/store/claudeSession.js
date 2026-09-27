@@ -8,7 +8,12 @@ import { useAppStore } from './appStore';
 import { useFileViewStore } from './fileViewStore';
 import { useOutputStore } from './outputStore';
 import { initialMode, initialPolicy, useSessionsStore, agentSettings } from './chatStore';
-import { commandCard, parseSlash } from '../lib/claudeCommands';
+import { invoke } from '@tauri-apps/api/core';
+import {
+  commandCard, parseSlash, isInstant, mcpCard, IDE_CARDS,
+  permissionsOf, hooksOf, memoryOf, skillsOf, doctorChecks,
+} from '../lib/claudeCommands';
+import { liveWindow } from '../lib/claudeUsage';
 import { computeChangePreview, revertSnapshot, DEFAULT_CMD_ALLOWLIST } from '../lib/agent';
 import {
   startClaude, userMessage, mapTool, changeOf, resultText, compactSummaryOf,
@@ -91,6 +96,8 @@ export function makeClaudeStore() {
   let stderr = '';
   let gotInit = false;
   let btwProc = null;
+  let sideProc = null;
+  let sideSeq = 0;
   let toolRunning = false;
   let outbox = Promise.resolve();
   // Un "/" es local si Claude Code lo resuelve sin llamar al modelo: en ese
@@ -442,7 +449,7 @@ export function makeClaudeStore() {
               : get().ccCommands,
           };
           try { localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog)); } catch { /* sin almacenamiento */ }
-          set({ ccModels: catalog.models, ccCommands: catalog.commands });
+          set({ ccModels: catalog.models, ccCommands: catalog.commands, ccAccount: info.account || get().ccAccount });
         }
         return p;
       })();
@@ -469,6 +476,47 @@ export function makeClaudeStore() {
       if (title) set({ conversationTitle: title.trim() });
       if (card.context?.used != null) set({ ccContext: { used: card.context.used, window: card.context.total || get().ccContext.window } });
       if (card.usage) useClaudeUsage.getState().fromText(card.usage);
+    }
+
+    // El `/mcp` de -p solo cuenta servidores; el control da cada uno con su
+    // estado y, como `interrupt`, se atiende aunque haya un turno en marcha.
+    async function mcpStatus() {
+      const p = await ensureProc();
+      const res = await p.control({ subtype: 'mcp_status' });
+      return mcpCard(res?.mcpServers || []);
+    }
+
+    async function ideCard(name) {
+      const card = { role: 'cmd', engine: 'claude', name, args: '', output: '', ide: true };
+      const root = useAppStore.getState().workspaceRoot || '';
+      const st = get();
+      if (name === 'help') return { ...card, help: true };
+      if (name === 'skills') return { ...card, skills: skillsOf(st.ccCommands) };
+      if (name === 'cost') {
+        const u = useClaudeUsage.getState();
+        return { ...card, cost: { usd: st.ccCost || 0, context: st.ccContext, session: liveWindow(u.session), week: liveWindow(u.week), plan: st.ccAccount?.subscriptionType || '' } };
+      }
+      if (name === 'status') {
+        // La cuenta llega en el `initialize`; arrancar el proceso no gasta tokens.
+        await ensureProc().catch(() => {});
+        const version = st.ccInfo?.version || await claudeVersion().catch(() => '');
+        return {
+          ...card,
+          status: {
+            version, model: st.ccInfo?.model || st.ccModel || 'default', mode: st.ccMode, effort: st.ccEffort,
+            cwd: st.ccInfo?.cwd || root, session: st.conversationId, account: get().ccAccount, mcp: st.ccInfo?.mcp || [], tools: st.ccInfo?.tools,
+          },
+        };
+      }
+      const files = await invoke('cc_config', { cwd: root });
+      if (name === 'permissions') return { ...card, permissions: { ...permissionsOf(files), mode: st.ccMode } };
+      if (name === 'hooks') return { ...card, hooks: hooksOf(files) };
+      if (name === 'memory') return { ...card, memory: memoryOf(files), root };
+      const [version, mcp] = await Promise.all([
+        claudeVersion().catch(() => ''),
+        mcpStatus().then((c) => c.mcp).catch(() => null),
+      ]);
+      return { ...card, doctor: doctorChecks({ version, account: get().ccAccount, files, mcp, context: get().ccContext }) };
     }
 
     async function applyEffort(p) {
@@ -509,6 +557,8 @@ export function makeClaudeStore() {
       ccPrevMode: 'default',
       ccQueue: [],
       ccBtw: null,
+      ccSide: null,
+      ccAccount: null,
       ccModels: cachedCatalog().models || [],
       ccCommands: cachedCatalog().commands || [],
       nativeTools: false,
@@ -633,6 +683,21 @@ export function makeClaudeStore() {
         const slash = parseSlash(text);
         if (slash?.name === 'btw') { get().askBtw(slash.args); return; }
         if (slash?.name === 'clear' || slash?.name === 'new') { await get().newConversation(); return; }
+        if (slash && IDE_CARDS.has(slash.name)) {
+          if (get().streaming) { get().runSide(slash); return; }
+          shown.command = slash;
+          push(shown);
+          push(await ideCard(slash.name).catch((e) => ({ role: 'error', content: String(e?.message || e) })));
+          return;
+        }
+        if (isInstant(slash) && get().streaming) { get().runSide(slash); return; }
+        if (slash?.name === 'mcp' && !slash.args) {
+          shown.command = slash;
+          push(shown);
+          const card = await mcpStatus().catch((e) => ({ role: 'error', content: String(e?.message || e) }));
+          push(card);
+          return;
+        }
         // Claude Code solo reconoce el "/" al principio del mensaje: sin el contexto delante.
         if (slash) { shown.command = slash; prompt = text.trim(); }
 
@@ -694,6 +759,62 @@ export function makeClaudeStore() {
           patch({ loading: false, error: String(e?.message || e) });
         }
       },
+      // Un "/" de solo lectura con Claude trabajando: Claude Code lo resolvería al
+      // final del turno, así que se pregunta a una copia desechable de la sesión.
+      runSide: async ({ name, args }) => {
+        const root = useAppStore.getState().workspaceRoot;
+        get().closeSide();
+        const seq = ++sideSeq;
+        const alive = () => sideSeq === seq;
+        const patch = (p) => { if (alive()) set({ ccSide: get().ccSide && { ...get().ccSide, ...p } }); };
+        set({ ccSide: { name, args, loading: true } });
+        if (IDE_CARDS.has(name) || (name === 'mcp' && !args)) {
+          try { patch({ loading: false, card: IDE_CARDS.has(name) ? await ideCard(name) : await mcpStatus() }); } catch (e) { patch({ loading: false, error: String(e?.message || e) }); }
+          return;
+        }
+        const sid = get().conversationId;
+        let err = '';
+        let self = null;
+        try {
+          self = await startClaude({
+            procId: `${procId}-side`, cwd: root, resume: sid, model: get().ccModel, permissionMode: 'default',
+            extraArgs: [...(sid ? ['--fork-session'] : []), '--no-session-persistence', '--max-turns', '1'],
+            onEvent: (ev) => {
+              if (!alive()) return;
+              if (ev.type === 'control_request' && ev.request?.subtype === 'can_use_tool') {
+                self.respond(ev.request_id, { behavior: 'deny', message: 'Solo se consulta un comando local.' }).catch(() => {});
+                return;
+              }
+              if (ev.type !== 'result') return;
+              if (ev.is_error) patch({ loading: false, error: String(ev.result || 'Claude Code no pudo responder.') });
+              else {
+                const card = commandCard(name, args, ev.result);
+                applyCommand(card);
+                patch({ loading: false, card });
+              }
+              self.close();
+            },
+            onStderr: (t) => { err += t; },
+            onExit: () => {
+              if (!alive()) return;
+              if (get().ccSide?.loading) patch({ loading: false, error: err.trim().slice(0, 400) || 'Claude Code se cerró sin responder.' });
+            },
+          });
+          if (!alive()) { self.close(); return; }
+          sideProc = self;
+          await self.send(userMessage(`/${name}${args ? ` ${args}` : ''}`));
+        } catch (e) {
+          patch({ loading: false, error: String(e?.message || e) });
+        }
+      },
+      closeSide: () => {
+        const p = sideProc;
+        sideProc = null;
+        sideSeq += 1;
+        p?.close();
+        set({ ccSide: null });
+      },
+
       closeBtw: () => {
         const p = btwProc;
         btwProc = null;

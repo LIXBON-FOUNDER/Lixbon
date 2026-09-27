@@ -14,8 +14,9 @@ import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
 import { Select } from '../components/Select';
 import { CLAUDE_MODES, claudeModelOptions } from '../lib/claudeCode';
-import { claudeMenuEntries } from '../lib/claudeCommands';
+import { SLASH_COMMANDS, GROUP_LABELS, CLAUDE_ALIASES, claudeSlashCommands } from './slashCommands';
 import { prepareOrchestrate } from '../store/orchStore';
+import { useDraftStore, EMPTY_DRAFT, setDraftText, setDraftImages, setDraftMentions } from '../store/draftStore';
 import { Switch } from '../components/Switch';
 import { ClaudeMark } from '../components/Logo';
 import { EffortSlider } from './EffortSlider';
@@ -29,56 +30,6 @@ import {
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-/** Comandos "/" del composer: acciones instantáneas, no texto para el modelo.
-    Espejo de apps/cli/lixbon_cli/commands.py::COMMAND_SPECS — mismo nombre
-    de comando para quien viene del CLI. Lo que allí es solo de terminal
-    (doctor, ps, nodes, bar…) no tiene equivalente aquí y se omite. */
-const SLASH_COMMANDS = [
-  { cmd: 'new', desc: 'Nueva conversación', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
-  { cmd: 'clear', desc: 'Vaciar el contexto y empezar de cero', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
-  { cmd: 'mode', desc: 'Modo: Agente, Plan o Preguntar', Icon: IconHammer, run: () => runCommand('chat.toggleAgentMenu') },
-  { cmd: 'agent', desc: 'Modo Agente: edita y ejecuta', Icon: IconHammer, run: () => runCommand('chat.mode.agent') },
-  { cmd: 'plan', desc: 'Modo Plan: investiga y propone antes de tocar nada', Icon: IconList, run: () => runCommand('chat.mode.plan') },
-  { cmd: 'ask', desc: 'Modo Preguntar: solo lectura', Icon: IconUser, run: () => runCommand('chat.mode.ask') },
-  { cmd: 'approve', desc: 'Auto-aprobar cambios del agente', Icon: IconCheck, run: () => runCommand('chat.toggleApprove') },
-  { cmd: 'undo', desc: 'Revertir el último cambio', Icon: IconHistory, run: () => runCommand('chat.undoLast') },
-  { cmd: 'diff', desc: 'Ver el último cambio', Icon: IconFolder, run: () => runCommand('chat.viewLastDiff') },
-  { cmd: 'commit', desc: 'Confirmar cambios en Git', Icon: IconGitCommit, run: () => runCommand('git.open') },
-  { cmd: 'model', desc: 'Cambiar de modelo', Icon: IconSun, run: () => runCommand('chat.focusModelPicker') },
-  { cmd: 'usage', desc: 'Ver consumo de la cuenta', Icon: IconChart, run: () => runCommand('chat.openUsage') },
-  { cmd: 'copy', desc: 'Copiar la última respuesta', Icon: IconClip, run: () => runCommand('chat.copyLast') },
-  { cmd: 'save', desc: 'Exportar la conversación a Markdown', Icon: IconFileCode, run: () => runCommand('chat.saveMarkdown') },
-  { cmd: 'history', desc: 'Ver conversaciones anteriores', Icon: IconHistory, run: () => runCommand('chat.showHistory') },
-  { cmd: 'workspace', desc: 'Cambiar la carpeta de trabajo', Icon: IconFolder, run: () => runCommand('chat.openWorkspace') },
-  { cmd: 'init', desc: 'Generar LIXBON.md con el contexto del proyecto', Icon: IconFileCode, run: () => runCommand('chat.init') },
-  { cmd: 'tools', desc: 'Herramientas y permisos del agente', Icon: IconPuzzle, run: () => runCommand('settings.openAgent') },
-  { cmd: 'allow', desc: 'Comandos que el agente ejecuta sin preguntar', Icon: IconPuzzle, run: () => runCommand('settings.openAgent') },
-  { cmd: 'login', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
-  { cmd: 'logout', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
-  { cmd: 'key', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
-  { cmd: 'config', desc: 'Ajustes', Icon: IconGear, run: () => runCommand('workbench.openSettings') },
-  { cmd: 'remote', desc: 'Control remoto por QR', Icon: IconTerminal, run: () => runCommand('remote.open') },
-  { cmd: 'orquestar', desc: 'Este chat pasa a coordinar un equipo de agentes (experimental)', hint: '<objetivo>', Icon: IconPuzzle },
-  { cmd: 'help', desc: 'Ver todos los comandos', Icon: IconList, run: () => runCommand('workbench.commandPalette') },
-];
-
-// En una sesión de Claude Code solo valen las acciones del IDE que tienen
-// sentido para él (las que cambian lo que el IDE muestra: conversación nueva,
-// modelo, modo); el resto de "/" son los comandos del propio Claude Code.
-const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace', 'orquestar']);
-
-const GROUP_LABELS = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' };
-
-function claudeSlashCommands(commands = []) {
-  const local = SLASH_COMMANDS.filter((c) => CLAUDE_LOCAL.has(c.cmd)).map((c) => ({ ...c, group: 'lixbon' }));
-  local.push({ cmd: 'btw', desc: 'Pregunta al margen, sin interrumpir a Claude', hint: '<pregunta>', Icon: IconTerminal, claude: true, group: 'lixbon' });
-  const taken = new Set(local.map((c) => c.cmd));
-  const remote = claudeMenuEntries(commands)
-    .filter((c) => !taken.has(c.cmd))
-    .map((c) => ({ ...c, Icon: c.group === 'skill' ? IconPuzzle : IconTerminal, claude: true }));
-  const order = { lixbon: 0, claude: 1, skill: 2 };
-  return [...local, ...remote.sort((a, b) => order[a.group] - order[b.group])];
-}
 
 /** Fuzzy match por subsecuencia (igual que QuickOpen). -1 = no coincide. */
 function fuzzyScore(text, q) {
@@ -111,9 +62,12 @@ function readImage(file) {
 }
 
 export function ChatInputBar() {
-  const [text, setText] = useState('');
-  const [images, setImages] = useState([]); // { name, dataUrl, base64 }
-  const [mentions, setMentions] = useState([]); // { name, path, rel }
+  const draftKey = useSessionsStore((s) => s.activeKey);
+  const draft = useDraftStore((s) => s.drafts[draftKey]) || EMPTY_DRAFT;
+  const { text, images, mentions } = draft; // images: { name, dataUrl, base64 } · mentions: { name, path, rel }
+  const setText = setDraftText;
+  const setImages = setDraftImages;
+  const setMentions = setDraftMentions;
   const [mentionQuery, setMentionQuery] = useState(null); // null = menú cerrado
   const [mentionSel, setMentionSel] = useState(0);
   const [allFiles, setAllFiles] = useState([]);
@@ -252,8 +206,11 @@ export function ChatInputBar() {
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
+    const max = Math.min(window.innerHeight * 0.45, 360);
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, Math.min(window.innerHeight * 0.45, 360)) + 'px';
+    // +1: con interlineado fraccionario scrollHeight redondea y asomaba una barra.
+    el.style.height = Math.min(el.scrollHeight + 1, max) + 'px';
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
   }, [text]);
 
   // ── @-menciones: detecta "@token" ANTES del cursor y abre el menú ────────
@@ -351,6 +308,12 @@ export function ChatInputBar() {
     // sigue abriendo el control remoto en vez de mandarlo al modelo.
     if (/^\/remote(\s|$)/i.test(text.trim())) {
       runCommand('remote.open');
+      setText('');
+      return;
+    }
+    const alias = isClaude && CLAUDE_ALIASES.find((c) => new RegExp(`^/${c.cmd}(\\s|$)`, 'i').test(text.trim()));
+    if (alias) {
+      alias.run();
       setText('');
       return;
     }

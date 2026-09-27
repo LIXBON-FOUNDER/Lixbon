@@ -25,7 +25,7 @@ const ES = {
   goal: 'Fijar un objetivo y seguir hasta cumplirlo',
   import: 'Importar la configuración de otro agente',
   init: 'Crear CLAUDE.md con la documentación del proyecto',
-  insights: 'Informe sobre tus sesiones de Claude Code',
+  insights: 'Informe sobre tus sesiones de Claude Code (tarda: las analiza todas)',
   'list-agents': 'Subagentes y otras sesiones de Claude abiertas',
   loop: 'Repetir un prompt o comando cada cierto tiempo',
   mcp: 'Estado de los servidores MCP',
@@ -147,5 +147,182 @@ export function commandCard(name, args, output) {
   if (name === 'usage') { const usage = parseUsageText(out); if (usage) card.usage = usage; }
   if (name === 'context') { const context = parseContextText(out); if (context) card.context = context; }
   if (!args) { const choices = choicesOf(name, out); if (choices.length) card.choices = choices; }
+  if (name === 'list-agents') { const agents = parseAgentsText(out); if (agents) card.agents = agents; }
+  if (name === 'skill-doctor') { const table = parseColumns(out); if (table) card.table = table; }
+  if (name === 'config' && !args) { const options = parseConfigOptions(out); if (options.length) card.options = options; }
+  if (!args && !card.usage && !card.context && !card.agents && !card.table && !card.options) { const setting = parseSetting(out); if (setting) card.setting = setting; }
   return card;
+}
+
+// Solo leen y no dependen del turno: mientras Claude trabaja se resuelven
+// aparte, como en su terminal, en vez de esperar al final del turno.
+const INSTANT = new Set(['usage', 'context', 'mcp', 'list-agents', 'skill-doctor']);
+const INSTANT_BARE = new Set(['model', 'effort', 'output-style', 'advisor', 'autocompact', 'config']);
+export const isInstant = (slash) => !!slash && (INSTANT.has(slash.name) || (!slash.args && INSTANT_BARE.has(slash.name)));
+
+const MCP_STATUS = {
+  connected: ['Conectado', 'ok'],
+  pending: ['Conectando', 'wait'],
+  'needs-auth': ['Falta autorizar', 'warn'],
+  failed: ['Falló', 'bad'],
+  disabled: ['Desactivado', 'off'],
+};
+
+/** Respuesta del control `mcp_status` → tarjeta de /mcp. */
+export function mcpCard(servers = []) {
+  const list = servers.map((s) => {
+    const [label, tone] = MCP_STATUS[s.status] || [s.status, 'off'];
+    const name = String(s.name || '').replace(/^claude\.ai /, '');
+    return { name, status: label, tone, scope: s.scope === 'claudeai' ? 'claude.ai' : s.scope || '', kind: s.config?.type === 'claudeai-proxy' ? 'conector' : s.config?.type || '' };
+  });
+  return { role: 'cmd', engine: 'claude', name: 'mcp', args: '', output: '', mcp: list };
+}
+
+const AGENT_STATUS = { busy: ['Trabajando', 'wait'], idle: ['En espera', 'off'] };
+
+function parseAgentsText(text) {
+  const self = /^This session:\s*(\S+)\s*\[([^\]]+)\]/m.exec(text);
+  if (!self) return null;
+  const others = [...text.matchAll(/^\s*\[(\w+)\]\s*·\s*(.+?)\s*·\s*(.+?)\s*·\s*started (.+)$/gm)].map((m) => {
+    const [label, tone] = AGENT_STATUS[m[1]] || [m[1], 'off'];
+    return { name: m[2], cwd: m[3], started: m[4].replace(/^(\d+)([hmd]) ago$/, 'hace $1 $2'), status: label, tone };
+  });
+  return { self: self[1], others };
+}
+
+/** Tabla en columnas alineadas con espacios (la de /skill-doctor) → filas. */
+function parseColumns(text) {
+  const lines = String(text).split('\n');
+  const h = lines.findIndex((l) => /^\s{2}\S.*\s{2,}\S/.test(l) && !/^\s{2}\S+\s+\S+\s+[<~\d-]/.test(l));
+  if (h < 0) return null;
+  const header = lines[h].trim().split(/\s{2,}/);
+  const rows = [];
+  let i = h + 1;
+  for (; i < lines.length && lines[i].trim(); i++) rows.push(lines[i].trim().split(/\s{2,}/));
+  if (!rows.length) return null;
+  const title = lines.slice(0, h).join('\n').trim();
+  const notes = lines.slice(i).join('\n').trim();
+  return { title, header, rows, notes };
+}
+
+const SETTING_ES = {
+  advisor: 'Asesor',
+  'auto-compact window': 'Ventana de autocompactación',
+  'output style': 'Estilo de las respuestas',
+  'current model': 'Modelo actual',
+};
+
+// "Clave: valor" en la primera línea de los comandos de ajuste (/advisor, /output-style…).
+function parseSetting(text) {
+  const m = /^([A-Z][\w -]{1,30}):\s*(\S.*)$/m.exec(text);
+  if (!m || /^Usage$/i.test(m[1])) return null;
+  const body = text.replace(m[0], '').replace(/^Usage: .*$/m, '').replace(/^Available styles:\s*$/m, '').replace(/^- .*$/gm, '').trim();
+  return { key: SETTING_ES[m[1].toLowerCase()] || m[1], value: m[2].replace(/`/g, ''), body };
+}
+
+function parseConfigOptions(text) {
+  return [...String(text).matchAll(/^\s{2}([\w.-]+)=(.+)$/gm)].map((m) => ({
+    key: m[1],
+    values: m[2].trim() === '<value>' ? null : m[2].trim().split('|'),
+  }));
+}
+
+// Lo que el menú "/" de la terminal trae y el modo -p no: Lixbon lo resuelve con
+// lo que ya sabe de la sesión y los archivos de configuración de Claude Code.
+export const IDE_CARDS = new Set(['status', 'cost', 'help', 'skills', 'permissions', 'memory', 'hooks', 'doctor']);
+
+export const SCOPE_ES = { user: 'Global', project: 'Proyecto', local: 'Local, solo tú' };
+
+function settingsOf(files) {
+  return files.filter((f) => f.kind === 'settings' && f.exists).map((f) => {
+    try { return { ...f, json: JSON.parse(f.content || '{}') || {} }; } catch (e) { return { ...f, json: {}, error: String(e.message || e) }; }
+  });
+}
+
+export function permissionsOf(files) {
+  const rules = [];
+  const dirs = [];
+  let defaultMode = null;
+  const settings = settingsOf(files);
+  for (const f of settings) {
+    const p = f.json.permissions || {};
+    for (const kind of ['allow', 'ask', 'deny']) {
+      for (const rule of Array.isArray(p[kind]) ? p[kind] : []) rules.push({ kind, rule: String(rule), scope: f.scope, path: f.path });
+    }
+    for (const d of Array.isArray(p.additionalDirectories) ? p.additionalDirectories : []) dirs.push({ dir: String(d), scope: f.scope });
+    if (p.defaultMode) defaultMode = { mode: p.defaultMode, scope: f.scope };
+  }
+  return {
+    rules, dirs, defaultMode,
+    errors: settings.filter((f) => f.error).map((f) => ({ path: f.path, error: f.error })),
+    files: files.filter((f) => f.kind === 'settings'),
+  };
+}
+
+export function hooksOf(files) {
+  const rows = [];
+  const settings = settingsOf(files);
+  for (const f of settings) {
+    for (const [event, groups] of Object.entries(f.json.hooks || {})) {
+      for (const g of Array.isArray(groups) ? groups : []) {
+        for (const h of Array.isArray(g?.hooks) ? g.hooks : []) {
+          rows.push({ event, matcher: g.matcher || '', command: h.command || h.prompt || h.url || h.type || '', type: h.type || 'command', scope: f.scope, path: f.path });
+        }
+      }
+    }
+  }
+  return { rows, disabled: settings.some((f) => f.json.disableAllHooks === true), files: files.filter((f) => f.kind === 'settings') };
+}
+
+export function memoryOf(files) {
+  return files.filter((f) => f.kind === 'memory').map((f) => ({
+    scope: f.scope, path: f.path, exists: f.exists,
+    lines: f.exists ? String(f.content || '').split('\n').length : 0,
+    tokens: f.exists ? Math.round(String(f.content || '').length / 4) : 0,
+  }));
+}
+
+const SKILL_SOURCES = { user: 'Tuyas', project: 'Del proyecto', plugin: 'De plugins', 'claude.ai sync': 'De claude.ai' };
+
+export function skillsOf(commands = []) {
+  return commands.filter((c) => c?.name && !c.builtin && !c.name.startsWith('__')).map((c) => {
+    const raw = String(c.description || '');
+    const src = /\((user|project|plugin|claude\.ai sync)\)\s*$/i.exec(raw)?.[1]?.toLowerCase();
+    return {
+      name: c.name,
+      desc: raw.replace(/\s*\((user|project|plugin|claude\.ai sync)\)\s*$/i, ''),
+      source: SKILL_SOURCES[src] || (c.name.includes(':') ? 'De plugins' : 'Otras'),
+    };
+  });
+}
+
+/** Revisión sin modelo: lo que suele romper Claude Code en una máquina. */
+export function doctorChecks({ version, account, files, mcp, context }) {
+  const checks = [];
+  checks.push(version
+    ? { tone: 'ok', label: 'Claude Code instalado', detail: version }
+    : { tone: 'bad', label: 'Claude Code no responde', detail: 'Instálalo desde claude.com/code y ejecuta claude en una terminal.' });
+  checks.push(account?.email
+    ? { tone: 'ok', label: 'Sesión iniciada', detail: [account.email, account.subscriptionType].filter(Boolean).join(' · ') }
+    : { tone: 'warn', label: 'Sin datos de la cuenta', detail: 'Si Claude no responde, ejecuta claude en una terminal e inicia sesión.' });
+  const settings = settingsOf(files);
+  const broken = settings.filter((f) => f.error);
+  checks.push(broken.length
+    ? { tone: 'bad', label: 'Ajustes con JSON inválido', detail: broken.map((f) => `${f.path}: ${f.error}`).join('\n'), paths: broken.map((f) => f.path) }
+    : { tone: 'ok', label: 'Ajustes válidos', detail: settings.length ? `${settings.length} archivo${settings.length === 1 ? '' : 's'} de settings` : 'Sin settings.json propios' });
+  if (mcp) {
+    const failed = mcp.filter((s) => s.tone === 'bad');
+    const auth = mcp.filter((s) => s.tone === 'warn');
+    if (failed.length) checks.push({ tone: 'bad', label: 'Servidores MCP caídos', detail: failed.map((s) => s.name).join(', ') });
+    if (auth.length) checks.push({ tone: 'warn', label: 'MCP sin autorizar', detail: `${auth.map((s) => s.name).join(', ')}. Autorízalos en los conectores de claude.ai o con /mcp en la terminal.` });
+    if (!failed.length && !auth.length) checks.push({ tone: 'ok', label: 'Servidores MCP', detail: mcp.length ? `${mcp.length} configurados, ninguno con errores` : 'Ninguno configurado' });
+  }
+  const memTokens = memoryOf(files).reduce((n, m) => n + m.tokens, 0);
+  checks.push(memTokens > 10000
+    ? { tone: 'warn', label: 'CLAUDE.md muy largo', detail: `~${Math.round(memTokens / 1000)}k tokens en cada turno. Recórtalo con /memory.` }
+    : { tone: 'ok', label: 'Memoria (CLAUDE.md)', detail: memTokens ? `~${memTokens.toLocaleString('es')} tokens por turno` : 'Sin CLAUDE.md' });
+  if (context?.window && context.used / context.window > 0.8) {
+    checks.push({ tone: 'warn', label: 'Contexto casi lleno', detail: `${Math.round((context.used / context.window) * 100)}% usado. Usa /compact o empieza otra conversación.` });
+  }
+  return checks;
 }
