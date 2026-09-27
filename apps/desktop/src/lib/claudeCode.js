@@ -41,7 +41,7 @@ export const permissionModeOf = (chatMode) => (chatMode === 'agent' ? 'default' 
 
 const CONTROL_TIMEOUT_MS = 20000;
 
-export async function startClaude({ procId, cwd, resume, model, effort, permissionMode, onEvent, onStderr, onExit }) {
+export async function startClaude({ procId, cwd, resume, model, effort, permissionMode, extraArgs = [], onEvent, onStderr, onExit }) {
   const waiting = new Map();
   const unlisten = await Promise.all([
     listen(`cc:line:${procId}`, (e) => {
@@ -61,11 +61,13 @@ export async function startClaude({ procId, cwd, resume, model, effort, permissi
   ]);
   const args = [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-    '--include-partial-messages', '--permission-prompt-tool', 'stdio',
+    // --replay-user-messages: el eco de cada mensaje dice cuándo Claude leyó uno que estaba en cola.
+    '--include-partial-messages', '--replay-user-messages', '--permission-prompt-tool', 'stdio',
     '--permission-mode', permissionMode, '--allow-dangerously-skip-permissions',
     ...(model ? ['--model', model] : []),
     ...(effort && effort !== 'auto' ? ['--effort', effort] : []),
     ...(resume ? ['--resume', resume] : []),
+    ...extraArgs,
   ];
   try {
     await invoke('cc_start', { id: procId, args, cwd });
@@ -95,14 +97,14 @@ export async function startClaude({ procId, cwd, resume, model, effort, permissi
   };
 }
 
-export function userMessage(text, images = []) {
+export function userMessage(text, images = [], uuid = undefined) {
   const content = [];
   for (const im of images) {
     const media = /^data:([^;]+);/.exec(im.dataUrl || '')?.[1] || 'image/png';
     content.push({ type: 'image', source: { type: 'base64', media_type: media, data: im.base64 } });
   }
   content.push({ type: 'text', text });
-  return { type: 'user', message: { role: 'user', content } };
+  return { type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content } };
 }
 
 // ── Herramientas de Claude Code → filas del agente ──────────────────────

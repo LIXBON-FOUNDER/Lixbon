@@ -66,6 +66,7 @@ const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'm
 
 function claudeSlashCommands(commands = []) {
   const local = SLASH_COMMANDS.filter((c) => CLAUDE_LOCAL.has(c.cmd));
+  local.push({ cmd: 'btw', desc: 'Pregunta al margen, sin interrumpir a Claude', hint: '<pregunta>', Icon: IconTerminal, claude: true });
   const taken = new Set(local.map((c) => c.cmd));
   const remote = commands
     .filter((c) => c?.name && !taken.has(c.name) && !c.name.startsWith('__'))
@@ -137,6 +138,7 @@ export function ChatInputBar() {
   const setCcEffort = useChatStore((s) => s.setCcEffort);
   const activeKey = useSessionsStore((s) => s.activeKey);
   const isClaude = engine === 'claude';
+  const locked = streaming && !isClaude;
   const agentActive = !!workspaceRoot;
   const modes = isClaude ? CLAUDE_MODES : CHAT_MODES;
   const currentMode = isClaude ? ccMode : chatMode;
@@ -173,6 +175,24 @@ export function ChatInputBar() {
     };
     window.addEventListener('lixbon:compose', onCompose);
     return () => window.removeEventListener('lixbon:compose', onCompose);
+  }, []);
+
+  // Mensajes en cola que vuelven a la caja (editar, o Detener antes de entregarlos).
+  useEffect(() => {
+    const onRestore = (e) => {
+      if (!barRef.current || barRef.current.offsetParent === null) return;
+      const drafts = e.detail?.drafts || [];
+      if (!drafts.length) return;
+      setText((prev) => [...drafts.map((d) => d.text.trim()).filter(Boolean), prev].filter(Boolean).join('\n\n'));
+      setImages((prev) => [...drafts.flatMap((d) => d.images || []), ...prev]);
+      setMentions((prev) => {
+        const all = [...drafts.flatMap((d) => d.mentions || []), ...prev];
+        return all.filter((m, i) => all.findIndex((x) => x.path === m.path) === i);
+      });
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener('lixbon:restore-drafts', onRestore);
+    return () => window.removeEventListener('lixbon:restore-drafts', onRestore);
   }, []);
 
   // La lista de @-menciones es del workspace ABIERTO: si se cambia de
@@ -316,7 +336,7 @@ export function ChatInputBar() {
   };
 
   const handleSend = () => {
-    if (streaming || (!text.trim() && !images.length)) return;
+    if (locked || (!text.trim() && !images.length)) return;
     // /remote con argumentos extra (el menú "/" solo cubre el token solo):
     // sigue abriendo el control remoto en vez de mandarlo al modelo.
     if (/^\/remote(\s|$)/i.test(text.trim())) {
@@ -429,7 +449,9 @@ export function ChatInputBar() {
       <textarea
         ref={textareaRef}
         className="chat-inputbar__textarea"
-        placeholder={isClaude ? (agentActive ? 'Pídele algo a Claude Code, @ para mencionar un archivo' : 'Abre una carpeta de trabajo para usar Claude Code')
+        placeholder={isClaude ? (!agentActive ? 'Abre una carpeta de trabajo para usar Claude Code'
+          : streaming ? 'Claude está trabajando: lo que envíes queda en cola, /btw para preguntar al margen'
+            : 'Pídele algo a Claude Code, @ para mencionar un archivo')
           : !agentActive ? 'Pregunta lo que quieras, / para comandos'
           : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
             : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
@@ -439,7 +461,7 @@ export function ChatInputBar() {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        disabled={streaming}
+        disabled={locked}
       />
 
       <div className="chat-inputbar__row">
@@ -526,7 +548,7 @@ export function ChatInputBar() {
           <span className="tip mono">Contexto {contextPct}% · {ctxWindow.toLocaleString('es')} tokens</span>
         </span>
 
-        {streaming ? (
+        {streaming && (!isClaude || (!text.trim() && !images.length)) ? (
           <button className="chat-inputbar__send" onClick={stop} title="Detener">
             <IconStop size={14} />
           </button>
@@ -535,7 +557,7 @@ export function ChatInputBar() {
             className="chat-inputbar__send"
             onClick={handleSend}
             disabled={!text.trim() && !images.length}
-            title="Enviar (Enter)"
+            title={streaming ? 'Poner en cola (Enter)' : 'Enviar (Enter)'}
           >
             <IconArrowUp size={16} />
           </button>

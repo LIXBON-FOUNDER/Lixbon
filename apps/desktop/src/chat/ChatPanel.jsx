@@ -8,6 +8,7 @@ import { ToolGroup } from './ToolGroup';
 import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
 import { QuestionCard } from './QuestionCard';
+import { ClaudeDock } from './ClaudeDock';
 import { LogoMark, ClaudeMark } from '../components/Logo';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
@@ -95,6 +96,7 @@ export function ChatPanel({ wide = false }) {
       </div>
       <ApprovalCard />
       <QuestionCard />
+      {engine === 'claude' && <ClaudeDock />}
       <ChatInputBar />
     </div>
   );

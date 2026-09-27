@@ -95,6 +95,47 @@ function PlanActions() {
   );
 }
 
+function UsageCard({ usage }) {
+  const intro = /subscription/i.test(usage.intro) ? 'Con tu suscripción de Claude' : usage.intro;
+  return (
+    <div className="ccusage">
+      {intro && <div className="ccusage__intro">{intro}</div>}
+      <div className="ccusage__limits">
+        {usage.limits.map((l) => {
+          const pct = Math.min(100, l.percent);
+          const tone = l.percent >= 100 ? 'full' : l.percent >= 80 ? 'warn' : '';
+          return (
+            <div key={l.key} className={`ccusage__limit${tone ? ` ccusage__limit--${tone}` : ''}`}>
+              <div className="ccusage__row">
+                <span className="ccusage__label">{l.label}</span>
+                <span className="ccusage__pct">{l.percent}%</span>
+              </div>
+              <div className="ccusage__bar"><span style={{ width: `${pct}%` }} /></div>
+              <div className="ccusage__reset">{l.resets ? `Se reinicia ${l.resets}` : l.percent === 0 ? 'Sin uso en esta ventana' : ''}</div>
+            </div>
+          );
+        })}
+      </div>
+      {usage.periods.length > 0 && (
+        <details className="ccusage__more">
+          <summary>Qué está consumiendo tu cupo</summary>
+          <div className="ccusage__periods">
+            {usage.periods.map((p) => (
+              <div key={p.label} className="ccusage__period">
+                <div className="ccusage__row">
+                  <span className="ccusage__label">{p.label}</span>
+                  <span className="ccusage__stats">{p.stats}</span>
+                </div>
+                <ul>{p.items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
   if (message.role === 'user') {
     return (
@@ -157,7 +198,9 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
           </ol>
         </div>
       )}
-      {message.content ? (
+      {message.usage ? (
+        <UsageCard usage={message.usage} />
+      ) : message.content ? (
         <>
           <ChatMarkdown>{message.content}</ChatMarkdown>
           {streaming && <span className="msg__caret" aria-hidden="true" />}

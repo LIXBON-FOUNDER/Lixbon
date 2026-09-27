@@ -1,10 +1,11 @@
 // AgentMode.jsx — el agente a pantalla completa: conversaciones, chat y los
 // cambios que va haciendo.
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useChatStore, newSession } from '../store/chatStore';
 import { useClaudeUsage } from '../store/claudeSession';
+import { liveWindow } from '../lib/claudeUsage';
 import { Popover } from '../components/Popover';
 import { LogoMark, ClaudeMark } from '../components/Logo';
 import { useWorkbenchStore } from '../store/workbenchStore';
@@ -22,10 +23,27 @@ import { IconPlus, IconDevice, IconDownload, IconChevronDown } from '../componen
 const GAP = 6;
 const baseName = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
-const resetOf = (secs) => (secs ? resetLabel(new Date(secs * 1000).toISOString()) : '');
+const resetOf = (w) => {
+  if (!w) return '';
+  if (w.expired) return 'ventana nueva';
+  if (w.resetAt) return resetLabel(new Date(w.resetAt * 1000).toISOString());
+  return w.resetText ? `se reinicia ${w.resetText}` : '';
+};
+const pctOf = (w) => Math.min(100, w?.percent ?? 0);
+
+function useMinuteTick() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+}
 
 function ClaudeQuota() {
-  const { session, week } = useClaudeUsage();
+  useMinuteTick();
+  const usage = useClaudeUsage();
+  const session = liveWindow(usage.session);
+  const week = liveWindow(usage.week);
   if (!session && !week) {
     return (
       <div className="quota quota--claude">
@@ -34,12 +52,13 @@ function ClaudeQuota() {
       </div>
     );
   }
+  const limited = (session?.percent ?? 0) >= 100;
   return (
-    <div className="quota quota--claude" title="Cupo de tu plan de Claude, según Claude Code">
-      <ProgressRing value={session?.percent || 0} size={22} stroke={2.6} />
+    <div className="quota quota--claude" title="Cupo de tu plan de Claude, según Claude Code. Escribe /usage para actualizarlo.">
+      <ProgressRing value={pctOf(session)} size={22} stroke={2.6} />
       <span className="quota__text">
-        <span>Claude · sesión {session?.percent ?? 0}% · semana {week?.percent ?? 0}%</span>
-        <span className="quota__sub">{resetOf(session?.resetAt)}</span>
+        <span>Claude · sesión {pctOf(session)}% · semana {pctOf(week)}%</span>
+        <span className="quota__sub">{limited ? `Límite alcanzado · ${resetOf(session)}` : resetOf(session)}</span>
       </span>
     </div>
   );

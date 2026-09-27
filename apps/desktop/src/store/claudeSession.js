@@ -8,6 +8,7 @@ import { useAppStore } from './appStore';
 import { useFileViewStore } from './fileViewStore';
 import { useOutputStore } from './outputStore';
 import { initialMode, initialPolicy, useSessionsStore, agentSettings } from './chatStore';
+import { parseUsageText } from '../lib/claudeUsage';
 import { computeChangePreview, revertSnapshot, DEFAULT_CMD_ALLOWLIST } from '../lib/agent';
 import {
   startClaude, userMessage, mapTool, changeOf, resultText, compactSummaryOf,
@@ -45,6 +46,18 @@ export const useClaudeUsage = create((set) => ({
     try { localStorage.setItem(USAGE_KEY, JSON.stringify(next)); } catch { /* sin almacenamiento */ }
     set(next);
   },
+  // `/usage` no emite rate_limit_event: su texto es la única lectura fresca.
+  fromText: (parsed) => set((prev) => {
+    const pick = (key, old) => {
+      const lim = parsed.limits.find((l) => l.key === key);
+      if (!lim) return old;
+      const keep = old?.resetAt && old.resetAt * 1000 > Date.now() && lim.percent > 0;
+      return { percent: lim.percent, resetAt: keep ? old.resetAt : null, resetText: lim.resets };
+    };
+    const next = { status: prev.status || '', session: pick('session', prev.session), week: pick('week (all models)', prev.week), at: Date.now() };
+    try { localStorage.setItem(USAGE_KEY, JSON.stringify(next)); } catch { /* sin almacenamiento */ }
+    return next;
+  }),
 }));
 
 let nextProc = 1;
@@ -77,6 +90,11 @@ export function makeClaudeStore() {
   let rows = new Map();
   let stderr = '';
   let gotInit = false;
+  let btwProc = null;
+  let toolRunning = false;
+  let outbox = Promise.resolve();
+  // En orden: un mensaje en cola no puede adelantarse al que arranca el turno.
+  const serial = (fn) => { const run = outbox.then(fn); outbox = run.catch(() => {}); return run; };
 
   return createStore((set, get) => {
     const msgs = () => get().messages;
@@ -114,6 +132,7 @@ export function makeClaudeStore() {
       if (last?.role === 'assistant' && !(last.content || '').trim() && !last.thinking && !last.plan) set({ messages: list.slice(0, -1) });
     };
     const finishTurn = () => {
+      toolRunning = false;
       flush();
       dropEmptyTail();
       set({ streaming: false, pendingApproval: null, pendingQuestion: null, ccCompacting: null });
@@ -132,6 +151,57 @@ export function makeClaudeStore() {
       dropEmptyTail();
       push({ role: 'compact', ms: started ? Date.now() - started : null, ...meta });
     };
+    const reveal = (item) => {
+      flush();
+      dropEmptyTail();
+      push(item.shown);
+      if (item.compacting) set({ ccCompacting: Date.now() });
+      else push({ role: 'assistant', content: '', engine: 'claude' });
+    };
+    const dequeue = (uuid) => {
+      const q = get().ccQueue;
+      const item = q.find((x) => x.uuid === uuid);
+      if (item) set({ ccQueue: q.filter((x) => x !== item) });
+      return item;
+    };
+    // La cola se retiene aquí (editable) y se suelta cuando empieza una
+    // herramienta: Claude Code lee su stdin en la pausa que sigue a esa herramienta.
+    // Los "/" esperan al final del turno, como en la terminal.
+    const deliver = () => {
+      const q = get().ccQueue;
+      const ready = q.filter((x) => !x.sent && !x.command);
+      if (!ready.length || !proc) return;
+      set({ ccQueue: q.map((x) => (ready.includes(x) ? { ...x, sent: true } : x)) });
+      serial(async () => {
+        const p = await ensureProc();
+        if (get().ccModel !== appliedModel) { await p.control({ subtype: 'set_model', model: get().ccModel || 'default' }); appliedModel = get().ccModel; }
+        for (const x of ready) await p.send(userMessage(x.prompt, x.images, x.uuid));
+      }).catch((err) => push({ role: 'error', content: String(err?.message || err) }));
+    };
+    const restoreDrafts = (items) => {
+      if (items.length) window.dispatchEvent(new CustomEvent('lixbon:restore-drafts', { detail: { drafts: items.map((x) => x.draft) } }));
+    };
+    function startTurn(item) {
+      const { shown, prompt, images, uuid, compacting } = item;
+      set({
+        messages: [...msgs(), shown, ...(compacting ? [] : [{ role: 'assistant', content: '', engine: 'claude' }])],
+        streaming: true,
+        ccCompacting: compacting ? Date.now() : null,
+        conversationTitle: get().conversationTitle || shown.content.slice(0, 60),
+      });
+      return serial(async () => {
+        const p = await ensureProc();
+        const mode = get().ccMode;
+        if (mode !== appliedMode) { await p.control({ subtype: 'set_permission_mode', mode }); appliedMode = mode; }
+        if (get().ccEffort !== appliedEffort) await applyEffort(p);
+        if (get().ccModel !== appliedModel) { await p.control({ subtype: 'set_model', model: get().ccModel || 'default' }); appliedModel = get().ccModel; }
+        await p.send(userMessage(prompt, images, uuid));
+      }).catch((err) => {
+        dropEmptyTail();
+        push({ role: 'error', content: String(err?.message || err) });
+        finishTurn();
+      });
+    }
 
     async function decide(req) {
       const root = useAppStore.getState().workspaceRoot;
@@ -144,6 +214,9 @@ export function makeClaudeStore() {
         if (!answers) return { behavior: 'deny', message: 'El usuario no respondió.' };
         const map = {};
         questions.forEach((q, i) => { map[q.question] = (answers[i] || []).join(', '); });
+        flush();
+        dropEmptyTail();
+        push({ role: 'tool', tool: 'ask_user', args: {}, ccName: name, pending: false, ok: true, answers: questions.map((q) => ({ question: q.question, answer: map[q.question] })) });
         return { behavior: 'allow', updatedInput: { ...input, answers: map } };
       }
       if (name === 'ExitPlanMode') {
@@ -200,6 +273,7 @@ export function makeClaudeStore() {
         case 'stream_event': {
           if (get().ccCompacting) break;
           const e = ev.event || {};
+          if (e.type === 'message_start') toolRunning = false;
           if (e.type === 'message_start') set({ ccMsgId: e.message?.id });
           if (e.type === 'content_block_delta') {
             const id = get().ccMsgId;
@@ -213,6 +287,7 @@ export function makeClaudeStore() {
           const m = ev.message || {};
           const u = m.usage;
           if (u) set({ ccContext: { ...get().ccContext, used: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) } });
+          if ((m.content || []).some((b) => b.type === 'tool_use')) { toolRunning = true; deliver(); }
           for (const b of m.content || []) {
             if (b.type === 'text' && !streamedMsgs.has(`${m.id}:text`)) appendText('content', b.text || '');
             else if (b.type === 'thinking' && !streamedMsgs.has(`${m.id}:thinking`)) appendText('thinking', b.thinking || '');
@@ -226,6 +301,11 @@ export function makeClaudeStore() {
           break;
         }
         case 'user': {
+          if (ev.isReplay) {
+            const item = dequeue(ev.uuid);
+            if (item) reveal(item);
+            break;
+          }
           const summary = compactSummaryOf(ev);
           if (summary != null) {
             const i = msgs().findLastIndex((m) => m.role === 'compact');
@@ -265,7 +345,12 @@ export function makeClaudeStore() {
           // Los comandos "/" locales de Claude Code solo dejan su salida aquí.
           if (!ev.is_error && ev.result) {
             const last = msgs()[msgs().length - 1];
-            if (last?.role === 'assistant' && !(last.content || '').trim()) patchAt(msgs().length - 1, { content: String(ev.result) });
+            const shown = (last?.content || '').trim();
+            if (last?.role === 'assistant' && (!shown || shown === String(ev.result).trim())) {
+              const usage = parseUsageText(ev.result);
+              if (usage) useClaudeUsage.getState().fromText(usage);
+              patchAt(msgs().length - 1, { content: String(ev.result), ...(usage ? { usage } : {}) });
+            }
           }
           if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
             if (!get().interrupted) {
@@ -275,8 +360,20 @@ export function makeClaudeStore() {
               push({ role: 'error', content: `Claude Code: ${text}${hint}` });
             }
           }
-          finishTurn();
           set({ interrupted: false });
+          // Un mensaje ya entregado que no alcanzó a entrar en el turno es el
+          // siguiente turno de Claude; si no, arranca el primero retenido.
+          const q = get().ccQueue;
+          const inflight = q.find((x) => x.sent);
+          finishTurn();
+          if (inflight) {
+            dequeue(inflight.uuid);
+            set({ streaming: true });
+            reveal(inflight);
+          } else if (q.length) {
+            dequeue(q[0].uuid);
+            startTurn(q[0]);
+          }
           break;
         }
         case 'control_request':
@@ -300,6 +397,8 @@ export function makeClaudeStore() {
         push({ role: 'error', content: why });
         finishTurn();
       }
+      restoreDrafts(get().ccQueue.filter((x) => !x.sent));
+      set({ ccQueue: [] });
       was.close();
     }
 
@@ -373,6 +472,8 @@ export function makeClaudeStore() {
       ccMode: initialCcMode(),
       ccEffort: localStorage.getItem(EFFORT_KEY) || 'auto',
       ccPrevMode: 'default',
+      ccQueue: [],
+      ccBtw: null,
       ccModels: cachedCatalog().models || [],
       ccCommands: cachedCatalog().commands || [],
       nativeTools: false,
@@ -472,37 +573,94 @@ export function makeClaudeStore() {
           set({ interrupted: true });
           proc.control({ subtype: 'interrupt' }).catch(() => {});
         }
+        // Como Esc en la terminal: lo que no llegó a entregarse vuelve a la caja.
+        const held = get().ccQueue.filter((x) => !x.sent);
+        set({ ccQueue: get().ccQueue.filter((x) => x.sent) });
+        restoreDrafts(held);
         finishTurn();
+      },
+      unqueue: (uuid, edit = false) => {
+        const item = get().ccQueue.find((x) => x.uuid === uuid && !x.sent);
+        if (!item) return;
+        set({ ccQueue: get().ccQueue.filter((x) => x !== item) });
+        if (edit) restoreDrafts([item]);
       },
 
       send: async (text, context = null, images = [], mentions = []) => {
         const hasImages = images?.length > 0;
-        if (get().streaming || (!text.trim() && !hasImages)) return;
+        if (!text.trim() && !hasImages) return;
         const shown = { role: 'user', content: text.trim(), images: hasImages ? images.map((im) => im.dataUrl) : null, context: context ? { name: context.name, selection: context.isSelection } : null };
         if (mentions?.length) shown.mentions = mentions.map((m) => m.name);
         let prompt = text.trim() || '(mira la imagen adjunta)';
         if (context?.path) prompt = `(Tengo abierto \`${context.path}\` en el editor${context.isSelection ? ', con una selección' : ''}.)\n\n${prompt}`;
         if (mentions?.length) prompt = `(Archivos mencionados: ${mentions.map((m) => `\`${m.rel || m.path}\``).join(', ')})\n\n${prompt}`;
 
-        const compacting = /^\/compact(\s|$)/i.test(text.trim());
-        set({
-          messages: [...msgs(), shown, ...(compacting ? [] : [{ role: 'assistant', content: '', engine: 'claude' }])],
-          streaming: true,
-          ccCompacting: compacting ? Date.now() : null,
-          conversationTitle: get().conversationTitle || shown.content.slice(0, 60),
-        });
+        const btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
+        if (btw) { get().askBtw((btw[1] || '').trim()); return; }
+
+        const item = {
+          uuid: crypto.randomUUID(),
+          shown,
+          prompt,
+          images: hasImages ? images : [],
+          compacting: /^\/compact(\s|$)/i.test(text.trim()),
+          command: text.trim().startsWith('/'),
+          draft: { text, images, mentions },
+        };
+        if (!get().streaming) { await startTurn(item); return; }
+        set({ ccQueue: [...get().ccQueue, item] });
+        if (toolRunning) deliver();
+      },
+
+      askBtw: async (question) => {
+        const root = useAppStore.getState().workspaceRoot;
+        get().closeBtw();
+        if (!question) { set({ ccBtw: { question: '', answer: '', error: 'Escribe la pregunta después de /btw.' } }); return; }
+        if (!root) { set({ ccBtw: { question, answer: '', error: 'Abre una carpeta de trabajo para usar Claude Code.' } }); return; }
+        set({ ccBtw: { question, answer: '', loading: true } });
+        const sid = get().conversationId;
+        const patch = (p) => set({ ccBtw: get().ccBtw && { ...get().ccBtw, ...p } });
+        let err = '';
+        let self = null;
+        // Claude Code no trae /btw en modo -p: se emula con una copia desechable
+        // de la sesión (fork sin persistencia) que no toca el turno en curso. Lleva
+        // las mismas herramientas que la principal para reusar su caché de prompt
+        // (cambiarlas cambia el prefijo cacheado); si intenta usarlas, se rechazan.
         try {
-          const p = await ensureProc();
-          const mode = get().ccMode;
-          if (mode !== appliedMode) { await p.control({ subtype: 'set_permission_mode', mode }); appliedMode = mode; }
-          if (get().ccEffort !== appliedEffort) await applyEffort(p);
-          if (get().ccModel !== appliedModel) { await p.control({ subtype: 'set_model', model: get().ccModel || 'default' }); appliedModel = get().ccModel; }
-          await p.send(userMessage(prompt, hasImages ? images : []));
-        } catch (err) {
-          dropEmptyTail();
-          push({ role: 'error', content: String(err?.message || err) });
-          finishTurn();
+          self = await startClaude({
+            procId: `${procId}-btw`, cwd: root, resume: sid, model: get().ccModel, permissionMode: 'default',
+            extraArgs: [...(sid ? ['--fork-session'] : []), '--no-session-persistence', '--max-turns', '1'],
+            onEvent: (ev) => {
+              if (!self || btwProc !== self) return;
+              if (ev.type === 'control_request' && ev.request?.subtype === 'can_use_tool') {
+                self.respond(ev.request_id, { behavior: 'deny', message: 'Es una pregunta al margen (/btw): responde sin herramientas.' }).catch(() => {});
+                return;
+              }
+              if (ev.type === 'stream_event' && ev.event?.delta?.type === 'text_delta') patch({ answer: (get().ccBtw?.answer || '') + ev.event.delta.text });
+              if (ev.type === 'result') {
+                patch({ loading: false, ...(ev.is_error ? { error: String(ev.result || 'Claude Code no pudo responder.') } : {}), ...(!get().ccBtw?.answer && ev.result ? { answer: String(ev.result) } : {}) });
+                btwProc = null;
+                self.close();
+              }
+            },
+            onStderr: (t) => { err += t; },
+            onExit: () => {
+              if (!self || btwProc !== self) return;
+              btwProc = null;
+              patch({ loading: false, ...(get().ccBtw?.answer ? {} : { error: err.trim().slice(0, 400) || 'Claude Code se cerró sin responder.' }) });
+            },
+          });
+          btwProc = self;
+          await self.send(userMessage(`Pregunta al margen (/btw): ${question}\n\nResponde breve y directo con lo que ya sabes de esta conversación. No uses herramientas ni retomes la tarea en curso.`));
+        } catch (e) {
+          patch({ loading: false, error: String(e?.message || e) });
         }
+      },
+      closeBtw: () => {
+        const p = btwProc;
+        btwProc = null;
+        p?.close();
+        set({ ccBtw: null });
       },
 
       runPlan: () => {

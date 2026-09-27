@@ -15,6 +15,7 @@ export function QuestionCard() {
 function Questions({ questions }) {
   const answer = useChatStore((s) => s.answerQuestion);
   const stop = useChatStore((s) => s.stop);
+  const isClaude = useChatStore((s) => s.engine === 'claude');
   const [step, setStep] = useState(0);
   const [picked, setPicked] = useState(() => questions.map(() => []));
   const [other, setOther] = useState(() => questions.map(() => ''));
@@ -69,9 +70,9 @@ function Questions({ questions }) {
   };
 
   return (
-    <div className="askq" ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}>
+    <div className={`askq${isClaude ? ' askq--claude' : ''}`} ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}>
       <div className="askq__head">
-        <span className="askq__eyebrow">El agente pregunta</span>
+        <span className="askq__eyebrow">{isClaude ? 'Claude pregunta' : 'El agente pregunta'}</span>
         {questions.length > 1 && (
           <div className="askq__tabs">
             {questions.map((qq, i) => (
