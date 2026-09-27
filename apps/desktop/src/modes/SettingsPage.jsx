@@ -9,6 +9,7 @@ import { AgentPage } from '../sections/Settings/pages/AgentPage';
 import { ModelsPage } from '../sections/Settings/pages/ModelsPage';
 import { EditorAdvancedPage } from '../sections/Settings/pages/EditorAdvancedPage';
 import { OrchestratorPage } from '../sections/Settings/pages/OrchestratorPage';
+import { McpPage } from '../sections/Settings/pages/McpPage';
 import { Keybindings } from '../sections/Settings/Keybindings';
 import { getAppVersion } from '../lib/tauri';
 import { IconChevronLeft, IconSearch } from '../components/Icons';
@@ -18,6 +19,7 @@ const SECTIONS = [
   { id: 'usage', label: 'Uso y límites', keywords: 'uso consumo cupo sesion semana tokens plan', Page: UsagePage },
   { id: 'agent', label: 'Agente y permisos', keywords: 'agente permisos aprobar comandos herramientas nativas autonomia modo', Page: AgentPage },
   { id: 'models', label: 'Modelos', keywords: 'modelos roles vision contexto ventana chat embeddings', Page: ModelsPage },
+  { id: 'mcp', label: 'Servidores MCP', keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
   { id: 'orch', label: 'Orquestador', keywords: 'orquestador agentes coordinador hijos skill lxo worktree experimental', Page: OrchestratorPage },
   { id: 'editor', label: 'Editor y avanzado', keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell indice rag servidor gateway actualizaciones version', Page: EditorAdvancedPage },
   { id: 'keys', label: 'Atajos de teclado', keywords: 'atajos teclado keybindings', Page: Keybindings, legacy: true, title: 'Atajos de teclado' },

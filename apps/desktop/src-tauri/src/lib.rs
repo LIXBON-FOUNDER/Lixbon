@@ -1333,6 +1333,8 @@ pub fn run() {
             mcp::mcp_stop,
             mcp::mcp_user_config,
             mcp::mcp_save_user_config,
+            mcp::mcp_import_sources,
+            mcp::mcp_open_user_config,
             claude_code::cc_version,
             claude_code::cc_start,
             claude_code::cc_send,

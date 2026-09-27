@@ -131,3 +131,35 @@
 .orch__field--wide { width: auto; flex: 1; max-width: 460px; }
 .orch__launcher-name { width: 110px; flex-shrink: 0; }
 .orch__repos { align-self: flex-start; margin: 4px 12px 10px; font-size: 11.5px; }
+
+/* Ajustes → Servidores MCP */
+.mcprow { align-items: flex-start; gap: 12px; }
+.mcprow__tile { flex-shrink: 0; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 11px; font-weight: 700; color: var(--ink-70); background: var(--surface-5, #2a2a2a); }
+.mcprow__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mcprow__main .srow__label { display: inline-flex; align-items: center; gap: 7px; }
+.mcprow__main .srow__label .orch__pill { margin-left: 0; }
+.mcprow__main .srow__tools { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcprow__actions { align-self: center; align-items: center; gap: 2px; }
+.mcprow__actions .ic, .mcprow__actions .lk { opacity: 0.6; transition: opacity 0.15s ease; }
+.mcprow:hover .mcprow__actions .ic, .mcprow__actions .lk.is-danger { opacity: 1; }
+.mcprow.is-error .mcprow__tile { color: var(--danger); background: var(--danger-soft); }
+.mcp__empty { display: flex; flex-direction: column; gap: 4px; padding: 14px 0; }
+.mcp__flash { color: var(--good); }
+
+.mcpf { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; padding: 14px 16px; }
+.mcpf__head { display: flex; align-items: center; gap: 10px; }
+.mcpf__templates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mcpf__grid { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.mcpf .fieldlabel { display: flex; flex-direction: column; gap: 6px; }
+.mcpf .field input.mono { font-family: var(--font-mono); font-size: 12px; }
+.mcpf__kv { display: flex; flex-direction: column; gap: 6px; }
+.mcpf__kvrow { display: flex; align-items: center; gap: 6px; }
+.mcpf__key { flex: 0 0 38%; }
+.mcpf__kvrow .field input { font-family: var(--font-mono); font-size: 12px; }
+.mcpf__add { align-self: flex-start; font-size: 11.5px; }
+.mcpf__json { width: 100%; min-height: 150px; padding: 10px 12px; resize: vertical; border: 0; outline: none; border-radius: var(--radius); font-size: 12px; line-height: 1.55; color: var(--ink); background: var(--surface-5, #2a2a2a); }
+.mcpf__error { margin: 0; font-size: 12px; color: var(--danger); white-space: pre-wrap; }
+.mcpf__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.mcpf__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.mcpf__pick { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; }
+.mcpf__pick input { accent-color: var(--accent); }

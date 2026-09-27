@@ -179,3 +179,105 @@ pub fn mcp_save_user_config(content: String) -> Result<String, String> {
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
+
+fn home() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from)
+}
+
+fn app_data() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return std::env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    return home().map(|h| h.join("Library/Application Support"));
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return home().map(|h| h.join(".config"));
+}
+
+#[derive(serde::Serialize)]
+pub struct McpImportSource {
+    source: String,
+    path: String,
+    servers: serde_json::Value,
+}
+
+fn servers_in(v: &serde_json::Value) -> Option<serde_json::Value> {
+    let obj = v.get("mcpServers").or_else(|| v.get("servers")).or_else(|| v.get("mcp").and_then(|m| m.get("servers")))?;
+    obj.as_object().filter(|o| !o.is_empty()).map(|_| obj.clone())
+}
+
+/// MCP que el usuario ya tiene en otros agentes, para importarlos. Solo se
+/// devuelven los bloques de servidores, no el resto de esos archivos
+/// (~/.claude.json guarda también historial y cuentas).
+#[tauri::command(async)]
+pub fn mcp_import_sources(cwd: String) -> Vec<McpImportSource> {
+    let mut out = vec![];
+    let mut push = |source: &str, path: PathBuf, pick: &dyn Fn(&serde_json::Value) -> Option<serde_json::Value>| {
+        let Ok(text) = fs::read_to_string(&path) else { return };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { return };
+        if let Some(servers) = pick(&json) {
+            out.push(McpImportSource { source: source.into(), path: path.to_string_lossy().into_owned(), servers });
+        }
+    };
+    if let Some(h) = home() {
+        let project = cwd.replace('\\', "/");
+        push("Claude Code", h.join(".claude.json"), &|j| {
+            let mut all = serde_json::Map::new();
+            if let Some(s) = j.get("mcpServers").and_then(|s| s.as_object()) {
+                all.extend(s.clone());
+            }
+            let proj = j.get("projects").and_then(|p| p.as_object()).and_then(|p| {
+                p.iter().find(|(k, _)| !project.is_empty() && k.replace('\\', "/").eq_ignore_ascii_case(&project)).map(|(_, v)| v.clone())
+            });
+            if let Some(s) = proj.as_ref().and_then(|p| p.get("mcpServers")).and_then(|s| s.as_object()) {
+                all.extend(s.clone());
+            }
+            (!all.is_empty()).then(|| serde_json::Value::Object(all))
+        });
+        push("Cursor", h.join(".cursor").join("mcp.json"), &servers_in);
+    }
+    if !cwd.is_empty() {
+        let p = PathBuf::from(&cwd);
+        push("Claude Code (proyecto)", p.join(".mcp.json"), &servers_in);
+        push("Cursor (proyecto)", p.join(".cursor").join("mcp.json"), &servers_in);
+        push("VS Code (proyecto)", p.join(".vscode").join("mcp.json"), &servers_in);
+    }
+    if let Some(base) = app_data() {
+        push("Claude Desktop", base.join("Claude").join("claude_desktop_config.json"), &servers_in);
+        push("VS Code", base.join("Code").join("User").join("mcp.json"), &servers_in);
+        push("VS Code", base.join("Code").join("User").join("settings.json"), &servers_in);
+    }
+    out
+}
+
+/// Abre `~/.lixbon/mcp.json` con la app del sistema (lo crea vacío si falta).
+#[tauri::command(async)]
+pub fn mcp_open_user_config() -> Result<String, String> {
+    let path = user_config_path().ok_or("no se encontró la carpeta del usuario")?;
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        fs::write(&path, "{\n  \"servers\": {}\n}\n").map_err(|e| e.to_string())?;
+    }
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("start").arg("").arg(&path);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(&path);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(&path);
+        c
+    };
+    crate::hide_console(&mut cmd);
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}

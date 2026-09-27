@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useMcpStore } from '../../store/mcpStore';
 import { useAppStore } from '../../store/appStore';
+import { useWorkbenchStore } from '../../store/workbenchStore';
 import { useFileViewStore } from '../../store/fileViewStore';
 import { MCP_CATALOG } from '../../lib/mcp';
 import { Segmented } from '../../components/Segmented';
@@ -43,6 +44,7 @@ export function McpList() {
       <div className="panelhead">
         <span className="panelhead__title">Extensiones</span>
         <div className="panelhead__fill" />
+        <button className="lk" onClick={() => useWorkbenchStore.getState().openSettings('mcp')} title="Añadir, importar o editar servidores">Gestionar</button>
         <button className="ic" onClick={reload} title="Releer mcp.json">
           {reloading ? <SpinRing size={13} /> : <IconRefresh size={14} />}
         </button>
@@ -66,7 +68,8 @@ export function McpList() {
 
         {tab === 'installed' && installed.length === 0 && (
           <p className="extlist__empty">
-            Sin servidores MCP. Añade uno del catálogo o decláralo en <span className="mono">.lixbon/mcp.json</span>.
+            Sin servidores MCP. Añade uno del catálogo o gestiónalos en{' '}
+            <button className="lk is-accent" onClick={() => useWorkbenchStore.getState().openSettings('mcp')}>Ajustes → Servidores MCP</button>.
           </p>
         )}
         {tab === 'installed' && installed.map((s) => (

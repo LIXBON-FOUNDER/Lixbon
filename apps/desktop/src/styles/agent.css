@@ -449,6 +449,9 @@
 .effwave--big.effwave--max span { background: linear-gradient(180deg, #FFB08A, var(--tone) 55%, #C8391F); }
 
 .effpop {
+  /* Portal sobre body: left/bottom los pone useAnchoredAbove. */
+  position: fixed;
+  z-index: 300;
   width: 300px;
   padding: 14px 16px 12px;
   border-radius: var(--radius);

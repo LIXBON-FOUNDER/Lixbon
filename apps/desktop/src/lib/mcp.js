@@ -227,3 +227,82 @@ export function fillTemplate(entry, values) {
     env: Object.fromEntries(Object.entries(entry.env).map(([k, v]) => [k, /^\{.+\}$/.test(v) ? values[`env:${k}`] || '' : v])),
   };
 }
+
+// ── Alta desde Ajustes: línea de comando, URL, JSON pegado o importado ──
+
+/** `npx -y "@a/b" --flag "con espacios"` → ['npx', '-y', '@a/b', '--flag', 'con espacios']. */
+export function splitCommandLine(line) {
+  const out = [];
+  let cur = '';
+  let quote = null;
+  let has = false;
+  for (const ch of String(line || '').trim()) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true;
+    } else if (/\s/.test(ch)) {
+      if (cur || has) out.push(cur);
+      cur = '';
+      has = false;
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur || has) out.push(cur);
+  return out;
+}
+
+export const joinCommandLine = (spec) => [spec.command, ...(spec.args || [])]
+  .map((a) => (/[\s"]/.test(a) || a === '' ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' ');
+
+// El cliente de Lixbon habla MCP por stdio; los servidores remotos (HTTP/SSE)
+// se conectan con el puente mcp-remote, que además resuelve su OAuth.
+export function remoteSpec(url, headers = {}) {
+  const args = ['-y', 'mcp-remote', url];
+  for (const [k, v] of Object.entries(headers)) args.push('--header', `${k}:${v}`);
+  return { command: 'npx', args, env: {} };
+}
+
+export const remoteUrlOf = (spec) => (spec?.command === 'npx' && spec.args?.[1] === 'mcp-remote' ? spec.args[2] : null);
+
+/** Un servidor en cualquiera de los formatos habituales (Claude, Cursor, VS Code). */
+export function specFrom(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.command === 'string') {
+    return {
+      command: raw.command,
+      args: Array.isArray(raw.args) ? raw.args.map(String) : [],
+      env: Object.fromEntries(Object.entries(raw.env || {}).map(([k, v]) => [k, String(v)])),
+    };
+  }
+  const url = raw.url || raw.serverUrl;
+  if (typeof url === 'string') return remoteSpec(url, raw.headers || {});
+  return null;
+}
+
+/** JSON pegado de una documentación: `{"mcpServers": {...}}`, `{"servers": {...}}`,
+    `"nombre": {...}` suelto o un único servidor (entonces hace falta `fallbackName`). */
+export function parseMcpJson(text, fallbackName = '') {
+  let src = String(text || '').trim();
+  if (!src) throw new Error('Pega la configuración del servidor.');
+  if (!src.startsWith('{')) src = `{${src}}`;
+  let data;
+  try { data = JSON.parse(src); } catch (e) {
+    try { data = JSON.parse(src.replace(/,\s*([}\]])/g, '$1')); } catch { throw new Error(`No es JSON válido: ${e.message}`); }
+  }
+  const block = data.mcpServers || data.servers || data.mcp?.servers || data;
+  if (specFrom(block)) {
+    if (!fallbackName) throw new Error('Es un solo servidor: escribe arriba su nombre.');
+    return { [fallbackName]: specFrom(block) };
+  }
+  const out = {};
+  for (const [name, raw] of Object.entries(block)) {
+    const spec = specFrom(raw);
+    if (spec) out[name] = spec;
+  }
+  if (!Object.keys(out).length) throw new Error('No se encontró ningún servidor con "command" o "url".');
+  return out;
+}
