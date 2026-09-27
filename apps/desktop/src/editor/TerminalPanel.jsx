@@ -14,7 +14,7 @@ import { termOpen, termWrite, termResize, termClose } from '../lib/tauri';
 import { Select } from '../components/Select';
 import { IconX, IconPlus } from '../components/Icons';
 
-const XTERM_THEMES = {
+export const XTERM_THEMES = {
   dark: {
     background: '#111111',
     foreground: '#DCDCD6',
@@ -39,10 +39,10 @@ const XTERM_THEMES = {
   },
 };
 
-const currentXtermTheme = () =>
+export const currentXtermTheme = () =>
   document.documentElement.dataset.theme === 'dark' ? XTERM_THEMES.dark : XTERM_THEMES.light;
 
-const FONT = "'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace";
+export const FONT = "'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace";
 
 const SHELLS = [
   { id: 'powershell', label: 'PowerShell' },

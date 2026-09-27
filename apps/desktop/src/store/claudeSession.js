@@ -8,7 +8,7 @@ import { useAppStore } from './appStore';
 import { useFileViewStore } from './fileViewStore';
 import { useOutputStore } from './outputStore';
 import { initialMode, initialPolicy, useSessionsStore, agentSettings } from './chatStore';
-import { parseUsageText } from '../lib/claudeUsage';
+import { commandCard, parseSlash } from '../lib/claudeCommands';
 import { computeChangePreview, revertSnapshot, DEFAULT_CMD_ALLOWLIST } from '../lib/agent';
 import {
   startClaude, userMessage, mapTool, changeOf, resultText, compactSummaryOf,
@@ -93,6 +93,12 @@ export function makeClaudeStore() {
   let btwProc = null;
   let toolRunning = false;
   let outbox = Promise.resolve();
+  // Un "/" es local si Claude Code lo resuelve sin llamar al modelo: en ese
+  // turno no llega ningún message_start.
+  let turnCmd = null;
+  let turnSpoke = false;
+  // total_cost_usd es lo acumulado por el proceso, no lo del turno.
+  let costBase = 0;
   // En orden: un mensaje en cola no puede adelantarse al que arranca el turno.
   const serial = (fn) => { const run = outbox.then(fn); outbox = run.catch(() => {}); return run; };
 
@@ -151,7 +157,9 @@ export function makeClaudeStore() {
       dropEmptyTail();
       push({ role: 'compact', ms: started ? Date.now() - started : null, ...meta });
     };
+    const beginTurn = (item) => { turnCmd = item.shown.command || null; turnSpoke = false; };
     const reveal = (item) => {
+      beginTurn(item);
       flush();
       dropEmptyTail();
       push(item.shown);
@@ -183,6 +191,7 @@ export function makeClaudeStore() {
     };
     function startTurn(item) {
       const { shown, prompt, images, uuid, compacting } = item;
+      beginTurn(item);
       set({
         messages: [...msgs(), shown, ...(compacting ? [] : [{ role: 'assistant', content: '', engine: 'claude' }])],
         streaming: true,
@@ -273,8 +282,11 @@ export function makeClaudeStore() {
         case 'stream_event': {
           if (get().ccCompacting) break;
           const e = ev.event || {};
-          if (e.type === 'message_start') toolRunning = false;
-          if (e.type === 'message_start') set({ ccMsgId: e.message?.id });
+          if (e.type === 'message_start') {
+            toolRunning = false;
+            turnSpoke = true;
+            set({ ccMsgId: e.message?.id });
+          }
           if (e.type === 'content_block_delta') {
             const id = get().ccMsgId;
             if (e.delta?.type === 'text_delta') { streamedMsgs.add(`${id}:text`); appendText('content', e.delta.text); }
@@ -286,7 +298,8 @@ export function makeClaudeStore() {
           if (get().ccCompacting) break;
           const m = ev.message || {};
           const u = m.usage;
-          if (u) set({ ccContext: { ...get().ccContext, used: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) } });
+          // Los "/" locales responden con un mensaje sintético de uso 0.
+          if (u && m.model !== '<synthetic>') set({ ccContext: { ...get().ccContext, used: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) } });
           if ((m.content || []).some((b) => b.type === 'tool_use')) { toolRunning = true; deliver(); }
           for (const b of m.content || []) {
             if (b.type === 'text' && !streamedMsgs.has(`${m.id}:text`)) appendText('content', b.text || '');
@@ -339,19 +352,18 @@ export function makeClaudeStore() {
           const mu = Object.values(ev.modelUsage || {})[0];
           set({
             ccContext: { ...get().ccContext, window: mu?.contextWindow || get().ccContext.window },
-            ccCost: (get().ccCost || 0) + (ev.total_cost_usd || 0),
+            ccCost: costBase + (ev.total_cost_usd || 0),
           });
           if (get().ccCompacting) endCompact();
-          // Los comandos "/" locales de Claude Code solo dejan su salida aquí.
-          if (!ev.is_error && ev.result) {
-            const last = msgs()[msgs().length - 1];
-            const shown = (last?.content || '').trim();
-            if (last?.role === 'assistant' && (!shown || shown === String(ev.result).trim())) {
-              const usage = parseUsageText(ev.result);
-              if (usage) useClaudeUsage.getState().fromText(usage);
-              patchAt(msgs().length - 1, { content: String(ev.result), ...(usage ? { usage } : {}) });
-            }
+          const last = msgs()[msgs().length - 1];
+          if (turnCmd && !turnSpoke && !ev.is_error && last?.role === 'assistant') {
+            const card = commandCard(turnCmd.name, turnCmd.args, ev.result);
+            set({ messages: [...msgs().slice(0, -1), card] });
+            applyCommand(card);
+          } else if (!ev.is_error && ev.result && last?.role === 'assistant' && !(last.content || '').trim()) {
+            patchAt(msgs().length - 1, { content: String(ev.result) });
           }
+          turnCmd = null;
           if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) {
             if (!get().interrupted) {
               const text = String(ev.result || ev.subtype || 'Claude Code terminó con un error.');
@@ -415,6 +427,7 @@ export function makeClaudeStore() {
         appliedModel = get().ccModel;
         appliedEffort = get().ccEffort;
         hiddenTurns = 0;
+        costBase = get().ccCost || 0;
         const p = await startClaude({
           procId, cwd: root, resume: get().conversationId, model: appliedModel, effort: appliedEffort, permissionMode: appliedMode,
           onEvent, onStderr: (t) => { stderr += t; }, onExit,
@@ -425,7 +438,7 @@ export function makeClaudeStore() {
           const catalog = {
             models: Array.isArray(info.models) ? info.models : get().ccModels,
             commands: Array.isArray(info.commands)
-              ? info.commands.map((c) => ({ name: c.name, description: c.description || '', hint: c.argumentHint || '' }))
+              ? info.commands.map((c) => ({ name: c.name, description: c.description || '', hint: c.argumentHint || '', builtin: !!c.builtin }))
               : get().ccCommands,
           };
           try { localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog)); } catch { /* sin almacenamiento */ }
@@ -434,6 +447,28 @@ export function makeClaudeStore() {
         return p;
       })();
       try { return await starting; } finally { starting = null; }
+    }
+
+    // Lo que un "/" cambia en Claude Code se refleja en los controles del IDE,
+    // y se da por aplicado para no volver a mandarlo en el siguiente turno.
+    function applyCommand(card) {
+      const out = card.output;
+      if (card.name === 'model' && card.args && /^Set model to/i.test(out)) {
+        const ccModel = card.args === 'default' ? '' : card.args;
+        localStorage.setItem(MODEL_KEY, ccModel);
+        appliedModel = ccModel;
+        set({ ccModel });
+      }
+      const effort = card.name === 'effort' && /^Set effort level to (\w+)/i.exec(out)?.[1];
+      if (effort) {
+        localStorage.setItem(EFFORT_KEY, effort);
+        appliedEffort = effort;
+        set({ ccEffort: effort });
+      }
+      const title = card.name === 'rename' && /^Session renamed to: (.+)$/m.exec(out)?.[1];
+      if (title) set({ conversationTitle: title.trim() });
+      if (card.context?.used != null) set({ ccContext: { used: card.context.used, window: card.context.total || get().ccContext.window } });
+      if (card.usage) useClaudeUsage.getState().fromText(card.usage);
     }
 
     async function applyEffort(p) {
@@ -595,16 +630,19 @@ export function makeClaudeStore() {
         if (context?.path) prompt = `(Tengo abierto \`${context.path}\` en el editor${context.isSelection ? ', con una selección' : ''}.)\n\n${prompt}`;
         if (mentions?.length) prompt = `(Archivos mencionados: ${mentions.map((m) => `\`${m.rel || m.path}\``).join(', ')})\n\n${prompt}`;
 
-        const btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
-        if (btw) { get().askBtw((btw[1] || '').trim()); return; }
+        const slash = parseSlash(text);
+        if (slash?.name === 'btw') { get().askBtw(slash.args); return; }
+        if (slash?.name === 'clear' || slash?.name === 'new') { await get().newConversation(); return; }
+        // Claude Code solo reconoce el "/" al principio del mensaje: sin el contexto delante.
+        if (slash) { shown.command = slash; prompt = text.trim(); }
 
         const item = {
           uuid: crypto.randomUUID(),
           shown,
           prompt,
           images: hasImages ? images : [],
-          compacting: /^\/compact(\s|$)/i.test(text.trim()),
-          command: text.trim().startsWith('/'),
+          compacting: slash?.name === 'compact',
+          command: !!slash,
           draft: { text, images, mentions },
         };
         if (!get().streaming) { await startTurn(item); return; }

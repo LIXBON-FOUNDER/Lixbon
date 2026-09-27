@@ -4,6 +4,7 @@
 // Cambios, Contexto y Terminal funcionen igual con los dos agentes.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { commandCard } from './claudeCommands';
 
 // Hasta el primer `initialize` (y su caché) no se sabe qué ofrece la cuenta.
 export const CLAUDE_MODELS = [
@@ -182,6 +183,11 @@ export function resultText(block) {
 }
 
 const HIDDEN_USER = /^(<command-|<local-command|<system-reminder|Caveat:)/;
+const COMMAND_NAME = /<command-name>\/?([^<]+)<\/command-name>/;
+const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+const COMMAND_OUT = /<local-command-std(?:out|err)>([\s\S]*?)<\/local-command-std(?:out|err)>/;
+// El IDE manda `/effort` por su cuenta al mover el control: no es del usuario.
+const IDE_COMMANDS = new Set(['effort']);
 
 /** Transcripción guardada de Claude Code → mensajes del chat. Los cambios del
     historial ya están hechos: se marcan aceptados para no pedir revisión. */
@@ -208,6 +214,7 @@ export function transcriptToMessages(text, root) {
     return b;
   };
   let title = '';
+  let lastCmd = null;
   for (const line of String(text).split('\n')) {
     if (!line.trim()) continue;
     let ev;
@@ -217,6 +224,12 @@ export function transcriptToMessages(text, root) {
     if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
       const m = ev.compactMetadata || ev.compact_metadata || {};
       out.push({ role: 'compact', trigger: m.trigger, preTokens: m.preTokens ?? m.pre_tokens });
+      continue;
+    }
+    if (ev.type === 'system' && ev.subtype === 'local_command') {
+      const run = ev.commandRun ? { name: ev.commandRun.command, args: ev.commandRun.args || '' } : lastCmd;
+      const stdout = COMMAND_OUT.exec(String(ev.content || ''))?.[1];
+      if (run && stdout != null && !IDE_COMMANDS.has(run.name)) out.push(commandCard(run.name, run.args, stdout));
       continue;
     }
     if ((ev.type !== 'user' && ev.type !== 'assistant') || ev.isSidechain || ev.isMeta) continue;
@@ -243,7 +256,12 @@ export function transcriptToMessages(text, root) {
       continue;
     }
     if (typeof content === 'string') {
-      if (!HIDDEN_USER.test(content.trim())) out.push({ role: 'user', content });
+      const name = COMMAND_NAME.exec(content)?.[1]?.trim();
+      if (name) {
+        const args = COMMAND_ARGS.exec(content)?.[1]?.trim() || '';
+        lastCmd = { name, args };
+        if (!IDE_COMMANDS.has(name)) out.push({ role: 'user', content: `/${name}${args ? ` ${args}` : ''}`, command: lastCmd });
+      } else if (!HIDDEN_USER.test(content.trim())) out.push({ role: 'user', content });
       continue;
     }
     for (const b of Array.isArray(content) ? content : []) {

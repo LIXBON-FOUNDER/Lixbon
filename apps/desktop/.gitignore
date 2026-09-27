@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sidecars compilados por scripts/build-lxo.mjs
+src-tauri/binaries/

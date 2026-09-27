@@ -27,6 +27,7 @@ export const DEFAULT_KEYMAP = {
   'ctrl+2': 'mode.editor',
   'ctrl+3': 'mode.design',
   'ctrl+4': 'mode.git',
+  'ctrl+5': 'mode.orch',
   'ctrl+k': 'workbench.focusSearch',
   'ctrl+,': 'workbench.openSettings',
   'ctrl+.': 'chat.cycleMode',

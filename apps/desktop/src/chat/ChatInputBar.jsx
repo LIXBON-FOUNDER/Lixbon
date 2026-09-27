@@ -4,7 +4,7 @@
 // El menú "/", el de @-menciones y el de opciones del agente se montan en un
 // portal sobre <body> con posición fija: `.shell__center` tiene overflow:hidden
 // (lo necesita el panel redondeado) y eso los recortaba — igual que Select.jsx.
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { Fragment, useRef, useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useChatStore, useSessionsStore, CHAT_MODES } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
@@ -14,6 +14,8 @@ import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
 import { Select } from '../components/Select';
 import { CLAUDE_MODES, claudeModelOptions } from '../lib/claudeCode';
+import { claudeMenuEntries } from '../lib/claudeCommands';
+import { orchestrateFromChat } from '../store/orchStore';
 import { Switch } from '../components/Switch';
 import { ClaudeMark } from '../components/Logo';
 import { EffortSlider } from './EffortSlider';
@@ -56,22 +58,26 @@ const SLASH_COMMANDS = [
   { cmd: 'key', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
   { cmd: 'config', desc: 'Ajustes', Icon: IconGear, run: () => runCommand('workbench.openSettings') },
   { cmd: 'remote', desc: 'Control remoto por QR', Icon: IconTerminal, run: () => runCommand('remote.open') },
+  { cmd: 'orquestar', desc: 'Repartir un objetivo entre varios agentes (experimental)', hint: '<objetivo>', Icon: IconPuzzle },
   { cmd: 'help', desc: 'Ver todos los comandos', Icon: IconList, run: () => runCommand('workbench.commandPalette') },
 ];
 
 // En una sesión de Claude Code solo valen las acciones del IDE que tienen
 // sentido para él (las que cambian lo que el IDE muestra: conversación nueva,
 // modelo, modo); el resto de "/" son los comandos del propio Claude Code.
-const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace']);
+const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace', 'orquestar']);
+
+const GROUP_LABELS = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' };
 
 function claudeSlashCommands(commands = []) {
-  const local = SLASH_COMMANDS.filter((c) => CLAUDE_LOCAL.has(c.cmd));
-  local.push({ cmd: 'btw', desc: 'Pregunta al margen, sin interrumpir a Claude', hint: '<pregunta>', Icon: IconTerminal, claude: true });
+  const local = SLASH_COMMANDS.filter((c) => CLAUDE_LOCAL.has(c.cmd)).map((c) => ({ ...c, group: 'lixbon' }));
+  local.push({ cmd: 'btw', desc: 'Pregunta al margen, sin interrumpir a Claude', hint: '<pregunta>', Icon: IconTerminal, claude: true, group: 'lixbon' });
   const taken = new Set(local.map((c) => c.cmd));
-  const remote = commands
-    .filter((c) => c?.name && !taken.has(c.name) && !c.name.startsWith('__'))
-    .map((c) => ({ cmd: c.name, desc: c.description || 'Comando de Claude Code', hint: c.hint, Icon: IconTerminal, claude: true }));
-  return [...local, ...remote];
+  const remote = claudeMenuEntries(commands)
+    .filter((c) => !taken.has(c.cmd))
+    .map((c) => ({ ...c, Icon: c.group === 'skill' ? IconPuzzle : IconTerminal, claude: true }));
+  const order = { lixbon: 0, claude: 1, skill: 2 };
+  return [...local, ...remote.sort((a, b) => order[a.group] - order[b.group])];
 }
 
 /** Fuzzy match por subsecuencia (igual que QuickOpen). -1 = no coincide. */
@@ -301,14 +307,18 @@ export function ChatInputBar() {
   const pickSlash = (entry) => {
     if (!entry) return;
     if (entry.claude) {
-      // Con argumentos se deja escrito para completarlo; sin ellos va directo.
-      if (entry.hint) {
+      if (!entry.direct) {
         setText(`/${entry.cmd} `);
         requestAnimationFrame(() => textareaRef.current?.focus());
         return;
       }
       setText('');
       send(`/${entry.cmd}`, null, [], []);
+      return;
+    }
+    if (!entry.run) {
+      setText(`/${entry.cmd} `);
+      requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
     setText('');
@@ -341,6 +351,13 @@ export function ChatInputBar() {
     // sigue abriendo el control remoto en vez de mandarlo al modelo.
     if (/^\/remote(\s|$)/i.test(text.trim())) {
       runCommand('remote.open');
+      setText('');
+      return;
+    }
+    const orch = /^\/orquestar(?:\s+([\s\S]+))?$/i.exec(text.trim());
+    if (orch) {
+      if (!orch[1]?.trim()) return;
+      orchestrateFromChat(orch[1].trim());
       setText('');
       return;
     }
@@ -379,16 +396,18 @@ export function ChatInputBar() {
       {slashOpen && cmdmenuPos && createPortal(
         <div className="cmdmenu" style={cmdmenuPos}>
           {slashMatches.map((c, i) => (
-            <div
-              key={c.cmd}
-              className={`cmdrow ${i === slashSel ? 'is-sel' : ''}`}
-              onPointerEnter={() => setSlashSel(i)}
-              onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}
-            >
-              <span className="cmdrow__icon"><c.Icon size={13} /></span>
-              <span className="cmdrow__name">/{c.cmd}{c.hint ? <span className="cmdrow__hint"> {c.hint}</span> : null}</span>
-              <span className="cmdrow__desc">{c.desc}</span>
-            </div>
+            <Fragment key={c.cmd}>
+              {c.group && c.group !== slashMatches[i - 1]?.group && <div className="cmdmenu__group">{GROUP_LABELS[c.group]}</div>}
+              <div
+                className={`cmdrow ${i === slashSel ? 'is-sel' : ''}`}
+                onPointerEnter={() => setSlashSel(i)}
+                onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}
+              >
+                <span className="cmdrow__icon"><c.Icon size={13} /></span>
+                <span className="cmdrow__name">/{c.cmd}{c.hint ? <span className="cmdrow__hint"> {c.hint}</span> : null}</span>
+                <span className="cmdrow__desc" title={c.desc}>{c.desc}</span>
+              </div>
+            </Fragment>
           ))}
         </div>,
         document.body,

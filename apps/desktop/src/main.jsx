@@ -14,6 +14,7 @@ import "./styles/views.css";
 import "./styles/studio.css";
 import "./styles/agent.css";
 import "./styles/settings.css";
+import "./styles/orch.css";
 import { initUiScale } from "./lib/uiScale";
 
 async function start() {

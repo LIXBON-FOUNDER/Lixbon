@@ -3,7 +3,7 @@
 import { memo, useEffect, useState } from 'react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { useChatStore } from '../store/chatStore';
-import { IconGlobe, IconFileCode } from '../components/Icons';
+import { IconGlobe, IconFileCode, IconCheck } from '../components/Icons';
 import { ClaudeMark } from '../components/Logo';
 
 /** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
@@ -136,7 +136,91 @@ function UsageCard({ usage }) {
   );
 }
 
+const CTX_TONES = {
+  messages: '#D97757',
+  'system prompt': '#8A8F98',
+  'system tools': '#6E9BD1',
+  'system tools (deferred)': '#4E6E96',
+  'mcp tools': '#9C7BD1',
+  'mcp tools (deferred)': '#6C5896',
+  'mcp server instructions': '#B69BE0',
+  'memory files': '#7FB58A',
+  'custom agents': '#D1B36E',
+  skills: '#5FB3B3',
+};
+
+function ContextCard({ context }) {
+  const parts = context.categories.filter((c) => c.key !== 'free space' && c.tokens > 0);
+  const free = context.categories.find((c) => c.key === 'free space');
+  return (
+    <div className="ccctx">
+      <div className="ccusage__row">
+        <span className="ccusage__label">{context.model || 'Contexto'}</span>
+        <span className="ccusage__pct">{context.usedText} / {context.totalText} · {context.pct}%</span>
+      </div>
+      <div className="ccctx__bar">
+        {parts.map((c) => <span key={c.key} style={{ width: `${c.pct}%`, background: c.key === 'autocompact buffer' ? undefined : CTX_TONES[c.key] || '#8A8F98' }} className={c.key === 'autocompact buffer' ? 'is-reserve' : ''} title={`${c.label} · ${c.text}`} />)}
+      </div>
+      <ul className="ccctx__legend">
+        {[...parts, ...(free ? [free] : [])].map((c) => (
+          <li key={c.key}>
+            <i className={c.key === 'autocompact buffer' ? 'is-reserve' : c.key === 'free space' ? 'is-free' : ''} style={CTX_TONES[c.key] ? { background: CTX_TONES[c.key] } : undefined} />
+            <span>{c.label}</span>
+            <span className="ccctx__num">{c.text}</span>
+          </li>
+        ))}
+      </ul>
+      {context.details && (
+        <details className="ccusage__more">
+          <summary>Detalle por skill, herramienta y servidor</summary>
+          <div className="ccctx__details"><ChatMarkdown>{context.details}</ChatMarkdown></div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// Solo /context y similares traen markdown de verdad; el resto son líneas
+// alineadas en columnas que el markdown desharía.
+const looksMarkdown = (t) => /^(#{1,4} |\|.*\|)/m.test(t);
+const plain = (t) => t.replace(/`([^`\n]+)`/g, '$1');
+
+function CommandCard({ message }) {
+  const send = useChatStore((s) => s.send);
+  const { name, args, output, choices } = message;
+  return (
+    <div className="msg cccmd">
+      {message.usage ? <UsageCard usage={message.usage} />
+        : message.context ? <ContextCard context={message.context} />
+          : output ? (
+            <div className="cccmd__out">
+              {looksMarkdown(output) ? <ChatMarkdown>{output}</ChatMarkdown> : <pre>{plain(output)}</pre>}
+            </div>
+          ) : <div className="cccmd__out cccmd__out--empty">Hecho, sin salida.</div>}
+      {choices?.length > 0 && (
+        <div className="cccmd__choices">
+          {choices.map((c) => (
+            <button key={c.value} className={`cccmd__choice${c.current ? ' is-current' : ''}`} title={c.desc || `/${name} ${c.value}`} onClick={() => send(`/${name} ${c.value}`)}>
+              {c.value}{c.current && <IconCheck size={11} />}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="cccmd__foot">/{name}{args ? ` ${args}` : ''} · local, sin gastar tokens</div>
+    </div>
+  );
+}
+
 export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
+  if (message.role === 'cmd') return <CommandCard message={message} />;
+  if (message.role === 'user' && message.command) {
+    return (
+      <div className="msg msg--user msg--cmd">
+        <span className="msg__cmdname">/{message.command.name}</span>
+        {message.command.args && <span className="msg__cmdargs">{message.command.args}</span>}
+      </div>
+    );
+  }
   if (message.role === 'user') {
     return (
       <div className="msg msg--user">

@@ -27,6 +27,7 @@ mod preview_proxy;
 mod visual_server;
 mod team;
 mod claude_code;
+mod orch;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1262,6 +1263,7 @@ pub fn run() {
         .manage(claude_code::ClaudeSessions::default())
         .manage(preview_proxy::PreviewProxy::default())
         .manage(visual_server::VisualServer::default())
+        .manage(orch::Orch::default())
         .manage(FsWatchState {
             watcher: Mutex::new(None),
             pending: Arc::new(Mutex::new(HashSet::new())),
@@ -1270,6 +1272,7 @@ pub fn run() {
             // Hilo que emite los lotes de cambios de disco al frontend.
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
+            app.state::<orch::Orch>().0.init(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1279,6 +1282,7 @@ pub fn run() {
                 if window.label() == "main" {
                     window.state::<mcp::McpServers>().stop_all();
                     window.state::<claude_code::ClaudeSessions>().stop_all();
+                    window.state::<orch::Orch>().0.shutdown();
                     team::apagar(window.app_handle());
                 }
             }
@@ -1334,7 +1338,19 @@ pub fn run() {
             claude_code::cc_send,
             claude_code::cc_stop,
             claude_code::cc_sessions,
-            claude_code::cc_session_read
+            claude_code::cc_session_read,
+            orch::orch_snapshot,
+            orch::orch_settings_set,
+            orch::orch_call,
+            orch::orch_new_run,
+            orch::orch_term_buffer,
+            orch::orch_term_write,
+            orch::orch_term_resize,
+            orch::orch_agents,
+            orch::orch_skill_install,
+            orch::orch_skill_uninstall,
+            orch::orch_path_status,
+            orch::orch_add_to_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

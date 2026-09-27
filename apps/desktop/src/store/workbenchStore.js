@@ -14,7 +14,7 @@ const write = (key, value) => {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* sin almacenamiento */ }
 };
 
-export const MODES = ['agent', 'editor', 'design', 'git'];
+export const MODES = ['agent', 'editor', 'design', 'git', 'orch'];
 
 export const SIZE_LIMITS = {
   side: [180, 480],
@@ -29,7 +29,7 @@ const DEFAULT_SIZES = { side: 240, agent: 400, terminal: 190, sessions: 248, cha
 
 // Paneles laterales de los modos que no son el editor (el editor usa
 // sideOpen/agentOpen). Git no tiene panel derecho.
-const DEFAULT_MODE_PANELS = { agent: { left: true, right: true }, design: { left: true, right: true }, git: { left: true } };
+const DEFAULT_MODE_PANELS = { agent: { left: true, right: true }, design: { left: true, right: true }, git: { left: true }, orch: { left: true } };
 
 /** { left, right } del modo activo; right = undefined si el modo no lo tiene. */
 export const selectSidePanels = (s) => (s.mode === 'editor'
@@ -68,7 +68,7 @@ export const useWorkbenchStore = create((set, get) => ({
   setMode: (mode) => {
     if (!MODES.includes(mode)) return;
     write('lx_mode', mode);
-    set({ page: null, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : get().focus });
+    set({ page: null, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? 'orchmain' : get().focus });
   },
 
   setFocus: (focus) => { if (get().focus !== focus) set({ focus }); },

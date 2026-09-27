@@ -1,11 +1,12 @@
 {
   "name": "lixbon",
   "private": true,
-  "version": "2.0.5",
+  "version": "2.0.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:lxo": "node scripts/build-lxo.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

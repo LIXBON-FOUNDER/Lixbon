@@ -42,6 +42,7 @@ import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib
 import { describeImages } from '../lib/vision';
 import { roleWarning } from '../lib/modelRoles';
 import { makeClaudeStore } from './claudeSession';
+import { orchPromptSection } from './orchStore';
 
 /** Categoría de permisos de una herramienta (Ajustes → Agente y permisos). */
 export function toolCategory(tool) {
@@ -476,7 +477,7 @@ function makeChatStore() {
       ];
       if (agentActive) {
         const mcp = chatMode === 'agent' ? mcpPromptSection() : '';
-        modelMessages.unshift({ role: 'system', content: (await buildAgentSystemPrompt(workspaceRoot)) + mcp + modePrompt(chatMode) });
+        modelMessages.unshift({ role: 'system', content: (await buildAgentSystemPrompt(workspaceRoot)) + mcp + (chatMode === 'agent' ? orchPromptSection() : '') + modePrompt(chatMode) });
       }
 
       abortController = new AbortController();

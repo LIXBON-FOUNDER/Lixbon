@@ -218,6 +218,7 @@ export function registerBuiltinCommands() {
     { id: 'mode.editor', title: 'Modo Editor', category: 'Ver', keywords: 'editor codigo', run: () => wb().setMode('editor') },
     { id: 'mode.design', title: 'Modo Diseño', category: 'Ver', keywords: 'diseno vista previa emulador movil responsive', run: () => wb().setMode('design') },
     { id: 'mode.git', title: 'Modo Git', category: 'Ver', keywords: 'git cambios commit github', run: () => wb().setMode('git') },
+    { id: 'mode.orch', title: 'Modo Orquestador', category: 'Ver', keywords: 'orquestador agentes coordinador hijos worktree lxo', run: () => wb().setMode('orch') },
 
     // ── Archivos ────────────────────────────────────────────────────────
     {

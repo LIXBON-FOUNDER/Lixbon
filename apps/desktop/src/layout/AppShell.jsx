@@ -17,6 +17,7 @@ import { EditorMode } from '../modes/EditorMode';
 import { AgentMode } from '../modes/AgentMode';
 import { DesignMode } from '../modes/DesignMode';
 import { GitMode } from '../modes/GitMode';
+import { OrchestratorMode } from '../orch/OrchestratorMode';
 import { Welcome } from '../modes/Welcome';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { SettingsPage } from '../modes/SettingsPage';
@@ -116,6 +117,7 @@ export function AppShell() {
             {!page && mode === 'agent' && <AgentMode />}
             {!page && mode === 'design' && <DesignMode />}
             {!page && mode === 'git' && <GitMode />}
+            {!page && mode === 'orch' && <OrchestratorMode />}
           </>
         )}
       </div>

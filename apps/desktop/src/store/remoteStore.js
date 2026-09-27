@@ -57,6 +57,8 @@ function mapSnapshot(messages) {
       out.push({ role: 'tool', tool: m.tool, content: (m.content || '').slice(0, RESULT_CHARS), ok: m.ok !== false });
     } else if (m.role === 'error') {
       out.push({ role: 'error', content: m.content || '' });
+    } else if (m.role === 'cmd' && m.output) {
+      out.push({ role: 'assistant', content: m.output });
     }
   }
   return out.slice(-SNAPSHOT_MSGS);
