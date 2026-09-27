@@ -137,7 +137,7 @@ export async function orchestrateFromChat(objective) {
   if (!root) { toast('Abre la carpeta del repositorio con el que quieres orquestar.'); return; }
   const res = await st.newRun(objective, settings.default_agent, root);
   if (res) {
-    toast(`Coordinador lanzado (${AGENT_LABELS[settings.default_agent] || settings.default_agent}) en ${root.split(/[\/]/).pop()}`);
+    toast(`Coordinador lanzado (${AGENT_LABELS[settings.default_agent] || settings.default_agent}) en ${root.split(/[\\/]/).pop()}`);
     useWorkbenchStore.getState().setMode('orch');
   }
 }
