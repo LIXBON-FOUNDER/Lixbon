@@ -6,8 +6,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-pub const SKILL_NAME: &str = "lixbon-orquestador";
-pub const SKILL_VERSION: u32 = 1;
+/// Como skill, su nombre es también el comando: `/orquestar <objetivo>`.
+pub const SKILL_NAME: &str = "orquestar";
+/// Nombre de la primera versión; se retira al instalar la nueva.
+const OLD_NAME: &str = "lixbon-orquestador";
+pub const SKILL_VERSION: u32 = 2;
 
 struct Target {
     id: &'static str,
@@ -71,19 +74,23 @@ fn installed_version(path: &Path) -> Option<u32> {
     line.split(':').nth(1)?.trim().parse().ok()
 }
 
-pub fn detect() -> Vec<Detected> {
+/// `lxo` es la ruta del binario de este Lixbon: una skill escrita por otra
+/// instalación (o por una versión de desarrollo) apunta a otro y se reescribe.
+pub fn detect(lxo: &str) -> Vec<Detected> {
     let Some(home) = home() else { return vec![] };
     TARGETS.iter().map(|t| {
         let bin = t.bins.iter().find_map(|b| which(b)).map(|p| p.to_string_lossy().into_owned());
         let file = skill_file(&home, t);
         let version = installed_version(&file);
+        let stale_path = version.is_some() && !std::fs::read_to_string(&file).is_ok_and(|t| t.contains(lxo));
+        let old = installed_version(&home.join(t.skills).join(OLD_NAME).join("SKILL.md")).is_some();
         Detected {
             id: t.id.into(),
             label: t.label.into(),
             detected: bin.is_some() || home.join(t.config).is_dir(),
             bin,
-            installed: version.is_some(),
-            outdated: version.is_some_and(|v| v < SKILL_VERSION),
+            installed: version.is_some() || old,
+            outdated: old || stale_path || version.is_some_and(|v| v < SKILL_VERSION),
             path: file.to_string_lossy().into_owned(),
         }
     }).collect()
@@ -94,42 +101,45 @@ fn skill_md(lxo: &str) -> String {
         r#"---
 name: {SKILL_NAME}
 description: >-
-  Orquestador de agentes de Lixbon (lxo). Úsala para repartir trabajo entre varios agentes
-  (Claude Code, Codex, OpenCode, Cursor, Lixbon…) cada uno en su rama y worktree, coordinarlos
-  como padre, esperar sus fases y resultados, responder sus preguntas y fusionar sus ramas.
-  Úsala también SIEMPRE que tu prompt diga que eres una tarea del orquestador de Lixbon, que
-  exista la variable LXO_TASK_ID o que te pidan leer .lixbon/tasks/*.md. Frases típicas:
-  "orquesta", "coordina agentes", "divide en subagentes", "lanza un hijo", "lxo".
+  Orquestador de agentes de Lixbon. Con "/orquestar <objetivo>" te conviertes en el COORDINADOR:
+  repartes el objetivo entre agentes hijos (Claude Code, Codex, Cursor, OpenCode, Gemini) eligiendo
+  para cada tarea el agente y el modelo más adecuados, esperas sus informes, integras sus ramas y
+  le cuentas al usuario el resultado. Úsala cuando el usuario escriba /orquestar, diga "orquesta",
+  "coordina agentes", "reparte esta tarea", "lanza el equipo" o "lxo". Úsala también SIEMPRE que
+  exista la variable LXO_TASK_ID o tu prompt diga que eres una tarea del orquestador de Lixbon:
+  entonces eres una tarea hija y sigues la guía de hija.
+argument-hint: <objetivo>
 metadata:
   lxo-skill-version: {SKILL_VERSION}
 ---
 
 # Orquestador de Lixbon
 
-Este archivo es solo el punto de entrada. La guía completa y actualizada la imprime el propio
-binario, para que nunca se desfase de la versión instalada.
+Este archivo es solo el punto de entrada: la guía completa la imprime el propio binario, así
+nunca se desfasa de la versión instalada.
 
 ## 1. Localiza `lxo`
 
-Usa, por este orden, el primero que exista y sigue usándolo para todos los comandos:
+Usa el primero que exista y sigue usándolo para todos los comandos:
 
-1. La variable de entorno `LXO_BIN`, que tienen los agentes que lanza Lixbon.
+1. La variable de entorno `LXO_BIN` (la tienen las tareas hijas que lanza Lixbon).
 2. `{lxo}`
 3. `lxo`, si está en el PATH.
 
-Si falla con "Lixbon no está abierto" o "orquestador desactivado", díselo al usuario: tiene que
-abrir Lixbon y activar Ajustes → Orquestador. No intentes simularlo con otros subagentes.
+Si responde "Lixbon no está abierto" o "orquestador desactivado", díselo al usuario: tiene que
+abrir Lixbon y activar Ajustes → Orquestador. No lo simules con otros subagentes.
 
-## 2. Carga la guía antes de hacer nada
+## 2. Carga tu guía antes de hacer nada
 
 ```
 lxo guide
 ```
 
-Te indica tu papel: **coordinador** si no tienes `LXO_TASK_ID` o si vas a repartir trabajo, y
-**tarea hija** si Lixbon te lanzó con una tarea asignada. Una hija también puede ser coordinadora
-de sus propios hijos. Sigue la guía al pie de la letra y usa siempre `--json` cuando necesites
-leer la salida.
+- Sin `LXO_TASK_ID`: eres el **coordinador**. El texto que acompaña a /orquestar es el objetivo.
+  Tú no implementas: repartes, esperas los informes, integras y respondes al usuario.
+- Con `LXO_TASK_ID`: eres una **tarea hija**. Haz solo tu encargo y entrega tu informe.
+
+Sigue la guía al pie de la letra y añade `--json` cuando necesites leer la salida.
 "#
     )
 }
@@ -141,6 +151,7 @@ pub fn install(ids: &[String], lxo: &str) -> Result<Vec<String>, String> {
         let file = skill_file(&home, t);
         std::fs::create_dir_all(file.parent().unwrap_or(&home)).map_err(|e| format!("{}: {e}", t.label))?;
         std::fs::write(&file, skill_md(lxo)).map_err(|e| format!("{}: {e}", t.label))?;
+        remove_ours(&home.join(t.skills).join(OLD_NAME));
         done.push(t.id.to_string());
     }
     Ok(done)
@@ -149,13 +160,25 @@ pub fn install(ids: &[String], lxo: &str) -> Result<Vec<String>, String> {
 pub fn uninstall(ids: &[String]) -> Result<(), String> {
     let home = home().ok_or("No se encontró la carpeta de usuario")?;
     for t in TARGETS.iter().filter(|t| ids.iter().any(|i| i == t.id)) {
-        let dir = home.join(t.skills).join(SKILL_NAME);
-        // Solo se borra lo que es nuestro: una carpeta con ese nombre y sin marca se respeta.
-        if installed_version(&dir.join("SKILL.md")).is_some() {
-            std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", t.label))?;
-        }
+        remove_ours(&home.join(t.skills).join(SKILL_NAME));
+        remove_ours(&home.join(t.skills).join(OLD_NAME));
     }
     Ok(())
+}
+
+/// Solo se borra lo que es nuestro: una carpeta con ese nombre y sin marca se respeta.
+fn remove_ours(dir: &Path) {
+    if installed_version(&dir.join("SKILL.md")).is_some() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Al arrancar, las instalaciones antiguas se ponen al día solas.
+pub fn refresh_outdated(lxo: &str) {
+    let ids: Vec<String> = detect(lxo).into_iter().filter(|a| a.outdated).map(|a| a.id).collect();
+    if !ids.is_empty() {
+        let _ = install(&ids, lxo);
+    }
 }
 
 #[cfg(test)]
@@ -165,7 +188,7 @@ mod tests {
     #[test]
     fn la_skill_lleva_version_y_ruta() {
         let md = skill_md("C:/Lixbon/lxo.exe");
-        assert!(md.contains("name: lixbon-orquestador"));
+        assert!(md.contains("name: orquestar"));
         assert!(md.contains("C:/Lixbon/lxo.exe"));
         let dir = std::env::temp_dir().join(format!("lxo-skill-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

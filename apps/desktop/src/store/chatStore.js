@@ -42,7 +42,7 @@ import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib
 import { describeImages } from '../lib/vision';
 import { roleWarning } from '../lib/modelRoles';
 import { makeClaudeStore } from './claudeSession';
-import { orchPromptSection } from './orchStore';
+import { orchPromptSection, isLxoCommand } from './orchStore';
 
 /** Categoría de permisos de una herramienta (Ajustes → Agente y permisos). */
 export function toolCategory(tool) {
@@ -807,6 +807,7 @@ function makeChatStore() {
       if (policy === 'never') return 'never';
       if (cat === 'command') {
         const cmd = args?.command || '';
+        if (isLxoCommand(cmd)) return false;
         // Ni con auto-run: los comandos que ejecutan código externo (npx, curl,
         // flags -e/-c), instalan paquetes o encadenan piden aprobación SIEMPRE.
         if (policy === 'allow') return isNeverAutoCommand(cmd);

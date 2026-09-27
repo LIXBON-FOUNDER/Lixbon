@@ -1,33 +1,42 @@
 # Orquestador de Lixbon · guía de tarea hija
 
-Lixbon te lanzó para una tarea concreta. Tu encargo está en `.lixbon/tasks/<tu-id>.md` (tu id
-está en `LXO_TASK_ID`). Trabajas en tu propia rama y worktree: nadie más toca tus archivos.
+Tu coordinador te asignó una tarea. Tu encargo completo está en `.lixbon/tasks/<tu-id>.md` (tu id
+está en `LXO_TASK_ID`). Trabajas en autónomo: nadie mira tu terminal para aprobar nada, así que no
+abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien habla con el usuario.
 
 ## Obligaciones
 
-1. **Haz solo tu tarea.** Si ves algo fuera de su alcance, menciónalo en tu resumen final.
+1. **Haz solo tu encargo.** Lo que veas fuera de su alcance, anótalo en tu informe.
 2. **Informa de tus fases** para que tu coordinador y el usuario vean el avance:
    ```
    lxo phase "Analizar" --start
    lxo phase "Analizar" --done --note "Encontrado el punto de entrada en src/auth.ts"
    ```
-   Usa pocas fases con nombre claro (p. ej. Analizar → Implementar → Verificar).
-3. **Si necesitas una decisión**, no abras preguntas interactivas (nadie las verá):
+   Pocas fases con nombre claro (por ejemplo Analizar → Implementar → Verificar).
+3. **Si solo tu coordinador puede decidir algo**:
    ```
    lxo ask "¿Uso JWT o sesiones con cookie?"
    ```
-   Se queda esperando hasta que tu coordinador responde y te imprime la respuesta.
-4. **Lee instrucciones nuevas** en cada punto de control (antes de empezar un archivo nuevo,
-   después de correr tests) y una vez más justo antes de terminar: `lxo check`.
-5. **Haz commit** de tu trabajo en tu rama (mensajes claros). No hagas push ni cambies de rama:
-   la fusión la decide tu coordinador.
-6. **Termina exactamente una vez**:
+   Espera la respuesta. Si tu herramienta de terminal corta la espera, sigue con
+   `lxo ask --resume <id>`; no repitas la pregunta.
+4. **Lee instrucciones nuevas** en cada punto de control (antes de un archivo nuevo, después de
+   correr tests) y justo antes de terminar: `lxo check`.
+5. **Si tienes rama propia** (tu encargo lo dice), haz commit ahí con mensajes claros. No hagas
+   push ni cambies de rama: la integración la hace tu coordinador. En la carpeta compartida no
+   hagas commits salvo que tu encargo lo pida.
+6. **Escribe tu informe** en `.lixbon/informe-<tu-id>.md`:
    ```
-   lxo done --summary "Qué hiciste. Cómo lo verificaste. Qué queda pendiente."
-   lxo done --failed --summary "Por qué no se pudo y qué haría falta."
+   # <tu-id> · <título>
+   ## Resultado        (hecho / parcial / no se pudo, en una frase)
+   ## Qué hice
+   ## Archivos         (ruta y qué cambió)
+   ## Cómo lo verifiqué (comandos y su resultado)
+   ## Pendiente y decisiones para el coordinador
    ```
-   Añade `--files a,b,c` con los archivos principales que cambiaste. Después de `lxo done` no
-   empieces trabajo nuevo: quédate esperando.
-
-Si el usuario te escribe directamente después de terminar, eso es trabajo nuevo suyo y manda
-sobre esta guía.
+7. **Cierra exactamente una vez**:
+   ```
+   lxo done --report .lixbon/informe-<tu-id>.md --summary "Una frase con el resultado"
+   ```
+   Añade `--failed` si no se pudo completar, y `--files a,b,c` con los archivos principales.
+   Después de `lxo done` no empieces trabajo nuevo: quédate esperando. Si tu coordinador te manda
+   un encargo nuevo, llegará a esta misma terminal; hazlo y vuelve a cerrar con un informe nuevo.

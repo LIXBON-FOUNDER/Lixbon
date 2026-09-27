@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { toast } from './toastStore';
 
 export const AGENT_LABELS = {
-  claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', externo: 'Externo',
+  claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador',
 };
 
 export const STATUS_LABELS = {
@@ -64,17 +64,6 @@ export const useOrchStore = create((set, get) => ({
     get().loadAgents();
   },
 
-  newRun: async (objective, agent, cwd) => {
-    try {
-      const res = await invoke('orch_new_run', { objective, agent, cwd });
-      set({ selected: res.task });
-      return res;
-    } catch (e) {
-      toast(String(e), { tone: 'error' });
-      return null;
-    }
-  },
-
   /** Acción sobre una tarea desde la interfaz (merge, pr, stop, reply…). */
   call: async (cmd, args = {}, okText = null) => {
     set({ busy: `${cmd}:${args.task || args.question || args.run || ''}` });
@@ -112,32 +101,42 @@ export function taskTree(tasks, run) {
 }
 
 /** Sección del system prompt del agente de Lixbon: con el orquestador activo
-    puede coordinar a otros agentes como cualquier otro, a través de `lxo`. */
+    puede ser coordinador, igual que Claude Code con la skill /orquestar. */
 export function orchPromptSection() {
   const snap = useOrchStore.getState().snap;
   if (!snap?.settings?.enabled || !snap.lxo_exists) return '';
   const lxo = `"${snap.lxo}"`;
-  return `\n\n## Orquestador de agentes (Lixbon)\nPuedes repartir trabajo grande entre varios agentes (Claude Code, Codex, OpenCode…), cada uno en su rama y worktree, con la CLI ${lxo}. Úsalo solo si el usuario lo pide o si la tarea tiene partes independientes que merezcan agentes en paralelo. Antes de nada ejecuta con run_command: ${lxo} guide coordinator, y sigue esa guía (usa siempre ${lxo} en lugar de lxo).`;
+  return `\n\n## Orquestador de agentes (Lixbon)\nCuando el usuario escriba "/orquestar <objetivo>" (o te pida orquestar o coordinar agentes), eres el COORDINADOR: no implementas, repartes el objetivo entre agentes hijos, eliges para cada uno agente y modelo, esperas sus informes, integras y le respondes. Usa la CLI ${lxo} con run_command (siempre esa ruta entre comillas en lugar de lxo). Antes de nada ejecuta ${lxo} guide coordinator y síguela. Para ${lxo} wait usa timeout 600 en run_command y --timeout-ms 540000.`;
 }
 
-/** `/orquestar <objetivo>` desde el chat: run nuevo en el repo activo con el
-    coordinador por defecto, y se abre el modo Orquestar para seguirlo. */
-export async function orchestrateFromChat(objective) {
+/** Antes de mandar `/orquestar`: el orquestador tiene que estar activo, y el
+    chat donde se lanza queda como coordinador en el modo Agente. */
+export async function prepareOrchestrate() {
   const st = useOrchStore.getState();
   if (!st.snap) await st.refresh();
   const { useWorkbenchStore } = await import('./workbenchStore');
   const { useAppStore } = await import('./appStore');
-  const settings = useOrchStore.getState().snap?.settings;
-  if (!settings?.enabled) {
+  if (!useOrchStore.getState().snap?.settings?.enabled) {
     toast('Activa antes el orquestador en Ajustes → Orquestador.');
     useWorkbenchStore.getState().openSettings('orch');
-    return;
+    return false;
   }
-  const root = useAppStore.getState().workspaceRoot;
-  if (!root) { toast('Abre la carpeta del repositorio con el que quieres orquestar.'); return; }
-  const res = await st.newRun(objective, settings.default_agent, root);
-  if (res) {
-    toast(`Coordinador lanzado (${AGENT_LABELS[settings.default_agent] || settings.default_agent}) en ${root.split(/[\\/]/).pop()}`);
-    useWorkbenchStore.getState().setMode('orch');
+  if (!useAppStore.getState().workspaceRoot) {
+    toast('Abre la carpeta del repositorio con el que quieres orquestar.');
+    return false;
   }
+  useWorkbenchStore.getState().setMode('agent');
+  return true;
+}
+
+/** Una llamada suelta a `lxo` (sin encadenar nada) es el propio orquestador:
+    el coordinador de Lixbon no tiene que pedir permiso para cada una. */
+export function isLxoCommand(cmd) {
+  const snap = useOrchStore.getState().snap;
+  if (!snap?.settings?.enabled || !snap.lxo) return false;
+  const c = String(cmd || '').trim();
+  if (/[&|;<>`\n]|\$\(/.test(c)) return false;
+  const path = String(snap.lxo).toLowerCase();
+  const head = c.toLowerCase();
+  return head.startsWith(`"${path}" `) || head.startsWith(`${path} `) || head.startsWith('lxo ');
 }

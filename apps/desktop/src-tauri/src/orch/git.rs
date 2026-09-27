@@ -143,7 +143,24 @@ pub fn remove_worktree(repo: &str, dir: &str, force: bool) -> Result<(), String>
         args.push("--force");
     }
     args.push(dir);
-    ok(repo, &args).map(|_| ())
+    // Windows tarda un momento en soltar la carpeta tras matar al agente que la usaba.
+    let mut last = String::new();
+    for _ in 0..8 {
+        match ok(repo, &args) {
+            Ok(_) => return Ok(()),
+            Err(e) if e.contains("Permission denied") || e.contains("being used") => {
+                last = e;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            // Un intento anterior quitó el registro pero no pudo borrar la carpeta.
+            Err(e) if e.contains("is not a working tree") => {
+                let _ = run(repo, &["worktree", "prune"]);
+                return std::fs::remove_dir_all(dir).or_else(|e| if Path::new(dir).exists() { Err(e) } else { Ok(()) }).map_err(|e| e.to_string());
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last)
 }
 
 pub fn delete_branch(repo: &str, branch: &str) -> Result<(), String> {

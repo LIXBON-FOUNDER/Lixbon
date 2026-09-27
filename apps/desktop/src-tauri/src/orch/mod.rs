@@ -1,15 +1,17 @@
-//! Orquestador de agentes (experimental). Cualquier agente del sistema habla
-//! con Lixbon a través de `lxo` (HTTP local, ver `server.rs`) para repartir
-//! trabajo en un árbol de tareas: cada hija corre en su propia terminal, en su
-//! rama y su worktree, y avisa a su padre al terminar cada fase.
+//! Orquestador de agentes (experimental), al estilo de Orca. El agente con el
+//! que habla el usuario es el coordinador: reparte tareas entre agentes hijos
+//! (Claude Code, Codex, Cursor, OpenCode…) eligiendo agente y modelo, espera sus
+//! informes, integra y responde. Todos hablan con Lixbon por `lxo` (HTTP local,
+//! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
+mod agents;
 mod git;
 mod pty;
 mod server;
 mod skill;
 pub mod state;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -23,50 +25,27 @@ use tauri_plugin_notification::NotificationExt;
 use state::{Kind, NewTask, State, Status, Task};
 
 pub enum Caller {
-    /// `lxo` desde una terminal: con id si es una tarea, sin él si es un coordinador externo.
+    /// `lxo` desde una terminal: con id si es una tarea, sin él si aún no lo es.
     Agent(Option<String>),
-    /// La interfaz de Lixbon: el usuario puede gestionar cualquier tarea.
+    /// La interfaz de Lixbon: solo observa y, si hace falta, detiene.
     User,
 }
+
+/// Un nivel: el coordinador y sus hijos. Un hijo no reparte trabajo.
+const MAX_DEPTH: u32 = 1;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Settings {
     pub enabled: bool,
-    pub max_depth: u32,
-    pub default_agent: String,
     pub notify_phases: bool,
     pub notify_done: bool,
     pub notify_questions: bool,
-    pub worktree_root: String,
-    /// Comando de cada agente; `{prompt}` se sustituye por la instrucción inicial.
-    /// Sin `{prompt}`, se escribe en su terminal cuando está lista.
-    pub launchers: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        let launchers = [
-            ("claude", r#"claude "{prompt}""#),
-            ("codex", r#"codex "{prompt}""#),
-            ("opencode", r#"opencode --prompt "{prompt}""#),
-            ("cursor", r#"cursor-agent "{prompt}""#),
-            ("gemini", r#"gemini -i "{prompt}""#),
-            ("lixbon", "lixbon chat"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-        Self {
-            enabled: false,
-            max_depth: 2,
-            default_agent: "claude".into(),
-            notify_phases: true,
-            notify_done: true,
-            notify_questions: true,
-            worktree_root: String::new(),
-            launchers,
-        }
+        Self { enabled: false, notify_phases: true, notify_done: true, notify_questions: true }
     }
 }
 
@@ -174,6 +153,10 @@ impl Core {
         }
         if enabled {
             let _ = self.start_server();
+            skill::refresh_outdated(&lxo_path().to_string_lossy());
+            // Preguntar a cada CLI por sus modelos tarda: se hace ya para que el
+            // primer `lxo agents` del coordinador responda al momento.
+            std::thread::spawn(|| agents::available(false));
         }
     }
 
@@ -283,7 +266,6 @@ impl Core {
         match cmd {
             "status" => {
                 let st = self.lock();
-                let cfg = self.settings();
                 let task = match &caller {
                     Caller::Agent(Some(id)) => Some(st.task(id)?.clone()),
                     _ => None,
@@ -294,10 +276,8 @@ impl Core {
                     "role": match &task { Some(t) if t.parent.is_some() => "worker", Some(_) => "coordinator", None => "external" },
                     "task": task,
                     "objective": objective,
-                    "max_depth": cfg.max_depth,
-                    "can_spawn": task.as_ref().map(|t| t.depth < cfg.max_depth).unwrap_or(true),
-                    "agents": cfg.launchers.keys().collect::<Vec<_>>(),
-                    "default_agent": cfg.default_agent,
+                    "can_spawn": task.as_ref().map(|t| t.depth < MAX_DEPTH).unwrap_or(true),
+                    "agents": agents::AGENTS.iter().map(|a| a.id).collect::<Vec<_>>(),
                 }))
             }
             "run_create" => {
@@ -309,10 +289,12 @@ impl Core {
                     return Err("Falta --objective".into());
                 }
                 let repo = git::toplevel(cwd).ok_or("El orquestador necesita un repositorio git: ejecútalo dentro de uno")?;
-                let agent = Some(s(args, "agent")).filter(|a| !a.is_empty()).unwrap_or_else(|| "externo".into());
+                let agent = Some(s(args, "agent")).filter(|a| !a.is_empty()).unwrap_or_else(|| "coordinador".into());
                 let mut st = self.lock();
                 let (run, task) = st.create_run(&objective, NewTask {
                     agent,
+                    model: None,
+                    effort: None,
                     title: objective.chars().take(60).collect(),
                     spec: objective.clone(),
                     repo,
@@ -327,6 +309,8 @@ impl Core {
                 Ok(json!({ "run": run, "task": task }))
             }
             "spawn" => self.spawn(&caller, args),
+            "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
+            "continue" => self.follow_up(&caller, args),
             "phase" => {
                 let me = Self::me(&caller)?;
                 let name = s(args, "name");
@@ -343,10 +327,12 @@ impl Core {
                 let files = args.get("files").and_then(Value::as_array)
                     .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
                     .unwrap_or_default();
+                let summary = s(args, "summary");
+                let report = self.store_report(&me, &s(args, "report"), &summary)?;
                 let mut st = self.lock();
-                let msg = st.done(&me, !b(args, "failed"), &s(args, "summary"), files)?;
+                let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
                 self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
-                Ok(json!({ "task": me, "status": st.task(&me)?.status }))
+                Ok(json!({ "task": me, "status": st.task(&me)?.status, "report": report }))
             }
             "ask" => {
                 let me = Self::me(&caller)?;
@@ -398,7 +384,7 @@ impl Core {
                 let me = Self::me(&caller)?;
                 let mut k = kinds(args);
                 if k.is_empty() {
-                    k = vec![Kind::Done, Kind::Question, Kind::Exited, Kind::Phase];
+                    k = vec![Kind::Done, Kind::Question, Kind::Exited];
                 }
                 let timeout = Duration::from_millis(n(args, "timeout_ms").unwrap_or(600_000));
                 let found = self.wait_for(&me, &k, None, timeout);
@@ -496,26 +482,29 @@ impl Core {
     }
 
     fn spawn(self: &Arc<Self>, caller: &Caller, args: &Value) -> Result<Value, String> {
-        let parent_id = match caller {
-            Caller::User => s(args, "parent"),
-            _ => Self::me(caller)?,
-        };
+        let parent_id = Self::me(caller)?;
         let spec = s(args, "task");
         if spec.is_empty() {
-            return Err("Falta --task con lo que tiene que hacer la hija".into());
+            return Err("Falta --task con el encargo completo de la hija".into());
         }
-        let cfg = self.settings();
-        let agent = Some(s(args, "agent")).filter(|a| !a.is_empty()).unwrap_or_else(|| cfg.default_agent.clone());
+        let agent = s(args, "agent");
+        if agent.is_empty() {
+            return Err("Falta --agent: elige uno de `lxo agents` según la tarea".into());
+        }
+        let model = Some(s(args, "model")).filter(|m| !m.is_empty());
+        let effort = Some(s(args, "effort")).filter(|m| !m.is_empty());
+        // Se valida antes de crear nada: un agente o modelo mal escrito no deja restos.
+        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x")?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
-        let shared = b(args, "no_worktree");
+        let shared = b(args, "shared");
 
         let (id, parent) = {
             let mut st = self.lock();
             let parent = st.task(&parent_id)?.clone();
-            let id = st.add_child(&parent_id, cfg.max_depth, NewTask {
-                agent: agent.clone(), title: title.clone(), spec: spec.clone(), repo: parent.repo.clone(),
-                cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
+            let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
+                agent: agent.clone(), model: model.clone(), effort: effort.clone(), title: title.clone(), spec: spec.clone(),
+                repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
             })?;
             (id, parent)
         };
@@ -525,12 +514,11 @@ impl Core {
                 return Ok(());
             }
             let base = Some(s(args, "base")).filter(|b| !b.is_empty())
-                .or_else(|| parent.branch.clone())
                 .or_else(|| git::current_branch(&parent.cwd))
                 .unwrap_or_else(|| "HEAD".into());
             let slug = state::slug(&title, 32);
             let branch = format!("lx/{}/{id}-{slug}", parent.run);
-            let dir = git::worktree_dir(&parent.repo, Some(&cfg.worktree_root), &format!("{}-{id}-{slug}", parent.run));
+            let dir = git::worktree_dir(&parent.repo, None, &format!("{}-{id}-{slug}", parent.run));
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
             let mut st = self.lock();
             let t = st.task_mut(&id)?;
@@ -552,44 +540,82 @@ impl Core {
         let _ = st.mark_running(&id);
         let t = st.task(&id)?.clone();
         self.commit(&st, &[]);
-        Ok(json!({ "task": t.id, "agent": t.agent, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
+        Ok(json!({ "task": t.id, "agent": t.agent, "model": t.model, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
     }
 
-    /// Nuevo run desde la interfaz: el coordinador también es una tarea gestionada.
-    pub fn new_run(self: &Arc<Self>, objective: &str, agent: &str, cwd: &str) -> Result<Value, String> {
-        if !self.settings().enabled {
-            return Err("Activa el orquestador en Ajustes → Orquestador".into());
+    /// Trabajo nuevo para una hija que ya entregó, en su misma terminal: conserva
+    /// su contexto (como reutilizar la terminal de un worker en Orca).
+    fn follow_up(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
+        let id = s(args, "task");
+        let spec = s(args, "spec");
+        if spec.is_empty() {
+            return Err("Falta --task con el nuevo encargo".into());
         }
-        let repo = git::toplevel(cwd).ok_or("La carpeta de trabajo no es un repositorio git")?;
-        let (run, task) = {
+        {
+            let st = self.lock();
+            Self::check_manages(&st, caller, &id)?;
+        }
+        if !self.terms.lock().map(|t| t.contains_key(&id)).unwrap_or(false) {
+            return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn"));
+        }
+        let task = {
             let mut st = self.lock();
-            st.create_run(objective, NewTask {
-                agent: agent.into(),
-                title: objective.lines().next().unwrap_or("").chars().take(60).collect(),
-                spec: objective.into(),
-                repo,
-                cwd: cwd.into(),
-                branch: git::current_branch(cwd),
-                base: None,
-                worktree: None,
-                external: false,
-            })
-        };
-        if let Err(e) = self.launch(&task) {
-            let mut st = self.lock();
-            st.remove_run(&run);
+            st.reopen(&id, &spec)?;
+            let t = st.task(&id)?.clone();
             self.commit(&st, &[]);
-            return Err(e);
+            t
+        };
+        let file = Path::new(&task.cwd).join(".lixbon").join("tasks").join(format!("{id}.md"));
+        let _ = std::fs::OpenOptions::new().append(true).open(&file).and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "\n## Seguimiento del coordinador\n\n{spec}\n\nAl terminar, escribe un informe nuevo y vuelve a cerrar con lxo done --report.")
+        });
+        if let Ok(terms) = self.terms.lock() {
+            if let Some(t) = terms.get(&id) {
+                t.type_prompt(&format!(
+                    "Nuevo encargo de tu coordinador (también al final de .lixbon/tasks/{id}.md): {spec} -- Al terminar escribe un informe nuevo y cierra otra vez con lxo done --report."
+                ));
+            }
         }
-        let mut st = self.lock();
-        let _ = st.mark_running(&task);
-        self.commit(&st, &[]);
-        Ok(json!({ "run": run, "task": task }))
+        Ok(json!({ "task": id, "status": "running" }))
+    }
+
+    /// Copia el informe de la hija junto al coordinador, en `.lixbon/informes/`,
+    /// para que lo lea sin entrar en el worktree de nadie.
+    fn store_report(&self, id: &str, path: &str, summary: &str) -> Result<String, String> {
+        let (task, coordinator) = {
+            let st = self.lock();
+            let t = st.task(id)?.clone();
+            let root = st.runs.get(&t.run).and_then(|r| st.tasks.get(&r.root)).cloned().ok_or("Run sin coordinador")?;
+            (t, root)
+        };
+        let text = if path.is_empty() {
+            if summary.is_empty() {
+                return Err("Falta --report con tu informe (.md): qué hiciste, archivos, cómo lo verificaste y qué queda.".into());
+            }
+            format!("# {} · {}\n\n{summary}\n", task.id, task.title)
+        } else {
+            let p = Path::new(path);
+            let full = if p.is_absolute() { p.to_path_buf() } else { Path::new(&task.cwd).join(p) };
+            std::fs::read_to_string(&full).map_err(|e| format!("No se pudo leer el informe {}: {e}", full.display()))?
+        };
+        let dir = Path::new(&coordinator.cwd).join(".lixbon").join("informes").join(&task.run);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        git::exclude_lixbon_dir(&coordinator.cwd);
+        let dest = dir.join(format!("{}-{}.md", task.id, state::slug(&task.title, 40)));
+        let header = format!(
+            "<!-- Tarea {} · {}{} · {} -->\n\n",
+            task.id,
+            task.agent,
+            task.model.as_deref().map(|m| format!(" ({m})")).unwrap_or_default(),
+            task.branch.as_deref().map(|b| format!("rama {b}")).unwrap_or_else(|| "carpeta compartida".into())
+        );
+        std::fs::write(&dest, format!("{header}{text}")).map_err(|e| e.to_string())?;
+        Ok(dest.to_string_lossy().into_owned())
     }
 
     fn launch(self: &Arc<Self>, id: &str) -> Result<(), String> {
         let app = self.app.get().ok_or("Lixbon aún no terminó de arrancar")?.clone();
-        let cfg = self.settings();
         let (task, parent, objective) = {
             let st = self.lock();
             let t = st.task(id)?.clone();
@@ -599,21 +625,12 @@ impl Core {
         };
         let dir = Path::new(&task.cwd).join(".lixbon").join("tasks");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective, cfg.max_depth))
+        std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
             .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
         git::exclude_lixbon_dir(&task.cwd);
 
-        let prompt = if task.parent.is_some() {
-            format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md y ejecuta lxo guide antes de empezar.")
-        } else {
-            format!("Eres el coordinador {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md y ejecuta lxo guide antes de empezar.")
-        };
-        let template = cfg.launchers.get(&task.agent).cloned().unwrap_or_else(|| task.agent.clone());
-        let (command, inject) = if template.contains("{prompt}") {
-            (template.replace("{prompt}", &prompt), None)
-        } else {
-            (template, Some(prompt))
-        };
+        let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
+        let launch = agents::launch(&task.agent, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
 
         let lxo = lxo_path();
         let mut path = lxo.parent().map(|p| p.as_os_str().to_owned()).unwrap_or_default();
@@ -621,26 +638,27 @@ impl Core {
             path.push(if cfg!(windows) { ";" } else { ":" });
             path.push(cur);
         }
-        let env = vec![
+        let mut env = launch.env;
+        env.extend([
             ("LXO_TASK_ID".to_string(), id.to_string()),
             ("LXO_RUN_ID".to_string(), task.run.clone()),
             ("LXO_BIN".to_string(), lxo.to_string_lossy().into_owned()),
             ("PATH".to_string(), path.to_string_lossy().into_owned()),
-        ];
+        ]);
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
-        let term = pty::spawn(&app, pty::Launch {
-            task: id,
-            cwd: &task.cwd,
-            script_dir: &dir.join(id),
-            command,
-            env,
-            inject,
-        }, move || {
-            if let Some(core) = weak.upgrade() {
-                core.on_exit(&tid);
-            }
-        })?;
+        let (out_event, exit_event) = (format!("orch:term:{id}"), format!("orch:term-exit:{id}"));
+        let app_exit = app.clone();
+        let term = pty::spawn(
+            pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped },
+            move |text| { let _ = app.emit(&out_event, text); },
+            move || {
+                let _ = app_exit.emit(&exit_event, ());
+                if let Some(core) = weak.upgrade() {
+                    core.on_exit(&tid);
+                }
+            },
+        )?;
         self.terms.lock().map_err(|_| "Estado interno corrupto")?.insert(id.to_string(), term);
         Ok(())
     }
@@ -733,38 +751,38 @@ impl State {
     }
 }
 
-fn task_file(t: &Task, parent: Option<&Task>, objective: &str, max_depth: u32) -> String {
-    let can_spawn = t.depth < max_depth;
+fn task_file(t: &Task, parent: Option<&Task>, objective: &str) -> String {
     let place = match (&t.branch, &t.worktree) {
-        (Some(br), Some(_)) => format!("Trabajas en tu propio worktree (`{}`), en la rama `{br}`, que sale de `{}`.", t.cwd, t.base.as_deref().unwrap_or("HEAD")),
-        _ => format!("Trabajas en la carpeta compartida `{}`: no cambies de rama.", t.cwd),
-    };
-    let role = match parent {
-        Some(p) => format!(
-            "Eres la tarea **{}** del run {}. Te coordina **{}** ({}).\nObjetivo general del run: {objective}",
-            t.id, t.run, p.id, p.agent
+        (Some(br), Some(_)) => format!(
+            "Trabajas en tu propio worktree (`{}`), en la rama `{br}`, que sale de `{}`. Haz commit ahí de tu trabajo.",
+            t.cwd,
+            t.base.as_deref().unwrap_or("HEAD")
         ),
-        None => format!("Eres el **coordinador** ({}) del run {}.", t.id, t.run),
+        _ => format!(
+            "Trabajas en la carpeta compartida del coordinador (`{}`): no cambies de rama ni hagas commits salvo que tu encargo lo pida.",
+            t.cwd
+        ),
     };
-    let spawn = if can_spawn {
-        format!("Puedes crear hijas con `lxo spawn` (profundidad {} de {max_depth}).", t.depth)
-    } else {
-        "No puedes crear más niveles: estás en la profundidad máxima.".into()
-    };
-    let rules = if parent.is_some() {
-        "1. Ejecuta `lxo guide` antes de empezar y sigue su guía de tarea hija.\n\
-         2. Informa de tus fases: `lxo phase \"<nombre>\" --start` y, al acabarla, `lxo phase \"<nombre>\" --done --note \"<resultado breve>\"`.\n\
-         3. Si necesitas una decisión, usa `lxo ask \"<pregunta>\"` (espera la respuesta). Nunca abras preguntas interactivas: nadie las verá.\n\
-         4. En los puntos de control ejecuta `lxo check` por si tu coordinador te mandó instrucciones.\n\
-         5. Haz commit de tu trabajo en tu rama antes de terminar.\n\
-         6. Al acabar: `lxo done --summary \"<tres frases: qué hiciste, cómo lo verificaste, qué queda>\"` (o `--failed`). Después no hagas nada más."
-    } else {
-        "1. Ejecuta `lxo guide` antes de empezar y sigue su guía de coordinador.\n\
-         2. Divide el objetivo en tareas independientes y lánzalas con `lxo spawn`.\n\
-         3. Espera con `lxo wait`, responde preguntas con `lxo reply`, revisa con `lxo diff` y fusiona con `lxo merge`.\n\
-         4. Cuando todo esté fusionado y verificado, resume al usuario el resultado de cada tarea."
-    };
-    format!("# {} · {}\n\n{role}\n\n{place}\n{spawn}\n\n## Qué tienes que hacer\n\n{}\n\n## Reglas\n\n{rules}\n", t.id, t.title, t.spec)
+    let coordinator = parent.map(|p| format!("{} ({})", p.id, p.agent)).unwrap_or_default();
+    let report = format!(".lixbon/informe-{}.md", t.id);
+    format!(
+        "# {id} · {title}\n\n\
+Eres la tarea **{id}** del run {run}. Te coordina **{coordinator}**, que es quien habla con el usuario.\n\
+Objetivo general: {objective}\n\n\
+{place}\n\n\
+## Tu encargo\n\n{spec}\n\n\
+## Reglas\n\n\
+1. Ejecuta `lxo guide` y síguela. Eres autónomo: nadie mira tu terminal para aprobar nada.\n\
+2. Informa de tus fases: `lxo phase \"<nombre>\" --start` y `lxo phase \"<nombre>\" --done --note \"<resultado>\"`.\n\
+3. Si solo tu coordinador puede decidir algo: `lxo ask \"<pregunta>\"` y espera. Nunca abras preguntas interactivas.\n\
+4. En cada punto de control ejecuta `lxo check` por si tu coordinador te mandó instrucciones.\n\
+5. Al acabar escribe tu informe en `{report}` (qué hiciste, archivos, cómo lo verificaste, qué queda y decisiones pendientes) \
+y cierra con `lxo done --report {report} --summary \"<una frase>\"` (o añade `--failed`). Después no hagas nada más.\n",
+        id = t.id,
+        title = t.title,
+        run = t.run,
+        spec = t.spec,
+    )
 }
 
 // ── Comandos de la interfaz ─────────────────────────────────────────────
@@ -778,7 +796,13 @@ pub fn orch_snapshot(orch: TauriState<'_, Orch>) -> Value {
 pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Result<Value, String> {
     let core = &orch.0;
     let enabled = settings.enabled;
+    let was = core.settings().enabled;
     write_json(&data_dir().join("settings.json"), &settings)?;
+    // Activarlo deja la skill en todos los agentes del equipo: nada que configurar a mano.
+    if enabled && !was {
+        let ids: Vec<String> = skill::detect(&lxo_path().to_string_lossy()).into_iter().filter(|a| a.detected).map(|a| a.id).collect();
+        let _ = skill::install(&ids, &lxo_path().to_string_lossy());
+    }
     if let Ok(mut s) = core.settings.lock() {
         *s = settings;
     }
@@ -792,11 +816,6 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
 #[tauri::command(async)]
 pub fn orch_call(orch: TauriState<'_, Orch>, cmd: String, args: Value) -> Result<Value, String> {
     orch.0.rpc(Caller::User, "", &cmd, &args)
-}
-
-#[tauri::command(async)]
-pub fn orch_new_run(orch: TauriState<'_, Orch>, objective: String, agent: String, cwd: String) -> Result<Value, String> {
-    orch.0.new_run(&objective, &agent, &cwd)
 }
 
 #[tauri::command]
@@ -820,7 +839,7 @@ pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, row
 
 #[tauri::command]
 pub fn orch_agents() -> Vec<skill::Detected> {
-    skill::detect()
+    skill::detect(&lxo_path().to_string_lossy())
 }
 
 #[tauri::command]
@@ -831,57 +850,4 @@ pub fn orch_skill_install(ids: Vec<String>) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
     skill::uninstall(&ids)
-}
-
-fn lxo_dir() -> String {
-    lxo_path().parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
-}
-
-/// PATH del usuario tal como está guardado (el del proceso es el de cuando arrancó Lixbon).
-#[cfg(windows)]
-fn user_path() -> Result<String, String> {
-    let out = crate::hide_console(std::process::Command::new("powershell.exe").args([
-        "-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetEnvironmentVariable('Path','User')",
-    ]))
-    .output()
-    .map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-#[tauri::command(async)]
-pub fn orch_path_status() -> Value {
-    let dir = lxo_dir();
-    #[cfg(windows)]
-    let in_path = user_path()
-        .map(|p| p.split(';').any(|e| e.trim().trim_end_matches('\\').eq_ignore_ascii_case(dir.trim_end_matches('\\'))))
-        .unwrap_or(false);
-    #[cfg(not(windows))]
-    let in_path = std::env::var("PATH").map(|p| p.split(':').any(|e| e == dir)).unwrap_or(false);
-    json!({ "dir": dir, "in_path": in_path, "supported": cfg!(windows) })
-}
-
-/// Añade la carpeta de `lxo` al PATH del usuario (no al del sistema: sin
-/// permisos de administrador). Las terminales abiertas antes no lo verán.
-#[tauri::command(async)]
-pub fn orch_add_to_path() -> Result<Value, String> {
-    #[cfg(windows)]
-    {
-        let dir = lxo_dir();
-        if orch_path_status()["in_path"].as_bool() == Some(true) {
-            return Ok(orch_path_status());
-        }
-        let current = user_path()?;
-        let next = if current.is_empty() { dir.clone() } else { format!("{};{dir}", current.trim_end_matches(';')) };
-        // SetEnvironmentVariable avisa a Windows del cambio (WM_SETTINGCHANGE), a diferencia de setx o del registro a mano.
-        let script = format!("[Environment]::SetEnvironmentVariable('Path', '{}', 'User')", next.replace('\'', "''"));
-        let out = crate::hide_console(std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &script]))
-            .output()
-            .map_err(|e| e.to_string())?;
-        if !out.status.success() {
-            return Err(format!("No se pudo cambiar el PATH: {}", String::from_utf8_lossy(&out.stderr).trim()));
-        }
-        Ok(orch_path_status())
-    }
-    #[cfg(not(windows))]
-    Err(format!("Añade {} a tu PATH en tu shell (~/.bashrc, ~/.zshrc…)", lxo_dir()))
 }

@@ -136,7 +136,7 @@ async function toolEditFile(root, relPath, oldText, newText, all = false) {
 
 async function toolRunCommand(root, command, timeoutSecs) {
   if (!String(command ?? '').trim()) throw new Error('Falta el comando');
-  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 300000);
+  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 600000);
   const res = await runCommand(command, timeoutMs);
   const output = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
   const prefix = res.timed_out ? '[TIMEOUT] ' : `[EXIT ${res.code}] `;

@@ -1342,15 +1342,12 @@ pub fn run() {
             orch::orch_snapshot,
             orch::orch_settings_set,
             orch::orch_call,
-            orch::orch_new_run,
             orch::orch_term_buffer,
             orch::orch_term_write,
             orch::orch_term_resize,
             orch::orch_agents,
             orch::orch_skill_install,
-            orch::orch_skill_uninstall,
-            orch::orch_path_status,
-            orch::orch_add_to_path
+            orch::orch_skill_uninstall
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

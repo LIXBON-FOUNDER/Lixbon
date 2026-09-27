@@ -8,10 +8,10 @@ import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
 import { Segmented } from '../components/Segmented';
-import { Select } from '../components/Select';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { AgentTerminal } from './AgentTerminal';
-import { IconPlus, IconTrash, IconGitBranch } from '../components/Icons';
+import { IconTrash, IconGitBranch } from '../components/Icons';
+import { useFileViewStore } from '../store/fileViewStore';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
 const ago = (ms) => {
@@ -61,66 +61,30 @@ function TaskRow({ task, selected, onSelect, asking }) {
   );
 }
 
-function NewRun({ onDone }) {
-  const snap = useOrchStore((s) => s.snap);
-  const newRun = useOrchStore((s) => s.newRun);
-  const root = useAppStore((s) => s.workspaceRoot);
-  const [objective, setObjective] = useState('');
-  const [agent, setAgent] = useState(snap?.settings?.default_agent || 'claude');
-  const [sending, setSending] = useState(false);
-  const agents = Object.keys(snap?.settings?.launchers || {}).map((id) => ({ value: id, label: agentLabel(id) }));
-
-  const start = async () => {
-    if (!objective.trim() || !root) return;
-    setSending(true);
-    const res = await newRun(objective.trim(), agent, root);
-    setSending(false);
-    if (res) { setObjective(''); onDone?.(); }
-  };
-
+function HowTo() {
   return (
     <div className="orch__new">
-      <span className="orch__new-title">Nuevo run</span>
+      <span className="orch__new-title">Cómo se orquesta</span>
       <span className="orch__hint">
-        Un agente coordinador recibe el objetivo, lo divide en tareas y lanza agentes hijos, cada uno en su rama y su worktree.
-        {!root && ' Abre antes una carpeta de trabajo (un repositorio git).'}
+        Escribe <span className="mono">/orquestar &lt;objetivo&gt;</span> en el chat del modo Agente, o en cualquier agente con la
+        skill instalada (Claude Code, Cursor, OpenCode, Codex). Ese chat pasa a ser el <b>coordinador</b>: reparte el objetivo,
+        elige qué agente y qué modelo hace cada tarea, espera sus informes, integra y te cuenta el resultado. Tú solo hablas con él.
       </span>
-      <textarea
-        className="stextarea"
-        rows={4}
-        placeholder="Objetivo, p. ej.: Añadir inicio de sesión con GitHub, con tests y documentación"
-        value={objective}
-        onChange={(e) => setObjective(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) start(); }}
-      />
-      <div className="orch__new-row">
-        <span className="orch__hint">Coordinador</span>
-        <Select value={agent} onChange={setAgent} options={agents} title="Agente coordinador" />
-        <div className="panelhead__fill" />
-        <button className="btn btn--primary" disabled={!objective.trim() || !root || sending} onClick={start}>
-          {sending ? 'Lanzando…' : 'Lanzar coordinador'}
-        </button>
-      </div>
       <span className="orch__hint">
-        También puedes coordinar desde cualquier agente con la skill instalada: pídele «orquesta esto con lxo».
+        Aquí puedes seguir qué hace cada agente: su terminal en vivo, sus fases, sus mensajes, su informe y sus cambios.
       </span>
     </div>
   );
 }
 
 function Activity({ task, messages, tasks }) {
-  const call = useOrchStore((s) => s.call);
-  const [drafts, setDrafts] = useState({});
-  const [note, setNote] = useState('');
+  const openReport = () => {
+    useWorkbenchStore.getState().setMode('editor');
+    useFileViewStore.getState().open(task.report);
+  };
   const mine = messages.filter((m) => m.from === task.id || m.to === task.id);
   const open = pendingQuestions(messages).filter((q) => q.to === task.id || q.from === task.id);
   const name = (id) => (tasks[id] ? `${tasks[id].title || id}` : id);
-
-  const reply = async (q) => {
-    const answer = (drafts[q.id] || '').trim();
-    if (!answer) return;
-    if (await call('reply', { question: q.id, answer }, 'Respuesta enviada')) setDrafts((d) => ({ ...d, [q.id]: '' }));
-  };
 
   return (
     <div className="orch__activity scroll">
@@ -128,17 +92,7 @@ function Activity({ task, messages, tasks }) {
         <div key={q.id} className="orch__question">
           <span className="orch__q-eyebrow">Pregunta de {name(q.from)} para {name(q.to)}</span>
           <p>{q.body}</p>
-          <div className="orch__q-row">
-            <div className="field field--strong">
-              <input
-                value={drafts[q.id] || ''}
-                placeholder="Responder en su lugar…"
-                onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === 'Enter') reply(q); }}
-              />
-            </div>
-            <button className="btn btn--primary" onClick={() => reply(q)}>Responder</button>
-          </div>
+          <span className="orch__hint">La responde el coordinador; si necesita tu decisión, te la pedirá en el chat.</span>
         </div>
       ))}
 
@@ -146,6 +100,13 @@ function Activity({ task, messages, tasks }) {
         <section className="orch__block">
           <span className="ssec__label">Encargo</span>
           <p className="orch__spec">{task.spec}</p>
+        </section>
+      )}
+
+      {task.report && (
+        <section className="orch__block">
+          <span className="ssec__label">Informe</span>
+          <button className="lk is-accent orch__report" onClick={openReport} title={task.report}>Abrir {task.report.split(/[\\/]/).pop()}</button>
         </section>
       )}
 
@@ -186,17 +147,6 @@ function Activity({ task, messages, tasks }) {
         ) : <span className="orch__hint">Sin mensajes todavía.</span>}
       </section>
 
-      {!isFinal(task.status) && task.parent && (
-        <section className="orch__block">
-          <span className="ssec__label">Enviar instrucciones</span>
-          <div className="orch__q-row">
-            <div className="field field--strong">
-              <input value={note} placeholder="La tarea lo leerá en su próximo lxo check" onChange={(e) => setNote(e.target.value)}
-                onKeyDown={async (e) => { if (e.key === 'Enter' && note.trim() && await call('send', { to: task.id, body: note.trim() }, 'Enviado')) setNote(''); }} />
-            </div>
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -226,12 +176,10 @@ function DiffTab({ task }) {
 
 function TaskView({ task, snap }) {
   const call = useOrchStore((s) => s.call);
-  const busy = useOrchStore((s) => s.busy);
-  const [tab, setTab] = useState('term');
+  const [tab, setTab] = useState(task.parent ? 'term' : 'activity');
   const live = snap.live.includes(task.id);
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
-  const is = (cmd) => busy === `${cmd}:${task.id}`;
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
 
@@ -242,24 +190,16 @@ function TaskView({ task, snap }) {
         <div className="orch__head-text">
           <span className="panelhead__title">{task.title || task.id}</span>
           <span className="panelhead__meta">
-            <span className="mono">{task.id}</span> · {agentLabel(task.agent)} · {STATUS_LABELS[task.status] || task.status}
+            <span className="mono">{task.id}</span> · {agentLabel(task.agent)}{task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''} · {STATUS_LABELS[task.status] || task.status}
             {parent ? ` · hija de ${parent.title || parent.id}` : ' · coordinador'}
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>
         </div>
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}
-        {parent && task.branch && !task.merged && (
-          <button className="lk is-accent" disabled={is('merge')} onClick={() => call('merge', { task: task.id, force: !final }, `Fusionada en ${parent.title || parent.id}`)}>
-            {is('merge') ? 'Fusionando…' : 'Fusionar en el padre'}
-          </button>
-        )}
-        {parent && task.branch && !task.pr_url && (
-          <button className="lk" disabled={is('pr')} onClick={() => call('pr', { task: task.id }, (r) => `PR abierto: ${r.url}`)}>{is('pr') ? 'Abriendo PR…' : 'Abrir PR'}</button>
-        )}
-        {!final && <button className="lk is-danger" onClick={() => call('stop', { task: task.id }, 'Tarea detenida')}>Detener</button>}
-        {final && task.worktree && (
-          <button className="lk" disabled={is('release')} onClick={() => call('release', { task: task.id }, 'Worktree liberado')}>Liberar worktree</button>
+        {task.merged && <span className="orch__pill is-ok">Fusionada</span>}
+        {!final && parent && (
+          <button className="lk is-danger" title="Solo para emergencias: el coordinador recibe el aviso" onClick={() => call('stop', { task: task.id }, 'Tarea detenida')}>Detener</button>
         )}
       </div>
       <div className="orch__tabs">
@@ -268,7 +208,7 @@ function TaskView({ task, snap }) {
           onChange={setTab}
           width={96}
           options={[
-            { value: 'term', label: 'Terminal' },
+            ...(task.parent ? [{ value: 'term', label: 'Terminal' }] : []),
             { value: 'activity', label: 'Actividad' },
             ...(task.branch ? [{ value: 'diff', label: 'Cambios' }] : []),
           ]}
@@ -276,9 +216,7 @@ function TaskView({ task, snap }) {
         {task.worktree && <span className="mono orch__hint orch__path" title={task.worktree}>{task.worktree}</span>}
       </div>
       <div className="orch__body">
-        {tab === 'term' && (task.external
-          ? <div className="changes__empty">Este coordinador corre fuera de Lixbon, en su propia terminal. Aquí ves su árbol, sus mensajes y sus hijas.</div>
-          : <AgentTerminal key={task.id} task={task.id} live={live} />)}
+        {tab === 'term' && task.parent && <AgentTerminal key={task.id} task={task.id} live={live} />}
         {tab === 'activity' && <Activity task={task} messages={snap.messages} tasks={snap.tasks} />}
         {tab === 'diff' && <DiffTab task={task} />}
       </div>
@@ -293,8 +231,8 @@ function Disabled() {
       <span className="orch__badge-exp">Experimental</span>
       <h2>Orquestador de agentes</h2>
       <p>
-        Reparte un objetivo entre varios agentes (Claude Code, Codex, OpenCode, Lixbon…). Un coordinador crea tareas hijas,
-        cada una en su propia terminal, rama y worktree; te avisa al terminar cada fase y tú decides qué se fusiona.
+        Un chat pasa a ser el coordinador de un equipo de agentes (Claude Code, Codex, Cursor, OpenCode…): reparte el
+        objetivo, elige agente y modelo para cada tarea, espera sus informes, integra y te cuenta el resultado.
       </p>
       <button className="btn btn--primary" onClick={() => openSettings('orch')}>Activar en Ajustes</button>
     </div>
@@ -305,7 +243,6 @@ export function OrchestratorMode() {
   const sizes = useWorkbenchStore((s) => s.sizes);
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
   const { snap, selected, select, init, call } = useOrchStore();
-  const [creating, setCreating] = useState(false);
   const [allRepos, setAllRepos] = useState(false);
   const root = useAppStore((s) => s.workspaceRoot);
 
@@ -329,11 +266,9 @@ export function OrchestratorMode() {
         <Panel id="orchtree" className="sidepanel orch__side">
           <div className="panelhead">
             <span className="panelhead__title">{allRepos ? 'Runs · todos los repos' : `Runs · ${root ? root.split(/[\\/]/).pop() : 'sin carpeta'}`}</span>
-            <div className="panelhead__fill" />
-            <button className="ic" title="Nuevo run" onClick={() => { setCreating(true); select(null); }}><IconPlus size={14} /></button>
           </div>
           <div className="orch__runs scroll">
-            {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Crea uno, escribe /orquestar en el chat o pide a un agente con la skill que orqueste una tarea.</div>}
+            {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
             {runs.map((r) => (
               <section key={r.id} className="orch__run">
                 <div className="orch__run-head">
@@ -341,7 +276,7 @@ export function OrchestratorMode() {
                   <button className="ic" title="Quitar este run de la lista (no borra ramas)" onClick={() => call('remove_run', { run: r.id })}><IconTrash size={12} /></button>
                 </div>
                 {taskTree(snap.tasks, r.id).map((t) => (
-                  <TaskRow key={t.id} task={t} selected={t.id === selected} asking={asking.has(t.id)} onSelect={(id) => { setCreating(false); select(id); }} />
+                  <TaskRow key={t.id} task={t} selected={t.id === selected} asking={asking.has(t.id)} onSelect={select} />
                 ))}
               </section>
             ))}
@@ -356,7 +291,7 @@ export function OrchestratorMode() {
         <Gutter sizeKey="side" />
       </Collapse>
       <Panel id="orchmain" className="wb__grow orch__main">
-        {task && !creating ? <TaskView task={task} snap={snap} /> : <NewRun onDone={() => setCreating(false)} />}
+        {task ? <TaskView key={task.id} task={task} snap={snap} /> : <HowTo />}
       </Panel>
     </div>
   );

@@ -1,147 +1,131 @@
-// OrchestratorPage.jsx — Ajustes → Orquestador (experimental): activarlo,
-// instalar la skill en los agentes del sistema y cómo se lanzan los hijos.
+// OrchestratorPage.jsx — Ajustes → Orquestador (experimental). No hay nada que
+// configurar del equipo: el coordinador elige agente y modelo por tarea. Aquí
+// solo se activa, se ve qué agentes tiene a su alcance y qué se notifica.
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { toast } from '../../../store/toastStore';
-import { useOrchStore, AGENT_LABELS } from '../../../store/orchStore';
+import { useOrchStore } from '../../../store/orchStore';
 import { Switch } from '../../../components/Switch';
-import { Segmented } from '../../../components/Segmented';
-import { Select } from '../../../components/Select';
 
-function AgentRow({ a, onInstall, onRemove }) {
-  const state = a.installed ? (a.outdated ? 'Desactualizada' : 'Instalada') : a.detected ? 'Sin instalar' : 'No detectado';
+function SkillRow({ a, onInstall, onRemove }) {
+  const state = a.installed ? (a.outdated ? 'Desactualizada' : 'Instalada') : 'Sin instalar';
   return (
     <div className="srow">
       <div className="srow__text">
-        <span className="srow__label">{a.label} <span className={`orch__pill ${a.installed && !a.outdated ? 'is-ok' : a.detected ? 'is-warn' : ''}`}>{state}</span></span>
-        <span className="mono srow__tools" title={a.path}>{a.installed ? a.path : a.bin || (a.detected ? 'Carpeta de configuración encontrada' : 'No está en este equipo')}</span>
+        <span className="srow__label">{a.label} <span className={`orch__pill ${a.installed && !a.outdated ? 'is-ok' : 'is-warn'}`}>{state}</span></span>
+        <span className="mono srow__tools" title={a.path}>{a.installed ? a.path : a.bin || 'Carpeta de configuración encontrada'}</span>
       </div>
       <div className="ssec__actions">
-        {a.installed && <button className="lk" onClick={onRemove}>Quitar</button>}
+        {a.installed && !a.outdated && <button className="lk" onClick={onRemove}>Quitar</button>}
         {(!a.installed || a.outdated) && <button className="lk is-accent" onClick={onInstall}>{a.outdated ? 'Actualizar' : 'Instalar'}</button>}
       </div>
     </div>
   );
 }
 
+function Team({ enabled }) {
+  const [agents, setAgents] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const load = async (refresh = false) => {
+    setLoading(true);
+    try {
+      const res = await invoke('orch_call', { cmd: 'agents', args: { refresh } });
+      setAgents(res.agents || []);
+    } catch { setAgents([]); }
+    setLoading(false);
+  };
+  useEffect(() => { if (enabled) load(); }, [enabled]);
+
+  return (
+    <section className="ssec rise rise--2">
+      <div className="ssec__row">
+        <span className="ssec__label">Agentes que puede usar el coordinador</span>
+        <div className="panelhead__fill" />
+        {enabled && <button className="lk" disabled={loading} onClick={() => load(true)}>{loading ? 'Consultando…' : 'Volver a consultar'}</button>}
+      </div>
+      <div className="ssec ssec--card ssec--rows">
+        <span className="srow__hint orch__intro">
+          Lixbon pregunta a cada CLI instalada qué modelos ofrece. El coordinador elige de aquí el agente y el modelo de cada
+          tarea (por ejemplo Opus para programar y Haiku para leer o documentar) y los lanza en
+          autónomo, sin pedir permisos, cada uno en su propio worktree.
+        </span>
+        {!enabled && <span className="srow__hint">Activa el orquestador para consultarlos.</span>}
+        {enabled && agents === null && <span className="srow__hint">Consultando a cada agente…</span>}
+        {enabled && agents?.length === 0 && <span className="srow__hint">No se encontró ningún agente compatible (claude, codex, gemini).</span>}
+        {enabled && <span className="srow__hint">Cursor y OpenCode pueden coordinar con /orquestar, pero todavía no trabajan como agentes hijos en Windows.</span>}
+        {agents?.map((a) => (
+          <div key={a.id} className="srow">
+            <div className="srow__text">
+              <span className="srow__label">{a.label}</span>
+              <span className="srow__hint">{a.strengths}</span>
+              <span className="mono srow__tools" title={a.models.map((m) => m.id).join(', ')}>
+                {a.models.length ? `${a.models.length} modelo${a.models.length === 1 ? '' : 's'}: ${a.models.slice(0, 6).map((m) => m.id).join(', ')}${a.models.length > 6 ? '…' : ''}` : 'No lista modelos: el coordinador pasa el id directamente'}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function OrchestratorPage() {
   const { snap, agents, init, loadAgents, saveSettings, installSkill, uninstallSkill } = useOrchStore();
   const settings = snap?.settings;
-  const [launchers, setLaunchers] = useState({});
-  const [wtRoot, setWtRoot] = useState('');
-  const [pathInfo, setPathInfo] = useState(null);
 
-  useEffect(() => { init(); loadAgents(); invoke('orch_path_status').then(setPathInfo).catch(() => {}); }, [init, loadAgents]);
-
-  const addToPath = async () => {
-    try {
-      setPathInfo(await invoke('orch_add_to_path'));
-      toast('lxo añadido a tu PATH. Las terminales que abras a partir de ahora ya lo verán.');
-    } catch (e) {
-      toast(String(e), { tone: 'error', ms: 8000 });
-    }
-  };
-  useEffect(() => {
-    if (settings) { setLaunchers(settings.launchers || {}); setWtRoot(settings.worktree_root || ''); }
-  }, [settings]);
+  useEffect(() => { init(); loadAgents(); }, [init, loadAgents]);
+  useEffect(() => { if (settings?.enabled) loadAgents(); }, [settings?.enabled, loadAgents]);
 
   if (!settings) return <div className="spage"><span className="srow__hint">Cargando…</span></div>;
 
-  const detected = agents.filter((a) => a.detected && (!a.installed || a.outdated));
-  const agentOptions = Object.keys(settings.launchers || {}).map((id) => ({ value: id, label: AGENT_LABELS[id] || id }));
+  const detected = agents.filter((a) => a.detected);
+  const pending = detected.filter((a) => !a.installed || a.outdated);
 
   return (
     <div className="spage">
       <div className="spage__head rise">
         <div className="spage__title">
           <span className="spage__h1">Orquestador <span className="orch__badge-exp">Experimental</span></span>
-          <span className="spage__sub">Varios agentes trabajando a la vez sobre el mismo objetivo, coordinados por uno de ellos.</span>
+          <span className="spage__sub">Un chat coordina a un equipo de agentes que trabajan a la vez sobre el mismo objetivo.</span>
         </div>
       </div>
 
       <section className="ssec ssec--card rise rise--1">
         <p className="orch__about">
-          Un agente <b>coordinador</b> (el que prefieras: Claude Code, Codex, OpenCode, Lixbon…) divide el objetivo en tareas y lanza
-          agentes <b>hijos</b>. Cada hijo trabaja en su propia terminal, en una rama y un worktree de git propios, y puede tener a su
-          vez sus propios hijos. Todos hablan con Lixbon mediante la CLI <span className="mono">lxo</span>: informan de sus fases,
-          preguntan a su padre y avisan al terminar. Tú lo sigues en el modo <b>Orquestar</b> y decides qué se fusiona o sube como PR.
+          Escribe <span className="mono">/orquestar &lt;objetivo&gt;</span> en el chat de Lixbon o en cualquier agente con la skill
+          (Claude Code, Cursor, OpenCode, Codex). Ese chat pasa a ser el <b>coordinador</b>: divide el objetivo en tareas, elige
+          para cada una el agente y el modelo, las lanza en autónomo (cada una en su rama y su worktree), espera el
+          <b> informe</b> de cada agente, integra los cambios y te cuenta qué se hizo y en qué archivos. Tú solo hablas con él; en el
+          modo <b>Orquestar</b> puedes mirar qué hace cada agente.
         </p>
         <div className="srow">
           <div className="srow__text">
             <span className="srow__label">Activar el orquestador</span>
             <span className={`srow__hint ${settings.enabled && !snap.lxo_exists ? 'is-warn' : ''}`}>
               {settings.enabled
-                ? (snap.lxo_exists ? `Escuchando en 127.0.0.1:${snap.server} · lxo en ${snap.lxo}` : 'Activo, pero falta lxo junto al ejecutable de Lixbon: reinstala la app.')
-                : 'Mientras esté apagado, lxo responde que el orquestador está desactivado.'}
+                ? (snap.lxo_exists ? 'Activo. Al activarlo se instaló la skill /orquestar en tus agentes.' : 'Activo, pero falta lxo junto al ejecutable de Lixbon: reinstala la app.')
+                : 'Al activarlo se instala la skill /orquestar en todos los agentes que tengas.'}
             </span>
           </div>
-          <Switch checked={!!settings.enabled} onChange={(v) => saveSettings({ enabled: v })} label="Activar el orquestador" />
+          <Switch checked={!!settings.enabled} onChange={async (v) => { await saveSettings({ enabled: v }); loadAgents(); }} label="Activar el orquestador" />
         </div>
       </section>
 
-      <section className="ssec rise rise--2">
+      <Team enabled={!!settings.enabled} />
+
+      <section className="ssec rise rise--3">
         <div className="ssec__row">
-          <span className="ssec__label">Skill en tus agentes</span>
+          <span className="ssec__label">Skill /orquestar</span>
           <div className="panelhead__fill" />
-          {detected.length > 0 && (
-            <button className="lk is-accent" onClick={() => installSkill(detected.map((a) => a.id))}>Instalar en todos los detectados ({detected.length})</button>
-          )}
+          {pending.length > 0 && <button className="lk is-accent" onClick={() => installSkill(pending.map((a) => a.id))}>Instalar en todos ({pending.length})</button>}
         </div>
         <div className="ssec ssec--card ssec--rows">
           <span className="srow__hint orch__intro">
-            Una sola skill, <span className="mono">lixbon-orquestador</span>, sirve para ser coordinador y para ser hijo. Instálala en los
-            agentes que quieras usar; después basta con pedirles «orquesta esto con lxo». Desde el chat de Lixbon: <span className="mono">/orquestar &lt;objetivo&gt;</span>.
+            La misma skill sirve para coordinar (cuando tú la invocas) y para trabajar como agente hijo (cuando Lixbon lanza al agente).
           </span>
-          {agents.map((a) => (
-            <AgentRow key={a.id} a={a} onInstall={() => installSkill([a.id])} onRemove={() => uninstallSkill([a.id])} />
+          {detected.length === 0 && <span className="srow__hint">No se encontró ningún agente en este equipo.</span>}
+          {detected.map((a) => (
+            <SkillRow key={a.id} a={a} onInstall={() => installSkill([a.id])} onRemove={() => uninstallSkill([a.id])} />
           ))}
-          <div className="srow">
-            <div className="srow__text">
-              <span className="srow__label">Lixbon (este IDE) <span className={`orch__pill ${settings.enabled ? 'is-ok' : ''}`}>{settings.enabled ? 'Integrado' : 'Apagado'}</span></span>
-              <span className="srow__hint">El agente de Lixbon recibe la guía del orquestador directamente mientras esté activado.</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="ssec ssec--card rise rise--2">
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Usar <span className="mono">lxo</span> desde cualquier terminal</span>
-            <span className="srow__hint">
-              {pathInfo?.in_path
-                ? `Ya está en tu PATH (${pathInfo.dir}).`
-                : 'Los agentes que lanza Lixbon y los que usan la skill no lo necesitan. Añádelo al PATH si quieres escribir lxo tú mismo en una terminal.'}
-            </span>
-          </div>
-          {pathInfo && !pathInfo.in_path && pathInfo.supported && <button className="lk is-accent" onClick={addToPath}>Añadir al PATH</button>}
-        </div>
-      </section>
-
-      <section className="ssec ssec--card rise rise--3">
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Agente por defecto para los hijos</span>
-            <span className="srow__hint">El coordinador puede elegir otro en cada tarea (lxo spawn --agent).</span>
-          </div>
-          <Select value={settings.default_agent} onChange={(v) => saveSettings({ default_agent: v })} options={agentOptions} />
-        </div>
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Niveles de hijos</span>
-            <span className="srow__hint">1: solo hijos · 2: hijos y nietos. Más niveles multiplican agentes y consumo.</span>
-          </div>
-          <Segmented size="sm" width={44} value={String(settings.max_depth)} onChange={(v) => saveSettings({ max_depth: Number(v) })}
-            options={['1', '2', '3', '4'].map((v) => ({ value: v, label: v }))} />
-        </div>
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Carpeta de los worktrees</span>
-            <span className="srow__hint">Vacía: junto al repositorio, en <span className="mono">&lt;repo&gt;.lixbon-wt/</span>.</span>
-          </div>
-          <div className="field field--strong orch__field">
-            <input value={wtRoot} placeholder="Predeterminada" onChange={(e) => setWtRoot(e.target.value)} onBlur={() => wtRoot !== settings.worktree_root && saveSettings({ worktree_root: wtRoot.trim() })} />
-          </div>
         </div>
       </section>
 
@@ -150,8 +134,8 @@ export function OrchestratorPage() {
         <div className="ssec ssec--card ssec--rows">
           {[
             ['notify_phases', 'Fase terminada', 'Cada vez que un agente cierra una fase de su tarea.'],
-            ['notify_done', 'Tarea terminada o cerrada', 'Cuando un agente acaba (bien o mal) o su terminal se cierra.'],
-            ['notify_questions', 'Preguntas', 'Cuando un agente se queda esperando una decisión.'],
+            ['notify_done', 'Tarea entregada o cerrada', 'Cuando un agente entrega su informe o su terminal se cierra.'],
+            ['notify_questions', 'Preguntas al coordinador', 'Cuando un agente se queda esperando una decisión.'],
           ].map(([key, label, hint]) => (
             <div key={key} className="srow">
               <div className="srow__text">
@@ -159,29 +143,6 @@ export function OrchestratorPage() {
                 <span className="srow__hint">{hint}</span>
               </div>
               <Switch checked={!!settings[key]} onChange={(v) => saveSettings({ [key]: v })} label={label} />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="ssec rise rise--3">
-        <span className="ssec__label">Cómo se lanza cada agente</span>
-        <div className="ssec ssec--card ssec--rows">
-          <span className="srow__hint orch__intro">
-            <span className="mono">{'{prompt}'}</span> se sustituye por la instrucción inicial. Si el comando no lo lleva, Lixbon la escribe en
-            la terminal cuando el agente está listo. Añade aquí los flags que quieras (modelo, permisos…).
-          </span>
-          {Object.keys(launchers).map((id) => (
-            <div key={id} className="srow">
-              <span className="srow__label orch__launcher-name">{AGENT_LABELS[id] || id}</span>
-              <div className="field field--strong orch__field orch__field--wide">
-                <input
-                  className="mono"
-                  value={launchers[id]}
-                  onChange={(e) => setLaunchers((l) => ({ ...l, [id]: e.target.value }))}
-                  onBlur={() => launchers[id] !== settings.launchers[id] && saveSettings({ launchers })}
-                />
-              </div>
             </div>
           ))}
         </div>

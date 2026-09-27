@@ -44,6 +44,10 @@ pub struct Task {
     pub parent: Option<String>,
     pub depth: u32,
     pub agent: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
     pub title: String,
     #[serde(default)]
     pub spec: String,
@@ -59,6 +63,9 @@ pub struct Task {
     pub summary: String,
     #[serde(default)]
     pub files: Vec<String>,
+    /// Informe final de la hija, copiado junto al coordinador.
+    #[serde(default)]
+    pub report: Option<String>,
     /// Coordinador que corre fuera de Lixbon (una terminal cualquiera).
     #[serde(default)]
     pub external: bool,
@@ -128,6 +135,8 @@ pub struct State {
 
 pub struct NewTask {
     pub agent: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
     pub title: String,
     pub spec: String,
     pub repo: String,
@@ -192,7 +201,7 @@ impl State {
         let depth = p.depth + 1;
         if depth > max_depth {
             return Err(format!(
-                "Profundidad máxima alcanzada ({max_depth}): {parent} no puede crear más niveles. Hazlo tú o pídeselo a tu padre."
+                "Solo el coordinador reparte tareas: {parent} es una tarea hija. Si necesitas ayuda, díselo con lxo ask o en tu informe."
             ));
         }
         Ok(depth)
@@ -213,6 +222,8 @@ impl State {
             parent,
             depth,
             agent: t.agent,
+            model: t.model,
+            effort: t.effort,
             title: t.title,
             spec: t.spec,
             repo: t.repo,
@@ -224,6 +235,7 @@ impl State {
             phases: vec![],
             summary: String::new(),
             files: vec![],
+            report: None,
             external: t.external,
             merged: false,
             pr_url: None,
@@ -281,17 +293,23 @@ impl State {
         }
     }
 
-    pub fn done(&mut self, id: &str, ok: bool, summary: &str, files: Vec<String>) -> Result<Option<u64>, String> {
+    pub fn done(&mut self, id: &str, ok: bool, summary: &str, files: Vec<String>, report: Option<String>) -> Result<Option<u64>, String> {
         self.ensure_open(id)?;
         let t = self.task_mut(id)?;
         t.summary = summary.into();
         t.files = files;
+        t.report = report.clone();
         let parent = t.parent.clone();
         let title = t.title.clone();
         self.touch(id, Some(if ok { Status::Done } else { Status::Failed }))?;
         match parent {
             Some(p) => {
-                let body = format!("{title}: {}. {summary}", if ok { "terminada" } else { "fallida" });
+                let status = if ok { "terminada" } else { "fallida" };
+                let body = match &report {
+                    Some(r) => format!("{title}: {status}. {summary}
+Informe: {r}"),
+                    None => format!("{title}: {status}. {summary}"),
+                };
                 self.post(id, &p, Kind::Done, &body, None).map(Some)
             }
             None => Ok(None),
@@ -318,6 +336,24 @@ impl State {
             self.touch(&q.from, Some(Status::Running))?;
         }
         self.post(from, &q.from, Kind::Reply, answer, Some(question))
+    }
+
+    /// Nueva tarea para una hija que ya terminó y sigue con su terminal abierta.
+    pub fn reopen(&mut self, id: &str, spec: &str) -> Result<(), String> {
+        let t = self.task_mut(id)?;
+        if !matches!(t.status, Status::Done | Status::Failed) {
+            return Err(format!("{id} no está esperando trabajo nuevo ({:?})", t.status).to_lowercase());
+        }
+        t.spec = format!("{}
+
+---
+Seguimiento:
+{spec}", t.spec);
+        t.summary.clear();
+        t.report = None;
+        t.status = Status::Running;
+        t.updated = now_ms();
+        Ok(())
     }
 
     pub fn close(&mut self, id: &str, status: Status, why: &str) -> Result<Option<u64>, String> {
@@ -411,7 +447,7 @@ mod tests {
 
     fn nt(title: &str) -> NewTask {
         NewTask {
-            agent: "claude".into(), title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
+            agent: "claude".into(), model: None, effort: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
             branch: None, base: None, worktree: None, external: false,
         }
     }
@@ -420,11 +456,10 @@ mod tests {
     fn arbol_con_limite_de_profundidad() {
         let mut s = State::default();
         let (_, root) = s.create_run("obj", nt("raíz"));
-        let hijo = s.add_child(&root, 2, nt("hijo")).unwrap();
-        let nieto = s.add_child(&hijo, 2, nt("nieto")).unwrap();
-        assert_eq!(s.task(&nieto).unwrap().depth, 2);
-        assert!(s.add_child(&nieto, 2, nt("bisnieto")).is_err());
-        assert!(s.is_ancestor(&root, &nieto));
+        let hijo = s.add_child(&root, 1, nt("hijo")).unwrap();
+        assert_eq!(s.task(&hijo).unwrap().depth, 1);
+        assert!(s.add_child(&hijo, 1, nt("nieto")).is_err());
+        assert!(s.is_ancestor(&root, &hijo));
         assert!(s.ensure_manages(&hijo, &root).is_err());
     }
 
@@ -432,14 +467,18 @@ mod tests {
     fn fases_y_fin_avisan_al_padre() {
         let mut s = State::default();
         let (_, root) = s.create_run("obj", nt("raíz"));
-        let hijo = s.add_child(&root, 2, nt("api")).unwrap();
+        let hijo = s.add_child(&root, 1, nt("api")).unwrap();
         assert!(s.phase(&hijo, "tests", false, "").unwrap().is_none());
         assert!(s.phase(&hijo, "tests", true, "12 ok").unwrap().is_some());
-        s.done(&hijo, true, "listo", vec![]).unwrap();
+        s.done(&hijo, true, "listo", vec![], Some("informe.md".into())).unwrap();
         let inbox = s.unread(&root, &[Kind::Phase, Kind::Done], None);
         assert_eq!(inbox.len(), 2);
         assert_eq!(s.task(&hijo).unwrap().status, Status::Done);
-        assert!(s.done(&hijo, false, "otra vez", vec![]).is_err());
+        assert!(s.done(&hijo, false, "otra vez", vec![], None).is_err());
+        s.reopen(&hijo, "corrige el test").unwrap();
+        assert_eq!(s.task(&hijo).unwrap().status, Status::Running);
+        assert!(s.task(&hijo).unwrap().report.is_none());
+        s.done(&hijo, true, "corregido", vec![], None).unwrap();
         assert!(s.close(&hijo, Status::Exited, "pty").unwrap().is_none());
     }
 
@@ -447,7 +486,7 @@ mod tests {
     fn pregunta_y_respuesta() {
         let mut s = State::default();
         let (_, root) = s.create_run("obj", nt("raíz"));
-        let hijo = s.add_child(&root, 2, nt("ui")).unwrap();
+        let hijo = s.add_child(&root, 1, nt("ui")).unwrap();
         let q = s.ask(&hijo, "¿tabs o espacios?").unwrap();
         assert_eq!(s.task(&hijo).unwrap().status, Status::Waiting);
         assert!(s.reply(&hijo, q, "tabs").is_err());

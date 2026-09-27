@@ -14,21 +14,22 @@ const WORKER: &str = include_str!("../guide/worker.md");
 
 const HELP: &str = "lxo · orquestador de agentes de Lixbon
 
-Coordinador:
-  lxo run create --objective \"...\" [--agent claude]
-  lxo spawn --task \"...\" [--agent claude|codex|opencode|…] [--name \"...\"] [--base <rama>] [--no-worktree]
-  lxo wait [--types done,question,phase,exited] [--timeout-ms 900000]
+Coordinador (el agente con el que habla el usuario):
+  lxo run create --objective \"...\" --agent <tu agente>
+  lxo agents [--refresh]                          agentes instalados y sus modelos
+  lxo spawn --agent <id> --task \"...\" [--model <id>] [--effort <nivel>] [--name \"...\"] [--shared] [--base <rama>]
+  lxo wait [--types done,question,exited,phase] [--timeout-ms 540000]
   lxo reply <id-pregunta> \"respuesta\"
-  lxo send <tarea> \"mensaje\"
-  lxo list | lxo show [<tarea>]
-  lxo diff <tarea> | lxo merge <tarea> [--squash] [--force] | lxo pr <tarea>
-  lxo stop <tarea> | lxo release <tarea> [--force]
+  lxo send <tarea> \"mensaje\"             instrucciones a una hija en marcha
+  lxo continue <tarea> --task \"...\"      nuevo encargo a una hija que ya entregó
+  lxo list | lxo show [<tarea>] | lxo diff <tarea>
+  lxo merge <tarea> [--squash] | lxo pr <tarea> | lxo stop <tarea> | lxo release <tarea> [--force]
 
 Tarea hija:
   lxo phase \"nombre\" --start | --done [--note \"...\"]
-  lxo ask \"pregunta\" [--timeout-ms N]
+  lxo ask \"pregunta\" [--timeout-ms N]   (lxo ask --resume <id> para seguir esperando)
   lxo check
-  lxo done --summary \"...\" [--failed] [--files a,b]
+  lxo done --report <informe.md> --summary \"...\" [--failed] [--files a,b]
 
 Siempre:
   lxo guide [coordinator|worker]   guía completa (léela antes de empezar)
@@ -60,7 +61,7 @@ fn parse(raw: Vec<String>) -> Args {
     Args { pos, flags }
 }
 
-const BOOL_FLAGS: &[&str] = &["json", "start", "done", "failed", "squash", "force", "no-worktree", "stat"];
+const BOOL_FLAGS: &[&str] = &["json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh"];
 
 impl Args {
     fn s(&self, k: &str) -> Option<String> {
@@ -169,19 +170,39 @@ fn human(cmd: &str, data: &Value) -> String {
                 _ => "No eres una tarea todavía: si vas a coordinar, empieza con `lxo run create`".into(),
             };
             format!(
-                "Lixbon {} · orquestador activo\n{who}\nPuedes crear hijas: {} (profundidad máxima {})\nAgentes: {} (por defecto {})",
-                data["version"].as_str().unwrap_or(""),
-                if data["can_spawn"].as_bool() == Some(true) { "sí" } else { "no" },
-                data["max_depth"],
-                data["agents"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
-                data["default_agent"].as_str().unwrap_or("")
+                "Lixbon {} · orquestador activo\n{who}\nPara ver agentes y modelos disponibles: lxo agents",
+                data["version"].as_str().unwrap_or("")
             )
         }
         "run_create" => format!("Run {} creado. Eres su coordinador ({}). Ahora lanza hijas con `lxo spawn`.", data["run"].as_str().unwrap_or(""), data["task"].as_str().unwrap_or("")),
+        "agents" => {
+            let list = data["agents"].as_array().cloned().unwrap_or_default();
+            if list.is_empty() {
+                return "No hay ningún agente instalado que Lixbon sepa lanzar (claude, codex, cursor-agent, opencode, gemini).".into();
+            }
+            list.iter().map(|a| {
+                let models: Vec<&str> = a["models"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str()).collect();
+                let shown = if models.is_empty() { "(no se pudieron listar; pasa el id igualmente)".to_string() } else if models.len() > 25 {
+                    format!("{} … y {} más (lxo agents --json para verlos todos)", models[..25].join(", "), models.len() - 25)
+                } else { models.join(", ") };
+                let efforts: Vec<&str> = a["efforts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                format!(
+                    "{} ({})\n  Bueno para: {}\n  Modelos: {}\n  {}{}",
+                    a["id"].as_str().unwrap_or(""),
+                    a["label"].as_str().unwrap_or(""),
+                    a["strengths"].as_str().unwrap_or(""),
+                    shown,
+                    a["model_hint"].as_str().unwrap_or(""),
+                    if efforts.is_empty() { String::new() } else { format!("\n  --effort: {}", efforts.join(", ")) }
+                )
+            }).collect::<Vec<_>>().join("\n\n")
+        }
+        "continue" => format!("Nuevo encargo enviado a {}: lo verás llegar con lxo wait como otro done.", data["task"].as_str().unwrap_or("")),
         "spawn" => format!(
-            "Hija {} lanzada con {} [{}]{}{}",
+            "Hija {} lanzada con {}{} [{}]{}{}",
             data["task"].as_str().unwrap_or(""),
             data["agent"].as_str().unwrap_or(""),
+            data["model"].as_str().map(|m| format!(" · {m}")).unwrap_or_default(),
             data["status"].as_str().unwrap_or(""),
             data["branch"].as_str().map(|b| format!(" · rama {b}")).unwrap_or_default(),
             data["worktree"].as_str().map(|w| format!(" · {w}")).unwrap_or_default()
@@ -221,7 +242,7 @@ fn human(cmd: &str, data: &Value) -> String {
         "pr" => format!("PR abierto: {}", data["url"].as_str().unwrap_or("")),
         "ask" => format!("Respuesta: {}", data["answer"].as_str().unwrap_or("")),
         "phase" => format!("Fase «{}» registrada.", data["phase"].as_str().unwrap_or("")),
-        "done" => "Tarea cerrada. No empieces trabajo nuevo: tu coordinador ya está avisado.".into(),
+        "done" => format!("Tarea cerrada e informe entregado ({}). No empieces trabajo nuevo: tu coordinador ya está avisado.", data["report"].as_str().unwrap_or("")),
         "reply" => format!("Respuesta enviada (#{}).", data["reply"]),
         "send" => format!("Mensaje enviado (#{}). La hija lo leerá en su próximo lxo check.", data["message"]),
         "stop" => format!("Tarea {} detenida.", data["task"].as_str().unwrap_or("")),
@@ -246,20 +267,11 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             let role = match sub(1).as_deref() {
                 Some("coordinator" | "coordinador") => "coordinator".to_string(),
                 Some("worker" | "hija") => "worker".to_string(),
-                _ => call("status", json!({}), me).ok().and_then(|s| s["role"].as_str().map(String::from)).unwrap_or_else(|| "external".into()),
+                _ if std::env::var("LXO_TASK_ID").is_ok_and(|v| !v.is_empty()) => "worker".to_string(),
+                _ => "coordinator".to_string(),
             };
-            let text = match role.as_str() {
-                "worker" => {
-                    let spawn = call("status", json!({}), me).ok().and_then(|s| s["can_spawn"].as_bool()).unwrap_or(false);
-                    if spawn && sub(1).is_none() {
-                        format!("{WORKER}\n---\n\nSi tu tarea es grande, puedes repartirla como coordinador de tus propias hijas:\n\n{COORDINATOR}")
-                    } else {
-                        WORKER.to_string()
-                    }
-                }
-                _ => COORDINATOR.to_string(),
-            };
-            return Ok(("guide".into(), Value::String(text)));
+            let text = if role == "worker" { WORKER } else { COORDINATOR };
+            return Ok(("guide".into(), Value::String(text.to_string())));
         }
         "status" => ("status", call("status", json!({}), me)?),
         "run" => {
@@ -274,9 +286,15 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             }
             ("run_create", data)
         }
+        "agents" => ("agents", call("agents", json!({ "refresh": a.b("refresh") }), me)?),
         "spawn" => ("spawn", call("spawn", json!({
             "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
-            "agent": a.s("agent"), "name": a.s("name"), "base": a.s("base"), "no_worktree": a.b("no-worktree"),
+            "agent": need(a.s("agent"), "--agent (mira `lxo agents`)")?,
+            "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
+        }), me)?),
+        "continue" => ("continue", call("continue", json!({
+            "task": need(sub(1), "la tarea")?,
+            "spec": need(a.s("task").or_else(|| sub(2)), "--task con el nuevo encargo")?,
         }), me)?),
         "phase" => {
             let name = need(sub(1).or_else(|| a.s("name")), "el nombre de la fase")?;
@@ -284,7 +302,12 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         }
         "done" => {
             let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
-            ("done", call("done", json!({ "summary": need(a.s("summary"), "--summary")?, "failed": a.b("failed"), "files": files }), me)?)
+            let report = a.s("report").unwrap_or_default();
+            let summary = a.s("summary").unwrap_or_default();
+            if report.is_empty() && summary.is_empty() {
+                return Err("Falta --report <informe.md> (y --summary con una frase).".into());
+            }
+            ("done", call("done", json!({ "summary": summary, "report": report, "failed": a.b("failed"), "files": files }), me)?)
         }
         "ask" => {
             let q = call("ask", json!({ "question": need(sub(1).or_else(|| a.s("question")), "la pregunta")? }), me)?;
@@ -367,9 +390,9 @@ mod tests {
         assert_eq!(a.at(1).as_deref(), Some("Tests"));
         assert!(a.b("done"));
         assert_eq!(a.s("note").as_deref(), Some("12 ok"));
-        let a = p(&["spawn", "--agent=codex", "--no-worktree", "--task", "x"]);
+        let a = p(&["spawn", "--agent=codex", "--shared", "--task", "x"]);
         assert_eq!(a.s("agent").as_deref(), Some("codex"));
-        assert!(a.b("no-worktree"));
+        assert!(a.b("shared"));
         assert_eq!(a.s("task").as_deref(), Some("x"));
         let a = p(&["merge", "t3", "--squash", "--json"]);
         assert_eq!(a.at(1).as_deref(), Some("t3"));
