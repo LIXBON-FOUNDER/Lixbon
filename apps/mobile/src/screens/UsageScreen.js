@@ -1,7 +1,6 @@
 // UsageScreen.js — plan vigente, consumo del período y barras de tokens/día
-// (30 días), espejo de "Mi cuenta → Uso" de la web (account.css): página
-// crema con tarjetas blancas, cuotas .quota (pista tinta 8 %, relleno tinta,
-// danger al llenarse) y gráfico de barras de tinta (.uchart).
+// (30 días) en paneles del IDE: cuotas con relleno de acento (peligro al
+// llenarse), cifras en mono y barras de acento.
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,7 +9,7 @@ import Icon from '../components/Icon';
 import { Card, CardTitle, PlanPill, StackHeader, useColors } from '../components/ui';
 import { ApiException } from '../api';
 import { useApi } from '../state';
-import { FONTS, RADIUS_PILL } from '../theme';
+import { FONTS } from '../theme';
 
 function fmtDate(iso) {
   if (typeof iso !== 'string') return '';
@@ -56,15 +55,16 @@ export default function UsageScreen({ onBack }) {
   const buckets = data?.buckets;
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bgSecondary }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
       <StackHeader title="Uso" onBack={onBack} />
       <ScrollView
         contentContainerStyle={{ paddingBottom: 30, paddingTop: 6 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor={c.ink}
-            colors={[c.ink]}
+            tintColor={c.accent}
+            colors={[c.accent]}
+            progressBackgroundColor={c.surface3}
             onRefresh={async () => {
               setRefreshing(true);
               await load();
@@ -73,7 +73,7 @@ export default function UsageScreen({ onBack }) {
           />
         }
       >
-        <View style={{ paddingHorizontal: 16, gap: 14 }}>
+        <View style={{ paddingHorizontal: 10, gap: 10 }}>
           {data == null && !error && (
             <View style={{ paddingTop: 40, alignItems: 'center' }}>
               <ActivityIndicator color={c.inkSoft} />
@@ -90,7 +90,7 @@ export default function UsageScreen({ onBack }) {
                 <PlanPill>{String(plan.name || plan.id || '')}</PlanPill>
               </View>
               <Pressable
-                onPress={() => Linking.openURL(`${api.base}/planes`)}
+                onPress={() => Linking.openURL(`${api.base}/plans`)}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -102,10 +102,9 @@ export default function UsageScreen({ onBack }) {
               >
                 <Text
                   style={{
-                    fontFamily: FONTS.ui,
+                    fontFamily: FONTS.uiMedium,
                     fontSize: 13.5,
                     color: c.accentDeep,
-                    textDecorationLine: 'underline',
                   }}
                 >
                   Ver planes y mejoras
@@ -161,8 +160,8 @@ function Quota({ label, hint, percent, resetsAt, fmtReset = fmtDate }) {
         <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>{label}</Text>
         <Text
           style={{
-            fontFamily: full ? FONTS.uiSemiBold : FONTS.ui,
-            fontSize: 14,
+            fontFamily: full ? FONTS.monoMedium : FONTS.mono,
+            fontSize: 13,
             color: full ? c.danger : c.inkSoft,
             fontVariant: ['tabular-nums'],
           }}
@@ -172,8 +171,8 @@ function Quota({ label, hint, percent, resetsAt, fmtReset = fmtDate }) {
       </View>
       <View
         style={{
-          height: 8,
-          borderRadius: RADIUS_PILL,
+          height: 6,
+          borderRadius: 3,
           backgroundColor: c.track,
           overflow: 'hidden',
         }}
@@ -182,8 +181,8 @@ function Quota({ label, hint, percent, resetsAt, fmtReset = fmtDate }) {
           style={{
             width: `${ratio * 100}%`,
             height: '100%',
-            borderRadius: RADIUS_PILL,
-            backgroundColor: full ? c.danger : c.ink,
+            borderRadius: 3,
+            backgroundColor: full ? c.danger : ratio >= 0.75 ? c.warn : c.accent,
           }}
         />
       </View>
@@ -191,8 +190,8 @@ function Quota({ label, hint, percent, resetsAt, fmtReset = fmtDate }) {
         <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkSoft }}>{hint}</Text>
       )}
       {resetsAt != null && (
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkSoft }}>
-          Se reinicia el {fmtReset(resetsAt)}
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkLabel }}>
+          se reinicia el {fmtReset(resetsAt)}
         </Text>
       )}
     </View>
@@ -229,15 +228,15 @@ function DailyChart({ daily }) {
               style={{
                 height: tokens > 0 ? Math.max(3, (CHART_HEIGHT * tokens) / max) : 2,
                 borderRadius: 2,
-                backgroundColor: tokens > 0 ? c.ink : c.track,
+                backgroundColor: tokens > 0 ? (i === 29 ? c.accentDeep : c.accent) : c.track,
               }}
             />
           </View>
         ))}
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 11, color: c.inkSoft }}>hace 30 días</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 11, color: c.inkSoft }}>hoy</Text>
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>hace 30 días</Text>
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>hoy</Text>
       </View>
     </View>
   );

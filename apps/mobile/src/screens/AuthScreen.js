@@ -1,12 +1,9 @@
 // AuthScreen.js — login / registro / olvidé mi contraseña.
-// Espejo fiel del auth de la web (auth.css): fondo crema SIN tarjeta, logo
-// arriba, toggle segmentado con pastilla oscura deslizante, campos pill con
-// etiqueta sobre el borde, CTA pill grande, enlaces olivo subrayados y
-// botones sociales Google (blanco) / Apple (tinta).
-import React, { useEffect, useRef, useState } from 'react';
+// Con el sistema del IDE: fondo con luz ambiente, isotipo + wordmark,
+// selector deslizante, campos de relleno con etiqueta flotante, CTA invertido
+// y botones sociales de relleno.
+import React, { useEffect, useState } from 'react';
 import {
-  Animated,
-  Easing,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -17,18 +14,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDialogs } from '../components/dialogs';
 import {
+  AmbientGlow,
   AppleLogo,
   FadeUp,
   FloatingField,
   GoogleLogo,
   LixLogo,
+  LogoMark,
+  Segmented,
   useColors,
   useIsDark,
-  useReducedMotion,
 } from '../components/ui';
 import { ApiException } from '../api';
 import { DEFAULT_API_BASE, useApi, useAuth, usePrefs } from '../state';
-import { FONTS, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS } from '../theme';
 
 export default function AuthScreen() {
   const c = useColors();
@@ -139,12 +138,12 @@ export default function AuthScreen() {
   };
 
   const notice = auth.notice;
-  // La web invierte las capas en oscuro: fondo --bg y superficies --bg-secondary.
-  const screenBg = dark ? c.bg : c.bgSecondary;
-  const surface = dark ? c.bgSecondary : c.bg;
+  const screenBg = c.bg;
+  const surface = c.surface3;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: screenBg }}>
+      <AmbientGlow />
       {/* Sin esto el teclado tapaba los campos de abajo: con edge-to-edge la
           ventana no se encoge, así que el ScrollView tampoco tenía nada que
           desplazar y el formulario quedaba a medias. */}
@@ -159,11 +158,15 @@ export default function AuthScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <FadeUp>
-          <LixLogo size={30} />
+        <FadeUp style={{ alignItems: 'center', gap: 14 }}>
+          <LogoMark size={48} />
+          <LixLogo size={24} />
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkLabel }}>
+            IA en nuestras propias GPUs
+          </Text>
         </FadeUp>
 
-        <View style={{ width: '100%', maxWidth: 420, marginTop: 30, gap: 22 }}>
+        <View style={{ width: '100%', maxWidth: 420, marginTop: 30, gap: 18 }}>
           <FadeUp delay={60}>
             {mode !== 'forgot' ? (
               <ModeToggle mode={mode} onChange={switchMode} surface={surface} />
@@ -183,9 +186,9 @@ export default function AuthScreen() {
           </FadeUp>
 
           {/* Campos: la key fuerza el fields-in al cambiar de modo */}
-          <FadeUp key={mode} style={{ gap: 16 }}>
+          <FadeUp key={mode} style={{ gap: 10 }}>
             {mode === 'register' && (
-              <View style={{ flexDirection: 'row', gap: 14 }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
                 <View style={{ flex: 1 }}>
                   <FloatingField surface={surface} label="Nombre" value={firstName} onChangeText={setFirstName} autoCapitalize="words" />
                 </View>
@@ -245,12 +248,14 @@ export default function AuthScreen() {
               onPress={busy ? undefined : submit}
               disabled={busy}
               style={({ pressed }) => ({
-                marginTop: 4,
-                paddingVertical: 17,
-                borderRadius: RADIUS_PILL,
+                marginTop: 6,
+                height: 48,
+                justifyContent: 'center',
+                borderRadius: RADIUS,
                 backgroundColor: c.primary,
                 alignItems: 'center',
-                opacity: busy ? 0.45 : pressed ? 0.85 : 1,
+                opacity: busy ? 0.45 : 1,
+                transform: [{ scale: pressed ? 0.98 : 1 }],
               })}
             >
               <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>
@@ -278,16 +283,12 @@ export default function AuthScreen() {
             {mode !== 'forgot' && (
               <>
                 {/* Divisor (.auth__divider) */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 6 }}>
-                  <View style={{ flex: 1, height: 1, backgroundColor: c.borderSoft }} />
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
-                    {mode === 'login' ? 'O inicia sesión con' : 'O regístrate con'}
-                  </Text>
-                  <View style={{ flex: 1, height: 1, backgroundColor: c.borderSoft }} />
-                </View>
+                <Text style={{ textAlign: 'center', marginTop: 8, fontFamily: FONTS.uiMedium, fontSize: 10.5, letterSpacing: 1, color: c.inkLabel }}>
+                  {mode === 'login' ? 'O INICIA SESIÓN CON' : 'O REGÍSTRATE CON'}
+                </Text>
 
                 {/* Sociales: Google superficie clara, Apple tinta (auth.css) */}
-                <View style={{ flexDirection: 'row', gap: 14 }}>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
                   <SocialButton
                     label="Google"
                     icon={<GoogleLogo />}
@@ -310,7 +311,7 @@ export default function AuthScreen() {
         </View>
 
         <Pressable onLongPress={changeServer} style={{ marginTop: 30, padding: 6 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>lixbon.com</Text>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>lixbon.com</Text>
         </Pressable>
       </ScrollView>
       </KeyboardAvoidingView>
@@ -319,100 +320,32 @@ export default function AuthScreen() {
 }
 
 // En oscuro el botón Apple es crema (primary) → logo en tinta oscura.
-const DARK_APPLE = '#1A1913';
+const DARK_APPLE = '#0B0B0B';
 
-// Toggle segmentado (.auth__toggle): superficie clara con borde y pastilla
-// de tinta deslizante con sombra; curva cubic-bezier(0.22,1,0.36,1).
-function ModeToggle({ mode, onChange, surface }) {
-  const c = useColors();
-  const reduced = useReducedMotion();
-  const [width, setWidth] = useState(0);
-  const anim = useRef(new Animated.Value(mode === 'register' ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: mode === 'register' ? 1 : 0,
-      duration: reduced ? 0 : 380,
-      easing: Easing.bezier(0.22, 1, 0.36, 1),
-      useNativeDriver: true,
-    }).start();
-  }, [mode, anim, reduced]);
-
-  const half = (width - 10) / 2;
-
+function ModeToggle({ mode, onChange }) {
   return (
-    <View
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      style={{
-        backgroundColor: surface,
-        borderWidth: 1,
-        borderColor: c.borderSoft,
-        borderRadius: RADIUS_PILL,
-        padding: 5,
-      }}
-    >
-      {width > 0 && (
-        <Animated.View
-          style={{
-            position: 'absolute',
-            top: 5,
-            bottom: 5,
-            left: 5,
-            width: half,
-            borderRadius: RADIUS_PILL,
-            backgroundColor: c.primary,
-            elevation: 4,
-            shadowColor: '#1B1A17',
-            shadowOpacity: 0.16,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 4 },
-            transform: [
-              { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, half] }) },
-            ],
-          }}
-        />
-      )}
-      <View style={{ flexDirection: 'row' }}>
-        {[
-          ['Iniciar Sesión', 'login'],
-          ['Registrarse', 'register'],
-        ].map(([label, value]) => {
-          const active = mode === value;
-          return (
-            <Pressable
-              key={value}
-              onPress={() => onChange(value)}
-              style={{ flex: 1, paddingVertical: 12 }}
-            >
-              <Text
-                style={{
-                  textAlign: 'center',
-                  fontFamily: FONTS.uiSemiBold,
-                  fontSize: 14.5,
-                  color: active ? c.onPrimary : c.ink,
-                }}
-              >
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
+    <Segmented
+      stretch
+      value={mode}
+      onChange={onChange}
+      options={[
+        { value: 'login', label: 'Iniciar sesión' },
+        { value: 'register', label: 'Registrarse' },
+      ]}
+    />
   );
 }
 
-// Enlace olivo subrayado (.auth__link).
+// Enlace en acento.
 function LinkText({ children, onPress }) {
   const c = useColors();
   return (
     <Pressable onPress={onPress} style={({ pressed }) => ({ alignSelf: 'center', padding: 4, opacity: pressed ? 0.72 : 1 })}>
       <Text
         style={{
-          fontFamily: FONTS.ui,
+          fontFamily: FONTS.uiMedium,
           fontSize: 13.5,
           color: c.accentDeep,
-          textDecorationLine: 'underline',
         }}
       >
         {children}
@@ -434,12 +367,11 @@ function SocialButton({ label, icon, onPress, disabled, variant, surface }) {
         justifyContent: 'center',
         alignItems: 'center',
         gap: 10,
-        paddingVertical: 14,
-        borderRadius: RADIUS_PILL,
-        backgroundColor: ink ? c.primary : surface || c.bg,
-        borderWidth: ink ? 0 : 1,
-        borderColor: pressed ? c.accentDeep : c.borderSoft,
-        opacity: disabled ? 0.45 : ink && pressed ? 0.85 : 1,
+        height: 46,
+        borderRadius: RADIUS,
+        backgroundColor: ink ? c.primary : pressed ? c.surface4 : surface || c.surface3,
+        opacity: disabled ? 0.45 : 1,
+        transform: [{ scale: pressed ? 0.97 : 1 }],
       })}
     >
       {icon}
