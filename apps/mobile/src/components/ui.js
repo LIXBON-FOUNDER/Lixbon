@@ -1,48 +1,92 @@
-// ui.js — piezas compartidas del design system Lixbon (espejo fiel de
-// apps/web/src/styles: base.css, auth.css, account.css): tema activo,
-// wordmark, iconos de marca, campo pill con etiqueta sobre el borde,
-// botones pill, icon-buttons circulares y tarjetas blancas sobre crema.
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+// ui.js — primitivas del sistema del IDE llevadas a la app: tema activo con
+// acento elegible, marca, campos y botones de relleno (sin bordes), selector
+// deslizante, interruptor, tarjetas, cabeceras y la luz ambiente del fondo.
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
   Easing,
+  Keyboard,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   View,
   useColorScheme,
 } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Defs, Path, Polygon, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
 
-import { DARK, FONTS, LIGHT, RADIUS_BOX, RADIUS_PILL } from '../theme';
-import { usePrefs } from '../state';
+import { FONTS, RADIUS, buildTheme } from '../theme';
+import { UI_DEFAULTS, usePrefs } from '../state';
 import Icon from './Icon';
+
+export const EASE = Easing.bezier(0.2, 0.8, 0.2, 1);
+export const SPRING = Easing.bezier(0.3, 1.25, 0.5, 1);
 
 // ── Tema activo ──────────────────────────────────────────────────────────────
 
-const ThemeContext = createContext(LIGHT);
+const ThemeContext = createContext(buildTheme('dark', 'lima'));
 
 export function ThemeProvider({ children }) {
   const prefs = usePrefs();
   const system = useColorScheme();
-  const mode = prefs.themeMode === 'system' ? system || 'light' : prefs.themeMode;
-  const colors = mode === 'dark' ? DARK : LIGHT;
+  const mode = prefs.themeMode === 'system' ? system || 'dark' : prefs.themeMode;
+  const accent = prefs.ui?.accent;
+  const colors = useMemo(() => buildTheme(mode, accent), [mode, accent]);
   return <ThemeContext.Provider value={colors}>{children}</ThemeContext.Provider>;
 }
 
 export const useColors = () => useContext(ThemeContext);
-export const useIsDark = () => useColors() === DARK;
+export const useIsDark = () => useColors().dark;
+export const useUi = () => usePrefs()?.ui || UI_DEFAULTS;
 
-// Espejo de prefers-reduced-motion (base.css lo respeta; la app también).
+// Sin animaciones si el sistema lo pide o si el usuario las apagó.
 export function useReducedMotion() {
+  const { motion } = useUi();
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduced).catch(() => {});
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
     return () => sub?.remove();
   }, []);
-  return reduced;
+  return reduced || !motion;
+}
+
+const TEXT_SCALE = { sm: 0.93, md: 1, lg: 1.1 };
+const SPACE_SCALE = { compact: 0.72, normal: 1, roomy: 1.3 };
+
+/// Escalas de la personalización: `t(n)` para el texto del chat, `s(n)` para
+/// el aire entre mensajes y filas.
+// KeyboardAvoidingView falla con edge-to-edge: la ventana ya no se encoge y KAV
+// mide su marco relativo al padre (aquí, debajo de la barra de título), así que
+// se queda corto. Se mide el contenedor en coordenadas de ventana contra el
+// borde superior del teclado y se devuelve el solape exacto.
+export function useKeyboardOverlap() {
+  const ref = useRef(null);
+  const [state, setState] = useState({ overlap: 0, open: false });
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) => {
+      const keyboardTop = e.endCoordinates.screenY;
+      ref.current?.measureInWindow((_x, y, _w, h) => {
+        setState({ overlap: h > 0 ? Math.max(0, Math.round(y + h - keyboardTop)) : 0, open: true });
+      });
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setState({ overlap: 0, open: false }));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  return { ref, ...state };
+}
+
+export function useScale() {
+  const { textSize, density } = useUi();
+  const tf = TEXT_SCALE[textSize] || 1;
+  const sf = SPACE_SCALE[density] || 1;
+  return { t: (n) => Math.round(n * tf * 10) / 10, s: (n) => Math.round(n * sf) };
 }
 
 // ── Marca ────────────────────────────────────────────────────────────────────
@@ -50,16 +94,27 @@ export function useReducedMotion() {
 export function LixLogo({ size = 28, color }) {
   const c = useColors();
   return (
-    <Text
-      style={{
-        fontFamily: FONTS.brand,
-        fontSize: size,
-        letterSpacing: size * 0.04,
-        color: color || c.ink,
-      }}
-    >
+    <Text style={{ fontFamily: FONTS.brand, fontSize: size, letterSpacing: size * 0.04, color: color || c.ink }}>
       LIXBON
     </Text>
+  );
+}
+
+/// Isotipo (el mismo del favicon de la web y del IDE).
+export function LogoMark({ size = 26 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 32 32">
+      <Rect x="0" y="0" width="32" height="32" rx="9" ry="9" fill="#1B1A17" />
+      <Polygon points="16,3.2 3.2,16 16,16" fill="#DCD6BC" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
+      <Polygon points="16,3.2 28.8,16 16,16" fill="#C7BE9F" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
+      <Polygon points="3.2,16 16,28.8 16,16" fill="#4B5327" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
+      <Polygon points="28.8,16 16,28.8 16,16" fill="#333A1C" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
+      <Path
+        d="M19.8 16C20.956 18.244 20.956 18.244 23.2 19.4C20.956 20.556 20.956 20.556 19.8 22.8C18.644 20.556 18.644 20.556 16.4 19.4C18.644 18.244 18.644 18.244 19.8 16Z"
+        fill="#FCFAEF"
+      />
+      <Circle cx="23.4" cy="22.6" r="1.1" fill="#FCFAEF" />
+    </Svg>
   );
 }
 
@@ -95,11 +150,36 @@ export function AppleLogo({ size = 19, color = '#000' }) {
   );
 }
 
-// ── Campo pill con etiqueta sobre el borde ───────────────────────────────────
-// Espejo del .ffield de auth.css: campo pill con superficie blanca, borde
-// suave, foco olivo y label que sube hasta quedar SOBRE el borde (con fondo
-// propio para cortar la línea), estilo outlined.
+/// Luz ambiente del marco del IDE: dos halos suaves, uno de tinta arriba a la
+/// izquierda y otro del acento abajo a la derecha.
+export function AmbientGlow() {
+  const c = useColors();
+  const { ambient } = useUi();
+  if (!ambient) return null;
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Svg width="100%" height="100%">
+        <Defs>
+          <RadialGradient id="lxInk" cx="10%" cy="0%" rx="80%" ry="45%">
+            <Stop offset="0" stopColor={c.dark ? '#F2F2EE' : '#FFFFFF'} stopOpacity={c.dark ? 0.07 : 0.9} />
+            <Stop offset="1" stopColor={c.dark ? '#F2F2EE' : '#FFFFFF'} stopOpacity={0} />
+          </RadialGradient>
+          <RadialGradient id="lxAccent" cx="100%" cy="100%" rx="75%" ry="40%">
+            <Stop offset="0" stopColor={c.accent} stopOpacity={c.dark ? 0.09 : 0.12} />
+            <Stop offset="1" stopColor={c.accent} stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#lxInk)" />
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#lxAccent)" />
+      </Svg>
+    </View>
+  );
+}
 
+// ── Campos ───────────────────────────────────────────────────────────────────
+
+/// Campo de relleno con etiqueta flotante dentro (sin contorno): el foco se
+/// dice con el relleno y una línea de acento abajo, como el .field del IDE.
 export function FloatingField({
   label,
   value,
@@ -108,11 +188,9 @@ export function FloatingField({
   keyboardType,
   autoCapitalize = 'none',
   onSubmitEditing,
-  surface, // fondo del campo (y de la etiqueta que corta el borde)
 }) {
   const c = useColors();
   const reduced = useReducedMotion();
-  const fieldBg = surface || c.bg;
   const [focused, setFocused] = useState(false);
   const lifted = focused || !!value;
   const anim = useRef(new Animated.Value(lifted ? 1 : 0)).current;
@@ -121,13 +199,19 @@ export function FloatingField({
     Animated.timing(anim, {
       toValue: lifted ? 1 : 0,
       duration: reduced ? 0 : 180,
-      easing: Easing.out(Easing.quad),
+      easing: EASE,
       useNativeDriver: false,
     }).start();
   }, [lifted, anim, reduced]);
 
   return (
-    <View>
+    <View
+      style={{
+        borderRadius: RADIUS,
+        backgroundColor: focused ? c.surface4 : c.surface3,
+        overflow: 'hidden',
+      }}
+    >
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -138,13 +222,11 @@ export function FloatingField({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onSubmitEditing={onSubmitEditing}
+        selectionColor={c.accent}
         style={{
-          backgroundColor: fieldBg,
-          borderWidth: 1,
-          borderColor: focused ? c.accentDeep : c.borderSoft,
-          borderRadius: RADIUS_PILL,
-          paddingHorizontal: 22,
-          paddingVertical: 15,
+          paddingHorizontal: 14,
+          paddingTop: 22,
+          paddingBottom: 8,
           fontFamily: FONTS.ui,
           fontSize: 15,
           color: c.ink,
@@ -154,88 +236,79 @@ export function FloatingField({
         pointerEvents="none"
         style={{
           position: 'absolute',
-          left: anim.interpolate({ inputRange: [0, 1], outputRange: [24, 18] }),
-          top: anim.interpolate({ inputRange: [0, 1], outputRange: [16, -9] }),
-          fontSize: anim.interpolate({ inputRange: [0, 1], outputRange: [15, 12.5] }),
+          left: 14,
+          top: anim.interpolate({ inputRange: [0, 1], outputRange: [16, 7] }),
+          fontSize: anim.interpolate({ inputRange: [0, 1], outputRange: [15, 11] }),
           fontFamily: lifted ? FONTS.uiMedium : FONTS.ui,
-          color: lifted ? (focused ? c.accentDeep : c.inkSoft) : c.inkMuted,
-          backgroundColor: lifted ? fieldBg : 'transparent',
-          paddingHorizontal: lifted ? 6 : 0,
-          borderRadius: 4,
+          color: focused ? c.accentDeep : c.inkLabel,
         }}
       >
         {label}
       </Animated.Text>
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 2,
+          backgroundColor: focused ? c.accent : 'transparent',
+        }}
+      />
     </View>
   );
 }
 
 // ── Botones ──────────────────────────────────────────────────────────────────
 
-/// CTA pill (.pill-btn de base.css; size="lg" = .auth__cta). El feedback de
-/// pulsación es una caída sutil de opacidad, como el hover de la web.
-export function PillButton({
-  label,
-  onPress,
-  disabled = false,
-  danger = false,
-  outline = false,
-  size = 'md',
-}) {
+/// Botón del IDE (.btn): primario invertido, secundario de relleno, peligro
+/// en rojo apagado. Pulsar encoge un poco, como el :active del escritorio.
+export function PillButton({ label, onPress, disabled = false, danger = false, outline = false, size = 'md', icon }) {
   const c = useColors();
-  const bg = danger ? c.danger : c.primary;
-  const fg = danger ? '#FFFFFF' : c.onPrimary;
   const lg = size === 'lg';
-
+  const bg = danger ? c.dangerSoft : outline ? c.surface5 : c.primary;
+  const fg = danger ? c.danger : outline ? c.inkBody : c.onPrimary;
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={({ pressed }) => [
-        {
-          borderRadius: RADIUS_PILL,
-          paddingHorizontal: 22,
-          paddingVertical: lg ? 16 : 11,
-          alignItems: 'center',
-          justifyContent: 'center',
-        },
-        outline
-          ? {
-              backgroundColor: pressed ? c.bgSecondary : c.bg,
-              borderWidth: 1,
-              borderColor: danger ? c.danger : c.border,
-            }
-          : { backgroundColor: bg, opacity: pressed ? 0.85 : 1 },
-        disabled && { opacity: 0.45 },
-      ]}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        gap: 8,
+        borderRadius: RADIUS,
+        paddingHorizontal: 18,
+        height: lg ? 48 : 38,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: bg,
+        opacity: disabled ? 0.45 : 1,
+        transform: [{ scale: pressed ? 0.97 : 1 }],
+      })}
     >
-      <Text
-        style={{
-          fontFamily: lg ? FONTS.uiSemiBold : FONTS.uiMedium,
-          fontSize: 15,
-          color: outline ? (danger ? c.danger : c.ink) : fg,
-        }}
-      >
-        {label}
-      </Text>
+      {icon ? <Icon name={icon} size={16} color={fg} /> : null}
+      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: lg ? 15 : 13.5, color: fg }}>{label}</Text>
     </Pressable>
   );
 }
 
-/// Botón circular de icono (.icon-btn de base.css): 34px, hover tinta al 7 %.
-export function IconButton({ children, onPress, size = 34, bg = 'transparent' }) {
+/// Botón de icono (.ic del IDE): cuadrado de radio 7, relleno solo al pulsar.
+export function IconButton({ children, onPress, onLongPress, size = 36, bg = 'transparent', active = false, label }) {
   const c = useColors();
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       style={({ pressed }) => ({
         width: size,
         height: size,
-        borderRadius: size / 2,
+        borderRadius: RADIUS,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: pressed ? c.pressed : bg,
+        backgroundColor: pressed ? c.pressed : active ? c.surface4 : bg,
+        transform: [{ scale: pressed ? 0.9 : 1 }],
       })}
     >
       {children}
@@ -243,123 +316,227 @@ export function IconButton({ children, onPress, size = 34, bg = 'transparent' })
   );
 }
 
-// ── Tarjetas y títulos ───────────────────────────────────────────────────────
-
-/// Tarjeta blanca sobre página crema (.card de account.css).
-export function Card({ children, style }) {
+/// Chip del IDE: relleno, texto suave; activo en acento.
+export function Chip({ label, icon, onPress, active = false, mono = false }) {
   const c = useColors();
   return (
-    <View
-      style={[
-        {
-          backgroundColor: c.bg,
-          borderRadius: RADIUS_BOX,
-          borderWidth: 1,
-          borderColor: c.borderSoft,
-          padding: 18,
-        },
-        style,
-      ]}
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        height: 30,
+        paddingHorizontal: 11,
+        borderRadius: RADIUS,
+        backgroundColor: active ? c.accentSoft : pressed ? c.surface5 : c.surface3,
+      })}
     >
-      {children}
-    </View>
+      {icon ? <Icon name={icon} size={14} color={active ? c.accentDeep : c.inkSoft} /> : null}
+      <Text
+        numberOfLines={1}
+        style={{
+          fontFamily: mono ? FONTS.mono : active ? FONTS.uiSemiBold : FONTS.ui,
+          fontSize: mono ? 11.5 : 12.5,
+          color: active ? c.accentDeep : c.ink70,
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
-/// Título de tarjeta (.card__title: 18px semibold — sin kickers en mayúsculas).
-export function CardTitle({ children, style }) {
-  const c = useColors();
-  return (
-    <Text style={[{ fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }, style]}>
-      {children}
-    </Text>
-  );
-}
+// ── Selector deslizante e interruptor ────────────────────────────────────────
 
-/// Cabecera de pantalla apilada: flecha de volver + título.
-export function StackHeader({ title, onBack }) {
+/// Selector con indicador deslizante (.seg / .modeswitch del IDE).
+export function Segmented({ options, value, onChange, stretch = false, size = 'md' }) {
   const c = useColors();
+  const reduced = useReducedMotion();
+  const [layouts, setLayouts] = useState({});
+  const x = useRef(new Animated.Value(0)).current;
+  const w = useRef(new Animated.Value(0)).current;
+  const ready = layouts[value] != null;
+  const placed = useRef(false);
+
+  useEffect(() => {
+    const l = layouts[value];
+    if (!l) return;
+    if (!placed.current || reduced) {
+      x.setValue(l.x);
+      w.setValue(l.width);
+      placed.current = true;
+      return;
+    }
+    Animated.parallel([
+      Animated.timing(x, { toValue: l.x, duration: 380, easing: SPRING, useNativeDriver: false }),
+      Animated.timing(w, { toValue: l.width, duration: 300, easing: EASE, useNativeDriver: false }),
+    ]).start();
+  }, [value, layouts, x, w, reduced]);
+
+  const h = size === 'sm' ? 26 : 30;
   return (
     <View
       style={{
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
+        alignSelf: stretch ? 'stretch' : 'flex-start',
+        padding: 3,
+        borderRadius: RADIUS,
+        backgroundColor: c.dark ? c.surface0 : c.surface4,
       }}
     >
-      <IconButton onPress={onBack} size={38}>
-        <SvgBack color={c.ink} />
-      </IconButton>
-      <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 18, color: c.ink }}>
-        {title}
-      </Text>
+      {ready && (
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: 3,
+            left: x,
+            width: w,
+            height: h,
+            borderRadius: RADIUS,
+            backgroundColor: c.dark ? c.surface5 : c.surface2,
+          }}
+        />
+      )}
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <Pressable
+            key={String(o.value)}
+            onPress={() => onChange(o.value)}
+            onLayout={(e) => {
+              const { x: lx, width } = e.nativeEvent.layout;
+              setLayouts((cur) => (cur[o.value]?.x === lx && cur[o.value]?.width === width ? cur : { ...cur, [o.value]: { x: lx, width } }));
+            }}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: active }}
+            style={[{ height: h, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' }, stretch && { flex: 1 }]}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                fontFamily: active ? FONTS.uiSemiBold : FONTS.ui,
+                fontSize: size === 'sm' ? 12 : 13,
+                color: active ? c.ink : c.inkMuted,
+              }}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
 
-function SvgBack({ color }) {
+/// Interruptor del IDE: pista de radio 7 y perilla cuadrada que se estira
+/// al pulsar; encendido en acento.
+export function Toggle({ value, onChange, disabled = false, label }) {
+  const c = useColors();
+  const reduced = useReducedMotion();
+  const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
+  const [pressed, setPressed] = useState(false);
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: value ? 1 : 0,
+      duration: reduced ? 0 : 320,
+      easing: SPRING,
+      useNativeDriver: false,
+    }).start();
+  }, [value, anim, reduced]);
+
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path
-        d="M19 12H5M11 18l-6-6 6-6"
-        stroke={color}
-        strokeWidth={1.6}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </Svg>
+    <Pressable
+      onPress={() => onChange(!value)}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      disabled={disabled}
+      hitSlop={8}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: value, disabled }}
+      style={{ opacity: disabled ? 0.45 : 1 }}
+    >
+      <Animated.View
+        style={{
+          width: 40,
+          height: 24,
+          borderRadius: RADIUS,
+          backgroundColor: anim.interpolate({ inputRange: [0, 1], outputRange: [c.surface5, c.accent] }),
+        }}
+      >
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: 4,
+            left: anim.interpolate({ inputRange: [0, 1], outputRange: [4, pressed ? 14 : 20] }),
+            width: pressed ? 22 : 16,
+            height: 16,
+            borderRadius: 5,
+            backgroundColor: value ? c.onAccent : c.inkMuted,
+          }}
+        />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+// ── Tarjetas, etiquetas y cabeceras ──────────────────────────────────────────
+
+/// Panel del IDE: relleno un peldaño por encima del fondo, sin borde.
+export function Card({ children, style }) {
+  const c = useColors();
+  return (
+    <View style={[{ backgroundColor: c.surface1, borderRadius: RADIUS, padding: 16 }, style]}>{children}</View>
+  );
+}
+
+export function CardTitle({ children, style }) {
+  const c = useColors();
+  return <Text style={[{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }, style]}>{children}</Text>;
+}
+
+/// Etiqueta en versalitas que encabeza un grupo (HOY, FIJADAS…).
+export function Eyebrow({ children, style }) {
+  const c = useColors();
+  return (
+    <Text style={[{ fontFamily: FONTS.uiMedium, fontSize: 10.5, letterSpacing: 1, color: c.inkLabel }, style]}>
+      {String(children).toUpperCase()}
+    </Text>
+  );
+}
+
+/// Cabecera de pantalla apilada (.panelhead): volver + título.
+export function StackHeader({ title, onBack, right = null }) {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, height: 50 }}>
+      <IconButton onPress={onBack} size={38} label="Volver">
+        <Icon name="arrow-left" size={19} color={c.ink} />
+      </IconButton>
+      <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>{title}</Text>
+      {right}
+    </View>
   );
 }
 
 export function ScreenTitle({ children }) {
   const c = useColors();
   return (
-    <Text
-      style={{
-        fontFamily: FONTS.uiSemiBold,
-        fontSize: 24,
-        color: c.ink,
-        paddingHorizontal: 18,
-        paddingTop: 12,
-        paddingBottom: 14,
-      }}
-    >
+    <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 22, color: c.ink, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 14 }}>
       {children}
     </Text>
   );
 }
 
-/// Cabecera de conversación: acción izquierda, bloque central de título con
-/// subtítulo bajo él, y menú de opciones a la derecha. El título es la única
-/// pieza que crece; el subtítulo lleva el contexto (modelo, host, estado) que
-/// antes había que adivinar. Todo el bloque central es pulsable cuando hay
-/// opciones, así que el ⋮ es un atajo y no el único camino.
-export function ChatHeader({
-  title,
-  subtitle,
-  onLeading,
-  leadingIcon = 'menu',
-  onOptions,
-  dot = null, // 'live' | 'idle' | null — punto de estado antes del título
-  divider = false,
-}) {
+/// Cabecera de conversación: acción izquierda, título con subtítulo en mono y
+/// menú de opciones. Todo el bloque central abre las opciones.
+export function ChatHeader({ title, subtitle, onLeading, leadingIcon = 'menu', onOptions, dot = null }) {
   const c = useColors();
-  const dotColor = dot === 'live' ? c.accent : c.inkMuted;
+  const dotColor = dot === 'live' ? c.accent : c.inkFaint;
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingHorizontal: 6,
-        paddingVertical: 6,
-        borderBottomWidth: divider ? 1 : 0,
-        borderBottomColor: c.borderSoft,
-      }}
-    >
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, height: 52 }}>
       <IconButton onPress={onLeading} size={40}>
         <Icon name={leadingIcon} size={20} color={c.ink} />
       </IconButton>
@@ -369,34 +546,21 @@ export function ChatHeader({
         disabled={!onOptions}
         style={({ pressed }) => ({
           flex: 1,
-          alignItems: 'center',
-          paddingVertical: 2,
-          borderRadius: 12,
+          alignItems: 'flex-start',
+          paddingHorizontal: 6,
+          paddingVertical: 3,
+          borderRadius: RADIUS,
           backgroundColor: pressed && onOptions ? c.pressed : 'transparent',
         })}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, maxWidth: '100%' }}>
-          {dot !== null && (
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
-          )}
-          <Text
-            numberOfLines={1}
-            style={{ flexShrink: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15.5, color: c.ink }}
-          >
+          {dot !== null && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />}
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>
             {title}
           </Text>
         </View>
         {!!subtitle && (
-          <Text
-            numberOfLines={1}
-            style={{
-              maxWidth: '100%',
-              marginTop: 1,
-              fontFamily: FONTS.ui,
-              fontSize: 12,
-              color: c.inkMuted,
-            }}
-          >
+          <Text numberOfLines={1} style={{ maxWidth: '100%', marginTop: 1, fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>
             {subtitle}
           </Text>
         )}
@@ -413,37 +577,37 @@ export function ChatHeader({
   );
 }
 
-/// Etiqueta de plan (.plan-pill: fondo acento, texto tinta).
+/// Etiqueta de plan: velo de acento, texto en acento.
 export function PlanPill({ children }) {
   const c = useColors();
   return (
-    <View
-      style={{
-        alignSelf: 'flex-start',
-        backgroundColor: c.accent,
-        borderRadius: RADIUS_PILL,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-      }}
-    >
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 12, color: c.onAccent }}>
-        {children}
-      </Text>
+    <View style={{ alignSelf: 'flex-start', backgroundColor: c.accentSoft, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 }}>
+      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 11, color: c.accentDeep }}>{children}</Text>
     </View>
   );
 }
 
-/// Entrada suave (fade + subida 10px) para mensajes y cambios de vista,
-/// espejo de las animaciones msg-in / fields-in de la web.
+/// Avatar cuadrado de radio 7 (el del IDE): inicial sobre tinta.
+export function Avatar({ name, size = 34 }) {
+  const c = useColors();
+  const initial = (String(name || '?').trim()[0] || '?').toUpperCase();
+  return (
+    <View style={{ width: size, height: size, borderRadius: RADIUS, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ fontFamily: FONTS.uiBold, fontSize: size * 0.42, color: c.onPrimary }}>{initial}</Text>
+    </View>
+  );
+}
+
+/// Entrada suave (fade + subida) para mensajes y cambios de vista.
 export function FadeUp({ children, delay = 0, style }) {
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   useEffect(() => {
     Animated.timing(anim, {
       toValue: 1,
-      duration: reduced ? 0 : 260,
-      delay,
-      easing: Easing.out(Easing.cubic),
+      duration: reduced ? 0 : 280,
+      delay: reduced ? 0 : delay,
+      easing: EASE,
       useNativeDriver: true,
     }).start();
   }, [anim, delay, reduced]);
@@ -451,10 +615,7 @@ export function FadeUp({ children, delay = 0, style }) {
     <Animated.View
       style={[
         style,
-        {
-          opacity: anim,
-          transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
-        },
+        { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
       ]}
     >
       {children}

@@ -1,5 +1,5 @@
 // state.js — estado global con React Context:
-//   PrefsContext → tema y servidor (AsyncStorage; nunca credenciales)
+//   PrefsContext → tema, personalización y servidor (AsyncStorage; nunca credenciales)
 //   AuthContext  → sesión (API key "Lixbon Mobile" en el Keystore vía
 //                  expo-secure-store) — se rota en cada login
 //   ChatContext  → modelos, conversación activa y streaming
@@ -24,6 +24,33 @@ import { streamChatCompletion } from './sse';
 export const DEFAULT_API_BASE = 'https://lixbon.com';
 const SECURE_KEY = 'lixbon_api_key';
 const MOBILE_KEY_NAME = 'Lixbon Mobile';
+const UI_KEY = 'uiPrefs';
+
+export const UI_DEFAULTS = {
+  accent: 'lima',
+  textSize: 'md', // sm | md | lg — texto del chat
+  density: 'normal', // compact | normal | roomy — aire entre mensajes y filas
+  sendOnEnter: false,
+  statusBar: true,
+  ambient: true,
+  motion: true,
+};
+
+const UI_OPTIONS = {
+  textSize: ['sm', 'md', 'lg'],
+  density: ['compact', 'normal', 'roomy'],
+};
+
+function cleanUi(raw) {
+  const out = { ...UI_DEFAULTS };
+  if (!raw || typeof raw !== 'object') return out;
+  if (typeof raw.accent === 'string') out.accent = raw.accent;
+  for (const [k, vals] of Object.entries(UI_OPTIONS)) if (vals.includes(raw[k])) out[k] = raw[k];
+  for (const k of ['sendOnEnter', 'statusBar', 'ambient', 'motion']) {
+    if (typeof raw[k] === 'boolean') out[k] = raw[k];
+  }
+  return out;
+}
 
 const ApiContext = createContext(null);
 const PrefsContext = createContext(null);
@@ -49,18 +76,21 @@ export function AppState({ children }) {
   );
 
   // ── Preferencias locales ─────────────────────────────────────────────────
-  const [themeMode, setThemeModeState] = useState('system'); // system | light | dark
+  const [themeMode, setThemeModeState] = useState('dark'); // system | light | dark
+  const [ui, setUiState] = useState(UI_DEFAULTS);
   const [apiBase, setApiBaseState] = useState(DEFAULT_API_BASE);
   const [prefsReady, setPrefsReady] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [mode, base] = await Promise.all([
+        const [mode, base, rawUi] = await Promise.all([
           AsyncStorage.getItem('themeMode'),
           AsyncStorage.getItem('apiBase'),
+          AsyncStorage.getItem(UI_KEY),
         ]);
-        if (mode === 'light' || mode === 'dark') setThemeModeState(mode);
+        if (mode === 'light' || mode === 'dark' || mode === 'system') setThemeModeState(mode);
+        if (rawUi) setUiState(cleanUi(JSON.parse(rawUi)));
         if (base) {
           live.apiBase = base;
           setApiBaseState(base);
@@ -77,6 +107,20 @@ export function AppState({ children }) {
     AsyncStorage.setItem('themeMode', mode).catch(() => {});
   }, []);
 
+  const setUi = useCallback((patch) => {
+    setUiState((cur) => {
+      const next = cleanUi({ ...cur, ...patch });
+      AsyncStorage.setItem(UI_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const resetUi = useCallback(() => {
+    setUiState(UI_DEFAULTS);
+    setThemeModeState('dark');
+    AsyncStorage.multiSet([[UI_KEY, JSON.stringify(UI_DEFAULTS)], ['themeMode', 'dark']]).catch(() => {});
+  }, []);
+
   const setApiBase = useCallback(
     (value) => {
       const cleaned = value.trim().replace(/\/+$/, '') || DEFAULT_API_BASE;
@@ -88,8 +132,8 @@ export function AppState({ children }) {
   );
 
   const prefs = useMemo(
-    () => ({ themeMode, apiBase, setThemeMode, setApiBase }),
-    [themeMode, apiBase, setThemeMode, setApiBase],
+    () => ({ themeMode, apiBase, ui, ready: prefsReady, setThemeMode, setApiBase, setUi, resetUi }),
+    [themeMode, apiBase, ui, prefsReady, setThemeMode, setApiBase, setUi, resetUi],
   );
 
   // ── Sesión ───────────────────────────────────────────────────────────────
@@ -266,6 +310,7 @@ function ChatState({ api, apiKey, ready, children }) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState('');
   const [webSearch, setWebSearch] = useState(false);
+  const [usage, setUsage] = useState(null); // {used, total} del último turno
   const draftRef = useRef(''); // texto del compositor (sobrevive al cambio de pestaña)
 
   const handleRef = useRef(null);
@@ -300,6 +345,7 @@ function ChatState({ api, apiKey, ready, children }) {
     setTitle(null);
     setMessages([]);
     setError('');
+    setUsage(null);
     hadHistoryRef.current = false;
   }, [stop]);
 
@@ -310,6 +356,7 @@ function ChatState({ api, apiKey, ready, children }) {
       setTitle(withTitle);
       setMessages([]);
       setError('');
+      setUsage(null);
       setLoadingMessages(true);
       hadHistoryRef.current = true;
       try {
@@ -345,38 +392,20 @@ function ChatState({ api, apiKey, ready, children }) {
     [api],
   );
 
-  const send = useCallback(
-    (text) => {
-      const trimmed = text.trim();
-      if (handleRef.current || !trimmed) return;
-      if (!model) {
-        setError('No hay modelos disponibles ahora mismo. Reintenta en un momento.');
-        return;
-      }
-
-      const current = messagesRef.current;
-      const convId = conversationId || Crypto.randomUUID();
-      const isFirstExchange = current.length === 0 && !hadHistoryRef.current;
-      const history = [
-        ...current.map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user', content: trimmed },
-      ];
-
+  // `thread` es lo que se ve y termina en el mensaje del usuario; es también
+  // lo que viaja al modelo.
+  const respond = useCallback(
+    ({ thread, convId, isFirstExchange }) => {
       setConversationId(convId);
-      setMessages([
-        ...current,
-        { role: 'user', content: trimmed },
-        { role: 'assistant', content: '' },
-      ]);
+      setMessages([...thread, { role: 'assistant', content: '' }]);
       setStreaming(true);
       setError('');
-      draftRef.current = '';
 
       handleRef.current = streamChatCompletion({
         base: api.base,
         token: apiKey,
         model,
-        messages: history,
+        messages: thread.map((m) => ({ role: m.role, content: m.content })),
         conversationId: convId,
         webSearch,
         onDelta: (delta) => {
@@ -391,6 +420,7 @@ function ChatState({ api, apiKey, ready, children }) {
             return [...msgs.slice(0, -1), { ...last, sources }];
           });
         },
+        onUsage: setUsage,
         onDone: () => {
           handleRef.current = null;
           setStreaming(false);
@@ -410,8 +440,46 @@ function ChatState({ api, apiKey, ready, children }) {
         },
       });
     },
-    [api, apiKey, model, conversationId, webSearch, generateTitle],
+    [api, apiKey, model, webSearch, generateTitle],
   );
+
+  const send = useCallback(
+    (text) => {
+      const trimmed = text.trim();
+      if (handleRef.current || !trimmed) return;
+      if (!model) {
+        setError('No hay modelos disponibles ahora mismo. Reintenta en un momento.');
+        return;
+      }
+      const current = messagesRef.current;
+      draftRef.current = '';
+      respond({
+        thread: [...current, { role: 'user', content: trimmed }],
+        convId: conversationId || Crypto.randomUUID(),
+        isFirstExchange: current.length === 0 && !hadHistoryRef.current,
+      });
+    },
+    [model, conversationId, respond],
+  );
+
+  // Rehace la última respuesta. El gateway vuelve a guardar el mensaje del
+  // usuario, así que antes se retira del historial el turno anterior.
+  const regenerate = useCallback(async () => {
+    if (handleRef.current || !model) return;
+    const current = messagesRef.current;
+    let lastUser = current.length - 1;
+    while (lastUser >= 0 && current[lastUser].role !== 'user') lastUser -= 1;
+    if (lastUser < 0) return;
+    const convId = conversationId || Crypto.randomUUID();
+    if (conversationId) {
+      try {
+        await api.post(`/api/conversations/${conversationId}/rewind`);
+      } catch {
+        // servidor sin rewind: se regenera igual
+      }
+    }
+    respond({ thread: current.slice(0, lastUser + 1), convId, isFirstExchange: false });
+  }, [api, model, conversationId, respond]);
 
   // Al cerrar sesión se descarta la conversación en curso.
   useEffect(() => {
@@ -430,6 +498,7 @@ function ChatState({ api, apiKey, ready, children }) {
       loadingMessages,
       error,
       webSearch,
+      usage,
       draftRef,
       loadModels,
       setModel,
@@ -439,9 +508,10 @@ function ChatState({ api, apiKey, ready, children }) {
       newChat,
       openConversation,
       send,
+      regenerate,
       stop,
     }),
-    [models, model, conversationId, title, messages, streaming, loadingMessages, error, webSearch, loadModels, newChat, openConversation, send, stop],
+    [models, model, conversationId, title, messages, streaming, loadingMessages, error, webSearch, usage, loadModels, newChat, openConversation, send, regenerate, stop],
   );
 
   return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;

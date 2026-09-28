@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Pressable,
   RefreshControl,
   Text,
@@ -20,10 +19,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ApiException } from '../api';
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { ChatHeader, FadeUp, IconButton, useColors } from '../components/ui';
+import { ChatHeader, FadeUp, IconButton, useColors, useKeyboardOverlap } from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
 import { useApi, useAuth } from '../state';
-import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS, RADIUS_BOX, RADIUS_PILL } from '../theme';
 
 const SOURCE_LABEL = { cli: 'CLI', ide: 'IDE' };
 
@@ -35,7 +34,7 @@ const FALLBACK_COMMANDS = [
   { name: 'status', args: '', description: 'Estado de la sesión y del host' },
 ];
 
-export default function RemoteScreen({ onBack, initialToken = null }) {
+export default function RemoteScreen({ onBack, initialToken = null, embedded = false }) {
   const api = useApi();
   const [session, setSession] = useState(null); // sesión abierta en detalle
   const [claiming, setClaiming] = useState(!!initialToken);
@@ -60,7 +59,7 @@ export default function RemoteScreen({ onBack, initialToken = null }) {
 
   if (claiming) {
     return (
-      <SafeAreaView edges={['top']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
       </SafeAreaView>
     );
@@ -71,15 +70,16 @@ export default function RemoteScreen({ onBack, initialToken = null }) {
       <RemoteSessionView
         session={session}
         onBack={() => setSession(null)}
+        embedded={embedded}
       />
     );
   }
-  return <RemoteListView onBack={onBack} onOpen={setSession} />;
+  return <RemoteListView onBack={onBack} onOpen={setSession} embedded={embedded} />;
 }
 
 // ── Lista de sesiones ───────────────────────────────────────────────────────
 
-function RemoteListView({ onBack, onOpen }) {
+function RemoteListView({ onBack, onOpen, embedded }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
@@ -164,8 +164,15 @@ function RemoteListView({ onBack, onOpen }) {
   }, []);
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bgSecondary }}>
-      <ScreenHeader title="Remote" onBack={onBack} />
+    <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
+      {embedded ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, height: 48 }}>
+          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>Sesiones remotas</Text>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>IDE · CLI</Text>
+        </View>
+      ) : (
+        <ScreenHeader title="Remoto" onBack={onBack} />
+      )}
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={c.inkSoft} />
@@ -180,7 +187,7 @@ function RemoteListView({ onBack, onOpen }) {
           }
           ListHeaderComponent={
             error ? (
-              <View style={{ padding: 12, borderRadius: 12, backgroundColor: c.dangerSoft }}>
+              <View style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
                 <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{error}</Text>
               </View>
             ) : null
@@ -222,11 +229,9 @@ function SessionCard({ session, onPress }) {
     <Pressable
       onPress={ended && !readable ? undefined : onPress}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? c.bgInput : c.bg,
-        borderRadius: RADIUS_BOX,
-        borderWidth: 1,
-        borderColor: c.borderSoft,
-        padding: 16,
+        backgroundColor: pressed ? c.surface4 : c.surface2,
+        borderRadius: RADIUS,
+        padding: 14,
         gap: 6,
         opacity: ended && !readable ? 0.55 : ended ? 0.8 : 1,
       })}
@@ -237,7 +242,7 @@ function SessionCard({ session, onPress }) {
             width: 8,
             height: 8,
             borderRadius: 4,
-            backgroundColor: online ? '#2E9E5B' : c.inkSoft,
+            backgroundColor: online ? c.good : c.inkFaint,
           }}
         />
         <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>
@@ -245,18 +250,18 @@ function SessionCard({ session, onPress }) {
         </Text>
         <View
           style={{
-            paddingHorizontal: 9,
-            paddingVertical: 3,
-            borderRadius: RADIUS_PILL,
+            paddingHorizontal: 7,
+            paddingVertical: 2,
+            borderRadius: 5,
             backgroundColor: c.accentSoft,
           }}
         >
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 11, color: c.ink }}>
+          <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 10.5, color: c.accentDeep }}>
             {SOURCE_LABEL[session.source] || session.source}
           </Text>
         </View>
       </View>
-      <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+      <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>
         {session.machine || '—'}
         {'  ·  '}
         {ended
@@ -273,13 +278,14 @@ function SessionCard({ session, onPress }) {
 
 // ── Detalle de sesión ───────────────────────────────────────────────────────
 
-function RemoteSessionView({ session, onBack }) {
+function RemoteSessionView({ session, onBack, embedded }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
   const { confirm, sheet, toast } = useDialogs();
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
   const [input, setInput] = useState('');
+  const keyboard = useKeyboardOverlap();
   const [sending, setSending] = useState(false);
   const streamRef = useRef(null);
   const aliveRef = useRef(true);
@@ -435,8 +441,8 @@ function RemoteSessionView({ session, onBack }) {
   const items = [...state.items].reverse();
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+    <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
+      <View ref={keyboard.ref} collapsable={false} style={{ flex: 1, paddingBottom: keyboard.overlap }}>
         <ChatHeader
           title={title}
           subtitle={subtitle}
@@ -498,8 +504,9 @@ function RemoteSessionView({ session, onBack }) {
           disabled={state.ended || !state.hostConnected}
           sending={sending}
           ended={state.ended}
+          keyboardOpen={keyboard.open}
         />
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -575,7 +582,7 @@ function TranscriptRow({ item }) {
             backgroundColor: c.bgSecondary,
           }}
         >
-          <Text style={{ fontFamily: 'monospace', fontSize: 12.5, lineHeight: 19, color: c.ink }}>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, lineHeight: 19, color: c.ink }}>
             {item.text}
           </Text>
         </View>
@@ -626,7 +633,7 @@ function ApprovalCard({ approval, onDecide }) {
           {isCommand ? 'El agente quiere ejecutar un comando' : 'El agente quiere aplicar un cambio'}
         </Text>
       </View>
-      <Text style={{ fontFamily: 'monospace', fontSize: 12.5, color: c.ink }}>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.ink }}>
         {approval.tool}
         {approval.summary ? `  ${approval.summary}` : ''}
       </Text>
@@ -673,6 +680,7 @@ function RemoteComposer({
   disabled,
   sending,
   ended,
+  keyboardOpen,
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -702,7 +710,7 @@ function RemoteComposer({
         paddingHorizontal: 14,
         paddingTop: 6,
         // Edge-to-edge: sin este inset la barra de navegación tapa el botón.
-        paddingBottom: Math.max(insets.bottom, 12),
+        paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 12),
       }}
     >
       {matches.length > 0 && !ended && (
@@ -731,11 +739,11 @@ function RemoteComposer({
                 backgroundColor: pressed ? c.pressed : 'transparent',
               })}
             >
-              <Text style={{ fontFamily: 'monospace', fontSize: 14, color: c.ink }}>
+              <Text style={{ fontFamily: FONTS.mono, fontSize: 14, color: c.ink }}>
                 /{cmd.name}
               </Text>
               {!!cmd.args && (
-                <Text style={{ fontFamily: 'monospace', fontSize: 12.5, color: c.inkMuted }}>
+                <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>
                   {cmd.args}
                 </Text>
               )}
@@ -852,7 +860,7 @@ function remoteMarkdownStyles(c) {
     strong: { fontFamily: FONTS.uiBold, color: c.ink },
     link: { color: c.accentDeep, textDecorationLine: 'underline' },
     code_inline: {
-      fontFamily: 'monospace',
+      fontFamily: FONTS.mono,
       fontSize: 13,
       color: c.ink,
       backgroundColor: c.bgSecondary,
@@ -860,24 +868,20 @@ function remoteMarkdownStyles(c) {
       paddingHorizontal: 4,
     },
     code_block: {
-      fontFamily: 'monospace',
+      fontFamily: FONTS.mono,
       fontSize: 13,
       color: c.ink,
-      backgroundColor: c.bgSecondary,
-      borderColor: c.borderSoft,
-      borderWidth: 1,
-      borderRadius: 12,
+      backgroundColor: c.codeBg,
+      borderRadius: RADIUS,
       padding: 12,
       marginVertical: 6,
     },
     fence: {
-      fontFamily: 'monospace',
+      fontFamily: FONTS.mono,
       fontSize: 13,
       color: c.ink,
-      backgroundColor: c.bgSecondary,
-      borderColor: c.borderSoft,
-      borderWidth: 1,
-      borderRadius: 12,
+      backgroundColor: c.codeBg,
+      borderRadius: RADIUS,
       padding: 12,
       marginVertical: 6,
     },
