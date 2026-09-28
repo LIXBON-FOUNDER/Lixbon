@@ -2023,6 +2023,34 @@ def list_messages(conversation_id: str, user_id: int) -> list[dict[str, Any]] | 
         ]
 
 
+
+def rewind_last_turn(conversation_id: str, user_id: int) -> int | None:
+    """Borra el último mensaje del usuario y las respuestas que lo siguen, para
+    regenerar sin duplicar el turno (el gateway vuelve a guardar el mensaje).
+    El uso ya facturado no se toca. None si la conversación no es del usuario."""
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return None
+        last_user = s.scalars(
+            select(Message)
+            .where(Message.conversation_id == conversation_id, Message.role == "user")
+            .order_by(desc(Message.created_at), desc(Message.id))
+            .limit(1)
+        ).first()
+        if not last_user:
+            return 0
+        result = s.execute(
+            delete(Message).where(
+                Message.conversation_id == conversation_id,
+                or_(
+                    Message.created_at > last_user.created_at,
+                    (Message.created_at == last_user.created_at) & (Message.id >= last_user.id),
+                ),
+            )
+        )
+        return result.rowcount or 0
+
 def rename_conversation(
     conversation_id: str, user_id: int, title: str, only_if_untitled: bool = False
 ) -> bool:

@@ -23,6 +23,7 @@ from core.persistence.queries import (
     list_messages,
     log_audit_event,
     rename_conversation,
+    rewind_last_turn,
     set_conversation_share,
 )
 from core.security.auth import web_or_api_key_auth, cookie_auth_required
@@ -134,6 +135,18 @@ async def api_delete_conversation(
     if not delete_conversation(conversation_id, user_data["id"]):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
     return {"deleted": conversation_id}
+
+
+@router.post("/api/conversations/{conversation_id}/rewind")
+async def api_rewind_conversation(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    """Quita el último turno (mensaje del usuario + respuesta) antes de regenerar."""
+    removed = rewind_last_turn(conversation_id, user_data["id"])
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    return {"removed": removed}
 
 
 @router.get("/api/conversations/{conversation_id}/share")
