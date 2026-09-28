@@ -6,6 +6,7 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -56,6 +57,31 @@ const SPACE_SCALE = { compact: 0.72, normal: 1, roomy: 1.3 };
 
 /// Escalas de la personalización: `t(n)` para el texto del chat, `s(n)` para
 /// el aire entre mensajes y filas.
+// KeyboardAvoidingView falla con edge-to-edge: la ventana ya no se encoge y KAV
+// mide su marco relativo al padre (aquí, debajo de la barra de título), así que
+// se queda corto. Se mide el contenedor en coordenadas de ventana contra el
+// borde superior del teclado y se devuelve el solape exacto.
+export function useKeyboardOverlap() {
+  const ref = useRef(null);
+  const [state, setState] = useState({ overlap: 0, open: false });
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) => {
+      const keyboardTop = e.endCoordinates.screenY;
+      ref.current?.measureInWindow((_x, y, _w, h) => {
+        setState({ overlap: h > 0 ? Math.max(0, Math.round(y + h - keyboardTop)) : 0, open: true });
+      });
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setState({ overlap: 0, open: false }));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  return { ref, ...state };
+}
+
 export function useScale() {
   const { textSize, density } = useUi();
   const tf = TEXT_SCALE[textSize] || 1;

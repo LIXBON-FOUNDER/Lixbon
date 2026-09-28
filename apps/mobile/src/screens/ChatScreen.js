@@ -4,14 +4,15 @@
 // con la barra de estado debajo.
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Linking, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { composeMessage, pickDocuments, pickImages, readAttachment, splitMessage } from '../attachments';
 import Icon from '../components/Icon';
 import StatusStrip from '../components/StatusStrip';
 import { useDialogs } from '../components/dialogs';
-import { FadeUp, LogoMark, useColors, useScale, useUi } from '../components/ui';
+import { FadeUp, LogoMark, useColors, useKeyboardOverlap, useScale, useUi } from '../components/ui';
 import { togglePin, usePins } from '../pins';
 import { shareConversation } from '../share';
 import { useApi, useAuth, useChat } from '../state';
@@ -20,7 +21,7 @@ import { FONTS, RADIUS, RADIUS_BOX } from '../theme';
 // Rellenan el compositor en vez de enviar: el usuario completa la idea.
 const STARTERS = [
   { icon: 'target', label: 'Investigar un tema a fondo', prompt: 'Investiga a fondo ' },
-  { icon: 'doc', label: 'Analizar un documento', prompt: 'Analiza este documento y resume lo importante:\n\n' },
+  { icon: 'doc', label: 'Analizar un documento', prompt: 'Analiza este documento y resume lo importante.', attach: true },
   { icon: 'waves', label: 'Comparar datos y fuentes', prompt: 'Compara estos datos y contrasta las fuentes:\n\n' },
   { icon: 'terminal', label: 'Revisar un fragmento de código', prompt: 'Revisa este código y dime qué mejorarías:\n\n' },
 ];
@@ -40,6 +41,9 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
   const pins = usePins(auth.user?.id);
   const ownInputRef = React.useRef(null);
   const inputRef = externalInputRef || ownInputRef;
+  const keyboard = useKeyboardOverlap();
+  const [attachments, setAttachments] = useState([]);
+  const reading = attachments.some((a) => a.status === 'reading');
 
   React.useEffect(() => {
     if (chat.models.length === 0) chat.loadModels();
@@ -131,12 +135,49 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
+  const addFiles = async (files) => {
+    for (const file of files) {
+      const id = `${Date.now()}-${Math.random()}`;
+      setAttachments((prev) => [...prev, { ...file, id, status: 'reading', preview: file.kind === 'image' ? file.uri : null }]);
+      try {
+        const result = await readAttachment(api, file);
+        setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...result, status: 'ready' } : a)));
+        if (result.truncated) toast(`${file.name}: solo se usará el principio del texto`);
+      } catch (err) {
+        setAttachments((prev) => prev.filter((a) => a.id !== id));
+        toast(`${file.name}: ${err?.message || 'no se pudo adjuntar'}`);
+      }
+    }
+  };
+
+  const attach = async () => {
+    const source = await sheet({
+      title: 'Adjuntar',
+      items: [
+        { label: 'Documento', icon: 'file', value: 'doc' },
+        { label: 'Imagen de la galería', icon: 'image', value: 'gallery' },
+        { label: 'Hacer una foto', icon: 'camera', value: 'camera' },
+      ],
+    });
+    if (!source) return;
+    try {
+      const files = source === 'doc' ? await pickDocuments() : await pickImages({ camera: source === 'camera' });
+      addFiles(files);
+    } catch (err) {
+      toast(err?.message || 'No se pudo abrir el selector');
+    }
+  };
+
+  const removeAttachment = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id));
+
   const send = () => {
     const text = input.trim();
-    if (!text || chat.streaming) return;
+    const ready = attachments.filter((a) => a.status === 'ready');
+    if ((!text && ready.length === 0) || reading || chat.streaming) return;
     setInput('');
+    setAttachments([]);
     chat.draftRef.current = '';
-    chat.send(text);
+    chat.send(composeMessage(text, ready));
   };
 
   const onUserLongPress = async (text) => {
@@ -147,7 +188,7 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
       ],
     });
     if (action === 'copy') copy(text);
-    if (action === 'edit') fill(text);
+    if (action === 'edit') fill(splitMessage(text).text);
   };
 
   const empty = chat.messages.length === 0 && !chat.loadingMessages;
@@ -155,7 +196,7 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
   const subtitle = chat.streaming ? 'respondiendo…' : chat.model || (chat.models.length === 0 ? 'sin modelos' : '');
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+    <View ref={keyboard.ref} collapsable={false} style={{ flex: 1, paddingBottom: keyboard.overlap }}>
       <Pressable
         onPress={openOptions}
         style={({ pressed }) => ({
@@ -193,14 +234,31 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
             <ActivityIndicator color={c.inkSoft} />
           </View>
         ) : empty ? (
-          <Hero firstName={firstName} onPick={fill} />
+          <Hero
+            firstName={firstName}
+            onPick={(starter) => {
+              fill(starter.prompt);
+              if (starter.attach) attach();
+            }}
+          />
         ) : (
           <MessageList onCopy={copy} onUserLongPress={onUserLongPress} />
         )}
       </View>
 
-      <Composer input={input} inputRef={inputRef} onChangeInput={onChangeInput} onSend={send} onPickModel={pickModel} />
-    </KeyboardAvoidingView>
+      <Composer
+        input={input}
+        inputRef={inputRef}
+        onChangeInput={onChangeInput}
+        onSend={send}
+        onPickModel={pickModel}
+        onAttach={attach}
+        attachments={attachments}
+        onRemoveAttachment={removeAttachment}
+        reading={reading}
+        keyboardOpen={keyboard.open}
+      />
+    </View>
   );
 }
 
@@ -225,7 +283,7 @@ function Hero({ firstName, onPick }) {
         {STARTERS.map((s, i) => (
           <FadeUp key={s.icon} delay={80 + i * 50}>
             <Pressable
-              onPress={() => onPick(s.prompt)}
+              onPress={() => onPick(s)}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -286,6 +344,7 @@ function MessageList({ onCopy, onUserLongPress }) {
       renderItem={({ item, index }) => {
         const isLast = index === 0;
         if (item.role === 'user') {
+          const { files, text } = splitMessage(item.content);
           return (
             <FadeUp style={{ alignItems: 'flex-end', marginVertical: s(9) }}>
               <Pressable
@@ -299,9 +358,23 @@ function MessageList({ onCopy, onUserLongPress }) {
                   borderRadius: RADIUS,
                 })}
               >
-                <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(14.5), lineHeight: t(21), color: c.ink }}>
-                  {item.content}
-                </Text>
+                {files.length > 0 && (
+                  <View style={{ gap: 4, marginBottom: text ? 8 : 0 }}>
+                    {files.map((f, i) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Icon name={f.kind === 'image' ? 'image' : 'file'} size={13} color={c.accentDeep} />
+                        <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: t(11.5), color: c.ink70 }}>
+                          {f.name}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {!!text && (
+                  <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(14.5), lineHeight: t(21), color: c.ink }}>
+                    {text}
+                  </Text>
+                )}
               </Pressable>
             </FadeUp>
           );
@@ -367,16 +440,28 @@ function MessageList({ onCopy, onUserLongPress }) {
   );
 }
 
-function Composer({ input, inputRef, onChangeInput, onSend, onPickModel }) {
+function Composer({
+  input,
+  inputRef,
+  onChangeInput,
+  onSend,
+  onPickModel,
+  onAttach,
+  attachments,
+  onRemoveAttachment,
+  reading,
+  keyboardOpen,
+}) {
   const c = useColors();
   const chat = useChat();
   const ui = useUi();
   const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
-  const canSend = !!input.trim() || chat.streaming;
+  const hasContent = !!input.trim() || attachments.some((a) => a.status === 'ready');
+  const canSend = chat.streaming || (hasContent && !reading);
 
   return (
-    <View style={{ paddingHorizontal: 10, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 10) }}>
+    <View style={{ paddingHorizontal: 10, paddingTop: 6, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 10) }}>
       {!!chat.error && (
         <View style={{ marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS, backgroundColor: c.dangerSoft, flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{chat.error}</Text>
@@ -395,6 +480,13 @@ function Composer({ input, inputRef, onChangeInput, onSend, onPickModel }) {
           paddingBottom: 8,
         }}
       >
+        {attachments.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingBottom: 8 }}>
+            {attachments.map((a) => (
+              <AttachmentChip key={a.id} item={a} onRemove={() => onRemoveAttachment(a.id)} />
+            ))}
+          </ScrollView>
+        )}
         <TextInput
           ref={inputRef}
           value={input}
@@ -420,6 +512,22 @@ function Composer({ input, inputRef, onChangeInput, onSend, onPickModel }) {
           }}
         />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          <Pressable
+            onPress={onAttach}
+            hitSlop={6}
+            accessibilityLabel="Adjuntar"
+            style={({ pressed }) => ({
+              width: 32,
+              height: 32,
+              borderRadius: RADIUS,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? c.pressed : 'transparent',
+            })}
+          >
+            <Icon name="clip" size={17} color={c.inkSoft} />
+          </Pressable>
+
           <Pressable
             onPress={() => chat.setWebSearch(!chat.webSearch)}
             hitSlop={6}
@@ -480,6 +588,48 @@ function Composer({ input, inputRef, onChangeInput, onSend, onPickModel }) {
         <View style={{ marginTop: 5 }}>
           <StatusStrip onPickModel={onPickModel} />
         </View>
+      )}
+    </View>
+  );
+}
+
+function AttachmentChip({ item, onRemove }) {
+  const c = useColors();
+  const reading = item.status === 'reading';
+  const kindLabel = item.kind === 'image' ? 'imagen' : 'documento';
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+        maxWidth: 200,
+        height: 40,
+        paddingLeft: item.preview ? 4 : 10,
+        paddingRight: 4,
+        borderRadius: RADIUS,
+        backgroundColor: c.surface5,
+      }}
+    >
+      {item.preview ? (
+        <Image source={{ uri: item.preview }} style={{ width: 32, height: 32, borderRadius: 5, opacity: reading ? 0.5 : 1 }} />
+      ) : (
+        <Icon name="file" size={15} color={c.accentDeep} />
+      )}
+      <View style={{ flexShrink: 1 }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 12, color: c.ink }}>
+          {item.name}
+        </Text>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 9.5, color: c.inkLabel }}>
+          {reading ? (item.kind === 'image' ? 'describiendo…' : 'leyendo…') : kindLabel}
+        </Text>
+      </View>
+      {reading ? (
+        <ActivityIndicator size="small" color={c.accent} style={{ marginHorizontal: 6 }} />
+      ) : (
+        <Pressable onPress={onRemove} hitSlop={8} accessibilityLabel={`Quitar ${item.name}`} style={{ padding: 6 }}>
+          <Icon name="x" size={13} color={c.inkSoft} />
+        </Pressable>
       )}
     </View>
   );

@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Pressable,
   RefreshControl,
   Text,
@@ -20,7 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ApiException } from '../api';
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { ChatHeader, FadeUp, IconButton, useColors } from '../components/ui';
+import { ChatHeader, FadeUp, IconButton, useColors, useKeyboardOverlap } from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS, RADIUS_BOX, RADIUS_PILL } from '../theme';
@@ -286,6 +285,7 @@ function RemoteSessionView({ session, onBack, embedded }) {
   const { confirm, sheet, toast } = useDialogs();
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
   const [input, setInput] = useState('');
+  const keyboard = useKeyboardOverlap();
   const [sending, setSending] = useState(false);
   const streamRef = useRef(null);
   const aliveRef = useRef(true);
@@ -442,7 +442,7 @@ function RemoteSessionView({ session, onBack, embedded }) {
 
   return (
     <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+      <View ref={keyboard.ref} collapsable={false} style={{ flex: 1, paddingBottom: keyboard.overlap }}>
         <ChatHeader
           title={title}
           subtitle={subtitle}
@@ -504,8 +504,9 @@ function RemoteSessionView({ session, onBack, embedded }) {
           disabled={state.ended || !state.hostConnected}
           sending={sending}
           ended={state.ended}
+          keyboardOpen={keyboard.open}
         />
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -679,6 +680,7 @@ function RemoteComposer({
   disabled,
   sending,
   ended,
+  keyboardOpen,
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -708,7 +710,7 @@ function RemoteComposer({
         paddingHorizontal: 14,
         paddingTop: 6,
         // Edge-to-edge: sin este inset la barra de navegación tapa el botón.
-        paddingBottom: Math.max(insets.bottom, 12),
+        paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 12),
       }}
     >
       {matches.length > 0 && !ended && (

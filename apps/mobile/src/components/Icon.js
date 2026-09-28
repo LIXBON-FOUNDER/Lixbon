@@ -50,6 +50,10 @@ const ICONS = {
   sun: { paths: ['M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'], circles: [{ cx: 12, cy: 12, r: 4 }] },
   moon: { paths: ['M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'] },
   type: { paths: ['M4 7V5h16v2M9 19h6M12 5v14'] },
+  clip: { paths: ['m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9'] },
+  image: { paths: ['m21 15-5-5L5 21'], rects: [{ x: 3, y: 3, width: 18, height: 18, rx: 2.5 }], circles: [{ cx: 8.5, cy: 8.5, r: 1.5 }] },
+  camera: { paths: ['M3 8a2 2 0 0 1 2-2h2.5L9 4h6l1.5 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z'], circles: [{ cx: 12, cy: 13, r: 3.5 }] },
+  file: { paths: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z', 'M14 3v5h5'] },
 
   'arrow-left': { paths: ['M19 12H5M11 18l-6-6 6-6'] },
   'arrow-up': { paths: ['M12 19V5M6 11l6-6 6 6'] },
