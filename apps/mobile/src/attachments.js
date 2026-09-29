@@ -57,9 +57,12 @@ async function shrinkImage(uri) {
   return { uri: out.uri, base64: out.base64 };
 }
 
-export async function readAttachment(api, file) {
+// describeImages=false: la imagen va tal cual (control remoto: el agente del
+// host la ve directamente, Claude Code incluido).
+export async function readAttachment(api, file, { describeImages = true } = {}) {
   if (file.kind === 'image') {
     const { uri, base64 } = await shrinkImage(file.uri);
+    if (!describeImages) return { preview: uri, base64, mime: 'image/jpeg' };
     const res = await api.post('/api/vision/describe', { images: [base64] });
     const text = (res?.description || '').trim();
     if (!text) throw new Error('El modelo de visión no devolvió nada.');

@@ -21,7 +21,8 @@ import { oauthAuthorize } from './oauth';
 import { registerPushToken } from './push';
 import { streamChatCompletion } from './sse';
 
-export const DEFAULT_API_BASE = 'https://lixbon.com';
+// EXPO_PUBLIC_API_BASE: builds contra staging o el gateway simulado de las pruebas.
+export const DEFAULT_API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://lixbon.com';
 const SECURE_KEY = 'lixbon_api_key';
 const MOBILE_KEY_NAME = 'Lixbon Mobile';
 const UI_KEY = 'uiPrefs';

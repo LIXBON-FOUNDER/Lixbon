@@ -6,7 +6,6 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
-  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -14,6 +13,8 @@ import {
   View,
   useColorScheme,
 } from 'react-native';
+import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Defs, Path, Polygon, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
 
 import { FONTS, RADIUS, buildTheme } from '../theme';
@@ -57,30 +58,20 @@ const SPACE_SCALE = { compact: 0.72, normal: 1, roomy: 1.3 };
 
 /// Escalas de la personalización: `t(n)` para el texto del chat, `s(n)` para
 /// el aire entre mensajes y filas.
-// KeyboardAvoidingView falla con edge-to-edge: la ventana ya no se encoge y KAV
-// mide su marco relativo al padre (aquí, debajo de la barra de título), así que
-// se queda corto. Se mide el contenedor en coordenadas de ventana contra el
-// borde superior del teclado y se devuelve el solape exacto.
-export function useKeyboardOverlap() {
-  const ref = useRef(null);
-  const [state, setState] = useState({ overlap: 0, open: false });
-
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', (e) => {
-      const keyboardTop = e.endCoordinates.screenY;
-      ref.current?.measureInWindow((_x, y, _w, h) => {
-        setState({ overlap: h > 0 ? Math.max(0, Math.round(y + h - keyboardTop)) : 0, open: true });
-      });
-    });
-    const hide = Keyboard.addListener('keyboardDidHide', () => setState({ overlap: 0, open: false }));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-
-  return { ref, ...state };
+// El KeyboardAvoidingView de RN no sirve con edge-to-edge: Android ya no
+// encoge la ventana y RN solo detecta el teclado en un relayout que no llega.
+// Tampoco vale medir la posición: measureInWindow descuenta la barra de estado.
+// Los contenedores que usan esto llegan al borde inferior de la pantalla, así
+// que basta con dejar debajo el alto del teclado (keyboard-controller lo lee
+// del inset del IME y lo anima a su ritmo). bottomInset: lo que el contenedor
+// ya deja libre abajo (p. ej. un SafeAreaView con borde inferior).
+export function KeyboardAware({ children, style, bottomInset = 0 }) {
+  const { height } = useReanimatedKeyboardAnimation();
+  const avoid = useAnimatedStyle(() => ({ paddingBottom: Math.max(0, -height.value - bottomInset) }), [bottomInset]);
+  return <Reanimated.View style={[{ flex: 1 }, style, avoid]}>{children}</Reanimated.View>;
 }
+
+export const useKeyboardOpen = () => useKeyboardState((state) => state.isVisible);
 
 export function useScale() {
   const { textSize, density } = useUi();
@@ -119,6 +110,35 @@ export function LogoMark({ size = 26 }) {
 }
 
 const SPARK_PATH = 'M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z';
+
+export function ClaudeMark({ size = 18 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 32 32">
+      {[0, 45, 90, 135].map((deg) => (
+        <Rect key={deg} x="14.6" y="3" width="2.8" height="26" rx="1.4" fill={CLAUDE_ORANGE} transform={`rotate(${deg} 16 16)`} />
+      ))}
+    </Svg>
+  );
+}
+
+export const CLAUDE_ORANGE = '#D97757';
+
+// Marca y colores de cada agente que puede manejarse en remoto.
+export function agentStyle(agent, c) {
+  if (agent === 'claude') {
+    return {
+      label: 'Claude Code',
+      ink: c.dark ? '#E8A38B' : '#B4553A',
+      soft: c.dark ? 'rgba(217,119,87,0.14)' : 'rgba(217,119,87,0.16)',
+      dot: CLAUDE_ORANGE,
+    };
+  }
+  return { label: 'Lixbon', ink: c.accentDeep, soft: c.accentSoft, dot: c.accent };
+}
+
+export function AgentMark({ agent, size = 18 }) {
+  return agent === 'claude' ? <ClaudeMark size={size} /> : <LogoMark size={size} />;
+}
 
 export function Spark({ size = 18, color }) {
   return (

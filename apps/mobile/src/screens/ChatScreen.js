@@ -4,15 +4,17 @@
 // con la barra de estado debajo.
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { composeMessage, pickDocuments, pickImages, readAttachment, splitMessage } from '../attachments';
+import { composeMessage, splitMessage } from '../attachments';
+import { AttachmentTray, useAttachments } from '../components/Attachments';
 import Icon from '../components/Icon';
 import StatusStrip from '../components/StatusStrip';
 import { useDialogs } from '../components/dialogs';
-import { FadeUp, LogoMark, useColors, useKeyboardOverlap, useScale, useUi } from '../components/ui';
+import { markdownStyles } from '../components/markdown';
+import { FadeUp, KeyboardAware, LogoMark, useColors, useKeyboardOpen, useScale, useUi } from '../components/ui';
 import { togglePin, usePins } from '../pins';
 import { shareConversation } from '../share';
 import { useApi, useAuth, useChat } from '../state';
@@ -41,9 +43,7 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
   const pins = usePins(auth.user?.id);
   const ownInputRef = React.useRef(null);
   const inputRef = externalInputRef || ownInputRef;
-  const keyboard = useKeyboardOverlap();
-  const [attachments, setAttachments] = useState([]);
-  const reading = attachments.some((a) => a.status === 'reading');
+  const attachments = useAttachments();
 
   React.useEffect(() => {
     if (chat.models.length === 0) chat.loadModels();
@@ -135,49 +135,13 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  const addFiles = async (files) => {
-    for (const file of files) {
-      const id = `${Date.now()}-${Math.random()}`;
-      setAttachments((prev) => [...prev, { ...file, id, status: 'reading', preview: file.kind === 'image' ? file.uri : null }]);
-      try {
-        const result = await readAttachment(api, file);
-        setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...result, status: 'ready' } : a)));
-        if (result.truncated) toast(`${file.name}: solo se usará el principio del texto`);
-      } catch (err) {
-        setAttachments((prev) => prev.filter((a) => a.id !== id));
-        toast(`${file.name}: ${err?.message || 'no se pudo adjuntar'}`);
-      }
-    }
-  };
-
-  const attach = async () => {
-    const source = await sheet({
-      title: 'Adjuntar',
-      items: [
-        { label: 'Documento', icon: 'file', value: 'doc' },
-        { label: 'Imagen de la galería', icon: 'image', value: 'gallery' },
-        { label: 'Hacer una foto', icon: 'camera', value: 'camera' },
-      ],
-    });
-    if (!source) return;
-    try {
-      const files = source === 'doc' ? await pickDocuments() : await pickImages({ camera: source === 'camera' });
-      addFiles(files);
-    } catch (err) {
-      toast(err?.message || 'No se pudo abrir el selector');
-    }
-  };
-
-  const removeAttachment = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id));
-
   const send = () => {
     const text = input.trim();
-    const ready = attachments.filter((a) => a.status === 'ready');
-    if ((!text && ready.length === 0) || reading || chat.streaming) return;
+    if ((!text && attachments.ready.length === 0) || attachments.reading || chat.streaming) return;
     setInput('');
-    setAttachments([]);
     chat.draftRef.current = '';
-    chat.send(composeMessage(text, ready));
+    chat.send(composeMessage(text, attachments.ready));
+    attachments.clear();
   };
 
   const onUserLongPress = async (text) => {
@@ -196,7 +160,7 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
   const subtitle = chat.streaming ? 'respondiendo…' : chat.model || (chat.models.length === 0 ? 'sin modelos' : '');
 
   return (
-    <View ref={keyboard.ref} collapsable={false} style={{ flex: 1, paddingBottom: keyboard.overlap }}>
+    <KeyboardAware>
       <Pressable
         onPress={openOptions}
         style={({ pressed }) => ({
@@ -238,7 +202,7 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
             firstName={firstName}
             onPick={(starter) => {
               fill(starter.prompt);
-              if (starter.attach) attach();
+              if (starter.attach) attachments.pick();
             }}
           />
         ) : (
@@ -252,13 +216,9 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
         onChangeInput={onChangeInput}
         onSend={send}
         onPickModel={pickModel}
-        onAttach={attach}
         attachments={attachments}
-        onRemoveAttachment={removeAttachment}
-        reading={reading}
-        keyboardOpen={keyboard.open}
       />
-    </View>
+    </KeyboardAware>
   );
 }
 
@@ -446,19 +406,16 @@ function Composer({
   onChangeInput,
   onSend,
   onPickModel,
-  onAttach,
   attachments,
-  onRemoveAttachment,
-  reading,
-  keyboardOpen,
 }) {
   const c = useColors();
   const chat = useChat();
   const ui = useUi();
   const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
-  const hasContent = !!input.trim() || attachments.some((a) => a.status === 'ready');
-  const canSend = chat.streaming || (hasContent && !reading);
+  const keyboardOpen = useKeyboardOpen();
+  const hasContent = !!input.trim() || attachments.ready.length > 0;
+  const canSend = chat.streaming || (hasContent && !attachments.reading);
 
   return (
     <View style={{ paddingHorizontal: 10, paddingTop: 6, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 10) }}>
@@ -480,13 +437,7 @@ function Composer({
           paddingBottom: 8,
         }}
       >
-        {attachments.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingBottom: 8 }}>
-            {attachments.map((a) => (
-              <AttachmentChip key={a.id} item={a} onRemove={() => onRemoveAttachment(a.id)} />
-            ))}
-          </ScrollView>
-        )}
+        <AttachmentTray items={attachments.items} onRemove={attachments.remove} />
         <TextInput
           ref={inputRef}
           value={input}
@@ -513,7 +464,7 @@ function Composer({
         />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
           <Pressable
-            onPress={onAttach}
+            onPress={attachments.pick}
             hitSlop={6}
             accessibilityLabel="Adjuntar"
             style={({ pressed }) => ({
@@ -591,70 +542,4 @@ function Composer({
       )}
     </View>
   );
-}
-
-function AttachmentChip({ item, onRemove }) {
-  const c = useColors();
-  const reading = item.status === 'reading';
-  const kindLabel = item.kind === 'image' ? 'imagen' : 'documento';
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 7,
-        maxWidth: 200,
-        height: 40,
-        paddingLeft: item.preview ? 4 : 10,
-        paddingRight: 4,
-        borderRadius: RADIUS,
-        backgroundColor: c.surface5,
-      }}
-    >
-      {item.preview ? (
-        <Image source={{ uri: item.preview }} style={{ width: 32, height: 32, borderRadius: 5, opacity: reading ? 0.5 : 1 }} />
-      ) : (
-        <Icon name="file" size={15} color={c.accentDeep} />
-      )}
-      <View style={{ flexShrink: 1 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 12, color: c.ink }}>
-          {item.name}
-        </Text>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 9.5, color: c.inkLabel }}>
-          {reading ? (item.kind === 'image' ? 'describiendo…' : 'leyendo…') : kindLabel}
-        </Text>
-      </View>
-      {reading ? (
-        <ActivityIndicator size="small" color={c.accent} style={{ marginHorizontal: 6 }} />
-      ) : (
-        <Pressable onPress={onRemove} hitSlop={8} accessibilityLabel={`Quitar ${item.name}`} style={{ padding: 6 }}>
-          <Icon name="x" size={13} color={c.inkSoft} />
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-function markdownStyles(c, t) {
-  const code = { fontFamily: FONTS.mono, fontSize: t(12.5), lineHeight: t(19), color: c.inkBody };
-  return {
-    body: { fontFamily: FONTS.ui, fontSize: t(15), lineHeight: t(23), color: c.inkBody },
-    heading1: { fontFamily: FONTS.uiSemiBold, fontSize: t(19), color: c.ink, marginTop: 8, marginBottom: 4 },
-    heading2: { fontFamily: FONTS.uiSemiBold, fontSize: t(17), color: c.ink, marginTop: 8, marginBottom: 4 },
-    heading3: { fontFamily: FONTS.uiSemiBold, fontSize: t(15.5), color: c.ink, marginTop: 6, marginBottom: 3 },
-    strong: { fontFamily: FONTS.uiBold, color: c.ink },
-    em: { fontStyle: 'italic', color: c.ink },
-    link: { color: c.accentDeep, textDecorationLine: 'underline' },
-    bullet_list_icon: { color: c.accentDeep },
-    ordered_list_icon: { color: c.inkLabel, fontFamily: FONTS.mono },
-    blockquote: { backgroundColor: c.surface2, borderLeftWidth: 2, borderLeftColor: c.accent, borderRadius: RADIUS, paddingHorizontal: 12, marginVertical: 4 },
-    code_inline: { ...code, color: c.accentDeep, backgroundColor: c.surface3, borderRadius: 4, paddingHorizontal: 4 },
-    code_block: { ...code, backgroundColor: c.codeBg, borderRadius: RADIUS, padding: 12, marginVertical: 6 },
-    fence: { ...code, backgroundColor: c.codeBg, borderRadius: RADIUS, padding: 12, marginVertical: 6 },
-    hr: { backgroundColor: c.surface4, height: 1, marginVertical: 10 },
-    table: { borderColor: c.surface4, borderWidth: 1, borderRadius: RADIUS },
-    th: { fontFamily: FONTS.uiSemiBold, fontSize: t(13), color: c.ink, padding: 6 },
-    td: { fontFamily: FONTS.ui, fontSize: t(13), color: c.inkBody, padding: 6 },
-    tr: { borderColor: c.surface4 },
-  };
 }
