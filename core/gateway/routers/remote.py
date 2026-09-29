@@ -27,15 +27,14 @@ from fastapi.responses import Response, StreamingResponse
 
 from core.config import PUBLIC_BASE_URL
 from core.gateway import deps
+from core.gateway.push import push_task
 from core.gateway.remote_hub import hub
 from core.persistence.queries import (
     claim_remote_session,
     count_remote_events,
     create_remote_session,
-    delete_device_token,
     end_remote_session,
     get_remote_session,
-    list_device_tokens,
     list_remote_events,
     list_remote_sessions,
     log_audit_event,
@@ -59,7 +58,7 @@ MAX_DOC_CHARS = 20_000
 # Las imágenes viajan en base64 por la cola del host: ~6 MB entre todas.
 MAX_IMAGES_B64 = 8 * 1024 * 1024
 MAX_MENTIONS = 20
-EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+AGENT_LABEL = {"lixbon": "Lixbon", "claude": "Claude Code"}
 
 
 def _public_base(request: Request) -> str:
@@ -148,34 +147,6 @@ async def _sse(queue: asyncio.Queue, first: list[dict[str, Any]] | None = None):
             return
 
 
-# ── Push (Expo) ────────────────────────────────────────────────────────────
-
-async def _send_push(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:
-    """Notificación push best-effort a los dispositivos del usuario."""
-    tokens = await asyncio.to_thread(list_device_tokens, user_id)
-    if not tokens or deps.http_client_fast is None:
-        return
-    messages = [
-        {"to": t, "title": title, "body": body, "data": data, "priority": "high"}
-        for t in tokens
-    ]
-    try:
-        resp = await deps.http_client_fast.post(EXPO_PUSH_URL, json=messages)
-        for token, ticket in zip(tokens, resp.json().get("data", [])):
-            details = (ticket or {}).get("details") or {}
-            if details.get("error") == "DeviceNotRegistered":
-                await asyncio.to_thread(delete_device_token, token)
-    except Exception as exc:
-        log.debug(f"[remote] push fallido: {exc}")
-
-
-def _push_task(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:
-    try:
-        asyncio.get_running_loop().create_task(_send_push(user_id, title, body, data))
-    except RuntimeError:
-        pass
-
-
 # ── Ciclo de vida de sesiones ──────────────────────────────────────────────
 
 @router.post("/api/remote/sessions")
@@ -202,10 +173,10 @@ async def create_session_endpoint(
 
     share_url = f"{_public_base(request)}/remote/{raw_token}"
     hub.notify_user(user["id"], {"type": "session_created", "session": sess})
-    _push_task(
+    push_task(
         user["id"],
-        "Sesión remota activa",
-        f"{title} · {machine} está listo para controlarse desde la app",
+        f"{AGENT_LABEL.get(agent or '', 'Sesión')} en remoto",
+        " · ".join(filter(None, [title, workspace if workspace != title else None, machine])),
         {"kind": "remote_session", "session_id": sess["id"]},
     )
     return {"session": sess, "share_token": raw_token, "share_url": share_url}
@@ -344,9 +315,9 @@ async def host_publish_events(
             if updated:
                 hub.notify_user(sess["user_id"], {"type": "session_updated", "session": updated})
         if ev.get("type") == "approval_request":
-            _push_task(
+            push_task(
                 sess["user_id"],
-                "El agente pide permiso",
+                f"{AGENT_LABEL.get(sess.get('agent') or '', 'El agente')} pide permiso",
                 f"{ev.get('tool', 'herramienta')} en {sess['title']}",
                 {"kind": "remote_approval", "session_id": session_id},
             )
@@ -493,9 +464,9 @@ async def register_device_endpoint(
     authorization: str | None = Header(default=None),
 ):
     user = cookie_auth_required(lixbon_session, authorization)
-    token = (payload.get("expo_push_token") or "").strip()
-    if not token or len(token) > 200:
-        raise HTTPException(status_code=422, detail="expo_push_token inválido")
+    token = (payload.get("token") or payload.get("expo_push_token") or "").strip()
+    if not token or len(token) > 300:
+        raise HTTPException(status_code=422, detail="Push token inválido")
     register_device_token(user["id"], token, (payload.get("platform") or "").strip() or None)
     return {"registered": True}
 

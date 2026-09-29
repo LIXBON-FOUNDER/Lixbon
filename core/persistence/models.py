@@ -528,7 +528,7 @@ class RemoteEvent(Base):
 
 
 class DeviceToken(Base):
-    """Push tokens de Expo por dispositivo (avisos de /remote con la app cerrada)."""
+    """Push tokens por dispositivo: FCM o, de versiones viejas de la app, Expo."""
     __tablename__ = "device_tokens"
     __table_args__ = (
         UniqueConstraint("expo_push_token", name="uq_device_tokens_token"),

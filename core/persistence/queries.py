@@ -2464,7 +2464,7 @@ REMOTE_MAX_EVENTS = 2000
 # guardan — `assistant_done` ya trae el texto final del turno.
 REMOTE_PERSISTED_EVENTS = frozenset({
     "hello", "snapshot", "user_msg", "assistant_done", "tool_use",
-    "tool_result", "notice", "error", "bye",
+    "tool_result", "notice", "command_result", "error", "bye",
 })
 # Recorte por texto y por evento: un tool_result puede traer un archivo entero
 # y un snapshot, la conversación completa del host.
@@ -2634,6 +2634,24 @@ def sweep_remote_sessions(offline_after_s: int = 60, end_after_h: int = 24) -> i
             .values(status="ended", ended_at=now_iso(), share_token_hash=None)
         ).rowcount
         return changed
+
+
+def purge_remote_sessions(max_idle_days: int = 7) -> int:
+    """Borra las sesiones (y su transcript) sin actividad en `max_idle_days`.
+    Un host conectado se refresca en cada barrido, así que nunca cae aquí."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_idle_days)).isoformat()
+    with get_session() as s:
+        stale = select(RemoteSession.id).where(
+            RemoteSession.last_seen_at < cutoff,
+            or_(RemoteSession.ended_at.is_(None), RemoteSession.ended_at < cutoff),
+        )
+        ids = list(s.scalars(stale).all())
+        if not ids:
+            return 0
+        # Sin depender del ON DELETE CASCADE (SQLite no lo aplica sin PRAGMA).
+        s.execute(delete(RemoteEvent).where(RemoteEvent.session_id.in_(ids)))
+        s.execute(delete(RemoteSession).where(RemoteSession.id.in_(ids)))
+        return len(ids)
 
 
 # ─── Transcript persistido de las sesiones remotas ─────────────────────────
