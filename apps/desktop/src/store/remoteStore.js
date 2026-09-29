@@ -52,6 +52,7 @@ let filesCache = { at: 0, list: [] };
 let sentCards = new WeakSet();
 let prevSide = null;
 let prevBtw = null;
+let prevBackground = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -245,11 +246,13 @@ function startChannel(sessionId) {
   sentCards = new WeakSet(chat.messages.filter((m) => m.role === 'cmd'));
   prevSide = chat.ccSide;
   prevBtw = chat.ccBtw;
+  prevBackground = chat.ccBackground || [];
 
   emitHello(true);
   emit('snapshot', { messages: mapSnapshot(chat.messages) });
   emit('status', { state: chat.streaming ? 'thinking' : 'idle' });
   if (chat.pendingApproval) announceApproval(chat.pendingApproval);
+  if (prevBackground.length) emitBackground(prevBackground);
 
   unsubChat = useChatStore.subscribe(onChatChange);
   flushTimer = setInterval(flushEvents, FLUSH_MS);
@@ -333,6 +336,10 @@ function onChatChange(state) {
   }
 
   announceSidePanels(state);
+  if ((state.ccBackground || []) !== prevBackground) {
+    prevBackground = state.ccBackground || [];
+    emitBackground(prevBackground);
+  }
 
   // Cambio de pestaña (otra sesión, quizá de otro agente), de título o de
   // modo: el móvil tiene que enterarse para rotular la sesión y sus comandos.
@@ -404,6 +411,10 @@ function announceSidePanels(state) {
     else if (btw.error) emit('error', { message: `/btw: ${btw.error}` });
   }
   prevBtw = btw;
+}
+
+function emitBackground(tasks) {
+  emit('background', { tasks: tasks.map(({ id, type, description, since }) => ({ id, type, description, since })) });
 }
 
 function helpCommands() {
