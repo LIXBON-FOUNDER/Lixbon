@@ -3,6 +3,7 @@
 // > (comandos), # (conversaciones) y ? (preguntar).
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardController } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useApi } from '../state';
@@ -83,6 +84,18 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
     return out;
   }, [query, convs, commands, onOpenConversation, onAsk]);
 
+  // autoFocus no abre el teclado dentro de un Modal en Android, y un focus()
+  // antes de que la ventana del Modal gane el foco a veces tampoco: se pide
+  // otra vez si el teclado no ha salido.
+  const focusInput = () => {
+    setTimeout(() => inputRef.current?.focus(), 350);
+    setTimeout(() => {
+      if (KeyboardController.isVisible() || !inputRef.current) return;
+      inputRef.current.blur();
+      inputRef.current.focus();
+    }, 900);
+  };
+
   const pick = (r) => {
     onClose();
     // La hoja se cierra antes de ejecutar: algunos comandos abren otra.
@@ -96,9 +109,7 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
       animationType="fade"
       onRequestClose={onClose}
       statusBarTranslucent
-      // autoFocus no abre el teclado dentro de un Modal en Android: el foco se
-      // pide cuando la ventana ya está visible.
-      onShow={() => setTimeout(() => inputRef.current?.focus(), 350)}
+      onShow={focusInput}
     >
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: c.scrim }} />
