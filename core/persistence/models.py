@@ -493,6 +493,8 @@ class RemoteSession(Base):
     source: Mapped[str] = mapped_column(Text, nullable=False)        # "cli" | "ide"
     title: Mapped[str] = mapped_column(Text, nullable=False)         # carpeta del workspace
     machine: Mapped[str | None] = mapped_column(Text)                # hostname del host
+    agent: Mapped[str | None] = mapped_column(Text)                  # "lixbon" | "claude"
+    workspace: Mapped[str | None] = mapped_column(Text)              # carpeta del proyecto en el host
     status: Mapped[str] = mapped_column(Text, nullable=False, default="online")  # online|offline|ended
     # Token del link/QR: hasheado como las API keys; NULL = link revocado
     share_token_hash: Mapped[str | None] = mapped_column(Text, unique=True)

@@ -2491,6 +2491,8 @@ def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
         "source": r.source,
         "title": r.title,
         "machine": r.machine,
+        "agent": r.agent,
+        "workspace": r.workspace,
         "status": r.status,
         "created_at": r.created_at,
         "last_seen_at": r.last_seen_at,
@@ -2498,7 +2500,14 @@ def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
     }
 
 
-def create_remote_session(user_id: int, source: str, title: str, machine: str | None) -> tuple[str, dict[str, Any]]:
+def create_remote_session(
+    user_id: int,
+    source: str,
+    title: str,
+    machine: str | None,
+    agent: str | None = None,
+    workspace: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Crea la sesión remota y su share token. Devuelve (token_en_claro, sesión)."""
     raw_token = secrets.token_urlsafe(32)
     expires = (datetime.now(timezone.utc) + timedelta(hours=REMOTE_TOKEN_TTL_HOURS)).isoformat()
@@ -2509,6 +2518,8 @@ def create_remote_session(user_id: int, source: str, title: str, machine: str | 
             source=source,
             title=title[:120] or "Sesión remota",
             machine=(machine or "")[:80] or None,
+            agent=agent,
+            workspace=(workspace or "")[:120] or None,
             status="online",
             share_token_hash=hash_api_key(raw_token),
             token_expires_at=expires,
@@ -2556,6 +2567,31 @@ def claim_remote_session(raw_token: str) -> dict[str, Any] | None:
         if r.token_expires_at and r.token_expires_at < now_iso():
             return None
         return {**_remote_session_to_dict(r), "user_id": r.user_id}
+
+
+def update_remote_session_meta(
+    session_id: str,
+    title: str | None = None,
+    agent: str | None = None,
+    workspace: str | None = None,
+) -> dict[str, Any] | None:
+    """Aplica lo que el host anuncia en su `hello` (cambia de conversación o de
+    agente sin cerrar la sesión). Devuelve la sesión solo si algo cambió."""
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or r.status == "ended":
+            return None
+        changes = {
+            "title": (title or "").strip()[:120] or None,
+            "agent": agent,
+            "workspace": (workspace or "").strip()[:120] or None,
+        }
+        changed = False
+        for field_name, value in changes.items():
+            if value and getattr(r, field_name) != value:
+                setattr(r, field_name, value)
+                changed = True
+        return _remote_session_to_dict(r) if changed else None
 
 
 def touch_remote_session(session_id: str, status: str | None = None) -> None:

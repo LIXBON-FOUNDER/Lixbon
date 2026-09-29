@@ -95,3 +95,12 @@ def test_el_tope_por_sesion_conserva_los_ultimos(session_id, monkeypatch):
     for n in range(1, 26):
         q.save_remote_events(session_id, [{"type": "user_msg", "seq": n, "text": f"m{n}"}])
     assert [ev["seq"] for ev in q.list_remote_events(session_id)] == list(range(16, 26))
+
+
+def test_el_hello_actualiza_titulo_y_agente(session_id, user_id):
+    sess = q.update_remote_session_meta(session_id, "Arreglar el login", "claude", "lixbon")
+    assert (sess["title"], sess["agent"], sess["workspace"]) == ("Arreglar el login", "claude", "lixbon")
+    # Sin cambios no hay nada que avisar a la app.
+    assert q.update_remote_session_meta(session_id, "Arreglar el login", "claude", "lixbon") is None
+    q.end_remote_session(session_id)
+    assert q.update_remote_session_meta(session_id, "otro", None, None) is None

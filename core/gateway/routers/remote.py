@@ -42,6 +42,7 @@ from core.persistence.queries import (
     register_device_token,
     save_remote_events,
     touch_remote_session,
+    update_remote_session_meta,
 )
 from core.security.auth import cookie_auth_required
 from core.security.ratelimit import check_auth_rate_limit, record_failed_auth
@@ -51,6 +52,13 @@ log = logging.getLogger("lixbon")
 
 SSE_PING_SECONDS = 15
 MAX_EVENTS_PER_BATCH = 200
+AGENTS = ("lixbon", "claude")
+CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files")
+MAX_ATTACHMENTS = 6
+MAX_DOC_CHARS = 20_000
+# Las imágenes viajan en base64 por la cola del host: ~6 MB entre todas.
+MAX_IMAGES_B64 = 8 * 1024 * 1024
+MAX_MENTIONS = 20
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
 
@@ -58,6 +66,53 @@ def _public_base(request: Request) -> str:
     if PUBLIC_BASE_URL:
         return PUBLIC_BASE_URL
     return str(request.base_url).rstrip("/")
+
+
+def _agent(value: Any) -> str | None:
+    return value if value in AGENTS else None
+
+
+def _clean_attachments(raw: Any) -> list[dict[str, Any]]:
+    """Adjuntos de un prompt remoto: documentos ya convertidos a texto (los
+    extrae /api/attachments en el cliente) e imágenes en base64 que el host
+    pasa tal cual a su agente."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_ATTACHMENTS:
+        raise HTTPException(status_code=422, detail=f"Máximo {MAX_ATTACHMENTS} adjuntos por mensaje")
+    out: list[dict[str, Any]] = []
+    image_bytes = 0
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "adjunto")[:200]
+        if item.get("kind") == "image":
+            data = item.get("base64")
+            if not isinstance(data, str) or not data:
+                continue
+            image_bytes += len(data)
+            out.append({"kind": "image", "name": name, "base64": data,
+                        "mime": str(item.get("mime") or "image/jpeg")[:40]})
+        elif item.get("kind") == "doc":
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            out.append({"kind": "doc", "name": name, "text": text[:MAX_DOC_CHARS]})
+    if image_bytes > MAX_IMAGES_B64:
+        raise HTTPException(status_code=413, detail={
+            "code": "too_large", "message": "Las imágenes pesan demasiado para enviarlas juntas.",
+        })
+    return out
+
+
+def _clean_mentions(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw[:MAX_MENTIONS]:
+        if isinstance(item, dict) and isinstance(item.get("path"), str):
+            out.append({k: str(item.get(k) or "")[:500] for k in ("path", "name", "rel")})
+    return out
 
 
 def _session_or_404(session_id: str) -> dict[str, Any]:
@@ -135,8 +190,10 @@ async def create_session_endpoint(
     source = payload.get("source") if payload.get("source") in ("cli", "ide") else "cli"
     title = (payload.get("title") or "").strip() or "Sesión remota"
     machine = (payload.get("machine") or "").strip() or socket.gethostname()
+    agent = _agent(payload.get("agent"))
+    workspace = (payload.get("workspace") or "").strip() or None
 
-    raw_token, sess = create_remote_session(user["id"], source, title, machine)
+    raw_token, sess = create_remote_session(user["id"], source, title, machine, agent, workspace)
     hub.channel(sess["id"], user["id"])
 
     ip = request.client.host if request.client else None
@@ -279,6 +336,13 @@ async def host_publish_events(
         log.warning(f"[remote] no se pudo guardar el transcript de {session_id}: {exc}")
 
     for ev in events:
+        if ev.get("type") == "hello":
+            updated = await asyncio.to_thread(
+                update_remote_session_meta, session_id,
+                ev.get("title"), _agent(ev.get("agent")), ev.get("workspace"),
+            )
+            if updated:
+                hub.notify_user(sess["user_id"], {"type": "session_updated", "session": updated})
         if ev.get("type") == "approval_request":
             _push_task(
                 sess["user_id"],
@@ -370,20 +434,30 @@ async def controller_send_command(
     lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ):
-    """El controller manda un comando al host: prompt | interrupt | approve | request_snapshot."""
+    """El controller manda un comando al host: prompt | interrupt | approve |
+    request_snapshot | files (buscar archivos del workspace para mencionarlos)."""
     sess = _owner_required(session_id, lixbon_session, authorization)
     if sess["status"] == "ended":
         raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
     kind = payload.get("type")
-    if kind not in ("prompt", "interrupt", "approve", "request_snapshot"):
+    if kind not in CONTROLLER_COMMANDS:
         raise HTTPException(status_code=422, detail=f"Comando no soportado: {kind}")
-    if kind == "prompt" and not (payload.get("text") or "").strip():
+    attachments = _clean_attachments(payload.get("attachments")) if kind == "prompt" else []
+    if kind == "prompt" and not (payload.get("text") or "").strip() and not attachments:
         raise HTTPException(status_code=422, detail="El prompt está vacío")
 
     ch = hub.channel(session_id, sess["user_id"])
     if not ch.host_connected:
         raise HTTPException(status_code=409, detail="El host no está conectado ahora mismo")
     command = {k: payload.get(k) for k in ("type", "text", "id", "decision", "from_seq") if k in payload}
+    if kind == "prompt":
+        if attachments:
+            command["attachments"] = attachments
+        mentions = _clean_mentions(payload.get("mentions"))
+        if mentions:
+            command["mentions"] = mentions
+    if kind == "files":
+        command["query"] = str(payload.get("query") or "")[:200]
     if not hub.push_command(ch, command):
         raise HTTPException(status_code=429, detail="El host tiene demasiados comandos pendientes")
     return {"queued": True}

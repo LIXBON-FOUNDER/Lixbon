@@ -125,6 +125,9 @@ def init_db() -> None:
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS session_credit_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0",
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS week_credit_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS week_anchor_slot INTEGER",
+        # /remote: qué agente maneja la sesión (Lixbon o Claude Code) y en qué carpeta
+        "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS agent TEXT",
+        "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS workspace TEXT",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:
