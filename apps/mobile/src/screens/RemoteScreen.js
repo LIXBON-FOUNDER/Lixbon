@@ -1,14 +1,14 @@
-// RemoteScreen.js — sección Remote: controla sesiones /remote del IDE o CLI.
-// Lista de sesiones (en vivo vía /api/remote/subscribe) y detalle con el
-// transcript del agente en streaming, envío de prompts, interrupción y
-// tarjetas de aprobación. Todo se ejecuta en la máquina host; esta pantalla
-// es un mando a distancia.
+// RemoteScreen.js — sección Remoto: sesiones /remote del IDE o del CLI, sea
+// cual sea su agente (Lixbon o Claude Code). Lista en vivo y detalle con el
+// transcript, los comandos "/" que publica el host, adjuntos, menciones de
+// @archivos y aprobaciones. Todo se ejecuta en la máquina host; esto es un mando.
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -17,14 +17,38 @@ import Markdown from 'react-native-markdown-display';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
+import { composeMessage, splitMessage } from '../attachments';
+import { AttachmentTray, MentionChip, useAttachments } from '../components/Attachments';
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { ChatHeader, FadeUp, IconButton, useColors, useKeyboardOverlap } from '../components/ui';
+import { markdownStyles } from '../components/markdown';
+import {
+  AgentMark,
+  FadeUp,
+  IconButton,
+  KeyboardAware,
+  agentStyle,
+  useColors,
+  useKeyboardOpen,
+  useScale,
+} from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
 import { useApi, useAuth } from '../state';
-import { FONTS, RADIUS, RADIUS_BOX, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS, RADIUS_BOX } from '../theme';
 
 const SOURCE_LABEL = { cli: 'CLI', ide: 'IDE' };
+const GROUP_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' };
+// Mismos nombres que en el IDE (Lixbon: agent/ask/plan; Claude Code: el resto).
+const MODE_LABEL = {
+  agent: 'agente',
+  ask: 'preguntar',
+  plan: 'plan',
+  default: 'preguntar',
+  acceptEdits: 'aceptar ediciones',
+  auto: 'auto',
+  bypassPermissions: 'sin permisos',
+};
+const MENTION_AT_END = /(^|\s)@([^\s@]*)$/;
 
 // Catálogo de reserva: si el host es de una versión anterior a que el `hello`
 // publicara sus comandos, la barra sigue ofreciendo lo básico en vez de nada.
@@ -34,9 +58,31 @@ const FALLBACK_COMMANDS = [
   { name: 'status', args: '', description: 'Estado de la sesión y del host' },
 ];
 
+// Las sesiones de antes de que el host anunciara su agente son de Lixbon.
+const agentOf = (session, meta) => meta?.agent || session?.agent || 'lixbon';
+
+function timeAgo(iso) {
+  const t = Date.parse(iso || '');
+  if (!t) return '';
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return 'ahora';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'ayer' : `hace ${d} días`;
+}
+
+function isOnline(session) {
+  if (session.status === 'ended') return false;
+  // host_connected lo calcula el gateway desde el hub y es la verdad viva; el
+  // status de la BD puede ir por detrás (el barrido corre cada pocos minutos).
+  return typeof session.host_connected === 'boolean' ? session.host_connected : session.status === 'online';
+}
+
 export default function RemoteScreen({ onBack, initialToken = null, embedded = false }) {
   const api = useApi();
-  const [session, setSession] = useState(null); // sesión abierta en detalle
+  const [session, setSession] = useState(null);
   const [claiming, setClaiming] = useState(!!initialToken);
   const { toast } = useDialogs();
 
@@ -66,13 +112,7 @@ export default function RemoteScreen({ onBack, initialToken = null, embedded = f
   }
 
   if (session) {
-    return (
-      <RemoteSessionView
-        session={session}
-        onBack={() => setSession(null)}
-        embedded={embedded}
-      />
-    );
+    return <RemoteSessionView session={session} onBack={() => setSession(null)} embedded={embedded} />;
   }
   return <RemoteListView onBack={onBack} onOpen={setSession} embedded={embedded} />;
 }
@@ -115,11 +155,11 @@ function RemoteListView({ onBack, onOpen, embedded }) {
 
   // Suscripción en vivo: cuando se ejecuta /remote en el IDE/CLI, la sesión
   // aparece aquí al instante sin refrescar. Cada (re)conexión relee la lista:
-  // los avisos emitidos mientras el stream estaba caído no se reenvían, así
-  // que sin esto una sesión creada durante el corte no aparecía nunca.
+  // los avisos emitidos mientras el stream estaba caído no se reenvían.
   useEffect(() => {
     aliveRef.current = true;
     let backoff = 2000;
+    const patch = (id, fields) => setSessions((cur) => cur.map((sx) => (sx.id === id ? { ...sx, ...fields } : sx)));
     const connect = () => {
       if (!aliveRef.current) return;
       load();
@@ -131,21 +171,14 @@ function RemoteListView({ onBack, onOpen, embedded }) {
           backoff = 2000;
           if (ev.type === 'session_created' && ev.session) {
             setSessions((cur) => [ev.session, ...cur.filter((sx) => sx.id !== ev.session.id)]);
+          } else if (ev.type === 'session_updated' && ev.session) {
+            // El host cambió de conversación, de título o de agente.
+            patch(ev.session.id, ev.session);
           } else if (ev.type === 'session_online' || ev.type === 'session_offline') {
             const online = ev.type === 'session_online';
-            setSessions((cur) =>
-              cur.map((sx) =>
-                sx.id === ev.session_id
-                  ? { ...sx, status: online ? 'online' : 'offline', host_connected: online }
-                  : sx,
-              ),
-            );
+            patch(ev.session_id, { status: online ? 'online' : 'offline', host_connected: online });
           } else if (ev.type === 'session_ended') {
-            setSessions((cur) =>
-              cur.map((sx) =>
-                sx.id === ev.session_id ? { ...sx, status: 'ended', host_connected: false } : sx,
-              ),
-            );
+            patch(ev.session_id, { status: 'ended', host_connected: false });
           }
         },
         onEnd: () => setTimeout(connect, backoff),
@@ -163,115 +196,152 @@ function RemoteListView({ onBack, onOpen, embedded }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const rows = useMemo(() => {
+    const live = sessions.filter((sx) => sx.status !== 'ended');
+    const past = sessions.filter((sx) => sx.status === 'ended');
+    return [
+      ...(live.length ? [{ header: 'En curso', count: live.length }, ...live] : []),
+      ...(past.length ? [{ header: 'Anteriores', count: past.length }, ...past] : []),
+    ];
+  }, [sessions]);
+
+  const liveCount = sessions.filter(isOnline).length;
+
   return (
     <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
-      {embedded ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, height: 48 }}>
-          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>Sesiones remotas</Text>
-          <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>IDE · CLI</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: embedded ? 16 : 6, paddingRight: 16, height: 50 }}>
+        {!embedded && (
+          <IconButton onPress={onBack} size={38} label="Atrás">
+            <Icon name="arrow-left" size={20} color={c.ink} />
+          </IconButton>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.ink }}>Sesiones remotas</Text>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>
+            {liveCount > 0 ? `${liveCount} en vivo · Lixbon y Claude Code` : 'Lixbon y Claude Code · IDE y CLI'}
+          </Text>
         </View>
-      ) : (
-        <ScreenHeader title="Remoto" onBack={onBack} />
-      )}
+      </View>
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={c.inkSoft} />
         </View>
       ) : (
         <FlatList
-          data={sessions}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 14, gap: 10, flexGrow: 1 }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.inkSoft} />
-          }
+          data={rows}
+          keyExtractor={(item) => (item.header ? `h-${item.header}` : item.id)}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16, gap: 6, flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.inkSoft} />}
           ListHeaderComponent={
             error ? (
-              <View style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
+              <View style={{ padding: 12, marginBottom: 6, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
                 <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{error}</Text>
               </View>
             ) : null
           }
-          ListEmptyComponent={
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 26, gap: 12 }}>
-              <Icon name="activity" size={30} color={c.inkSoft} />
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 17, color: c.ink, textAlign: 'center' }}>
-                Sin sesiones remotas
+          ListEmptyComponent={<EmptySessions base={api.base} />}
+          renderItem={({ item }) =>
+            item.header ? (
+              <Text style={{ marginTop: 10, marginBottom: 2, marginLeft: 4, fontFamily: FONTS.monoMedium, fontSize: 10, letterSpacing: 0.8, color: c.inkLabel }}>
+                {item.header.toUpperCase()} · {item.count}
               </Text>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 14, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
-                Ejecuta /remote en el IDE o el CLI de Lixbon y la sesión aparecerá aquí
-                al instante. Tiene que ser la misma cuenta Lixbon y el mismo servidor
-                ({api.base.replace(/^https?:\/\//, '')}). Desliza hacia abajo para
-                actualizar.
-              </Text>
-            </View>
+            ) : (
+              <SessionCard session={item} onPress={() => onOpen(item)} />
+            )
           }
-          renderItem={({ item }) => <SessionCard session={item} onPress={() => onOpen(item)} />}
         />
       )}
     </SafeAreaView>
   );
 }
 
+function EmptySessions({ base }) {
+  const c = useColors();
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, gap: 12 }}>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ padding: 10, borderRadius: RADIUS_BOX, backgroundColor: agentStyle('lixbon', c).soft }}>
+          <AgentMark agent="lixbon" size={26} />
+        </View>
+        <View style={{ padding: 10, borderRadius: RADIUS_BOX, backgroundColor: agentStyle('claude', c).soft }}>
+          <AgentMark agent="claude" size={26} />
+        </View>
+      </View>
+      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink, textAlign: 'center' }}>Sin sesiones remotas</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkMuted, textAlign: 'center' }}>
+        Escribe /remote en el IDE, con Lixbon o con Claude Code, o en el CLI, y la sesión aparecerá aquí al instante.
+      </Text>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkFaint, textAlign: 'center' }}>
+        misma cuenta · {base.replace(/^https?:\/\//, '')}
+      </Text>
+    </View>
+  );
+}
+
 function SessionCard({ session, onPress }) {
   const c = useColors();
+  const agent = agentOf(session);
+  const a = agentStyle(agent, c);
   const ended = session.status === 'ended';
-  // Una sesión terminada con transcript guardado se sigue pudiendo abrir: en
-  // modo lectura, para releer lo que se habló desde el IDE o el CLI.
+  // Una sesión terminada con transcript guardado se sigue pudiendo abrir en
+  // modo lectura, para releer lo que se habló.
   const readable = ended && (session.transcript_events || 0) > 0;
-  // host_connected lo calcula el gateway desde el hub y es la verdad viva; el
-  // status de la BD puede ir por detrás (el barrido corre cada pocos minutos).
-  const online =
-    !ended && (typeof session.host_connected === 'boolean'
-      ? session.host_connected
-      : session.status === 'online');
+  const online = isOnline(session);
+  const status = ended ? (readable ? 'terminada · ver conversación' : 'terminada') : online ? 'en vivo' : 'sin conexión';
+  const where = [session.workspace, session.source === 'cli' ? `CLI · ${session.machine || ''}` : SOURCE_LABEL[session.source]]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <Pressable
       onPress={ended && !readable ? undefined : onPress}
       style={({ pressed }) => ({
-        backgroundColor: pressed ? c.surface4 : c.surface2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        padding: 12,
         borderRadius: RADIUS,
-        padding: 14,
-        gap: 6,
-        opacity: ended && !readable ? 0.55 : ended ? 0.8 : 1,
+        backgroundColor: pressed ? c.surface4 : c.surface2,
+        opacity: ended && !readable ? 0.5 : 1,
       })}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <View
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: online ? c.good : c.inkFaint,
-          }}
-        />
-        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>
-          {session.title || 'Sesión remota'}
-        </Text>
-        <View
-          style={{
-            paddingHorizontal: 7,
-            paddingVertical: 2,
-            borderRadius: 5,
-            backgroundColor: c.accentSoft,
-          }}
-        >
-          <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 10.5, color: c.accentDeep }}>
-            {SOURCE_LABEL[session.source] || session.source}
+      <View style={{ width: 42, height: 42, borderRadius: RADIUS, backgroundColor: a.soft, alignItems: 'center', justifyContent: 'center' }}>
+        <AgentMark agent={agent} size={agent === 'claude' ? 22 : 26} />
+        {online && (
+          <View
+            style={{
+              position: 'absolute',
+              right: -3,
+              bottom: -3,
+              width: 12,
+              height: 12,
+              borderRadius: 6,
+              backgroundColor: c.good,
+              borderWidth: 2,
+              borderColor: c.surface2,
+            }}
+          />
+        )}
+      </View>
+      <View style={{ flex: 1, gap: 3 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.ink }}>
+            {session.title || 'Sesión remota'}
+          </Text>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: c.inkFaint }}>
+            {timeAgo(session.last_seen_at || session.created_at)}
           </Text>
         </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 10.5, color: a.ink }}>{a.label}</Text>
+          {!!where && (
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>
+              · {where}
+            </Text>
+          )}
+        </View>
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: online ? c.good : c.inkFaint }}>{status}</Text>
       </View>
-      <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>
-        {session.machine || '—'}
-        {'  ·  '}
-        {ended
-          ? readable
-            ? 'terminada · ver conversación'
-            : 'terminada'
-          : online
-            ? 'en línea'
-            : 'sin conexión'}
-      </Text>
     </Pressable>
   );
 }
@@ -285,11 +355,15 @@ function RemoteSessionView({ session, onBack, embedded }) {
   const { confirm, sheet, toast } = useDialogs();
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
   const [input, setInput] = useState('');
-  const keyboard = useKeyboardOverlap();
+  const [mentions, setMentions] = useState([]);
   const [sending, setSending] = useState(false);
   const streamRef = useRef(null);
   const aliveRef = useRef(true);
   const seqRef = useRef(0);
+  const inputRef = useRef(null);
+
+  const caps = state.meta?.capabilities || [];
+  const attachments = useAttachments({ describeImages: false, allowImages: caps.includes('images') });
 
   useEffect(() => {
     seqRef.current = state.lastSeq;
@@ -308,10 +382,7 @@ function RemoteSessionView({ session, onBack, embedded }) {
         for (const ev of Array.isArray(res?.events) ? res.events : []) dispatch(ev);
       } catch (err) {
         if (alive) {
-          dispatch({
-            type: 'error',
-            message: err instanceof ApiException ? err.message : 'No se pudo cargar la conversación',
-          });
+          dispatch({ type: 'error', message: err instanceof ApiException ? err.message : 'No se pudo cargar la conversación' });
         }
       } finally {
         if (alive) dispatch({ type: 'session_ended' });
@@ -373,23 +444,64 @@ function RemoteSessionView({ session, onBack, embedded }) {
     [api, session.id, toast],
   );
 
+  // @archivo: el host busca en su workspace y responde con un evento `files`.
+  const mentionQuery = useMemo(() => {
+    const m = input.match(MENTION_AT_END);
+    return m ? m[2] : null;
+  }, [input]);
+  const canMention = caps.includes('files') && state.hostConnected && !state.ended;
+  useEffect(() => {
+    if (mentionQuery === null || !canMention) return undefined;
+    const timer = setTimeout(() => sendCommand({ type: 'files', query: mentionQuery }, { quiet: true }), 180);
+    return () => clearTimeout(timer);
+  }, [mentionQuery, canMention, sendCommand]);
+
+  const pickMention = (file) => {
+    setInput((cur) => cur.replace(MENTION_AT_END, '$1'));
+    setMentions((cur) => (cur.some((m) => m.path === file.path) ? cur : [...cur, file]));
+    inputRef.current?.focus();
+  };
+
+  const startMention = () => {
+    setInput((cur) => (cur && !/\s$/.test(cur) ? `${cur} @` : `${cur}@`));
+    inputRef.current?.focus();
+  };
+
   const sendPrompt = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    const ready = attachments.ready;
+    if ((!text && ready.length === 0) || sending || attachments.reading) return;
+    // Un host que no anuncia adjuntos solo entiende texto: los documentos van
+    // dentro del mensaje, como en el chat.
+    const command = caps.includes('attachments')
+      ? {
+          type: 'prompt',
+          text,
+          attachments: ready.map((a) =>
+            a.kind === 'image'
+              ? { kind: 'image', name: a.name, base64: a.base64, mime: a.mime }
+              : { kind: 'doc', name: a.name, text: a.text },
+          ),
+          mentions: mentions.map(({ name, rel, path }) => ({ name, rel, path })),
+        }
+      : { type: 'prompt', text: composeMessage(text, ready.filter((a) => a.kind === 'doc')) };
     setSending(true);
-    const ok = await sendCommand({ type: 'prompt', text });
+    const ok = await sendCommand(command);
     setSending(false);
-    if (ok) setInput('');
+    if (ok) {
+      setInput('');
+      setMentions([]);
+      attachments.clear();
+    }
   };
 
   const interrupt = () => sendCommand({ type: 'interrupt' });
-
   const approve = (id, decision) => sendCommand({ type: 'approve', id, decision });
 
   const endSession = async () => {
     const ok = await confirm({
       title: 'Terminar sesión remota',
-      message: 'El IDE/CLI recupera el control local y el link del QR deja de funcionar.',
+      message: 'El equipo recupera el control local y el link del QR deja de funcionar.',
       confirmLabel: 'Terminar',
       danger: true,
     });
@@ -402,187 +514,164 @@ function RemoteSessionView({ session, onBack, embedded }) {
     onBack();
   };
 
-  const title = state.meta?.title || session.title || 'Sesión remota';
-  const status = state.ended
-    ? 'Sesión terminada'
-    : !state.hostConnected
-      ? 'Host sin conexión…'
-      : state.agentState === 'thinking'
-        ? 'El agente está trabajando…'
-        : 'Conectado · listo';
-  const subtitle = [
-    SOURCE_LABEL[state.meta?.source || session.source],
-    state.meta?.machine,
-    status,
-  ]
-    .filter(Boolean)
-    .join('  ·  ');
-
+  const agent = agentOf(session, state.meta);
   const commands = state.meta?.commands?.length ? state.meta.commands : FALLBACK_COMMANDS;
 
   const options = async () => {
     const action = await sheet({
-      title,
+      title: state.meta?.title || session.title || 'Sesión remota',
       items: [
-        { label: 'Ver comandos', icon: 'slash', value: 'commands' },
-        ...(state.agentState === 'thinking'
-          ? [{ label: 'Interrumpir al agente', icon: 'stop', value: 'interrupt' }]
-          : []),
-        ...(state.ended
-          ? []
-          : [{ label: 'Terminar sesión remota', icon: 'logout', danger: true, value: 'end' }]),
+        { label: 'Comandos del agente', icon: 'slash', value: 'commands' },
+        ...(canMention ? [{ label: 'Mencionar un archivo', icon: 'file', value: 'mention' }] : []),
+        ...(state.agentState === 'thinking' ? [{ label: 'Interrumpir al agente', icon: 'stop', value: 'interrupt' }] : []),
+        ...(state.ended ? [] : [{ label: 'Terminar sesión remota', icon: 'logout', danger: true, value: 'end' }]),
       ],
     });
     if (action === 'commands') setInput('/');
+    if (action === 'mention') startMention();
     if (action === 'interrupt') interrupt();
     if (action === 'end') endSession();
   };
 
-  const items = [...state.items].reverse();
+  const items = useMemo(() => [...state.items].reverse(), [state.items]);
+  const thinking = state.agentState === 'thinking';
 
   return (
     <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
-      <View ref={keyboard.ref} collapsable={false} style={{ flex: 1, paddingBottom: keyboard.overlap }}>
-        <ChatHeader
-          title={title}
-          subtitle={subtitle}
-          onLeading={onBack}
-          leadingIcon="arrow-left"
-          onOptions={options}
-          dot={state.hostConnected && !state.ended ? 'live' : 'idle'}
-          divider
-        />
+      <KeyboardAware>
+        <SessionHeader session={session} state={state} agent={agent} onBack={onBack} onOptions={options} />
 
-        {/* Transcript */}
         <View style={{ flex: 1 }}>
           {state.items.length === 0 ? (
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 10 }}>
-              {state.hostConnected ? (
-                <>
-                  <Icon name="chat" size={26} color={c.inkSoft} />
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, textAlign: 'center' }}>
-                    Sesión conectada. Escribe abajo para pedirle algo al agente,
-                    o empieza con «/» para usar un comando.
-                  </Text>
-                </>
-              ) : archived && state.ended ? (
-                <>
-                  <Icon name="chat" size={26} color={c.inkSoft} />
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, textAlign: 'center' }}>
-                    Esta sesión terminó sin conversación guardada.
-                  </Text>
-                </>
-              ) : (
-                <ActivityIndicator color={c.inkSoft} />
-              )}
-            </View>
+            <SessionEmpty state={state} agent={agent} />
           ) : (
             <FlatList
               inverted
               data={items}
               keyExtractor={(item) => item.key}
-              contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 14 }}
+              contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12 }}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => <TranscriptRow item={item} />}
+              renderItem={({ item }) => <TranscriptRow item={item} agent={agent} />}
             />
           )}
         </View>
 
-        {/* Aprobaciones pendientes */}
         {state.approvals.map((a) => (
           <ApprovalCard key={a.id} approval={a} onDecide={approve} />
         ))}
 
-        {/* Compositor */}
         <RemoteComposer
           input={input}
+          inputRef={inputRef}
           onChangeInput={setInput}
           onSend={sendPrompt}
           onInterrupt={interrupt}
           commands={commands}
-          thinking={state.agentState === 'thinking'}
+          thinking={thinking}
           disabled={state.ended || !state.hostConnected}
           sending={sending}
           ended={state.ended}
-          keyboardOpen={keyboard.open}
+          attachments={attachments}
+          mentions={mentions}
+          onRemoveMention={(path) => setMentions((cur) => cur.filter((m) => m.path !== path))}
+          canMention={canMention}
+          onStartMention={startMention}
+          mentionQuery={canMention ? mentionQuery : null}
+          files={state.files}
+          onPickMention={pickMention}
         />
-      </View>
+      </KeyboardAware>
     </SafeAreaView>
   );
 }
 
-function TranscriptRow({ item }) {
+function SessionHeader({ session, state, agent, onBack, onOptions }) {
   const c = useColors();
-  if (item.kind === 'user') {
-    return (
-      <FadeUp style={{ alignItems: 'flex-end', marginVertical: 8 }}>
-        <View
-          style={{
-            maxWidth: '80%',
-            backgroundColor: c.primary,
-            paddingHorizontal: 19,
-            paddingVertical: 11,
-            borderRadius: RADIUS_BOX,
-            borderBottomRightRadius: 15,
-          }}
-        >
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 15, lineHeight: 22, color: c.onPrimary }}>
-            {item.text}
+  const a = agentStyle(agent, c);
+  const meta = state.meta || {};
+  const status = state.ended
+    ? 'terminada'
+    : !state.hostConnected
+      ? 'host sin conexión…'
+      : state.agentState === 'thinking'
+        ? 'trabajando…'
+        : 'en vivo';
+  const live = state.hostConnected && !state.ended;
+  const details = [meta.workspace || session.workspace, meta.model, MODE_LABEL[meta.mode] || meta.mode]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <View style={{ paddingBottom: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 54, paddingHorizontal: 6 }}>
+        <IconButton onPress={onBack} size={38} label="Volver a las sesiones">
+          <Icon name="arrow-left" size={19} color={c.ink} />
+        </IconButton>
+        <View style={{ width: 32, height: 32, borderRadius: RADIUS, backgroundColor: a.soft, alignItems: 'center', justifyContent: 'center' }}>
+          <AgentMark agent={agent} size={agent === 'claude' ? 17 : 20} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.ink }}>
+            {meta.title || session.title || 'Sesión remota'}
+          </Text>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: a.ink }}>
+            {a.label}
+            <Text style={{ color: c.inkLabel }}>{details ? `  ·  ${details}` : ''}</Text>
           </Text>
         </View>
-        {item.origin === 'local' && (
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 11, color: c.inkMuted, marginTop: 3 }}>
-            desde el equipo
-          </Text>
-        )}
-      </FadeUp>
-    );
-  }
-  if (item.kind === 'tool') {
-    return (
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          marginVertical: 4,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: c.borderSoft,
-          backgroundColor: c.bgSecondary,
-        }}
-      >
-        {item.running ? (
-          <ActivityIndicator size="small" color={c.inkSoft} />
-        ) : (
-          <Icon name={item.error ? 'warning' : 'check'} size={14} color={item.error ? c.danger : c.inkSoft} />
-        )}
-        <Text numberOfLines={2} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkSoft }}>
-          <Text style={{ fontFamily: FONTS.uiMedium, color: c.ink }}>{item.tool}</Text>
-          {item.summary ? `  ${item.summary}` : ''}
-          {!item.running && item.result ? `\n${firstLine(item.result)}` : ''}
+        <IconButton onPress={onOptions} size={38} label="Opciones de la sesión">
+          <Icon name="dots" size={18} color={c.inkSoft} />
+        </IconButton>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 14, height: 22 }}>
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: live ? (state.agentState === 'thinking' ? a.dot : c.good) : c.inkFaint }} />
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: live ? c.ink70 : c.inkLabel }}>{status}</Text>
+        <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkFaint }}>
+          {[SOURCE_LABEL[meta.source || session.source], session.source === 'cli' ? meta.machine || session.machine : null]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
       </View>
-    );
-  }
+    </View>
+  );
+}
+
+function SessionEmpty({ state, agent }) {
+  const c = useColors();
+  const a = agentStyle(agent, c);
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36, gap: 12 }}>
+      {state.hostConnected || state.ended ? (
+        <>
+          <View style={{ padding: 12, borderRadius: RADIUS_BOX, backgroundColor: a.soft }}>
+            <AgentMark agent={agent} size={28} />
+          </View>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkMuted, textAlign: 'center' }}>
+            {state.ended
+              ? 'Esta sesión terminó sin conversación guardada.'
+              : `Conectado con ${a.label}. Pídele algo, adjunta archivos o empieza con «/» para usar un comando.`}
+          </Text>
+        </>
+      ) : (
+        <ActivityIndicator color={c.inkSoft} />
+      )}
+    </View>
+  );
+}
+
+function TranscriptRow({ item, agent }) {
+  const c = useColors();
+  const { t } = useScale();
+  if (item.kind === 'user') return <UserRow item={item} />;
+  if (item.kind === 'tool') return <ToolRow item={item} />;
   if (item.kind === 'notice') {
-    // Respuesta del host a un comando: monoespaciada y sin burbuja, para que
-    // se lea como salida del equipo y no como algo que dijo el modelo.
+    // Respuesta del host a un comando: monoespaciada, para que se lea como
+    // salida del equipo y no como algo que dijo el modelo.
     return (
       <FadeUp style={{ marginVertical: 6 }}>
-        <View
-          style={{
-            paddingHorizontal: 13,
-            paddingVertical: 10,
-            borderRadius: 12,
-            borderLeftWidth: 2,
-            borderLeftColor: c.accent,
-            backgroundColor: c.bgSecondary,
-          }}
-        >
-          <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, lineHeight: 19, color: c.ink }}>
+        <View style={{ flexDirection: 'row', borderRadius: RADIUS, backgroundColor: c.surface2, overflow: 'hidden' }}>
+          <View style={{ width: 2, backgroundColor: agentStyle(agent, c).dot }} />
+          <Text selectable style={{ flex: 1, padding: 10, fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>
             {item.text}
           </Text>
         </View>
@@ -591,23 +680,108 @@ function TranscriptRow({ item }) {
   }
   if (item.kind === 'error') {
     return (
-      <View style={{ marginVertical: 6, padding: 10, borderRadius: 10, backgroundColor: c.dangerSoft }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{item.text}</Text>
+      <View style={{ marginVertical: 6, padding: 10, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
+        <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{item.text}</Text>
       </View>
     );
   }
-  // asistente
   return (
     <View style={{ marginVertical: 8 }}>
       {item.text ? (
-        <Markdown style={remoteMarkdownStyles(c)}>{item.text}</Markdown>
+        <Markdown style={markdownStyles(c, t)}>{item.text}</Markdown>
       ) : item.open ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <ActivityIndicator size="small" color={c.inkSoft} />
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Pensando…</Text>
+          <AgentMark agent={agent} size={14} />
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkLabel }}>trabajando…</Text>
         </View>
       ) : null}
     </View>
+  );
+}
+
+function UserRow({ item }) {
+  const c = useColors();
+  const { t } = useScale();
+  const { files, text } = splitMessage(item.text);
+  const mentions = Array.isArray(item.mentions) ? item.mentions : [];
+  const hasExtras = files.length > 0 || item.images > 0 || mentions.length > 0;
+  return (
+    <FadeUp style={{ alignItems: 'flex-end', marginVertical: 8 }}>
+      <View style={{ maxWidth: '86%', backgroundColor: c.surface3, paddingHorizontal: 14, paddingVertical: 10, borderRadius: RADIUS }}>
+        {hasExtras && (
+          <View style={{ gap: 4, marginBottom: text ? 8 : 0 }}>
+            {files.map((f, i) => (
+              <ExtraLine key={`f${i}`} icon={f.kind === 'image' ? 'image' : 'file'} label={f.name} />
+            ))}
+            {item.images > 0 && (
+              <ExtraLine icon="image" label={item.images === 1 ? '1 imagen' : `${item.images} imágenes`} />
+            )}
+            {mentions.map((m, i) => (
+              <ExtraLine key={`m${i}`} icon="at" label={typeof m === 'string' ? m : m.name} />
+            ))}
+          </View>
+        )}
+        {!!text && (
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(14.5), lineHeight: t(21), color: c.ink }}>
+            {text}
+          </Text>
+        )}
+      </View>
+      {item.origin === 'local' && (
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: c.inkFaint, marginTop: 3 }}>desde el equipo</Text>
+      )}
+    </FadeUp>
+  );
+}
+
+function ExtraLine({ icon, label }) {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      {icon === 'at' ? (
+        <Text style={{ width: 13, textAlign: 'center', fontFamily: FONTS.monoMedium, fontSize: 12, color: c.accentDeep }}>@</Text>
+      ) : (
+        <Icon name={icon} size={13} color={c.accentDeep} />
+      )}
+      <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: 11.5, color: c.ink70 }}>{label}</Text>
+    </View>
+  );
+}
+
+function ToolRow({ item }) {
+  const c = useColors();
+  const [open, setOpen] = useState(false);
+  const expandable = !item.running && !!item.result;
+  return (
+    <Pressable
+      onPress={expandable ? () => setOpen((v) => !v) : undefined}
+      style={({ pressed }) => ({
+        marginVertical: 3,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: RADIUS,
+        backgroundColor: pressed && expandable ? c.surface3 : c.surface2,
+        gap: 6,
+      })}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {item.running ? (
+          <ActivityIndicator size="small" color={c.accent} style={{ transform: [{ scale: 0.75 }] }} />
+        ) : (
+          <Icon name={item.error ? 'warning' : 'check'} size={13} color={item.error ? c.danger : c.good} />
+        )}
+        <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 11.5, color: c.ink70 }}>{item.tool}</Text>
+        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>
+          {item.summary || (expandable && !open ? firstLine(item.result) : '')}
+        </Text>
+        {expandable && <Icon name={open ? 'chevron-up' : 'chevron-down'} size={12} color={c.inkFaint} />}
+      </View>
+      {open && (
+        <Text selectable style={{ fontFamily: FONTS.mono, fontSize: 11, lineHeight: 16, color: c.inkBody }}>
+          {item.result}
+        </Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -615,63 +789,55 @@ function ApprovalCard({ approval, onDecide }) {
   const c = useColors();
   const isCommand = approval.risk === 'command';
   return (
-    <View
-      style={{
-        marginHorizontal: 14,
-        marginBottom: 8,
-        padding: 14,
-        borderRadius: RADIUS_BOX,
-        borderWidth: 1,
-        borderColor: c.borderSoft,
-        backgroundColor: c.bgSecondary,
-        gap: 10,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Icon name="warning" size={16} color={c.ink} />
-        <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 14, color: c.ink }}>
-          {isCommand ? 'El agente quiere ejecutar un comando' : 'El agente quiere aplicar un cambio'}
+    <FadeUp style={{ marginHorizontal: 10, marginBottom: 8 }}>
+      <View style={{ padding: 12, borderRadius: RADIUS_BOX, backgroundColor: c.surface3, gap: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Icon name="warning" size={15} color={c.accentDeep} />
+          <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 13.5, color: c.ink }}>
+            {isCommand ? 'El agente quiere ejecutar un comando' : 'El agente quiere aplicar un cambio'}
+          </Text>
+        </View>
+        <Text selectable style={{ padding: 9, borderRadius: RADIUS, backgroundColor: c.surface2, fontFamily: FONTS.mono, fontSize: 12, color: c.inkBody }}>
+          <Text style={{ color: c.accentDeep }}>{approval.tool}</Text>
+          {approval.summary ? `  ${approval.summary}` : ''}
         </Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable
+            onPress={() => onDecide(approval.id, 'deny')}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 40,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: RADIUS,
+              backgroundColor: pressed ? c.surface6 : c.surface5,
+            })}
+          >
+            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 13.5, color: c.danger }}>Denegar</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => onDecide(approval.id, 'allow')}
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 40,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: RADIUS,
+              backgroundColor: c.primary,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 13.5, color: c.onPrimary }}>Permitir</Text>
+          </Pressable>
+        </View>
       </View>
-      <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.ink }}>
-        {approval.tool}
-        {approval.summary ? `  ${approval.summary}` : ''}
-      </Text>
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Pressable
-          onPress={() => onDecide(approval.id, 'deny')}
-          style={({ pressed }) => ({
-            flex: 1,
-            alignItems: 'center',
-            paddingVertical: 10,
-            borderRadius: RADIUS_PILL,
-            borderWidth: 1,
-            borderColor: c.borderSoft,
-            backgroundColor: pressed ? c.pressed : 'transparent',
-          })}
-        >
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.danger }}>Denegar</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => onDecide(approval.id, 'allow')}
-          style={({ pressed }) => ({
-            flex: 1,
-            alignItems: 'center',
-            paddingVertical: 10,
-            borderRadius: RADIUS_PILL,
-            backgroundColor: c.primary,
-            opacity: pressed ? 0.85 : 1,
-          })}
-        >
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.onPrimary }}>Permitir</Text>
-        </Pressable>
-      </View>
-    </View>
+    </FadeUp>
   );
 }
 
 function RemoteComposer({
   input,
+  inputRef,
   onChangeInput,
   onSend,
   onInterrupt,
@@ -680,104 +846,121 @@ function RemoteComposer({
   disabled,
   sending,
   ended,
-  keyboardOpen,
+  attachments,
+  mentions,
+  onRemoveMention,
+  canMention,
+  onStartMention,
+  mentionQuery,
+  files,
+  onPickMention,
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const canSend = !!input.trim() && !disabled && !sending;
+  const keyboardOpen = useKeyboardOpen();
+  const [focused, setFocused] = useState(false);
+  const hasContent = !!input.trim() || attachments.ready.length > 0;
+  const canSend = hasContent && !disabled && !sending && !attachments.reading;
+  // Los hosts encolan lo que llega mientras el agente trabaja: con algo escrito
+  // se envía; con la caja vacía, el botón interrumpe.
+  const showStop = thinking && !hasContent;
 
-  // El menú de comandos aparece mientras se escribe el nombre (antes del primer
+  // El menú "/" aparece mientras se escribe el nombre (antes del primer
   // espacio): a partir de ahí lo que se teclea es el argumento.
-  const query = useMemo(() => {
+  const slashQuery = useMemo(() => {
     if (!input.startsWith('/') || input.includes(' ') || input.includes('\n')) return null;
     return input.slice(1).toLowerCase();
   }, [input]);
-  const matches = useMemo(
-    () => (query === null ? [] : commands.filter((cmd) => cmd.name.startsWith(query))),
-    [query, commands],
+  const slashMatches = useMemo(
+    () => (slashQuery === null ? [] : commands.filter((cmd) => cmd.name.toLowerCase().startsWith(slashQuery)).slice(0, 60)),
+    [slashQuery, commands],
   );
 
-  // Igual que en el CLI: sin argumento se envía de una; con argumento se deja
-  // el nombre escrito y el foco puesto para completarlo.
-  const pick = (cmd) => {
-    if (cmd.args) onChangeInput(`/${cmd.name} `);
-    else onChangeInput(`/${cmd.name}`);
-  };
+  const mentionResults = useMemo(() => {
+    if (mentionQuery === null) return null;
+    if (!files || files.query !== mentionQuery) return null;
+    return files.items.filter((f) => !mentions.some((m) => m.path === f.path));
+  }, [mentionQuery, files, mentions]);
+
+  // Igual que en el IDE: sin argumento se envía de una; con argumento se deja
+  // el nombre escrito para completarlo.
+  const pickCommand = (cmd) => onChangeInput(cmd.args ? `/${cmd.name} ` : `/${cmd.name}`);
 
   return (
-    <View
-      style={{
-        paddingHorizontal: 14,
-        paddingTop: 6,
-        // Edge-to-edge: sin este inset la barra de navegación tapa el botón.
-        paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 12),
-      }}
-    >
-      {matches.length > 0 && !ended && (
-        <View
-          style={{
-            marginBottom: 8,
-            borderRadius: RADIUS_BOX,
-            borderWidth: 1,
-            borderColor: c.borderSoft,
-            backgroundColor: c.bgSecondary,
-            overflow: 'hidden',
-          }}
-        >
-          {matches.slice(0, 6).map((cmd, i) => (
-            <Pressable
-              key={cmd.name}
-              onPress={() => pick(cmd)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
-                paddingHorizontal: 14,
-                paddingVertical: 11,
-                borderTopWidth: i === 0 ? 0 : 1,
-                borderTopColor: c.borderSoft,
-                backgroundColor: pressed ? c.pressed : 'transparent',
-              })}
-            >
-              <Text style={{ fontFamily: FONTS.mono, fontSize: 14, color: c.ink }}>
-                /{cmd.name}
-              </Text>
-              {!!cmd.args && (
-                <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>
-                  {cmd.args}
+    <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 10) }}>
+      {slashMatches.length > 0 && !ended && (
+        <SuggestionBox>
+          {slashMatches.map((cmd, i) => (
+            <React.Fragment key={`${cmd.group || ''}${cmd.name}`}>
+              {cmd.group && cmd.group !== slashMatches[i - 1]?.group && <GroupLabel>{GROUP_LABEL[cmd.group] || cmd.group}</GroupLabel>}
+              <SuggestionRow onPress={() => pickCommand(cmd)}>
+                <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 12.5, color: c.ink }}>/{cmd.name}</Text>
+                {!!cmd.args && <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>{cmd.args}</Text>}
+                <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 11.5, color: c.inkLabel }}>
+                  {cmd.description}
                 </Text>
-              )}
-              <Text
-                numberOfLines={1}
-                style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}
-              >
-                {cmd.description}
-              </Text>
-            </Pressable>
+              </SuggestionRow>
+            </React.Fragment>
           ))}
-        </View>
+        </SuggestionBox>
+      )}
+
+      {mentionQuery !== null && (
+        <SuggestionBox>
+          <GroupLabel>{mentionQuery ? `Archivos · «${mentionQuery}»` : 'Archivos del proyecto'}</GroupLabel>
+          {mentionResults === null ? (
+            <View style={{ padding: 12, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={c.inkSoft} />
+            </View>
+          ) : mentionResults.length === 0 ? (
+            <Text style={{ padding: 12, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkLabel }}>Sin coincidencias.</Text>
+          ) : (
+            mentionResults.map((f) => (
+              <SuggestionRow key={f.path} onPress={() => onPickMention(f)}>
+                <Icon name="file" size={13} color={c.accentDeep} />
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.ink }}>{f.name}</Text>
+                <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>
+                  {f.rel}
+                </Text>
+              </SuggestionRow>
+            ))
+          )}
+        </SuggestionBox>
       )}
 
       <View
         style={{
-          backgroundColor: c.bgInput,
+          backgroundColor: focused ? c.surface4 : c.surface3,
           borderRadius: RADIUS_BOX,
-          paddingHorizontal: 15,
-          paddingTop: 11,
-          paddingBottom: 9,
+          paddingHorizontal: 12,
+          paddingTop: 10,
+          paddingBottom: 8,
           opacity: ended ? 0.55 : 1,
         }}
       >
+        <AttachmentTray
+          items={attachments.items}
+          onRemove={attachments.remove}
+          extra={
+            mentions.length > 0
+              ? mentions.map((m) => <MentionChip key={m.path} mention={m} onRemove={() => onRemoveMention(m.path)} />)
+              : null
+          }
+        />
         <TextInput
+          ref={inputRef}
           value={input}
           onChangeText={onChangeInput}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           editable={!ended}
           placeholder={ended ? 'La sesión terminó' : disabled ? 'Host sin conexión…' : 'Pídele algo al agente…'}
-          placeholderTextColor={c.inkSoft}
+          placeholderTextColor={c.inkLabel}
+          selectionColor={c.accent}
           multiline
           style={{
-            maxHeight: 130,
-            paddingHorizontal: 6,
+            maxHeight: 140,
+            paddingHorizontal: 4,
             paddingTop: 2,
             paddingBottom: 6,
             fontFamily: FONTS.ui,
@@ -786,40 +969,36 @@ function RemoteComposer({
             color: c.ink,
           }}
         />
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-          {/* Atajo a los comandos: el «/» no es descubrible por sí solo. */}
-          <Pressable
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+          <ToolButton icon="clip" label="Adjuntar" onPress={attachments.pick} disabled={ended} />
+          {canMention && <ToolButton glyph="@" label="Mencionar un archivo" onPress={onStartMention} active={mentionQuery !== null} />}
+          <ToolButton
+            icon="slash"
+            label="Comandos"
             onPress={() => onChangeInput(input.startsWith('/') ? '' : '/')}
             disabled={ended}
-            hitSlop={6}
-            style={({ pressed }) => ({
-              width: 34,
-              height: 34,
-              borderRadius: 17,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: query !== null ? 0 : 1,
-              borderColor: c.borderSoft,
-              backgroundColor: query !== null ? c.primary : pressed ? c.pressed : 'transparent',
-            })}
-          >
-            <Icon name="slash" size={17} color={query !== null ? c.onPrimary : c.ink} />
-          </Pressable>
-
+            active={slashQuery !== null}
+          />
+          <View style={{ flex: 1 }} />
           <Pressable
-            onPress={thinking ? onInterrupt : onSend}
-            disabled={thinking ? disabled : !canSend}
+            onPress={showStop ? onInterrupt : onSend}
+            disabled={showStop ? disabled : !canSend}
+            accessibilityLabel={showStop ? 'Interrumpir' : 'Enviar'}
             style={({ pressed }) => ({
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: c.primary,
+              width: 36,
+              height: 36,
+              borderRadius: RADIUS,
+              backgroundColor: showStop || canSend ? c.primary : c.surface5,
               alignItems: 'center',
               justifyContent: 'center',
-              opacity: (thinking ? disabled : !canSend) ? 0.45 : pressed ? 0.85 : 1,
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             })}
           >
-            <Icon name={thinking ? 'stop' : 'arrow-up'} size={17} color={c.onPrimary} />
+            {sending ? (
+              <ActivityIndicator size="small" color={c.onPrimary} />
+            ) : (
+              <Icon name={showStop ? 'stop' : 'arrow-up'} size={17} color={showStop || canSend ? c.onPrimary : c.inkLabel} />
+            )}
           </Pressable>
         </View>
       </View>
@@ -827,63 +1006,72 @@ function RemoteComposer({
   );
 }
 
-function ScreenHeader({ title, onBack }) {
+function ToolButton({ icon, glyph, label, onPress, disabled = false, active = false }) {
   const c = useColors();
   return (
-    <View
-      style={{
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={4}
+      accessibilityLabel={label}
+      style={({ pressed }) => ({
+        width: 32,
+        height: 32,
+        borderRadius: RADIUS,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: disabled ? 0.4 : 1,
+        backgroundColor: active ? c.accentSoft : pressed ? c.pressed : 'transparent',
+      })}
+    >
+      {glyph ? (
+        <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 16, color: active ? c.accentDeep : c.inkSoft }}>{glyph}</Text>
+      ) : (
+        <Icon name={icon} size={17} color={active ? c.accentDeep : c.inkSoft} />
+      )}
+    </Pressable>
+  );
+}
+
+function SuggestionBox({ children }) {
+  const c = useColors();
+  return (
+    <View style={{ marginBottom: 6, borderRadius: RADIUS_BOX, backgroundColor: c.surface2, overflow: 'hidden', maxHeight: 260 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 4 }}>
+        {children}
+      </ScrollView>
+    </View>
+  );
+}
+
+function GroupLabel({ children }) {
+  const c = useColors();
+  return (
+    <Text style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 3, fontFamily: FONTS.monoMedium, fontSize: 9.5, letterSpacing: 0.8, color: c.inkLabel }}>
+      {String(children).toUpperCase()}
+    </Text>
+  );
+}
+
+function SuggestionRow({ children, onPress }) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-      }}
+        minHeight: 38,
+        paddingHorizontal: 12,
+        backgroundColor: pressed ? c.surface4 : 'transparent',
+      })}
     >
-      <IconButton onPress={onBack} size={38}>
-        <Icon name="arrow-left" size={20} color={c.ink} />
-      </IconButton>
-      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }}>{title}</Text>
-    </View>
+      {children}
+    </Pressable>
   );
 }
 
 function firstLine(text) {
   return String(text).split('\n')[0].slice(0, 120);
-}
-
-function remoteMarkdownStyles(c) {
-  return {
-    body: { fontFamily: FONTS.ui, fontSize: 15, lineHeight: 23, color: c.ink },
-    heading1: { fontFamily: FONTS.uiSemiBold, fontSize: 20, color: c.ink, marginTop: 8, marginBottom: 4 },
-    heading2: { fontFamily: FONTS.uiSemiBold, fontSize: 18, color: c.ink, marginTop: 8, marginBottom: 4 },
-    heading3: { fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink, marginTop: 6, marginBottom: 3 },
-    strong: { fontFamily: FONTS.uiBold, color: c.ink },
-    link: { color: c.accentDeep, textDecorationLine: 'underline' },
-    code_inline: {
-      fontFamily: FONTS.mono,
-      fontSize: 13,
-      color: c.ink,
-      backgroundColor: c.bgSecondary,
-      borderRadius: 4,
-      paddingHorizontal: 4,
-    },
-    code_block: {
-      fontFamily: FONTS.mono,
-      fontSize: 13,
-      color: c.ink,
-      backgroundColor: c.codeBg,
-      borderRadius: RADIUS,
-      padding: 12,
-      marginVertical: 6,
-    },
-    fence: {
-      fontFamily: FONTS.mono,
-      fontSize: 13,
-      color: c.ink,
-      backgroundColor: c.codeBg,
-      borderRadius: RADIUS,
-      padding: 12,
-      marginVertical: 6,
-    },
-  };
 }

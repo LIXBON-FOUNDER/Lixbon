@@ -4,13 +4,12 @@
 // y botones sociales de relleno.
 import React, { useEffect, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDialogs } from '../components/dialogs';
 import {
@@ -19,6 +18,7 @@ import {
   FadeUp,
   FloatingField,
   GoogleLogo,
+  KeyboardAware,
   LixLogo,
   LogoMark,
   Segmented,
@@ -137,6 +137,7 @@ export default function AuthScreen() {
     }
   };
 
+  const insets = useSafeAreaInsets();
   const notice = auth.notice;
   const screenBg = c.bg;
   const surface = c.surface3;
@@ -147,7 +148,7 @@ export default function AuthScreen() {
       {/* Sin esto el teclado tapaba los campos de abajo: con edge-to-edge la
           ventana no se encoge, así que el ScrollView tampoco tenía nada que
           desplazar y el formulario quedaba a medias. */}
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+      <KeyboardAware bottomInset={insets.bottom}>
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
@@ -314,7 +315,7 @@ export default function AuthScreen() {
           <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>lixbon.com</Text>
         </Pressable>
       </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAware>
     </SafeAreaView>
   );
 }

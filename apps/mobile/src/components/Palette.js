@@ -90,7 +90,16 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      // autoFocus no abre el teclado dentro de un Modal en Android: el foco se
+      // pide cuando la ventana ya está visible.
+      onShow={() => setTimeout(() => inputRef.current?.focus(), 350)}
+    >
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: c.scrim }} />
         <View

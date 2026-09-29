@@ -90,7 +90,8 @@ export const initialRemoteState = {
   approvals: [], // [{ id, tool, summary, risk }]
   agentState: 'idle', // idle | thinking
   hostConnected: false,
-  meta: null, // hello: { source, title, machine, mode, model }
+  meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
+  files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
   session: null,
   ended: false,
   lastSeq: 0,
@@ -103,7 +104,7 @@ function mapSnapshotMessages(messages) {
   const items = [];
   for (const m of Array.isArray(messages) ? messages : []) {
     if (!m || typeof m !== 'object') continue;
-    if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '' }));
+    if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
       items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: '', result: m.content || '', error: m.ok === false, running: false }));
@@ -142,10 +143,13 @@ export function remoteReducer(state, ev) {
         ...s,
         meta: {
           source: ev.source,
+          agent: ev.agent || null,
           title: ev.title,
+          workspace: ev.workspace || null,
           machine: ev.machine,
           mode: ev.mode,
           model: ev.model,
+          capabilities: Array.isArray(ev.capabilities) ? ev.capabilities : [],
           // El host publica los comandos que acepta; cada superficie tiene los
           // suyos, así que la app no los adivina (con un host viejo llega
           // undefined y se cae al catálogo por defecto).
@@ -155,7 +159,15 @@ export function remoteReducer(state, ev) {
     case 'snapshot':
       return { ...s, items: mapSnapshotMessages(ev.messages) };
     case 'user_msg':
-      return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'user', text: ev.text || '', origin: ev.origin })] };
+      return {
+        ...s,
+        items: [
+          ...closeOpenAssistant(s.items),
+          withKey({ kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [] }),
+        ],
+      };
+    case 'files':
+      return { ...s, files: { query: ev.query || '', items: Array.isArray(ev.items) ? ev.items : [] } };
     case 'assistant_delta': {
       const items = [...s.items];
       const idx = items.findLastIndex((it) => it.kind === 'assistant' && it.open);

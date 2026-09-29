@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, BackHandler, Pressable, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import Palette from './src/components/Palette';
 import Sidebar from './src/components/Sidebar';
@@ -41,15 +42,19 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <AppState>
-        <ThemeProvider>
-          <DialogProvider>
-            <Root />
-          </DialogProvider>
-        </ThemeProvider>
-      </AppState>
-    </SafeAreaProvider>
+    // La app es edge-to-edge (app.config.js): sin esto keyboard-controller
+    // descuenta la barra de navegación y la caja quedaba medio tapada.
+    <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+      <SafeAreaProvider>
+        <AppState>
+          <ThemeProvider>
+            <DialogProvider>
+              <Root />
+            </DialogProvider>
+          </ThemeProvider>
+        </AppState>
+      </SafeAreaProvider>
+    </KeyboardProvider>
   );
 }
 
