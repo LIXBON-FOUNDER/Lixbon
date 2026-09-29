@@ -136,7 +136,7 @@ async function toolEditFile(root, relPath, oldText, newText, all = false) {
 
 async function toolRunCommand(root, command, timeoutSecs) {
   if (!String(command ?? '').trim()) throw new Error('Falta el comando');
-  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 300000);
+  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 600000);
   const res = await runCommand(command, timeoutMs);
   const output = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
   const prefix = res.timed_out ? '[TIMEOUT] ' : `[EXIT ${res.code}] `;
@@ -605,7 +605,16 @@ export async function buildAgentSystemPrompt(root) {
     '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n' +
     '{"tool":"run_command","args":{"command":"npm test","timeout":60}}\n' +
     '{"tool":"fetch_url","args":{"url":"https://…"}}  (descarga una página web como texto)\n' +
-    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n\n' +
+    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n' +
+    '{"tool":"ask_user","args":{"questions":[{"question":"¿Qué base de datos uso?","header":"Base de datos","options":[{"label":"PostgreSQL","description":"Ya está en docker-compose"},{"label":"SQLite"}],"multiSelect":false}]}}  ' +
+    '(pregunta al usuario con opciones: hasta 4 preguntas de 2 a 6 opciones; siempre podrá escribir otra respuesta. ' +
+    'Úsala solo cuando una decisión dependa del usuario y no puedas deducirla del código)\n\n' +
+    '=== VISUALES ===\n' +
+    'El IDE muestra archivos .html, .svg y .md en una pestaña de vista previa. Si el usuario pide un diagrama, ' +
+    'un dashboard, un mockup, un prototipo o cualquier cosa visual que no sea parte del proyecto, crea UN archivo HTML ' +
+    'autónomo (CSS y JS en línea; librerías solo por CDN https) en .lixbon/visuals/<nombre>.html con write_file ' +
+    'y dile que puede abrirlo con «Ver visual». Sin carpeta de trabajo o en modo Preguntar/Plan, devuélvelo en un ' +
+    'único bloque ```html y el usuario lo abrirá con el botón «Ver» del bloque.\n\n' +
     '=== REGLAS OBLIGATORIAS ===\n' +
     '1. Si el usuario pide crear, modificar, arreglar o eliminar algo, DEBES hacerlo con herramientas EN ESTA MISMA RESPUESTA. ' +
     'Tú ejecutas los cambios; el usuario no copia código.\n' +

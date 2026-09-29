@@ -11,7 +11,8 @@ function normalizeUrl(raw) {
 
 export function AdvancedPanel() {
   const { serverUrl, setServerUrl } = useAppStore();
-  const { currentVersion, checkForUpdates, updateInfo } = useVersion();
+  const { currentVersion, checkForUpdates, updateInfo, showUpdate } = useVersion();
+  const [checkError, setCheckError] = useState('');
 
   const [urlInput, setUrlInput] = useState(serverUrl);
   const [urlStatus, setUrlStatus] = useState(null); // { ok, text }
@@ -40,8 +41,11 @@ export function AdvancedPanel() {
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
     setUpdateChecked(false);
+    setCheckError('');
     try {
-      await checkForUpdates();
+      if (await checkForUpdates()) showUpdate();
+    } catch (e) {
+      setCheckError(`No se pudo comprobar: ${e?.message || e}`);
     } finally {
       setCheckingUpdate(false);
       setUpdateChecked(true);
@@ -89,10 +93,15 @@ export function AdvancedPanel() {
         </div>
         {updateChecked && (
           <p className="settings__status">
-            {updateInfo
-              ? `Hay una versión nueva (${updateInfo.latest_version || 'disponible'}): usa el aviso superior para instalarla.`
-              : 'Estás en la última versión.'}
+            {checkError || (updateInfo
+              ? `Hay una versión nueva (v${updateInfo.latest_version}). Se muestra el aviso arriba para instalarla.`
+              : 'Estás en la última versión.')}
           </p>
+        )}
+        {updateInfo && (
+          <div className="settings__actions">
+            <button className="pill-btn pill-btn--primary" onClick={showUpdate}>Instalar v{updateInfo.latest_version}</button>
+          </div>
         )}
       </section>
     </>

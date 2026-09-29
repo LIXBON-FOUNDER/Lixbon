@@ -12,6 +12,11 @@
 import { api } from './api';
 import { modelId } from './vision';
 
+// Sin ningún modelo alcanzable el gateway devuelve una entrada `error: …` en
+// el catálogo; no es un modelo y no debe poder elegirse.
+export const isErrorModel = (id) => String(id || '').startsWith('error:');
+export const usableModels = (catalog) => (Array.isArray(catalog) ? catalog.filter((m) => !isErrorModel(m?.id)) : catalog);
+
 /** Roles del gateway, en el orden en que se muestran en Ajustes. */
 export const ROLE_ORDER = ['chat', 'fim', 'vision', 'embed', 'route'];
 
@@ -20,7 +25,7 @@ export async function fetchModelRoles() {
   try {
     const res = await api.get('/api/model-roles');
     if (!res || typeof res.roles !== 'object' || !res.roles) return null;
-    return res;
+    return { ...res, models: usableModels(res.models) };
   } catch (e) {
     // 404 = gateway anterior a los roles; cualquier otro fallo se degrada igual.
     console.warn('[roles] /api/model-roles no disponible:', e?.message || e);

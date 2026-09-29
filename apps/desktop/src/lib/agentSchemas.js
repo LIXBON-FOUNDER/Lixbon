@@ -252,6 +252,41 @@ export const TOOL_SCHEMAS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'ask_user',
+      description: 'Pregunta al usuario con opciones para elegir (hasta 4 preguntas). Úsala solo cuando una decisión dependa de él y no se pueda deducir del código. Siempre podrá escribir otra respuesta.',
+      parameters: {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            description: '1 a 4 preguntas',
+            items: {
+              type: 'object',
+              properties: {
+                question: p('string', 'La pregunta, completa y clara'),
+                header: p('string', 'Etiqueta corta (máx. 24 caracteres)'),
+                multiSelect: p('boolean', 'true si puede elegir varias opciones'),
+                options: {
+                  type: 'array',
+                  description: '2 a 6 opciones',
+                  items: {
+                    type: 'object',
+                    properties: { label: p('string', 'Texto de la opción'), description: p('string', 'Qué implica elegirla') },
+                    required: ['label'],
+                  },
+                },
+              },
+              required: ['question', 'options'],
+            },
+          },
+        },
+        required: ['questions'],
+      },
+    },
+  },
 ];
 
 /** Convierte un tool_call nativo (OpenAI) al formato interno {tool, args}. */

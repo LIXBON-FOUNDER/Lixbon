@@ -28,47 +28,55 @@ export function Select({
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
   const listRef = useRef(null);
+  const hoverByKey = useRef(false);
 
   const idx = options.findIndex((o) => o.value === value);
   const selected = idx >= 0 ? options[idx] : null;
 
-  // Posición del menú a partir del botón (coordenadas de viewport: es fixed).
   useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    setPos({
-      minWidth: r.width,
-      right: window.innerWidth - r.right,
-      ...(up
-        ? { bottom: window.innerHeight - r.top + GAP }
-        : { top: r.bottom + GAP }),
-    });
+    if (!open || !btnRef.current) return undefined;
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setPos({
+        minWidth: r.width,
+        right: window.innerWidth - r.right,
+        ...(up
+          ? { bottom: window.innerHeight - r.top + GAP }
+          : { top: r.bottom + GAP }),
+      });
+    };
+    place();
+    // El scroll de la propia lista (rueda, o scrollIntoView al pasar el ratón)
+    // también llega aquí en captura: antes cerraba el menú al ir a elegir.
+    const onScroll = (e) => { if (!listRef.current?.contains(e.target)) place(); };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', onScroll, true);
+    };
   }, [open, up]);
 
   useEffect(() => {
     if (!open) return;
+    hoverByKey.current = true;
     setHover(idx >= 0 ? idx : 0);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!open) return undefined;
     const onDown = (e) => {
       if (btnRef.current?.contains(e.target) || listRef.current?.contains(e.target)) return;
       setOpen(false);
     };
-    // Si el ancla se mueve, la posición fija deja de valer: cerrar es lo honesto.
-    const onMove = () => setOpen(false);
-
     window.addEventListener('pointerdown', onDown);
-    window.addEventListener('resize', onMove);
-    window.addEventListener('scroll', onMove, true);
-    return () => {
-      window.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('resize', onMove);
-      window.removeEventListener('scroll', onMove, true);
-    };
-  }, [open, idx]);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [open]);
 
   // Mantener visible la opción resaltada al navegar con las flechas.
   useEffect(() => {
-    if (!open || !listRef.current) return;
+    if (!open || !listRef.current || !hoverByKey.current) return;
     listRef.current.children[hover]?.scrollIntoView({ block: 'nearest' });
   }, [open, hover]);
 
@@ -94,9 +102,11 @@ export function Select({
       setOpen(false);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
+      hoverByKey.current = true;
       setHover((h) => Math.min(options.length - 1, h + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      hoverByKey.current = true;
       setHover((h) => Math.max(0, h - 1));
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -129,7 +139,7 @@ export function Select({
               role="option"
               aria-selected={o.value === value}
               className={`select__opt ${i === hover ? 'is-hover' : ''} ${o.disabled ? 'is-disabled' : ''}`}
-              onPointerEnter={() => setHover(i)}
+              onPointerEnter={() => { hoverByKey.current = false; setHover(i); }}
               onClick={() => pick(i)}
             >
               <span className="select__opt-check">

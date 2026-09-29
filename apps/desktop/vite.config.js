@@ -1,11 +1,19 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
+
+  // Dos documentos: el IDE y la ventana de Lixbon Team (src-tauri/src/team.rs).
+  build: {
+    rollupOptions: {
+      input: { main: resolve(__dirname, "index.html"), team: resolve(__dirname, "team.html") },
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

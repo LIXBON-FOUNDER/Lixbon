@@ -46,6 +46,7 @@ export function ConfirmDialog() {
           <input
             ref={inputRef}
             className="confirm__input"
+            type={dialog.input.type || 'text'}
             value={text}
             placeholder={dialog.input.placeholder || ''}
             spellCheck={false}

@@ -1,5 +1,5 @@
 // FileTree.jsx — explorador de archivos del workspace (panel izquierdo).
-// Clic en un archivo → vista rápida de solo lectura (FileQuickView). Clic
+// Clic en un archivo → se abre en una pestaña del editor. Clic
 // derecho → menú contextual (nuevo, renombrar, duplicar, copiar ruta, revelar,
 // eliminar). La carpeta raíz vive en appStore.workspaceRoot (la fija openWorkspace).
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -201,6 +201,12 @@ export function FileTree() {
       setNewItemName('');
     }
   };
+
+  useEffect(() => {
+    const onCreate = (e) => startCreateIn(createParent(), e.detail?.type === 'dir' ? 'dir' : 'file');
+    window.addEventListener('lixbon:explorer-create', onCreate);
+    return () => window.removeEventListener('lixbon:explorer-create', onCreate);
+  });
 
   // ── Acciones del menú contextual ─────────────────────────────────────
 

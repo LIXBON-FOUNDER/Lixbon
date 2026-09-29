@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
-import { fetchModelRoles, roleModel } from '../lib/modelRoles';
+import { fetchModelRoles, roleModel, usableModels } from '../lib/modelRoles';
 
 export function ModelPicker() {
   const {
@@ -37,7 +37,7 @@ export function ModelPicker() {
           return null;
         });
         if (cancelled) return;
-        catalogo = res?.data;
+        catalogo = usableModels(res?.data);
       }
       if (!Array.isArray(catalogo) || catalogo.length === 0) return;
       setAvailableModels(catalogo);

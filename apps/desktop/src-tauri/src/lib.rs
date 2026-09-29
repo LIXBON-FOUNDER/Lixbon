@@ -15,11 +15,19 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn hide_console(cmd: &mut Command) -> &mut Command {
+pub(crate) fn hide_console(cmd: &mut Command) -> &mut Command {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
 }
+
+mod mcp;
+mod auth_loopback;
+mod preview_proxy;
+mod visual_server;
+mod team;
+mod claude_code;
+mod orch;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -250,6 +258,28 @@ fn read_file_content(path: String, root: State<WorkspaceRoot>) -> Result<String,
 
     fs::read_to_string(&file)
         .map_err(|_| "El archivo no es texto (¿binario?) o no se pudo leer".to_string())
+}
+
+/// Guarda texto donde el usuario elija en un diálogo nativo. La ruta la pone
+/// el diálogo, nunca el frontend: así no es una escritura arbitraria fuera del
+/// workspace. Devuelve la ruta, o None si canceló.
+#[tauri::command]
+async fn save_text_as(app: AppHandle, default_name: String, content: String) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_file_name(&default_name).add_filter("Markdown", &["md"]);
+    if let Some(dir) = dirs_documents() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(picked) = dialog.blocking_save_file() else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    write_atomic(&path, content.as_bytes())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+fn dirs_documents() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    let docs = PathBuf::from(home).join("Documents");
+    docs.is_dir().then_some(docs)
 }
 
 #[tauri::command]
@@ -1229,6 +1259,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
+        .manage(mcp::McpServers::default())
+        .manage(claude_code::ClaudeSessions::default())
+        .manage(preview_proxy::PreviewProxy::default())
+        .manage(visual_server::VisualServer::default())
+        .manage(orch::Orch::default())
         .manage(FsWatchState {
             watcher: Mutex::new(None),
             pending: Arc::new(Mutex::new(HashSet::new())),
@@ -1237,7 +1272,20 @@ pub fn run() {
             // Hilo que emite los lotes de cambios de disco al frontend.
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
+            app.state::<orch::Orch>().0.init(app.handle().clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Los servidores MCP son procesos hijos: sin esto quedaban vivos
+            // al cerrar la ventana.
+            if let tauri::WindowEvent::Destroyed = event {
+                if window.label() == "main" {
+                    window.state::<mcp::McpServers>().stop_all();
+                    window.state::<claude_code::ClaudeSessions>().stop_all();
+                    window.state::<orch::Orch>().0.shutdown();
+                    team::apagar(window.app_handle());
+                }
+            }
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -1245,6 +1293,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
             get_app_version,
             set_workspace_root,
@@ -1271,7 +1320,38 @@ pub fn run() {
             run_command,
             secret_set,
             secret_get,
-            secret_delete
+            secret_delete,
+            auth_loopback::auth_loopback_start,
+            preview_proxy::preview_proxy_start,
+            mcp::vscode_user_file,
+            save_text_as,
+            visual_server::visual_base,
+            visual_server::visual_snippet,
+            team::team_abrir,
+            mcp::mcp_start,
+            mcp::mcp_send,
+            mcp::mcp_stop,
+            mcp::mcp_user_config,
+            mcp::mcp_save_user_config,
+            mcp::mcp_import_sources,
+            mcp::mcp_open_user_config,
+            claude_code::cc_version,
+            claude_code::cc_start,
+            claude_code::cc_send,
+            claude_code::cc_stop,
+            claude_code::cc_sessions,
+            claude_code::cc_session_read,
+            claude_code::cc_config,
+            claude_code::cc_config_open,
+            orch::orch_snapshot,
+            orch::orch_settings_set,
+            orch::orch_call,
+            orch::orch_term_buffer,
+            orch::orch_term_write,
+            orch::orch_term_resize,
+            orch::orch_agents,
+            orch::orch_skill_install,
+            orch::orch_skill_uninstall
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -13,7 +13,7 @@ export const MAX_AGENT_STEPS = 40;
 export const MAX_REPEATED_CALLS = 3;
 export const READ_ONLY_TOOLS = new Set([
   'list_files', 'read_file', 'search', 'search_codebase',
-  'find_files', 'outline', 'fetch_url', 'web_search',
+  'find_files', 'outline', 'fetch_url', 'web_search', 'ask_user',
 ]);
 
 // ── Seguridad de run_command (B4) ──────────────────────────────────────

@@ -5,7 +5,7 @@
 // animación de plegado) recorta un popover normal — el portal lo evita.
 import { useLayoutEffect, useState } from 'react';
 
-export function useAnchoredAbove(anchorRef, open, { gap = 8, align = 'left', matchWidth = false } = {}) {
+export function useAnchoredAbove(anchorRef, open, { gap = 8, align = 'left', matchWidth = false, below = false } = {}) {
   const [pos, setPos] = useState(null);
 
   useLayoutEffect(() => {
@@ -13,7 +13,7 @@ export function useAnchoredAbove(anchorRef, open, { gap = 8, align = 'left', mat
     const compute = () => {
       const r = anchorRef.current.getBoundingClientRect();
       setPos({
-        bottom: window.innerHeight - r.top + gap,
+        ...(below ? { top: r.bottom + gap } : { bottom: window.innerHeight - r.top + gap }),
         ...(align === 'right' ? { right: window.innerWidth - r.right } : { left: r.left }),
         ...(matchWidth ? { width: r.width } : {}),
       });
@@ -22,7 +22,7 @@ export function useAnchoredAbove(anchorRef, open, { gap = 8, align = 'left', mat
     // Si la ventana cambia de tamaño la posición fija deja de valer.
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
-  }, [open, anchorRef, gap, align, matchWidth]);
+  }, [open, anchorRef, gap, align, matchWidth, below]);
 
   return pos;
 }

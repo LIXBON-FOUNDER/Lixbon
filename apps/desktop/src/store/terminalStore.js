@@ -14,13 +14,22 @@ const SHELL_LABEL = {
 
 let seq = 1;
 
+export const SHELL_OPTIONS = Object.entries(SHELL_LABEL).map(([id, label]) => ({ id, label }));
+
+const readShell = () => { try { return localStorage.getItem('lixbon_default_shell') || 'powershell'; } catch { return 'powershell'; } };
+
 export const useTerminalStore = create((set, get) => ({
+  defaultShell: readShell(),
+  setDefaultShell: (defaultShell) => {
+    try { localStorage.setItem('lixbon_default_shell', defaultShell); } catch { /* sin almacenamiento */ }
+    set({ defaultShell });
+  },
   sessions: [], // [{ key, id, shell, title }]  id lo rellena TerminalPanel al abrir el PTY
   activeKey: null,
   pending: {}, // key -> comando encolado hasta que el PTY tenga id (Run/Build)
 
   /** Registra una sesión nueva (aún sin id de PTY) y la deja activa. */
-  addSession: (shell = 'powershell') => {
+  addSession: (shell = get().defaultShell) => {
     const key = `term-${seq++}`;
     const session = { key, id: null, shell, title: SHELL_LABEL[shell] || shell };
     set((s) => ({ sessions: [...s.sessions, session], activeKey: key }));
@@ -53,7 +62,7 @@ export const useTerminalStore = create((set, get) => ({
       termWrite(active.id, cmd + '\r').catch(() => {});
       return;
     }
-    const key = active ? active.key : addSession('powershell');
+    const key = active ? active.key : addSession();
     set((s) => ({ pending: { ...s.pending, [key]: cmd } }));
   },
 

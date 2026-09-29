@@ -2,7 +2,7 @@
 
 <img src="assets/brand/icon-192.png" width="72" alt="lixbon">
 
-# lixbon
+# LIXBON
 
 **Modelos LLM auto-hospedados sobre un clúster GPU distribuido, con API compatible con OpenAI y clientes web, escritorio, CLI y móvil.**
 
