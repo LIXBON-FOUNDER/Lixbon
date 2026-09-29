@@ -109,8 +109,19 @@ function mapSnapshotMessages(messages) {
     else if (m.role === 'tool') {
       items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: '', result: m.content || '', error: m.ok === false, running: false }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
+    else if (m.role === 'command') items.push(commandItem(m));
   }
   return items;
+}
+
+function commandItem(ev) {
+  return withKey({
+    kind: 'command',
+    name: ev.name || '',
+    args: ev.args || '',
+    rows: Array.isArray(ev.rows) ? ev.rows : [],
+    text: ev.text || '',
+  });
 }
 
 function closeOpenAssistant(items, finalText, keepIfEmpty = false) {
@@ -224,6 +235,8 @@ export function remoteReducer(state, ev) {
       // Respuesta del host a un slash-command: no es del modelo, así que se
       // pinta como una nota del sistema y no como una burbuja del asistente.
       return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'notice', text: ev.text || '' })] };
+    case 'command_result':
+      return { ...s, items: [...closeOpenAssistant(s.items), commandItem(ev)] };
     case 'error':
       return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':

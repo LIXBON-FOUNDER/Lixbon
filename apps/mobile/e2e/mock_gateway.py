@@ -105,6 +105,7 @@ TRANSCRIPTS = {
 }
 
 streams: dict[str, list[queue.Queue]] = {}
+subscribers: list[queue.Queue] = []
 lock = threading.Lock()
 
 
@@ -139,7 +140,15 @@ def handle_command(session_id: str, command: dict) -> None:
         push(session_id, {"type": "user_msg", "text": text, "origin": "remote",
                           "images": sum(1 for a in atts if a.get("kind") == "image"),
                           "mentions": [m.get("name") for m in command.get("mentions") or []]})
-        push(session_id, {"type": "assistant_done", "text": "Recibido desde el teléfono."})
+        if text.strip() == "/status":
+            push(session_id, {"type": "command_result", "name": "status", "args": "", "text": "", "rows": [
+                {"label": "Versión", "detail": "2.1.0 (Claude Code)"},
+                {"label": "Modelo", "detail": "opus"},
+                {"label": "Cuenta", "detail": "ana@lixbon.com · max", "tone": "ok"},
+                {"label": "MCP", "detail": "railway: falló", "tone": "bad"},
+            ]})
+        else:
+            push(session_id, {"type": "assistant_done", "text": "Recibido desde el teléfono."})
     elif kind == "approve":
         push(session_id, {"type": "approval_resolved", "id": command.get("id")})
 
@@ -190,9 +199,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         q: queue.Queue = queue.Queue()
-        if session_id:
-            with lock:
+        with lock:
+            if session_id:
                 streams.setdefault(session_id, []).append(q)
+            else:
+                subscribers.append(q)
         try:
             self._chunk(": connected\n\n")
             for ev in first:
@@ -206,9 +217,8 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         finally:
-            if session_id:
-                with lock:
-                    streams.get(session_id, []).remove(q)
+            with lock:
+                (streams.get(session_id, []) if session_id else subscribers).remove(q)
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -249,6 +259,17 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if path == "/api/auth/login":
             return self._json({"api_key": "lxb_e2e_key", "user": USER})
+        if path == "/__e2e/new_session":
+            # Lo que hace el gateway cuando un IDE ejecuta /remote.
+            sess = {**SESSIONS[0], "id": "claude02", "title": "Revisar las notificaciones push",
+                    "created_at": iso(0), "last_seen_at": iso(0)}
+            if not any(sx["id"] == "claude02" for sx in SESSIONS):
+                SESSIONS.insert(0, sess)
+                HELLOS["claude02"] = {**HELLOS["claude01"], "title": sess["title"]}
+            with lock:
+                for q in subscribers:
+                    q.put({"type": "session_created", "session": sess})
+            return self._json({"subscribers": len(subscribers)})
         parts = path.strip("/").split("/")
         if len(parts) == 5 and parts[:3] == ["api", "remote", "sessions"] and parts[4] == "commands":
             handle_command(parts[3], body)

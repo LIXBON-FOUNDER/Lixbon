@@ -80,11 +80,25 @@ function isOnline(session) {
   return typeof session.host_connected === 'boolean' ? session.host_connected : session.status === 'online';
 }
 
-export default function RemoteScreen({ onBack, initialToken = null, embedded = false }) {
+export default function RemoteScreen({ onBack, initialToken = null, initialSessionId = null, embedded = false }) {
   const api = useApi();
   const [session, setSession] = useState(null);
-  const [claiming, setClaiming] = useState(!!initialToken);
+  const [claiming, setClaiming] = useState(!!initialToken || !!initialSessionId);
   const { toast } = useDialogs();
+
+  useEffect(() => {
+    if (!initialSessionId || initialToken) return;
+    api
+      .get('/api/remote/sessions')
+      .then((res) => {
+        const found = (res?.sessions || []).find((sx) => sx.id === initialSessionId);
+        if (found) setSession(found);
+        else toast('Esa sesión ya no existe');
+      })
+      .catch(() => {})
+      .finally(() => setClaiming(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSessionId]);
 
   // Deep link (QR / notificación): el token solo identifica la sesión; el
   // claim va autenticado con la API key y el gateway verifica que seas el dueño.
@@ -495,6 +509,10 @@ function RemoteSessionView({ session, onBack, embedded }) {
     }
   };
 
+  const runSlash = async (text) => {
+    if (await sendCommand({ type: 'prompt', text })) setInput('');
+  };
+
   const interrupt = () => sendCommand({ type: 'interrupt' });
   const approve = (id, decision) => sendCommand({ type: 'approve', id, decision });
 
@@ -520,11 +538,12 @@ function RemoteSessionView({ session, onBack, embedded }) {
   const options = async () => {
     const action = await sheet({
       title: state.meta?.title || session.title || 'Sesión remota',
+      subtitle: [agentStyle(agent, c).label, state.meta?.workspace || session.workspace].filter(Boolean).join(' · '),
       items: [
-        { label: 'Comandos del agente', icon: 'slash', value: 'commands' },
-        ...(canMention ? [{ label: 'Mencionar un archivo', icon: 'file', value: 'mention' }] : []),
-        ...(state.agentState === 'thinking' ? [{ label: 'Interrumpir al agente', icon: 'stop', value: 'interrupt' }] : []),
-        ...(state.ended ? [] : [{ label: 'Terminar sesión remota', icon: 'logout', danger: true, value: 'end' }]),
+        { label: 'Comandos', description: `Los «/» de ${agentStyle(agent, c).label}`, icon: 'slash', hint: '/', value: 'commands' },
+        ...(canMention ? [{ label: 'Mencionar un archivo', description: 'Busca en la carpeta del proyecto', icon: 'file', hint: '@', value: 'mention' }] : []),
+        ...(state.agentState === 'thinking' ? [{ label: 'Interrumpir', description: 'Detiene el turno en curso', icon: 'stop', value: 'interrupt' }] : []),
+        ...(state.ended ? [] : [{ label: 'Terminar sesión remota', description: 'El equipo recupera el control y el QR deja de valer', icon: 'logout', danger: true, value: 'end' }]),
       ],
     });
     if (action === 'commands') setInput('/');
@@ -566,6 +585,7 @@ function RemoteSessionView({ session, onBack, embedded }) {
           onChangeInput={setInput}
           onSend={sendPrompt}
           onInterrupt={interrupt}
+          onRunCommand={runSlash}
           commands={commands}
           thinking={thinking}
           disabled={state.ended || !state.hostConnected}
@@ -664,6 +684,7 @@ function TranscriptRow({ item, agent }) {
   const { t } = useScale();
   if (item.kind === 'user') return <UserRow item={item} />;
   if (item.kind === 'tool') return <ToolRow item={item} />;
+  if (item.kind === 'command') return <CommandCard item={item} agent={agent} />;
   if (item.kind === 'notice') {
     // Respuesta del host a un comando: monoespaciada, para que se lea como
     // salida del equipo y no como algo que dijo el modelo.
@@ -745,6 +766,55 @@ function ExtraLine({ icon, label }) {
       )}
       <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: 11.5, color: c.ink70 }}>{label}</Text>
     </View>
+  );
+}
+
+const TONE_COLOR = { ok: 'good', wait: 'accent', warn: 'accentDeep', bad: 'danger' };
+
+// Resultado de un «/» del IDE (/status, /cost, /doctor…): allí es una tarjeta
+// con controles, aquí llega resumido en filas o como texto de Claude Code.
+function CommandCard({ item, agent }) {
+  const c = useColors();
+  const a = agentStyle(agent, c);
+  const [expanded, setExpanded] = useState(false);
+  const rows = expanded ? item.rows : item.rows.slice(0, 12);
+  return (
+    <FadeUp style={{ marginVertical: 6 }}>
+      <View style={{ borderRadius: RADIUS_BOX, backgroundColor: c.surface2, overflow: 'hidden' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 36, backgroundColor: c.surface3 }}>
+          <AgentMark agent={agent} size={13} />
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.monoMedium, fontSize: 12, color: a.ink }}>
+            /{item.name}
+            {!!item.args && <Text style={{ fontFamily: FONTS.mono, color: c.inkLabel }}>{`  ${item.args}`}</Text>}
+          </Text>
+        </View>
+        {rows.length > 0 && (
+          <View style={{ paddingVertical: 4 }}>
+            {rows.map((r, i) => (
+              <View key={i} style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 12, paddingVertical: 6 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 6, backgroundColor: r.tone && TONE_COLOR[r.tone] ? c[TONE_COLOR[r.tone]] : c.inkFaint }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13, color: c.ink }}>{r.label}</Text>
+                  {!!r.detail && (
+                    <Text selectable style={{ fontFamily: FONTS.mono, fontSize: 11, lineHeight: 16, color: c.inkMuted, marginTop: 1 }}>{r.detail}</Text>
+                  )}
+                </View>
+              </View>
+            ))}
+            {item.rows.length > 12 && (
+              <Pressable onPress={() => setExpanded((v) => !v)} style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+                <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.accentDeep }}>
+                  {expanded ? 'ver menos' : `ver ${item.rows.length - 12} más`}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+        {!!item.text && (
+          <Text selectable style={{ padding: 12, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody }}>{item.text}</Text>
+        )}
+      </View>
+    </FadeUp>
   );
 }
 
@@ -841,6 +911,7 @@ function RemoteComposer({
   onChangeInput,
   onSend,
   onInterrupt,
+  onRunCommand,
   commands,
   thinking,
   disabled,
@@ -884,7 +955,7 @@ function RemoteComposer({
 
   // Igual que en el IDE: sin argumento se envía de una; con argumento se deja
   // el nombre escrito para completarlo.
-  const pickCommand = (cmd) => onChangeInput(cmd.args ? `/${cmd.name} ` : `/${cmd.name}`);
+  const pickCommand = (cmd) => (cmd.args ? onChangeInput(`/${cmd.name} `) : onRunCommand(`/${cmd.name}`));
 
   return (
     <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 10) }}>

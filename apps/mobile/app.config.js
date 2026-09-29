@@ -2,7 +2,14 @@
 // (única fuente: el CI comprueba que el tag mobile-vX.Y.Z coincida con ella).
 // La carpeta android/ NO se versiona: la genera `expo prebuild` en CI.
 // Iconos: generados desde apps/web/public/favicon.svg (rombo de la marca).
+const fs = require('fs');
+const path = require('path');
 const { version } = require('./package.json');
+
+// Lo escribe el CI desde el secret GOOGLE_SERVICES_JSON. Sin él la app compila
+// igual, pero sin push de FCM (solo avisos locales con la app abierta).
+const googleServices = path.join(__dirname, 'google-services.json');
+const hasFirebase = fs.existsSync(googleServices);
 
 // versionCode DERIVADO de la versión: Android se niega a instalar un APK cuyo
 // versionCode no sea mayor que el instalado, así que dejarlo fijo mientras
@@ -27,6 +34,7 @@ module.exports = {
       package: 'com.usuario.lixbon',
       versionCode,
       edgeToEdgeEnabled: true,
+      ...(hasFirebase ? { googleServicesFile: './google-services.json' } : {}),
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#1B1A17',
@@ -45,6 +53,7 @@ module.exports = {
       ],
     },
     plugins: [
+      ['expo-notifications', { icon: './assets/notification-icon.png', color: '#4B5327', defaultChannel: 'remote' }],
       [
         'expo-image-picker',
         {

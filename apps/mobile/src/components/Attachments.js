@@ -43,12 +43,13 @@ export function useAttachments({ describeImages = true, allowImages = true } = {
   const pick = useCallback(async () => {
     const source = await sheet({
       title: 'Adjuntar',
+      subtitle: allowImages ? 'documentos, imágenes o una foto' : 'este equipo solo recibe documentos',
       items: [
-        { label: 'Documento', icon: 'file', value: 'doc' },
+        { label: 'Documento', description: 'PDF, Word, Excel, texto o código', icon: 'file', value: 'doc' },
         ...(allowImages
           ? [
-              { label: 'Imagen de la galería', icon: 'image', value: 'gallery' },
-              { label: 'Hacer una foto', icon: 'camera', value: 'camera' },
+              { label: 'Imagen de la galería', description: 'Fotos y capturas del teléfono', icon: 'image', value: 'gallery' },
+              { label: 'Hacer una foto', description: 'Abre la cámara', icon: 'camera', value: 'camera' },
             ]
           : []),
       ],

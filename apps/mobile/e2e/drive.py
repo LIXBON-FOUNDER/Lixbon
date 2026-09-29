@@ -10,10 +10,12 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "e2e-out"
 PKG = "com.usuario.lixbon"
+MOCK = "http://127.0.0.1:8765"
 results: dict[str, object] = {}
 
 
@@ -197,6 +199,52 @@ def main() -> None:
     tap(find(r"^Permitir$"))
     time.sleep(1.5)
     shot("14-remoto-aprobado")
+
+    # Hojas inferiores con el diseño de la app
+    tap(find(r"^Adjuntar$"))
+    find(r"Imagen de la galer")
+    shot("14b-hoja-adjuntar")
+    adb("shell", "input", "keyevent", "4")
+    time.sleep(1)
+    tap(find(r"Opciones de la sesi"))
+    find(r"Terminar sesi")
+    shot("14c-hoja-opciones")
+    adb("shell", "input", "keyevent", "4")
+    time.sleep(1)
+
+    # Un «/» sin argumentos se envía al elegirlo y su resultado llega como tarjeta
+    tap(edits()[-1])
+    type_text("/sta")
+    time.sleep(1)
+    shot("14d-menu-comandos")
+    tap(find(r"^/status$"))
+    find(r"2\.1\.0 \(Claude Code\)", timeout=15)
+    hide_keyboard()
+    shot("14e-resultado-comando")
+    results["comando_status"] = {"ok": True}
+
+    # Sesión nueva en el IDE → aviso en el teléfono → al tocarlo se abre
+    req = urllib.request.Request(f"{MOCK}/__e2e/new_session", data=b"{}", method="POST")
+    print("new_session:", urllib.request.urlopen(req, timeout=10).read().decode(), flush=True)
+    title = "Revisar las notificaciones push"
+    shown = False
+    for _ in range(15):
+        if title in adb("shell", "dumpsys", "notification", "--noredact"):
+            shown = True
+            break
+        time.sleep(1)
+    results["notificacion_sesion_nueva"] = {"ok": shown}
+    adb("shell", "cmd", "statusbar", "expand-notifications")
+    time.sleep(1.5)
+    shot("14f-notificacion")
+    if shown:
+        tap(find(re.escape(title)))
+        time.sleep(3)
+        header = [n for n in nodes() if n.get("text") == title]
+        results["notificacion_abre_sesion"] = {"ok": bool(header)}
+        shot("14g-sesion-desde-notificacion")
+    else:
+        adb("shell", "cmd", "statusbar", "collapse")
 
     tap(find(r"Volver a las sesiones"))
     tap(find(r"Refactor del reducer remoto"))

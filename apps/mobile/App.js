@@ -21,6 +21,8 @@ import AppearanceScreen from './src/screens/AppearanceScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import RemoteScreen from './src/screens/RemoteScreen';
+import { notifyLocal, onRemoteNotificationTap } from './src/push';
+import { openEventStream } from './src/remote';
 import UsageScreen from './src/screens/UsageScreen';
 import { shareConversation } from './src/share';
 import { AppState, useApi, useAuth, useChat, usePrefs } from './src/state';
@@ -152,6 +154,50 @@ function useCommands({ setSection, pushScreen, pickModel, openRemote }) {
   }, [chat, prefs, ui, last, auth, api, toast, confirm, setSection, pushScreen, pickModel, openRemote]);
 }
 
+const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };
+
+// Aviso de sesión nueva mientras la app sigue viva, para builds sin FCM (con
+// FCM el aviso lo manda el gateway y notifyLocal no hace nada).
+function useRemoteAlerts() {
+  const api = useApi();
+  const auth = useAuth();
+  useEffect(() => {
+    if (!auth.apiKey) return undefined;
+    let alive = true;
+    let stream = null;
+    let backoff = 3000;
+    const connect = () => {
+      if (!alive) return;
+      stream = openEventStream({
+        base: api.base,
+        token: auth.apiKey,
+        path: '/api/remote/subscribe',
+        onEvent: (ev) => {
+          backoff = 3000;
+          if (ev.type !== 'session_created' || !ev.session) return;
+          const sx = ev.session;
+          notifyLocal({
+            title: `${AGENT_LABEL[sx.agent] || 'Sesión'} en remoto`,
+            body: [sx.title, sx.workspace !== sx.title ? sx.workspace : null, sx.machine].filter(Boolean).join(' · '),
+            data: { kind: 'remote_session', session_id: sx.id },
+          });
+        },
+        onEnd: () => alive && setTimeout(connect, backoff),
+        onError: () => {
+          if (!alive) return;
+          setTimeout(connect, backoff);
+          backoff = Math.min(backoff * 2, 60000);
+        },
+      });
+    };
+    connect();
+    return () => {
+      alive = false;
+      stream?.cancel();
+    };
+  }, [api, auth.apiKey]);
+}
+
 function HomeShell() {
   const c = useColors();
   const chat = useChat();
@@ -253,10 +299,17 @@ function HomeShell() {
     }
   }, [deepLink]);
 
-  useEffect(() => {
-    const { onRemoteNotificationTap } = require('./src/push');
-    return onRemoteNotificationTap(() => setSection('remote'));
-  }, []);
+  const [remoteSessionId, setRemoteSessionId] = useState(null);
+  useEffect(
+    () =>
+      onRemoteNotificationTap((data) => {
+        setRemoteToken(null);
+        setRemoteSessionId(data.session_id || null);
+        setSection('remote');
+      }),
+    [],
+  );
+  useRemoteAlerts();
 
   // Atrás de Android: paleta, drawer, pantalla apilada y Remoto, en ese orden.
   useEffect(() => {
@@ -312,11 +365,13 @@ function HomeShell() {
         </View>
         {section === 'remote' && (
           <RemoteScreen
-            key={remoteToken || 'list'}
+            key={remoteToken || remoteSessionId || 'list'}
             embedded
             initialToken={remoteToken}
+            initialSessionId={remoteSessionId}
             onBack={() => {
               setRemoteToken(null);
+              setRemoteSessionId(null);
               setSection('chat');
             }}
           />
