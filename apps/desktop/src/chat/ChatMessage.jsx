@@ -6,6 +6,7 @@ import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode, IconCheck } from '../components/Icons';
 import { ClaudeMark } from '../components/Logo';
 import { IdeCard } from './ClaudeCards';
+import { splitDocs } from '../lib/docBlocks';
 
 /** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
     cursor parpadeante, como la última línea del mockup. */
@@ -326,6 +327,7 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
     );
   }
   if (message.role === 'user') {
+    const { docs, text } = splitDocs(message.content);
     return (
       <div className="msg msg--user">
         {message.context && (
@@ -335,6 +337,15 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
             {message.context.selection ? ' (selección)' : ''}
           </span>
         )}
+        {docs.map((name, i) => (
+          <span key={`d${i}`} className="msg__ctx" title="Documento adjunto">
+            <IconFileCode size={12} />
+            {name}
+          </span>
+        ))}
+        {message.mentions?.map((name, i) => (
+          <span key={`m${i}`} className="msg__ctx" title="Archivo mencionado">@{name}</span>
+        ))}
         {message.images?.length > 0 && (
           <div className="msg__images">
             {message.images.map((src, i) => (
@@ -342,7 +353,7 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
             ))}
           </div>
         )}
-        {message.content}
+        {text}
       </div>
     );
   }

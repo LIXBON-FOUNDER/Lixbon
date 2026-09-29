@@ -1172,6 +1172,12 @@
 .remote { display: flex; flex-direction: column; gap: 18px; }
 .remote__hero { display: flex; gap: 14px; align-items: flex-start; }
 .remote__icon { flex-shrink: 0; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius); background: var(--accent-soft, rgba(198, 214, 110, 0.12)); color: var(--accent); }
+.remote__agent { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 22px; padding: 0 8px; margin-bottom: 6px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--accent-soft, rgba(198, 214, 110, 0.12)); color: var(--accent); }
+.remote__agent--claude { background: rgba(217, 119, 87, 0.14); color: #E8A38B; }
+.remote__agent-ws { font-family: var(--font-mono, monospace); font-weight: 500; color: var(--ink-50); }
+.remote--claude .remote__icon { background: rgba(217, 119, 87, 0.14); }
+.remote--claude .remote__live { color: #E8A38B; }
+.remote--claude .remote__pulse { background: #D97757; }
 .remote__title { font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--ink); }
 .remote__lead { margin-top: 4px; font-size: 12.5px; line-height: 1.55; color: var(--ink-50); }
 .remote__lead strong { color: var(--ink-body); font-weight: 600; }

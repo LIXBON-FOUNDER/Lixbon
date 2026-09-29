@@ -43,6 +43,7 @@ import { describeImages } from '../lib/vision';
 import { roleWarning } from '../lib/modelRoles';
 import { makeClaudeStore } from './claudeSession';
 import { orchPromptSection, isLxoCommand } from './orchStore';
+import { questionOf } from '../lib/docBlocks';
 
 /** Categoría de permisos de una herramienta (Ajustes → Agente y permisos). */
 export function toolCategory(tool) {
@@ -376,6 +377,9 @@ function makeChatStore() {
         content: text.trim(),
         context: context ? { name: context.name, selection: context.isSelection } : null,
         images: hasImages ? images.map((im) => im.dataUrl) : null,
+        // Aquí y no más abajo: con imágenes el mensaje se publica antes de
+        // describirlas y la burbuja ya no se volvería a pintar.
+        mentions: mentions?.length ? mentions.map((m) => m.name) : undefined,
       };
       let visionText = '';
       if (hasImages) {
@@ -447,7 +451,6 @@ function makeChatStore() {
           }
           if (blocks.length) modelText = blocks.join('\n\n') + '\n\n' + modelText;
         }
-        userMsg.mentions = mentions.map((m) => m.name);
       }
 
       // RAG: en chat normal, inyecta fragmentos relevantes del índice del codebase
@@ -967,7 +970,7 @@ export function useOpenSessions() {
     const s = sessions[key].getState();
     return {
       key, active: key === activeKey, streaming: s.streaming, waiting: !!s.pendingApproval || !!s.pendingQuestion,
-      title: s.conversationTitle || (s.messages.find((m) => m.role === 'user')?.content || '').slice(0, 60), conversationId: s.conversationId, hasMessages: s.messages.length > 0, seen: !!seen[key], engine: s.engine,
+      title: s.conversationTitle || questionOf(s.messages.find((m) => m.role === 'user')?.content || '').slice(0, 60), conversationId: s.conversationId, hasMessages: s.messages.length > 0, seen: !!seen[key], engine: s.engine,
     };
   });
 }

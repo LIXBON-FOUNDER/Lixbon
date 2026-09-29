@@ -19,6 +19,7 @@ import {
   startClaude, userMessage, mapTool, changeOf, resultText, compactSummaryOf,
   claudeTranscript, transcriptToMessages, claudeVersion, HIDDEN_TOOLS, CLAUDE_MODES,
 } from '../lib/claudeCode';
+import { questionOf } from '../lib/docBlocks';
 
 const MODEL_KEY = 'lixbon_claude_model';
 const USAGE_KEY = 'lixbon_claude_usage';
@@ -203,7 +204,7 @@ export function makeClaudeStore() {
         messages: [...msgs(), shown, ...(compacting ? [] : [{ role: 'assistant', content: '', engine: 'claude' }])],
         streaming: true,
         ccCompacting: compacting ? Date.now() : null,
-        conversationTitle: get().conversationTitle || shown.content.slice(0, 60),
+        conversationTitle: get().conversationTitle || questionOf(shown.content).slice(0, 60),
       });
       return serial(async () => {
         const p = await ensureProc();
