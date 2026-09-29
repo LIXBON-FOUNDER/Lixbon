@@ -86,7 +86,7 @@ def edits():
 
 
 def tap(n, dismiss: bool = True) -> None:
-    # CLOSE_SYSTEM_DIALOGS también pliega la cortina de notificaciones.
+    # Dentro de la cortina de notificaciones no se busca nada más.
     if dismiss:
         dismiss_system_dialogs()
     x1, y1, x2, y2 = n["box"]
@@ -261,6 +261,7 @@ def main() -> None:
     tap(find(r"Volver a las sesiones"))
     tap(find(r"Refactor del reducer remoto"))
     find(r"remote\.js", timeout=20)
+    results["esperando_tarea"] = {"ok": bool(find(r"Esperando a una tarea", timeout=10))}
     shot("15-remoto-lixbon")
     tap(find(r"Volver a las sesiones"))
     tap(find(r"api-server"))

@@ -96,6 +96,9 @@ TRANSCRIPTS = {
             {"role": "assistant", "content": "Listo: `remote.js` ahora solo tiene el reducer."},
         ]},
         {"type": "status", "state": "idle"},
+        {"type": "background", "tasks": [
+            {"id": "b1", "type": "local_bash", "description": "npm test -- --watch=false", "since": time.time() * 1000 - 95000},
+        ]},
     ],
     "cli01": [
         {"type": "hello", "source": "cli", "title": "api-server", "machine": "gabriel-pc"},

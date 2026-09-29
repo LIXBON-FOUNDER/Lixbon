@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Pressable,
   RefreshControl,
@@ -30,6 +31,7 @@ import {
   agentStyle,
   useColors,
   useKeyboardOpen,
+  useReducedMotion,
   useScale,
 } from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
@@ -575,6 +577,10 @@ function RemoteSessionView({ session, onBack, embedded }) {
           )}
         </View>
 
+        {!state.ended && state.agentState !== 'thinking' && state.background.length > 0 && (
+          <WaitingStrip tasks={state.background} agent={agent} />
+        )}
+
         {state.approvals.map((a) => (
           <ApprovalCard key={a.id} approval={a} onDecide={approve} />
         ))}
@@ -615,7 +621,9 @@ function SessionHeader({ session, state, agent, onBack, onOptions }) {
       ? 'host sin conexión…'
       : state.agentState === 'thinking'
         ? 'trabajando…'
-        : 'en vivo';
+        : state.background.length
+          ? 'esperando…'
+          : 'en vivo';
   const live = state.hostConnected && !state.ended;
   const details = [meta.workspace || session.workspace, meta.model, MODE_LABEL[meta.mode] || meta.mode]
     .filter(Boolean)
@@ -644,7 +652,7 @@ function SessionHeader({ session, state, agent, onBack, onOptions }) {
         </IconButton>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 14, height: 22 }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: live ? (state.agentState === 'thinking' ? a.dot : c.good) : c.inkFaint }} />
+        <PulseDot active={live && (state.agentState === 'thinking' || state.background.length > 0)} color={live ? (state.agentState === 'thinking' || state.background.length ? a.dot : c.good) : c.inkFaint} />
         <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: live ? c.ink70 : c.inkLabel }}>{status}</Text>
         <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkFaint }}>
           {[SOURCE_LABEL[meta.source || session.source], session.source === 'cli' ? meta.machine || session.machine : null]
@@ -766,6 +774,72 @@ function ExtraLine({ icon, label }) {
       )}
       <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: 11.5, color: c.ink70 }}>{label}</Text>
     </View>
+  );
+}
+
+const TASK_LABEL = { local_bash: 'comando', local_agent: 'subagente', remote_agent: 'agente remoto' };
+
+function PulseDot({ active, color }) {
+  const reduced = useReducedMotion();
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!active || reduced) {
+      pulse.setValue(1);
+      return undefined;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active, reduced, pulse]);
+  return <Animated.View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, opacity: pulse }} />;
+}
+
+function useNow(active) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+const elapsed = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`;
+};
+
+// El turno terminó pero el agente dejó algo corriendo y retomará solo cuando
+// acabe: sin esto la sesión parecía parada.
+function WaitingStrip({ tasks, agent }) {
+  const c = useColors();
+  const a = agentStyle(agent, c);
+  const now = useNow(true);
+  return (
+    <FadeUp style={{ marginHorizontal: 10, marginBottom: 6 }}>
+      <View style={{ paddingHorizontal: 12, paddingVertical: 9, borderRadius: RADIUS_BOX, backgroundColor: a.soft, gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <PulseDot active color={a.dot} />
+          <Text style={{ flex: 1, fontFamily: FONTS.monoMedium, fontSize: 11.5, color: a.ink }}>
+            {tasks.length === 1 ? 'Esperando a una tarea en segundo plano' : `Esperando a ${tasks.length} tareas en segundo plano`}
+          </Text>
+        </View>
+        {tasks.map((t) => (
+          <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: a.ink, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: c.pressed }}>
+              {TASK_LABEL[t.type] || 'tarea'}
+            </Text>
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkBody }}>{t.description || t.id}</Text>
+            {!!t.since && <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>{elapsed(now - t.since)}</Text>}
+          </View>
+        ))}
+      </View>
+    </FadeUp>
   );
 }
 

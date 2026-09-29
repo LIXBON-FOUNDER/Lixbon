@@ -125,11 +125,12 @@ export default function Sidebar({ open, onClose, onNavigate }) {
   const longPress = async (item, pinned) => {
     const action = await sheet({
       title: item.title || 'Sin título',
+      subtitle: 'conversación',
       items: [
-        { label: pinned ? 'Quitar de fijadas' : 'Fijar arriba', icon: 'pin', value: 'pin' },
-        { label: 'Renombrar', icon: 'pencil', value: 'rename' },
-        { label: 'Compartir como Markdown', icon: 'share', value: 'share' },
-        { label: 'Eliminar', icon: 'trash', danger: true, value: 'delete' },
+        { label: pinned ? 'Quitar de fijadas' : 'Fijar arriba', description: pinned ? 'Vuelve a su sitio por fecha' : 'Siempre visible arriba de la lista', icon: 'pin', value: 'pin' },
+        { label: 'Renombrar', description: 'Cambia el título', icon: 'pencil', value: 'rename' },
+        { label: 'Compartir como Markdown', description: 'Toda la conversación', icon: 'share', value: 'share' },
+        { label: 'Eliminar', description: 'No se puede deshacer', icon: 'trash', danger: true, value: 'delete' },
       ],
     });
     if (action === 'pin') togglePin(user.id, item.id);

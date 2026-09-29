@@ -262,8 +262,9 @@ function HomeShell() {
   const pickModel = useCallback(async () => {
     const value = await sheet({
       title: 'Modelo',
+      subtitle: chat.model ? `ahora: ${chat.model}` : 'elige con cuál conversar',
       emptyLabel: 'No hay modelos disponibles.',
-      items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model, mono: true })),
+      items: chat.models.map((m) => ({ label: m, icon: 'layers', value: m, selected: m === chat.model, mono: true })),
     });
     if (value) chat.setModel(value);
   }, [sheet, chat]);

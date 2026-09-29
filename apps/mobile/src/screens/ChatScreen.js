@@ -62,8 +62,9 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
   const pickModel = async () => {
     const value = await sheet({
       title: 'Modelo',
+      subtitle: chat.model ? `ahora: ${chat.model}` : 'elige con cuál conversar',
       emptyLabel: 'No hay modelos disponibles.',
-      items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model, mono: true })),
+      items: chat.models.map((m) => ({ label: m, icon: 'layers', value: m, selected: m === chat.model, mono: true })),
     });
     if (value) chat.setModel(value);
   };
@@ -71,17 +72,24 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
   const openOptions = async () => {
     const action = await sheet({
       title: chat.title || 'Nueva conversación',
+      subtitle: [chat.model, chat.webSearch ? 'web on' : null].filter(Boolean).join(' · '),
       items: [
-        { label: 'Nueva conversación', icon: 'plus', value: 'new' },
-        { label: 'Cambiar de modelo', icon: 'layers', value: 'model' },
-        { label: chat.webSearch ? 'Desactivar búsqueda web' : 'Activar búsqueda web', icon: 'globe', value: 'web' },
-        ...(lastAssistant ? [{ label: 'Copiar la última respuesta', icon: 'copy', value: 'copy' }] : []),
-        ...(chat.messages.length > 0 ? [{ label: 'Compartir como Markdown', icon: 'share', value: 'share' }] : []),
+        { group: 'Chat', label: 'Nueva conversación', description: 'Empieza de cero con el mismo modelo', icon: 'plus', value: 'new' },
+        { group: 'Chat', label: 'Cambiar de modelo', description: chat.model || 'Sin modelo elegido', icon: 'layers', value: 'model' },
+        {
+          group: 'Chat',
+          label: chat.webSearch ? 'Desactivar búsqueda web' : 'Activar búsqueda web',
+          description: chat.webSearch ? 'Responde solo con lo que sabe el modelo' : 'Busca en internet antes de responder',
+          icon: 'globe',
+          value: 'web',
+        },
+        ...(lastAssistant ? [{ group: 'Compartir', label: 'Copiar la última respuesta', description: 'Al portapapeles, en Markdown', icon: 'copy', value: 'copy' }] : []),
+        ...(chat.messages.length > 0 ? [{ group: 'Compartir', label: 'Compartir como Markdown', description: 'Toda la conversación', icon: 'share', value: 'share' }] : []),
         ...(saved
           ? [
-              { label: pinned ? 'Quitar de fijadas' : 'Fijar arriba', icon: 'pin', value: 'pin' },
-              { label: 'Renombrar', icon: 'pencil', value: 'rename' },
-              { label: 'Eliminar', icon: 'trash', danger: true, value: 'delete' },
+              { group: 'Conversación', label: pinned ? 'Quitar de fijadas' : 'Fijar arriba', description: pinned ? 'Vuelve a su sitio por fecha' : 'Siempre visible en la barra lateral', icon: 'pin', value: 'pin' },
+              { group: 'Conversación', label: 'Renombrar', description: 'Cambia el título', icon: 'pencil', value: 'rename' },
+              { group: 'Conversación', label: 'Eliminar', description: 'No se puede deshacer', icon: 'trash', danger: true, value: 'delete' },
             ]
           : []),
       ],
@@ -146,9 +154,11 @@ export default function ChatScreen({ inputRef: externalInputRef }) {
 
   const onUserLongPress = async (text) => {
     const action = await sheet({
+      title: 'Tu mensaje',
+      subtitle: splitMessage(text).text.slice(0, 60),
       items: [
-        { label: 'Copiar', icon: 'copy', value: 'copy' },
-        { label: 'Editar y volver a enviar', icon: 'pencil', value: 'edit' },
+        { label: 'Copiar', description: 'Al portapapeles', icon: 'copy', value: 'copy' },
+        { label: 'Editar y volver a enviar', description: 'Lo pone en la caja para corregirlo', icon: 'pencil', value: 'edit' },
       ],
     });
     if (action === 'copy') copy(text);

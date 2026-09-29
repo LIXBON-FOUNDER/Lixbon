@@ -91,6 +91,7 @@ export const initialRemoteState = {
   agentState: 'idle', // idle | thinking
   hostConnected: false,
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
+  background: [], // tareas que el agente dejó corriendo: [{ id, type, description, since }]
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
   session: null,
   ended: false,
@@ -235,13 +236,15 @@ export function remoteReducer(state, ev) {
       // Respuesta del host a un slash-command: no es del modelo, así que se
       // pinta como una nota del sistema y no como una burbuja del asistente.
       return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'notice', text: ev.text || '' })] };
+    case 'background':
+      return { ...s, background: Array.isArray(ev.tasks) ? ev.tasks : [] };
     case 'command_result':
       return { ...s, items: [...closeOpenAssistant(s.items), commandItem(ev)] };
     case 'error':
       return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':
     case 'session_ended':
-      return { ...s, ended: true, hostConnected: false, approvals: [] };
+      return { ...s, ended: true, hostConnected: false, approvals: [], background: [] };
     default:
       return s;
   }
