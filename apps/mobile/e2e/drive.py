@@ -72,7 +72,6 @@ def dismiss_system_dialogs() -> None:
         x1, y1, x2, y2 = n["box"]
         adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
         time.sleep(0.8)
-    adb("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
     return bool(dialogs)
 
 
@@ -249,7 +248,7 @@ def main() -> None:
     time.sleep(1.5)
     shot("14f-notificacion")
     if shown:
-        shade = [n for n in nodes() if n.get("text") == title]
+        shade = [n for n in nodes() if title in n.get("text", "")]
         if shade:
             tap(shade[0], dismiss=False)
         time.sleep(3)
