@@ -60,16 +60,20 @@ def find(pattern: str, timeout: float = 25, last: bool = False, cls: str | None 
         ]
         if found:
             return found[-1] if last else found[0]
+        dismiss_system_dialogs()
         time.sleep(1)
     raise SystemExit(f"no aparece: {pattern}")
 
 
 def dismiss_system_dialogs() -> None:
     """El emulador de CI a veces saca un "X isn't responding" del sistema."""
-    for n in nodes():
-        if n.get("text") in ("Wait", "Esperar") and n.get("package") == "android":
-            tap(n)
+    dialogs = [n for n in nodes() if n.get("text") in ("Wait", "Esperar") and n.get("package") == "android"]
+    for n in dialogs:
+        x1, y1, x2, y2 = n["box"]
+        adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
+        time.sleep(0.8)
     adb("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
+    return bool(dialogs)
 
 
 def edits():
@@ -82,7 +86,10 @@ def edits():
     return []
 
 
-def tap(n) -> None:
+def tap(n, dismiss: bool = True) -> None:
+    # CLOSE_SYSTEM_DIALOGS también pliega la cortina de notificaciones.
+    if dismiss:
+        dismiss_system_dialogs()
     x1, y1, x2, y2 = n["box"]
     adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
     time.sleep(0.8)
@@ -112,6 +119,9 @@ def ime_top() -> int | None:
 
 def check_above_keyboard(name: str) -> None:
     time.sleep(1.5)
+    if dismiss_system_dialogs():
+        tap(edits()[-1])
+        time.sleep(1.5)
     shown = "mInputShown=true" in adb("shell", "dumpsys", "input_method")
     boxes = edits()
     top = ime_top()
@@ -131,6 +141,7 @@ def hide_keyboard() -> None:
 def main() -> None:
     # El diálogo de notificaciones taparía la app a mitad del recorrido.
     adb("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS")
+    adb("shell", "settings", "put", "global", "hide_error_dialogs", "1")
     time.sleep(15)
     dismiss_system_dialogs()
     adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
@@ -238,7 +249,9 @@ def main() -> None:
     time.sleep(1.5)
     shot("14f-notificacion")
     if shown:
-        tap(find(re.escape(title)))
+        shade = [n for n in nodes() if n.get("text") == title]
+        if shade:
+            tap(shade[0], dismiss=False)
         time.sleep(3)
         header = [n for n in nodes() if n.get("text") == title]
         results["notificacion_abre_sesion"] = {"ok": bool(header)}
