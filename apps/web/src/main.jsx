@@ -12,6 +12,7 @@ import './styles/pagos.css';
 import './styles/public.css';
 import './styles/landing.css';
 import './styles/remote.css';
+import './styles/titulares.css';
 // El último: solo añade movimiento a lo anterior (ver motion.css).
 import './styles/motion.css';
 
