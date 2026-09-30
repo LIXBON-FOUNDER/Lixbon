@@ -55,6 +55,10 @@ const store = new Map([
   ['serverUrl', 'https://lixbon.com'],
   ['user', { id: 1, first_name: 'Johnny', last_name: 'Morales', username: 'jmorales', email: 'jm@orbita.dev', plan_name: 'Pro' }],
 ]);
+// ?server=…&key=… apunta el mock a un gateway de verdad (p. ej. uno local).
+const qs = new URLSearchParams(location.search);
+if (qs.get('server')) store.set('serverUrl', qs.get('server'));
+if (qs.get('key')) store.set('apiKey', qs.get('key'));
 // ?auth abre la pantalla de entrada; ?onboarding, el recorrido inicial.
 if (location.search.includes('auth')) store.delete('apiKey');
 if (location.search.includes('onboarding')) localStorage.removeItem('lixbon_onboarded');
@@ -298,11 +302,14 @@ function teamFetch(method, url, init) {
   const h = TEAM[`${method} ${url.pathname}`];
   return h ? h() : undefined;
 }
-if (typeof window.WebSocket === 'function') window.WebSocket = class { constructor() { setTimeout(() => this.onclose?.(), 10); } send() {} close() {} };
+// Con ?server= el gateway es de verdad: ni su fetch ni su WebSocket se simulan.
+const REAL = qs.get('server') ? new URL(qs.get('server')).origin : '';
+if (!REAL && typeof window.WebSocket === 'function') window.WebSocket = class { constructor() { setTimeout(() => this.onclose?.(), 10); } send() {} close() {} };
 
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+  if (REAL && url.origin === REAL) return realFetch(input, init);
   const method = (init.method || 'GET').toUpperCase();
   const del = method === 'DELETE' && url.pathname.match(/^\/api\/keys\/(\d+)$/);
   if (del) {

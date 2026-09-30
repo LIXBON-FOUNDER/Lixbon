@@ -9,6 +9,7 @@ import '../styles/base.css';
 import '../styles/shell.css';
 import '../styles/studio.css';
 import './styles/team.css';
+import './styles/issues.css';
 import './styles/team-window.css';
 import { initUiScale } from '../lib/uiScale';
 

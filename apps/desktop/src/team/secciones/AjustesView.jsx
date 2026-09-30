@@ -1,5 +1,5 @@
-// AjustesView.jsx — ajustes del proyecto (general, repositorio e issues,
-// gente, canales) y de esta ventana (tamaño de la interfaz).
+// AjustesView.jsx — ajustes del equipo (general, miembros, issues, canales) y
+// de esta ventana (tamaño de la interfaz, conversaciones acopladas al IDE).
 import { useEffect, useState } from 'react';
 import { useTeamStore } from '../store/teamStore';
 import { useAcopladosStore } from '../store/acopladosStore';
@@ -7,10 +7,9 @@ import { normalizeRepo } from '../lib/githubApi';
 import { estadoDef } from '../lib/presencia';
 import { TPanel, Cara, nombreDe } from '../ui/Panel';
 import { inicialesDe } from '../layout/TeamTitleBar';
-import { IconTrash, IconPlus, IconX, IconCheck, IconChevronLeft } from '../../components/Icons';
-import { IconGitHub, IconLinear, IconHash, IconLock } from '../ui/icons';
-import { useIssuesStore } from '../store/issuesStore';
-import { esEquipoLinear, pareceClave } from '../lib/linear';
+import { IconTrash, IconPlus, IconX, IconCheck } from '../../components/Icons';
+import { IconGitHub, IconHash, IconLock } from '../ui/icons';
+import { AjustesIssues } from './issues/AjustesIssues';
 import { UI_SCALES, readUiScale, setUiScale } from '../../lib/uiScale';
 
 
@@ -26,20 +25,10 @@ function General({ proyecto, lider }) {
   const editarProyecto = useTeamStore((s) => s.editarProyecto);
   const [nombre, setNombre] = useState(proyecto.nombre);
   const [repo, setRepo] = useState(proyecto.github_repo || '');
-  const [equipo, setEquipo] = useState(esEquipoLinear(proyecto.linear_team_id) ? proyecto.linear_team_id : '');
-  const [plinear, setPlinear] = useState(esEquipoLinear(proyecto.linear_project_id) ? proyecto.linear_project_id : '');
-  const linear = useIssuesStore();
-  const conClave = linear.estado === 'lista';
-  const elegido = linear.equipos.find((e) => e.id === equipo);
-  const vinculoRoto = !!proyecto.linear_team_id && !esEquipoLinear(proyecto.linear_team_id);
-  useEffect(() => { linear.mirarClave(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (conClave) linear.cargarEquipos(); }, [conClave]); // eslint-disable-line react-hooks/exhaustive-deps
   const [guardado, setGuardado] = useState('');
   useEffect(() => {
     setNombre(proyecto.nombre);
     setRepo(proyecto.github_repo || '');
-    setEquipo(esEquipoLinear(proyecto.linear_team_id) ? proyecto.linear_team_id : '');
-    setPlinear(esEquipoLinear(proyecto.linear_project_id) ? proyecto.linear_project_id : '');
     setGuardado('');
   }, [proyecto.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -47,12 +36,9 @@ function General({ proyecto, lider }) {
     e.preventDefault();
     const normal = normalizeRepo(repo.trim());
     if (repo.trim() && !normal) { setGuardado('Ese repositorio no se entiende. Pon «owner/repo».'); return; }
-    if (pareceClave(equipo) || pareceClave(plinear)) { setGuardado('Eso es una API key: va en Issues → Conectar, no aquí. Aquí se elige el equipo.'); return; }
     const fallo = await editarProyecto(proyecto.id, {
       nombre: nombre.trim() || proyecto.nombre,
       github_repo: normal || null,
-      linear_team_id: equipo.trim() || null,
-      linear_project_id: plinear.trim() || null,
     });
     if (!fallo) setRepo(normal);
     setGuardado(fallo || 'Guardado.');
@@ -62,16 +48,16 @@ function General({ proyecto, lider }) {
     <form className="tajustes__sec" onSubmit={guardar}>
       <div className="tajustes__cab">
         <h1>General</h1>
-        <p>{lider ? `Lo ven los ${proyecto.miembros.length} integrantes de ${proyecto.nombre}.` : 'Formas parte de este proyecto. Los ajustes los lleva su líder.'}</p>
+        <p>{lider ? `Lo ven los ${proyecto.miembros.length} integrantes de ${proyecto.nombre}.` : 'Formas parte de este equipo. Los ajustes los lleva su líder.'}</p>
       </div>
       <div className="tajustes__fila">
-        <span className="tproy tproy--xl">{inicialesDe(nombre)}</span>
-        <label className="tcampo tfill">Nombre del proyecto
+        <span className="tproy tproy--xl">{proyecto.tablero?.prefijo || inicialesDe(nombre)}</span>
+        <label className="tcampo tfill">Nombre del equipo
           <input className="tinput" value={nombre} onChange={(e) => setNombre(e.target.value)} disabled={!lider} maxLength={60} />
         </label>
       </div>
-      <span className="tajustes__h2">Repositorio e issues</span>
-      <div className="ttarjeta">
+      <span className="tajustes__h2">Repositorio</span>
+      <div className="tcaja">
         <IconGitHub size={18} />
         <label className="tcampo tfill">Repositorio de GitHub
           <input className="tinput mono" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repo" spellCheck={false} disabled={!lider} />
@@ -79,35 +65,7 @@ function General({ proyecto, lider }) {
         </label>
         <span className={`tvinculo ${proyecto.github_repo ? 'is-on' : ''}`}><span className="tpunto" />{proyecto.github_repo ? 'Vinculado' : 'Sin vincular'}</span>
       </div>
-      <div className="ttarjeta">
-        <IconLinear size={18} className="tlinear" />
-        <div className="tcampos tfill">
-          {conClave ? (
-            <>
-              <label className="tcampo">Equipo de Linear
-                <select className="tinput" value={equipo} onChange={(e) => { setEquipo(e.target.value); setPlinear(''); }} disabled={!lider}>
-                  <option value="">Sin vincular</option>
-                  {linear.equipos.map((e) => <option key={e.id} value={e.id}>{e.key} · {e.name}</option>)}
-                </select>
-              </label>
-              {elegido?.projects?.nodes?.length > 0 && (
-                <label className="tcampo">Proyecto de Linear (opcional)
-                  <select className="tinput" value={plinear} onChange={(e) => setPlinear(e.target.value)} disabled={!lider}>
-                    <option value="">Todo el equipo</option>
-                    {elegido.projects.nodes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </label>
-              )}
-              {!linear.equiposCargados && <span className="tnota">Pidiendo tus equipos a Linear…</span>}
-            </>
-          ) : (
-            <span className="tnota">Conecta tu API key de Linear en la pestaña Issues y aquí podrás elegir el equipo de una lista.</span>
-          )}
-          {vinculoRoto && <span className="terror">El vínculo guardado no es un equipo de Linear válido. Elige el equipo y guarda.</span>}
-        </div>
-        <span className={`tvinculo ${esEquipoLinear(proyecto.linear_team_id) ? 'is-on' : ''}`}><span className="tpunto" />{esEquipoLinear(proyecto.linear_team_id) ? 'Vinculado' : 'Sin vincular'}</span>
-      </div>
-      <p className="tnota">El proyecto guarda a qué apunta, nunca una credencial: cada integrante consulta con su propia clave.</p>
+      <p className="tnota">El equipo guarda a qué repositorio apunta, nunca una credencial: cada integrante lo lee con su propia clave de GitHub.</p>
       {lider && (
         <div className="tajustes__acc">
           <button className="btn btn--primary" type="submit">Guardar</button>
@@ -131,7 +89,7 @@ function Gente({ proyecto, lider }) {
   };
   return (
     <div className="tajustes__sec">
-      <div className="tajustes__cab"><h1>Gente y roles</h1><p>{proyecto.miembros.length} personas. El líder invita, crea canales privados y decide quién los ve.</p></div>
+      <div className="tajustes__cab"><h1>Miembros y roles</h1><p>{proyecto.miembros.length} personas. El líder invita, crea canales privados y decide quién los ve.</p></div>
       {lider && (
         <form className="tajustes__fila" onSubmit={mandar}>
           <input className="tinput tfill" value={quien} onChange={(e) => setQuien(e.target.value)} placeholder="correo o @usuario" spellCheck={false} aria-label="Invitar" />
@@ -232,18 +190,18 @@ function Interfaz() {
 }
 
 export function AjustesView() {
-  const { proyectoActivo, soyLider, volverAlChat } = useTeamStore();
+  const { proyectoActivo, soyLider } = useTeamStore();
   const proyecto = proyectoActivo();
   const [sec, setSec] = useState(proyecto ? 'general' : 'interfaz');
   const lider = soyLider();
   const NAV = [
-    ['Proyecto', proyecto ? [['general', 'General'], ['gente', 'Gente y roles'], ['canales', 'Canales']] : []],
+    ['Equipo', proyecto ? [['general', 'General'], ['gente', 'Miembros y roles'], ['issues', 'Issues'], ['canales', 'Canales']] : []],
     ['Esta ventana', [['interfaz', 'Interfaz']]],
   ];
   return (
     <TPanel id="ajustes" className="wb__grow tajustes">
       <nav className="tajustes__nav">
-        <button className="lk tajustes__volver" onClick={volverAlChat}><IconChevronLeft size={13} /> Volver al chat</button>
+        <div className="tajustes__titulo">Ajustes del equipo</div>
         {NAV.map(([t, items]) => items.length > 0 && (
           <div key={t} className="tgrupo">
             <div className="tcap">{t}</div>
@@ -254,6 +212,7 @@ export function AjustesView() {
       <div className="tajustes__cuerpo">
         {sec === 'general' && proyecto && <General proyecto={proyecto} lider={lider} />}
         {sec === 'gente' && proyecto && <Gente proyecto={proyecto} lider={lider} />}
+        {sec === 'issues' && proyecto && <AjustesIssues proyecto={proyecto} lider={lider} />}
         {sec === 'canales' && proyecto && <Canales proyecto={proyecto} lider={lider} />}
         {sec === 'interfaz' && <Interfaz />}
       </div>

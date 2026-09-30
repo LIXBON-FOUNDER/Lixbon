@@ -312,10 +312,6 @@ select.tinput { appearance: none; cursor: pointer; }
 .tprogreso__barra { height: 4px; border-radius: 4px; background: var(--surface-4); overflow: hidden; display: flex; }
 .tprogreso__leyenda { display: flex; gap: 12px; font-size: 11px; color: var(--ink-50); }
 
-.tnueva { margin: 0 12px 8px; height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: var(--radius); background: var(--surface-3); font-size: 11px; }
-.tnueva input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--ink); font: inherit; font-size: 13px; }
-.tnueva input::placeholder { color: #6A6A65; }
-.tnueva .terror { display: flex; align-items: center; gap: 4px; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .tgrupo__cab { height: 30px; margin-top: 8px; display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 12px; color: var(--ink-soft); }
 .tissue { position: relative; display: flex; align-items: center; border-radius: var(--radius); transition: background-color 0.15s ease; }
@@ -423,8 +419,8 @@ select.tinput { appearance: none; cursor: pointer; }
 .tajustes__item:hover { background: rgba(var(--ink-rgb), 0.03); }
 .tajustes__sub { margin: 4px 0 8px 26px; padding: 6px; border-radius: var(--radius); background: var(--surface-3); }
 .tajustes__seg { align-self: flex-start; }
-.ttarjeta { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface-2); }
-.ttarjeta > svg { margin-top: 22px; flex-shrink: 0; }
+.tcaja { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface-2); }
+.tcaja > svg { margin-top: 22px; flex-shrink: 0; }
 .tvinculo { display: flex; align-items: center; gap: 6px; margin-top: 26px; font-size: 12px; color: var(--ink-50); white-space: nowrap; }
 .tvinculo.is-on { color: var(--good); }
 

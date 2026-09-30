@@ -576,7 +576,7 @@ def _validar_campos(s, i: TeamIssue, datos: dict[str, Any]) -> None:
         raise ErrorIssues(422, "Estimación fuera de rango.")
 
 
-def _poner_etiquetas(s, i: TeamIssue, ids: list[str], actor: int | None) -> None:
+def _poner_etiquetas(s, i: TeamIssue, ids: list[str], actor: int | None, registrar: bool = True) -> None:
     validas = set(s.scalars(select(TeamEtiqueta.id).where(TeamEtiqueta.proyecto_id == i.proyecto_id,
                                                           TeamEtiqueta.id.in_(ids or []))))
     if set(ids or []) - validas:
@@ -587,7 +587,8 @@ def _poner_etiquetas(s, i: TeamIssue, ids: list[str], actor: int | None) -> None
     s.execute(delete(TeamIssueEtiqueta).where(TeamIssueEtiqueta.issue_id == i.id))
     for eid in validas:
         s.add(TeamIssueEtiqueta(issue_id=i.id, etiqueta_id=eid))
-    _registrar(s, i, actor, "etiquetas", ",".join(sorted(antes)), ",".join(sorted(validas)))
+    if registrar:
+        _registrar(s, i, actor, "etiquetas", ",".join(sorted(antes)), ",".join(sorted(validas)))
 
 
 CAMPOS = ("titulo", "descripcion", "estado_id", "prioridad", "estimacion", "asignado_id",
@@ -621,7 +622,7 @@ def crear_issue(proyecto_id: str, uid: int, datos: dict[str, Any]) -> str:
                 s.add(i)
                 s.flush()
                 if datos.get("etiquetas"):
-                    _poner_etiquetas(s, i, datos["etiquetas"], None)
+                    _poner_etiquetas(s, i, datos["etiquetas"], uid, registrar=False)
                 _registrar(s, i, uid, "creada", None, i.titulo)
                 return i.id
         except IntegrityError:
