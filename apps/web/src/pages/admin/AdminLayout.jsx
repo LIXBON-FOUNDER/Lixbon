@@ -149,11 +149,15 @@ export default function AdminLayout() {
           })}
         </nav>
 
-        <Link to="/chat" className="adm__back">
-          <IconChat size={17} />
-          <span>Volver al chat</span>
-        </Link>
-        <div className="adm__tema"><TemaBoton /></div>
+        {/* Pie de la navegación: volver al chat y el tema en una misma fila,
+            alineados con los enlaces de arriba. */}
+        <div className="adm__util">
+          <Link to="/chat" className="adm-link adm__back">
+            <IconChat size={18} />
+            <span className="adm-link__txt">Volver al chat</span>
+          </Link>
+          <TemaBoton className="icon-btn adm__tema" />
+        </div>
 
         <div className="adm__foot">
           <span className="tab" />

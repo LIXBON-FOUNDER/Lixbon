@@ -533,6 +533,21 @@
   color: #FBEEEB;
 }
 
+/* El hover global usa los colores del tema oscuro (fondo casi blanco): dentro
+   del diálogo claro dejaría el texto pálido sobre blanco. */
+.modal .pill-btn--primary:hover:not(:disabled) {
+  background: #335519;
+}
+
+.modal .pill-btn.is-danger:hover:not(:disabled) {
+  background: #7A2A1F;
+}
+
+.modal .pill-btn--primary:disabled {
+  background: #CDCDC7;
+  color: #6B6B66;
+}
+
 .share-link {
   display: flex;
   gap: 8px;
