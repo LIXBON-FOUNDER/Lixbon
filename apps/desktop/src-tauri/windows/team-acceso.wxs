@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Acceso directo «Lixbon Team»: el mismo ejecutable con --team, que abre
+<!-- Acceso directo «Lixbon Team»: el mismo ejecutable con el flag «team», que abre
      solo la ventana de Team. Uno en el menú Inicio (junto al de Lixbon) y otro
      en el escritorio. Los ids Path, ProductIcon, INSTALLDIR,
      ApplicationProgramsFolder y DesktopFolder son los de la plantilla MSI de Tauri. -->
