@@ -17,7 +17,7 @@ import {
   IconRefresh, IconShield, IconTerminal, IconUser, IconArrowLeft,
 } from '../components/Icons';
 
-const SOPORTE = 'soporte@lixbon.com';
+const SOPORTE = 'support@lixbon.com';
 const MIN_MENSAJE = 20;
 const MAX_MENSAJE = 5000;
 

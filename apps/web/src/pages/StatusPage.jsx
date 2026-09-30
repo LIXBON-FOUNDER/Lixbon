@@ -164,7 +164,7 @@ export default function StatusPage() {
             <IconAlert size={20} />
             <div>
               <h2>{t('cannotCheckTitle')}</h2>
-              <p>{t('cannotCheckBefore')} <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>.</p>
+              <p>{t('cannotCheckBefore')} <a href="mailto:support@lixbon.com">support@lixbon.com</a>.</p>
             </div>
           </div>
         ) : !data ? (
@@ -198,7 +198,7 @@ export default function StatusPage() {
 
             <p className="status__nota">
               {t('sampleNoteBefore')} {Math.round(data.sample_interval_s / 60)} {t('sampleNoteMid')}{' '}
-              <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>{t('sampleNoteAfter')}
+              <a href="mailto:support@lixbon.com">support@lixbon.com</a>{t('sampleNoteAfter')}
             </p>
           </>
         )}

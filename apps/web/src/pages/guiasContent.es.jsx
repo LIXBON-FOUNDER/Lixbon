@@ -334,7 +334,7 @@ function DatosPrivados() {
       <h2>Para empresas y datos sensibles</h2>
       <p>
         Si tu caso exige que los datos no salgan de tu infraestructura, escríbenos a{' '}
-        <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>: la arquitectura de
+        <a href="mailto:support@lixbon.com">support@lixbon.com</a>: la arquitectura de
         lixbon (gateway + nodos GPU) permite desplegar los nodos en tu propio hardware.
       </p>
       <p>
