@@ -1495,10 +1495,13 @@
 .pubfoot__contacto span { font-size: 15px; color: var(--pf-muted); }
 
 .pubfoot__marca { margin-top: 104px; }
-.pubfoot__wordmark { display: block; width: 100%; }
+/* LIXBON en Bruno Ace SC mide ~4.82× su cuerpo: a 20cqw ocupa ~96% del
+   ancho del pie, sea cual sea la ventana (con vw se salía la N al pasar de
+   los 1200px del contenedor). */
+.pubfoot__wordmark { display: block; width: 100%; container-type: inline-size; }
 .pubfoot__wordmark .brand {
   display: flex; justify-content: space-between; width: 100%;
-  font-size: clamp(64px, 17.6vw, 262px); line-height: 1; color: var(--pf-ink);
+  font-size: 17vw; font-size: 20cqw; line-height: 1; color: var(--pf-ink);
   overflow: hidden; padding-bottom: 0.04em;
 }
 
