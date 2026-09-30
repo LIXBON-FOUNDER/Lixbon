@@ -81,3 +81,20 @@ def test_suscripcion_por_usuario():
         assert q1.empty()
 
     run(scenario())
+
+
+def test_hello_conserva_agente_comandos_y_capacidades():
+    async def scenario():
+        hub = RemoteHub()
+        ch = hub.channel("s1", 1)
+        hub.publish_events(ch, [{
+            "type": "hello", "source": "ide", "agent": "claude", "workspace": "lixbon",
+            "commands": [{"name": "compact", "group": "claude"}], "capabilities": ["images"],
+            "basura": "x",
+        }])
+        assert ch.meta["agent"] == "claude"
+        assert ch.meta["commands"][0]["name"] == "compact"
+        assert ch.meta["capabilities"] == ["images"]
+        assert "basura" not in ch.meta
+
+    run(scenario())

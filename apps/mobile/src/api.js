@@ -31,8 +31,9 @@ export class ApiClient {
     return this.getBase().replace(/\/+$/, '');
   }
 
-  async request(path, { method = 'GET', body = null, auth = true } = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+  async request(path, { method = 'GET', body = null, form = null, auth = true } = {}) {
+    // Con FormData el boundary del multipart lo pone fetch: fijar Content-Type lo rompe.
+    const headers = form ? {} : { 'Content-Type': 'application/json' };
     const token = this.getToken();
     if (auth && token) headers.Authorization = `Bearer ${token}`;
 
@@ -41,7 +42,7 @@ export class ApiClient {
       res = await fetch(`${this.base}${path}`, {
         method,
         headers,
-        body: body != null ? JSON.stringify(body) : undefined,
+        body: form || (body != null ? JSON.stringify(body) : undefined),
       });
     } catch {
       throw new ApiException('Sin conexión con el servidor');
@@ -69,6 +70,10 @@ export class ApiClient {
 
   post(path, body = null, opts = {}) {
     return this.request(path, { method: 'POST', body, ...opts });
+  }
+
+  upload(path, form) {
+    return this.request(path, { method: 'POST', form });
   }
 
   patch(path, body = null) {

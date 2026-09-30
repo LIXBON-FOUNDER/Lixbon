@@ -140,7 +140,7 @@ rellenar sí o sí:
 | `MODEL_NUM_CTX` | Ventana de contexto global |
 | `ADMIN_TOKEN`, `ADMIN_EMAILS` | Acceso al panel admin y a `/api/versions/upload` |
 | `NODE_SHARED_SECRET` | Autenticación gateway ↔ nodos |
-| `BREVO_API_KEY`, `EMAIL_FROM` | Correos de verificación y recuperación |
+| `BREVO_API_KEY`, `EMAIL_FROM`, `SUPPORT_INBOX` | Correos de verificación y recuperación; buzón del formulario de soporte |
 | `PUBLIC_BASE_URL`, `ALLOWED_ORIGINS` | URL pública y CORS |
 
 ## Añadir un nodo GPU

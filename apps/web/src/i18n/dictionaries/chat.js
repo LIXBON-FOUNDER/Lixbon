@@ -18,7 +18,7 @@ export default {
     emptyTitleGuest: 'Solo tienes un chat disponible para usar. Inicia sesión para tener más chats y funciones',
     searchingWeb: 'Buscando en internet…',
     thinking: 'Pensando…',
-    jumpMore: 'más',
+    jumpMore: 'Ir al último mensaje',
     disclaimer: 'lixbon puede equivocarse. Verifica la información antes de usarla.',
 
     inputPlaceholder: 'Escribe tu mensaje…',
@@ -93,7 +93,7 @@ export default {
     emptyTitleGuest: 'You only have one chat available. Log in for more chats and features',
     searchingWeb: 'Searching the web…',
     thinking: 'Thinking…',
-    jumpMore: 'more',
+    jumpMore: 'Jump to latest message',
     disclaimer: 'lixbon can make mistakes. Check the information before using it.',
 
     inputPlaceholder: 'Type your message…',

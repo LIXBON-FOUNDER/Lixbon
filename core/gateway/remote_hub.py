@@ -19,6 +19,14 @@ QUEUE_MAX = 1000             # tope defensivo por cola
 MAX_CONTROLLERS = 5          # controllers simultáneos por sesión
 
 
+# Lo que el host anuncia en su `hello` y un controller que llega tarde necesita:
+# qué agente es, dónde trabaja, qué comandos "/" acepta y qué puede recibir.
+HELLO_META_KEYS = (
+    "source", "title", "machine", "mode", "model",
+    "agent", "workspace", "commands", "capabilities",
+)
+
+
 @dataclass
 class RemoteChannel:
     session_id: str
@@ -72,7 +80,7 @@ class RemoteHub:
             ev["seq"] = ch.last_seq
             ev.setdefault("ts", time.time())
             if ev.get("type") == "hello":
-                ch.meta = {k: ev.get(k) for k in ("source", "title", "machine", "mode", "model")}
+                ch.meta = {k: ev.get(k) for k in HELLO_META_KEYS}
             ch.buffer.append(ev)
             self._fanout(ch, ev)
         return ch.last_seq
