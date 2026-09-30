@@ -43,7 +43,7 @@ export function PublicFooter() {
         { to: '/legal/privacy', label: t('footerPrivacy') },
         { to: '/legal/terms', label: t('footerTerms') },
         { to: '/legal/refunds', label: t('footerRefunds') },
-        { href: `mailto:${SOPORTE}`, label: tc('support') },
+        { to: '/support', label: tc('support') },
       ],
     },
   ];

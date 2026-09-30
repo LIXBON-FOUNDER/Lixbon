@@ -13,8 +13,6 @@ import { IconMenu, IconX } from './Icons';
 import { TemaBoton } from './TemaBoton';
 import { LanguageSwitch } from './LanguageSwitch';
 
-const SUPPORT_EMAIL = 'soporte@lixbon.com';
-
 // El logo se monta animado una vez por visita: al navegar entre páginas
 // públicas la barra se vuelve a montar y repetirlo cansaría.
 let logoYaAnimado = false;
@@ -76,9 +74,9 @@ export function PublicNav() {
         <LanguageSwitch />
         <TemaBoton />
         <div className="pubnav__wide">
-          <a href={`mailto:${SUPPORT_EMAIL}`} className="pill-btn pill-btn--outline pubnav__btn">
+          <Link to="/support" className={`pill-btn pill-btn--outline pubnav__btn ${pathname.startsWith('/support') ? 'is-active' : ''}`}>
             {tc('support')}
-          </a>
+          </Link>
           {!user && (
             <Link to="/auth" className="pubnav__login">{tc('logIn')}</Link>
           )}
@@ -107,7 +105,7 @@ export function PublicNav() {
             {l.label}
           </Link>
         ))}
-        <a href={`mailto:${SUPPORT_EMAIL}`} className="pubnav__menu-link">{tc('support')}</a>
+        <Link to="/support" className={`pubnav__menu-link ${pathname.startsWith('/support') ? 'is-active' : ''}`}>{tc('support')}</Link>
         {!user && <Link to="/auth" className="pubnav__menu-link">{tc('logIn')}</Link>}
         <Link to="/chat" className="pill-btn pill-btn--primary pubnav__menu-cta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
       </div>

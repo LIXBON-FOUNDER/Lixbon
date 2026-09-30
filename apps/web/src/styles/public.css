@@ -438,11 +438,14 @@
 }
 
 .modal {
+  /* El diálogo es siempre claro: en oscuro, el crema invertido; en claro,
+     papel un punto sobre el fondo. Por eso su texto va en colores fijos. */
+  --modal-bg: #F2F2F0;
   position: relative;
   width: min(480px, 100%);
   padding: 18px 20px;
   border-radius: var(--radius);
-  background: var(--primary);
+  background: var(--modal-bg);
   color: #141414;
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
   animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -457,7 +460,12 @@
   width: 78px;
   height: 11px;
   border-radius: 8px 8px 0 0;
-  background: var(--primary);
+  background: var(--modal-bg);
+}
+
+:root[data-theme="light"] .modal {
+  --modal-bg: #FBFAF6;
+  box-shadow: 0 30px 70px -18px rgba(60, 52, 30, 0.3);
 }
 
 @keyframes modal-pop {
@@ -1636,3 +1644,81 @@
 .dl-picker__select svg { position: absolute; right: 12px; color: var(--ink-muted); pointer-events: none; }
 .dl-picker .dl-card__cta { align-self: auto; flex-shrink: 0; }
 
+
+/* ── Soporte (/support) ──────────────────────────────────────────────── */
+/* Formulario a la izquierda, atajos a la derecha. Los tipos de caso son
+   tarjetas de relleno: la elegida se tiñe de acento, sin bordes. */
+
+.soporte__wrap { width: min(1200px, calc(100% - 96px)); margin: 0 auto; padding-top: 72px; }
+.soporte__titulo { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 5.6vw, 80px); line-height: 1; color: var(--ink); text-wrap: balance; }
+.soporte__lead { margin: 24px 0 0; max-width: 640px; font-size: 17px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
+
+.soporte__rejilla { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 64px; align-items: start; margin-top: 56px; }
+
+.soporte__form { display: flex; flex-direction: column; gap: 24px; }
+.soporte__etiqueta { display: block; margin-bottom: 10px; font-size: 13px; font-weight: 500; color: var(--ink-soft); }
+
+.soporte__tipos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+.soporte__tipos legend { padding: 0; }
+.soporte__tipo {
+  position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
+  border-radius: var(--radius); background: var(--surface-1); color: var(--ink-muted); cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.soporte__tipo:hover { background: var(--surface-2); }
+.soporte__tipo.is-on { background: var(--accent-soft); color: var(--accent); }
+.soporte__tipo:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.soporte__tipo input { position: absolute; opacity: 0; pointer-events: none; }
+.soporte__tipo svg { flex: none; margin-top: 1px; }
+.soporte__tipo strong { display: block; font-size: 14px; font-weight: 500; color: var(--ink); }
+.soporte__tipo small { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--ink-muted); }
+
+.soporte__pista { display: flex; align-items: flex-start; gap: 10px; margin: -8px 0 0; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+.soporte__pista svg { flex: none; margin-top: 2px; color: var(--ink-muted); }
+
+.soporte__campo { display: flex; flex-direction: column; }
+.soporte__campo input, .soporte__campo textarea {
+  width: 100%; padding: 12px 14px; border: 0; border-radius: var(--radius);
+  background: var(--field); color: var(--ink); font: inherit; font-size: 15px; outline: none;
+  transition: background-color .15s ease;
+}
+.soporte__campo input:focus, .soporte__campo textarea:focus { background: var(--field-focus); }
+.soporte__campo textarea { min-height: 190px; resize: vertical; line-height: 1.6; }
+.soporte__cuenta { align-self: flex-end; margin-top: 8px; font-size: 12px; color: var(--ink-muted); }
+.soporte__cuenta.is-corto { color: var(--warn); }
+.soporte__dos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.soporte__como { margin: 0; font-size: 14px; color: var(--ink-soft); }
+.soporte__como strong { color: var(--ink); font-weight: 500; }
+.soporte__trampa { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.soporte__enviar { align-self: flex-start; height: 46px; padding: 0 26px; font-size: 14.5px; }
+
+.soporte__hecho { display: flex; flex-direction: column; align-items: flex-start; gap: 22px; padding: 40px; border-radius: var(--radius); background: var(--surface-1); animation: landing-sube .8s var(--ease-out) both; }
+.soporte__hecho-icono { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); }
+.soporte__hecho-texto { margin: 0; max-width: 520px; font-size: 17px; line-height: 1.6; color: var(--ink-soft); }
+.soporte__ticket { display: flex; flex-direction: column; gap: 6px; }
+.soporte__ticket span { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
+.soporte__ticket strong { font-family: var(--font-mono); font-size: 28px; font-weight: 500; color: var(--ink); }
+
+.soporte__lado { display: flex; flex-direction: column; gap: 18px; }
+.soporte__lienzo .paisaje { aspect-ratio: 4 / 3; }
+.soporte__lado-titulo { margin: 8px 0 0; font-family: var(--font-display); font-weight: 400; font-size: 28px; line-height: 1.1; color: var(--ink); }
+.soporte__atajos { display: flex; flex-direction: column; gap: 6px; }
+.soporte__atajo { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface-1); color: var(--ink-muted); text-decoration: none; transition: background-color .15s ease; }
+.soporte__atajo:hover { background: var(--surface-2); }
+.soporte__atajo svg { flex: none; margin-top: 1px; }
+.soporte__atajo strong { display: inline-flex; align-items: center; gap: 6px; font-size: 14.5px; font-weight: 500; color: var(--ink); }
+.soporte__atajo strong svg { opacity: .5; transition: transform .3s var(--ease-out); }
+.soporte__atajo:hover strong svg { transform: rotate(180deg) translateX(-3px) !important; }
+.soporte__atajo small { display: block; margin-top: 3px; font-size: 13px; line-height: 1.45; color: var(--ink-muted); }
+.soporte__directo { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-muted); }
+.soporte__directo a { color: var(--ink); }
+
+@media (max-width: 980px) {
+  .soporte__wrap { width: calc(100% - 40px); padding-top: 48px; }
+  .soporte__rejilla { grid-template-columns: 1fr; gap: 48px; margin-top: 40px; }
+  .soporte__tipos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .soporte__tipos, .soporte__dos { grid-template-columns: 1fr; }
+  .soporte__hecho { padding: 28px 22px; }
+}

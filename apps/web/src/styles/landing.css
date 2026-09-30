@@ -118,6 +118,26 @@
 .paisaje .estrella { animation: landing-titila 3.6s ease-in-out infinite alternate; }
 @keyframes landing-titila { from { opacity: .35; } to { opacity: 1; } }
 
+/* El crepúsculo vive: una estrella fugaz cada tantos segundos, luciérnagas
+   junto a la orilla y el humo de la cabaña. */
+.paisaje .fugaz { opacity: 0; animation: landing-fugaz 9s ease-in 2s infinite; }
+@keyframes landing-fugaz {
+  0% { opacity: 0; transform: translate(-60px, -20px); }
+  4% { opacity: 1; }
+  10% { opacity: 0; transform: translate(120px, 40px); }
+  100% { opacity: 0; transform: translate(120px, 40px); }
+}
+.paisaje .luciernaga { animation: landing-luciernaga 3.2s ease-in-out infinite alternate; }
+@keyframes landing-luciernaga {
+  from { opacity: .15; transform: translate(0, 0); }
+  to { opacity: 1; transform: translate(4px, -6px); }
+}
+.paisaje .humo { animation: landing-humo 6s ease-in-out infinite; }
+@keyframes landing-humo {
+  0%, 100% { opacity: .2; transform: translate(0, 0); }
+  50% { opacity: .45; transform: translate(4px, -6px); }
+}
+
 /* En oscuro los paisajes de día bajan un punto de luz, como al atardecer. */
 :root[data-theme="dark"] .paisaje:not(.paisaje--noche)::before {
   content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
@@ -242,7 +262,7 @@
 .revelar-listo .pubfoot__marca:not(.is-visible) .logo__letra { animation: none; opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .logo--animado *, .landing__eyebrow, .landing__h1, .landing__hero-pie, .landing__lienzo--hero, .paisaje .estrella { animation: none !important; }
+  .logo--animado *, .landing__eyebrow, .landing__h1, .landing__hero-pie, .landing__lienzo--hero, .paisaje .estrella, .paisaje .fugaz, .paisaje .luciernaga, .paisaje .humo { animation: none !important; }
   .paisaje .capa { transform: none; }
 }
 
