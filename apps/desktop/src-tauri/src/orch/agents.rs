@@ -67,7 +67,11 @@ pub struct Launch {
     pub piped: bool,
 }
 
-pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &str) -> Result<Launch, String> {
+/// Herramientas que se le quitan a una hija de solo lectura. Bash se conserva:
+/// la necesita para `lxo`.
+const READ_ONLY_BLOCKED: &[&str] = &["Edit", "Write", "NotebookEdit"];
+
+pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &str, read_only: bool) -> Result<Launch, String> {
     let a = spec(agent).ok_or_else(|| format!("Agente desconocido: {agent}. Usa uno de `lxo agents`."))?;
     if PAUSED.contains(&agent) {
         return Err(format!("{} no está disponible todavía como agente hijo en Lixbon. Usa uno de `lxo agents`.", a.label));
@@ -85,6 +89,12 @@ pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &s
     let mut piped = false;
     match agent {
         "claude" => {
+            // Va delante de todo: la lista de --disallowedTools acaba en la siguiente opción.
+            if read_only {
+                let mut blocked = vec!["--disallowedTools".to_string()];
+                blocked.extend(READ_ONLY_BLOCKED.iter().map(|t| t.to_string()));
+                args.splice(0..0, blocked);
+            }
             if let Some(m) = &model { args.extend(["--model".into(), m.clone()]); }
             if let Some(e) = &effort { args.extend(["--effort".into(), e.clone()]); }
             args.push(format!("\"{prompt}\""));
@@ -307,13 +317,19 @@ mod tests {
 
     #[test]
     fn lanzadores_autonomos_con_modelo() {
-        let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea").unwrap();
+        let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea", false).unwrap();
         assert_eq!(l.command, r#"claude --dangerously-skip-permissions --model opus --effort high "Lee la tarea""#);
-        assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x").is_err());
-        let l = launch("codex", Some("gpt-5.5"), Some("high"), "x").unwrap();
+        assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x", false).is_err());
+        let l = launch("codex", Some("gpt-5.5"), Some("high"), "x", false).unwrap();
         assert_eq!(l.command, r#"codex --dangerously-bypass-approvals-and-sandbox --model gpt-5.5 -c model_reasoning_effort=high "x""#);
-        assert!(launch("claude", Some("opus & del"), None, "x").is_err());
-        assert!(launch("gemini", None, Some("high"), "x").is_err());
+        assert!(launch("claude", Some("opus & del"), None, "x", false).is_err());
+        assert!(launch("gemini", None, Some("high"), "x", false).is_err());
+    }
+
+    #[test]
+    fn solo_lectura_sin_herramientas_de_edicion() {
+        let l = launch("claude", Some("haiku"), None, "Lee", true).unwrap();
+        assert_eq!(l.command, r#"claude --disallowedTools Edit Write NotebookEdit --dangerously-skip-permissions --model haiku "Lee""#);
     }
 
     #[test]

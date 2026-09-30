@@ -6,7 +6,6 @@
 import { registerCommands } from '../lib/commands';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
-import { useIndexStore } from '../store/indexStore';
 import { useChatStore, CHAT_MODES, newSession } from '../store/chatStore';
 import { pickDirectory, openExternal, saveTextAs, revealInDir, readDir } from '../lib/tauri';
 import { toast } from '../store/toastStore';
@@ -249,11 +248,6 @@ export function registerBuiltinCommands() {
       id: 'workbench.openSettings', title: 'Ajustes',
       category: 'Ver', keywords: 'ajustes settings preferencias config',
       run: () => app().openModal('settings'),
-    },
-    {
-      id: 'codebase.buildIndex', title: 'IA: (re)construir índice del codebase',
-      category: 'IA', keywords: 'rag indice embeddings codebase semantico',
-      run: () => useIndexStore.getState().build(),
     },
 
     // ── Chat (comandos "/") ─────────────────────────────────────────────

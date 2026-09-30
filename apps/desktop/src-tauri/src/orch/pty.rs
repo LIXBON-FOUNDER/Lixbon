@@ -347,7 +347,7 @@ mod real {
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::process::Command::new("git").arg("init").arg("-q").current_dir(&dir).status();
         let prompt = "Crea un archivo llamado hola.txt que contenga la palabra hola. No hagas nada mas.";
-        let l = crate::orch::agents::launch(agent, model, None, prompt).unwrap();
+        let l = crate::orch::agents::launch(agent, model, None, prompt, false).unwrap();
         let screen = Arc::new(Mutex::new(String::new()));
         let sc = screen.clone();
         let mut term = super::spawn(

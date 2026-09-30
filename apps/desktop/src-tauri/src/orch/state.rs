@@ -48,6 +48,9 @@ pub struct Task {
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
+    /// Rol de Ajustes → Orquestador con el que se lanzó (explorador, implementador…).
+    #[serde(default)]
+    pub role: Option<String>,
     pub title: String,
     #[serde(default)]
     pub spec: String,
@@ -137,6 +140,7 @@ pub struct NewTask {
     pub agent: String,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub role: Option<String>,
     pub title: String,
     pub spec: String,
     pub repo: String,
@@ -224,6 +228,7 @@ impl State {
             agent: t.agent,
             model: t.model,
             effort: t.effort,
+            role: t.role,
             title: t.title,
             spec: t.spec,
             repo: t.repo,
@@ -447,7 +452,7 @@ mod tests {
 
     fn nt(title: &str) -> NewTask {
         NewTask {
-            agent: "claude".into(), model: None, effort: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
+            agent: "claude".into(), model: None, effort: None, role: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
             branch: None, base: None, worktree: None, external: false,
         }
     }

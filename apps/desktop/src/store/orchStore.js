@@ -9,6 +9,8 @@ export const AGENT_LABELS = {
   claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador',
 };
 
+export const ROLE_LABELS = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
+
 export const STATUS_LABELS = {
   starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
 };
@@ -106,7 +108,7 @@ export function orchPromptSection() {
   const snap = useOrchStore.getState().snap;
   if (!snap?.settings?.enabled || !snap.lxo_exists) return '';
   const lxo = `"${snap.lxo}"`;
-  return `\n\n## Orquestador de agentes (Lixbon)\nCuando el usuario escriba "/orquestar <objetivo>" (o te pida orquestar o coordinar agentes), eres el COORDINADOR: no implementas, repartes el objetivo entre agentes hijos, eliges para cada uno agente y modelo, esperas sus informes, integras y le respondes. Usa la CLI ${lxo} con run_command (siempre esa ruta entre comillas en lugar de lxo). Antes de nada ejecuta ${lxo} guide coordinator y síguela. Para ${lxo} wait usa timeout 600 en run_command y --timeout-ms 540000.`;
+  return `\n\n## Orquestador de agentes (Lixbon)\nCuando el usuario escriba "/orquestar <objetivo>" (o te pida orquestar o coordinar agentes), eres el COORDINADOR: no implementas, repartes el objetivo entre agentes hijos lanzándolos por rol (lxo roles, lxo spawn --role …), esperas sus informes, integras y le respondes. Usa la CLI ${lxo} con run_command (siempre esa ruta entre comillas en lugar de lxo). Antes de nada ejecuta ${lxo} guide coordinator y síguela. Para ${lxo} wait usa timeout 600 en run_command y --timeout-ms 540000.`;
 }
 
 /** Antes de mandar `/orquestar`: el orquestador tiene que estar activo, y el
