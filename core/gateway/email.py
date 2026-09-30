@@ -18,7 +18,7 @@ BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 EMAIL_FROM = os.getenv("EMAIL_FROM", "lixbon <no-reply@lixbon.com>")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 # Buzón que recibe los casos del formulario de soporte (/support).
-SUPPORT_INBOX = os.getenv("SUPPORT_INBOX", "soporte@lixbon.com")
+SUPPORT_INBOX = os.getenv("SUPPORT_INBOX", "support@lixbon.com")
 
 _MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
           "agosto", "septiembre", "octubre", "noviembre", "diciembre")
