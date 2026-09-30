@@ -225,25 +225,64 @@ export function promptVisuals(designSystem, locale = 'es') {
 
 // ── Inspector y navegación entre páginas dentro del iframe ───────────────────
 // Se inyecta antes de </body>. Habla con la página padre por postMessage:
-//   lixbon:select   (clic con el inspector activo) → selector, texto, estilos
+//   lixbon:select   (clic con el inspector activo) → selector, clases, medidas,
+//                   estilos del panel y todo el CSS calculado que difiere del
+//                   de un elemento igual recién creado en el mismo sitio
 //   lixbon:navigate (clic en <a href="otra.html">) → cambia de página
-//   lixbon:apply    (padre → iframe) → aplica texto/estilos a un selector
+//   lixbon:apply    (padre → iframe) → aplica texto, clases o estilos a un selector
 const INSPECTOR = String.raw`<script>(function(){
 if (window.parent === window) return;
-var inspect = false, box = document.createElement('div');
-box.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #B4C64E;border-radius:3px;z-index:2147483647;display:none;box-shadow:0 0 0 2px rgba(0,0,0,.25)';
-document.body.appendChild(box);
+var inspect = false, sel = null;
+function caja(css){var b=document.createElement('div');b.style.cssText='position:fixed;pointer-events:none;z-index:2147483647;display:none;border-radius:2px;'+css;document.documentElement.appendChild(b);return b;}
+var hover = caja('outline:1px dashed #B4C64E;outline-offset:1px'), fija = caja('outline:2px solid #B4C64E;outline-offset:2px');
 function path(el){var parts=[];while(el&&el.nodeType===1&&el!==document.body&&el!==document.documentElement){var p=el.parentElement;var i=p?Array.prototype.indexOf.call(p.children,el)+1:1;parts.unshift(el.tagName.toLowerCase()+':nth-child('+i+')');el=p;}return 'body > '+parts.join(' > ');}
-function show(el){var r=el.getBoundingClientRect();box.style.display='block';box.style.left=r.left+'px';box.style.top=r.top+'px';box.style.width=r.width+'px';box.style.height=r.height+'px';}
-document.addEventListener('mousemove',function(e){if(!inspect)return;var el=e.target;if(!el||el===box||el===document.body||el===document.documentElement)return;show(el);},true);
+function ruta(el){var parts=[];while(el&&el.nodeType===1&&el!==document.body&&parts.length<4){var t=el.tagName.toLowerCase();if(el.id)t+='#'+el.id;parts.unshift(t);el=el.parentElement;}return parts.join(' › ');}
+function show(b,el){if(!el){b.style.display='none';return;}var r=el.getBoundingClientRect();b.style.display='block';b.style.left=r.left+'px';b.style.top=r.top+'px';b.style.width=r.width+'px';b.style.height=r.height+'px';}
+var DERIVADAS=/^(width|height|inline-size|block-size|perspective-origin|transform-origin|-webkit-locale)$/;
+var LOGICAS=/(^|-)(block|inline)(-|$)|^inset/;
+var HEREDADAS=/^(color|font|line-height|letter-spacing|word-spacing|text-(align|indent|transform|shadow|rendering|wrap)|white-space|cursor|visibility|direction|quotes|list-style|caret-color|tab-size|hyphens|orphans|widows|-webkit-(font|text|locale|tap|border-horizontal|border-vertical))/;
+// Lo que declara este elemento (clases, reglas, estilo en línea): lo no heredable
+// que difiere de la misma etiqueta sin estilos, y lo heredable que difiere del padre.
+function distinto(el){
+  var cs=getComputedStyle(el),out={},ref=document.createElement(el.tagName);
+  document.documentElement.appendChild(ref);
+  var base=getComputedStyle(ref),padre=el.parentElement?getComputedStyle(el.parentElement):null;
+  var estatico=cs.position==='static',color=cs.color;
+  for(var i=0;i<cs.length;i++){var k=cs[i];if(DERIVADAS.test(k)||LOGICAS.test(k))continue;var v=cs.getPropertyValue(k);
+    if(estatico&&/^(top|right|bottom|left|z-index)$/.test(k))continue;
+    if(/-color$/.test(k)&&k!=='color'&&k!=='background-color'&&v===color)continue;
+    if(HEREDADAS.test(k)){if(padre&&v!==padre.getPropertyValue(k))out[k]=v;}
+    else if(v!==base.getPropertyValue(k))out[k]=v;}
+  ref.remove(); // mismo tick: nunca llega a pintarse
+  return out;
+}
+function enviar(el){
+  var cs=getComputedStyle(el),r=el.getBoundingClientRect();
+  var st={};['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','display',
+  'marginTop','marginRight','marginBottom','marginLeft','paddingTop','paddingRight','paddingBottom','paddingLeft',
+  'borderRadius','borderTopWidth','borderTopColor','borderTopStyle','opacity','width','height','gap'].forEach(function(k){st[k]=cs[k];});
+  parent.postMessage({type:'lixbon:select',selector:path(el),ruta:ruta(el),tag:el.tagName.toLowerCase(),
+    clases:el.getAttribute('class')||'',text:el.children.length===0?el.textContent:'',html:el.outerHTML.slice(0,800),
+    medidas:{w:Math.round(r.width),h:Math.round(r.height)},styles:st,css:distinto(el),inline:el.getAttribute('style')||''},'*');
+}
+document.addEventListener('mousemove',function(e){if(!inspect)return;var el=e.target;if(!el||el===document.body||el===document.documentElement)return;show(hover,el);},true);
 document.addEventListener('click',function(e){
   var a=e.target.closest&&e.target.closest('a[href]');
   if(!inspect&&a){var h=a.getAttribute('href')||'';if(/^[^:\/#][^:]*\.html(#.*)?$/.test(h)){e.preventDefault();parent.postMessage({type:'lixbon:navigate',page:h.split('#')[0]},'*');}return;}
-  if(!inspect)return;e.preventDefault();e.stopPropagation();var el=e.target;if(el===box)return;var cs=getComputedStyle(el);
-  parent.postMessage({type:'lixbon:select',selector:path(el),tag:el.tagName.toLowerCase(),text:el.children.length===0?el.textContent:'',html:el.outerHTML.slice(0,800),styles:{color:cs.color,background:cs.backgroundColor,fontSize:cs.fontSize,fontWeight:cs.fontWeight,padding:cs.padding,borderRadius:cs.borderRadius}},'*');
+  if(!inspect)return;e.preventDefault();e.stopPropagation();var el=e.target;if(el===document.documentElement)return;
+  sel=el;show(fija,el);enviar(el);
 },true);
-function apply(op){var el=document.querySelector(op.selector);if(!el)return;if(op.text!=null)el.textContent=op.text;if(op.style)for(var k in op.style)el.style[k]=op.style[k];}
-window.addEventListener('message',function(e){var m=e.data||{};if(m.type==='lixbon:apply')apply(m);if(m.type==='lixbon:inspect'){inspect=!!m.on;box.style.display='none';}});
+function recolocar(){show(fija,inspect?sel:null);}
+window.addEventListener('scroll',recolocar,true);window.addEventListener('resize',recolocar);
+function apply(op){var el=document.querySelector(op.selector);if(!el)return;
+  if(op.text!=null)el.textContent=op.text;
+  if(op.className!=null)el.setAttribute('class',op.className);
+  if(op.style)for(var k in op.style){if(k.indexOf('-')>=0)el.style.setProperty(k,op.style[k]);else el.style[k]=op.style[k];}
+  return el;}
+window.addEventListener('message',function(e){var m=e.data||{};
+  if(m.type==='lixbon:apply'){var el=apply(m);if(el&&el===sel){recolocar();enviar(el);}}
+  if(m.type==='lixbon:inspect'){inspect=!!m.on;hover.style.display='none';if(!inspect)sel=null;recolocar();}
+  if(m.type==='lixbon:deselect'){sel=null;recolocar();}});
 (window.__lixbonOps||[]).forEach(apply);
 })();</script>`;
 
@@ -261,7 +300,13 @@ export function aplicarOps(html, ops) {
     const el = doc.querySelector(op.selector);
     if (!el) continue;
     if (op.text != null) el.textContent = op.text;
-    if (op.style) for (const k of Object.keys(op.style)) el.style[k] = op.style[k];
+    if (op.className != null) el.setAttribute('class', op.className);
+    if (op.style) {
+      for (const k of Object.keys(op.style)) {
+        if (k.includes('-')) el.style.setProperty(k, op.style[k]);
+        else el.style[k] = op.style[k];
+      }
+    }
   }
   const tieneDoctype = /^\s*<!doctype/i.test(html);
   return `${tieneDoctype ? '<!doctype html>\n' : ''}${doc.documentElement.outerHTML}`;

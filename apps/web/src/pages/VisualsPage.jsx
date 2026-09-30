@@ -186,14 +186,16 @@ export default function VisualsPage() {
   const paginaActual = paginas.length ? (paginas.find((f) => f.name === pagina) || paginas[0]) : null;
   const claveOps = actual && paginaActual ? `${actual.indice}:${paginaActual.name}` : '';
   const opsActuales = useMemo(() => ops[claveOps] || [], [ops, claveOps]);
-  const doc = useMemo(() => documentoPreview(paginaActual, opsActuales), [paginaActual, opsActuales]);
+  // Las ediciones de después se aplican en vivo por postMessage: si entraran en
+  // las dependencias, cada cambio recargaría el iframe y perdería la selección.
+  const doc = useMemo(() => documentoPreview(paginaActual, opsActuales), [paginaActual, claveOps]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (doc) setCargando(true); }, [doc]);
 
   // ── Mensajes del iframe (selección, navegación entre páginas) ──────────
   useEffect(() => {
     const onMessage = (e) => {
       const m = e.data || {};
-      if (m.type === 'lixbon:select') setSeleccion({ selector: m.selector, tag: m.tag, text: m.text, html: m.html, styles: m.styles });
+      if (m.type === 'lixbon:select') { const { type: _tipo, ...datos } = m; setSeleccion(datos); }
       if (m.type === 'lixbon:navigate' && paginas.some((f) => f.name === m.page)) {
         setPagina(m.page);
         setVista('pagina');
@@ -619,7 +621,7 @@ export default function VisualsPage() {
       </header>
       <VerifyBanner />
 
-      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'}`}>
+      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'} ${inspeccion && seleccion ? 'con-inspector' : ''}`}>
         <section className="vis-chat">
           <div className="chat-scroll" ref={scrollRef}>
             <div className="chat-thread vis-thread">
@@ -725,11 +727,19 @@ export default function VisualsPage() {
               </div>
             )}
             {generando && actual && <div className="vis-stage__badge">{t('newVersionOnTheWay')}</div>}
-            {inspeccion && (
-              <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo} onCerrar={() => setSeleccion(null)} />
-            )}
             {inspeccion && !seleccion && <div className="vis-stage__badge">{t('clickToEdit')}</div>}
           </div>
+          {inspeccion && seleccion && (
+            <Inspector
+              seleccion={seleccion}
+              onAplicar={aplicarOp}
+              onPedir={pedirAlModelo}
+              onCerrar={() => {
+                setSeleccion(null);
+                frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:deselect' }, '*');
+              }}
+            />
+          )}
         </section>
       </div>
     </div>
