@@ -2,7 +2,7 @@
 // propio) e inspector del elemento seleccionado en el lienzo.
 import { useEffect, useRef, useState } from 'react';
 import { DESIGN_SYSTEMS, designSystemPersonalizado } from '../lib/visuals';
-import { IconChevron, IconX } from './Icons';
+import { IconChevron, IconSearch, IconX } from './Icons';
 import { useDismiss } from '../hooks/useDismiss';
 import { Desplegable } from './Desplegable';
 import { useT } from '../i18n/useT';
@@ -74,49 +74,288 @@ function swatchDe(ds) {
   return { lixbon: '#B4C64E', editorial: '#B23A2E', minimal: '#111111', corporativo: '#1D4ED8', vibrante: '#FF5A36', tech: '#22D3EE' }[ds.id] || '#888';
 }
 
-/** Panel del elemento seleccionado: texto y estilos básicos, o pedírselo al modelo. */
+const aHex = (color) => {
+  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(color || '');
+  return m ? `#${[m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}` : '#000000';
+};
+const alfaDe = (color) => {
+  const m = /rgba\([^)]*,\s*([\d.]+)\)/.exec(color || '');
+  return m ? Number(m[1]) : 1;
+};
+const transparente = (color) => !color || color === 'transparent' || alfaDe(color) === 0;
+const legibleColor = (color) => {
+  if (transparente(color)) return '';
+  const a = alfaDe(color);
+  return `${aHex(color).toUpperCase()}${a < 1 ? ` ${Math.round(a * 100)}%` : ''}`;
+};
+const primeraFuente = (f) => (f || '').split(',')[0].replace(/["']/g, '').trim();
+const aKebab = (k) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+
+/** Campo de texto que confirma al salir o con Enter; se reinicia al cambiar
+ *  el valor calculado (otra selección, o el iframe devolviendo el nuevo). */
+function Valor({ valor, onCommit, etiqueta, prefijo, mono = true, className = '' }) {
+  const confirmar = (e) => {
+    const v = e.target.value.trim();
+    if (v !== (valor ?? '')) onCommit(v);
+  };
+  return (
+    <label className={`vis-insp__valor ${mono ? 'is-mono' : ''} ${className}`}>
+      {prefijo && <span className="vis-insp__pref" aria-hidden="true">{prefijo}</span>}
+      <input
+        key={valor}
+        defaultValue={valor ?? ''}
+        aria-label={etiqueta}
+        spellCheck={false}
+        onBlur={confirmar}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { e.currentTarget.value = valor ?? ''; e.currentTarget.blur(); } }}
+      />
+    </label>
+  );
+}
+
+function ColorCampo({ valor, onCommit, etiqueta, vacio }) {
+  const sin = transparente(valor);
+  return (
+    <div className="vis-insp__color">
+      <label className={`vis-insp__muestra ${sin ? 'is-vacia' : ''}`} style={sin ? undefined : { background: valor }}>
+        <input type="color" aria-label={etiqueta} value={aHex(valor)} onChange={(e) => onCommit(e.target.value)} />
+      </label>
+      <input
+        key={valor}
+        className="vis-insp__hex"
+        aria-label={etiqueta}
+        defaultValue={legibleColor(valor)}
+        placeholder={vacio}
+        spellCheck={false}
+        onBlur={(e) => { const v = e.target.value.trim(); if (v !== legibleColor(valor)) onCommit(v.replace(/\s+\d+%$/, '') || 'transparent'); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      />
+    </div>
+  );
+}
+
+function Seccion({ titulo, children }) {
+  return (
+    <section className="vis-insp__sec">
+      <h3 className="vis-insp__eyebrow">{titulo}</h3>
+      {children}
+    </section>
+  );
+}
+
+const ALINEACIONES = [
+  { v: 'left', d: 'M4 6h16M4 12h10M4 18h13' },
+  { v: 'center', d: 'M4 6h16M7 12h10M5 18h14' },
+  { v: 'right', d: 'M4 6h16M10 12h10M7 18h13' },
+];
+
+/** Panel del elemento seleccionado: pestaña Diseño (texto, clases, tipografía,
+ *  color, caja) y pestaña CSS con todo lo calculado que no es por defecto. */
 export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
   const t = useT('visuals');
-  const [texto, setTexto] = useState(seleccion?.text || '');
-  const [estilo, setEstilo] = useState({});
-  useEffect(() => { setTexto(seleccion?.text || ''); setEstilo({}); }, [seleccion]);
+  const [pestana, setPestana] = useState('diseno');
+  const [filtro, setFiltro] = useState('');
+  const [nuevaClase, setNuevaClase] = useState('');
+  const [nuevaProp, setNuevaProp] = useState({ k: '', v: '' });
   if (!seleccion) return null;
 
-  const cambiar = (k, v) => {
-    const next = { ...estilo, [k]: v };
-    setEstilo(next);
-    onAplicar({ selector: seleccion.selector, style: { [k]: v } });
-  };
-  const aplicarTexto = () => { if (texto !== seleccion.text) onAplicar({ selector: seleccion.selector, text: texto }); };
-  const aRgbHex = (rgb) => {
-    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb || '');
-    return m ? `#${[m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}` : '#000000';
-  };
+  const st = seleccion.styles || {};
+  const css = seleccion.css || {};
+  const clases = (seleccion.clases || '').split(/\s+/).filter(Boolean);
+  const inline = (seleccion.inline || '').split(';').map((d) => d.trim()).filter(Boolean).map((d) => {
+    const i = d.indexOf(':');
+    return [d.slice(0, i).trim(), d.slice(i + 1).trim()];
+  }).filter(([k]) => k);
+  const estilo = (k, v) => onAplicar({ selector: seleccion.selector, style: { [k]: v } });
+  const ponerClases = (lista) => onAplicar({ selector: seleccion.selector, className: lista.join(' ') });
   const editable = seleccion.text !== '' && seleccion.text != null;
+  const q = filtro.trim().toLowerCase();
+  const calculado = Object.entries(css).filter(([k, v]) => !q || k.includes(q) || String(v).toLowerCase().includes(q));
+  const anadirClase = () => {
+    const nuevas = nuevaClase.split(/\s+/).filter((c) => c && !clases.includes(c));
+    if (nuevas.length) ponerClases([...clases, ...nuevas]);
+    setNuevaClase('');
+  };
+  const anadirProp = () => {
+    const k = nuevaProp.k.trim();
+    if (k && nuevaProp.v.trim()) estilo(k, nuevaProp.v.trim());
+    setNuevaProp({ k: '', v: '' });
+  };
+  const lado = (tipo, l) => st[`${tipo}${l}`];
+  const caja = (tipo, l) => (
+    <Valor valor={lado(tipo, l)} etiqueta={`${tipo} ${l}`} className="vis-insp__lado"
+      onCommit={(v) => estilo(`${tipo}${l}`, /^-?\d+(\.\d+)?$/.test(v) ? `${v}px` : v)} />
+  );
 
   return (
-    <aside className="vis-inspector">
-      <div className="vis-inspector__head">
-        <span className="mono">&lt;{seleccion.tag}&gt;</span>
-        <button className="icon-btn" onClick={onCerrar} aria-label={t('close')}><IconX size={14} /></button>
+    <aside className="vis-insp" aria-label={t('inspTabDesign')}>
+      <div className="vis-insp__cab">
+        <div className="vis-insp__fila">
+          <span className="vis-insp__tag">{seleccion.tag}</span>
+          <span className="vis-insp__ruta" title={seleccion.selector}>{seleccion.ruta || seleccion.selector}</span>
+          <button className="icon-btn" onClick={onCerrar} aria-label={t('inspClose')}><IconX size={14} /></button>
+        </div>
+        <div className="vis-insp__tabs" role="tablist">
+          <button role="tab" aria-selected={pestana === 'diseno'} className={pestana === 'diseno' ? 'is-on' : ''} onClick={() => setPestana('diseno')}>{t('inspTabDesign')}</button>
+          <button role="tab" aria-selected={pestana === 'css'} className={pestana === 'css' ? 'is-on' : ''} onClick={() => setPestana('css')}>{t('inspTabCss')} · {Object.keys(css).length}</button>
+        </div>
+        {pestana === 'css' && (
+          <label className="vis-insp__buscar">
+            <IconSearch size={14} />
+            <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder={t('inspFilter')} aria-label={t('inspFilter')} />
+          </label>
+        )}
       </div>
-      {editable && (
-        <label className="vis-inspector__campo">{t('text')}
-          <textarea rows={3} value={texto} onChange={(e) => setTexto(e.target.value)} onBlur={aplicarTexto} />
-        </label>
-      )}
-      <div className="vis-inspector__grid">
-        <label>{t('color')}<input type="color" value={estilo.color || aRgbHex(seleccion.styles?.color)} onChange={(e) => cambiar('color', e.target.value)} /></label>
-        <label>{t('background')}<input type="color" value={estilo.backgroundColor || aRgbHex(seleccion.styles?.background)} onChange={(e) => cambiar('backgroundColor', e.target.value)} /></label>
-        <label>{t('size')}<input type="text" defaultValue={seleccion.styles?.fontSize} onBlur={(e) => cambiar('fontSize', e.target.value)} /></label>
-        <label>{t('weight')}<select defaultValue={seleccion.styles?.fontWeight} onChange={(e) => cambiar('fontWeight', e.target.value)}>
-          {['300', '400', '500', '600', '700', '800'].map((w) => <option key={w} value={w}>{w}</option>)}
-        </select></label>
-        <label>{t('padding')}<input type="text" defaultValue={seleccion.styles?.padding} onBlur={(e) => cambiar('padding', e.target.value)} /></label>
-        <label>{t('radius')}<input type="text" defaultValue={seleccion.styles?.borderRadius} onBlur={(e) => cambiar('borderRadius', e.target.value)} /></label>
+
+      <div className="vis-insp__cuerpo">
+        {pestana === 'diseno' ? (
+          <>
+            {editable && (
+              <Seccion titulo={t('text')}>
+                <textarea
+                  key={seleccion.selector + seleccion.text}
+                  className="vis-insp__texto"
+                  rows={Math.min(5, Math.max(1, Math.ceil((seleccion.text || '').length / 34)))}
+                  defaultValue={seleccion.text}
+                  aria-label={t('text')}
+                  onBlur={(e) => { if (e.target.value !== seleccion.text) onAplicar({ selector: seleccion.selector, text: e.target.value }); }}
+                />
+              </Seccion>
+            )}
+
+            <Seccion titulo={`${t('inspClasses')} · ${clases.length}`}>
+              <div className="vis-insp__clases">
+                {clases.map((c) => (
+                  <span key={c} className="vis-insp__clase">
+                    {c}
+                    <button aria-label={`${t('inspUndo')} ${c}`} onClick={() => ponerClases(clases.filter((x) => x !== c))}><IconX size={10} /></button>
+                  </span>
+                ))}
+                <input
+                  className="vis-insp__clase-nueva"
+                  value={nuevaClase}
+                  placeholder={t('inspAddClass')}
+                  aria-label={t('inspAddClass')}
+                  spellCheck={false}
+                  onChange={(e) => setNuevaClase(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') anadirClase(); }}
+                  onBlur={anadirClase}
+                />
+              </div>
+            </Seccion>
+
+            <Seccion titulo={t('inspTypography')}>
+              <Valor valor={primeraFuente(st.fontFamily)} etiqueta={t('inspFont')} mono={false} onCommit={(v) => estilo('fontFamily', v)} />
+              <div className="vis-insp__tres">
+                <Valor valor={st.fontSize} prefijo="T" etiqueta={t('size')} onCommit={(v) => estilo('fontSize', v)} />
+                <Valor valor={st.fontWeight} prefijo="P" etiqueta={t('weight')} onCommit={(v) => estilo('fontWeight', v)} />
+                <Valor valor={st.lineHeight} prefijo="L" etiqueta={t('inspLine')} onCommit={(v) => estilo('lineHeight', v)} />
+              </div>
+              <div className="vis-insp__dos-auto">
+                <Valor valor={st.letterSpacing} prefijo={t('inspTracking')} etiqueta={t('inspTracking')} onCommit={(v) => estilo('letterSpacing', v)} />
+                <div className="vis-insp__seg" role="group" aria-label={t('inspAlign')}>
+                  {ALINEACIONES.map((a) => (
+                    <button key={a.v} className={(st.textAlign === a.v || (a.v === 'left' && st.textAlign === 'start')) ? 'is-on' : ''} aria-label={a.v} onClick={() => estilo('textAlign', a.v)}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d={a.d} /></svg>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </Seccion>
+
+            <Seccion titulo={t('inspColors')}>
+              <div className="vis-insp__dos">
+                <ColorCampo valor={st.color} etiqueta={t('color')} onCommit={(v) => estilo('color', v)} />
+                <ColorCampo valor={st.backgroundColor} etiqueta={t('background')} vacio={t('inspNoBg')} onCommit={(v) => estilo('backgroundColor', v)} />
+              </div>
+            </Seccion>
+
+            <Seccion titulo={t('inspSpacing')}>
+              <div className="vis-insp__caja">
+                <span className="vis-insp__caja-nombre">{t('inspMargin')}</span>
+                <div className="vis-insp__caja-v">{caja('margin', 'Top')}</div>
+                <div className="vis-insp__caja-h">
+                  {caja('margin', 'Left')}
+                  <div className="vis-insp__caja vis-insp__caja--dentro">
+                    <span className="vis-insp__caja-nombre">{t('inspPaddingBox')}</span>
+                    <div className="vis-insp__caja-v">{caja('padding', 'Top')}</div>
+                    <div className="vis-insp__caja-h">
+                      {caja('padding', 'Left')}
+                      <span className="vis-insp__medida">{seleccion.medidas ? `${seleccion.medidas.w} × ${seleccion.medidas.h}` : '—'}</span>
+                      {caja('padding', 'Right')}
+                    </div>
+                    <div className="vis-insp__caja-v">{caja('padding', 'Bottom')}</div>
+                  </div>
+                  {caja('margin', 'Right')}
+                </div>
+                <div className="vis-insp__caja-v">{caja('margin', 'Bottom')}</div>
+              </div>
+            </Seccion>
+
+            <Seccion titulo={t('inspBorder')}>
+              <div className="vis-insp__tres">
+                <Valor valor={st.borderRadius} prefijo="R" etiqueta={t('radius')} onCommit={(v) => estilo('borderRadius', v)} />
+                <Valor valor={st.borderTopWidth} prefijo="B" etiqueta={t('inspBorderWidth')} onCommit={(v) => estilo('borderWidth', v)} />
+                <Valor valor={st.opacity} prefijo="O" etiqueta={t('inspOpacity')} onCommit={(v) => estilo('opacity', v)} />
+              </div>
+            </Seccion>
+          </>
+        ) : (
+          <>
+            <Seccion titulo={t('inspClasses')}>
+              <textarea
+                key={seleccion.selector + seleccion.clases}
+                className="vis-insp__texto vis-insp__texto--mono"
+                rows={Math.min(6, Math.max(2, Math.ceil((seleccion.clases || '').length / 34)))}
+                defaultValue={seleccion.clases}
+                placeholder={t('inspNoClasses')}
+                aria-label={t('inspClasses')}
+                spellCheck={false}
+                onBlur={(e) => { const v = e.target.value.trim().replace(/\s+/g, ' '); if (v !== (seleccion.clases || '').trim()) onAplicar({ selector: seleccion.selector, className: v }); }}
+              />
+            </Seccion>
+
+            {inline.length > 0 && (
+              <Seccion titulo={`${t('inspEdited')} · ${inline.length}`}>
+                <div className="vis-insp__props">
+                  {inline.map(([k, v]) => (
+                    <div key={k} className="vis-insp__prop is-editada">
+                      <span className="vis-insp__prop-k">{k}</span>
+                      <Valor valor={v} etiqueta={k} onCommit={(nv) => estilo(k, nv)} />
+                      <button className="vis-insp__quitar" aria-label={`${t('inspUndo')} ${k}`} onClick={() => estilo(k, '')}><IconX size={11} /></button>
+                    </div>
+                  ))}
+                </div>
+              </Seccion>
+            )}
+
+            <Seccion titulo={t('inspComputed')}>
+              <div className="vis-insp__props">
+                {calculado.length === 0 && <p className="vis-insp__vacio">{t('inspNoCss')}</p>}
+                {calculado.map(([k, v]) => (
+                  <div key={k} className="vis-insp__prop">
+                    <span className="vis-insp__prop-k" title={k}>{k}</span>
+                    <Valor valor={v} etiqueta={k} onCommit={(nv) => estilo(k, nv)} />
+                  </div>
+                ))}
+                <div className="vis-insp__prop vis-insp__prop--nueva">
+                  <input value={nuevaProp.k} placeholder={t('inspPropName')} aria-label={t('inspPropName')} spellCheck={false}
+                    onChange={(e) => setNuevaProp({ ...nuevaProp, k: aKebab(e.target.value) })} />
+                  <input value={nuevaProp.v} placeholder={t('inspPropValue')} aria-label={t('inspPropValue')} spellCheck={false}
+                    onChange={(e) => setNuevaProp({ ...nuevaProp, v: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') anadirProp(); }} />
+                </div>
+                <button className="vis-insp__anadir" onClick={anadirProp} disabled={!nuevaProp.k.trim() || !nuevaProp.v.trim()}>{t('inspAddProp')}</button>
+              </div>
+            </Seccion>
+          </>
+        )}
       </div>
-      <button className="vis-tool" onClick={() => onPedir(seleccion)}>{t('requestModelChange')}</button>
-      <p className="vis-inspector__nota">{t('manualChangesNote')}</p>
+
+      <div className="vis-insp__pie">
+        <button className="vis-insp__pedir" onClick={() => onPedir(seleccion)}>{t('requestModelChange')}</button>
+        <p className="vis-insp__nota">{t('manualChangesNote')}</p>
+      </div>
     </aside>
   );
 }
