@@ -313,6 +313,21 @@ p {
   background-clip: content-box;
 }
 
+/* La página entera se desplaza sin barra: rueda, trackpad, teclado y táctil
+   siguen funcionando; solo desaparece el carril del borde derecho. Los
+   paneles internos (chat, listas, código) conservan su barra discreta. */
+html,
+body,
+#root {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar {
+  display: none;
+}
+
 /* Foco visible solo al navegar con teclado, y sin dibujar bordes: un halo
    por fuera de la caja, que no empuja el layout. */
 :focus-visible {
