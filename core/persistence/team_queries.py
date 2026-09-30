@@ -23,6 +23,7 @@ from typing import Any
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
+from core.persistence import team_issues as ti
 from core.persistence.database import get_session
 from core.persistence.models import (
     IdeAuthToken,
@@ -256,6 +257,7 @@ def _proyecto_salida(s, p: TeamProyecto, uid: int, presencia) -> dict[str, Any]:
         "linear_team_id": p.linear_team_id, "linear_project_id": p.linear_project_id,
         "creado_en": p.creado_en,
         "rol": mio.rol if mio else "integrante",
+        "tablero": ti.tablero_salida(s, p),
         "canales": [_canal_salida(s, c, uid, presencia) for c in canales],
         "miembros": [
             {"usuario": usuario_publico(gente.get(m.usuario_id)), "rol": m.rol,
@@ -330,7 +332,7 @@ def bootstrap(uid: int, presencia_real: str, presencia) -> dict[str, Any]:
 
 # ── Proyectos ──────────────────────────────────────────────────────────────
 
-def crear_proyecto(uid: int, nombre: str) -> str:
+def crear_proyecto(uid: int, nombre: str, issues: dict[str, Any] | None = None) -> str:
     """El que lo crea queda como líder y se crea el canal #general: un proyecto
     sin ningún canal es una pantalla vacía sin nada que hacer."""
     ts = now_iso()
@@ -343,6 +345,10 @@ def crear_proyecto(uid: int, nombre: str) -> str:
         s.add(TeamMiembro(proyecto_id=pid, usuario_id=uid, rol="lider", desde=ts))
         s.add(TeamCanal(id=_id("c"), proyecto_id=pid, nombre="general", tipo="publico",
                         tema="Todo el equipo", creado_en=ts))
+    # El equipo nace con sus issues configuradas: lo que eligió el asistente o,
+    # si no eligió nada, lo de siempre.
+    issues = issues or {}
+    ti.preparar_proyecto(pid, issues.get("prefijo"), issues.get("config"), issues.get("etiquetas"))
     return pid
 
 
