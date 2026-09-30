@@ -36,6 +36,7 @@ import RemotePage from './pages/RemotePage';
 import NotFoundPage from './pages/NotFoundPage';
 import LegalPage from './pages/LegalPage';
 import StatusPage from './pages/StatusPage';
+import SupportPage from './pages/SupportPage';
 
 // Árbol de rutas públicas y de app: se monta dos veces (ver AppRoutes), una
 // vez en / (español, idioma por defecto) y otra en /en (inglés). El slug es
@@ -77,6 +78,7 @@ function LocalizedRoutes() {
       <Route path="/apps" element={<DownloadsPage />} />
       <Route path="/news" element={<ReleasesPage />} />
       <Route path="/status" element={<StatusPage />} />
+      <Route path="/support" element={<SupportPage />} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/docs/:section" element={<DocsPage />} />
       <Route path="/legal" element={<Navigate to="/legal/privacy" replace />} />
@@ -110,6 +112,7 @@ export function AppRoutes() {
               <Route path="/aplicaciones" element={<Navigate to="/apps" replace />} />
               <Route path="/descargas" element={<Navigate to="/apps" replace />} />
               <Route path="/novedades" element={<Navigate to="/news" replace />} />
+              <Route path="/soporte" element={<Navigate to="/support" replace />} />
               <Route path="/login" element={<Navigate to="/auth" replace />} />
               <Route path="/register" element={<Navigate to="/auth?mode=register" replace />} />
 

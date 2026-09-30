@@ -480,8 +480,8 @@ export default function ChatPage() {
               {/* Dentro del compositor: se apoya en su borde superior y lo sigue
                   cuando la caja crece o el teclado móvil la empuja. */}
               {showJump && (
-                <button className="chat-jump" onClick={jumpToBottom}>
-                  {t('jumpMore')} <IconArrowDown size={14} />
+                <button className="chat-jump" onClick={jumpToBottom} aria-label={t('jumpMore')} title={t('jumpMore')}>
+                  <IconArrowDown size={16} />
                 </button>
               )}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}

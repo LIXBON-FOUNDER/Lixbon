@@ -487,3 +487,71 @@ def recarga_automatica_fallida(*, pack_nombre: str, url_facturacion: str) -> tup
             envoltura(eyebrow="Facturación", titulo="No pudimos recargar tu saldo",
                       cuerpo_html=cuerpo),
             texto)
+
+
+def _mensaje_citado(mensaje: str) -> str:
+    # El texto del usuario tal cual, escapado y con sus saltos de línea.
+    return caja(
+        f'<div style="font-family:{TIPO};font-size:14px;line-height:1.65;color:{TINTA};'
+        f'white-space:pre-wrap;word-break:break-word;">{_esc(mensaje)}</div>'
+    )
+
+
+def soporte_caso(*, ticket: str, categoria: str, asunto: str, mensaje: str, correo: str,
+                 nombre: str | None, plan: str | None, user_id: int | None,
+                 pagina: str | None, dispositivo: str, cuando: str) -> tuple[str, str, str]:
+    """El caso tal como llega al buzón de soporte. Responder va al usuario."""
+    datos = [
+        ("Caso", f'<span style="font-family:{MONO};">{_esc(ticket)}</span>'),
+        ("Tipo", _esc(categoria)),
+        ("De", _esc(f"{nombre} <{correo}>" if nombre else correo)),
+        ("Cuenta", _esc(f"#{user_id} · plan {plan or '—'}") if user_id else "Sin sesión"),
+        ("Cuándo", _esc(cuando)),
+        ("Desde", _esc(dispositivo)),
+    ]
+    if pagina:
+        datos.append(("Página", _esc(pagina)))
+    cuerpo = (
+        caja(filas_dato(datos), relleno="6px 20px")
+        + raya("24px 0 18px")
+        + _mensaje_citado(mensaje)
+        + parrafo("Responde a este correo para contestarle directamente.",
+                  tamano=13, color=APAGADO, margen="18px 0 0")
+    )
+    texto = (
+        f"[{ticket}] {categoria}: {asunto}\n"
+        f"De: {nombre + ' ' if nombre else ''}<{correo}>\n"
+        f"Cuenta: {'#' + str(user_id) if user_id else 'sin sesión'} · plan {plan or '—'}\n"
+        f"Cuándo: {cuando}\nDesde: {dispositivo}\n"
+        + (f"Página: {pagina}\n" if pagina else "")
+        + f"\n{mensaje}\n"
+    )
+    return (f"[{ticket}] {categoria} — {asunto}",
+            envoltura(eyebrow=f"Soporte · {categoria}", titulo=asunto, cuerpo_html=cuerpo),
+            texto)
+
+
+def soporte_acuse(*, ticket: str, categoria: str, asunto: str, mensaje: str) -> tuple[str, str, str]:
+    """El acuse que recibe el usuario: número de caso y copia de lo que envió."""
+    cuerpo = (
+        parrafo("Recibimos tu mensaje y ya está con el equipo. Te respondemos a este mismo "
+                "correo, normalmente en menos de 24 horas hábiles.")
+        + caja(filas_dato([
+            ("Caso", f'<span style="font-family:{MONO};">{_esc(ticket)}</span>'),
+            ("Tipo", _esc(categoria)),
+            ("Asunto", _esc(asunto)),
+        ]), relleno="6px 20px")
+        + raya("24px 0 18px")
+        + parrafo("Lo que nos enviaste:", tamano=13, color=APAGADO, margen="0 0 10px")
+        + _mensaje_citado(mensaje)
+        + parrafo("Si quieres añadir algo, responde a este correo y se sumará al mismo caso.",
+                  tamano=13, color=APAGADO, margen="18px 0 0")
+    )
+    texto = (
+        f"Recibimos tu mensaje ({ticket}).\n\n"
+        f"Tipo: {categoria}\nAsunto: {asunto}\n\n{mensaje}\n\n"
+        "Te respondemos a este mismo correo, normalmente en menos de 24 horas hábiles.\n"
+    )
+    return (f"Recibimos tu mensaje [{ticket}] — lixbon",
+            envoltura(eyebrow="Soporte", titulo="Tenemos tu caso", cuerpo_html=cuerpo),
+            texto)
