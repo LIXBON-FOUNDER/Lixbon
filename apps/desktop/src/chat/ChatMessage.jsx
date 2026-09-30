@@ -444,8 +444,6 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
           <ChatMarkdown>{message.content}</ChatMarkdown>
           {streaming && <span className="msg__caret" aria-hidden="true" />}
         </>
-      ) : message.vision ? (
-        <LiveStatus text="Analizando la imagen…" />
       ) : message.generating ? (
         <LiveStatus text={`Generando cambio… (${(message.generating / 1000).toFixed(1)}k caracteres)`} />
       ) : (

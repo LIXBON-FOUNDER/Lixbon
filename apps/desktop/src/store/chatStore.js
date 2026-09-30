@@ -38,7 +38,6 @@ import {
 import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
 import { useMcpStore, mcpToolSchemas, mcpPromptSection } from './mcpStore';
 import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib/agentContext';
-import { describeImages } from '../lib/vision';
 import { makeClaudeStore } from './claudeSession';
 import { orchPromptSection, isLxoCommand } from './orchStore';
 import { questionOf } from '../lib/docBlocks';
@@ -360,46 +359,21 @@ function makeChatStore() {
       const isFirstExchange = !conversationId;
       const agentActive = !!workspaceRoot;
 
-      // ── Sub-agente de visión: si hay imágenes, un modelo multimodal las
-      //    describe en texto para que el modelo de texto (qwen…) las entienda. ──
+      // Las imágenes van tal cual al modelo del chat, que es multimodal; no hay
+      // un modelo aparte que las describa.
       const userMsg = {
         role: 'user',
         content: text.trim(),
         context: context ? { name: context.name, selection: context.isSelection } : null,
         images: hasImages ? images.map((im) => im.dataUrl) : null,
-        // Aquí y no más abajo: con imágenes el mensaje se publica antes de
-        // describirlas y la burbuja ya no se volvería a pintar.
         mentions: mentions?.length ? mentions.map((m) => m.name) : undefined,
       };
-      let visionText = '';
-      if (hasImages) {
-        const visionModel = appState.effectiveVisionModel();
-        if (!visionModel) {
-          // Qué falta en el clúster es cosa nuestra (el gateway lo registra);
-          // al usuario solo se le dice qué puede hacer.
-          set({ messages: [...messages, userMsg, {
-            role: 'error',
-            content: 'Ahora mismo lixbon no puede leer imágenes. Describe lo que muestra o inténtalo de nuevo en un rato.',
-          }] });
-          return;
-        }
-        abortController = new AbortController();
-        set({ messages: [...messages, userMsg, { role: 'assistant', content: '', vision: true }], streaming: true, conversationId: convId });
-        try {
-          const desc = await describeImages({
-            serverUrl, apiKey, model: visionModel,
-            images: images.map((im) => im.base64),
-            signal: abortController.signal,
-          });
-          visionText = `[El usuario adjuntó ${images.length} imagen(es). Un modelo de visión (${visionModel}) las describió así:\n${desc}\n]\n\n`;
-        } catch (err) {
-          abortController = null;
-          if (err.name === 'AbortError') { set({ messages: get().messages.slice(0, -1), streaming: false }); return; }
-          set({ messages: [...get().messages.slice(0, -1), { role: 'error', content: `Visión: ${err.message}` }], streaming: false });
-          return;
-        }
-        // Quita la burbuja de estado "viendo imagen"; sigue el flujo normal
-        set({ messages: get().messages.slice(0, -1), streaming: false });
+      if (hasImages && !appState.supportsImages(currentModel)) {
+        set({ messages: [...messages, userMsg, {
+          role: 'error',
+          content: 'Este modelo no puede ver imágenes. Elige otro en el selector de modelo o describe lo que muestra.',
+        }] });
+        return;
       }
 
       let modelText = text.trim() || '(ver la imagen adjunta)';
@@ -440,8 +414,6 @@ function makeChatStore() {
         }
       }
 
-      // La descripción de la imagen (del sub-agente de visión) va primero
-      if (visionText) modelText = visionText + modelText;
 
       const history = [...messages, userMsg];
       set({ messages: [...history, { role: 'assistant', content: '', sources: null }], streaming: true, conversationId: convId });
@@ -451,7 +423,7 @@ function makeChatStore() {
       // por una versión podada a mitad de turno.
       let modelMessages = [
         ...buildModelHistory(history.slice(0, -1), agentActive),
-        { role: 'user', content: modelText },
+        { role: 'user', content: modelText, ...(hasImages ? { images: images.map((im) => im.base64) } : {}) },
       ];
       if (agentActive) {
         const mcp = chatMode === 'agent' ? mcpPromptSection() : '';

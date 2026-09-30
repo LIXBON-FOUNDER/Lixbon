@@ -2,8 +2,8 @@ import { create } from 'zustand';
 import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
-import { detectVisionModel, modelId } from '../lib/vision';
-import { fetchModelRoles, roleModel, normalizeModel } from '../lib/modelRoles';
+import { modelId } from '../lib/vision';
+import { fetchModelRoles, normalizeModel } from '../lib/modelRoles';
 import { fetchMe } from '../lib/account';
 import { useWorkbenchStore } from './workbenchStore';
 
@@ -198,12 +198,11 @@ export const useAppStore = create((set, get) => ({
     return roles;
   },
 
-  /** Modelo de visión: el del rol `vision` del gateway, o autodetectado de la
-      lista (por capability, y solo si no, por nombre). */
-  effectiveVisionModel: () => {
-    const { availableModels, modelRoles } = get();
-    if (modelRoles) return roleModel(modelRoles, 'vision');
-    return detectVisionModel(availableModels);
+  /** ¿El modelo ve imágenes? Solo se descarta si el catálogo dice que no;
+      sin datos se le mandan igual (los modelos que usamos son multimodales). */
+  supportsImages: (model = get().currentModel) => {
+    const caps = catalogEntry(get().availableModels, model)?.capabilities;
+    return !Array.isArray(caps) || caps.length === 0 || caps.includes('vision');
   },
 
   /** Ventana de contexto del modelo actual: la que el gateway le aplica
