@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
-import { useOrchStore, taskTree, isFinal, AGENT_LABELS, STATUS_LABELS } from '../store/orchStore';
+import { useOrchStore, taskTree, isFinal, AGENT_LABELS, STATUS_LABELS, ROLE_LABELS } from '../store/orchStore';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
@@ -110,7 +110,7 @@ function TaskRow({ task, selected, onSelect, asking, now }) {
       <span className="orch__task-main">
         <span className="orch__task-title">{task.title || task.id}</span>
         <span className="orch__task-meta">
-          {agentLabel(task.agent)}{task.model ? ` · ${task.model}` : ''}
+          {task.role ? `${ROLE_LABELS[task.role] || task.role} · ` : ''}{agentLabel(task.agent)}{task.model ? ` · ${task.model}` : ''}
           {phase && !final ? <> · <span className="orch__task-phase">{phase.name}</span></> : ''}
         </span>
       </span>
@@ -272,7 +272,7 @@ function TaskView({ task, snap }) {
           <span className="panelhead__title">{task.title || task.id}</span>
           <span className="panelhead__meta">
             <span className={`orch__state orch__state--${task.status}`}>{STATUS_LABELS[task.status] || task.status} · {elapsed(task, now)}</span>
-            <span className="mono">{task.id}</span> · {agentLabel(task.agent)}{task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''}
+            <span className="mono">{task.id}</span> · {task.role ? `${ROLE_LABELS[task.role] || task.role} · ` : ''}{agentLabel(task.agent)}{task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''}
             {parent ? ` · hija de ${parent.title || parent.id}` : ' · coordinador'}
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>

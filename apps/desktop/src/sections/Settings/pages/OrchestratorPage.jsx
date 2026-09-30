@@ -1,10 +1,57 @@
-// OrchestratorPage.jsx — Ajustes → Orquestador (experimental). No hay nada que
-// configurar del equipo: el coordinador elige agente y modelo por tarea. Aquí
-// solo se activa, se ve qué agentes tiene a su alcance y qué se notifica.
+// OrchestratorPage.jsx — Ajustes → Orquestador (experimental). Aquí se activa,
+// se asigna modelo y esfuerzo a cada rol del equipo (el coordinador lanza hijas
+// por rol y no puede cambiarlos) y se elige qué se notifica.
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useOrchStore } from '../../../store/orchStore';
 import { Switch } from '../../../components/Switch';
+import { Select } from '../../../components/Select';
+
+const EFFORT_LABELS = { low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo' };
+
+/** Modelo y esfuerzo de cada rol. Todos corren en Claude Code por ahora. */
+function Roles({ roles, settings, claude, onSave }) {
+  const models = claude?.models?.length ? claude.models.map((m) => m.id) : ['haiku', 'sonnet', 'opus'];
+  const efforts = claude?.efforts?.length ? claude.efforts : Object.keys(EFFORT_LABELS);
+  const save = (id, patch) => {
+    const current = settings.roles?.[id] || { model: roles.find((r) => r.id === id)?.model || '', effort: roles.find((r) => r.id === id)?.effort || '' };
+    onSave({ roles: { ...settings.roles, [id]: { ...current, ...patch } } });
+  };
+  return (
+    <section className="ssec rise rise--2">
+      <span className="ssec__label">Roles del equipo</span>
+      <div className="ssec ssec--card ssec--rows">
+        <span className="srow__hint orch__intro">
+          El coordinador es el chat donde escribes <span className="mono">/orquestar</span>: planifica con el modelo de ese chat y
+          lanza a cada hija por rol. El modelo de cada rol lo decides tú aquí; el coordinador no puede cambiarlo. Pon lo barato en
+          lo que solo lee y reserva el modelo caro para cuando haga falta.
+        </span>
+        {roles.map((r) => {
+          const opts = [...new Set([...models, r.model])].map((id) => ({ value: id, label: id }));
+          return (
+            <div key={r.id} className="srow">
+              <div className="srow__text">
+                <span className="srow__label">
+                  {r.label} {r.read_only && <span className="orch__pill is-ok">Solo lectura</span>}
+                </span>
+                <span className="srow__hint">{r.purpose}</span>
+              </div>
+              <div className="ssec__actions">
+                <Select value={r.model} onChange={(model) => save(r.id, { model })} options={opts} title={`Modelo del ${r.label.toLowerCase()}`} />
+                <Select
+                  value={r.effort || ''}
+                  onChange={(effort) => save(r.id, { effort })}
+                  options={[{ value: '', label: 'Esfuerzo por defecto' }, ...efforts.map((e) => ({ value: e, label: `Esfuerzo ${(EFFORT_LABELS[e] || e).toLowerCase()}` }))]}
+                  title={`Esfuerzo del ${r.label.toLowerCase()}`}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function SkillRow({ a, onInstall, onRemove }) {
   const state = a.installed ? (a.outdated ? 'Desactualizada' : 'Instalada') : 'Sin instalar';
@@ -22,7 +69,8 @@ function SkillRow({ a, onInstall, onRemove }) {
   );
 }
 
-function Team({ enabled }) {
+/** Agentes instalados y sus modelos (la consulta a cada CLI tarda; Rust la cachea). */
+function useTeam(enabled) {
   const [agents, setAgents] = useState(null);
   const [loading, setLoading] = useState(false);
   const load = async (refresh = false) => {
@@ -34,6 +82,11 @@ function Team({ enabled }) {
     setLoading(false);
   };
   useEffect(() => { if (enabled) load(); }, [enabled]);
+  return { agents, loading, load };
+}
+
+function Team({ enabled, team }) {
+  const { agents, loading, load } = team;
 
   return (
     <section className="ssec rise rise--2">
@@ -45,8 +98,8 @@ function Team({ enabled }) {
       <div className="ssec ssec--card ssec--rows">
         <span className="srow__hint orch__intro">
           Lixbon pregunta a cada CLI instalada qué modelos ofrece. El coordinador elige de aquí el agente y el modelo de cada
-          tarea (por ejemplo Opus para programar y Haiku para leer o documentar) y los lanza en
-          autónomo, sin pedir permisos, cada uno en su propio worktree.
+          tarea cuando no usa un rol (solo si se lo pides) y los lanza en autónomo, sin pedir permisos, cada uno en su propio
+          worktree.
         </span>
         {!enabled && <span className="srow__hint">Activa el orquestador para consultarlos.</span>}
         {enabled && agents === null && <span className="srow__hint">Consultando a cada agente…</span>}
@@ -71,6 +124,7 @@ function Team({ enabled }) {
 export function OrchestratorPage() {
   const { snap, agents, init, loadAgents, saveSettings, installSkill, uninstallSkill } = useOrchStore();
   const settings = snap?.settings;
+  const team = useTeam(!!settings?.enabled);
 
   useEffect(() => { init(); loadAgents(); }, [init, loadAgents]);
   useEffect(() => { if (settings?.enabled) loadAgents(); }, [settings?.enabled, loadAgents]);
@@ -110,7 +164,9 @@ export function OrchestratorPage() {
         </div>
       </section>
 
-      <Team enabled={!!settings.enabled} />
+      <Roles roles={snap.roles || []} settings={settings} claude={team.agents?.find((a) => a.id === 'claude')} onSave={saveSettings} />
+
+      <Team enabled={!!settings.enabled} team={team} />
 
       <section className="ssec rise rise--3">
         <div className="ssec__row">

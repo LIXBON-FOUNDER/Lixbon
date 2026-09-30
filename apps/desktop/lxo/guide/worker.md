@@ -33,6 +33,16 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
    ## Cómo lo verifiqué (comandos y su resultado)
    ## Pendiente y decisiones para el coordinador
    ```
+   Si tu encargo dice que eres de **solo lectura** (explorador, revisor), no puedes escribir
+   archivos: manda el informe por stdin en el paso 7 con `--report -` y sé breve (rutas con
+   línea y conclusiones, no bloques de código):
+   ```
+   lxo done --summary "Una frase" --report - <<'EOF'
+   # <tu-id> · <título>
+   ## Resultado
+   ...
+   EOF
+   ```
 7. **Cierra exactamente una vez**:
    ```
    lxo done --report .lixbon/informe-<tu-id>.md --summary "Una frase con el resultado"

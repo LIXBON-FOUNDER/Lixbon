@@ -16,7 +16,9 @@ const HELP: &str = "lxo · orquestador de agentes de Lixbon
 
 Coordinador (el agente con el que habla el usuario):
   lxo run create --objective \"...\" --agent <tu agente>
-  lxo agents [--refresh]                          agentes instalados y sus modelos
+  lxo roles                                       roles del equipo y el modelo que les asignó el usuario
+  lxo spawn --role <rol> --task \"...\" [--name \"...\"] [--base <rama>]
+  lxo agents [--refresh]                          agentes instalados y sus modelos (solo sin --role)
   lxo spawn --agent <id> --task \"...\" [--model <id>] [--effort <nivel>] [--name \"...\"] [--shared] [--base <rama>]
   lxo wait [--types done,question,exited,phase] [--timeout-ms 540000]
   lxo reply <id-pregunta> \"respuesta\"
@@ -30,6 +32,7 @@ Tarea hija:
   lxo ask \"pregunta\" [--timeout-ms N]   (lxo ask --resume <id> para seguir esperando)
   lxo check
   lxo done --report <informe.md> --summary \"...\" [--failed] [--files a,b]
+  lxo done --report - --summary \"...\" <<'EOF' … EOF   (solo lectura: informe por stdin)
 
 Siempre:
   lxo guide [coordinator|worker]   guía completa (léela antes de empezar)
@@ -170,7 +173,7 @@ fn human(cmd: &str, data: &Value) -> String {
                 _ => "No eres una tarea todavía: si vas a coordinar, empieza con `lxo run create`".into(),
             };
             format!(
-                "Lixbon {} · orquestador activo\n{who}\nPara ver agentes y modelos disponibles: lxo agents",
+                "Lixbon {} · orquestador activo\n{who}\nPara ver los roles del equipo y sus modelos: lxo roles",
                 data["version"].as_str().unwrap_or("")
             )
         }
@@ -197,10 +200,23 @@ fn human(cmd: &str, data: &Value) -> String {
                 )
             }).collect::<Vec<_>>().join("\n\n")
         }
+        "roles" => {
+            let list = data["roles"].as_array().cloned().unwrap_or_default();
+            let rows: Vec<String> = list.iter().map(|r| format!(
+                "{} · {}{}{}\n  {}",
+                r["id"].as_str().unwrap_or(""),
+                r["model"].as_str().unwrap_or(""),
+                r["effort"].as_str().map(|e| format!(" · esfuerzo {e}")).unwrap_or_default(),
+                if r["read_only"].as_bool() == Some(true) { " · solo lectura (sin rama)" } else { " · rama y worktree propios" },
+                r["purpose"].as_str().unwrap_or("")
+            )).collect();
+            format!("{}\n\nLanza con: lxo spawn --role <rol> --name \"...\" --task \"...\"", rows.join("\n"))
+        }
         "continue" => format!("Nuevo encargo enviado a {}: lo verás llegar con lxo wait como otro done.", data["task"].as_str().unwrap_or("")),
         "spawn" => format!(
-            "Hija {} lanzada con {}{} [{}]{}{}",
+            "Hija {} lanzada {}con {}{} [{}]{}{}",
             data["task"].as_str().unwrap_or(""),
+            data["role"].as_str().map(|r| format!("como {r} ")).unwrap_or_default(),
             data["agent"].as_str().unwrap_or(""),
             data["model"].as_str().map(|m| format!(" · {m}")).unwrap_or_default(),
             data["status"].as_str().unwrap_or(""),
@@ -287,9 +303,11 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             ("run_create", data)
         }
         "agents" => ("agents", call("agents", json!({ "refresh": a.b("refresh") }), me)?),
+        "roles" => ("roles", call("roles", json!({}), me)?),
         "spawn" => ("spawn", call("spawn", json!({
             "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
-            "agent": need(a.s("agent"), "--agent (mira `lxo agents`)")?,
+            "role": a.s("role"),
+            "agent": if a.s("role").is_some() { a.s("agent") } else { Some(need(a.s("agent"), "--role (mira `lxo roles`) o --agent (mira `lxo agents`)")?) },
             "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
         }), me)?),
         "continue" => ("continue", call("continue", json!({
@@ -302,12 +320,21 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         }
         "done" => {
             let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
-            let report = a.s("report").unwrap_or_default();
+            let mut report = a.s("report").unwrap_or_default();
             let summary = a.s("summary").unwrap_or_default();
-            if report.is_empty() && summary.is_empty() {
+            // `--report -`: el informe llega por stdin (las hijas de solo lectura no escriben archivos).
+            let mut report_text = String::new();
+            if report == "-" {
+                std::io::stdin().read_to_string(&mut report_text).map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
+                if report_text.trim().is_empty() {
+                    return Err("--report - espera el informe por stdin: lxo done --summary \"...\" --report - <<'EOF' … EOF".into());
+                }
+                report.clear();
+            }
+            if report.is_empty() && report_text.is_empty() && summary.is_empty() {
                 return Err("Falta --report <informe.md> (y --summary con una frase).".into());
             }
-            ("done", call("done", json!({ "summary": summary, "report": report, "failed": a.b("failed"), "files": files }), me)?)
+            ("done", call("done", json!({ "summary": summary, "report": report, "report_text": report_text, "failed": a.b("failed"), "files": files }), me)?)
         }
         "ask" => {
             let q = call("ask", json!({ "question": need(sub(1).or_else(|| a.s("question")), "la pregunta")? }), me)?;
@@ -397,5 +424,9 @@ mod tests {
         let a = p(&["merge", "t3", "--squash", "--json"]);
         assert_eq!(a.at(1).as_deref(), Some("t3"));
         assert!(a.b("squash") && a.b("json"));
+        let a = p(&["done", "--summary", "ok", "--report", "-"]);
+        assert_eq!(a.s("report").as_deref(), Some("-"));
+        let a = p(&["spawn", "--role", "explorador", "--task", "x"]);
+        assert_eq!(a.s("role").as_deref(), Some("explorador"));
     }
 }

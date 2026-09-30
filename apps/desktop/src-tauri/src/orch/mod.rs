@@ -7,11 +7,12 @@
 mod agents;
 mod git;
 mod pty;
+mod roles;
 mod server;
 mod skill;
 pub mod state;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -41,11 +42,13 @@ pub struct Settings {
     pub notify_phases: bool,
     pub notify_done: bool,
     pub notify_questions: bool,
+    /// Modelo y esfuerzo de cada rol del equipo (ver `roles.rs`).
+    pub roles: BTreeMap<String, roles::RoleCfg>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { enabled: false, notify_phases: true, notify_done: true, notify_questions: true }
+        Self { enabled: false, notify_phases: true, notify_done: true, notify_questions: true, roles: roles::defaults() }
     }
 }
 
@@ -295,6 +298,7 @@ impl Core {
                     agent,
                     model: None,
                     effort: None,
+                    role: None,
                     title: objective.chars().take(60).collect(),
                     spec: objective.clone(),
                     repo,
@@ -310,6 +314,7 @@ impl Core {
             }
             "spawn" => self.spawn(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
+            "roles" => Ok(roles::describe(&self.settings().roles)),
             "continue" => self.follow_up(&caller, args),
             "phase" => {
                 let me = Self::me(&caller)?;
@@ -328,7 +333,7 @@ impl Core {
                     .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
                     .unwrap_or_default();
                 let summary = s(args, "summary");
-                let report = self.store_report(&me, &s(args, "report"), &summary)?;
+                let report = self.store_report(&me, &s(args, "report"), &s(args, "report_text"), &summary)?;
                 let mut st = self.lock();
                 let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
                 self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
@@ -487,23 +492,39 @@ impl Core {
         if spec.is_empty() {
             return Err("Falta --task con el encargo completo de la hija".into());
         }
-        let agent = s(args, "agent");
-        if agent.is_empty() {
-            return Err("Falta --agent: elige uno de `lxo agents` según la tarea".into());
-        }
-        let model = Some(s(args, "model")).filter(|m| !m.is_empty());
-        let effort = Some(s(args, "effort")).filter(|m| !m.is_empty());
+        let role = Some(s(args, "role")).filter(|r| !r.is_empty());
+        let (agent, model, effort, read_only) = match &role {
+            // Con rol, agente, modelo y esfuerzo los fija el usuario en Ajustes: el
+            // coordinador no puede cambiarlos (es donde se controla el gasto).
+            Some(id) => {
+                if !s(args, "model").is_empty() || !s(args, "effort").is_empty() || !s(args, "agent").is_empty() {
+                    return Err(format!(
+                        "Con --role {id} no pases --agent, --model ni --effort: los fija el usuario en Ajustes → Orquestador (míralos con lxo roles)"
+                    ));
+                }
+                let r = roles::resolve(&self.settings().roles, id)?;
+                (roles::AGENT.to_string(), Some(r.model), r.effort, r.spec.read_only)
+            }
+            None => {
+                let agent = s(args, "agent");
+                if agent.is_empty() {
+                    return Err("Falta --role (mira `lxo roles`) o --agent (mira `lxo agents`)".into());
+                }
+                (agent, Some(s(args, "model")).filter(|m| !m.is_empty()), Some(s(args, "effort")).filter(|m| !m.is_empty()), false)
+            }
+        };
         // Se valida antes de crear nada: un agente o modelo mal escrito no deja restos.
-        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x")?;
+        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", read_only)?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
-        let shared = b(args, "shared");
+        // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
+        let shared = b(args, "shared") || read_only;
 
         let (id, parent) = {
             let mut st = self.lock();
             let parent = st.task(&parent_id)?.clone();
             let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
-                agent: agent.clone(), model: model.clone(), effort: effort.clone(), title: title.clone(), spec: spec.clone(),
+                agent: agent.clone(), model: model.clone(), effort: effort.clone(), role: role.clone(), title: title.clone(), spec: spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
             })?;
             (id, parent)
@@ -540,7 +561,7 @@ impl Core {
         let _ = st.mark_running(&id);
         let t = st.task(&id)?.clone();
         self.commit(&st, &[]);
-        Ok(json!({ "task": t.id, "agent": t.agent, "model": t.model, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
+        Ok(json!({ "task": t.id, "agent": t.agent, "model": t.model, "effort": t.effort, "role": t.role, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
     }
 
     /// Trabajo nuevo para una hija que ya entregó, en su misma terminal: conserva
@@ -582,14 +603,17 @@ impl Core {
 
     /// Copia el informe de la hija junto al coordinador, en `.lixbon/informes/`,
     /// para que lo lea sin entrar en el worktree de nadie.
-    fn store_report(&self, id: &str, path: &str, summary: &str) -> Result<String, String> {
+    fn store_report(&self, id: &str, path: &str, inline: &str, summary: &str) -> Result<String, String> {
         let (task, coordinator) = {
             let st = self.lock();
             let t = st.task(id)?.clone();
             let root = st.runs.get(&t.run).and_then(|r| st.tasks.get(&r.root)).cloned().ok_or("Run sin coordinador")?;
             (t, root)
         };
-        let text = if path.is_empty() {
+        let text = if !inline.trim().is_empty() {
+            // Las hijas de solo lectura no pueden escribir archivos: mandan el informe por stdin.
+            inline.to_string()
+        } else if path.is_empty() {
             if summary.is_empty() {
                 return Err("Falta --report con tu informe (.md): qué hiciste, archivos, cómo lo verificaste y qué queda.".into());
             }
@@ -604,8 +628,9 @@ impl Core {
         git::exclude_lixbon_dir(&coordinator.cwd);
         let dest = dir.join(format!("{}-{}.md", task.id, state::slug(&task.title, 40)));
         let header = format!(
-            "<!-- Tarea {} · {}{} · {} -->\n\n",
+            "<!-- Tarea {} · {}{}{} · {} -->\n\n",
             task.id,
+            task.role.as_deref().map(|r| format!("{r} · ")).unwrap_or_default(),
             task.agent,
             task.model.as_deref().map(|m| format!(" ({m})")).unwrap_or_default(),
             task.branch.as_deref().map(|b| format!("rama {b}")).unwrap_or_else(|| "carpeta compartida".into())
@@ -630,7 +655,8 @@ impl Core {
         git::exclude_lixbon_dir(&task.cwd);
 
         let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
-        let launch = agents::launch(&task.agent, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
+        let read_only = task.role.as_deref().and_then(roles::spec).is_some_and(|r| r.read_only);
+        let launch = agents::launch(&task.agent, task.model.as_deref(), task.effort.as_deref(), &prompt, read_only)?;
 
         let lxo = lxo_path();
         let mut path = lxo.parent().map(|p| p.as_os_str().to_owned()).unwrap_or_default();
@@ -734,6 +760,7 @@ impl Core {
         let start = st.messages.len().saturating_sub(400);
         json!({
             "settings": self.settings(),
+            "roles": roles::describe(&self.settings().roles)["roles"],
             "server": server,
             "lxo": lxo_path(),
             "lxo_exists": lxo_path().is_file(),
@@ -765,19 +792,37 @@ fn task_file(t: &Task, parent: Option<&Task>, objective: &str) -> String {
     };
     let coordinator = parent.map(|p| format!("{} ({})", p.id, p.agent)).unwrap_or_default();
     let report = format!(".lixbon/informe-{}.md", t.id);
+    let role = t.role.as_deref().and_then(roles::spec);
+    let read_only = role.is_some_and(|r| r.read_only);
+    let role_line = role.map(|r| format!("Tu rol: **{}**. {}\n\n", r.label, r.purpose)).unwrap_or_default();
+    let deliver = if read_only {
+        format!(
+            "Eres de **solo lectura**: no tienes Edit ni Write y no debes modificar archivos (tampoco con Bash). \
+Tu informe va por la entrada estándar, sin archivo:\n\n\
+```\nlxo done --summary \"<una frase>\" --report - <<'EOF'\n# {id} · {title}\n## Resultado\n...\nEOF\n```\n\n\
+Sé breve: tu coordinador paga cada línea que lee. Rutas con número de línea y conclusiones; \
+nada de copiar bloques de código salvo las pocas líneas imprescindibles.",
+            id = t.id,
+            title = t.title,
+        )
+    } else {
+        format!(
+            "Escribe tu informe en `{report}` (qué hiciste, archivos, cómo lo verificaste, qué queda y decisiones pendientes) \
+y cierra con `lxo done --report {report} --summary \"<una frase>\"`."
+        )
+    };
     format!(
         "# {id} · {title}\n\n\
 Eres la tarea **{id}** del run {run}. Te coordina **{coordinator}**, que es quien habla con el usuario.\n\
 Objetivo general: {objective}\n\n\
-{place}\n\n\
+{role_line}{place}\n\n\
 ## Tu encargo\n\n{spec}\n\n\
 ## Reglas\n\n\
 1. Ejecuta `lxo guide` y síguela. Eres autónomo: nadie mira tu terminal para aprobar nada.\n\
 2. Informa de tus fases: `lxo phase \"<nombre>\" --start` y `lxo phase \"<nombre>\" --done --note \"<resultado>\"`.\n\
 3. Si solo tu coordinador puede decidir algo: `lxo ask \"<pregunta>\"` y espera. Nunca abras preguntas interactivas.\n\
 4. En cada punto de control ejecuta `lxo check` por si tu coordinador te mandó instrucciones.\n\
-5. Al acabar escribe tu informe en `{report}` (qué hiciste, archivos, cómo lo verificaste, qué queda y decisiones pendientes) \
-y cierra con `lxo done --report {report} --summary \"<una frase>\"` (o añade `--failed`). Después no hagas nada más.\n",
+5. Al acabar: {deliver} Si no se pudo completar, añade `--failed`. Después no hagas nada más.\n",
         id = t.id,
         title = t.title,
         run = t.run,
@@ -797,6 +842,7 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
     let core = &orch.0;
     let enabled = settings.enabled;
     let was = core.settings().enabled;
+    roles::validate(&settings.roles)?;
     write_json(&data_dir().join("settings.json"), &settings)?;
     // Activarlo deja la skill en todos los agentes del equipo: nada que configurar a mano.
     if enabled && !was {
