@@ -37,6 +37,7 @@ ignore = "0.4"
 # Papelera del SO para delete_entry (borrar deja de ser irreversible).
 trash = "5"
 tauri-plugin-http = "~2.6"
+tauri-plugin-single-instance = "2"
 
 # Windows Credential Manager para guardar la API key cifrada (DPAPI) en vez
 # de en claro en el JSON de settings. Solo Windows: en otros SO el frontend

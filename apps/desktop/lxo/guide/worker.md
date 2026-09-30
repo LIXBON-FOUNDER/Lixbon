@@ -50,3 +50,7 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
    Añade `--failed` si no se pudo completar, y `--files a,b,c` con los archivos principales.
    Después de `lxo done` no empieces trabajo nuevo: quédate esperando. Si tu coordinador te manda
    un encargo nuevo, llegará a esta misma terminal; hazlo y vuelve a cerrar con un informe nuevo.
+8. **Si tu encargo cita una issue de Lixbon Team** (`LXB-12`), léela con `lxo issue ver LXB-12` y
+   pon la clave en tus mensajes de commit (`fix: … (LXB-12)`): así queda ligada al equipo. El
+   cierre de la issue lo hace tu coordinador; tú solo comentas si tu encargo lo pide, con
+   `lxo issue comentar LXB-12 --texto "…"` (sale firmado como informe de tu rol).

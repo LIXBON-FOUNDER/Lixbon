@@ -5,7 +5,9 @@ import { Aviso } from './Conectar';
 
 async function enfocarIde() {
   const ventanas = await getAllWindows().catch(() => []);
-  await ventanas.find((w) => w.label === 'main')?.setFocus().catch(() => {});
+  const ide = ventanas.find((w) => w.label === 'main');
+  await ide?.show().catch(() => {});
+  await ide?.setFocus().catch(() => {});
 }
 
 export function SinSesion({ error }) {

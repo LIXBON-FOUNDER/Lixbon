@@ -282,3 +282,66 @@ def test_lo_pendiente_de_un_ciclo_cerrado_pasa_al_de_hoy(cliente, gente, equipo)
     ciclos = next(p for p in tablero["proyectos"] if p["id"] == pid)["tablero"]["ciclos"]
     actual = next(c for c in ciclos if c["empieza"] <= hoy <= c["termina"])
     assert movida["ciclo_id"] == actual["id"]
+
+
+def _firmado(secreto: str, datos: dict) -> tuple[bytes, dict]:
+    import hashlib
+    import hmac
+    import json
+    cuerpo = json.dumps(datos).encode()
+    firma = "sha256=" + hmac.new(secreto.encode(), cuerpo, hashlib.sha256).hexdigest()
+    return cuerpo, {"X-Hub-Signature-256": firma, "Content-Type": "application/json"}
+
+
+def test_webhook_de_github_liga_y_mueve(cliente, gente, equipo):
+    pid = equipo["id"]
+    assert cliente.get(f"/api/team/projects/{pid}/github-webhook", headers=gente["mateo"]["h"]).status_code == 403
+    w = cliente.get(f"/api/team/projects/{pid}/github-webhook", headers=gente["lia"]["h"]).json()
+    assert w["url"].endswith(f"/api/team/github/webhook/{pid}") and len(w["secreto"]) >= 32
+    cliente.patch(f"/api/team/projects/{pid}/issue-settings", headers=gente["lia"]["h"],
+                  json={"automatismos": {"rama": True, "pr": True}})
+    # Una prueba anterior borró «En revisión»: el flujo del PR la necesita.
+    cliente.post(f"/api/team/projects/{pid}/states", headers=gente["lia"]["h"],
+                 json={"nombre": "En revisión", "tipo": "revision"})
+    i = cliente.post(f"/api/team/projects/{pid}/issues", headers=gente["lia"]["h"], json={"titulo": "Webhook"}).json()
+    rama = f"lx/lxb-{i['numero']}-webhook"
+
+    # Sin firma buena, nada.
+    cuerpo, cab = _firmado("otro", {"ref": rama, "ref_type": "branch"})
+    assert cliente.post(f"/api/team/github/webhook/{pid}", content=cuerpo,
+                        headers={**cab, "X-GitHub-Event": "create"}).status_code == 401
+
+    cuerpo, cab = _firmado(w["secreto"], {"ref": rama, "ref_type": "branch"})
+    r = cliente.post(f"/api/team/github/webhook/{pid}", content=cuerpo, headers={**cab, "X-GitHub-Event": "create"})
+    assert r.status_code == 200 and r.json()["issues"] == 1
+    d = cliente.get(f"/api/team/issues/{i['id']}", headers=gente["lia"]["h"]).json()
+    assert d["rama"] == rama and d["estado"]["tipo"] == "en_curso"
+    assert {e["tipo"] for e in d["estados"]} >= {"en_curso", "hecho"}
+
+    pr = {"action": "opened", "pull_request": {"number": 7, "title": f"Webhook ({i['clave']})", "body": "",
+                                                "html_url": "https://github.com/x/y/pull/7", "merged": False,
+                                                "head": {"ref": rama}}}
+    cuerpo, cab = _firmado(w["secreto"], pr)
+    cliente.post(f"/api/team/github/webhook/{pid}", content=cuerpo, headers={**cab, "X-GitHub-Event": "pull_request"})
+    assert cliente.get(f"/api/team/issues/{i['id']}", headers=gente["lia"]["h"]).json()["estado"]["tipo"] == "revision"
+
+    pr["action"] = "closed"
+    pr["pull_request"]["merged"] = True
+    cuerpo, cab = _firmado(w["secreto"], pr)
+    cliente.post(f"/api/team/github/webhook/{pid}", content=cuerpo, headers={**cab, "X-GitHub-Event": "pull_request"})
+    d = cliente.get(f"/api/team/issues/{i['id']}", headers=gente["lia"]["h"]).json()
+    assert d["estado"]["tipo"] == "hecho" and d["pr"] == {"ref": "#7", "estado": "fusionado", "url": "https://github.com/x/y/pull/7"}
+
+    push = {"commits": [{"id": "abcdef1234567", "message": f"fix: algo ({i['clave']})", "url": "https://github.com/x/y/commit/abcdef1"}]}
+    cuerpo, cab = _firmado(w["secreto"], push)
+    r = cliente.post(f"/api/team/github/webhook/{pid}", content=cuerpo, headers={**cab, "X-GitHub-Event": "push"})
+    assert r.json()["issues"] == 1
+    tipos = {v["tipo"] for v in cliente.get(f"/api/team/issues/{i['id']}", headers=gente["lia"]["h"]).json()["vinculos_lista"]}
+    assert tipos == {"rama", "pr", "commit"}
+
+    # Rotar invalida el secreto anterior.
+    nuevo = cliente.post(f"/api/team/projects/{pid}/github-webhook/rotar", headers=gente["lia"]["h"]).json()["secreto"]
+    assert nuevo != w["secreto"]
+    cuerpo, cab = _firmado(w["secreto"], {"zen": "hola"})
+    assert cliente.post(f"/api/team/github/webhook/{pid}", content=cuerpo,
+                        headers={**cab, "X-GitHub-Event": "ping"}).status_code == 401

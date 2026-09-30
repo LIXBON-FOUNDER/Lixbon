@@ -11,7 +11,11 @@ async function mandarAlIde(texto) {
   await emitTo('main', EVENTO_COMPONER, { texto });
   const { getAllWindows } = await import('@tauri-apps/api/window');
   const ventanas = await getAllWindows();
-  await ventanas.find((w) => w.label === 'main')?.setFocus();
+  // Si Team se abrió con su acceso directo, el IDE está oculto: se muestra.
+  const ide = ventanas.find((w) => w.label === 'main');
+  await ide?.show();
+  await ide?.unminimize();
+  await ide?.setFocus();
 }
 
 function contexto(issue, t) {

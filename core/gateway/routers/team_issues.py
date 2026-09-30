@@ -13,9 +13,13 @@ todo el equipo:
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from core.gateway.team_hub import hub
@@ -24,6 +28,7 @@ from core.persistence import team_queries as tq
 from core.security.auth import cookie_auth_required
 
 router = APIRouter()
+logger = logging.getLogger("lixbon.team.github")
 
 
 def _ejecutar(fn, *args):
@@ -286,3 +291,94 @@ async def borrar_iniciativa(iniciativa_id: str, yo: dict[str, Any] = Depends(coo
     for iid in tocadas:
         _emitir_issue(pid, iid)
     return Response(status_code=204)
+
+
+# ── GitHub: webhook por equipo ─────────────────────────────────────────────
+
+@router.get("/api/team/projects/{proyecto_id}/github-webhook")
+async def ver_webhook(proyecto_id: str, peticion: Request, yo: dict[str, Any] = Depends(cookie_auth_required)):
+    """Lo que el líder pega en GitHub (Settings › Webhooks)."""
+    d = _ejecutar(ti.secreto_webhook, proyecto_id, yo["id"])
+    return _webhook_salida(proyecto_id, d, peticion)
+
+
+@router.post("/api/team/projects/{proyecto_id}/github-webhook/rotar")
+async def rotar_webhook(proyecto_id: str, peticion: Request, yo: dict[str, Any] = Depends(cookie_auth_required)):
+    d = _ejecutar(ti.secreto_webhook, proyecto_id, yo["id"], True)
+    return _webhook_salida(proyecto_id, d, peticion)
+
+
+def _webhook_salida(proyecto_id: str, d: dict[str, Any], peticion: Request) -> dict[str, Any]:
+    from core.config import PUBLIC_BASE_URL
+    base = PUBLIC_BASE_URL or str(peticion.base_url).rstrip("/")
+    return {
+        "url": f"{base}/api/team/github/webhook/{proyecto_id}",
+        "secreto": d["secreto"],
+        "tipo": "application/json",
+        "eventos": ["pull_request", "create", "push"],
+        "repo": d["repo"],
+    }
+
+
+@router.post("/api/team/github/webhook/{proyecto_id}")
+async def webhook_github(proyecto_id: str, peticion: Request):
+    """GitHub avisa de ramas, commits y PR. Cada uno se liga a las issues que
+    nombra (rama lx/lxb-12-…, «LXB-12» en el título o el mensaje) y los
+    automatismos del equipo mueven la issue. Sin sesión: la firma HMAC con el
+    secreto del equipo es la que dice que el aviso viene de GitHub."""
+    cfg = ti.webhook_de(proyecto_id)
+    cuerpo = await peticion.body()
+    firma = peticion.headers.get("x-hub-signature-256", "")
+    if not cfg or not cfg["secreto"]:
+        raise HTTPException(status_code=404, detail="Webhook no configurado.")
+    esperada = "sha256=" + hmac.new(cfg["secreto"].encode(), cuerpo, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(firma, esperada):
+        raise HTTPException(status_code=401, detail="Firma inválida.")
+    evento = peticion.headers.get("x-github-event", "")
+    try:
+        datos = json.loads(cuerpo or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="JSON inválido.")
+    if evento == "ping":
+        return {"ok": True}
+    repo = (datos.get("repository") or {}).get("full_name", "")
+    if cfg["repo"] and repo and repo.lower() != cfg["repo"].lower():
+        return {"ok": True, "ignorado": "otro repositorio"}
+
+    vinculos: list[tuple[list[str], dict[str, Any]]] = []
+    if evento == "pull_request":
+        pr = datos.get("pull_request") or {}
+        accion = datos.get("action", "")
+        if accion == "closed":
+            estado = "fusionado" if pr.get("merged") else "cerrado"
+        elif accion in ("opened", "reopened", "ready_for_review", "edited", "synchronize"):
+            estado = "abierto"
+        else:
+            return {"ok": True, "ignorado": accion}
+        rama = (pr.get("head") or {}).get("ref", "")
+        textos = [pr.get("title", ""), pr.get("body") or "", rama]
+        vinculos.append((textos, {"tipo": "pr", "ref": f"#{pr.get('number')}", "estado": estado,
+                                  "url": pr.get("html_url")}))
+        if rama:
+            vinculos.append((textos, {"tipo": "rama", "ref": rama, "estado": None, "url": None}))
+    elif evento == "create" and datos.get("ref_type") == "branch":
+        rama = datos.get("ref", "")
+        vinculos.append(([rama], {"tipo": "rama", "ref": rama, "estado": None, "url": None}))
+    elif evento == "push":
+        for c in (datos.get("commits") or [])[:20]:
+            vinculos.append(([c.get("message", "")], {"tipo": "commit", "ref": str(c.get("id", ""))[:7],
+                                                      "estado": None, "url": c.get("url")}))
+    else:
+        return {"ok": True, "ignorado": evento}
+
+    tocadas: set[str] = set()
+    for textos, v in vinculos:
+        for iid in ti.issues_por_claves(proyecto_id, cfg["prefijo"], textos):
+            try:
+                ti.vincular(iid, None, v["tipo"], v["ref"], v["estado"], v["url"])
+                tocadas.add(iid)
+            except ti.ErrorIssues as e:
+                logger.info("webhook: no se pudo vincular %s a %s: %s", v["ref"], iid, e.detalle)
+    for iid in tocadas:
+        _emitir_issue(proyecto_id, iid)
+    return {"ok": True, "issues": len(tocadas)}

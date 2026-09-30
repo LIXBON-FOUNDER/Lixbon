@@ -589,6 +589,8 @@ class TeamProyecto(Base):
     issues_prefijo: Mapped[str | None] = mapped_column(Text)
     issues_contador: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     issues_config: Mapped[str | None] = mapped_column(Text)
+    # Secreto con el que GitHub firma los webhooks de este equipo (HMAC-SHA256).
+    github_webhook_secreto: Mapped[str | None] = mapped_column(Text)
 
 
 class TeamMiembro(Base):

@@ -696,9 +696,13 @@ def detalle(issue_id: str, uid: int) -> dict[str, Any]:
                              .limit(100)))
         vins = list(s.scalars(select(TeamIssueVinculo).where(TeamIssueVinculo.issue_id == i.id)
                               .order_by(TeamIssueVinculo.creado_en)))
+        estados = list(s.scalars(select(TeamEstado).where(TeamEstado.proyecto_id == i.proyecto_id)
+                                 .order_by(TeamEstado.orden)))
         return {
             **base,
             "descripcion": i.descripcion,
+            "estado": next((_estado_salida(e) for e in estados if e.id == i.estado_id), None),
+            "estados": [_estado_salida(e) for e in estados],
             "subtareas_lista": _resumenes(s, hijas, p.issues_prefijo),
             "comentarios_lista": [_comentario_salida(c) for c in coms],
             "actividad": [
@@ -818,3 +822,39 @@ def buscar_por_clave(uid: int, clave: str) -> dict[str, Any] | None:
                 return _resumenes(s, [i], p.issues_prefijo)[0]
     return None
 
+
+
+# ── GitHub ─────────────────────────────────────────────────────────────────
+
+def secreto_webhook(proyecto_id: str, uid: int, rotar: bool = False) -> dict[str, Any]:
+    """El secreto con el que GitHub firma los avisos de este equipo. Solo lo ve
+    el líder, que es quien lo pega en GitHub; rotarlo invalida el anterior."""
+    import secrets as _secrets
+    with get_session() as s:
+        p = _exigir_miembro(s, proyecto_id, uid, lider=True)
+        if rotar or not p.github_webhook_secreto:
+            p.github_webhook_secreto = _secrets.token_hex(24)
+        return {"secreto": p.github_webhook_secreto, "repo": p.github_repo}
+
+
+def webhook_de(proyecto_id: str) -> dict[str, Any] | None:
+    with get_session() as s:
+        p = s.get(TeamProyecto, proyecto_id)
+        if not p:
+            return None
+        return {"secreto": p.github_webhook_secreto, "repo": p.github_repo, "prefijo": p.issues_prefijo}
+
+
+def issues_por_claves(proyecto_id: str, prefijo: str, textos: list[str]) -> list[str]:
+    """Las issues de este equipo nombradas en unos textos («LXB-12», o
+    «lxb-12» dentro de una rama como lx/lxb-12-macos)."""
+    if not prefijo:
+        return []
+    patron = re.compile(rf"(?<![A-Za-z0-9]){re.escape(prefijo)}-(\d+)(?![0-9])", re.IGNORECASE)
+    numeros = {int(m.group(1)) for t in textos if t for m in patron.finditer(t)}
+    if not numeros:
+        return []
+    with get_session() as s:
+        return list(s.scalars(select(TeamIssue.id).where(
+            TeamIssue.proyecto_id == proyecto_id, TeamIssue.numero.in_(numeros),
+            TeamIssue.borrado_en.is_(None))))

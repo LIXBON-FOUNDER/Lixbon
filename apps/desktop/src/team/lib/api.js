@@ -166,3 +166,8 @@ export const editarIniciativa = (iniciativaId, cambios) =>
 
 export const borrarIniciativa = (iniciativaId) =>
   pedir(`/api/team/initiatives/${iniciativaId}`, { metodo: 'DELETE' });
+
+export const webhookGithub = (proyectoId) => pedir(`/api/team/projects/${proyectoId}/github-webhook`);
+
+export const rotarWebhookGithub = (proyectoId) =>
+  pedir(`/api/team/projects/${proyectoId}/github-webhook/rotar`, { metodo: 'POST' });

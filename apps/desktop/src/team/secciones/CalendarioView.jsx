@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useIssuesStore } from '../store/issuesStore';
 import { useTablero } from '../store/useTablero';
 import { TPanel } from '../ui/Panel';
-import { IconCalendar, IconLock } from '../ui/icons';
+import { IconCalendar } from '../ui/icons';
 import { IconChevronLeft, IconChevronRight, IconPlus } from '../../components/Icons';
 import { esCerrado, hoyISO, sumarDias, diaDe, isoDe, MESES_LARGOS, fechaCorta } from '../lib/issues';
 
@@ -79,7 +79,6 @@ export function CalendarioView() {
         <div className="tleyenda tcal__leyenda">
           <span><span className="tcal__muestra"><i /></span>Issue que vence (color de su estado)</span>
           {hayCiclos && <span><i className="is-linea" style={{ background: 'var(--accent)' }} />Ciclo</span>}
-          <span className="tdim"><IconLock size={12} /> Google Calendar llegará cuando Google verifique el permiso; tu agenda será solo tuya.</span>
         </div>
       </div>
 

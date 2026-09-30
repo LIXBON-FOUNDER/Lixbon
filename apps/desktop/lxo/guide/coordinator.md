@@ -14,6 +14,10 @@ su worktree, y trabaja en autónomo.
    ya coordinas otro. A partir de ahí eres el coordinador de ese run.
 3. **Haz commit** de lo que las hijas deban ver: parten de tu último commit, no de los cambios sin guardar.
 4. `lxo roles`: los roles del equipo y el modelo que el usuario asignó a cada uno.
+5. **Si el objetivo nombra una issue de Lixbon Team** (una clave como `LXB-12`, típico cuando llega
+   desde «Delegar al orquestador»): `lxo issue ver LXB-12` te da su descripción, subtareas y
+   comentarios. Muévela a su estado de trabajo con `lxo issue mover LXB-12 "En curso"` y pasa la
+   clave a cada hija en su `--task`, para que la citen en sus commits.
 
 ## 2. Explora, planifica y reparte por roles
 
@@ -99,7 +103,19 @@ Por cada hija terminada con éxito:
    `lxo pr <tarea>` en lugar de fusionar.
 5. `lxo release <tarea>` borra su worktree (y su rama, si ya está fusionada).
 
-## 5. Informa al usuario
+## 5. Cierra la issue, si la hay
+
+Si el run vino de una issue, deja en ella el resultado (el equipo lo lee en Team, no en tu chat):
+```
+lxo issue comentar LXB-12 --texto - <<'EOF'
+Qué se hizo, qué rama o PR lo contiene y qué queda pendiente.
+EOF
+lxo issue mover LXB-12 "En revisión"      # o "Hecho" si ya está fusionado y verificado
+lxo issue vincular LXB-12 --pr "#31" --url https://github.com/…/pull/31   # si abriste PR
+```
+Con el webhook de GitHub del equipo, las ramas y PR que citan la clave se vinculan solos.
+
+## 6. Informa al usuario
 
 Una línea por tarea con: rol y modelo, resultado, informe (`.lixbon/informes/...`), archivos
 principales y evidencia (tests). Después, lo que se integró y se subió, y las decisiones que

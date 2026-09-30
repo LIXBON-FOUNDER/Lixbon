@@ -495,3 +495,12 @@
 .tcal__celda.is-fuera .tcal__banda { opacity: 0.25; }
 .tajfila .tinput { width: auto; }
 .tajfila__txt { flex: 1 1 260px; }
+
+/* Ajustes › General: webhook de GitHub */
+.twebhook { display: flex; flex-direction: column; gap: 10px; }
+.tcopiables { display: flex; flex-direction: column; border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.tcopiable { min-height: 42px; display: flex; align-items: center; gap: 12px; padding: 0 14px; box-shadow: inset 0 -1px 0 var(--surface-3); font-size: 12.5px; }
+.tcopiable:last-child { box-shadow: none; }
+.tcopiable__e { width: 110px; flex-shrink: 0; color: var(--ink-soft); }
+.tcopiable__v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-body); font-size: 12px; }
+.twebhook__rotar { align-self: flex-start; }

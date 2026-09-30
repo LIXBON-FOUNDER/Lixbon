@@ -113,6 +113,7 @@ def init_db() -> None:
         "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS issues_prefijo TEXT",
         "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS issues_contador BIGINT NOT NULL DEFAULT 0",
         "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS issues_config TEXT",
+        "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS github_webhook_secreto TEXT",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_threshold_microusd BIGINT NOT NULL DEFAULT 0",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_pack_id TEXT",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_payment_method TEXT",
