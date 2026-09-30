@@ -1,16 +1,19 @@
 // AgentPage.jsx — Ajustes → Agente y permisos: modo con el que empieza cada
-// conversación, un preajuste de autonomía y el permiso por tipo de herramienta.
-import { useState } from 'react';
+// conversación, un preajuste de autonomía, el permiso por tipo de herramienta
+// y los comandos que se ejecutan sin preguntar.
 import { useChatStore, CHAT_MODES } from '../../../store/chatStore';
 import { useMcpStore } from '../../../store/mcpStore';
 import { Segmented } from '../../../components/Segmented';
 import { Switch } from '../../../components/Switch';
+import { IconShield } from '../../../components/Icons';
+import { PageHead, SectionHead } from '../SettingsParts';
+import { CommandAllowlist } from '../CommandAllowlist';
 
 const CATEGORIES = [
   { id: 'read', label: 'Leer y buscar', hint: 'Leer archivos, listar, buscar texto y la búsqueda semántica.', tools: 'read_file · list_files · search · outline' },
   { id: 'edit', label: 'Editar archivos', hint: 'Crear y modificar archivos. Todo queda revisable y reversible.', tools: 'edit_file · write_file · multi_edit · rename_file' },
   { id: 'delete', label: 'Borrar archivos', hint: 'Se puede revertir desde el chat, pero conviene verlo antes.', tools: 'delete_file' },
-  { id: 'command', label: 'Ejecutar comandos', hint: 'Aun en "Permitir", los que instalan paquetes, encadenan o ejecutan código externo preguntan siempre.', tools: 'run_command' },
+  { id: 'command', label: 'Ejecutar comandos', hint: 'En Preguntar, los de la lista de abajo se ejecutan sin preguntar.', tools: 'run_command' },
   { id: 'web', label: 'Web', hint: 'Descargar páginas y buscar en internet.', tools: 'fetch_url · web_search' },
   { id: 'mcp', label: 'Servidores MCP', hint: 'Herramientas de tus extensiones.', tools: null },
 ];
@@ -19,6 +22,13 @@ const PRESETS = {
   careful: { read: 'allow', edit: 'ask', delete: 'ask', command: 'ask', web: 'ask', mcp: 'ask' },
   balanced: { read: 'allow', edit: 'allow', delete: 'ask', command: 'ask', web: 'allow', mcp: 'ask' },
   auto: { read: 'allow', edit: 'allow', delete: 'allow', command: 'allow', web: 'allow', mcp: 'allow' },
+};
+
+const PRESET_HINT = {
+  careful: 'Solo lee sin preguntar; todo lo demás te lo consulta.',
+  balanced: 'Lee, edita y busca en la web solo; pregunta antes de borrar, ejecutar o usar MCP.',
+  auto: 'Hace todo sin preguntar. Los comandos peligrosos siguen pidiendo permiso.',
+  custom: 'Personalizada: ajustada herramienta a herramienta.',
 };
 
 const POLICY_OPTIONS = [
@@ -33,48 +43,40 @@ export function AgentPage() {
     toolPolicy, setToolPolicy, commandAllowlist, setCommandAllowlist,
   } = useChatStore();
   const mcpTools = useMcpStore((s) => s.agentTools().length);
-  const [allowDraft, setAllowDraft] = useState(() => commandAllowlist.join('\n'));
   const preset = Object.entries(PRESETS).find(([, p]) => Object.keys(p).every((k) => p[k] === toolPolicy[k]))?.[0] || 'custom';
   const applyPreset = (id) => Object.entries(PRESETS[id]).forEach(([k, v]) => setToolPolicy(k, v));
 
   return (
     <div className="spage">
-      <div className="spage__head rise">
-        <div className="spage__title">
-          <span className="spage__h1">Agente y permisos</span>
-          <span className="spage__sub">Decide qué puede hacer el agente sin preguntarte.</span>
-        </div>
-      </div>
+      <PageHead icon={IconShield} title="Agente y permisos" sub="Decide qué puede hacer el agente de Lixbon sin preguntarte." />
 
-      <section className="ssec ssec--card rise rise--1">
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Modo por defecto</span>
-            <span className="srow__hint">Se alterna en el chat con Shift+Tab o Ctrl+.</span>
+      <section className="ssec rise rise--1">
+        <SectionHead label="Comportamiento" />
+        <div className="ssec ssec--card ssec--rows">
+          <div className="srow">
+            <div className="srow__text">
+              <span className="srow__label">Modo por defecto</span>
+              <span className="srow__hint">Con el que empieza cada conversación. En el chat se alterna con Shift+Tab o Ctrl+.</span>
+            </div>
+            <Segmented width={96} value={chatMode} onChange={setChatMode} options={CHAT_MODES.map((m) => ({ value: m.id, label: m.label }))} />
           </div>
-          <Segmented
-            width={96}
-            value={chatMode}
-            onChange={setChatMode}
-            options={CHAT_MODES.map((m) => ({ value: m.id, label: m.label }))}
-          />
-        </div>
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Autonomía</span>
-            <span className="srow__hint">{preset === 'custom' ? 'Personalizada: ajustada herramienta a herramienta.' : 'Un punto de partida; afina abajo cada tipo de herramienta.'}</span>
+          <div className="srow">
+            <div className="srow__text">
+              <span className="srow__label">Autonomía</span>
+              <span className="srow__hint">{PRESET_HINT[preset]}</span>
+            </div>
+            <Segmented
+              width={96}
+              value={preset}
+              onChange={applyPreset}
+              options={[{ value: 'careful', label: 'Cauteloso' }, { value: 'balanced', label: 'Equilibrado' }, { value: 'auto', label: 'Autónomo' }]}
+            />
           </div>
-          <Segmented
-            width={96}
-            value={preset}
-            onChange={applyPreset}
-            options={[{ value: 'careful', label: 'Cauteloso' }, { value: 'balanced', label: 'Equilibrado' }, { value: 'auto', label: 'Autónomo' }]}
-          />
         </div>
       </section>
 
       <section className="ssec rise rise--2">
-        <span className="ssec__label">Herramientas</span>
+        <SectionHead label="Permisos por herramienta" hint="Afinan el preajuste de autonomía. Cambiar uno lo convierte en personalizado." />
         <div className="ssec ssec--card ssec--rows">
           {CATEGORIES.map((c) => (
             <div key={c.id} className="srow">
@@ -89,28 +91,18 @@ export function AgentPage() {
         </div>
       </section>
 
-      <section className="ssec rise rise--3">
-        <span className="ssec__label">Comandos permitidos sin preguntar</span>
-        <div className="ssec ssec--card">
-          <span className="srow__hint">Un prefijo por línea, por ejemplo «npm test». Solo cuenta cuando "Ejecutar comandos" está en Preguntar; los que llevan &&, |, ; o &gt; preguntan siempre.</span>
-          <textarea
-            className="stextarea mono"
-            rows={5}
-            spellCheck={false}
-            value={allowDraft}
-            onChange={(e) => setAllowDraft(e.target.value)}
-            onBlur={() => setCommandAllowlist(allowDraft.split('\n'))}
-          />
-        </div>
-      </section>
+      <CommandAllowlist list={commandAllowlist} onChange={setCommandAllowlist} commandPolicy={toolPolicy.command || 'ask'} />
 
-      <section className="ssec ssec--card rise rise--3">
-        <div className="srow">
-          <div className="srow__text">
-            <span className="srow__label">Herramientas nativas</span>
-            <span className="srow__hint">Usa los tool_calls del modelo en vez del protocolo de texto. Más fiable si el modelo declara la capacidad «tools».</span>
+      <section className="ssec rise rise--3">
+        <SectionHead label="Avanzado" />
+        <div className="ssec ssec--card ssec--rows">
+          <div className="srow">
+            <div className="srow__text">
+              <span className="srow__label">Herramientas nativas</span>
+              <span className="srow__hint">Usa los tool_calls del modelo en vez del protocolo de texto. Más fiable si el modelo declara la capacidad «tools».</span>
+            </div>
+            <Switch checked={nativeTools} onChange={setNativeTools} label="Herramientas nativas" />
           </div>
-          <Switch checked={nativeTools} onChange={setNativeTools} label="Herramientas nativas" />
         </div>
       </section>
     </div>

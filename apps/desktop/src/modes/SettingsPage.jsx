@@ -1,35 +1,52 @@
-// SettingsPage.jsx — Ajustes a pantalla completa: navegación con indicador
-// deslizante a la izquierda y la sección elegida centrada.
-import { useEffect, useMemo, useState } from 'react';
+// SettingsPage.jsx — Ajustes a pantalla completa: navegación por grupos con
+// icono e indicador deslizante a la izquierda, y la sección elegida centrada.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { Panel } from '../layout/Panel';
 import { ProfilePage } from '../sections/Settings/pages/ProfilePage';
 import { UsagePage } from '../sections/Settings/pages/UsagePage';
 import { AgentPage } from '../sections/Settings/pages/AgentPage';
 import { ModelsPage } from '../sections/Settings/pages/ModelsPage';
-import { EditorAdvancedPage } from '../sections/Settings/pages/EditorAdvancedPage';
+import { EditorPage } from '../sections/Settings/pages/EditorPage';
+import { IndexPage } from '../sections/Settings/pages/IndexPage';
+import { ServerPage } from '../sections/Settings/pages/ServerPage';
 import { OrchestratorPage } from '../sections/Settings/pages/OrchestratorPage';
 import { McpPage } from '../sections/Settings/pages/McpPage';
 import { Keybindings } from '../sections/Settings/Keybindings';
 import { getAppVersion } from '../lib/tauri';
-import { IconChevronLeft, IconSearch } from '../components/Icons';
+import {
+  IconChevronLeft, IconSearch, IconUser, IconChart, IconCpu, IconShield, IconNodes, IconPuzzle,
+  IconCode, IconDatabase, IconKeyboard, IconServer, IconExtensions,
+} from '../components/Icons';
 
-const SECTIONS = [
-  { id: 'profile', label: 'Perfil y cuenta', keywords: 'perfil nombre foto api key claves sesion cerrar', Page: ProfilePage },
-  { id: 'usage', label: 'Uso y límites', keywords: 'uso consumo cupo sesion semana tokens plan', Page: UsagePage },
-  { id: 'agent', label: 'Agente y permisos', keywords: 'agente permisos aprobar comandos herramientas nativas autonomia modo', Page: AgentPage },
-  { id: 'models', label: 'Modelos', keywords: 'modelos roles vision contexto ventana chat embeddings', Page: ModelsPage },
-  { id: 'mcp', label: 'Servidores MCP', keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
-  { id: 'orch', label: 'Orquestador', keywords: 'orquestador agentes coordinador hijos skill lxo worktree experimental', Page: OrchestratorPage },
-  { id: 'editor', label: 'Editor y avanzado', keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell indice rag servidor gateway actualizaciones version', Page: EditorAdvancedPage },
-  { id: 'keys', label: 'Atajos de teclado', keywords: 'atajos teclado keybindings', Page: Keybindings, legacy: true, title: 'Atajos de teclado' },
+const GROUPS = [
+  { label: 'Cuenta', items: [
+    { id: 'profile', label: 'Perfil y cuenta', icon: IconUser, keywords: 'perfil nombre foto api key claves sesion cerrar eliminar', Page: ProfilePage },
+    { id: 'usage', label: 'Uso y límites', icon: IconChart, keywords: 'uso consumo cupo sesion semana tokens plan', Page: UsagePage },
+  ] },
+  { label: 'Inteligencia', items: [
+    { id: 'models', label: 'Modelos', icon: IconCpu, keywords: 'modelos roles vision contexto ventana chat embeddings', Page: ModelsPage },
+    { id: 'agent', label: 'Agente y permisos', icon: IconShield, keywords: 'agente permisos aprobar comandos permitidos allowlist herramientas nativas autonomia modo', Page: AgentPage },
+    { id: 'orch', label: 'Orquestador', icon: IconNodes, keywords: 'orquestador agentes coordinador hijos roles explorador implementador revisor skill lxo worktree experimental', Page: OrchestratorPage },
+    { id: 'mcp', label: 'Servidores MCP', icon: IconPuzzle, keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
+  ] },
+  { label: 'Espacio de trabajo', items: [
+    { id: 'editor', label: 'Interfaz y editor', icon: IconCode, keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
+    { id: 'index', label: 'Índice del código', icon: IconDatabase, keywords: 'indice rag embeddings contexto codebase semantica buscar', Page: IndexPage },
+    { id: 'keys', label: 'Atajos de teclado', icon: IconKeyboard, keywords: 'atajos teclado keybindings combinacion', Page: Keybindings },
+  ] },
+  { label: 'Sistema', items: [
+    { id: 'server', label: 'Conexión y versión', icon: IconServer, keywords: 'servidor gateway url tunel actualizaciones version', Page: ServerPage },
+  ] },
 ];
-const ROW_H = 34;
+const SECTIONS = GROUPS.flatMap((g) => g.items);
 
 export function SettingsPage() {
   const { settingsSection, setSettingsSection, closePage, setMode, showSide } = useWorkbenchStore();
   const [query, setQuery] = useState('');
   const [version, setVersion] = useState('');
+  const [thumb, setThumb] = useState(null);
+  const itemRefs = useRef({});
 
   useEffect(() => { getAppVersion().then(setVersion).catch(() => {}); }, []);
   useEffect(() => {
@@ -38,13 +55,22 @@ export function SettingsPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [closePage]);
 
-  const visible = useMemo(() => {
+  const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? SECTIONS.filter((s) => s.label.toLowerCase().includes(q) || s.keywords.includes(q)) : SECTIONS;
+    if (!q) return GROUPS;
+    return GROUPS
+      .map((g) => ({ ...g, items: g.items.filter((s) => s.label.toLowerCase().includes(q) || s.keywords.includes(q)) }))
+      .filter((g) => g.items.length);
   }, [query]);
   const current = SECTIONS.find((s) => s.id === settingsSection) || SECTIONS[0];
-  const idx = visible.findIndex((s) => s.id === current.id);
   const Page = current.Page;
+
+  // Con grupos las filas no están a distancia fija: el indicador se coloca
+  // donde está de verdad el botón activo.
+  useLayoutEffect(() => {
+    const el = itemRefs.current[current.id];
+    setThumb(el ? { top: el.offsetTop, height: el.offsetHeight } : null);
+  }, [current.id, groups]);
 
   return (
     <div className="wb wb--settings">
@@ -54,32 +80,38 @@ export function SettingsPage() {
           <IconSearch size={13} />
           <input value={query} placeholder="Buscar ajustes" onChange={(e) => setQuery(e.target.value)} />
         </div>
-        <nav className="settingsnav__list">
-          {idx >= 0 && <span className="settingsnav__thumb" style={{ transform: `translateY(${idx * ROW_H}px)` }} />}
-          {visible.map((s) => (
-            <button key={s.id} className={`settingsnav__item ${s.id === current.id ? 'is-active' : ''}`} onClick={() => setSettingsSection(s.id)}>
-              {s.label}
-            </button>
+        <nav className="settingsnav__list scroll">
+          {thumb && <span className="settingsnav__thumb" style={{ transform: `translateY(${thumb.top}px)`, height: thumb.height }} />}
+          {groups.length === 0 && <span className="settingsnav__empty">Nada coincide con «{query}»</span>}
+          {groups.map((g) => (
+            <div key={g.label} className="settingsnav__group">
+              <span className="settingsnav__grouplabel">{g.label}</span>
+              {g.items.map((s) => {
+                const Icon = s.icon;
+                return (
+                  <button
+                    key={s.id}
+                    ref={(el) => { itemRefs.current[s.id] = el; }}
+                    className={`settingsnav__item ${s.id === current.id ? 'is-active' : ''}`}
+                    onClick={() => setSettingsSection(s.id)}
+                  >
+                    <Icon size={15} />
+                    <span>{s.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </nav>
-        <button className="lk settingsnav__link" onClick={() => { setMode('editor'); showSide('extensions'); }}>Extensiones y MCP</button>
-        <div className="panelhead__fill" />
+        <button className="lk settingsnav__link" onClick={() => { setMode('editor'); showSide('extensions'); }}>
+          <IconExtensions size={13} /> Extensiones
+        </button>
         {version && <span className="mono settingsnav__ver">lixbon desktop {version}</span>}
       </Panel>
       <div className="gutter gutter--x" style={{ cursor: 'default' }} />
       <Panel id="settings" className="wb__grow settingsbody scroll">
         <div className="settingsbody__inner" key={current.id}>
-          {current.legacy ? (
-            <div className="spage">
-              <div className="spage__head rise">
-                <div className="spage__title">
-                  <span className="spage__h1">{current.title}</span>
-                  {current.sub && <span className="spage__sub">{current.sub}</span>}
-                </div>
-              </div>
-              <div className="rise rise--1 legacyset"><Page /></div>
-            </div>
-          ) : <Page />}
+          <Page />
         </div>
       </Panel>
     </div>
