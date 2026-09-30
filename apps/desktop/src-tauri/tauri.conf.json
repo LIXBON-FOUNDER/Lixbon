@@ -30,6 +30,15 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "externalBin": ["binaries/lxo"],
+    "windows": {
+      "wix": {
+        "fragmentPaths": ["windows/team-acceso.wxs"],
+        "componentRefs": ["LixbonTeamMenuInicio", "LixbonTeamEscritorio"]
+      },
+      "nsis": {
+        "installerHooks": "windows/team-acceso.nsh"
+      }
+    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

@@ -6,6 +6,7 @@
 
 mod agents;
 mod git;
+mod issues;
 mod pty;
 mod roles;
 mod server;
@@ -315,6 +316,15 @@ impl Core {
             "spawn" => self.spawn(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
+            "issue" => {
+                // El rol de la hija firma sus comentarios como informe de agente.
+                let rol = match &caller {
+                    Caller::Agent(Some(id)) => self.lock().task(id).ok().and_then(|t| t.role.clone()),
+                    _ => None,
+                };
+                let app = self.app.get().ok_or("La app todavía no ha arrancado")?;
+                issues::ejecutar(app, args, rol)
+            }
             "continue" => self.follow_up(&caller, args),
             "phase" => {
                 let me = Self::me(&caller)?;

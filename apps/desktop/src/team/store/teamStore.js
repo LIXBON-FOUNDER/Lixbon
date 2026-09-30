@@ -4,6 +4,7 @@ import { leerSesion, revalidar, fijarServidor } from '../lib/sesion';
 import { abrirSocket } from '../lib/socket';
 import { useMensajesStore } from './mensajesStore';
 import { useBorradorStore } from './borradorStore';
+import { useIssuesStore } from './issuesStore';
 
 const ESCRIBIENDO_MS = 4000;
 
@@ -160,6 +161,7 @@ export const useTeamStore = create((set, get) => ({
     api.usarLlave('');
     useMensajesStore.getState().limpiar();
     useBorradorStore.getState().limpiar();
+    useIssuesStore.getState().limpiar();
     set({
       hidratado: false, llave: '', usuario: null, sesion: 'sin-sesion', errorSesion: '',
       proyectos: [], directos: [], amigos: [], solicitudes: [],
@@ -327,9 +329,9 @@ export const useTeamStore = create((set, get) => ({
     }
   },
 
-  crearProyecto: async (nombre) => {
+  crearProyecto: async (nombre, issues) => {
     try {
-      const proyecto = await api.crearProyecto(nombre);
+      const proyecto = issues ? await api.crearEquipo(nombre, issues) : await api.crearProyecto(nombre);
       set((s) => ({ proyectos: [...s.proyectos, proyecto] }));
       get().irAProyecto(proyecto.id);
       return '';
@@ -555,6 +557,11 @@ export const useTeamStore = create((set, get) => ({
         set((s) => ({
           proyectos: s.proyectos.map((p) => (p.id === ev.proyecto.id ? ev.proyecto : p)),
         }));
+        break;
+
+      case 'issue':
+      case 'issue_comentario':
+        useIssuesStore.getState().evento(ev);
         break;
 
       case 'miembro_entra':

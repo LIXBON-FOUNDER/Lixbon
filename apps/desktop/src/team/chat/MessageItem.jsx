@@ -5,6 +5,7 @@ import { openExternal } from '../../lib/tauri';
 import { useMensajesStore } from '../store/mensajesStore';
 import { useTeamStore } from '../store/teamStore';
 import { Adjunto } from './Adjunto';
+import { CitasIssue } from './CitaIssue';
 import { hace } from '../lib/tiempo';
 import { Cara, nombreDe, tintaDe } from '../ui/Panel';
 import { IconPencil, IconTrash } from '../../components/Icons';
@@ -128,6 +129,7 @@ export function MessageItem({ mensaje, autor, propio, seguido, directo = false, 
         ) : (
           <>
             {mensaje.texto && <div className="tmsg__burbuja"><Texto texto={mensaje.texto} />{meta}</div>}
+            {mensaje.texto && <CitasIssue texto={mensaje.texto} />}
             {mensaje.adjuntos?.length > 0 && (
               <div className={`tmsg__adjuntos ${enRejilla(mensaje.adjuntos) ? 'is-rejilla' : ''}`}>
                 {mensaje.adjuntos.map((a) => <Adjunto key={a.id} adjunto={a} compacto={enRejilla(mensaje.adjuntos)} />)}

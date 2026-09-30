@@ -1257,6 +1257,11 @@ fn secret_delete(name: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Una sola instancia: el acceso directo «Lixbon Team» (--team) con la app
+        // ya abierta no arranca otra copia, abre Team en la que hay.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            team::segunda_instancia(app, &argv);
+        }))
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
         .manage(mcp::McpServers::default())
@@ -1273,12 +1278,16 @@ pub fn run() {
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
             app.state::<orch::Orch>().0.init(app.handle().clone());
+            team::al_arrancar(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
             // Los servidores MCP son procesos hijos: sin esto quedaban vivos
             // al cerrar la ventana.
             if let tauri::WindowEvent::Destroyed = event {
+                if window.label() == team::VENTANA {
+                    team::al_cerrar_team(window.app_handle());
+                }
                 if window.label() == "main" {
                     window.state::<mcp::McpServers>().stop_all();
                     window.state::<claude_code::ClaudeSessions>().stop_all();

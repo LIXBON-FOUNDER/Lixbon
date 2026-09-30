@@ -109,3 +109,65 @@ export const quitarAmigo = (usuarioId) =>
 
 export const ponerPresencia = (estado) =>
   pedir('/api/team/presence', { metodo: 'PUT', cuerpo: { estado } });
+
+// ── Issues propias ──────────────────────────────────────────────────────────
+
+export const crearEquipo = (nombre, issues) =>
+  pedir('/api/team/projects', { metodo: 'POST', cuerpo: { nombre, issues } });
+
+export const listarIssues = (proyectoId) => pedir(`/api/team/projects/${proyectoId}/issues`);
+
+export const crearIssue = (proyectoId, datos) =>
+  pedir(`/api/team/projects/${proyectoId}/issues`, { metodo: 'POST', cuerpo: datos });
+
+export const verIssue = (issueId) => pedir(`/api/team/issues/${issueId}`);
+
+export const editarIssue = (issueId, cambios) =>
+  pedir(`/api/team/issues/${issueId}`, { metodo: 'PATCH', cuerpo: cambios });
+
+export const borrarIssue = (issueId) => pedir(`/api/team/issues/${issueId}`, { metodo: 'DELETE' });
+
+export const buscarIssue = (clave) => pedir(`/api/team/issues/buscar?clave=${encodeURIComponent(clave)}`);
+
+export const comentarIssue = (issueId, texto, deAgente = null) =>
+  pedir(`/api/team/issues/${issueId}/comments`, { metodo: 'POST', cuerpo: { texto, de_agente: deAgente } });
+
+export const borrarComentario = (comentarioId) =>
+  pedir(`/api/team/issue-comments/${comentarioId}`, { metodo: 'DELETE' });
+
+export const vincularIssue = (issueId, vinculo) =>
+  pedir(`/api/team/issues/${issueId}/links`, { metodo: 'POST', cuerpo: vinculo });
+
+export const ajustesIssues = (proyectoId, cambios) =>
+  pedir(`/api/team/projects/${proyectoId}/issue-settings`, { metodo: 'PATCH', cuerpo: cambios });
+
+export const crearEstado = (proyectoId, datos) =>
+  pedir(`/api/team/projects/${proyectoId}/states`, { metodo: 'POST', cuerpo: datos });
+
+export const editarEstado = (estadoId, cambios) =>
+  pedir(`/api/team/states/${estadoId}`, { metodo: 'PATCH', cuerpo: cambios });
+
+export const borrarEstado = (estadoId, moverA) =>
+  pedir(`/api/team/states/${estadoId}${moverA ? `?mover_a=${encodeURIComponent(moverA)}` : ''}`, { metodo: 'DELETE' });
+
+export const crearEtiqueta = (proyectoId, datos) =>
+  pedir(`/api/team/projects/${proyectoId}/labels`, { metodo: 'POST', cuerpo: datos });
+
+export const editarEtiqueta = (etiquetaId, cambios) =>
+  pedir(`/api/team/labels/${etiquetaId}`, { metodo: 'PATCH', cuerpo: cambios });
+
+export const borrarEtiqueta = (etiquetaId) => pedir(`/api/team/labels/${etiquetaId}`, { metodo: 'DELETE' });
+
+export const crearIniciativa = (proyectoId, datos) =>
+  pedir(`/api/team/projects/${proyectoId}/initiatives`, { metodo: 'POST', cuerpo: datos });
+
+export const editarIniciativa = (iniciativaId, cambios) =>
+  pedir(`/api/team/initiatives/${iniciativaId}`, { metodo: 'PATCH', cuerpo: cambios });
+
+export const borrarIniciativa = (iniciativaId) =>
+  pedir(`/api/team/initiatives/${iniciativaId}`, { metodo: 'DELETE' });
+
+export const webhookGithub = (proyectoId) => pedir(`/api/team/projects/${proyectoId}/github-webhook`);
+
+export const rotarWebhookGithub = (proyectoId) =>
+  pedir(`/api/team/projects/${proyectoId}/github-webhook/rotar`, { metodo: 'POST' });

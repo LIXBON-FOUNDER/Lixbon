@@ -584,6 +584,13 @@ class TeamProyecto(Base):
     linear_team_id: Mapped[str | None] = mapped_column(Text)
     linear_project_id: Mapped[str | None] = mapped_column(Text)
     creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+    # Issues propias: el prefijo de las claves (LXB-12), el contador que da el
+    # siguiente número y el JSON con ciclos, escala de estimación y automatismos.
+    issues_prefijo: Mapped[str | None] = mapped_column(Text)
+    issues_contador: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    issues_config: Mapped[str | None] = mapped_column(Text)
+    # Secreto con el que GitHub firma los webhooks de este equipo (HMAC-SHA256).
+    github_webhook_secreto: Mapped[str | None] = mapped_column(Text)
 
 
 class TeamMiembro(Base):
@@ -732,3 +739,161 @@ class LoginDevice(Base):
     user_agent: Mapped[str | None] = mapped_column(Text)
     first_seen: Mapped[str] = mapped_column(Text, nullable=False)
     last_seen: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# ── Issues de Lixbon Team ──────────────────────────────────────────────────
+# Viven dentro de un proyecto (el «equipo» en pantalla). Lo que la interfaz
+# llama «Proyectos» se guarda como iniciativas para no chocar con team_proyectos.
+
+
+class TeamEstado(Base):
+    """Un paso del flujo. El `tipo` es lo que entiende el sistema (qué cuenta
+    como cerrado, dónde nace una issue); el nombre y el color son del equipo."""
+    __tablename__ = "team_estados"
+    __table_args__ = (Index("idx_team_estados_proyecto", "proyecto_id"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    proyecto_id: Mapped[str] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"), nullable=False)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str] = mapped_column(Text, nullable=False)
+    tipo: Mapped[str] = mapped_column(Text, nullable=False)   # backlog|pendiente|en_curso|revision|hecho|cancelado
+    orden: Mapped[float] = mapped_column(nullable=False, default=0)
+
+
+class TeamEtiqueta(Base):
+    __tablename__ = "team_etiquetas"
+    __table_args__ = (Index("idx_team_etiquetas_proyecto", "proyecto_id"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    proyecto_id: Mapped[str] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"), nullable=False)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamCiclo(Base):
+    """Las fechas son días (YYYY-MM-DD), ambos incluidos."""
+    __tablename__ = "team_ciclos"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "numero", name="uq_team_ciclos_numero"),
+        Index("idx_team_ciclos_proyecto", "proyecto_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    proyecto_id: Mapped[str] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"), nullable=False)
+    numero: Mapped[int] = mapped_column(nullable=False)
+    empieza: Mapped[str] = mapped_column(Text, nullable=False)
+    termina: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamIniciativa(Base):
+    """Lo que en pantalla es un «Proyecto»: un grupo de issues con responsable,
+    fecha objetivo y un estado que dice el equipo, no el porcentaje."""
+    __tablename__ = "team_iniciativas"
+    __table_args__ = (Index("idx_team_iniciativas_proyecto", "proyecto_id"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    proyecto_id: Mapped[str] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"), nullable=False)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str] = mapped_column(Text, nullable=False)
+    responsable_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    objetivo: Mapped[str | None] = mapped_column(Text)
+    estado: Mapped[str] = mapped_column(Text, nullable=False, default="planificado")  # planificado|en_camino|en_riesgo|hecho
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamIssue(Base):
+    """El ÚNICO (proyecto_id, numero) es lo que garantiza que dos issues creadas
+    a la vez no acaben las dos siendo LXB-12. `orden` es un índice fraccional:
+    mover una tarjeta cambia una fila, no la columna entera."""
+    __tablename__ = "team_issues"
+    __table_args__ = (
+        UniqueConstraint("proyecto_id", "numero", name="uq_team_issues_numero"),
+        Index("idx_team_issues_proyecto", "proyecto_id", "borrado_en"),
+        Index("idx_team_issues_padre", "padre_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    proyecto_id: Mapped[str] = mapped_column(
+        ForeignKey("team_proyectos.id", ondelete="CASCADE"), nullable=False)
+    numero: Mapped[int] = mapped_column(nullable=False)
+    titulo: Mapped[str] = mapped_column(Text, nullable=False)
+    descripcion: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    estado_id: Mapped[str] = mapped_column(Text, nullable=False)
+    prioridad: Mapped[int] = mapped_column(nullable=False, default=0)   # 0 sin · 1 baja · 2 media · 3 alta · 4 urgente
+    estimacion: Mapped[int | None] = mapped_column()
+    asignado_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    agente_rol: Mapped[str | None] = mapped_column(Text)             # rol del orquestador que la trabaja
+    ciclo_id: Mapped[str | None] = mapped_column(Text)
+    iniciativa_id: Mapped[str | None] = mapped_column(Text)
+    padre_id: Mapped[str | None] = mapped_column(Text)
+    fecha_limite: Mapped[str | None] = mapped_column(Text)           # YYYY-MM-DD
+    orden: Mapped[float] = mapped_column(nullable=False, default=0)
+    creado_por: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+    actualizado_en: Mapped[str] = mapped_column(Text, nullable=False)
+    cerrado_en: Mapped[str | None] = mapped_column(Text)
+    borrado_en: Mapped[str | None] = mapped_column(Text)
+
+
+class TeamIssueEtiqueta(Base):
+    __tablename__ = "team_issue_etiquetas"
+    __table_args__ = (Index("idx_team_issue_etiquetas_etiqueta", "etiqueta_id"),)
+
+    issue_id: Mapped[str] = mapped_column(
+        ForeignKey("team_issues.id", ondelete="CASCADE"), primary_key=True)
+    etiqueta_id: Mapped[str] = mapped_column(
+        ForeignKey("team_etiquetas.id", ondelete="CASCADE"), primary_key=True)
+
+
+class TeamIssueComentario(Base):
+    """`de_agente` lleva el rol cuando el comentario es el informe de un agente
+    del orquestador: se pinta distinto y no cuenta como conversación humana."""
+    __tablename__ = "team_issue_comentarios"
+    __table_args__ = (Index("idx_team_issue_comentarios_issue", "issue_id", "creado_en"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    issue_id: Mapped[str] = mapped_column(
+        ForeignKey("team_issues.id", ondelete="CASCADE"), nullable=False)
+    autor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+    de_agente: Mapped[str | None] = mapped_column(Text)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+    editado_en: Mapped[str | None] = mapped_column(Text)
+
+
+class TeamIssueActividad(Base):
+    """Cada cambio de campo, con el antes y el después. Es lo que resuelve los
+    conflictos a posteriori: gana el último, pero nada se pierde de vista."""
+    __tablename__ = "team_issue_actividad"
+    __table_args__ = (Index("idx_team_issue_actividad_issue", "issue_id", "en"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    issue_id: Mapped[str] = mapped_column(
+        ForeignKey("team_issues.id", ondelete="CASCADE"), nullable=False)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    campo: Mapped[str] = mapped_column(Text, nullable=False)
+    antes: Mapped[str | None] = mapped_column(Text)
+    despues: Mapped[str | None] = mapped_column(Text)
+    en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TeamIssueVinculo(Base):
+    """Rama, PR o commit ligado a una issue. Se guarda la referencia, no acceso."""
+    __tablename__ = "team_issue_vinculos"
+    __table_args__ = (
+        UniqueConstraint("issue_id", "tipo", "ref", name="uq_team_issue_vinculos"),
+        Index("idx_team_issue_vinculos_issue", "issue_id"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    issue_id: Mapped[str] = mapped_column(
+        ForeignKey("team_issues.id", ondelete="CASCADE"), nullable=False)
+    tipo: Mapped[str] = mapped_column(Text, nullable=False)         # rama|pr|commit
+    ref: Mapped[str] = mapped_column(Text, nullable=False)
+    estado: Mapped[str | None] = mapped_column(Text)                # abierto|fusionado|cerrado
+    url: Mapped[str | None] = mapped_column(Text)
+    creado_en: Mapped[str] = mapped_column(Text, nullable=False)

@@ -1,180 +1,178 @@
+// issuesStore.js — las issues de cada equipo, contra el gateway de Lixbon.
+// Los cambios se pintan al momento (optimista) y el evento del socket trae la
+// versión buena; si el servidor dice que no, se vuelve a lo que había.
 import { create } from 'zustand';
-import {
-  loadToken, saveToken, deleteToken, getViewer, getWorkspace, listIssues,
-  getIssue, addComment, createIssue, setIssueState, esEquipoLinear,
-} from '../lib/linear';
+import * as api from '../lib/api';
 
-const vacio = () => ({ issues: [], cargando: false, error: '', cargado: false });
+const vacio = () => ({ issues: [], cargando: false, cargado: false, error: '' });
+// Mismo objeto siempre para un equipo sin cargar: los selectores no deben
+// devolver algo nuevo en cada lectura.
+const VACIO = Object.freeze(vacio());
 
 export const useIssuesStore = create((set, get) => ({
-  token: null,
-  viewer: null,
-  estado: 'mirando',
-  error: '',
-
-  equipos: [],
-  equiposCargados: false,
-  cargandoEquipos: false,
-
   porProyecto: {},
-
-  abierta: null,
+  abierta: null,          // detalle de la issue abierta (con comentarios, actividad…)
+  abiertaId: null,
   cargandoAbierta: false,
+  errorAbierta: '',
+  creando: null,          // { proyectoId, estadoId?, padreId? } cuando el formulario está abierto
 
-  del: (proyectoId) => get().porProyecto[proyectoId] || vacio(),
+  del: (proyectoId) => get().porProyecto[proyectoId] || VACIO,
 
-  _actualizar(proyectoId, cambios) {
+  _poner(proyectoId, cambios) {
     set((s) => {
       const actual = s.porProyecto[proyectoId] || vacio();
-      return {
-        porProyecto: {
-          ...s.porProyecto,
-          [proyectoId]: typeof cambios === 'function' ? cambios(actual) : { ...actual, ...cambios },
-        },
-      };
+      const nuevo = typeof cambios === 'function' ? cambios(actual) : { ...actual, ...cambios };
+      return { porProyecto: { ...s.porProyecto, [proyectoId]: nuevo } };
     });
   },
 
-  mirarClave: async () => {
-    if (get().estado !== 'mirando') return;
-    const token = await loadToken();
-    if (!token) { set({ token: '', estado: 'sin-clave' }); return; }
-    set({ token, estado: 'comprobando' });
-    try {
-      const viewer = await getViewer(token);
-      set({ viewer, estado: 'lista', error: '' });
-    } catch (e) {
-      set({ estado: 'error', error: e.message });
-    }
-  },
-
-  conectar: async (clave) => {
-    const limpia = clave.trim();
-    if (!limpia) return;
-    set({ estado: 'comprobando', error: '' });
-    try {
-      const viewer = await getViewer(limpia);
-      await saveToken(limpia);
-      set({ token: limpia, viewer, estado: 'lista', error: '' });
-    } catch (e) {
-      set({ estado: 'sin-clave', error: e.message });
-    }
-  },
-
-  desconectar: async () => {
-    await deleteToken();
-    set({
-      token: '', viewer: null, estado: 'sin-clave', error: '',
-      equipos: [], equiposCargados: false, porProyecto: {}, abierta: null,
+  _guardarIssue(issue) {
+    get()._poner(issue.proyecto_id, (a) => {
+      const hay = a.issues.some((i) => i.id === issue.id);
+      return { ...a, issues: hay ? a.issues.map((i) => (i.id === issue.id ? issue : i)) : [...a.issues, issue] };
     });
-  },
-
-  cargarEquipos: async () => {
-    const { token, equiposCargados, cargandoEquipos } = get();
-    if (!token || equiposCargados || cargandoEquipos) return;
-    set({ cargandoEquipos: true });
-    try {
-      const equipos = await getWorkspace(token);
-      set({ equipos, equiposCargados: true, cargandoEquipos: false });
-    } catch (e) {
-      set({ error: e.message, cargandoEquipos: false });
+    const { abierta } = get();
+    if (abierta?.id === issue.id) set({ abierta: { ...abierta, ...issue } });
+    if (abierta && issue.padre_id === abierta.id) {
+      const lista = abierta.subtareas_lista || [];
+      const hay = lista.some((x) => x.id === issue.id);
+      set({ abierta: { ...get().abierta, subtareas_lista: hay ? lista.map((x) => (x.id === issue.id ? issue : x)) : [...lista, issue] } });
     }
   },
 
-  estadosDe: (teamId) => {
-    const equipo = get().equipos.find((e) => e.id === teamId);
-    const nodos = equipo?.states?.nodes || [];
-    return [...nodos].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  },
-
-  cargar: async (proyecto, { forzar = false } = {}) => {
-    const { token } = get();
-    if (!token || !esEquipoLinear(proyecto?.linear_team_id)) return;
-    const actual = get().del(proyecto.id);
-    if (actual.cargando || (actual.cargado && !forzar)) return;
-    get()._actualizar(proyecto.id, { cargando: true, error: '' });
-    get().cargarEquipos();
+  cargar: async (proyectoId, { forzar = false } = {}) => {
+    const actual = get().del(proyectoId);
+    if (!proyectoId || actual.cargando || (actual.cargado && !forzar)) return;
+    get()._poner(proyectoId, { cargando: true, error: '' });
     try {
-      const issues = await listIssues(token, {
-        teamId: proyecto.linear_team_id,
-        projectId: proyecto.linear_project_id || '',
-      });
-      get()._actualizar(proyecto.id, { issues, cargando: false, cargado: true });
+      const issues = await api.listarIssues(proyectoId);
+      get()._poner(proyectoId, { issues, cargando: false, cargado: true });
     } catch (e) {
-      get()._actualizar(proyecto.id, { cargando: false, cargado: true, error: e.message });
+      get()._poner(proyectoId, { cargando: false, error: e.message });
     }
   },
 
+  abrirCreacion: (datos) => set({ creando: datos }),
+  cerrarCreacion: () => set({ creando: null }),
+
+  crear: async (proyectoId, datos) => {
+    try {
+      const issue = await api.crearIssue(proyectoId, datos);
+      get()._guardarIssue(issue);
+      return { issue };
+    } catch (e) {
+      return { error: e.message };
+    }
+  },
+
+  /** Cambia una issue ya: la tarjeta se mueve antes de que conteste el servidor. */
+  editar: async (issueId, cambios) => {
+    const buscar = () => {
+      for (const [pid, datos] of Object.entries(get().porProyecto)) {
+        const i = datos.issues.find((x) => x.id === issueId);
+        if (i) return { pid, i };
+      }
+      return null;
+    };
+    const antes = buscar();
+    if (antes) get()._guardarIssue({ ...antes.i, ...cambios });
+    try {
+      const issue = await api.editarIssue(issueId, cambios);
+      get()._guardarIssue(issue);
+      return '';
+    } catch (e) {
+      if (antes) get()._guardarIssue(antes.i);
+      return e.message;
+    }
+  },
+
+  borrar: async (issueId) => {
+    try {
+      await api.borrarIssue(issueId);
+      get()._quitar(issueId);
+      return '';
+    } catch (e) {
+      return e.message;
+    }
+  },
+
+  _quitar(issueId) {
+    set((s) => ({
+      porProyecto: Object.fromEntries(Object.entries(s.porProyecto).map(([pid, d]) => [
+        pid, { ...d, issues: d.issues.filter((i) => i.id !== issueId) },
+      ])),
+      ...(s.abiertaId === issueId ? { abierta: null, abiertaId: null } : {}),
+    }));
+  },
+
+  /** Abre el detalle desde cualquier sección: lleva a Issues y, si la issue es
+   *  de otro equipo, cambia a ese equipo. */
   abrir: async (issueId) => {
-    const { token } = get();
-    if (!token) return;
-    set({ cargandoAbierta: true, abierta: null });
+    set({ abiertaId: issueId, cargandoAbierta: true, errorAbierta: '', abierta: get().abierta?.id === issueId ? get().abierta : null });
+    const { useTeamStore } = await import('./teamStore');
+    if (useTeamStore.getState().vista !== 'issues') useTeamStore.getState().irA('issues');
     try {
-      const issue = await getIssue(token, issueId);
-      set({ abierta: issue, cargandoAbierta: false });
+      const abierta = await api.verIssue(issueId);
+      const team = useTeamStore.getState();
+      if (abierta.proyecto_id !== team.proyectoId) useTeamStore.setState({ proyectoId: abierta.proyecto_id });
+      if (get().abiertaId === issueId) set({ abierta, cargandoAbierta: false });
     } catch (e) {
-      set({ cargandoAbierta: false, error: e.message });
+      if (get().abiertaId === issueId) set({ cargandoAbierta: false, errorAbierta: e.message });
     }
   },
 
-  cerrar: () => set({ abierta: null }),
+  cerrar: () => set({ abierta: null, abiertaId: null, errorAbierta: '' }),
 
   comentar: async (issueId, texto) => {
-    const { token } = get();
-    if (!token || !texto.trim()) return '';
     try {
-      const comentario = await addComment(token, issueId, texto.trim());
-      set((s) => {
-        if (s.abierta?.id !== issueId) return {};
-        const nodes = [...(s.abierta.comments?.nodes || []), comentario];
-        return { abierta: { ...s.abierta, comments: { ...s.abierta.comments, nodes } } };
-      });
+      const c = await api.comentarIssue(issueId, texto);
+      get()._comentario({ accion: 'creado', issue_id: issueId, comentario: c });
       return '';
     } catch (e) {
       return e.message;
     }
   },
 
-  crear: async (proyecto, titulo) => {
-    const { token } = get();
-    if (!token || !proyecto?.linear_team_id) return 'Este proyecto no está vinculado a Linear.';
+  borrarComentario: async (comentarioId) => {
     try {
-      await createIssue(token, {
-        teamId: proyecto.linear_team_id,
-        projectId: proyecto.linear_project_id || '',
-        title: titulo.trim(),
-      });
-      await get().cargar(proyecto, { forzar: true });
+      await api.borrarComentario(comentarioId);
+      const a = get().abierta;
+      if (a) get()._comentario({ accion: 'borrado', issue_id: a.id, comentario_id: comentarioId });
       return '';
     } catch (e) {
       return e.message;
     }
   },
 
-  mover: async (proyectoId, issueId, stateId) => {
-    const { token } = get();
-    if (!token) return;
-    const antes = get().del(proyectoId).issues;
-    const destino = antes.find((i) => i.id === issueId)?.state;
-    get()._actualizar(proyectoId, (a) => ({
-      ...a,
-      issues: a.issues.map((i) => (i.id === issueId ? { ...i, _moviendo: true } : i)),
-    }));
-    try {
-      const issue = await setIssueState(token, issueId, stateId);
-      get()._actualizar(proyectoId, (a) => ({
-        ...a,
-        issues: a.issues.map((i) => (i.id === issueId ? { ...i, state: issue.state, _moviendo: false } : i)),
-      }));
-      set((s) => (s.abierta?.id === issueId ? { abierta: { ...s.abierta, state: issue.state } } : {}));
-    } catch (e) {
-      get()._actualizar(proyectoId, (a) => ({
-        ...a,
-        issues: a.issues.map((i) => (i.id === issueId ? { ...i, state: destino, _moviendo: false } : i)),
-        error: e.message,
-      }));
+  _comentario(ev) {
+    const a = get().abierta;
+    if (!a || a.id !== ev.issue_id) return;
+    const lista = a.comentarios_lista || [];
+    if (ev.accion === 'creado') {
+      if (lista.some((c) => c.id === ev.comentario.id)) return;
+      set({ abierta: { ...a, comentarios_lista: [...lista, ev.comentario] } });
+    } else {
+      set({ abierta: { ...a, comentarios_lista: lista.filter((c) => c.id !== ev.comentario_id) } });
     }
   },
 
-  limpiar: () => set({ porProyecto: {}, abierta: null }),
+  /** Eventos del socket de Team que tocan issues. */
+  evento: (ev) => {
+    if (ev.tipo === 'issue') {
+      if (ev.accion === 'borrada') get()._quitar(ev.issue_id);
+      else if (ev.issue) {
+        get()._guardarIssue(ev.issue);
+        // La actividad del detalle abierto se refresca en segundo plano.
+        if (get().abiertaId === ev.issue.id) {
+          api.verIssue(ev.issue.id).then((abierta) => {
+            if (get().abiertaId === abierta.id) set({ abierta });
+          }).catch(() => {});
+        }
+      }
+    }
+    if (ev.tipo === 'issue_comentario') get()._comentario(ev);
+  },
+
+  limpiar: () => set({ porProyecto: {}, abierta: null, abiertaId: null, creando: null }),
 }));
