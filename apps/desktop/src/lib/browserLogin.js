@@ -68,6 +68,6 @@ export async function oauthLogin(serverUrl, provider, signal) {
     `${serverUrl}/api/auth/oauth/${provider}/start?${new URLSearchParams({ redirect_uri: redirect, code_challenge: challenge })}`);
   if (error || !code) throw new Error(`Cancelaste el inicio de sesión con ${PROVIDER_NAMES[provider]}.`);
   return postJson(`${serverUrl}/api/auth/oauth/exchange`, {
-    code, code_verifier: verifier, issue_api_key: true, key_name: 'Lixbon IDE',
+    code, code_verifier: verifier, issue_api_key: true, key_name: 'lixbon Desktop',
   });
 }
