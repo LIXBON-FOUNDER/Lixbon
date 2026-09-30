@@ -16,7 +16,9 @@ const HELP: &str = "lxo · orquestador de agentes de Lixbon
 
 Coordinador (el agente con el que habla el usuario):
   lxo run create --objective \"...\" --agent <tu agente>
-  lxo agents [--refresh]                          agentes instalados y sus modelos
+  lxo roles                                       roles del equipo y el modelo que les asignó el usuario
+  lxo spawn --role <rol> --task \"...\" [--name \"...\"] [--base <rama>]
+  lxo agents [--refresh]                          agentes instalados y sus modelos (solo sin --role)
   lxo spawn --agent <id> --task \"...\" [--model <id>] [--effort <nivel>] [--name \"...\"] [--shared] [--base <rama>]
   lxo wait [--types done,question,exited,phase] [--timeout-ms 540000]
   lxo reply <id-pregunta> \"respuesta\"
@@ -30,6 +32,13 @@ Tarea hija:
   lxo ask \"pregunta\" [--timeout-ms N]   (lxo ask --resume <id> para seguir esperando)
   lxo check
   lxo done --report <informe.md> --summary \"...\" [--failed] [--files a,b]
+  lxo done --report - --summary \"...\" <<'EOF' … EOF   (solo lectura: informe por stdin)
+
+Issues de Lixbon Team (con la cuenta del IDE):
+  lxo issue ver <CLAVE>                            título, estado, descripción, subtareas y comentarios
+  lxo issue comentar <CLAVE> --texto \"...\"        (--texto - <<'EOF' … EOF para un informe largo)
+  lxo issue mover <CLAVE> \"En revisión\"           por nombre del estado o por tipo (en_curso, revision, hecho)
+  lxo issue vincular <CLAVE> --rama <rama> | --pr <#n> [--url …] | --commit <sha>
 
 Siempre:
   lxo guide [coordinator|worker]   guía completa (léela antes de empezar)
@@ -170,7 +179,7 @@ fn human(cmd: &str, data: &Value) -> String {
                 _ => "No eres una tarea todavía: si vas a coordinar, empieza con `lxo run create`".into(),
             };
             format!(
-                "Lixbon {} · orquestador activo\n{who}\nPara ver agentes y modelos disponibles: lxo agents",
+                "Lixbon {} · orquestador activo\n{who}\nPara ver los roles del equipo y sus modelos: lxo roles",
                 data["version"].as_str().unwrap_or("")
             )
         }
@@ -197,10 +206,23 @@ fn human(cmd: &str, data: &Value) -> String {
                 )
             }).collect::<Vec<_>>().join("\n\n")
         }
+        "roles" => {
+            let list = data["roles"].as_array().cloned().unwrap_or_default();
+            let rows: Vec<String> = list.iter().map(|r| format!(
+                "{} · {}{}{}\n  {}",
+                r["id"].as_str().unwrap_or(""),
+                r["model"].as_str().unwrap_or(""),
+                r["effort"].as_str().map(|e| format!(" · esfuerzo {e}")).unwrap_or_default(),
+                if r["read_only"].as_bool() == Some(true) { " · solo lectura (sin rama)" } else { " · rama y worktree propios" },
+                r["purpose"].as_str().unwrap_or("")
+            )).collect();
+            format!("{}\n\nLanza con: lxo spawn --role <rol> --name \"...\" --task \"...\"", rows.join("\n"))
+        }
         "continue" => format!("Nuevo encargo enviado a {}: lo verás llegar con lxo wait como otro done.", data["task"].as_str().unwrap_or("")),
         "spawn" => format!(
-            "Hija {} lanzada con {}{} [{}]{}{}",
+            "Hija {} lanzada {}con {}{} [{}]{}{}",
             data["task"].as_str().unwrap_or(""),
+            data["role"].as_str().map(|r| format!("como {r} ")).unwrap_or_default(),
             data["agent"].as_str().unwrap_or(""),
             data["model"].as_str().map(|m| format!(" · {m}")).unwrap_or_default(),
             data["status"].as_str().unwrap_or(""),
@@ -252,7 +274,58 @@ fn human(cmd: &str, data: &Value) -> String {
             if data["worktree_removed"].as_bool() == Some(true) { " Worktree borrado." } else { "" },
             if data["branch_deleted"].as_bool() == Some(true) { " Rama borrada (ya estaba fusionada)." } else { " La rama se conserva." }
         ),
+        "issue" => issue_human(data),
         _ => serde_json::to_string_pretty(data).unwrap_or_default(),
+    }
+}
+
+const PRIORIDADES: [&str; 5] = ["sin prioridad", "baja", "media", "alta", "urgente"];
+
+fn issue_human(data: &Value) -> String {
+    let clave = data["clave"].as_str().unwrap_or("");
+    match data["accion"].as_str().unwrap_or("") {
+        "comentar" => format!("Comentario publicado en {clave}."),
+        "mover" => format!("{clave} está ahora en «{}».", data["estado"].as_str().unwrap_or("")),
+        "vincular" => format!("{} {} vinculado a {clave}.", data["tipo"].as_str().unwrap_or(""), data["ref"].as_str().unwrap_or("")),
+        _ => {
+            let i = &data["issue"];
+            let mut out = vec![format!("{} · {}", i["clave"].as_str().unwrap_or(""), i["titulo"].as_str().unwrap_or(""))];
+            let prioridad = PRIORIDADES.get(i["prioridad"].as_u64().unwrap_or(0) as usize).copied().unwrap_or("");
+            out.push(format!(
+                "Estado: {} · prioridad {}{}{}",
+                i["estado"]["nombre"].as_str().unwrap_or("?"),
+                prioridad,
+                i["fecha_limite"].as_str().map(|f| format!(" · vence {f}")).unwrap_or_default(),
+                i["rama"].as_str().map(|r| format!(" · rama {r}")).unwrap_or_default(),
+            ));
+            if let Some(d) = i["descripcion"].as_str().filter(|d| !d.trim().is_empty()) {
+                out.push(String::new());
+                out.push(d.trim().to_string());
+            }
+            let estados = i["estados"].as_array().cloned().unwrap_or_default();
+            let nombre_estado = |id: &Value| estados.iter().find(|e| &e["id"] == id).and_then(|e| e["nombre"].as_str()).unwrap_or("?").to_string();
+            let subt = i["subtareas_lista"].as_array().cloned().unwrap_or_default();
+            if !subt.is_empty() {
+                out.push(String::new());
+                out.push("Subtareas:".into());
+                for x in &subt {
+                    out.push(format!("  {} · {} [{}]", x["clave"].as_str().unwrap_or(""), x["titulo"].as_str().unwrap_or(""), nombre_estado(&x["estado_id"])));
+                }
+            }
+            let coms = i["comentarios_lista"].as_array().cloned().unwrap_or_default();
+            if !coms.is_empty() {
+                out.push(String::new());
+                out.push(format!("Últimos comentarios ({} en total):", coms.len()));
+                for c in coms.iter().rev().take(5).rev() {
+                    let quien = c["de_agente"].as_str().map(|r| format!("agente {r}")).unwrap_or_else(|| "persona".into());
+                    out.push(format!("  [{quien}] {}", c["texto"].as_str().unwrap_or("").replace('\n', "\n  ")));
+                }
+            }
+            let nombres: Vec<&str> = estados.iter().filter_map(|e| e["nombre"].as_str()).collect();
+            out.push(String::new());
+            out.push(format!("Estados del equipo: {}", nombres.join(", ")));
+            out.join("\n")
+        }
     }
 }
 
@@ -287,9 +360,11 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             ("run_create", data)
         }
         "agents" => ("agents", call("agents", json!({ "refresh": a.b("refresh") }), me)?),
+        "roles" => ("roles", call("roles", json!({}), me)?),
         "spawn" => ("spawn", call("spawn", json!({
             "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
-            "agent": need(a.s("agent"), "--agent (mira `lxo agents`)")?,
+            "role": a.s("role"),
+            "agent": if a.s("role").is_some() { a.s("agent") } else { Some(need(a.s("agent"), "--role (mira `lxo roles`) o --agent (mira `lxo agents`)")?) },
             "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
         }), me)?),
         "continue" => ("continue", call("continue", json!({
@@ -302,12 +377,21 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         }
         "done" => {
             let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
-            let report = a.s("report").unwrap_or_default();
+            let mut report = a.s("report").unwrap_or_default();
             let summary = a.s("summary").unwrap_or_default();
-            if report.is_empty() && summary.is_empty() {
+            // `--report -`: el informe llega por stdin (las hijas de solo lectura no escriben archivos).
+            let mut report_text = String::new();
+            if report == "-" {
+                std::io::stdin().read_to_string(&mut report_text).map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
+                if report_text.trim().is_empty() {
+                    return Err("--report - espera el informe por stdin: lxo done --summary \"...\" --report - <<'EOF' … EOF".into());
+                }
+                report.clear();
+            }
+            if report.is_empty() && report_text.is_empty() && summary.is_empty() {
                 return Err("Falta --report <informe.md> (y --summary con una frase).".into());
             }
-            ("done", call("done", json!({ "summary": summary, "report": report, "failed": a.b("failed"), "files": files }), me)?)
+            ("done", call("done", json!({ "summary": summary, "report": report, "report_text": report_text, "failed": a.b("failed"), "files": files }), me)?)
         }
         "ask" => {
             let q = call("ask", json!({ "question": need(sub(1).or_else(|| a.s("question")), "la pregunta")? }), me)?;
@@ -340,6 +424,28 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         "pr" => ("pr", call("pr", json!({ "task": need(sub(1), "la tarea")? }), me)?),
         "stop" => ("stop", call("stop", json!({ "task": need(sub(1), "la tarea")? }), me)?),
         "release" => ("release", call("release", json!({ "task": need(sub(1), "la tarea")?, "force": a.b("force") }), me)?),
+        "issue" => {
+            // `lxo issue LXB-12` es `lxo issue ver LXB-12`.
+            let (accion, clave) = match (sub(1), sub(2)) {
+                (Some(x), Some(c)) if ["ver", "comentar", "mover", "vincular"].contains(&x.as_str()) => (x, c),
+                (Some(c), _) if c.contains('-') => ("ver".to_string(), c),
+                _ => return Err("Uso: lxo issue <ver|comentar|mover|vincular> <CLAVE> …  (mira `lxo help`)".into()),
+            };
+            let mut texto = a.s("texto").or_else(|| sub(3)).unwrap_or_default();
+            if accion == "comentar" && texto == "-" {
+                texto.clear();
+                std::io::stdin().read_to_string(&mut texto).map_err(|e| format!("No se pudo leer el comentario de stdin: {e}"))?;
+            }
+            let (tipo, referencia) = if let Some(r) = a.s("rama") { ("rama", r) }
+                else if let Some(r) = a.s("pr") { ("pr", r) }
+                else if let Some(r) = a.s("commit") { ("commit", r) }
+                else { ("", String::new()) };
+            ("issue", call("issue", json!({
+                "accion": accion, "clave": clave, "texto": texto,
+                "estado": a.s("estado").or_else(|| sub(3)),
+                "tipo": tipo, "ref": referencia, "url": a.s("url"),
+            }), me)?)
+        }
         other => return Err(format!("Comando desconocido: {other}. Ejecuta `lxo help`.")),
     };
     Ok((out.0.to_string(), out.1))
@@ -397,5 +503,34 @@ mod tests {
         let a = p(&["merge", "t3", "--squash", "--json"]);
         assert_eq!(a.at(1).as_deref(), Some("t3"));
         assert!(a.b("squash") && a.b("json"));
+        let a = p(&["done", "--summary", "ok", "--report", "-"]);
+        assert_eq!(a.s("report").as_deref(), Some("-"));
+        let a = p(&["spawn", "--role", "explorador", "--task", "x"]);
+        assert_eq!(a.s("role").as_deref(), Some("explorador"));
+    }
+
+    #[test]
+    fn issue_legible() {
+        let data = json!({ "accion": "ver", "issue": {
+            "clave": "LXB-12", "titulo": "Notarizar macOS", "prioridad": 4, "rama": "lx/lxb-12-macos",
+            "estado": { "nombre": "En curso" }, "descripcion": "Firmar y notarizar.",
+            "estados": [{ "id": "a", "nombre": "En curso" }, { "id": "b", "nombre": "Hecho" }],
+            "subtareas_lista": [{ "clave": "LXB-13", "titulo": "Runner", "estado_id": "b" }],
+            "comentarios_lista": [{ "texto": "Listo el runner", "de_agente": "implementador" }],
+        }});
+        let t = issue_human(&data);
+        assert!(t.starts_with("LXB-12 · Notarizar macOS\nEstado: En curso · prioridad urgente · rama lx/lxb-12-macos"));
+        assert!(t.contains("  LXB-13 · Runner [Hecho]"));
+        assert!(t.contains("[agente implementador] Listo el runner"));
+        assert!(t.ends_with("Estados del equipo: En curso, Hecho"));
+        assert_eq!(issue_human(&json!({ "accion": "mover", "clave": "LXB-12", "estado": "Hecho" })), "LXB-12 está ahora en «Hecho».");
+    }
+
+    #[test]
+    fn flags_de_issue() {
+        let a = p(&["issue", "comentar", "LXB-12", "--texto", "-"]);
+        assert_eq!(a.s("texto").as_deref(), Some("-"));
+        let a = p(&["issue", "vincular", "LXB-12", "--pr", "#4", "--url", "https://github.com/x/y/pull/4"]);
+        assert_eq!(a.s("pr").as_deref(), Some("#4"));
     }
 }

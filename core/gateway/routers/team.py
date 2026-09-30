@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from core.config import PUBLIC_BASE_URL, r2_configured
 from core.gateway.team_hub import hub
+from core.persistence import team_issues as ti
 from core.persistence import team_queries as tq
 from core.persistence.queries import validate_api_key
 from core.security.auth import cookie_auth_required
@@ -139,8 +140,17 @@ def _borrar_de_r2(claves: list[str]) -> None:
 
 # ── Cuerpos ────────────────────────────────────────────────────────────────
 
+class IssuesIniciales(BaseModel):
+    """El paso Issues del asistente de «Nuevo equipo». Todo opcional: lo que
+    falte se queda en los valores de siempre."""
+    prefijo: str | None = None
+    etiquetas: list[str] | None = None
+    config: dict[str, Any] | None = None
+
+
 class ProyectoNuevo(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=60)
+    issues: IssuesIniciales | None = None
 
 
 class ProyectoCambios(BaseModel):
@@ -199,7 +209,17 @@ async def team_bootstrap(yo: dict[str, Any] = Depends(cookie_auth_required)):
 
 @router.post("/api/team/projects", status_code=201)
 async def crear_proyecto(cuerpo: ProyectoNuevo, yo: dict[str, Any] = Depends(cookie_auth_required)):
-    pid = tq.crear_proyecto(yo["id"], cuerpo.nombre.strip())
+    issues = cuerpo.issues.model_dump(exclude_none=True) if cuerpo.issues else None
+    # Se valida ANTES de crear: un identificador mal escrito no puede dejar un
+    # equipo a medio nacer.
+    try:
+        if issues and issues.get("prefijo"):
+            issues["prefijo"] = ti._prefijo_valido(issues["prefijo"])
+        if issues and issues.get("config"):
+            ti._config_limpia(issues["config"], ti.CONFIG_POR_DEFECTO)
+    except ti.ErrorIssues as e:
+        raise _no(e.codigo, e.detalle)
+    pid = tq.crear_proyecto(yo["id"], cuerpo.nombre.strip(), issues)
     return tq.proyecto_salida(pid, yo["id"], hub.estado_publico)
 
 

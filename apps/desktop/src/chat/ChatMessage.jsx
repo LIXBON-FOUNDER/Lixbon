@@ -61,6 +61,46 @@ export function CompactLive({ since }) {
   );
 }
 
+const TASK_LABEL = { local_bash: 'comando', local_agent: 'subagente', remote_agent: 'agente remoto' };
+
+function useNow() {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+const elapsed = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+};
+
+export function WaitingLive({ tasks }) {
+  const now = useNow();
+  return (
+    <div className="compact compact--live waiting" role="status">
+      <div className="compact__head">
+        <ClaudeMark size={13} className="claudemark--live" />
+        <span className="compact__label">
+          {tasks.length === 1 ? 'Esperando a una tarea en segundo plano…' : `Esperando a ${tasks.length} tareas en segundo plano…`}
+        </span>
+      </div>
+      <ul className="waiting__list">
+        {tasks.map((t) => (
+          <li key={t.id}>
+            <span className="waiting__kind mono">{TASK_LABEL[t.type] || 'tarea'}</span>
+            <span className="waiting__desc">{t.description || t.id}</span>
+            <span className="msg__live-secs mono">{elapsed(now - t.since)}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="compact__bar"><span /></div>
+    </div>
+  );
+}
+
 const fmtTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
 function CompactDivider({ message }) {
@@ -404,8 +444,6 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
           <ChatMarkdown>{message.content}</ChatMarkdown>
           {streaming && <span className="msg__caret" aria-hidden="true" />}
         </>
-      ) : message.vision ? (
-        <LiveStatus text="Analizando la imagen…" />
       ) : message.generating ? (
         <LiveStatus text={`Generando cambio… (${(message.generating / 1000).toFixed(1)}k caracteres)`} />
       ) : (

@@ -14,7 +14,6 @@ import { useOutputStore } from './outputStore';
 import { api } from '../lib/api';
 import { streamChatCompletion } from '../lib/stream';
 import { readFileContent } from '../lib/tauri';
-import { searchIndex } from '../lib/codebaseIndex';
 import {
   MAX_AGENT_STEPS,
   MAX_REPEATED_CALLS,
@@ -39,8 +38,6 @@ import {
 import { TOOL_SCHEMAS, nativeCallToInternal } from '../lib/agentSchemas';
 import { useMcpStore, mcpToolSchemas, mcpPromptSection } from './mcpStore';
 import { clipToolOutput, estimateTokens, fitHistory, promptBudget } from '../lib/agentContext';
-import { describeImages } from '../lib/vision';
-import { roleWarning } from '../lib/modelRoles';
 import { makeClaudeStore } from './claudeSession';
 import { orchPromptSection, isLxoCommand } from './orchStore';
 import { questionOf } from '../lib/docBlocks';
@@ -73,7 +70,7 @@ function modePrompt(mode) {
   if (mode === 'plan') {
     return '\n\n=== MODO PLAN (manda sobre las reglas anteriores) ===\n'
       + 'El usuario quiere un PLAN, no cambios. Solo puedes usar herramientas de lectura (read_file, list_files, find_files, '
-      + 'outline, search, search_codebase, fetch_url, web_search) y ask_user. Cualquier otra herramienta será rechazada.\n'
+      + 'outline, search, fetch_url, web_search) y ask_user. Cualquier otra herramienta será rechazada.\n'
       + 'Si algo es ambiguo o hay varias opciones razonables, pregunta con ask_user ANTES de cerrar el plan.\n'
       + 'Termina con el plan en markdown bajo "## Plan": pasos numerados, archivos que cambiarían y riesgos. '
       + 'Puedes incluir fragmentos de código cortos para ilustrar. No digas que ya hiciste cambios.';
@@ -224,9 +221,6 @@ function makeChatStore() {
     // Por defecto el agente escribe directo (petición del diseño); en Ajustes
     // se puede exigir aprobación por cambio.
     autoApprove: (localStorage.getItem('lixbon_agent_auto') ?? 'true') === 'true',
-    // Tool-calling nativo (opt-in): requiere un modelo que soporte tools en
-    // Ollama. Off = protocolo de texto (JSON embebido), fiable y por defecto.
-    nativeTools: (localStorage.getItem('lixbon_agent_native') ?? 'false') === 'true',
     // Ejecutar comandos del agente sin aprobación (B4). OFF por defecto: correr
     // shell es irreversible (a diferencia de editar archivos, que tiene revert),
     // así que los comandos SIEMPRE piden confirmación salvo que estén en la
@@ -259,11 +253,6 @@ function makeChatStore() {
     },
 
     setAutoApprove: (autoApprove) => get().setToolPolicy('edit', autoApprove ? 'allow' : 'ask'),
-
-    setNativeTools: (nativeTools) => {
-      localStorage.setItem('lixbon_agent_native', nativeTools ? 'true' : 'false');
-      share({ nativeTools });
-    },
 
     setAutoRunCommands: (autoRunCommands) => get().setToolPolicy('command', autoRunCommands ? 'allow' : 'ask'),
 
@@ -370,49 +359,21 @@ function makeChatStore() {
       const isFirstExchange = !conversationId;
       const agentActive = !!workspaceRoot;
 
-      // ── Sub-agente de visión: si hay imágenes, un modelo multimodal las
-      //    describe en texto para que el modelo de texto (qwen…) las entienda. ──
+      // Las imágenes van tal cual al modelo del chat, que es multimodal; no hay
+      // un modelo aparte que las describa.
       const userMsg = {
         role: 'user',
         content: text.trim(),
         context: context ? { name: context.name, selection: context.isSelection } : null,
         images: hasImages ? images.map((im) => im.dataUrl) : null,
-        // Aquí y no más abajo: con imágenes el mensaje se publica antes de
-        // describirlas y la burbuja ya no se volvería a pintar.
         mentions: mentions?.length ? mentions.map((m) => m.name) : undefined,
       };
-      let visionText = '';
-      if (hasImages) {
-        const visionModel = appState.effectiveVisionModel();
-        if (!visionModel) {
-          // El aviso lo redacta el gateway (sabe qué falta); el texto local es el
-          // respaldo para un gateway antiguo sin roles.
-          const aviso = roleWarning(appState.modelRoles, 'vision')
-            || 'Instala uno en Ollama (p. ej. `ollama pull llava`).';
-          set({ messages: [...messages, userMsg, {
-            role: 'error',
-            content: `Adjuntaste una imagen pero no hay un modelo de visión disponible. ${aviso} `
-              + 'También puedes elegirlo en Ajustes → Modelos.',
-          }] });
-          return;
-        }
-        abortController = new AbortController();
-        set({ messages: [...messages, userMsg, { role: 'assistant', content: '', vision: true }], streaming: true, conversationId: convId });
-        try {
-          const desc = await describeImages({
-            serverUrl, apiKey, model: visionModel,
-            images: images.map((im) => im.base64),
-            signal: abortController.signal,
-          });
-          visionText = `[El usuario adjuntó ${images.length} imagen(es). Un modelo de visión (${visionModel}) las describió así:\n${desc}\n]\n\n`;
-        } catch (err) {
-          abortController = null;
-          if (err.name === 'AbortError') { set({ messages: get().messages.slice(0, -1), streaming: false }); return; }
-          set({ messages: [...get().messages.slice(0, -1), { role: 'error', content: `Visión: ${err.message}` }], streaming: false });
-          return;
-        }
-        // Quita la burbuja de estado "viendo imagen"; sigue el flujo normal
-        set({ messages: get().messages.slice(0, -1), streaming: false });
+      if (hasImages && !appState.supportsImages(currentModel)) {
+        set({ messages: [...messages, userMsg, {
+          role: 'error',
+          content: 'Este modelo no puede ver imágenes. Elige otro en el selector de modelo o describe lo que muestra.',
+        }] });
+        return;
       }
 
       let modelText = text.trim() || '(ver la imagen adjunta)';
@@ -453,20 +414,6 @@ function makeChatStore() {
         }
       }
 
-      // RAG: en chat normal, inyecta fragmentos relevantes del índice del codebase
-      // (en modo agente no: el agente llama a search_codebase cuando lo necesita).
-      if (appState.useCodebaseContext && !agentActive && text.trim()) {
-        try {
-          const hits = await searchIndex(text.trim(), 5);
-          if (hits.length) {
-            const block = hits.map((h) => `# ${h.rel}:${h.start}-${h.end}\n${h.text}`).join('\n\n');
-            modelText = `Contexto relevante del proyecto (búsqueda semántica):\n\n${block}\n\n---\n\n` + modelText;
-          }
-        } catch { /* sin índice/modelo de embeddings: se ignora */ }
-      }
-
-      // La descripción de la imagen (del sub-agente de visión) va primero
-      if (visionText) modelText = visionText + modelText;
 
       const history = [...messages, userMsg];
       set({ messages: [...history, { role: 'assistant', content: '', sources: null }], streaming: true, conversationId: convId });
@@ -476,7 +423,7 @@ function makeChatStore() {
       // por una versión podada a mitad de turno.
       let modelMessages = [
         ...buildModelHistory(history.slice(0, -1), agentActive),
-        { role: 'user', content: modelText },
+        { role: 'user', content: modelText, ...(hasImages ? { images: images.map((im) => im.base64) } : {}) },
       ];
       if (agentActive) {
         const mcp = chatMode === 'agent' ? mcpPromptSection() : '';
@@ -496,8 +443,8 @@ function makeChatStore() {
       // Un solo recordatorio por turno: si el modelo "sugiere" código en vez de
       // aplicarlo (vicio de los modelos chicos), se le exige usar la herramienta.
       let nudged = false;
-      // Tool-calling nativo (opt-in): solo se envían los schemas en modo agente.
-      const useNative = agentActive && get().nativeTools;
+      // Tool-calling nativo si el modelo lo declara; solo en modo agente.
+      const useNative = agentActive && appState.supportsNativeTools(currentModel);
       // Bucles y desbordamientos: el turno no puede acabar en silencio por
       // ninguno de los dos (era exactamente lo que parecía "el agente se cuelga").
       let lastSignature = '';
@@ -540,7 +487,7 @@ function makeChatStore() {
             : null;
           const systemMsg = modelMessages[0]?.role === 'system' ? [modelMessages[0]] : [];
           const body = modelMessages.slice(systemMsg.length);
-          const budget = promptBudget(appState.contextWindow, tools, estimateTokens(systemMsg));
+          const budget = promptBudget(appState.effectiveContextWindow(currentModel), tools, estimateTokens(systemMsg));
           const fitted = fitHistory(body, budget);
           if (fitted.pruned && !prunedWarned) {
             prunedWarned = true;
@@ -564,7 +511,6 @@ function makeChatStore() {
             conversationId: convId,
             signal,
             tools,
-            numCtx: appState.contextWindow,
             onDelta: (delta) => {
               raw += delta;
               const { thinking, visible } = splitThinking(raw);

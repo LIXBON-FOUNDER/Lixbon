@@ -28,7 +28,7 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, versions, ws_status, monitor
+from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -107,6 +107,7 @@ app.middleware("http")(security_headers_middleware)
 app.include_router(auth.router)
 app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
 app.include_router(team.router)       # /api/team/* + /ws/team (Lixbon Team)
+app.include_router(team_issues.router)  # /api/team/* de las issues propias
 app.include_router(oauth.router)
 app.include_router(keys.router)
 app.include_router(chat.router)

@@ -18,6 +18,7 @@ import { listFiles } from '../lib/tauri';
 import { fuzzyScore } from '../lib/fuzzy';
 import { claudeMenuEntries, parseSlash } from '../lib/claudeCommands';
 import { CLAUDE_IDE_CARDS } from '../chat/slashCommands';
+import { remoteCard } from '../lib/remoteCards';
 
 const FLUSH_MS = 250;
 const RESULT_CHARS = 600;
@@ -46,6 +47,12 @@ let remotePromptQueue = [];   // prompts recibidos mientras había streaming
 let nextRemotePrompt = null;
 let lastHelloKey = '';
 let filesCache = { at: 0, list: [] };
+// Las tarjetas de comando entran reemplazando la burbuja del turno, sin cambiar
+// la longitud del chat: se reconocen por identidad.
+let sentCards = new WeakSet();
+let prevSide = null;
+let prevBtw = null;
+let prevBackground = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -72,8 +79,8 @@ function mapSnapshot(messages) {
       out.push({ role: 'tool', tool: m.tool, content: (m.content || '').slice(0, RESULT_CHARS), ok: m.ok !== false });
     } else if (m.role === 'error') {
       out.push({ role: 'error', content: m.content || '' });
-    } else if (m.role === 'cmd' && m.output) {
-      out.push({ role: 'assistant', content: m.output });
+    } else if (m.role === 'cmd') {
+      out.push({ role: 'command', ...remoteCard(m, helpCommands()) });
     }
   }
   return out.slice(-SNAPSHOT_MSGS);
@@ -236,11 +243,16 @@ function startChannel(sessionId) {
   nextRemotePrompt = null;
   lastHelloKey = '';
   filesCache = { at: 0, list: [] };
+  sentCards = new WeakSet(chat.messages.filter((m) => m.role === 'cmd'));
+  prevSide = chat.ccSide;
+  prevBtw = chat.ccBtw;
+  prevBackground = chat.ccBackground || [];
 
   emitHello(true);
   emit('snapshot', { messages: mapSnapshot(chat.messages) });
   emit('status', { state: chat.streaming ? 'thinking' : 'idle' });
   if (chat.pendingApproval) announceApproval(chat.pendingApproval);
+  if (prevBackground.length) emitBackground(prevBackground);
 
   unsubChat = useChatStore.subscribe(onChatChange);
   flushTimer = setInterval(flushEvents, FLUSH_MS);
@@ -287,6 +299,7 @@ function onChatChange(state) {
       // resincronizar con un snapshot completo en lugar de derivar deltas.
       closeAssistant(prev);
       emit('snapshot', { messages: mapSnapshot(msgs) });
+      msgs.forEach((m) => m.role === 'cmd' && sentCards.add(m));
     } else {
       for (let i = prev.length; i < msgs.length; i++) announceNew(msgs[i]);
       // Delta de la burbuja de asistente en streaming (siempre la última)
@@ -304,6 +317,7 @@ function onChatChange(state) {
       }
     }
     prevMessages = msgs;
+    announceCards(msgs);
   }
 
   if (state.streaming !== prevStreaming) {
@@ -319,6 +333,12 @@ function onChatChange(state) {
     } else {
       emit('status', { state: 'thinking' });
     }
+  }
+
+  announceSidePanels(state);
+  if ((state.ccBackground || []) !== prevBackground) {
+    prevBackground = state.ccBackground || [];
+    emitBackground(prevBackground);
   }
 
   // Cambio de pestaña (otra sesión, quizá de otro agente), de título o de
@@ -357,6 +377,48 @@ function announceNew(m) {
   } else if (m.role === 'error') {
     emit('error', { message: m.content || '' });
   }
+}
+
+function announceCards(msgs) {
+  for (const m of msgs.slice(-4)) {
+    if (m.role !== 'cmd' || sentCards.has(m)) continue;
+    sentCards.add(m);
+    if (assistantOpen && m === msgs[msgs.length - 1]) {
+      emit('assistant_done', { text: '' });
+      assistantOpen = false;
+      assistantSent = '';
+    }
+    emit('command_result', remoteCard(m, helpCommands()));
+  }
+}
+
+// Con Claude trabajando, los "/" de lectura y /btw se responden en paneles
+// aparte del IDE que no pasan por los mensajes.
+function announceSidePanels(state) {
+  const side = state.ccSide;
+  if (side && side !== prevSide && !side.loading) {
+    if (side.card && !sentCards.has(side.card)) {
+      sentCards.add(side.card);
+      emit('command_result', remoteCard(side.card, helpCommands()));
+    } else if (side.error) {
+      emit('error', { message: `/${side.name}: ${side.error}` });
+    }
+  }
+  prevSide = side;
+  const btw = state.ccBtw;
+  if (btw && btw !== prevBtw && !btw.loading && prevBtw?.loading) {
+    if (btw.answer) emit('command_result', { name: 'btw', args: btw.question, rows: [], text: btw.answer });
+    else if (btw.error) emit('error', { message: `/btw: ${btw.error}` });
+  }
+  prevBtw = btw;
+}
+
+function emitBackground(tasks) {
+  emit('background', { tasks: tasks.map(({ id, type, description, since }) => ({ id, type, description, since })) });
+}
+
+function helpCommands() {
+  return commandsOf(useChatStore.getState()).map(({ name, args = '', description }) => ({ name: args ? `${name} ${args}` : name, description }));
 }
 
 function closeAssistant(msgs) {

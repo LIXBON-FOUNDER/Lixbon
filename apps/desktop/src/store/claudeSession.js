@@ -273,6 +273,20 @@ export function makeClaudeStore() {
             if (ev.status === 'compacting') startCompact();
             break;
           }
+          // Tareas que Claude dejó corriendo (comandos, subagentes): con el
+          // turno ya cerrado es lo único que dice que sigue esperando algo.
+          if (ev.subtype === 'background_tasks_changed') {
+            const prev = get().ccBackground;
+            set({
+              ccBackground: (ev.tasks || []).map((t) => ({
+                id: t.task_id,
+                type: t.task_type,
+                description: t.description || '',
+                since: prev.find((p) => p.id === t.task_id)?.since || Date.now(),
+              })),
+            });
+            break;
+          }
           if (ev.subtype === 'compact_boundary') {
             const m = ev.compact_metadata || {};
             endCompact({ trigger: m.trigger, preTokens: m.pre_tokens });
@@ -411,6 +425,7 @@ export function makeClaudeStore() {
       proc = null;
       starting = null;
       if (!was) return;
+      if (get().ccBackground.length) set({ ccBackground: [] });
       if (get().streaming) {
         dropEmptyTail();
         const why = gotInit ? 'Claude Code se cerró a mitad del turno.' : `No se pudo arrancar Claude Code.${stderr ? `\n\n${stderr.trim().slice(0, 600)}` : ''}`;
@@ -553,6 +568,7 @@ export function makeClaudeStore() {
       ccCost: 0,
       ccMsgId: null,
       ccCompacting: null,
+      ccBackground: [],
       ccMode: initialCcMode(),
       ccEffort: localStorage.getItem(EFFORT_KEY) || 'auto',
       ccPrevMode: 'default',
@@ -562,7 +578,6 @@ export function makeClaudeStore() {
       ccAccount: null,
       ccModels: cachedCatalog().models || [],
       ccCommands: cachedCatalog().commands || [],
-      nativeTools: false,
       ...shared,
 
       setToolPolicy: (cat, value) => agentSettings.setToolPolicy(get().toolPolicy, cat, value),
@@ -596,7 +611,6 @@ export function makeClaudeStore() {
       setAutoApprove: (v) => get().setToolPolicy('edit', v ? 'allow' : 'ask'),
       setAutoRunCommands: (v) => get().setToolPolicy('command', v ? 'allow' : 'ask'),
       setCommandAllowlist: (list) => agentSettings.setCommandAllowlist(list),
-      setNativeTools: () => {},
 
       setCcModel: (ccModel) => {
         localStorage.setItem(MODEL_KEY, ccModel);

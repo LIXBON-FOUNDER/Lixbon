@@ -84,7 +84,8 @@ export function ChatInputBar() {
     autoApprove, setAutoApprove, autoRunCommands, setAutoRunCommands,
   } = useChatStore();
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
-  const contextWindow = useAppStore((s) => s.contextWindow);
+  // La ventana la fija lixbon por modelo; se recalcula al cambiar de modelo o llegar el catálogo.
+  const contextWindow = useAppStore((s) => s.effectiveContextWindow(s.currentModel));
   const messages = useChatStore((s) => s.messages);
   const engine = useChatStore((s) => s.engine);
   const ccContext = useChatStore((s) => s.ccContext);
@@ -104,7 +105,7 @@ export function ChatInputBar() {
   const currentMode = isClaude ? ccMode : chatMode;
   const mode = modes.find((m) => m.id === currentMode) || modes[0];
   const pickMode = isClaude ? setCcMode : setChatMode;
-  const modelOptions = useMemo(() => claudeModelOptions(ccModels), [ccModels]);
+  const modelOptions = useMemo(() => claudeModelOptions(ccModels, ccModel), [ccModels, ccModel]);
   const effortLevels = useMemo(() => {
     const m = (ccModels || []).find((x) => (ccModel ? x.value === ccModel : x.value === 'default'));
     return m?.supportsEffort && Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels : [];

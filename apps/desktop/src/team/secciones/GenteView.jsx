@@ -1,148 +1,215 @@
-// GenteView.jsx — la gente del proyecto, los amigos y las solicitudes.
+// GenteView.jsx — la gente del equipo con lo que está haciendo y su carga, los
+// agentes del orquestador como parte del equipo, los amigos y las solicitudes.
 import { useState } from 'react';
 import { useTeamStore } from '../store/teamStore';
+import { useIssuesStore } from '../store/issuesStore';
+import { useTablero } from '../store/useTablero';
 import { estadoDef } from '../lib/presencia';
-import { TPanel, TGutter, Cara, nombreDe } from '../ui/Panel';
-import { IconSearch, IconCheck } from '../../components/Icons';
-import { IconReply } from '../ui/icons';
+import { ROLES_AGENTE, esCerrado, plano } from '../lib/issues';
+import { TPanel, Cara, nombreDe } from '../ui/Panel';
+import { IconAgente, IconBurbuja, IconPeople } from '../ui/icons';
+import { IconSearch, IconCheck, IconPlus } from '../../components/Icons';
 
 const ORDEN = { en_linea: 0, no_molestar: 1, invisible: 2, desconectado: 3 };
-const plano = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+const PARA = {
+  explorador: 'Busca y lee código para planificar. No edita nada.',
+  implementador: 'Escribe el código de cada tarea en su propia rama.',
+  revisor: 'Revisa los cambios antes del PR, sin tocarlos.',
+  escalado: 'Retoma lo que se atasca tras dos intentos.',
+};
+const SOLO_LECTURA = new Set(['explorador', 'revisor']);
 
-function Invitar({ proyecto }) {
-  const invitar = useTeamStore((s) => s.invitar);
-  const [quien, setQuien] = useState('');
-  const [error, setError] = useState('');
-  const [aviso, setAviso] = useState('');
-  const mandar = async (e) => {
-    e.preventDefault();
-    const limpio = quien.trim();
-    if (!limpio) return;
-    const fallo = await invitar(proyecto.id, limpio);
-    if (fallo) { setError(fallo); setAviso(''); return; }
-    setError('');
-    setAviso(`${limpio} ya está en ${proyecto.nombre}.`);
-    setQuien('');
-  };
+function Persona({ m, t, soyYo, onMensaje }) {
+  const abrir = useIssuesStore((s) => s.abrir);
+  const def = estadoDef(m.estado);
+  const suyas = t.issues.filter((i) => i.asignado_id === m.usuario.id);
+  const abiertas = suyas.filter((i) => !esCerrado(t.estadosPorId[i.estado_id]));
+  const ahora = abiertas.find((i) => t.estadosPorId[i.estado_id]?.tipo === 'en_curso')
+    || abiertas.find((i) => t.estadosPorId[i.estado_id]?.tipo === 'revision');
+  const delCiclo = t.cicloHoy ? suyas.filter((i) => i.ciclo_id === t.cicloHoy.id) : suyas;
+  const total = delCiclo.reduce((n, i) => n + (i.estimacion || 0), 0);
+  const hechos = delCiclo.filter((i) => t.estadosPorId[i.estado_id]?.tipo === 'hecho').reduce((n, i) => n + (i.estimacion || 0), 0);
   return (
-    <form className="tform tform--suelto" onSubmit={mandar}>
-      <span className="tform__t">Invitar a {proyecto.nombre}</span>
-      <span className="tnota">Entra como integrante. Solo el líder puede invitar y quitar gente.</span>
-      <label className="tcampo">Correo o @usuario
-        <input className="tinput" value={quien} onChange={(e) => setQuien(e.target.value)} spellCheck={false} />
-      </label>
-      {error && <p className="terror">{error}</p>}
-      {aviso && <p className="tok">{aviso}</p>}
-      <button className="btn btn--primary btn--sm" type="submit" disabled={!quien.trim()}>Invitar</button>
-    </form>
+    <article className="tpersona">
+      <div className="tpersona__cab">
+        <Cara usuario={m.usuario} estado={m.estado} size={42} />
+        <span className="tpersona__id">
+          <span className="tpersona__nombre">
+            {[m.usuario.first_name, m.usuario.last_name].filter(Boolean).join(' ') || nombreDe(m.usuario)}{soyYo ? ' (tú)' : ''}
+            <span className={`trol ${m.rol === 'lider' ? 'is-lider' : ''}`}>{m.rol === 'lider' ? 'Líder' : 'Integrante'}</span>
+          </span>
+          <span className="tdim">{def.label}{m.usuario.username ? ` · @${m.usuario.username}` : ''}</span>
+        </span>
+        <span className="tfill" />
+        {!soyYo && <button className="ic tpersona__msg" onClick={() => onMensaje(m.usuario.id)} aria-label={`Mensaje a ${nombreDe(m.usuario)}`}><IconBurbuja size={15} /></button>}
+      </div>
+      {ahora ? (
+        <button className="tpersona__ahora" onClick={() => abrir(ahora.id)}>
+          <span className="tdim">Ahora</span><span className="mono">{ahora.clave}</span><span className="tpersona__issue">{ahora.titulo}</span>
+        </button>
+      ) : <span className="tpersona__ahora is-libre"><span className="tdim">Sin nada en curso</span></span>}
+      <div className="tpersona__carga">
+        <span><b>{abiertas.length}</b> {abiertas.length === 1 ? 'abierta' : 'abiertas'}</span>
+        {total > 0 && (
+          <>
+            <span className="tpersona__barra"><span style={{ width: `${(hechos / total) * 100}%` }} /></span>
+            <span><b>{hechos}</b> de {total} pts{t.cicloHoy ? ' del ciclo' : ''}</span>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function Agentes({ t }) {
+  return (
+    <section className="tsec" aria-label="Agentes del equipo">
+      <div className="tsec__cab">
+        <h2>Agentes del equipo</h2>
+        <span className="tdim">Los roles del orquestador del IDE. Trabajan las issues que les delegas.</span>
+      </div>
+      <div className="tagentes">
+        {Object.entries(ROLES_AGENTE).map(([id, r]) => {
+          const suyas = t.issues.filter((i) => i.agente_rol === id && !esCerrado(t.estadosPorId[i.estado_id]));
+          return (
+            <div key={id} className="tagentecard">
+              <div className="tagentecard__cab">
+                <span className="tagente__ico is-grande"><IconAgente size={17} /></span>
+                <span className="tagentecard__id"><b>{r.nombre}</b><span className="tdim">{r.modelo}</span></span>
+              </div>
+              <span className="tagentecard__para">{PARA[id]}</span>
+              <span className="tagentecard__pie">
+                {SOLO_LECTURA.has(id) && <span className="tchip">Solo lectura</span>}
+                <span className={`tagentecard__estado ${suyas.length ? 'is-trabajando' : ''}`}>
+                  <span className="tcuadro" />
+                  {suyas.length ? (suyas.length === 1 ? `${suyas[0].clave} · en curso` : `${suyas.length} issues en curso`) : 'Libre'}
+                </span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
 export function GenteView() {
-  const { proyectoActivo, usuario, amigos, solicitudes, abrirDirecto, soyLider, aceptarAmistad, pedirAmistad, anchos } = useTeamStore();
-  const [tab, setTab] = useState('proyecto');
-  const [filtro, setFiltro] = useState('');
-  const [amigo, setAmigo] = useState('');
-  const [avisoAmigo, setAvisoAmigo] = useState('');
-  const proyecto = proyectoActivo();
+  const { usuario, amigos, solicitudes, abrirDirecto, soyLider, aceptarAmistad, pedirAmistad, invitar } = useTeamStore();
+  const t = useTablero();
+  const [filtro, setFiltro] = useState('equipo');
+  const [q, setQ] = useState('');
+  const [quien, setQuien] = useState('');
+  const [aviso, setAviso] = useState('');
   const lider = soyLider();
 
-  const miembros = (proyecto?.miembros || []).map((m) => ({ usuario: m.usuario, estado: m.estado, rol: m.rol }));
-  const listaAmigos = amigos.map((a) => ({ usuario: a.usuario, estado: a.estado, rol: 'amigo' }));
+  const miembros = [...t.miembros].sort((a, b) => (ORDEN[a.estado] ?? 3) - (ORDEN[b.estado] ?? 3) || nombreDe(a.usuario).localeCompare(nombreDe(b.usuario)));
+  const enLinea = miembros.filter((m) => m.estado !== 'desconectado');
   const recibidas = solicitudes.filter((s) => s.direccion === 'recibida');
   const enviadas = solicitudes.filter((s) => s.direccion === 'enviada');
-  const enLinea = miembros.filter((m) => m.estado !== 'desconectado');
-  const TABS = [
-    ['proyecto', 'Del proyecto', miembros.length],
-    ['amigos', 'Amigos', listaAmigos.length],
-    ['linea', 'En línea ahora', enLinea.length],
+  const FILTROS = [
+    ['equipo', 'Todo el equipo', miembros.length],
+    ['linea', 'En línea', enLinea.length],
+    ['agentes', 'Agentes', Object.keys(ROLES_AGENTE).length],
+    ['amigos', 'Amigos', amigos.length],
+    ['solicitudes', 'Solicitudes', recibidas.length],
   ];
-  const base = tab === 'amigos' ? listaAmigos : tab === 'linea' ? enLinea : miembros;
-  const busca = plano(filtro.trim());
-  const gente = base
-    .filter((m) => !busca || plano(`${nombreDe(m.usuario)} ${m.usuario.username || ''}`).includes(busca))
-    .sort((a, b) => (ORDEN[a.estado] ?? 3) - (ORDEN[b.estado] ?? 3) || nombreDe(a.usuario).localeCompare(nombreDe(b.usuario)));
+  const busca = plano(q.trim());
+  const pasa = (u) => !busca || plano(`${nombreDe(u)} ${u.last_name || ''} ${u.username || ''}`).includes(busca);
+  const lista = (filtro === 'linea' ? enLinea : miembros).filter((m) => pasa(m.usuario));
 
-  const mandarAmistad = async (e) => {
+  const mandar = async (e) => {
     e.preventDefault();
-    if (!amigo.trim()) return;
-    const fallo = await pedirAmistad(amigo.trim());
-    setAvisoAmigo(fallo || `Solicitud enviada a ${amigo.trim()}.`);
-    if (!fallo) setAmigo('');
+    const limpio = quien.trim();
+    if (!limpio) return;
+    const fallo = lider && filtro !== 'amigos' ? await invitar(t.proyectoId, limpio) : await pedirAmistad(limpio);
+    setAviso(fallo || (lider && filtro !== 'amigos' ? `${limpio} ya está en ${t.proyecto.nombre}.` : `Solicitud enviada a ${limpio}.`));
+    if (!fallo) setQuien('');
   };
 
   return (
     <>
-      <TPanel id="gente-lado" style={{ width: anchos.lista }}>
-        <header className="tpanelhead"><span className="tpanelhead__s">Gente</span></header>
-        <div className="tlado">
-          {TABS.map(([id, nombre, n]) => (
-            <button key={id} className={`tfila ${tab === id ? 'is-on' : ''}`} onClick={() => setTab(id)}>
-              <span className="tfila__n">{nombre}</span><span className="mono tdim">{n}</span>
-            </button>
-          ))}
-        </div>
+      <TPanel id="gente-lado" className="tidx tidx--issues">
+        <div className="tidx__titulo">Gente</div>
+        {FILTROS.map(([id, nombre, n]) => (
+          <button key={id} className={`tfila ${filtro === id ? 'is-on' : ''}`} onClick={() => setFiltro(id)}>
+            <span className="tfila__n">{nombre}</span><span className="tfila__cuenta">{n || ''}</span>
+          </button>
+        ))}
+        <div className="tfill" />
+        {recibidas.length > 0 && filtro !== 'solicitudes' && (
+          <div className="tidx__aviso">
+            <b>{recibidas.length === 1 ? 'Una solicitud pendiente' : `${recibidas.length} solicitudes pendientes`}</b>
+            <button className="btn btn--sm" onClick={() => setFiltro('solicitudes')}>Ver</button>
+          </div>
+        )}
       </TPanel>
-      <TGutter clave="lista" min={180} max={320} />
-      <TPanel id="gente" className="wb__grow">
-        <header className="tpanelhead">
-          <span className="tpanelhead__t">{TABS.find((t) => t[0] === tab)[1]}</span>
-          <span className="mono tdim">{gente.length}</span>
-          <div className="tfill" />
-          <label className="tbuscar">
-            <IconSearch size={13} />
-            <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar por nombre o @usuario" aria-label="Buscar gente" />
-          </label>
-        </header>
-        <div className="tgente mono"><span /><span>Nombre</span><span>Estado</span><span>Rol</span><span /></div>
-        <div className="tlista">
-          {gente.map((m) => {
-            const def = estadoDef(m.estado);
-            const soyYo = m.usuario.id === usuario?.id;
-            return (
-              <div key={m.usuario.id} className="tgente tgente__fila">
-                <Cara usuario={m.usuario} estado={m.estado} size={30} />
-                <span className="tgente__n">
-                  <span>{[m.usuario.first_name, m.usuario.last_name].filter(Boolean).join(' ') || nombreDe(m.usuario)}{soyYo ? ' (tú)' : ''}</span>
-                  {m.usuario.username && <span className="mono tdim">@{m.usuario.username}</span>}
-                </span>
-                <span style={{ color: def.color }}>{def.label}</span>
-                <span className={`mono ${m.rol === 'lider' ? 'tacento' : 'tdim'}`}>{m.rol === 'lider' ? 'Líder' : m.rol === 'amigo' ? 'Amigo' : 'Integrante'}</span>
-                <span className="tgente__acc">
-                  {!soyYo && <button className="btn btn--ghost btn--sm" onClick={() => abrirDirecto(m.usuario.id)}><IconReply size={13} /> Mensaje</button>}
-                </span>
-              </div>
-            );
-          })}
-          {!gente.length && <p className="tidx__vacio">{busca ? 'Nadie se llama así.' : tab === 'amigos' ? 'Todavía no tienes amigos en Lixbon Team.' : 'No hay nadie aquí.'}</p>}
+
+      <TPanel id="gente" className="wb__grow tgentev">
+        <div className="tcabeza">
+          <div className="tcabeza__fila">
+            <span className="tcabeza__ico"><IconPeople size={17} /></span>
+            <h1 className="tcabeza__titulo">{t.proyecto?.nombre || 'Gente'}</h1>
+            <span className="tfill" />
+            <label className="tbuscar">
+              <IconSearch size={13} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nombre o @usuario" aria-label="Buscar gente" />
+            </label>
+          </div>
+          <p className="tcabeza__sub">{miembros.length} {miembros.length === 1 ? 'persona' : 'personas'} · {enLinea.length} en línea · {Object.keys(ROLES_AGENTE).length} agentes del orquestador</p>
         </div>
-      </TPanel>
-      <TGutter clave="info" min={280} max={420} lado="izquierda" />
-      <TPanel id="gente-invitar" style={{ width: anchos.info }}>
-        <div className="tlado tlado--suelto">
-          {proyecto && lider && <Invitar proyecto={proyecto} />}
-          <section className="tbloque">
-            <span className="tcap">Solicitudes de amistad {recibidas.length > 0 && <span className="mono tacento">{recibidas.length}</span>}</span>
-            {recibidas.map((s) => (
-              <div key={s.usuario.id} className="tsolicitud">
-                <Cara usuario={s.usuario} size={26} />
-                <span className="tgente__n"><span>{nombreDe(s.usuario)}</span>{s.usuario.username && <span className="mono tdim">@{s.usuario.username}</span>}</span>
-                <button className="tfila__ok" onClick={() => aceptarAmistad(s.usuario.id)} aria-label="Aceptar la solicitud"><IconCheck size={14} /></button>
+
+        <div className="tgentev__scroll">
+          {(filtro === 'equipo' || filtro === 'linea') && (
+            <>
+              <div className="tpersonas">
+                {lista.map((m) => <Persona key={m.usuario.id} m={m} t={t} soyYo={m.usuario.id === usuario?.id} onMensaje={abrirDirecto} />)}
+                {!lista.length && <p className="tnota">{busca ? 'Nadie se llama así.' : 'No hay nadie aquí.'}</p>}
               </div>
-            ))}
-            {!recibidas.length && <span className="tnota">Nada pendiente.</span>}
-          </section>
-          <form className="tbloque" onSubmit={mandarAmistad}>
-            <span className="tcap">Agregar a alguien</span>
-            <input className="tinput" value={amigo} onChange={(e) => { setAmigo(e.target.value); setAvisoAmigo(''); }} placeholder="correo o @usuario" spellCheck={false} aria-label="Correo o usuario" />
-            {avisoAmigo && <p className="tnota">{avisoAmigo}</p>}
-            <button className="btn btn--ghost btn--sm" type="submit" disabled={!amigo.trim()}>Enviar solicitud</button>
-          </form>
-          {enviadas.length > 0 && (
-            <section className="tbloque">
-              <span className="tcap">Enviadas</span>
-              {enviadas.map((s) => <div key={s.usuario.id} className="tsolicitud"><Cara usuario={s.usuario} size={22} /><span className="tgente__n">{nombreDe(s.usuario)}</span><span className="tdim">pendiente</span></div>)}
-            </section>
+              {filtro === 'equipo' && !busca && <Agentes t={t} />}
+            </>
+          )}
+          {filtro === 'agentes' && <Agentes t={t} />}
+          {filtro === 'amigos' && (
+            <div className="tfilas">
+              {amigos.filter((a) => pasa(a.usuario)).map((a) => (
+                <div key={a.usuario.id} className="tfilap">
+                  <Cara usuario={a.usuario} estado={a.estado} size={30} />
+                  <span className="tfilap__id"><b>{nombreDe(a.usuario)}</b>{a.usuario.username && <span className="mono tdim">@{a.usuario.username}</span>}</span>
+                  <span className="tdim">{estadoDef(a.estado).label}</span>
+                  <button className="btn btn--ghost btn--sm" onClick={() => abrirDirecto(a.usuario.id)}><IconBurbuja size={13} /> Mensaje</button>
+                </div>
+              ))}
+              {!amigos.length && <p className="tnota">Todavía no tienes amigos en Lixbon Team. Agrega a alguien con su correo o @usuario.</p>}
+            </div>
+          )}
+          {filtro === 'solicitudes' && (
+            <div className="tfilas">
+              {recibidas.map((s) => (
+                <div key={s.usuario.id} className="tfilap">
+                  <Cara usuario={s.usuario} size={30} />
+                  <span className="tfilap__id"><b>{nombreDe(s.usuario)}</b>{s.usuario.username && <span className="mono tdim">@{s.usuario.username}</span>}</span>
+                  <span className="tdim">quiere agregarte</span>
+                  <button className="btn btn--primary btn--sm" onClick={() => aceptarAmistad(s.usuario.id)}><IconCheck size={13} /> Aceptar</button>
+                </div>
+              ))}
+              {enviadas.map((s) => (
+                <div key={s.usuario.id} className="tfilap">
+                  <Cara usuario={s.usuario} size={30} />
+                  <span className="tfilap__id"><b>{nombreDe(s.usuario)}</b></span>
+                  <span className="tdim">enviada · pendiente</span>
+                </div>
+              ))}
+              {!recibidas.length && !enviadas.length && <p className="tnota">Nada pendiente.</p>}
+            </div>
+          )}
+
+          {(filtro === 'amigos' || lider) && filtro !== 'agentes' && filtro !== 'solicitudes' && (
+            <form className="tinvitar" onSubmit={mandar}>
+              <span className="tinvitar__t">{filtro === 'amigos' ? 'Agregar a alguien' : `Invitar a ${t.proyecto?.nombre}`}</span>
+              <input className="tinput" value={quien} onChange={(e) => { setQuien(e.target.value); setAviso(''); }} placeholder="correo o @usuario" spellCheck={false} aria-label="Correo o usuario" />
+              <button className="btn btn--primary btn--sm" type="submit" disabled={!quien.trim()}><IconPlus size={13} /> {filtro === 'amigos' ? 'Enviar solicitud' : 'Invitar'}</button>
+              {aviso && <span className="tnota">{aviso}</span>}
+            </form>
           )}
         </div>
       </TPanel>

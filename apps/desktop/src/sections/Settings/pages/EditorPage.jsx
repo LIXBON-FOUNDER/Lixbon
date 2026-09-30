@@ -1,16 +1,16 @@
-// EditorAdvancedPage.jsx — Ajustes → Editor y avanzado: editor, terminal,
-// índice del código, servidor y actualizaciones.
+// EditorPage.jsx — Ajustes → Interfaz y editor: tamaño del IDE, cómo se ve el
+// código y el terminal por defecto.
 import { useEffect, useState } from 'react';
 import { useWorkbenchStore } from '../../../store/workbenchStore';
 import { useTerminalStore, SHELL_OPTIONS } from '../../../store/terminalStore';
 import { Segmented } from '../../../components/Segmented';
 import { Switch } from '../../../components/Switch';
 import { Select } from '../../../components/Select';
-import { IndexPanel } from '../panels/IndexPanel';
-import { AdvancedPanel } from '../panels/AdvancedPanel';
+import { IconCode } from '../../../components/Icons';
 import { UI_SCALES, readUiScale, setUiScale } from '../../../lib/uiScale';
+import { PageHead, SectionHead } from '../SettingsParts';
 
-export function EditorAdvancedPage() {
+export function EditorPage() {
   const editor = useWorkbenchStore((s) => s.editor);
   const setOption = useWorkbenchStore((s) => s.setEditorOption);
   const { defaultShell, setDefaultShell } = useTerminalStore();
@@ -24,16 +24,11 @@ export function EditorAdvancedPage() {
 
   return (
     <div className="spage">
-      <div className="spage__head rise">
-        <div className="spage__title">
-          <span className="spage__h1">Editor y avanzado</span>
-          <span className="spage__sub">Cómo se ve el código, el terminal y la conexión con el clúster.</span>
-        </div>
-      </div>
+      <PageHead icon={IconCode} title="Interfaz y editor" sub="Cómo se ve el IDE, el código y el terminal." />
 
       <section className="ssec rise rise--1">
-        <span className="ssec__label">Interfaz</span>
-        <div className="ssec ssec--card">
+        <SectionHead label="Interfaz" />
+        <div className="ssec ssec--card ssec--rows">
           <div className="srow">
             <div className="srow__text">
               <span className="srow__label">Tamaño de la interfaz</span>
@@ -44,11 +39,14 @@ export function EditorAdvancedPage() {
         </div>
       </section>
 
-      <section className="ssec rise rise--1">
-        <span className="ssec__label">Editor</span>
+      <section className="ssec rise rise--2">
+        <SectionHead label="Editor" />
         <div className="ssec ssec--card ssec--rows">
           <div className="srow">
-            <span className="srow__label">Tamaño de fuente</span>
+            <div className="srow__text">
+              <span className="srow__label">Tamaño de fuente</span>
+              <span className="srow__hint">Del código en el editor, entre 10 y 22 px.</span>
+            </div>
             <span className="stepper">
               <button className="ic" onClick={() => setOption('fontSize', Math.max(10, editor.fontSize - 1))} aria-label="Reducir">−</button>
               <span className="mono stepper__value" key={editor.fontSize}>{editor.fontSize}</span>
@@ -56,7 +54,10 @@ export function EditorAdvancedPage() {
             </span>
           </div>
           <div className="srow">
-            <span className="srow__label">Tamaño de tabulación</span>
+            <div className="srow__text">
+              <span className="srow__label">Tamaño de tabulación</span>
+              <span className="srow__hint">Espacios que ocupa cada nivel de sangría.</span>
+            </div>
             <Segmented size="sm" width={44} value={editor.tabSize} onChange={(v) => setOption('tabSize', v)} options={[2, 4, 8].map((n) => ({ value: n, label: String(n) }))} />
           </div>
           <div className="srow">
@@ -69,9 +70,9 @@ export function EditorAdvancedPage() {
         </div>
       </section>
 
-      <section className="ssec rise rise--2">
-        <span className="ssec__label">Terminal</span>
-        <div className="ssec ssec--card">
+      <section className="ssec rise rise--3">
+        <SectionHead label="Terminal" />
+        <div className="ssec ssec--card ssec--rows">
           <div className="srow">
             <div className="srow__text">
               <span className="srow__label">Shell por defecto</span>
@@ -80,16 +81,6 @@ export function EditorAdvancedPage() {
             <Select value={defaultShell} onChange={setDefaultShell} options={SHELL_OPTIONS.map((s) => ({ value: s.id, label: s.label }))} />
           </div>
         </div>
-      </section>
-
-      <section className="ssec rise rise--3">
-        <span className="ssec__label">Índice del código</span>
-        <div className="legacyset"><IndexPanel /></div>
-      </section>
-
-      <section className="ssec rise rise--3">
-        <span className="ssec__label">Servidor y actualizaciones</span>
-        <div className="legacyset"><AdvancedPanel /></div>
       </section>
     </div>
   );

@@ -13,7 +13,8 @@ import { Switch } from '../../../components/Switch';
 import { Segmented } from '../../../components/Segmented';
 import { SpinRing } from '../../../components/Ring';
 import { StatusMark } from '../../Extensions/McpList';
-import { IconPlus, IconRefresh, IconTrash, IconPencil, IconEye, IconEyeOff, IconX, IconDownload, IconExternal } from '../../../components/Icons';
+import { PageHead } from '../SettingsParts';
+import { IconPlus, IconRefresh, IconTrash, IconPencil, IconEye, IconEyeOff, IconX, IconDownload, IconExternal, IconPuzzle } from '../../../components/Icons';
 
 const SCOPE_LABEL = { usuario: 'Global', proyecto: 'Proyecto' };
 const initials = (name) => name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).replace(/^./, (c) => c.toUpperCase()) || 'MC';
@@ -320,12 +321,7 @@ export function McpPage() {
 
   return (
     <div className="spage">
-      <div className="spage__head rise">
-        <div className="spage__title">
-          <span className="spage__h1">Servidores MCP</span>
-          <span className="spage__sub">Herramientas externas para el agente de Lixbon: GitHub, bases de datos, navegador, búsqueda…</span>
-        </div>
-      </div>
+      <PageHead icon={IconPuzzle} title="Servidores MCP" sub="Herramientas externas para el agente de Lixbon: GitHub, bases de datos, navegador, búsqueda…" />
 
       <section className="ssec rise rise--1">
         <div className="ssec__row">

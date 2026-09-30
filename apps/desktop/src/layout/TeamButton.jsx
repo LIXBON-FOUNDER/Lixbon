@@ -3,7 +3,12 @@
 // git), lo pendiente, y los accesos al panel acoplado y a la ventana de Team.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, emitTo } from '@tauri-apps/api/event';
 import { useTeamStore } from '../team/store/teamStore';
+import { useIssuesStore } from '../team/store/issuesStore';
+import { Casilla, Rombos } from '../team/ui/Marcas';
+import { EVENTO_COMPONER } from '../team/lib/ide';
+import { esCerrado, vencimiento } from '../team/lib/issues';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
@@ -28,6 +33,19 @@ export function TeamButton() {
     else salir();
   }, [apiKey, serverUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // La ventana de Team manda texto al chat del IDE («Delegar al orquestador»,
+  // «Abrir en el IDE»): se pasa al modo agente y se deja en la caja del chat.
+  useEffect(() => {
+    let quitar = null;
+    listen(EVENTO_COMPONER, (e) => {
+      const texto = e.payload?.texto;
+      if (!texto) return;
+      useWorkbenchStore.getState().setMode('agent');
+      setTimeout(() => window.dispatchEvent(new CustomEvent('lixbon:compose', { detail: { text: texto } })), 120);
+    }).then((f) => { quitar = f; }).catch(() => {});
+    return () => quitar?.();
+  }, []);
+
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => { if (!rootRef.current?.contains(e.target)) setOpen(false); };
@@ -44,8 +62,23 @@ export function TeamButton() {
   const enLinea = miembros.filter((m) => m.estado === 'en_linea').length;
   const pendientes = Object.values(noLeidos).reduce((a, n) => a + n, 0);
   const lider = proyecto?.rol === 'lider';
+  const issuesDel = useIssuesStore((s) => (proyecto ? s.porProyecto[proyecto.id] : null));
+  const cargarIssues = useIssuesStore((s) => s.cargar);
+  useEffect(() => { if (proyecto && open) cargarIssues(proyecto.id); }, [proyecto?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const estados = Object.fromEntries((proyecto?.tablero?.estados || []).map((e) => [e.id, e]));
+  const mias = (issuesDel?.issues || [])
+    .filter((i) => i.asignado_id === usuario?.id && !esCerrado(estados[i.estado_id]))
+    .sort((a, b) => b.prioridad - a.prioridad)
+    .slice(0, 5);
 
   const abrirVentana = () => { setOpen(false); invoke('team_abrir').catch(() => {}); };
+  // Abre Team y le pide algo (una issue, el formulario de nueva issue). Se
+  // repite por si la ventana aún se está cargando: pedirlo dos veces no daña.
+  const pedirATeam = async (evento, datos) => {
+    setOpen(false);
+    await invoke('team_abrir').catch(() => {});
+    for (const ms of [350, 1200]) setTimeout(() => emitTo('team', evento, datos).catch(() => {}), ms);
+  };
   const abrirPanel = () => { setOpen(false); setRightView('team'); };
   const escribirA = async (usuarioId) => {
     setOpen(false);
@@ -142,6 +175,31 @@ export function TeamButton() {
                 <button className="pill-btn pill-btn--primary" onClick={handleInvite} disabled={!inviteValue.trim()}>Invitar</button>
               </div>
               {inviteMsg && <p className="settings__status">{inviteMsg}</p>}
+            </>
+          )}
+
+          {proyecto && (
+            <>
+              <div className="ctx-menu__sep" />
+              <div className="team__issues">
+                <div className="team__issues-head">
+                  <span>Tus issues</span>
+                  <button className="team__nueva" onClick={() => pedirATeam('team:nueva-issue', { proyectoId: proyecto.id })}>+ Nueva</button>
+                </div>
+                {mias.map((i) => {
+                  const v = vencimiento(i.fecha_limite);
+                  return (
+                    <button key={i.id} className="team__issue" onClick={() => pedirATeam('team:abrir-issue', { id: i.id })} title={`${i.clave} · ${i.titulo}`}>
+                      <Casilla estado={estados[i.estado_id]} size={14} />
+                      <span className="mono team__issue-clave">{i.clave}</span>
+                      <span className="team__issue-t">{i.titulo}</span>
+                      {i.prioridad > 0 && <Rombos prioridad={i.prioridad} size={13} />}
+                      {v && <span className={`team__issue-v is-${v.tono}`}>{v.texto}</span>}
+                    </button>
+                  );
+                })}
+                {issuesDel?.cargado && !mias.length && <p className="settings__hint" style={{ padding: '2px 8px 6px' }}>Nada asignado a ti en {proyecto.nombre}.</p>}
+              </div>
             </>
           )}
 

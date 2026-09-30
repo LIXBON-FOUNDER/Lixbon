@@ -33,6 +33,16 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
    ## Cómo lo verifiqué (comandos y su resultado)
    ## Pendiente y decisiones para el coordinador
    ```
+   Si tu encargo dice que eres de **solo lectura** (explorador, revisor), no puedes escribir
+   archivos: manda el informe por stdin en el paso 7 con `--report -` y sé breve (rutas con
+   línea y conclusiones, no bloques de código):
+   ```
+   lxo done --summary "Una frase" --report - <<'EOF'
+   # <tu-id> · <título>
+   ## Resultado
+   ...
+   EOF
+   ```
 7. **Cierra exactamente una vez**:
    ```
    lxo done --report .lixbon/informe-<tu-id>.md --summary "Una frase con el resultado"
@@ -40,3 +50,7 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
    Añade `--failed` si no se pudo completar, y `--files a,b,c` con los archivos principales.
    Después de `lxo done` no empieces trabajo nuevo: quédate esperando. Si tu coordinador te manda
    un encargo nuevo, llegará a esta misma terminal; hazlo y vuelve a cerrar con un informe nuevo.
+8. **Si tu encargo cita una issue de Lixbon Team** (`LXB-12`), léela con `lxo issue ver LXB-12` y
+   pon la clave en tus mensajes de commit (`fix: … (LXB-12)`): así queda ligada al equipo. El
+   cierre de la issue lo hace tu coordinador; tú solo comentas si tu encargo lo pide, con
+   `lxo issue comentar LXB-12 --texto "…"` (sale firmado como informe de tu rol).

@@ -122,13 +122,6 @@ export function Indice() {
   const buscarRef = useRef(null);
 
   useEffect(() => { cargar(); }, [cargar]);
-  useEffect(() => {
-    const alPulsar = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); buscarRef.current?.focus(); buscarRef.current?.select(); }
-    };
-    window.addEventListener('keydown', alPulsar);
-    return () => window.removeEventListener('keydown', alPulsar);
-  }, []);
 
   const proyecto = proyectoActivo();
   const lider = soyLider();
@@ -201,9 +194,7 @@ export function Indice() {
           aria-label="Buscar en el índice"
           spellCheck={false}
         />
-        {filtro
-          ? <button className="ic" onClick={() => setFiltro('')} aria-label="Limpiar"><IconX size={12} /></button>
-          : <span className="mono tdim tidx__k">Ctrl K</span>}
+        {filtro && <button className="ic" onClick={() => setFiltro('')} aria-label="Limpiar"><IconX size={12} /></button>}
       </div>
 
       <div className="tidx__scroll">

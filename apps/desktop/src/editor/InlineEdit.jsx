@@ -86,7 +86,7 @@ export function InlineEdit({ path, relPath, onClose }) {
   const run = async () => {
     const instruction = prompt.trim();
     if (!instruction || phase === 'running') return;
-    const { serverUrl, apiKey, currentModel, contextWindow } = useAppStore.getState();
+    const { serverUrl, apiKey, currentModel } = useAppStore.getState();
     if (!currentModel) { setError('Elige un modelo en el chat primero.'); return; }
     setError('');
     setPhase('running');
@@ -105,7 +105,7 @@ export function InlineEdit({ path, relPath, onClose }) {
     let raw = '';
     try {
       await streamChatCompletion({
-        serverUrl, apiKey, model: currentModel, signal: ctrl.signal, numCtx: contextWindow, noPersist: true,
+        serverUrl, apiKey, model: currentModel, signal: ctrl.signal, noPersist: true,
         messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
         onDelta: (d) => { raw += d; },
       });

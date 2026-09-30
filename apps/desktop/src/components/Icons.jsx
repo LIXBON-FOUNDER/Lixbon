@@ -347,3 +347,44 @@ export const IconDevice = (p) => (
 export const IconCode = (p) => (
   <Svg {...p}><path d="m8 7-5 5 5 5M16 7l5 5-5 5" /></Svg>
 );
+
+/* ── Ajustes ─────────────────────────────────────────────────────────── */
+
+export const IconShield = (p) => (
+  <Svg {...p}><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></Svg>
+);
+
+export const IconCpu = (p) => (
+  <Svg {...p}>
+    <rect x="6" y="6" width="12" height="12" rx="2" /><rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+    <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" />
+  </Svg>
+);
+
+export const IconNodes = (p) => (
+  <Svg {...p}>
+    <circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="19" r="2.5" /><circle cx="19" cy="19" r="2.5" />
+    <path d="M12 7.5V12M12 12l-5.3 4.9M12 12l5.3 4.9" />
+  </Svg>
+);
+
+export const IconKeyboard = (p) => (
+  <Svg {...p}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6.5 14h.01M17.5 14h.01M9.5 14h5" />
+  </Svg>
+);
+
+export const IconDatabase = (p) => (
+  <Svg {...p}>
+    <ellipse cx="12" cy="5.5" rx="7.5" ry="2.5" />
+    <path d="M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5" />
+  </Svg>
+);
+
+export const IconServer = (p) => (
+  <Svg {...p}>
+    <rect x="3.5" y="4" width="17" height="7" rx="1.5" /><rect x="3.5" y="13" width="17" height="7" rx="1.5" />
+    <path d="M7 7.5h.01M7 16.5h.01" />
+  </Svg>
+);

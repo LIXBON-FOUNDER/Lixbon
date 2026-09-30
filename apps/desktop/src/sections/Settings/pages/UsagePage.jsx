@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import { api } from '../../../lib/api';
 import { openExternal } from '../../../lib/tauri';
+import { IconChart } from '../../../components/Icons';
+import { PageHead } from '../SettingsParts';
 
 function fmtReset(iso) {
   if (!iso) return '';
@@ -93,14 +95,10 @@ export function UsagePage() {
 
   return (
     <div className="spage">
-      <div className="spage__head rise">
-        <div className="spage__title">
-          <span className="spage__h1">Uso y límites</span>
-          <span className="spage__sub">El mismo cupo en web, escritorio, CLI y móvil.</span>
-        </div>
+      <PageHead icon={IconChart} title="Uso y límites" sub="El mismo cupo en web, escritorio, CLI y móvil.">
         <span className="plantag">{data?.plan?.name || user?.plan_name || 'Gratuito'}</span>
         <button className="btn btn--primary" onClick={() => openExternal(`${serverUrl}/plans`)}>Mejorar plan</button>
-      </div>
+      </PageHead>
 
       {error && <p className="spage__error">{error}</p>}
 

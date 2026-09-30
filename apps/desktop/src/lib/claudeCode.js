@@ -14,11 +14,26 @@ export const CLAUDE_MODELS = [
   { value: 'haiku', label: 'Haiku' },
 ];
 
-/** Opciones del selector a partir de los modelos que anuncia Claude Code. */
-export function claudeModelOptions(models) {
+function modelFamily(m) {
+  const r = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(m.resolvedModel || m.value || '');
+  return r && { family: r[1], version: Number(r[2]) * 100 + Number(r[3] || 0) };
+}
+
+/** Opciones del selector: el predeterminado y solo el modelo más reciente de
+    cada familia. El elegido se conserva aunque sea antiguo, para no perderlo. */
+export function claudeModelOptions(models, current = '') {
   if (!Array.isArray(models) || !models.length) return CLAUDE_MODELS;
   const byId = new Map(models.filter((m) => m.value !== 'default').map((m) => [m.resolvedModel || m.value, m.displayName]));
-  return models.map((m) => (m.value === 'default'
+  const latest = new Map();
+  for (const m of models) {
+    const f = m.value !== 'default' && modelFamily(m);
+    if (f && !(latest.get(f.family)?.version >= f.version)) latest.set(f.family, { ...f, value: m.value });
+  }
+  const visible = models.filter((m) => {
+    const f = m.value !== 'default' && modelFamily(m);
+    return !f || m.value === current || latest.get(f.family).value === m.value;
+  });
+  return visible.map((m) => (m.value === 'default'
     ? { value: '', label: `Predeterminado${byId.get(m.resolvedModel) ? ` · ${byId.get(m.resolvedModel)}` : ''}` }
     : { value: m.value, label: m.displayName || m.value }));
 }
