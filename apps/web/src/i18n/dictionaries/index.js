@@ -18,10 +18,8 @@ import shared from './shared';
 import remote from './remote';
 import notFound from './notFound';
 import dialogs from './dialogs';
-import illustrations from './illustrations';
 
 export const DICTIONARIES = {
-  illustrations,
   common,
   nav,
   sidebar,
