@@ -4,13 +4,12 @@
 import { useChatStore, CHAT_MODES } from '../../../store/chatStore';
 import { useMcpStore } from '../../../store/mcpStore';
 import { Segmented } from '../../../components/Segmented';
-import { Switch } from '../../../components/Switch';
 import { IconShield } from '../../../components/Icons';
 import { PageHead, SectionHead } from '../SettingsParts';
 import { CommandAllowlist } from '../CommandAllowlist';
 
 const CATEGORIES = [
-  { id: 'read', label: 'Leer y buscar', hint: 'Leer archivos, listar, buscar texto y la búsqueda semántica.', tools: 'read_file · list_files · search · outline' },
+  { id: 'read', label: 'Leer y buscar', hint: 'Leer archivos, listar, buscar texto y ver la estructura del código.', tools: 'read_file · list_files · find_files · search · outline' },
   { id: 'edit', label: 'Editar archivos', hint: 'Crear y modificar archivos. Todo queda revisable y reversible.', tools: 'edit_file · write_file · multi_edit · rename_file' },
   { id: 'delete', label: 'Borrar archivos', hint: 'Se puede revertir desde el chat, pero conviene verlo antes.', tools: 'delete_file' },
   { id: 'command', label: 'Ejecutar comandos', hint: 'En Preguntar, los de la lista de abajo se ejecutan sin preguntar.', tools: 'run_command' },
@@ -39,7 +38,7 @@ const POLICY_OPTIONS = [
 
 export function AgentPage() {
   const {
-    chatMode, setChatMode, nativeTools, setNativeTools,
+    chatMode, setChatMode,
     toolPolicy, setToolPolicy, commandAllowlist, setCommandAllowlist,
   } = useChatStore();
   const mcpTools = useMcpStore((s) => s.agentTools().length);
@@ -92,19 +91,6 @@ export function AgentPage() {
       </section>
 
       <CommandAllowlist list={commandAllowlist} onChange={setCommandAllowlist} commandPolicy={toolPolicy.command || 'ask'} />
-
-      <section className="ssec rise rise--3">
-        <SectionHead label="Avanzado" />
-        <div className="ssec ssec--card ssec--rows">
-          <div className="srow">
-            <div className="srow__text">
-              <span className="srow__label">Herramientas nativas</span>
-              <span className="srow__hint">Usa los tool_calls del modelo en vez del protocolo de texto. Más fiable si el modelo declara la capacidad «tools».</span>
-            </div>
-            <Switch checked={nativeTools} onChange={setNativeTools} label="Herramientas nativas" />
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

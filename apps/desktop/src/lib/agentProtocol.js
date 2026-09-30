@@ -12,7 +12,7 @@ export const MAX_AGENT_STEPS = 40;
 // repite la misma herramienta con los mismos argumentos indefinidamente.
 export const MAX_REPEATED_CALLS = 3;
 export const READ_ONLY_TOOLS = new Set([
-  'list_files', 'read_file', 'search', 'search_codebase',
+  'list_files', 'read_file', 'search',
   'find_files', 'outline', 'fetch_url', 'web_search', 'ask_user',
 ]);
 
@@ -188,7 +188,6 @@ const TOOL_ARG_KEYS = {
   append_file: ['path', 'content'],
   mkdir: ['path'],
   search: ['pattern'],
-  search_codebase: ['query'],
   delete_file: ['path'],
   rename_file: ['src', 'dst'],
   run_command: ['command', 'timeout'],

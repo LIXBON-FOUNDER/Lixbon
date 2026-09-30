@@ -84,7 +84,8 @@ export function ChatInputBar() {
     autoApprove, setAutoApprove, autoRunCommands, setAutoRunCommands,
   } = useChatStore();
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
-  const contextWindow = useAppStore((s) => s.contextWindow);
+  // La ventana la fija lixbon por modelo; se recalcula al cambiar de modelo o llegar el catálogo.
+  const contextWindow = useAppStore((s) => s.effectiveContextWindow(s.currentModel));
   const messages = useChatStore((s) => s.messages);
   const engine = useChatStore((s) => s.engine);
   const ccContext = useChatStore((s) => s.ccContext);

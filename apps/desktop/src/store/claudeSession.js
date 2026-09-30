@@ -578,7 +578,6 @@ export function makeClaudeStore() {
       ccAccount: null,
       ccModels: cachedCatalog().models || [],
       ccCommands: cachedCatalog().commands || [],
-      nativeTools: false,
       ...shared,
 
       setToolPolicy: (cat, value) => agentSettings.setToolPolicy(get().toolPolicy, cat, value),
@@ -612,7 +611,6 @@ export function makeClaudeStore() {
       setAutoApprove: (v) => get().setToolPolicy('edit', v ? 'allow' : 'ask'),
       setAutoRunCommands: (v) => get().setToolPolicy('command', v ? 'allow' : 'ask'),
       setCommandAllowlist: (list) => agentSettings.setCommandAllowlist(list),
-      setNativeTools: () => {},
 
       setCcModel: (ccModel) => {
         localStorage.setItem(MODEL_KEY, ccModel);

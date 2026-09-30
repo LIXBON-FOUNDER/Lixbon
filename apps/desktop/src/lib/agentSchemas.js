@@ -174,18 +174,6 @@ export const TOOL_SCHEMAS = [
   {
     type: 'function',
     function: {
-      name: 'search_codebase',
-      description: 'Búsqueda SEMÁNTICA en el índice del codebase: encuentra fragmentos relevantes por significado (no por texto exacto). Útil para "dónde se hace X".',
-      parameters: {
-        type: 'object',
-        properties: { query: p('string', 'Qué buscar, en lenguaje natural') },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'delete_file',
       description: 'Elimina un archivo o carpeta.',
       parameters: {

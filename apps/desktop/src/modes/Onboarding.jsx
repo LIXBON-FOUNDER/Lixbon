@@ -45,7 +45,7 @@ function describe(model, roles) {
 }
 
 export function Onboarding({ onDone }) {
-  const { currentModel, setCurrentModel, setAvailableModels, setModelRoles, workspaceRoot, openWorkspace, useCodebaseContext, setUseCodebaseContext } = useAppStore();
+  const { currentModel, setCurrentModel, setAvailableModels, setModelRoles, workspaceRoot, openWorkspace } = useAppStore();
   const chat = useChatStore();
   const [step, setStep] = useState(0);
   const [models, setModels] = useState(null);
@@ -154,13 +154,6 @@ export function Onboarding({ onDone }) {
                   <span className={`mono onb__rowsub ${folderError ? 'is-error' : ''}`}>{folderError || (workspaceRoot ? baseName(workspaceRoot) : 'Ninguna todavía')}</span>
                 </div>
                 <button className={`btn ${workspaceRoot ? 'btn--ghost' : 'btn--primary'}`} onClick={chooseFolder}>{workspaceRoot ? 'Cambiar' : 'Elegir'}</button>
-              </div>
-              <div className="onb__row">
-                <div className="onb__rowtext">
-                  <span>Contexto automático del código</span>
-                  <span className="onb__rowsub">Indexa el proyecto y añade al chat los fragmentos relevantes.</span>
-                </div>
-                <Switch checked={useCodebaseContext} onChange={setUseCodebaseContext} label="Contexto automático del código" />
               </div>
               <div className="onb__row">
                 <div className="onb__rowtext">
