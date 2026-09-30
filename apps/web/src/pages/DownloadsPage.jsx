@@ -12,14 +12,33 @@ import { PublicFooter } from '../components/PublicFooter';
 import { CodeBlock } from '../components/CodeBlock';
 import { IconDownload, IconTerminal, IconCheck, IconPhone, IconChevron } from '../components/Icons';
 
-const MAX_VERSIONES = 8;
+// Solo la última y la penúltima versión publicada de cada app: el selector
+// no tiene que cargar con todo el historial.
+const MAX_VERSIONES = 2;
 
-// Las versiones del escritorio, de la más nueva a la más vieja, sin repetir.
-// La primera estable es la recomendada; si aún no hay estable, la primera beta.
-function versionesEscritorio(lista) {
+// «1.4.0-beta.2» → [1, 4, 0] y su prerelease; una versión final va por
+// delante de sus betas.
+function compararVersiones(a, b) {
+  const [na, pa = ''] = String(a).split('-', 2);
+  const [nb, pb = ''] = String(b).split('-', 2);
+  const xa = na.split('.').map((n) => parseInt(n, 10) || 0);
+  const xb = nb.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(xa.length, xb.length); i += 1) {
+    if ((xa[i] || 0) !== (xb[i] || 0)) return (xa[i] || 0) - (xb[i] || 0);
+  }
+  if (pa === pb) return 0;
+  if (!pa) return 1;
+  if (!pb) return -1;
+  return pa.localeCompare(pb, undefined, { numeric: true });
+}
+
+// Las versiones de un producto, de la más nueva a la más vieja, sin repetir.
+function versionesDe(lista, producto) {
   const vistas = new Set();
   return lista
-    .filter((v) => (v.product || 'desktop') === 'desktop')
+    .filter((v) => (v.product || 'desktop') === producto)
+    .sort((a, b) => compararVersiones(b.version, a.version)
+      || String(b.release_date || '').localeCompare(String(a.release_date || '')))
     .filter((v) => {
       const k = `${v.version}@${v.channel}`;
       if (vistas.has(k)) return false;
@@ -29,11 +48,57 @@ function versionesEscritorio(lista) {
     .slice(0, MAX_VERSIONES);
 }
 
+const claveDe = (v) => `${v.version}@${v.channel}`;
+// La recomendada es la primera estable; si aún no hay estable, la más nueva.
+const recomendadaDe = (lista) => lista.find((v) => v.channel === 'stable') || lista[0];
+
+/** Selector de versión + descarga, igual para escritorio y Android. */
+function SelectorVersion({ versiones, producto, requisitos, t }) {
+  const [elegida, setElegida] = useState('');
+  const recomendada = versiones?.length ? recomendadaDe(versiones) : null;
+  const clave = elegida || (recomendada ? claveDe(recomendada) : '');
+  const sel = versiones?.find((v) => claveDe(v) === clave);
+
+  if (versiones === null) return <span className="dl-card__meta">{t('loading')}</span>;
+  if (!versiones.length) {
+    return <span className="pill-btn pill-btn--outline dl-card__cta is-soon">{t('comingSoon')}</span>;
+  }
+  const url = sel
+    ? `/api/updates/download/${encodeURIComponent(sel.version)}/${sel.channel}${producto === 'desktop' ? '' : `?product=${producto}`}`
+    : '';
+  return (
+    <>
+      <div className="dl-picker">
+        <label className="dl-picker__select">
+          <select aria-label={t('version')} value={clave} onChange={(e) => setElegida(e.target.value)}>
+            {versiones.map((v) => (
+              <option key={claveDe(v)} value={claveDe(v)}>
+                v{v.version} · {v.channel === 'stable' ? t('stable') : t('beta')}{v === recomendada ? ` · ${t('recommended')}` : ''}
+              </option>
+            ))}
+          </select>
+          <IconChevron size={14} />
+        </label>
+        {sel && (
+          <a href={url} className="pill-btn pill-btn--primary dl-card__cta">
+            <IconDownload size={16} /> {t('download')}
+          </a>
+        )}
+      </div>
+      {sel && (
+        <span className="dl-card__meta">
+          {sel.release_date} · {requisitos}
+          {sel.channel !== 'stable' && ` · ${t('betaNote')}`}
+        </span>
+      )}
+    </>
+  );
+}
+
 export default function DownloadsPage() {
   const t = useT('downloads');
   useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/apps' });
-  const [versiones, setVersiones] = useState(null);
-  const [elegida, setElegida] = useState('');
+  const [escritorio, setEscritorio] = useState(null);
   const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');
 
@@ -43,21 +108,15 @@ export default function DownloadsPage() {
   useEffect(() => {
     api.get('/api/versions')
       .then((res) => {
-        const lista = versionesEscritorio(Array.isArray(res.data) ? res.data : []);
-        setVersiones(lista);
-        const recomendada = lista.find((v) => v.channel === 'stable') || lista[0];
-        if (recomendada) setElegida(`${recomendada.version}@${recomendada.channel}`);
+        const lista = Array.isArray(res.data) ? res.data : [];
+        setEscritorio(versionesDe(lista, 'desktop'));
+        setAndroid(versionesDe(lista, 'android'));
       })
-      .catch(() => setVersiones([]));
-    api.get('/api/updates/latest/stable?product=android')
-      .then((res) => setAndroid(res.data))
-      .catch(() => setAndroid({ available: false }));
+      .catch(() => { setEscritorio([]); setAndroid([]); });
     if (/Mac|Linux|X11/.test(navigator.platform) && !/Win/.test(navigator.platform)) {
       setOs('unix');
     }
   }, []);
-
-  const sel = versiones?.find((v) => `${v.version}@${v.channel}` === elegida);
 
   const winCmd = `irm ${base}/install.ps1 | iex`;
   const unixCmd = `curl -fsSL ${base}/install.sh | bash`;
@@ -86,42 +145,7 @@ export default function DownloadsPage() {
                 <li><IconCheck size={15} /> {t('desktopFeature3')}</li>
               </ul>
               <div className="dl-card__bottom">
-                {versiones?.length ? (
-                  <>
-                    <div className="dl-picker">
-                      <label className="dl-picker__select">
-                        <select aria-label={t('version')} value={elegida} onChange={(e) => setElegida(e.target.value)}>
-                          {versiones.map((v, i) => {
-                            const recomendada = v.channel === 'stable' && versiones.findIndex((x) => x.channel === 'stable') === i;
-                            return (
-                              <option key={`${v.version}@${v.channel}`} value={`${v.version}@${v.channel}`}>
-                                v{v.version} · {v.channel === 'stable' ? t('stable') : t('beta')}{recomendada ? ` · ${t('recommended')}` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        <IconChevron size={14} />
-                      </label>
-                      {sel && (
-                        <a href={`/api/updates/download/${encodeURIComponent(sel.version)}/${sel.channel}`} className="pill-btn pill-btn--primary dl-card__cta">
-                          <IconDownload size={16} /> {t('download')}
-                        </a>
-                      )}
-                    </div>
-                    {sel && (
-                      <span className="dl-card__meta">
-                        {sel.release_date} · Windows 10/11 (64 bits)
-                        {sel.channel !== 'stable' && ` · ${t('betaNote')}`}
-                      </span>
-                    )}
-                  </>
-                ) : versiones === null ? (
-                  <span className="dl-card__meta">{t('loading')}</span>
-                ) : (
-                  <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
-                    {t('comingSoon')}
-                  </span>
-                )}
+                <SelectorVersion versiones={escritorio} producto="desktop" requisitos="Windows 10/11 (64 bits)" t={t} />
               </div>
             </section>
 
@@ -139,20 +163,7 @@ export default function DownloadsPage() {
                 <li><IconCheck size={15} /> {t('androidFeature3')}</li>
               </ul>
               <div className="dl-card__bottom">
-                {android?.available ? (
-                  <>
-                    <a href={android.download_url} className="pill-btn pill-btn--primary dl-card__cta">
-                      <IconDownload size={16} /> {t('download')} v{android.version}
-                    </a>
-                    <span className="dl-card__meta">
-                      {android.title} · {android.release_date} · APK · Android 7.0+
-                    </span>
-                  </>
-                ) : (
-                  <span className="pill-btn pill-btn--outline dl-card__cta is-soon">
-                    {t('comingSoon')}
-                  </span>
-                )}
+                <SelectorVersion versiones={android} producto="android" requisitos="APK · Android 7.0+" t={t} />
               </div>
             </section>
           </div>
