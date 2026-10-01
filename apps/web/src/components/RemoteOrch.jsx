@@ -287,6 +287,13 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 function Settings({ state, send, t }) {
   const orch = state.orch;
+  // Lo elegido se ve al momento; el snapshot siguiente del IDE lo confirma.
+  const [pending, setPending] = useState({});
+  useEffect(() => { setPending({}); }, [orch.roles]);
+  const change = (id, patch) => {
+    setPending((cur) => ({ ...cur, [id]: { ...cur[id], ...patch } }));
+    send('settings', { role: id, ...patch });
+  };
   useEffect(() => { if (state.orchAgents === null) send('agents', {}); }, [state.orchAgents, send]);
   const claude = state.orchAgents?.find((a) => a.id === 'claude');
   const models = claude?.models?.length ? claude.models : ['haiku', 'sonnet', 'opus'];
@@ -306,7 +313,7 @@ function Settings({ state, send, t }) {
       <span className="rorch-label">{t('orch.roles')}</span>
       <p className="remote__dim rorch-hint">{t('orch.rolesHint')}</p>
       <section className="rorch-card">
-        {orch.roles.map((r) => (
+        {orch.roles.map((role) => ({ ...role, ...pending[role.id] })).map((r) => (
           <div key={r.id} className="rorch-row rorch-row--role">
             <div className="rorch-row-text">
               <span className="rorch-row-label">{r.label} {r.read_only && <span className="rorch-pill is-ok">{t('orch.readOnly')}</span>}</span>
@@ -315,13 +322,13 @@ function Settings({ state, send, t }) {
             <div className="rorch-role-ctl">
               <Select
                 value={r.model}
-                onChange={(model) => send('settings', { role: r.id, model })}
+                onChange={(model) => change(r.id, { model })}
                 options={[...new Set([...models, r.model])].map((m) => ({ value: m, label: m }))}
                 aria-label={t('orch.model')}
               />
               <Select
                 value={r.effort || ''}
-                onChange={(effort) => send('settings', { role: r.id, effort })}
+                onChange={(effort) => change(r.id, { effort })}
                 options={[{ value: '', label: t('orch.effortDefault') }, ...efforts.map((e) => ({ value: e, label: t(`orch.effort.${e}`) }))]}
                 aria-label={t('orch.effortLabel')}
               />

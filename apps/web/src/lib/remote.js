@@ -122,6 +122,10 @@ export function remoteReducer(state, ev) {
           source: ev.source, agent: ev.agent || null, title: ev.title, workspace: ev.workspace || null,
           machine: ev.machine, mode: ev.mode, model: ev.model,
           capabilities: Array.isArray(ev.capabilities) ? ev.capabilities : [],
+          models: Array.isArray(ev.models) ? ev.models : [],
+          model_value: ev.model_value ?? null,
+          efforts: Array.isArray(ev.efforts) ? ev.efforts : [],
+          effort: ev.effort ?? null,
         },
       };
     case 'files':
