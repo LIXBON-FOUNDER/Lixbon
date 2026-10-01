@@ -20,13 +20,14 @@ import { fuzzyScore } from '../lib/fuzzy';
 import { claudeMenuEntries, parseSlash } from '../lib/claudeCommands';
 import { CLAUDE_IDE_CARDS } from '../chat/slashCommands';
 import { remoteCard } from '../lib/remoteCards';
+import { startOrchBridge, stopOrchBridge, handleOrchAction, republishOrch, prepareRemoteOrchestrate } from '../lib/remoteOrch';
 
 const FLUSH_MS = 250;
 const RESULT_CHARS = 600;
 const SNAPSHOT_MSGS = 80;
 const MACHINE = 'Lixbon IDE';
 // Lo que el móvil puede mandar con un prompt; un host sin esto solo recibe texto.
-const CAPABILITIES = ['attachments', 'images', 'mentions', 'files'];
+const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch'];
 const FILE_RESULTS = 30;
 const FILES_TTL_MS = 30_000;
 const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };
@@ -122,8 +123,11 @@ function claudeCommands(chat) {
   return [...local.map((c) => ({ ...c, group: 'lixbon' })), ...cards, ...catalog];
 }
 
+const ORCH_COMMAND = { name: 'orquestar', args: '<objetivo>', description: 'Coordina un equipo de agentes para un objetivo', group: 'orch' };
+
 function commandsOf(chat) {
-  return agentOf(chat) === 'claude' ? claudeCommands(chat) : lixbonCommands().map((c) => ({ ...c, group: 'lixbon' }));
+  const list = agentOf(chat) === 'claude' ? claudeCommands(chat) : lixbonCommands().map((c) => ({ ...c, group: 'lixbon' }));
+  return list.some((c) => c.name === 'orquestar') ? list : [ORCH_COMMAND, ...list];
 }
 
 function helloFields() {
@@ -256,12 +260,14 @@ function startChannel(sessionId) {
   if (prevBackground.length) emitBackground(prevBackground);
 
   unsubChat = useChatStore.subscribe(onChatChange);
+  startOrchBridge(emit);
   flushTimer = setInterval(flushEvents, FLUSH_MS);
   readCommands(sessionId);
 }
 
 function stopChannel() {
   if (unsubChat) { unsubChat(); unsubChat = null; }
+  stopOrchBridge();
   if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
   if (readerAbort) { readerAbort.abort(); readerAbort = null; }
   buffer = [];
@@ -460,6 +466,18 @@ function sendRemotePrompt(item) {
   if (chat.streaming && agentOf(chat) !== 'claude') { remotePromptQueue.push(item); return; }
   const text = (item.text || '').trim();
   const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+  const orch = attachments.length === 0 && /^\/orquestar(?:\s+([\s\S]+))?$/i.exec(text);
+  if (orch) {
+    // El chat de la sesión pasa a ser el coordinador, como en el IDE.
+    prepareRemoteOrchestrate(orch[1]).then((problem) => {
+      if (problem) { emit('notice', { text: problem }); return; }
+      const now = useChatStore.getState();
+      if (agentOf(now) !== 'claude' && now.chatMode !== 'agent') now.setChatMode('agent');
+      nextRemotePrompt = { images: 0, mentions: [] };
+      useChatStore.getState().send(text, null, [], []);
+    });
+    return;
+  }
   const slash = attachments.length === 0 && parseSlash(text);
   if (slash && runRemoteSlash(slash, chat)) return;
 
@@ -517,6 +535,10 @@ function handleCommand(cmd) {
     case 'request_snapshot':
       emitHello(true);
       emit('snapshot', { messages: mapSnapshot(chat.messages) });
+      republishOrch();
+      break;
+    case 'orch':
+      handleOrchAction(cmd.action, cmd.args || {});
       break;
     case 'bye':
       useRemoteStore.getState()._endedRemotely();
