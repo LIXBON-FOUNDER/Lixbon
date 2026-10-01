@@ -57,6 +57,9 @@ let sentCards = new WeakSet();
 let prevSide = null;
 let prevBtw = null;
 let prevBackground = null;
+// Tools anunciadas mientras seguían en curso (índice del mensaje → id): su
+// resultado se manda cuando el mensaje deja de estar pendiente.
+let pendingTools = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,6 +76,8 @@ function toolSummary(tool, args = {}) {
   return String(args.path || args.pattern || '').slice(0, 200) || tool;
 }
 
+const toolResult = (m) => String(m.full || m.content || '').slice(0, RESULT_CHARS);
+
 function mapSnapshot(messages) {
   const out = [];
   for (const m of messages) {
@@ -80,7 +85,7 @@ function mapSnapshot(messages) {
     else if (m.role === 'assistant' && (m.content || '').trim()) {
       out.push({ role: 'assistant', content: m.content });
     } else if (m.role === 'tool') {
-      out.push({ role: 'tool', tool: m.tool, label: describeTool(m), summary: toolSummary(m.tool, m.args), content: (m.content || '').slice(0, RESULT_CHARS), ok: m.ok !== false });
+      out.push({ role: 'tool', id: `t${out.length}`, tool: m.tool, label: describeTool(m), summary: toolSummary(m.tool, m.args), content: toolResult(m), ok: m.ok !== false, pending: !!m.pending });
     } else if (m.role === 'error') {
       out.push({ role: 'error', content: m.content || '' });
     } else if (m.role === 'cmd') {
@@ -276,9 +281,11 @@ function startChannel(sessionId) {
   prevSide = chat.ccSide;
   prevBtw = chat.ccBtw;
   prevBackground = chat.ccBackground || [];
+  pendingTools = new Map();
 
   emitHello(true);
   emit('snapshot', { messages: mapSnapshot(chat.messages) });
+  trackSnapshotPending(chat.messages);
   emit('status', { state: chat.streaming ? 'thinking' : 'idle' });
   if (chat.pendingApproval) announceApproval(chat.pendingApproval);
   if (prevBackground.length) emitBackground(prevBackground);
@@ -336,9 +343,11 @@ function onChatChange(state) {
       // resincronizar con un snapshot completo en lugar de derivar deltas.
       closeAssistant(prev);
       emit('snapshot', { messages: mapSnapshot(msgs) });
+      trackSnapshotPending(msgs);
       msgs.forEach((m) => m.role === 'cmd' && sentCards.add(m));
     } else {
-      for (let i = prev.length; i < msgs.length; i++) announceNew(msgs[i]);
+      settlePendingTools(msgs);
+      for (let i = prev.length; i < msgs.length; i++) announceNew(msgs[i], i);
       // Delta de la burbuja de asistente en streaming (siempre la última)
       const last = msgs[msgs.length - 1];
       if (assistantOpen && last?.role === 'assistant') {
@@ -390,7 +399,32 @@ function onChatChange(state) {
   }
 }
 
-function announceNew(m) {
+// Los ids de la instantánea son posicionales (`t` + su orden entre los
+// mensajes visibles): se recalculan igual para seguir las que siguen en curso.
+function trackSnapshotPending(msgs) {
+  pendingTools = new Map();
+  let n = 0;
+  msgs.forEach((m, i) => {
+    if (m.role === 'user' || m.role === 'tool' || m.role === 'error' || m.role === 'cmd' || (m.role === 'assistant' && (m.content || '').trim())) {
+      if (m.role === 'tool' && m.pending) pendingTools.set(i, `t${n}`);
+      n += 1;
+    }
+  });
+}
+
+function settlePendingTools(msgs) {
+  for (const [i, id] of pendingTools) {
+    const m = msgs[i];
+    if (m?.role !== 'tool') { pendingTools.delete(i); continue; }
+    if (m.pending) continue;
+    pendingTools.delete(i);
+    emit('tool_result', { id, tool: m.tool, result: toolResult(m), error: m.ok === false });
+  }
+}
+
+let toolSeq = 0;
+
+function announceNew(m, index) {
   if (m.role === 'user') {
     emit('user_msg', {
       text: m.content || '',
@@ -405,12 +439,10 @@ function announceNew(m) {
     assistantSent = m.content || '';
     if (assistantSent) emit('assistant_delta', { text: assistantSent });
   } else if (m.role === 'tool') {
-    emit('tool_use', { tool: m.tool, summary: toolSummary(m.tool, m.args), label: describeTool(m), readonly: false });
-    emit('tool_result', {
-      tool: m.tool,
-      result: (m.content || '').slice(0, RESULT_CHARS),
-      error: m.ok === false,
-    });
+    const id = `u${++toolSeq}`;
+    emit('tool_use', { id, tool: m.tool, summary: toolSummary(m.tool, m.args), label: describeTool(m), readonly: false });
+    if (m.pending) pendingTools.set(index, id);
+    else emit('tool_result', { id, tool: m.tool, result: toolResult(m), error: m.ok === false });
   } else if (m.role === 'error') {
     emit('error', { message: m.content || '' });
   }
@@ -581,6 +613,7 @@ function handleCommand(cmd) {
       break;
     case 'request_snapshot':
       emitHello(true);
+      trackSnapshotPending(chat.messages);
       emit('snapshot', { messages: mapSnapshot(chat.messages) });
       republishOrch();
       break;

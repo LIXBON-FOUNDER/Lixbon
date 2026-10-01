@@ -34,7 +34,7 @@ import {
   useScale,
 } from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
-import { describeRemoteTool, summarizeRemoteTools } from '../toolText';
+import { describeRemoteTool, shownCommand, summarizeRemoteTools } from '../toolText';
 import WaveText from '../components/WaveText';
 import RemoteOrch from './RemoteOrch';
 import { useApi, useAuth } from '../state';
@@ -827,9 +827,9 @@ function ToolLine({ items }) {
             <Pressable key={it.key} onPress={it.result ? () => setShown((k) => (k === it.key ? null : it.key)) : undefined} style={{ gap: 6 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text numberOfLines={1} style={{ flexShrink: 0, maxWidth: '55%', fontFamily: FONTS.uiMedium, fontSize: 12.5, color: it.error ? c.danger : c.ink70 }}>
-                  {describeRemoteTool(it)}
+                  {shownCommand(it) ? 'Ejecutó' : describeRemoteTool(it)}
                 </Text>
-                <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>{it.summary}</Text>
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 11, color: shownCommand(it) ? c.ink70 : c.inkLabel }}>{it.summary}</Text>
                 {!!it.result && <Icon name={shown === it.key ? 'chevron-down' : 'chevron-right'} size={11} color={c.inkFaint} />}
               </View>
               {shown === it.key && (
