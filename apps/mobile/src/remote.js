@@ -107,7 +107,7 @@ function mapSnapshotMessages(messages) {
     if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
-      items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: '', result: m.content || '', error: m.ok === false, running: false }));
+      items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: false }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
   }
   return items;
@@ -198,7 +198,7 @@ export function remoteReducer(state, ev) {
       return {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
-          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '',
+          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
           readonly: !!ev.readonly, running: true, result: '', error: false,
         })],
       };
