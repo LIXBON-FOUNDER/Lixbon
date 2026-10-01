@@ -16,6 +16,7 @@ import { Logo } from '../components/Logo';
 import { Markdown } from '../components/Markdown';
 import { WaveText } from '../components/WaveText';
 import { RemoteOrch } from '../components/RemoteOrch';
+import { Select } from '../components/Select';
 import { IconChevron, IconClip, IconFile, IconImage, IconSend, IconStop, IconX } from '../components/Icons';
 import { useLocale } from '../i18n/LocaleContext';
 import { describeRemoteTool, summarizeRemoteTools } from '../lib/toolText';
@@ -210,6 +211,51 @@ function groupItems(items) {
   return out;
 }
 
+// ── Modelo y esfuerzo de la sesión ──────────────────────────────────────────
+
+/** Selectores de modelo y esfuerzo, los mismos que ofrece el composer del IDE.
+    El cambio se pinta al momento y lo confirma el siguiente hello del host. */
+function SessionConfig({ state, sendCommand, t, disabled }) {
+  const meta = state.meta || {};
+  const canConfig = (meta.capabilities || []).includes('config') && meta.models?.length > 0;
+  const [model, setModel] = useState(null);
+  const [effort, setEffort] = useState(null);
+  // Cuando llega el hello con el valor nuevo, manda el host.
+  useEffect(() => { setModel(null); }, [meta.model_value]);
+  useEffect(() => { setEffort(null); }, [meta.effort]);
+  if (!canConfig) return meta.model ? <span className="remote__model">{meta.model}</span> : null;
+  const current = model ?? meta.model_value ?? '';
+  const curEffort = effort ?? meta.effort ?? 'auto';
+  const pick = async (patch) => {
+    if (patch.model != null) setModel(patch.model);
+    if (patch.effort != null) setEffort(patch.effort);
+    const ok = await sendCommand({ type: 'config', ...patch });
+    if (!ok) { setModel(null); setEffort(null); }
+  };
+  return (
+    <span className="remote__config">
+      <Select
+        className="chat-input__model"
+        value={current}
+        onChange={(v) => pick({ model: v })}
+        options={meta.models.map((m) => ({ value: m.value, label: m.label }))}
+        disabled={disabled}
+        aria-label={t('modelLabel')}
+      />
+      {meta.efforts?.length > 0 && (
+        <Select
+          className="chat-input__model"
+          value={curEffort}
+          onChange={(v) => pick({ effort: v })}
+          options={meta.efforts.map((e) => ({ value: e, label: t(`effortLevel.${e}`) }))}
+          disabled={disabled}
+          aria-label={t('effortLabel')}
+        />
+      )}
+    </span>
+  );
+}
+
 // ── Caja de escritura ───────────────────────────────────────────────────────
 
 const ACCEPT = [
@@ -394,7 +440,7 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
             )}
           </div>
           <div className="chat-input__meta">
-            {state.meta?.model && <span className="remote__model">{state.meta.model}</span>}
+            <SessionConfig state={state} sendCommand={sendCommand} t={t} disabled={disabled} />
           </div>
           {thinking ? (
             <button type="button" className="chat-input__send is-stop" title={t('stop')} aria-label={t('stop')} onClick={() => sendCommand({ type: 'interrupt' })}>

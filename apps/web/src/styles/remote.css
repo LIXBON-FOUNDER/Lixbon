@@ -446,3 +446,10 @@
     padding-bottom: calc(12px + var(--safe-b, 0px));
   }
 }
+
+/* Modelo y esfuerzo de la sesión en la caja de escritura (mismo selector que el chat). */
+.remote__config { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.remote__config .chat-input__model { max-width: 200px; }
+@media (max-width: 640px) {
+  .remote__config .chat-input__model { max-width: 140px; }
+}

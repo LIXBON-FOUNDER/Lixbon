@@ -32,6 +32,7 @@ EPHEMERAL_EVENTS = frozenset({"orch_diff", "orch_term", "orch_agents", "orch_err
 HELLO_META_KEYS = (
     "source", "title", "machine", "mode", "model",
     "agent", "workspace", "commands", "capabilities",
+    "models", "model_value", "efforts", "effort",
 )
 
 

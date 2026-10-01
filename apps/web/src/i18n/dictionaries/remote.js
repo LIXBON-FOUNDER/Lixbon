@@ -45,6 +45,9 @@ export default {
     noImages: 'Este host no acepta imágenes. Actualiza la app de escritorio para enviarlas.',
     analyzeDoc: 'Analiza este documento.',
     message: 'el mensaje',
+    modelLabel: 'Modelo de la sesión',
+    effortLabel: 'Esfuerzo',
+    effortLevel: { auto: 'Esfuerzo auto', low: 'Esfuerzo bajo', medium: 'Esfuerzo medio', high: 'Esfuerzo alto', xhigh: 'Esfuerzo muy alto', max: 'Esfuerzo máximo' },
     tabChat: 'Conversación',
     tabOrch: 'Orquestar',
     orch: {
@@ -159,6 +162,9 @@ export default {
     noImages: 'This host doesn’t accept images. Update the desktop app to send them.',
     analyzeDoc: 'Analyze this document.',
     message: 'the message',
+    modelLabel: 'Session model',
+    effortLabel: 'Effort',
+    effortLevel: { auto: 'Auto effort', low: 'Low effort', medium: 'Medium effort', high: 'High effort', xhigh: 'Very high effort', max: 'Max effort' },
     tabChat: 'Conversation',
     tabOrch: 'Orchestrate',
     orch: {

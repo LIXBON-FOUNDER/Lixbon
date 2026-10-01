@@ -52,7 +52,7 @@ log = logging.getLogger("lixbon")
 SSE_PING_SECONDS = 15
 MAX_EVENTS_PER_BATCH = 200
 AGENTS = ("lixbon", "claude")
-CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch")
+CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch", "config")
 # Lo que un controller puede pedirle al orquestador del host. El host vuelve a
 # validar cada acción: esto solo evita reenviar basura.
 ORCH_ACTIONS = ("refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents")
@@ -434,6 +434,14 @@ async def controller_send_command(
             command["mentions"] = mentions
     if kind == "files":
         command["query"] = str(payload.get("query") or "")[:200]
+    if kind == "config":
+        # Modelo y/o esfuerzo de la sesión; el host solo acepta los que ofrece.
+        for key in ("model", "effort"):
+            value = payload.get(key)
+            if isinstance(value, str) and len(value) <= 120:
+                command[key] = value
+        if "model" not in command and "effort" not in command:
+            raise HTTPException(status_code=422, detail="Nada que cambiar")
     if kind == "orch":
         action = payload.get("action")
         args = payload.get("args") or {}
