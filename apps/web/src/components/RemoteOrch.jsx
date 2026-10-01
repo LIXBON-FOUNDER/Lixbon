@@ -2,10 +2,10 @@
 // la web. El IDE manda un snapshot (`state.orch`) cada vez que cambia y atiende
 // las acciones que se le piden (`orch` + action): parar una tarea, ver su
 // terminal o su diff, cambiar el modelo de un rol… Aquí solo se pinta y se pide.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n/useT';
 import { Select } from './Select';
-import { IconArrowLeft, IconExternal, IconRefresh, IconStop, IconTrash } from './Icons';
+import { IconArrowLeft, IconChevron, IconExternal, IconRefresh, IconStop, IconTrash } from './Icons';
 import { WaveText } from './WaveText';
 
 const FINAL = ['done', 'failed', 'stopped', 'exited'];
@@ -77,6 +77,61 @@ function Seg({ value, onChange, options }) {
 
 // ── Detalle de una tarea ────────────────────────────────────────────────────
 
+// ── Encargo por secciones ───────────────────────────────────────────────────
+
+// El coordinador escribe los encargos con apartados en mayúsculas
+// («OBJETIVO:», «ARCHIVOS EN ALCANCE:»…): cada uno se pinta como bloque.
+const SECTION = /^([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ0-9 /.-]{2,40}(?:\s*\([^)\n]{0,60}\))?):[ \t]*/gm;
+const prettyLabel = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+
+function specSections(text) {
+  const marks = [...String(text || '').matchAll(SECTION)];
+  if (marks.length < 2) return null;
+  const out = [];
+  const pre = text.slice(0, marks[0].index).trim();
+  if (pre) out.push({ label: '', body: pre });
+  marks.forEach((m, i) => {
+    const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
+    out.push({ label: prettyLabel(m[1].trim()), body: text.slice(m.index + m[0].length, end).trim() });
+  });
+  return out;
+}
+
+// Líneas con pinta de código (contratos, comandos de aceptación) en mono.
+const CODEY = /^\s{2,}\S|^(?:const|let|var|function|import|export|node|npm|npx|git|python3?)\b|[{};]\s*$|=>/;
+
+function SpecBody({ text }) {
+  const lines = text.split('\n');
+  const blocks = [];
+  for (const line of lines) {
+    const item = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const kind = item ? 'li' : CODEY.test(line) ? 'code' : 'p';
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === kind && kind !== 'p') last.lines.push(item ? item[1] : line);
+    else blocks.push({ kind, lines: [item ? item[1] : line] });
+  }
+  return blocks.map((b, i) => {
+    if (b.kind === 'li') return <ul key={i} className="rorch-spec-list">{b.lines.map((l, k) => <li key={k}>{l}</li>)}</ul>;
+    if (b.kind === 'code') return <pre key={i} className="rorch-spec-code">{b.lines.join('\n')}</pre>;
+    return b.lines[0].trim() ? <p key={i} className="rorch-text">{b.lines[0]}</p> : null;
+  });
+}
+
+function SpecText({ text }) {
+  const sections = useMemo(() => specSections(text), [text]);
+  if (!sections) return <div className="rorch-spec"><SpecBody text={text} /></div>;
+  return (
+    <dl className="rorch-spec rorch-spec--sections">
+      {sections.map((sec, i) => (
+        <div key={i} className="rorch-spec-sec">
+          {sec.label && <dt>{sec.label}</dt>}
+          <dd><SpecBody text={sec.body} /></dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function Activity({ task, orch, t }) {
   const name = (id) => orch.tasks.find((x) => x.id === id)?.title || id;
   const mine = orch.messages.filter((m) => m.from === task.id || m.to === task.id);
@@ -90,11 +145,11 @@ function Activity({ task, orch, t }) {
           <span className="remote__dim">{t('orch.questionHint')}</span>
         </div>
       ))}
-      {task.spec && <section className="rorch-block"><span className="rorch-label">{t('orch.spec')}</span><p className="rorch-text">{task.spec}</p></section>}
+      {task.spec && <section className="rorch-block"><span className="rorch-label">{t('orch.spec')}</span><SpecText text={task.spec} /></section>}
       {task.summary && (
         <section className="rorch-block">
           <span className="rorch-label">{t('orch.summary')}</span>
-          <p className="rorch-text">{task.summary}</p>
+          <SpecText text={task.summary} />
           {task.files?.length > 0 && <code className="rorch-files">{task.files.join(' · ')}</code>}
         </section>
       )}
@@ -134,6 +189,21 @@ function Activity({ task, orch, t }) {
   );
 }
 
+/** Pantalla de la terminal: sigue el final mientras no subas a leer. */
+function TermScreen({ text }) {
+  const ref = useRef(null);
+  const stick = useRef(true);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return (
+    <div className="rorch-term" ref={ref} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }}>
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
 function Terminal({ task, state, send, t }) {
   const term = state.orchTerm[task.id];
   const live = state.orch.live.includes(task.id);
@@ -149,25 +219,103 @@ function Terminal({ task, state, send, t }) {
         <span className="remote__dim">{live ? t('orch.termLive') : t('orch.termClosed')}</span>
         <button type="button" className="rorch-link" onClick={() => send('term', { task: task.id })}><IconRefresh size={13} /> {t('orch.refresh')}</button>
       </div>
-      <pre className="rorch-term">{term ? (term.text || t('orch.termEmpty')) : t('orch.loading')}</pre>
+      <TermScreen text={term ? (term.text || t('orch.termEmpty')) : t('orch.loading')} />
     </div>
+  );
+}
+
+// ── Cambios: el patch por archivo, con números de línea ─────────────────────
+
+function parsePatch(text) {
+  const files = [];
+  let file = null;
+  let hunk = null;
+  let oldNo = 0;
+  let newNo = 0;
+  for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
+    if (line.startsWith('diff --git')) {
+      file = { name: line.replace(/^diff --git a\/(.*) b\/.*$/, '$1'), hunks: [], meta: [], add: 0, del: 0 };
+      files.push(file);
+      hunk = null;
+      continue;
+    }
+    if (!file) { file = { name: '', hunks: [], meta: [], add: 0, del: 0 }; files.push(file); }
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
+    if (m) {
+      oldNo = +m[1];
+      newNo = +m[2];
+      hunk = { head: (line.match(/^@@[^@]*@@/) || [line])[0], ctx: m[3].trim(), lines: [] };
+      file.hunks.push(hunk);
+      continue;
+    }
+    if (!hunk) {
+      if (/^new file/.test(line)) file.status = 'new';
+      else if (/^deleted file/.test(line)) file.status = 'deleted';
+      else if (/^rename to /.test(line)) file.name = line.slice(10);
+      else if (line.trim() && !/^(index |--- |\+\+\+ |similarity|rename from|old mode|new mode)/.test(line)) file.meta.push(line);
+      continue;
+    }
+    if (line.startsWith('\\')) continue;
+    if (line.startsWith('+')) { hunk.lines.push({ kind: 'add', text: line.slice(1), n: newNo++ }); file.add++; }
+    else if (line.startsWith('-')) { hunk.lines.push({ kind: 'del', text: line.slice(1), o: oldNo++ }); file.del++; }
+    else hunk.lines.push({ kind: 'ctx', text: line.slice(1), o: oldNo++, n: newNo++ });
+  }
+  return files.filter((f) => f.hunks.length || f.meta.length || f.status);
+}
+
+function DiffFile({ file, t }) {
+  const [open, setOpen] = useState(true);
+  const dir = file.name.includes('/') ? file.name.slice(0, file.name.lastIndexOf('/') + 1) : '';
+  const base = file.name.slice(dir.length);
+  return (
+    <section className={`rdv-file ${open ? 'is-open' : ''}`}>
+      <button type="button" className="rdv-filehead" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className={`rdv-chev ${open ? 'is-open' : ''}`} aria-hidden="true"><IconChevron size={14} /></span>
+        <span className="rdv-name"><span className="rdv-dir">{dir}</span>{base}</span>
+        {file.status && <span className="rdv-tag">{t(`orch.file.${file.status}`)}</span>}
+        <span className="rdv-counts">
+          {file.add > 0 && <span className="rdv-add">+{file.add}</span>}
+          {file.del > 0 && <span className="rdv-del">−{file.del}</span>}
+        </span>
+      </button>
+      {open && (
+        <div className="rdv-body">
+          {file.meta.map((m, i) => <div key={i} className="rdv-meta">{m}</div>)}
+          <div className="rdv-grid">
+            {file.hunks.map((h, hi) => (
+              <div key={hi} className="rdv-hunk">
+                <div className="rdv-row rdv-row--head"><span className="rdv-no" /><span className="rdv-no" /><span className="rdv-code">{h.head}{h.ctx ? `  ${h.ctx}` : ''}</span></div>
+                {h.lines.map((l, i) => (
+                  <div key={i} className={`rdv-row rdv-row--${l.kind}`}>
+                    <span className="rdv-no">{l.kind === 'add' ? '' : l.o}</span>
+                    <span className="rdv-no">{l.kind === 'del' ? '' : l.n}</span>
+                    <span className="rdv-code"><span className="rdv-sign">{l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}</span>{l.text || ' '}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
 function Diff({ task, state, send, t }) {
   const d = state.orchDiff[task.id];
   useEffect(() => { send('diff', { task: task.id }); }, [task.id, task.updated, send]);
+  const files = useMemo(() => (d?.diff?.trim() ? parsePatch(d.diff) : []), [d?.diff]);
   if (!d) return <p className="remote__dim">{t('orch.loading')}</p>;
+  if (!files.length) return <p className="remote__dim">{d.stat || t('orch.noCommits')}</p>;
+  const add = files.reduce((n, f) => n + f.add, 0);
+  const del = files.reduce((n, f) => n + f.del, 0);
   return (
     <div className="rorch-diff">
-      <pre className="rorch-stat">{d.stat || t('orch.noCommits')}</pre>
-      {d.diff && (
-        <pre className="rorch-patch">
-          {d.diff.split('\n').map((l, i) => (
-            <span key={i} className={l.startsWith('+') && !l.startsWith('+++') ? 'is-add' : l.startsWith('-') && !l.startsWith('---') ? 'is-del' : l.startsWith('@@') ? 'is-hunk' : l.startsWith('diff ') ? 'is-file' : ''}>{l}{'\n'}</span>
-          ))}
-        </pre>
-      )}
+      <div className="rdv-summary">
+        <span>{files.length === 1 ? t('orch.fileChanged') : t('orch.filesChanged', { n: files.length })}</span>
+        <span className="rdv-counts">{add > 0 && <span className="rdv-add">+{add}</span>}{del > 0 && <span className="rdv-del">−{del}</span>}</span>
+      </div>
+      {files.map((f, i) => <DiffFile key={`${f.name}${i}`} file={f} t={t} />)}
       {d.truncated && <p className="remote__dim">{t('orch.diffTruncated')}</p>}
     </div>
   );

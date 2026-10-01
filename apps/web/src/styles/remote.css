@@ -376,19 +376,68 @@
 
 .rorch-term-wrap { display: flex; flex-direction: column; gap: 8px; }
 .rorch-term-bar { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
-.rorch-term, .rorch-stat, .rorch-patch {
-  margin: 0; padding: 12px 14px; border-radius: var(--radius); background: #141413; color: #D6D6D3;
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+/* La terminal es siempre oscura, como en el IDE: el TUI de los agentes se
+   diseñó para ese fondo. Sin reajuste de líneas: llega con el ancho del PTY. */
+.rorch-term {
+  max-height: 60vh; overflow: auto; padding: 14px 16px; border-radius: var(--radius);
+  background: #111110; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
-.rorch-term { max-height: 52vh; overflow: auto; }
+.rorch-term pre {
+  margin: 0; width: max-content; min-width: 100%;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.25; color: #D9D9D4; white-space: pre;
+  font-variant-ligatures: none; tab-size: 4;
+}
+
+.rorch-spec { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.rorch-spec--sections { gap: 0; border-radius: var(--radius); background: var(--surface-1); padding: 4px 16px; }
+.rorch-spec-sec { display: grid; grid-template-columns: 150px 1fr; gap: 16px; padding: 12px 0; }
+.rorch-spec-sec + .rorch-spec-sec { box-shadow: 0 -1px 0 var(--surface-3); }
+.rorch-spec-sec dt { font-size: 12.5px; font-weight: 500; color: var(--ink-muted); padding-top: 1px; }
+.rorch-spec-sec dd { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.rorch-spec .rorch-text { font-size: 13.5px; line-height: 1.6; }
+.rorch-spec-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; line-height: 1.55; color: var(--ink-body); }
+.rorch-spec-list li::marker { color: var(--ink-faint); }
+.rorch-spec-code {
+  margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--surface-2); overflow-x: auto;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: var(--ink-soft); white-space: pre;
+}
+@media (max-width: 640px) {
+  .rorch-spec-sec { grid-template-columns: 1fr; gap: 4px; }
+}
+
 .rorch-diff { display: flex; flex-direction: column; gap: 10px; }
-.rorch-stat { background: var(--surface-2); color: var(--ink-soft); }
-.rorch-patch { max-height: 60vh; overflow: auto; }
-.rorch-patch .is-add { color: #9BD59A; background: rgba(110, 158, 62, 0.14); }
-.rorch-patch .is-del { color: #E79A86; background: rgba(196, 85, 61, 0.14); }
-.rorch-patch .is-hunk { color: #8EC5FF; }
-.rorch-patch .is-file { color: #F2F2F0; font-weight: 600; }
-.rorch-patch span { display: block; }
+.rdv-summary { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-soft); }
+.rdv-counts { display: inline-flex; gap: 8px; font-family: var(--font-mono); font-size: 12px; }
+.rdv-add { color: var(--ok); }
+.rdv-del { color: var(--danger-ink); }
+.rdv-file { border-radius: var(--radius); background: var(--surface-1); overflow: hidden; }
+.rdv-filehead {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; text-align: left;
+  font-size: 13px; color: var(--ink); position: sticky; top: 0; z-index: 1; background: var(--surface-1);
+}
+.rdv-filehead:hover { background: var(--surface-2); }
+.rdv-chev { display: inline-flex; color: var(--ink-faint); transform: rotate(-90deg); transition: transform 0.15s ease; }
+.rdv-chev.is-open { transform: none; }
+.rdv-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12.5px; }
+.rdv-dir { color: var(--ink-muted); }
+.rdv-tag { padding: 1px 7px; border-radius: 999px; background: var(--surface-3); font-size: 11px; color: var(--ink-soft); }
+.rdv-body { border-top: 1px solid var(--surface-3); max-height: 70vh; overflow: auto; scrollbar-width: thin; }
+.rdv-meta { padding: 8px 14px; font-size: 12.5px; color: var(--ink-muted); }
+.rdv-grid { width: max-content; min-width: 100%; padding: 4px 0 8px; font-family: var(--font-mono); font-size: 12px; line-height: 20px; }
+.rdv-hunk + .rdv-hunk { margin-top: 6px; }
+.rdv-row { display: grid; grid-template-columns: 44px 44px 1fr; }
+.rdv-no { padding-right: 10px; text-align: right; color: var(--ink-faint); user-select: none; font-size: 11px; }
+.rdv-code { padding: 0 16px 0 6px; white-space: pre; color: var(--ink-soft); }
+.rdv-sign { display: inline-block; width: 14px; user-select: none; color: var(--ink-faint); }
+.rdv-row--head .rdv-code { color: var(--info, #5B8DEF); opacity: 0.8; font-size: 11px; }
+.rdv-row--head { background: var(--surface-2); }
+.rdv-row--add { background: rgba(98, 160, 72, 0.12); }
+.rdv-row--del { background: rgba(200, 86, 60, 0.11); }
+.rdv-row--add .rdv-code, .rdv-row--add .rdv-sign { color: var(--ok); }
+.rdv-row--del .rdv-code, .rdv-row--del .rdv-sign { color: var(--danger-ink); }
+.rdv-row--add .rdv-no { color: color-mix(in srgb, var(--ok) 60%, transparent); }
+.rdv-row--del .rdv-no { color: color-mix(in srgb, var(--danger-ink) 60%, transparent); }
 
 .rorch-settings { display: flex; flex-direction: column; gap: 12px; }
 .rorch-card { display: flex; flex-direction: column; padding: 4px 16px; border-radius: var(--radius); background: var(--surface-1); }
