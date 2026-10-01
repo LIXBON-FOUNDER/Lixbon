@@ -14,6 +14,7 @@ import { api } from '../lib/api';
 import { initialRemoteState, openEventStream, remoteReducer } from '../lib/remote';
 import { Logo } from '../components/Logo';
 import { Markdown } from '../components/Markdown';
+import { WaveText } from '../components/WaveText';
 import { IconChevron, IconClip, IconFile, IconImage, IconSend, IconStop, IconX } from '../components/Icons';
 import { useLocale } from '../i18n/LocaleContext';
 import { describeRemoteTool, summarizeRemoteTools } from '../lib/toolText';
@@ -147,15 +148,6 @@ function RemoteList({ onOpen, t, tc }) {
 
 // ── Actividad del agente: una línea por tramo de herramientas ───────────────
 
-function WaveText({ text }) {
-  const chars = [...(text.length > 90 ? `${text.slice(0, 89)}…` : text)];
-  return (
-    <span className="actline__text actline__wave" aria-label={text}>
-      {chars.map((c, i) => <span key={i} aria-hidden="true" style={{ '--i': i }}>{c}</span>)}
-    </span>
-  );
-}
-
 function ToolLine({ items, t, locale }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(null);
@@ -175,7 +167,7 @@ function ToolLine({ items, t, locale }) {
         <span className="actline__icon" aria-hidden="true">
           {current ? <span className="actline__pulse" /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
         </span>
-        {current ? <WaveText key={text} text={text} /> : <span className="actline__text">{text}</span>}
+        {current ? <WaveText key={text} text={text} className="actline__text" /> : <span className="actline__text">{text}</span>}
         <span className="actline__meta">
           {current && items.length > 1 && <span className="actline__step">{t('stepOf', { n: done + 1, total: items.length })}</span>}
           {!current && failed > 0 && <span className="actline__fail">{t('failedCount', { n: failed })}</span>}
