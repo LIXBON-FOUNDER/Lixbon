@@ -9,6 +9,7 @@
 // cambios de chatStore y deriva los eventos (deltas del asistente, filas de
 // herramienta, aprobaciones) comparando estados.
 
+import { describeTool } from '../lib/toolText';
 import { create } from 'zustand';
 import { useAppStore } from './appStore';
 import { useChatStore } from './chatStore';
@@ -76,7 +77,7 @@ function mapSnapshot(messages) {
     else if (m.role === 'assistant' && (m.content || '').trim()) {
       out.push({ role: 'assistant', content: m.content });
     } else if (m.role === 'tool') {
-      out.push({ role: 'tool', tool: m.tool, content: (m.content || '').slice(0, RESULT_CHARS), ok: m.ok !== false });
+      out.push({ role: 'tool', tool: m.tool, label: describeTool(m), summary: toolSummary(m.tool, m.args), content: (m.content || '').slice(0, RESULT_CHARS), ok: m.ok !== false });
     } else if (m.role === 'error') {
       out.push({ role: 'error', content: m.content || '' });
     } else if (m.role === 'cmd') {
@@ -368,7 +369,7 @@ function announceNew(m) {
     assistantSent = m.content || '';
     if (assistantSent) emit('assistant_delta', { text: assistantSent });
   } else if (m.role === 'tool') {
-    emit('tool_use', { tool: m.tool, summary: toolSummary(m.tool, m.args), readonly: false });
+    emit('tool_use', { tool: m.tool, summary: toolSummary(m.tool, m.args), label: describeTool(m), readonly: false });
     emit('tool_result', {
       tool: m.tool,
       result: (m.content || '').slice(0, RESULT_CHARS),
