@@ -9,6 +9,7 @@
 // cambios de chatStore y deriva los eventos (deltas del asistente, filas de
 // herramienta, aprobaciones) comparando estados.
 
+import { describeTool } from '../lib/toolText';
 import { create } from 'zustand';
 import { useAppStore } from './appStore';
 import { useChatStore } from './chatStore';
@@ -17,15 +18,17 @@ import { runCommand } from '../lib/commands';
 import { listFiles } from '../lib/tauri';
 import { fuzzyScore } from '../lib/fuzzy';
 import { claudeMenuEntries, parseSlash } from '../lib/claudeCommands';
+import { claudeModelOptions } from '../lib/claudeCode';
 import { CLAUDE_IDE_CARDS } from '../chat/slashCommands';
 import { remoteCard } from '../lib/remoteCards';
+import { startOrchBridge, stopOrchBridge, handleOrchAction, republishOrch, prepareRemoteOrchestrate } from '../lib/remoteOrch';
 
 const FLUSH_MS = 250;
 const RESULT_CHARS = 600;
 const SNAPSHOT_MSGS = 80;
 const MACHINE = 'Lixbon IDE';
 // Lo que el móvil puede mandar con un prompt; un host sin esto solo recibe texto.
-const CAPABILITIES = ['attachments', 'images', 'mentions', 'files'];
+const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch', 'config'];
 const FILE_RESULTS = 30;
 const FILES_TTL_MS = 30_000;
 const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };
@@ -35,6 +38,7 @@ let buffer = [];              // eventos pendientes de POST
 let flushTimer = null;
 let readerAbort = null;       // AbortController del SSE de comandos
 let unsubChat = null;
+let unsubApp = null;
 let prevMessages = [];
 let prevStreaming = false;
 let assistantOpen = false;    // hay una burbuja de asistente en streaming
@@ -53,6 +57,10 @@ let sentCards = new WeakSet();
 let prevSide = null;
 let prevBtw = null;
 let prevBackground = null;
+// Tools anunciadas mientras seguían en curso (índice del mensaje → id): su
+// resultado se manda cuando el mensaje deja de estar pendiente.
+let pendingTools = new Map();
+let prevCompacting = false;   // Claude Code está compactando la conversación
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -69,6 +77,8 @@ function toolSummary(tool, args = {}) {
   return String(args.path || args.pattern || '').slice(0, 200) || tool;
 }
 
+const toolResult = (m) => String(m.full || m.content || '').slice(0, RESULT_CHARS);
+
 function mapSnapshot(messages) {
   const out = [];
   for (const m of messages) {
@@ -76,7 +86,7 @@ function mapSnapshot(messages) {
     else if (m.role === 'assistant' && (m.content || '').trim()) {
       out.push({ role: 'assistant', content: m.content });
     } else if (m.role === 'tool') {
-      out.push({ role: 'tool', tool: m.tool, content: (m.content || '').slice(0, RESULT_CHARS), ok: m.ok !== false });
+      out.push({ role: 'tool', id: `t${out.length}`, tool: m.tool, label: describeTool(m), summary: toolSummary(m.tool, m.args), content: toolResult(m), ok: m.ok !== false, pending: !!m.pending });
     } else if (m.role === 'error') {
       out.push({ role: 'error', content: m.content || '' });
     } else if (m.role === 'cmd') {
@@ -121,8 +131,32 @@ function claudeCommands(chat) {
   return [...local.map((c) => ({ ...c, group: 'lixbon' })), ...cards, ...catalog];
 }
 
+const ORCH_COMMAND = { name: 'orquestar', args: '<objetivo>', description: 'Coordina un equipo de agentes para un objetivo', group: 'orch' };
+
 function commandsOf(chat) {
-  return agentOf(chat) === 'claude' ? claudeCommands(chat) : lixbonCommands().map((c) => ({ ...c, group: 'lixbon' }));
+  const list = agentOf(chat) === 'claude' ? claudeCommands(chat) : lixbonCommands().map((c) => ({ ...c, group: 'lixbon' }));
+  return list.some((c) => c.name === 'orquestar') ? list : [ORCH_COMMAND, ...list];
+}
+
+/** Modelos y esfuerzos que el remoto puede elegir, los mismos del composer. */
+function modelChoices(chat, app, agent) {
+  if (agent === 'claude') {
+    const models = claudeModelOptions(chat.ccModels, chat.ccModel).map((m) => ({ value: m.value, label: m.label }));
+    const cur = (chat.ccModels || []).find((x) => (chat.ccModel ? x.value === chat.ccModel : x.value === 'default'));
+    const levels = cur?.supportsEffort && Array.isArray(cur.supportedEffortLevels) ? cur.supportedEffortLevels : [];
+    return {
+      models,
+      model_value: chat.ccModel || '',
+      efforts: levels.length ? ['auto', ...levels] : [],
+      effort: levels.length ? (['auto', ...levels].includes(chat.ccEffort) ? chat.ccEffort : 'auto') : null,
+    };
+  }
+  return {
+    models: (app.availableModels || []).map((m) => ({ value: m.id, label: m.id })),
+    model_value: app.currentModel || '',
+    efforts: [],
+    effort: null,
+  };
 }
 
 function helloFields() {
@@ -140,12 +174,13 @@ function helloFields() {
     model: agent === 'claude' ? chat.ccModel || 'default' : app.currentModel,
     commands: commandsOf(chat).map(({ name, args = '', description, group }) => ({ name, args, description, group })),
     capabilities: CAPABILITIES,
+    ...modelChoices(chat, app, agent),
   };
 }
 
 function emitHello(force = false) {
   const hello = helloFields();
-  const key = [hello.agent, hello.title, hello.workspace, hello.mode, hello.model, hello.commands.length].join('|');
+  const key = [hello.agent, hello.title, hello.workspace, hello.mode, hello.model, hello.model_value, hello.effort, hello.models.length, hello.efforts.length, hello.commands.length].join('|');
   if (!force && key === lastHelloKey) return;
   lastHelloKey = key;
   emit('hello', hello);
@@ -247,20 +282,31 @@ function startChannel(sessionId) {
   prevSide = chat.ccSide;
   prevBtw = chat.ccBtw;
   prevBackground = chat.ccBackground || [];
+  pendingTools = new Map();
+  prevCompacting = !!chat.ccCompacting;
 
   emitHello(true);
   emit('snapshot', { messages: mapSnapshot(chat.messages) });
-  emit('status', { state: chat.streaming ? 'thinking' : 'idle' });
+  trackSnapshotPending(chat.messages);
+  emit('status', statusOf(chat));
   if (chat.pendingApproval) announceApproval(chat.pendingApproval);
   if (prevBackground.length) emitBackground(prevBackground);
 
   unsubChat = useChatStore.subscribe(onChatChange);
+  // El modelo de Lixbon vive en appStore: al cambiarlo (aquí o desde el remoto)
+  // el hello lo cuenta.
+  unsubApp = useAppStore.subscribe((s, prev) => {
+    if (s.currentModel !== prev.currentModel || s.availableModels !== prev.availableModels) emitHello();
+  });
+  startOrchBridge(emit);
   flushTimer = setInterval(flushEvents, FLUSH_MS);
   readCommands(sessionId);
 }
 
 function stopChannel() {
   if (unsubChat) { unsubChat(); unsubChat = null; }
+  if (unsubApp) { unsubApp(); unsubApp = null; }
+  stopOrchBridge();
   if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
   if (readerAbort) { readerAbort.abort(); readerAbort = null; }
   buffer = [];
@@ -299,9 +345,11 @@ function onChatChange(state) {
       // resincronizar con un snapshot completo en lugar de derivar deltas.
       closeAssistant(prev);
       emit('snapshot', { messages: mapSnapshot(msgs) });
+      trackSnapshotPending(msgs);
       msgs.forEach((m) => m.role === 'cmd' && sentCards.add(m));
     } else {
-      for (let i = prev.length; i < msgs.length; i++) announceNew(msgs[i]);
+      settlePendingTools(msgs);
+      for (let i = prev.length; i < msgs.length; i++) announceNew(msgs[i], i);
       // Delta de la burbuja de asistente en streaming (siempre la última)
       const last = msgs[msgs.length - 1];
       if (assistantOpen && last?.role === 'assistant') {
@@ -331,8 +379,12 @@ function onChatChange(state) {
         setTimeout(() => sendRemotePrompt(next), 50);
       }
     } else {
-      emit('status', { state: 'thinking' });
+      emit('status', statusOf(state));
     }
+  }
+  if (!!state.ccCompacting !== prevCompacting) {
+    prevCompacting = !!state.ccCompacting;
+    emit('status', statusOf(state));
   }
 
   announceSidePanels(state);
@@ -353,7 +405,47 @@ function onChatChange(state) {
   }
 }
 
-function announceNew(m) {
+// Los ids de la instantánea son posicionales (`t` + su orden entre los
+// mensajes visibles): se recalculan igual para seguir las que siguen en curso.
+function trackSnapshotPending(msgs) {
+  pendingTools = new Map();
+  let n = 0;
+  msgs.forEach((m, i) => {
+    if (m.role === 'user' || m.role === 'tool' || m.role === 'error' || m.role === 'cmd' || (m.role === 'assistant' && (m.content || '').trim())) {
+      if (m.role === 'tool' && m.pending) pendingTools.set(i, `t${n}`);
+      n += 1;
+    }
+  });
+}
+
+// `activity` dice qué hace el agente cuando no hay texto ni tools que mostrar
+// (la compactación de Claude Code puede tardar un minuto).
+const statusOf = (chat) => (chat.streaming || chat.ccCompacting
+  ? { state: 'thinking', activity: chat.ccCompacting ? 'compacting' : null }
+  : { state: 'idle' });
+
+function compactNotice(m) {
+  const bits = [
+    m.trigger === 'auto' ? 'automáticamente' : null,
+    m.preTokens ? `${Math.round(m.preTokens / 1000)}k tokens resumidos` : null,
+    m.ms ? `${Math.max(1, Math.round(m.ms / 1000))} s` : null,
+  ].filter(Boolean);
+  return `Conversación compactada${bits.length ? ` · ${bits.join(' · ')}` : ''}`;
+}
+
+function settlePendingTools(msgs) {
+  for (const [i, id] of pendingTools) {
+    const m = msgs[i];
+    if (m?.role !== 'tool') { pendingTools.delete(i); continue; }
+    if (m.pending) continue;
+    pendingTools.delete(i);
+    emit('tool_result', { id, tool: m.tool, result: toolResult(m), error: m.ok === false });
+  }
+}
+
+let toolSeq = 0;
+
+function announceNew(m, index) {
   if (m.role === 'user') {
     emit('user_msg', {
       text: m.content || '',
@@ -368,14 +460,14 @@ function announceNew(m) {
     assistantSent = m.content || '';
     if (assistantSent) emit('assistant_delta', { text: assistantSent });
   } else if (m.role === 'tool') {
-    emit('tool_use', { tool: m.tool, summary: toolSummary(m.tool, m.args), readonly: false });
-    emit('tool_result', {
-      tool: m.tool,
-      result: (m.content || '').slice(0, RESULT_CHARS),
-      error: m.ok === false,
-    });
+    const id = `u${++toolSeq}`;
+    emit('tool_use', { id, tool: m.tool, summary: toolSummary(m.tool, m.args), label: describeTool(m), readonly: false });
+    if (m.pending) pendingTools.set(index, id);
+    else emit('tool_result', { id, tool: m.tool, result: toolResult(m), error: m.ok === false });
   } else if (m.role === 'error') {
     emit('error', { message: m.content || '' });
+  } else if (m.role === 'compact') {
+    emit('notice', { text: compactNotice(m) });
   }
 }
 
@@ -459,6 +551,18 @@ function sendRemotePrompt(item) {
   if (chat.streaming && agentOf(chat) !== 'claude') { remotePromptQueue.push(item); return; }
   const text = (item.text || '').trim();
   const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+  const orch = attachments.length === 0 && /^\/orquestar(?:\s+([\s\S]+))?$/i.exec(text);
+  if (orch) {
+    // El chat de la sesión pasa a ser el coordinador, como en el IDE.
+    prepareRemoteOrchestrate(orch[1]).then((problem) => {
+      if (problem) { emit('notice', { text: problem }); return; }
+      const now = useChatStore.getState();
+      if (agentOf(now) !== 'claude' && now.chatMode !== 'agent') now.setChatMode('agent');
+      nextRemotePrompt = { images: 0, mentions: [] };
+      useChatStore.getState().send(text, null, [], []);
+    });
+    return;
+  }
   const slash = attachments.length === 0 && parseSlash(text);
   if (slash && runRemoteSlash(slash, chat)) return;
 
@@ -495,6 +599,23 @@ async function searchFiles(query) {
   });
 }
 
+/** Modelo o esfuerzo elegidos desde el remoto: solo valores que el composer
+    del IDE también ofrece. El nuevo hello confirma el cambio al controller. */
+function applyRemoteConfig(cmd) {
+  const chat = useChatStore.getState();
+  const app = useAppStore.getState();
+  const agent = agentOf(chat);
+  const choices = modelChoices(chat, app, agent);
+  if (typeof cmd.model === 'string' && choices.models.some((m) => m.value === cmd.model)) {
+    if (agent === 'claude') chat.setCcModel(cmd.model); else app.setCurrentModel(cmd.model);
+  }
+  const after = modelChoices(useChatStore.getState(), useAppStore.getState(), agent);
+  if (typeof cmd.effort === 'string' && agent === 'claude' && after.efforts.includes(cmd.effort)) {
+    useChatStore.getState().setCcEffort(cmd.effort);
+  }
+  emitHello(true);
+}
+
 function handleCommand(cmd) {
   const chat = useChatStore.getState();
   switch (cmd.type) {
@@ -515,7 +636,15 @@ function handleCommand(cmd) {
       break;
     case 'request_snapshot':
       emitHello(true);
+      trackSnapshotPending(chat.messages);
       emit('snapshot', { messages: mapSnapshot(chat.messages) });
+      republishOrch();
+      break;
+    case 'orch':
+      handleOrchAction(cmd.action, cmd.args || {});
+      break;
+    case 'config':
+      applyRemoteConfig(cmd);
       break;
     case 'bye':
       useRemoteStore.getState()._endedRemotely();

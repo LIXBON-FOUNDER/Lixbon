@@ -1081,6 +1081,84 @@ fn run_command_blocking(command: String, dir: PathBuf, timeout: Duration) -> Res
     })
 }
 
+/// Salida máxima de `gh_exec`. El JSON de un PR (cuerpo, archivos, checks) o
+/// el log de un job no se puede recortar como la de `run_command`: un JSON sin
+/// su principio no se parsea. Por encima del tope se avisa en vez de truncar.
+const GH_OUTPUT_CAP: usize = 24 * 1024 * 1024; // 24 MB
+
+/// Ejecuta la CLI `gh` con argumentos sueltos (sin shell: el texto del usuario,
+/// como el ref de un workflow, no se interpreta) en la carpeta de trabajo y
+/// devuelve stdout ENTERO. Lo usa el modo Git para PRs y GitHub Actions.
+#[tauri::command]
+async fn gh_exec(args: Vec<String>, timeout_ms: Option<u64>, root: State<'_, WorkspaceRoot>) -> Result<CmdOutput, String> {
+    let dir = workspace_path(&root)?;
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 600_000));
+    tauri::async_runtime::spawn_blocking(move || gh_exec_blocking(args, dir, timeout))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_exec_blocking(args: Vec<String>, dir: PathBuf, timeout: Duration) -> Result<CmdOutput, String> {
+    let mut cmd = Command::new("gh");
+    cmd.args(&args)
+        .current_dir(&dir)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| format!("No se pudo ejecutar gh: {e}"))?;
+    let out_pipe = child.stdout.take().ok_or_else(|| "Sin stdout".to_string())?;
+    let err_pipe = child.stderr.take().ok_or_else(|| "Sin stderr".to_string())?;
+    // stdout completo hasta el tope (luego se sigue drenando sin guardar).
+    let out_h = thread::spawn(move || {
+        let mut pipe = out_pipe;
+        let mut out = Vec::new();
+        let mut buf = [0u8; 16384];
+        let mut overflow = false;
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if out.len() + n > GH_OUTPUT_CAP { overflow = true; } else { out.extend_from_slice(&buf[..n]); }
+                }
+            }
+        }
+        (out, overflow)
+    });
+    let err_h = thread::spawn(move || read_tail_capped(err_pipe, 256 * 1024));
+
+    let start = Instant::now();
+    let mut timed_out = false;
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code().unwrap_or(-1),
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    timed_out = true;
+                    break -1;
+                }
+                thread::sleep(Duration::from_millis(30));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    let (out, overflow) = out_h.join().unwrap_or_default();
+    if overflow {
+        return Err("La respuesta de GitHub es demasiado grande para mostrarla aquí.".into());
+    }
+    let err = err_h.join().unwrap_or_default();
+    Ok(CmdOutput {
+        stdout: String::from_utf8_lossy(&out).into_owned(),
+        stderr: String::from_utf8_lossy(&err).into_owned(),
+        code,
+        timed_out,
+    })
+}
+
 /// Extrae "repo" de URLs tipo https://github.com/u/repo.git o git@host:u/repo.git
 fn repo_name_from_url(url: &str) -> Option<String> {
     let trimmed = url.trim().trim_end_matches('/');
@@ -1327,6 +1405,7 @@ pub fn run() {
             git_run,
             git_clone,
             run_command,
+            gh_exec,
             secret_set,
             secret_get,
             secret_delete,

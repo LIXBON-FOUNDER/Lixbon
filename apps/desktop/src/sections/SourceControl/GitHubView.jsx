@@ -12,7 +12,9 @@ import { ghStatus, listPrs, viewPr, reviewComments, mergePr, checkState } from '
 import { Segmented } from '../../components/Segmented';
 import { SpinRing } from '../../components/Ring';
 import { LogoMark } from '../../components/Logo';
-import { IconExternal, IconCheck, IconX, IconPullRequest, IconRefresh } from '../../components/Icons';
+import { IconExternal, IconCheck, IconX, IconPullRequest, IconRefresh, IconPlay } from '../../components/Icons';
+import { StatusIcon, GhMarkdown, duration, taskProgress } from './ghShared';
+import { hace } from '../../team/lib/tiempo';
 
 const API = 'https://api.github.com';
 
@@ -64,7 +66,7 @@ function askAgent(text) {
   useChatStore.getState().send(text);
 }
 
-function PrDetail({ number, slug, onChanged }) {
+function PrDetail({ number, slug, onChanged, onOpenRun }) {
   const [pr, setPr] = useState(null);
   const [comments, setComments] = useState([]);
   const [error, setError] = useState('');
@@ -84,13 +86,22 @@ function PrDetail({ number, slug, onChanged }) {
 
   useEffect(() => { setPr(null); load(); }, [load]);
 
-  if (error) return <div className="ghd__empty"><span className="scm2__error">{error}</span></div>;
+  if (error) {
+    return (
+      <div className="ghd__empty ghd__empty--col">
+        <span className="scm2__error">{error}</span>
+        <button className="btn btn--ghost" onClick={() => { setPr(null); load(); }}><IconRefresh size={12} /> Reintentar</button>
+      </div>
+    );
+  }
   if (!pr) return <div className="ghd__empty"><SpinRing size={16} /></div>;
 
   const st = stateOf(pr);
   const checks = (pr.statusCheckRollup || []).map(checkState);
   const running = checks.some((c) => c.state === 'running');
   const failing = checks.filter((c) => c.state === 'fail').length;
+  const passed = checks.filter((c) => c.state === 'ok' || c.state === 'skip').length;
+  const tasks = taskProgress(pr.body);
   const approvals = (pr.reviews || []).filter((r) => r.state === 'APPROVED').length;
   const byReviewer = new Map();
   for (const r of pr.reviews || []) byReviewer.set(r.author?.login, r.state);
@@ -127,23 +138,55 @@ function PrDetail({ number, slug, onChanged }) {
             <span className="mono">{pr.headRefName} → {pr.baseRefName}</span>
             <span>· {pr.commits?.length || 0} commits · {pr.files?.length || 0} archivos</span>
             <span className="diffstat mono"><em className="is-add">+{pr.additions}</em> <em className="is-del">−{pr.deletions}</em></span>
+            {pr.author?.login && <span>· {pr.author.login}{pr.createdAt ? `, ${hace(pr.createdAt)}` : ''}</span>}
           </div>
         </div>
 
-        {pr.body?.trim() && <div className="ghd__card ghd__body rise rise--1">{pr.body.trim()}</div>}
-
         {checks.length > 0 && (
-          <div className="ghd__card rise rise--1">
-            {checks.map((c, i) => (
-              <button key={i} className="ghcheck" onClick={() => c.url && openExternal(c.url)}>
-                {c.state === 'running' ? <SpinRing size={12} /> : c.state === 'ok'
-                  ? <span className="ghcheck__icon is-ok"><IconCheck size={10} /></span>
-                  : <span className="ghcheck__icon is-fail"><IconX size={10} /></span>}
-                <span className="ghcheck__name">{c.name}</span>
-                <span className="mono ghcheck__time">{c.state === 'running' ? 'en curso' : c.secs != null ? `${c.secs} s` : ''}</span>
-              </button>
-            ))}
+          <div className="ghd__card ghchecks rise rise--1">
+            <div className="ghchecks__head">
+              <StatusIcon state={running ? 'running' : failing ? 'fail' : 'ok'} size={20} />
+              <div className="ghchecks__sum">
+                <strong>{running ? 'Verificaciones en curso' : failing ? `${failing} ${failing === 1 ? 'verificación falló' : 'verificaciones fallaron'}` : 'Todas las verificaciones pasaron'}</strong>
+                <span className="scm2__muted">{passed} de {checks.length} correctas{running ? ` · ${checks.filter((c) => c.state === 'running').length} en curso` : ''}</span>
+              </div>
+              <span className="ghchecks__bar" aria-hidden="true">
+                {checks.map((c, i) => <i key={i} className={`is-${c.state}`} />)}
+              </span>
+            </div>
+            <div className="ghchecks__list">
+              {checks.map((c, i) => (
+                <button
+                  key={i}
+                  className={`ghcheck is-${c.state}`}
+                  onClick={() => (c.runId && onOpenRun ? onOpenRun(c.runId) : c.url && openExternal(c.url))}
+                  title={c.runId ? 'Ver la ejecución en Actions' : 'Abrir en GitHub'}
+                >
+                  <StatusIcon state={c.state} size={16} />
+                  <span className="ghcheck__name">{c.workflow && <span className="ghcheck__wf">{c.workflow} · </span>}{c.name}</span>
+                  <span className="mono ghcheck__time">{c.state === 'running' ? 'en curso' : c.state === 'skip' ? 'omitido' : duration(c.secs)}</span>
+                  {c.runId && onOpenRun && <IconPlay size={11} className="ghcheck__go" />}
+                </button>
+              ))}
+            </div>
           </div>
+        )}
+
+        {pr.body?.trim() ? (
+          <div className="ghd__card ghd__desc rise rise--1">
+            <div className="ghd__deschead">
+              <span className="ssec__label">Descripción</span>
+              {tasks.total > 0 && (
+                <span className={`ghtasks ${tasks.done === tasks.total ? 'is-done' : ''}`}>
+                  <span className="ghtasks__bar"><i style={{ width: `${(tasks.done / tasks.total) * 100}%` }} /></span>
+                  {tasks.done} de {tasks.total} tareas
+                </span>
+              )}
+            </div>
+            <GhMarkdown>{pr.body.trim()}</GhMarkdown>
+          </div>
+        ) : (
+          <div className="ghd__card scm2__muted rise rise--1">Sin descripción.</div>
         )}
 
         {threads.map((c) => (
@@ -242,12 +285,12 @@ function PublicView() {
           <span className="ghd__title">{pr.title} <span className="ghd__num">#{pr.number}</span></span>
           <div className="ghd__meta"><span className="mono">{pr.head.ref} → {pr.base.ref}</span></div>
         </div>
-        {pr.body && <div className="ghd__card ghd__body">{pr.body.slice(0, 1200)}</div>}
+        {pr.body && <div className="ghd__card ghd__desc"><GhMarkdown>{pr.body}</GhMarkdown></div>}
         {checks?.length > 0 && (
           <div className="ghd__card">
             {checks.map((c) => (
               <div key={c.id} className="ghcheck">
-                <span className={`ghcheck__icon ${c.conclusion === 'success' ? 'is-ok' : 'is-fail'}`}>{c.conclusion === 'success' ? <IconCheck size={10} /> : <IconX size={10} />}</span>
+                <StatusIcon state={c.status !== 'completed' ? 'running' : c.conclusion === 'success' ? 'ok' : ['skipped', 'neutral'].includes(c.conclusion) ? 'skip' : 'fail'} />
                 <span className="ghcheck__name">{c.name}</span>
               </div>
             ))}
@@ -259,7 +302,7 @@ function PublicView() {
   );
 }
 
-export function GitHubView() {
+export function GitHubView({ onOpenRun }) {
   const { remoteUrl, branch } = useGitStore();
   const slug = remoteUrl && remoteUrl.includes('github.com') ? githubSlug(remoteUrl) : '';
   const [status, setStatus] = useState(null);
@@ -322,7 +365,7 @@ export function GitHubView() {
           );
         })}
       </div>
-      {selected ? <PrDetail key={selected} number={selected} slug={slug} onChanged={loadList} /> : <div className="ghd__empty">Elige un pull request.</div>}
+      {selected ? <PrDetail key={selected} number={selected} slug={slug} onChanged={loadList} onOpenRun={onOpenRun} /> : <div className="ghd__empty">Elige un pull request.</div>}
     </div>
   );
 }

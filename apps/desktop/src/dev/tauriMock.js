@@ -112,28 +112,112 @@ const PRS = [
   { number: 127, title: 'fix: paginación de /orders', author: { login: 'ana' }, headRefName: 'fix/orders', baseRefName: 'main', state: 'OPEN', isDraft: false, reviewDecision: 'APPROVED', url: '' },
   { number: 125, title: 'chore: migrar a Vite 6', author: { login: 'lixbon-agent' }, headRefName: 'chore/vite6', baseRefName: 'main', state: 'OPEN', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', url: '' },
 ];
+const PR_BODY = `## Qué cambia
+
+Sustituye la sesión legacy por **tokens con refresco automático**. \`getActiveSession\` desaparece; los consumidores usan \`useSession\`.
+
+- Refresco con backoff exponencial cuando no hay red.
+- Sin cambios de UI.
+
+## Cómo se probó
+
+- [x] \`npm test\`: 214 pasan
+- [x] \`vite build\` y \`tsc --noEmit\`
+- [ ] Probado en Safari
+
+Cierra #231. Detalles en [la guía de sesión](https://github.com/orbita/orbita-web/wiki).`;
+
+const iso = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString();
+const WORKFLOWS = [
+  { id: 101, name: 'CI', path: '.github/workflows/ci.yml', state: 'active' },
+  { id: 102, name: 'Release', path: '.github/workflows/release.yml', state: 'active' },
+  { id: 103, name: 'Nightly e2e', path: '.github/workflows/e2e.yml', state: 'disabled_manually' },
+];
+const RUNS = [
+  { databaseId: 9001, number: 412, attempt: 1, displayTitle: 'feat(auth): sesión por tokens', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'in_progress', conclusion: '', event: 'pull_request', headBranch: 'feat/session-api', headSha: 'a3f9c21aa77', createdAt: iso(3), startedAt: iso(3), updatedAt: iso(0), url: 'https://github.com' },
+  { databaseId: 9000, number: 411, attempt: 2, displayTitle: 'fix: paginación de /orders', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'completed', conclusion: 'failure', event: 'push', headBranch: 'fix/orders', headSha: '7be0d14bb21', createdAt: iso(48), startedAt: iso(48), updatedAt: iso(44), url: 'https://github.com' },
+  { databaseId: 8999, number: 37, attempt: 1, displayTitle: 'desktop v2.0.16', name: 'Release', workflowName: 'Release', workflowDatabaseId: 102, status: 'completed', conclusion: 'success', event: 'workflow_dispatch', headBranch: 'main', headSha: 'e21aa0ccc90', createdAt: iso(180), startedAt: iso(180), updatedAt: iso(166), url: 'https://github.com' },
+  { databaseId: 8998, number: 410, attempt: 1, displayTitle: 'chore: migrar a Vite 6', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'completed', conclusion: 'cancelled', event: 'pull_request', headBranch: 'chore/vite6', headSha: 'c0ffee12345', createdAt: iso(1500), startedAt: iso(1500), updatedAt: iso(1497), url: 'https://github.com' },
+  { databaseId: 8997, number: 409, attempt: 1, displayTitle: 'docs: README del CLI', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'queued', conclusion: '', event: 'push', headBranch: 'main', headSha: 'bada55e1234', createdAt: iso(1), startedAt: iso(1), updatedAt: iso(1), url: 'https://github.com' },
+];
+const step = (number, name, conclusion, a, b, status = 'completed') => ({ number, name, status, conclusion, startedAt: iso(a), completedAt: status === 'completed' ? iso(b) : '0001-01-01T00:00:00Z' });
+const JOBS = {
+  9000: [
+    { databaseId: 7001, name: 'lint', status: 'completed', conclusion: 'success', startedAt: iso(48), completedAt: iso(47), url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 48, 48), step(2, 'Run actions/checkout@v4', 'success', 48, 48), step(3, 'npm run lint', 'success', 48, 47)] },
+    { databaseId: 7002, name: 'tests (node 22)', status: 'completed', conclusion: 'failure', startedAt: iso(48), completedAt: iso(44), url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 48, 48), step(2, 'Run actions/checkout@v4', 'success', 48, 48), step(3, 'npm ci', 'success', 48, 46), step(4, 'npm test', 'failure', 46, 44), step(5, 'Upload coverage', 'skipped', 44, 44)] },
+  ],
+  9001: [
+    { databaseId: 7101, name: 'lint', status: 'completed', conclusion: 'success', startedAt: iso(3), completedAt: iso(2), url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 3, 3), step(2, 'npm run lint', 'success', 3, 2)] },
+    { databaseId: 7102, name: 'tests (node 22)', status: 'in_progress', conclusion: '', startedAt: iso(3), completedAt: '', url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 3, 3), step(2, 'npm ci', 'success', 3, 2), step(3, 'npm test', '', 2, 0, 'in_progress'), step(4, 'Upload coverage', '', 0, 0, 'pending')] },
+  ],
+};
+const LOG = (job) => [
+  ['Set up job', 'Current runner version: 2.320.0', 'Operating System', 'Ubuntu 24.04'],
+  ['Run actions/checkout@v4', '##[group]Run actions/checkout@v4', 'Syncing repository: orbita/orbita-web', '##[endgroup]'],
+  ['npm ci', '[command]/usr/bin/npm ci', 'added 812 packages in 21s'],
+  ['npm test', '[command]/usr/bin/npm test', '> orbita-web@1.4.0 test', ' PASS  src/lib/session.test.ts', ' FAIL  src/api/orders.test.ts', '  ● paginación › devuelve la segunda página', '    expect(received).toHaveLength(expected)', '    Expected length: 20', '    Received length: 0', '##[error]Process completed with exit code 1.'],
+].map(([name, ...lines]) => lines.map((l, i) => `${job}\t${name}\t2026-09-30T10:0${i}:00.0000000Z ${l}`).join('\n')).join('\n');
+const DISPATCH_YAML = `name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Canal de publicación
+        type: choice
+        options: [stable, beta]
+        default: stable
+      dry_run:
+        description: Simular sin publicar
+        type: boolean
+        default: false
+      notes:
+        description: Notas de la versión
+        required: false
+jobs:
+  build:
+    runs-on: windows-latest`;
+
 function ghMock(command) {
   const ok = (v) => ({ stdout: typeof v === 'string' ? v : JSON.stringify(v), stderr: '', code: 0, timed_out: false });
   if (command.includes('--version') || command.includes('auth status')) return ok('gh version 2.60.0');
   if (command.includes('pr list')) return ok(command.includes('closed') ? [] : PRS);
   if (command.includes('/comments')) {
-    return ok([{ id: 1, path: 'src/lib/auth.ts', line: 21, body: '¿Qué pasa si el refresco falla sin red? Deberíamos reintentar con backoff.', user: { login: 'ana' }, diff_hunk: '@@ -18,9 +18,12 @@\n   const token = await session.create(creds)\n+  session.scheduleRefresh(token)', html_url: 'https://github.com' }]);
+    return ok([[{ id: 1, path: 'src/lib/auth.ts', line: 21, body: '¿Qué pasa si el refresco falla sin red? Deberíamos reintentar con backoff.', user: { login: 'ana' }, diff_hunk: '@@ -18,9 +18,12 @@\n   const token = await session.create(creds)\n+  session.scheduleRefresh(token)', html_url: 'https://github.com' }]]);
   }
   if (command.includes('pr view')) {
     const n = Number(command.match(/pr view (\d+)/)[1]);
     const base = PRS.find((p) => p.number === n) || PRS[0];
     return ok({
-      ...base, body: 'Sustituye la sesión legacy por tokens con refresco automático.\ngetActiveSession desaparece; los consumidores usan useSession. Sin cambios de UI.',
+      ...base, body: PR_BODY, createdAt: iso(300),
       mergeable: 'MERGEABLE', additions: 47, deletions: 23, commits: [{}, {}, {}], files: [{}, {}, {}, {}, {}, {}],
       reviews: [{ author: { login: 'ana' }, state: 'COMMENTED' }], reviewRequests: [{ login: 'luis' }],
       labels: [{ name: 'auth' }, { name: 'refactor' }], closingIssuesReferences: [{ number: 231, url: '' }],
       statusCheckRollup: [
-        { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-25T10:00:00Z', completedAt: '2026-09-25T10:00:48Z' },
-        { __typename: 'CheckRun', name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-25T10:00:00Z', completedAt: '2026-09-25T10:00:12Z' },
-        { __typename: 'CheckRun', name: 'tests', status: 'IN_PROGRESS', conclusion: null },
+        { __typename: 'CheckRun', name: 'lint', workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-25T10:00:00Z', completedAt: '2026-09-25T10:00:12Z', detailsUrl: 'https://github.com/orbita/orbita-web/actions/runs/9001/job/7101' },
+        { __typename: 'CheckRun', name: 'build', workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-25T10:00:00Z', completedAt: '2026-09-25T10:00:48Z', detailsUrl: 'https://github.com/orbita/orbita-web/actions/runs/9001/job/7101' },
+        { __typename: 'CheckRun', name: 'tests (node 22)', workflowName: 'CI', status: 'IN_PROGRESS', conclusion: null, detailsUrl: 'https://github.com/orbita/orbita-web/actions/runs/9001/job/7102' },
       ],
     });
   }
+  if (command.includes('workflow list')) return ok(WORKFLOWS);
+  if (command.includes('run list')) {
+    const wf = command.match(/--workflow (\d+)/);
+    const st = command.match(/--status (\w+)/);
+    return ok(RUNS.filter((r) => (!wf || r.workflowDatabaseId === Number(wf[1]))
+      && (!st || (st[1] === 'in_progress' ? r.status === 'in_progress' : r.conclusion === st[1]))));
+  }
+  if (command.includes('--log')) return ok(LOG(command.includes('7102') ? 'tests' : 'tests (node 22)'));
+  if (command.includes('run view')) {
+    const id = Number(command.match(/run view (\d+)/)[1]);
+    const run = RUNS.find((r) => r.databaseId === id) || RUNS[1];
+    return ok({ ...run, jobs: JOBS[id] || JOBS[9000] });
+  }
+  if (command.includes('/contents/')) return ok(command.includes('release') ? btoa(unescape(encodeURIComponent(DISPATCH_YAML))) : btoa('name: CI\non: [push, pull_request]\n'));
+  if (/run (rerun|cancel)|workflow (run|enable|disable)/.test(command)) return ok('');
   return ok('');
 }
 
@@ -188,6 +272,7 @@ const handlers = {
   term_write: () => null,
   term_resize: () => null,
   term_close: () => null,
+  gh_exec: ({ args }) => ghMock(`gh ${args.join(' ')}`),
   run_command: ({ command }) => (command.startsWith('gh ') ? ghMock(command) : command.includes('tsc')
     ? {
       stdout: "src/components/agent/AgentPanel.tsx(21,11): error TS2339: Property 'stream' does not exist on type 'AgentState'.\nsrc/lib/session.ts(3,11): warning TS6133: 'c' is declared but its value is never read.\n",
