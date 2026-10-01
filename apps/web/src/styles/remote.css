@@ -265,17 +265,6 @@
 .actline__chev { display: grid; place-items: center; color: var(--ink-faint); transform: rotate(-90deg); transition: transform 0.2s ease; }
 .actline__chev.is-open { transform: none; }
 
-/* La ola: cada letra se enciende en el color de acento y sube un pelo. */
-.actline__wave { display: inline-flex; white-space: pre; animation: actline-in 0.25s ease both; }
-.actline__wave > span {
-  display: inline-block; color: var(--ink-soft);
-  animation: actline-wave 1.8s ease-in-out infinite; animation-delay: calc(var(--i) * 38ms);
-}
-@keyframes actline-wave {
-  0%, 30%, 100% { color: var(--ink-soft); transform: none; }
-  12% { color: var(--accent); transform: translateY(-1.5px); }
-}
-@keyframes actline-in { from { opacity: 0; transform: translateY(3px); } }
 @keyframes actline-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.75); } }
 @keyframes remote-rise { from { opacity: 0; transform: translateY(4px); } }
 
@@ -291,7 +280,6 @@
 .actrow__out { margin: 0; max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--ink-soft); white-space: pre-wrap; word-break: break-word; }
 
 @media (prefers-reduced-motion: reduce) {
-  .actline__wave > span { animation: none; color: var(--accent); }
   .actline__pulse { animation: none; }
 }
 

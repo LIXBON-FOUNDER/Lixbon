@@ -623,8 +623,8 @@
 }
 
 .msg__thinking {
+  display: inline-flex;
   color: var(--ink-muted);
-  animation: pulse 1.2s ease-in-out infinite;
 }
 
 .msg-razon {
@@ -672,7 +672,6 @@
   gap: 8px;
   color: var(--ink-muted);
   font-size: 14px;
-  animation: pulse 1.2s ease-in-out infinite;
 }
 
 /* Fuentes de la búsqueda web */
@@ -1500,3 +1499,19 @@
 }
 
 .msg__error svg { flex-shrink: 0; margin-top: 2px; }
+
+/* La ola: cada letra de una acción en curso se enciende en el color de acento
+   y sube un pelo, una tras otra (WaveText.jsx). */
+.wave { display: inline-flex; min-width: 0; white-space: pre; overflow: hidden; animation: wave-in 0.25s ease both; }
+.wave > span {
+  display: inline-block; white-space: pre; color: var(--ink-soft);
+  animation: wave-letter 1.8s ease-in-out infinite; animation-delay: calc(var(--i) * 38ms);
+}
+@keyframes wave-letter {
+  0%, 30%, 100% { color: var(--ink-soft); transform: none; }
+  12% { color: var(--accent); transform: translateY(-1.5px); }
+}
+@keyframes wave-in { from { opacity: 0; transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .wave > span { animation: none; color: var(--accent); }
+}
