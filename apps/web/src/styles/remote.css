@@ -228,7 +228,11 @@
   font-size: 13px;
   color: var(--ink-body);
 }
-.remote__mention:hover, .remote__mention:focus-visible { background: var(--surface-3); outline: none; }
+.remote__mention:hover, .remote__mention:focus-visible, .remote__mention.is-active { background: var(--surface-3); outline: none; }
+.remote__slash { max-height: 300px; overflow-y: auto; }
+.remote__slash-group { padding: 8px 10px 4px; font-size: 11px; font-weight: 500; letter-spacing: .02em; color: var(--ink-faint); }
+.remote__slash-name { flex-shrink: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+.remote__slash-args { flex-shrink: 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); }
 .remote__mention-name { color: var(--ink); }
 .remote__mention-rel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); text-align: right; }
 
@@ -454,3 +458,4 @@
 @media (max-width: 640px) {
   .remote__config .chat-input__model { max-width: 140px; }
 }
+.remote__slash-desc { font-family: inherit; font-size: 12px; }

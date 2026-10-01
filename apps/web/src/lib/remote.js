@@ -43,6 +43,7 @@ export const initialRemoteState = {
   items: [],
   approvals: [],
   agentState: 'idle',
+  activity: null, // 'compacting' mientras Claude Code compacta
   hostConnected: false,
   meta: null,
   files: null,
@@ -122,6 +123,7 @@ export function remoteReducer(state, ev) {
           source: ev.source, agent: ev.agent || null, title: ev.title, workspace: ev.workspace || null,
           machine: ev.machine, mode: ev.mode, model: ev.model,
           capabilities: Array.isArray(ev.capabilities) ? ev.capabilities : [],
+          commands: Array.isArray(ev.commands) ? ev.commands : [],
           models: Array.isArray(ev.models) ? ev.models : [],
           model_value: ev.model_value ?? null,
           efforts: Array.isArray(ev.efforts) ? ev.efforts : [],
@@ -186,7 +188,7 @@ export function remoteReducer(state, ev) {
       return { ...s, items };
     }
     case 'status':
-      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle' };
+      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle', activity: ev.state === 'thinking' ? ev.activity || null : null };
     case 'approval_request':
       if (s.approvals.some((a) => a.id === ev.id)) return s;
       return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit' }] };
