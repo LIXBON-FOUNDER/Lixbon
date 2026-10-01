@@ -52,7 +52,11 @@ log = logging.getLogger("lixbon")
 SSE_PING_SECONDS = 15
 MAX_EVENTS_PER_BATCH = 200
 AGENTS = ("lixbon", "claude")
-CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files")
+CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch")
+# Lo que un controller puede pedirle al orquestador del host. El host vuelve a
+# validar cada acción: esto solo evita reenviar basura.
+ORCH_ACTIONS = ("refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents")
+MAX_ORCH_ARGS = 4_000
 MAX_ATTACHMENTS = 6
 MAX_DOC_CHARS = 20_000
 # Las imágenes viajan en base64 por la cola del host: ~6 MB entre todas.
@@ -353,6 +357,7 @@ async def controller_events_stream(
         "host_connected": ch.host_connected,
         "session": {k: v for k, v in sess.items() if k != "user_id"},
         "meta": ch.meta,
+        "orch": ch.orch,
     }
     # Replay: primero lo guardado (sobrevive al reinicio del gateway y a las
     # sesiones de días), luego lo que el buffer en memoria tenga por encima.
@@ -429,6 +434,15 @@ async def controller_send_command(
             command["mentions"] = mentions
     if kind == "files":
         command["query"] = str(payload.get("query") or "")[:200]
+    if kind == "orch":
+        action = payload.get("action")
+        args = payload.get("args") or {}
+        if action not in ORCH_ACTIONS or not isinstance(args, dict):
+            raise HTTPException(status_code=422, detail="Acción del orquestador no soportada")
+        if len(json.dumps(args, default=str)) > MAX_ORCH_ARGS:
+            raise HTTPException(status_code=413, detail="Argumentos del orquestador demasiado grandes")
+        command["action"] = action
+        command["args"] = args
     if not hub.push_command(ch, command):
         raise HTTPException(status_code=429, detail="El host tiene demasiados comandos pendientes")
     return {"queued": True}

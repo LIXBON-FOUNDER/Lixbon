@@ -98,3 +98,23 @@ def test_hello_conserva_agente_comandos_y_capacidades():
         assert "basura" not in ch.meta
 
     run(scenario())
+
+
+def test_estado_del_orquestador_fuera_del_replay():
+    async def scenario():
+        hub = RemoteHub()
+        ch = hub.channel("s1", 1)
+        _, q = hub.attach_controller(ch)
+        hub.publish_events(ch, [
+            {"type": "user_msg", "text": "hola"},
+            {"type": "orch", "enabled": True, "runs": []},
+            {"type": "orch", "enabled": True, "runs": [{"id": "r1"}]},
+            {"type": "orch_term", "task": "t1", "text": "…"},
+        ])
+        # Todo llega en vivo…
+        assert [q.get_nowait()["type"] for _ in range(4)] == ["user_msg", "orch", "orch", "orch_term"]
+        # …pero el replay solo guarda el transcript, y del orquestador el último.
+        assert [ev["type"] for ev in hub.replay(ch, 0)] == ["user_msg"]
+        assert ch.orch["runs"] == [{"id": "r1"}]
+
+    run(scenario())
