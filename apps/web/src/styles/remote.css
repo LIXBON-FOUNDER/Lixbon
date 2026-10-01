@@ -144,35 +144,6 @@
 
 .remote__hint { margin: auto; text-align: center; }
 
-.remote__tool {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12.5px;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  background: var(--surface-3);
-  color: var(--ink-muted);
-}
-
-/* Que falle una herramienta se dice con el relleno, no con un marco. */
-.remote__tool.is-error {
-  background: var(--field-error);
-  color: var(--danger-ink);
-}
-
-.remote__tool-name { font-weight: 500; color: var(--ink); }
-
-.remote__tool-summary {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-}
-
-.remote__tool-state { flex-shrink: 0; }
-
 .remote__error {
   padding: 10px 14px;
   border-radius: var(--radius);
@@ -204,26 +175,125 @@
   justify-content: flex-end;
 }
 
-.remote__composer {
+/* La sesión ocupa justo la pantalla: el hilo hace scroll por dentro y la caja
+   de escritura queda fija abajo, como en cualquier chat. */
+.remote-page--session {
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-vh, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+.remote-page--session .remote__session { min-height: 0; padding-bottom: 0; }
+.remote-page--session .remote__thread { min-height: 0; overscroll-behavior: contain; }
+.remote__head-text { min-width: 0; }
+.remote__head-text .remote__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.remote__dock {
+  flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  padding-top: 12px;
+  padding: 10px 0 calc(18px + var(--safe-b, 0px));
 }
+.remote__dock .remote__approval { margin-bottom: 0; }
+.remote__send-error { margin: 0; font-size: 13px; color: var(--danger-ink); }
 
-.remote__composer input {
-  flex: 1;
-  height: 44px;
-  padding: 0 16px;
+.remote__composer.chat-input { display: block; padding-top: 0; }
+.remote__composer .chat-input__text { min-height: 24px; }
+.remote__at { font-size: 16px; font-weight: 600; line-height: 1; }
+.remote__model { font-size: 12px; color: var(--ink-muted); }
+.attach-chip--mention .attach-chip__name { color: var(--accent); }
+
+.remote__mentions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
   border-radius: var(--radius);
-  background: var(--field);
-  font: inherit;
-  color: var(--ink);
-  outline: none;
-  transition: background 0.18s ease;
+  background: var(--surface-1);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
 }
+.remote__mention {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  text-align: left;
+  font-size: 13px;
+  color: var(--ink-body);
+}
+.remote__mention:hover, .remote__mention:focus-visible { background: var(--surface-3); outline: none; }
+.remote__mention-name { color: var(--ink); }
+.remote__mention-rel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); text-align: right; }
 
-.remote__composer input:focus { background: var(--field-focus); }
-.remote__composer input:disabled { opacity: 0.55; }
+.remote__extras { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.remote__extra { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 5px; background: var(--surface-5); font-size: 11.5px; color: var(--ink-soft); }
+.remote__notice { padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 13px; color: var(--ink-soft); }
+
+/* ── Actividad del agente: una línea por tramo ── */
+
+.actline-group { display: flex; flex-direction: column; animation: remote-rise 0.3s ease both; }
+.actline {
+  display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%;
+  min-height: 30px; padding: 4px 10px 4px 6px; margin-left: -6px; border-radius: var(--radius);
+  text-align: left; font-size: 13px; color: var(--ink-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.actline:hover { background: var(--surface-2); color: var(--ink-soft); }
+.actline__icon { width: 14px; height: 14px; flex: 0 0 14px; display: grid; place-items: center; }
+.actline__pulse { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); animation: actline-pulse 1.4s ease-in-out infinite; }
+.actline__mark { position: relative; width: 14px; height: 14px; }
+.actline__mark::after {
+  content: ''; position: absolute; left: 4.5px; top: 1px; width: 4px; height: 8px;
+  border: solid var(--ok); border-width: 0 1.8px 1.8px 0; transform: rotate(45deg);
+}
+.actline__mark.is-err::before, .actline__mark.is-err::after {
+  content: ''; position: absolute; left: 6px; top: 2px; width: 1.8px; height: 10px; border: 0;
+  background: var(--danger-ink); transform: rotate(45deg);
+}
+.actline__mark.is-err::before { transform: rotate(-45deg); }
+.actline__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actline__meta { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 12px; }
+.actline__step { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+.actline__fail { color: var(--danger-ink); }
+.actline__chev { display: grid; place-items: center; color: var(--ink-faint); transform: rotate(-90deg); transition: transform 0.2s ease; }
+.actline__chev.is-open { transform: none; }
+
+/* La ola: cada letra se enciende en el color de acento y sube un pelo. */
+.actline__wave { display: inline-flex; white-space: pre; animation: actline-in 0.25s ease both; }
+.actline__wave > span {
+  display: inline-block; color: var(--ink-soft);
+  animation: actline-wave 1.8s ease-in-out infinite; animation-delay: calc(var(--i) * 38ms);
+}
+@keyframes actline-wave {
+  0%, 30%, 100% { color: var(--ink-soft); transform: none; }
+  12% { color: var(--accent); transform: translateY(-1.5px); }
+}
+@keyframes actline-in { from { opacity: 0; transform: translateY(3px); } }
+@keyframes actline-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.75); } }
+@keyframes remote-rise { from { opacity: 0; transform: translateY(4px); } }
+
+.actline__detail { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 4px 6px; padding: 6px 0 6px 14px; box-shadow: inset 1.5px 0 0 var(--surface-4); }
+.actrow { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.actrow__line { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
+.actrow.is-err .actrow__name { color: var(--danger-ink); }
+.actrow__name { flex-shrink: 0; }
+.actrow__summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); }
+.actrow__toggle { flex-shrink: 0; font-size: 12px; color: var(--ink-muted); }
+.actrow__toggle:hover { color: var(--ink); }
+.actrow__state { flex-shrink: 0; font-size: 11.5px; color: var(--ink-faint); }
+.actrow__out { margin: 0; max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--ink-soft); white-space: pre-wrap; word-break: break-word; }
+
+@media (prefers-reduced-motion: reduce) {
+  .actline__wave > span { animation: none; color: var(--accent); }
+  .actline__pulse { animation: none; }
+}
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 
@@ -251,26 +321,15 @@
     padding: 14px;
   }
 
-  /* El resumen de la herramienta se lleva todo el ancho si no se apila. */
-  .remote__tool {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-
-  .remote__tool-summary {
-    flex-basis: 100%;
-  }
-
   .remote__approval-actions .pill-btn {
     flex: 1;
   }
 
-  .remote__composer {
-    padding-top: 10px;
+  .remote__composer .chat-input__text {
+    font-size: 16px; /* menos de 16px hace que iOS haga zoom al enfocar */
   }
 
-  .remote__composer input {
-    padding: 0 14px;
-    font-size: 16px; /* menos de 16px hace que iOS haga zoom al enfocar */
+  .remote__dock {
+    padding-bottom: calc(12px + var(--safe-b, 0px));
   }
 }
