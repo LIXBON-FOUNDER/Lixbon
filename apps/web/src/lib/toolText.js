@@ -91,6 +91,10 @@ const KIND_OF = {
   fetch_url: 'web', web_search: 'web', WebFetch: 'web', WebSearch: 'web',
 };
 
+/** Comando ya terminado con su línea a la vista: en el detalle se muestra el
+    comando tal cual (la descripción solo acompaña mientras está en curso). */
+export const shownCommand = (item) => (KIND_OF[item.tool] === 'cmd' && !item.running && item.summary ? item.summary : '');
+
 /** Frase en curso para una herramienta del transcript remoto. */
 export function describeRemoteTool(item, locale = 'es') {
   if (item.label) return item.label;

@@ -19,7 +19,7 @@ import { RemoteOrch } from '../components/RemoteOrch';
 import { Select } from '../components/Select';
 import { IconChevron, IconClip, IconFile, IconImage, IconSend, IconStop, IconX } from '../components/Icons';
 import { useLocale } from '../i18n/LocaleContext';
-import { describeRemoteTool, summarizeRemoteTools } from '../lib/toolText';
+import { describeRemoteTool, shownCommand, summarizeRemoteTools } from '../lib/toolText';
 import {
   contextoDe, esAudioOVideo, esImagen, mensajeDeError, prepararImagen, subirDocumento,
 } from '../lib/adjuntos';
@@ -178,11 +178,13 @@ function ToolLine({ items, t, locale }) {
       </button>
       {open && (
         <div className="actline__detail">
-          {items.map((it) => (
+          {items.map((it) => {
+            const cmd = shownCommand(it);
+            return (
             <div key={it.key} className={`actrow ${it.error ? 'is-err' : ''}`}>
               <div className="actrow__line">
-                <span className="actrow__name">{describeRemoteTool(it, locale)}</span>
-                {it.summary && <code className="actrow__summary">{it.summary}</code>}
+                <span className="actrow__name">{cmd ? t('ran') : describeRemoteTool(it, locale)}</span>
+                {it.summary && <code className={`actrow__summary ${cmd ? 'is-cmd' : ''}`} title={it.summary}>{it.summary}</code>}
                 {it.result && (
                   <button type="button" className="actrow__toggle" onClick={() => setShown((k) => (k === it.key ? null : it.key))}>
                     {shown === it.key ? t('hideOutput') : t('output')}
@@ -192,7 +194,8 @@ function ToolLine({ items, t, locale }) {
               </div>
               {shown === it.key && <pre className="actrow__out">{it.result}</pre>}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
