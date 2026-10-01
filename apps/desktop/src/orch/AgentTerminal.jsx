@@ -8,6 +8,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { currentXtermTheme, FONT } from '../editor/TerminalPanel';
+import { ptyCols } from '../lib/orchTermSize';
 
 export function AgentTerminal({ task, live }) {
   const hostRef = useRef(null);
@@ -35,7 +36,7 @@ export function AgentTerminal({ task, live }) {
     const resize = () => {
       try {
         fit.fit();
-        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).catch(() => {});
+        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).then(() => ptyCols.set(task, term.cols)).catch(() => {});
       } catch { /* oculto */ }
     };
 

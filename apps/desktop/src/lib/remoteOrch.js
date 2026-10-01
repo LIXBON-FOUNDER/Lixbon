@@ -5,6 +5,9 @@
 // (`orch` + action). Cada acción se valida aquí: el controller no manda nada
 // que el IDE no sepa hacer ya desde su propia interfaz.
 import { invoke } from '@tauri-apps/api/core';
+import { Terminal } from '@xterm/xterm';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { DEFAULT_COLS, ptyCols } from './orchTermSize';
 import { useOrchStore, prepareOrchestrate } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
 
@@ -23,6 +26,31 @@ const cut = (s, n) => (s && s.length > n ? `${s.slice(0, n)}…` : s || '');
 const base = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop();
 // eslint-disable-next-line no-control-regex -- quita los códigos ANSI de la terminal
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b[()][0-9A-Za-z]|\r(?!\n)/g;
+
+/** La salida cruda del PTY pasada por un emulador (sin pintar): los agentes
+    redibujan con movimientos de cursor y quitar los códigos a mano se comía
+    espacios y letras. Devuelve el texto de la pantalla y su historial. */
+export async function renderTerm(raw, cols) {
+  if (!raw) return '';
+  const term = new Terminal({ cols, rows: 32, scrollback: 4000, allowProposedApi: true });
+  try {
+    term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = '11';
+    await new Promise((resolve) => term.write(raw, resolve));
+    const buf = term.buffer.active;
+    const lines = [];
+    for (let i = 0; i < buf.length; i++) {
+      const line = buf.getLine(i);
+      if (!line) continue;
+      const s = line.translateToString(true);
+      if (line.isWrapped && lines.length) lines[lines.length - 1] += s;
+      else lines.push(s);
+    }
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  } finally {
+    term.dispose();
+  }
+}
 
 /** Lo que viaja: sin rutas absolutas ni el texto completo de cada mensaje. */
 export function compactSnapshot(snap) {
@@ -146,7 +174,8 @@ export async function handleOrchAction(action, args = {}) {
       case 'term': {
         if (!known(args.task)) return fail('Esa tarea ya no existe.');
         const raw = await invoke('orch_term_buffer', { task: args.task }).catch(() => '');
-        const text = String(raw || '').replace(ANSI, '').replace(/\n{3,}/g, '\n\n');
+        const text = await renderTerm(String(raw || ''), ptyCols.get(args.task) || DEFAULT_COLS)
+          .catch(() => String(raw || '').replace(ANSI, ''));
         emitFn?.('orch_term', {
           task: args.task,
           text: text.slice(-TERM_CHARS),
