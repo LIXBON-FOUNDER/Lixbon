@@ -59,15 +59,10 @@ export const useAppStore = create((set, get) => ({
     try {
       const { serverUrl, apiKey, user } = await loadSettings();
       set({ serverUrl, apiKey, user, hydrated: true });
-      // La sesión (apiKey) y el perfil (user) se guardan por separado: si uno
-      // quedó sin el otro (login viejo, borrado parcial…), el sidebar se
-      // queda sin tarjeta de cuenta aunque la app arranque bien. Se repara
-      // solo, sin bloquear el arranque.
-      if (apiKey && !user) {
-        fetchMe(serverUrl, apiKey)
-          .then((fresh) => { get().setUser(fresh); })
-          .catch(() => {}); // sesión inválida: se verá al primer request real
-      }
+      // El perfil persistido lleva el plan de cuando se inició sesión: se
+      // relee siempre (también repara la sesión sin perfil guardado) sin
+      // bloquear el arranque.
+      if (apiKey) get().refreshUser();
     } catch (e) {
       console.error('[store] Error hidratando configuración:', e);
       set({ hydrated: true }); // no bloquear la app: quedará en pantalla de auth
@@ -172,6 +167,14 @@ export const useAppStore = create((set, get) => ({
   setUser: (user) => {
     saveSetting('user', user);
     set({ user });
+  },
+
+  refreshUser: async () => {
+    const { serverUrl, apiKey } = get();
+    if (!apiKey) return;
+    try {
+      get().setUser(await fetchMe(serverUrl, apiKey));
+    } catch { /* sesión inválida o sin red: se verá al primer request real */ }
   },
 
   setApiKey: (apiKey) => {
