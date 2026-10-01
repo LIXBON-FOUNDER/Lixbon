@@ -23,6 +23,7 @@ from core.persistence.queries import (
     archive_old_inactive_keys,
     init_db,
     purge_expired_sessions,
+    purge_remote_sessions,
     sweep_remote_sessions,
     touch_remote_session,
 )
@@ -172,6 +173,9 @@ def _start_archiver_cron() -> None:
                 for _sid in _hub.live_host_sessions():
                     touch_remote_session(_sid)
                 sweep_remote_sessions()
+                purged = purge_remote_sessions()
+                if purged:
+                    _log.getLogger("lixbon").info(f"[cron] {purged} sesiones remotas inactivas borradas.")
             except Exception as exc:
                 _log.getLogger("lixbon").warning(f"[cron] Error en sweep de sesiones remotas: {exc}")
 

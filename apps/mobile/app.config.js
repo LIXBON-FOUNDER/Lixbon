@@ -46,6 +46,13 @@ module.exports = {
     },
     plugins: [
       [
+        'expo-image-picker',
+        {
+          cameraPermission: 'Lixbon usa la cámara para adjuntar fotos al chat.',
+          microphonePermission: false,
+        },
+      ],
+      [
         'expo-splash-screen',
         {
           image: './assets/splash-icon.png',

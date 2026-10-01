@@ -105,7 +105,7 @@ export function ChatInputBar() {
   const currentMode = isClaude ? ccMode : chatMode;
   const mode = modes.find((m) => m.id === currentMode) || modes[0];
   const pickMode = isClaude ? setCcMode : setChatMode;
-  const modelOptions = useMemo(() => claudeModelOptions(ccModels), [ccModels]);
+  const modelOptions = useMemo(() => claudeModelOptions(ccModels, ccModel), [ccModels, ccModel]);
   const effortLevels = useMemo(() => {
     const m = (ccModels || []).find((x) => (ccModel ? x.value === ccModel : x.value === 'default'));
     return m?.supportsEffort && Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels : [];

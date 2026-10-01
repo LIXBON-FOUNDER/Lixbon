@@ -1,32 +1,20 @@
-// Sidebar.js — contenido del drawer lateral, espejo del sidebar de la web
-// (DISENO_WEB.md 2.1): wordmark arriba, "Nueva conversación" como bloque
-// crema, búsqueda, sección Historial con las conversaciones (abrir / mantener
-// pulsado para renombrar o eliminar), un menú crema que despliega Remote / Uso
-// / Documentación hacia arriba (sin separadores que corten la columna), y
-// footer de perfil crema con avatar de tinta, plan y engranaje (→ Cuenta).
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  FlatList,
-  Linking,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+// Sidebar.js — el panel lateral del IDE en el drawer: marca, "Nueva
+// conversación", filtro, historial (fijadas + grupos por fecha; mantener
+// pulsado para fijar, renombrar, compartir o eliminar), accesos y tarjeta de
+// cuenta.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
+import { groupByDate, togglePin, usePins } from '../pins';
+import { shareConversationById } from '../share';
+import { CHAT_SOURCE } from '../sse';
 import { useApi, useAuth, useChat } from '../state';
-import { FONTS, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS } from '../theme';
 import Icon from './Icon';
 import { useDialogs } from './dialogs';
-import { IconButton, LixLogo, PlanPill, useColors, useReducedMotion } from './ui';
-import { CHAT_SOURCE } from '../sse';
-
-const MENU_ITEM_HEIGHT = 46;
+import { Avatar, Eyebrow, IconButton, LixLogo, LogoMark, PlanPill, useColors, useScale } from './ui';
 
 export default function Sidebar({ open, onClose, onNavigate }) {
   const c = useColors();
@@ -34,31 +22,27 @@ export default function Sidebar({ open, onClose, onNavigate }) {
   const auth = useAuth();
   const chat = useChat();
   const insets = useSafeAreaInsets();
+  const { s } = useScale();
   const { prompt, confirm, sheet, toast } = useDialogs();
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
   const queryRef = useRef('');
   const debounceRef = useRef(null);
   const loadedOnce = useRef(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const user = auth.user || {};
+  const pins = usePins(user.id);
 
   const load = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      // Historial propio de la app. Sin `source` el gateway devuelve TODAS las
-      // superficies (la app se autentica con API key, no con sesión), y el CLI,
-      // el IDE y la web acababan mezclados aquí dentro. Lo que se hable desde
-      // el IDE o el CLI se sigue en la pantalla Remoto, no en este historial.
-      const params = [`source=${CHAT_SOURCE}`];
+      // Historial propio de la app: sin `source` el gateway devolvería también
+      // lo del CLI, el IDE y la web (la app se autentica con API key).
+      const params = [`source=${CHAT_SOURCE}`, 'limit=100'];
       if (queryRef.current) params.push(`q=${encodeURIComponent(queryRef.current)}`);
-      const qs = params.length ? `?${params.join('&')}` : '';
-      const res = await api.get(`/api/conversations${qs}`);
-      setItems(
-        (Array.isArray(res?.conversations) ? res.conversations : []).filter(
-          (it) => it && typeof it === 'object',
-        ),
-      );
+      const res = await api.get(`/api/conversations?${params.join('&')}`);
+      setItems((Array.isArray(res?.conversations) ? res.conversations : []).filter((it) => it && typeof it === 'object'));
     } catch {
       // offline: se queda la lista anterior
     } finally {
@@ -66,24 +50,30 @@ export default function Sidebar({ open, onClose, onNavigate }) {
     }
   };
 
-  // Recarga cada vez que se abre el drawer (la primera con spinner). Al
-  // cerrarlo el menú desplegable vuelve a su estado plegado.
   useEffect(() => {
     if (open) {
       load({ silent: loadedOnce.current });
       loadedOnce.current = true;
-    } else {
-      setMenuOpen(false);
     }
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const onQuery = (value) => {
+    setQuery(value);
     queryRef.current = value;
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => load({ silent: true }), 300);
   };
+
+  const rows = useMemo(() => {
+    const pinned = items.filter((it) => pins.includes(it.id));
+    const groups = [...(pinned.length ? [['Fijadas', pinned]] : []), ...groupByDate(items.filter((it) => !pins.includes(it.id)))];
+    return groups.flatMap(([label, list]) => [
+      { key: `g:${label}`, label },
+      ...list.map((it) => ({ key: String(it.id), item: it, pinned: label === 'Fijadas' })),
+    ]);
+  }, [items, pins]);
 
   const openConversation = (item) => {
     chat.openConversation(item.id, typeof item.title === 'string' ? item.title : null);
@@ -94,6 +84,8 @@ export default function Sidebar({ open, onClose, onNavigate }) {
     chat.newChat();
     onClose();
   };
+
+  const fail = (err) => toast(err instanceof ApiException ? err.message : 'Sin conexión con el servidor');
 
   const rename = async (item) => {
     const value = await prompt({
@@ -107,8 +99,9 @@ export default function Sidebar({ open, onClose, onNavigate }) {
     try {
       await api.patch(`/api/conversations/${item.id}`, { title: trimmed });
       setItems((cur) => cur.map((it) => (it.id === item.id ? { ...it, title: trimmed } : it)));
+      if (chat.conversationId === item.id) chat.setTitle(trimmed);
     } catch (err) {
-      toast(err instanceof ApiException ? err.message : 'Sin conexión con el servidor');
+      fail(err);
     }
   };
 
@@ -125,169 +118,125 @@ export default function Sidebar({ open, onClose, onNavigate }) {
       setItems((cur) => cur.filter((it) => it.id !== item.id));
       if (chat.conversationId === item.id) chat.newChat();
     } catch (err) {
-      toast(err instanceof ApiException ? err.message : 'Sin conexión con el servidor');
+      fail(err);
     }
   };
 
-  const longPress = async (item) => {
+  const longPress = async (item, pinned) => {
     const action = await sheet({
+      title: item.title || 'Sin título',
       items: [
+        { label: pinned ? 'Quitar de fijadas' : 'Fijar arriba', icon: 'pin', value: 'pin' },
         { label: 'Renombrar', icon: 'pencil', value: 'rename' },
+        { label: 'Compartir como Markdown', icon: 'share', value: 'share' },
         { label: 'Eliminar', icon: 'trash', danger: true, value: 'delete' },
       ],
     });
+    if (action === 'pin') togglePin(user.id, item.id);
     if (action === 'rename') rename(item);
+    if (action === 'share') shareConversationById(api, item.id).catch(fail);
     if (action === 'delete') remove(item);
   };
 
-  const user = auth.user || {};
-  const fullName = [user.first_name, user.last_name]
-    .filter((s) => typeof s === 'string' && s)
-    .join(' ');
+  const fullName = [user.first_name, user.last_name].filter((x) => typeof x === 'string' && x).join(' ');
   const displayName = fullName || user.username || user.email || '—';
-  const initial = (displayName[0] || '?').toUpperCase();
 
   return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: c.bgSidebar,
-        paddingTop: insets.top + 6,
-        borderRightWidth: 1,
-        borderRightColor: c.borderSoft,
-      }}
-    >
-      {/* Cabecera: wordmark + cerrar */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingLeft: 18,
-          paddingRight: 10,
-          paddingBottom: 14,
-        }}
-      >
-        <LixLogo size={24} />
-        <IconButton onPress={onClose}>
-          <Icon name="panel" size={19} color={c.inkSoft} />
+    <View style={{ flex: 1, backgroundColor: c.surface1, paddingTop: insets.top + 6, borderTopRightRadius: RADIUS, borderBottomRightRadius: RADIUS }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 16, paddingRight: 8, height: 46 }}>
+        <LogoMark size={22} />
+        <LixLogo size={14} />
+        <View style={{ flex: 1 }} />
+        <IconButton onPress={onClose} label="Cerrar el panel">
+          <Icon name="panel" size={18} color={c.inkSoft} />
         </IconButton>
       </View>
 
-      {/* Nueva conversación: bloque crema, la acción principal del drawer */}
-      <Pressable
-        onPress={newChat}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 12,
-          marginHorizontal: 12,
-          paddingHorizontal: 16,
-          paddingVertical: 14,
-          borderRadius: 18,
-          backgroundColor: c.primary,
-          opacity: pressed ? 0.85 : 1,
-        })}
-      >
-        <Icon name="plus" size={19} color={c.onPrimary} strokeWidth={1.9} />
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onPrimary }}>
-          Nueva conversación
-        </Text>
-      </Pressable>
+      <View style={{ paddingHorizontal: 10, gap: 8, paddingTop: 4 }}>
+        <Pressable
+          onPress={newChat}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            height: 42,
+            paddingHorizontal: 13,
+            borderRadius: RADIUS,
+            backgroundColor: pressed ? c.surface4 : c.surface3,
+            transform: [{ scale: pressed ? 0.98 : 1 }],
+          })}
+        >
+          <Icon name="plus" size={17} color={c.accentDeep} strokeWidth={1.9} />
+          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14, color: c.ink }}>Nueva conversación</Text>
+        </Pressable>
 
-      {/* Búsqueda */}
-      <View
-        style={{
-          marginHorizontal: 12,
-          marginTop: 10,
-          marginBottom: 4,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          paddingHorizontal: 14,
-          borderRadius: RADIUS_PILL,
-          backgroundColor: c.bgInput,
-        }}
-      >
-        <Icon name="search" size={15} color={c.inkSoft} />
-        <TextInput
-          onChangeText={onQuery}
-          placeholder="Buscar conversaciones…"
-          placeholderTextColor={c.inkSoft}
-          autoCorrect={false}
-          style={{ flex: 1, paddingVertical: 10, fontFamily: FONTS.ui, fontSize: 14, color: c.ink }}
-        />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 38, paddingHorizontal: 11, borderRadius: RADIUS, backgroundColor: c.surface3 }}>
+          <Icon name="search" size={14} color={c.inkLabel} />
+          <TextInput
+            value={query}
+            onChangeText={onQuery}
+            placeholder="Buscar conversaciones"
+            placeholderTextColor={c.inkLabel}
+            selectionColor={c.accent}
+            autoCorrect={false}
+            style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: 13.5, color: c.ink }}
+          />
+          {!!query && (
+            <Pressable onPress={() => onQuery('')} hitSlop={8}>
+              <Icon name="x" size={13} color={c.inkLabel} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
-      {/* Historial de la app: solo las conversaciones nacidas aquí. */}
-      <Text
-        style={{
-          fontFamily: FONTS.uiMedium,
-          fontSize: 11,
-          letterSpacing: 1.1,
-          color: c.inkMuted,
-          paddingHorizontal: 20,
-          paddingTop: 16,
-          paddingBottom: 8,
-        }}
-      >
-        HISTORIAL
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 }}>
+        <Eyebrow style={{ flex: 1 }}>Historial</Eyebrow>
+        {items.length > 0 && (
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: c.ink70, paddingHorizontal: 6, borderRadius: 5, backgroundColor: c.surface4 }}>
+            {items.length}
+          </Text>
+        )}
+      </View>
+
       <View style={{ flex: 1 }}>
         {loading && items.length === 0 ? (
           <View style={{ paddingTop: 30, alignItems: 'center' }}>
             <ActivityIndicator color={c.inkSoft} />
           </View>
         ) : items.length === 0 ? (
-          <Text
-            style={{
-              paddingHorizontal: 20,
-              paddingTop: 14,
-              fontFamily: FONTS.ui,
-              fontSize: 13,
-              lineHeight: 19,
-              color: c.inkMuted,
-            }}
-          >
-            {queryRef.current ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}
+          <Text style={{ paddingHorizontal: 20, paddingTop: 14, fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+            {query ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}
           </Text>
         ) : (
           <FlatList
-            data={items}
-            keyExtractor={(item) => String(item.id)}
+            data={rows}
+            keyExtractor={(r) => r.key}
             contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 8 }}
-            renderItem={({ item }) => {
+            renderItem={({ item: row }) => {
+              if (row.label) {
+                return <Eyebrow style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4, fontSize: 10 }}>{row.label}</Eyebrow>;
+              }
+              const item = row.item;
               const active = chat.conversationId === item.id;
               return (
                 <Pressable
                   onPress={() => openConversation(item)}
-                  onLongPress={() => longPress(item)}
+                  onLongPress={() => longPress(item, row.pinned)}
+                  delayLongPress={320}
                   style={({ pressed }) => ({
                     flexDirection: 'row',
                     alignItems: 'center',
-                    gap: 11,
-                    paddingVertical: 10,
+                    gap: 9,
+                    paddingVertical: s(9),
                     paddingHorizontal: 12,
-                    borderRadius: 12,
-                    backgroundColor: active ? c.accentSoft : pressed ? c.pressed : 'transparent',
+                    borderRadius: RADIUS,
+                    backgroundColor: active ? c.surface4 : pressed ? c.pressed : 'transparent',
                   })}
                 >
-                  <View
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 3,
-                      backgroundColor: active ? c.accent : c.inkMuted,
-                    }}
-                  />
+                  {row.pinned && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: c.accent }} />}
                   <Text
                     numberOfLines={1}
-                    style={{
-                      flex: 1,
-                      fontFamily: active ? FONTS.uiMedium : FONTS.ui,
-                      fontSize: 14,
-                      color: active ? c.ink : c.inkSoft,
-                    }}
+                    style={{ flex: 1, fontFamily: active ? FONTS.uiMedium : FONTS.ui, fontSize: 14, color: active ? c.ink : c.ink70 }}
                   >
                     {item.title || 'Sin título'}
                   </Text>
@@ -298,138 +247,58 @@ export default function Sidebar({ open, onClose, onNavigate }) {
         )}
       </View>
 
-      {/* Accesos: menú que se despliega hacia arriba desde su propio botón */}
-      <CollapsibleMenu
-        open={menuOpen}
-        onToggle={() => setMenuOpen((v) => !v)}
-        items={[
-          { icon: 'activity', label: 'Remote', onPress: () => onNavigate('remote') },
-          { icon: 'chart', label: 'Uso', onPress: () => onNavigate('usage') },
-          {
-            icon: 'book',
-            label: 'Documentación',
-            onPress: () => Linking.openURL(`${api.base}/docs`),
-          },
-        ]}
-      />
+      <View style={{ paddingHorizontal: 8, paddingTop: 6 }}>
+        <NavRow icon="activity" label="Remoto" onPress={() => onNavigate('remote')} />
+        <NavRow icon="chart" label="Uso y límites" onPress={() => onNavigate('usage')} />
+        <NavRow icon="palette" label="Personalizar" onPress={() => onNavigate('appearance')} />
+        <NavRow icon="book" label="Documentación" onPress={() => Linking.openURL(`${api.base}/docs`)} />
+      </View>
 
-      {/* Footer de perfil (tarjeta crema, como la web) */}
       <Pressable
         onPress={() => onNavigate('account')}
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 12,
-          backgroundColor: pressed ? c.bgInput : c.bgSecondary,
-          borderRadius: 18,
-          marginHorizontal: 12,
-          marginBottom: Math.max(insets.bottom, 12),
-          paddingHorizontal: 14,
-          paddingVertical: 12,
+          gap: 11,
+          backgroundColor: pressed ? c.surface4 : c.surface3,
+          borderRadius: RADIUS,
+          marginHorizontal: 10,
+          marginTop: 8,
+          marginBottom: Math.max(insets.bottom, 10),
+          paddingHorizontal: 12,
+          paddingVertical: 10,
         })}
       >
-        <View
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 19,
-            backgroundColor: c.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>
-            {initial}
-          </Text>
-        </View>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>
+        <Avatar name={displayName} size={34} />
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: 13.5, color: c.ink }}>
             {displayName}
           </Text>
           {typeof user.plan_name === 'string' && <PlanPill>{user.plan_name}</PlanPill>}
         </View>
-        <Icon name="gear" size={19} color={c.inkSoft} />
+        <Icon name="gear" size={18} color={c.inkSoft} />
       </Pressable>
     </View>
   );
 }
 
-/// Menú de accesos que crece hacia arriba desde su botón, sin separadores que
-/// corten la columna. El botón es crema (el color más contrastado del tema)
-/// para que se lea como el mando de "más opciones" del drawer.
-function CollapsibleMenu({ open, onToggle, items }) {
+function NavRow({ icon, label, onPress }) {
   const c = useColors();
-  const reduced = useReducedMotion();
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: open ? 1 : 0,
-      duration: reduced ? 0 : 220,
-      easing: Easing.bezier(0.22, 1, 0.36, 1),
-      useNativeDriver: false, // anima altura: no puede ir por el hilo nativo
-    }).start();
-  }, [open, anim, reduced]);
-
   return (
-    <View style={{ paddingBottom: 8 }}>
-      <Animated.View
-        // El clip evita que los ítems asomen mientras la altura se pliega.
-        style={{
-          overflow: 'hidden',
-          opacity: anim,
-          height: anim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, items.length * MENU_ITEM_HEIGHT + 6],
-          }),
-        }}
-      >
-        {items.map((item) => (
-          <Pressable
-            key={item.label}
-            onPress={item.onPress}
-            style={({ pressed }) => ({
-              height: MENU_ITEM_HEIGHT,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 12,
-              marginHorizontal: 12,
-              paddingHorizontal: 12,
-              borderRadius: 12,
-              backgroundColor: pressed ? c.pressed : 'transparent',
-            })}
-          >
-            <Icon name={item.icon} size={19} color={c.inkSoft} />
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>
-              {item.label}
-            </Text>
-          </Pressable>
-        ))}
-      </Animated.View>
-
-      <Pressable
-        onPress={onToggle}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={open ? 'Cerrar el menú de opciones' : 'Abrir el menú de opciones'}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-          marginHorizontal: 12,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-          borderRadius: RADIUS_PILL,
-          backgroundColor: c.primary,
-          opacity: pressed ? 0.85 : 1,
-        })}
-      >
-        <Icon name="menu" size={18} color={c.onPrimary} strokeWidth={1.9} />
-        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.onPrimary }}>
-          {open ? 'Cerrar menú' : 'Más opciones'}
-        </Text>
-        <Icon name={open ? 'chevron-down' : 'chevron-up'} size={16} color={c.onPrimary} />
-      </Pressable>
-    </View>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        height: 40,
+        paddingHorizontal: 12,
+        borderRadius: RADIUS,
+        backgroundColor: pressed ? c.pressed : 'transparent',
+      })}
+    >
+      <Icon name={icon} size={17} color={c.inkSoft} />
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.ink70 }}>{label}</Text>
+    </Pressable>
   );
 }

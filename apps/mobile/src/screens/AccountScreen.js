@@ -1,21 +1,20 @@
 // AccountScreen.js — todo lo del usuario: perfil, verificación de correo,
 // tema, privacidad, API key, documentación (abre la web), borrado de
-// historial, cierre de sesión y eliminación de cuenta. Espejo de "Mi cuenta"
-// de la web (account.css): página crema con tarjetas blancas y títulos de
-// tarjeta (18px semibold), avatar de tinta con inicial y plan-pill de acento.
+// historial, cierre de sesión y eliminación de cuenta. Paneles del IDE sobre
+// el fondo, sin líneas: los grupos se separan por relleno.
 import Constants from 'expo-constants';
 import React from 'react';
-import { Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from '../components/Icon';
 import { useDialogs } from '../components/dialogs';
-import { Card, CardTitle, IconButton, PlanPill, StackHeader, useColors } from '../components/ui';
+import { Avatar, Card, CardTitle, IconButton, PlanPill, Segmented, StackHeader, Toggle, useColors } from '../components/ui';
 import { ApiException } from '../api';
 import { useApi, useAuth, useChat, usePrefs } from '../state';
-import { FONTS, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS } from '../theme';
 
-export default function AccountScreen({ onBack }) {
+export default function AccountScreen({ onBack, onNavigate }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
@@ -154,32 +153,19 @@ export default function AccountScreen({ onBack }) {
   const version = Constants.expoConfig?.version || '';
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bgSecondary }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
       <StackHeader title="Cuenta" onBack={onBack} />
       <ScrollView contentContainerStyle={{ paddingBottom: 40, paddingTop: 6 }}>
-        <View style={{ paddingHorizontal: 16, gap: 14 }}>
+        <View style={{ paddingHorizontal: 10, gap: 10 }}>
           {/* Perfil */}
           <Card>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: c.primary,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 18, color: c.onPrimary }}>
-                  {initials}
-                </Text>
-              </View>
+              <Avatar name={initials} size={48} />
               <View style={{ flex: 1, marginLeft: 14, gap: 2 }}>
                 <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>
                   {fullName || user.username || '—'}
                 </Text>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkSoft }}>
+                <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkLabel }}>
                   {email}
                 </Text>
                 {typeof user.plan_name === 'string' && (
@@ -203,14 +189,14 @@ export default function AccountScreen({ onBack }) {
                   gap: 8,
                   paddingHorizontal: 12,
                   paddingVertical: 10,
-                  borderRadius: 12,
-                  backgroundColor: c.accentSoft,
+                  borderRadius: RADIUS,
+                  backgroundColor: c.warnSoft,
                   opacity: pressed ? 0.72 : 1,
                 })}
               >
-                <Icon name="mail" size={15} color={c.accentDeep} />
+                <Icon name="mail" size={15} color={c.warn} />
                 <Text
-                  style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 13, color: c.accentDeep }}
+                  style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 13, color: c.warn }}
                 >
                   Correo sin verificar — toca para reenviar el enlace
                 </Text>
@@ -219,42 +205,19 @@ export default function AccountScreen({ onBack }) {
           </Card>
 
           {/* Apariencia */}
-          <Card>
-            <CardTitle style={{ marginBottom: 12 }}>Apariencia</CardTitle>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {[
-                ['Auto', 'system'],
-                ['Claro', 'light'],
-                ['Oscuro', 'dark'],
-              ].map(([label, mode]) => {
-                const active = prefs.themeMode === mode;
-                return (
-                  <Pressable
-                    key={mode}
-                    onPress={() => prefs.setThemeMode(mode)}
-                    style={({ pressed }) => ({
-                      paddingHorizontal: 18,
-                      paddingVertical: 9,
-                      borderRadius: RADIUS_PILL,
-                      backgroundColor: active ? c.primary : 'transparent',
-                      borderWidth: 1,
-                      borderColor: active ? c.primary : c.borderSoft,
-                      opacity: pressed && !active ? 0.72 : 1,
-                    })}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: FONTS.uiMedium,
-                        fontSize: 13,
-                        color: active ? c.onPrimary : c.ink,
-                      }}
-                    >
-                      {label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+          <Card style={{ gap: 12 }}>
+            <CardTitle>Apariencia</CardTitle>
+            <Segmented
+              stretch
+              value={prefs.themeMode}
+              onChange={prefs.setThemeMode}
+              options={[
+                { value: 'dark', label: 'Oscuro' },
+                { value: 'light', label: 'Claro' },
+                { value: 'system', label: 'Sistema' },
+              ]}
+            />
+            <ActionRow icon="palette" label="Acento, texto, densidad y más" onPress={() => onNavigate?.('appearance')} />
           </Card>
 
           {/* Privacidad */}
@@ -281,9 +244,7 @@ export default function AccountScreen({ onBack }) {
               label="Documentación"
               onPress={() => Linking.openURL(`${api.base}/docs`)}
             />
-            <Separator />
             <ActionRow icon="key" label="Regenerar API key" onPress={regenerateKey} />
-            <Separator />
             <ActionRow
               icon="trash"
               label="Borrar historial de conversaciones"
@@ -294,7 +255,6 @@ export default function AccountScreen({ onBack }) {
           {/* Sesión */}
           <Card style={{ paddingVertical: 8 }}>
             <ActionRow icon="logout" label="Cerrar sesión" onPress={logout} />
-            <Separator />
             <ActionRow icon="warning" label="Eliminar cuenta" danger onPress={deleteAccount} />
           </Card>
 
@@ -302,22 +262,17 @@ export default function AccountScreen({ onBack }) {
             style={{
               textAlign: 'center',
               marginTop: 6,
-              fontFamily: FONTS.ui,
-              fontSize: 12,
-              color: c.inkMuted,
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+              color: c.inkLabel,
             }}
           >
-            Lixbon móvil · v{version}
+            lixbon android · v{version}
           </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-function Separator() {
-  const c = useColors();
-  return <View style={{ height: 1, backgroundColor: c.borderSoft }} />;
 }
 
 function SwitchRow({ icon, label, value, onChange }) {
@@ -328,17 +283,12 @@ function SwitchRow({ icon, label, value, onChange }) {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        paddingVertical: 4,
+        paddingVertical: 8,
       }}
     >
-      <Icon name={icon} size={19} color={c.inkSoft} />
+      <Icon name={icon} size={18} color={c.inkSoft} />
       <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ true: c.accentDeep, false: c.track }}
-        thumbColor="#FFFFFF"
-      />
+      <Toggle label={label} value={value} onChange={onChange} />
     </View>
   );
 }
@@ -352,10 +302,10 @@ function ActionRow({ icon, label, onPress, danger = false }) {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        paddingVertical: 14,
-        paddingHorizontal: 4,
-        marginHorizontal: -4,
-        borderRadius: 12,
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        marginHorizontal: -8,
+        borderRadius: RADIUS,
         backgroundColor: pressed ? c.pressed : 'transparent',
       })}
     >
