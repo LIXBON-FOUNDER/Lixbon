@@ -2,6 +2,7 @@
 // Con sesión: chat con streaming SSE, memoria de conversación e historial.
 // Sin sesión: se VE la interfaz ("¿Qué investigaremos hoy?"); al enviar → registro.
 import { useSeo } from '../lib/seo';
+import { WaveText } from '../components/WaveText';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useNavigate, Link } from '../i18n/link';
@@ -459,7 +460,7 @@ export default function ChatPage() {
                       )}
                       {searching && i === messages.length - 1 && !m.content && (
                         <span className="msg__searching">
-                          <IconGlobe size={14} /> {t('searchingWeb')}
+                          <IconGlobe size={14} /> <WaveText key="buscando" text={t('searchingWeb')} />
                         </span>
                       )}
                       {m.reasoning && (
@@ -469,7 +470,7 @@ export default function ChatPage() {
                         ? <MensajeError>{m.content}</MensajeError>
                         : m.content
                         ? <Markdown streaming={busy && i === messages.length - 1}>{m.content}</Markdown>
-                        : (!searching && !m.reasoning && <span className="msg__thinking">{t('thinking')}</span>)}
+                        : (!searching && !m.reasoning && <span className="msg__thinking"><WaveText key="pensando" text={t('thinking')} /></span>)}
                       {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                     </div>
                   )
@@ -480,8 +481,8 @@ export default function ChatPage() {
               {/* Dentro del compositor: se apoya en su borde superior y lo sigue
                   cuando la caja crece o el teclado móvil la empuja. */}
               {showJump && (
-                <button className="chat-jump" onClick={jumpToBottom}>
-                  {t('jumpMore')} <IconArrowDown size={14} />
+                <button className="chat-jump" onClick={jumpToBottom} aria-label={t('jumpMore')} title={t('jumpMore')}>
+                  <IconArrowDown size={16} />
                 </button>
               )}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}

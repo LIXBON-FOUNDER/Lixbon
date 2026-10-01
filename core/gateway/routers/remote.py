@@ -27,21 +27,21 @@ from fastapi.responses import Response, StreamingResponse
 
 from core.config import PUBLIC_BASE_URL
 from core.gateway import deps
+from core.gateway.push import push_task
 from core.gateway.remote_hub import hub
 from core.persistence.queries import (
     claim_remote_session,
     count_remote_events,
     create_remote_session,
-    delete_device_token,
     end_remote_session,
     get_remote_session,
-    list_device_tokens,
     list_remote_events,
     list_remote_sessions,
     log_audit_event,
     register_device_token,
     save_remote_events,
     touch_remote_session,
+    update_remote_session_meta,
 )
 from core.security.auth import cookie_auth_required
 from core.security.ratelimit import check_auth_rate_limit, record_failed_auth
@@ -51,13 +51,71 @@ log = logging.getLogger("lixbon")
 
 SSE_PING_SECONDS = 15
 MAX_EVENTS_PER_BATCH = 200
-EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+AGENTS = ("lixbon", "claude")
+CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch")
+# Lo que un controller puede pedirle al orquestador del host. El host vuelve a
+# validar cada acción: esto solo evita reenviar basura.
+ORCH_ACTIONS = ("refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents")
+MAX_ORCH_ARGS = 4_000
+MAX_ATTACHMENTS = 6
+MAX_DOC_CHARS = 20_000
+# Las imágenes viajan en base64 por la cola del host: ~6 MB entre todas.
+MAX_IMAGES_B64 = 8 * 1024 * 1024
+MAX_MENTIONS = 20
+AGENT_LABEL = {"lixbon": "Lixbon", "claude": "Claude Code"}
 
 
 def _public_base(request: Request) -> str:
     if PUBLIC_BASE_URL:
         return PUBLIC_BASE_URL
     return str(request.base_url).rstrip("/")
+
+
+def _agent(value: Any) -> str | None:
+    return value if value in AGENTS else None
+
+
+def _clean_attachments(raw: Any) -> list[dict[str, Any]]:
+    """Adjuntos de un prompt remoto: documentos ya convertidos a texto (los
+    extrae /api/attachments en el cliente) e imágenes en base64 que el host
+    pasa tal cual a su agente."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_ATTACHMENTS:
+        raise HTTPException(status_code=422, detail=f"Máximo {MAX_ATTACHMENTS} adjuntos por mensaje")
+    out: list[dict[str, Any]] = []
+    image_bytes = 0
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "adjunto")[:200]
+        if item.get("kind") == "image":
+            data = item.get("base64")
+            if not isinstance(data, str) or not data:
+                continue
+            image_bytes += len(data)
+            out.append({"kind": "image", "name": name, "base64": data,
+                        "mime": str(item.get("mime") or "image/jpeg")[:40]})
+        elif item.get("kind") == "doc":
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            out.append({"kind": "doc", "name": name, "text": text[:MAX_DOC_CHARS]})
+    if image_bytes > MAX_IMAGES_B64:
+        raise HTTPException(status_code=413, detail={
+            "code": "too_large", "message": "Las imágenes pesan demasiado para enviarlas juntas.",
+        })
+    return out
+
+
+def _clean_mentions(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw[:MAX_MENTIONS]:
+        if isinstance(item, dict) and isinstance(item.get("path"), str):
+            out.append({k: str(item.get(k) or "")[:500] for k in ("path", "name", "rel")})
+    return out
 
 
 def _session_or_404(session_id: str) -> dict[str, Any]:
@@ -93,34 +151,6 @@ async def _sse(queue: asyncio.Queue, first: list[dict[str, Any]] | None = None):
             return
 
 
-# ── Push (Expo) ────────────────────────────────────────────────────────────
-
-async def _send_push(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:
-    """Notificación push best-effort a los dispositivos del usuario."""
-    tokens = await asyncio.to_thread(list_device_tokens, user_id)
-    if not tokens or deps.http_client_fast is None:
-        return
-    messages = [
-        {"to": t, "title": title, "body": body, "data": data, "priority": "high"}
-        for t in tokens
-    ]
-    try:
-        resp = await deps.http_client_fast.post(EXPO_PUSH_URL, json=messages)
-        for token, ticket in zip(tokens, resp.json().get("data", [])):
-            details = (ticket or {}).get("details") or {}
-            if details.get("error") == "DeviceNotRegistered":
-                await asyncio.to_thread(delete_device_token, token)
-    except Exception as exc:
-        log.debug(f"[remote] push fallido: {exc}")
-
-
-def _push_task(user_id: int, title: str, body: str, data: dict[str, Any]) -> None:
-    try:
-        asyncio.get_running_loop().create_task(_send_push(user_id, title, body, data))
-    except RuntimeError:
-        pass
-
-
 # ── Ciclo de vida de sesiones ──────────────────────────────────────────────
 
 @router.post("/api/remote/sessions")
@@ -135,8 +165,10 @@ async def create_session_endpoint(
     source = payload.get("source") if payload.get("source") in ("cli", "ide") else "cli"
     title = (payload.get("title") or "").strip() or "Sesión remota"
     machine = (payload.get("machine") or "").strip() or socket.gethostname()
+    agent = _agent(payload.get("agent"))
+    workspace = (payload.get("workspace") or "").strip() or None
 
-    raw_token, sess = create_remote_session(user["id"], source, title, machine)
+    raw_token, sess = create_remote_session(user["id"], source, title, machine, agent, workspace)
     hub.channel(sess["id"], user["id"])
 
     ip = request.client.host if request.client else None
@@ -145,10 +177,10 @@ async def create_session_endpoint(
 
     share_url = f"{_public_base(request)}/remote/{raw_token}"
     hub.notify_user(user["id"], {"type": "session_created", "session": sess})
-    _push_task(
+    push_task(
         user["id"],
-        "Sesión remota activa",
-        f"{title} · {machine} está listo para controlarse desde la app",
+        f"{AGENT_LABEL.get(agent or '', 'Sesión')} en remoto",
+        " · ".join(filter(None, [title, workspace if workspace != title else None, machine])),
         {"kind": "remote_session", "session_id": sess["id"]},
     )
     return {"session": sess, "share_token": raw_token, "share_url": share_url}
@@ -279,10 +311,17 @@ async def host_publish_events(
         log.warning(f"[remote] no se pudo guardar el transcript de {session_id}: {exc}")
 
     for ev in events:
+        if ev.get("type") == "hello":
+            updated = await asyncio.to_thread(
+                update_remote_session_meta, session_id,
+                ev.get("title"), _agent(ev.get("agent")), ev.get("workspace"),
+            )
+            if updated:
+                hub.notify_user(sess["user_id"], {"type": "session_updated", "session": updated})
         if ev.get("type") == "approval_request":
-            _push_task(
+            push_task(
                 sess["user_id"],
-                "El agente pide permiso",
+                f"{AGENT_LABEL.get(sess.get('agent') or '', 'El agente')} pide permiso",
                 f"{ev.get('tool', 'herramienta')} en {sess['title']}",
                 {"kind": "remote_approval", "session_id": session_id},
             )
@@ -318,6 +357,7 @@ async def controller_events_stream(
         "host_connected": ch.host_connected,
         "session": {k: v for k, v in sess.items() if k != "user_id"},
         "meta": ch.meta,
+        "orch": ch.orch,
     }
     # Replay: primero lo guardado (sobrevive al reinicio del gateway y a las
     # sesiones de días), luego lo que el buffer en memoria tenga por encima.
@@ -370,20 +410,39 @@ async def controller_send_command(
     lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ):
-    """El controller manda un comando al host: prompt | interrupt | approve | request_snapshot."""
+    """El controller manda un comando al host: prompt | interrupt | approve |
+    request_snapshot | files (buscar archivos del workspace para mencionarlos)."""
     sess = _owner_required(session_id, lixbon_session, authorization)
     if sess["status"] == "ended":
         raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
     kind = payload.get("type")
-    if kind not in ("prompt", "interrupt", "approve", "request_snapshot"):
+    if kind not in CONTROLLER_COMMANDS:
         raise HTTPException(status_code=422, detail=f"Comando no soportado: {kind}")
-    if kind == "prompt" and not (payload.get("text") or "").strip():
+    attachments = _clean_attachments(payload.get("attachments")) if kind == "prompt" else []
+    if kind == "prompt" and not (payload.get("text") or "").strip() and not attachments:
         raise HTTPException(status_code=422, detail="El prompt está vacío")
 
     ch = hub.channel(session_id, sess["user_id"])
     if not ch.host_connected:
         raise HTTPException(status_code=409, detail="El host no está conectado ahora mismo")
     command = {k: payload.get(k) for k in ("type", "text", "id", "decision", "from_seq") if k in payload}
+    if kind == "prompt":
+        if attachments:
+            command["attachments"] = attachments
+        mentions = _clean_mentions(payload.get("mentions"))
+        if mentions:
+            command["mentions"] = mentions
+    if kind == "files":
+        command["query"] = str(payload.get("query") or "")[:200]
+    if kind == "orch":
+        action = payload.get("action")
+        args = payload.get("args") or {}
+        if action not in ORCH_ACTIONS or not isinstance(args, dict):
+            raise HTTPException(status_code=422, detail="Acción del orquestador no soportada")
+        if len(json.dumps(args, default=str)) > MAX_ORCH_ARGS:
+            raise HTTPException(status_code=413, detail="Argumentos del orquestador demasiado grandes")
+        command["action"] = action
+        command["args"] = args
     if not hub.push_command(ch, command):
         raise HTTPException(status_code=429, detail="El host tiene demasiados comandos pendientes")
     return {"queued": True}
@@ -419,9 +478,9 @@ async def register_device_endpoint(
     authorization: str | None = Header(default=None),
 ):
     user = cookie_auth_required(lixbon_session, authorization)
-    token = (payload.get("expo_push_token") or "").strip()
-    if not token or len(token) > 200:
-        raise HTTPException(status_code=422, detail="expo_push_token inválido")
+    token = (payload.get("token") or payload.get("expo_push_token") or "").strip()
+    if not token or len(token) > 300:
+        raise HTTPException(status_code=422, detail="Push token inválido")
     register_device_token(user["id"], token, (payload.get("platform") or "").strip() or None)
     return {"registered": True}
 

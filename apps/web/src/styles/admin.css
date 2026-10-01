@@ -105,21 +105,28 @@
   color: var(--accent);
 }
 
-.adm__back {
+.adm__util {
   display: flex;
   align-items: center;
-  gap: 11px;
-  margin: auto 8px 4px;
-  padding: 9px 10px;
-  border-radius: var(--radius);
-  color: var(--ink-muted);
-  font-size: 13.5px;
-  transition: background 0.18s ease, color 0.18s ease;
+  gap: 4px;
+  margin: auto 8px 0;
 }
 
-.adm__back:hover {
+.adm__back {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-muted);
+}
+
+.adm__tema {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+}
+
+.adm__tema:hover {
   background: var(--surface-2);
-  color: var(--ink-body);
+  color: var(--ink);
 }
 
 .adm__foot {
@@ -1464,7 +1471,7 @@ a.adm-btn {
     width: auto;
   }
 
-  .adm__back,
+  .adm__util,
   .adm__foot {
     margin: 4px 8px 8px;
   }
@@ -1482,9 +1489,6 @@ a.adm-btn {
     animation: menu-in 0.16s ease;
   }
 
-  .adm__back {
-    margin-top: 0;
-  }
 
   .adm__head {
     flex-direction: column;
@@ -1624,4 +1628,78 @@ a.adm-btn {
   }
 }
 
-.adm__tema { display: flex; padding: 4px 8px; }
+
+/* ── Pestañas de una página (Tarifas) ─────────────────────────────────── */
+
+.adm-pestanas {
+  display: flex;
+  gap: 4px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  overflow-x: auto;
+}
+
+.adm-pestana {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--ink-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.adm-pestana:hover {
+  color: var(--ink);
+}
+
+.adm-pestana.is-on {
+  background: var(--surface-4);
+  color: var(--ink);
+}
+
+/* Base del cupo: tres campos y el botón en la misma línea. */
+.adm-tarifa-base {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+/* Alta plegada encima de la tabla. */
+.adm-alta {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.adm-alta__acciones {
+  display: flex;
+  gap: 6px;
+}
+
+.adm-acciones__hueco {
+  display: inline-block;
+  width: 37px;
+}
+
+@media (max-width: 900px) {
+  .adm-tarifa-base,
+  .adm-alta {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .adm-tarifa-base > .adm-btn,
+  .adm-alta__acciones {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}

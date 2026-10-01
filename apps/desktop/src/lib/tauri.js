@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 
 // ── Comandos Rust (src-tauri/src/lib.rs) ──────────────────────────────
 
@@ -34,6 +34,11 @@ export function readFileContent(path) {
     de pisarlo. Devuelve el mtime nuevo (ms). */
 export function writeFileContent(path, content, expectedMtime) {
   return invoke('write_file_content', { path, content, expectedMtime: expectedMtime ?? null });
+}
+
+/** Diálogo nativo "Guardar como" + escritura. Devuelve la ruta o null si se canceló. */
+export function saveTextAs(defaultName, content) {
+  return invoke('save_text_as', { defaultName, content });
 }
 
 /** mtime del archivo en ms (la "versión" que el editor guarda al abrirlo). */
@@ -137,6 +142,12 @@ export function runCommand(command, timeoutMs, cwd) {
   return invoke('run_command', { command, timeoutMs: timeoutMs ?? null, cwd: cwd ?? null });
 }
 
+/** Ejecuta la CLI `gh` con argumentos sueltos (sin shell) y devuelve la
+    salida completa, sin recortes: {stdout, stderr, code, timed_out}. */
+export function ghExec(args, timeoutMs) {
+  return invoke('gh_exec', { args, timeoutMs: timeoutMs ?? null });
+}
+
 // ── Plugins ───────────────────────────────────────────────────────────
 
 /** Abre el selector nativo de carpetas. Devuelve la ruta o null si se cancela. */
@@ -147,4 +158,55 @@ export function pickDirectory(options = {}) {
 /** Abre una URL en el navegador del sistema. */
 export function openExternal(url) {
   return openUrl(url);
+}
+
+export function revealInDir(path) {
+  return revealItemInDir(path);
+}
+
+// ── Servidores MCP (stdio) ─────────────────────────────────────────────
+
+/** Lanza un servidor MCP. Sus líneas de stdout llegan por `mcp:line:{id}`
+    y el cierre por `mcp:exit:{id}`. */
+export function mcpStart(id, command, args = [], env = {}, cwd = null) {
+  return invoke('mcp_start', { id, command, args, env, cwd });
+}
+
+export function mcpSend(id, line) {
+  return invoke('mcp_send', { id, line });
+}
+
+export function mcpStop(id) {
+  return invoke('mcp_stop', { id });
+}
+
+/** Contenido de ~/.lixbon/mcp.json, o null si no existe. */
+export function mcpUserConfig() {
+  return invoke('mcp_user_config');
+}
+
+/** Guarda ~/.lixbon/mcp.json (valida que sea JSON). Devuelve la ruta. */
+export function mcpSaveUserConfig(content) {
+  return invoke('mcp_save_user_config', { content });
+}
+
+/** Servidor de un solo uso en 127.0.0.1 para la vuelta del navegador en el
+    login con lixbon.com. Devuelve el puerto; el resultado llega como evento
+    `auth:callback` o `auth:timeout`. */
+export function authLoopbackStart() {
+  return invoke('auth_loopback_start');
+}
+
+/** Proxy de la vista previa (modo Diseño) que inyecta el inspector.
+    Devuelve el puerto local; `url` es el servidor de desarrollo. */
+export function previewProxyStart(url) {
+  return invoke('preview_proxy_start', { url });
+}
+
+export function visualBase() {
+  return invoke('visual_base');
+}
+
+export function visualSnippet(content, ext) {
+  return invoke('visual_snippet', { content, ext });
 }

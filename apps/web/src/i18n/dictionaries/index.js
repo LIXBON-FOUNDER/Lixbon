@@ -18,10 +18,9 @@ import shared from './shared';
 import remote from './remote';
 import notFound from './notFound';
 import dialogs from './dialogs';
-import illustrations from './illustrations';
+import support from './support';
 
 export const DICTIONARIES = {
-  illustrations,
   common,
   nav,
   sidebar,
@@ -41,4 +40,5 @@ export const DICTIONARIES = {
   remote,
   notFound,
   dialogs,
+  support,
 };

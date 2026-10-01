@@ -45,6 +45,13 @@ export const initialRemoteState = {
   agentState: 'idle',
   hostConnected: false,
   meta: null,
+  files: null,
+  // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
+  orch: null,
+  orchDiff: {},
+  orchTerm: {},
+  orchAgents: null,
+  orchError: null,
   session: null,
   ended: false,
   lastSeq: 0,
@@ -61,7 +68,7 @@ function mapSnapshotMessages(messages) {
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
       items.push(withKey({
-        kind: 'tool', tool: m.tool || 'tool', summary: '',
+        kind: 'tool', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '',
         result: m.content || '', error: m.ok === false, running: false,
       }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
@@ -96,13 +103,40 @@ export function remoteReducer(state, ev) {
         hostConnected: !!ev.host_connected,
         session: ev.session || s.session,
         meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
+        orch: ev.orch || s.orch,
       };
+    case 'orch':
+      return { ...s, orch: ev };
+    case 'orch_diff':
+      return { ...s, orchDiff: { ...s.orchDiff, [ev.task]: ev } };
+    case 'orch_term':
+      return { ...s, orchTerm: { ...s.orchTerm, [ev.task]: ev } };
+    case 'orch_agents':
+      return { ...s, orchAgents: Array.isArray(ev.agents) ? ev.agents : [] };
+    case 'orch_error':
+      return { ...s, orchError: { message: ev.message || 'Error', action: ev.action, at: Date.now() } };
     case 'hello':
-      return { ...s, meta: { source: ev.source, title: ev.title, machine: ev.machine, mode: ev.mode, model: ev.model } };
+      return {
+        ...s,
+        meta: {
+          source: ev.source, agent: ev.agent || null, title: ev.title, workspace: ev.workspace || null,
+          machine: ev.machine, mode: ev.mode, model: ev.model,
+          capabilities: Array.isArray(ev.capabilities) ? ev.capabilities : [],
+        },
+      };
+    case 'files':
+      return { ...s, files: { query: ev.query || '', items: Array.isArray(ev.items) ? ev.items : [] } };
+    case 'notice':
+      return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'notice', text: ev.text || '' })] };
     case 'snapshot':
       return { ...s, items: mapSnapshotMessages(ev.messages) };
     case 'user_msg':
-      return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'user', text: ev.text || '', origin: ev.origin })] };
+      return {
+        ...s,
+        items: [...closeOpenAssistant(s.items), withKey({
+          kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [],
+        })],
+      };
     case 'assistant_delta': {
       const items = [...s.items];
       const idx = lastIdx(items, (it) => it.kind === 'assistant' && it.open);
@@ -133,7 +167,7 @@ export function remoteReducer(state, ev) {
       return {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
-          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '',
+          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
           readonly: !!ev.readonly, running: true, result: '', error: false,
         })],
       };

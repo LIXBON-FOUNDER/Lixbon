@@ -344,7 +344,7 @@ function DatosPrivados() {
       <p>
         If your case requires that data never leave your own infrastructure,
         write to us at{' '}
-        <a href="mailto:soporte@lixbon.com">soporte@lixbon.com</a>: lixbon’s
+        <a href="mailto:support@lixbon.com">support@lixbon.com</a>: lixbon’s
         architecture (gateway + GPU nodes) allows deploying the nodes on your
         own hardware.
       </p>

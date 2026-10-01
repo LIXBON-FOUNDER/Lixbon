@@ -19,11 +19,28 @@ QUEUE_MAX = 1000             # tope defensivo por cola
 MAX_CONTROLLERS = 5          # controllers simultáneos por sesión
 
 
+# Lo que el host anuncia en su `hello` y un controller que llega tarde necesita:
+# qué agente es, dónde trabaja, qué comandos "/" acepta y qué puede recibir.
+# Estado vivo que no es transcript: no entra en el buffer de replay (lo
+# llenaría con snapshots repetidos) y nunca se persiste. Del orquestador se
+# guarda solo el último, que el controller recibe al conectar.
+STATE_EVENTS = frozenset({"orch"})
+# Respuestas a una petición puntual de un controller (diff, terminal…): se
+# reparten y se olvidan.
+EPHEMERAL_EVENTS = frozenset({"orch_diff", "orch_term", "orch_agents", "orch_error"})
+
+HELLO_META_KEYS = (
+    "source", "title", "machine", "mode", "model",
+    "agent", "workspace", "commands", "capabilities",
+)
+
+
 @dataclass
 class RemoteChannel:
     session_id: str
     user_id: int
     meta: dict[str, Any] = field(default_factory=dict)      # hello del host
+    orch: dict[str, Any] | None = None                      # último estado del orquestador
     host_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=QUEUE_MAX))
     controllers: dict[int, asyncio.Queue] = field(default_factory=dict)
     buffer: deque = field(default_factory=lambda: deque(maxlen=EVENT_BUFFER_SIZE))
@@ -71,9 +88,13 @@ class RemoteHub:
             ch.last_seq += 1
             ev["seq"] = ch.last_seq
             ev.setdefault("ts", time.time())
-            if ev.get("type") == "hello":
-                ch.meta = {k: ev.get(k) for k in ("source", "title", "machine", "mode", "model")}
-            ch.buffer.append(ev)
+            kind = ev.get("type")
+            if kind == "hello":
+                ch.meta = {k: ev.get(k) for k in HELLO_META_KEYS}
+            if kind in STATE_EVENTS:
+                ch.orch = ev
+            elif kind not in EPHEMERAL_EVENTS:
+                ch.buffer.append(ev)
             self._fanout(ch, ev)
         return ch.last_seq
 

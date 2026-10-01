@@ -93,6 +93,12 @@ export const initialRemoteState = {
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
   background: [], // tareas que el agente dejó corriendo: [{ id, type, description, since }]
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
+  // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
+  orch: null,
+  orchDiff: {},
+  orchTerm: {},
+  orchAgents: null,
+  orchError: null,
   session: null,
   ended: false,
   lastSeq: 0,
@@ -108,7 +114,7 @@ function mapSnapshotMessages(messages) {
     if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
-      items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: '', result: m.content || '', error: m.ok === false, running: false }));
+      items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: false }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
     else if (m.role === 'command') items.push(commandItem(m));
   }
@@ -149,7 +155,18 @@ export function remoteReducer(state, ev) {
         hostConnected: !!ev.host_connected,
         session: ev.session || s.session,
         meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
+        orch: ev.orch || s.orch,
       };
+    case 'orch':
+      return { ...s, orch: ev };
+    case 'orch_diff':
+      return { ...s, orchDiff: { ...s.orchDiff, [ev.task]: ev } };
+    case 'orch_term':
+      return { ...s, orchTerm: { ...s.orchTerm, [ev.task]: ev } };
+    case 'orch_agents':
+      return { ...s, orchAgents: Array.isArray(ev.agents) ? ev.agents : [] };
+    case 'orch_error':
+      return { ...s, orchError: { message: ev.message || 'Error', action: ev.action, at: Date.now() } };
     case 'hello':
       return {
         ...s,
@@ -210,7 +227,7 @@ export function remoteReducer(state, ev) {
       return {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
-          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '',
+          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
           readonly: !!ev.readonly, running: true, result: '', error: false,
         })],
       };

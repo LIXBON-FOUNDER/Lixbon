@@ -15,6 +15,7 @@ const BASE = [
   { path: '/apps', priority: '0.8', changefreq: 'monthly' },
   { path: '/news', priority: '0.6', changefreq: 'weekly' },
   { path: '/status', priority: '0.5', changefreq: 'hourly' },
+  { path: '/support', priority: '0.5', changefreq: 'monthly' },
   { path: '/docs', priority: '0.8', changefreq: 'weekly' },
   { path: '/guides', priority: '0.8', changefreq: 'weekly' },
   ...GUIAS_INDEX.map((s) => ({ path: `/guides/${s.id}`, priority: '0.7', changefreq: 'monthly' })),

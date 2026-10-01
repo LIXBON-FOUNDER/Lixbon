@@ -9,7 +9,6 @@ import {
   renameEntry, deleteEntry, searchInFiles, runCommand,
 } from './tauri';
 import { diffCounts, normalizeRel } from './agentProtocol';
-import { searchIndex } from './codebaseIndex';
 import { api } from './api';
 
 // La parte pura del protocolo (parseo de tool calls, diff, límites) vive en
@@ -136,7 +135,7 @@ async function toolEditFile(root, relPath, oldText, newText, all = false) {
 
 async function toolRunCommand(root, command, timeoutSecs) {
   if (!String(command ?? '').trim()) throw new Error('Falta el comando');
-  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 300000);
+  const timeoutMs = Math.min(Math.max((parseInt(timeoutSecs, 10) || 30) * 1000, 1000), 600000);
   const res = await runCommand(command, timeoutMs);
   const output = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
   const prefix = res.timed_out ? '[TIMEOUT] ' : `[EXIT ${res.code}] `;
@@ -195,24 +194,6 @@ async function toolSearch(root, pattern) {
     .slice(0, 200)
     .map((h) => `${toRel(root, h.path)}:${h.line}:${h.text.trim().slice(0, 200)}`)
     .join('\n');
-}
-
-/** Búsqueda semántica (RAG): fragmentos relevantes del índice del codebase. */
-async function toolSearchCodebase(root, query) {
-  if (!String(query ?? '').trim()) throw new Error('Falta la consulta');
-  let hits;
-  try {
-    hits = await searchIndex(query, 6);
-  } catch (e) {
-    return `(el índice del codebase no está disponible: ${e.message || e}. `
-      + 'Pídele al usuario que lo construya en Ajustes → Agente, o usa search/grep.)';
-  }
-  if (!hits.length) {
-    return '(sin índice o sin resultados; usa la herramienta search para buscar por texto)';
-  }
-  return hits
-    .map((h) => `# ${h.rel}:${h.start}-${h.end} (relevancia ${h.score.toFixed(2)})\n${h.text}`)
-    .join('\n\n---\n\n');
 }
 
 // Carpetas que find_files/outline nunca deben ofrecer: espejo de
@@ -441,7 +422,6 @@ export async function executeToolCall(root, tool, args = {}) {
     case 'append_file': return toolAppendFile(root, args.path, String(args.content ?? ''));
     case 'mkdir': return toolMkdir(root, args.path);
     case 'search': return toolSearch(root, args.pattern);
-    case 'search_codebase': return toolSearchCodebase(root, args.query ?? args.pattern);
     case 'delete_file': return toolDeleteFile(root, args.path);
     case 'rename_file': return toolRenameFile(root, args.src, args.dst);
     case 'run_command': return toolRunCommand(root, args.command, args.timeout);
@@ -600,12 +580,20 @@ export async function buildAgentSystemPrompt(root) {
     '{"tool":"append_file","args":{"path":"archivo.txt","content":"texto nuevo al final"}}\n' +
     '{"tool":"mkdir","args":{"path":"carpeta/subcarpeta"}}\n' +
     '{"tool":"search","args":{"pattern":"texto exacto a buscar (grep)"}}\n' +
-    '{"tool":"search_codebase","args":{"query":"qué hace o dónde está X (búsqueda semántica)"}}\n' +
     '{"tool":"delete_file","args":{"path":"archivo.txt"}}\n' +
     '{"tool":"rename_file","args":{"src":"viejo.txt","dst":"nuevo.txt"}}\n' +
     '{"tool":"run_command","args":{"command":"npm test","timeout":60}}\n' +
     '{"tool":"fetch_url","args":{"url":"https://…"}}  (descarga una página web como texto)\n' +
-    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n\n' +
+    '{"tool":"web_search","args":{"query":"…","limit":5}}  (busca en internet vía el gateway)\n' +
+    '{"tool":"ask_user","args":{"questions":[{"question":"¿Qué base de datos uso?","header":"Base de datos","options":[{"label":"PostgreSQL","description":"Ya está en docker-compose"},{"label":"SQLite"}],"multiSelect":false}]}}  ' +
+    '(pregunta al usuario con opciones: hasta 4 preguntas de 2 a 6 opciones; siempre podrá escribir otra respuesta. ' +
+    'Úsala solo cuando una decisión dependa del usuario y no puedas deducirla del código)\n\n' +
+    '=== VISUALES ===\n' +
+    'El IDE muestra archivos .html, .svg y .md en una pestaña de vista previa. Si el usuario pide un diagrama, ' +
+    'un dashboard, un mockup, un prototipo o cualquier cosa visual que no sea parte del proyecto, crea UN archivo HTML ' +
+    'autónomo (CSS y JS en línea; librerías solo por CDN https) en .lixbon/visuals/<nombre>.html con write_file ' +
+    'y dile que puede abrirlo con «Ver visual». Sin carpeta de trabajo o en modo Preguntar/Plan, devuélvelo en un ' +
+    'único bloque ```html y el usuario lo abrirá con el botón «Ver» del bloque.\n\n' +
     '=== REGLAS OBLIGATORIAS ===\n' +
     '1. Si el usuario pide crear, modificar, arreglar o eliminar algo, DEBES hacerlo con herramientas EN ESTA MISMA RESPUESTA. ' +
     'Tú ejecutas los cambios; el usuario no copia código.\n' +

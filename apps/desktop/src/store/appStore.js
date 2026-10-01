@@ -2,10 +2,18 @@ import { create } from 'zustand';
 import { loadSettings, saveSetting, DEFAULT_SERVER_URL } from '../lib/settings';
 import { setWorkspaceRoot } from '../lib/tauri';
 import { useGitStore } from './gitStore';
-import { detectVisionModel, modelId } from '../lib/vision';
-import { fetchModelRoles, roleModel } from '../lib/modelRoles';
-import { resetIndexCache } from '../lib/codebaseIndex';
+import { modelId } from '../lib/vision';
+import { fetchModelRoles, normalizeModel } from '../lib/modelRoles';
 import { fetchMe } from '../lib/account';
+import { useWorkbenchStore } from './workbenchStore';
+
+// Si el catálogo aún no llegó: la que usaba el IDE antes (solo para medir).
+const DEFAULT_CONTEXT_WINDOW = 8192;
+
+function catalogEntry(catalog, model) {
+  const want = normalizeModel(model);
+  return want ? (catalog || []).find((m) => typeof m === 'object' && normalizeModel(modelId(m)) === want) : null;
+}
 
 export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
@@ -24,12 +32,7 @@ export const useAppStore = create((set, get) => ({
   // Carpetas abiertas recientemente (para la pantalla de bienvenida, D4).
   recentFolders: JSON.parse(localStorage.getItem('lixbon_recents') || '[]'),
 
-  // Layout: un único sidebar (logo, rama, nav, contenido de la vista activa,
-  // cuenta). El nav decide qué se ve dentro del sidebar y, para 'git', también
-  // reemplaza el chat por la vista de GitHub en el panel central.
   diffData: null, // { title, patch } para el visor de diff (Git)
-  leftView: localStorage.getItem('lixbon_left_view') || 'chat', // 'chat' | 'explorer' | 'git' | 'extensions'
-  sidebarOpen: (localStorage.getItem('lixbon_sidebar_open') ?? 'true') === 'true',
   // Ventana flotante: null | 'settings' | 'remote' | 'diff'.
   modalView: null,
   modalSection: null, // categoría inicial de Ajustes (null = la última/por defecto)
@@ -38,17 +41,9 @@ export const useAppStore = create((set, get) => ({
   panels: JSON.parse(localStorage.getItem('lixbon_panels') || '{"terminal":false}'),
   panelHeights: JSON.parse(localStorage.getItem('lixbon_panel_heights') || '{"terminal":240}'),
 
-  currentModel: localStorage.getItem('lixbon_current_model') || '',
-  // Modelo de visión (sub-agente que describe imágenes para el modelo de texto).
-  // '' = autodetectar de los modelos disponibles.
-  visionModel: localStorage.getItem('lixbon_vision_model') || '',
-  // Modelo de embeddings para el índice del codebase (B3). '' = autodetectar.
-  embedModel: localStorage.getItem('lixbon_embed_model') || '',
-  // Inyectar contexto relevante del codebase (RAG) en el chat automáticamente.
-  useCodebaseContext: (localStorage.getItem('lixbon_rag') ?? 'false') === 'true',
-  // Ventana de contexto (num_ctx) que se pide a Ollama. Ollama usa 4096 por
-  // defecto aunque el modelo soporte más; subirla evita truncar. Más = más VRAM.
-  contextWindow: parseInt(localStorage.getItem('lixbon_context_window') || '8192', 10),
+  currentModel: (localStorage.getItem('lixbon_current_model') || '').replace(/^error:.*/, ''),
+  // Ventana de contexto, visión, embeddings y tool-calling los decide lixbon
+  // (gateway y catálogo), no el usuario: ver effective*() más abajo.
   availableModels: [],
   // Mapa rol→modelo que resuelve el gateway (GET /api/model-roles).
   // NO se persiste: es verdad del servidor, y cachearla haría que el IDE
@@ -64,15 +59,10 @@ export const useAppStore = create((set, get) => ({
     try {
       const { serverUrl, apiKey, user } = await loadSettings();
       set({ serverUrl, apiKey, user, hydrated: true });
-      // La sesión (apiKey) y el perfil (user) se guardan por separado: si uno
-      // quedó sin el otro (login viejo, borrado parcial…), el sidebar se
-      // queda sin tarjeta de cuenta aunque la app arranque bien. Se repara
-      // solo, sin bloquear el arranque.
-      if (apiKey && !user) {
-        fetchMe(serverUrl, apiKey)
-          .then((fresh) => { get().setUser(fresh); })
-          .catch(() => {}); // sesión inválida: se verá al primer request real
-      }
+      // El perfil persistido lleva el plan de cuando se inició sesión: se
+      // relee siempre (también repara la sesión sin perfil guardado) sin
+      // bloquear el arranque.
+      if (apiKey) get().refreshUser();
     } catch (e) {
       console.error('[store] Error hidratando configuración:', e);
       set({ hydrated: true }); // no bloquear la app: quedará en pantalla de auth
@@ -80,31 +70,37 @@ export const useAppStore = create((set, get) => ({
   },
 
   /** Abre el visor de diff como ventana flotante con un patch unified. */
-  openDiff: (title, patch) => set({ diffData: { title, patch }, modalView: 'diff', modalSection: null }),
+  openDiff: (title, patch, meta = null) => set({ diffData: { title, patch, meta }, modalView: 'diff', modalSection: null }),
 
   /** Ventana flotante (Ajustes / Consumo / Diff / Control remoto).
       `section` abre Ajustes directamente en esa categoría. */
-  openModal: (modalView, section = null) => set({ modalView, modalSection: section }),
+  openModal: (modalView, section = null) => {
+    if (modalView === 'settings') {
+      const legacy = { account: 'profile', appearance: 'editor', index: 'editor', advanced: 'editor' };
+      useWorkbenchStore.getState().openSettings(legacy[section] || section);
+      return;
+    }
+    set({ modalView, modalSection: section });
+  },
   closeModal: () => set({ modalView: null, modalSection: null }),
 
   /** Muestra u oculta la Terminal (único panel del dock inferior). */
   toggleTerminal: () => get().togglePanel('terminal'),
   showTerminal: () => { if (!get().panels.terminal) get().togglePanel('terminal'); },
 
-  /** Cambia la vista activa del sidebar (Chat/Archivos/Git/Extensiones) y lo
-      abre si estaba plegado — el plegado en sí lo controla solo la barrita. */
+  /** Nombres heredados de la navegación (chat/explorer/git/extensions)
+      traducidos a los modos y paneles del workbench. */
   selectNav: (view) => {
-    localStorage.setItem('lixbon_left_view', view);
-    set({ leftView: view });
-    if (!get().sidebarOpen) get().toggleSidebar();
+    const wb = useWorkbenchStore.getState();
+    if (view === 'chat') wb.setMode('agent');
+    else if (view === 'git') wb.setMode('git');
+    else {
+      wb.setMode('editor');
+      wb.showSide(view === 'extensions' ? 'extensions' : view === 'search' ? 'search' : 'files');
+    }
   },
 
-  /** Plegar/desplegar el sidebar (la barrita entre el sidebar y el chat). */
-  toggleSidebar: () => {
-    const sidebarOpen = !get().sidebarOpen;
-    localStorage.setItem('lixbon_sidebar_open', sidebarOpen ? 'true' : 'false');
-    set({ sidebarOpen });
-  },
+  toggleSidebar: () => useWorkbenchStore.getState().toggleSide(),
 
   setQuickOpen: (quickOpen) => set({ quickOpen }),
 
@@ -118,7 +114,6 @@ export const useAppStore = create((set, get) => ({
     const recents = [canonical, ...get().recentFolders.filter((p) => p !== canonical)].slice(0, 8);
     localStorage.setItem('lixbon_recents', JSON.stringify(recents));
     set({ workspaceRoot: canonical, recentFolders: recents });
-    resetIndexCache(); // el índice RAG es por-workspace
     useGitStore.getState().refresh();
     return canonical;
   },
@@ -174,6 +169,14 @@ export const useAppStore = create((set, get) => ({
     set({ user });
   },
 
+  refreshUser: async () => {
+    const { serverUrl, apiKey } = get();
+    if (!apiKey) return;
+    try {
+      get().setUser(await fetchMe(serverUrl, apiKey));
+    } catch { /* sesión inválida o sin red: se verá al primer request real */ }
+  },
+
   setApiKey: (apiKey) => {
     saveSetting('apiKey', apiKey);
     set({ apiKey });
@@ -198,45 +201,27 @@ export const useAppStore = create((set, get) => ({
     return roles;
   },
 
-  setVisionModel: (model) => {
-    localStorage.setItem('lixbon_vision_model', model || '');
-    set({ visionModel: model || '' });
+  /** ¿El modelo ve imágenes? Solo se descarta si el catálogo dice que no;
+      sin datos se le mandan igual (los modelos que usamos son multimodales). */
+  supportsImages: (model = get().currentModel) => {
+    const caps = catalogEntry(get().availableModels, model)?.capabilities;
+    return !Array.isArray(caps) || caps.length === 0 || caps.includes('vision');
   },
 
-  setEmbedModel: (model) => {
-    localStorage.setItem('lixbon_embed_model', model || '');
-    set({ embedModel: model || '' });
+  /** Ventana de contexto del modelo actual: la que el gateway le aplica
+      (`num_ctx` de /v1/models, fijado por nosotros por modelo o rol). El IDE no
+      la pide: solo la usa para medir y podar el historial. */
+  effectiveContextWindow: (model = get().currentModel) => {
+    const entry = catalogEntry(get().availableModels, model);
+    const n = Number(entry?.num_ctx || entry?.context_length);
+    return n > 0 ? n : DEFAULT_CONTEXT_WINDOW;
   },
 
-  setUseCodebaseContext: (v) => {
-    localStorage.setItem('lixbon_rag', v ? 'true' : 'false');
-    set({ useCodebaseContext: v });
-  },
-
-  /** Modelo de embeddings: el elegido a mano, el del rol `embed`, o heurístico. */
-  effectiveEmbedModel: () => {
-    const { embedModel, availableModels, modelRoles } = get();
-    const ids = availableModels.map(modelId);
-    if (embedModel && ids.includes(embedModel)) return embedModel;
-    if (modelRoles) return roleModel(modelRoles, 'embed');
-    return ids.find((id) => /embed/i.test(id)) || '';
-  },
-
-  setContextWindow: (n) => {
-    const v = Math.max(2048, Math.min(131072, parseInt(n, 10) || 8192));
-    localStorage.setItem('lixbon_context_window', String(v));
-    set({ contextWindow: v });
-  },
-
-  /** Modelo de visión efectivo: el elegido a mano, el del rol `vision`, o
-      autodetectado de la lista (por capability, y solo si no, por nombre).
-      availableModels trae objetos {id,…}, no strings — normalizar con modelId. */
-  effectiveVisionModel: () => {
-    const { visionModel, availableModels, modelRoles } = get();
-    const ids = availableModels.map(modelId);
-    if (visionModel && ids.includes(visionModel)) return visionModel;
-    if (modelRoles) return roleModel(modelRoles, 'vision');
-    return detectVisionModel(availableModels);
+  /** Tool-calling nativo solo si el modelo declara la capacidad «tools»; si no
+      se sabe, el protocolo de texto, que funciona con cualquiera. */
+  supportsNativeTools: (model = get().currentModel) => {
+    const caps = catalogEntry(get().availableModels, model)?.capabilities;
+    return Array.isArray(caps) && caps.includes('tools');
   },
 
   setLatency: (latency) => set({ latency }),

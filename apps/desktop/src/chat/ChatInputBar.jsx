@@ -4,16 +4,25 @@
 // El menú "/", el de @-menciones y el de opciones del agente se montan en un
 // portal sobre <body> con posición fija: `.shell__center` tiene overflow:hidden
 // (lo necesita el panel redondeado) y eso los recortaba — igual que Select.jsx.
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { Fragment, useRef, useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useChatStore } from '../store/chatStore';
+import { useChatStore, useSessionsStore, CHAT_MODES } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
 import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
 import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
+import { Select } from '../components/Select';
+import { CLAUDE_MODES, claudeModelOptions } from '../lib/claudeCode';
+import { SLASH_COMMANDS, GROUP_LABELS, CLAUDE_ALIASES, claudeSlashCommands } from './slashCommands';
+import { prepareOrchestrate } from '../store/orchStore';
+import { useDraftStore, EMPTY_DRAFT, setDraftText, setDraftImages, setDraftMentions } from '../store/draftStore';
+import { Switch } from '../components/Switch';
+import { ClaudeMark } from '../components/Logo';
+import { EffortSlider } from './EffortSlider';
+import { ProgressRing } from '../components/Ring';
 import {
-  IconSend, IconStop, IconX, IconFileCode, IconHammer, IconClip,
+  IconStop, IconX, IconFileCode, IconHammer, IconClip, IconChevronDown, IconAt, IconArrowUp,
   IconPlus, IconTerminal, IconHistory, IconFolder, IconSun,
   IconGitCommit, IconChart, IconList, IconCheck, IconUser,
   IconPuzzle, IconGear,
@@ -21,34 +30,6 @@ import {
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-/** Comandos "/" del composer: acciones instantáneas, no texto para el modelo.
-    Espejo de apps/cli/lixbon_cli/commands.py::COMMAND_SPECS — mismo nombre
-    de comando para quien viene del CLI. Lo que allí es solo de terminal
-    (doctor, ps, nodes, bar…) no tiene equivalente aquí y se omite. */
-const SLASH_COMMANDS = [
-  { cmd: 'new', desc: 'Nueva conversación', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
-  { cmd: 'clear', desc: 'Vaciar el contexto y empezar de cero', Icon: IconPlus, run: () => runCommand('chat.newConversation') },
-  { cmd: 'mode', desc: 'Modo del agente (auto-aplicar, auto-run)', Icon: IconHammer, run: () => runCommand('chat.toggleAgentMenu') },
-  { cmd: 'approve', desc: 'Auto-aprobar cambios del agente', Icon: IconCheck, run: () => runCommand('chat.toggleApprove') },
-  { cmd: 'undo', desc: 'Revertir el último cambio', Icon: IconHistory, run: () => runCommand('chat.undoLast') },
-  { cmd: 'diff', desc: 'Ver el último cambio', Icon: IconFolder, run: () => runCommand('chat.viewLastDiff') },
-  { cmd: 'commit', desc: 'Confirmar cambios en Git', Icon: IconGitCommit, run: () => runCommand('git.open') },
-  { cmd: 'model', desc: 'Cambiar de modelo', Icon: IconSun, run: () => runCommand('chat.focusModelPicker') },
-  { cmd: 'usage', desc: 'Ver consumo de la cuenta', Icon: IconChart, run: () => runCommand('chat.openUsage') },
-  { cmd: 'copy', desc: 'Copiar la última respuesta', Icon: IconClip, run: () => runCommand('chat.copyLast') },
-  { cmd: 'save', desc: 'Guardar la conversación en Markdown', Icon: IconFileCode, run: () => runCommand('chat.saveMarkdown') },
-  { cmd: 'history', desc: 'Ver conversaciones anteriores', Icon: IconHistory, run: () => runCommand('chat.showHistory') },
-  { cmd: 'workspace', desc: 'Cambiar la carpeta de trabajo', Icon: IconFolder, run: () => runCommand('chat.openWorkspace') },
-  { cmd: 'init', desc: 'Generar LIXBON.md con el contexto del proyecto', Icon: IconFileCode, run: () => runCommand('chat.init') },
-  { cmd: 'tools', desc: 'Herramientas y permisos del agente', Icon: IconPuzzle, run: () => runCommand('settings.openAgent') },
-  { cmd: 'allow', desc: 'Comandos que el agente ejecuta sin preguntar', Icon: IconPuzzle, run: () => runCommand('settings.openAgent') },
-  { cmd: 'login', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
-  { cmd: 'logout', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
-  { cmd: 'key', desc: 'Cuenta y sesión', Icon: IconUser, run: () => runCommand('settings.openAccount') },
-  { cmd: 'config', desc: 'Ajustes', Icon: IconGear, run: () => runCommand('workbench.openSettings') },
-  { cmd: 'remote', desc: 'Control remoto por QR', Icon: IconTerminal, run: () => runCommand('remote.open') },
-  { cmd: 'help', desc: 'Ver todos los comandos', Icon: IconList, run: () => runCommand('workbench.commandPalette') },
-];
 
 /** Fuzzy match por subsecuencia (igual que QuickOpen). -1 = no coincide. */
 function fuzzyScore(text, q) {
@@ -81,9 +62,12 @@ function readImage(file) {
 }
 
 export function ChatInputBar() {
-  const [text, setText] = useState('');
-  const [images, setImages] = useState([]); // { name, dataUrl, base64 }
-  const [mentions, setMentions] = useState([]); // { name, path, rel }
+  const draftKey = useSessionsStore((s) => s.activeKey);
+  const draft = useDraftStore((s) => s.drafts[draftKey]) || EMPTY_DRAFT;
+  const { text, images, mentions } = draft; // images: { name, dataUrl, base64 } · mentions: { name, path, rel }
+  const setText = setDraftText;
+  const setImages = setDraftImages;
+  const setMentions = setDraftMentions;
   const [mentionQuery, setMentionQuery] = useState(null); // null = menú cerrado
   const [mentionSel, setMentionSel] = useState(0);
   const [allFiles, setAllFiles] = useState([]);
@@ -96,11 +80,81 @@ export function ChatInputBar() {
   const agentPopRef = useRef(null);
 
   const {
-    send, stop, streaming, agentMode, setAgentMode,
+    send, stop, streaming, chatMode, setChatMode, cycleChatMode,
     autoApprove, setAutoApprove, autoRunCommands, setAutoRunCommands,
   } = useChatStore();
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
-  const agentActive = agentMode && !!workspaceRoot;
+  // La ventana la fija lixbon por modelo; se recalcula al cambiar de modelo o llegar el catálogo.
+  const contextWindow = useAppStore((s) => s.effectiveContextWindow(s.currentModel));
+  const messages = useChatStore((s) => s.messages);
+  const engine = useChatStore((s) => s.engine);
+  const ccContext = useChatStore((s) => s.ccContext);
+  const ccModel = useChatStore((s) => s.ccModel);
+  const setCcModel = useChatStore((s) => s.setCcModel);
+  const ccCommands = useChatStore((s) => s.ccCommands);
+  const ccModels = useChatStore((s) => s.ccModels);
+  const ccMode = useChatStore((s) => s.ccMode);
+  const setCcMode = useChatStore((s) => s.setCcMode);
+  const ccEffort = useChatStore((s) => s.ccEffort);
+  const setCcEffort = useChatStore((s) => s.setCcEffort);
+  const activeKey = useSessionsStore((s) => s.activeKey);
+  const isClaude = engine === 'claude';
+  const locked = streaming && !isClaude;
+  const agentActive = !!workspaceRoot;
+  const modes = isClaude ? CLAUDE_MODES : CHAT_MODES;
+  const currentMode = isClaude ? ccMode : chatMode;
+  const mode = modes.find((m) => m.id === currentMode) || modes[0];
+  const pickMode = isClaude ? setCcMode : setChatMode;
+  const modelOptions = useMemo(() => claudeModelOptions(ccModels, ccModel), [ccModels, ccModel]);
+  const effortLevels = useMemo(() => {
+    const m = (ccModels || []).find((x) => (ccModel ? x.value === ccModel : x.value === 'default'));
+    return m?.supportsEffort && Array.isArray(m.supportedEffortLevels) ? m.supportedEffortLevels : [];
+  }, [ccModels, ccModel]);
+
+  // Claude Code arranca al abrir su sesión: así anuncia modelos y comandos
+  // antes del primer mensaje y la primera respuesta no espera al arranque.
+  useEffect(() => {
+    if (isClaude && workspaceRoot) useChatStore.getState().warmup?.();
+  }, [isClaude, workspaceRoot, activeKey]);
+
+  // Estimación gruesa (≈4 caracteres por token): basta para avisar antes de
+  // que el modelo empiece a recortar la conversación.
+  const ctxWindow = isClaude ? ccContext.window : contextWindow;
+  const contextPct = useMemo(() => {
+    if (isClaude) return Math.min(100, Math.round((ccContext.used / ccContext.window) * 100));
+    const chars = messages.reduce((n, m) => n + (m.content?.length || 0), 0) + text.length;
+    return Math.min(100, Math.round((chars / 4 / contextWindow) * 100));
+  }, [messages, text, contextWindow, isClaude, ccContext]);
+
+  // Otros paneles (Diseño, búsqueda…) pueden dejar texto preparado aquí.
+  useEffect(() => {
+    const onCompose = (e) => {
+      if (!barRef.current || barRef.current.offsetParent === null) return; // instancia oculta
+      const add = e.detail?.text || '';
+      setText((prev) => (prev ? `${prev}\n${add}` : add));
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener('lixbon:compose', onCompose);
+    return () => window.removeEventListener('lixbon:compose', onCompose);
+  }, []);
+
+  // Mensajes en cola que vuelven a la caja (editar, o Detener antes de entregarlos).
+  useEffect(() => {
+    const onRestore = (e) => {
+      if (!barRef.current || barRef.current.offsetParent === null) return;
+      const drafts = e.detail?.drafts || [];
+      if (!drafts.length) return;
+      setText((prev) => [...drafts.map((d) => d.text.trim()).filter(Boolean), prev].filter(Boolean).join('\n\n'));
+      setImages((prev) => [...drafts.flatMap((d) => d.images || []), ...prev]);
+      setMentions((prev) => {
+        const all = [...drafts.flatMap((d) => d.mentions || []), ...prev];
+        return all.filter((m, i) => all.findIndex((x) => x.path === m.path) === i);
+      });
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener('lixbon:restore-drafts', onRestore);
+    return () => window.removeEventListener('lixbon:restore-drafts', onRestore);
+  }, []);
 
   // La lista de @-menciones es del workspace ABIERTO: si se cambia de
   // carpeta, la caché vieja no vale — sin esto, mencionar mostraba archivos
@@ -149,12 +203,15 @@ export function ChatInputBar() {
     }
   };
 
-  // Autocrecer el textarea hasta 6 líneas
+  // Autocrecer: se ve todo lo escrito hasta ~45% de la ventana, luego scroll.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
+    const max = Math.min(window.innerHeight * 0.45, 360);
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 132) + 'px';
+    // +1: con interlineado fraccionario scrollHeight redondea y asomaba una barra.
+    el.style.height = Math.min(el.scrollHeight + 1, max) + 'px';
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
   }, [text]);
 
   // ── @-menciones: detecta "@token" ANTES del cursor y abre el menú ────────
@@ -191,18 +248,37 @@ export function ChatInputBar() {
   // Menú "/": solo cuando TODO el mensaje es un token "/algo" sin espacios —
   // en cuanto se completa la frase (aparece un espacio) el menú se cierra solo.
   const slashMatches = useMemo(() => {
-    const m = /^\/(\w*)$/.exec(text);
+    const m = /^\/([\w:-]*)$/.exec(text);
     if (!m) return [];
     const q = m[1].toLowerCase();
-    return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(q));
-  }, [text]);
+    const list = isClaude ? claudeSlashCommands(ccCommands) : SLASH_COMMANDS;
+    return list.filter((c) => c.cmd.toLowerCase().startsWith(q)).slice(0, 60);
+  }, [text, isClaude, ccCommands]);
   const slashOpen = slashMatches.length > 0;
+  useEffect(() => {
+    if (slashOpen) document.querySelector('.cmdmenu .cmdrow.is-sel')?.scrollIntoView({ block: 'nearest' });
+  }, [slashSel, slashOpen]);
   const menuOpen = mentionQuery !== null && mentionMatches.length > 0;
   const cmdmenuPos = useAnchoredAbove(barRef, slashOpen, { matchWidth: true });
   const mentionMenuPos = useAnchoredAbove(barRef, menuOpen, { matchWidth: true });
 
   const pickSlash = (entry) => {
     if (!entry) return;
+    if (entry.claude) {
+      if (!entry.direct) {
+        setText(`/${entry.cmd} `);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+        return;
+      }
+      setText('');
+      send(`/${entry.cmd}`, null, [], []);
+      return;
+    }
+    if (!entry.run) {
+      setText(`/${entry.cmd} `);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
     setText('');
     entry.run();
   };
@@ -220,13 +296,36 @@ export function ChatInputBar() {
     requestAnimationFrame(() => el?.focus());
   };
 
+  const insertAt = () => {
+    const next = text && !/\s$/.test(text) ? `${text} @` : `${text}@`;
+    setText(next);
+    detectMention(next, next.length);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const handleSend = () => {
-    if (streaming || (!text.trim() && !images.length)) return;
+    if (locked || (!text.trim() && !images.length)) return;
     // /remote con argumentos extra (el menú "/" solo cubre el token solo):
     // sigue abriendo el control remoto en vez de mandarlo al modelo.
     if (/^\/remote(\s|$)/i.test(text.trim())) {
       runCommand('remote.open');
       setText('');
+      return;
+    }
+    const alias = isClaude && CLAUDE_ALIASES.find((c) => new RegExp(`^/${c.cmd}(\\s|$)`, 'i').test(text.trim()));
+    if (alias) {
+      alias.run();
+      setText('');
+      return;
+    }
+    const orch = /^\/orquestar(?:\s+([\s\S]+))?$/i.exec(text.trim());
+    if (orch) {
+      if (!orch[1]?.trim()) return;
+      // Este mismo chat es el coordinador: el mensaje sigue su camino normal
+      // (Claude Code lo resuelve con la skill /orquestar; el agente de Lixbon, con su prompt).
+      const message = text;
+      setText('');
+      prepareOrchestrate().then((ok) => { if (ok) send(message, null, [], []); else setText(message); });
       return;
     }
     send(text, null, images, mentions);
@@ -248,6 +347,11 @@ export function ChatInputBar() {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionMatches[mentionSel]); return; }
       if (e.key === 'Escape') { e.preventDefault(); setMentionQuery(null); return; }
     }
+    if (e.key === 'Tab' && e.shiftKey && workspaceRoot) {
+      e.preventDefault();
+      cycleChatMode();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -255,20 +359,22 @@ export function ChatInputBar() {
   };
 
   return (
-    <div className="chat-inputbar" ref={barRef}>
+    <div className={`chat-inputbar ${isClaude ? 'chat-inputbar--claude' : ''}`} ref={barRef}>
       {slashOpen && cmdmenuPos && createPortal(
         <div className="cmdmenu" style={cmdmenuPos}>
           {slashMatches.map((c, i) => (
-            <div
-              key={c.cmd}
-              className={`cmdrow ${i === slashSel ? 'is-sel' : ''}`}
-              onPointerEnter={() => setSlashSel(i)}
-              onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}
-            >
-              <span className="cmdrow__icon"><c.Icon size={13} /></span>
-              <span className="cmdrow__name">/{c.cmd}</span>
-              <span className="cmdrow__desc">{c.desc}</span>
-            </div>
+            <Fragment key={c.cmd}>
+              {c.group && c.group !== slashMatches[i - 1]?.group && <div className="cmdmenu__group">{GROUP_LABELS[c.group]}</div>}
+              <div
+                className={`cmdrow ${i === slashSel ? 'is-sel' : ''}`}
+                onPointerEnter={() => setSlashSel(i)}
+                onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}
+              >
+                <span className="cmdrow__icon"><c.Icon size={13} /></span>
+                <span className="cmdrow__name">/{c.cmd}{c.hint ? <span className="cmdrow__hint"> {c.hint}</span> : null}</span>
+                <span className="cmdrow__desc" title={c.desc}>{c.desc}</span>
+              </div>
+            </Fragment>
           ))}
         </div>,
         document.body,
@@ -326,97 +432,120 @@ export function ChatInputBar() {
         onChange={(e) => { addFiles([...e.target.files]); e.target.value = ''; }}
       />
 
-      {/* Una sola fila, minimalista: adjuntar, opciones del agente (un botón
-          que abre el resto), el texto (crece hasta 6 líneas), modelo y enviar. */}
-      <div className="chat-inputbar__row">
-        <button
-          className="chat-inputbar__attach"
-          onClick={() => fileInputRef.current?.click()}
-          title="Adjuntar imagen (o pega con Ctrl+V)"
-        >
-          <IconClip size={15} />
-        </button>
+      <textarea
+        ref={textareaRef}
+        className="chat-inputbar__textarea"
+        placeholder={isClaude ? (!agentActive ? 'Abre una carpeta de trabajo para usar Claude Code'
+          : streaming ? 'Claude está trabajando: lo que envíes queda en cola, /btw para preguntar al margen'
+            : 'Pídele algo a Claude Code, @ para mencionar un archivo')
+          : !agentActive ? 'Pregunta lo que quieras, / para comandos'
+          : chatMode === 'plan' ? 'Describe qué quieres hacer y el agente propondrá un plan'
+            : chatMode === 'ask' ? 'Pregunta sobre el código, @ para mencionar un archivo'
+              : 'Pide algo, @ para mencionar un archivo, / para comandos'}
+        rows={1}
+        value={text}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onPaste={onPaste}
+        disabled={locked}
+      />
 
+      <div className="chat-inputbar__row">
+        {isClaude && (
+          <span className="chat-inputbar__engine" title="Estás hablando con Claude Code">
+            <ClaudeMark size={12} />Claude Code
+          </span>
+        )}
         <div className="agentmenu-wrap">
           <button
             ref={agentBtnRef}
-            className={`chat-inputbar__opts ${agentActive ? 'is-on' : ''}`}
-            disabled={!workspaceRoot}
+            className={`chat-inputbar__mode ${agentActive ? `is-on mode--${mode.tone || mode.id}` : ''}`}
             onClick={() => setAgentMenuOpen((v) => !v)}
-            title={workspaceRoot ? 'Opciones del agente (/mode)' : 'Abre una carpeta de trabajo para usar el agente'}
+            title={workspaceRoot ? 'Modo del chat (Shift+Tab para alternar)' : 'Abre una carpeta de trabajo para usar el agente'}
           >
-            <IconHammer size={14} />
+            {agentActive && <span className="modedot" />}
+            {agentActive ? mode.label : 'Chat'}
+            <IconChevronDown size={12} className={`chev ${agentMenuOpen ? 'is-flipped' : ''}`} />
           </button>
 
           {agentMenuOpen && agentMenuPos && createPortal(
             <div className="agentmenu" ref={agentPopRef} style={agentMenuPos}>
-              <div className="agentmenu__row">
-                <span>Agente</span>
-                <button
-                  className={`settings__toggle ${agentMode ? 'is-on' : ''}`}
-                  onClick={() => setAgentMode(!agentMode)}
-                >
-                  <span className="settings__toggle-knob" />
-                </button>
-              </div>
-              <p className="agentmenu__hint">
-                {agentActive
-                  ? 'Puede crear y editar archivos de tu carpeta de trabajo.'
-                  : 'Actívalo para que el modelo edite archivos (con tu aprobación).'}
-              </p>
-              {agentActive && (
+              {workspaceRoot ? (
                 <>
-                  <div className="agentmenu__row">
-                    <span>Auto-aplicar cambios</span>
-                    <button
-                      className={`settings__toggle ${autoApprove ? 'is-on' : ''}`}
-                      onClick={() => setAutoApprove(!autoApprove)}
-                    >
-                      <span className="settings__toggle-knob" />
-                    </button>
+                  <div className="agentmenu__title">
+                    <span>Modo</span>
+                    <span className="agentmenu__kbd"><kbd>Shift</kbd><kbd>Tab</kbd></span>
                   </div>
-                  <div className="agentmenu__row">
-                    <span>Comandos sin preguntar</span>
+                  {modes.map((m) => (
                     <button
-                      className={`settings__toggle ${autoRunCommands ? 'is-on' : ''}`}
-                      onClick={() => setAutoRunCommands(!autoRunCommands)}
+                      key={m.id}
+                      className={`modeopt mode--${m.tone || m.id} ${m.id === currentMode ? 'is-active' : ''}`}
+                      onClick={() => { pickMode(m.id); setAgentMenuOpen(false); textareaRef.current?.focus(); }}
                     >
-                      <span className="settings__toggle-knob" />
+                      <span className="modedot" />
+                      <span className="modeopt__text">
+                        <span className="modeopt__label">{m.label}</span>
+                        <span className="modeopt__desc">{m.desc}</span>
+                      </span>
+                      {m.id === currentMode && <IconCheck size={13} />}
                     </button>
-                  </div>
+                  ))}
+                  {!isClaude && chatMode === 'agent' && (
+                    <div className="agentmenu__opts">
+                      <div className="agentmenu__row">
+                        <span>Aplicar cambios sin preguntar</span>
+                        <Switch checked={autoApprove} onChange={setAutoApprove} label="Aplicar cambios sin preguntar" />
+                      </div>
+                      <div className="agentmenu__row">
+                        <span>Ejecutar comandos sin preguntar</span>
+                        <Switch checked={autoRunCommands} onChange={setAutoRunCommands} label="Ejecutar comandos sin preguntar" />
+                      </div>
+                    </div>
+                  )}
                 </>
+              ) : (
+                <p className="agentmenu__hint">Abre una carpeta de trabajo para usar los modos Agente, Plan y Preguntar.</p>
               )}
             </div>,
             document.body,
           )}
         </div>
 
-        <textarea
-          ref={textareaRef}
-          className="chat-inputbar__textarea"
-          placeholder="Escríbele al agente…  (@ para mencionar un archivo)"
-          rows={1}
-          value={text}
-          onChange={onChange}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          disabled={streaming}
-        />
+        {isClaude
+          ? <Select up className="modelpicker modelpicker--claude" value={ccModel} onChange={setCcModel} options={modelOptions} title="Modelo de Claude Code" />
+          : <ModelPicker />}
+        {isClaude && effortLevels.length > 0 && (
+          <EffortSlider levels={effortLevels} value={ccEffort} onChange={setCcEffort} />
+        )}
 
-        <ModelPicker />
+        <div className="chat-inputbar__fill" />
 
-        {streaming ? (
+        <button className="ic" onClick={() => fileInputRef.current?.click()} title="Adjuntar imagen (o pega con Ctrl+V)">
+          <IconClip size={15} />
+        </button>
+        {workspaceRoot && (
+          <button className="ic" onClick={insertAt} title="Mencionar un archivo (@)">
+            <IconAt size={15} />
+          </button>
+        )}
+
+        <span className="tipw chat-inputbar__ctx">
+          <ProgressRing value={contextPct} size={20} />
+          <span className="tip mono">Contexto {contextPct}% · {ctxWindow.toLocaleString('es')} tokens</span>
+        </span>
+
+        {streaming && (!isClaude || (!text.trim() && !images.length)) ? (
           <button className="chat-inputbar__send" onClick={stop} title="Detener">
-            <IconStop size={15} />
+            <IconStop size={14} />
           </button>
         ) : (
           <button
             className="chat-inputbar__send"
             onClick={handleSend}
             disabled={!text.trim() && !images.length}
-            title="Enviar (Enter)"
+            title={streaming ? 'Poner en cola (Enter)' : 'Enviar (Enter)'}
           >
-            <IconSend size={16} />
+            <IconArrowUp size={16} />
           </button>
         )}
       </div>

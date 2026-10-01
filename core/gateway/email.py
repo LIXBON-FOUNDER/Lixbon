@@ -17,6 +17,8 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 EMAIL_FROM = os.getenv("EMAIL_FROM", "lixbon <no-reply@lixbon.com>")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+# Buzón que recibe los casos del formulario de soporte (/support).
+SUPPORT_INBOX = os.getenv("SUPPORT_INBOX", "support@lixbon.com")
 
 _MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
           "agosto", "septiembre", "octubre", "noviembre", "diciembre")
@@ -56,7 +58,8 @@ def problema_de_configuracion() -> str | None:
     return None
 
 
-async def send_email(to: str, subject: str, html: str, text: str = "") -> bool:
+async def send_email(to: str, subject: str, html: str, text: str = "",
+                     reply_to: str | None = None) -> bool:
     if not to:
         return False
     if not BREVO_API_KEY:
@@ -78,6 +81,9 @@ async def send_email(to: str, subject: str, html: str, text: str = "") -> bool:
     }
     if text:
         cuerpo["textContent"] = text
+    if reply_to:
+        # Responder al caso desde el buzón de soporte le escribe al usuario.
+        cuerpo["replyTo"] = {"email": reply_to}
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as cliente:
@@ -307,3 +313,22 @@ def importe_de_factura(centavos: int | None, moneda: str | None) -> str | None:
     if not centavos:
         return None
     return f"${centavos / 100:.2f} {(moneda or 'usd').upper()}"
+
+
+async def send_support_ticket(*, ticket: str, categoria: str, asunto: str, mensaje: str,
+                              correo: str, nombre: str | None, plan: str | None,
+                              user_id: int | None, pagina: str | None,
+                              user_agent: str | None) -> bool:
+    asunto_correo, html, texto = plantillas.soporte_caso(
+        ticket=ticket, categoria=categoria, asunto=asunto, mensaje=mensaje, correo=correo,
+        nombre=nombre, plan=plan, user_id=user_id, pagina=pagina,
+        dispositivo=describir_dispositivo(user_agent), cuando=momento_largo(),
+    )
+    return await send_email(SUPPORT_INBOX, asunto_correo, html, texto, reply_to=correo)
+
+
+async def send_support_receipt(to: str, *, ticket: str, categoria: str, asunto: str,
+                               mensaje: str) -> bool:
+    asunto_correo, html, texto = plantillas.soporte_acuse(
+        ticket=ticket, categoria=categoria, asunto=asunto, mensaje=mensaje)
+    return await send_email(to, asunto_correo, html, texto, reply_to=SUPPORT_INBOX)

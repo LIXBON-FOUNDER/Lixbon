@@ -1,21 +1,21 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lixbon",
-  "version": "1.2.0",
+  "version": "2.0.17",
   "identifier": "com.usuario.app-lixbon",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run build:lxo && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:lxo && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "title": "Lixbon",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 960,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
         "minHeight": 600,
         "center": true,
         "decorations": false,
@@ -23,12 +23,22 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https:; connect-src 'self' https: ws://localhost:* http://localhost:* ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https: http://127.0.0.1:*; connect-src 'self' https: wss: ws://localhost:* http://localhost:* ipc: http://ipc.localhost; frame-src http://localhost:* http://127.0.0.1:* https:"
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/lxo"],
+    "windows": {
+      "wix": {
+        "fragmentPaths": ["windows/team-acceso.wxs"],
+        "componentRefs": ["LixbonTeamMenuInicio", "LixbonTeamEscritorio"]
+      },
+      "nsis": {
+        "installerHooks": "windows/team-acceso.nsh"
+      }
+    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

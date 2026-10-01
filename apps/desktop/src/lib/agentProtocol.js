@@ -12,8 +12,8 @@ export const MAX_AGENT_STEPS = 40;
 // repite la misma herramienta con los mismos argumentos indefinidamente.
 export const MAX_REPEATED_CALLS = 3;
 export const READ_ONLY_TOOLS = new Set([
-  'list_files', 'read_file', 'search', 'search_codebase',
-  'find_files', 'outline', 'fetch_url', 'web_search',
+  'list_files', 'read_file', 'search',
+  'find_files', 'outline', 'fetch_url', 'web_search', 'ask_user',
 ]);
 
 // ── Seguridad de run_command (B4) ──────────────────────────────────────
@@ -57,13 +57,22 @@ export function isNeverAutoCommand(command) {
 
 /** ¿El comando puede ejecutarse sin aprobación según la allowlist? */
 export function isAllowedCommand(command, allowlist = DEFAULT_CMD_ALLOWLIST) {
+  return commandVerdict(command, allowlist).allowed;
+}
+
+/** Lo mismo que isAllowedCommand, con el motivo (para explicarlo en Ajustes).
+    reason: 'empty' | 'chain' | 'never' | 'listed' | 'unlisted'; `match` es el prefijo que lo permite. */
+export function commandVerdict(command, allowlist = DEFAULT_CMD_ALLOWLIST) {
   const cmd = String(command ?? '').trim();
-  if (!cmd || CMD_CHAIN_RE.test(cmd) || CMD_NEVER_AUTO_RE.test(cmd)) return false;
+  if (!cmd) return { allowed: false, reason: 'empty' };
+  if (CMD_CHAIN_RE.test(cmd)) return { allowed: false, reason: 'chain' };
+  if (CMD_NEVER_AUTO_RE.test(cmd)) return { allowed: false, reason: 'never' };
   const lower = cmd.toLowerCase();
-  return allowlist.some((p) => {
+  const match = allowlist.find((p) => {
     const pref = String(p).trim().toLowerCase();
     return pref && (lower === pref || lower.startsWith(pref + ' '));
   });
+  return match ? { allowed: true, reason: 'listed', match } : { allowed: false, reason: 'unlisted' };
 }
 
 /** Normaliza la ruta relativa que dio el modelo; rechaza absolutas y '..'. */
@@ -179,7 +188,6 @@ const TOOL_ARG_KEYS = {
   append_file: ['path', 'content'],
   mkdir: ['path'],
   search: ['pattern'],
-  search_codebase: ['query'],
   delete_file: ['path'],
   rename_file: ['src', 'dst'],
   run_command: ['command', 'timeout'],

@@ -1,0 +1,445 @@
+// tauriMock.js — solo en `npm run dev` fuera de Tauri: simula la API nativa
+// con un proyecto de ejemplo en memoria para poder diseñar y revisar la
+// interfaz en un navegador sin compilar el backend de Rust.
+const ROOT = '/demo/orbita-web';
+
+const FILES = {
+  'package.json': '{\n  "name": "orbita-web",\n  "private": true,\n  "scripts": { "dev": "vite", "test": "vitest" }\n}\n',
+  'tsconfig.json': '{\n  "compilerOptions": { "strict": true, "jsx": "react-jsx" }\n}\n',
+  'README.md':'# Órbita\n\nApp de finanzas personales.\n',
+  'src/app/page.tsx': 'export default function Inicio() {\n  return <main>Inicio</main>;\n}\n',
+  'src/app/movimientos/page.tsx': 'export default function Movimientos() {\n  return <main>Movimientos</main>;\n}\n',
+  'src/app/(cuenta)/perfil/page.tsx': 'export default function Perfil() {\n  return <main>Perfil</main>;\n}\n',
+  'src/app/movimientos/[id]/page.tsx': 'export default function Movimiento() {\n  return <main>Detalle</main>;\n}\n',
+  'src/App.tsx':'import { AgentPanel } from "./components/agent/AgentPanel";\n\nexport default function App() {\n  return <AgentPanel activeId="main" onSend={() => {}} />;\n}\n',
+  'src/components/agent/AgentPanel.tsx': [
+    'import { useEffect } from "react";',
+    'import { useAgent } from "@/hooks/useAgent";',
+    'import { Thread } from "./Thread";',
+    '',
+    'interface AgentPanelProps {',
+    '  activeId: string;',
+    '  onSend: (text: string) => void;',
+    '}',
+    '',
+    'export function AgentPanel({ activeId, onSend }: AgentPanelProps) {',
+    '  const { messages, status, stream } = useAgent(activeId);',
+    '  const isStreaming = status === "running";',
+    '',
+    '  // Se suscribe al stream del agente mientras el panel está montado.',
+    '  useEffect(() => stream.subscribe(), [stream]);',
+    '',
+    '  return (',
+    '    <Thread',
+    '      messages={messages}',
+    '      streaming={isStreaming}',
+    '      onSend={onSend}',
+    '    />',
+    '  );',
+    '}',
+    '',
+  ].join('\n'),
+  'src/components/agent/Thread.tsx': 'export function Thread(props: any) {\n  return <div className="thread">{props.messages.length}</div>;\n}\n',
+  'src/hooks/useAgent.ts': 'export function useAgent(id: string) {\n  return { messages: [], status: "idle", stream: { subscribe: () => () => {} } };\n}\n',
+  'src/hooks/useSession.ts': 'import { session } from "@/lib/session";\n\nexport function useSession() {\n  return session.current();\n}\n',
+  'src/lib/auth.ts': 'import { session } from "./session";\n\nexport async function signIn(creds: { email: string }) {\n  const token = await session.create(creds);\n  session.persist(token);\n  return token.user;\n}\n',
+  'src/lib/session.ts': 'export const session = {\n  current: () => null,\n  create: async (c: unknown) => ({ user: c }),\n  persist: (_t: unknown) => {},\n};\n',
+  'src/styles/app.css': ':root {\n  --bg: #0b0b0b;\n}\n\nbody {\n  margin: 0;\n  background: var(--bg);\n}\n',
+};
+
+const files = new Map(Object.entries(FILES).map(([rel, content]) => [`${ROOT}/${rel}`, { content, mtime: Date.now() }]));
+const callbacks = new Map();
+let nextId = 1;
+const store = new Map([
+  ['apiKey', 'lixbon_sk_demo'],
+  ['serverUrl', 'https://lixbon.com'],
+  ['user', { id: 1, first_name: 'Johnny', last_name: 'Morales', username: 'jmorales', email: 'jm@orbita.dev', plan_name: 'Pro' }],
+]);
+// ?server=…&key=… apunta el mock a un gateway de verdad (p. ej. uno local).
+const qs = new URLSearchParams(location.search);
+if (qs.get('server')) store.set('serverUrl', qs.get('server'));
+if (qs.get('key')) store.set('apiKey', qs.get('key'));
+// ?auth abre la pantalla de entrada; ?onboarding, el recorrido inicial.
+if (location.search.includes('auth')) store.delete('apiKey');
+if (location.search.includes('onboarding')) localStorage.removeItem('lixbon_onboarded');
+
+function listDir(dir) {
+  const prefix = `${dir}/`;
+  const seen = new Map();
+  for (const path of files.keys()) {
+    if (!path.startsWith(prefix)) continue;
+    const [head, ...rest] = path.slice(prefix.length).split('/');
+    const full = prefix + head;
+    if (!seen.has(full)) seen.set(full, { name: head, path: full, is_dir: rest.length > 0, size: 0 });
+  }
+  return [...seen.values()].sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name));
+}
+
+const GIT = {
+  status: 'M  src/lib/auth.ts\n M src/hooks/useSession.ts\n M src/components/agent/AgentPanel.tsx\n?? src/lib/session.ts\n',
+  branch: 'feat/session-api\n',
+  log: ['a3f9c21', 'refactor(auth): extrae session.ts'].join('\u001f'),
+};
+
+function git(args) {
+  const [cmd] = args;
+  const out = (stdout) => ({ stdout, stderr: '', code: 0 });
+  if (cmd === 'status') return out(GIT.status);
+  if (cmd === 'branch' && args[1] === '--show-current') return out(GIT.branch);
+  if (cmd === 'branch') return out('feat/session-api\t*\nmain\t \n');
+  if (cmd === 'remote' && args[1] === 'get-url') return out('https://github.com/orbita/orbita-web.git\n');
+  if (cmd === 'remote') return out('origin\n');
+  if (cmd === 'rev-list') return out('0\t2\n');
+  if (cmd === 'log') {
+    const US = '\u001f';
+    return out([
+      ['a3f9c21aa', 'agente', '2026-09-25', 'refactor(auth): extrae session.ts'],
+      ['7be0d14bb', 'Johnny', '2026-09-25', 'test(auth): cubre el refresco de token'],
+      ['e21aa0ccc', 'Johnny', '2026-09-24', 'chore: actualiza dependencias'],
+    ].map((r) => r.join(US)).join('\n'));
+  }
+  if (cmd === 'diff' && args.includes('--numstat')) {
+    return out(args.includes('--cached') ? '28\t15\tsrc/lib/auth.ts\n' : '12\t5\tsrc/hooks/useSession.ts\n7\t3\tsrc/components/agent/AgentPanel.tsx\n');
+  }
+  if (cmd === 'diff' || cmd === 'show') {
+    return out('diff --git a/src/lib/auth.ts b/src/lib/auth.ts\n--- a/src/lib/auth.ts\n+++ b/src/lib/auth.ts\n@@ -1,6 +1,7 @@\n-import { legacy } from "./legacy-session";\n+import { session } from "./session";\n export async function signIn(creds) {\n-  const s = await legacy.open(creds);\n+  const token = await session.create(creds);\n+  session.persist(token);\n');
+  }
+  return out('');
+}
+
+const PRS = [
+  { number: 128, title: 'feat(auth): sesión por tokens', author: { login: 'jmorales' }, headRefName: 'feat/session-api', baseRefName: 'main', state: 'OPEN', isDraft: false, reviewDecision: 'REVIEW_REQUIRED', url: 'https://github.com/orbita/orbita-web/pull/128' },
+  { number: 127, title: 'fix: paginación de /orders', author: { login: 'ana' }, headRefName: 'fix/orders', baseRefName: 'main', state: 'OPEN', isDraft: false, reviewDecision: 'APPROVED', url: '' },
+  { number: 125, title: 'chore: migrar a Vite 6', author: { login: 'lixbon-agent' }, headRefName: 'chore/vite6', baseRefName: 'main', state: 'OPEN', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', url: '' },
+];
+const PR_BODY = `## Qué cambia
+
+Sustituye la sesión legacy por **tokens con refresco automático**. \`getActiveSession\` desaparece; los consumidores usan \`useSession\`.
+
+- Refresco con backoff exponencial cuando no hay red.
+- Sin cambios de UI.
+
+## Cómo se probó
+
+- [x] \`npm test\`: 214 pasan
+- [x] \`vite build\` y \`tsc --noEmit\`
+- [ ] Probado en Safari
+
+Cierra #231. Detalles en [la guía de sesión](https://github.com/orbita/orbita-web/wiki).`;
+
+const iso = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString();
+const WORKFLOWS = [
+  { id: 101, name: 'CI', path: '.github/workflows/ci.yml', state: 'active' },
+  { id: 102, name: 'Release', path: '.github/workflows/release.yml', state: 'active' },
+  { id: 103, name: 'Nightly e2e', path: '.github/workflows/e2e.yml', state: 'disabled_manually' },
+];
+const RUNS = [
+  { databaseId: 9001, number: 412, attempt: 1, displayTitle: 'feat(auth): sesión por tokens', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'in_progress', conclusion: '', event: 'pull_request', headBranch: 'feat/session-api', headSha: 'a3f9c21aa77', createdAt: iso(3), startedAt: iso(3), updatedAt: iso(0), url: 'https://github.com' },
+  { databaseId: 9000, number: 411, attempt: 2, displayTitle: 'fix: paginación de /orders', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'completed', conclusion: 'failure', event: 'push', headBranch: 'fix/orders', headSha: '7be0d14bb21', createdAt: iso(48), startedAt: iso(48), updatedAt: iso(44), url: 'https://github.com' },
+  { databaseId: 8999, number: 37, attempt: 1, displayTitle: 'desktop v2.0.16', name: 'Release', workflowName: 'Release', workflowDatabaseId: 102, status: 'completed', conclusion: 'success', event: 'workflow_dispatch', headBranch: 'main', headSha: 'e21aa0ccc90', createdAt: iso(180), startedAt: iso(180), updatedAt: iso(166), url: 'https://github.com' },
+  { databaseId: 8998, number: 410, attempt: 1, displayTitle: 'chore: migrar a Vite 6', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'completed', conclusion: 'cancelled', event: 'pull_request', headBranch: 'chore/vite6', headSha: 'c0ffee12345', createdAt: iso(1500), startedAt: iso(1500), updatedAt: iso(1497), url: 'https://github.com' },
+  { databaseId: 8997, number: 409, attempt: 1, displayTitle: 'docs: README del CLI', name: 'CI', workflowName: 'CI', workflowDatabaseId: 101, status: 'queued', conclusion: '', event: 'push', headBranch: 'main', headSha: 'bada55e1234', createdAt: iso(1), startedAt: iso(1), updatedAt: iso(1), url: 'https://github.com' },
+];
+const step = (number, name, conclusion, a, b, status = 'completed') => ({ number, name, status, conclusion, startedAt: iso(a), completedAt: status === 'completed' ? iso(b) : '0001-01-01T00:00:00Z' });
+const JOBS = {
+  9000: [
+    { databaseId: 7001, name: 'lint', status: 'completed', conclusion: 'success', startedAt: iso(48), completedAt: iso(47), url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 48, 48), step(2, 'Run actions/checkout@v4', 'success', 48, 48), step(3, 'npm run lint', 'success', 48, 47)] },
+    { databaseId: 7002, name: 'tests (node 22)', status: 'completed', conclusion: 'failure', startedAt: iso(48), completedAt: iso(44), url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 48, 48), step(2, 'Run actions/checkout@v4', 'success', 48, 48), step(3, 'npm ci', 'success', 48, 46), step(4, 'npm test', 'failure', 46, 44), step(5, 'Upload coverage', 'skipped', 44, 44)] },
+  ],
+  9001: [
+    { databaseId: 7101, name: 'lint', status: 'completed', conclusion: 'success', startedAt: iso(3), completedAt: iso(2), url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 3, 3), step(2, 'npm run lint', 'success', 3, 2)] },
+    { databaseId: 7102, name: 'tests (node 22)', status: 'in_progress', conclusion: '', startedAt: iso(3), completedAt: '', url: 'https://github.com',
+      steps: [step(1, 'Set up job', 'success', 3, 3), step(2, 'npm ci', 'success', 3, 2), step(3, 'npm test', '', 2, 0, 'in_progress'), step(4, 'Upload coverage', '', 0, 0, 'pending')] },
+  ],
+};
+const LOG = (job) => [
+  ['Set up job', 'Current runner version: 2.320.0', 'Operating System', 'Ubuntu 24.04'],
+  ['Run actions/checkout@v4', '##[group]Run actions/checkout@v4', 'Syncing repository: orbita/orbita-web', '##[endgroup]'],
+  ['npm ci', '[command]/usr/bin/npm ci', 'added 812 packages in 21s'],
+  ['npm test', '[command]/usr/bin/npm test', '> orbita-web@1.4.0 test', ' PASS  src/lib/session.test.ts', ' FAIL  src/api/orders.test.ts', '  ● paginación › devuelve la segunda página', '    expect(received).toHaveLength(expected)', '    Expected length: 20', '    Received length: 0', '##[error]Process completed with exit code 1.'],
+].map(([name, ...lines]) => lines.map((l, i) => `${job}\t${name}\t2026-09-30T10:0${i}:00.0000000Z ${l}`).join('\n')).join('\n');
+const DISPATCH_YAML = `name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Canal de publicación
+        type: choice
+        options: [stable, beta]
+        default: stable
+      dry_run:
+        description: Simular sin publicar
+        type: boolean
+        default: false
+      notes:
+        description: Notas de la versión
+        required: false
+jobs:
+  build:
+    runs-on: windows-latest`;
+
+function ghMock(command) {
+  const ok = (v) => ({ stdout: typeof v === 'string' ? v : JSON.stringify(v), stderr: '', code: 0, timed_out: false });
+  if (command.includes('--version') || command.includes('auth status')) return ok('gh version 2.60.0');
+  if (command.includes('pr list')) return ok(command.includes('closed') ? [] : PRS);
+  if (command.includes('/comments')) {
+    return ok([[{ id: 1, path: 'src/lib/auth.ts', line: 21, body: '¿Qué pasa si el refresco falla sin red? Deberíamos reintentar con backoff.', user: { login: 'ana' }, diff_hunk: '@@ -18,9 +18,12 @@\n   const token = await session.create(creds)\n+  session.scheduleRefresh(token)', html_url: 'https://github.com' }]]);
+  }
+  if (command.includes('pr view')) {
+    const n = Number(command.match(/pr view (\d+)/)[1]);
+    const base = PRS.find((p) => p.number === n) || PRS[0];
+    return ok({
+      ...base, body: PR_BODY, createdAt: iso(300),
+      mergeable: 'MERGEABLE', additions: 47, deletions: 23, commits: [{}, {}, {}], files: [{}, {}, {}, {}, {}, {}],
+      reviews: [{ author: { login: 'ana' }, state: 'COMMENTED' }], reviewRequests: [{ login: 'luis' }],
+      labels: [{ name: 'auth' }, { name: 'refactor' }], closingIssuesReferences: [{ number: 231, url: '' }],
+      statusCheckRollup: [
+        { __typename: 'CheckRun', name: 'lint', workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-25T10:00:00Z', completedAt: '2026-09-25T10:00:12Z', detailsUrl: 'https://github.com/orbita/orbita-web/actions/runs/9001/job/7101' },
+        { __typename: 'CheckRun', name: 'build', workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-25T10:00:00Z', completedAt: '2026-09-25T10:00:48Z', detailsUrl: 'https://github.com/orbita/orbita-web/actions/runs/9001/job/7101' },
+        { __typename: 'CheckRun', name: 'tests (node 22)', workflowName: 'CI', status: 'IN_PROGRESS', conclusion: null, detailsUrl: 'https://github.com/orbita/orbita-web/actions/runs/9001/job/7102' },
+      ],
+    });
+  }
+  if (command.includes('workflow list')) return ok(WORKFLOWS);
+  if (command.includes('run list')) {
+    const wf = command.match(/--workflow (\d+)/);
+    const st = command.match(/--status (\w+)/);
+    return ok(RUNS.filter((r) => (!wf || r.workflowDatabaseId === Number(wf[1]))
+      && (!st || (st[1] === 'in_progress' ? r.status === 'in_progress' : r.conclusion === st[1]))));
+  }
+  if (command.includes('--log')) return ok(LOG(command.includes('7102') ? 'tests' : 'tests (node 22)'));
+  if (command.includes('run view')) {
+    const id = Number(command.match(/run view (\d+)/)[1]);
+    const run = RUNS.find((r) => r.databaseId === id) || RUNS[1];
+    return ok({ ...run, jobs: JOBS[id] || JOBS[9000] });
+  }
+  if (command.includes('/contents/')) return ok(command.includes('release') ? btoa(unescape(encodeURIComponent(DISPATCH_YAML))) : btoa('name: CI\non: [push, pull_request]\n'));
+  if (/run (rerun|cancel)|workflow (run|enable|disable)/.test(command)) return ok('');
+  return ok('');
+}
+
+const handlers = {
+  'plugin:store|load': () => 1,
+  'plugin:store|get': ({ key }) => [store.get(key) ?? null, store.has(key)],
+  'plugin:store|set': ({ key, value }) => { store.set(key, value); },
+  'plugin:store|delete': ({ key }) => store.delete(key),
+  'plugin:store|save': () => null,
+  'plugin:store|has': ({ key }) => store.has(key),
+  'plugin:event|listen': ({ handler }) => handler,
+  'plugin:event|unlisten': () => null,
+  'plugin:window|is_maximized': () => false,
+  'plugin:dialog|open': () => ROOT,
+  secret_get: () => store.get('apiKey'),
+  secret_set: ({ value }) => { store.set('apiKey', value); },
+  secret_delete: () => { store.delete('apiKey'); },
+  get_app_version: () => '2.0.0-dev',
+  get_workspace_root: () => ROOT,
+  set_workspace_root: ({ path }) => path,
+  read_dir: ({ path }) => listDir(path),
+  read_file_content: ({ path }) => {
+    const f = files.get(path);
+    if (!f) throw new Error(`No existe: ${path}`);
+    return f.content;
+  },
+  stat_file: ({ path }) => files.get(path)?.mtime ?? 0,
+  write_file_content: ({ path, content, expectedMtime }) => {
+    const f = files.get(path);
+    if (f && expectedMtime && f.mtime !== expectedMtime) throw new Error(`CONFLICT:${f.mtime}`);
+    const mtime = Date.now();
+    files.set(path, { content, mtime });
+    return mtime;
+  },
+  list_files: () => [...files.keys()].map((path) => ({ name: path.split('/').pop(), path, rel: path.slice(ROOT.length + 1) })),
+  search_in_files: ({ query, caseSensitive }) => {
+    const hits = [];
+    const q = caseSensitive ? query : query.toLowerCase();
+    for (const [path, f] of files) {
+      f.content.split('\n').forEach((text, i) => {
+        if ((caseSensitive ? text : text.toLowerCase()).includes(q)) hits.push({ path, name: path.split('/').pop(), line: i + 1, text });
+      });
+    }
+    return hits;
+  },
+  replace_in_files: () => ({ files: 0, replacements: 0 }),
+  save_text_as: ({ defaultName, content }) => { console.log('[mock] save_text_as', defaultName, content.length); return `C:/Users/demo/Documents/${defaultName}`; },
+  visual_base: () => 'about:blank#',
+  visual_snippet: ({ content, ext }) => URL.createObjectURL(new Blob([content], { type: ext === 'svg' ? 'image/svg+xml' : 'text/html' })),
+  git_run: ({ args }) => git(args),
+  term_open: () => `t${nextId++}`,
+  term_write: () => null,
+  term_resize: () => null,
+  term_close: () => null,
+  gh_exec: ({ args }) => ghMock(`gh ${args.join(' ')}`),
+  run_command: ({ command }) => (command.startsWith('gh ') ? ghMock(command) : command.includes('tsc')
+    ? {
+      stdout: "src/components/agent/AgentPanel.tsx(21,11): error TS2339: Property 'stream' does not exist on type 'AgentState'.\nsrc/lib/session.ts(3,11): warning TS6133: 'c' is declared but its value is never read.\n",
+      stderr: '', code: 2, timed_out: false,
+    }
+    : { stdout: '', stderr: '', code: 0, timed_out: false }),
+};
+
+window.__TAURI_INTERNALS__ = {
+  metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
+  transformCallback(cb, once) {
+    const id = nextId++;
+    callbacks.set(id, (payload) => { if (once) callbacks.delete(id); cb?.(payload); });
+    return id;
+  },
+  unregisterCallback: (id) => callbacks.delete(id),
+  convertFileSrc: (p) => p,
+  async invoke(cmd, args = {}) {
+    const h = handlers[cmd];
+    if (h) return h(args);
+    if (cmd.startsWith('plugin:window|') || cmd.startsWith('plugin:webview|')) return null;
+    console.info('[tauriMock] sin simular:', cmd, args);
+    return null;
+  },
+};
+window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+if (location.search.includes('onboarding')) localStorage.removeItem('lixbon_workspace_root');
+else localStorage.setItem('lixbon_workspace_root', ROOT);
+
+const day = (i) => new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+const keys = [
+  { id: 1, name: 'lixbon desktop', masked_key: 'lixbon_sk_…a91f', created_at: day(40), last_accessed: new Date(Date.now() - 600000).toISOString(), is_active: true },
+  { id: 2, name: 'CI', masked_key: 'lixbon_sk_…07bc', created_at: day(12), last_accessed: null, is_active: true },
+];
+const GATEWAY = {
+  'GET /api/account/usage': () => ({
+    plan: { name: 'Pro' },
+    buckets: {
+      session: { percent: 42, messages: 38, reset_at: new Date(Date.now() + 2.4 * 3600000).toISOString() },
+      week: { percent: 67, messages: 412, reset_at: new Date(Date.now() + 3 * 86400000).toISOString() },
+    },
+    daily: Array.from({ length: 30 }, (_, i) => [
+      { usage_date: day(i), model: 'lixbon-coder', total_tokens: Math.round(40000 + Math.abs(Math.sin(i)) * 180000) },
+      { usage_date: day(i), model: 'lixbon-fast', total_tokens: Math.round(Math.abs(Math.cos(i)) * 60000) },
+    ]).flat(),
+  }),
+  'GET /api/keys': () => ({ keys }),
+  'GET /api/conversations': () => ({
+    conversations: [
+      { id: 11, title: 'Refactor auth', updated_at: new Date(Date.now() - 20 * 60000).toISOString() },
+      { id: 12, title: 'Tests E2E del checkout', updated_at: new Date(Date.now() - 3 * 3600000).toISOString() },
+      { id: 13, title: 'Paginación en /orders', updated_at: new Date(Date.now() - 26 * 3600000).toISOString() },
+      { id: 14, title: 'Generar LIXBON.md', updated_at: new Date(Date.now() - 30 * 3600000).toISOString() },
+      { id: 15, title: 'Migrar a Vite 6', updated_at: new Date(Date.now() - 4 * 86400000).toISOString() },
+    ],
+  }),
+  'GET /api/model-roles': () => ({
+    roles: { chat: { model: 'lixbon-coder' }, fim: { model: 'lixbon-fast' }, vision: { model: 'lixbon-vision' }, embed: { model: 'nomic-embed' } },
+    models: [
+      { id: 'lixbon-coder', capabilities: ['completion', 'tools'] },
+      { id: 'lixbon-fast', capabilities: ['completion'] },
+      { id: 'lixbon-vision', capabilities: ['completion', 'vision'] },
+      { id: 'nomic-embed', capabilities: ['embedding'] },
+    ],
+  }),
+  'POST /api/keys': (body) => {
+    keys.unshift({ id: nextId++, name: body.name, masked_key: 'lixbon_sk_…new0', created_at: new Date().toISOString(), last_accessed: null, is_active: true });
+    return { api_key: `lixbon_sk_${Math.random().toString(36).slice(2)}` };
+  },
+  'PATCH /api/account/profile': (body) => ({ user: { ...store.get('user'), ...body } }),
+};
+// Lixbon Team en modo dev: un proyecto, dos canales, un directo y mensajes.
+const U = (id, first_name, username) => ({ id, first_name, last_name: '', username, email: `${username}@demo.dev` });
+const YO = U(1, 'Demo', 'demo');
+const LU = U(2, 'Lucía', 'lucia');
+const MA = U(3, 'Marco', 'marco');
+const hace = (min) => new Date(Date.now() - min * 60000).toISOString();
+const teamMsgs = {
+  c1: [
+    { id: 'm1', seq: 1, canal_id: 'c1', autor_id: 2, texto: 'Subí la rama `feat/sesion-token`. El login ya no pide la contraseña cada hora.', creado_en: hace(60), adjuntos: [], respuestas: 2, ultima_respuesta_en: hace(20), respondientes: [3, 1] },
+    { id: 'm2', seq: 2, canal_id: 'c1', autor_id: 3, texto: '¿Alguien mira el test que falla en CI?\n```\nFAIL src/lib/auth.test.ts\n  ✕ refresca el token caducado (41 ms)\n```', creado_en: hace(45), adjuntos: [] },
+    { id: 'm3', seq: 3, canal_id: 'c1', autor_id: 1, texto: 'Me lo quedo, ya lo tengo abierto.', creado_en: hace(42), adjuntos: [] },
+  ],
+  d1: [{ id: 'm9', seq: 1, canal_id: 'd1', autor_id: 3, texto: '¿Revisas conmigo el PR del gateway?', creado_en: hace(300), adjuntos: [] }],
+};
+const teamHilo = { m1: [
+  { id: 'm4', seq: 4, canal_id: 'c1', autor_id: 3, texto: '¿El refresh se hace en el cliente o en el gateway?', creado_en: hace(30), responde_a: 'm1', adjuntos: [] },
+  { id: 'm5', seq: 5, canal_id: 'c1', autor_id: 1, texto: 'En el gateway; el cliente solo reintenta una vez.', creado_en: hace(20), responde_a: 'm1', adjuntos: [] },
+] };
+const TEAM = {
+  'GET /api/team/bootstrap': () => ({
+    yo: YO, presencia: 'en_linea',
+    proyectos: [{
+      id: 'p1', nombre: 'orbita-web', rol: 'lider', github_repo: '', linear_team_id: '',
+      miembros: [{ usuario: YO, rol: 'lider', estado: 'en_linea' }, { usuario: LU, rol: 'integrante', estado: 'en_linea' }, { usuario: MA, rol: 'integrante', estado: 'no_molestar' }],
+      canales: [{ id: 'c1', nombre: 'general', tipo: 'publico', tema: 'Lo que pasa en orbita-web', proyecto_id: 'p1' }, { id: 'c2', nombre: 'producto', tipo: 'privado', tema: '', proyecto_id: 'p1' }],
+    }],
+    directos: [{ id: 'd1', tipo: 'directo', con: MA, estado: 'no_molestar' }],
+    amigos: [], solicitudes: [{ usuario: U(4, 'Sofía', 'sofia'), direccion: 'recibida' }],
+  }),
+};
+function teamFetch(method, url, init) {
+  const m = url.pathname.match(/^\/api\/team\/channels\/([^/]+)\/messages$/);
+  if (m && method === 'GET') {
+    const hilo = url.searchParams.get('hilo_de');
+    return { mensajes: hilo ? teamHilo[hilo] || [] : teamMsgs[m[1]] || [], hay_mas: false };
+  }
+  if (m && method === 'POST') {
+    const b = JSON.parse(init.body);
+    return { id: `m${Date.now()}`, seq: Date.now(), canal_id: m[1], client_id: b.client_id, autor_id: 1, texto: b.texto, creado_en: new Date().toISOString(), responde_a: b.responde_a, adjuntos: [] };
+  }
+  const h = TEAM[`${method} ${url.pathname}`];
+  return h ? h() : undefined;
+}
+// Con ?server= el gateway es de verdad: ni su fetch ni su WebSocket se simulan.
+const REAL = qs.get('server') ? new URL(qs.get('server')).origin : '';
+if (!REAL && typeof window.WebSocket === 'function') window.WebSocket = class { constructor() { setTimeout(() => this.onclose?.(), 10); } send() {} close() {} };
+
+const realFetch = window.fetch.bind(window);
+window.fetch = async (input, init = {}) => {
+  const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+  if (REAL && url.origin === REAL) return realFetch(input, init);
+  const method = (init.method || 'GET').toUpperCase();
+  const del = method === 'DELETE' && url.pathname.match(/^\/api\/keys\/(\d+)$/);
+  if (del) {
+    const k = keys.findIndex((x) => x.id === Number(del[1]));
+    if (k >= 0) keys.splice(k, 1);
+    return new Response('{}', { headers: { 'content-type': 'application/json' } });
+  }
+  if (method === 'POST' && url.pathname === '/v1/chat/completions') return mockCompletion(JSON.parse(init.body));
+  const t = url.pathname.startsWith('/api/team/') ? teamFetch(method, url, init)
+    : url.pathname === '/api/auth/me' ? { user: store.get('user') || YO } : undefined;
+  if (t !== undefined) return new Response(JSON.stringify(t), { headers: { 'content-type': 'application/json' } });
+  const h = GATEWAY[`${method} ${url.pathname}`];
+  if (!h) return realFetch(input, init);
+  const body = init.body ? JSON.parse(init.body) : {};
+  return new Response(JSON.stringify(h(body)), { headers: { 'content-type': 'application/json' } });
+};
+
+// Respuesta simulada del modelo: para la edición en línea devuelve el
+// fragmento con un comentario encima; para el chat, un saludo.
+function mockCompletion(body) {
+  const last = body.messages.at(-1)?.content || '';
+  const frag = last.match(/<<<[^\n]*\n([\s\S]*?)\nFRAGMENTO>>>/);
+  const fence = '```';
+  const system = body.messages[0]?.role === 'system' ? body.messages[0].content : '';
+  const ask = JSON.stringify({ tool: 'ask_user', args: { questions: [
+    { question: '¿Qué base de datos quieres usar?', header: 'Base de datos', options: [{ label: 'PostgreSQL', description: 'Ya está en docker-compose.yml' }, { label: 'SQLite', description: 'Un archivo, sin servidor' }] },
+    { question: '¿Qué pantallas incluyo?', header: 'Pantallas', multiSelect: true, options: [{ label: 'Login' }, { label: 'Dashboard' }, { label: 'Ajustes' }] },
+  ] } });
+  const text = frag ? `${fence}\n// editado por el mock\n${frag[1]}\n${fence}`
+    : last.startsWith('TOOL_RESULT ask_user') ? (system.includes('MODO PLAN')
+      ? `Gracias. Con eso:\n\n## Plan\n1. Crear \`src/db.ts\` con la conexión.\n2. Añadir las pantallas elegidas en \`src/pages\`.\n3. Probar con \`npm test\`.\n\n**Riesgos:** migraciones de datos existentes.`
+      : 'Perfecto, sigo con esas opciones.')
+      : last.includes('pregunta') ? ask
+        : 'Hola, soy el modelo simulado del modo dev.';
+  const enc = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(ctrl) {
+      for (const part of text.match(/[\s\S]{1,12}/g)) {
+        ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`));
+        await new Promise((r) => setTimeout(r, last.includes('lento') ? 700 : 30));
+      }
+      ctrl.enqueue(enc.encode('data: [DONE]\n\n'));
+      ctrl.close();
+    },
+  });
+  return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+}
+

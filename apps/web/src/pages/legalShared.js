@@ -6,7 +6,7 @@ export const RESPONSABLE = {
   nit: '[NIT o documento]',
   direccion: '[Dirección], Medellín, Colombia',
   correo: 'privacidad@lixbon.com',
-  soporte: 'soporte@lixbon.com',
+  soporte: 'support@lixbon.com',
 };
 
 export const VIGENCIA = { es: '15 de septiembre de 2026', en: 'September 15, 2026' };

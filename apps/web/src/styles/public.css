@@ -3,9 +3,18 @@
    diálogos. Todo sobre el mismo escalón de superficies, sin una sola línea. */
 
 /* ── Barra de navegación pública ─────────────────────────────────────── */
+/* Fija arriba al hacer scroll. Arriba del todo es transparente; al bajar
+   (`.is-scrolled`, PublicNav.jsx) gana un velo del fondo con desenfoque y una
+   sombra difusa, nunca una línea. También es el ancla del menú compacto. */
+
+:root { --pubnav-h: 60px; }
 
 .pubnav {
-  position: relative; /* ancla del menú compacto */
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: transparent;
+  transition: background-color var(--dur-3, .32s) ease, box-shadow var(--dur-3, .32s) ease, backdrop-filter var(--dur-3, .32s) ease;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -13,6 +22,13 @@
   flex-shrink: 0;
   padding: 0 32px;
   padding-top: var(--safe-t);
+}
+
+.pubnav.is-scrolled {
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: 0 12px 32px -22px rgba(var(--shadow-rgb), 0.45);
 }
 
 .pubnav__logo {
@@ -422,11 +438,14 @@
 }
 
 .modal {
+  /* El diálogo es siempre claro: en oscuro, el crema invertido; en claro,
+     papel un punto sobre el fondo. Por eso su texto va en colores fijos. */
+  --modal-bg: #F2F2F0;
   position: relative;
   width: min(480px, 100%);
   padding: 18px 20px;
   border-radius: var(--radius);
-  background: var(--primary);
+  background: var(--modal-bg);
   color: #141414;
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
   animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -441,7 +460,12 @@
   width: 78px;
   height: 11px;
   border-radius: 8px 8px 0 0;
-  background: var(--primary);
+  background: var(--modal-bg);
+}
+
+:root[data-theme="light"] .modal {
+  --modal-bg: #FBFAF6;
+  box-shadow: 0 30px 70px -18px rgba(60, 52, 30, 0.3);
 }
 
 @keyframes modal-pop {
@@ -531,6 +555,21 @@
 .modal .pill-btn.is-danger {
   background: #8E3226;
   color: #FBEEEB;
+}
+
+/* El hover global usa los colores del tema oscuro (fondo casi blanco): dentro
+   del diálogo claro dejaría el texto pálido sobre blanco. */
+.modal .pill-btn--primary:hover:not(:disabled) {
+  background: #335519;
+}
+
+.modal .pill-btn.is-danger:hover:not(:disabled) {
+  background: #7A2A1F;
+}
+
+.modal .pill-btn--primary:disabled {
+  background: #CDCDC7;
+  color: #6B6B66;
 }
 
 .share-link {
@@ -636,7 +675,7 @@
 
 .docs__nav {
   position: sticky;
-  top: 24px;
+  top: calc(var(--pubnav-h) + 24px);
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -806,7 +845,7 @@
 
 .docs__toc {
   position: sticky;
-  top: 24px;
+  top: calc(var(--pubnav-h) + 24px);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1407,7 +1446,7 @@
   align-items: start;
 }
 
-.legal__nav { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
+.legal__nav { position: sticky; top: calc(var(--pubnav-h) + 24px); display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
 .legal__link {
   padding: 7px 11px; border-radius: var(--radius-chip);
   color: var(--ink-soft); font-size: 13.5px; text-decoration: none;
@@ -1423,17 +1462,57 @@
 }
 
 /* ── Pie público ─────────────────────────────────────────────────────── */
+/* Oscuro en los dos temas, con los colores del isotipo: el fondo #1B1A17 y el
+   crema de sus piezas. Arriba frase y llamada; en medio el mapa del sitio;
+   abajo el wordmark a todo lo ancho, cortado por el borde inferior. */
 
 .pubfoot {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  width: min(1320px, calc(100% - 64px)); margin: 0 auto; padding: 28px 0 32px;
-  border-top: 1px solid rgba(var(--ink-rgb), 0.06);
-  color: var(--ink-muted); font-size: 12.5px;
+  --pf-bg: #1B1A17;
+  --pf-ink: #EDE8DA;
+  --pf-soft: rgba(237, 232, 218, 0.72);
+  --pf-muted: rgba(237, 232, 218, 0.46);
+  margin-top: 120px;
+  overflow: hidden;
+  background: var(--pf-bg);
+  color: var(--pf-ink);
 }
-.pubfoot__links { display: flex; gap: 18px; flex-wrap: wrap; }
-.pubfoot__links a { color: var(--ink-soft); text-decoration: none; transition: color .15s ease; }
-.pubfoot__links a:hover { color: var(--ink); }
-@media (max-width: 900px) { .pubfoot { width: calc(100% - 32px); } }
+.pubfoot__in { width: min(1200px, calc(100% - 96px)); margin: 0 auto; padding-top: 96px; }
+
+.pubfoot__arriba { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
+.pubfoot__frase { margin: 0; max-width: 13ch; font-family: var(--font-display); font-size: clamp(40px, 5vw, 68px); line-height: 1.02; color: var(--pf-ink); text-wrap: balance; }
+.pubfoot__cta {
+  display: inline-flex; align-items: center; height: 46px; padding: 0 24px; border-radius: var(--radius);
+  background: var(--pf-ink); color: var(--pf-bg); font-size: 14.5px; font-weight: 500; text-decoration: none;
+  transition: background-color .2s ease, transform .2s var(--ease-out, ease);
+}
+.pubfoot__cta:hover { background: #FFFFFF; transform: translateY(-1px); }
+
+.pubfoot__mapa { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; margin-top: 96px; }
+.pubfoot__col, .pubfoot__contacto { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.pubfoot__mapa h2 { margin: 0 0 6px; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pf-muted); }
+.pubfoot__mapa a { font-size: 15px; color: var(--pf-soft); text-decoration: none; transition: color .2s ease; }
+.pubfoot__mapa a:hover { color: var(--pf-ink); }
+.pubfoot__contacto span { font-size: 15px; color: var(--pf-muted); }
+
+.pubfoot__marca { margin-top: 104px; }
+/* LIXBON en Bruno Ace SC mide ~4.82× su cuerpo: a 20cqw ocupa ~96% del
+   ancho del pie, sea cual sea la ventana (con vw se salía la N al pasar de
+   los 1200px del contenedor). */
+.pubfoot__wordmark { display: block; width: 100%; container-type: inline-size; }
+.pubfoot__wordmark .brand {
+  display: flex; justify-content: space-between; width: 100%;
+  font-size: 17vw; font-size: 20cqw; line-height: 1; color: var(--pf-ink);
+  overflow: hidden; padding-bottom: 0.04em;
+}
+
+.pubfoot__base { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 28px 0 calc(32px + var(--safe-b)); font-size: 13px; color: var(--pf-muted); }
+
+@media (max-width: 900px) {
+  .pubfoot { margin-top: 72px; }
+  .pubfoot__in { width: calc(100% - 40px); padding-top: 64px; }
+  .pubfoot__mapa { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 24px; margin-top: 64px; }
+  .pubfoot__marca { margin-top: 64px; }
+}
 
 /* ── Guías ───────────────────────────────────────────────────────────── */
 
@@ -1454,7 +1533,7 @@
 .guias__cuerpo { max-width: 760px; padding: 0; }
 .guias__cuerpo .docs__eyebrow { text-decoration: none; }
 .guias__cuerpo > .guias__meta { display: block; margin: -6px 0 20px; }
-.guias__mas { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 10px; }
+.guias__mas { position: sticky; top: calc(var(--pubnav-h) + 24px); display: flex; flex-direction: column; gap: 10px; }
 .guias__mas a { font-size: 13px; line-height: 1.4; color: var(--ink-soft); text-decoration: none; }
 .guias__mas a:hover { color: var(--ink); }
 @media (max-width: 900px) {
@@ -1568,3 +1647,81 @@
 .dl-picker__select svg { position: absolute; right: 12px; color: var(--ink-muted); pointer-events: none; }
 .dl-picker .dl-card__cta { align-self: auto; flex-shrink: 0; }
 
+
+/* ── Soporte (/support) ──────────────────────────────────────────────── */
+/* Formulario a la izquierda, atajos a la derecha. Los tipos de caso son
+   tarjetas de relleno: la elegida se tiñe de acento, sin bordes. */
+
+.soporte__wrap { width: min(1200px, calc(100% - 96px)); margin: 0 auto; padding-top: 72px; }
+.soporte__titulo { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 5.6vw, 80px); line-height: 1; color: var(--ink); text-wrap: balance; }
+.soporte__lead { margin: 24px 0 0; max-width: 640px; font-size: 17px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
+
+.soporte__rejilla { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 64px; align-items: start; margin-top: 56px; }
+
+.soporte__form { display: flex; flex-direction: column; gap: 24px; }
+.soporte__etiqueta { display: block; margin-bottom: 10px; font-size: 13px; font-weight: 500; color: var(--ink-soft); }
+
+.soporte__tipos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+.soporte__tipos legend { padding: 0; }
+.soporte__tipo {
+  position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
+  border-radius: var(--radius); background: var(--surface-1); color: var(--ink-muted); cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.soporte__tipo:hover { background: var(--surface-2); }
+.soporte__tipo.is-on { background: var(--accent-soft); color: var(--accent); }
+.soporte__tipo:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.soporte__tipo input { position: absolute; opacity: 0; pointer-events: none; }
+.soporte__tipo svg { flex: none; margin-top: 1px; }
+.soporte__tipo strong { display: block; font-size: 14px; font-weight: 500; color: var(--ink); }
+.soporte__tipo small { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--ink-muted); }
+
+.soporte__pista { display: flex; align-items: flex-start; gap: 10px; margin: -8px 0 0; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+.soporte__pista svg { flex: none; margin-top: 2px; color: var(--ink-muted); }
+
+.soporte__campo { display: flex; flex-direction: column; }
+.soporte__campo input, .soporte__campo textarea {
+  width: 100%; padding: 12px 14px; border: 0; border-radius: var(--radius);
+  background: var(--field); color: var(--ink); font: inherit; font-size: 15px; outline: none;
+  transition: background-color .15s ease;
+}
+.soporte__campo input:focus, .soporte__campo textarea:focus { background: var(--field-focus); }
+.soporte__campo textarea { min-height: 190px; resize: vertical; line-height: 1.6; }
+.soporte__cuenta { align-self: flex-end; margin-top: 8px; font-size: 12px; color: var(--ink-muted); }
+.soporte__cuenta.is-corto { color: var(--warn); }
+.soporte__dos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.soporte__como { margin: 0; font-size: 14px; color: var(--ink-soft); }
+.soporte__como strong { color: var(--ink); font-weight: 500; }
+.soporte__trampa { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.soporte__enviar { align-self: flex-start; height: 46px; padding: 0 26px; font-size: 14.5px; }
+
+.soporte__hecho { display: flex; flex-direction: column; align-items: flex-start; gap: 22px; padding: 40px; border-radius: var(--radius); background: var(--surface-1); animation: landing-sube .8s var(--ease-out) both; }
+.soporte__hecho-icono { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); }
+.soporte__hecho-texto { margin: 0; max-width: 520px; font-size: 17px; line-height: 1.6; color: var(--ink-soft); }
+.soporte__ticket { display: flex; flex-direction: column; gap: 6px; }
+.soporte__ticket span { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
+.soporte__ticket strong { font-family: var(--font-mono); font-size: 28px; font-weight: 500; color: var(--ink); }
+
+.soporte__lado { display: flex; flex-direction: column; gap: 18px; }
+.soporte__lienzo .paisaje { aspect-ratio: 4 / 3; }
+.soporte__lado-titulo { margin: 8px 0 0; font-family: var(--font-display); font-weight: 400; font-size: 28px; line-height: 1.1; color: var(--ink); }
+.soporte__atajos { display: flex; flex-direction: column; gap: 6px; }
+.soporte__atajo { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface-1); color: var(--ink-muted); text-decoration: none; transition: background-color .15s ease; }
+.soporte__atajo:hover { background: var(--surface-2); }
+.soporte__atajo svg { flex: none; margin-top: 1px; }
+.soporte__atajo strong { display: inline-flex; align-items: center; gap: 6px; font-size: 14.5px; font-weight: 500; color: var(--ink); }
+.soporte__atajo strong svg { opacity: .5; transition: transform .3s var(--ease-out); }
+.soporte__atajo:hover strong svg { transform: rotate(180deg) translateX(-3px) !important; }
+.soporte__atajo small { display: block; margin-top: 3px; font-size: 13px; line-height: 1.45; color: var(--ink-muted); }
+.soporte__directo { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-muted); }
+.soporte__directo a { color: var(--ink); }
+
+@media (max-width: 980px) {
+  .soporte__wrap { width: calc(100% - 40px); padding-top: 48px; }
+  .soporte__rejilla { grid-template-columns: 1fr; gap: 48px; margin-top: 40px; }
+  .soporte__tipos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .soporte__tipos, .soporte__dos { grid-template-columns: 1fr; }
+  .soporte__hecho { padding: 28px 22px; }
+}

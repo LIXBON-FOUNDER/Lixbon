@@ -5,6 +5,7 @@
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
 import { ActivityIndicator, FlatList, Linking, Pressable, Text, TextInput, View } from 'react-native';
+import WaveText from '../components/WaveText';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -391,9 +392,14 @@ function MessageList({ onCopy, onUserLongPress }) {
                 {item.content}
               </Markdown>
             ) : isLast && chat.streaming ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <ActivityIndicator size="small" color={c.accent} />
-                <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkLabel }}>pensando…</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 2, backgroundColor: c.accent }} />
+                <WaveText
+                  text={chat.webSearch ? 'Buscando en internet…' : 'Pensando…'}
+                  color={c.ink70}
+                  accent={c.accent}
+                  style={{ fontFamily: FONTS.ui, fontSize: 13 }}
+                />
               </View>
             ) : null}
             {!!item.content && !(isLast && chat.streaming) && (

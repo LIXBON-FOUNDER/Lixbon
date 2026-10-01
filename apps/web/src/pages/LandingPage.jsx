@@ -1,14 +1,16 @@
-// LandingPage.jsx — la portada pública de lixbon.com (/). Minimalista: una
-// columna, titulares grandes, secciones numeradas y dos dibujos de línea. Es
+// LandingPage.jsx — la portada pública de lixbon.com (/). Minimalista y
+// cálida: titulares en Lancelot, mucho aire, secciones numeradas y cuatro
+// paisajes pintados (Paisajes.jsx) que se mueven despacio con el scroll. Es
 // la página que posiciona: todo el texto va en HTML, con FAQPage.
 import { useMemo } from 'react';
 import { Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
-import { Logo } from '../components/Logo';
+import { PublicFooter } from '../components/PublicFooter';
 import { IconArrowLeft } from '../components/Icons';
-import { IlustracionCluster, IlustracionPrivacidad } from '../components/IlustracionesLanding';
+import { PaisajeAmanecer, PaisajeCosta, PaisajeCrepusculo, PaisajeValle } from '../components/Paisajes';
+import { useRevelar } from '../hooks/useRevelar';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
 import { useAuth } from '../hooks/useAuth';
 
@@ -31,8 +33,7 @@ export default function LandingPage() {
   const { user } = useAuth();
   const locale = useLocale();
   const t = useT('landing');
-  const nav = useT('nav');
-  const common = useT('common');
+  const revelar = useRevelar();
 
   const jsonLd = useMemo(() => [
     ORGANIZACION,
@@ -53,98 +54,122 @@ export default function LandingPage() {
   });
 
   return (
-    <div className="page landing">
+    <div className="page landing" ref={revelar}>
       <PublicNav />
 
-      <main className="landing__wrap">
-        <section className="landing__hero">
+      <main>
+        <section className="landing__hero landing__wrap">
+          <p className="landing__eyebrow">{t('heroEyebrow')}</p>
           <h1 className="landing__h1">{t('heroTitle')}</h1>
-          <p className="landing__lead">{t('heroLead')}</p>
-          <div className="landing__cta">
-            {user ? (
-              <Link to="/chat" className="pill-btn pill-btn--primary landing__btn">{t('ctaGoToChat')}</Link>
-            ) : (
-              <>
-                <Link to="/auth?mode=register" className="pill-btn pill-btn--primary landing__btn">{t('ctaStartFree')}</Link>
-                <Link to="/chat" className="landing__enlace">{t('ctaTryChat')} <Flecha /></Link>
-              </>
-            )}
+          <div className="landing__hero-pie">
+            <p className="landing__lead">{t('heroLead')}</p>
+            <div>
+              <div className="landing__cta">
+                {user ? (
+                  <Link to="/chat" className="pill-btn pill-btn--primary landing__btn">{t('ctaGoToChat')}</Link>
+                ) : (
+                  <>
+                    <Link to="/auth?mode=register" className="pill-btn pill-btn--primary landing__btn">{t('ctaStartFree')}</Link>
+                    <Link to="/chat" className="landing__enlace">{t('ctaTryChat')} <Flecha /></Link>
+                  </>
+                )}
+              </div>
+              {!user && <p className="landing__nota">{t('freeNote')}</p>}
+            </div>
           </div>
-          {!user && <p className="landing__nota">{t('freeNote')}</p>}
         </section>
 
-        <section className="landing__banda"><IlustracionCluster /></section>
+        <figure className="landing__lienzo landing__lienzo--hero">
+          <PaisajeAmanecer />
+          <figcaption>{t('paintingHero')}</figcaption>
+        </figure>
 
-        <section className="landing__fila">
-          <div>
+        <section className="landing__fila landing__wrap">
+          <div data-revelar>
             <span className="landing__num">{t('section1Num')}</span>
             <h2 className="landing__h2">{t('section1Title')}</h2>
             <p className="landing__p">{t('section1P1')}</p>
             <p className="landing__p">{t('section1P2')}</p>
           </div>
-          <div><IlustracionPrivacidad /></div>
+          <figure className="landing__lienzo landing__lienzo--retrato" data-revelar>
+            <PaisajeCosta />
+            <figcaption>{t('paintingCoast')}</figcaption>
+          </figure>
         </section>
 
-        <section className="landing__fila landing__fila--inv">
-          <div>
+        <section className="landing__bloque landing__wrap">
+          <div data-revelar>
             <span className="landing__num">{t('section2Num')}</span>
-            <h2 className="landing__h2">{t('section2Title')}</h2>
+            <h2 className="landing__h2 landing__h2--ancho">{t('section2Title')}</h2>
           </div>
-          <ul className="landing__lista">
-            {t('products').map(({ title, text, href }) => (
-              <li key={title}>
-                <h3><Link to={href}>{title}</Link></h3>
+          <figure className="landing__lienzo landing__lienzo--banda" data-revelar>
+            <PaisajeValle />
+            <figcaption>{t('paintingValley')}</figcaption>
+          </figure>
+          <ul className="landing__productos">
+            {t('products').map(({ title, text, href }, i) => (
+              <li key={title} data-revelar style={{ '--retraso': `${i * 90}ms` }}>
+                <h3><Link to={href}>{title} <Flecha /></Link></h3>
                 <p>{text}</p>
               </li>
             ))}
           </ul>
         </section>
 
-        <section className="landing__fila">
-          <div>
+        <section className="landing__fila landing__wrap">
+          <div data-revelar>
             <span className="landing__num">{t('section3Num')}</span>
             <h2 className="landing__h2">{t('section3Title')}</h2>
             <p className="landing__p">{t('section3P')}</p>
             <Link to="/docs/using-your-api-key" className="landing__enlace">{t('section3Link')} <Flecha /></Link>
           </div>
-          <pre className="landing__codigo"><code>{CODIGO}</code></pre>
+          <pre className="landing__codigo" data-revelar><code>{CODIGO}</code></pre>
         </section>
 
-        <section className="landing__bloque">
-          <span className="landing__num">{t('section4Num')}</span>
-          <h2 className="landing__h2">{t('section4Title')}</h2>
-          <p className="landing__p">{t('section4P')}</p>
+        <section className="landing__bloque landing__wrap">
+          <div data-revelar>
+            <span className="landing__num">{t('section4Num')}</span>
+            <h2 className="landing__h2">{t('section4Title')}</h2>
+            <p className="landing__p">{t('section4P')}</p>
+          </div>
           <div className="landing__precios">
-            {t('plans').map(({ name, price, period, lines }) => (
-              <div key={name} className="landing__precio">
+            {t('plans').map(({ name, price, period, lines }, i) => (
+              <div key={name} className="landing__precio" data-revelar style={{ '--retraso': `${i * 90}ms` }}>
                 <h3>{name}</h3>
                 <p className="landing__cifra">{price}{period && <span> {period}</span>}</p>
-                <p>{lines.map((l) => <span key={l}>{l}<br /></span>)}</p>
+                <ul>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
               </div>
             ))}
           </div>
-          <p className="landing__nota landing__enlaces"><Link to="/plans" className="landing__enlace">{t('seePlans')} <Flecha /></Link><Link to="/docs/api-pricing" className="landing__enlace">{t('apiPricingLink')} <Flecha /></Link></p>
+          <p className="landing__enlaces"><Link to="/plans" className="landing__enlace">{t('seePlans')} <Flecha /></Link><Link to="/docs/api-pricing" className="landing__enlace">{t('apiPricingLink')} <Flecha /></Link></p>
         </section>
 
-        <section className="landing__bloque">
-          <span className="landing__num">{t('section5Num')}</span>
-          <ul className="landing__faq">
-            {t('faq').map(({ q, a }) => <li key={q}><h3>{q}</h3><p>{a}</p></li>)}
-          </ul>
+        <section className="landing__fila landing__fila--faq landing__wrap">
+          <div data-revelar>
+            <span className="landing__num">{t('section5Num')}</span>
+            <h2 className="landing__h2">{t('faqTitle')}</h2>
+          </div>
+          <div className="landing__faq" data-revelar>
+            {t('faq').map(({ q, a }) => (
+              <details key={q}>
+                <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
+                <p>{a}</p>
+              </details>
+            ))}
+          </div>
         </section>
 
-        <section className="landing__final">
-          <h2 className="landing__h2">{t('finalTitle')}</h2>
-          <p className="landing__p">{t('finalP')}</p>
-          <Link to={user ? '/chat' : '/auth?mode=register'} className="pill-btn pill-btn--primary landing__btn">{user ? t('ctaGoToChat') : t('ctaCreateAccount')}</Link>
+        <section className="landing__final" data-revelar>
+          <PaisajeCrepusculo className="landing__final-fondo" />
+          <div className="landing__final-texto">
+            <h2 className="landing__h2">{t('finalTitle')}</h2>
+            <p className="landing__p">{t('finalP')}</p>
+            <Link to={user ? '/chat' : '/auth?mode=register'} className="landing__btn landing__btn--claro">{user ? t('ctaGoToChat') : t('ctaCreateAccount')}</Link>
+          </div>
         </section>
-
-        <footer className="landing__pie">
-          <div><Logo /><p>{t('footerLocation')} · © {new Date().getFullYear()}</p></div>
-          <nav><Link to="/docs">{nav('docs')}</Link><Link to="/guides">{nav('guides')}</Link><Link to="/apps">{nav('apps')}</Link><Link to="/plans">{nav('plans')}</Link></nav>
-          <nav><Link to="/legal/privacy">{nav('footerPrivacy')}</Link><Link to="/legal/terms">{nav('footerTerms')}</Link><Link to="/legal/refunds">{nav('footerRefunds')}</Link><Link to="/status">{nav('footerStatus')}</Link><a href="mailto:soporte@lixbon.com">{common('support')}</a></nav>
-        </footer>
       </main>
+
+      <PublicFooter />
     </div>
   );
 }

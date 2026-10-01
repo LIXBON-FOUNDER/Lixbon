@@ -124,6 +124,11 @@
   box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
 }
 
+/* En claro la tarjeta es papel sobre papel: un escalón más clara que el
+   fondo y con una sombra cálida y amplia en vez de la negra. */
+:root[data-theme="light"] .auth { --auth-card: var(--surface-1); }
+:root[data-theme="light"] .auth__card { box-shadow: 0 30px 70px -20px rgba(60, 52, 30, 0.22); }
+
 .auth__head {
   display: flex;
   flex-direction: column;

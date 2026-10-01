@@ -2464,7 +2464,7 @@ REMOTE_MAX_EVENTS = 2000
 # guardan — `assistant_done` ya trae el texto final del turno.
 REMOTE_PERSISTED_EVENTS = frozenset({
     "hello", "snapshot", "user_msg", "assistant_done", "tool_use",
-    "tool_result", "notice", "error", "bye",
+    "tool_result", "notice", "command_result", "error", "bye",
 })
 # Recorte por texto y por evento: un tool_result puede traer un archivo entero
 # y un snapshot, la conversación completa del host.
@@ -2491,6 +2491,8 @@ def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
         "source": r.source,
         "title": r.title,
         "machine": r.machine,
+        "agent": r.agent,
+        "workspace": r.workspace,
         "status": r.status,
         "created_at": r.created_at,
         "last_seen_at": r.last_seen_at,
@@ -2498,7 +2500,14 @@ def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
     }
 
 
-def create_remote_session(user_id: int, source: str, title: str, machine: str | None) -> tuple[str, dict[str, Any]]:
+def create_remote_session(
+    user_id: int,
+    source: str,
+    title: str,
+    machine: str | None,
+    agent: str | None = None,
+    workspace: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Crea la sesión remota y su share token. Devuelve (token_en_claro, sesión)."""
     raw_token = secrets.token_urlsafe(32)
     expires = (datetime.now(timezone.utc) + timedelta(hours=REMOTE_TOKEN_TTL_HOURS)).isoformat()
@@ -2509,6 +2518,8 @@ def create_remote_session(user_id: int, source: str, title: str, machine: str | 
             source=source,
             title=title[:120] or "Sesión remota",
             machine=(machine or "")[:80] or None,
+            agent=agent,
+            workspace=(workspace or "")[:120] or None,
             status="online",
             share_token_hash=hash_api_key(raw_token),
             token_expires_at=expires,
@@ -2558,6 +2569,31 @@ def claim_remote_session(raw_token: str) -> dict[str, Any] | None:
         return {**_remote_session_to_dict(r), "user_id": r.user_id}
 
 
+def update_remote_session_meta(
+    session_id: str,
+    title: str | None = None,
+    agent: str | None = None,
+    workspace: str | None = None,
+) -> dict[str, Any] | None:
+    """Aplica lo que el host anuncia en su `hello` (cambia de conversación o de
+    agente sin cerrar la sesión). Devuelve la sesión solo si algo cambió."""
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or r.status == "ended":
+            return None
+        changes = {
+            "title": (title or "").strip()[:120] or None,
+            "agent": agent,
+            "workspace": (workspace or "").strip()[:120] or None,
+        }
+        changed = False
+        for field_name, value in changes.items():
+            if value and getattr(r, field_name) != value:
+                setattr(r, field_name, value)
+                changed = True
+        return _remote_session_to_dict(r) if changed else None
+
+
 def touch_remote_session(session_id: str, status: str | None = None) -> None:
     with get_session() as s:
         r = s.get(RemoteSession, session_id)
@@ -2598,6 +2634,24 @@ def sweep_remote_sessions(offline_after_s: int = 60, end_after_h: int = 24) -> i
             .values(status="ended", ended_at=now_iso(), share_token_hash=None)
         ).rowcount
         return changed
+
+
+def purge_remote_sessions(max_idle_days: int = 7) -> int:
+    """Borra las sesiones (y su transcript) sin actividad en `max_idle_days`.
+    Un host conectado se refresca en cada barrido, así que nunca cae aquí."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_idle_days)).isoformat()
+    with get_session() as s:
+        stale = select(RemoteSession.id).where(
+            RemoteSession.last_seen_at < cutoff,
+            or_(RemoteSession.ended_at.is_(None), RemoteSession.ended_at < cutoff),
+        )
+        ids = list(s.scalars(stale).all())
+        if not ids:
+            return 0
+        # Sin depender del ON DELETE CASCADE (SQLite no lo aplica sin PRAGMA).
+        s.execute(delete(RemoteEvent).where(RemoteEvent.session_id.in_(ids)))
+        s.execute(delete(RemoteSession).where(RemoteSession.id.in_(ids)))
+        return len(ids)
 
 
 # ─── Transcript persistido de las sesiones remotas ─────────────────────────

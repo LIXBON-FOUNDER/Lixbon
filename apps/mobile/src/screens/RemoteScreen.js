@@ -28,6 +28,7 @@ import {
   FadeUp,
   IconButton,
   KeyboardAware,
+  Segmented,
   agentStyle,
   useColors,
   useKeyboardOpen,
@@ -35,6 +36,9 @@ import {
   useScale,
 } from '../components/ui';
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
+import { describeRemoteTool, summarizeRemoteTools } from '../toolText';
+import WaveText from '../components/WaveText';
+import RemoteOrch from './RemoteOrch';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS, RADIUS_BOX } from '../theme';
 
@@ -554,16 +558,33 @@ function RemoteSessionView({ session, onBack, embedded }) {
     if (action === 'end') endSession();
   };
 
-  const items = useMemo(() => [...state.items].reverse(), [state.items]);
+  const items = useMemo(() => groupItems(state.items).reverse(), [state.items]);
   const thinking = state.agentState === 'thinking';
+  const [tab, setTab] = useState('chat');
+  const canOrch = !state.ended && (state.meta?.capabilities || []).includes('orch');
+  const orchBusy = !!state.orch?.tasks?.some((x) => !['done', 'failed', 'stopped', 'exited'].includes(x.status));
 
   return (
     <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
       <KeyboardAware>
         <SessionHeader session={session} state={state} agent={agent} onBack={onBack} onOptions={options} />
 
+        {canOrch && (
+          <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+            <Segmented
+              stretch
+              size="sm"
+              value={tab}
+              onChange={setTab}
+              options={[{ value: 'chat', label: 'Conversación' }, { value: 'orch', label: orchBusy ? 'Orquestar ·' : 'Orquestar' }]}
+            />
+          </View>
+        )}
+
         <View style={{ flex: 1 }}>
-          {state.items.length === 0 ? (
+          {canOrch && tab === 'orch' ? (
+            <RemoteOrch state={state} sendCommand={sendCommand} />
+          ) : state.items.length === 0 ? (
             <SessionEmpty state={state} agent={agent} />
           ) : (
             <FlatList
@@ -691,7 +712,7 @@ function TranscriptRow({ item, agent }) {
   const c = useColors();
   const { t } = useScale();
   if (item.kind === 'user') return <UserRow item={item} />;
-  if (item.kind === 'tool') return <ToolRow item={item} />;
+  if (item.kind === 'tools') return <ToolLine items={item.items} />;
   if (item.kind === 'command') return <CommandCard item={item} agent={agent} />;
   if (item.kind === 'notice') {
     // Respuesta del host a un comando: monoespaciada, para que se lea como
@@ -892,40 +913,79 @@ function CommandCard({ item, agent }) {
   );
 }
 
-function ToolRow({ item }) {
+/** Agrupa las herramientas consecutivas para pintarlas como una sola línea. */
+function groupItems(items) {
+  const out = [];
+  for (const it of items) {
+    const last = out[out.length - 1];
+    if (it.kind === 'tool' && last?.kind === 'tools') last.items.push(it);
+    else if (it.kind === 'tool') out.push({ kind: 'tools', key: it.key, items: [it] });
+    else out.push(it);
+  }
+  return out;
+}
+
+/** Un tramo de herramientas en UNA línea: la acción en curso en palabras con
+    una ola de color, o el resumen al terminar. El detalle se despliega. */
+function ToolLine({ items }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
-  const expandable = !item.running && !!item.result;
+  const [shown, setShown] = useState(null);
+  const current = [...items].reverse().find((it) => it.running);
+  const failed = items.filter((it) => it.error).length;
+  const done = items.filter((it) => !it.running).length;
+  const text = current ? describeRemoteTool(current) : summarizeRemoteTools(items);
   return (
-    <Pressable
-      onPress={expandable ? () => setOpen((v) => !v) : undefined}
-      style={({ pressed }) => ({
-        marginVertical: 3,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        borderRadius: RADIUS,
-        backgroundColor: pressed && expandable ? c.surface3 : c.surface2,
-        gap: 6,
-      })}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        {item.running ? (
-          <ActivityIndicator size="small" color={c.accent} style={{ transform: [{ scale: 0.75 }] }} />
+    <View style={{ marginVertical: 4 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={({ pressed }) => ({
+          flexDirection: 'row', alignItems: 'center', gap: 9, alignSelf: 'flex-start', maxWidth: '100%',
+          paddingVertical: 6, paddingHorizontal: 8, marginLeft: -8, borderRadius: RADIUS,
+          backgroundColor: pressed ? c.surface2 : 'transparent',
+        })}
+      >
+        {current ? (
+          <View style={{ width: 7, height: 7, borderRadius: 2, backgroundColor: c.accent }} />
         ) : (
-          <Icon name={item.error ? 'warning' : 'check'} size={13} color={item.error ? c.danger : c.good} />
+          <Icon name={failed ? 'warning' : 'check'} size={13} color={failed ? c.danger : c.good} />
         )}
-        <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 11.5, color: c.ink70 }}>{item.tool}</Text>
-        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>
-          {item.summary || (expandable && !open ? firstLine(item.result) : '')}
-        </Text>
-        {expandable && <Icon name={open ? 'chevron-up' : 'chevron-down'} size={12} color={c.inkFaint} />}
-      </View>
+        {current ? (
+          <WaveText key={text} text={text} color={c.ink70} accent={c.accent} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 13 }} />
+        ) : (
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{text}</Text>
+        )}
+        {current && items.length > 1 && (
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkFaint }}>{done + 1} de {items.length}</Text>
+        )}
+        {!current && failed > 0 && (
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.danger }}>{failed === 1 ? '1 falló' : `${failed} fallaron`}</Text>
+        )}
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} color={c.inkFaint} />
+      </Pressable>
       {open && (
-        <Text selectable style={{ fontFamily: FONTS.mono, fontSize: 11, lineHeight: 16, color: c.inkBody }}>
-          {item.result}
-        </Text>
+        <View style={{ marginLeft: 6, paddingLeft: 12, borderLeftWidth: 1.5, borderLeftColor: c.surface4, gap: 8, paddingVertical: 4 }}>
+          {items.map((it) => (
+            <Pressable key={it.key} onPress={it.result ? () => setShown((k) => (k === it.key ? null : it.key)) : undefined} style={{ gap: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text numberOfLines={1} style={{ flexShrink: 0, maxWidth: '55%', fontFamily: FONTS.uiMedium, fontSize: 12.5, color: it.error ? c.danger : c.ink70 }}>
+                  {describeRemoteTool(it)}
+                </Text>
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>{it.summary}</Text>
+                {!!it.result && <Icon name={shown === it.key ? 'chevron-down' : 'chevron-right'} size={11} color={c.inkFaint} />}
+              </View>
+              {shown === it.key && (
+                <Text selectable style={{ padding: 9, borderRadius: RADIUS, backgroundColor: c.surface2, fontFamily: FONTS.mono, fontSize: 11, lineHeight: 16, color: c.inkBody }}>
+                  {it.result}
+                </Text>
+              )}
+            </Pressable>
+          ))}
+        </View>
       )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -1217,6 +1277,3 @@ function SuggestionRow({ children, onPress }) {
   );
 }
 
-function firstLine(text) {
-  return String(text).split('\n')[0].slice(0, 120);
-}

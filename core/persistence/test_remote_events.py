@@ -95,3 +95,46 @@ def test_el_tope_por_sesion_conserva_los_ultimos(session_id, monkeypatch):
     for n in range(1, 26):
         q.save_remote_events(session_id, [{"type": "user_msg", "seq": n, "text": f"m{n}"}])
     assert [ev["seq"] for ev in q.list_remote_events(session_id)] == list(range(16, 26))
+
+
+def test_el_hello_actualiza_titulo_y_agente(session_id, user_id):
+    sess = q.update_remote_session_meta(session_id, "Arreglar el login", "claude", "lixbon")
+    assert (sess["title"], sess["agent"], sess["workspace"]) == ("Arreglar el login", "claude", "lixbon")
+    # Sin cambios no hay nada que avisar a la app.
+    assert q.update_remote_session_meta(session_id, "Arreglar el login", "claude", "lixbon") is None
+    q.end_remote_session(session_id)
+    assert q.update_remote_session_meta(session_id, "otro", None, None) is None
+
+
+def _age(session_id, days, ended=False):
+    from datetime import datetime, timedelta, timezone
+    old = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with q.get_session() as s:
+        r = s.get(models.RemoteSession, session_id)
+        r.last_seen_at = old
+        if ended:
+            r.status, r.ended_at = "ended", old
+
+
+def test_purga_las_sesiones_inactivas_mas_de_7_dias(user_id):
+    _, vieja = q.create_remote_session(user_id, "ide", "vieja", "host")
+    _, reciente = q.create_remote_session(user_id, "ide", "reciente", "host")
+    _, terminada = q.create_remote_session(user_id, "cli", "terminada", "host")
+    q.save_remote_events(vieja["id"], [{"type": "user_msg", "seq": 1, "text": "hola"}])
+    _age(vieja["id"], 8)
+    _age(reciente["id"], 6)
+    _age(terminada["id"], 10, ended=True)
+
+    assert q.purge_remote_sessions() == 2
+
+    ids = {sx["id"] for sx in q.list_remote_sessions(user_id)}
+    assert reciente["id"] in ids
+    assert not ids & {vieja["id"], terminada["id"]}
+    assert q.list_remote_events(vieja["id"]) == []
+
+
+def test_no_purga_una_sesion_terminada_hace_poco(user_id):
+    _, sess = q.create_remote_session(user_id, "ide", "x", "host")
+    _age(sess["id"], 9)
+    q.end_remote_session(sess["id"])
+    assert q.purge_remote_sessions() == 0

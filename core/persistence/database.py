@@ -109,6 +109,11 @@ def init_db() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_app_versions_product_version ON app_versions (product, version)",
         # Pagos en casa: recarga automática del saldo de créditos
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_enabled INTEGER NOT NULL DEFAULT 0",
+        # Lixbon Team: issues propias
+        "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS issues_prefijo TEXT",
+        "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS issues_contador BIGINT NOT NULL DEFAULT 0",
+        "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS issues_config TEXT",
+        "ALTER TABLE team_proyectos ADD COLUMN IF NOT EXISTS github_webhook_secreto TEXT",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_threshold_microusd BIGINT NOT NULL DEFAULT 0",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_pack_id TEXT",
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_payment_method TEXT",
@@ -125,6 +130,9 @@ def init_db() -> None:
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS session_credit_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0",
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS week_credit_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS week_anchor_slot INTEGER",
+        # /remote: qué agente maneja la sesión (Lixbon o Claude Code) y en qué carpeta
+        "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS agent TEXT",
+        "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS workspace TEXT",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:
