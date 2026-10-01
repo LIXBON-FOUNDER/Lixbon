@@ -60,6 +60,7 @@ let prevBackground = null;
 // Tools anunciadas mientras seguían en curso (índice del mensaje → id): su
 // resultado se manda cuando el mensaje deja de estar pendiente.
 let pendingTools = new Map();
+let prevCompacting = false;   // Claude Code está compactando la conversación
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -282,11 +283,12 @@ function startChannel(sessionId) {
   prevBtw = chat.ccBtw;
   prevBackground = chat.ccBackground || [];
   pendingTools = new Map();
+  prevCompacting = !!chat.ccCompacting;
 
   emitHello(true);
   emit('snapshot', { messages: mapSnapshot(chat.messages) });
   trackSnapshotPending(chat.messages);
-  emit('status', { state: chat.streaming ? 'thinking' : 'idle' });
+  emit('status', statusOf(chat));
   if (chat.pendingApproval) announceApproval(chat.pendingApproval);
   if (prevBackground.length) emitBackground(prevBackground);
 
@@ -377,8 +379,12 @@ function onChatChange(state) {
         setTimeout(() => sendRemotePrompt(next), 50);
       }
     } else {
-      emit('status', { state: 'thinking' });
+      emit('status', statusOf(state));
     }
+  }
+  if (!!state.ccCompacting !== prevCompacting) {
+    prevCompacting = !!state.ccCompacting;
+    emit('status', statusOf(state));
   }
 
   announceSidePanels(state);
@@ -410,6 +416,21 @@ function trackSnapshotPending(msgs) {
       n += 1;
     }
   });
+}
+
+// `activity` dice qué hace el agente cuando no hay texto ni tools que mostrar
+// (la compactación de Claude Code puede tardar un minuto).
+const statusOf = (chat) => (chat.streaming || chat.ccCompacting
+  ? { state: 'thinking', activity: chat.ccCompacting ? 'compacting' : null }
+  : { state: 'idle' });
+
+function compactNotice(m) {
+  const bits = [
+    m.trigger === 'auto' ? 'automáticamente' : null,
+    m.preTokens ? `${Math.round(m.preTokens / 1000)}k tokens resumidos` : null,
+    m.ms ? `${Math.max(1, Math.round(m.ms / 1000))} s` : null,
+  ].filter(Boolean);
+  return `Conversación compactada${bits.length ? ` · ${bits.join(' · ')}` : ''}`;
 }
 
 function settlePendingTools(msgs) {
@@ -445,6 +466,8 @@ function announceNew(m, index) {
     else emit('tool_result', { id, tool: m.tool, result: toolResult(m), error: m.ok === false });
   } else if (m.role === 'error') {
     emit('error', { message: m.content || '' });
+  } else if (m.role === 'compact') {
+    emit('notice', { text: compactNotice(m) });
   }
 }
 

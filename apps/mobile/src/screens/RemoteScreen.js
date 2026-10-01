@@ -577,6 +577,13 @@ function RemoteSessionView({ session, onBack, embedded }) {
           )}
         </View>
 
+        {state.activity === 'compacting' && thinking && !state.ended && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 16, paddingVertical: 6 }} accessibilityRole="progressbar">
+            <View style={{ width: 7, height: 7, borderRadius: 2, backgroundColor: c.accent }} />
+            <WaveText text="Compactando la conversación…" color={c.ink70} accent={c.accent} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 13 }} />
+          </View>
+        )}
+
         {state.approvals.map((a) => (
           <ApprovalCard key={a.id} approval={a} onDecide={approve} />
         ))}

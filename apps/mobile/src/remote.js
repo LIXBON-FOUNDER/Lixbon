@@ -89,6 +89,7 @@ export const initialRemoteState = {
   items: [],
   approvals: [], // [{ id, tool, summary, risk }]
   agentState: 'idle', // idle | thinking
+  activity: null, // 'compacting' mientras Claude Code compacta
   hostConnected: false,
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
@@ -233,7 +234,7 @@ export function remoteReducer(state, ev) {
       return { ...s, items };
     }
     case 'status':
-      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle' };
+      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle', activity: ev.state === 'thinking' ? ev.activity || null : null };
     case 'approval_request':
       if (s.approvals.some((a) => a.id === ev.id)) return s;
       return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit' }] };
