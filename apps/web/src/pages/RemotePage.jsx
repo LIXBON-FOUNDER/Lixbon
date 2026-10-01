@@ -6,7 +6,7 @@
 // Transcript en vivo (SSE), envío de prompts, interrupción y aprobaciones.
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Link, useNavigate } from '../i18n/link';
 import { useT } from '../i18n/useT';
@@ -268,6 +268,13 @@ const ACCEPT = [
 ].join(',');
 const MAX_ADJUNTOS = 6;
 const MENTION_AT_END = /(^|\s)@([^\s@]*)$/;
+// Los mismos grupos que el menú «/» del IDE y del móvil.
+const COMMAND_GROUPS = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills', orch: 'Orquestar' };
+const FALLBACK_COMMANDS = [
+  { name: 'help', args: '', description: 'Ver los comandos disponibles' },
+  { name: 'new', args: '', description: 'Empezar una conversación nueva' },
+  { name: 'status', args: '', description: 'Estado de la sesión y del host' },
+];
 let siguienteAdjunto = 0;
 
 function RemoteComposer({ state, sendCommand, t, tc }) {
@@ -305,6 +312,28 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
     ? state.files.items.filter((f) => !mentions.some((m) => m.path === f.path)).slice(0, 8)
     : [];
 
+  // El menú «/» aparece mientras se escribe el nombre (antes del primer
+  // espacio); a partir de ahí lo que se teclea es el argumento.
+  const commands = state.meta?.commands?.length ? state.meta.commands : FALLBACK_COMMANDS;
+  const slashQuery = !disabled && input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null;
+  const slashMatches = useMemo(
+    () => (slashQuery == null ? [] : commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery)).slice(0, 60)),
+    [slashQuery, commands],
+  );
+  const [slashIdx, setSlashIdx] = useState(0);
+  useEffect(() => { setSlashIdx(0); }, [slashQuery]);
+  const slashListRef = useRef(null);
+  useEffect(() => {
+    slashListRef.current?.querySelector('.is-active')?.scrollIntoView({ block: 'nearest' });
+  }, [slashIdx]);
+
+  // Como en el IDE: sin argumento se envía de una; con argumento se deja el
+  // nombre escrito para completarlo.
+  const pickCommand = (cmd) => {
+    if (cmd.args) { setInput(`/${cmd.name} `); textRef.current?.focus(); return; }
+    enviar(null, `/${cmd.name}`);
+  };
+
   const pickMention = (file) => {
     setInput((cur) => cur.replace(MENTION_AT_END, '$1'));
     setMentions((cur) => (cur.some((m) => m.path === file.path) ? cur : [...cur, file]));
@@ -336,9 +365,9 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
     }
   };
 
-  const enviar = async (e) => {
+  const enviar = async (e, override) => {
     e?.preventDefault();
-    const text = input.trim();
+    const text = (override ?? input).trim();
     if ((!text && !listos.length) || disabled || sending || leyendo) return;
     // Un host sin adjuntos solo entiende texto: los documentos van dentro del
     // mensaje, como en el chat.
@@ -368,6 +397,20 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
   };
 
   const onKeyDown = (e) => {
+    if (slashMatches.length) {
+      const n = slashMatches.length;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx((i) => (i + 1) % n); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx((i) => (i - 1 + n) % n); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setInput(''); return; }
+      if ((e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) || e.key === 'Tab') {
+        const cmd = slashMatches[Math.min(slashIdx, n - 1)];
+        // Con el nombre ya completo y Enter, se envía tal cual.
+        if (e.key === 'Enter' && input.slice(1).toLowerCase() === cmd.name.toLowerCase()) { e.preventDefault(); enviar(); return; }
+        e.preventDefault();
+        pickCommand(cmd);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       if (sugerencias.length) { e.preventDefault(); pickMention(sugerencias[0]); return; }
       e.preventDefault();
@@ -383,6 +426,29 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setArrastrando(false); }}
       onDrop={(e) => { e.preventDefault(); setArrastrando(false); if (!disabled) añadir(e.dataTransfer.files); }}
     >
+      {slashMatches.length > 0 && (
+        <div className="remote__mentions remote__slash" role="listbox" ref={slashListRef} aria-label={t('commandsLabel')}>
+          {slashMatches.map((cmd, i) => (
+            <Fragment key={`${cmd.group || ''}${cmd.name}`}>
+              {cmd.group && cmd.group !== slashMatches[i - 1]?.group && (
+                <div className="remote__slash-group">{COMMAND_GROUPS[cmd.group] || cmd.group}</div>
+              )}
+              <button
+                type="button"
+                role="option"
+                aria-selected={i === slashIdx}
+                className={`remote__mention ${i === slashIdx ? 'is-active' : ''}`}
+                onMouseEnter={() => setSlashIdx(i)}
+                onMouseDown={(e) => { e.preventDefault(); pickCommand(cmd); }}
+              >
+                <span className="remote__slash-name">/{cmd.name}</span>
+                {cmd.args && <span className="remote__slash-args">{cmd.args}</span>}
+                <span className="remote__mention-rel remote__slash-desc">{cmd.description}</span>
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      )}
       {sugerencias.length > 0 && (
         <div className="remote__mentions" role="listbox">
           {sugerencias.map((f) => (
@@ -611,7 +677,15 @@ function RemoteSession({ session, t, tc }) {
             </div>
           );
         })}
-        {!state.items.length && (
+        {state.activity === 'compacting' && state.agentState === 'thinking' && !state.ended && (
+          <div className="actline-group">
+            <div className="actline is-running" role="status">
+              <span className="actline__icon" aria-hidden="true"><span className="actline__pulse" /></span>
+              <WaveText text={t('compacting')} className="actline__text" />
+            </div>
+          </div>
+        )}
+        {!state.items.length && state.activity !== 'compacting' && (
           <p className="remote__dim remote__hint">
             {state.hostConnected ? t('hintConnected') : t('hintWaiting')}
           </p>
