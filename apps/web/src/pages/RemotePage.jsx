@@ -15,6 +15,7 @@ import { initialRemoteState, openEventStream, remoteReducer } from '../lib/remot
 import { Logo } from '../components/Logo';
 import { Markdown } from '../components/Markdown';
 import { WaveText } from '../components/WaveText';
+import { RemoteOrch } from '../components/RemoteOrch';
 import { IconChevron, IconClip, IconFile, IconImage, IconSend, IconStop, IconX } from '../components/Icons';
 import { useLocale } from '../i18n/LocaleContext';
 import { describeRemoteTool, summarizeRemoteTools } from '../lib/toolText';
@@ -416,6 +417,7 @@ function RemoteSession({ session, t, tc }) {
   const locale = useLocale();
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
   const [sendError, setSendError] = useState('');
+  const [tab, setTab] = useState('chat');
   const seqRef = useRef(0);
   const threadRef = useRef(null);
   const stick = useRef(true);
@@ -495,6 +497,8 @@ function RemoteSession({ session, t, tc }) {
   }, [session.id, t]);
 
   const title = state.meta?.title || session.title || t('defaultSessionTitle');
+  const canOrch = !archived && (state.meta?.capabilities || []).includes('orch');
+  const orchBusy = !!state.orch?.tasks?.some((x) => !['done', 'failed', 'stopped', 'exited'].includes(x.status));
   const statusLabel = state.ended
     ? t('sessionEndedStatus')
     : !state.hostConnected
@@ -514,9 +518,22 @@ function RemoteSession({ session, t, tc }) {
             {' · '}{statusLabel}
           </p>
         </div>
+        {canOrch && (
+          <div className="rseg remote__tabs" role="tablist">
+            {[['chat', t('tabChat')], ['orch', t('tabOrch')]].map(([v, label]) => (
+              <button key={v} type="button" role="tab" aria-selected={tab === v} className={tab === v ? 'is-on' : ''} onClick={() => setTab(v)}>
+                {label}
+                {v === 'orch' && orchBusy && <span className="remote__tab-dot" />}
+              </button>
+            ))}
+          </div>
+        )}
         <span className={`remote__dot remote__dot--lg ${state.hostConnected && !state.ended ? 'is-online' : ''}`} />
       </div>
 
+      {canOrch && tab === 'orch' ? (
+        <div className="remote__thread remote__thread--orch"><RemoteOrch state={state} sendCommand={sendCommand} /></div>
+      ) : (
       <div className="remote__thread" ref={threadRef} onScroll={onScroll}>
         {groupItems(state.items).map((item) => {
           if (item.kind === 'tools') return <ToolLine key={item.key} items={item.items} t={t} locale={locale} />;
@@ -551,6 +568,7 @@ function RemoteSession({ session, t, tc }) {
           </p>
         )}
       </div>
+      )}
 
       <div className="remote__dock">
         {state.approvals.map((a) => (
