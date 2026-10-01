@@ -142,6 +142,12 @@ export function runCommand(command, timeoutMs, cwd) {
   return invoke('run_command', { command, timeoutMs: timeoutMs ?? null, cwd: cwd ?? null });
 }
 
+/** Ejecuta la CLI `gh` con argumentos sueltos (sin shell) y devuelve la
+    salida completa, sin recortes: {stdout, stderr, code, timed_out}. */
+export function ghExec(args, timeoutMs) {
+  return invoke('gh_exec', { args, timeoutMs: timeoutMs ?? null });
+}
+
 // ── Plugins ───────────────────────────────────────────────────────────
 
 /** Abre el selector nativo de carpetas. Devuelve la ruta o null si se cancela. */
