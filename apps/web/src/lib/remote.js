@@ -45,6 +45,7 @@ export const initialRemoteState = {
   agentState: 'idle',
   hostConnected: false,
   meta: null,
+  files: null,
   session: null,
   ended: false,
   lastSeq: 0,
@@ -61,7 +62,7 @@ function mapSnapshotMessages(messages) {
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
       items.push(withKey({
-        kind: 'tool', tool: m.tool || 'tool', summary: '',
+        kind: 'tool', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '',
         result: m.content || '', error: m.ok === false, running: false,
       }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
@@ -98,11 +99,27 @@ export function remoteReducer(state, ev) {
         meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
       };
     case 'hello':
-      return { ...s, meta: { source: ev.source, title: ev.title, machine: ev.machine, mode: ev.mode, model: ev.model } };
+      return {
+        ...s,
+        meta: {
+          source: ev.source, agent: ev.agent || null, title: ev.title, workspace: ev.workspace || null,
+          machine: ev.machine, mode: ev.mode, model: ev.model,
+          capabilities: Array.isArray(ev.capabilities) ? ev.capabilities : [],
+        },
+      };
+    case 'files':
+      return { ...s, files: { query: ev.query || '', items: Array.isArray(ev.items) ? ev.items : [] } };
+    case 'notice':
+      return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'notice', text: ev.text || '' })] };
     case 'snapshot':
       return { ...s, items: mapSnapshotMessages(ev.messages) };
     case 'user_msg':
-      return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'user', text: ev.text || '', origin: ev.origin })] };
+      return {
+        ...s,
+        items: [...closeOpenAssistant(s.items), withKey({
+          kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [],
+        })],
+      };
     case 'assistant_delta': {
       const items = [...s.items];
       const idx = lastIdx(items, (it) => it.kind === 'assistant' && it.open);
@@ -133,7 +150,7 @@ export function remoteReducer(state, ev) {
       return {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
-          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '',
+          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
           readonly: !!ev.readonly, running: true, result: '', error: false,
         })],
       };
