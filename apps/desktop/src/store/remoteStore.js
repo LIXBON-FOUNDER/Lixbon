@@ -18,6 +18,7 @@ import { runCommand } from '../lib/commands';
 import { listFiles } from '../lib/tauri';
 import { fuzzyScore } from '../lib/fuzzy';
 import { claudeMenuEntries, parseSlash } from '../lib/claudeCommands';
+import { claudeModelOptions } from '../lib/claudeCode';
 import { CLAUDE_IDE_CARDS } from '../chat/slashCommands';
 import { remoteCard } from '../lib/remoteCards';
 import { startOrchBridge, stopOrchBridge, handleOrchAction, republishOrch, prepareRemoteOrchestrate } from '../lib/remoteOrch';
@@ -27,7 +28,7 @@ const RESULT_CHARS = 600;
 const SNAPSHOT_MSGS = 80;
 const MACHINE = 'Lixbon IDE';
 // Lo que el móvil puede mandar con un prompt; un host sin esto solo recibe texto.
-const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch'];
+const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch', 'config'];
 const FILE_RESULTS = 30;
 const FILES_TTL_MS = 30_000;
 const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };
@@ -37,6 +38,7 @@ let buffer = [];              // eventos pendientes de POST
 let flushTimer = null;
 let readerAbort = null;       // AbortController del SSE de comandos
 let unsubChat = null;
+let unsubApp = null;
 let prevMessages = [];
 let prevStreaming = false;
 let assistantOpen = false;    // hay una burbuja de asistente en streaming
@@ -130,6 +132,27 @@ function commandsOf(chat) {
   return list.some((c) => c.name === 'orquestar') ? list : [ORCH_COMMAND, ...list];
 }
 
+/** Modelos y esfuerzos que el remoto puede elegir, los mismos del composer. */
+function modelChoices(chat, app, agent) {
+  if (agent === 'claude') {
+    const models = claudeModelOptions(chat.ccModels, chat.ccModel).map((m) => ({ value: m.value, label: m.label }));
+    const cur = (chat.ccModels || []).find((x) => (chat.ccModel ? x.value === chat.ccModel : x.value === 'default'));
+    const levels = cur?.supportsEffort && Array.isArray(cur.supportedEffortLevels) ? cur.supportedEffortLevels : [];
+    return {
+      models,
+      model_value: chat.ccModel || '',
+      efforts: levels.length ? ['auto', ...levels] : [],
+      effort: levels.length ? (['auto', ...levels].includes(chat.ccEffort) ? chat.ccEffort : 'auto') : null,
+    };
+  }
+  return {
+    models: (app.availableModels || []).map((m) => ({ value: m.id, label: m.id })),
+    model_value: app.currentModel || '',
+    efforts: [],
+    effort: null,
+  };
+}
+
 function helloFields() {
   const chat = useChatStore.getState();
   const app = useAppStore.getState();
@@ -145,12 +168,13 @@ function helloFields() {
     model: agent === 'claude' ? chat.ccModel || 'default' : app.currentModel,
     commands: commandsOf(chat).map(({ name, args = '', description, group }) => ({ name, args, description, group })),
     capabilities: CAPABILITIES,
+    ...modelChoices(chat, app, agent),
   };
 }
 
 function emitHello(force = false) {
   const hello = helloFields();
-  const key = [hello.agent, hello.title, hello.workspace, hello.mode, hello.model, hello.commands.length].join('|');
+  const key = [hello.agent, hello.title, hello.workspace, hello.mode, hello.model, hello.model_value, hello.effort, hello.models.length, hello.efforts.length, hello.commands.length].join('|');
   if (!force && key === lastHelloKey) return;
   lastHelloKey = key;
   emit('hello', hello);
@@ -260,6 +284,11 @@ function startChannel(sessionId) {
   if (prevBackground.length) emitBackground(prevBackground);
 
   unsubChat = useChatStore.subscribe(onChatChange);
+  // El modelo de Lixbon vive en appStore: al cambiarlo (aquí o desde el remoto)
+  // el hello lo cuenta.
+  unsubApp = useAppStore.subscribe((s, prev) => {
+    if (s.currentModel !== prev.currentModel || s.availableModels !== prev.availableModels) emitHello();
+  });
   startOrchBridge(emit);
   flushTimer = setInterval(flushEvents, FLUSH_MS);
   readCommands(sessionId);
@@ -267,6 +296,7 @@ function startChannel(sessionId) {
 
 function stopChannel() {
   if (unsubChat) { unsubChat(); unsubChat = null; }
+  if (unsubApp) { unsubApp(); unsubApp = null; }
   stopOrchBridge();
   if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
   if (readerAbort) { readerAbort.abort(); readerAbort = null; }
@@ -514,6 +544,23 @@ async function searchFiles(query) {
   });
 }
 
+/** Modelo o esfuerzo elegidos desde el remoto: solo valores que el composer
+    del IDE también ofrece. El nuevo hello confirma el cambio al controller. */
+function applyRemoteConfig(cmd) {
+  const chat = useChatStore.getState();
+  const app = useAppStore.getState();
+  const agent = agentOf(chat);
+  const choices = modelChoices(chat, app, agent);
+  if (typeof cmd.model === 'string' && choices.models.some((m) => m.value === cmd.model)) {
+    if (agent === 'claude') chat.setCcModel(cmd.model); else app.setCurrentModel(cmd.model);
+  }
+  const after = modelChoices(useChatStore.getState(), useAppStore.getState(), agent);
+  if (typeof cmd.effort === 'string' && agent === 'claude' && after.efforts.includes(cmd.effort)) {
+    useChatStore.getState().setCcEffort(cmd.effort);
+  }
+  emitHello(true);
+}
+
 function handleCommand(cmd) {
   const chat = useChatStore.getState();
   switch (cmd.type) {
@@ -539,6 +586,9 @@ function handleCommand(cmd) {
       break;
     case 'orch':
       handleOrchAction(cmd.action, cmd.args || {});
+      break;
+    case 'config':
+      applyRemoteConfig(cmd);
       break;
     case 'bye':
       useRemoteStore.getState()._endedRemotely();
