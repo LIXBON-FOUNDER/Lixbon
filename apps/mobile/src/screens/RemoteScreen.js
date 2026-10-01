@@ -27,6 +27,7 @@ import {
   FadeUp,
   IconButton,
   KeyboardAware,
+  Segmented,
   agentStyle,
   useColors,
   useKeyboardOpen,
@@ -35,6 +36,7 @@ import {
 import { initialRemoteState, openEventStream, remoteReducer } from '../remote';
 import { describeRemoteTool, summarizeRemoteTools } from '../toolText';
 import WaveText from '../components/WaveText';
+import RemoteOrch from './RemoteOrch';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS, RADIUS_BOX } from '../theme';
 
@@ -537,14 +539,31 @@ function RemoteSessionView({ session, onBack, embedded }) {
 
   const items = useMemo(() => groupItems(state.items).reverse(), [state.items]);
   const thinking = state.agentState === 'thinking';
+  const [tab, setTab] = useState('chat');
+  const canOrch = !state.ended && (state.meta?.capabilities || []).includes('orch');
+  const orchBusy = !!state.orch?.tasks?.some((x) => !['done', 'failed', 'stopped', 'exited'].includes(x.status));
 
   return (
     <SafeAreaView edges={embedded ? [] : ['top']} style={{ flex: 1, backgroundColor: embedded ? 'transparent' : c.bg }}>
       <KeyboardAware>
         <SessionHeader session={session} state={state} agent={agent} onBack={onBack} onOptions={options} />
 
+        {canOrch && (
+          <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+            <Segmented
+              stretch
+              size="sm"
+              value={tab}
+              onChange={setTab}
+              options={[{ value: 'chat', label: 'Conversación' }, { value: 'orch', label: orchBusy ? 'Orquestar ·' : 'Orquestar' }]}
+            />
+          </View>
+        )}
+
         <View style={{ flex: 1 }}>
-          {state.items.length === 0 ? (
+          {canOrch && tab === 'orch' ? (
+            <RemoteOrch state={state} sendCommand={sendCommand} />
+          ) : state.items.length === 0 ? (
             <SessionEmpty state={state} agent={agent} />
           ) : (
             <FlatList

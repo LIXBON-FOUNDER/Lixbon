@@ -92,6 +92,12 @@ export const initialRemoteState = {
   hostConnected: false,
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
+  // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
+  orch: null,
+  orchDiff: {},
+  orchTerm: {},
+  orchAgents: null,
+  orchError: null,
   session: null,
   ended: false,
   lastSeq: 0,
@@ -137,7 +143,18 @@ export function remoteReducer(state, ev) {
         hostConnected: !!ev.host_connected,
         session: ev.session || s.session,
         meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
+        orch: ev.orch || s.orch,
       };
+    case 'orch':
+      return { ...s, orch: ev };
+    case 'orch_diff':
+      return { ...s, orchDiff: { ...s.orchDiff, [ev.task]: ev } };
+    case 'orch_term':
+      return { ...s, orchTerm: { ...s.orchTerm, [ev.task]: ev } };
+    case 'orch_agents':
+      return { ...s, orchAgents: Array.isArray(ev.agents) ? ev.agents : [] };
+    case 'orch_error':
+      return { ...s, orchError: { message: ev.message || 'Error', action: ev.action, at: Date.now() } };
     case 'hello':
       return {
         ...s,
