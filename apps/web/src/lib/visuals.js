@@ -23,6 +23,50 @@ export const TIPOS = [
     prefijo: { es: 'Crea un prototipo navegable de varias pantallas para: ', en: 'Create a navigable multi-screen prototype for: ' } },
 ];
 
+// Ideas de encargo bajo el campo de la galería: unas generales y unas por tipo.
+export const IDEAS = {
+  general: {
+    es: ['Una landing para una cafetería de especialidad en Lisboa', 'Un dashboard de ventas con KPIs, gráfica mensual y tabla de pedidos', 'Un prototipo de app para reservar pistas de pádel'],
+    en: ['A landing page for a specialty coffee shop in Lisbon', 'A sales dashboard with KPIs, a monthly chart and an orders table', 'A prototype of an app to book padel courts'],
+  },
+  landing: {
+    es: ['Estudio de arquitectura: sobrio, mucho blanco, proyectos a sangre', 'App de finanzas personales para jóvenes, tono cercano', 'Festival de música electrónica: oscuro, tipografía enorme'],
+    en: ['Architecture studio: restrained, lots of white, full-bleed projects', 'Personal finance app for young people, friendly tone', 'Electronic music festival: dark, huge type'],
+  },
+  componente: {
+    es: ['Tabla de precios con tres planes y conmutador mensual/anual', 'Formulario de registro con validación y estados de error', 'Tarjeta de producto con galería, variantes y botón de compra'],
+    en: ['Pricing table with three plans and a monthly/yearly toggle', 'Sign-up form with validation and error states', 'Product card with gallery, variants and a buy button'],
+  },
+  dashboard: {
+    es: ['Panel de una tienda online: ventas, pedidos, stock bajo', 'Monitor de servidores con uso de CPU, memoria y alertas', 'CRM con embudo de ventas y actividad reciente'],
+    en: ['Online store panel: sales, orders, low stock', 'Server monitor with CPU, memory usage and alerts', 'CRM with a sales funnel and recent activity'],
+  },
+  email: {
+    es: ['Bienvenida a una plataforma de cursos online', 'Factura con desglose de conceptos e IVA', 'Newsletter mensual de una librería independiente'],
+    en: ['Welcome email for an online course platform', 'Invoice with itemized lines and tax', 'Monthly newsletter for an independent bookshop'],
+  },
+  logo: {
+    es: ['Logotipo para «Raíz», una panadería de masa madre', 'Icono de app para un gestor de tareas minimalista', 'Ilustración de un faro al atardecer, estilo plano'],
+    en: ['Logo for "Raíz", a sourdough bakery', 'App icon for a minimalist task manager', 'Flat illustration of a lighthouse at sunset'],
+  },
+  prototipo: {
+    es: ['App de recetas: inicio, receta y lista de la compra', 'Registro en tres pasos para una app de banca', 'App de viajes: búsqueda, resultados y reserva'],
+    en: ['Recipe app: home, recipe and shopping list', 'Three-step sign-up for a banking app', 'Travel app: search, results and booking'],
+  },
+  imagen: {
+    es: ['Bodegón de cerámica sobre lino, luz de ventana', 'Paisaje alpino al amanecer, fotografía analógica', 'Retrato de un gato con gafas, ilustración editorial'],
+    en: ['Ceramic still life on linen, window light', 'Alpine landscape at dawn, analog photography', 'Portrait of a cat wearing glasses, editorial illustration'],
+  },
+};
+
+/** Anchos de vista previa del editor; 0 = el que deje el lienzo. */
+export const ANCHOS = [
+  { id: 'ajustar', ancho: 0 },
+  { id: 'escritorio', ancho: 1280 },
+  { id: 'tablet', ancho: 820 },
+  { id: 'movil', ancho: 390 },
+];
+
 export const VISUALS_PROMPT = `Eres el diseñador de interfaces de Lixbon Visuals. Produces diseños reales, no maquetas genéricas.
 
 FORMATO (obligatorio):
@@ -375,12 +419,6 @@ export function extraerImagen(texto) {
 export function esConversacionDeImagenes(messages) {
   return messages.some((m) => m.role === 'assistant' && extraerImagen(m.content));
 }
-
-export const DISPOSITIVOS = [
-  { id: 'movil', label: 'Móvil', ancho: 390 },
-  { id: 'tablet', label: 'Tablet', ancho: 820 },
-  { id: 'escritorio', label: 'Escritorio', ancho: 0 },
-];
 
 /** Versiones de una conversación: cada respuesta con archivos (o imagen).
  *  Las páginas que una respuesta no reescribe se heredan de la anterior. */
