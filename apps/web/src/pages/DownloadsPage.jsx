@@ -99,8 +99,11 @@ export default function DownloadsPage() {
   const t = useT('downloads');
   useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/apps' });
   const [escritorio, setEscritorio] = useState(null);
+  const [escritorioMac, setEscritorioMac] = useState(null);
   const [android, setAndroid] = useState(null);
   const [os, setOs] = useState('windows');
+  // Plataforma de la app de escritorio (la pestaña del CLI tiene la suya).
+  const [plataforma, setPlataforma] = useState('windows');
 
   // Origen del gateway (para los comandos de instalación del CLI)
   const base = useMemo(() => (typeof window === 'undefined' ? 'https://lixbon.com' : window.location.origin), []);
@@ -110,12 +113,14 @@ export default function DownloadsPage() {
       .then((res) => {
         const lista = Array.isArray(res.data) ? res.data : [];
         setEscritorio(versionesDe(lista, 'desktop'));
+        setEscritorioMac(versionesDe(lista, 'desktop-mac'));
         setAndroid(versionesDe(lista, 'android'));
       })
-      .catch(() => { setEscritorio([]); setAndroid([]); });
+      .catch(() => { setEscritorio([]); setEscritorioMac([]); setAndroid([]); });
     if (/Mac|Linux|X11/.test(navigator.platform) && !/Win/.test(navigator.platform)) {
       setOs('unix');
     }
+    if (/Mac/.test(navigator.platform)) setPlataforma('mac');
   }, []);
 
   const winCmd = `irm ${base}/install.ps1 | iex`;
@@ -145,7 +150,30 @@ export default function DownloadsPage() {
                 <li><IconCheck size={15} /> {t('desktopFeature3')}</li>
               </ul>
               <div className="dl-card__bottom">
-                <SelectorVersion versiones={escritorio} producto="desktop" requisitos="Windows 10/11 (64 bits)" t={t} />
+                <div className="os-tabs dl-card__plataformas" role="tablist" aria-label={t('platform')}>
+                  <button
+                    role="tab" aria-selected={plataforma === 'windows'}
+                    className={`os-tab ${plataforma === 'windows' ? 'is-active' : ''}`}
+                    onClick={() => setPlataforma('windows')}
+                  >
+                    Windows
+                  </button>
+                  <button
+                    role="tab" aria-selected={plataforma === 'mac'}
+                    className={`os-tab ${plataforma === 'mac' ? 'is-active' : ''}`}
+                    onClick={() => setPlataforma('mac')}
+                  >
+                    macOS
+                  </button>
+                </div>
+                {plataforma === 'mac' ? (
+                  <>
+                    <SelectorVersion key="mac" versiones={escritorioMac} producto="desktop-mac" requisitos={t('macRequirements')} t={t} />
+                    {!!escritorioMac?.length && <span className="dl-card__meta">{t('macUnsigned')}</span>}
+                  </>
+                ) : (
+                  <SelectorVersion key="win" versiones={escritorio} producto="desktop" requisitos="Windows 10/11 (64 bits)" t={t} />
+                )}
               </div>
             </section>
 

@@ -1725,3 +1725,6 @@
   .soporte__tipos, .soporte__dos { grid-template-columns: 1fr; }
   .soporte__hecho { padding: 28px 22px; }
 }
+
+/* Selector Windows / macOS dentro de la tarjeta de escritorio. */
+.dl-card__plataformas { align-self: flex-start; }
