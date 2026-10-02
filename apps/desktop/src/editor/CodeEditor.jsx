@@ -11,7 +11,8 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { indentOnInput, bracketMatching, foldGutter, foldKeymap, indentUnit } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { lixbonTheme, lixbonHighlight } from './cmTheme';
+import { cmThemeFor } from './cmTheme';
+import { themeMode, watchTheme } from './themeMode';
 import { loadLanguage } from './languages';
 import { inlineEditExtension } from './inlineState';
 import { agentReviewExtension, setBaseline, reviewBaseline } from './agentReview';
@@ -28,6 +29,7 @@ const langC = new Compartment();
 const tabC = new Compartment();
 const wrapC = new Compartment();
 const sizeC = new Compartment();
+const themeC = new Compartment();
 
 const tabExt = (n) => [EditorState.tabSize.of(n), indentUnit.of(' '.repeat(n))];
 const sizeExt = (px) => EditorView.theme({ '&': { fontSize: `${px}px` } });
@@ -80,8 +82,7 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
       agentReviewExtension,
       diagnosticsExtension,
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab]),
-      lixbonTheme,
-      lixbonHighlight,
+      themeC.of(cmThemeFor(themeMode())),
       langC.of([]),
       tabC.of(tabExt(options.tabSize)),
       wrapC.of(options.wordWrap ? EditorView.lineWrapping : []),
@@ -102,9 +103,13 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
   useEffect(() => {
     viewRef.current = new EditorView({ parent: hostRef.current, state: EditorState.create({ doc: '' }) });
     activeView = viewRef.current;
+    const stopThemeWatch = watchTheme((mode) => {
+      viewRef.current?.dispatch({ effects: themeC.reconfigure(cmThemeFor(mode)) });
+    });
     const onReviewEvent = (e) => cbs.current.onReview?.(e.detail.action, e.detail.index);
     viewRef.current.dom.addEventListener('lx-review', onReviewEvent);
     return () => {
+      stopThemeWatch();
       activeView = null;
       if (pathRef.current) states.set(pathRef.current, viewRef.current.state);
       viewRef.current.destroy();
@@ -120,6 +125,7 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
     pathRef.current = path;
     view.setState(states.get(path) || makeState(content));
     applyOptions(view, options);
+    view.dispatch({ effects: themeC.reconfigure(cmThemeFor(themeMode())) });
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
     cbs.current.onCursor?.({ line: line.number, col: head - line.from + 1, selected: 0 });
