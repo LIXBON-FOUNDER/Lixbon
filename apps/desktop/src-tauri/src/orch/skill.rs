@@ -195,7 +195,7 @@ abrir Lixbon y activar Ajustes → Orquestador. No lo simules con otros subagent
 ## 2. Lanza al adversario
 
 1. `lxo status`. Si dice que no eres una tarea, crea un run:
-   `lxo run create --objective "Revisión adversarial: <qué se ataca>"`.
+   `lxo run create --objective "Revisión adversarial: <qué se ataca>" --agent <tu agente>`.
    Si eres una tarea hija (`LXO_TASK_ID`), mira `lxo status --json`: con `can_spawn` puedes lanzarlo
    como hija tuya; si no, pídeselo a tu coordinador con `lxo ask`.
 2. Haz commit de lo que deba ver: parte de tu último commit, no de los cambios sin guardar.
@@ -217,6 +217,7 @@ diff nuevo. Lo que siga sin resolverse, cuéntaselo al usuario.
 ## 4. Informa al usuario
 
 Qué hallazgos se corrigieron, cuáles se descartaron y por qué, y qué queda abierto.
+Si creaste el run en el paso 2, ciérralo con `lxo run close`.
 "#
     )
 }
