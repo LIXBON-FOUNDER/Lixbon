@@ -9,7 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionsStore } from '../store/chatStore';
 import { leerMascota, personajeDe } from '../lib/mascota';
-import { preguntaFinal } from './mascotaAgente';
+import { preguntaFinal } from './estadoAgente';
 
 const POSPONER_MIN = 10;
 

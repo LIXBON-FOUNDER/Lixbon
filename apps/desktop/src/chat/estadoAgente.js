@@ -1,4 +1,4 @@
-// mascotaAgente.js — lo que la mascota necesita saber del agente, leído de los
+// estadoAgente.js — lo que la mascota necesita saber del agente, leído de los
 // mensajes de la sesión (sirve igual para el agente de Lixbon y Claude Code):
 // si piensa o escribe, cuántos pasos lleva en este turno y qué propone hacer
 // después cuando termina.

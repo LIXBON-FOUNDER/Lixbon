@@ -14,7 +14,7 @@ import { useChatStore, useSessionsStore } from '../store/chatStore';
 import { NOMBRES, alAzar, duracion, personajeDe, useMascota } from '../lib/mascota';
 import { SpriteMascota, Bocadillo } from '../components/Mascota';
 import { useAccion, useBocadillo, useCaminata, useGestos, useInactivo } from '../components/mascotaVida';
-import { actividadDe, animacionDeTrabajo, preguntaFinal } from './mascotaAgente';
+import { actividadDe, animacionDeTrabajo, preguntaFinal } from './estadoAgente';
 import { FRASES, saludoDeLaHora } from './mascotaFrases';
 
 function useActividad() {
