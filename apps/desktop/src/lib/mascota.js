@@ -24,7 +24,19 @@ export const MASCOTA_DEFAULTS = {
 };
 
 // Cuadros de cada tira (public/mascotas/<personaje>-<estado>.png).
-export const CUADROS = { idle: 2, type: 2, think: 1, sleep: 2, point: 1, wave: 2, whip: 3, kart: 2 };
+export const CUADROS = {
+  idle: 12, talk: 4, look: 8, walk: 6, wave: 4, celebrate: 4, stretch: 4, scratch: 2,
+  think: 2, point: 2, type: 2, sleep: 2, whip: 3, kart: 2,
+};
+// Milisegundos por cuadro: el ritmo de cada animación (igual que en la web).
+export const MS_CUADRO = {
+  idle: 220, talk: 130, look: 280, walk: 110, wave: 170, celebrate: 150, stretch: 420, scratch: 220,
+  think: 480, point: 420, type: 180, sleep: 1200, whip: 250, kart: 120,
+};
+/** Lo que dura una vuelta completa de una animación. */
+export const duracion = (estado) => (CUADROS[estado] || 1) * (MS_CUADRO[estado] || 200);
+/** Un elemento al azar de una lista. */
+export const alAzar = (v) => (Array.isArray(v) ? v[Math.floor(Math.random() * v.length)] : v);
 export const NOMBRES = { gael: 'Gael', leya: 'Leya' };
 
 const oyentes = new Set();

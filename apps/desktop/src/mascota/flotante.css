@@ -32,7 +32,8 @@ html, body.mascota-ventana, .mascota-ventana #root {
   background: var(--ink);
   color: var(--bg);
   box-shadow: 0 -3px 0 0 var(--ink), 0 3px 0 0 var(--ink), -3px 0 0 0 var(--ink), 3px 0 0 0 var(--ink);
-  animation: mascota-pop 0.3s steps(3) both;
+  transform-origin: calc(100% + 10px) calc(100% - 22px);
+  animation: mascota-abre 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 /* Cola hacia la mascota, abajo a la derecha. */
 .flotante__bocadillo::after {
@@ -61,7 +62,7 @@ html, body.mascota-ventana, .mascota-ventana #root {
   opacity: 0.6;
 }
 
-.flotante__texto { margin: 0; font-size: 13.5px; line-height: 1.4; }
+.flotante__texto { display: grid; margin: 0; font-size: 13.5px; line-height: 1.4; }
 
 .flotante__grito {
   margin: 0;
