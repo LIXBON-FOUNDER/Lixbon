@@ -267,6 +267,11 @@ impl Core {
         if matches!(caller, Caller::Agent(_)) && !self.settings().enabled {
             return Err("El orquestador está desactivado: actívalo en Lixbon → Ajustes → Orquestador".into());
         }
+        if let Caller::Agent(Some(id)) = &caller {
+            if b(args, "session") && cmd != "run_create" && !self.lock().tasks.contains_key(id) {
+                return Err("sesion-obsoleta".into());
+            }
+        }
         match cmd {
             "status" => {
                 let st = self.lock();
@@ -286,7 +291,10 @@ impl Core {
             }
             "run_create" => {
                 if let Caller::Agent(Some(id)) = &caller {
-                    return Err(format!("Ya eres la tarea {id}: crea hijos directamente con lxo spawn"));
+                    if !b(args, "session") {
+                        return Err(format!("Ya eres la tarea {id}: crea hijos directamente con lxo spawn"));
+                    }
+                    self.lock().session_replaceable(id)?;
                 }
                 let objective = s(args, "objective");
                 if objective.is_empty() {
@@ -470,6 +478,18 @@ impl Core {
                 Ok(json!({ "task": id, "status": "stopped" }))
             }
             "release" => self.release(&caller, &s(args, "task"), b(args, "force")),
+            "run_close" => {
+                let me = Self::me(&caller)?;
+                let run = {
+                    let st = self.lock();
+                    let t = st.task(&me)?;
+                    if t.parent.is_some() {
+                        return Err("Solo el coordinador del run puede cerrarlo".into());
+                    }
+                    t.run.clone()
+                };
+                self.close_run(&run, b(args, "force"))
+            }
             "remove_run" => {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz".into());
@@ -479,10 +499,11 @@ impl Core {
                 for id in &ids {
                     self.kill_term(id);
                 }
+                let (_, kept) = self.free_worktrees(&run, false);
                 let mut st = self.lock();
                 st.remove_run(&run);
                 self.commit(&st, &[]);
-                Ok(json!({ "removed": run }))
+                Ok(json!({ "removed": run, "kept": kept }))
             }
             other => Err(format!("Comando desconocido: {other}")),
         }
@@ -559,14 +580,17 @@ impl Core {
             t.base = Some(base);
             Ok(())
         })()
+        .and_then(|_| self.ensure_launchable(&id))
         .and_then(|_| self.launch(&id));
 
-        let mut st = self.lock();
         if let Err(e) = prepared {
+            self.discard_worktree(&id);
+            let mut st = self.lock();
             st.tasks.remove(&id);
             self.commit(&st, &[]);
             return Err(e);
         }
+        let mut st = self.lock();
         // Si el agente ya murió al arrancar, la tarea quedó en `exited` y así se informa.
         let _ = st.mark_running(&id);
         let t = st.task(&id)?.clone();
@@ -711,10 +735,10 @@ impl Core {
         }
     }
 
-    fn kill_term(&self, id: &str) {
-        if let Some(mut t) = self.terms.lock().ok().and_then(|mut m| m.remove(id)) {
-            t.kill();
-        }
+    fn kill_term(&self, id: &str) -> bool {
+        let Some(mut t) = self.terms.lock().ok().and_then(|mut m| m.remove(id)) else { return false };
+        t.kill();
+        true
     }
 
     fn merge(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
@@ -761,6 +785,73 @@ impl Core {
         t.cwd = repo;
         self.commit(&st, &[]);
         Ok(json!({ "task": id, "worktree_removed": worktree.is_some(), "branch_deleted": branch_deleted }))
+    }
+
+    fn ensure_launchable(&self, id: &str) -> Result<(), String> {
+        let st = self.lock();
+        let t = st.task(id)?;
+        if t.status.is_final() || st.runs.get(&t.run).is_none_or(|r| r.closed) {
+            return Err("El run se cerró mientras se preparaba la tarea: no se lanzó".into());
+        }
+        Ok(())
+    }
+
+    fn discard_worktree(&self, id: &str) {
+        let Some((repo, wt, branch)) = self.lock().tasks.get(id).and_then(|t| Some((t.repo.clone(), t.worktree.clone()?, t.branch.clone()))) else { return };
+        if git::remove_worktree(&repo, &wt, true).is_ok() {
+            if let Some(b) = branch {
+                let _ = git::delete_branch(&repo, &b);
+            }
+        }
+    }
+
+    fn close_run(&self, run: &str, force: bool) -> Result<Value, String> {
+        let (stopped, msgs, ids) = {
+            let mut st = self.lock();
+            let (stopped, msgs) = st.close_run(run, force)?;
+            let ids: Vec<String> = st.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
+            (stopped, msgs, ids)
+        };
+        let terminals: Vec<&String> = ids.iter().filter(|id| self.kill_term(id)).collect();
+        let (released, kept) = self.free_worktrees(run, force);
+        self.commit(&self.lock(), &msgs);
+        Ok(json!({ "run": run, "stopped": stopped, "terminals": terminals, "released": released, "kept": kept }))
+    }
+
+    /// Libera los worktrees del run cuyas ramas ya están en la del coordinador; las
+    /// demás se conservan. Con `force` también se liberan los limpios sin fusionar; los
+    /// worktrees con cambios sin commit se conservan siempre y nunca se borra una rama sin fusionar.
+    fn free_worktrees(&self, run: &str, force: bool) -> (Vec<Value>, Vec<Value>) {
+        let (tasks, into) = {
+            let st = self.lock();
+            let root = st.runs.get(run).and_then(|r| st.tasks.get(&r.root));
+            let into = root.and_then(|r| git::current_branch(&r.cwd).or_else(|| r.branch.clone()));
+            (st.tasks.values().filter(|t| t.run == run && t.worktree.is_some()).cloned().collect::<Vec<_>>(), into)
+        };
+        let (mut released, mut kept) = (vec![], vec![]);
+        for t in tasks {
+            let Some(wt) = t.worktree.clone() else { continue };
+            let merged = t.merged || t.branch.as_deref().zip(into.as_deref()).is_some_and(|(b, i)| git::is_merged(&t.repo, b, i));
+            if !merged && !force {
+                kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "rama sin fusionar" }));
+                continue;
+            }
+            if git::is_dirty(&wt) {
+                kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "cambios sin commit" }));
+                continue;
+            }
+            if let Err(e) = git::remove_worktree(&t.repo, &wt, false) {
+                kept.push(json!({ "task": t.id, "branch": t.branch, "reason": e.lines().next().unwrap_or_default() }));
+                continue;
+            }
+            let branch_deleted = merged && t.branch.as_ref().is_some_and(|b| git::delete_branch(&t.repo, b).is_ok());
+            if let Ok(task) = self.lock().task_mut(&t.id) {
+                task.worktree = None;
+                task.cwd = t.repo.clone();
+            }
+            released.push(json!({ "task": t.id, "branch": t.branch, "branch_deleted": branch_deleted }));
+        }
+        (released, kept)
     }
 
     pub fn snapshot(&self) -> Value {
