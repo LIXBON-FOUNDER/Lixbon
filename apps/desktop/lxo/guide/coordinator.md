@@ -146,6 +146,8 @@ ramas ya están fusionadas en la tuya, marca el run como terminado y borra tu se
 así el árbol del modo Orquestar queda limpio y el siguiente /orquestar empieza de cero. Si quedan
 worktrees conservados, la sesión se mantiene para que puedas seguir con `lxo merge` y `lxo release`.
 
+- Un run sin actividad (ni hijas en marcha, preguntas ni terminales) se cierra solo a los 30 min,
+  pero no cuentes con ello: ciérralo tú explícitamente.
 - Si quedan hijas en marcha, lo rechaza: espera a que terminen o páralas con `lxo stop <tarea>`.
   `lxo run close --force` las para y libera también los worktrees limpios sin fusionar (las ramas
   sin fusionar y los worktrees con cambios sin commit nunca se borran).

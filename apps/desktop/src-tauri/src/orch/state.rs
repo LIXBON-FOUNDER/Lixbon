@@ -128,6 +128,8 @@ pub struct Run {
     pub created: u64,
     #[serde(default)]
     pub closed: bool,
+    #[serde(default)]
+    pub last_activity: u64,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -195,7 +197,7 @@ impl State {
     pub fn create_run(&mut self, objective: &str, root: NewTask) -> (String, String) {
         let run = self.next("r");
         let task = self.insert_task(&run, None, 0, root);
-        self.runs.insert(run.clone(), Run { id: run.clone(), objective: objective.into(), root: task.clone(), created: now_ms(), closed: false });
+        self.runs.insert(run.clone(), Run { id: run.clone(), objective: objective.into(), root: task.clone(), created: now_ms(), closed: false, last_activity: now_ms() });
         (run, task)
     }
 
@@ -447,6 +449,45 @@ Seguimiento:
         self.tasks.values().filter(|t| t.run == run && Some(t.id.as_str()) != root && !t.status.is_final()).map(|t| t.id.clone()).collect()
     }
 
+    pub fn touch_run(&mut self, task: &str) {
+        let Some(run) = self.tasks.get(task).map(|t| t.run.clone()) else { return };
+        if let Some(r) = self.runs.get_mut(&run) {
+            r.last_activity = now_ms();
+        }
+    }
+
+    fn run_last_activity(&self, run: &Run) -> u64 {
+        let tasks = self.tasks.values().filter(|t| t.run == run.id).map(|t| t.updated);
+        let messages = self.messages.iter().filter(|m| m.run == run.id).map(|m| m.at);
+        tasks.chain(messages).chain([run.created, run.last_activity]).max().unwrap_or(0)
+    }
+
+    fn has_unanswered_question(&self, run: &str) -> bool {
+        self.messages.iter().any(|q| {
+            q.run == run && q.kind == Kind::Question && !self.messages.iter().any(|m| m.reply_to == Some(q.id))
+        })
+    }
+
+    /// Runs abiertos sin hijas en marcha, sin preguntas por responder, sin terminales
+    /// vivas y sin actividad desde hace `idle_ms`.
+    pub fn idle_runs(&self, now: u64, idle_ms: u64, live: &[String]) -> Vec<String> {
+        self.runs.values()
+            .filter(|r| !r.closed)
+            .filter(|r| now.saturating_sub(self.run_last_activity(r)) >= idle_ms)
+            .filter(|r| self.run_open_tasks(&r.id).is_empty() && !self.has_unanswered_question(&r.id))
+            .filter(|r| !live.iter().any(|id| self.tasks.get(id).is_some_and(|t| t.run == r.id)))
+            .map(|r| r.id.clone())
+            .collect()
+    }
+
+    /// Sin hijas en marcha y con todas las ramas propias fusionadas: solo falta cerrar el run.
+    pub fn run_wrapped_up(&self, run: &str) -> bool {
+        let root = self.runs.get(run).map(|r| r.root.as_str());
+        self.tasks.values()
+            .filter(|t| t.run == run && Some(t.id.as_str()) != root)
+            .all(|t| t.status.is_final() && (t.branch.is_none() || t.merged))
+    }
+
     /// Cierra el run: sin `force` rechaza si quedan hijas en marcha; con `force` las
     /// para. Devuelve las tareas paradas y los avisos generados. Las terminales y
     /// worktrees los limpia `mod.rs`.
@@ -502,6 +543,72 @@ mod tests {
             agent: "claude".into(), model: None, effort: None, role: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
             branch: None, base: None, worktree: None, external: false,
         }
+    }
+
+    const IDLE: u64 = 30 * 60 * 1000;
+
+    fn aged(s: &mut State, run: &str) {
+        s.runs.get_mut(run).unwrap().created = 0;
+        s.runs.get_mut(run).unwrap().last_activity = 0;
+        s.tasks.values_mut().for_each(|t| t.updated = 0);
+        s.messages.iter_mut().for_each(|m| m.at = 0);
+    }
+
+    fn idle(s: &State, live: &[String]) -> Vec<String> {
+        s.idle_runs(IDLE + 1, IDLE, live)
+    }
+
+    #[test]
+    fn barrido_cierra_run_inactivo_sin_hijas() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let hijo = s.add_child(&root, 1, nt("hijo")).unwrap();
+        s.done(&hijo, true, "ok", vec![], None).unwrap();
+        aged(&mut s, &run);
+        assert_eq!(idle(&s, &[]), vec![run.clone()]);
+        s.close_run(&run, false).unwrap();
+        assert!(idle(&s, &[]).is_empty());
+    }
+
+    #[test]
+    fn barrido_respeta_actividad_hijas_preguntas_y_terminales() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let hijo = s.add_child(&root, 1, nt("hijo")).unwrap();
+        aged(&mut s, &run);
+        assert!(idle(&s, &[]).is_empty(), "hija en marcha");
+
+        s.done(&hijo, true, "ok", vec![], None).unwrap();
+        aged(&mut s, &run);
+        s.touch_run(&root);
+        assert!(idle(&s, &[]).is_empty(), "actividad reciente del coordinador");
+
+        aged(&mut s, &run);
+        assert!(idle(&s, std::slice::from_ref(&hijo)).is_empty(), "terminal viva");
+        assert_eq!(idle(&s, &[]).len(), 1);
+
+        let nieto = s.add_child(&root, 1, nt("otra")).unwrap();
+        let q = s.ask(&nieto, "¿A o B?").unwrap();
+        s.done(&nieto, true, "ok", vec![], None).unwrap();
+        aged(&mut s, &run);
+        assert!(idle(&s, &[]).is_empty(), "pregunta sin responder");
+        s.reply(&root, q, "A").unwrap();
+        aged(&mut s, &run);
+        assert_eq!(idle(&s, &[]).len(), 1);
+    }
+
+    #[test]
+    fn run_listo_para_cerrar_exige_ramas_fusionadas() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let hijo = s.add_child(&root, 1, nt("hijo")).unwrap();
+        assert!(!s.run_wrapped_up(&run));
+        s.done(&hijo, true, "ok", vec![], None).unwrap();
+        assert!(s.run_wrapped_up(&run));
+        s.task_mut(&hijo).unwrap().branch = Some("lx/x".into());
+        assert!(!s.run_wrapped_up(&run));
+        s.task_mut(&hijo).unwrap().merged = true;
+        assert!(s.run_wrapped_up(&run));
     }
 
     #[test]

@@ -262,7 +262,7 @@ fn human(cmd: &str, data: &Value) -> String {
             }
             if let Some(open) = data["open_children"].as_array() {
                 let ids: Vec<&str> = open.iter().filter_map(Value::as_str).collect();
-                out.push(if ids.is_empty() { "No te queda ninguna hija en marcha.".into() } else { format!("Hijas en marcha: {}", ids.join(", ")) });
+                out.push(if ids.is_empty() { data["hint"].as_str().unwrap_or("No te queda ninguna hija en marcha.").into() } else { format!("Hijas en marcha: {}", ids.join(", ")) });
             }
             out.join("\n")
         }
@@ -285,7 +285,7 @@ fn human(cmd: &str, data: &Value) -> String {
             out.join("\n")
         }
         "diff" => format!("{}...{}\n{}\n\n{}", data["base"].as_str().unwrap_or(""), data["branch"].as_str().unwrap_or(""), data["stat"].as_str().unwrap_or(""), data["diff"].as_str().unwrap_or("")),
-        "merge" => format!("Fusionada {} en {}", data["merged"].as_str().unwrap_or(""), data["into"].as_str().unwrap_or("")),
+        "merge" => with_hint(format!("Fusionada {} en {}", data["merged"].as_str().unwrap_or(""), data["into"].as_str().unwrap_or("")), data),
         "pr" => format!("PR abierto: {}", data["url"].as_str().unwrap_or("")),
         "ask" => format!("Respuesta: {}", data["answer"].as_str().unwrap_or("")),
         "phase" => format!("Fase «{}» registrada.", data["phase"].as_str().unwrap_or("")),
@@ -293,14 +293,22 @@ fn human(cmd: &str, data: &Value) -> String {
         "reply" => format!("Respuesta enviada (#{}).", data["reply"]),
         "send" => format!("Mensaje enviado (#{}). La hija lo leerá en su próximo lxo check.", data["message"]),
         "stop" => format!("Tarea {} detenida.", data["task"].as_str().unwrap_or("")),
-        "release" => format!(
+        "release" => with_hint(format!(
             "Tarea {} liberada.{}{}",
             data["task"].as_str().unwrap_or(""),
             if data["worktree_removed"].as_bool() == Some(true) { " Worktree borrado." } else { "" },
             if data["branch_deleted"].as_bool() == Some(true) { " Rama borrada (ya estaba fusionada)." } else { " La rama se conserva." }
-        ),
+        ), data),
         "issue" => issue_human(data),
         _ => serde_json::to_string_pretty(data).unwrap_or_default(),
+    }
+}
+
+fn with_hint(text: String, data: &Value) -> String {
+    match data["hint"].as_str() {
+        Some(h) => format!("{text}
+{h}"),
+        None => text,
     }
 }
 
@@ -601,6 +609,15 @@ mod tests {
         assert!(t.contains("[agente implementador] Listo el runner"));
         assert!(t.ends_with("Estados del equipo: En curso, Hecho"));
         assert_eq!(issue_human(&json!({ "accion": "mover", "clave": "LXB-12", "estado": "Hecho" })), "LXB-12 está ahora en «Hecho».");
+    }
+
+    #[test]
+    fn recordatorio_de_cierre_en_wait_y_merge() {
+        let wait = human("wait", &json!({ "messages": [], "open_children": [], "hint": "Cierra con `lxo run close`." }));
+        assert!(wait.contains("lxo run close"));
+        let merge = human("merge", &json!({ "merged": "b", "into": "/r", "hint": "Cierra con `lxo run close`." }));
+        assert!(merge.ends_with("lxo run close`."));
+        assert!(!human("merge", &json!({ "merged": "b", "into": "/r" })).contains("run close"));
     }
 
     #[test]

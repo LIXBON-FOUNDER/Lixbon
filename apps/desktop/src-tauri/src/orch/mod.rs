@@ -134,6 +134,9 @@ fn kinds(args: &Value) -> Vec<Kind> {
 }
 
 const MAX_WAIT: Duration = Duration::from_secs(30 * 60);
+const IDLE_CLOSE_MS: u64 = 30 * 60 * 1000;
+const SWEEP_EVERY: Duration = Duration::from_secs(60);
+const CLOSE_REMINDER: &str = "No quedan hijas en marcha. Si el objetivo está cumplido e integrado, termina con `lxo run close`.";
 
 impl Core {
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -161,6 +164,29 @@ impl Core {
             // Preguntar a cada CLI por sus modelos tarda: se hace ya para que el
             // primer `lxo agents` del coordinador responda al momento.
             std::thread::spawn(|| agents::available(false));
+        }
+        let weak = Arc::downgrade(self);
+        std::thread::spawn(move || {
+            while let Some(core) = weak.upgrade() {
+                core.close_idle_runs();
+                drop(core);
+                std::thread::sleep(SWEEP_EVERY);
+            }
+        });
+    }
+
+    fn close_idle_runs(&self) {
+        let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+        let idle = self.lock().idle_runs(state::now_ms(), IDLE_CLOSE_MS, &live);
+        for run in idle {
+            {
+                let mut st = self.lock();
+                let Some(root) = st.runs.get(&run).map(|r| r.root.clone()) else { continue };
+                if let Ok(id) = st.post(&root, &root, Kind::Note, "Run cerrado por inactividad (30 min sin actividad ni hijas en marcha)", None) {
+                    st.mark_read(&[id]);
+                }
+            }
+            let _ = self.close_run(&run, false);
         }
     }
 
@@ -271,6 +297,9 @@ impl Core {
             if b(args, "session") && cmd != "run_create" && !self.lock().tasks.contains_key(id) {
                 return Err("sesion-obsoleta".into());
             }
+        }
+        if let Caller::Agent(Some(id)) = &caller {
+            self.lock().touch_run(id);
         }
         match cmd {
             "status" => {
@@ -411,11 +440,13 @@ impl Core {
                 }
                 let timeout = Duration::from_millis(n(args, "timeout_ms").unwrap_or(600_000));
                 let found = self.wait_for(&me, &k, None, timeout);
-                let pending = {
+                let (pending, hint) = {
                     let st = self.lock();
-                    st.children_open(&me)
+                    let hint = st.task(&me).ok().filter(|t| t.parent.is_none()).map(|_| CLOSE_REMINDER);
+                    (st.children_open(&me), hint)
                 };
-                Ok(json!({ "messages": found, "timeout": found.is_empty(), "open_children": pending }))
+                let hint = hint.filter(|_| pending.is_empty());
+                Ok(json!({ "messages": found, "timeout": found.is_empty(), "open_children": pending, "hint": hint }))
             }
             "check" | "inbox" => {
                 let me = Self::me(&caller)?;
@@ -758,7 +789,8 @@ impl Core {
         let mut st = self.lock();
         st.task_mut(&id)?.merged = true;
         self.commit(&st, &[]);
-        Ok(json!({ "task": id, "merged": branch, "into": parent_dir, "output": out }))
+        let hint = self.close_hint(&st, &id);
+        Ok(json!({ "task": id, "merged": branch, "into": parent_dir, "output": out, "hint": hint }))
     }
 
     fn release(&self, caller: &Caller, id: &str, force: bool) -> Result<Value, String> {
@@ -784,7 +816,14 @@ impl Core {
         t.worktree = None;
         t.cwd = repo;
         self.commit(&st, &[]);
-        Ok(json!({ "task": id, "worktree_removed": worktree.is_some(), "branch_deleted": branch_deleted }))
+        let hint = self.close_hint(&st, id);
+        Ok(json!({ "task": id, "worktree_removed": worktree.is_some(), "branch_deleted": branch_deleted, "hint": hint }))
+    }
+
+    fn close_hint(&self, st: &State, task: &str) -> Option<&'static str> {
+        let run = &st.tasks.get(task)?.run;
+        let open = st.runs.get(run).is_some_and(|r| !r.closed);
+        (open && st.run_wrapped_up(run)).then_some(CLOSE_REMINDER)
     }
 
     fn ensure_launchable(&self, id: &str) -> Result<(), String> {
