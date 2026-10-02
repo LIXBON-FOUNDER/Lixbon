@@ -144,7 +144,7 @@
   color: var(--ink);
 }
 .msg__live--claude { gap: 8px; }
-.msg__live--claude .msg__live-text { color: #E8A38B; }
+.msg__live--claude .msg__live-text { color: var(--claude-ink); }
 .msg__live-secs { font-size: 12px; color: var(--ink-50); }
 .claudemark--live { animation: claude-live 1.8s ease-in-out infinite; transform-origin: center; }
 @keyframes claude-live {
@@ -748,7 +748,7 @@
   flex-shrink: 0;
 }
 
-.cmdrow.is-sel .cmdrow__icon { background: rgba(23, 23, 19, 0.16); color: var(--on-primary); }
+.cmdrow.is-sel .cmdrow__icon { background: rgba(var(--on-primary-rgb), 0.16); color: var(--on-primary); }
 
 .cmdrow__name {
   font-family: var(--font-mono);
@@ -763,7 +763,7 @@
   text-align: right;
 }
 
-.cmdrow.is-sel .cmdrow__desc { color: rgba(23, 23, 19, 0.6); }
+.cmdrow.is-sel .cmdrow__desc { color: rgba(var(--on-primary-rgb), 0.6); }
 
 /* Menú de @-menciones (aparece sobre la caja; portal, ver .cmdmenu arriba) */
 .mention-menu {

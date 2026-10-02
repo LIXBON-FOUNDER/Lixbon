@@ -885,8 +885,8 @@
   padding: 14px 16px 14px;
   overflow: hidden;
   border-radius: var(--radius);
-  background: var(--surface-5, #262626);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-5, var(--surface-5));
+  border: 1px solid rgba(var(--ink-rgb), 0.06);
   box-shadow: 0 16px 40px rgba(var(--shadow-rgb, 0, 0, 0), 0.45);
   animation: update-in 0.4s var(--spring, cubic-bezier(0.3, 1.25, 0.5, 1)) both;
 }
@@ -902,7 +902,7 @@
 @keyframes update-in { from { opacity: 0; transform: translate(24px, 12px) scale(0.97); } }
 @keyframes update-sheen { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 .update-modal__head { display: flex; align-items: center; gap: 10px; }
-.update-modal__icon { flex-shrink: 0; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--accent); background: var(--accent-soft, rgba(198, 214, 110, 0.14)); }
+.update-modal__icon { flex-shrink: 0; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--accent); background: var(--accent-soft, rgba(var(--accent-rgb), 0.14)); }
 .update-modal__title-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .update-modal__title { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
 .update-modal__badge { font-family: var(--font-mono); font-size: 11px; color: var(--ink-50); }
@@ -1171,13 +1171,13 @@
 
 .remote { display: flex; flex-direction: column; gap: 18px; }
 .remote__hero { display: flex; gap: 14px; align-items: flex-start; }
-.remote__icon { flex-shrink: 0; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius); background: var(--accent-soft, rgba(198, 214, 110, 0.12)); color: var(--accent); }
-.remote__agent { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 22px; padding: 0 8px; margin-bottom: 6px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--accent-soft, rgba(198, 214, 110, 0.12)); color: var(--accent); }
-.remote__agent--claude { background: rgba(217, 119, 87, 0.14); color: #E8A38B; }
+.remote__icon { flex-shrink: 0; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius); background: var(--accent-soft, rgba(var(--accent-rgb), 0.12)); color: var(--accent); }
+.remote__agent { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 22px; padding: 0 8px; margin-bottom: 6px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--accent-soft, rgba(var(--accent-rgb), 0.12)); color: var(--accent); }
+.remote__agent--claude { background: rgba(var(--claude-rgb), 0.14); color: var(--claude-ink); }
 .remote__agent-ws { font-family: var(--font-mono, monospace); font-weight: 500; color: var(--ink-50); }
-.remote--claude .remote__icon { background: rgba(217, 119, 87, 0.14); }
-.remote--claude .remote__live { color: #E8A38B; }
-.remote--claude .remote__pulse { background: #D97757; }
+.remote--claude .remote__icon { background: rgba(var(--claude-rgb), 0.14); }
+.remote--claude .remote__live { color: var(--claude-ink); }
+.remote--claude .remote__pulse { background: var(--claude); }
 .remote__title { font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--ink); }
 .remote__lead { margin-top: 4px; font-size: 12.5px; line-height: 1.55; color: var(--ink-50); }
 .remote__lead strong { color: var(--ink-body); font-weight: 600; }
