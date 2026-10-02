@@ -4,6 +4,7 @@
 // equipo) y se copian en localStorage para arrancar sin esperar a la red.
 import { useSyncExternalStore } from 'react';
 import { api } from './api';
+import { CUADROS } from './mascotaSprites';
 import { useAppStore } from '../store/appStore';
 
 const CLAVE = 'lixbon_mascota';
@@ -24,14 +25,11 @@ export const MASCOTA_DEFAULTS = {
   reducir: false,
 };
 
-// Cuadros de cada tira (public/mascotas/<personaje>-<estado>.png).
-export const CUADROS = {
-  idle: 12, talk: 4, look: 8, walk: 6, wave: 4, celebrate: 4, stretch: 4, scratch: 2,
-  think: 2, point: 2, type: 2, sleep: 2, whip: 3, kart: 2,
-};
+// Cuadros de cada tira y versión de los PNG: los escribe el generador.
+export { CUADROS, VERSION_SPRITES } from './mascotaSprites';
 // Milisegundos por cuadro: el ritmo de cada animación (igual que en la web).
 export const MS_CUADRO = {
-  idle: 220, talk: 130, look: 280, walk: 110, wave: 170, celebrate: 150, stretch: 420, scratch: 220,
+  idle: 220, talk: 130, look: 280, walk: 140, wave: 170, celebrate: 150, stretch: 420, scratch: 220,
   think: 480, point: 420, type: 180, sleep: 1200, whip: 250, kart: 120,
 };
 /** Lo que dura una vuelta completa de una animación. */

@@ -1,7 +1,7 @@
 // Mascota.jsx — piezas visuales de Gael y Leya en el IDE: el sprite animado
 // (una tira de cuadros pixel art de 48×48) y el bocadillo de esquinas en
 // escalón. La lógica de cuándo hace qué vive en chat/MascotaAgente.jsx.
-import { CUADROS, MS_CUADRO } from '../lib/mascota';
+import { CUADROS, MS_CUADRO, VERSION_SPRITES } from '../lib/mascota';
 
 export function SpriteMascota({ personaje, estado = 'idle', tam = 96, espejo = false, quieta = false, className = '' }) {
   return (
@@ -12,7 +12,7 @@ export function SpriteMascota({ personaje, estado = 'idle', tam = 96, espejo = f
         '--w': `${tam}px`,
         '--n': CUADROS[estado] || 1,
         '--d': `${(CUADROS[estado] || 1) * (MS_CUADRO[estado] || 200)}ms`,
-        backgroundImage: `url(/mascotas/${personaje}-${estado}.png)`,
+        backgroundImage: `url(/mascotas/${personaje}-${estado}.png?v=${VERSION_SPRITES})`,
       }}
     />
   );
