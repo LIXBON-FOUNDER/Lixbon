@@ -39,6 +39,7 @@ fn claude_command() -> Command {
     #[cfg(windows)]
     let mut cmd = {
         let mut c = Command::new("cmd");
+        crate::env_path::ensure_claude_on_path();
         c.arg("/C").arg("claude");
         c
     };

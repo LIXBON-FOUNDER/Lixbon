@@ -28,6 +28,7 @@ mod visual_server;
 mod team;
 mod mascota;
 mod claude_code;
+mod env_path;
 mod orch;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -1335,6 +1336,7 @@ fn secret_delete(name: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    env_path::refresh_process_path();
     tauri::Builder::default()
         // Una sola instancia: el acceso directo «Lixbon Team» (--team) con la app
         // ya abierta no arranca otra copia, abre Team en la que hay.
