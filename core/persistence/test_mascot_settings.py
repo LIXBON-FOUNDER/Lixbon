@@ -13,10 +13,10 @@ def test_sin_guardar_devuelve_defaults():
 
 def test_mezcla_parcial_sobre_lo_guardado():
     guardado = _clean_mascot({"personaje": "leya", "dormir_min": 10})
-    nuevo = _clean_mascot({"activa": False}, guardado)
+    nuevo = _clean_mascot({"activa": True}, guardado)
     assert nuevo["personaje"] == "leya"
     assert nuevo["dormir_min"] == 10
-    assert nuevo["activa"] is False
+    assert nuevo["activa"] is True
 
 
 def test_descarta_claves_y_valores_invalidos():
@@ -28,10 +28,16 @@ def test_descarta_claves_y_valores_invalidos():
         "<script>": 1,              # clave desconocida
     })
     assert m["personaje"] == "gael"
-    assert m["activa"] is True
+    assert m["activa"] is False
     assert m["latigo_min"] == 30
     assert m["dormir_min"] == 5
     assert "<script>" not in m
+
+
+def test_forma_de_los_obreros():
+    m = _clean_mascot({"obrero_revisor": "monitor", "obrero_escalado": "dragon"})
+    assert m["obrero_revisor"] == "monitor"
+    assert m["obrero_escalado"] == MASCOT_DEFAULTS["obrero_escalado"]
 
 
 def test_settings_json_corrupto_o_raro():

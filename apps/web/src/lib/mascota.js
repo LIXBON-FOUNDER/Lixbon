@@ -10,7 +10,7 @@ export const CLAVE_MASCOTA = 'lixbon-mascota';
 
 // Mismo contrato que MASCOT_DEFAULTS en core/persistence/queries.py.
 export const MASCOTA_DEFAULTS = {
-  activa: true,
+  activa: false,       // la activa el usuario
   personaje: 'gael',   // gael | leya | ambos
   trabajo: 'auto',     // IDE: escribir | conducir | auto
   preguntar: true,     // IDE
