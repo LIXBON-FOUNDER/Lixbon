@@ -7,6 +7,7 @@ import { Segmented } from '../../../components/Segmented';
 import { Switch } from '../../../components/Switch';
 import { Select } from '../../../components/Select';
 import { IconCode } from '../../../components/Icons';
+import { useTheme } from '../../../lib/theme';
 import { UI_SCALES, readUiScale, setUiScale } from '../../../lib/uiScale';
 import { PageHead, SectionHead } from '../SettingsParts';
 
@@ -14,6 +15,7 @@ export function EditorPage() {
   const editor = useWorkbenchStore((s) => s.editor);
   const setOption = useWorkbenchStore((s) => s.setEditorOption);
   const { defaultShell, setDefaultShell } = useTerminalStore();
+  const [theme, setTheme] = useTheme();
   const [scale, setScale] = useState(readUiScale);
 
   useEffect(() => {
@@ -29,6 +31,23 @@ export function EditorPage() {
       <section className="ssec rise rise--1">
         <SectionHead label="Interfaz" />
         <div className="ssec ssec--card ssec--rows">
+          <div className="srow">
+            <div className="srow__text">
+              <span className="srow__label">Tema</span>
+              <span className="srow__hint">Sistema sigue el modo claro u oscuro de tu equipo.</span>
+            </div>
+            <Segmented
+              size="sm"
+              width={64}
+              value={theme}
+              onChange={setTheme}
+              options={[
+                { value: 'system', label: 'Sistema' },
+                { value: 'light', label: 'Claro' },
+                { value: 'dark', label: 'Oscuro' },
+              ]}
+            />
+          </div>
           <div className="srow">
             <div className="srow__text">
               <span className="srow__label">Tamaño de la interfaz</span>

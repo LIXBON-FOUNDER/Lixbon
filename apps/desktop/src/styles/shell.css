@@ -268,7 +268,7 @@
 .avatar-edit__spinner {
   width: 15px;
   height: 15px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
+  border: 2px solid rgba(var(--ink-rgb), 0.35);
   border-top-color: #fff;
   border-radius: 50%;
   animation: avatar-spin 0.7s linear infinite;
