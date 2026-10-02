@@ -43,9 +43,11 @@ class SettingsPayload(BaseModel):
     """PATCH parcial: solo se actualiza lo que venga no-nulo."""
     anonymous_usage: bool | None = None
     save_history: bool | None = None
-    # Preferencias de la mascota (parcial: se mezcla con lo guardado y se
-    # descarta lo que no sea una clave o un valor conocido).
+    # Preferencias de la mascota, web (`mascot`) e IDE (`mascot_ide`), cada
+    # una por su lado. Parcial: se mezcla con lo guardado y se descarta lo
+    # que no sea una clave o un valor conocido.
     mascot: dict[str, Any] | None = None
+    mascot_ide: dict[str, Any] | None = None
 
 
 @router.get("/api/plans")
@@ -184,8 +186,9 @@ async def api_update_settings(
     patch = {k: v for k, v in payload.model_dump().items() if v is not None}
     settings = update_user_settings(user_id, patch)
     # De la mascota solo se registra qué cambió, no el objeto entero.
-    audit = {k: v for k, v in patch.items() if k != "mascot"}
-    if isinstance(patch.get("mascot"), dict):
-        audit["mascot_keys"] = sorted(patch["mascot"])[:20]
+    audit = {k: v for k, v in patch.items() if k not in ("mascot", "mascot_ide")}
+    for clave in ("mascot", "mascot_ide"):
+        if isinstance(patch.get(clave), dict):
+            audit[f"{clave}_keys"] = sorted(patch[clave])[:20]
     log_audit_event("settings_updated", user_id=user_id, **audit)
     return {"settings": settings}

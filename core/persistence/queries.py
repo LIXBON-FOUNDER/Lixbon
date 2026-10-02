@@ -244,8 +244,9 @@ SETTINGS_DEFAULTS: dict[str, bool] = {
 }
 
 
-# La mascota (Gael y Leya) tiene sus propias preferencias: la web y el IDE
-# leen el mismo objeto, así que se guarda con la cuenta y no en cada equipo.
+# La mascota (Gael y Leya) tiene sus propias preferencias, guardadas con la
+# cuenta (y no en cada equipo): `mascot` las de la web y `mascot_ide` las del
+# IDE de escritorio. Son independientes; comparten forma y valores válidos.
 MASCOT_DEFAULTS: dict[str, Any] = {
     "activa": True,        # mostrarla en todas partes
     "personaje": "gael",   # gael | leya | ambos (se turnan)
@@ -261,6 +262,7 @@ MASCOT_DEFAULTS: dict[str, Any] = {
 }
 _MASCOT_ENUMS = {"personaje": ("gael", "leya", "ambos"), "trabajo": ("escribir", "conducir", "auto")}
 _MASCOT_RANGES = {"latigo_min": (1, 30), "dormir_min": (1, 60)}
+MASCOT_KEYS = ("mascot", "mascot_ide")
 
 
 def _clean_mascot(raw: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -292,7 +294,9 @@ def _parse_settings(raw: str | None) -> dict[str, Any]:
     if not isinstance(stored, dict):
         stored = {}
     settings: dict[str, Any] = {k: bool(stored.get(k, v)) for k, v in SETTINGS_DEFAULTS.items()}
-    settings["mascot"] = _clean_mascot(stored.get("mascot"))
+    # La web y el IDE tienen cada uno sus ajustes de mascota, independientes.
+    for clave in MASCOT_KEYS:
+        settings[clave] = _clean_mascot(stored.get(clave))
     return settings
 
 
@@ -311,8 +315,9 @@ def update_user_settings(user_id: int, patch: dict[str, Any]) -> dict[str, Any]:
             return dict(SETTINGS_DEFAULTS)
         current = _parse_settings(user.settings_json)
         current.update({k: bool(v) for k, v in patch.items() if k in SETTINGS_DEFAULTS})
-        if "mascot" in patch:
-            current["mascot"] = _clean_mascot(patch["mascot"], current["mascot"])
+        for clave in MASCOT_KEYS:
+            if clave in patch:
+                current[clave] = _clean_mascot(patch[clave], current[clave])
         user.settings_json = _json.dumps(current)
         return current
 

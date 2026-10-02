@@ -40,3 +40,12 @@ def test_settings_json_corrupto_o_raro():
     s = _parse_settings(json.dumps({"mascot": {"guia": False}, "save_history": False}))
     assert s["mascot"]["guia"] is False
     assert s["save_history"] is False
+
+
+def test_web_e_ide_son_independientes():
+    s = _parse_settings(json.dumps({"mascot": {"personaje": "leya"}, "mascot_ide": {"personaje": "gael", "latigo": False}}))
+    assert s["mascot"]["personaje"] == "leya"
+    assert s["mascot_ide"]["personaje"] == "gael"
+    assert s["mascot_ide"]["latigo"] is False
+    assert s["mascot"]["latigo"] is True
+    assert _parse_settings(None)["mascot_ide"] == MASCOT_DEFAULTS
