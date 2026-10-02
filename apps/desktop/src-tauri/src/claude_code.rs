@@ -39,7 +39,15 @@ fn claude_command() -> Command {
     #[cfg(windows)]
     let mut cmd = {
         let mut c = Command::new("cmd");
-        c.arg("/C").arg("claude");
+        let target = if crate::env_path::claude_on_path() {
+            None
+        } else {
+            crate::env_path::claude_fallback()
+        };
+        match target {
+            Some(p) => c.arg("/C").arg(p),
+            None => c.arg("/C").arg("claude"),
+        };
         c
     };
     #[cfg(not(windows))]
