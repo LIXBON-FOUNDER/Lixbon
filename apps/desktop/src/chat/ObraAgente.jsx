@@ -1,6 +1,6 @@
 // ObraAgente.jsx — la mascota cuando este chat coordina un equipo (/orquestar).
 // Gael y Leya salen a la vez con casco de obra blanco: son el coordinador.
-// Cada agente hijo es un robot obrero con casco amarillo o naranja que llega
+// Cada agente hijo es un robot obrero (color y casco según su rol) que llega
 // caminando, recibe su tarea (un papel que vuela desde uno de los dos),
 // trabaja de fondo, y al terminar camina hasta ellos con el informe.
 // Todo se deduce del snapshot del orquestador; aquí solo se pone en escena.
@@ -20,6 +20,9 @@ const enRepo = (task, root) => {
 };
 const recorta = (t, n = 38) => (t && t.length > n ? `${t.slice(0, n - 1)}…` : t || 'una tarea');
 const FUERA = 'calc(100% + 90px)';
+// Los sprites existen por rol (bot-<rol>-*.png); lo demás va en gris.
+const ROLES = ['explorador', 'implementador', 'revisor', 'escalado'];
+const rolDe = (t) => (ROLES.includes(t.role) ? t.role : 'general');
 
 function useRunActivo() {
   const snap = useOrchStore((s) => s.snap);
@@ -61,7 +64,7 @@ export function ObraAgente({ tam = 96 }) {
   const [globos, setGlobos] = useState({});
   const timers = useRef(new Set());
   const visto = useRef({ run: null, tareas: new Set(), msgs: new Set() });
-  const cuenta = useRef({ encargos: 0, colores: 0, papeles: 0 });
+  const cuenta = useRef({ encargos: 0, papeles: 0 });
   const botTam = tam >= 96 ? 72 : 48;
   const max = tam >= 96 ? 6 : 3;
   const paso = Math.round(botTam * 0.72);
@@ -94,8 +97,7 @@ export function ObraAgente({ tam = 96 }) {
 
   const llegar = (t) => {
     const quien = cuenta.current.encargos++ % 2 ? 'leya' : 'gael';
-    const color = cuenta.current.colores++ % 2 ? 'naranja' : 'amarillo';
-    setBots((l) => [...l, { id: t.id, color, fase: 'entra', quien, entrando: true }]);
+    setBots((l) => [...l, { id: t.id, rol: rolDe(t), fase: 'entra', quien, entrando: true }]);
     en(40, () => poner(t.id, { entrando: false }));
     en(900, () => { acto(quien, 'point', 1900); decir(quien, `Para ti: ${recorta(t.title)}`, 2800); });
     en(1500, () => {
@@ -138,9 +140,8 @@ export function ObraAgente({ tam = 96 }) {
       cuenta.current.encargos = 0;
       visto.current = { run: run.id, tareas: new Set(tareas.map((t) => t.id)), msgs: new Set(mensajes.map((m) => m.id)) };
       setBots(tareas.filter((t) => !isFinal(t.status)).slice(0, 12).map((t, i) => (
-        { id: t.id, color: i % 2 ? 'naranja' : 'amarillo', fase: t.status === 'waiting' ? 'duda' : 'trabaja', quien: i % 2 ? 'leya' : 'gael' }
+        { id: t.id, rol: rolDe(t), fase: t.status === 'waiting' ? 'duda' : 'trabaja', quien: i % 2 ? 'leya' : 'gael' }
       )));
-      cuenta.current.colores = tareas.length;
       return;
     }
     const actuales = new Map(bots.map((b) => [b.id, b]));
@@ -197,7 +198,7 @@ export function ObraAgente({ tam = 96 }) {
         <div key={b.id} className={`obra-bot obra-bot--${b.fase}`} style={{ right: posiciones[i] }}>
           <Globo texto={globos[b.id]} />
           <SpriteMascota
-            personaje={`bot-${b.color}`}
+            personaje={`bot-${b.rol}`}
             estado={estadoBot[b.fase] || 'idle'}
             tam={botTam}
             espejo={b.fase === 'sale'}
