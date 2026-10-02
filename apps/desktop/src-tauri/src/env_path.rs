@@ -108,6 +108,27 @@ pub fn claude_on_path() -> bool {
         .any(|d| ["claude.exe", "claude.cmd"].iter().any(|f| d.join(f).is_file()))
 }
 
+pub fn path_with_dir(current: &str, dir: &str) -> String {
+    merge_paths(&[current, dir])
+}
+
+// No se pasa la ruta absoluta a `cmd /C`: con espacios y argumentos entre
+// comillas cmd quita las comillas exteriores y rompe la línea.
+#[cfg(windows)]
+pub fn ensure_claude_on_path() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if claude_on_path() {
+        return;
+    }
+    ONCE.call_once(|| {
+        let Some(dir) = claude_fallback().and_then(|p| p.parent().map(|d| d.to_string_lossy().into_owned())) else {
+            return;
+        };
+        let current = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", path_with_dir(&current, &dir));
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +142,13 @@ mod tests {
     #[test]
     fn conserva_el_orden_actual_primero() {
         assert_eq!(merge_paths(&[r"C:\X", r"C:\M", r"C:\U"]), r"C:\X;C:\M;C:\U");
+    }
+
+    #[test]
+    fn anade_directorio_una_sola_vez() {
+        let once = path_with_dir(r"C:\A", r"C:\Users\Ana B\.local\bin");
+        assert_eq!(once, r"C:\A;C:\Users\Ana B\.local\bin");
+        assert_eq!(path_with_dir(&once, r"c:\users\ana b\.local\bin\"), once);
     }
 
     #[test]
