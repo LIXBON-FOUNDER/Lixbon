@@ -1,0 +1,95 @@
+/* flotante.css — la ventana del aviso flotante. Fondo transparente: solo se
+   ven la mascota y su bocadillo sobre el escritorio. */
+
+html, body.mascota-ventana, .mascota-ventana #root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+.flotante {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 10px 10px 6px;
+  font-family: var(--font-ui);
+}
+
+.flotante__bocadillo {
+  position: relative;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 236px;
+  margin-top: 6px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: 0 -3px 0 0 var(--ink), 0 3px 0 0 var(--ink), -3px 0 0 0 var(--ink), 3px 0 0 0 var(--ink);
+  animation: mascota-pop 0.3s steps(3) both;
+}
+/* Cola hacia la mascota, abajo a la derecha. */
+.flotante__bocadillo::after {
+  content: '';
+  position: absolute;
+  right: -12px;
+  bottom: 22px;
+  width: 9px;
+  height: 6px;
+  background: var(--ink);
+  box-shadow: 6px 6px 0 0 var(--ink);
+}
+
+.flotante--latigo .flotante__bocadillo {
+  box-shadow: 0 -3px 0 0 var(--warn), 0 3px 0 0 var(--warn), -3px 0 0 0 var(--warn), 3px 0 0 0 var(--warn);
+}
+
+.flotante__cabeza {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.flotante__texto { margin: 0; font-size: 13.5px; line-height: 1.4; }
+
+.flotante__grito {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.15;
+  animation: flotante-tiembla 0.25s steps(2) infinite;
+}
+@keyframes flotante-tiembla { 50% { transform: translate(2px, -1px) rotate(-1deg); } }
+
+.flotante__botones { display: flex; gap: 6px; flex-wrap: wrap; }
+.flotante__btn {
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.1);
+  color: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.flotante__btn:hover { background: rgba(0, 0, 0, 0.18); }
+.flotante__btn.is-principal { background: var(--bg); color: var(--ink); }
+.flotante__btn.is-principal:hover { background: var(--surface-3); }
+
+/* macOS: sin transparencia, tarjeta oscura con la mascota dentro. */
+body.is-opaca, .is-opaca #root { background: var(--bg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .flotante__bocadillo, .flotante__grito { animation: none; }
+}

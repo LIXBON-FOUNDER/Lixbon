@@ -232,6 +232,13 @@ const handlers = {
   'plugin:event|unlisten': () => null,
   'plugin:window|is_maximized': () => false,
   'plugin:dialog|open': () => ROOT,
+  mascota_flotante: ({ datos }) => { console.info('[tauriMock] aviso flotante', datos); },
+  mascota_flotante_cerrar: () => null,
+  // mascota.html en el navegador: ?latigo muestra el segundo aviso.
+  mascota_datos: () => JSON.stringify(qs.has('latigo')
+    ? { modo: 'latigo', personaje: 'gael', fuera: '2 min', texto: '«Checkout» lleva 2 min esperando tu revisión.' }
+    : { modo: 'aviso', personaje: 'leya', texto: '¡Fase 2 lista! Te espero para seguir con «Checkout».' }),
+  mascota_volver: () => null,
   secret_get: () => store.get('apiKey'),
   secret_set: ({ value }) => { store.set('apiKey', value); },
   secret_delete: () => { store.delete('apiKey'); },
@@ -320,6 +327,8 @@ const GATEWAY = {
     ]).flat(),
   }),
   'GET /api/keys': () => ({ keys }),
+  'GET /health': () => ({ status: 'ok' }),
+  'GET /v1/models': () => ({ data: [{ id: 'lixbon-1', name: 'lixbon-1', capabilities: [] }] }),
   'GET /api/conversations': () => ({
     conversations: [
       { id: 11, title: 'Refactor auth', updated_at: new Date(Date.now() - 20 * 60000).toISOString() },
@@ -343,6 +352,7 @@ const GATEWAY = {
     return { api_key: `lixbon_sk_${Math.random().toString(36).slice(2)}` };
   },
   'PATCH /api/account/profile': (body) => ({ user: { ...store.get('user'), ...body } }),
+  'PATCH /api/account/settings': (body) => { console.info('[tauriMock] ajustes', body); return { settings: { mascot: body.mascot } }; },
 };
 // Lixbon Team en modo dev: un proyecto, dos canales, un directo y mensajes.
 const U = (id, first_name, username) => ({ id, first_name, last_name: '', username, email: `${username}@demo.dev` });
@@ -429,12 +439,26 @@ function mockCompletion(body) {
       : 'Perfecto, sigo con esas opciones.')
       : last.includes('pregunta') ? ask
         : 'Hola, soy el modelo simulado del modo dev.';
+  // «… fase N …»: tarea de varios pasos (herramientas de lectura) para ver a
+  // la mascota en el kart y su pregunta al terminar.
+  const pedido = body.messages.find((m) => m.role === 'user' && !String(m.content).startsWith('TOOL_RESULT'))?.content || '';
+  const fase = /fase\s+(\d+)/i.exec(String(pedido));
+  const hechos = body.messages.filter((m) => String(m.content).startsWith('TOOL_RESULT')).length;
+  const PASOS = [
+    { tool: 'list_files', args: { path: 'src' } },
+    { tool: 'read_file', args: { path: 'src/App.tsx' } },
+    { tool: 'search', args: { query: 'useAgent' } },
+    { tool: 'read_file', args: { path: 'src/hooks/useAgent.ts' } },
+  ];
+  const texto = fase && !frag
+    ? (hechos < PASOS.length ? JSON.stringify(PASOS[hechos]) : `Fase ${fase[1]} terminada: revisé la estructura y el hook del agente.`)
+    : text;
   const enc = new TextEncoder();
   const stream = new ReadableStream({
     async start(ctrl) {
-      for (const part of text.match(/[\s\S]{1,12}/g)) {
+      for (const part of texto.match(/[\s\S]{1,12}/g)) {
         ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`));
-        await new Promise((r) => setTimeout(r, last.includes('lento') ? 700 : 30));
+        await new Promise((r) => setTimeout(r, last.includes('lento') ? 700 : fase ? 400 : 30));
       }
       ctrl.enqueue(enc.encode('data: [DONE]\n\n'));
       ctrl.close();
