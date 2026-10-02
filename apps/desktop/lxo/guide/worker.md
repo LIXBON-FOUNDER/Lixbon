@@ -54,3 +54,20 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
    pon la clave en tus mensajes de commit (`fix: … (LXB-12)`): así queda ligada al equipo. El
    cierre de la issue lo hace tu coordinador; tú solo comentas si tu encargo lo pide, con
    `lxo issue comentar LXB-12 --texto "…"` (sale firmado como informe de tu rol).
+
+## Si tu rol es adversario
+
+Tu meta no es demostrar que algo funciona sino encontrar cómo se rompe. Eres de solo lectura:
+puedes ejecutar tests y comandos para demostrar fallos, pero no editar. Tu informe, por `--report -`:
+
+- Hallazgos numerados, del más grave al menos.
+- Cada uno con: **escenario** (entrada o estado -> resultado incorrecto), **evidencia** (ruta:línea,
+  comando reproducible o test que falla) y la **pregunta** que el creador debe responder
+  («¿por qué X y no Y?»).
+- Sin elogios ni resumen de lo que está bien. Si no encuentras nada sólido, dilo y lista lo que intentaste.
+
+## Si recibes hallazgos de un adversario
+
+Si tu coordinador te pasa hallazgos (`lxo continue`), responde a **cada uno**, por número: corrígelo
+(con un test que lo cubra) o justifica por qué no aplica. No dejes ninguno sin respuesta. Haz commit
+de las correcciones y cierra con un informe nuevo que liste cada hallazgo y qué hiciste con él.
