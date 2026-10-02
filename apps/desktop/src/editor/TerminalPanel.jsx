@@ -11,36 +11,10 @@ import { listen } from '@tauri-apps/api/event';
 import { useTerminalStore } from '../store/terminalStore';
 import { useAppStore } from '../store/appStore';
 import { termOpen, termWrite, termResize, termClose } from '../lib/tauri';
+import { currentXtermTheme } from './xtermThemes';
+import { watchTheme } from './themeMode';
 import { Select } from '../components/Select';
 import { IconX, IconPlus } from '../components/Icons';
-
-export const XTERM_THEMES = {
-  dark: {
-    background: '#111111',
-    foreground: '#DCDCD6',
-    cursor: '#C6D66E',
-    cursorAccent: '#111111',
-    selectionBackground: 'rgba(198, 214, 110, 0.25)',
-    black: '#1c1c1c', brightBlack: '#6b6b66',
-    red: '#e5766b', brightRed: '#f09289',
-    green: '#9fc46a', brightGreen: '#c6d66e',
-    yellow: '#e2b85c', brightYellow: '#f0cd7c',
-    blue: '#7aa7e0', brightBlue: '#9cc0ef',
-    magenta: '#c39ae0', brightMagenta: '#d6b5ee',
-    cyan: '#6fc2c0', brightCyan: '#92d8d5',
-    white: '#dcdcd6', brightWhite: '#f5f5f0',
-  },
-  light: {
-    background: '#f6f7ed',
-    foreground: '#171717',
-    cursor: '#171717',
-    cursorAccent: '#f6f7ed',
-    selectionBackground: 'rgba(23, 23, 23, 0.18)',
-  },
-};
-
-export const currentXtermTheme = () =>
-  document.documentElement.dataset.theme === 'dark' ? XTERM_THEMES.dark : XTERM_THEMES.light;
 
 export const FONT = "'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace";
 
@@ -98,10 +72,7 @@ function TerminalInstance({ session, active }) {
       } catch { /* sin WebGL: renderer DOM */ }
     });
 
-    const themeObserver = new MutationObserver(() => {
-      term.options.theme = currentXtermTheme();
-    });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const stopThemeWatch = watchTheme(() => { term.options.theme = currentXtermTheme(); });
 
     (async () => {
       try {
@@ -141,7 +112,7 @@ function TerminalInstance({ session, active }) {
     return () => {
       disposed = true;
       ro.disconnect();
-      themeObserver.disconnect();
+      stopThemeWatch();
       if (unlistenOut) unlistenOut();
       if (unlistenExit) unlistenExit();
       term.dispose();
