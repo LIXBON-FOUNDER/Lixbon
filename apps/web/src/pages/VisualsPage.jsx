@@ -19,7 +19,7 @@ import { descargarBlob } from '../lib/archivos';
 import { crearZip } from '../lib/zip';
 import {
   ANCHOS, DESIGN_SYSTEMS, IDEAS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
-  documentoPreview, documentoPresentacion, esConversacionDeImagenes, resolverPagina, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
+  documentoPreview, documentoPresentacion, esConversacionDeImagenes, resolverPagina, rotuloDe, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
   tiempoRelativo,
 } from '../lib/visuals';
 import { Logo } from '../components/Logo';
@@ -227,7 +227,7 @@ export default function VisualsPage() {
       const m = e.data || {};
       if (m.type === 'lixbon:select') { const { type: _tipo, ...datos } = m; setSeleccion(datos); }
       if (m.type === 'lixbon:navigate' && e.source === frameRef.current?.contentWindow) {
-        const destino = resolverPagina(paginas.map((f) => f.name), m.page);
+        const destino = resolverPagina(paginas.map((f) => f.name), m.page, m.texto, Object.fromEntries(paginas.map((f) => [f.name, rotuloDe(f.code)])));
         if (!destino) { setEnlaceRoto(m.page || '/'); return; }
         setEnlaceRoto(null);
         if (destino === paginaRef.current) { if (m.hash) frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:hash', hash: m.hash }, '*'); return; }
