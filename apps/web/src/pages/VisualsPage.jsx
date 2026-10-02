@@ -18,7 +18,7 @@ import { streamChatCompletion } from '../lib/stream';
 import { descargarBlob } from '../lib/archivos';
 import { crearZip } from '../lib/zip';
 import {
-  DESIGN_SYSTEMS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
+  ANCHOS, DESIGN_SYSTEMS, IDEAS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
   documentoPreview, documentoPresentacion, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
   tiempoRelativo,
 } from '../lib/visuals';
@@ -31,7 +31,7 @@ import { Desplegable } from '../components/Desplegable';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import {
   IconArrowLeft, IconCheck, IconChevron, IconCode, IconCopy, IconDots, IconDownload, IconExternal, IconFile, IconHistory,
-  IconLayers, IconPanel, IconPencil, IconPointer, IconShare, IconTrash, IconX,
+  IconGrid, IconLayers, IconPanel, IconPencil, IconPhone, IconPointer, IconRedo, IconRows, IconSearch, IconShare, IconTablet, IconTrash, IconUndo, IconWindow, IconX,
 } from '../components/Icons';
 
 const CONTEXT_WINDOW = 30;
@@ -98,14 +98,19 @@ export default function VisualsPage() {
   const [inspeccion, setInspeccion] = useState(false);
   const [seleccion, setSeleccion] = useState(null);
   const [ops, setOps] = useState({});             // `${indice}:${pagina}` → [{selector, text?, style?}]
-  const [prefill, setPrefill] = useState('');
+  const [prefill, setPrefill] = useState({ texto: '', n: 0 });
   const [menu, setMenu] = useState(null);         // 'paginas' | 'historial' | 'compartir'
   const [enlace, setEnlace] = useState(null);     // token de compartir
   const [editandoTitulo, setEditandoTitulo] = useState(false);
+  const [deshechas, setDeshechas] = useState({}); // clave de ops → ops deshechas (para rehacer)
+  const [revOps, setRevOps] = useState(0);        // sube al deshacer: el iframe se rehace sin la op
+  const [ancho, setAncho] = useState(() => local.get('lixbon.visuals.ancho', 'ajustar'));
+  const [panelMovil, setPanelMovil] = useState('chat'); // pantallas estrechas: un panel cada vez
   const abortRef = useRef(null);
   const loadedConvRef = useRef(null);
   const scrollRef = useRef(null);
   const frameRef = useRef(null);
+  const stageRef = useRef(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -145,11 +150,13 @@ export default function VisualsPage() {
       setVersion(null);
       setPagina(null);
       setOps({});
+      setDeshechas({});
       setSeleccion(null);
       setTipo(null);
       return;
     }
     setOps(local.get(`lixbon.visuals.ops.${routeConvId}`, {}));
+    setDeshechas({});
     const ds = local.get(`lixbon.visuals.ds.${routeConvId}`, null);
     if (ds) setDesignSystem(dsDesde(ds));
     if (!user || loadedConvRef.current === routeConvId) return;
@@ -188,8 +195,24 @@ export default function VisualsPage() {
   const opsActuales = useMemo(() => ops[claveOps] || [], [ops, claveOps]);
   // Las ediciones de después se aplican en vivo por postMessage: si entraran en
   // las dependencias, cada cambio recargaría el iframe y perdería la selección.
-  const doc = useMemo(() => documentoPreview(paginaActual, opsActuales), [paginaActual, claveOps]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const doc = useMemo(() => documentoPreview(paginaActual, opsActuales), [paginaActual, claveOps, revOps]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (doc) setCargando(true); }, [doc]);
+
+  // ── Ancho de vista previa: fijo en px, a escala si no cabe ────────────
+  const [anchoStage, setAnchoStage] = useState(0);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([e]) => setAnchoStage(Math.floor(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [routeConvId, actual?.kind]);
+  const anchoFijo = ANCHOS.find((a) => a.id === ancho)?.ancho || 0;
+  const marco = anchoFijo && anchoStage ? {
+    ancho: anchoFijo,
+    escala: Math.min(1, anchoStage / anchoFijo),
+    visible: Math.min(anchoFijo, anchoStage),
+  } : null;
 
   // ── Mensajes del iframe (selección, navegación entre páginas) ──────────
   useEffect(() => {
@@ -210,20 +233,88 @@ export default function VisualsPage() {
     if (!inspeccion) setSeleccion(null);
   }, [inspeccion, doc]);
 
+  const guardarOps = (fn) => setOps((prev) => {
+    const next = fn(prev);
+    if (routeConvId) local.set(`lixbon.visuals.ops.${routeConvId}`, next);
+    return next;
+  });
   const aplicarOp = (op) => {
     frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:apply', ...op }, '*');
-    setOps((prev) => {
-      const next = { ...prev, [claveOps]: [...(prev[claveOps] || []), op] };
-      if (routeConvId) local.set(`lixbon.visuals.ops.${routeConvId}`, next);
-      return next;
-    });
+    guardarOps((prev) => ({ ...prev, [claveOps]: [...(prev[claveOps] || []), op] }));
+    setDeshechas((prev) => (prev[claveOps]?.length ? { ...prev, [claveOps]: [] } : prev));
+  };
+  // Una op no se puede retirar en vivo: se rehace el documento sin ella.
+  const recargarConOps = () => { setSeleccion(null); setRevOps((n) => n + 1); };
+  const pilaRehacer = deshechas[claveOps] || [];
+  const deshacer = () => {
+    if (!opsActuales.length) return;
+    const ultima = opsActuales[opsActuales.length - 1];
+    guardarOps((prev) => ({ ...prev, [claveOps]: (prev[claveOps] || []).slice(0, -1) }));
+    setDeshechas((prev) => ({ ...prev, [claveOps]: [...(prev[claveOps] || []), ultima] }));
+    recargarConOps();
+  };
+  const rehacer = () => {
+    if (!pilaRehacer.length) return;
+    const op = pilaRehacer[pilaRehacer.length - 1];
+    frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:apply', ...op }, '*');
+    guardarOps((prev) => ({ ...prev, [claveOps]: [...(prev[claveOps] || []), op] }));
+    setDeshechas((prev) => ({ ...prev, [claveOps]: (prev[claveOps] || []).slice(0, -1) }));
+  };
+  const descartarRetoques = async () => {
+    const ok = await confirmar({ titulo: t('discardTitle'), texto: t('discardText', { n: opsActuales.length, name: paginaActual?.name || '' }), etiqueta: t('discard') });
+    if (!ok) return;
+    guardarOps((prev) => { const { [claveOps]: _fuera, ...resto } = prev; return resto; });
+    setDeshechas((prev) => ({ ...prev, [claveOps]: [] }));
+    recargarConOps();
+  };
+  // La última se guarda como null: así las versiones nuevas se muestran solas.
+  const verVersion = (n) => { setVersion(n >= versiones.length - 1 ? null : n); setPanelMovil('lienzo'); };
+  const elegirAncho = (id) => { setAncho(id); local.set('lixbon.visuals.ancho', id); };
+  const irAPagina = (name) => { setPagina(name); setVista('pagina'); };
+  const paginaRelativa = (paso) => {
+    if (paginas.length < 2 || !paginaActual) return;
+    const i = paginas.findIndex((f) => f.name === paginaActual.name);
+    irAPagina(paginas[(i + paso + paginas.length) % paginas.length].name);
   };
 
+  // Texto para el campo del chat; la clave fuerza a rellenarlo aunque se repita.
+  const rellenar = (texto) => setPrefill((p) => ({ texto, n: p.n + 1 }));
+
   const pedirAlModelo = (sel) => {
-    setPrefill(`${t('elementPrefillBefore')} ${paginaActual?.name || t('thePage')} (<${sel.tag}>): ${sel.html.slice(0, 300)}\n\n${t('elementPrefillMiddle')} `);
+    rellenar(`${t('elementPrefillBefore')} ${paginaActual?.name || t('thePage')} (<${sel.tag}>): ${sel.html.slice(0, 300)}\n\n${t('elementPrefillMiddle')} `);
     setInspeccion(false);
     setChatAbierto(true);
   };
+
+  // ── Atajos del editor (fuera de campos de texto) ──────────────────────
+  const atajosRef = useRef(null);
+  atajosRef.current = { deshacer, rehacer, paginaRelativa, inspeccion, verCodigo, menu, paginaActual, modoImagen, routeConvId };
+  useEffect(() => {
+    const onKey = (e) => {
+      const a = atajosRef.current;
+      if (!a.routeConvId || a.modoImagen) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) a.rehacer(); else a.deshacer(); return; }
+      if (mod && k === 'y') { e.preventDefault(); a.rehacer(); return; }
+      if (mod || e.altKey) return;
+      if (k === 'escape') {
+        if (a.menu) setMenu(null);
+        else if (a.inspeccion) setInspeccion(false);
+        else if (a.verCodigo) setVerCodigo(false);
+        return;
+      }
+      if (!a.paginaActual) return;
+      if (k === 'v' && !/\.svg$/i.test(a.paginaActual.name)) { setInspeccion((v) => !v); setVerCodigo(false); setVista('pagina'); }
+      else if (k === 'c') { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }
+      else if (k === 'arrowright' || k === ']') a.paginaRelativa(1);
+      else if (k === 'arrowleft' || k === '[') a.paginaRelativa(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // ── Imagen: una petición al nodo de difusión, sin stream ──────────────
   const generarImagen = async (prompt) => {
@@ -263,7 +354,7 @@ export default function VisualsPage() {
   const send = async (texto, images = []) => {
     if (!user) { navigate('/auth?mode=register'); return; }
     if (!tieneVisuals(user)) { navigate('/plans'); return; }
-    setPrefill('');
+    setPrefill((p) => (p.texto ? { texto: '', n: p.n } : p));
     if (modoImagen) { await generarImagen(texto); return; }
     let chosenModel = model;
     if (!chosenModel) {
@@ -468,9 +559,15 @@ export default function VisualsPage() {
                 </div>
               ) : null}
               <div className="vis-hero__input">
-                <ChatInput onSend={send} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
+                <ChatInput key={prefill.n} initialText={prefill.texto} onSend={send} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
                   tools={tipo?.id !== 'imagen' && <DesignSystemPicker value={designSystem} onChange={elegirDesignSystem} compacto />}
                   placeholder={tipo ? tipo.hint[locale] : t('inputPlaceholder')} />
+              </div>
+              <div className="vis-ideas">
+                <span className="vis-ideas__label">{t('ideas')}</span>
+                {(IDEAS[tipo?.id] || IDEAS.general)[locale === 'en' ? 'en' : 'es'].map((idea) => (
+                  <button key={idea} className="vis-idea" onClick={() => rellenar(idea)}>{idea}</button>
+                ))}
               </div>
               {!user && <p className="vis-hero__nota">{t('proAdvanceNote')}</p>}
               </>
@@ -492,7 +589,7 @@ export default function VisualsPage() {
     <div className="vis-page vis-editor">
       <header className="vis-top">
         <Link to="/visuals" className="icon-btn" title={t('allDesigns')}><IconArrowLeft size={17} /></Link>
-        <button className={`icon-btn ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? t('hideChat') : t('showChat')} aria-pressed={chatAbierto}>
+        <button className={`icon-btn vis-top__panel ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? t('hideChat') : t('showChat')} aria-pressed={chatAbierto}>
           <IconPanel size={17} />
         </button>
         <div className="vis-titulo">
@@ -503,41 +600,6 @@ export default function VisualsPage() {
           ) : (
             <button className="vis-titulo__nombre" onClick={() => setEditandoTitulo(true)} title={t('renameDesign')}>{tituloVisible}</button>
           )}
-          {!modoImagen && (
-            <Menu abierto={menu === 'paginas'} onCerrar={() => setMenu(null)}>
-              <button className={`vis-chip ${menu === 'paginas' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'paginas' ? null : 'paginas')} title={t('pages')}>
-                <IconFile size={14} />
-                <span>{vista === 'lienzo' ? t('canvas') : paginaActual?.name || (paginas.length ? t('pagesCountShort', { n: paginas.length }) : t('noPagesYet'))}</span>
-                <IconChevron size={13} open={menu === 'paginas'} />
-              </button>
-              <Desplegable abierto={menu === 'paginas'} className="vis-menu__panel vis-menu__panel--paginas">
-                  {paginas.length > 1 && (
-                    <>
-                      <div className="vis-menu__head">{t('view')}</div>
-                      <button className={`vis-menu__item ${vista === 'lienzo' ? 'is-active' : ''}`} onClick={() => { setVista('lienzo'); setInspeccion(false); setMenu(null); }}>
-                        <IconLayers size={15} /><span className="vis-menu__item-text"><strong>{t('canvas')}</strong><small>{t('allPagesAtOnce', { n: paginas.length })}</small></span>
-                        {vista === 'lienzo' && <IconCheck size={14} />}
-                      </button>
-                      <div className="vis-menu__sep" />
-                    </>
-                  )}
-                  <div className="vis-menu__head">{t('pages')}</div>
-                  {paginas.map((f) => {
-                    const activa = vista === 'pagina' && paginaActual?.name === f.name;
-                    return (
-                      <button key={f.name} className={`vis-menu__item ${activa ? 'is-active' : ''}`} onClick={() => { setPagina(f.name); setVista('pagina'); setMenu(null); }}>
-                        <IconFile size={15} /><span className="vis-menu__item-text"><strong>{f.name.replace(/\.(html?|svg)$/, '')}</strong></span>
-                        {activa && <IconCheck size={14} />}
-                      </button>
-                    );
-                  })}
-                  {!paginas.length && <p className="vis-menu__vacio">{t('noPagesHint')}</p>}
-                  <div className="vis-menu__sep" />
-                  <button className="vis-menu__item" onClick={() => { setEditandoTitulo(true); setMenu(null); }}><IconPencil size={15} /><span>{t('renameDesign')}</span></button>
-                  <Link className="vis-menu__item" to="/visuals"><IconLayers size={15} /><span>{t('allDesigns')}</span></Link>
-              </Desplegable>
-            </Menu>
-          )}
           {versiones.length > 0 && (
             <Menu abierto={menu === 'historial'} onCerrar={() => setMenu(null)}>
               <button className={`vis-chip ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title={t('versions')}>
@@ -546,7 +608,7 @@ export default function VisualsPage() {
               <Desplegable abierto={menu === 'historial'} className="vis-menu__panel">
                   <div className="vis-menu__head">{t('versions')}</div>
                   {versiones.map((v, n) => (
-                    <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); setMenu(null); }}>
+                    <button key={v.indice} className={`vis-menu__item ${indiceVersion === n ? 'is-active' : ''}`} onClick={() => { verVersion(n); setMenu(null); }}>
                       <span className="vis-menu__check">{indiceVersion === n && <IconCheck size={14} />}</span>
                       <span className="vis-menu__item-text"><strong>{t('version', { n: n + 1 })}</strong><small>{v.kind === 'image' ? t('image') : v.nuevas.join(', ')}</small></span>
                     </button>
@@ -560,10 +622,10 @@ export default function VisualsPage() {
           <TemaBoton />
           {!modoImagen && (
             <div className="vis-seg">
-              <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title={t('selectHint')}>
+              <button className={`vis-tool ${inspeccion ? 'is-active' : ''}`} onClick={() => { setInspeccion((v) => !v); setVista('pagina'); setVerCodigo(false); }} disabled={!paginaActual || esSvg(paginaActual.name)} title={`${t('selectHint')} (V)`}>
                 <IconPointer size={14} /> {t('select')}
               </button>
-              <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }} disabled={!paginaActual}>
+              <button className={`vis-tool ${verCodigo ? 'is-active' : ''}`} onClick={() => { setVerCodigo((v) => !v); setInspeccion(false); setVista('pagina'); }} disabled={!paginaActual} title={`${t('codeHint')} (C)`}>
                 <IconCode size={14} /> {t('code')}
               </button>
             </div>
@@ -621,7 +683,16 @@ export default function VisualsPage() {
       </header>
       <VerifyBanner />
 
-      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'} ${inspeccion && seleccion ? 'con-inspector' : ''}`}>
+      <div className="vis-movil">
+        <div className="vis-panel-toggle" role="tablist">
+          <button role="tab" aria-selected={panelMovil === 'chat'} className={panelMovil === 'chat' ? 'is-active' : ''} onClick={() => setPanelMovil('chat')}>{t('mobileChat')}</button>
+          <button role="tab" aria-selected={panelMovil === 'lienzo'} className={panelMovil === 'lienzo' ? 'is-active' : ''} onClick={() => setPanelMovil('lienzo')}>
+            {t('mobileDesign')}{versiones.length > 0 && <span className="vis-panel-toggle__n">v{indiceVersion + 1}</span>}
+          </button>
+        </div>
+      </div>
+
+      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'} ${inspeccion && seleccion ? 'con-inspector' : ''} ${panelMovil === 'lienzo' ? 'is-lienzo' : 'is-chat'}`}>
         <section className="vis-chat">
           <div className="chat-scroll" ref={scrollRef}>
             <div className="chat-thread vis-thread">
@@ -637,7 +708,7 @@ export default function VisualsPage() {
                       const imagen = extraerImagen(m.content);
                       if (imagen) {
                         return (
-                          <button className={`vis-thumb ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => setVersion(n)}>
+                          <button className={`vis-thumb ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => verVersion(n)}>
                             <img src={imagen.src} alt={imagen.alt} />
                             <span>v{n + 1}</span>
                           </button>
@@ -657,7 +728,7 @@ export default function VisualsPage() {
                             : (!archivos.length && !m.reasoning && <span className="msg__thinking">{t('thinking')}</span>)}
                           {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                           {n >= 0 && versiones[n].nuevas.length > 0 && (
-                            <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => { setVersion(n); setPagina(null); }}>
+                            <button className={`vis-version-chip ${actual?.indice === i ? 'is-active' : ''}`} onClick={() => verVersion(n)}>
                               v{n + 1} · {versiones[n].nuevas.join(', ')}
                             </button>
                           )}
@@ -697,26 +768,87 @@ export default function VisualsPage() {
                 ))}
               </div>
             )}
-            <ChatInput key={prefill} initialText={prefill} onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
+            <ChatInput key={prefill.n} initialText={prefill.texto} onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel}
               placeholder={modoImagen ? t('imagePlaceholder') : t('editPlaceholder')} />
           </div>
         </section>
 
         <section className="vis-canvas">
-          <div className="vis-stage">
+          <div className="vis-lienzo">
+          {actual?.kind === 'file' && (
+            <div className="vis-stagebar">
+              <div className="vis-pestanas" role="tablist" aria-label={t('pages')}>
+                {paginas.length > 1 && (
+                  <button role="tab" aria-selected={vista === 'lienzo'} className={`vis-pestana ${vista === 'lienzo' ? 'is-on' : ''}`}
+                    onClick={() => { setVista('lienzo'); setInspeccion(false); setVerCodigo(false); }} title={t('allPagesAtOnce', { n: paginas.length })}>
+                    <IconLayers size={14} /> {t('canvas')}
+                  </button>
+                )}
+                {paginas.map((f) => {
+                  const activa = vista === 'pagina' && paginaActual?.name === f.name;
+                  const retocada = (ops[`${actual.indice}:${f.name}`] || []).length > 0;
+                  return (
+                    <button key={f.name} role="tab" aria-selected={activa} className={`vis-pestana ${activa ? 'is-on' : ''}`} onClick={() => irAPagina(f.name)} title={f.name}>
+                      <IconFile size={13} /> {f.name.replace(/\.(html?|svg)$/, '')}
+                      {actual.nuevas?.includes(f.name) && indiceVersion > 0 && <span className="vis-pestana__nueva" title={t('changedInVersion')} />}
+                      {retocada && <span className="vis-pestana__retoque" title={t('hasManualEdits')}>✎</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="vis-stagebar__der">
+                {vista === 'pagina' && (opsActuales.length > 0 || pilaRehacer.length > 0) && (
+                  <div className="vis-retoques">
+                    <button className="vis-tool vis-tool--icono" onClick={deshacer} disabled={!opsActuales.length} title={`${t('undo')} (Ctrl+Z)`} aria-label={t('undo')}><IconUndo size={15} /></button>
+                    <button className="vis-tool vis-tool--icono" onClick={rehacer} disabled={!pilaRehacer.length} title={`${t('redo')} (Ctrl+Shift+Z)`} aria-label={t('redo')}><IconRedo size={15} /></button>
+                    {opsActuales.length > 0 && (
+                      <button className="vis-tool vis-tool--icono vis-retoques__n" onClick={descartarRetoques}
+                        title={`${t(opsActuales.length === 1 ? 'manualEditsOne' : 'manualEditsCount', { n: opsActuales.length })} · ${t('discardHint')}`} aria-label={t('discardHint')}>
+                        <IconTrash size={14} /><span>{opsActuales.length}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+                {vista === 'pagina' && !verCodigo && (
+                  <div className="vis-seg vis-seg--chico" role="group" aria-label={t('previewWidth')}>
+                    {ANCHOS.map((a) => {
+                      const Icono = { ajustar: IconPanel, escritorio: IconWindow, tablet: IconTablet, movil: IconPhone }[a.id];
+                      const etiqueta = a.ancho ? `${t(`width_${a.id}`)} · ${a.ancho}px` : t('width_ajustar');
+                      return (
+                        <button key={a.id} className={`vis-tool vis-tool--icono ${ancho === a.id ? 'is-active' : ''}`} onClick={() => elegirAncho(a.id)} title={etiqueta} aria-label={etiqueta} aria-pressed={ancho === a.id}>
+                          <Icono size={15} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {versiones.length > 1 && indiceVersion < versiones.length - 1 && (
+            <div className="vis-aviso" role="status">
+              <IconHistory size={14} />
+              <span>{t('viewingOldVersion', { n: indiceVersion + 1, total: versiones.length })}</span>
+              <button className="vis-aviso__btn" onClick={() => setVersion(null)}>{t('backToLatest')}</button>
+            </div>
+          )}
+          <div className="vis-stage" ref={stageRef}>
             {actual ? (
               actual.kind === 'image' ? (
                 <img className="vis-imagen" src={actual.src} alt={actual.name} />
               ) : vista === 'lienzo' ? (
                 <Board paginas={paginas} documento={(f) => documentoPreview(f, ops[`${actual.indice}:${f.name}`] || [])}
-                  onAbrir={(name) => { setPagina(name); setVista('pagina'); }} />
+                  onAbrir={irAPagina} />
               ) : verCodigo ? (
-                <pre className="vis-code"><code>{codigoFinal(paginaActual)}</code></pre>
+                <CodigoVista nombre={paginaActual.name} codigo={codigoFinal(paginaActual)} retoques={opsActuales.length}
+                  copiado={copiado === 'codigo'} onCopiar={copiarCodigo} t={t} />
               ) : (
-                <div className="vis-frame">
-                  <iframe ref={frameRef} title={t('previewTitle')} sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
+                <div className={`vis-frame ${marco ? 'is-fijo' : ''}`} style={marco ? { width: marco.visible } : undefined}>
+                  <iframe key={revOps} ref={frameRef} title={t('previewTitle')} sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
+                    style={marco ? { width: marco.ancho, height: `${100 / marco.escala}%`, transform: `scale(${marco.escala})`, transformOrigin: '0 0' } : undefined}
                     onLoad={() => { setCargando(false); frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*'); }} />
                   {cargando && <div className="vis-stage__loading"><span>{t('rendering', { name: paginaActual?.name })}</span></div>}
+                  {marco && <span className="vis-frame__medida">{marco.ancho}px{marco.escala < 1 ? ` · ${Math.round(marco.escala * 100)}%` : ''}</span>}
                 </div>
               )
             ) : (
@@ -728,6 +860,7 @@ export default function VisualsPage() {
             )}
             {generando && actual && <div className="vis-stage__badge">{t('newVersionOnTheWay')}</div>}
             {inspeccion && !seleccion && <div className="vis-stage__badge">{t('clickToEdit')}</div>}
+          </div>
           </div>
           {inspeccion && seleccion && (
             <Inspector
@@ -746,41 +879,89 @@ export default function VisualsPage() {
   );
 }
 
-/** Galería de diseños: miniatura de la última versión, última edición, autor. */
+/** Código de la página con números de línea; incluye los retoques manuales. */
+function CodigoVista({ nombre, codigo, retoques, copiado, onCopiar, t }) {
+  const lineas = useMemo(() => codigo.split('\n'), [codigo]);
+  return (
+    <div className="vis-code">
+      <div className="vis-code__cab">
+        <IconFile size={13} />
+        <span className="vis-code__nombre">{nombre}</span>
+        <span className="vis-code__meta">{t('linesCount', { n: lineas.length })}{retoques ? ` · ${t('includesManualEdits')}` : ''}</span>
+        <button className="vis-field__btn" onClick={onCopiar}>{copiado ? <IconCheck size={13} /> : <IconCopy size={13} />} {copiado ? t('copied') : t('copy')}</button>
+      </div>
+      <pre className="vis-code__cuerpo"><code>{lineas.map((l, i) => <span key={i} className="vis-code__l">{l || ' '}{'\n'}</span>)}</code></pre>
+    </div>
+  );
+}
+
+/** Galería de diseños: miniatura de la última versión, última edición y
+ *  número de páginas; se busca por nombre, se ordena y se ve en lista o en
+ *  cuadrícula (lo elegido se recuerda en el navegador). */
 function Galeria({ conversations, loading, onRename, onDelete, t, tc }) {
   const locale = useLocale();
   const [miniaturas, setMiniaturas] = useState({}); // id → { files } | null
   const [menuId, setMenuId] = useState(null);
   const [renombrando, setRenombrando] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
+  const [orden, setOrden] = useState(() => local.get('lixbon.visuals.orden', 'reciente'));
+  const [disposicion, setDisposicion] = useState(() => local.get('lixbon.visuals.vista', 'lista'));
   const navigate = useNavigate();
 
+  const cambiarOrden = (v) => { setOrden(v); local.set('lixbon.visuals.orden', v); };
+  const cambiarDisposicion = (v) => { setDisposicion(v); local.set('lixbon.visuals.vista', v); };
+
+  const visibles = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    const lista = conversations.filter((c) => !q || (c.title || t('untitledDesign')).toLowerCase().includes(q));
+    if (orden === 'nombre') return lista.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', locale));
+    return lista.slice().sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+  }, [conversations, busqueda, orden, locale, t]);
+
   useEffect(() => {
-    conversations.slice(0, 24).forEach((c) => {
+    visibles.slice(0, 24).forEach((c) => {
       if (miniaturas[c.id] !== undefined) return;
       setMiniaturas((prev) => ({ ...prev, [c.id]: null }));
       api.get(`/api/conversations/${c.id}/files`)
         .then((r) => setMiniaturas((prev) => ({ ...prev, [c.id]: r.data })))
         .catch(() => setMiniaturas((prev) => ({ ...prev, [c.id]: { files: [] } })));
     });
-  }, [conversations]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visibles]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="vis-galeria__vacio">{t('loadingDesigns')}</div>;
   if (!conversations.length) return <div className="vis-galeria__vacio">{t('designsWillAppear')}</div>;
 
   return (
     <section className="vis-galeria__lista">
-      <h3 className="vis-galeria__titulo">{t('yourDesigns')} <small>{conversations.length}</small></h3>
-      <div className="vis-cards">
-        {conversations.map((c) => {
+      <div className="vis-galeria__barra">
+        <h3 className="vis-galeria__titulo">{t('yourDesigns')} <small>{conversations.length}</small></h3>
+        <label className="vis-buscar">
+          <IconSearch size={14} />
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder={t('searchDesigns')} aria-label={t('searchDesigns')}
+            onKeyDown={(e) => { if (e.key === 'Escape') setBusqueda(''); }} />
+          {busqueda && <button className="vis-buscar__x" onClick={() => setBusqueda('')} aria-label={t('clearSearch')}><IconX size={12} /></button>}
+        </label>
+        <div className="vis-seg vis-seg--chico" role="group" aria-label={t('sortBy')}>
+          <button className={`vis-tool ${orden === 'reciente' ? 'is-active' : ''}`} onClick={() => cambiarOrden('reciente')}>{t('sortRecent')}</button>
+          <button className={`vis-tool ${orden === 'nombre' ? 'is-active' : ''}`} onClick={() => cambiarOrden('nombre')}>{t('sortName')}</button>
+        </div>
+        <div className="vis-seg vis-seg--chico" role="group" aria-label={t('layout')}>
+          <button className={`vis-tool ${disposicion === 'lista' ? 'is-active' : ''}`} onClick={() => cambiarDisposicion('lista')} title={t('layoutList')} aria-label={t('layoutList')} aria-pressed={disposicion === 'lista'}><IconRows size={15} /></button>
+          <button className={`vis-tool ${disposicion === 'cuadricula' ? 'is-active' : ''}`} onClick={() => cambiarDisposicion('cuadricula')} title={t('layoutGrid')} aria-label={t('layoutGrid')} aria-pressed={disposicion === 'cuadricula'}><IconGrid size={15} /></button>
+        </div>
+      </div>
+      {!visibles.length && <div className="vis-galeria__vacio">{t('noDesignsMatch', { q: busqueda.trim() })}</div>}
+      <div className={`vis-cards ${disposicion === 'cuadricula' ? 'vis-cards--grid' : ''}`}>
+        {visibles.map((c) => {
           const mini = miniaturas[c.id];
           const portada = mini?.files?.find((f) => f.name === 'index.html') || mini?.files?.[0];
           return (
             <article key={c.id} className="vis-card">
               <button className="vis-card__preview" onClick={() => navigate(`/visuals/${c.id}`)} title={t('open')}>
                 {portada ? (
-                  <iframe title={c.title || t('untitledDesign')} sandbox="allow-scripts" srcDoc={documentoPreview(portada)} tabIndex={-1} />
+                  <iframe title={c.title || t('untitledDesign')} sandbox="allow-scripts" srcDoc={documentoPreview(portada)} tabIndex={-1} loading="lazy" />
                 ) : (
-                  <span className="vis-card__sin">{mini === null || mini === undefined ? '…' : t('noPreview')}</span>
+                  <span className={`vis-card__sin ${mini === null || mini === undefined ? 'is-cargando' : ''}`}>{mini === null || mini === undefined ? '' : t('noPreview')}</span>
                 )}
               </button>
               <div className="vis-card__body">
