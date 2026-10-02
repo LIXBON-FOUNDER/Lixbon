@@ -10,6 +10,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionsStore } from '../store/chatStore';
 import { leerMascota, personajeDe } from '../lib/mascota';
 import { preguntaFinal } from './estadoAgente';
+import { nombreDeTarea } from './nombreDeTarea';
 
 const POSPONER_MIN = 10;
 
@@ -55,7 +56,7 @@ export function useAvisoFlotante() {
     const avisar = (s, pide) => {
       const prefs = leerMascota();
       if (!prefs.activa || !prefs.flotante || enFoco) return;
-      const titulo = s.conversationTitle || 'la tarea';
+      const titulo = nombreDeTarea(s);
       const p = pide ? null : preguntaFinal(s.messages || []);
       ultimo = { titulo };
       mostrar({
