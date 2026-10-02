@@ -352,7 +352,7 @@ const GATEWAY = {
     return { api_key: `lixbon_sk_${Math.random().toString(36).slice(2)}` };
   },
   'PATCH /api/account/profile': (body) => ({ user: { ...store.get('user'), ...body } }),
-  'PATCH /api/account/settings': (body) => { console.info('[tauriMock] ajustes', body); return { settings: { mascot: body.mascot } }; },
+  'PATCH /api/account/settings': (body) => { console.info('[tauriMock] ajustes', body); return { settings: { mascot_ide: body.mascot_ide } }; },
 };
 // Lixbon Team en modo dev: un proyecto, dos canales, un directo y mensajes.
 const U = (id, first_name, username) => ({ id, first_name, last_name: '', username, email: `${username}@demo.dev` });

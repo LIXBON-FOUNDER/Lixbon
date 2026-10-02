@@ -1,6 +1,6 @@
-// MascotaPage.jsx — Ajustes → Mascota: Gael y Leya. Son los mismos ajustes
-// que en lixbon.com (se guardan en la cuenta), así que cambiarlos aquí también
-// los cambia en la web.
+// MascotaPage.jsx — Ajustes → Mascota: Gael y Leya en el IDE. Son solo del
+// IDE: la web tiene los suyos. Se guardan en la cuenta para que te sigan en
+// cualquier equipo.
 import { Segmented } from '../../../components/Segmented';
 import { Switch } from '../../../components/Switch';
 import { Select } from '../../../components/Select';
@@ -36,7 +36,7 @@ export function MascotaPage() {
 
   return (
     <div className="spage">
-      <PageHead icon={IconMascota} title="Mascota" sub="Gael y Leya te acompañan mientras trabaja el agente. Se guarda en tu cuenta: la web usa los mismos ajustes." />
+      <PageHead icon={IconMascota} title="Mascota" sub="Gael y Leya te acompañan mientras trabaja el agente. Solo afecta al IDE (la web tiene sus propios ajustes) y se guarda en tu cuenta." />
 
       <section className="ssec rise rise--1">
         <div className="ssec ssec--card ssec--rows">

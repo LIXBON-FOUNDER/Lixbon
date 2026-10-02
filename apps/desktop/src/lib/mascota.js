@@ -1,12 +1,14 @@
-// mascota.js — preferencias de la mascota (Gael y Leya) en el IDE. Son las
-// mismas que en la web: viven en la cuenta (settings.mascot, que trae
-// /api/auth/me) y se copian en localStorage para arrancar sin esperar a la red.
-// Cambiarlas aquí las guarda también en la cuenta.
+// mascota.js — preferencias de la mascota (Gael y Leya) en el IDE. Son solo
+// del IDE, independientes de las de la web: viven en la cuenta como
+// settings.mascot_ide (las trae /api/auth/me, así te siguen en cualquier
+// equipo) y se copian en localStorage para arrancar sin esperar a la red.
 import { useSyncExternalStore } from 'react';
 import { api } from './api';
 import { useAppStore } from '../store/appStore';
 
 const CLAVE = 'lixbon_mascota';
+// Clave de la cuenta: la web usa `mascot`, el IDE la suya.
+const CLAVE_CUENTA = 'mascot_ide';
 
 // Mismo contrato que MASCOT_DEFAULTS en core/persistence/queries.py.
 export const MASCOTA_DEFAULTS = {
@@ -19,7 +21,6 @@ export const MASCOTA_DEFAULTS = {
   latigo_min: 2,
   dormir: true,
   dormir_min: 5,
-  guia: true,          // solo web
   reducir: false,
 };
 
@@ -78,14 +79,14 @@ export function fijarMascota(patch) {
   temporizador = setTimeout(() => {
     const envio = pendiente;
     pendiente = null;
-    api.patch('/api/account/settings', { mascot: envio }).catch(() => { /* queda en local */ });
+    api.patch('/api/account/settings', { [CLAVE_CUENTA]: envio }).catch(() => { /* queda en local */ });
   }, 400);
 }
 
 // Lo que llega de la cuenta (al iniciar sesión o al refrescar el usuario)
 // manda, salvo que sea lo mismo que ya se adoptó.
 function adoptar(user) {
-  const remoto = user?.settings?.mascot;
+  const remoto = user?.settings?.[CLAVE_CUENTA];
   if (!remoto || pendiente) return;
   const firma = JSON.stringify(remoto);
   if (firma === ultimoRemoto) return;
