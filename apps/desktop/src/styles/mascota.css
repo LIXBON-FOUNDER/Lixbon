@@ -146,15 +146,18 @@
 
 /* ── Pista del kart ──────────────────────────────────────────────────── */
 
+/* Superpuesta al final del feed, sin empujar nada ni capturar clics. */
 .pista {
-  position: relative;
-  flex-shrink: 0;
-  height: 96px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--tam);
   overflow: hidden;
-  background: var(--surface-1);
-  animation: pista-entra 0.3s var(--ease) both;
+  pointer-events: none;
 }
-@keyframes pista-entra { from { height: 0; } }
+.pista--chica .pista__accion { display: none; }
+.pista--chica .pista__rotulo { top: 2px; }
 
 .pista__carril { position: absolute; left: 0; right: 0; bottom: 6px; height: 2px;
   background: repeating-linear-gradient(90deg, var(--surface-4) 0 12px, transparent 12px 24px); }
@@ -175,7 +178,7 @@
 @keyframes pista-polvo { from { opacity: 0.9; transform: translateX(0); } to { opacity: 0; transform: translateX(-14px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .mascota-sprite, .mascota-bocadillo, .mascota-puntos i, .pista, .pista__kart, .pista__polvo { animation: none; }
+  .mascota-sprite, .mascota-bocadillo, .mascota-puntos i, .pista__kart, .pista__polvo { animation: none; }
   .mascota-zzz i { animation: none; opacity: 1; position: static; }
 }
 

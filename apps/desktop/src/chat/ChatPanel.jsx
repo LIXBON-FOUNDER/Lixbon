@@ -10,7 +10,7 @@ import { ApprovalCard } from './ApprovalCard';
 import { QuestionCard } from './QuestionCard';
 import { ClaudeDock } from './ClaudeDock';
 import { LogoMark, ClaudeMark } from '../components/Logo';
-import { MascotaAgente } from './MascotaAgente';
+import { MascotaAgente, PistaAgente } from './MascotaAgente';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
     el resto se renderiza como mensajes normales. */
@@ -102,7 +102,10 @@ export function ChatPanel({ wide = false }) {
       {engine === 'claude' && <ClaudeDock />}
       {/* La mascota se apoya en el borde superior del compositor, a la
           derecha; en el panel lateral del Editor, en pequeño. */}
-      <div className="mascota-anclaje"><MascotaAgente tam={wide ? 96 : 48} /></div>
+      <div className="mascota-anclaje">
+        <PistaAgente tam={wide ? 96 : 48} />
+        <MascotaAgente tam={wide ? 96 : 48} />
+      </div>
       <ChatInputBar />
     </div>
   );

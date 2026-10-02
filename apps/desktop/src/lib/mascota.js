@@ -105,8 +105,21 @@ export function useMascota() {
   return useSyncExternalStore(suscribir, leerMascota);
 }
 
-// Con "ambos" se turnan: uno por arranque, elegido al azar.
-const turno = Math.random() < 0.5 ? 'gael' : 'leya';
+// Con "ambos" se turnan: cada tarea del agente le toca al otro; el primero se
+// elige al azar al arrancar.
+let turno = Math.random() < 0.5 ? 'gael' : 'leya';
+let ultimoCambio = 0;
 export function personajeDe(prefs) {
   return prefs.personaje === 'ambos' ? turno : prefs.personaje;
+}
+// Hay dos vistas de la mascota montadas a la vez (mascota y pista): el
+// intervalo evita que ambas pasen el turno por la misma tarea.
+export function pasarTurno() {
+  if (Date.now() - ultimoCambio < 1000) return;
+  ultimoCambio = Date.now();
+  turno = turno === 'gael' ? 'leya' : 'gael';
+  avisar();
+}
+export function useTurno() {
+  return useSyncExternalStore(suscribir, () => turno);
 }

@@ -11,7 +11,7 @@
 // Lo que dice aparece con rebote y se escribe letra a letra mientras habla.
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore, useSessionsStore } from '../store/chatStore';
-import { NOMBRES, alAzar, duracion, personajeDe, useMascota } from '../lib/mascota';
+import { NOMBRES, alAzar, duracion, pasarTurno, personajeDe, useMascota, useTurno } from '../lib/mascota';
 import { SpriteMascota, Bocadillo } from '../components/Mascota';
 import { useAccion, useBocadillo, useCaminata, useGestos, useInactivo } from '../components/mascotaVida';
 import { actividadDe, animacionDeTrabajo, preguntaFinal } from './estadoAgente';
@@ -36,6 +36,7 @@ let yaSaludo = false;
 
 export function MascotaAgente({ tam = 96 }) {
   const prefs = useMascota();
+  useTurno();
   const act = leerActividad(useActividad());
   const activeKey = useSessionsStore((s) => s.activeKey);
   const quieta = prefs.reducir;
@@ -72,7 +73,12 @@ export function MascotaAgente({ tam = 96 }) {
       return;
     }
     if (!act.esperando && prev.esperando) bocadillo.callar();
-    if (act.trabajando && !prev.trabajando) { setPregunta(null); bocadillo.callar(); return; }
+    if (act.trabajando && !prev.trabajando) {
+      if (prefs.personaje === 'ambos') pasarTurno();
+      setPregunta(null);
+      bocadillo.callar();
+      return;
+    }
     if (prev.trabajando && !act.trabajando && !act.esperando) {
       hacer('celebrate', duracion('celebrate') * 2);
       const p = prefs.preguntar ? preguntaFinal(useChatStore.getState().messages) : null;
@@ -181,11 +187,12 @@ export function MascotaAgente({ tam = 96 }) {
   );
 }
 
-/** La pista: aparece sobre la barra de estado mientras el agente va en kart.
+/** La pista: aparece sobre la caja del chat mientras el agente va en kart.
     No se sabe cuántos pasos hará, así que avanza cada vez menos (nunca llega
     a la meta hasta que termina) y pone una bandera por paso. */
-export function PistaAgente() {
+export function PistaAgente({ tam = 96 }) {
   const prefs = useMascota();
+  useTurno();
   const act = leerActividad(useActividad());
   if (!prefs.activa || !act.trabajando || act.esperando) return null;
   if (animacionDeTrabajo(prefs, act) !== 'kart') return null;
@@ -196,7 +203,7 @@ export function PistaAgente() {
   const banderas = Array.from({ length: Math.min(act.pasos, 14) }, (_, i) => avance(i + 1));
 
   return (
-    <div className="pista" role="status" aria-label={`${NOMBRES[quien]} trabajando: paso ${act.pasos}. ${act.accion}`}>
+    <div className={`pista ${tam < 96 ? 'pista--chica' : ''}`} style={{ '--tam': `${tam}px` }} role="status" aria-label={`${NOMBRES[quien]} trabajando: paso ${act.pasos}. ${act.accion}`}>
       <div className="pista__carril" aria-hidden="true">
         <span className="pista__hecho" style={{ width: `${p * 100}%` }} />
         {banderas.map((x, i) => <span key={i} className="pista__bandera" style={{ left: `${x * 100}%` }} />)}
@@ -204,9 +211,9 @@ export function PistaAgente() {
       </div>
       <span className="pista__rotulo mono">{NOMBRES[quien].toUpperCase()} · PASO {act.pasos}</span>
       {act.accion && <span className="pista__accion">{act.accion}</span>}
-      <div className="pista__kart" style={{ left: `calc(${p * 100}% - ${Math.round(p * 160)}px)` }}>
+      <div className="pista__kart" style={{ left: `calc(${p * 100}% - ${Math.round(p * tam * 1.5)}px)` }}>
         <span className="pista__polvo" aria-hidden="true" />
-        <SpriteMascota personaje={quien} estado="kart" tam={96} quieta={prefs.reducir} />
+        <SpriteMascota personaje={quien} estado="kart" tam={tam} quieta={prefs.reducir} />
       </div>
     </div>
   );

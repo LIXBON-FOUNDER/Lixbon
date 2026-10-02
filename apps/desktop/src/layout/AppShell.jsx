@@ -12,7 +12,6 @@ import { useMcpStore } from '../store/mcpStore';
 import { useProblemsStore } from '../store/problemsStore';
 
 import { StatusBar } from './StatusBar';
-import { PistaAgente } from '../chat/MascotaAgente';
 import { useAvisoFlotante } from '../chat/avisoFlotante';
 import { UpdateModal } from '../components/UpdateModal';
 import { EditorMode } from '../modes/EditorMode';
@@ -111,7 +110,6 @@ export function AppShell() {
         )}
       </div>
 
-      {!showWelcome && <PistaAgente />}
       {!showWelcome && <StatusBar />}
 
       {quickOpen && <QuickOpen />}

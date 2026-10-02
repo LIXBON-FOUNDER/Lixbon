@@ -11,6 +11,8 @@ function turno(messages) {
   return messages.slice(i + 1);
 }
 
+const ESCRIBE = /write|edit|append|insert|create|patch/i;
+
 /** Estado del turno para animar a la mascota. */
 export function actividadDe(s) {
   const t = turno(s.messages || []);
@@ -20,19 +22,21 @@ export function actividadDe(s) {
   return {
     trabajando: !!s.streaming,
     esperando: !!s.pendingApproval || !!s.pendingQuestion,
-    escribiendo: ultimo?.role === 'assistant' && !!(ultimo.content || '').trim(),
+    escribiendo: (ultimo?.role === 'assistant' && !!(ultimo.content || '').trim())
+      || (ultimo?.role === 'tool' && ESCRIBE.test(ultimo.tool || '')),
     pasos: herramientas.length,
     accion: ultimaHerramienta ? describeTool(ultimaHerramienta) : '',
   };
 }
 
-/** Con «Según la tarea»: si el agente ya está usando herramientas es una
-    tarea de varios pasos y va en kart; si solo responde, escribe. */
+/** Con «Según la tarea»: teclea mientras responde o escribe archivos, va en
+    kart mientras recorre el proyecto en varios pasos y piensa si aún no ha
+    hecho nada. */
 export function animacionDeTrabajo(prefs, act) {
   if (prefs.trabajo === 'conducir') return 'kart';
-  if (prefs.trabajo === 'escribir') return act.escribiendo ? 'type' : 'think';
-  if (act.pasos >= 2) return 'kart';
-  return act.escribiendo ? 'type' : 'think';
+  if (act.escribiendo) return 'type';
+  if (prefs.trabajo === 'escribir') return 'think';
+  return act.pasos >= 2 ? 'kart' : 'think';
 }
 
 const NUM = /\bfase\s+(\d{1,2})\b/gi;
