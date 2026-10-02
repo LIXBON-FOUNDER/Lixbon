@@ -805,6 +805,13 @@ fn task_file(t: &Task, parent: Option<&Task>, objective: &str) -> String {
     let role = t.role.as_deref().and_then(roles::spec);
     let read_only = role.is_some_and(|r| r.read_only);
     let role_line = role.map(|r| format!("Tu rol: **{}**. {}\n\n", r.label, r.purpose)).unwrap_or_default();
+    let adversary_line = if role.is_some_and(|r| r.id == "adversario") {
+        "Tu meta no es demostrar que funciona sino encontrar cómo se rompe. Puedes ejecutar tests y comandos para demostrar fallos, pero no edites nada. Tu informe es una lista de hallazgos numerados, del más grave al menos, y cada uno lleva: escenario concreto que lo rompe (entrada o estado -> resultado incorrecto), evidencia (ruta:línea, comando reproducible o test que falla) y la pregunta que el creador debe responder («¿por qué X y no Y?»). Sin elogios ni resumen de lo que está bien. Si no encuentras nada sólido, dilo y lista lo que intentaste.
+
+"
+    } else {
+        ""
+    };
     let deliver = if read_only {
         format!(
             "Eres de **solo lectura**: no tienes Edit ni Write y no debes modificar archivos (tampoco con Bash). \
@@ -825,7 +832,7 @@ y cierra con `lxo done --report {report} --summary \"<una frase>\"`."
         "# {id} · {title}\n\n\
 Eres la tarea **{id}** del run {run}. Te coordina **{coordinator}**, que es quien habla con el usuario.\n\
 Objetivo general: {objective}\n\n\
-{role_line}{place}\n\n\
+{role_line}{adversary_line}{place}\n\n\
 ## Tu encargo\n\n{spec}\n\n\
 ## Reglas\n\n\
 1. Ejecuta `lxo guide` y síguela. Eres autónomo: nadie mira tu terminal para aprobar nada.\n\
