@@ -1,7 +1,7 @@
 // mascota.js — preferencias de la mascota (Gael y Leya), compartidas por toda
 // la web. Un solo estado (como useTema): se guarda en localStorage para que
-// funcione sin sesión y, con sesión, en la cuenta (settings.mascot), que es
-// lo que lee también el IDE. Lo de la cuenta manda al iniciar sesión.
+// funcione sin sesión y, con sesión, en la cuenta (settings.mascot). Lo de la
+// cuenta manda al iniciar sesión. El IDE tiene los suyos (settings.mascot_ide).
 import { useSyncExternalStore } from 'react';
 import { api } from './api';
 

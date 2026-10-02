@@ -645,11 +645,10 @@ function UsageSection({ usage, buckets, daily, plan }) {
 }
 
 // ── Mascota ─────────────────────────────────────────────────────────────
-// Se guarda al momento (local y en la cuenta, ver lib/mascota.js): no hay
-// botón de guardar, como en el resto de interruptores de Ajustes.
+// Solo la mascota de la web: el IDE tiene sus propios ajustes (en su página
+// de Ajustes). Se guarda al momento, local y en la cuenta (lib/mascota.js).
 
 const MINUTOS_SIESTA = [1, 2, 5, 10, 15, 30];
-const MINUTOS_LATIGO = [1, 2, 3, 5, 10];
 
 function MascotSection() {
   const t = useT('mascota');
@@ -660,11 +659,6 @@ function MascotSection() {
     { id: 'gael', nombre: 'Gael', sub: t('settings.gaelSub'), sprite: 'gael' },
     { id: 'leya', nombre: 'Leya', sub: t('settings.leyaSub'), sprite: 'leya' },
     { id: 'ambos', nombre: t('settings.bothName'), sub: t('settings.bothSub'), sprite: null },
-  ];
-  const trabajos = [
-    { id: 'escribir', label: t('settings.workWrite') },
-    { id: 'conducir', label: t('settings.workDrive') },
-    { id: 'auto', label: t('settings.workAuto') },
   ];
   const vista = m.personaje === 'leya' ? 'leya' : 'gael';
   const apagada = !m.activa;
@@ -732,35 +726,6 @@ function MascotSection() {
         </Row>
       </div>
 
-      <div className={`set-card ${apagada ? 'is-apagada' : ''}`}>
-        <h2 className="set-title">{t('settings.ideTitle')}</h2>
-        <p className="set-lead">{t('settings.ideHint')}</p>
-        <Row label={t('settings.work')}>
-          <div className="mascota-segmentos" role="group" aria-label={t('settings.work')}>
-            {trabajos.map((w) => (
-              <button key={w.id} type="button" disabled={apagada}
-                className={`mascota-segmentos__op ${m.trabajo === w.id ? 'is-activa' : ''}`}
-                aria-pressed={m.trabajo === w.id}
-                onClick={() => fijarMascota({ trabajo: w.id })}>
-                {w.label}
-              </button>
-            ))}
-          </div>
-        </Row>
-        <Row label={t('settings.ask')} hint={t('settings.askHint')}>
-          <Toggle label={t('settings.ask')} checked={m.preguntar} onChange={set('preguntar')} disabled={apagada} />
-        </Row>
-        <Row label={t('settings.floating')} hint={t('settings.floatingHint')}>
-          <Toggle label={t('settings.floating')} checked={m.flotante} onChange={set('flotante')} disabled={apagada} />
-        </Row>
-        <Row label={t('settings.whip')} hint={t('settings.whipHint')}>
-          {m.latigo && (
-            <Select value={m.latigo_min} options={minutos(MINUTOS_LATIGO)} onChange={set('latigo_min')}
-              aria-label={t('settings.whipAfter')} disabled={apagada || !m.flotante} />
-          )}
-          <Toggle label={t('settings.whip')} checked={m.latigo} onChange={set('latigo')} disabled={apagada || !m.flotante} />
-        </Row>
-      </div>
     </>
   );
 }
