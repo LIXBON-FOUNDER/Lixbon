@@ -13,7 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useAuth } from '../hooks/useAuth';
 import { useT } from '../i18n/useT';
 import {
-  CUADROS, MS_CUADRO, NOMBRES, alAzar, duracion, fijarMascota, personajeDe, sincronizarConCuenta, useMascota,
+  CUADROS, MS_CUADRO, NOMBRES, VERSION_SPRITES, alAzar, duracion, fijarMascota, personajeDe, sincronizarConCuenta, useMascota,
 } from '../lib/mascota';
 
 /** Al iniciar o cerrar sesión, la mascota toma los ajustes de la cuenta. */
@@ -33,7 +33,7 @@ export function SpriteMascota({ personaje, estado = 'idle', tam = 96, espejo = f
         '--w': `${tam}px`,
         '--n': cuadros,
         '--d': `${cuadros * (MS_CUADRO[estado] || 200)}ms`,
-        backgroundImage: `url(/mascotas/${personaje}-${estado}.png)`,
+        backgroundImage: `url(/mascotas/${personaje}-${estado}.png?v=${VERSION_SPRITES})`,
       }}
     />
   );
