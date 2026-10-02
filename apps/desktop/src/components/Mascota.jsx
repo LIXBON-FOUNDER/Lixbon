@@ -3,7 +3,7 @@
 // escalón. La lógica de cuándo hace qué vive en chat/MascotaAgente.jsx.
 import { CUADROS, MS_CUADRO, VERSION_SPRITES } from '../lib/mascota';
 
-export function SpriteMascota({ personaje, estado = 'idle', tam = 96, espejo = false, quieta = false, className = '' }) {
+export function SpriteMascota({ personaje, estado = 'idle', tam = 96, espejo = false, quieta = false, casco = false, className = '' }) {
   return (
     <span
       aria-hidden="true"
@@ -12,7 +12,7 @@ export function SpriteMascota({ personaje, estado = 'idle', tam = 96, espejo = f
         '--w': `${tam}px`,
         '--n': CUADROS[estado] || 1,
         '--d': `${(CUADROS[estado] || 1) * (MS_CUADRO[estado] || 200)}ms`,
-        backgroundImage: `url(/mascotas/${personaje}-${estado}.png?v=${VERSION_SPRITES})`,
+        backgroundImage: `url(/mascotas/${personaje}-${estado}${casco ? '-casco' : ''}.png?v=${VERSION_SPRITES})`,
       }}
     />
   );

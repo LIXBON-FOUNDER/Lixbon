@@ -2,7 +2,8 @@
 
 Cada estado es una tira horizontal de cuadros de 48×48 (el kart, de 72×48):
     <personaje>-<estado>.png  con estado en idle, type, think, sleep, point,
-    wave, whip y kart.
+    wave, whip y kart. Con `-casco` (casco de obra blanco, para cuando son
+    coordinadores) y los robots `bot-<amarillo|naranja>-<estado>`.
 Se dibujan por capas (pelo de atrás, cuerpo, brazos, cabeza, pelo de delante)
 y cada capa lleva su propio contorno, así los brazos se leen encima del torso.
 Uso: python apps/web/scripts/mascotas.py  (requiere Pillow).
@@ -161,6 +162,18 @@ def hair_front(c,name):
         l.px(16,8,c['hairL']); l.px(22,8,c['hairL'])
         l.rect(29,9,31,10,'#d9cff2'); l.px(30,9,'#ffffff')   # clip
     return l
+CASCO=False
+def casco_layer():
+    """Casco de obra blanco (el coordinador): cúpula con cresta y ala."""
+    w,wS,wL='#f4f4ef','#c9cac2','#ffffff'
+    h=L()
+    h.blob(23.5,6,12.5,6,w,e=2.4,ymax=9)
+    for (x,y) in list(h.p):
+        if x>=32: h.p[(x,y)]=wS
+    h.rect(9,9,38,10,w); h.rect(9,10,38,10,wS)
+    h.rect(22,1,25,9,wL)
+    for y in range(2,9): h.px(21,y,wS); h.px(26,y,wS)
+    return h
 def mover(l,dx,dy):
     if not dx and not dy: return l
     n=L(l.w,l.h); n.p={(x+dx,y+dy):v for (x,y),v in l.p.items()}; return n
@@ -227,6 +240,7 @@ def char(name,mode='open',look=0,armsL=IDLE_L,armsR=IDLE_R,legs=True,extra_front
     # Con los brazos en alto (delante=True) los dos van por delante de la cabeza.
     if armsL and not delante: layers.append((mover(arm(c,armsL,open_=openL),0,bodyDy),True))
     layers+= [(mover(h,hx,hy),True),(mover(hair_front(c,name),hx,hy),True)]
+    if CASCO: layers.append((mover(casco_layer(),hx,hy),True))
     if armsL and delante: layers.append((mover(arm(c,armsL,open_=openL),0,bodyDy),True))
     if armsR: layers.append((armR_layer or mover(arm(c,armsR,open_=openR),0,bodyDy),True))
     if extra_front:
@@ -523,10 +537,130 @@ ESTADOS = {
     'wave': (wave, 4), 'celebrate': (celebrate, 4), 'stretch': (stretch, 4), 'scratch': (scratch, 2),
     'think': (think, 2), 'point': (point, 2), 'type': (typing, 2), 'sleep': (sleep, 2), 'whip': (whip, 3),
 }
+# ── Robots obreros: los agentes hijos del orquestador ───────────────────
+# Ni humanos ni animales: un robotito de chapa con pantalla por cara, el casco
+# de obra amarillo o naranja y el piloto encendido encima. Trabajan de fondo.
+BOT = dict(K='#14191d', body='#8fa4b0', bodyS='#6c818d', bodyL='#b9c9d1', screen='#1b262d', led='#7be0a5',
+           ledD='#3f9468', dark='#3a464e', paper='#f7f4ee', paperS='#c8c3b6', ink='#7a756a')
+CH['bot'] = dict(K=BOT['K'])
+CASCOS = {
+    'amarillo': dict(c='#f5c518', s='#c99a0c', l='#ffe066'),
+    'naranja': dict(c='#f08a24', s='#c0661a', l='#ffb061'),
+}
+
+def bot_char(color, ojos='open', bodyDy=0, brazoL=None, brazoR=None, piernas=(0, 0), extra=None, luz=True, boca=None):
+    b = BOT; cs = CASCOS[color]
+    capas = []
+    lg = L()
+    for x0, alza in ((18, piernas[0]), (26, piernas[1])):
+        lg.rect(x0, 40 - alza, x0 + 3, 43 - alza, b['bodyS'])
+        lg.rect(x0 - 2, 44 - alza, x0 + 5, 45 - alza, b['dark'])
+    capas.append((lg, True))
+    t = L()
+    t.rect(16, 29, 31, 40, b['body']); t.rect(16, 38, 31, 40, b['bodyS']); t.rect(17, 30, 18, 38, b['bodyL'])
+    t.rect(21, 32, 26, 36, b['screen']); t.rect(22, 33, 23, 33, b['led']); t.rect(25, 33, 25, 33, b['ledD'])
+    t.rect(22, 35, 25, 35, b['ledD'])
+    capas.append((mover(t, 0, bodyDy), True))
+    h = L()
+    h.rect(14, 16, 33, 28, b['body']); h.rect(14, 26, 33, 28, b['bodyS']); h.rect(15, 17, 16, 25, b['bodyL'])
+    h.rect(17, 18, 30, 26, b['screen'])
+    if ojos == 'open':
+        for ex in (19, 26): h.rect(ex, 20, ex + 2, 23, b['led']); h.px(ex, 20, '#c9ffe0')
+    elif ojos == 'blink':
+        for ex in (19, 26): h.rect(ex, 22, ex + 2, 22, b['led'])
+    elif ojos == 'feliz':
+        for ex in (19, 26): h.px(ex, 22, b['led']); h.px(ex + 1, 21, b['led']); h.px(ex + 2, 22, b['led'])
+    elif ojos == 'arriba':
+        for ex in (19, 26): h.rect(ex, 19, ex + 2, 21, b['led'])
+    elif ojos == 'duda':
+        h.rect(22, 19, 25, 19, b['led']); h.rect(25, 20, 26, 21, b['led']); h.rect(23, 22, 24, 22, b['led']); h.rect(23, 24, 24, 24, b['led'])
+    if boca == 'abierta': h.rect(22, 24, 25, 25, b['led'])
+    c = L()
+    c.blob(23.5, 13, 11, 6.5, cs['c'], e=2.4, ymax=15)
+    for (x, y) in list(c.p):
+        if x >= 31: c.p[(x, y)] = cs['s']
+    c.rect(11, 15, 36, 16, cs['c']); c.rect(11, 16, 36, 16, cs['s'])
+    c.rect(22, 8, 25, 15, cs['l'])
+    if luz:
+        c.rect(22, 4, 25, 7, cs['s']); c.rect(23, 5, 24, 6, '#ffe9a8')
+    capas.append((mover(h, 0, bodyDy), True))
+    capas.append((mover(c, 0, bodyDy), True))
+    def brazo(pts):
+        a = L()
+        for p0, p1 in zip(pts, pts[1:]): a.line(p0, p1, b['bodyS'], 1)
+        hx_, hy = pts[-1]
+        a.rect(hx_ - 1, hy - 1, hx_ + 1, hy + 1, b['dark'])
+        return a
+    if brazoL: capas.append((mover(brazo(brazoL), 0, bodyDy), True))
+    if brazoR: capas.append((mover(brazo(brazoR), 0, bodyDy), True))
+    for e in (extra or []): capas.append(e)
+    return capas
+
+B_IDLE_L = [(15, 31), (12, 35), (12, 38)]
+B_IDLE_R = [(32, 31), (35, 35), (35, 38)]
+
+def papel(x0, y0, w=12, h=14, check=False):
+    p = L()
+    p.rect(x0, y0, x0 + w - 1, y0 + h - 1, BOT['paper']); p.rect(x0, y0 + h - 1, x0 + w - 1, y0 + h - 1, BOT['paperS'])
+    for y in range(y0 + 3, y0 + h - 2, 3): p.rect(x0 + 2, y, x0 + w - 3, y, BOT['ink'])
+    if check: p.rect(x0 + w - 4, y0 + 1, x0 + w - 3, y0 + 1, BOT['led'])
+    return p
+
+def bot_idle(color, f):
+    return render(bot_char(color, 'blink' if f == 11 else 'open', bodyDy=RESPIRA[f], brazoL=B_IDLE_L, brazoR=B_IDLE_R, luz=f % 6 < 3), 'bot')
+def bot_walk(color, f):
+    alza = [(2, 0), (0, 0), (0, 2), (0, 0)][f]
+    bote = 0 if alza != (0, 0) else 1
+    ad = [1, 0, -1, 0][f]
+    return render(bot_char(color, 'open', bodyDy=bote, piernas=alza,
+                           brazoL=[(15, 31), (13, 35), (13, 37 - (2 if ad < 0 else 0))],
+                           brazoR=[(32, 31), (34, 35), (34, 37 - (2 if ad > 0 else 0))], luz=f % 2 == 0), 'bot')
+def bot_carry(color, f):
+    alza = [(2, 0), (0, 0), (0, 2), (0, 0)][f]
+    bote = 0 if alza != (0, 0) else 1
+    pa = papel(17, 29 + bote, 14, 12, check=True)
+    return render(bot_char(color, 'feliz' if f % 2 else 'open', bodyDy=bote, piernas=alza,
+                           brazoL=[(15, 31), (14, 36), (18, 38)], brazoR=[(32, 31), (33, 36), (29, 38)],
+                           extra=[(pa, True)]), 'bot')
+def bot_work(color, f):
+    if f == 0:
+        brazoR = [(32, 31), (37, 27), (39, 22)]
+        martillo = L(); martillo.rect(37, 17, 43, 20, BOT['dark']); martillo.rect(38, 17, 39, 18, BOT['bodyL'])
+        extra = [(martillo, True)]
+    else:
+        brazoR = [(32, 31), (38, 34), (41, 38)]
+        martillo = L(); martillo.rect(39, 37, 45, 40, BOT['dark']); martillo.rect(40, 37, 41, 38, BOT['bodyL'])
+        chispa = L()
+        for p_ in ((44, 43), (46, 41), (42, 44), (47, 44)): chispa.px(*p_, '#ffe066')
+        extra = [(martillo, True), (chispa, False)]
+    return render(bot_char(color, 'open', bodyDy=f, brazoL=B_IDLE_L, brazoR=brazoR, extra=extra, luz=bool(f)), 'bot')
+def bot_think(color, f):
+    return render(bot_char(color, 'arriba', brazoL=B_IDLE_L, brazoR=[(32, 31), (36, 28), (33, 23 - f)], luz=bool(f)), 'bot')
+def bot_celebrate(color, f):
+    alto = [0, 2, 4, 2][f]
+    arriba = [(9, 24), (7, 18), (6, 14), (7, 18)][f]
+    im = render(bot_char(color, 'feliz', boca='abierta', brazoL=[(15, 31), (11, 28), arriba],
+                         brazoR=[(32, 31), (36, 28), (47 - arriba[0], arriba[1])]), 'bot')
+    out = Image.new('RGBA', (S, S)); out.paste(im, (0, -alto), im); return out
+def bot_ask(color, f):
+    return render(bot_char(color, 'duda', brazoL=B_IDLE_L, brazoR=[(32, 31), (37, 25), (39 + f, 19)], luz=bool(f)), 'bot')
+
+ESTADOS_BOT = {
+    'idle': (bot_idle, 12), 'walk': (bot_walk, 4), 'carry': (bot_carry, 4), 'work': (bot_work, 2),
+    'think': (bot_think, 2), 'celebrate': (bot_celebrate, 4), 'ask': (bot_ask, 2),
+}
+
 for n in ('gael', 'leya'):
     for estado, (fn, cuadros) in ESTADOS.items():
         strip([fn(n, f) for f in range(cuadros)]).save(f'{n}-{estado}.png')
     strip([kart(n, 0), kart(n, 1)], 72).save(f'{n}-kart.png')
+    CASCO = True
+    for estado, (fn, cuadros) in ESTADOS.items():
+        strip([fn(n, f) for f in range(cuadros)]).save(f'{n}-{estado}-casco.png')
+    CASCO = False
+for color in CASCOS:
+    for estado, (fn, cuadros) in ESTADOS_BOT.items():
+        strip([fn(color, f) for f in range(cuadros)]).save(f'bot-{color}-{estado}.png')
 
 
 # ── Versión y cuadros para el código, y copia al IDE ───────────────────
@@ -536,6 +670,7 @@ pngs = sorted(_glob.glob('*.png'))
 version = hashlib.sha1(b''.join(open(f, 'rb').read() for f in pngs)).hexdigest()[:8]
 cuadros = {e: n for e, (_, n) in ESTADOS.items()}
 cuadros['kart'] = 2
+cuadros.update({e: n for e, (_, n) in ESTADOS_BOT.items()})
 js = (
     '// mascotaSprites.js — GENERADO por apps/web/scripts/mascotas.py: no editar a mano.\n'
     '// Cuadros de cada tira de sprites y versión (hash) de los PNG: va en la URL\n'
@@ -546,7 +681,7 @@ js = (
     + '};\n'
 )
 for app in ('web', 'desktop'):
-    with open(os.path.join(APPS, app, 'src', 'lib', 'mascotaSprites.js'), 'w') as fh:
+    with open(os.path.join(APPS, app, 'src', 'lib', 'mascotaSprites.js'), 'w', encoding='utf-8') as fh:
         fh.write(js)
 destino = os.path.join(APPS, 'desktop', 'public', 'mascotas')
 os.makedirs(destino, exist_ok=True)

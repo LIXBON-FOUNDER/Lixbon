@@ -1,7 +1,7 @@
 // mascotaSprites.js — GENERADO por apps/web/scripts/mascotas.py: no editar a mano.
 // Cuadros de cada tira de sprites y versión (hash) de los PNG: va en la URL
 // para que, al regenerarlos, el navegador no use los viejos de la caché.
-export const VERSION_SPRITES = 'b5f10000';
+export const VERSION_SPRITES = '65ed563f';
 export const CUADROS = {
   idle: 12,
   talk: 4,
@@ -17,4 +17,7 @@ export const CUADROS = {
   sleep: 2,
   whip: 3,
   kart: 2,
+  carry: 4,
+  work: 2,
+  ask: 2,
 };

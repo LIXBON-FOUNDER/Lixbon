@@ -224,3 +224,64 @@
 
 .mascota-fila__controles { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .mascota-minutos { width: 104px; }
+
+/* ── Obra: Gael y Leya coordinando robots obreros (chat/ObraAgente.jsx) ─ */
+
+.obra {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -14px;
+  height: var(--tam);
+  pointer-events: none;
+}
+.obra--chica { bottom: -8px; }
+.obra-coord, .obra-bot { position: absolute; bottom: 0; }
+.obra-bot { transition: right 1.6s linear; }
+.obra-bot--trabaja, .obra-bot--recibe, .obra-bot--duda, .obra-bot--cae { transition-duration: 0.6s; transition-timing-function: var(--ease); }
+.obra-bot--entrega, .obra-bot--celebra { transition-duration: 0.3s; }
+
+.obra-globo {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  z-index: 2;
+  width: max-content;
+  max-width: 170px;
+  padding: 5px 8px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 11.5px;
+  line-height: 1.35;
+  transform: translateX(-50%);
+  box-shadow: 0 -2px 0 0 var(--ink), 0 2px 0 0 var(--ink), -2px 0 0 0 var(--ink), 2px 0 0 0 var(--ink);
+  animation: obra-globo 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.obra-globo--der { left: auto; right: 4px; transform: none; max-width: 200px; }
+@keyframes obra-globo { from { opacity: 0; scale: 0.7; } }
+
+.obra-papel {
+  position: absolute;
+  bottom: var(--alto);
+  z-index: 3;
+  width: 14px;
+  height: 18px;
+  animation: obra-vuela 0.9s ease-in-out both;
+}
+.obra-papel i {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, #7a756a 3px 4px) 3px 4px / 8px 12px no-repeat,
+    #f7f4ee;
+  box-shadow: 0 0 0 2px #14191d;
+  animation: obra-arco 0.9s ease-out both;
+}
+.obra-papel--informe i { border-top: 3px solid #7be0a5; }
+@keyframes obra-vuela { from { right: var(--de); } to { right: var(--a); } }
+@keyframes obra-arco { 50% { transform: translateY(-30px) rotate(-10deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .obra-bot { transition: none; }
+  .obra-papel, .obra-papel i, .obra-globo { animation: none; }
+}
