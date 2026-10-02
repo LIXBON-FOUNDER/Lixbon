@@ -21,6 +21,7 @@ import { ShareDialog } from '../components/ShareDialog';
 import { VerifyBanner } from '../components/VerifyBanner';
 import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Icons';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
+import { MascotaChat } from '../components/Mascota';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
@@ -366,6 +367,9 @@ export default function ChatPage() {
   }
 
   const empty = messages.length === 0;
+  // Para la mascota: con texto ya en la respuesta escribe; antes, piensa.
+  const ultimo = messages[messages.length - 1];
+  const escribiendo = busy && ultimo?.role === 'assistant' && Boolean(ultimo.content);
 
   return (
     <div className="chat-shell">
@@ -435,6 +439,7 @@ export default function ChatPage() {
               {user ? t('emptyTitleUser') : t('emptyTitleGuest')}
             </h2>
             <div className="chat-hero__input">
+              {user && <MascotaChat ocupado={busy} escribiendo={escribiendo} />}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
             </div>
@@ -485,6 +490,7 @@ export default function ChatPage() {
                   <IconArrowDown size={16} />
                 </button>
               )}
+              <MascotaChat ocupado={busy} escribiendo={escribiendo} />
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
               <p className="chat-disclaimer">

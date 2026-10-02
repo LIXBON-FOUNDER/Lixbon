@@ -6,6 +6,7 @@ import { ConfirmarProvider } from './hooks/useConfirmar';
 import { useViewportHeight } from './hooks/useViewportHeight';
 import { RouteFade } from './components/RouteFade';
 import { LocaleProvider } from './i18n/LocaleContext';
+import { MascotaSync } from './components/Mascota';
 
 import ChatPage from './pages/ChatPage';
 import AuthPage from './pages/AuthPage';
@@ -102,6 +103,7 @@ export function AppRoutes() {
   return (
     <LocaleProvider locale={locale}>
       <AuthProvider>
+        <MascotaSync />
         <ConfirmarProvider>
           <RouteFade>
             <Routes>

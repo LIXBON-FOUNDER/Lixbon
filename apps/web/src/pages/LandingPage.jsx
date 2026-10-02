@@ -13,6 +13,7 @@ import { PaisajeAmanecer, PaisajeCosta, PaisajeCrepusculo, PaisajeValle } from '
 import { useRevelar } from '../hooks/useRevelar';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
 import { useAuth } from '../hooks/useAuth';
+import { MascotaGuia } from '../components/Mascota';
 
 const CODIGO = `from openai import OpenAI
 
@@ -58,7 +59,7 @@ export default function LandingPage() {
       <PublicNav />
 
       <main>
-        <section className="landing__hero landing__wrap">
+        <section className="landing__hero landing__wrap" data-mascota="hero">
           <p className="landing__eyebrow">{t('heroEyebrow')}</p>
           <h1 className="landing__h1">{t('heroTitle')}</h1>
           <div className="landing__hero-pie">
@@ -85,7 +86,7 @@ export default function LandingPage() {
         </figure>
 
         <section className="landing__fila landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="private">
             <span className="landing__num">{t('section1Num')}</span>
             <h2 className="landing__h2">{t('section1Title')}</h2>
             <p className="landing__p">{t('section1P1')}</p>
@@ -98,7 +99,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__bloque landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="products">
             <span className="landing__num">{t('section2Num')}</span>
             <h2 className="landing__h2 landing__h2--ancho">{t('section2Title')}</h2>
           </div>
@@ -117,7 +118,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__fila landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="api">
             <span className="landing__num">{t('section3Num')}</span>
             <h2 className="landing__h2">{t('section3Title')}</h2>
             <p className="landing__p">{t('section3P')}</p>
@@ -127,7 +128,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__bloque landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="plans">
             <span className="landing__num">{t('section4Num')}</span>
             <h2 className="landing__h2">{t('section4Title')}</h2>
             <p className="landing__p">{t('section4P')}</p>
@@ -145,7 +146,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__fila landing__fila--faq landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="faq">
             <span className="landing__num">{t('section5Num')}</span>
             <h2 className="landing__h2">{t('faqTitle')}</h2>
           </div>
@@ -159,7 +160,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="landing__final" data-revelar>
+        <section className="landing__final" data-revelar data-mascota="final">
           <PaisajeCrepusculo className="landing__final-fondo" />
           <div className="landing__final-texto">
             <h2 className="landing__h2">{t('finalTitle')}</h2>
@@ -170,6 +171,7 @@ export default function LandingPage() {
       </main>
 
       <PublicFooter />
+      <MascotaGuia selector="[data-mascota]" />
     </div>
   );
 }

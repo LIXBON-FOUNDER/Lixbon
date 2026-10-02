@@ -6,10 +6,14 @@ import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
+import { MascotaGuia } from '../components/Mascota';
 import { SITE_URL, useSeo } from '../lib/seo';
 import { GUIAS } from './guiasContent';
 import { LEGACY_GUIDE_IDS, withLocale } from '../i18n/paths';
 
+
+// Lo que la mascota puede comentar mientras lees: avisos, código y apartados.
+const SELECTOR_MASCOTA = '.docs__content [data-mascota], .docs__content .docs__callout, .docs__content .codeblock, .docs__content h2';
 export default function GuiasPage() {
   const { slug } = useParams();
   const locale = useLocale();
@@ -52,6 +56,7 @@ export default function GuiasPage() {
       <PublicNav />
       {guia ? <Articulo guia={guia} locale={locale} t={t} /> : <Indice locale={locale} t={t} />}
       <PublicFooter />
+      <MascotaGuia selector={SELECTOR_MASCOTA} />
     </div>
   );
 }

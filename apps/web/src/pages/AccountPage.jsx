@@ -21,19 +21,24 @@ import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconLogout,
-  IconCheck, IconCamera,
+  IconCheck, IconCamera, IconMascota,
 } from '../components/Icons';
+import { Select } from '../components/Select';
+import { SpriteMascota } from '../components/Mascota';
+import { fijarMascota, useMascota } from '../lib/mascota';
 
 const unlimited = (v) => v === -1;
 
 function useSections() {
   const t = useT('account');
+  const tm = useT('mascota');
   return [
     { id: 'general', label: t('sections.general'), Icon: IconUser },
     { id: 'profile', label: t('sections.profile'), Icon: IconGear },
     { id: 'privacy', label: t('sections.privacy'), Icon: IconShield },
     { id: 'billing', label: t('sections.billing'), Icon: IconCard },
     { id: 'usage', label: t('sections.usage'), Icon: IconChart },
+    { id: 'mascot', label: tm('settings.section'), Icon: IconMascota },
   ];
 }
 
@@ -639,6 +644,127 @@ function UsageSection({ usage, buckets, daily, plan }) {
   );
 }
 
+// ── Mascota ─────────────────────────────────────────────────────────────
+// Se guarda al momento (local y en la cuenta, ver lib/mascota.js): no hay
+// botón de guardar, como en el resto de interruptores de Ajustes.
+
+const MINUTOS_SIESTA = [1, 2, 5, 10, 15, 30];
+const MINUTOS_LATIGO = [1, 2, 3, 5, 10];
+
+function MascotSection() {
+  const t = useT('mascota');
+  const m = useMascota();
+  const set = (k) => (v) => fijarMascota({ [k]: v });
+  const minutos = (lista) => lista.map((n) => ({ value: n, label: t('settings.minutes', { n }) }));
+  const personajes = [
+    { id: 'gael', nombre: 'Gael', sub: t('settings.gaelSub'), sprite: 'gael' },
+    { id: 'leya', nombre: 'Leya', sub: t('settings.leyaSub'), sprite: 'leya' },
+    { id: 'ambos', nombre: t('settings.bothName'), sub: t('settings.bothSub'), sprite: null },
+  ];
+  const trabajos = [
+    { id: 'escribir', label: t('settings.workWrite') },
+    { id: 'conducir', label: t('settings.workDrive') },
+    { id: 'auto', label: t('settings.workAuto') },
+  ];
+  const vista = m.personaje === 'leya' ? 'leya' : 'gael';
+  const apagada = !m.activa;
+
+  return (
+    <>
+      <div className="set-card">
+        <div className="mascota-ajustes__cabecera">
+          <div className="mascota-ajustes__escena">
+            {m.activa
+              ? <>
+                  <SpriteMascota personaje={vista} estado="idle" tam={96} quieta={m.reducir} />
+                  {m.personaje === 'ambos' && <SpriteMascota personaje="leya" estado="idle" tam={96} quieta={m.reducir} />}
+                </>
+              : <SpriteMascota personaje={vista} estado="sleep" tam={96} quieta />}
+          </div>
+          <div className="mascota-ajustes__texto">
+            <h2 className="set-title">{t('settings.title')}</h2>
+            <p className="set-lead">{t('settings.intro')}</p>
+          </div>
+        </div>
+        <Row label={t('settings.active')}>
+          <Toggle label={t('settings.active')} checked={m.activa} onChange={set('activa')} />
+        </Row>
+      </div>
+
+      <div className={`set-card ${apagada ? 'is-apagada' : ''}`}>
+        <h2 className="set-title">{t('settings.character')}</h2>
+        <div className="mascota-elegir" role="group" aria-label={t('settings.character')}>
+          {personajes.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`mascota-elegir__op ${m.personaje === p.id ? 'is-activa' : ''}`}
+              aria-pressed={m.personaje === p.id}
+              disabled={apagada}
+              onClick={() => fijarMascota({ personaje: p.id })}
+            >
+              <span className="mascota-elegir__retrato">
+                {p.sprite
+                  ? <SpriteMascota personaje={p.sprite} estado="idle" tam={48} quieta />
+                  : <><SpriteMascota personaje="gael" estado="idle" tam={48} quieta /><SpriteMascota personaje="leya" estado="idle" tam={48} quieta /></>}
+              </span>
+              <span className="mascota-elegir__nombre">{p.nombre}</span>
+              <span className="mascota-elegir__sub">{p.sub}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className={`set-card ${apagada ? 'is-apagada' : ''}`}>
+        <h2 className="set-title">{t('settings.webTitle')}</h2>
+        <Row label={t('settings.guide')} hint={t('settings.guideHint')}>
+          <Toggle label={t('settings.guide')} checked={m.guia} onChange={set('guia')} disabled={apagada} />
+        </Row>
+        <Row label={t('settings.sleep')} hint={t('settings.sleepHint')}>
+          {m.dormir && (
+            <Select value={m.dormir_min} options={minutos(MINUTOS_SIESTA)} onChange={set('dormir_min')}
+              aria-label={t('settings.sleepAfter')} disabled={apagada} />
+          )}
+          <Toggle label={t('settings.sleep')} checked={m.dormir} onChange={set('dormir')} disabled={apagada} />
+        </Row>
+        <Row label={t('settings.reduce')} hint={t('settings.reduceHint')}>
+          <Toggle label={t('settings.reduce')} checked={m.reducir} onChange={set('reducir')} disabled={apagada} />
+        </Row>
+      </div>
+
+      <div className={`set-card ${apagada ? 'is-apagada' : ''}`}>
+        <h2 className="set-title">{t('settings.ideTitle')}</h2>
+        <p className="set-lead">{t('settings.ideHint')}</p>
+        <Row label={t('settings.work')}>
+          <div className="mascota-segmentos" role="group" aria-label={t('settings.work')}>
+            {trabajos.map((w) => (
+              <button key={w.id} type="button" disabled={apagada}
+                className={`mascota-segmentos__op ${m.trabajo === w.id ? 'is-activa' : ''}`}
+                aria-pressed={m.trabajo === w.id}
+                onClick={() => fijarMascota({ trabajo: w.id })}>
+                {w.label}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label={t('settings.ask')} hint={t('settings.askHint')}>
+          <Toggle label={t('settings.ask')} checked={m.preguntar} onChange={set('preguntar')} disabled={apagada} />
+        </Row>
+        <Row label={t('settings.floating')} hint={t('settings.floatingHint')}>
+          <Toggle label={t('settings.floating')} checked={m.flotante} onChange={set('flotante')} disabled={apagada} />
+        </Row>
+        <Row label={t('settings.whip')} hint={t('settings.whipHint')}>
+          {m.latigo && (
+            <Select value={m.latigo_min} options={minutos(MINUTOS_LATIGO)} onChange={set('latigo_min')}
+              aria-label={t('settings.whipAfter')} disabled={apagada || !m.flotante} />
+          )}
+          <Toggle label={t('settings.whip')} checked={m.latigo} onChange={set('latigo')} disabled={apagada || !m.flotante} />
+        </Row>
+      </div>
+    </>
+  );
+}
+
 // ── Página ──────────────────────────────────────────────────────────────
 
 export default function AccountPage() {
@@ -761,6 +887,7 @@ export default function AccountPage() {
               )}
               {current.id === 'privacy' && <PrivacySection user={user} onUserChange={setUser} />}
               {current.id === 'billing' && <SeccionFacturacion plan={plan} />}
+              {current.id === 'mascot' && <MascotSection />}
               {current.id === 'usage' && <UsageSection usage={account.usage} buckets={account.buckets} daily={account.daily} plan={plan} />}
             </div>
           )}

@@ -244,6 +244,46 @@ SETTINGS_DEFAULTS: dict[str, bool] = {
 }
 
 
+# La mascota (Gael y Leya) tiene sus propias preferencias: la web y el IDE
+# leen el mismo objeto, así que se guarda con la cuenta y no en cada equipo.
+MASCOT_DEFAULTS: dict[str, Any] = {
+    "activa": True,        # mostrarla en todas partes
+    "personaje": "gael",   # gael | leya | ambos (se turnan)
+    "trabajo": "auto",     # IDE: escribir | conducir | auto (según la tarea)
+    "preguntar": True,     # IDE: proponer el siguiente paso al terminar
+    "flotante": True,      # IDE: aviso sobre otras apps al terminar
+    "latigo": True,        # IDE: "tlabaja" si no vuelves
+    "latigo_min": 2,
+    "dormir": True,        # siesta con inactividad
+    "dormir_min": 5,
+    "guia": True,          # web: acompaña la lectura en lixbon.com, docs y guías
+    "reducir": False,      # sin animaciones
+}
+_MASCOT_ENUMS = {"personaje": ("gael", "leya", "ambos"), "trabajo": ("escribir", "conducir", "auto")}
+_MASCOT_RANGES = {"latigo_min": (1, 30), "dormir_min": (1, 60)}
+
+
+def _clean_mascot(raw: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Mezcla `raw` sobre `base` quedándose solo con claves y valores válidos."""
+    out = dict(base or MASCOT_DEFAULTS)
+    if not isinstance(raw, dict):
+        return out
+    for k, default in MASCOT_DEFAULTS.items():
+        if k not in raw:
+            continue
+        v = raw[k]
+        if k in _MASCOT_ENUMS:
+            if v in _MASCOT_ENUMS[k]:
+                out[k] = v
+        elif k in _MASCOT_RANGES:
+            lo, hi = _MASCOT_RANGES[k]
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = max(lo, min(hi, int(v)))
+        elif isinstance(default, bool) and isinstance(v, bool):
+            out[k] = v
+    return out
+
+
 def _parse_settings(raw: str | None) -> dict[str, Any]:
     try:
         stored = _json.loads(raw or "{}")
@@ -251,7 +291,9 @@ def _parse_settings(raw: str | None) -> dict[str, Any]:
         stored = {}
     if not isinstance(stored, dict):
         stored = {}
-    return {k: bool(stored.get(k, v)) for k, v in SETTINGS_DEFAULTS.items()}
+    settings: dict[str, Any] = {k: bool(stored.get(k, v)) for k, v in SETTINGS_DEFAULTS.items()}
+    settings["mascot"] = _clean_mascot(stored.get("mascot"))
+    return settings
 
 
 def get_user_settings(user_id: int) -> dict[str, Any]:
@@ -269,6 +311,8 @@ def update_user_settings(user_id: int, patch: dict[str, Any]) -> dict[str, Any]:
             return dict(SETTINGS_DEFAULTS)
         current = _parse_settings(user.settings_json)
         current.update({k: bool(v) for k, v in patch.items() if k in SETTINGS_DEFAULTS})
+        if "mascot" in patch:
+            current["mascot"] = _clean_mascot(patch["mascot"], current["mascot"])
         user.settings_json = _json.dumps(current)
         return current
 
