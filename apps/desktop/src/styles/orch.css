@@ -12,6 +12,9 @@
 .orch__run + .orch__run { margin-top: 10px; padding-top: 10px; box-shadow: 0 -1px 0 rgba(var(--ink-rgb), 0.05); }
 .orch__run-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 6px 12px; }
 .orch__run-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-35); }
+.orch__run--closed { opacity: 0.55; }
+.orch__run--closed .orch__run-title { cursor: pointer; }
+.orch__run-tag { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-35); }
 .orch__run-head .ic { opacity: 0; transition: opacity 0.15s ease; }
 .orch__run:hover .orch__run-head .ic { opacity: 1; }
 

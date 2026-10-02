@@ -163,6 +163,10 @@ pub fn remove_worktree(repo: &str, dir: &str, force: bool) -> Result<(), String>
     Err(last)
 }
 
+pub fn is_merged(repo: &str, branch: &str, into: &str) -> bool {
+    run(repo, &["merge-base", "--is-ancestor", branch, into]).is_ok_and(|o| o.ok)
+}
+
 pub fn delete_branch(repo: &str, branch: &str) -> Result<(), String> {
     ok(repo, &["branch", "-d", branch]).map(|_| ())
 }

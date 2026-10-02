@@ -16,6 +16,7 @@ const HELP: &str = "lxo · orquestador de agentes de Lixbon
 
 Coordinador (el agente con el que habla el usuario):
   lxo run create --objective \"...\" --agent <tu agente>
+  lxo run close [--force]                         cierra el run: terminales, worktrees fusionados y sesión (paso final)
   lxo roles                                       roles del equipo y el modelo que les asignó el usuario
   lxo spawn --role <rol> --task \"...\" [--name \"...\"] [--base <rama>]
   lxo agents [--refresh]                          agentes instalados y sus modelos (solo sin --role)
@@ -105,12 +106,35 @@ fn session_file() -> PathBuf {
     home().join(".lixbon").join("orch").join("external").join(format!("{h:016x}"))
 }
 
-fn caller() -> Option<String> {
+fn task_env() -> Option<String> {
     std::env::var("LXO_TASK_ID").ok().filter(|s| !s.is_empty())
-        .or_else(|| std::fs::read_to_string(session_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
 }
 
-fn call(cmd: &str, args: Value, caller: Option<&str>) -> Result<Value, String> {
+fn session_task() -> Option<String> {
+    std::fs::read_to_string(session_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn caller() -> Option<String> {
+    task_env().or_else(session_task)
+}
+
+const STALE_SESSION_MARK: &str = "sesion-obsoleta";
+const STALE_SESSION: &str = "Tu run anterior ya no existe: empieza con `lxo run create --objective \"...\"`";
+
+fn call(cmd: &str, mut args: Value, caller: Option<&str>) -> Result<Value, String> {
+    let from_session = caller.is_some() && task_env().is_none();
+    if from_session {
+        args["session"] = Value::Bool(true);
+    }
+    let res = send(cmd, args, caller);
+    if from_session && res.as_ref().is_err_and(|e| e == STALE_SESSION_MARK) {
+        let _ = std::fs::remove_file(session_file());
+        return Err(STALE_SESSION.into());
+    }
+    res
+}
+
+fn send(cmd: &str, args: Value, caller: Option<&str>) -> Result<Value, String> {
     let info: Value = std::fs::read(home().join(".lixbon").join("orch.json")).ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .ok_or("Lixbon no está abierto o el orquestador está desactivado (Lixbon → Ajustes → Orquestador)")?;
@@ -184,6 +208,7 @@ fn human(cmd: &str, data: &Value) -> String {
             )
         }
         "run_create" => format!("Run {} creado. Eres su coordinador ({}). Ahora lanza hijas con `lxo spawn`.", data["run"].as_str().unwrap_or(""), data["task"].as_str().unwrap_or("")),
+        "run_close" => run_close_human(data),
         "agents" => {
             let list = data["agents"].as_array().cloned().unwrap_or_default();
             if list.is_empty() {
@@ -279,6 +304,38 @@ fn human(cmd: &str, data: &Value) -> String {
     }
 }
 
+fn run_close_human(data: &Value) -> String {
+    let ids = |k: &str| -> Vec<String> { data[k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() };
+    let mut out = vec![format!("Run {} cerrado: tu tarea queda terminada y la sesión de esta carpeta se borró.", data["run"].as_str().unwrap_or(""))];
+    let stopped = ids("stopped");
+    if !stopped.is_empty() {
+        out.push(format!("Paradas (seguían en marcha): {}.", stopped.join(", ")));
+    }
+    let terminals = ids("terminals");
+    out.push(if terminals.is_empty() { "Terminales: no había ninguna abierta.".into() } else { format!("Terminales cerradas: {}.", terminals.join(", ")) });
+    let released: Vec<String> = data["released"].as_array().into_iter().flatten().map(|r| format!(
+        "  {} · worktree borrado{}",
+        r["task"].as_str().unwrap_or(""),
+        if r["branch_deleted"].as_bool() == Some(true) { format!(" y rama {} borrada", r["branch"].as_str().unwrap_or("")) } else { String::new() }
+    )).collect();
+    out.push(if released.is_empty() { "Worktrees liberados: ninguno.".into() } else { format!("Worktrees liberados:
+{}", released.join("
+")) });
+    let kept: Vec<String> = data["kept"].as_array().into_iter().flatten().map(|k| format!(
+        "  {} · {}{}",
+        k["task"].as_str().unwrap_or(""),
+        k["branch"].as_str().map(|b| format!("{b} · ")).unwrap_or_default(),
+        k["reason"].as_str().unwrap_or("")
+    )).collect();
+    if !kept.is_empty() {
+        out.push(format!("Conservados (fusiónalos y usa `lxo release <tarea>`, o descártalos con `lxo release <tarea> --force`):
+{}", kept.join("
+")));
+    }
+    out.join("
+")
+}
+
 const PRIORIDADES: [&str; 5] = ["sin prioridad", "baja", "media", "alta", "urgente"];
 
 fn issue_human(data: &Value) -> String {
@@ -348,8 +405,13 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         }
         "status" => ("status", call("status", json!({}), me)?),
         "run" => {
+            if sub(1).as_deref() == Some("close") {
+                let data = call("run_close", json!({ "force": a.b("force") }), me)?;
+                let _ = std::fs::remove_file(session_file());
+                return Ok(("run_close".into(), data));
+            }
             if sub(1).as_deref() != Some("create") {
-                return Err("Uso: lxo run create --objective \"...\"".into());
+                return Err("Uso: lxo run create --objective \"...\" | lxo run close [--force]".into());
             }
             let data = call("run_create", json!({ "objective": need(a.s("objective"), "--objective")?, "agent": a.s("agent") }), me)?;
             if let Some(task) = data["task"].as_str() {
@@ -524,6 +586,22 @@ mod tests {
         assert!(t.contains("[agente implementador] Listo el runner"));
         assert!(t.ends_with("Estados del equipo: En curso, Hecho"));
         assert_eq!(issue_human(&json!({ "accion": "mover", "clave": "LXB-12", "estado": "Hecho" })), "LXB-12 está ahora en «Hecho».");
+    }
+
+    #[test]
+    fn cierre_de_run_legible() {
+        let data = json!({
+            "run": "r3", "stopped": ["t5"], "terminals": ["t4", "t5"],
+            "released": [{ "task": "t4", "branch": "lx/r3/t4-api", "branch_deleted": true }],
+            "kept": [{ "task": "t5", "branch": "lx/r3/t5-ui", "reason": "rama sin fusionar" }],
+        });
+        let t = run_close_human(&data);
+        assert!(t.starts_with("Run r3 cerrado"));
+        assert!(t.contains("Paradas (seguían en marcha): t5."));
+        assert!(t.contains("Terminales cerradas: t4, t5."));
+        assert!(t.contains("  t4 · worktree borrado y rama lx/r3/t4-api borrada"));
+        assert!(t.contains("  t5 · lx/r3/t5-ui · rama sin fusionar"));
+        assert!(run_close_human(&json!({ "run": "r3" })).contains("Worktrees liberados: ninguno."));
     }
 
     #[test]
