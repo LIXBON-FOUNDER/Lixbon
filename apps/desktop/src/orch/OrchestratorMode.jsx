@@ -147,6 +147,10 @@ function HowTo() {
         elige qué agente y qué modelo hace cada tarea, espera sus informes, integra y te cuenta el resultado. Tú solo hablas con él.
       </span>
       <span className="orch__hint">
+        Para verificar lo hecho, escribe <span className="mono">/adversary &lt;qué atacar&gt;</span>: un agente adversario busca cómo
+        se rompe y quien lo hizo tiene que corregir o justificar cada hallazgo.
+      </span>
+      <span className="orch__hint">
         Aquí puedes seguir qué hace cada agente: su terminal en vivo, sus fases, sus mensajes, su informe y sus cambios.
       </span>
     </div>

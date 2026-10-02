@@ -132,10 +132,12 @@ function claudeCommands(chat) {
 }
 
 const ORCH_COMMAND = { name: 'orquestar', args: '<objetivo>', description: 'Coordina un equipo de agentes para un objetivo', group: 'orch' };
+const ADVERSARY_COMMAND = { name: 'adversary', args: '<qué atacar>', description: 'Un agente adversario busca cómo se rompe lo hecho', group: 'orch' };
 
 function commandsOf(chat) {
   const list = agentOf(chat) === 'claude' ? claudeCommands(chat) : lixbonCommands().map((c) => ({ ...c, group: 'lixbon' }));
-  return list.some((c) => c.name === 'orquestar') ? list : [ORCH_COMMAND, ...list];
+  const extra = [ORCH_COMMAND, ADVERSARY_COMMAND].filter((o) => !list.some((c) => c.name === o.name));
+  return [...extra, ...list];
 }
 
 /** Modelos y esfuerzos que el remoto puede elegir, los mismos del composer. */
@@ -551,7 +553,7 @@ function sendRemotePrompt(item) {
   if (chat.streaming && agentOf(chat) !== 'claude') { remotePromptQueue.push(item); return; }
   const text = (item.text || '').trim();
   const attachments = Array.isArray(item.attachments) ? item.attachments : [];
-  const orch = attachments.length === 0 && /^\/orquestar(?:\s+([\s\S]+))?$/i.exec(text);
+  const orch = attachments.length === 0 && /^\/(?:orquestar|adversary)(?:\s+([\s\S]+))?$/i.exec(text);
   if (orch) {
     // El chat de la sesión pasa a ser el coordinador, como en el IDE.
     prepareRemoteOrchestrate(orch[1]).then((problem) => {

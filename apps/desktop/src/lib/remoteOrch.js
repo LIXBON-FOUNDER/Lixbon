@@ -204,7 +204,7 @@ export async function handleOrchAction(action, args = {}) {
 /** `/orquestar <objetivo>` mandado desde el remoto. Devuelve el texto de un
     aviso si no se puede orquestar, o null si el mensaje puede seguir su camino. */
 export async function prepareRemoteOrchestrate(objective) {
-  if (!objective?.trim()) return 'Escribe el objetivo: /orquestar <objetivo>.';
+  if (!objective?.trim()) return 'Escribe el objetivo: /orquestar <objetivo> o /adversary <qué atacar>.';
   const st = useOrchStore.getState();
   if (!st.snap) await st.refresh();
   if (!useOrchStore.getState().snap?.settings?.enabled) {
