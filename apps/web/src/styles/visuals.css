@@ -422,6 +422,15 @@
 .vis-lienzo > .vis-stage { min-width: 0; }
 .vis-split.con-inspector { --insp-w: 312px; }
 
+.vis-enlace-roto {
+  position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 10px; max-width: calc(100% - 48px);
+  padding: 8px 8px 8px 14px; border-radius: var(--radius);
+  background: var(--surface-2); color: var(--ink-body); font-size: 13px; box-shadow: var(--sombra-menu);
+  animation: vis-menu-in .16s ease;
+}
+.vis-enlace-roto > span { min-width: 0; }
+
 .vis-insp {
   flex: 0 0 var(--insp-w, 312px);
   width: var(--insp-w, 312px);
@@ -556,15 +565,46 @@
   top: 0;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+  cursor: grab;
 }
-
+.vis-board__artboard:active { cursor: grabbing; }
+/* El contorno va con outline para no mover el contenido; grueso porque el
+   tablero se ve a escala. */
+.vis-board__artboard.is-elegido { outline: 6px solid var(--accent); outline-offset: 4px; }
 .vis-board__artboard iframe { width: 100%; height: 100%; border: 0; pointer-events: none; display: block; }
-.vis-board__name {
-  position: absolute; left: 0; bottom: 100%; margin-bottom: 12px;
-  font-family: var(--font-mono); color: var(--ink-soft); white-space: nowrap;
+
+/* Cabecera de cada tablero, a tamaño de pantalla sobre su esquina. */
+.vis-board__cab {
+  position: absolute;
+  display: flex; align-items: center; gap: 8px;
+  height: 26px;
+  transform: translateY(calc(-100% - 6px));
+  color: var(--ink-soft);
+  cursor: grab;
+  user-select: none;
 }
+.vis-board__cab:active { cursor: grabbing; }
+.vis-board__titulo { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; }
+.vis-board__titulo strong { overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.vis-board__titulo small { flex-shrink: 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-label); }
+.vis-board__cab.is-elegido .vis-board__titulo strong { color: var(--accent); }
+.vis-board__cab.is-estrecho .vis-board__titulo small { display: none; }
+/* Estrecho y elegido: los botones bajan una fila para no tapar el título. */
+.vis-board__cab.is-estrecho .vis-board__acciones { position: absolute; left: 0; top: -24px; padding: 1px; border-radius: 6px; background: var(--surface-2); box-shadow: var(--sombra-menu); }
+.vis-board__titulo-input {
+  flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; outline: none;
+  background: var(--field-focus); color: var(--ink); font-size: 12.5px; font-weight: 600;
+}
+.vis-board__acciones { display: none; gap: 1px; flex-shrink: 0; }
+.vis-board__cab:hover .vis-board__acciones, .vis-board__cab.is-elegido .vis-board__acciones { display: flex; }
+.vis-board__acciones button {
+  display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--ink-muted); cursor: pointer;
+}
+.vis-board__acciones button:hover { background: var(--surface-3); color: var(--ink); }
+.vis-board__acciones button.is-on { background: var(--surface-4); color: var(--ink); }
 
 .vis-board__zoom {
   position: absolute;

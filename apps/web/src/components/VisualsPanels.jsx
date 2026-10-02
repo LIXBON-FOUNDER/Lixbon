@@ -360,79 +360,224 @@ export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
   );
 }
 
-/** Lienzo libre: las páginas como artboards, con zoom y desplazamiento. */
-export function Board({ paginas, documento, onAbrir }) {
+// Tamaños de tablero en el lienzo (px de la página, antes del zoom).
+const TABLEROS = {
+  escritorio: { w: 1280, h: 800 },
+  tablet: { w: 820, h: 1180 },
+  movil: { w: 390, h: 844 },
+};
+const HUECO = 120;
+const ZOOM_MIN = 0.05;
+const ZOOM_MAX = 2;
+
+const tituloDe = (f) => {
+  const m = /<title>([^<]{1,80})<\/title>/i.exec(f.code || '');
+  return (m && m[1].trim()) || f.name.replace(/\.(html?|svg)$/, '');
+};
+
+/** Coloca en fila (y salta de fila al pasar de ~4400 px) las páginas sin
+ *  posición, a la derecha y debajo de lo ya colocado. */
+function colocar(paginas, layout) {
+  const out = { ...layout };
+  const puestas = paginas.filter((f) => out[f.name]?.x != null);
+  let x = 0;
+  let y = 0;
+  let altoFila = 0;
+  if (puestas.length) {
+    y = Math.min(...puestas.map((f) => out[f.name].y));
+    x = Math.max(...puestas.map((f) => out[f.name].x + TABLEROS[out[f.name].d || 'escritorio'].w)) + HUECO;
+  }
+  for (const f of paginas) {
+    if (out[f.name]?.x != null) continue;
+    const d = out[f.name]?.d || 'escritorio';
+    const { w, h } = TABLEROS[d];
+    if (x > 0 && x + w > 4400) { x = 0; y += altoFila + HUECO * 1.5; altoFila = 0; }
+    out[f.name] = { ...out[f.name], x, y, d };
+    x += w + HUECO;
+    altoFila = Math.max(altoFila, h);
+  }
+  return out;
+}
+
+/** Lienzo libre al estilo de un tablero de diseño: cada página es un
+ *  tablero con su título que se mueve por separado (arrastrando el tablero
+ *  o su cabecera), cambia de tamaño (escritorio/tablet/móvil) y se renombra
+ *  con doble clic en el título. El fondo se arrastra para desplazarse y
+ *  Ctrl+rueda hace zoom. Posiciones, tamaños y títulos se guardan por diseño. */
+export function Board({ paginas, documento, onAbrir, clave, activa }) {
   const t = useT('visuals');
   const ref = useRef(null);
-  const [vista, setVista] = useState({ x: 40, y: 40, z: 0.3 });
+  const almacen = `lixbon.visuals.board.${clave || 'tmp'}`;
+  const [layout, setLayout] = useState(() => {
+    try { return colocar(paginas, JSON.parse(localStorage.getItem(almacen) || '{}')); } catch { return colocar(paginas, {}); }
+  });
+  const [vista, setVista] = useState({ x: 40, y: 60, z: 0.25 });
+  const [elegido, setElegido] = useState(activa || null);
+  const [encima, setEncima] = useState([]);       // orden de apilado: el último, arriba
+  const [renombrando, setRenombrando] = useState(null);
   const arrastre = useRef(null);
-  const ANCHO = 1280;
-  const ALTO = 800;
-  const HUECO = 120;
+  const vistaRef = useRef(vista);
+  vistaRef.current = vista;
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+
+  const guardar = (next) => {
+    setLayout(next);
+    try { localStorage.setItem(almacen, JSON.stringify(next)); } catch { /* sin almacenamiento */ }
+  };
+  // Páginas nuevas (otra versión) entran colocadas sin mover las demás.
+  useEffect(() => {
+    setLayout((prev) => (paginas.every((f) => prev[f.name]?.x != null) ? prev : colocar(paginas, prev)));
+  }, [paginas]);
+
+  const caja = (f) => {
+    const l = layout[f.name] || {};
+    const { w, h } = TABLEROS[l.d || 'escritorio'];
+    return { x: l.x || 0, y: l.y || 0, w, h };
+  };
 
   const ajustar = () => {
     const el = ref.current;
-    if (!el) return;
-    const total = paginas.length * ANCHO + (paginas.length - 1) * HUECO;
-    const z = Math.min(1, (el.clientWidth - 80) / total, (el.clientHeight - 120) / ALTO);
-    setVista({ x: (el.clientWidth - total * z) / 2, y: 60, z });
+    if (!el || !paginas.length) return;
+    const cajas = paginas.map(caja);
+    const x0 = Math.min(...cajas.map((c) => c.x));
+    const y0 = Math.min(...cajas.map((c) => c.y));
+    const x1 = Math.max(...cajas.map((c) => c.x + c.w));
+    const y1 = Math.max(...cajas.map((c) => c.y + c.h));
+    const z = Math.min(1, (el.clientWidth - 80) / (x1 - x0), (el.clientHeight - 140) / (y1 - y0));
+    setVista({ z, x: (el.clientWidth - (x1 - x0) * z) / 2 - x0 * z, y: 70 + (el.clientHeight - 140 - (y1 - y0) * z) / 2 - y0 * z });
   };
   useEffect(ajustar, [paginas.length]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onWheel = (e) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const factor = Math.exp(-e.deltaY * 0.0015);
-      const rect = ref.current.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      setVista((v) => {
-        const z = Math.min(2, Math.max(0.08, v.z * factor));
-        return { z, x: px - (px - v.x) * (z / v.z), y: py - (py - v.y) * (z / v.z) };
-      });
-    } else {
-      setVista((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
-    }
+  const ordenar = () => {
+    const limpio = Object.fromEntries(Object.entries(layout).map(([k, v]) => [k, { d: v.d, titulo: v.titulo }]));
+    guardar(colocar(paginas, limpio));
+    reencuadrar.current = true;
   };
+  // Tras «Ordenar», encuadrar con las posiciones ya aplicadas.
+  const reencuadrar = useRef(false);
+  useEffect(() => { if (reencuadrar.current) { reencuadrar.current = false; ajustar(); } });  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const zoomEn = (factor, px, py) => setVista((v) => {
+    const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.z * factor));
+    return { z, x: px - (px - v.x) * (z / v.z), y: py - (py - v.y) * (z / v.z) };
+  });
   useEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
+    const onWheel = (e) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect();
+        zoomEn(Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top);
+      } else {
+        setVista((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      }
+    };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
+  const zoomCentro = (f) => { const el = ref.current; zoomEn(f, el.clientWidth / 2, el.clientHeight / 2); };
 
-  const onPointerDown = (e) => {
-    if (e.button !== 0) return;
-    arrastre.current = { sx: e.clientX, sy: e.clientY, x: vista.x, y: vista.y, movido: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
+  // Un solo gestor de arrastre: fondo = desplazar; tablero o cabecera = moverlo.
+  const empezar = (e, nombre) => {
+    if (e.button !== 0 || e.target.closest('button, input')) return;
+    e.stopPropagation();
+    const l = nombre ? layout[nombre] : null;
+    arrastre.current = { nombre, sx: e.clientX, sy: e.clientY, ox: nombre ? l.x : vista.x, oy: nombre ? l.y : vista.y, movido: false };
+    if (nombre) { setElegido(nombre); setEncima((prev) => [...prev.filter((n) => n !== nombre), nombre]); }
+    else setElegido(null);
   };
-  const onPointerMove = (e) => {
+  const mover = (e) => {
     const a = arrastre.current;
     if (!a) return;
     const dx = e.clientX - a.sx;
     const dy = e.clientY - a.sy;
-    if (Math.abs(dx) + Math.abs(dy) > 3) a.movido = true;
-    setVista((v) => ({ ...v, x: a.x + dx, y: a.y + dy }));
+    if (!a.movido && Math.abs(dx) + Math.abs(dy) > 3) {
+      // La captura empieza con el arrastre: así un clic o doble clic sigue
+      // llegando al tablero o a su título.
+      a.movido = true;
+      ref.current.setPointerCapture(e.pointerId);
+    }
+    if (!a.movido) return;
+    if (a.nombre) {
+      const z = vistaRef.current.z;
+      setLayout((prev) => ({ ...prev, [a.nombre]: { ...prev[a.nombre], x: Math.round(a.ox + dx / z), y: Math.round(a.oy + dy / z) } }));
+    } else {
+      setVista((v) => ({ ...v, x: a.ox + dx, y: a.oy + dy }));
+    }
   };
-  const onPointerUp = () => { arrastre.current = null; };
-  const zoom = (f) => setVista((v) => ({ ...v, z: Math.min(2, Math.max(0.08, v.z * f)) }));
+  const soltar = () => {
+    const a = arrastre.current;
+    arrastre.current = null;
+    if (a?.nombre && a.movido) guardar(layoutRef.current);
+  };
+
+  const cambiarTamano = (nombre, d) => guardar({ ...layout, [nombre]: { ...layout[nombre], d } });
+  const renombrar = (nombre, titulo) => {
+    setRenombrando(null);
+    const limpio = (titulo || '').trim();
+    guardar({ ...layout, [nombre]: { ...layout[nombre], titulo: limpio || undefined } });
+  };
+
+  const apilado = (n) => { const i = encima.indexOf(n); return i < 0 ? 1 : 2 + i; };
 
   return (
-    <div className="vis-board" ref={ref} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+    <div className="vis-board" ref={ref} onPointerDown={(e) => empezar(e, null)} onPointerMove={mover} onPointerUp={soltar} onPointerCancel={soltar}>
       <div className="vis-board__capa" style={{ transform: `translate(${vista.x}px, ${vista.y}px) scale(${vista.z})` }}>
-        {paginas.map((f, i) => (
-          <div key={f.name} className="vis-board__artboard" style={{ left: i * (ANCHO + HUECO), width: ANCHO, height: ALTO }}
-            onDoubleClick={() => onAbrir(f.name)}>
-            <span className="vis-board__name" style={{ fontSize: Math.min(48, 14 / vista.z) }}>{f.name}</span>
-            <iframe title={f.name} sandbox="allow-scripts" srcDoc={documento(f)} tabIndex={-1} />
-          </div>
-        ))}
+        {paginas.map((f) => {
+          const c = caja(f);
+          return (
+            <div key={f.name} className={`vis-board__artboard ${elegido === f.name ? 'is-elegido' : ''}`}
+              style={{ left: c.x, top: c.y, width: c.w, height: c.h, zIndex: apilado(f.name) }}
+              onPointerDown={(e) => empezar(e, f.name)} onDoubleClick={() => onAbrir(f.name)}>
+              <iframe title={f.name} sandbox="allow-scripts" srcDoc={documento(f)} tabIndex={-1} />
+            </div>
+          );
+        })}
       </div>
-      <div className="vis-board__zoom">
-        <button className="vis-tool" onClick={() => zoom(1 / 1.25)} title={t('zoomOut')}>−</button>
+      {/* Cabeceras fuera de la capa escalada: texto nítido y a tamaño fijo. */}
+      {paginas.map((f) => {
+        const c = caja(f);
+        const l = layout[f.name] || {};
+        const titulo = l.titulo || tituloDe(f);
+        const d = l.d || 'escritorio';
+        return (
+          <div key={f.name} className={`vis-board__cab ${elegido === f.name ? 'is-elegido' : ''} ${c.w * vista.z < 200 ? 'is-estrecho' : ''}`}
+            style={{ left: vista.x + c.x * vista.z, top: vista.y + c.y * vista.z, width: Math.max(60, c.w * vista.z), zIndex: 10 + apilado(f.name) }}
+            onPointerDown={(e) => empezar(e, f.name)} onDoubleClick={(e) => { e.stopPropagation(); setRenombrando(f.name); }}>
+            {renombrando === f.name ? (
+              <input className="vis-board__titulo-input" autoFocus defaultValue={titulo} aria-label={t('boardRename')}
+                onBlur={(e) => renombrar(f.name, e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setRenombrando(null); }} />
+            ) : (
+              <span className="vis-board__titulo" title={`${titulo} · ${f.name} — ${t('boardRenameHint')}`}>
+                <strong>{titulo}</strong><small>{f.name}</small>
+              </span>
+            )}
+            <span className="vis-board__acciones">
+              {Object.keys(TABLEROS).map((k) => (
+                <button key={k} className={d === k ? 'is-on' : ''} onClick={() => cambiarTamano(f.name, k)} title={`${t(`width_${k}`)} · ${TABLEROS[k].w}px`} aria-label={t(`width_${k}`)}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+                    {k === 'escritorio' && <rect x="2.5" y="5" width="19" height="13" rx="2.5" />}
+                    {k === 'tablet' && <rect x="5" y="3" width="14" height="18" rx="2.5" />}
+                    {k === 'movil' && <rect x="7.5" y="3" width="9" height="18" rx="2.5" />}
+                  </svg>
+                </button>
+              ))}
+              <button onClick={() => onAbrir(f.name)} title={t('boardOpen')} aria-label={t('boardOpen')}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></svg>
+              </button>
+            </span>
+          </div>
+        );
+      })}
+      <div className="vis-board__zoom" onPointerDown={(e) => e.stopPropagation()}>
+        <button className="vis-tool" onClick={() => zoomCentro(1 / 1.25)} title={t('zoomOut')}>−</button>
         <span>{Math.round(vista.z * 100)}%</span>
-        <button className="vis-tool" onClick={() => zoom(1.25)} title={t('zoomIn')}>+</button>
+        <button className="vis-tool" onClick={() => zoomCentro(1.25)} title={t('zoomIn')}>+</button>
         <button className="vis-tool" onClick={ajustar}>{t('fit')}</button>
+        <button className="vis-tool" onClick={ordenar} title={t('boardArrangeHint')}>{t('boardArrange')}</button>
         <span className="vis-board__hint">{t('boardHint')}</span>
       </div>
     </div>
