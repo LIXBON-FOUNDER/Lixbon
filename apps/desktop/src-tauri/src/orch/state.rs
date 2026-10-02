@@ -358,6 +358,7 @@ Seguimiento:
 {spec}", t.spec);
         t.summary.clear();
         t.report = None;
+        t.merged = false;
         t.status = Status::Running;
         t.updated = now_ms();
         Ok(())
@@ -447,8 +448,9 @@ Seguimiento:
     }
 
     /// Cierra el run: sin `force` rechaza si quedan hijas en marcha; con `force` las
-    /// para. Devuelve las tareas paradas. Las terminales y worktrees los limpia `mod.rs`.
-    pub fn close_run(&mut self, run: &str, force: bool) -> Result<Vec<String>, String> {
+    /// para. Devuelve las tareas paradas y los avisos generados. Las terminales y
+    /// worktrees los limpia `mod.rs`.
+    pub fn close_run(&mut self, run: &str, force: bool) -> Result<(Vec<String>, Vec<u64>), String> {
         let root = {
             let r = self.runs.get(run).ok_or_else(|| format!("No existe el run {run}"))?;
             if r.closed {
@@ -460,8 +462,9 @@ Seguimiento:
         if !open.is_empty() && !force {
             return Err(format!("El run {run} tiene hijas en marcha ({}): espera a que terminen, páralas con lxo stop o usa lxo run close --force", open.join(", ")));
         }
+        let mut msgs = vec![];
         for id in &open {
-            self.close(id, Status::Stopped, "detenida al cerrar el run")?;
+            msgs.extend(self.close(id, Status::Stopped, "detenida al cerrar el run")?);
         }
         if !self.task(&root)?.status.is_final() {
             self.touch(&root, Some(Status::Done))?;
@@ -469,22 +472,18 @@ Seguimiento:
         if let Some(r) = self.runs.get_mut(run) {
             r.closed = true;
         }
-        Ok(open)
+        Ok((open, msgs))
     }
 
-    /// `lxo run create` desde una sesión de carpeta: Ok(false) si la tarea recordada
-    /// ya no cuenta (borrada, final o run cerrado), Ok(true) si sigue activa pero sin
-    /// hijas en marcha (hay que cerrar su run antes), Err si aún hay hijas trabajando.
-    pub fn session_replaceable(&self, id: &str) -> Result<bool, String> {
-        let Some(t) = self.tasks.get(id) else { return Ok(false) };
+    /// `lxo run create` desde una sesión de carpeta: solo se sustituye si la tarea
+    /// recordada ya no cuenta (borrada, final o run cerrado). Un run abierto nunca se
+    /// cierra por otro chat que comparta carpeta.
+    pub fn session_replaceable(&self, id: &str) -> Result<(), String> {
+        let Some(t) = self.tasks.get(id) else { return Ok(()) };
         if t.status.is_final() || self.runs.get(&t.run).is_none_or(|r| r.closed) {
-            return Ok(false);
+            return Ok(());
         }
-        let open = self.run_open_tasks(&t.run);
-        if open.is_empty() {
-            return Ok(true);
-        }
-        Err(format!("Tu run anterior ({}) sigue abierto con hijas en marcha ({}): ciérralo con `lxo run close` (con --force las para)", t.run, open.join(", ")))
+        Err(format!("Tu run anterior {} sigue abierto: ciérralo con `lxo run close` y vuelve a crear el run", t.run))
     }
 
     pub fn remove_run(&mut self, run: &str) {
@@ -562,8 +561,9 @@ mod tests {
         let err = s.close_run(&run, false).unwrap_err();
         assert!(err.contains(&a) && err.contains(&nieta) && !s.runs[&run].closed);
         assert_eq!(s.task(&root).unwrap().status, Status::Running);
-        let mut stopped = s.close_run(&run, true).unwrap();
+        let (mut stopped, msgs) = s.close_run(&run, true).unwrap();
         stopped.sort();
+        assert_eq!(msgs.len(), 2);
         assert_eq!(stopped, vec![a.clone(), nieta.clone()]);
         assert_eq!(s.task(&a).unwrap().status, Status::Stopped);
         assert_eq!(s.task(&nieta).unwrap().status, Status::Stopped);
@@ -579,30 +579,52 @@ mod tests {
         let (run, root) = s.create_run("obj", nt("raíz"));
         let h = s.add_child(&root, 1, nt("h")).unwrap();
         s.done(&h, true, "ok", vec![], None).unwrap();
-        assert!(s.close_run(&run, false).unwrap().is_empty());
+        assert!(s.close_run(&run, false).unwrap().0.is_empty());
         assert!(s.runs[&run].closed && s.task(&root).unwrap().status.is_final());
         assert!(s.add_child(&root, 1, nt("tarde")).is_err());
     }
 
     #[test]
-    fn sesion_obsoleta_se_sustituye_al_crear_run() {
+    fn sesion_solo_se_sustituye_si_ya_no_cuenta() {
         let mut s = State::default();
-        assert_eq!(s.session_replaceable("t26"), Ok(false));
+        assert!(s.session_replaceable("t26").is_ok());
         let (run, root) = s.create_run("obj", nt("raíz"));
         s.mark_running(&root).unwrap();
-        assert_eq!(s.session_replaceable(&root), Ok(true));
-        let h = s.add_child(&root, 1, nt("h")).unwrap();
         let err = s.session_replaceable(&root).unwrap_err();
-        assert!(err.contains(&h) && err.contains("lxo run close"));
-        s.close_run(&run, true).unwrap();
-        assert_eq!(s.session_replaceable(&root), Ok(false));
+        assert!(err.contains(&run) && err.contains("lxo run close"));
+        let h = s.add_child(&root, 1, nt("h")).unwrap();
+        assert!(s.session_replaceable(&root).is_err());
+        s.done(&h, true, "ok", vec![], None).unwrap();
+        assert!(s.session_replaceable(&root).is_err());
+        s.close_run(&run, false).unwrap();
+        assert!(s.session_replaceable(&root).is_ok());
+        s.task_mut(&root).unwrap().status = Status::Running;
+        assert!(s.session_replaceable(&root).is_ok(), "run cerrado");
         let (run2, root2) = s.create_run("otro", nt("raíz 2"));
         s.mark_running(&root2).unwrap();
-        s.task_mut(&root).unwrap().status = Status::Running;
-        assert_eq!(s.session_replaceable(&root), Ok(false), "run cerrado");
-        assert_eq!(s.session_replaceable(&root2), Ok(true));
         s.remove_run(&run2);
-        assert_eq!(s.session_replaceable(&root2), Ok(false));
+        assert!(s.session_replaceable(&root2).is_ok());
+    }
+
+    #[test]
+    fn continuar_una_hija_invalida_su_fusion() {
+        let mut s = State::default();
+        let (_, root) = s.create_run("obj", nt("raíz"));
+        let h = s.add_child(&root, 1, nt("h")).unwrap();
+        s.done(&h, true, "ok", vec![], None).unwrap();
+        s.task_mut(&h).unwrap().merged = true;
+        s.reopen(&h, "más").unwrap();
+        assert!(!s.task(&h).unwrap().merged);
+    }
+
+    #[test]
+    fn merge_y_release_siguen_con_run_cerrado() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let h = s.add_child(&root, 1, nt("h")).unwrap();
+        s.done(&h, true, "ok", vec![], None).unwrap();
+        s.close_run(&run, false).unwrap();
+        assert!(s.ensure_manages(&root, &h).is_ok());
     }
 
     #[test]

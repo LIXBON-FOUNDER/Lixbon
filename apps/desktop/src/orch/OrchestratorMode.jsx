@@ -331,6 +331,10 @@ export function OrchestratorMode() {
 
   useEffect(() => { init(); }, [init]);
 
+  const removedText = (res) => (res?.kept?.length
+    ? `Run quitado. Worktrees conservados en disco: ${res.kept.map((k) => `${k.task} (${k.reason})`).join(', ')}`
+    : 'Run quitado');
+
   const allRuns = useMemo(() => Object.values(snap?.runs || {}).sort((a, b) => b.created - a.created), [snap]);
   const runs = useMemo(
     () => (allRepos ? allRuns : allRuns.filter((r) => inRepo(snap?.tasks?.[r.root], root))),
@@ -360,10 +364,12 @@ export function OrchestratorMode() {
               return (
               <section key={r.id} className={`orch__run${r.closed ? ' orch__run--closed' : ''}`}>
                 <div className="orch__run-head">
-                  <span className="orch__run-title" title={r.objective} onClick={r.closed ? toggle : undefined}>{r.objective}</span>
+                  {r.closed
+                    ? <button className="orch__run-title orch__run-fold" title={r.objective} aria-expanded={!folded} onClick={toggle}>{r.objective}</button>
+                    : <span className="orch__run-title" title={r.objective}>{r.objective}</span>}
                   {r.closed && <span className="orch__run-tag">cerrado</span>}
                   {!r.closed && <RunProgress tasks={taskTree(snap.tasks, r.id)} />}
-                  <button className="ic" title="Quitar este run de la lista (no borra ramas)" onClick={() => call('remove_run', { run: r.id })}><IconTrash size={12} /></button>
+                  <button className="ic" title="Quitar este run de la lista (libera los worktrees fusionados y borra sus ramas)" onClick={() => call('remove_run', { run: r.id }, removedText)}><IconTrash size={12} /></button>
                 </div>
                 {!folded && taskTree(snap.tasks, r.id).map((t) => (
                   <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={select} />

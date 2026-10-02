@@ -294,11 +294,7 @@ impl Core {
                     if !b(args, "session") {
                         return Err(format!("Ya eres la tarea {id}: crea hijos directamente con lxo spawn"));
                     }
-                    let replaceable = self.lock().session_replaceable(id)?;
-                    if replaceable {
-                        let run = self.lock().task(id)?.run.clone();
-                        self.close_run(&run, false)?;
-                    }
+                    self.lock().session_replaceable(id)?;
                 }
                 let objective = s(args, "objective");
                 if objective.is_empty() {
@@ -503,11 +499,11 @@ impl Core {
                 for id in &ids {
                     self.kill_term(id);
                 }
-                self.free_worktrees(&run, false);
+                let (_, kept) = self.free_worktrees(&run, false);
                 let mut st = self.lock();
                 st.remove_run(&run);
                 self.commit(&st, &[]);
-                Ok(json!({ "removed": run }))
+                Ok(json!({ "removed": run, "kept": kept }))
             }
             other => Err(format!("Comando desconocido: {other}")),
         }
@@ -584,14 +580,17 @@ impl Core {
             t.base = Some(base);
             Ok(())
         })()
+        .and_then(|_| self.ensure_launchable(&id))
         .and_then(|_| self.launch(&id));
 
-        let mut st = self.lock();
         if let Err(e) = prepared {
+            self.discard_worktree(&id);
+            let mut st = self.lock();
             st.tasks.remove(&id);
             self.commit(&st, &[]);
             return Err(e);
         }
+        let mut st = self.lock();
         // Si el agente ya murió al arrancar, la tarea quedó en `exited` y así se informa.
         let _ = st.mark_running(&id);
         let t = st.task(&id)?.clone();
@@ -788,21 +787,40 @@ impl Core {
         Ok(json!({ "task": id, "worktree_removed": worktree.is_some(), "branch_deleted": branch_deleted }))
     }
 
+    fn ensure_launchable(&self, id: &str) -> Result<(), String> {
+        let st = self.lock();
+        let t = st.task(id)?;
+        if t.status.is_final() || st.runs.get(&t.run).is_none_or(|r| r.closed) {
+            return Err("El run se cerró mientras se preparaba la tarea: no se lanzó".into());
+        }
+        Ok(())
+    }
+
+    fn discard_worktree(&self, id: &str) {
+        let Some((repo, wt, branch)) = self.lock().tasks.get(id).and_then(|t| Some((t.repo.clone(), t.worktree.clone()?, t.branch.clone()))) else { return };
+        if git::remove_worktree(&repo, &wt, true).is_ok() {
+            if let Some(b) = branch {
+                let _ = git::delete_branch(&repo, &b);
+            }
+        }
+    }
+
     fn close_run(&self, run: &str, force: bool) -> Result<Value, String> {
-        let (stopped, ids) = {
+        let (stopped, msgs, ids) = {
             let mut st = self.lock();
-            let stopped = st.close_run(run, force)?;
+            let (stopped, msgs) = st.close_run(run, force)?;
             let ids: Vec<String> = st.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
-            (stopped, ids)
+            (stopped, msgs, ids)
         };
         let terminals: Vec<&String> = ids.iter().filter(|id| self.kill_term(id)).collect();
         let (released, kept) = self.free_worktrees(run, force);
-        self.commit(&self.lock(), &[]);
+        self.commit(&self.lock(), &msgs);
         Ok(json!({ "run": run, "stopped": stopped, "terminals": terminals, "released": released, "kept": kept }))
     }
 
     /// Libera los worktrees del run cuyas ramas ya están en la del coordinador; las
-    /// demás se conservan (con `force` se borra el worktree, nunca una rama sin fusionar).
+    /// demás se conservan. Con `force` también se liberan los limpios sin fusionar; los
+    /// worktrees con cambios sin commit se conservan siempre y nunca se borra una rama sin fusionar.
     fn free_worktrees(&self, run: &str, force: bool) -> (Vec<Value>, Vec<Value>) {
         let (tasks, into) = {
             let st = self.lock();
@@ -818,7 +836,11 @@ impl Core {
                 kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "rama sin fusionar" }));
                 continue;
             }
-            if let Err(e) = git::remove_worktree(&t.repo, &wt, force) {
+            if git::is_dirty(&wt) {
+                kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "cambios sin commit" }));
+                continue;
+            }
+            if let Err(e) = git::remove_worktree(&t.repo, &wt, false) {
                 kept.push(json!({ "task": t.id, "branch": t.branch, "reason": e.lines().next().unwrap_or_default() }));
                 continue;
             }

@@ -304,9 +304,18 @@ fn human(cmd: &str, data: &Value) -> String {
     }
 }
 
+fn keeps_nothing(data: &Value) -> bool {
+    data["kept"].as_array().is_none_or(|k| k.is_empty())
+}
+
 fn run_close_human(data: &Value) -> String {
     let ids = |k: &str| -> Vec<String> { data[k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() };
-    let mut out = vec![format!("Run {} cerrado: tu tarea queda terminada y la sesión de esta carpeta se borró.", data["run"].as_str().unwrap_or(""))];
+    let tail = if keeps_nothing(data) {
+        "tu tarea queda terminada y la sesión de esta carpeta se borró."
+    } else {
+        "tu tarea queda terminada. La sesión de esta carpeta se conserva para que `lxo merge` y `lxo release` sigan funcionando con lo conservado."
+    };
+    let mut out = vec![format!("Run {} cerrado: {tail}", data["run"].as_str().unwrap_or(""))];
     let stopped = ids("stopped");
     if !stopped.is_empty() {
         out.push(format!("Paradas (seguían en marcha): {}.", stopped.join(", ")));
@@ -316,7 +325,11 @@ fn run_close_human(data: &Value) -> String {
     let released: Vec<String> = data["released"].as_array().into_iter().flatten().map(|r| format!(
         "  {} · worktree borrado{}",
         r["task"].as_str().unwrap_or(""),
-        if r["branch_deleted"].as_bool() == Some(true) { format!(" y rama {} borrada", r["branch"].as_str().unwrap_or("")) } else { String::new() }
+        match (r["branch"].as_str(), r["branch_deleted"].as_bool() == Some(true)) {
+            (Some(b), true) => format!(" y rama {b} borrada"),
+            (Some(b), false) => format!("; rama {b} conservada (puede tener commits sin integrar)"),
+            _ => String::new(),
+        }
     )).collect();
     out.push(if released.is_empty() { "Worktrees liberados: ninguno.".into() } else { format!("Worktrees liberados:
 {}", released.join("
@@ -407,7 +420,9 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         "run" => {
             if sub(1).as_deref() == Some("close") {
                 let data = call("run_close", json!({ "force": a.b("force") }), me)?;
-                let _ = std::fs::remove_file(session_file());
+                if keeps_nothing(&data) {
+                    let _ = std::fs::remove_file(session_file());
+                }
                 return Ok(("run_close".into(), data));
             }
             if sub(1).as_deref() != Some("create") {
@@ -601,6 +616,11 @@ mod tests {
         assert!(t.contains("Terminales cerradas: t4, t5."));
         assert!(t.contains("  t4 · worktree borrado y rama lx/r3/t4-api borrada"));
         assert!(t.contains("  t5 · lx/r3/t5-ui · rama sin fusionar"));
+        assert!(t.contains("La sesión de esta carpeta se conserva"));
+        assert!(!keeps_nothing(&data));
+        assert!(keeps_nothing(&json!({ "kept": [] })));
+        let limpio = run_close_human(&json!({ "run": "r3", "released": [{ "task": "t4", "branch": "b", "branch_deleted": false }] }));
+        assert!(limpio.contains("se borró") && limpio.contains("rama b conservada"));
         assert!(run_close_human(&json!({ "run": "r3" })).contains("Worktrees liberados: ninguno."));
     }
 

@@ -11,9 +11,10 @@ su worktree, y trabaja en autónomo.
 1. `lxo status` comprueba que el orquestador está activo.
 2. `lxo run create --objective "<objetivo del usuario en una frase>" --agent <tu agente: claude|codex|lixbon…>`
    Cada objetivo nuevo del usuario (cada /orquestar) es un run nuevo, aunque `lxo status` diga que
-   ya coordinas otro. A partir de ahí eres el coordinador de ese run. Si el run anterior terminó, se
-   borró desde la interfaz o ya no tiene hijas en marcha, `run create` lo sustituye solo; si aún tiene
-   hijas trabajando, te pide cerrarlo con `lxo run close`.
+   ya coordinas otro. A partir de ahí eres el coordinador de ese run. Si el run anterior terminó, está
+   cerrado o se borró desde la interfaz, `run create` lo sustituye solo. Si dice que el run anterior
+   sigue abierto, y ese objetivo ya terminó, ciérralo primero con `lxo run close` y vuelve a crear el
+   run; no lo cierres si es de otro chat que aún trabaja en esta carpeta.
 3. **Haz commit** de lo que las hijas deban ver: parten de tu último commit, no de los cambios sin guardar.
 4. `lxo roles`: los roles del equipo y el modelo que el usuario asignó a cada uno.
 5. **Si el objetivo nombra una issue de Lixbon Team** (una clave como `LXB-12`, típico cuando llega
@@ -123,11 +124,12 @@ Con el webhook de GitHub del equipo, las ramas y PR que citan la clave se vincul
 **Paso final obligatorio: `lxo run close`**, cuando el objetivo está cumplido e integrado (y la
 issue, si la hay, actualizada). Cierra las terminales de todas las hijas, libera los worktrees cuyas
 ramas ya están fusionadas en la tuya, marca el run como terminado y borra tu sesión de esta carpeta:
-así el árbol del modo Orquestar queda limpio y el siguiente /orquestar empieza de cero.
+así el árbol del modo Orquestar queda limpio y el siguiente /orquestar empieza de cero. Si quedan
+worktrees conservados, la sesión se mantiene para que puedas seguir con `lxo merge` y `lxo release`.
 
 - Si quedan hijas en marcha, lo rechaza: espera a que terminen o páralas con `lxo stop <tarea>`.
-  `lxo run close --force` las para y descarta también los worktrees sin fusionar (las ramas sin
-  fusionar nunca se borran).
+  `lxo run close --force` las para y libera también los worktrees limpios sin fusionar (las ramas
+  sin fusionar y los worktrees con cambios sin commit nunca se borran).
 - Las ramas sin fusionar se conservan y la salida las lista: intégralas o dile al usuario qué queda.
 - No lo ejecutes si el usuario aún puede pedirte cambios sobre este run: tras cerrarlo ya no puedes
   lanzar hijas en él.
