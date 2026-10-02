@@ -942,6 +942,8 @@ button.statusbar__item:hover { color: var(--ink); }
 .rise--1 { animation-delay: 0.06s; }
 .rise--2 { animation-delay: 0.12s; }
 .rise--3 { animation-delay: 0.18s; }
+.rise--4 { animation-delay: 0.24s; }
+.rise--5 { animation-delay: 0.3s; }
 .drop-in { animation: lx-drop 0.24s var(--ease) both; }
 
 @keyframes lx-spin { to { transform: rotate(360deg); } }

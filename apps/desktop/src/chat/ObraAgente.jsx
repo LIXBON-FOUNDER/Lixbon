@@ -1,6 +1,6 @@
 // ObraAgente.jsx — la mascota cuando este chat coordina un equipo (/orquestar).
 // Gael y Leya salen a la vez con casco de obra blanco: son el coordinador.
-// Cada agente hijo es un robot obrero (color y casco según su rol) que llega
+// Cada agente hijo es un obrero (forma elegida en Ajustes, color según su rol) que llega
 // caminando, recibe su tarea (un papel que vuela desde uno de los dos),
 // trabaja de fondo, y al terminar camina hasta ellos con el informe.
 // Todo se deduce del snapshot del orquestador; aquí solo se pone en escena.
@@ -20,7 +20,7 @@ const enRepo = (task, root) => {
 };
 const recorta = (t, n = 38) => (t && t.length > n ? `${t.slice(0, n - 1)}…` : t || 'una tarea');
 const FUERA = 'calc(100% + 90px)';
-// Los sprites existen por rol (bot-<rol>-*.png); lo demás va en gris.
+// Sprites <forma>-<rol>-*.png; sin rol conocido, robot gris.
 const ROLES = ['explorador', 'implementador', 'revisor', 'escalado'];
 const rolDe = (t) => (ROLES.includes(t.role) ? t.role : 'general');
 
@@ -198,7 +198,7 @@ export function ObraAgente({ tam = 96 }) {
         <div key={b.id} className={`obra-bot obra-bot--${b.fase}`} style={{ right: posiciones[i] }}>
           <Globo texto={globos[b.id]} />
           <SpriteMascota
-            personaje={`bot-${b.rol}`}
+            personaje={b.rol === 'general' ? 'robot-general' : `${prefs[`obrero_${b.rol}`] || 'robot'}-${b.rol}`}
             estado={estadoBot[b.fase] || 'idle'}
             tam={botTam}
             espejo={b.fase === 'sale'}

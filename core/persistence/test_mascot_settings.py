@@ -34,6 +34,12 @@ def test_descarta_claves_y_valores_invalidos():
     assert "<script>" not in m
 
 
+def test_forma_de_los_obreros():
+    m = _clean_mascot({"obrero_revisor": "monitor", "obrero_escalado": "dragon"})
+    assert m["obrero_revisor"] == "monitor"
+    assert m["obrero_escalado"] == MASCOT_DEFAULTS["obrero_escalado"]
+
+
 def test_settings_json_corrupto_o_raro():
     assert _parse_settings("no es json")["mascot"] == MASCOT_DEFAULTS
     assert _parse_settings(json.dumps({"mascot": "texto"}))["mascot"] == MASCOT_DEFAULTS

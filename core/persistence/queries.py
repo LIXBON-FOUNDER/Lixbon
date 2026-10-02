@@ -259,8 +259,18 @@ MASCOT_DEFAULTS: dict[str, Any] = {
     "dormir_min": 5,
     "guia": True,          # web: acompaña la lectura en lixbon.com, docs y guías
     "reducir": False,      # sin animaciones
+    # IDE: forma de los agentes hijos del orquestador por rol (el color lo da el rol).
+    "obrero_explorador": "gota",
+    "obrero_implementador": "robot",
+    "obrero_revisor": "gota",
+    "obrero_escalado": "monitor",
 }
-_MASCOT_ENUMS = {"personaje": ("gael", "leya", "ambos"), "trabajo": ("escribir", "conducir", "auto")}
+_FORMAS_OBRERO = ("robot", "monitor", "gota")
+_MASCOT_ENUMS = {
+    "personaje": ("gael", "leya", "ambos"),
+    "trabajo": ("escribir", "conducir", "auto"),
+    **{f"obrero_{rol}": _FORMAS_OBRERO for rol in ("explorador", "implementador", "revisor", "escalado")},
+}
 _MASCOT_RANGES = {"latigo_min": (1, 30), "dormir_min": (1, 60)}
 MASCOT_KEYS = ("mascot", "mascot_ide")
 

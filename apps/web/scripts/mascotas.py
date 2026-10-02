@@ -3,7 +3,8 @@
 Cada estado es una tira horizontal de cuadros de 48×48 (el kart, de 72×48):
     <personaje>-<estado>.png  con estado en idle, type, think, sleep, point,
     wave, whip y kart. Con `-casco` (casco de obra blanco, para cuando son
-    coordinadores) y los agentes hijos `bot-<rol>-<estado>` (color según el rol).
+    coordinadores) y, solo para el IDE, los agentes hijos del orquestador
+    `<robot|monitor|gota>-<rol>-<estado>` (color según el rol).
 Se dibujan por capas (pelo de atrás, cuerpo, brazos, cabeza, pelo de delante)
 y cada capa lleva su propio contorno, así los brazos se leen encima del torso.
 Uso: python apps/web/scripts/mascotas.py  (requiere Pillow).
@@ -543,8 +544,8 @@ ESTADOS = {
 # ── Agentes hijos del orquestador ──────────────────────────────────────
 # Ni humanos ni animales, con casco de obra. El color del cuerpo y del casco
 # depende del rol de la tarea (ROLES). Hay tres formas: el robot (la que usa
-# el IDE), un monitor con patas y una gota de código; las dos últimas solo se
-# generan como muestra con MASCOTAS_MUESTRAS=<carpeta>.
+# el IDE), un monitor con patas y una gota de código; en el IDE el usuario
+# elige la forma de cada rol. Solo los usa el IDE: van directos a su carpeta.
 AG = dict(K='#14191d', screen='#1b262d', led='#7be0a5', ledD='#3f9468', dark='#3a464e',
           paper='#f7f4ee', paperS='#c8c3b6', ink='#7a756a')
 CH['bot'] = dict(K=AG['K'])
@@ -718,23 +719,24 @@ for n in ('gael', 'leya'):
     for estado, (fn, cuadros) in ESTADOS.items():
         strip([fn(n, f) for f in range(cuadros)]).save(f'{n}-{estado}-casco.png')
     CASCO = False
-for rol in ROLES:
-    for estado, (fn, cuadros) in ESTADOS_BOT.items():
-        strip([fn('robot', rol, f) for f in range(cuadros)]).save(f'bot-{rol}-{estado}.png')
-MUESTRAS = os.environ.get('MASCOTAS_MUESTRAS')
-if MUESTRAS:
-    os.makedirs(MUESTRAS, exist_ok=True)
-    for fo in FORMAS:
-        for rol in ROLES:
-            for estado, (fn, cuadros) in ESTADOS_BOT.items():
-                strip([fn(fo, rol, f) for f in range(cuadros)]).save(os.path.join(MUESTRAS, f'{fo}-{rol}-{estado}.png'))
+IDE = os.path.abspath(os.path.join(os.getcwd(), '..', '..', '..', 'desktop', 'public', 'mascotas'))
+os.makedirs(IDE, exist_ok=True)
+agentes = []
+for fo in FORMAS:
+    for rol in ROLES:
+        # Sin rol solo hay robot gris: no se elige.
+        if rol == 'general' and fo != 'robot': continue
+        for estado, (fn, cuadros) in ESTADOS_BOT.items():
+            ruta = os.path.join(IDE, f'{fo}-{rol}-{estado}.png')
+            strip([fn(fo, rol, f) for f in range(cuadros)]).save(ruta)
+            agentes.append(ruta)
 
 
 # ── Versión y cuadros para el código, y copia al IDE ───────────────────
 import hashlib, shutil, glob as _glob
 APPS = os.path.abspath(os.path.join(os.getcwd(), '..', '..', '..'))
 pngs = sorted(_glob.glob('*.png'))
-version = hashlib.sha1(b''.join(open(f, 'rb').read() for f in pngs)).hexdigest()[:8]
+version = hashlib.sha1(b''.join(open(f, 'rb').read() for f in pngs + agentes)).hexdigest()[:8]
 cuadros = {e: n for e, (_, n) in ESTADOS.items()}
 cuadros['kart'] = 2
 cuadros.update({e: n for e, (_, n) in ESTADOS_BOT.items()})

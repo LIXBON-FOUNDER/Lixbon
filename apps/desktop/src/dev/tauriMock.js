@@ -489,6 +489,8 @@ function orchSimulado() {
     hijo('t1', 'Explorar la estructura', 'explorador', 4, 18),
     hijo('t2', 'Implementar el hook useAgent', 'implementador', 7, 30, 'done', [12, 16]),
     hijo('t3', 'Revisar los tests', 'revisor', 14, 34, 'failed'),
+    hijo('t4', 'Arreglar el build', 'escalado', 10, 28),
+    hijo('t5', 'Actualizar el README', null, 16, 38),
   ].filter(Boolean);
   const tasks = { raiz: { id: 'raiz', run: 'run1', parent: null, depth: 0, title: 'Coordinador', agent: 'claude', repo: ROOT, status: 'running', created: OBRA_T0, updated: OBRA_T0, phases: [] }, ...Object.fromEntries(hijos) };
   const messages = s > 9 ? [{ id: 'm1', kind: 'phase', from: 't1', to: 'raiz', body: 'Mapeando carpetas', at: OBRA_T0 + 9000 }] : [];

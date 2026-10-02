@@ -23,6 +23,11 @@ export const MASCOTA_DEFAULTS = {
   dormir: true,
   dormir_min: 5,
   reducir: false,
+  // Forma de los agentes hijos del orquestador por rol: robot | monitor | gota.
+  obrero_explorador: 'gota',
+  obrero_implementador: 'robot',
+  obrero_revisor: 'gota',
+  obrero_escalado: 'monitor',
 };
 
 // Cuadros de cada tira y versión de los PNG: los escribe el generador.

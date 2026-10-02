@@ -222,6 +222,24 @@
 .mascota-elegir__nombre { font-size: 13px; font-weight: 600; }
 .mascota-elegir__sub { font-size: 11.5px; opacity: 0.7; }
 
+.mascota-formas { display: flex; gap: 6px; flex-shrink: 0; }
+.mascota-formas__op {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 5px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+.mascota-formas__op:hover:not(:disabled):not(.is-activa) { background: var(--surface-4); }
+.mascota-formas__op.is-activa { background: var(--ink); color: var(--bg); }
+.mascota-formas__op.is-fija { cursor: default; opacity: 0.8; }
+.mascota-formas__op:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .mascota-fila__controles { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .mascota-minutos { width: 104px; }
 

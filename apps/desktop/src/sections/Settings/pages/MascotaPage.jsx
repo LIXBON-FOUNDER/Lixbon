@@ -14,6 +14,18 @@ const PERSONAJES = [
   { value: 'leya', label: 'Leya', sub: 'Directa y bromista' },
   { value: 'ambos', label: 'Ambos', sub: 'Se turnan cada vez que abres el IDE' },
 ];
+const FORMAS = [
+  { value: 'robot', label: 'Robot' },
+  { value: 'monitor', label: 'Monitor' },
+  { value: 'gota', label: 'Gota' },
+];
+// El color va con el rol (lo pinta el generador de sprites); aquí solo se elige la forma.
+const ROLES = [
+  { value: 'explorador', label: 'Explorador', color: 'Azul' },
+  { value: 'implementador', label: 'Implementador', color: 'Verde' },
+  { value: 'revisor', label: 'Revisor', color: 'Morado' },
+  { value: 'escalado', label: 'Escalado', color: 'Coral' },
+];
 const minutos = (lista) => lista.map((n) => ({ value: n, label: `${n} min` }));
 
 function Fila({ label, hint, children }) {
@@ -98,6 +110,38 @@ export function MascotaPage() {
       </section>
 
       <section className={`ssec rise rise--4 ${off ? 'is-apagada' : ''}`}>
+        <SectionHead label="Equipo del orquestador" hint="Con /orquestar, Gael y Leya se ponen el casco y coordinan. Cada agente hijo sale con el color de su rol; elige su forma." />
+        <div className="ssec ssec--card ssec--rows">
+          {ROLES.map((r) => (
+            <Fila key={r.value} label={r.label} hint={r.color}>
+              <span className="mascota-formas" role="group" aria-label={`Forma del ${r.label.toLowerCase()}`}>
+                {FORMAS.map((f) => {
+                  const elegida = m[`obrero_${r.value}`] === f.value;
+                  return (
+                    <button
+                      key={f.value}
+                      type="button"
+                      disabled={off}
+                      aria-pressed={elegida}
+                      title={`${f.label} ${r.color.toLowerCase()}`}
+                      className={`mascota-formas__op ${elegida ? 'is-activa' : ''}`}
+                      onClick={() => fijarMascota({ [`obrero_${r.value}`]: f.value })}
+                    >
+                      <SpriteMascota personaje={`${f.value}-${r.value}`} tam={48} quieta={!elegida || off || m.reducir} />
+                      <span>{f.label}</span>
+                    </button>
+                  );
+                })}
+              </span>
+            </Fila>
+          ))}
+          <Fila label="Sin rol" hint="Tareas que el coordinador lanza sin un rol conocido: siempre robot gris.">
+            <span className="mascota-formas"><span className="mascota-formas__op is-fija"><SpriteMascota personaje="robot-general" tam={48} quieta /><span>Robot</span></span></span>
+          </Fila>
+        </div>
+      </section>
+
+      <section className={`ssec rise rise--5 ${off ? 'is-apagada' : ''}`}>
         <SectionHead label="Fuera de la app" hint="Cuando el agente termina o pide permiso y estás en otra ventana." />
         <div className="ssec ssec--card ssec--rows">
           <Fila label="Aviso flotante" hint="La mascota aparece sobre las demás apps, en la esquina de la pantalla.">
