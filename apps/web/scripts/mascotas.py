@@ -6,6 +6,10 @@ Cada estado es una tira horizontal de cuadros de 48×48 (el kart, de 72×48):
 Se dibujan por capas (pelo de atrás, cuerpo, brazos, cabeza, pelo de delante)
 y cada capa lleva su propio contorno, así los brazos se leen encima del torso.
 Uso: python apps/web/scripts/mascotas.py  (requiere Pillow).
+
+Además de los PNG escribe src/lib/mascotaSprites.js (cuadros por estado y una
+versión que es el hash de los sprites, para que el navegador no use los de la
+caché tras regenerarlos) y copia todo al IDE (apps/desktop).
 """
 import os
 from PIL import Image
@@ -202,14 +206,22 @@ def arm(c,pts,hand=True,fist=False,open_=False):
 IDLE_L=[(16,30),(14,35),(14,38)]
 IDLE_R=[(31,30),(33,35),(33,38)]
 def char(name,mode='open',look=0,armsL=IDLE_L,armsR=IDLE_R,legs=True,extra_front=None,extra_mid=None,dy=0,openR=False,armR_layer=None,
-         lookX=0,boca='normal',headDx=0,headDy=0,bodyDy=0,openL=False,delante=False):
+         lookX=0,boca='normal',headDx=0,headDy=0,bodyDy=0,openL=False,delante=False,giro=0):
     """Personaje de frente. headDx/headDy mueven cabeza y pelo; bodyDy baja
     el torso, los brazos y la cabeza (respirar) dejando los pies en el suelo."""
     c=CH[name]; K=c['K']
-    h=head_layer(c,name); face(h,c,name,mode,look,lookX,boca)
+    h=head_layer(c,name)
+    if giro:
+        # Cara girada 3/4: los rasgos se corren `giro` px, sin salirse de la cabeza.
+        rasgos=L(); face(rasgos,c,name,mode,look,lookX,boca)
+        for (x,y),v in rasgos.p.items():
+            if (x+giro,y) in h.p: h.p[(x+giro,y)]=v
+    else:
+        face(h,c,name,mode,look,lookX,boca)
     hx,hy=headDx,headDy+bodyDy
     layers=[(mover(hair_back(c,name),hx,hy),True)]
-    if legs: layers.append((legs_layer(c),True))
+    if isinstance(legs, L): layers.append((legs,True))
+    elif legs: layers.append((legs_layer(c),True))
     layers.append((mover(body_layer(c,name),0,bodyDy),True))
     if extra_mid: layers.append((extra_mid,True))
     # Con los brazos en alto (delante=True) los dos van por delante de la cabeza.
@@ -473,13 +485,41 @@ def walk(name, f):
     capas.append((mover(af, 0, bote), True))
     return comp(capas, S, S, K)
 
+# ── Caminando (3/4): la cara mira hacia donde va, rodillas arriba y brazos
+# que se balancean. Mira a la derecha; a la izquierda se pinta en espejo.
+
+def piernas_paso(c, alza_izq, alza_der):
+    """Piernas de frente; la que avanza sube `alza` px (rodilla arriba)."""
+    b = L()
+    for x0, alza in ((17, alza_izq), (25, alza_der)):
+        y = -alza
+        b.rect(x0, 38 + y, x0 + 5, 43 + y, c['pants']); b.rect(x0, 42 + y, x0 + 5, 43 + y, c['pantsS'])
+        b.rect(x0 - 1 + (x0 > 20), 44 + y, x0 + 5 + (x0 > 20), 45 + y, c['shoe'])
+        b.rect(x0 - 1 + (x0 > 20), 45 + y, x0 + 5 + (x0 > 20), 45 + y, c['shoeS'])
+    b.rect(22, 38, 25, 40, c['pants'])
+    return b
+
+def walk(name, f):
+    c = CH[name]
+    # 4 tiempos: izquierda arriba, apoyo, derecha arriba, apoyo.
+    alza = [(2, 0), (0, 0), (0, 2), (0, 0)][f]
+    bote = 0 if alza != (0, 0) else 1
+    # Brazos al revés que las piernas: el que va delante sube la mano, el
+    # otro queda atrás (más abajo y pegado al cuerpo).
+    adelante = [1, 0, -1, 0][f]                # 1: brazo derecho delante
+    brazoL = [(16, 30), (14, 34), (15, 36) if adelante < 0 else (14, 39) if adelante > 0 else (14, 38)]
+    brazoR = [(31, 30), (33, 34), (32, 36) if adelante > 0 else (33, 39) if adelante < 0 else (33, 38)]
+    lay = char(name, 'open', 0, lookX=1, giro=2, headDx=1, bodyDy=bote,
+               armsL=brazoL, armsR=brazoR, legs=piernas_paso(c, *alza))
+    return render(lay, name)
+
 def strip(frames,w=S):
     im=Image.new('RGBA',(w*len(frames),S))
     for i,f in enumerate(frames): im.paste(f,(i*w,0))
     return im
 # Cuadros por estado: tiene que coincidir con CUADROS en lib/mascota.js (web e IDE).
 ESTADOS = {
-    'idle': (idle, 12), 'talk': (talk, 4), 'look': (look, 8), 'walk': (walk, 6),
+    'idle': (idle, 12), 'talk': (talk, 4), 'look': (look, 8), 'walk': (walk, 4),
     'wave': (wave, 4), 'celebrate': (celebrate, 4), 'stretch': (stretch, 4), 'scratch': (scratch, 2),
     'think': (think, 2), 'point': (point, 2), 'type': (typing, 2), 'sleep': (sleep, 2), 'whip': (whip, 3),
 }
@@ -487,3 +527,29 @@ for n in ('gael', 'leya'):
     for estado, (fn, cuadros) in ESTADOS.items():
         strip([fn(n, f) for f in range(cuadros)]).save(f'{n}-{estado}.png')
     strip([kart(n, 0), kart(n, 1)], 72).save(f'{n}-kart.png')
+
+
+# ── Versión y cuadros para el código, y copia al IDE ───────────────────
+import hashlib, shutil, glob as _glob
+APPS = os.path.abspath(os.path.join(os.getcwd(), '..', '..', '..'))
+pngs = sorted(_glob.glob('*.png'))
+version = hashlib.sha1(b''.join(open(f, 'rb').read() for f in pngs)).hexdigest()[:8]
+cuadros = {e: n for e, (_, n) in ESTADOS.items()}
+cuadros['kart'] = 2
+js = (
+    '// mascotaSprites.js — GENERADO por apps/web/scripts/mascotas.py: no editar a mano.\n'
+    '// Cuadros de cada tira de sprites y versión (hash) de los PNG: va en la URL\n'
+    '// para que, al regenerarlos, el navegador no use los viejos de la caché.\n'
+    f"export const VERSION_SPRITES = '{version}';\n"
+    'export const CUADROS = {\n'
+    + ''.join(f'  {e}: {n},\n' for e, n in cuadros.items())
+    + '};\n'
+)
+for app in ('web', 'desktop'):
+    with open(os.path.join(APPS, app, 'src', 'lib', 'mascotaSprites.js'), 'w') as fh:
+        fh.write(js)
+destino = os.path.join(APPS, 'desktop', 'public', 'mascotas')
+os.makedirs(destino, exist_ok=True)
+for f in pngs:
+    shutil.copy(f, destino)
+print('sprites', version, len(pngs))
