@@ -22,22 +22,6 @@
   to { background-position-x: calc(var(--n) * var(--w) * -1); }
 }
 
-.mascota-sprite--type { --d: 0.36s; }
-.mascota-sprite--sleep { --d: 2.4s; }
-.mascota-sprite--whip { --d: 0.75s; }
-.mascota-sprite--kart { --d: 0.24s; }
-
-/* Reposo: parpadea de vez en cuando, no a cada rato. */
-.mascota-sprite--idle {
-  animation: mascota-parpadeo 4.2s step-end infinite;
-}
-
-@keyframes mascota-parpadeo {
-  0% { background-position-x: 0; }
-  94% { background-position-x: calc(var(--w) * -1); }
-  100% { background-position-x: 0; }
-}
-
 .mascota-sprite--kart {
   width: calc(var(--w) * 1.5);
   background-size: calc(var(--w) * 3) var(--w);
@@ -73,8 +57,12 @@
     0 3px 0 0 var(--primary),
     -3px 0 0 0 var(--primary),
     3px 0 0 0 var(--primary);
-  animation: mascota-pop 0.28s steps(3) both;
+  /* Se abre desde la cola, con un rebote. */
+  transform-origin: 18px calc(100% + 9px);
+  animation: mascota-abre 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
+
+.mascota-bocadillo.is-cerrando { animation: mascota-cierra 0.2s ease-in both; }
 
 .mascota-bocadillo::after {
   content: '';
@@ -87,8 +75,20 @@
   box-shadow: -6px -3px 0 0 var(--primary);
 }
 
-@keyframes mascota-pop {
-  from { opacity: 0; transform: translateY(6px); }
+/* El texto completo reserva el sitio; encima se va escribiendo. */
+.mascota-bocadillo__texto { display: grid; }
+.mascota-bocadillo__molde,
+.mascota-bocadillo__escrito { grid-area: 1 / 1; }
+.mascota-bocadillo__molde { visibility: hidden; }
+
+@keyframes mascota-abre {
+  0% { opacity: 0; transform: scale(0.3) translateY(10px); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+
+@keyframes mascota-cierra {
+  to { opacity: 0; transform: scale(0.6) translateY(6px); }
 }
 
 /* Puntos de "pensando" y zetas de la siesta, sobre la cabeza. */
@@ -207,6 +207,7 @@
 .mascota-guia--esquina .mascota-bocadillo {
   left: auto;
   right: 6px;
+  transform-origin: calc(100% - 18px) calc(100% + 9px);
 }
 
 .mascota-guia--esquina .mascota-bocadillo::after {
@@ -214,6 +215,8 @@
   right: 18px;
   box-shadow: 6px -3px 0 0 var(--primary);
 }
+
+.mascota-guia__cuerpo { position: relative; }
 
 .mascota-guia__boton {
   display: block;
@@ -242,6 +245,7 @@
   background: var(--surface-3);
   opacity: 0.75;
   transition: opacity 0.15s ease, background 0.15s ease;
+  animation: mascota-abre 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
 .mascota-volver:hover {
@@ -252,6 +256,7 @@
 @media (prefers-reduced-motion: reduce) {
   .mascota-sprite,
   .mascota-bocadillo,
+  .mascota-volver,
   .mascota-puntos i { animation: none; }
   .mascota-guia { transition: none; }
   .mascota-zzz i { animation: none; opacity: 1; position: static; }

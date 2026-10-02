@@ -67,7 +67,7 @@ def head_layer(c,name):
             for x in (13,14,15,32,33,34):
                 if (x,y) in h.p: h.p[(x,y)]=c['fade']
     return h
-def face(h,c,name,mode='open',look=0):
+def face(h,c,name,mode='open',look=0,lookX=0,boca='normal'):
     K=c['K']
     ey=16
     for ex in (16,28):
@@ -75,9 +75,10 @@ def face(h,c,name,mode='open',look=0):
             h.rect(ex,ey,ex+3,ey,K)
             h.rect(ex,ey+1,ex+3,ey+4,W_)
             iy=ey+1+(0 if look<0 else 1)
-            h.rect(ex+1,iy,ex+2,iy+2 if look>=0 else iy+1,c['iris'])
-            h.rect(ex+1,iy+1,ex+2,iy+2 if look>=0 else iy+1,c['pupil'])
-            h.px(ex+1,iy,W_)
+            ix=ex+1+lookX
+            h.rect(ix,iy,ix+1,iy+2 if look>=0 else iy+1,c['iris'])
+            h.rect(ix,iy+1,ix+1,iy+2 if look>=0 else iy+1,c['pupil'])
+            h.px(ix,iy,W_)
             if name=='leya':
                 h.px(ex-1 if ex==16 else ex+4,ey-1,K); h.px(ex-1 if ex==16 else ex+4,ey,K)
                 h.rect(ex,ey+5,ex+3,ey+5,c['skinS'])
@@ -85,6 +86,8 @@ def face(h,c,name,mode='open',look=0):
             h.rect(ex,ey+3,ex+3,ey+3,K); h.px(ex-1 if ex==16 else ex+4,ey+2,K)
         elif mode=='sleep':
             h.rect(ex,ey+3,ex+3,ey+3,K); h.px(ex,ey+2,K); h.px(ex+3,ey+2,K)
+        elif mode=='feliz':  # ^ ^
+            h.px(ex,ey+3,K); h.px(ex+1,ey+2,K); h.px(ex+2,ey+2,K); h.px(ex+3,ey+3,K)
     # brows
     if name=='gael':
         if mode=='angry':
@@ -104,6 +107,12 @@ def face(h,c,name,mode='open',look=0):
         h.rect(22,23,25,25,c['lipD']); h.rect(22,23,25,23,K); h.rect(23,25,24,25,c['lip'])
     elif mode=='sleep':
         h.rect(23,24,24,24,c['lipD'])
+    elif boca=='abierta':
+        h.rect(22,23,25,24,c['lipD']); h.rect(23,25,24,25,c['lip'])
+    elif boca=='o':
+        h.rect(23,23,24,25,c['lipD'])
+    elif boca=='sonrisa':
+        h.px(21,23,c['lip']); h.rect(22,24,25,24,c['lip']); h.px(26,23,c['lip'])
     else:
         h.rect(22,24,25,24,c['lip']); 
         if name=='gael': h.rect(23,25,24,25,c['lipD'])
@@ -148,12 +157,18 @@ def hair_front(c,name):
         l.px(16,8,c['hairL']); l.px(22,8,c['hairL'])
         l.rect(29,9,31,10,'#d9cff2'); l.px(30,9,'#ffffff')   # clip
     return l
-def body_layer(c,name,legs=True):
+def mover(l,dx,dy):
+    if not dx and not dy: return l
+    n=L(l.w,l.h); n.p={(x+dx,y+dy):v for (x,y),v in l.p.items()}; return n
+def legs_layer(c):
     b=L()
-    if legs:
+    if True:
         b.rect(17,38,22,43,c['pants']); b.rect(25,38,30,43,c['pants']); b.rect(22,38,25,40,c['pants'])
         b.rect(17,42,22,43,c['pantsS']); b.rect(25,42,30,43,c['pantsS'])
         b.rect(16,44,22,45,c['shoe']); b.rect(25,44,31,45,c['shoe']); b.rect(16,45,22,45,c['shoeS']); b.rect(25,45,31,45,c['shoeS'])
+    return b
+def body_layer(c,name,legs=True):
+    b=L()
     if name=='gael':
         b.blob(23.5,33,9.5,7,c['top'],e=3,ymin=27)
         b.rect(15,33,32,39,c['top'])
@@ -186,14 +201,22 @@ def arm(c,pts,hand=True,fist=False,open_=False):
     return l
 IDLE_L=[(16,30),(14,35),(14,38)]
 IDLE_R=[(31,30),(33,35),(33,38)]
-def char(name,mode='open',look=0,armsL=IDLE_L,armsR=IDLE_R,legs=True,extra_front=None,extra_mid=None,dy=0,openR=False,armR_layer=None):
+def char(name,mode='open',look=0,armsL=IDLE_L,armsR=IDLE_R,legs=True,extra_front=None,extra_mid=None,dy=0,openR=False,armR_layer=None,
+         lookX=0,boca='normal',headDx=0,headDy=0,bodyDy=0,openL=False,delante=False):
+    """Personaje de frente. headDx/headDy mueven cabeza y pelo; bodyDy baja
+    el torso, los brazos y la cabeza (respirar) dejando los pies en el suelo."""
     c=CH[name]; K=c['K']
-    h=head_layer(c,name); face(h,c,name,mode,look)
-    layers=[(hair_back(c,name),True),(body_layer(c,name,legs),True)]
+    h=head_layer(c,name); face(h,c,name,mode,look,lookX,boca)
+    hx,hy=headDx,headDy+bodyDy
+    layers=[(mover(hair_back(c,name),hx,hy),True)]
+    if legs: layers.append((legs_layer(c),True))
+    layers.append((mover(body_layer(c,name),0,bodyDy),True))
     if extra_mid: layers.append((extra_mid,True))
-    if armsL: layers.append((arm(c,armsL),True))
-    layers+= [(h,True),(hair_front(c,name),True)]
-    if armsR: layers.append((armR_layer or arm(c,armsR,open_=openR),True))
+    # Con los brazos en alto (delante=True) los dos van por delante de la cabeza.
+    if armsL and not delante: layers.append((mover(arm(c,armsL,open_=openL),0,bodyDy),True))
+    layers+= [(mover(h,hx,hy),True),(mover(hair_front(c,name),hx,hy),True)]
+    if armsL and delante: layers.append((mover(arm(c,armsL,open_=openL),0,bodyDy),True))
+    if armsR: layers.append((armR_layer or mover(arm(c,armsR,open_=openR),0,bodyDy),True))
     if extra_front:
         for e in extra_front: layers.append(e)
     return layers
@@ -292,16 +315,175 @@ def kart(name,f):
         sp=L(W,S); sp.rect(0,33,3,33,'#5e5e5c'); sp.rect(1,36,4,36,'#5e5e5c'); layers.append((sp,False))
     im=comp(layers,W,S,c['K'])
     return im
+
+# ── Animaciones con más cuadros ─────────────────────────────────────────
+# (redefinen las de arriba: mismo nombre, más vida)
+
+RESPIRA = [0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1]
+
+def idle(name, f):
+    """12 cuadros: respira (el torso baja un píxel) y parpadea al final."""
+    return render(char(name, 'closed' if f == 11 else 'open', 0, bodyDy=RESPIRA[f]), name)
+
+def talk(name, f):
+    """Hablando: la boca cambia, la cabeza acompaña y la mano gesticula."""
+    bocas = ['abierta', 'normal', 'o', 'sonrisa']
+    mano = [(33, 38), (34, 35), (35, 33), (34, 35)][f]
+    return render(char(name, 'open', 0, boca=bocas[f], headDy=[0, 1, 0, 0][f],
+                       armsR=[(31, 30), (34, 34), mano], openR=f == 2), name)
+
+def look(name, f):
+    """Mira a un lado, al centro y al otro, girando un poco la cabeza."""
+    lado = [-1, -1, -1, 0, 1, 1, 1, 0][f]
+    return render(char(name, 'open', 0, lookX=lado, headDx=lado), name)
+
+def wave(name, f):
+    manos = [(38, 19), (40, 17), (41, 19), (39, 21)]
+    codo = [(36, 27), (37, 26), (37, 26), (36, 27)][f]
+    return render(char(name, 'open', 0, boca='sonrisa', headDx=[0, 1, 1, 0][f],
+                       armsR=[(31, 30), codo, manos[f]], openR=True), name)
+
+def celebrate(name, f):
+    """Salta con los brazos arriba: el tramo final de una tarea."""
+    alto = [0, 2, 4, 2][f]
+    arriba = [(9, 22), (7, 16), (6, 13), (7, 16)][f]
+    lay = char(name, 'feliz', 0, boca='abierta', delante=True,
+               armsL=[(16, 30), (10, 27), arriba],
+               armsR=[(31, 30), (37, 27), (47 - arriba[0], arriba[1])], openL=True, openR=True)
+    return render(lay, name, shift=(0, -alto))
+
+def stretch(name, f):
+    """Se estira y bosteza (gesto de espera)."""
+    fases = [
+        ([(16, 30), (14, 35), (14, 38)], [(31, 30), (33, 35), (33, 38)], 'open', 'normal'),
+        ([(16, 30), (11, 24), (12, 15)], [(31, 30), (36, 24), (35, 15)], 'closed', 'o'),
+        ([(16, 30), (11, 20), (17, 4)], [(31, 30), (36, 20), (30, 4)], 'closed', 'abierta'),
+        ([(16, 30), (11, 24), (12, 15)], [(31, 30), (36, 24), (35, 15)], 'closed', 'o'),
+    ]
+    al, ar, ojos, boca = fases[f]
+    return render(char(name, ojos, 0, boca=boca, armsL=al, armsR=ar, bodyDy=1 if f == 2 else 0, delante=f > 0), name)
+
+def scratch(name, f):
+    """Se rasca la cabeza, mirando arriba (duda)."""
+    mano = (34, 11) if f == 0 else (33, 13)
+    return render(char(name, 'open', -1, boca='o', armsR=[(31, 30), (37, 24), mano]), name)
+
+def think(name, f=0):
+    """Mano en la barbilla, dando golpecitos."""
+    return render(char(name, 'open', -1, lookX=1 if f else 0, armsR=[(31, 30), (35, 34), (31, 27 - f)]), name)
+
+def point(name, f=0):
+    c = CH[name]
+    lay = char(name, 'open', 0, boca='sonrisa' if f else 'normal', armsR=[(31, 30), (37, 30), (42 + f, 30)])
+    fg = L(); fg.rect(43 + f, 29, 45 + f, 29, c['skin'])
+    lay.append((fg, True))
+    return render(lay, name)
+
+def sleep(name, f):
+    return render(char(name, 'sleep', 0, bodyDy=f), name)
+
+# ── Caminando de perfil (mirando a la derecha; a la izquierda, en espejo) ─
+
+ZANCADA = [4, 2, 0, -3, -2, 1]
+
+def walk(name, f):
+    c = CH[name]; K = c['K']
+    dx = ZANCADA[f]
+    bote = 1 if abs(dx) <= 1 else 0          # al cruzar las piernas el cuerpo baja
+    capas = []
+    # pelo de atrás (Leya)
+    pb = L()
+    if name == 'leya':
+        pb.blob(22, 15, 12, 11.5, c['hair'], e=2.2)
+        for y in range(15, 38):
+            for x in range(11, 24):
+                if y <= 37 - (x % 3): pb.px(x, y, c['hair'] if (x + y) % 6 else c['hairM'])
+    capas.append((mover(pb, 0, bote), True))
+    # brazo de atrás y pierna de atrás (más oscuros)
+    sombra = c['topS'] if c['sleeve'] else c['skinS']
+    ab = L(); ab.line((24, 31), (24 - dx, 37), sombra, 1); ab.rect(23 - dx, 37, 25 - dx, 38, c['skinS'])
+    capas.append((mover(ab, 0, bote), True))
+    def pierna(desp, col, colS):
+        lg = L()
+        lg.line((24, 39), (24 + desp, 43), col, 1)
+        lg.rect(23 + desp, 44, 27 + desp, 45, c['shoe']); lg.rect(23 + desp, 45, 27 + desp, 45, c['shoeS'])
+        return lg
+    capas.append((pierna(-dx, c['pantsS'], c['pantsS']), True))
+    # torso de perfil
+    b = L()
+    if name == 'gael':
+        b.blob(24, 33, 6, 7, c['top'], e=3, ymin=27); b.rect(18, 33, 29, 39, c['top'])
+        b.rect(18, 38, 29, 39, c['topS']); b.rect(17, 27, 21, 31, c['topS'])     # capucha atrás
+        b.rect(22, 26, 27, 28, c['neck']); b.rect(22, 28, 27, 28, c['neckS'])
+        b.rect(26, 29, 26, 32, c['topL'])
+    else:
+        b.rect(22, 26, 26, 28, c['skin'])
+        b.rect(19, 29, 28, 35, c['top']); b.rect(19, 34, 28, 35, c['topS']); b.rect(21, 31, 27, 31, c['topL'])
+        b.rect(20, 36, 27, 37, c['skin']); b.rect(19, 38, 28, 39, c['pants'])
+    capas.append((mover(b, 0, bote), True))
+    capas.append((pierna(dx, c['pants'], c['pantsS']), True))
+    # cabeza de perfil
+    h = L()
+    h.blob(23.5, 17, 10.5, 10.5, c['skin'], e=2.6)
+    h.px(35, 20, c['skin']); h.px(35, 21, c['skin'])                          # nariz
+    for y in range(20, 27):
+        for x in range(13, 36):
+            if (x, y) in h.p and x <= 16: h.p[(x, y)] = c['skinS']
+    ey = 16
+    h.rect(29, ey, 32, ey, K); h.rect(29, ey + 1, 32, ey + 4, W_)
+    h.rect(31, ey + 1, 32, ey + 3, c['iris']); h.rect(31, ey + 2, 32, ey + 3, c['pupil']); h.px(31, ey + 1, W_)
+    if name == 'leya':
+        h.px(33, ey - 1, K); h.px(33, ey, K)
+        h.px(30, 22, c['blush']); h.px(31, 22, c['blush'])
+        h.rect(31, 24, 33, 24, c['lip'])
+    else:
+        h.rect(28, 13, 32, 13, K)
+        h.rect(31, 24, 33, 24, c['lip']); h.rect(32, 25, 33, 25, c['lipD'])
+        h.rect(19, 16, 21, 20, c['skin']); h.px(20, 18, c['skinS'])            # oreja
+        for y in range(9, 16):
+            for x in range(14, 20):
+                if (x, y) in h.p: h.p[(x, y)] = c['fade']
+    capas.append((mover(h, 0, bote), True))
+    # pelo de delante
+    pf = L()
+    if name == 'gael':
+        cols = [c['hairL'], c['hairM'], c['hair']]
+        pf.blob(23, 6, 11.5, 5, c['hair'], e=2.2, ymax=9)
+        for (x, y) in list(pf.p): pf.p[(x, y)] = cols[(x // 2 + y) % 3]
+        # rastas: por delante caen sobre la frente; por detrás, sobre la nuca
+        for i, (x0, y0, x1, y1) in enumerate([(13, 6, 12, 17), (16, 6, 15, 15), (26, 6, 27, 14), (29, 6, 31, 15), (32, 6, 34, 13)]):
+            n = y1 - y0
+            for j in range(n + 1):
+                x = round(x0 + (x1 - x0) * j / n) - (1 if (f + i) % 2 and j > n - 3 else 0); y = y0 + j
+                k = (y + i) % 3
+                pf.px(x, y, cols[k]); pf.px(x + 1, y, cols[(k + 1) % 3])
+        for x, y in ((17, 0), (18, 0), (24, 0), (25, 0), (30, 1)): pf.px(x, y, c['hairM'])
+    else:
+        pf.blob(23, 13, 12, 9, c['hair'], e=2.3, ymax=14)
+        for y in range(10, 31):                                                 # mechón junto a la oreja
+            for x in (19, 20, 21): pf.px(x, y, c['hair'])
+            pf.px(20, y, c['streak'])
+            if y % 5 == 0: pf.px(20, y, c['streakL'])
+        for x in range(18, 23): pf.px(x, 7, c['hairL'])
+        pf.rect(28, 9, 30, 10, '#d9cff2'); pf.px(29, 9, '#ffffff')
+    capas.append((mover(pf, 0, bote), True))
+    # brazo de delante, balanceándose al revés que la pierna de delante
+    af = L(); col = c['top'] if c['sleeve'] else c['skin']
+    af.line((24, 31), (24 - dx, 37), col, 1); af.rect(23 - dx, 37, 25 - dx, 39, c['skin'])
+    capas.append((mover(af, 0, bote), True))
+    return comp(capas, S, S, K)
+
 def strip(frames,w=S):
     im=Image.new('RGBA',(w*len(frames),S))
     for i,f in enumerate(frames): im.paste(f,(i*w,0))
     return im
-for n in ('gael','leya'):
-    strip([idle(n,0),idle(n,1)]).save(f'{n}-idle.png')
-    strip([typing(n,0),typing(n,1)]).save(f'{n}-type.png')
-    strip([think(n)]).save(f'{n}-think.png')
-    strip([sleep(n,0),sleep(n,1)]).save(f'{n}-sleep.png')
-    strip([point(n)]).save(f'{n}-point.png')
-    strip([wave(n,0),wave(n,1)]).save(f'{n}-wave.png')
-    strip([whip(n,0),whip(n,1),whip(n,2)]).save(f'{n}-whip.png')
-    strip([kart(n,0),kart(n,1)],72).save(f'{n}-kart.png')
+# Cuadros por estado: tiene que coincidir con CUADROS en lib/mascota.js (web e IDE).
+ESTADOS = {
+    'idle': (idle, 12), 'talk': (talk, 4), 'look': (look, 8), 'walk': (walk, 6),
+    'wave': (wave, 4), 'celebrate': (celebrate, 4), 'stretch': (stretch, 4), 'scratch': (scratch, 2),
+    'think': (think, 2), 'point': (point, 2), 'type': (typing, 2), 'sleep': (sleep, 2), 'whip': (whip, 3),
+}
+for n in ('gael', 'leya'):
+    for estado, (fn, cuadros) in ESTADOS.items():
+        strip([fn(n, f) for f in range(cuadros)]).save(f'{n}-{estado}.png')
+    strip([kart(n, 0), kart(n, 1)], 72).save(f'{n}-kart.png')
