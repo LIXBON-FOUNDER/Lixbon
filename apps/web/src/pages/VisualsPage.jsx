@@ -19,7 +19,7 @@ import { descargarBlob } from '../lib/archivos';
 import { crearZip } from '../lib/zip';
 import {
   ANCHOS, DESIGN_SYSTEMS, IDEAS, TAMANOS_IMAGEN, TIPO_IMAGEN, TIPOS, aplicarOps, construirVersiones, designSystemPersonalizado,
-  documentoPreview, documentoPresentacion, esConversacionDeImagenes, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
+  documentoPreview, documentoPresentacion, esConversacionDeImagenes, resolverPagina, esSvg, extraerArchivo, extraerArchivos, extraerEdiciones, extraerImagen, promptVisuals,
   tiempoRelativo,
 } from '../lib/visuals';
 import { Logo } from '../components/Logo';
@@ -60,6 +60,9 @@ function Menu({ abierto, onCerrar, children, className = '' }) {
   useDismiss(abierto, ref, onCerrar);
   return <div className={`vis-menu ${className}`} ref={ref}>{children}</div>;
 }
+
+// Qué toca una op: texto, clases o las propiedades de estilo que cambia.
+const claveDeOp = (op) => (op.text != null ? 'text' : op.className != null ? 'class' : Object.keys(op.style || {}).sort().join(','));
 
 export default function VisualsPage() {
   const t = useT('visuals');
@@ -105,11 +108,14 @@ export default function VisualsPage() {
   const [deshechas, setDeshechas] = useState({}); // clave de ops → ops deshechas (para rehacer)
   const [revOps, setRevOps] = useState(0);        // sube al deshacer: el iframe se rehace sin la op
   const [ancho, setAncho] = useState(() => local.get('lixbon.visuals.ancho', 'ajustar'));
+  const [enlaceRoto, setEnlaceRoto] = useState(null); // página que pidió un enlace y no existe
   const [panelMovil, setPanelMovil] = useState('chat'); // pantallas estrechas: un panel cada vez
   const abortRef = useRef(null);
   const loadedConvRef = useRef(null);
   const scrollRef = useRef(null);
   const frameRef = useRef(null);
+  const hashPendiente = useRef('');
+  const paginaRef = useRef(null);
   const stageRef = useRef(null);
 
   const loadConversations = useCallback(async () => {
@@ -191,6 +197,7 @@ export default function VisualsPage() {
   const actual = indiceVersion >= 0 ? versiones[indiceVersion] : null;
   const paginas = useMemo(() => (actual?.kind === 'file' ? actual.files : []), [actual]);
   const paginaActual = paginas.length ? (paginas.find((f) => f.name === pagina) || paginas[0]) : null;
+  paginaRef.current = paginaActual?.name || null;
   const claveOps = actual && paginaActual ? `${actual.indice}:${paginaActual.name}` : '';
   const opsActuales = useMemo(() => ops[claveOps] || [], [ops, claveOps]);
   // Las ediciones de después se aplican en vivo por postMessage: si entraran en
@@ -219,14 +226,20 @@ export default function VisualsPage() {
     const onMessage = (e) => {
       const m = e.data || {};
       if (m.type === 'lixbon:select') { const { type: _tipo, ...datos } = m; setSeleccion(datos); }
-      if (m.type === 'lixbon:navigate' && paginas.some((f) => f.name === m.page)) {
-        setPagina(m.page);
+      if (m.type === 'lixbon:navigate' && e.source === frameRef.current?.contentWindow) {
+        const destino = resolverPagina(paginas.map((f) => f.name), m.page);
+        if (!destino) { setEnlaceRoto(m.page || '/'); return; }
+        setEnlaceRoto(null);
+        if (destino === paginaRef.current) { if (m.hash) frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:hash', hash: m.hash }, '*'); return; }
+        hashPendiente.current = m.hash || '';
+        setPagina(destino);
         setVista('pagina');
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [paginas]);
+  useEffect(() => { setEnlaceRoto(null); }, [paginaActual?.name, indiceVersion]);
 
   useEffect(() => {
     frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*');
@@ -240,7 +253,14 @@ export default function VisualsPage() {
   });
   const aplicarOp = (op) => {
     frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:apply', ...op }, '*');
-    guardarOps((prev) => ({ ...prev, [claveOps]: [...(prev[claveOps] || []), op] }));
+    guardarOps((prev) => {
+      const lista = prev[claveOps] || [];
+      // Un cambio seguido sobre lo mismo (arrastrar el selector de color,
+      // corregir un valor) sustituye al anterior en vez de apilarse.
+      const ultima = lista[lista.length - 1];
+      const mismo = ultima && ultima.selector === op.selector && claveDeOp(ultima) === claveDeOp(op);
+      return { ...prev, [claveOps]: mismo ? [...lista.slice(0, -1), op] : [...lista, op] };
+    });
     setDeshechas((prev) => (prev[claveOps]?.length ? { ...prev, [claveOps]: [] } : prev));
   };
   // Una op no se puede retirar en vivo: se rehace el documento sin ella.
@@ -838,7 +858,7 @@ export default function VisualsPage() {
                 <img className="vis-imagen" src={actual.src} alt={actual.name} />
               ) : vista === 'lienzo' ? (
                 <Board paginas={paginas} documento={(f) => documentoPreview(f, ops[`${actual.indice}:${f.name}`] || [])}
-                  onAbrir={irAPagina} />
+                  onAbrir={irAPagina} clave={routeConvId} activa={paginaActual?.name} />
               ) : verCodigo ? (
                 <CodigoVista nombre={paginaActual.name} codigo={codigoFinal(paginaActual)} retoques={opsActuales.length}
                   copiado={copiado === 'codigo'} onCopiar={copiarCodigo} t={t} />
@@ -846,7 +866,12 @@ export default function VisualsPage() {
                 <div className={`vis-frame ${marco ? 'is-fijo' : ''}`} style={marco ? { width: marco.visible } : undefined}>
                   <iframe key={revOps} ref={frameRef} title={t('previewTitle')} sandbox="allow-scripts allow-forms allow-popups allow-modals" srcDoc={doc}
                     style={marco ? { width: marco.ancho, height: `${100 / marco.escala}%`, transform: `scale(${marco.escala})`, transformOrigin: '0 0' } : undefined}
-                    onLoad={() => { setCargando(false); frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*'); }} />
+                    onLoad={() => {
+                      setCargando(false);
+                      const w = frameRef.current?.contentWindow;
+                      w?.postMessage({ type: 'lixbon:inspect', on: inspeccion }, '*');
+                      if (hashPendiente.current) { w?.postMessage({ type: 'lixbon:hash', hash: hashPendiente.current }, '*'); hashPendiente.current = ''; }
+                    }} />
                   {cargando && <div className="vis-stage__loading"><span>{t('rendering', { name: paginaActual?.name })}</span></div>}
                   {marco && <span className="vis-frame__medida">{marco.ancho}px{marco.escala < 1 ? ` · ${Math.round(marco.escala * 100)}%` : ''}</span>}
                 </div>
@@ -856,6 +881,13 @@ export default function VisualsPage() {
                 {generando ? (
                   <span className="vis-trabajo"><span className="vis-trabajo__dot" />{t('writingDesign')}</span>
                 ) : busy && modoImagen ? t('generatingImageShort') : t('previewWillAppear')}
+              </div>
+            )}
+            {enlaceRoto && vista === 'pagina' && !verCodigo && (
+              <div className="vis-enlace-roto" role="status">
+                <span>{t('brokenLink', { page: enlaceRoto })}</span>
+                <button className="vis-aviso__btn" onClick={() => { rellenar(t('createMissingPage', { page: /\.html?$/i.test(enlaceRoto) ? enlaceRoto : `${enlaceRoto.replace(/^\/+/, '') || 'index'}.html`, from: paginaActual?.name || 'index.html' })); setEnlaceRoto(null); setPanelMovil('chat'); setChatAbierto(true); }}>{t('askToCreateIt')}</button>
+                <button className="icon-btn" onClick={() => setEnlaceRoto(null)} aria-label={t('close')}><IconX size={13} /></button>
               </div>
             )}
             {generando && actual && <div className="vis-stage__badge">{t('newVersionOnTheWay')}</div>}

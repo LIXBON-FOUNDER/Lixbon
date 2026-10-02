@@ -96,6 +96,7 @@ HTML:
 - Textos reales y coherentes con el encargo, en el idioma del usuario. Nada de lorem ipsum ni "Título aquí".
 - Responsive (móvil primero). Estados hover/focus/disabled donde toque. Accesible: contraste, alt, labels.
 - Prototipos de app: cada pantalla es una página (file:inicio.html, file:detalle.html…) enlazada con <a href>; el lienzo las muestra como artboards.
+- ENLACES: entre páginas, href relativo con el nombre EXACTO del archivo (href="proyectos.html"), nunca "/proyectos", "proyectos" sin .html ni URLs absolutas. Cada enlace de la cabecera, el pie o un botón apunta a una página que entregas en esta respuesta o en una anterior, o a un ancla (#id) que existe en la misma página. Nada de href vacíos.
 - Componentes: muéstralos dentro de una página de demostración con fondo neutro y el componente centrado, en sus variantes.
 - SVG: viewBox definido, sin tamaño fijo, formas limpias, sin texto rasterizado ni filtros pesados.
 
@@ -310,9 +311,17 @@ function enviar(el){
     medidas:{w:Math.round(r.width),h:Math.round(r.height)},styles:st,css:distinto(el),inline:el.getAttribute('style')||''},'*');
 }
 document.addEventListener('mousemove',function(e){if(!inspect)return;var el=e.target;if(!el||el===document.body||el===document.documentElement)return;show(hover,el);},true);
+function anclar(h){return window.__lixbonAnclar(h);}
+function ir(u){window.__lixbonGo(u);}
+// En burbuja: si la propia página gestiona el clic (menús, pestañas…) y lo
+// cancela, se respeta; si corta la propagación, lo recoge la Navigation API.
+window.addEventListener('click',function(e){
+  if(inspect||e.defaultPrevented||e.button!==0)return;
+  var a=e.target.closest&&e.target.closest('a[href]');if(!a)return;
+  var h=(a.getAttribute('href')||'').trim();if(/^javascript:/i.test(h))return;
+  e.preventDefault();if(h===''||h==='#')return;if(h.charAt(0)==='#'){anclar(h);return;}ir(a.href||h);
+},false);
 document.addEventListener('click',function(e){
-  var a=e.target.closest&&e.target.closest('a[href]');
-  if(!inspect&&a){var h=a.getAttribute('href')||'';if(/^[^:\/#][^:]*\.html(#.*)?$/.test(h)){e.preventDefault();parent.postMessage({type:'lixbon:navigate',page:h.split('#')[0]},'*');}return;}
   if(!inspect)return;e.preventDefault();e.stopPropagation();var el=e.target;if(el===document.documentElement)return;
   sel=el;show(fija,el);enviar(el);
 },true);
@@ -326,14 +335,65 @@ function apply(op){var el=document.querySelector(op.selector);if(!el)return;
 window.addEventListener('message',function(e){var m=e.data||{};
   if(m.type==='lixbon:apply'){var el=apply(m);if(el&&el===sel){recolocar();enviar(el);}}
   if(m.type==='lixbon:inspect'){inspect=!!m.on;hover.style.display='none';if(!inspect)sel=null;recolocar();}
-  if(m.type==='lixbon:deselect'){sel=null;recolocar();}});
+  if(m.type==='lixbon:deselect'){sel=null;recolocar();}
+  if(m.type==='lixbon:hash'){anclar(m.hash);}});
+// Formularios: enviarlos navegaría el iframe fuera del diseño.
+document.addEventListener('submit',function(e){if(e.defaultPrevented)return;e.preventDefault();var f=e.target,act=f.getAttribute('action');if(act&&act!=='#')ir(act);},false);
 (window.__lixbonOps||[]).forEach(apply);
 })();</script>`;
+
+// Navegación dentro del diseño. El documento es about:srcdoc y sus URLs
+// relativas se resuelven contra la del editor: dejar navegar al iframe lo
+// lleva a lixbon.com, que no se deja incrustar («ha rechazado la conexión»).
+// Va al principio del documento para que exista antes que los scripts de la
+// página: las anclas desplazan, las páginas del diseño las cambia el padre
+// (lixbon:navigate) y lo externo se abre en otra pestaña.
+const PUENTE_NAV = String.raw`<script>(function(){
+if (window.parent === window || window.__lixbonGo) return;
+var BASE=document.baseURI,abrir=window.open;
+function anclar(hash){if(!hash||hash==='#')return false;var id=decodeURIComponent(hash.slice(1));
+  var t=document.getElementById(id)||document.getElementsByName(id)[0];if(!t)return false;t.scrollIntoView({behavior:'smooth',block:'start'});return true;}
+function go(url){var u,raw=String(url);
+  // En «Presentar» la base es blob:, que no resuelve rutas relativas: se leen a mano.
+  if(!/^https?:/.test(BASE)&&!/^[a-z][a-z0-9+.-]*:/i.test(raw)){var i=raw.indexOf('#'),h=i<0?'':raw.slice(i),ruta=(i<0?raw:raw.slice(0,i)).split('?')[0];
+    if(!ruta){anclar(h);return;}parent.postMessage({type:'lixbon:navigate',page:decodeURIComponent(ruta.split('/').filter(Boolean).pop()||''),hash:h},'*');return;}
+  try{u=new URL(raw,BASE);}catch(_){return;}
+  if(/^(mailto|tel|sms|javascript):/.test(u.protocol))return;
+  if(u.protocol==='about:'){anclar(u.hash);return;}
+  var base=new URL(BASE);
+  if(u.origin!==base.origin){abrir.call(window,u.href,'_blank','noopener');return;}
+  if(u.pathname===base.pathname&&u.search===base.search){anclar(u.hash);return;}
+  var seg=u.pathname.split('/').filter(Boolean).pop()||'';
+  parent.postMessage({type:'lixbon:navigate',page:decodeURIComponent(seg),hash:u.hash},'*');}
+window.__lixbonGo=go;window.__lixbonAnclar=anclar;
+Object.defineProperty(window,'__lixbonIr',{set:go,get:function(){return location.href;},configurable:true});
+window.open=function(u){if(u==null||u==='')return abrir.apply(window,arguments);go(u);return null;};
+})();</script>`;
+
+// En los scripts de la página, `location.href = x`, `location = x`,
+// `location.assign(x)` y `location.replace(x)` pasan por el puente: una
+// navegación hacia fuera de about:srcdoc no se puede cancelar desde dentro.
+const ASIGNA_LOCATION = /(?<![\w$.])(?<!(?:let|var|const)\s+)(?:(?:window|document|self|top|parent)\.)?location(?:\.href)?\s*=(?!=)/g;
+const METODO_LOCATION = /(?<![\w$.])(?:(?:window|document|self|top|parent)\.)?location\.(?:assign|replace)\s*\(/g;
+const desviar = (js) => js.replace(ASIGNA_LOCATION, 'window.__lixbonIr=').replace(METODO_LOCATION, 'window.__lixbonGo(');
+export function desviarNavegacion(html) {
+  return html
+    .replace(/(<script\b(?![^>]*\bsrc=)[^>]*>)([\s\S]*?)(<\/script>)/gi, (m, a, js, c) => a + desviar(js) + c)
+    .replace(/(\son[a-z]+\s*=\s*)(["'])([\s\S]*?)\2/gi, (m, a, q, js) => a + q + desviar(js) + q);
+}
+
+function conPuente(html) {
+  const doc = desviarNavegacion(html);
+  if (/<head\b[^>]*>/i.test(doc)) return doc.replace(/<head\b[^>]*>/i, (m) => m + PUENTE_NAV);
+  if (/<html\b[^>]*>/i.test(doc)) return doc.replace(/<html\b[^>]*>/i, (m) => m + PUENTE_NAV);
+  return PUENTE_NAV + doc;
+}
 
 function conInspector(html, ops) {
   const previos = ops && ops.length ? `<script>window.__lixbonOps=${JSON.stringify(ops)}</script>` : '';
   const inyeccion = `${previos}${INSPECTOR}`;
-  return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${inyeccion}</body>`) : `${html}${inyeccion}`;
+  const doc = conPuente(html);
+  return /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, () => `${inyeccion}</body>`) : `${doc}${inyeccion}`;
 }
 
 /** Aplica las ediciones manuales al HTML fuente (sin ejecutar scripts). */
@@ -372,6 +432,22 @@ export function documentoPreview(archivo, ops = []) {
   return conInspector(archivo.code, ops);
 }
 
+/** Qué página del diseño pide un enlace: el nombre exacto, sin extensión,
+ *  sin mayúsculas ni acentos («/Proyectos», «proyectos», «proyectos.htm»…)
+ *  o la portada para «/» e «index». null si el diseño no la tiene. Se
+ *  serializa tal cual en «Presentar»: no puede usar nada de fuera. */
+export function resolverPagina(nombres, pedida) {
+  const base = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\.(html?|svg|php|aspx?)$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const p = String(pedida || '');
+  if (nombres.includes(p)) return p;
+  const b = base(p);
+  if (!b || b === 'index' || b === 'inicio' || b === 'home') {
+    return nombres.find((n) => /^index\.html?$/i.test(n)) || (b ? nombres.find((n) => base(n) === b) : null) || nombres[0] || null;
+  }
+  return nombres.find((n) => base(n) === b) || null;
+}
+
 /** Documento autocontenido para «Presentar»: todas las páginas dentro, la
  *  actual en un iframe y navegación por hash (atrás/adelante funcionan; un
  *  <a href="otra.html"> llega como lixbon:navigate desde el bridge). */
@@ -386,7 +462,10 @@ var PAGES=${json},INICIAL=${JSON.stringify(inicial || paginas[0]?.name || '')},f
 function actual(){var h=decodeURIComponent(location.hash.slice(1));return PAGES[h]?h:INICIAL;}
 function render(){f.srcdoc=PAGES[actual()]||'';}
 window.addEventListener('hashchange',render);
-window.addEventListener('message',function(e){var m=e.data||{};if(m.type==='lixbon:navigate'&&PAGES[m.page]&&m.page!==actual())location.hash=m.page;});
+var resolver=${resolverPagina.toString()},HASH='';
+f.addEventListener('load',function(){if(HASH){f.contentWindow.postMessage({type:'lixbon:hash',hash:HASH},'*');HASH='';}});
+window.addEventListener('message',function(e){var m=e.data||{};if(m.type!=='lixbon:navigate')return;var p=resolver(Object.keys(PAGES),m.page);if(!p)return;
+  if(p===actual()){f.contentWindow.postMessage({type:'lixbon:hash',hash:m.hash||''},'*');return;}HASH=m.hash||'';location.hash=p;});
 render();
 </script></body></html>`;
 }
