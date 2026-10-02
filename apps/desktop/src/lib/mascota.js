@@ -13,7 +13,7 @@ const CLAVE_CUENTA = 'mascot_ide';
 
 // Mismo contrato que MASCOT_DEFAULTS en core/persistence/queries.py.
 export const MASCOTA_DEFAULTS = {
-  activa: true,
+  activa: false,       // la activa el usuario
   personaje: 'gael',   // gael | leya | ambos
   trabajo: 'auto',     // escribir | conducir | auto (según la tarea)
   preguntar: true,     // proponer el siguiente paso al terminar

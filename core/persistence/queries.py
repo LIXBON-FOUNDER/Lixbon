@@ -248,7 +248,7 @@ SETTINGS_DEFAULTS: dict[str, bool] = {
 # cuenta (y no en cada equipo): `mascot` las de la web y `mascot_ide` las del
 # IDE de escritorio. Son independientes; comparten forma y valores válidos.
 MASCOT_DEFAULTS: dict[str, Any] = {
-    "activa": True,        # mostrarla en todas partes
+    "activa": False,       # mostrarla en todas partes; la activa el usuario
     "personaje": "gael",   # gael | leya | ambos (se turnan)
     "trabajo": "auto",     # IDE: escribir | conducir | auto (según la tarea)
     "preguntar": True,     # IDE: proponer el siguiente paso al terminar
