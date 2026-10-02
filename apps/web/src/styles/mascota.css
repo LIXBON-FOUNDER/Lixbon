@@ -1,0 +1,353 @@
+/* mascota.css — Gael y Leya (components/Mascota.jsx). Sprites pixel art de
+   48×48 por cuadro, escalados a múltiplos enteros para que el píxel se vea
+   nítido. Es la única pieza de la web con "píxeles": el bocadillo lleva las
+   esquinas recortadas a juego, y por eso no sigue el radio de la interfaz. */
+
+.mascota-sprite {
+  --w: 96px;
+  --n: 1;
+  --d: 0.7s;
+  display: block;
+  width: var(--w);
+  height: var(--w);
+  flex-shrink: 0;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: calc(var(--n) * var(--w)) var(--w);
+  animation: mascota-cuadros var(--d) steps(var(--n)) infinite;
+}
+
+@keyframes mascota-cuadros {
+  to { background-position-x: calc(var(--n) * var(--w) * -1); }
+}
+
+.mascota-sprite--type { --d: 0.36s; }
+.mascota-sprite--sleep { --d: 2.4s; }
+.mascota-sprite--whip { --d: 0.75s; }
+.mascota-sprite--kart { --d: 0.24s; }
+
+/* Reposo: parpadea de vez en cuando, no a cada rato. */
+.mascota-sprite--idle {
+  animation: mascota-parpadeo 4.2s step-end infinite;
+}
+
+@keyframes mascota-parpadeo {
+  0% { background-position-x: 0; }
+  94% { background-position-x: calc(var(--w) * -1); }
+  100% { background-position-x: 0; }
+}
+
+.mascota-sprite--kart {
+  width: calc(var(--w) * 1.5);
+  background-size: calc(var(--w) * 3) var(--w);
+  animation-name: mascota-kart;
+}
+
+@keyframes mascota-kart {
+  to { background-position-x: calc(var(--w) * -3); }
+}
+
+.mascota-sprite.is-espejo { transform: scaleX(-1); }
+.mascota-sprite.is-quieta { animation: none; }
+
+/* ── Bocadillo ───────────────────────────────────────────────────────── */
+
+.mascota-bocadillo {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 6px;
+  z-index: 1;
+  width: max-content;
+  max-width: var(--ancho, 210px);
+  padding: 7px 10px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-wrap: pretty;
+  pointer-events: none;
+  /* Esquinas en escalón: un píxel de 3px recortado en cada una. */
+  box-shadow:
+    0 -3px 0 0 var(--primary),
+    0 3px 0 0 var(--primary),
+    -3px 0 0 0 var(--primary),
+    3px 0 0 0 var(--primary);
+  animation: mascota-pop 0.28s steps(3) both;
+}
+
+.mascota-bocadillo::after {
+  content: '';
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 18px;
+  width: 6px;
+  height: 6px;
+  background: var(--primary);
+  box-shadow: -6px -3px 0 0 var(--primary);
+}
+
+@keyframes mascota-pop {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+/* Puntos de "pensando" y zetas de la siesta, sobre la cabeza. */
+.mascota-puntos {
+  position: absolute;
+  bottom: calc(100% - 6px);
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.mascota-puntos i {
+  width: 5px;
+  height: 5px;
+  background: var(--ink-soft);
+  animation: mascota-punto 1.2s steps(2) infinite;
+}
+
+.mascota-puntos i:nth-child(2) { animation-delay: 0.2s; }
+.mascota-puntos i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes mascota-punto {
+  0%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+.mascota-zzz {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  pointer-events: none;
+}
+
+.mascota-zzz i {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-weight: 500;
+  color: var(--ink-muted);
+  opacity: 0;
+  animation: mascota-zzz 2.4s linear infinite;
+}
+
+.mascota-zzz i:nth-child(1) { font-size: 11px; }
+.mascota-zzz i:nth-child(2) { font-size: 14px; animation-delay: 0.8s; }
+.mascota-zzz i:nth-child(3) { font-size: 17px; animation-delay: 1.6s; }
+
+@keyframes mascota-zzz {
+  0% { opacity: 0; transform: translate(0, 0); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(14px, -30px); }
+}
+
+/* ── En el chat ──────────────────────────────────────────────────────── */
+
+.chat-hero__input { position: relative; }
+
+/* Con sitio, se sienta fuera de la columna, a la izquierda del compositor y
+   a ras de la caja de texto: no tapa ningún mensaje. */
+.mascota-chat {
+  position: absolute;
+  right: calc(100% - 8px);
+  bottom: 52px;
+  z-index: 2;
+}
+
+.chat-hero__input .mascota-chat { bottom: 0; right: calc(100% + 12px); }
+
+.mascota-chat__boton {
+  display: block;
+  border-radius: var(--radius);
+}
+
+.mascota-chat__boton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mascota-chat__chica { display: none; }
+
+/* Sin margen al lado (pantallas estrechas o panel abierto): pequeña, sentada
+   sobre el borde superior de la caja. */
+@media (max-width: 1240px) {
+  .mascota-chat {
+    right: auto;
+    left: 34px;
+    bottom: calc(100% - 22px);
+  }
+  /* En la portada del chat el título queda justo encima: sin sitio, no sale. */
+  .chat-hero__input .mascota-chat { display: none; }
+  .mascota-chat__grande { display: none; }
+  .mascota-chat__chica { display: block; }
+  .mascota-chat .mascota-zzz { right: 0; }
+}
+
+/* ── Guía de las páginas públicas ────────────────────────────────────── */
+
+.mascota-guia {
+  position: fixed;
+  z-index: 30;
+  transition: top 0.35s cubic-bezier(0.4, 0, 0.2, 1), left 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mascota-guia--esquina {
+  right: calc(16px + var(--safe-r));
+  bottom: calc(16px + var(--safe-b));
+}
+
+.mascota-guia--esquina-izq {
+  left: calc(16px + var(--safe-l));
+  bottom: calc(16px + var(--safe-b));
+}
+
+.mascota-guia--esquina .mascota-bocadillo {
+  left: auto;
+  right: 6px;
+}
+
+.mascota-guia--esquina .mascota-bocadillo::after {
+  left: auto;
+  right: 18px;
+  box-shadow: 6px -3px 0 0 var(--primary);
+}
+
+.mascota-guia__boton {
+  display: block;
+  border-radius: var(--radius);
+}
+
+.mascota-guia__boton:focus-visible,
+.mascota-volver:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Oculta: queda un botón con la mascota en pequeño para traerla de vuelta. */
+.mascota-volver {
+  position: fixed;
+  right: calc(16px + var(--safe-r));
+  bottom: calc(16px + var(--safe-b));
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: var(--surface-3);
+  opacity: 0.75;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.mascota-volver:hover {
+  opacity: 1;
+  background: var(--surface-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascota-sprite,
+  .mascota-bocadillo,
+  .mascota-puntos i { animation: none; }
+  .mascota-guia { transition: none; }
+  .mascota-zzz i { animation: none; opacity: 1; position: static; }
+}
+
+@media print {
+  .mascota-chat,
+  .mascota-guia,
+  .mascota-volver { display: none; }
+}
+
+/* ── Ajustes › Mascota ───────────────────────────────────────────────── */
+
+.mascota-ajustes__cabecera {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 12px;
+}
+
+.mascota-ajustes__escena {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 168px;
+  height: 112px;
+  padding-bottom: 6px;
+  border-radius: var(--radius);
+  background: var(--bg-row);
+  overflow: hidden;
+}
+
+.mascota-ajustes__escena .mascota-sprite + .mascota-sprite { margin-left: -28px; }
+
+.mascota-ajustes__texto .set-title { margin-bottom: 6px; }
+
+.set-card.is-apagada { opacity: 0.5; }
+
+.mascota-elegir {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mascota-elegir__op {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-row);
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.mascota-elegir__op:hover:not(:disabled) { background: var(--bg-hover); }
+.mascota-elegir__op.is-activa,
+.mascota-elegir__op.is-activa:hover:not(:disabled) { background: var(--primary); color: var(--on-primary); }
+.mascota-elegir__op:disabled { cursor: default; }
+
+.mascota-elegir__retrato {
+  display: flex;
+  margin-bottom: 6px;
+}
+
+.mascota-elegir__retrato .mascota-sprite + .mascota-sprite { margin-left: -16px; }
+
+.mascota-elegir__nombre { font-size: 13.5px; font-weight: 500; }
+.mascota-elegir__sub { font-size: 12px; opacity: 0.72; }
+
+.mascota-segmentos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mascota-segmentos__op {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-chip);
+  background: var(--bg-secondary);
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.mascota-segmentos__op:hover:not(:disabled) { background: var(--bg-hover); color: var(--ink); }
+.mascota-segmentos__op.is-activa,
+.mascota-segmentos__op.is-activa:hover:not(:disabled) { background: var(--primary); color: var(--on-primary); }
+
+@media (max-width: 640px) {
+  .mascota-ajustes__cabecera { flex-direction: column; align-items: flex-start; }
+  .mascota-elegir { grid-template-columns: minmax(0, 1fr); }
+  .mascota-elegir__op { flex-direction: row; align-items: center; gap: 12px; }
+  .mascota-elegir__retrato { margin-bottom: 0; }
+  .mascota-elegir__sub { margin-left: auto; }
+}

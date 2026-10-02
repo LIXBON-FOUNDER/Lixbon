@@ -19,6 +19,7 @@ import remote from './remote';
 import notFound from './notFound';
 import dialogs from './dialogs';
 import support from './support';
+import mascota from './mascota';
 
 export const DICTIONARIES = {
   common,
@@ -41,4 +42,5 @@ export const DICTIONARIES = {
   notFound,
   dialogs,
   support,
+  mascota,
 };

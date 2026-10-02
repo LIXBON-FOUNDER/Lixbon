@@ -381,6 +381,17 @@ export const IconUser = (p) => (
   </Svg>
 );
 
+// Gael y Leya, en cabeza de chibi: la sección de Ajustes de la mascota.
+export const IconMascota = (p) => (
+  <Svg {...p}>
+    <Tinta d="M12 4.5a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z" />
+    <circle cx="12" cy="10.5" r="6" />
+    <path d="M6.3 9c1.3-1.4 3.2-2.2 5.7-2.2s4.4.8 5.7 2.2" />
+    <path d="M9.6 11.2v.6M14.4 11.2v.6" />
+    <path d="M7.5 20.5c1-1.5 2.6-2.3 4.5-2.3s3.5.8 4.5 2.3" />
+  </Svg>
+);
+
 export const IconUsers = (p) => (
   <Svg {...p}>
     <Tinta d="M9 5.25a3.25 3.25 0 1 1 0 6.5 3.25 3.25 0 0 1 0-6.5Z" />
