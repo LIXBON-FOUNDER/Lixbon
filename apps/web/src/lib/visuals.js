@@ -96,6 +96,7 @@ HTML:
 - Textos reales y coherentes con el encargo, en el idioma del usuario. Nada de lorem ipsum ni "Título aquí".
 - Responsive (móvil primero). Estados hover/focus/disabled donde toque. Accesible: contraste, alt, labels.
 - Prototipos de app: cada pantalla es una página (file:inicio.html, file:detalle.html…) enlazada con <a href>; el lienzo las muestra como artboards.
+- NOMBRES: cada página lleva su file:nombre corto y en minúsculas (proyectos.html, estudio.html), y ese nombre es EXACTAMENTE el que usan los href de las demás páginas. Nunca dejes un bloque sin nombre.
 - ENLACES: entre páginas, href relativo con el nombre EXACTO del archivo (href="proyectos.html"), nunca "/proyectos", "proyectos" sin .html ni URLs absolutas. Cada enlace de la cabecera, el pie o un botón apunta a una página que entregas en esta respuesta o en una anterior, o a un ancla (#id) que existe en la misma página. Nada de href vacíos.
 - Componentes: muéstralos dentro de una página de demostración con fondo neutro y el componente centrado, en sus variantes.
 - SVG: viewBox definido, sin tamaño fijo, formas limpias, sin texto rasterizado ni filtros pesados.
@@ -141,6 +142,7 @@ export function extraerArchivos(texto) {
     const fin = m.index + m[0].length;
     const cerrado = texto.slice(fin - 3, fin) === '```';
     let name = null;
+    let anonimo = false;
     const enInfo = NOMBRE.exec(info) || NOMBRE.exec(` ${info}`);
     if (enInfo) name = enInfo[1];
     if (!name) {
@@ -162,14 +164,97 @@ export function extraerArchivos(texto) {
     if (!name) {
       if (/^\s*<svg/i.test(code) || info.toLowerCase() === 'svg') name = 'logo.svg';
       else {
-        const titulo = /<title>([^<]{1,40})<\/title>/i.exec(code);
-        name = anonimos === 0 ? 'index.html' : `${(titulo ? titulo[1] : `pagina-${anonimos + 1}`).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.html`;
+        const titulo = /<title>([^<]{1,80})<\/title>/i.exec(code);
+        name = anonimos === 0 ? 'index.html' : `${slug(titulo ? primerSegmento(titulo[1]) : `pagina-${anonimos + 1}`) || `pagina-${anonimos + 1}`}.html`;
+        anonimo = anonimos > 0;
       }
       anonimos += 1;
     }
-    out.push({ name: limpiarNombre(name), code: sanearHtml(code), cerrado });
+    out.push({ name: limpiarNombre(name), code: sanearHtml(code), cerrado, ...(anonimo ? { anonimo: true } : {}) });
+  }
+  return nombrarPorEnlaces(out);
+}
+
+// ── Nombres de las páginas sin nombre ───────────────────────────────────────
+// Cuando el modelo no pone file:nombre, el nombre sale del <title>; pero los
+// enlaces de las otras páginas dicen cómo se llaman de verdad
+// (href="estudio.html"). Se empareja cada página sin nombre con el destino de
+// enlace que mejor encaja con su título y su <h1>.
+
+const slug = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+/** «Proyectos | Nimbus Arquitectura» → «Proyectos». */
+const primerSegmento = (t) => String(t || '').split(/\s+[|·—–:-]\s+|\s*[|·—–]\s*/)[0].trim() || String(t || '');
+const VACIAS = new Set(['para', 'por', 'con', 'los', 'las', 'del', 'una', 'uno', 'que', 'mas', 'the', 'and', 'for', 'our', 'your', 'html', 'htm', 'page', 'pagina']);
+/** Palabras con peso de un texto, sin acentos ni plural. */
+export function fichasDe(texto) {
+  return new Set(slug(texto).split('-').filter((w) => w.length >= 3 && !VACIAS.has(w)).map((w) => w.replace(/(es|s)$/, '')));
+}
+const textoPlano = (html) => String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+/** Título y primer <h1> de una página, para emparejarla con enlaces. */
+export function rotuloDe(code) {
+  const t = /<title>([^<]{1,120})<\/title>/i.exec(code || '');
+  const h = /<h1\b[^>]*>([\s\S]{1,300}?)<\/h1>/i.exec(code || '');
+  return `${t ? t[1] : ''} ${h ? textoPlano(h[1]) : ''}`.trim();
+}
+const ENLACE = /<a\b[^>]*\bhref\s*=\s*["']([^"'#?][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+/** Destinos internos (x.html) de los enlaces de unas páginas, con sus textos. */
+export function destinosDeEnlaces(codigos) {
+  const out = new Map();
+  for (const code of codigos) {
+    for (const m of String(code || '').matchAll(ENLACE)) {
+      const href = m[1].trim();
+      if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) continue;
+      const ruta = href.split(/[?#]/)[0].split('/').filter(Boolean).pop() || '';
+      if (!ruta || (/\.[a-z0-9]+$/i.test(ruta) && !/\.html?$/i.test(ruta))) continue;
+      const name = /\.html?$/i.test(ruta) ? ruta : `${ruta}.html`;
+      if (!out.has(name)) out.set(name, []);
+      out.get(name).push(textoPlano(m[2]));
+    }
   }
   return out;
+}
+
+function nombrarPorEnlaces(files) {
+  const sueltos = files.filter((f) => f.anonimo);
+  if (!sueltos.length) return files;
+  const destinos = destinosDeEnlaces(files.map((f) => f.code));
+  const ocupados = new Set(files.filter((f) => !f.anonimo).map((f) => f.name.toLowerCase()));
+  // Todas las parejas posibles con su puntuación; se asignan de mejor a peor.
+  const parejas = [];
+  for (const f of sueltos) {
+    const rotulo = rotuloDe(f.code);
+    const principal = slug(primerSegmento(/<title>([^<]{1,120})<\/title>/i.exec(f.code)?.[1] || ''));
+    const propias = fichasDe(`${rotulo} ${f.name}`);
+    for (const [destino, textos] of destinos) {
+      if (ocupados.has(destino.toLowerCase())) continue;
+      const base = slug(destino.replace(/\.html?$/i, ''));
+      let puntos = 0;
+      if (principal && base === principal) puntos += 100;
+      if (textos.some((tx) => slug(tx) === principal && principal)) puntos += 60;
+      for (const w of fichasDe(`${base} ${textos.join(' ')}`)) if (propias.has(w)) puntos += 10;
+      if (puntos > 0) parejas.push({ f, destino, puntos });
+    }
+  }
+  parejas.sort((a, b) => b.puntos - a.puntos);
+  const asignado = new Map();
+  for (const { f, destino } of parejas) {
+    if (asignado.has(f) || ocupados.has(destino.toLowerCase())) continue;
+    asignado.set(f, destino);
+    ocupados.add(destino.toLowerCase());
+  }
+  // Por descarte: una sola página sin pareja y un solo destino sin página.
+  const sinPareja = sueltos.filter((f) => !asignado.has(f));
+  const libres = [...destinos.keys()].filter((d) => !ocupados.has(d.toLowerCase()));
+  if (sinPareja.length === 1 && libres.length === 1) asignado.set(sinPareja[0], libres[0]);
+  return files.map((f) => {
+    if (!f.anonimo) return f;
+    let name = asignado.get(f) || f.name;
+    if (!asignado.has(f) && ocupados.has(name.toLowerCase())) name = name.replace(/\.html$/, '-2.html');
+    ocupados.add(name.toLowerCase());
+    const { anonimo: _a, ...resto } = f;
+    return { ...resto, name };
+  });
 }
 
 /** Último archivo de un texto (aunque el bloque aún esté abierto) y si cerró. */
@@ -312,14 +397,14 @@ function enviar(el){
 }
 document.addEventListener('mousemove',function(e){if(!inspect)return;var el=e.target;if(!el||el===document.body||el===document.documentElement)return;show(hover,el);},true);
 function anclar(h){return window.__lixbonAnclar(h);}
-function ir(u){window.__lixbonGo(u);}
+function ir(u,t){window.__lixbonGo(u,t);}
 // En burbuja: si la propia página gestiona el clic (menús, pestañas…) y lo
 // cancela, se respeta; si corta la propagación, lo recoge la Navigation API.
 window.addEventListener('click',function(e){
   if(inspect||e.defaultPrevented||e.button!==0)return;
   var a=e.target.closest&&e.target.closest('a[href]');if(!a)return;
   var h=(a.getAttribute('href')||'').trim();if(/^javascript:/i.test(h))return;
-  e.preventDefault();if(h===''||h==='#')return;if(h.charAt(0)==='#'){anclar(h);return;}ir(a.href||h);
+  e.preventDefault();if(h===''||h==='#')return;if(h.charAt(0)==='#'){anclar(h);return;}ir(a.href||h,a.textContent||a.getAttribute('aria-label')||'');
 },false);
 document.addEventListener('click',function(e){
   if(!inspect)return;e.preventDefault();e.stopPropagation();var el=e.target;if(el===document.documentElement)return;
@@ -338,7 +423,7 @@ window.addEventListener('message',function(e){var m=e.data||{};
   if(m.type==='lixbon:deselect'){sel=null;recolocar();}
   if(m.type==='lixbon:hash'){anclar(m.hash);}});
 // Formularios: enviarlos navegaría el iframe fuera del diseño.
-document.addEventListener('submit',function(e){if(e.defaultPrevented)return;e.preventDefault();var f=e.target,act=f.getAttribute('action');if(act&&act!=='#')ir(act);},false);
+document.addEventListener('submit',function(e){if(e.defaultPrevented)return;e.preventDefault();var f=e.target,act=f.getAttribute('action');if(act&&act!=='#')ir(act,'');},false);
 (window.__lixbonOps||[]).forEach(apply);
 })();</script>`;
 
@@ -353,10 +438,10 @@ if (window.parent === window || window.__lixbonGo) return;
 var BASE=document.baseURI,abrir=window.open;
 function anclar(hash){if(!hash||hash==='#')return false;var id=decodeURIComponent(hash.slice(1));
   var t=document.getElementById(id)||document.getElementsByName(id)[0];if(!t)return false;t.scrollIntoView({behavior:'smooth',block:'start'});return true;}
-function go(url){var u,raw=String(url);
+function go(url,texto){var u,raw=String(url);texto=(texto||'').replace(/\s+/g,' ').trim().slice(0,80);
   // En «Presentar» la base es blob:, que no resuelve rutas relativas: se leen a mano.
   if(!/^https?:/.test(BASE)&&!/^[a-z][a-z0-9+.-]*:/i.test(raw)){var i=raw.indexOf('#'),h=i<0?'':raw.slice(i),ruta=(i<0?raw:raw.slice(0,i)).split('?')[0];
-    if(!ruta){anclar(h);return;}parent.postMessage({type:'lixbon:navigate',page:decodeURIComponent(ruta.split('/').filter(Boolean).pop()||''),hash:h},'*');return;}
+    if(!ruta){anclar(h);return;}parent.postMessage({type:'lixbon:navigate',page:decodeURIComponent(ruta.split('/').filter(Boolean).pop()||''),hash:h,texto:texto},'*');return;}
   try{u=new URL(raw,BASE);}catch(_){return;}
   if(/^(mailto|tel|sms|javascript):/.test(u.protocol))return;
   if(u.protocol==='about:'){anclar(u.hash);return;}
@@ -364,7 +449,7 @@ function go(url){var u,raw=String(url);
   if(u.origin!==base.origin){abrir.call(window,u.href,'_blank','noopener');return;}
   if(u.pathname===base.pathname&&u.search===base.search){anclar(u.hash);return;}
   var seg=u.pathname.split('/').filter(Boolean).pop()||'';
-  parent.postMessage({type:'lixbon:navigate',page:decodeURIComponent(seg),hash:u.hash},'*');}
+  parent.postMessage({type:'lixbon:navigate',page:decodeURIComponent(seg),hash:u.hash,texto:texto},'*');}
 window.__lixbonGo=go;window.__lixbonAnclar=anclar;
 Object.defineProperty(window,'__lixbonIr',{set:go,get:function(){return location.href;},configurable:true});
 window.open=function(u){if(u==null||u==='')return abrir.apply(window,arguments);go(u);return null;};
@@ -432,20 +517,39 @@ export function documentoPreview(archivo, ops = []) {
   return conInspector(archivo.code, ops);
 }
 
-/** Qué página del diseño pide un enlace: el nombre exacto, sin extensión,
- *  sin mayúsculas ni acentos («/Proyectos», «proyectos», «proyectos.htm»…)
- *  o la portada para «/» e «index». null si el diseño no la tiene. Se
- *  serializa tal cual en «Presentar»: no puede usar nada de fuera. */
-export function resolverPagina(nombres, pedida) {
+/** Qué página del diseño pide un enlace. Por orden: el nombre exacto; el
+ *  mismo sin extensión, mayúsculas ni acentos («/Proyectos», «proyectos.htm»);
+ *  la portada para «/», «index», «inicio» o «home»; uno que empieza por el
+ *  otro («proyectos» ↔ «proyectos-nimbus.html»); y si no, la página cuyo
+ *  título, <h1> o nombre comparte más palabras con el destino y el texto del
+ *  enlace (`rotulos`: nombre → título y h1). null si ninguna encaja.
+ *  Se serializa tal cual en «Presentar»: no puede usar nada de fuera. */
+export function resolverPagina(nombres, pedida, texto = '', rotulos = {}) {
   const base = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\.(html?|svg|php|aspx?)$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const VACIAS = ['para', 'por', 'con', 'los', 'las', 'del', 'una', 'uno', 'que', 'mas', 'the', 'and', 'for', 'our', 'your', 'html', 'htm', 'page', 'pagina'];
+  const fichas = (t) => base(t).split('-').filter((w) => w.length >= 3 && VACIAS.indexOf(w) < 0).map((w) => w.replace(/(es|s)$/, ''));
   const p = String(pedida || '');
-  if (nombres.includes(p)) return p;
+  if (nombres.indexOf(p) >= 0) return p;
   const b = base(p);
   if (!b || b === 'index' || b === 'inicio' || b === 'home') {
     return nombres.find((n) => /^index\.html?$/i.test(n)) || (b ? nombres.find((n) => base(n) === b) : null) || nombres[0] || null;
   }
-  return nombres.find((n) => base(n) === b) || null;
+  const igual = nombres.find((n) => base(n) === b);
+  if (igual) return igual;
+  const prefijo = nombres.filter((n) => base(n).indexOf(`${b}-`) === 0 || b.indexOf(`${base(n)}-`) === 0);
+  if (prefijo.length === 1) return prefijo[0];
+  const buscadas = fichas(`${b} ${texto || ''}`);
+  if (!buscadas.length) return null;
+  let mejor = null;
+  let puntos = 0;
+  let empate = false;
+  for (const n of nombres) {
+    const propias = fichas(`${n} ${rotulos[n] || ''}`);
+    const pts = buscadas.filter((w) => propias.indexOf(w) >= 0).length;
+    if (pts > puntos) { mejor = n; puntos = pts; empate = false; } else if (pts && pts === puntos) empate = true;
+  }
+  return puntos && !empate ? mejor : null;
 }
 
 /** Documento autocontenido para «Presentar»: todas las páginas dentro, la
@@ -453,7 +557,8 @@ export function resolverPagina(nombres, pedida) {
  *  <a href="otra.html"> llega como lixbon:navigate desde el bridge). */
 export function documentoPresentacion(paginas, inicial, titulo = 'Presentación') {
   const docs = {};
-  for (const f of paginas) docs[f.name] = documentoPreview(f);
+  const rotulos = {};
+  for (const f of paginas) { docs[f.name] = documentoPreview(f); rotulos[f.name] = rotuloDe(f.code); }
   const json = JSON.stringify(docs).replace(/<\//g, '<\\/');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(titulo)}</title><style>
 html,body{margin:0;height:100%;background:#0E0E0E}iframe{display:block;width:100%;height:100%;border:0}
@@ -462,9 +567,9 @@ var PAGES=${json},INICIAL=${JSON.stringify(inicial || paginas[0]?.name || '')},f
 function actual(){var h=decodeURIComponent(location.hash.slice(1));return PAGES[h]?h:INICIAL;}
 function render(){f.srcdoc=PAGES[actual()]||'';}
 window.addEventListener('hashchange',render);
-var resolver=${resolverPagina.toString()},HASH='';
+var resolver=${resolverPagina.toString()},ROTULOS=${JSON.stringify(rotulos).replace(/<\//g, '<\\/')},HASH='';
 f.addEventListener('load',function(){if(HASH){f.contentWindow.postMessage({type:'lixbon:hash',hash:HASH},'*');HASH='';}});
-window.addEventListener('message',function(e){var m=e.data||{};if(m.type!=='lixbon:navigate')return;var p=resolver(Object.keys(PAGES),m.page);if(!p)return;
+window.addEventListener('message',function(e){var m=e.data||{};if(m.type!=='lixbon:navigate')return;var p=resolver(Object.keys(PAGES),m.page,m.texto||'',ROTULOS);if(!p)return;
   if(p===actual()){f.contentWindow.postMessage({type:'lixbon:hash',hash:m.hash||''},'*');return;}HASH=m.hash||'';location.hash=p;});
 render();
 </script></body></html>`;
