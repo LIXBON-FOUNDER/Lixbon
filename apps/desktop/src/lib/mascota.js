@@ -94,7 +94,9 @@ function adoptar(user) {
   const firma = JSON.stringify(remoto);
   if (firma === ultimoRemoto) return;
   ultimoRemoto = firma;
-  estado = limpiar(remoto);
+  // Lo que la cuenta no trae (un gateway más viejo descarta claves nuevas)
+  // se queda como estaba aquí.
+  estado = limpiar({ ...estado, ...remoto });
   guardarLocal();
   avisar();
 }
