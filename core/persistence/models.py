@@ -106,6 +106,8 @@ class Conversation(Base):
     source: Mapped[str | None] = mapped_column(Text)
     # F-compartir: token público de solo lectura (NULL = no compartida)
     share_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    # 1 = el usuario la archivó: la limpieza por inactividad no la toca.
+    archived: Mapped[int] = mapped_column(nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 

@@ -7,7 +7,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { currentXtermTheme, FONT } from '../editor/TerminalPanel';
+import { FONT } from '../editor/TerminalPanel';
+import { currentXtermTheme } from '../editor/xtermThemes';
+import { watchTheme } from '../editor/themeMode';
+import { ptyCols } from '../lib/orchTermSize';
 
 export function AgentTerminal({ task, live }) {
   const hostRef = useRef(null);
@@ -35,7 +38,7 @@ export function AgentTerminal({ task, live }) {
     const resize = () => {
       try {
         fit.fit();
-        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).catch(() => {});
+        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).then(() => ptyCols.set(task, term.cols)).catch(() => {});
       } catch { /* oculto */ }
     };
 
@@ -57,13 +60,12 @@ export function AgentTerminal({ task, live }) {
 
     const ro = new ResizeObserver(resize);
     ro.observe(hostRef.current);
-    const themeObserver = new MutationObserver(() => { term.options.theme = currentXtermTheme(); });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const stopThemeWatch = watchTheme(() => { term.options.theme = currentXtermTheme(); });
 
     return () => {
       disposed = true;
       ro.disconnect();
-      themeObserver.disconnect();
+      stopThemeWatch();
       unlisten.forEach((u) => u());
       term.dispose();
     };

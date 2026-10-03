@@ -144,13 +144,18 @@ export function OrchestratorPage() {
             su rama y su worktree, espera el <b>informe</b> de cada agente, integra los cambios y te cuenta qué se hizo. Tú solo hablas
             con él; en el modo <b>Orquestar</b> puedes mirar qué hace cada agente.
           </p>
+          <p className="orch__about">
+            Con <span className="mono">/adversary &lt;qué atacar&gt;</span> un agente <b>adversario</b> no intenta demostrar que algo
+            funciona, sino encontrar cómo se rompe: casos límite, errores ocultos y suposiciones sin justificar. Quien hizo el trabajo
+            tiene que corregir o justificar cada hallazgo. <b>/orquestar</b> ahorra tokens repartiendo el trabajo; <b>/adversary</b> lo verifica.
+          </p>
           <div className="srow">
             <div className="srow__text">
               <span className="srow__label">Activar el orquestador</span>
               <span className={`srow__hint ${settings.enabled && !snap.lxo_exists ? 'is-warn' : ''}`}>
                 {settings.enabled
-                  ? (snap.lxo_exists ? 'Activo. Al activarlo se instaló la skill /orquestar en tus agentes.' : 'Activo, pero falta lxo junto al ejecutable de Lixbon: reinstala la app.')
-                  : 'Al activarlo se instala la skill /orquestar en todos los agentes que tengas.'}
+                  ? (snap.lxo_exists ? 'Activo. Al activarlo se instalaron las skills /orquestar y /adversary en tus agentes.' : 'Activo, pero falta lxo junto al ejecutable de Lixbon: reinstala la app.')
+                  : 'Al activarlo se instalan las skills /orquestar y /adversary en todos los agentes que tengas.'}
               </span>
             </div>
             <Switch checked={!!settings.enabled} onChange={async (v) => { await saveSettings({ enabled: v }); loadAgents(); }} label="Activar el orquestador" />
@@ -164,8 +169,8 @@ export function OrchestratorPage() {
 
       <section className="ssec rise rise--3">
         <SectionHead
-          label="Skill /orquestar"
-          hint="La misma skill sirve para coordinar (cuando tú la invocas) y para trabajar como agente hijo (cuando Lixbon lanza al agente)."
+          label="Skills /orquestar y /adversary"
+          hint="Se instalan juntas. /orquestar sirve para coordinar (cuando tú la invocas) y para trabajar como agente hijo (cuando Lixbon lanza al agente); /adversary lanza un adversario que ataca lo hecho."
         >
           {pending.length > 0 && <button className="lk is-accent" onClick={() => installSkill(pending.map((a) => a.id))}>Instalar en todos ({pending.length})</button>}
         </SectionHead>

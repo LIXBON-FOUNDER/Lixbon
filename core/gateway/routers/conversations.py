@@ -22,8 +22,10 @@ from core.persistence.queries import (
     list_conversations,
     list_messages,
     log_audit_event,
+    purge_inactive_conversations,
     rename_conversation,
     rewind_last_turn,
+    set_conversation_archived,
     set_conversation_share,
 )
 from core.security.auth import web_or_api_key_auth, cookie_auth_required
@@ -64,6 +66,9 @@ def _fallback_title(messages: list[dict[str, Any]]) -> str:
     return title
 
 
+IDE_PURGE_DAYS = 14
+
+
 class RenamePayload(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
 
@@ -74,6 +79,7 @@ async def api_list_conversations(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     source: str | None = Query(default=None, max_length=16),
+    archived: bool | None = Query(default=None),
     user_data: dict[str, Any] = Depends(cookie_auth_required),
 ):
     # Historial independiente por superficie: cada cliente pide su `source`
@@ -82,7 +88,10 @@ async def api_list_conversations(
     # key sin `source` se devuelve todo, que es el contrato de la API pública.
     if not source:
         source = "web" if user_data.get("auth_via") == "session" else None
-    items = list_conversations(user_data["id"], limit=limit, offset=offset, q=q, source=source)
+    # Solo el historial del IDE caduca; se purga al listarlo para no depender de un cron.
+    if source == "ide":
+        purge_inactive_conversations(user_data["id"], "ide", IDE_PURGE_DAYS)
+    items = list_conversations(user_data["id"], limit=limit, offset=offset, q=q, source=source, archived=archived)
     return {"conversations": items, "limit": limit, "offset": offset}
 
 
@@ -135,6 +144,26 @@ async def api_delete_conversation(
     if not delete_conversation(conversation_id, user_data["id"]):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
     return {"deleted": conversation_id}
+
+
+@router.post("/api/conversations/{conversation_id}/archive")
+async def api_archive_conversation(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    if not set_conversation_archived(conversation_id, user_data["id"], True):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    return {"id": conversation_id, "archived": True}
+
+
+@router.delete("/api/conversations/{conversation_id}/archive")
+async def api_unarchive_conversation(
+    conversation_id: str,
+    user_data: dict[str, Any] = Depends(cookie_auth_required),
+):
+    if not set_conversation_archived(conversation_id, user_data["id"], False):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    return {"id": conversation_id, "archived": False}
 
 
 @router.post("/api/conversations/{conversation_id}/rewind")

@@ -7,6 +7,7 @@ import { IconGlobe, IconFileCode, IconCheck } from '../components/Icons';
 import { ClaudeMark } from '../components/Logo';
 import { IdeCard } from './ClaudeCards';
 import { splitDocs } from '../lib/docBlocks';
+import { useThemeMode } from '../editor/themeMode';
 
 /** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
     cursor parpadeante, como la última línea del mockup. */
@@ -179,19 +180,34 @@ function UsageCard({ usage }) {
 }
 
 const CTX_TONES = {
-  messages: '#D97757',
-  'system prompt': '#8A8F98',
-  'system tools': '#6E9BD1',
-  'system tools (deferred)': '#4E6E96',
-  'mcp tools': '#9C7BD1',
-  'mcp tools (deferred)': '#6C5896',
-  'mcp server instructions': '#B69BE0',
-  'memory files': '#7FB58A',
-  'custom agents': '#D1B36E',
-  skills: '#5FB3B3',
+  dark: {
+    messages: '#D97757',
+    'system prompt': '#8A8F98',
+    'system tools': '#6E9BD1',
+    'system tools (deferred)': '#4E6E96',
+    'mcp tools': '#9C7BD1',
+    'mcp tools (deferred)': '#6C5896',
+    'mcp server instructions': '#B69BE0',
+    'memory files': '#7FB58A',
+    'custom agents': '#D1B36E',
+    skills: '#5FB3B3',
+  },
+  light: {
+    messages: '#C2502B',
+    'system prompt': '#6B7079',
+    'system tools': '#2F6DB5',
+    'system tools (deferred)': '#6F93BD',
+    'mcp tools': '#7A4FC0',
+    'mcp tools (deferred)': '#A58BD0',
+    'mcp server instructions': '#9468D6',
+    'memory files': '#3E8A52',
+    'custom agents': '#A8801A',
+    skills: '#238A8A',
+  },
 };
 
 function ContextCard({ context }) {
+  const tones = CTX_TONES[useThemeMode()];
   const parts = context.categories.filter((c) => c.key !== 'free space' && c.tokens > 0);
   const free = context.categories.find((c) => c.key === 'free space');
   return (
@@ -201,12 +217,12 @@ function ContextCard({ context }) {
         <span className="ccusage__pct">{context.usedText} / {context.totalText} · {context.pct}%</span>
       </div>
       <div className="ccctx__bar">
-        {parts.map((c) => <span key={c.key} style={{ width: `${c.pct}%`, background: c.key === 'autocompact buffer' ? undefined : CTX_TONES[c.key] || '#8A8F98' }} className={c.key === 'autocompact buffer' ? 'is-reserve' : ''} title={`${c.label} · ${c.text}`} />)}
+        {parts.map((c) => <span key={c.key} style={{ width: `${c.pct}%`, background: c.key === 'autocompact buffer' ? undefined : tones[c.key] || '#8A8F98' }} className={c.key === 'autocompact buffer' ? 'is-reserve' : ''} title={`${c.label} · ${c.text}`} />)}
       </div>
       <ul className="ccctx__legend">
         {[...parts, ...(free ? [free] : [])].map((c) => (
           <li key={c.key}>
-            <i className={c.key === 'autocompact buffer' ? 'is-reserve' : c.key === 'free space' ? 'is-free' : ''} style={CTX_TONES[c.key] ? { background: CTX_TONES[c.key] } : undefined} />
+            <i className={c.key === 'autocompact buffer' ? 'is-reserve' : c.key === 'free space' ? 'is-free' : ''} style={tones[c.key] ? { background: tones[c.key] } : undefined} />
             <span>{c.label}</span>
             <span className="ccctx__num">{c.text}</span>
           </li>

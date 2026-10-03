@@ -26,7 +26,9 @@ mod auth_loopback;
 mod preview_proxy;
 mod visual_server;
 mod team;
+mod mascota;
 mod claude_code;
+mod env_path;
 mod orch;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -1334,6 +1336,7 @@ fn secret_delete(name: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    env_path::refresh_process_path();
     tauri::Builder::default()
         // Una sola instancia: el acceso directo «Lixbon Team» (--team) con la app
         // ya abierta no arranca otra copia, abre Team en la que hay.
@@ -1347,6 +1350,7 @@ pub fn run() {
         .manage(preview_proxy::PreviewProxy::default())
         .manage(visual_server::VisualServer::default())
         .manage(orch::Orch::default())
+        .manage(mascota::MascotaDatos(Mutex::new(String::new())))
         .manage(FsWatchState {
             watcher: Mutex::new(None),
             pending: Arc::new(Mutex::new(HashSet::new())),
@@ -1371,6 +1375,7 @@ pub fn run() {
                     window.state::<claude_code::ClaudeSessions>().stop_all();
                     window.state::<orch::Orch>().0.shutdown();
                     team::apagar(window.app_handle());
+                    mascota::apagar(window.app_handle());
                 }
             }
         })
@@ -1416,6 +1421,10 @@ pub fn run() {
             visual_server::visual_base,
             visual_server::visual_snippet,
             team::team_abrir,
+            mascota::mascota_flotante,
+            mascota::mascota_datos,
+            mascota::mascota_flotante_cerrar,
+            mascota::mascota_volver,
             mcp::mcp_start,
             mcp::mcp_send,
             mcp::mcp_stop,
@@ -1429,6 +1438,8 @@ pub fn run() {
             claude_code::cc_stop,
             claude_code::cc_sessions,
             claude_code::cc_session_read,
+            claude_code::cc_session_delete,
+            claude_code::cc_session_archive,
             claude_code::cc_config,
             claude_code::cc_config_open,
             orch::orch_snapshot,

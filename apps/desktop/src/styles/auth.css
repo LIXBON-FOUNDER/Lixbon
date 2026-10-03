@@ -17,7 +17,7 @@
   flex-direction: column;
   padding: 36px 44px 40px;
   border-radius: var(--radius);
-  background: #0E0E0E;
+  background: var(--surface-0);
   overflow: hidden;
   animation: lx-fade 0.5s ease both;
 }
@@ -27,7 +27,7 @@
   top: -120px;
   width: 720px;
   height: 620px;
-  background: radial-gradient(closest-side, rgba(198, 214, 110, 0.16), transparent);
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb), 0.16), transparent);
   animation: lx-auth-drift 16s ease-in-out infinite;
   pointer-events: none;
 }
@@ -36,7 +36,7 @@
   top: 420px;
   width: 640px;
   height: 560px;
-  background: radial-gradient(closest-side, rgba(242, 242, 238, 0.1), transparent);
+  background: radial-gradient(closest-side, rgba(var(--ink-rgb), 0.1), transparent);
   animation-delay: -8s;
 }
 @keyframes lx-auth-drift {

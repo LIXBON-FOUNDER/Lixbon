@@ -232,6 +232,16 @@ const handlers = {
   'plugin:event|unlisten': () => null,
   'plugin:window|is_maximized': () => false,
   'plugin:dialog|open': () => ROOT,
+  // ?obra simula un run del orquestador (tres agentes hijos) para ver la escena
+  // de Gael y Leya con los robots obreros; recarga la página para repetirlo.
+  orch_snapshot: () => orchSimulado(),
+  mascota_flotante: ({ datos }) => { console.info('[tauriMock] aviso flotante', datos); },
+  mascota_flotante_cerrar: () => null,
+  // mascota.html en el navegador: ?latigo muestra el segundo aviso.
+  mascota_datos: () => JSON.stringify(qs.has('latigo')
+    ? { modo: 'latigo', personaje: 'gael', fuera: '2 min', texto: '«Checkout» lleva 2 min esperando tu revisión.' }
+    : { modo: 'aviso', personaje: 'leya', texto: '¡Fase 2 lista! Te espero para seguir con «Checkout».' }),
+  mascota_volver: () => null,
   secret_get: () => store.get('apiKey'),
   secret_set: ({ value }) => { store.set('apiKey', value); },
   secret_delete: () => { store.delete('apiKey'); },
@@ -320,6 +330,8 @@ const GATEWAY = {
     ]).flat(),
   }),
   'GET /api/keys': () => ({ keys }),
+  'GET /health': () => ({ status: 'ok' }),
+  'GET /v1/models': () => ({ data: [{ id: 'lixbon-1', name: 'lixbon-1', capabilities: [] }] }),
   'GET /api/conversations': () => ({
     conversations: [
       { id: 11, title: 'Refactor auth', updated_at: new Date(Date.now() - 20 * 60000).toISOString() },
@@ -343,6 +355,7 @@ const GATEWAY = {
     return { api_key: `lixbon_sk_${Math.random().toString(36).slice(2)}` };
   },
   'PATCH /api/account/profile': (body) => ({ user: { ...store.get('user'), ...body } }),
+  'PATCH /api/account/settings': (body) => { console.info('[tauriMock] ajustes', body); return { settings: { mascot_ide: body.mascot_ide } }; },
 };
 // Lixbon Team en modo dev: un proyecto, dos canales, un directo y mensajes.
 const U = (id, first_name, username) => ({ id, first_name, last_name: '', username, email: `${username}@demo.dev` });
@@ -429,12 +442,26 @@ function mockCompletion(body) {
       : 'Perfecto, sigo con esas opciones.')
       : last.includes('pregunta') ? ask
         : 'Hola, soy el modelo simulado del modo dev.';
+  // «… fase N …»: tarea de varios pasos (herramientas de lectura) para ver a
+  // la mascota en el kart y su pregunta al terminar.
+  const pedido = body.messages.find((m) => m.role === 'user' && !String(m.content).startsWith('TOOL_RESULT'))?.content || '';
+  const fase = /fase\s+(\d+)/i.exec(String(pedido));
+  const hechos = body.messages.filter((m) => String(m.content).startsWith('TOOL_RESULT')).length;
+  const PASOS = [
+    { tool: 'list_files', args: { path: 'src' } },
+    { tool: 'read_file', args: { path: 'src/App.tsx' } },
+    { tool: 'search', args: { query: 'useAgent' } },
+    { tool: 'read_file', args: { path: 'src/hooks/useAgent.ts' } },
+  ];
+  const texto = fase && !frag
+    ? (hechos < PASOS.length ? JSON.stringify(PASOS[hechos]) : `Fase ${fase[1]} terminada: revisé la estructura y el hook del agente.`)
+    : text;
   const enc = new TextEncoder();
   const stream = new ReadableStream({
     async start(ctrl) {
-      for (const part of text.match(/[\s\S]{1,12}/g)) {
+      for (const part of texto.match(/[\s\S]{1,12}/g)) {
         ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`));
-        await new Promise((r) => setTimeout(r, last.includes('lento') ? 700 : 30));
+        await new Promise((r) => setTimeout(r, last.includes('lento') ? 700 : fase ? 400 : 30));
       }
       ctrl.enqueue(enc.encode('data: [DONE]\n\n'));
       ctrl.close();
@@ -443,3 +470,33 @@ function mockCompletion(body) {
   return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
 }
 
+const OBRA_T0 = Date.now();
+function orchSimulado() {
+  const settings = { enabled: true };
+  if (!qs.has('obra')) return { settings, runs: {}, tasks: {}, messages: [], live: [], lxo_exists: true };
+  const s = (Date.now() - OBRA_T0) / 1000;
+  const hijo = (id, titulo, role, desde, hasta, final = 'done', espera = null) => {
+    if (s < desde) return null;
+    const terminada = hasta !== null && s >= hasta;
+    const esperando = espera && s >= espera[0] && s < espera[1];
+    return [id, {
+      id, run: 'run1', parent: 'raiz', depth: 1, title: titulo, role, agent: 'claude', repo: ROOT, created: OBRA_T0 + desde * 1000,
+      updated: OBRA_T0 + (terminada ? hasta : s) * 1000, phases: [],
+      status: terminada ? final : esperando ? 'waiting' : 'running',
+    }];
+  };
+  const hijos = [
+    hijo('t1', 'Explorar la estructura', 'explorador', 4, 18),
+    hijo('t2', 'Implementar el hook useAgent', 'implementador', 7, 30, 'done', [12, 16]),
+    hijo('t3', 'Revisar los tests', 'revisor', 14, 34, 'failed'),
+    hijo('t4', 'Arreglar el build', 'escalado', 10, 28),
+    hijo('t5', 'Actualizar el README', null, 16, 38),
+  ].filter(Boolean);
+  const tasks = { raiz: { id: 'raiz', run: 'run1', parent: null, depth: 0, title: 'Coordinador', agent: 'claude', repo: ROOT, status: 'running', created: OBRA_T0, updated: OBRA_T0, phases: [] }, ...Object.fromEntries(hijos) };
+  const messages = s > 9 ? [{ id: 'm1', kind: 'phase', from: 't1', to: 'raiz', body: 'Mapeando carpetas', at: OBRA_T0 + 9000 }] : [];
+  return { settings, runs: { run1: { id: 'run1', root: 'raiz', objective: 'Demo', created: OBRA_T0 } }, tasks, messages, live: [], lxo_exists: true, lxo: 'lxo' };
+}
+if (qs.has('obra')) setInterval(() => import('../store/orchStore').then((m) => m.useOrchStore.getState().refresh()), 700);
+
+// La mascota viene apagada de fábrica: el demo la enciende (mascota.js ya se evaluó).
+if (qs.has('obra')) import('../lib/mascota').then((m) => m.fijarMascota({ activa: true, personaje: 'ambos' }));
