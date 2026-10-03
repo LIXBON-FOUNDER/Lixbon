@@ -2020,6 +2020,7 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
         # de dónde salió cada conversación cuando lista todas juntas.
         # Las legacy (NULL) son de la web, igual que en el filtro de listado.
         "source": c.source or "web",
+        "archived": bool(c.archived),
         "created_at": c.created_at,
         "updated_at": c.updated_at,
     }
@@ -2027,10 +2028,11 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
 
 def list_conversations(
     user_id: int, limit: int = 50, offset: int = 0, q: str | None = None,
-    source: str | None = None,
+    source: str | None = None, archived: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Conversaciones del usuario, más recientes primero. `q` busca en el título.
-    `source` filtra por superficie (web/ide/cli); 'web' incluye las legacy (NULL)."""
+    `source` filtra por superficie (web/ide/cli); 'web' incluye las legacy (NULL).
+    `archived` None = todas."""
     with get_session() as s:
         stmt = (
             select(Conversation)
@@ -2045,7 +2047,39 @@ def list_conversations(
             stmt = stmt.where(Conversation.source == source)
         if q:
             stmt = stmt.where(Conversation.title.ilike(f"%{q}%"))
+        if archived is not None:
+            stmt = stmt.where(Conversation.archived == int(archived))
         return [_conversation_to_dict(c) for c in s.scalars(stmt).all()]
+
+
+def set_conversation_archived(conversation_id: str, user_id: int, archived: bool) -> bool:
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        conv.archived = int(archived)
+        # Desarchivar cuenta como actividad: si no, una vieja se purgaría al instante.
+        if not archived:
+            conv.updated_at = now_iso()
+        return True
+
+
+def purge_inactive_conversations(user_id: int, source: str, days: int) -> int:
+    """Borra las conversaciones sin archivar de `source` sin actividad en `days` días."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_session() as s:
+        stale = select(Conversation.id).where(
+            Conversation.user_id == user_id,
+            Conversation.source == source,
+            Conversation.archived == 0,
+            Conversation.updated_at < cutoff,
+        )
+        ids = list(s.scalars(stale).all())
+        if not ids:
+            return 0
+        s.execute(delete(Message).where(Message.conversation_id.in_(ids)))
+        s.execute(delete(Conversation).where(Conversation.id.in_(ids)))
+        return len(ids)
 
 
 def get_conversation(conversation_id: str, user_id: int) -> dict[str, Any] | None:

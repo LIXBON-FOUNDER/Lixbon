@@ -105,6 +105,12 @@ export const IconTrash = (p) => (
   </Svg>
 );
 
+export const IconArchive = (p) => (
+  <Svg {...p}>
+    <path d="M3 4h18v4H3zM5 8v12h14V8M10 12h4" />
+  </Svg>
+);
+
 export const IconArrowDown = (p) => (
   <Svg {...p}><path d="M12 5v14M6 13l6 6 6-6" /></Svg>
 );

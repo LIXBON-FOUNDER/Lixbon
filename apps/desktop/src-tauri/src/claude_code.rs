@@ -3,7 +3,7 @@
 //! permisos, interrupciones) lo habla el frontend (`src/lib/claudeCode.js`).
 //! El historial es el del propio Claude Code: `~/.claude/projects/<cwd>/*.jsonl`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -184,6 +184,44 @@ pub struct CcSession {
     id: String,
     title: String,
     updated_ms: u64,
+    archived: bool,
+}
+
+const PURGE_AFTER_MS: u64 = 14 * 24 * 60 * 60 * 1000;
+
+// Fuera de ~/.claude: Claude Code no debe ver ni pisar este archivo.
+fn archived_file() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(PathBuf::from(home).join(".lixbon").join("claude-archived.json"))
+}
+
+fn read_archived() -> HashSet<String> {
+    archived_file()
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn write_archived(ids: &HashSet<String>) -> Result<(), String> {
+    let path = archived_file().ok_or("no se encontró la carpeta del usuario")?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut list: Vec<&String> = ids.iter().collect();
+    list.sort();
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, serde_json::to_vec(&list).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+// Claude Code guarda junto al .jsonl una carpeta con los subagentes y resultados de herramientas.
+fn remove_session_files(dir: &Path, id: &str) -> Result<(), String> {
+    fs::remove_file(dir.join(format!("{id}.jsonl"))).map_err(|e| e.to_string())?;
+    let extra = dir.join(id);
+    if extra.is_dir() {
+        let _ = fs::remove_dir_all(extra);
+    }
+    Ok(())
 }
 
 fn text_of(content: &serde_json::Value) -> Option<String> {
@@ -242,6 +280,8 @@ fn session_title(path: &Path) -> Option<String> {
 #[tauri::command(async)]
 pub fn cc_sessions(cwd: String) -> Result<Vec<CcSession>, String> {
     let Some(dir) = project_dir(&cwd) else { return Ok(vec![]) };
+    let archived = read_archived();
+    let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     let mut files: Vec<(PathBuf, u64)> = fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .flatten()
@@ -253,17 +293,66 @@ pub fn cc_sessions(cwd: String) -> Result<Vec<CcSession>, String> {
             let ms = e.metadata().ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
             Some((p, ms))
         })
+        .filter(|(p, ms)| {
+            let id = p.file_stem().and_then(|x| x.to_str()).unwrap_or("");
+            if archived.contains(id) || now.saturating_sub(*ms) < PURGE_AFTER_MS || !valid_id(id) {
+                return true;
+            }
+            remove_session_files(&dir, id).is_err()
+        })
         .collect();
     files.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut recent = 0;
     Ok(files
         .into_iter()
-        .take(40)
+        .filter(|(p, _)| {
+            let is_archived = p.file_stem().and_then(|x| x.to_str()).is_some_and(|id| archived.contains(id));
+            if !is_archived {
+                recent += 1;
+            }
+            is_archived || recent <= 40
+        })
         .filter_map(|(p, ms)| {
             let id = p.file_stem()?.to_str()?.to_string();
             let title = session_title(&p)?;
-            Some(CcSession { id, title, updated_ms: ms })
+            let archived = archived.contains(&id);
+            Some(CcSession { id, title, updated_ms: ms, archived })
         })
         .collect())
+}
+
+#[tauri::command(async)]
+pub fn cc_session_delete(cwd: String, id: String) -> Result<(), String> {
+    if !valid_id(&id) {
+        return Err("id de sesión inválido".into());
+    }
+    let dir = project_dir(&cwd).ok_or("no hay historial de Claude Code para esta carpeta")?;
+    remove_session_files(&dir, &id)?;
+    let mut archived = read_archived();
+    if archived.remove(&id) {
+        write_archived(&archived)?;
+    }
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn cc_session_archive(cwd: String, id: String, archived: bool) -> Result<(), String> {
+    if !valid_id(&id) {
+        return Err("id de sesión inválido".into());
+    }
+    let mut ids = read_archived();
+    if archived {
+        ids.insert(id);
+    } else {
+        // Desarchivar cuenta como actividad: si no, una vieja se purgaría al listar.
+        if let Some(dir) = project_dir(&cwd) {
+            if let Ok(f) = fs::File::options().write(true).open(dir.join(format!("{id}.jsonl"))) {
+                let _ = f.set_modified(std::time::SystemTime::now());
+            }
+        }
+        ids.remove(&id);
+    }
+    write_archived(&ids)
 }
 
 #[tauri::command(async)]

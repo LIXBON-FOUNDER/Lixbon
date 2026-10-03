@@ -101,6 +101,7 @@ def init_db() -> None:
         # Origen de la conversación (web/ide/cli): historial independiente por
         # superficie. NULL = legacy (se muestra en la web).
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source TEXT",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived INTEGER NOT NULL DEFAULT 0",
         # Releases multi-producto (desktop/android): la unicidad pasa de
         # version → (product, version). El DROP del constraint viejo es
         # imprescindible: con él, registrar el APK 0.1.0 pisaría el MSI 0.1.0.

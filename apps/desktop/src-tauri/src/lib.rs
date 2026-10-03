@@ -1438,6 +1438,8 @@ pub fn run() {
             claude_code::cc_stop,
             claude_code::cc_sessions,
             claude_code::cc_session_read,
+            claude_code::cc_session_delete,
+            claude_code::cc_session_archive,
             claude_code::cc_config,
             claude_code::cc_config_open,
             orch::orch_snapshot,

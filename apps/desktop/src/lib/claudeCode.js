@@ -51,6 +51,8 @@ export const CLAUDE_MODES = [
 export const claudeVersion = () => invoke('cc_version');
 export const claudeSessions = (cwd) => invoke('cc_sessions', { cwd });
 export const claudeTranscript = (cwd, id) => invoke('cc_session_read', { cwd, id });
+export const claudeDeleteSession = (cwd, id) => invoke('cc_session_delete', { cwd, id });
+export const claudeArchiveSession = (cwd, id, archived) => invoke('cc_session_archive', { cwd, id, archived });
 
 /** Plan y Preguntar son solo lectura: los dos van al modo plan de Claude Code. */
 export const permissionModeOf = (chatMode) => (chatMode === 'agent' ? 'default' : 'plan');
