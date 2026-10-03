@@ -2,7 +2,7 @@
 // cálida: titulares en Lancelot, mucho aire, secciones numeradas y cuatro
 // paisajes pintados (Paisajes.jsx) que se mueven despacio con el scroll. Es
 // la página que posiciona: todo el texto va en HTML, con FAQPage.
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
@@ -14,6 +14,7 @@ import { useRevelar } from '../hooks/useRevelar';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
 import { useAuth } from '../hooks/useAuth';
 import { MascotaGuia } from '../components/Mascota';
+import { PreguntaLixbon } from '../components/PreguntaLixbon';
 
 const CODIGO = `from openai import OpenAI
 
@@ -35,6 +36,7 @@ export default function LandingPage() {
   const locale = useLocale();
   const t = useT('landing');
   const revelar = useRevelar();
+  const [preguntando, setPreguntando] = useState(false);
 
   const jsonLd = useMemo(() => [
     ORGANIZACION,
@@ -150,13 +152,18 @@ export default function LandingPage() {
             <span className="landing__num">{t('section5Num')}</span>
             <h2 className="landing__h2">{t('faqTitle')}</h2>
           </div>
-          <div className="landing__faq" data-revelar>
-            {t('faq').map(({ q, a }) => (
-              <details key={q}>
-                <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
-                <p>{a}</p>
-              </details>
-            ))}
+          <div data-revelar>
+            <div className={`landing__faqbox ${preguntando ? 'is-preguntando' : ''}`}>
+              <div className="landing__faq" inert={preguntando}>
+                {t('faq').map(({ q, a }) => (
+                  <details key={q}>
+                    <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
+                    <p>{a}</p>
+                  </details>
+                ))}
+              </div>
+              <PreguntaLixbon abierta={preguntando} onAbrir={() => setPreguntando(true)} onCerrar={() => setPreguntando(false)} />
+            </div>
           </div>
         </section>
 
