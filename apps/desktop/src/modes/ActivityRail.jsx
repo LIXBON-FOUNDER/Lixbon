@@ -1,8 +1,7 @@
 // ActivityRail.jsx — riel de iconos del modo Editor.
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useGitStore } from '../store/gitStore';
-import { useAppStore } from '../store/appStore';
-import { IconFolder, IconSearch, IconGitBranch, IconExtensions, IconSliders } from '../components/Icons';
+import { IconFolder, IconSearch, IconGitBranch, IconExtensions } from '../components/Icons';
 
 const ITEMS = [
   { view: 'files', label: 'Archivos', kbd: 'Ctrl Shift E', Icon: IconFolder },
@@ -13,7 +12,6 @@ const ITEMS = [
 export function ActivityRail() {
   const { sideOpen, sideView, showSide, toggleSide, setMode } = useWorkbenchStore();
   const changes = useGitStore((s) => s.changes.length);
-  const openModal = useAppStore((s) => s.openModal);
 
   const pick = (view) => (sideOpen && sideView === view ? toggleSide() : showSide(view));
 
@@ -33,10 +31,6 @@ export function ActivityRail() {
           <Icon size={18} />
         </button>
       ))}
-      <div className="rail__fill" />
-      <button className="rail__btn" onClick={() => openModal('settings')} data-tip="Ajustes">
-        <IconSliders size={18} />
-      </button>
     </nav>
   );
 }

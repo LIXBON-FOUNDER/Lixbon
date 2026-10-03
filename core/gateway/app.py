@@ -28,7 +28,7 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor
+from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -125,6 +125,7 @@ app.include_router(ws_status.router)
 app.include_router(monitor.router)
 app.include_router(status.router)    # /api/status público (página /status)
 app.include_router(support.router)   # /api/support: formulario de soporte
+app.include_router(ask.router)       # /api/ask: pregunta a lixbon en la FAQ de la portada
 app.include_router(nodes_admin.router)
 app.include_router(nodes_link.router)
 app.include_router(images.router)     # /api/images/* (nodos con modelo de difusión)

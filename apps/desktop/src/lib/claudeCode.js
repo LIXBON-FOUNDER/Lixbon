@@ -115,6 +115,31 @@ export async function startClaude({ procId, cwd, resume, model, effort, permissi
   };
 }
 
+/** Una pregunta suelta a Claude Code, sin herramientas ni sesión guardada. */
+export async function claudeAsk({ cwd, prompt, model = 'haiku', onDelta }) {
+  const procId = `ask-${Date.now()}`;
+  let text = '';
+  let proc;
+  try {
+    return await new Promise((resolve, reject) => {
+      startClaude({
+        procId, cwd, model, permissionMode: 'plan', extraArgs: ['--no-session-persistence', '--tools', ''],
+        onEvent: (ev) => {
+          if (ev.type === 'stream_event' && ev.event?.delta?.type === 'text_delta') { text += ev.event.delta.text; onDelta?.(text); }
+          else if (ev.type === 'result') {
+            if (ev.is_error) reject(new Error(ev.result || 'Claude Code no pudo responder'));
+            else resolve(ev.result || text);
+          }
+        },
+        onStderr: () => {},
+        onExit: () => reject(new Error('Claude Code se cerró sin responder')),
+      }).then((p) => { proc = p; p.send(userMessage(prompt)).catch(reject); }, reject);
+    });
+  } finally {
+    proc?.close();
+  }
+}
+
 export function userMessage(text, images = [], uuid = undefined) {
   const content = [];
   for (const im of images) {

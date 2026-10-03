@@ -59,6 +59,8 @@ export const useWorkbenchStore = create((set, get) => ({
 
   editor: { fontSize: 13, tabSize: 2, wordWrap: false, ...read('lx_editor', {}) },
 
+  commitMsg: { engine: 'lixbon', lang: 'es', ...read('lx_commitmsg', {}) },
+
   design: { url: 'http://localhost:3000', device: 'mobile', landscape: false, zoom: 'fit', ...read('lx_design', {}) },
 
   openSettings: (section) => set({ page: 'settings', settingsSection: section || get().settingsSection }),
@@ -131,6 +133,12 @@ export const useWorkbenchStore = create((set, get) => ({
     const editor = { ...get().editor, [key]: value };
     write('lx_editor', editor);
     set({ editor });
+  },
+
+  setCommitMsgOption: (key, value) => {
+    const commitMsg = { ...get().commitMsg, [key]: value };
+    write('lx_commitmsg', commitMsg);
+    set({ commitMsg });
   },
 
   setDesign: (patch) => {

@@ -7,7 +7,9 @@ import { listen } from '@tauri-apps/api/event';
 import { gitRun, gitClone } from '../lib/tauri';
 import { streamChatCompletion } from '../lib/stream';
 import { splitThinking } from '../lib/agentProtocol';
+import { claudeAsk } from '../lib/claudeCode';
 import { useAppStore } from './appStore';
+import { useWorkbenchStore } from './workbenchStore';
 import { useOutputStore } from './outputStore';
 
 // Cada cuánto se consulta al remoto si hay commits nuevos.
@@ -51,9 +53,14 @@ function parseNumstat(stdout) {
   return map;
 }
 
-const COMMIT_SYSTEM = 'Escribes mensajes de commit. Responde SOLO con el mensaje: una primera línea de máximo 72 caracteres '
-  + 'y, si hace falta, una línea en blanco y 1-4 viñetas breves. Sigue el estilo de los commits recientes del repositorio '
-  + '(idioma, prefijos tipo feat/fix, ámbito entre paréntesis). Sin comillas ni bloques de código.';
+const COMMIT_LANGS = { es: 'español', en: 'inglés', pt: 'portugués', fr: 'francés', de: 'alemán', it: 'italiano' };
+
+const commitRules = (lang) => 'Escribes mensajes de commit siguiendo Conventional Commits: '
+  + '`tipo(ámbito opcional): descripción` con tipo feat, fix, docs, style, refactor, perf, test, build, ci o chore, '
+  + 'en minúsculas, modo imperativo y sin punto final. Primera línea de máximo 72 caracteres y, si hace falta, '
+  + 'una línea en blanco y 1-4 viñetas breves (usa `BREAKING CHANGE:` si rompe compatibilidad). '
+  + `Escribe la descripción en ${COMMIT_LANGS[lang] || COMMIT_LANGS.es}; el tipo y el ámbito siempre en inglés minúsculas. `
+  + 'Responde SOLO con el mensaje, sin comillas ni bloques de código.';
 
 const cleanMessage = (raw) => splitThinking(raw).visible.replace(/^```\w*\n?|```\s*$/g, '');
 
@@ -184,8 +191,9 @@ export const useGitStore = create((set, get) => ({
       de trabajo si no hay nada preparado) y del estilo de los últimos commits. */
   generateMessage: async () => {
     if (get().generating) return { ok: false };
-    const { serverUrl, apiKey, currentModel } = useAppStore.getState();
-    if (!currentModel) return { ok: false, error: 'Elige un modelo en el chat primero.' };
+    const { serverUrl, apiKey, currentModel, workspaceRoot } = useAppStore.getState();
+    const { engine, lang } = useWorkbenchStore.getState().commitMsg;
+    if (engine !== 'claude' && !currentModel) return { ok: false, error: 'Elige un modelo en el chat primero.' };
     set({ generating: true });
     try {
       const staged = get().changes.some((c) => c.staged);
@@ -195,18 +203,24 @@ export const useGitStore = create((set, get) => ({
       ]);
       const patch = (diff.stdout || '').slice(0, 14000);
       if (!patch.trim()) return { ok: false, error: 'No hay cambios que describir.' };
+      const context = `Commits recientes:\n${recent.stdout || '(ninguno)'}\n\nDiff:\n${patch}`;
       let raw = '';
-      await streamChatCompletion({
-        serverUrl, apiKey, model: currentModel, noPersist: true,
-        messages: [
-          { role: 'system', content: COMMIT_SYSTEM },
-          { role: 'user', content: `Commits recientes:\n${recent.stdout || '(ninguno)'}\n\nDiff:\n${patch}` },
-        ],
-        onDelta: (d) => {
-          raw += d;
-          set({ message: cleanMessage(raw).trimStart() });
-        },
-      });
+      if (engine === 'claude') {
+        raw = await claudeAsk({
+          cwd: workspaceRoot,
+          prompt: `${commitRules(lang)}\n\n${context}`,
+          onDelta: (t) => set({ message: cleanMessage(t).trimStart() }),
+        });
+      } else {
+        await streamChatCompletion({
+          serverUrl, apiKey, model: currentModel, noPersist: true,
+          messages: [{ role: 'system', content: commitRules(lang) }, { role: 'user', content: context }],
+          onDelta: (d) => {
+            raw += d;
+            set({ message: cleanMessage(raw).trimStart() });
+          },
+        });
+      }
       set({ message: cleanMessage(raw).trim() });
       return { ok: true };
     } catch (e) {
