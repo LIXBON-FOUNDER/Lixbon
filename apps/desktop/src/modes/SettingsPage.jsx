@@ -10,12 +10,13 @@ import { EditorPage } from '../sections/Settings/pages/EditorPage';
 import { ServerPage } from '../sections/Settings/pages/ServerPage';
 import { OrchestratorPage } from '../sections/Settings/pages/OrchestratorPage';
 import { McpPage } from '../sections/Settings/pages/McpPage';
+import { GitPage } from '../sections/Settings/pages/GitPage';
 import { MascotaPage } from '../sections/Settings/pages/MascotaPage';
 import { Keybindings } from '../sections/Settings/Keybindings';
 import { getAppVersion } from '../lib/tauri';
 import {
   IconChevronLeft, IconSearch, IconUser, IconChart, IconShield, IconNodes, IconPuzzle,
-  IconCode, IconKeyboard, IconServer, IconExtensions, IconMascota,
+  IconCode, IconKeyboard, IconServer, IconExtensions, IconMascota, IconGitBranch,
 } from '../components/Icons';
 
 const GROUPS = [
@@ -30,6 +31,7 @@ const GROUPS = [
   ] },
   { label: 'Espacio de trabajo', items: [
     { id: 'editor', label: 'Interfaz y editor', icon: IconCode, keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
+    { id: 'git', label: 'Git', icon: IconGitBranch, keywords: 'git commit mensaje conventional commits idioma generar claude lixbon', Page: GitPage },
     { id: 'keys', label: 'Atajos de teclado', icon: IconKeyboard, keywords: 'atajos teclado keybindings combinacion', Page: Keybindings },
     { id: 'mascota', label: 'Mascota', icon: IconMascota, keywords: 'mascota gael leya pixel animacion kart latigo aviso flotante dormir', Page: MascotaPage },
   ] },

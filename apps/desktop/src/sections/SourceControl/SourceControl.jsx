@@ -1,7 +1,7 @@
 // SourceControl.jsx — panel izquierdo del modo Git: rama, mensaje de commit
 // (con propuesta del modelo), cambios preparados y sin preparar, historial y
 // el estado del pull request de la rama.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useGitStore } from '../../store/gitStore';
 import { useAppStore } from '../../store/appStore';
 import { pickDirectory } from '../../lib/tauri';
@@ -138,6 +138,14 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishUrl, setPublishUrl] = useState('');
   const branchRef = useRef(null);
+  const msgRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = msgRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [message, isRepo]);
 
   useEffect(() => { refresh(); }, [refresh, workspaceRoot]);
   useEffect(() => { if (historyOpen) log(60).then(setCommits); }, [historyOpen, log, ahead, changes.length]);
@@ -197,9 +205,10 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
       <div className="scm2__commit">
         <div className="scm2__msg">
           <textarea
+            ref={msgRef}
             value={message}
             placeholder={staged.length ? 'Mensaje de commit' : 'Prepara cambios para hacer commit'}
-            rows={message.includes('\n') ? 4 : 2}
+            rows={1}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey && canCommit) run(commit); }}
           />

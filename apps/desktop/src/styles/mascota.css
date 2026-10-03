@@ -242,6 +242,7 @@
 
 .mascota-fila__controles { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .mascota-minutos { width: 104px; }
+.mascota-minutos .select__btn { width: 100%; min-width: 0; padding: 6px 8px 6px 11px; }
 
 /* ── Obra: Gael y Leya coordinando robots obreros (chat/ObraAgente.jsx) ─ */
 

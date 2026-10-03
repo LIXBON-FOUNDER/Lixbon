@@ -22,7 +22,7 @@ import { AppMenu } from './AppMenu';
 import { WindowControls } from './WindowControls';
 import {
   IconSearch, IconChevronDown, IconLayoutLeft, IconLayoutBottom, IconLayoutRight,
-  IconFolderOpen, IconFileCode, IconTerminal,
+  IconFolderOpen, IconFileCode, IconTerminal, IconSliders,
 } from '../components/Icons';
 
 const MODE_TABS = [
@@ -252,6 +252,17 @@ function SearchExpand() {
   );
 }
 
+function SettingsButton() {
+  const open = useWorkbenchStore((s) => s.page === 'settings');
+  const openSettings = useWorkbenchStore((s) => s.openSettings);
+  const closePage = useWorkbenchStore((s) => s.closePage);
+  return (
+    <button className={`ic ${open ? 'is-on' : ''}`} onClick={() => (open ? closePage() : openSettings())} title="Ajustes">
+      <IconSliders size={16} />
+    </button>
+  );
+}
+
 const RIGHT_TITLE = { editor: 'Agente', agent: 'Cambios', design: 'Agente' };
 
 function PanelToggles() {
@@ -297,6 +308,7 @@ export function TitleBar({ minimal = false }) {
               <IconTerminal size={16} />
             </button>
           )}
+          <SettingsButton />
           <TeamButton />
           <AccountMenu compact />
         </div>
