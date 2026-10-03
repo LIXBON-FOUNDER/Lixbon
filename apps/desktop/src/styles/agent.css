@@ -361,6 +361,8 @@
 .hist__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
 .hist__group + .hist__group { margin-top: 12px; }
 .hist__label { display: block; padding: 4px 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-35); }
+.hist__label--toggle { display: flex; align-items: center; gap: 4px; width: 100%; text-align: left; }
+.hist__label--toggle:hover { color: var(--ink-50); }
 .hist__item { position: relative; display: flex; align-items: center; border-radius: var(--radius); animation: lx-rise 0.3s var(--ease) both; }
 .hist__item:hover { background: rgba(var(--ink-rgb), 0.04); }
 .hist__item.is-active { background: var(--surface-4); }

@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { FONT } from '../editor/TerminalPanel';
 import { currentXtermTheme } from '../editor/xtermThemes';
 import { watchTheme } from '../editor/themeMode';
+import { ptyCols } from '../lib/orchTermSize';
 
 export function AgentTerminal({ task, live }) {
   const hostRef = useRef(null);
@@ -37,7 +38,7 @@ export function AgentTerminal({ task, live }) {
     const resize = () => {
       try {
         fit.fit();
-        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).catch(() => {});
+        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).then(() => ptyCols.set(task, term.cols)).catch(() => {});
       } catch { /* oculto */ }
     };
 

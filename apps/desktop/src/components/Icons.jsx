@@ -105,6 +105,12 @@ export const IconTrash = (p) => (
   </Svg>
 );
 
+export const IconArchive = (p) => (
+  <Svg {...p}>
+    <path d="M3 4h18v4H3zM5 8v12h14V8M10 12h4" />
+  </Svg>
+);
+
 export const IconArrowDown = (p) => (
   <Svg {...p}><path d="M12 5v14M6 13l6 6 6-6" /></Svg>
 );
@@ -130,6 +136,11 @@ export const IconCheck = (p) => (
 
 export const IconUser = (p) => (
   <Svg {...p}><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></Svg>
+);
+
+// Cabeza de chibi: Gael y Leya (Ajustes › Mascota).
+export const IconMascota = (p) => (
+  <Svg {...p}><circle cx="12" cy="10.5" r="6" /><path d="M6.3 9c1.3-1.4 3.2-2.2 5.7-2.2s4.4.8 5.7 2.2M9.6 11.2v.6M14.4 11.2v.6M7.5 20.5c1-1.5 2.6-2.3 4.5-2.3s3.5.8 4.5 2.3" /></Svg>
 );
 
 export const IconChart = (p) => (

@@ -1,14 +1,16 @@
 // HistoryList.jsx — conversaciones del IDE agrupadas por fecha, con la que
-// está en curso arriba: buscar, abrir, renombrar y borrar.
+// está en curso arriba: buscar, abrir, renombrar, archivar y borrar.
+// Lo no archivado se borra solo tras 14 días sin actividad: Claude Code en cc_sessions,
+// Lixbon en el gateway al listar source=ide.
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { showConfirm } from '../lib/confirm';
 import { useChatStore, useOpenSessions, useSessionsStore, spawnSessionOf } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
-import { claudeSessions } from '../lib/claudeCode';
+import { claudeSessions, claudeDeleteSession, claudeArchiveSession } from '../lib/claudeCode';
 import { ClaudeMark } from '../components/Logo';
 import { SpinRing } from '../components/Ring';
-import { IconPencil, IconTrash, IconSearch } from '../components/Icons';
+import { IconPencil, IconTrash, IconSearch, IconArchive, IconChevronRight, IconChevronDown } from '../components/Icons';
 
 function relTime(iso) {
   if (!iso) return '';
@@ -41,14 +43,17 @@ export function HistoryList() {
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const open = useOpenSessions();
   const running = open.filter((o) => o.streaming || o.waiting || (!o.active && !o.seen && o.hasMessages));
   const runningKey = running.map((o) => `${o.key}:${o.streaming}:${o.conversationId}`).join('|');
 
   const fetchList = async (q = '') => {
+    const base = `/api/conversations?source=ide&limit=50${q ? `&q=${encodeURIComponent(q)}` : ''}`;
     try {
-      const res = await api.get(`/api/conversations?source=ide&limit=50${q ? `&q=${encodeURIComponent(q)}` : ''}`);
-      setItems(res.conversations || []);
+      const [recent, archived] = await Promise.all([api.get(`${base}&archived=false`), api.get(`${base}&archived=true`)]);
+      // Un gateway sin `archived` ignora el filtro y devuelve lo mismo en ambas: el filtro evita duplicados.
+      setItems([...(recent.conversations || []).filter((c) => !c.archived), ...(archived.conversations || []).filter((c) => c.archived)]);
     } catch {
       setItems([]);
     }
@@ -62,7 +67,7 @@ export function HistoryList() {
   useEffect(() => {
     if (!workspaceRoot) { setCcItems([]); return; }
     claudeSessions(workspaceRoot)
-      .then((list) => setCcItems(list.map((s) => ({ id: s.id, title: s.title, updated_at: new Date(s.updated_ms).toISOString(), engine: 'claude' }))))
+      .then((list) => setCcItems(list.map((s) => ({ id: s.id, title: s.title, updated_at: new Date(s.updated_ms).toISOString(), engine: 'claude', archived: s.archived }))))
       .catch(() => setCcItems([]));
   }, [workspaceRoot, conversationId, streaming, runningKey]);
 
@@ -80,12 +85,15 @@ export function HistoryList() {
     const pool = engine === 'claude' ? ccItems.filter((c) => !q || c.title.toLowerCase().includes(q)) : (items || []);
     const all = [...pool]
       .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    const archived = [];
     for (const c of all) {
       if (liveIds.has(c.id)) continue;
+      if (c.archived) { archived.push(c); continue; }
       const label = groupOf(c.updated_at);
       const g = out.find((x) => x.label === label) || (out.push({ label, items: [] }), out[out.length - 1]);
       g.items.push(c);
     }
+    if (archived.length) out.push({ label: 'Archivadas', archived: true, items: archived });
     return out;
   }, [items, ccItems, runningKey, engine]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -113,18 +121,39 @@ export function HistoryList() {
     }
   };
 
-  const remove = async (id, title) => {
+  const remove = async (c) => {
+    const claude = c.engine === 'claude';
     const { choice } = await showConfirm({
-      title: 'Eliminar conversación',
-      message: `«${title || 'Sin título'}» se borrará para siempre, también en la web y el móvil.`,
+      title: claude ? 'Eliminar sesión' : 'Eliminar conversación',
+      message: `«${c.title || 'Sin título'}» se borrará para siempre, ${claude ? 'también del historial de Claude Code en la terminal' : 'también en la web y el móvil'}.`,
       options: [{ id: 'yes', label: 'Eliminar', kind: 'danger' }, { id: 'cancel', label: 'Cancelar' }],
     });
     if (choice !== 'yes') return;
     try {
-      await api.delete(`/api/conversations/${id}`);
-      setItems((prev) => prev.filter((c) => c.id !== id));
+      if (claude) {
+        await claudeDeleteSession(workspaceRoot, c.id);
+        setCcItems((prev) => prev.filter((x) => x.id !== c.id));
+      } else {
+        await api.delete(`/api/conversations/${c.id}`);
+        setItems((prev) => prev.filter((x) => x.id !== c.id));
+      }
     } catch (e) {
-      setError(`No se pudo eliminar: ${e.message}`);
+      setError(`No se pudo eliminar: ${e.message || e}`);
+    }
+  };
+
+  const toggleArchive = async (c) => {
+    const flip = (prev) => prev.map((x) => (x.id === c.id ? { ...x, archived: !c.archived } : x));
+    try {
+      if (c.engine === 'claude') {
+        await claudeArchiveSession(workspaceRoot, c.id, !c.archived);
+        setCcItems(flip);
+      } else {
+        await (c.archived ? api.delete : api.post)(`/api/conversations/${c.id}/archive`);
+        setItems(flip);
+      }
+    } catch (e) {
+      setError(`No se pudo archivar: ${e.message || e}`);
     }
   };
 
@@ -147,8 +176,12 @@ export function HistoryList() {
         {items && groups.length === 0 && <span className="hist__empty">{query ? 'Sin resultados.' : 'Aún no tienes conversaciones.'}</span>}
         {groups.map((g) => (
           <section key={g.label} className="hist__group">
-            <span className="hist__label">{g.label}</span>
-            {g.items.map((c, i) => (
+            {g.archived ? (
+              <button className="hist__label hist__label--toggle" onClick={() => setShowArchived((v) => !v)}>
+                {showArchived ? <IconChevronDown size={10} /> : <IconChevronRight size={10} />} {g.label} · {g.items.length}
+              </button>
+            ) : <span className="hist__label">{g.label}</span>}
+            {(!g.archived || showArchived) && g.items.map((c, i) => (
               <div key={c.key || c.id} className={`hist__item ${(c.key ? open.find((o) => o.key === c.key)?.active : c.id === conversationId) ? 'is-active' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 20}ms` }}>
                 {renamingId === c.id ? (
                   <input
@@ -177,10 +210,13 @@ export function HistoryList() {
                     <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
                   </button>
                 )}
-                {!c.live && c.engine !== 'claude' && renamingId !== c.id && (
+                {!c.live && renamingId !== c.id && (
                   <span className="hist__acts">
-                    <button className="ic" title="Renombrar" onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}><IconPencil size={12} /></button>
-                    <button className="ic" title="Eliminar" onClick={() => remove(c.id, c.title)}><IconTrash size={12} /></button>
+                    {c.engine !== 'claude' && (
+                      <button className="ic" title="Renombrar" onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}><IconPencil size={12} /></button>
+                    )}
+                    <button className="ic" title={c.archived ? 'Desarchivar' : 'Archivar (no se borrará sola)'} onClick={() => toggleArchive(c)}><IconArchive size={12} /></button>
+                    <button className="ic" title="Eliminar" onClick={() => remove(c)}><IconTrash size={12} /></button>
                   </span>
                 )}
               </div>

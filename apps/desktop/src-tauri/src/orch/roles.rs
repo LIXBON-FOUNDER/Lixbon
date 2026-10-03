@@ -32,6 +32,8 @@ pub const ROLES: &[RoleSpec] = &[
         purpose: "Revisa el diff de otra hija y busca fallos. No edita archivos." },
     RoleSpec { id: "escalado", label: "Escalado", read_only: false, model: "opus", effort: "high",
         purpose: "Retoma lo que el implementador no resolvió tras dos intentos." },
+    RoleSpec { id: "adversario", label: "Adversario", read_only: true, model: "opus", effort: "high",
+        purpose: "Busca cómo se rompe lo que hizo otro: casos límite, errores ocultos, suposiciones sin justificar. No edita archivos." },
 ];
 
 pub fn spec(id: &str) -> Option<&'static RoleSpec> {
@@ -110,6 +112,14 @@ mod tests {
         let r = resolve(&cfg, "revisor").unwrap();
         assert_eq!((r.model.as_str(), r.effort), ("opus", None));
         assert!(resolve(&cfg, "planner").is_err());
+    }
+
+    #[test]
+    fn el_adversario_es_opus_high_y_solo_lectura() {
+        let r = resolve(&BTreeMap::new(), "adversario").unwrap();
+        assert_eq!((r.model.as_str(), r.effort.as_deref()), ("opus", Some("high")));
+        assert!(r.spec.read_only);
+        assert!(defaults().contains_key("adversario"));
     }
 
     #[test]
