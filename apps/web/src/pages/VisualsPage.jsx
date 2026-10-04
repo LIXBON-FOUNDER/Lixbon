@@ -25,18 +25,18 @@ import {
 } from '../lib/visuals';
 import {
   baseDe, deleteVisual, eventsUrl, fileUrl, getText, getVisual, listRenders, metaDePieza, paraWeb, piezasDe, pushFiles,
-  rendersPorFuente, requestRender, setShare,
+  renombrarVersion, rendersPorFuente, requestRender, setShare,
 } from '../lib/visualsApi';
 import {
-  actualizarVisual, aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, guardarRespuesta,
-  listarVersiones, listarVisuals,
+  actualizarVisual, aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, etiquetaDePedido,
+  guardarRespuesta, listarVersiones, listarVisuals, nombreVersion,
 } from '../lib/visualStudio';
 import { Logo } from '../components/Logo';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
 import { Board, DesignSystemPicker, Inspector } from '../components/VisualsPanels';
-import { PiezaEditor } from '../components/PiezaEditor';
+import { PiezaEditor, PiezaVista } from '../components/PiezaEditor';
 import { Desplegable } from '../components/Desplegable';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import {
@@ -350,15 +350,19 @@ function Galeria({ t, tc }) {
 // ── Estudio de un visual ─────────────────────────────────────────────────────
 
 function Salida({ id, version, piece, t }) {
-  const [html, setHtml] = useState('');
-  const fuente = !piece.output && piece.source;
+  const [html, setHtml] = useState(null);
+  const fuente = piece.source;
+  // Con su HTML se ve la pieza real a cualquier zoom; el PNG/MP4 queda para descargar.
+  // En vídeo se muestra el MP4 si está al día, para ver el resultado final.
+  const usarSalida = piece.output && (!fuente || (esVideo(piece.output.path) && !piece.stale));
   useEffect(() => {
-    if (!fuente) return;
-    getText(fileUrl(id, fuente.path, version)).then((h) => setHtml(paraWeb(h, baseDe(id, fuente.path)))).catch(() => setHtml(''));
-  }, [id, fuente, version]);
-  // Sin scripts (las piezas animan solo con CSS) y con origen propio: así cargan
-  // las fuentes de marca, que un iframe sin origen no puede pedir.
-  if (fuente) return <iframe className="vis-pieza__vivo" title={fuente.path} sandbox="allow-same-origin" srcDoc={html} />;
+    if (!fuente || usarSalida) return;
+    getText(fileUrl(id, fuente.path, version)).then(setHtml).catch(() => setHtml(''));
+  }, [id, fuente, version, usarSalida]);
+  if (fuente && !usarSalida) {
+    if (html === null) return null;
+    return <PiezaVista html={html} meta={metaDePieza(html)} baseHref={baseDe(id, fuente.path)} title={fuente.path} />;
+  }
   if (!piece.output) return <p className="vis-stage__empty">{t('notRendered')}</p>;
   const src = fileUrl(id, piece.output.path, version);
   return esVideo(piece.output.path)
@@ -382,7 +386,8 @@ function Estudio({ id }) {
   const [error, setError] = useState('');
   const [verNum, setVerNum] = useState(null);         // null = la última
   const [historial, setHistorial] = useState([]);
-  const [nueva, setNueva] = useState(null);           // versión que llegó mientras mirabas otra
+  const [nueva, setNueva] = useState(null);           // { v, label } que llegó mientras mirabas otra
+  const [renombrando, setRenombrando] = useState(null);
   const [messages, setMessages] = useState([]);
   const [models, setModels] = useState([]);
   const [modelInfo, setModelInfo] = useState({});
@@ -478,14 +483,15 @@ function Estudio({ id }) {
     if (loading || !user || error) return undefined;
     const es = new EventSource(eventsUrl(id));
     es.addEventListener('version', (e) => {
-      const { version: v } = JSON.parse(e.data);
+      const { version: v, label } = JSON.parse(e.data);
       cargarHistorial();
       if (busyRef.current) return;
-      if (verNumRef.current === null) cargar(null); else setNueva(v);
+      if (verNumRef.current === null) cargar(null); else setNueva({ v, label });
     });
     es.addEventListener('meta', (e) => {
-      const { title } = JSON.parse(e.data);
-      setManifest((m) => (m ? { ...m, title } : m));
+      const { title, label } = JSON.parse(e.data);
+      if (title) setManifest((m) => (m ? { ...m, title } : m));
+      if (label) cargarHistorial();
     });
     es.addEventListener('render', (e) => {
       const ev = JSON.parse(e.data);
@@ -508,7 +514,8 @@ function Estudio({ id }) {
   const viendoUltima = !manifest || manifest.viewing === manifest.version;
   const { pieces, docs } = useMemo(() => (manifest ? piezasDe(manifest) : { pieces: [], docs: [] }), [manifest]);
   const modoImagen = manifest?.meta?.mode === 'image';
-  const modoPiezas = !vivo && manifest && (manifest.kind === 'marketing' || modoImagen || pieces.some((p) => p.source?.render)
+  // Un diseño sigue siendo páginas aunque el agente le pusiera <meta name="render"> para revisarlo.
+  const modoPiezas = !vivo && manifest && (manifest.kind === 'marketing' || modoImagen
     || (!paginasSrv.length && pieces.some((p) => p.output)));
   const docActual = docs.find((d) => d.path === pagina);
   const paginaActual = docActual || modoPiezas ? null : (paginas.find((f) => f.name === pagina) || paginas[0] || null);
@@ -611,7 +618,7 @@ function Estudio({ id }) {
     setAviso('');
     try {
       const files = retocadas.map((f) => ({ path: f.name, role: 'source', text: aplicarOps(f.code, ops[`${versionVista}:${f.name}`]) }));
-      await pushFiles(id, files, manifest.version);
+      await pushFiles(id, files, manifest.version, { amend: true });
       guardarOps((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith(`${versionVista}:`))));
       setDeshechas({});
       setInspeccion(false);
@@ -626,6 +633,18 @@ function Estudio({ id }) {
     }
   };
 
+  const primeraVersion = historial.length ? historial[historial.length - 1].version : 1;
+  const nombreDe = (h) => nombreVersion(h, t, { primera: h?.version === primeraVersion });
+  const etiquetaVista = nombreDe(historial.find((h) => h.version === manifest?.viewing)
+    || { version: manifest?.viewing, label: manifest?.viewing_label });
+  const guardarNombre = async (version, valor) => {
+    setRenombrando(null);
+    const limpio = (valor || '').trim();
+    const actual = historial.find((h) => h.version === version);
+    if (!limpio || limpio === actual?.label) return;
+    setHistorial((hs) => hs.map((h) => (h.version === version ? { ...h, label: limpio } : h)));
+    try { await renombrarVersion(id, version, limpio); } catch { cargarHistorial(); }
+  };
   const verVersion = (v) => { setVerNum(v >= (manifest?.version || 0) ? null : v); setNueva(null); setPanelMovil('lienzo'); };
   const elegirAncho = (a) => { setAncho(a); local.set('lixbon.visuals.ancho', a); };
   const irAPagina = (name) => { setPagina(name); setVista('pagina'); };
@@ -692,7 +711,7 @@ function Estudio({ id }) {
       const ext = (r.data.mime || 'image/jpeg').includes('png') ? 'png' : 'jpg';
       const n = pieces.filter((p) => p.output && !p.source).length + 1;
       const nombre = `imagen-${n}.${ext}`;
-      await pushFiles(id, [{ path: nombre, role: 'output', base64: r.data.image_base64 }], manifest.version);
+      await pushFiles(id, [{ path: nombre, role: 'output', base64: r.data.image_base64 }], manifest.version, { label: etiquetaDePedido(prompt) });
       setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', content: t('imageSaved', { name: nombre }) }]);
       setVerNum(null);
       await cargar(null);
@@ -755,7 +774,7 @@ function Estudio({ id }) {
           return { ...last, content: t('emptyModelResponse'), error: true };
         });
       }
-      await guardarDe(respuesta, base, patchLast);
+      await guardarDe(respuesta, base, patchLast, texto);
       if (isFirst) {
         try {
           const res = await api.post(`/api/conversations/${cid}/generate-title`);
@@ -768,7 +787,7 @@ function Estudio({ id }) {
     } catch (err) {
       if (err.name === 'AbortError') {
         setMessages((prev) => (prev[prev.length - 1]?.content ? prev : prev.slice(0, -1)));
-        if (respuesta) await guardarDe(respuesta, base, patchLast);
+        if (respuesta) await guardarDe(respuesta, base, patchLast, texto);
         return;
       }
       patchLast((last) => ({ ...last, content: last.content || err.message, error: !last.content }));
@@ -779,14 +798,14 @@ function Estudio({ id }) {
   };
 
   // Convierte lo que escribió el modelo en una versión nueva del visual.
-  const guardarDe = async (respuesta, base, patchLast) => {
+  const guardarDe = async (respuesta, base, patchLast, pedido) => {
     const r = aplicarRespuesta(base.paginas, respuesta);
     if (r.fallos.length) patchLast((last) => ({ ...last, fallos: r.fallos }));
     if (!r.cambiadas.length) { await cargar(null); return; }
     try {
       const res = await guardarRespuesta(id, base.manifest.version, r.cambiadas,
-        (actuales) => aplicarRespuesta(actuales, respuesta).cambiadas);
-      patchLast((last) => ({ ...last, version: res.version, nuevas: r.cambiadas.map((f) => f.name), reaplicada: res.reaplicada }));
+        (actuales) => aplicarRespuesta(actuales, respuesta).cambiadas, etiquetaDePedido(pedido));
+      patchLast((last) => ({ ...last, version: res.version, label: res.label, nuevas: r.cambiadas.map((f) => f.name), reaplicada: res.reaplicada }));
       const cargado = await cargar(null);
       cargarHistorial();
       if (cargado && !cargado.paginas.some((f) => f.name === pagina)) setPagina(r.cambiadas[0].name);
@@ -833,23 +852,31 @@ function Estudio({ id }) {
   };
   const editarPieza = async () => {
     const html = await getText(fileUrl(id, piezaActual.source.path, versionVista));
-    setEditandoPieza({ path: piezaActual.source.path, html, meta: metaDePieza(html) || { kind: 'image', size: '1280x1600', seconds: 0 }, base: manifest.version, msg: '' });
+    setInspeccion(false);
+    setEditandoPieza({ path: piezaActual.source.path, html, meta: metaDePieza(html) || { kind: 'image', size: '1080x1350', seconds: 0 }, base: manifest.version, msg: '' });
   };
+  // Guardar rehace la versión que se está editando en vez de apilar otra.
   const guardarPieza = async (html) => {
     setGuardando(true);
     try {
-      const res = await pushFiles(id, [{ path: editandoPieza.path, role: 'source', text: html }], editandoPieza.base);
+      const res = await pushFiles(id, [{ path: editandoPieza.path, role: 'source', text: html }], editandoPieza.base, { amend: true });
       setEditandoPieza((e) => ({ ...e, base: res.version, msg: res.renders?.length ? tv('editor.savedRendering') : tv('editor.saved') }));
       if (res.renders?.length) setJobs((prev) => ({ ...prev, ...rendersPorFuente(res.renders) }));
       setVerNum(null);
       await cargar(null);
       cargarHistorial();
+      return true;
     } catch (err) {
       const d = err.response?.data?.detail;
       setEditandoPieza((e) => ({ ...e, msg: d?.code === 'stale_base' ? tv('staleSave', { v: d.latest_version }) : tv('editor.saveError') }));
+      return false;
     } finally {
       setGuardando(false);
     }
+  };
+  const cerrarEditor = async (sucio) => {
+    if (sucio && !(await confirmar({ titulo: tv('editor.unsavedTitle'), texto: tv('editor.unsavedText'), etiqueta: tv('editor.unsavedExit') }))) return;
+    setEditandoPieza(null);
   };
 
   // ── Exportar y compartir ──────────────────────────────────────────────
@@ -906,13 +933,6 @@ function Estudio({ id }) {
       </div>
     );
   }
-  if (editandoPieza) {
-    return (
-      <PiezaEditor html={editandoPieza.html} meta={editandoPieza.meta} baseHref={baseDe(id, editandoPieza.path)} saving={guardando}
-        message={editandoPieza.msg} onSave={guardarPieza} onClose={() => setEditandoPieza(null)} />
-    );
-  }
-
   const puedeEditar = tieneVisuals(user);
   const retocadas = retocadasDe(versionVista);
   const job = piezaActual?.source ? jobs[piezaActual.source.path] : null;
@@ -941,19 +961,33 @@ function Estudio({ id }) {
           {manifest.version > 0 && (
             <Menu abierto={menu === 'historial'} onCerrar={() => setMenu(null)}>
               <button className={`vis-chip ${menu === 'historial' ? 'is-active' : ''}`} onClick={() => setMenu(menu === 'historial' ? null : 'historial')} title={t('versions')}>
-                <IconHistory size={14} /><span>v{versionVista}</span><IconChevron size={13} open={menu === 'historial'} />
+                <IconHistory size={14} /><span className="vis-chip__nombre">{etiquetaVista}</span><IconChevron size={13} open={menu === 'historial'} />
               </button>
               <Desplegable abierto={menu === 'historial'} className="vis-menu__panel">
                 <div className="vis-menu__head">{t('versions')}</div>
-                {historial.map((h) => (
-                  <button key={h.version} className={`vis-menu__item ${versionVista === h.version ? 'is-active' : ''}`} onClick={() => { verVersion(h.version); setMenu(null); }}>
-                    <span className="vis-menu__check">{versionVista === h.version && <IconCheck size={14} />}</span>
-                    <span className="vis-menu__item-text">
-                      <strong>{t('version', { n: h.version })} <small>· {tiempoRelativo(h.created_at, locale)}</small></strong>
-                      <small>{[...h.sources, ...h.outputs].map((p) => p.split('/').pop()).join(', ')}</small>
-                    </span>
-                  </button>
-                ))}
+                <div className="vis-versiones">
+                  {historial.map((h, i) => (
+                    <div key={h.version} className={`vis-version-item ${versionVista === h.version ? 'is-active' : ''}`}>
+                      {renombrando === h.version ? (
+                        <input className="vis-version-item__input" autoFocus defaultValue={h.label || nombreDe(h)} maxLength={80}
+                          aria-label={t('renameVersion')} onBlur={(e) => guardarNombre(h.version, e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setRenombrando(null); }} />
+                      ) : (
+                        <button className="vis-version-item__main" onClick={() => { verVersion(h.version); setMenu(null); }}
+                          onDoubleClick={() => setRenombrando(h.version)}>
+                          <span className="vis-version-item__nombre">{nombreDe(h)}</span>
+                          <small>
+                            {i === 0 && <span className="vis-version-item__actual">{t('currentVersion')}</span>}
+                            {tiempoRelativo(h.created_at, locale)} · {[...h.sources, ...h.outputs].map((p) => p.split('/').pop()).join(', ')}
+                          </small>
+                        </button>
+                      )}
+                      <button className="vis-version-item__edit" onClick={() => setRenombrando(h.version)} title={t('renameVersion')} aria-label={t('renameVersion')}>
+                        <IconPencil size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </Desplegable>
             </Menu>
           )}
@@ -1031,12 +1065,12 @@ function Estudio({ id }) {
         <div className="vis-panel-toggle" role="tablist">
           <button role="tab" aria-selected={panelMovil === 'chat'} className={panelMovil === 'chat' ? 'is-active' : ''} onClick={() => setPanelMovil('chat')}>{t('mobileChat')}</button>
           <button role="tab" aria-selected={panelMovil === 'lienzo'} className={panelMovil === 'lienzo' ? 'is-active' : ''} onClick={() => setPanelMovil('lienzo')}>
-            {t('mobileDesign')}{manifest.version > 0 && <span className="vis-panel-toggle__n">v{versionVista}</span>}
+            {t('mobileDesign')}
           </button>
         </div>
       </div>
 
-      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'} ${inspeccion && seleccion ? 'con-inspector' : ''} ${panelMovil === 'lienzo' ? 'is-lienzo' : 'is-chat'}`}>
+      <div className={`vis-split ${chatAbierto ? '' : 'is-solo-lienzo'} ${(inspeccion && seleccion) || editandoPieza ? 'con-inspector' : ''} ${panelMovil === 'lienzo' ? 'is-lienzo' : 'is-chat'}`}>
         <section className="vis-chat">
           <div className="chat-scroll" ref={scrollRef}>
             <div className="chat-thread vis-thread">
@@ -1063,7 +1097,7 @@ function Estudio({ id }) {
                           {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                           {m.version ? (
                             <button className={`vis-version-chip ${versionVista === m.version ? 'is-active' : ''}`} onClick={() => verVersion(m.version)}>
-                              v{m.version} · {m.nuevas.join(', ')}
+                              {m.label || historial.find((h) => h.version === m.version)?.label || m.nuevas.join(', ')}
                             </button>
                           ) : archivos.length > 0 && !activo && (
                             <button className="vis-version-chip" onClick={() => { verVersion(manifest.version); irAPagina(archivos[0]); }}>
@@ -1119,6 +1153,10 @@ function Estudio({ id }) {
         </section>
 
         <section className="vis-canvas">
+          {editandoPieza ? (
+            <PiezaEditor key={editandoPieza.path} html={editandoPieza.html} meta={editandoPieza.meta} baseHref={baseDe(id, editandoPieza.path)}
+              nombre={nombreCorto(editandoPieza.path)} saving={guardando} message={editandoPieza.msg} onSave={guardarPieza} onClose={cerrarEditor} />
+          ) : (<>
           <div className="vis-lienzo">
             {(pestanas.length > 0 || docs.length > 0) && (
               <div className="vis-stagebar">
@@ -1197,13 +1235,13 @@ function Estudio({ id }) {
             {!viendoUltima && (
               <div className="vis-aviso" role="status">
                 <IconHistory size={14} />
-                <span>{t('viewingOldVersion', { n: versionVista, total: manifest.version })}</span>
+                <span>{t('viewingOldVersion', { name: etiquetaVista })}</span>
                 <button className="vis-aviso__btn" onClick={() => verVersion(manifest.version)}>{t('backToLatest')}</button>
               </div>
             )}
-            {viendoUltima && nueva && nueva > manifest.version && (
+            {viendoUltima && nueva && nueva.v > manifest.version && (
               <div className="vis-aviso" role="status">
-                <span>{tv('liveNew', { v: nueva })}</span>
+                <span>{tv('liveNew', { name: nueva.label || t('versionUnnamed') })}</span>
                 <button className="vis-aviso__btn" onClick={() => { setNueva(null); cargar(null); }}>{tv('liveShow')}</button>
               </div>
             )}
@@ -1219,7 +1257,7 @@ function Estudio({ id }) {
               {docActual ? (
                 <div className="vis-doc"><Markdown>{doc}</Markdown></div>
               ) : modoPiezas ? (
-                piezaActual ? <div className="vis-pieza"><Salida id={id} version={versionVista} piece={piezaActual} t={tv} /></div>
+                piezaActual ? <div className="vis-pieza"><Salida key={piezaActual.source?.path || piezaActual.output?.path} id={id} version={versionVista} piece={piezaActual} t={tv} /></div>
                   : <div className="vis-stage__empty">{busy ? t('generatingImageShort') : t('previewWillAppear')}</div>
               ) : paginaActual ? (
                 vista === 'lienzo' ? (
@@ -1262,6 +1300,7 @@ function Estudio({ id }) {
             <Inspector seleccion={seleccion} onAplicar={aplicarOp} onPedir={pedirAlModelo}
               onCerrar={() => { setSeleccion(null); frameRef.current?.contentWindow?.postMessage({ type: 'lixbon:deselect' }, '*'); }} />
           )}
+          </>)}
         </section>
       </div>
     </div>

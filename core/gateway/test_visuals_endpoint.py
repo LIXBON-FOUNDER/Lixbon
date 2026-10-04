@@ -105,6 +105,38 @@ def test_versiones_lineales_y_base_version(cliente):
     assert {f["path"] for f in cliente.get(ruta).json()["files"]} == {"a.html", "a.png"}
 
 
+def test_rehacer_la_ultima_version(cliente):
+    vis = _crear(cliente, files=[{"path": "a.html", "text": "uno"}, {"path": "b.html", "text": "b"}])
+    ruta = f"/api/visuals/{vis['id']}"
+    assert _subir(cliente, vis["id"], [{"path": "a.html", "text": "dos"}], base_version=1).json()["version"] == 2
+    r = _subir(cliente, vis["id"], [{"path": "a.html", "text": "dos bis"}], base_version=2, amend=True)
+    assert r.json()["version"] == 3
+    assert [h["version"] for h in cliente.get(f"{ruta}/versions").json()["items"]] == [3, 1]
+    assert cliente.get(f"{ruta}/files/a.html").text == "dos bis" and cliente.get(f"{ruta}/files/b.html").text == "b"
+    assert cliente.get(f"{ruta}/files/a.html?v=1").text == "uno"
+    r = _subir(cliente, vis["id"], [{"path": "b.html", "text": "b2"}], base_version=2, amend=True)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "stale_base"
+    assert _subir(cliente, vis["id"], [{"path": "b.html", "text": "b2"}], base_version=3, amend=True).json()["version"] == 4
+    assert cliente.get(f"{ruta}/files/a.html").text == "dos bis" and cliente.get(f"{ruta}/files/b.html").text == "b2"
+    assert [h["version"] for h in cliente.get(f"{ruta}/versions").json()["items"]] == [4, 1]
+
+
+def test_versiones_con_nombre(cliente):
+    r = cliente.post("/api/visuals", json={"kind": "design", "title": "N", "label": "Landing inicial",
+                                           "files": [{"path": "a.html", "text": "uno"}]})
+    vid = r.json()["id"]
+    ruta = f"/api/visuals/{vid}"
+    _subir(cliente, vid, [{"path": "a.html", "text": "dos"}], base_version=1, label="  Titular   más grande ")
+    _subir(cliente, vid, [{"path": "a.html", "text": "dos bis"}], base_version=2, amend=True)
+    items = cliente.get(f"{ruta}/versions").json()["items"]
+    assert [(i["version"], i["label"]) for i in items] == [(3, "Titular más grande"), (1, "Landing inicial")]
+    assert cliente.get(ruta).json()["viewing_label"] == "Titular más grande"
+    assert cliente.patch(f"{ruta}/versions/1", json={"label": "Primera idea"}).json()["label"] == "Primera idea"
+    assert cliente.patch(f"{ruta}/versions/2", json={"label": "x"}).status_code == 404
+    assert cliente.patch(f"{ruta}/versions/1", json={"label": "   "}).status_code == 400
+    assert cliente.get(f"{ruta}?version=1").json()["viewing_label"] == "Primera idea"
+
+
 @pytest.mark.parametrize("ruta", ["../x.html", "/abs.html", "a\\b.html", "x/../../y.html", "malware.exe", "sin_extension"])
 def test_rutas_invalidas(cliente, ruta):
     vis = _crear(cliente)

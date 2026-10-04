@@ -27,6 +27,12 @@ export const DOCS_INDEX = [
       es: 'Diseña landings, dashboards, emails, logos y prototipos con IA; edítalos en el lienzo, compártelos y conviértelos en proyecto.',
       en: 'Design landing pages, dashboards, emails, logos and prototypes with AI; edit them on the canvas, share them and turn them into a project.',
     } },
+  { id: 'mcp', group: { es: 'Aplicaciones', en: 'Apps' },
+    title: { es: 'MCP y skills', en: 'MCP and skills' },
+    description: {
+      es: 'Conecta Claude Code, Cursor, VS Code o el CLI al servidor MCP de Lixbon para crear y renderizar Visuals, e instala skills como /marketing-lxo.',
+      en: 'Connect Claude Code, Cursor, VS Code or the CLI to the Lixbon MCP server to create and render Visuals, and install skills like /marketing-lxo.',
+    } },
   { id: 'cli', group: { es: 'Aplicaciones', en: 'Apps' },
     title: { es: 'CLI', en: 'CLI' },
     description: {

@@ -64,6 +64,9 @@ TOOLS = [
             "properties": {
                 "title": {"type": "string", "description": "Título corto del visual"},
                 "kind": {"type": "string", "enum": list(store.KINDS), "default": "design"},
+                "label": {"type": "string", "maxLength": 80,
+                          "description": "Nombre corto de esta versión en el idioma del usuario, lo que pidió "
+                                         "(p. ej. «Landing inicial», «Titular más grande»). Lo ve en el historial"},
                 "files": {"type": "array", "items": _FILE, "minItems": 1},
             },
             "required": ["title", "files"],
@@ -74,7 +77,9 @@ TOOLS = [
         "title": "Editar visual",
         "description": "Crea una versión nueva de un visual. Exige base_version = la versión que leíste con visual_get; "
                        "si alguien guardó después (p. ej. retoques del usuario en la web) responde stale_base y debes releer. "
-                       "Usa edits (search/replace exacto) para cambios pequeños o files para archivos completos, no ambos.",
+                       "Usa edits (search/replace exacto) para cambios pequeños o files para archivos completos, no ambos. "
+                       "Con amend: true corriges tu propia última escritura sin añadir otra versión al historial "
+                       "(p. ej. tras mirar el render); solo vale si la última versión la escribiste tú.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -86,6 +91,11 @@ TOOLS = [
                     "required": ["path", "search", "replace"]}},
                 "files": {"type": "array", "items": _FILE},
                 "title": {"type": "string"},
+                "label": {"type": "string", "maxLength": 80,
+                          "description": "Nombre corto de esta versión en el idioma del usuario, lo que pidió "
+                                         "(p. ej. «Landing inicial», «Titular más grande»). Lo ve en el historial"},
+                "amend": {"type": "boolean", "default": False,
+                          "description": "Rehace tu última versión en vez de crear otra (correcciones de la misma petición)"},
             },
             "required": ["id", "base_version"],
         },
@@ -140,7 +150,7 @@ TOOLS += [
         "name": "visual_render",
         "title": "Renderizar piezas",
         "description": "Encola el render a PNG o MP4 de las piezas de un visual (HTML con <meta name=\"render\">). "
-                       "El servidor lo hace en segundo plano y guarda la salida como versión nueva; consulta el estado "
+                       "El servidor lo hace en segundo plano y adjunta la salida a la versión actual; consulta el estado "
                        "con visual_render_status. Sin paths, renderiza todas las piezas.",
         "inputSchema": {
             "type": "object",
@@ -247,7 +257,8 @@ def _call_tool(name: str, args: dict, user: dict[str, Any], base: str) -> dict[s
     uid = user["id"]
     if name == "visual_create":
         res = svc.create(user, kind=args.get("kind") or "design", title=_require(args, "title", str),
-                         files=decode_files(_require(args, "files", list)), origin="mcp", base=base)
+                         files=decode_files(_require(args, "files", list)), origin="mcp", base=base,
+                         label=args.get("label") if isinstance(args.get("label"), str) else None)
         return {k: res[k] for k in ("id", "title", "kind", "version", "url")}
     if name == "visual_update":
         vid = _normalize_id(_require(args, "id", str))
@@ -257,7 +268,9 @@ def _call_tool(name: str, args: dict, user: dict[str, Any], base: str) -> dict[s
         if not args.get("edits") and not args.get("files"):
             raise RpcError(-32602, "Envía edits o files")
         res = svc.write(user, vid, files=decode_files(args.get("files")) or None, edits=args.get("edits"),
-                        base_version=base_version, title=args.get("title"), origin="mcp", base=base)
+                        base_version=base_version, title=args.get("title"), origin="mcp", base=base,
+                        amend=args.get("amend") is True,
+                        label=args.get("label") if isinstance(args.get("label"), str) else None)
         return {k: res[k] for k in ("id", "title", "version", "files", "url")}
     if name == "visual_get":
         vid = _normalize_id(_require(args, "id", str))

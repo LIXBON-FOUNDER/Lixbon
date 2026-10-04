@@ -7,6 +7,7 @@
 | [ARQUITECTURA.md](ARQUITECTURA.md) | Mapa del monorepo, componentes, contratos entre gateway y apps, despliegue |
 | [RAMAS_Y_RELEASES.md](RAMAS_Y_RELEASES.md) | Modelo de ramas (`master` / `desktop` / `cli` / `mobile`), convención de commits, cómo publicar cada producto |
 | [ESTADO_ACTUAL.md](ESTADO_ACTUAL.md) | Estado del proyecto para retomar el trabajo |
+| [ESPECIFICACION_VISUALS.md](ESPECIFICACION_VISUALS.md) | Visuals como servicio de artefactos: decisiones, modelo de datos, servidor MCP, versiones, render y catálogo de skills |
 | [../PRODUCT.md](../PRODUCT.md) | Brief de producto: usuarios, personalidad de marca, principios de diseño |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Cómo contribuir: entorno por producto, rama correcta, commits, checklist de PR |
 | [../SECURITY.md](../SECURITY.md) | Cómo reportar vulnerabilidades y prácticas de seguridad del proyecto |

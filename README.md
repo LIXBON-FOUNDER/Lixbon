@@ -37,6 +37,7 @@ que una GPU alquilada no necesita puerto entrante, túnel ni DNS.
 - **Límites por plan** con dos relojes: sesión de 5 h y cap semanal, compartidos entre todos los clientes.
 - **Orquestación**: selección por CPU/RAM/GPU, circuit breaker con backoff, nodos por conexión inversa.
 - **Cuatro clientes con la misma cuenta e historial**: web, desktop (Tauri), CLI (agente con herramientas y MCP) y Android.
+- **Visuals y MCP**: diseños y piezas de marketing con versiones con nombre, editables en la web y creables desde cualquier agente (Claude Code, Cursor, VS Code, el CLI…) por el servidor MCP `lixbon.com/mcp`. Catálogo de skills oficiales (`/marketing-lxo`, `/adversary`) en `lixbon.com/skills`. Configuración en Ajustes › MCP.
 - **Control remoto**: una sesión del CLI o del desktop se puede seguir y dirigir desde el móvil (`/remote`).
 
 ## Productos y ramas

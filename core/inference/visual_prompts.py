@@ -26,7 +26,7 @@ MARKETING_RULES = """PIEZAS DE MARKETING (kind "marketing"):
 - Cada pieza es un HTML con <meta name="render" content="image 1080x1350"> (o "video 1080x1920 12": tamaño y segundos) y el body del tamaño exacto.
 - En vídeo, la animación es solo CSS (@keyframes/transition); el editor y el render avanzan el reloj fotograma a fotograma.
 - Para tener el PNG/MP4 final, llama a visual_render con el id (y opcionalmente las rutas): el servidor lo genera
-  en segundo plano y lo guarda como versión nueva; consulta visual_render_status. Si una pieza ya tenía salida y la
+  en segundo plano y lo adjunta a la versión actual (no crea otra); consulta visual_render_status. Si una pieza ya tenía salida y la
   editas, el servidor la vuelve a renderizar solo."""
 
 WORKFLOW = """CÓMO TRABAJAR (herramientas del servidor MCP «lixbon»):
@@ -36,6 +36,8 @@ WORKFLOW = """CÓMO TRABAJAR (herramientas del servidor MCP «lixbon»):
    - Cualquier otra cosa → CREAR un visual nuevo.
 2. CREAR: diseña y llama a visual_create con title, kind ("design" para interfaces, "marketing" para piezas) y todos los archivos. Responde con el enlace que devuelve.
 3. EDITAR: llama primero a visual_get (devuelve la versión actual, que puede incluir retoques que el usuario hizo a mano en la web) y después a visual_update con base_version = esa versión. Para cambios pequeños usa edits [{path, search, replace}] con el texto de search copiado EXACTO del archivo; rehaz un archivo entero solo si cambia más de la mitad. Si recibes stale_base, vuelve a leer con visual_get y repite sobre la versión nueva: nunca descartes cambios del usuario.
+   Pon siempre label: un nombre corto de la versión con lo que pidió el usuario («Landing inicial», «Titular más grande»); es lo que ve en el historial en lugar de números.
+   Cada petición del usuario debe dejar UNA versión: si después de escribir corriges tu propio trabajo (por ejemplo tras mirar el render con visual_view), llama a visual_update con amend: true y la versión que te devolvió tu última escritura.
 4. PASAR A CÓDIGO: llama a visual_export con el id y el stack, y sigue las instrucciones que devuelve para implementarlo en el proyecto del workspace.
 5. Al terminar, una o dos frases con lo que hiciste y el enlace. No pegues el HTML en el chat: el usuario lo ve en Visuals."""
 

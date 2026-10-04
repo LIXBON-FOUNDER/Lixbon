@@ -11,6 +11,18 @@
 
 ---
 
+## 0.-5 Visuals por MCP, versiones con nombre y editor integrado (2026-10-04)
+
+Detalle y decisiones en `docs/ESPECIFICACION_VISUALS.md` (§11 y §15).
+
+- **MCP** (`core/gateway/routers/mcp.py`, `lixbon.com/mcp`, API key como Bearer): `visual_create`, `visual_update` (`label`, `amend`), `visual_get`, `visual_list`, `visual_export`, `visual_render`, `visual_render_status`, `visual_view` y el prompt `visual`. Configuración lista por cliente (Claude Code, Cursor, VS Code, Antigravity, Codex, Gemini, CLI) en la web, Ajustes › MCP (`components/McpSection.jsx`, `i18n/dictionaries/mcp.js`). El CLI registra el servidor solo con su sesión (`"lixbon_mcp": false` lo apaga) y `/visual` crea, edita y pasa a código. Verificado con Claude Code real.
+- **Skills** (`core/persistence/skills.py`, `routers/skills.py`): catálogo oficial en `/skills` y Ajustes › Skills del IDE; `/marketing-lxo` y `/adversary`. Publicación en Admin › Skills (carpeta + semver mayor).
+- **Versiones**: modos `new`/`amend`/`attach` en `put_files`, tabla `visual_versions` (nombre y origen), `PATCH /api/visuals/{id}/versions/{n}`. El editor web guarda con `amend` (actualiza la versión en edición); el agente solo enmienda lo suyo (`last_origin`). El render del worker se adjunta a la versión actual en vez de crear otra.
+- **Web**: historial con nombres y renombrar; `PiezaEditor.jsx` embebido a la derecha del lienzo, con sliders de arrastre; `PiezaVista` muestra el HTML vivo en lugar del PNG. Render de imágenes a 2x (`core/render/renderer.py`).
+- **Pendiente de operar**: redesplegar el worker (`infra/render_worker/deploy.sh`), subir `marketing-lxo` 1.0.1 en Admin › Skills, migrar `railway.toml` antes de 2026-12-01 y registrar el MCP en los agentes del IDE (rama `desktop`).
+
+---
+
 ## 0.-4 Página pública /status (2026-09-15)
 
 - `core/gateway/routers/status.py`: `GET /api/status` sin sesión, cacheado 30 s.

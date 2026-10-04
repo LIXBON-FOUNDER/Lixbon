@@ -1,6 +1,6 @@
 # Especificación: Visuals como servicio de artefactos de Lixbon
 
-Estado (2026-10-03): especificación aprobada. Fase 2 hecha salvo el IDE; **fases 3 y 4 hechas** (falta construir la imagen Docker y desplegar). Nada commiteado.
+Estado (2026-10-04): especificación aprobada. Fases 1, 3, 4 y 5 hechas; fase 2 hecha salvo el IDE. Worker de render desplegado en Railway (`infra/render_worker/deploy.sh`, no se despliega solo con el push). Tras las primeras pruebas con Claude Code real se añadieron versiones con nombre, `amend` y el editor integrado (ver [§15](#15-ajustes-tras-las-primeras-pruebas-2026-10-04)).
 Método: especificación guiada por preguntas (estilo spec-kit): cada decisión sale de una respuesta del dueño del producto y está en el [registro de decisiones](#2-registro-de-decisiones). Lo que no se decidió está en [puntos abiertos](#13-puntos-abiertos). Nada de lo no registrado debe darse por hecho.
 
 ## 1. Resumen
@@ -127,6 +127,7 @@ Dos tablas, que reemplazan a las provisionales de la implementación previa (`ar
 
 - `visuals(id, user_id, kind, title, version, share_token, meta_json, created_at, updated_at)`
 - `visual_files(id, visual_id, version, path, role, mime, size, sha256, content_text, content_blob, created_at)`; único `(visual_id, path, version)`.
+- `visual_versions(id, visual_id, version, label, origin, created_at)`; único `(visual_id, version)`. Nombre y origen (`web`, `mcp`, `api`) de cada versión; las versiones antiguas no tienen fila y la web les deduce un nombre.
 - Roles de archivo: `source` (HTML editable) y `output` (PNG/MP4/MD ya generados).
 - Pieza = HTML fuente + salida con el mismo nombre; el `<meta name="render" content="image 1080x1350">` (o `video 1080x1920 12`) declara tipo y tamaño.
 - Una salida es **desactualizada** si su fuente tiene una versión mayor; el visor la marca hasta que el worker la regenere.
@@ -134,12 +135,12 @@ Dos tablas, que reemplazan a las provisionales de la implementación previa (`ar
 
 ## 7. Herramientas MCP (propuesta de contrato)
 
-Los nombres y campos son propuestos; se confirman en la fase del MCP.
+Contrato implementado en `core/gateway/routers/mcp.py`; la configuración por cliente está en la web, Ajustes › MCP (`/account/mcp`).
 
 | Herramienta | Entrada | Resultado |
 |---|---|---|
-| `visual_create` | `title`, `kind`, `files[]` | `id`, `url`, `version` |
-| `visual_update` | `id`, `base_version`, `files[]` o `edits[]` (SEARCH/REPLACE por archivo) | `version`; error `stale_base` |
+| `visual_create` | `title`, `kind`, `label?`, `files[]` | `id`, `url`, `version` |
+| `visual_update` | `id`, `base_version`, `files[]` o `edits[]` (SEARCH/REPLACE por archivo), `label?`, `amend?` | `version`; error `stale_base` |
 | `visual_get` | `id`, `version?`, `paths?` | manifiesto y contenido de texto |
 | `visual_list` | `kind?`, `query?` | lista breve |
 | `visual_export` | `id`, `format` (`bundle` \| `zip`), `stack?` | archivos, estilos, assets e instrucciones para implementarlo |
@@ -231,3 +232,26 @@ Cada fase termina con pruebas automáticas y una verificación real en el navega
 - Binarios en Postgres no escalan para vídeo; hay disparador claro para pasar a bucket (D11).
 - El worker de render añade un servicio que operar (D22).
 - La calidad del tool-calling de modelos auto-hospedados no está medida (D23, punto abierto 1).
+
+## 15. Ajustes tras las primeras pruebas (2026-10-04)
+
+Probando el MCP con Claude Code real salieron tres problemas; esto es lo que cambió.
+
+**Versiones: una petición, una versión, con nombre**
+- `put_files` tiene tres modos: `new` (versión nueva), `amend` (rehace la versión actual: crea la N+1, mueve los archivos que no cambian y borra los sobrescritos, así la anterior desaparece del historial) y `attach` (añade filas a la versión actual sin subir el número; lo usa el worker para las salidas renderizadas, por eso un render ya no crea versión).
+- `amend` lo piden `PATCH`/`POST /api/visuals/{id}/files` con `amend: true` (el editor web lo usa siempre al guardar, para actualizar la versión que se está editando) y la herramienta `visual_update` con `amend: true` (el agente, para corregirse tras `visual_view`). Un agente solo puede enmendar si la última escritura fue suya (`last_origin` en `meta_json`): si la web retocó después, su cambio crea una versión nueva y no se pierde nada.
+- Cada versión lleva `label`: lo manda el chat o el estudio (lo que pidió el usuario, hasta 60 caracteres), `label` en `visual_create`/`visual_update` (hasta 80) o el prompt de una imagen generada. Un `amend` sin nombre conserva el anterior. `PATCH /api/visuals/{id}/versions/{version}` la renombra y publica un evento `meta`. `GET …/versions` devuelve `label` y `origin`; el manifiesto trae `viewing_label`.
+- Web: el historial muestra nombre, «Actual», fecha y archivos; se renombra con el lápiz o doble clic. Sin número `v3` en ninguna parte (cabecera, avisos, chips del chat, panel del chat).
+
+**Editor integrado**
+- Editar una pieza ya no abre otra vista: el panel de edición (`PiezaEditor`, pestañas Diseño y Código) se despliega a la derecha del lienzo. Sliders de arrastre con valor editable, colores, grosor, alineación, línea de tiempo del vídeo; deshacer/rehacer; Guardar solo activo con cambios; el chat se pliega.
+- La vista previa de una pieza es el HTML vivo a su tamaño real escalado al lienzo (`PiezaVista`), no el PNG; el PNG/MP4 se muestra solo en vídeo o si no hay fuente.
+
+**Calidad del render**
+- Las imágenes se renderizan a doble resolución (`device_scale_factor` 2) cuando el lado mayor es ≤ 2160 px; por encima y en vídeo, a 1x. Antes salían a 1x y se veían borrosas junto al editor.
+
+**Skills**
+- `/marketing-lxo` pide `label` siempre y `amend: true` para correcciones. Sus archivos viven en `.claude/skills/` (ignorada por git): tras cambiarlos hay que subir una versión nueva en Admin › Skills.
+
+**Despliegue**
+- La tabla `visual_versions` la crea el gateway al arrancar (`create_all`). El worker de render hay que redesplegarlo con `bash infra/render_worker/deploy.sh` para el render a 2x y el modo `attach`.

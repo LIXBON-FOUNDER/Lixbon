@@ -17,7 +17,7 @@ from sqlalchemy import delete, desc, func, select
 
 from core.inference.visual_files import apply_edits
 from core.persistence.database import get_session
-from core.persistence.models import Visual, VisualFile
+from core.persistence.models import Visual, VisualFile, VisualVersion
 from core.persistence.queries import now_iso
 
 KINDS = ("design", "marketing")
@@ -28,6 +28,7 @@ MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_VISUAL_BYTES = 100 * 1024 * 1024
 MAX_FILES_PER_PUSH = 100
 MAX_PATH_LEN = 200
+MAX_LABEL_LEN = 80
 MB = 1024 * 1024
 RENDER_META = re.compile(r'<meta\s+name="render"\s+content="(image|video)\s+(\d+)x(\d+)(?:\s+([\d.]+))?"', re.I)
 
@@ -153,10 +154,24 @@ def _prepare(files: list[dict[str, Any]]) -> list[tuple]:
     return prepared
 
 
+def _clean_label(label: str | None) -> str | None:
+    label = " ".join((label or "").split())
+    return label[:MAX_LABEL_LEN].rstrip() or None
+
+
 def put_files(visual_id: str, user_id: int, files: list[dict[str, Any]], *, title: str | None = None,
-              base_version: int | None = None, max_storage_mb: int = -1) -> dict[str, Any]:
-    """Escribe un lote como versión nueva. Con `base_version`, rechaza la escritura si
-    alguien guardó otra versión antes (`stale_base`): quien escribe debe releer."""
+              base_version: int | None = None, max_storage_mb: int = -1, mode: str = "new",
+              origin: str | None = None, label: str | None = None) -> dict[str, Any]:
+    """Escribe un lote. Con `base_version`, rechaza la escritura si alguien guardó otra
+    versión antes (`stale_base`): quien escribe debe releer.
+
+    mode: "new" crea una versión; "amend" funde la última versión con el lote en una
+    versión nueva y la anterior desaparece del historial (el número sube igual, así
+    quien tenía la vieja recibe stale_base); "attach" añade el lote a la última versión
+    sin cambiar su número (solo salidas que genera el servidor, como los renders).
+    `label` nombra la versión; al rehacerla sin nombre nuevo conserva el que tenía."""
+    if mode not in ("new", "amend", "attach"):
+        raise VisualError("invalid_mode", f"Modo de escritura no válido: {mode}")
     prepared = _prepare(files)
     incoming = sum(len(p[4]) for p in prepared)
     if max_storage_mb != -1 and user_storage_bytes(user_id) + incoming > max_storage_mb * MB:
@@ -174,10 +189,33 @@ def put_files(visual_id: str, user_id: int, files: list[dict[str, Any]], *, titl
             sizes[path] = len(raw)
         if sum(sizes.values()) > MAX_VISUAL_BYTES:
             raise VisualError("visual_too_large", f"El visual supera {MAX_VISUAL_BYTES // MB} MB", 413)
-        v.version += 1
+        head = v.version
+        incoming = {p[0] for p in prepared}
+        label = _clean_label(label)
         v.updated_at = now_iso()
+        if mode == "attach" and head > 0:
+            s.execute(delete(VisualFile).where(VisualFile.visual_id == v.id, VisualFile.version == head,
+                                               VisualFile.path.in_(incoming)))
+        else:
+            v.version += 1
+            if mode == "amend" and head > 0:
+                for f in s.scalars(select(VisualFile).where(VisualFile.visual_id == v.id, VisualFile.version == head)).all():
+                    if f.path in incoming:
+                        s.delete(f)
+                    else:
+                        f.version = v.version
+                previa = _labels(s, v.id).get(head)
+                if previa:
+                    label = label or previa.label
+                    s.delete(previa)
+            s.add(VisualVersion(visual_id=v.id, version=v.version, label=label, origin=origin, created_at=v.updated_at))
+        s.flush()
         if title:
             v.title = title.strip()[:200] or v.title
+        if origin and mode != "attach":
+            current = json.loads(v.meta_json) if v.meta_json else {}
+            current["last_origin"] = origin
+            v.meta_json = json.dumps(current)
         for path, role, ext, text, raw, meta in prepared:
             is_text = ext in TEXT_EXTENSIONS
             s.add(VisualFile(
@@ -187,11 +225,12 @@ def put_files(visual_id: str, user_id: int, files: list[dict[str, Any]], *, titl
                 content_text=text if is_text else None,
                 content_blob=None if is_text else raw,
                 meta_json=json.dumps(meta) if meta else None, created_at=v.updated_at))
-        return {**_row(v), "files": [p[0] for p in prepared]}
+        return {**_row(v), "files": [p[0] for p in prepared], "label": None if mode == "attach" else label}
 
 
 def edit_files(visual_id: str, user_id: int, edits: list[dict[str, Any]], *, base_version: int,
-               title: str | None = None, max_storage_mb: int = -1) -> dict[str, Any]:
+               title: str | None = None, max_storage_mb: int = -1, mode: str = "new",
+               origin: str | None = None, label: str | None = None) -> dict[str, Any]:
     """Aplica pares SEARCH/REPLACE sobre los archivos de texto de `base_version`.
     Cada edición: {path, search, replace}. Si un fragmento no encaja, no se escribe nada."""
     if not edits:
@@ -216,7 +255,8 @@ def edit_files(visual_id: str, user_id: int, edits: list[dict[str, Any]], *, bas
             raise VisualError("edit_mismatch", f"En {path} no se encontró el fragmento: «{err}». Lee el archivo y reintenta.", 422)
     changed = sorted({normalize_path(e["path"]) for e in edits})
     return put_files(visual_id, user_id, [{"path": p, "role": roles[p], "text": texts[p]} for p in changed],
-                     title=title, base_version=base_version, max_storage_mb=max_storage_mb)
+                     title=title, base_version=base_version, max_storage_mb=max_storage_mb,
+                     mode=mode, origin=origin, label=label)
 
 
 def _cover(files: dict[str, VisualFile]) -> str | None:
@@ -279,25 +319,55 @@ def update_visual(visual_id: str, user_id: int, *, title: str | None = None,
         return _row(v)
 
 
+def _labels(s, visual_id: str) -> dict[int, VisualVersion]:
+    return {r.version: r for r in s.scalars(select(VisualVersion).where(VisualVersion.visual_id == visual_id)).all()}
+
+
 def list_versions(visual_id: str, user_id: int) -> list[dict[str, Any]] | None:
-    """Cada versión con su fecha y los archivos que cambió."""
+    """Cada versión con su nombre, fecha y los archivos que cambió."""
     with get_session() as s:
         v = _owned(s, visual_id, user_id)
         if not v:
             return None
         rows = s.execute(select(VisualFile.version, VisualFile.path, VisualFile.role, VisualFile.created_at)
                          .where(VisualFile.visual_id == visual_id).order_by(VisualFile.version)).all()
+        names = _labels(s, visual_id)
         out: dict[int, dict[str, Any]] = {}
         for version, path, role, created in rows:
-            item = out.setdefault(version, {"version": version, "created_at": created, "sources": [], "outputs": []})
+            meta = names.get(version)
+            item = out.setdefault(version, {"version": version, "created_at": meta.created_at if meta else created,
+                                            "label": meta.label if meta else None,
+                                            "origin": meta.origin if meta else None, "sources": [], "outputs": []})
             item["sources" if role == "source" else "outputs"].append(path)
         return sorted(out.values(), key=lambda i: i["version"], reverse=True)
+
+
+def rename_version(visual_id: str, user_id: int, version: int, label: str) -> dict[str, Any] | None:
+    label = _clean_label(label)
+    if not label:
+        raise VisualError("invalid_label", "El nombre no puede estar vacío")
+    with get_session() as s:
+        v = _owned(s, visual_id, user_id)
+        if not v:
+            return None
+        exists = s.scalar(select(func.count()).select_from(VisualFile)
+                          .where(VisualFile.visual_id == v.id, VisualFile.version == version))
+        if not exists:
+            raise VisualError("not_found", f"La versión {version} no existe", 404)
+        row = _labels(s, v.id).get(version)
+        if row:
+            row.label = label
+        else:
+            s.add(VisualVersion(visual_id=v.id, version=version, label=label, created_at=now_iso()))
+        return {"version": version, "label": label}
 
 
 def _manifest(s, v: Visual, version: int | None) -> dict[str, Any]:
     ver = _clamp(v, version)
     files = _files_at(s, v.id, ver)
+    names = _labels(s, v.id)
     return {**_row(v), "share_token": v.share_token, "viewing": ver,
+            "viewing_label": names[ver].label if ver in names else None,
             "files": sorted((_file_info(f) for f in files.values()), key=lambda f: f["path"])}
 
 
@@ -335,6 +405,7 @@ def delete_visual(visual_id: str, user_id: int) -> bool:
         if not v:
             return False
         s.execute(delete(VisualFile).where(VisualFile.visual_id == v.id))
+        s.execute(delete(VisualVersion).where(VisualVersion.visual_id == v.id))
         s.delete(v)
         return True
 

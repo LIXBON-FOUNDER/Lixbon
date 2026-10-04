@@ -111,8 +111,22 @@ def test_crear_leer_editar_y_exportar(mcp):
                   edits=[{"path": "index.html", "search": "no está", "replace": "x"}])
     assert res["isError"] and '"edit_mismatch"' in res["content"][0]["text"]
 
+    _, corregido = tool(mcp, "visual_update", id=vid, base_version=2, amend=True,
+                        edits=[{"path": "index.html", "search": "<p>dos</p>", "replace": "<p>dos bis</p>"}])
+    assert corregido["version"] == 3
+    versiones = mcp.get(f"/api/visuals/{vid}/versions").json()["items"]
+    assert [v["version"] for v in versiones] == [3, 1]
+
+    texto = '<h1 class="t">Hola</h1>\n<p>dos bis</p>\n'
+    retoque = mcp.post(f"/api/visuals/{vid}/files", json={"files": [{"path": "index.html", "text": texto}], "base_version": 3})
+    assert retoque.json()["version"] == 4
+    _, sobre_retoque = tool(mcp, "visual_update", id=vid, base_version=4, amend=True,
+                            edits=[{"path": "index.html", "search": "<h1", "replace": '<h1 id="x"'}])
+    assert sobre_retoque["version"] == 5  # el retoque del usuario no se funde con la corrección del agente
+    assert [v["version"] for v in mcp.get(f"/api/visuals/{vid}/versions").json()["items"]] == [5, 4, 3, 1]
+
     _, exp = tool(mcp, "visual_export", id=vid, stack="react")
-    assert "React + Vite" in exp["instructions"] and exp["files"][0]["text"].endswith("<p>dos</p>")
+    assert "React + Vite" in exp["instructions"] and exp["files"][0]["text"].startswith("<h1 id=\"x\"")
 
     _, lista = tool(mcp, "visual_list", query="Landing")
     assert [i["id"] for i in lista["items"]] == [vid]

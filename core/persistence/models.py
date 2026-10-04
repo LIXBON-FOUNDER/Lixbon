@@ -930,6 +930,21 @@ class Visual(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class VisualVersion(Base):
+    """Nombre de una versión ("Titular más grande", "Retoques en post-1") para que el
+    historial se lea sin números. Las versiones antiguas no tienen fila."""
+    __tablename__ = "visual_versions"
+    __table_args__ = (UniqueConstraint("visual_id", "version", name="uq_visual_versions"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    visual_id: Mapped[str] = mapped_column(
+        ForeignKey("visuals.id", ondelete="CASCADE"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(nullable=False)
+    label: Mapped[str | None] = mapped_column(Text)
+    origin: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class VisualFile(Base):
     """Archivo de un visual en una versión. La versión N lee el último registro
     de cada ruta con `version <= N` (copia en escritura)."""

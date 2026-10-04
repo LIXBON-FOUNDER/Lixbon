@@ -2,7 +2,7 @@
 visual_renders.py — Cola de renders de Visuals (HTML → PNG/MP4) en la base de datos.
 
 El gateway encola; el worker (core/render/worker.py) reclama con arrendamiento,
-renderiza y guarda la salida como versión nueva del visual. Cada salida registra
+renderiza y adjunta la salida a la última versión del visual. Cada salida registra
 el sha256 del HTML del que sale, así se sabe si quedó desactualizada.
 """
 from __future__ import annotations
@@ -163,7 +163,7 @@ def complete(job_id: str, data: bytes, source_sha256: str, *, max_storage_mb: in
     res = store.put_files(visual_id, user_id, [{
         "path": out, "role": "output", "data": data,
         "meta": {"source": path, "source_sha256": source_sha256, "render_job": job_id},
-    }], max_storage_mb=max_storage_mb)
+    }], max_storage_mb=max_storage_mb, mode="attach")
     with get_session() as s:
         job = s.get(VisualRenderJob, job_id)
         job.status, job.output_path, job.output_version = "done", out, res["version"]

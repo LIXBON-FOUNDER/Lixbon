@@ -27,7 +27,7 @@ import { FILE_PROMPT } from '../lib/archivos';
 import { tieneVisuals } from '../lib/planes';
 import { deleteVisual, getVisual } from '../lib/visualsApi';
 import {
-  aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, guardarRespuesta, tieneVisual,
+  aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, etiquetaDePedido, guardarRespuesta, tieneVisual,
   tituloDe, visualDeConversacion,
 } from '../lib/visualStudio';
 
@@ -208,14 +208,14 @@ export default function ChatPage() {
   const cargarVisual = async (vid) => {
     const m = await getVisual(vid);
     const paginas = await cargarPaginas(vid, m);
-    setVisual({ id: vid, title: m.title, version: m.version });
+    setVisual({ id: vid, title: m.title, version: m.version, label: m.viewing_label });
     setPaginasVisual(paginas);
     return paginas;
   };
 
   // Lo que el modelo escribió en bloques file:/edit: pasa a ser una versión del
   // visual de la conversación (se crea la primera vez).
-  const guardarVisual = async (respuesta, convId, base, patchLast) => {
+  const guardarVisual = async (respuesta, convId, base, patchLast, pedido) => {
     const r = aplicarRespuesta(base.paginas, respuesta, { estricto: true });
     if (r.fallos.length) patchLast((last) => ({ ...last, aviso: t('visualEditFailed', { names: r.fallos.map((f) => f.name).join(', ') }) }));
     if (!r.cambiadas.length) return;
@@ -227,12 +227,13 @@ export default function ChatPage() {
           kind: 'design', title: tituloDe(r.files, title || t('untitled')),
           meta: { conversation_id: convId, origin: 'chat' },
           files: r.cambiadas.map((f) => ({ path: f.name, role: 'source', text: f.code })),
+          label: etiquetaDePedido(pedido),
         });
         vid = vis.id;
         version = vis.version;
       } else {
         version = (await guardarRespuesta(vid, base.visual.version, r.cambiadas,
-          (actuales) => aplicarRespuesta(actuales, respuesta, { estricto: true }).cambiadas)).version;
+          (actuales) => aplicarRespuesta(actuales, respuesta, { estricto: true }).cambiadas, etiquetaDePedido(pedido))).version;
       }
       patchLast((last) => ({ ...last, visual: { version, nuevas: r.cambiadas.map((f) => f.name) } }));
       await cargarVisual(vid);
@@ -345,7 +346,7 @@ export default function ChatPage() {
       // Stream cerrado sin contenido ni aviso (p. ej. el gateway se reinició a
       // mitad): que no quede "Pensando…" con el botón de enviar activo.
       patchLast((last) => (last.content ? last : { ...last, content: t('emptyResponseNotice'), error: true }));
-      if (conVisuals && tieneVisual(respuesta)) await guardarVisual(respuesta, convId, base, patchLast);
+      if (conVisuals && tieneVisual(respuesta)) await guardarVisual(respuesta, convId, base, patchLast, text);
 
       if (isFirstExchange && saveHistory) {
         try {
@@ -562,7 +563,7 @@ export default function ChatPage() {
                         return (
                           <>
                             {cuerpo && <Markdown streaming={activo}>{cuerpo}</Markdown>}
-                            <VisualChip nombres={nombres.length ? nombres : ['index.html']} version={m.visual?.version} t={t}
+                            <VisualChip nombres={nombres.length ? nombres : ['index.html']} t={t}
                               escribiendo={activo ? (r.abierto?.name || r.editando?.name || nombres[0] || 'index.html') : null}
                               onOpen={() => setPanelVisual(true)} />
                           </>
