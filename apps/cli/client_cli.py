@@ -1198,10 +1198,6 @@ class ApiClient:
     def nodes(self) -> dict:
         return self._json("GET", f"{self.server}/api/nodes", timeout=20)
 
-    def visual_files(self, conversation_id: str) -> dict:
-        """Archivos de la última versión de un diseño de Visuals."""
-        return self._json("GET", f"{self.server}/api/conversations/{conversation_id}/files", timeout=30)
-
     def generate_title(self, conversation_id: str) -> dict:
         """Auto-título del servidor tras el primer intercambio (como la web)."""
         return self._json("POST",
@@ -3852,12 +3848,13 @@ def verify_file(workspace: Path, path: Path) -> tuple[str, str]:
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/mcp.py
 # ──────────────────────────────────────────────────────────────────────────
-"""Cliente MCP (Model Context Protocol) por stdio, sin dependencias.
+"""Cliente MCP (Model Context Protocol) por stdio y por HTTP, sin dependencias.
 
 Servidores en `<workspace>/.lixbon/mcp.json` o `~/.lixbon/mcp.json`:
 
     {"servers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
-                            "env": {"GITHUB_TOKEN": "..."}}}}
+                            "env": {"GITHUB_TOKEN": "..."}},
+                 "remoto": {"url": "https://ejemplo.com/mcp", "headers": {"Authorization": "Bearer ..."}}}}
 
 Cada tool del servidor se expone al modelo como `mcp__<servidor>__<tool>`.
 """
@@ -3867,7 +3864,10 @@ import re
 import shutil
 import subprocess
 import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
+
 
 MCP_PROTOCOL = "2024-11-05"
 MCP_FILENAME = "mcp.json"
@@ -3882,6 +3882,38 @@ class McpError(RuntimeError):
 
 def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", text).strip("_") or "x"
+
+
+def format_tool_result(result: dict) -> str:
+    parts = []
+    for item in result.get("content") or []:
+        kind = item.get("type")
+        if kind == "text":
+            parts.append(str(item.get("text", "")))
+        elif kind == "image":
+            parts.append(f"[imagen {item.get('mimeType', '')}: no se puede mostrar aquí]")
+        elif kind == "resource":
+            res = item.get("resource") or {}
+            parts.append(str(res.get("text") or f"[recurso {res.get('uri', '')}]"))
+    text = "\n".join(p for p in parts if p).strip() or "(sin contenido)"
+    if len(text) > MAX_RESULT_CHARS:
+        text = text[:MAX_RESULT_CHARS] + "\n…[recortado]"
+    return f"[ERROR] {text}" if result.get("isError") else text
+
+
+def prompt_text(result: dict) -> str:
+    textos = []
+    for msg in result.get("messages") or []:
+        content = msg.get("content") or {}
+        if isinstance(content, dict) and content.get("type") == "text":
+            textos.append(str(content.get("text", "")))
+    return "\n\n".join(textos)
+
+
+def _rpc_error(response: dict) -> None:
+    if "error" in response:
+        err = response["error"]
+        raise McpError(str(err.get("message") or err) if isinstance(err, dict) else str(err))
 
 
 class McpServer:
@@ -3956,29 +3988,14 @@ class McpServer:
         finally:
             self._pending.pop(ident, None)
         response = slot["response"] or {}
-        if "error" in response:
-            err = response["error"]
-            raise McpError(str(err.get("message") or err) if isinstance(err, dict) else str(err))
+        _rpc_error(response)
         return response.get("result") or {}
 
     def call(self, tool: str, arguments: dict) -> str:
-        result = self.request("tools/call", {"name": tool, "arguments": arguments or {}})
-        parts = []
-        for item in result.get("content") or []:
-            kind = item.get("type")
-            if kind == "text":
-                parts.append(str(item.get("text", "")))
-            elif kind == "image":
-                parts.append(f"[imagen {item.get('mimeType', '')}: no se puede mostrar aquí]")
-            elif kind == "resource":
-                res = item.get("resource") or {}
-                parts.append(str(res.get("text") or f"[recurso {res.get('uri', '')}]"))
-        text = "\n".join(p for p in parts if p).strip() or "(sin contenido)"
-        if len(text) > MAX_RESULT_CHARS:
-            text = text[:MAX_RESULT_CHARS] + "\n…[recortado]"
-        if result.get("isError"):
-            return f"[ERROR] {text}"
-        return text
+        return format_tool_result(self.request("tools/call", {"name": tool, "arguments": arguments or {}}))
+
+    def get_prompt(self, name: str, arguments: dict) -> str:
+        return prompt_text(self.request("prompts/get", {"name": name, "arguments": arguments or {}}))
 
     def close(self) -> None:
         if self.proc and self.alive:
@@ -3987,6 +4004,92 @@ class McpServer:
                 self.proc.wait(timeout=3)
             except Exception:
                 self.proc.kill()
+
+
+def _sse_response(body: str, ident: int) -> dict | None:
+    """Respuesta JSON-RPC con `ident` dentro de un cuerpo text/event-stream."""
+    for bloque in body.replace("\r\n", "\n").split("\n\n"):
+        data = "\n".join(line[5:].lstrip() for line in bloque.split("\n") if line.startswith("data:"))
+        if not data:
+            continue
+        try:
+            msg = json.loads(data)
+        except ValueError:
+            continue
+        if isinstance(msg, dict) and msg.get("id") == ident:
+            return msg
+    return None
+
+
+class HttpMcpServer:
+    """Servidor MCP remoto (Streamable HTTP): cada petición es un POST JSON-RPC y la
+    respuesta llega como JSON o como stream SSE. Sin canal de servidor (GET)."""
+
+    def __init__(self, name: str, url: str, headers: dict | None = None):
+        self.name = name
+        self.url = url
+        self.headers = {k: str(v) for k, v in (headers or {}).items()}
+        self.command, self.args = url, []
+        self.tools: list[dict] = []
+        self.error = ""
+        self._seq = 0
+        self._session: str | None = None
+        self._started = False
+        self._lock = threading.Lock()
+
+    @property
+    def alive(self) -> bool:
+        return self._started
+
+    def start(self) -> None:
+        self.request("initialize", {
+            "protocolVersion": MCP_PROTOCOL,
+            "capabilities": {},
+            "clientInfo": {"name": "lixbon-cli", "version": "1"},
+        }, timeout=START_TIMEOUT)
+        self._post({"jsonrpc": "2.0", "method": "notifications/initialized"}, START_TIMEOUT)
+        self._started = True
+        self.tools = list(self.request("tools/list", {}, timeout=START_TIMEOUT).get("tools") or [])
+
+    def _post(self, message: dict, timeout: float) -> dict | None:
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                   "User-Agent": USER_AGENT, **self.headers}
+        if self._session:
+            headers["Mcp-Session-Id"] = self._session
+        req = urllib.request.Request(self.url, data=json.dumps(message, ensure_ascii=False).encode("utf-8"),
+                                     headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                self._session = resp.headers.get("Mcp-Session-Id") or self._session
+                if resp.status == 202:
+                    return None
+                body = resp.read().decode("utf-8", errors="replace")
+                ctype = resp.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as exc:
+            detalle = exc.read().decode("utf-8", errors="replace")[:200]
+            raise McpError(f"«{self.name}» respondió {exc.code}: {detalle}") from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise McpError(f"no se pudo conectar con «{self.name}»: {getattr(exc, 'reason', exc)}") from exc
+        if "text/event-stream" in ctype:
+            return _sse_response(body, message.get("id"))
+        return json.loads(body) if body.strip() else None
+
+    def request(self, method: str, params: dict, timeout: float = CALL_TIMEOUT) -> dict:
+        with self._lock:
+            self._seq += 1
+            ident = self._seq
+        response = self._post({"jsonrpc": "2.0", "id": ident, "method": method, "params": params}, timeout) or {}
+        _rpc_error(response)
+        return response.get("result") or {}
+
+    def call(self, tool: str, arguments: dict) -> str:
+        return format_tool_result(self.request("tools/call", {"name": tool, "arguments": arguments or {}}))
+
+    def get_prompt(self, name: str, arguments: dict) -> str:
+        return prompt_text(self.request("prompts/get", {"name": name, "arguments": arguments or {}}))
+
+    def close(self) -> None:
+        self._started = False
 
 
 def load_mcp_config(workspace: Path, home_dir: Path) -> dict[str, dict]:
@@ -4000,20 +4103,25 @@ def load_mcp_config(workspace: Path, home_dir: Path) -> dict[str, dict]:
         except (OSError, ValueError):
             continue
         for name, spec in (data.get("servers") or data.get("mcpServers") or {}).items():
-            if isinstance(spec, dict) and spec.get("command"):
+            if isinstance(spec, dict) and spec.get("url"):
+                servers[str(name)] = dict(spec)
+            elif isinstance(spec, dict) and spec.get("command"):
                 servers[str(name)] = {**spec, "cwd": spec.get("cwd") or str(workspace)}
     return servers
 
 
 class McpRegistry:
     def __init__(self):
-        self.servers: dict[str, McpServer] = {}
+        self.servers: dict[str, McpServer | HttpMcpServer] = {}
         self._tool_map: dict[str, tuple[str, str]] = {}  # nombre expuesto → (servidor, tool)
 
     def start_all(self, config: dict[str, dict]) -> None:
         for name, spec in config.items():
-            server = McpServer(name, str(spec["command"]), [str(a) for a in spec.get("args") or []],
-                               spec.get("env") or {}, str(spec.get("cwd") or ""))
+            if spec.get("url"):
+                server = HttpMcpServer(name, str(spec["url"]), spec.get("headers") or {})
+            else:
+                server = McpServer(name, str(spec["command"]), [str(a) for a in spec.get("args") or []],
+                                   spec.get("env") or {}, str(spec.get("cwd") or ""))
             self.servers[name] = server
             try:
                 server.start()
@@ -6356,7 +6464,7 @@ COMMAND_SPECS: list[tuple[str, str, str, str]] = [
     ("run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"),
     ("workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"),
     ("init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"),
-    ("visual", "<id o enlace> [stack]", "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)", "agente"),
+    ("visual", "<qué diseñar> | <id> <cambio> | codigo <id> [stack]", "Diseñar en Lixbon Visuals: crear, editar o pasar a código", "agente"),
     # ── cuenta ──────────────────────────────────────────────────────────
     ("status", "", "Ver estado de la sesión", "cuenta"),
     ("cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"),
@@ -6747,49 +6855,6 @@ def parse_image_markers(text: str, staged: list[Path]) -> list[Path]:
             images.append(staged[index])
     return images
 
-
-STACKS = {
-    "react": "React 18 + Vite (JavaScript, sin TypeScript salvo que ya lo use el proyecto)",
-    "api": "API con Express (Node) en server/",
-}
-
-
-def visual_project_prompt(titulo: str, carpeta: str, paginas: list[str], stack: str) -> str:
-    """Encargo para que el agente replique un diseño de Visuals como proyecto."""
-    palabras = stack.lower().split()
-    partes = [STACKS[p] for p in ("react", "api") if p in palabras]
-    con_api = "api" in palabras
-    descripcion = " y ".join(partes) if partes and len(partes) == len(palabras) else stack
-    proyecto = f"{carpeta}-app"
-    lineas = [
-        f"Replica el diseño «{titulo}» como un proyecto pequeño en {proyecto}/ con {descripcion}.",
-        f"Las páginas originales están en {carpeta}/ ({', '.join(paginas)}): HTML autocontenido con "
-        "Tailwind por CDN. Léelas TODAS antes de escribir nada; el resultado tiene que verse igual "
-        "(mismos textos, colores, tipografías, espaciados y estados hover/responsive).",
-        "",
-        "Reglas:",
-        f"- Cada página del diseño es una ruta (react-router-dom); index.html es la ruta /. "
-        "Cabecera y pie compartidos en components/; el resto en pages/.",
-        "- Tailwind instalado por npm (no por CDN). Las fuentes de Google Fonts van en index.html.",
-        "- Sin lorem ipsum: conserva los textos del diseño. Los datos repetidos (tarjetas, listas) "
-        "salen de un array o del backend, no copiados a mano.",
-        "- Formularios funcionales con validación en el cliente.",
-    ]
-    if con_api:
-        lineas += [
-            "- Backend en server/ (Express): un endpoint por formulario del diseño (POST) y uno GET por "
-            "cada lista de datos; guarda en un JSON en disco. Vite hace proxy de /api al servidor "
-            "y `npm run dev` arranca los dos (concurrently).",
-        ]
-    lineas += [
-        "- README.md corto: cómo instalar, arrancar y dónde está cada cosa.",
-        "- Al terminar ejecuta `npm install` y `npm run build`; si falla, arréglalo antes de dar por hecho el trabajo.",
-        "",
-        "Empieza por el esqueleto (vite + dependencias), luego los componentes compartidos y después "
-        "una página por turno de trabajo, comprobando el build al final.",
-    ]
-    return "\n".join(lineas)
-
 # ──────────────────────────────────────────────────────────────────────────
 # módulo: lixbon_cli/app.py
 # ──────────────────────────────────────────────────────────────────────────
@@ -6803,6 +6868,8 @@ import time
 import uuid
 from pathlib import Path
 
+
+LIXBON_MCP = "lixbon"
 
 
 # Resultado del prompt cuando la terminal cambió de tamaño con la caja abierta.
@@ -7938,10 +8005,20 @@ class ChatApp:
             except OSError:
                 return
 
+    def _mcp_config(self) -> dict[str, dict]:
+        """Servidores declarados más el de Lixbon (Visuals), si hay cuenta y no se
+        desactivó con "lixbon_mcp": false en config.json."""
+        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        key = self.cfg.get("api_key")
+        if key and self.cfg.get("lixbon_mcp", True) and LIXBON_MCP not in config:
+            config[LIXBON_MCP] = {"url": f"{server_base(self.cfg.get('base_url', ''))}/mcp",
+                                  "headers": {"Authorization": f"Bearer {key}"}}
+        return config
+
     def _start_mcp(self) -> None:
         """Arranca los servidores MCP declarados en segundo plano: el modelo los
         ve en cuanto responden; el arranque del CLI no espera."""
-        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        config = self._mcp_config()
         if not config:
             return
         registry = McpRegistry()
@@ -7954,7 +8031,7 @@ class ChatApp:
 
     def cmd_mcp(self, arg: str):
         registry = self.session.get("mcp")
-        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        config = self._mcp_config()
         if not config:
             print_note("Sin servidores MCP. Declara alguno en .lixbon/mcp.json (proyecto) o ~/.lixbon/mcp.json:")
             print_note('{"servers": {"nombre": {"command": "npx", "args": ["-y", "@paquete/servidor"], "env": {}}}}')
@@ -8994,63 +9071,50 @@ class ChatApp:
         return True
 
     def cmd_visual(self, arg: str):
-        """Descarga al workspace las páginas de un diseño de Visuals (por id o
-        por el enlace /visuals/<id>) y, si se quiere, pone al agente a
-        replicarlo como proyecto real (React + Vite, con API…)."""
-        import re as _re
-
-        m = _re.search(r"([0-9a-f]{8}-[0-9a-f-]{27})", arg or "")
-        if not m:
-            print_error("Uso: /visual <id o enlace de https://lixbon.com/visuals/...> [stack]")
-            print_note("  /visual <id>                  elige qué hacer con el diseño en un menú")
-            print_note("  /visual <id> react            React + Vite")
-            print_note("  /visual <id> react api        React + Vite + API Express")
-            print_note("  /visual <id> vue + fastapi    cualquier stack, en tus palabras")
+        """Diseña en Lixbon Visuals con el agente: crear, editar un visual o pasarlo a
+        código. Las instrucciones las da el prompt `visual` del MCP de Lixbon y el
+        agente trabaja con sus herramientas visual_*."""
+        peticion = (arg or "").strip()
+        if not peticion:
+            print_error("Uso: /visual <qué diseñar>")
+            print_note("  /visual una landing para mi API             crea un visual nuevo")
+            print_note("  /visual vis_… haz el título más grande       edita uno existente (id o enlace)")
+            print_note("  /visual codigo vis_… react                   lo implementa en este proyecto")
             return True
-        stack = (arg or "")[m.end():].strip()
+        if not self.cfg.get("api_key"):
+            print_error("Visuals necesita tu cuenta de Lixbon: inicia sesión con /login.")
+            return True
+        server = self._lixbon_mcp()
+        if server is None:
+            return True
         try:
-            with spinner("trayendo el diseño…"):
-                data = self.api.visual_files(m.group(1))
-        except ApiError as exc:
-            self._report_api_error(exc)
-            return True
-        files = data.get("files") or []
-        if not files:
-            print_error("Ese diseño todavía no tiene páginas.")
-            return True
-        carpeta = _re.sub(r"[^a-z0-9]+", "-", (data.get("title") or "visual").lower()).strip("-") or "visual"
-        destino = self.workspace / carpeta
-        destino.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            (destino / f["name"]).write_text(f["code"], encoding="utf-8")
-        print_ok(f"{len(files)} archivo{'s' if len(files) != 1 else ''} en {carpeta}/  "
-                 f"({data.get('versions', 1)} versiones en la web)")
-        for f in files:
-            print_note(f"  {carpeta}/{f['name']}")
-        rutas = ", ".join(f"{carpeta}/{f['name']}" for f in files)
-        titulo = data.get("title") or carpeta
-        if not stack:
-            stack = select("¿Qué hago con el diseño?", [
-                Option("Dejarlo en HTML", "", "solo los archivos; le pides cambios al agente"),
-                Option("Replicarlo en React + Vite", "react", f"proyecto en {carpeta}-app/ con una ruta por página"),
-                Option("React + Vite + API Express", "react api", "lo mismo, con backend para formularios y datos"),
-                Option("Otro stack", "otro", f"escríbelo: /visual {m.group(1)[:8]}… vue + fastapi"),
-            ], hint="↑↓ elegir · Enter confirmar · Esc dejarlo en HTML") or ""
-        if stack == "otro":
-            print_note(f"Repite el comando con el stack: /visual {m.group(1)} <stack>")
-            stack = ""
-        if not stack:
-            self.history.append({"role": "user", "content": (
-                f"[He traído al workspace el diseño «{titulo}» de Lixbon Visuals: {rutas}. "
-                "Son páginas HTML autocontenidas (Tailwind por CDN). Cuando te pida cambios, edita esos archivos.]")})
+            with spinner("preparando Lixbon Visuals…"):
+                instrucciones = server.get_prompt("visual", {"peticion": peticion})
+        except McpError as exc:
+            print_error(f"Lixbon Visuals: {exc}")
             return True
         self.mode = "agent"
         self.cfg["mode"] = "agent"
         save_config(self.cfg)
         self.session["plan_mode"] = False
         self._refresh_status()
-        self.send_message(visual_project_prompt(titulo, carpeta, [f["name"] for f in files], stack))
+        self.send_message(instrucciones)
         return True
+
+    def _lixbon_mcp(self, espera: float = 15.0):
+        """El servidor MCP de Lixbon ya conectado, esperando a que arranque si hace falta."""
+        fin = time.monotonic() + espera
+        while self.session.get("mcp") is None and time.monotonic() < fin:
+            time.sleep(0.2)
+        registry = self.session.get("mcp")
+        server = registry.servers.get(LIXBON_MCP) if registry else None
+        if server is None:
+            print_error("No se pudo preparar el servidor MCP de Lixbon. Revisa /mcp.")
+            return None
+        if not server.alive:
+            print_error(f"No hay conexión con Lixbon Visuals: {server.error or 'sin respuesta'}")
+            return None
+        return server
 
     def cmd_init(self, arg: str):
         """Genera LIXBON.md: el contexto del proyecto que el CLI carga solo."""

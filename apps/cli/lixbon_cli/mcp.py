@@ -1,9 +1,10 @@
-"""Cliente MCP (Model Context Protocol) por stdio, sin dependencias.
+"""Cliente MCP (Model Context Protocol) por stdio y por HTTP, sin dependencias.
 
 Servidores en `<workspace>/.lixbon/mcp.json` o `~/.lixbon/mcp.json`:
 
     {"servers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
-                            "env": {"GITHUB_TOKEN": "..."}}}}
+                            "env": {"GITHUB_TOKEN": "..."}},
+                 "remoto": {"url": "https://ejemplo.com/mcp", "headers": {"Authorization": "Bearer ..."}}}}
 
 Cada tool del servidor se expone al modelo como `mcp__<servidor>__<tool>`.
 """
@@ -13,7 +14,11 @@ import re
 import shutil
 import subprocess
 import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+from lixbon_cli.config import USER_AGENT
 
 MCP_PROTOCOL = "2024-11-05"
 MCP_FILENAME = "mcp.json"
@@ -28,6 +33,38 @@ class McpError(RuntimeError):
 
 def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", text).strip("_") or "x"
+
+
+def format_tool_result(result: dict) -> str:
+    parts = []
+    for item in result.get("content") or []:
+        kind = item.get("type")
+        if kind == "text":
+            parts.append(str(item.get("text", "")))
+        elif kind == "image":
+            parts.append(f"[imagen {item.get('mimeType', '')}: no se puede mostrar aquí]")
+        elif kind == "resource":
+            res = item.get("resource") or {}
+            parts.append(str(res.get("text") or f"[recurso {res.get('uri', '')}]"))
+    text = "\n".join(p for p in parts if p).strip() or "(sin contenido)"
+    if len(text) > MAX_RESULT_CHARS:
+        text = text[:MAX_RESULT_CHARS] + "\n…[recortado]"
+    return f"[ERROR] {text}" if result.get("isError") else text
+
+
+def prompt_text(result: dict) -> str:
+    textos = []
+    for msg in result.get("messages") or []:
+        content = msg.get("content") or {}
+        if isinstance(content, dict) and content.get("type") == "text":
+            textos.append(str(content.get("text", "")))
+    return "\n\n".join(textos)
+
+
+def _rpc_error(response: dict) -> None:
+    if "error" in response:
+        err = response["error"]
+        raise McpError(str(err.get("message") or err) if isinstance(err, dict) else str(err))
 
 
 class McpServer:
@@ -102,29 +139,14 @@ class McpServer:
         finally:
             self._pending.pop(ident, None)
         response = slot["response"] or {}
-        if "error" in response:
-            err = response["error"]
-            raise McpError(str(err.get("message") or err) if isinstance(err, dict) else str(err))
+        _rpc_error(response)
         return response.get("result") or {}
 
     def call(self, tool: str, arguments: dict) -> str:
-        result = self.request("tools/call", {"name": tool, "arguments": arguments or {}})
-        parts = []
-        for item in result.get("content") or []:
-            kind = item.get("type")
-            if kind == "text":
-                parts.append(str(item.get("text", "")))
-            elif kind == "image":
-                parts.append(f"[imagen {item.get('mimeType', '')}: no se puede mostrar aquí]")
-            elif kind == "resource":
-                res = item.get("resource") or {}
-                parts.append(str(res.get("text") or f"[recurso {res.get('uri', '')}]"))
-        text = "\n".join(p for p in parts if p).strip() or "(sin contenido)"
-        if len(text) > MAX_RESULT_CHARS:
-            text = text[:MAX_RESULT_CHARS] + "\n…[recortado]"
-        if result.get("isError"):
-            return f"[ERROR] {text}"
-        return text
+        return format_tool_result(self.request("tools/call", {"name": tool, "arguments": arguments or {}}))
+
+    def get_prompt(self, name: str, arguments: dict) -> str:
+        return prompt_text(self.request("prompts/get", {"name": name, "arguments": arguments or {}}))
 
     def close(self) -> None:
         if self.proc and self.alive:
@@ -133,6 +155,92 @@ class McpServer:
                 self.proc.wait(timeout=3)
             except Exception:
                 self.proc.kill()
+
+
+def _sse_response(body: str, ident: int) -> dict | None:
+    """Respuesta JSON-RPC con `ident` dentro de un cuerpo text/event-stream."""
+    for bloque in body.replace("\r\n", "\n").split("\n\n"):
+        data = "\n".join(line[5:].lstrip() for line in bloque.split("\n") if line.startswith("data:"))
+        if not data:
+            continue
+        try:
+            msg = json.loads(data)
+        except ValueError:
+            continue
+        if isinstance(msg, dict) and msg.get("id") == ident:
+            return msg
+    return None
+
+
+class HttpMcpServer:
+    """Servidor MCP remoto (Streamable HTTP): cada petición es un POST JSON-RPC y la
+    respuesta llega como JSON o como stream SSE. Sin canal de servidor (GET)."""
+
+    def __init__(self, name: str, url: str, headers: dict | None = None):
+        self.name = name
+        self.url = url
+        self.headers = {k: str(v) for k, v in (headers or {}).items()}
+        self.command, self.args = url, []
+        self.tools: list[dict] = []
+        self.error = ""
+        self._seq = 0
+        self._session: str | None = None
+        self._started = False
+        self._lock = threading.Lock()
+
+    @property
+    def alive(self) -> bool:
+        return self._started
+
+    def start(self) -> None:
+        self.request("initialize", {
+            "protocolVersion": MCP_PROTOCOL,
+            "capabilities": {},
+            "clientInfo": {"name": "lixbon-cli", "version": "1"},
+        }, timeout=START_TIMEOUT)
+        self._post({"jsonrpc": "2.0", "method": "notifications/initialized"}, START_TIMEOUT)
+        self._started = True
+        self.tools = list(self.request("tools/list", {}, timeout=START_TIMEOUT).get("tools") or [])
+
+    def _post(self, message: dict, timeout: float) -> dict | None:
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                   "User-Agent": USER_AGENT, **self.headers}
+        if self._session:
+            headers["Mcp-Session-Id"] = self._session
+        req = urllib.request.Request(self.url, data=json.dumps(message, ensure_ascii=False).encode("utf-8"),
+                                     headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                self._session = resp.headers.get("Mcp-Session-Id") or self._session
+                if resp.status == 202:
+                    return None
+                body = resp.read().decode("utf-8", errors="replace")
+                ctype = resp.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as exc:
+            detalle = exc.read().decode("utf-8", errors="replace")[:200]
+            raise McpError(f"«{self.name}» respondió {exc.code}: {detalle}") from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise McpError(f"no se pudo conectar con «{self.name}»: {getattr(exc, 'reason', exc)}") from exc
+        if "text/event-stream" in ctype:
+            return _sse_response(body, message.get("id"))
+        return json.loads(body) if body.strip() else None
+
+    def request(self, method: str, params: dict, timeout: float = CALL_TIMEOUT) -> dict:
+        with self._lock:
+            self._seq += 1
+            ident = self._seq
+        response = self._post({"jsonrpc": "2.0", "id": ident, "method": method, "params": params}, timeout) or {}
+        _rpc_error(response)
+        return response.get("result") or {}
+
+    def call(self, tool: str, arguments: dict) -> str:
+        return format_tool_result(self.request("tools/call", {"name": tool, "arguments": arguments or {}}))
+
+    def get_prompt(self, name: str, arguments: dict) -> str:
+        return prompt_text(self.request("prompts/get", {"name": name, "arguments": arguments or {}}))
+
+    def close(self) -> None:
+        self._started = False
 
 
 def load_mcp_config(workspace: Path, home_dir: Path) -> dict[str, dict]:
@@ -146,20 +254,25 @@ def load_mcp_config(workspace: Path, home_dir: Path) -> dict[str, dict]:
         except (OSError, ValueError):
             continue
         for name, spec in (data.get("servers") or data.get("mcpServers") or {}).items():
-            if isinstance(spec, dict) and spec.get("command"):
+            if isinstance(spec, dict) and spec.get("url"):
+                servers[str(name)] = dict(spec)
+            elif isinstance(spec, dict) and spec.get("command"):
                 servers[str(name)] = {**spec, "cwd": spec.get("cwd") or str(workspace)}
     return servers
 
 
 class McpRegistry:
     def __init__(self):
-        self.servers: dict[str, McpServer] = {}
+        self.servers: dict[str, McpServer | HttpMcpServer] = {}
         self._tool_map: dict[str, tuple[str, str]] = {}  # nombre expuesto → (servidor, tool)
 
     def start_all(self, config: dict[str, dict]) -> None:
         for name, spec in config.items():
-            server = McpServer(name, str(spec["command"]), [str(a) for a in spec.get("args") or []],
-                               spec.get("env") or {}, str(spec.get("cwd") or ""))
+            if spec.get("url"):
+                server = HttpMcpServer(name, str(spec["url"]), spec.get("headers") or {})
+            else:
+                server = McpServer(name, str(spec["command"]), [str(a) for a in spec.get("args") or []],
+                                   spec.get("env") or {}, str(spec.get("cwd") or ""))
             self.servers[name] = server
             try:
                 server.start()
