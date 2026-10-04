@@ -30,6 +30,7 @@ mod mascota;
 mod claude_code;
 mod env_path;
 mod orch;
+mod skills_catalog;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1450,7 +1451,11 @@ pub fn run() {
             orch::orch_term_resize,
             orch::orch_agents,
             orch::orch_skill_install,
-            orch::orch_skill_uninstall
+            orch::orch_skill_uninstall,
+            skills_catalog::skills_agents,
+            skills_catalog::skills_installed,
+            skills_catalog::skill_install,
+            skills_catalog::skill_uninstall
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

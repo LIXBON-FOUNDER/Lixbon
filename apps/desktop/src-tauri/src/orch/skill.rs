@@ -51,6 +51,23 @@ pub struct Detected {
     pub path: String,
 }
 
+/// Carpeta de skills de cada agente conocido, para el catálogo (Ajustes › Skills).
+pub(crate) struct AgentDir {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub dir: PathBuf,
+    pub detected: bool,
+}
+
+pub(crate) fn agent_dirs(home: &Path) -> Vec<AgentDir> {
+    TARGETS.iter().map(|t| AgentDir {
+        id: t.id,
+        label: t.label,
+        dir: home.join(t.skills),
+        detected: t.bins.iter().any(|b| which(b).is_some()) || home.join(t.config).is_dir(),
+    }).collect()
+}
+
 pub fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }

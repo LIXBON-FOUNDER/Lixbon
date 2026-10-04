@@ -10,7 +10,7 @@ mod issues;
 mod pty;
 mod roles;
 mod server;
-mod skill;
+pub(crate) mod skill;
 pub mod state;
 
 use std::collections::{BTreeMap, HashMap};
