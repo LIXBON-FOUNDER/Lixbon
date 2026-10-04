@@ -258,11 +258,6 @@ function nombrarPorEnlaces(files) {
 }
 
 /** Último archivo de un texto (aunque el bloque aún esté abierto) y si cerró. */
-export function extraerArchivo(texto) {
-  const todos = extraerArchivos(texto);
-  return todos.length ? todos[todos.length - 1] : null;
-}
-
 // ── Ediciones SEARCH/REPLACE sobre un archivo ya existente ───────────────────
 
 const EDIT_INFO = /^(?:edit|patch|diff):\s*([\w./-]+\.(?:html?|svg))$/i;
@@ -598,10 +593,6 @@ const IMG_MD = /!\[([^\]]*)\]\((data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)\)/;
 export function extraerImagen(texto) {
   const m = IMG_MD.exec(texto || '');
   return m ? { alt: m[1], src: m[2] } : null;
-}
-
-export function esConversacionDeImagenes(messages) {
-  return messages.some((m) => m.role === 'assistant' && extraerImagen(m.content));
 }
 
 /** Versiones de una conversación: cada respuesta con archivos (o imagen).

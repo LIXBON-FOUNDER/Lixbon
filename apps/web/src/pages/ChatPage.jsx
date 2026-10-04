@@ -19,9 +19,17 @@ import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
 import { VerifyBanner } from '../components/VerifyBanner';
-import { IconShare, IconArrowDown, IconGlobe, IconMenu } from '../components/Icons';
+import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu } from '../components/Icons';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import { MascotaChat } from '../components/Mascota';
+import { ChatVisualPanel, VISUAL_CHAT_PROMPT, VisualChip, sinBloquesVisuales } from '../components/ChatVisualPanel';
+import { FILE_PROMPT } from '../lib/archivos';
+import { tieneVisuals } from '../lib/planes';
+import { deleteVisual, getVisual } from '../lib/visualsApi';
+import {
+  aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, guardarRespuesta, tieneVisual,
+  tituloDe, visualDeConversacion,
+} from '../lib/visualStudio';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
@@ -81,6 +89,11 @@ export default function ChatPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [webSearch, setWebSearch] = useState(false);
   const [searching, setSearching] = useState(false);
+  // Visual de esta conversación (si el modelo entregó páginas) y su panel.
+  const [visual, setVisual] = useState(null);       // { id, title, version }
+  const [paginasVisual, setPaginasVisual] = useState([]);
+  const [panelVisual, setPanelVisual] = useState(false);
+  const [errorVisual, setErrorVisual] = useState('');
 
   const scrollRef = useRef(null);
   const loadedConvRef = useRef(null); // conversación ya cargada (evita refetch tras navigate)
@@ -140,9 +153,18 @@ export default function ChatPage() {
       setMessages([]);
       setTitle(null);
       setContextUso(null);
+      setVisual(null);
+      setPaginasVisual([]);
+      setPanelVisual(false);
+      setErrorVisual('');
       return;
     }
     if (!user || loadedConvRef.current === routeConvId) return;
+    setVisual(null);
+    setPaginasVisual([]);
+    setPanelVisual(false);
+    setErrorVisual('');
+    visualDeConversacion(routeConvId).then((v) => { if (v) cargarVisual(v.id); }).catch(() => {});
     loadedConvRef.current = routeConvId;
     setMsgsLoading(true);
     api.get(`/api/conversations/${routeConvId}/messages`)
@@ -183,6 +205,52 @@ export default function ChatPage() {
   // ── Enviar mensaje ───────────────────────────────────────────────────
   const modelVision = Boolean(modelInfo[model]?.capabilities?.includes('vision'));
 
+  const cargarVisual = async (vid) => {
+    const m = await getVisual(vid);
+    const paginas = await cargarPaginas(vid, m);
+    setVisual({ id: vid, title: m.title, version: m.version });
+    setPaginasVisual(paginas);
+    return paginas;
+  };
+
+  // Lo que el modelo escribió en bloques file:/edit: pasa a ser una versión del
+  // visual de la conversación (se crea la primera vez).
+  const guardarVisual = async (respuesta, convId, base, patchLast) => {
+    const r = aplicarRespuesta(base.paginas, respuesta, { estricto: true });
+    if (r.fallos.length) patchLast((last) => ({ ...last, aviso: t('visualEditFailed', { names: r.fallos.map((f) => f.name).join(', ') }) }));
+    if (!r.cambiadas.length) return;
+    try {
+      let vid = base.visual?.id;
+      let version;
+      if (!vid) {
+        const vis = await crearVisual({
+          kind: 'design', title: tituloDe(r.files, title || t('untitled')),
+          meta: { conversation_id: convId, origin: 'chat' },
+          files: r.cambiadas.map((f) => ({ path: f.name, role: 'source', text: f.code })),
+        });
+        vid = vis.id;
+        version = vis.version;
+      } else {
+        version = (await guardarRespuesta(vid, base.visual.version, r.cambiadas,
+          (actuales) => aplicarRespuesta(actuales, respuesta, { estricto: true }).cambiadas)).version;
+      }
+      patchLast((last) => ({ ...last, visual: { version, nuevas: r.cambiadas.map((f) => f.name) } }));
+      await cargarVisual(vid);
+      setErrorVisual('');
+    } catch (err) {
+      setErrorVisual(err.response?.data?.detail?.message || t('visualSaveError'));
+    }
+  };
+
+  const descartarVisual = async () => {
+    const ok = await confirmar({ titulo: t('discardVisualTitle'), texto: t('discardVisualText'), etiqueta: t('discardVisual') });
+    if (!ok) return;
+    try { await deleteVisual(visual.id); } catch { /* ya no existe */ }
+    setVisual(null);
+    setPaginasVisual([]);
+    setPanelVisual(false);
+  };
+
   const send = async (text, images = []) => {
     if (!user) {
       navigate('/auth?mode=register');
@@ -209,6 +277,8 @@ export default function ChatPage() {
     // Las imágenes viajan con el mensaje (modelo con visión); el historial
     // guardado solo conserva el texto.
     const history = [...messages.slice(-CONTEXT_WINDOW), { role: 'user', content: text, ...(images.length ? { images } : {}) }];
+    const conVisuals = tieneVisuals(user);
+    const base = { visual, paginas: paginasVisual };
 
     if (!routeConvId && saveHistory) {
       loadedConvRef.current = convId; // evita el refetch al cambiar la URL
@@ -229,11 +299,13 @@ export default function ChatPage() {
       return next;
     });
 
+    let respuesta = '';
     try {
       await streamChatCompletion({
         model: chosenModel,
-        messages: history,
+        messages: conVisuals ? compactarHistorial(history, { soloPaginas: true }) : history,
         conversationId: convId,
+        system: conVisuals ? FILE_PROMPT + VISUAL_CHAT_PROMPT + contextoArchivos(base.paginas, base.visual?.version || 0) : FILE_PROMPT,
         webSearch,
         signal: abort.signal,
         onSources: (sources, queries) => {
@@ -247,6 +319,8 @@ export default function ChatPage() {
         },
         onDelta: (delta) => {
           setSearching(false);
+          respuesta += delta;
+          if (conVisuals && tieneVisual(respuesta)) setPanelVisual(true);
           patchLast((last) => ({ ...last, content: last.content + delta }));
         },
         onReasoning: (delta) => {
@@ -271,6 +345,7 @@ export default function ChatPage() {
       // Stream cerrado sin contenido ni aviso (p. ej. el gateway se reinició a
       // mitad): que no quede "Pensando…" con el botón de enviar activo.
       patchLast((last) => (last.content ? last : { ...last, content: t('emptyResponseNotice'), error: true }));
+      if (conVisuals && tieneVisual(respuesta)) await guardarVisual(respuesta, convId, base, patchLast);
 
       if (isFirstExchange && saveHistory) {
         try {
@@ -404,6 +479,11 @@ export default function ChatPage() {
             <IconMenu />
           </button>
           <h1 className="chat-header__title">{title || (empty ? '' : t('untitled'))}</h1>
+          {visual && !panelVisual && (
+            <button className="pill-btn chat-header__visual" onClick={() => setPanelVisual(true)}>
+              <IconLayers size={15} /> {t('visualShow')}
+            </button>
+          )}
           {user ? (
             !empty && routeConvId && (
               <button
@@ -471,11 +551,23 @@ export default function ChatPage() {
                       {m.reasoning && (
                         <Razonamiento texto={m.reasoning} activo={busy && i === messages.length - 1 && !m.content} />
                       )}
-                      {m.error
-                        ? <MensajeError>{m.content}</MensajeError>
-                        : m.content
-                        ? <Markdown streaming={busy && i === messages.length - 1}>{m.content}</Markdown>
-                        : (!searching && !m.reasoning && <span className="msg__thinking"><WaveText key="pensando" text={t('thinking')} /></span>)}
+                      {(() => {
+                        if (m.error) return <MensajeError>{m.content}</MensajeError>;
+                        if (!m.content) return !searching && !m.reasoning && <span className="msg__thinking"><WaveText key="pensando" text={t('thinking')} /></span>;
+                        const activo = busy && i === messages.length - 1;
+                        if (!tieneVisual(m.content)) return <Markdown streaming={activo}>{m.content}</Markdown>;
+                        const r = aplicarRespuesta([], m.content, { enCurso: true, estricto: true });
+                        const nombres = m.visual?.nuevas || [...new Set([...r.files.map((f) => f.name), ...(r.editando ? [r.editando.name] : [])])];
+                        const cuerpo = sinBloquesVisuales(m.content);
+                        return (
+                          <>
+                            {cuerpo && <Markdown streaming={activo}>{cuerpo}</Markdown>}
+                            <VisualChip nombres={nombres.length ? nombres : ['index.html']} version={m.visual?.version} t={t}
+                              escribiendo={activo ? (r.abierto?.name || r.editando?.name || nombres[0] || 'index.html') : null}
+                              onOpen={() => setPanelVisual(true)} />
+                          </>
+                        );
+                      })()}
                       {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
                     </div>
                   )
@@ -504,6 +596,16 @@ export default function ChatPage() {
           <div className={`chat-toast ${toast.leaving ? 'is-leaving' : ''}`}>{toast.text}</div>
         )}
       </main>
+
+      {panelVisual && (() => {
+        const ult = messages[messages.length - 1];
+        const vivo = busy && ult?.role === 'assistant' && tieneVisual(ult.content)
+          ? aplicarRespuesta(paginasVisual, ult.content, { enCurso: true, estricto: true }) : null;
+        return (
+          <ChatVisualPanel visual={visual} paginas={paginasVisual} vivo={vivo} error={errorVisual} t={t}
+            onClose={() => setPanelVisual(false)} onDiscard={descartarVisual} />
+        );
+      })()}
 
       {shareOpen && routeConvId && (
         <ShareDialog conversationId={routeConvId} onClose={() => setShareOpen(false)} />

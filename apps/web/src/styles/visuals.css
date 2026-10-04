@@ -1009,3 +1009,17 @@
   .vis-galeria__barra .vis-galeria__titulo { flex: 1 0 100%; }
   .vis-top__right .vis-seg, .vis-top__right .vis-ds, .vis-top__right > .vis-tool:not(.vis-tool--blanco) { display: none; }
 }
+
+/* ── Estudio sobre visuals con versiones: piezas, documentos, galería ── */
+.vis-pestana__nueva.is-warn { background: var(--warn, #d9a23b); }
+.vis-pieza { display: flex; justify-content: center; align-items: flex-start; width: 100%; height: 100%; }
+.vis-pieza__media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius); background: var(--surface-2); }
+.vis-pieza__vivo { width: min(100%, 1080px); height: 100%; min-height: 480px; border: 0; border-radius: var(--radius); background: #fff; }
+.vis-doc { width: 100%; max-width: 760px; padding: 24px 28px; border-radius: var(--radius); background: var(--bg-card); font-size: 14px; line-height: 1.65; color: var(--ink-body); }
+.vis-thread__vacio { margin: 12px 4px; font-size: 13px; line-height: 1.55; color: var(--ink-muted); }
+.vis-composer__bloqueo { margin: 0; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-3); font-size: 13px; color: var(--ink-soft); }
+.vis-composer__bloqueo a { color: var(--accent); }
+.vis-tool__n { margin-left: 4px; font-size: 11px; color: var(--ink-muted); }
+.vis-card__kind { padding: 0 6px; border-radius: var(--radius-chip); background: var(--surface-3); color: var(--ink-soft); }
+.vis-card__kind.is-marketing { background: var(--accent-soft); color: var(--accent); }
+.vis-card__preview img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }

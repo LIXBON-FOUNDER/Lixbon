@@ -42,6 +42,7 @@ export function PublicNav() {
     { to: '/docs', label: t('docs') },
     { to: '/guides', label: t('guides') },
     { to: '/apps', label: t('apps') },
+    { to: '/skills', label: t('skills') },
     { to: '/plans', label: t('plans') },
   ];
 

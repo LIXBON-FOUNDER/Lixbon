@@ -33,6 +33,7 @@ export function PublicFooter() {
         { to: '/docs', label: t('docs') },
         { to: '/guides', label: t('guides') },
         { to: '/apps', label: t('apps') },
+        { to: '/skills', label: t('skills') },
         { to: '/news', label: t('footerNews') },
         { to: '/status', label: t('footerStatus') },
       ],
