@@ -753,6 +753,10 @@ def _plan_to_dict(p: Plan) -> dict[str, Any]:
         "sort_order": p.sort_order,
         "is_active": bool(p.is_active),
         "stripe_price_id": p.stripe_price_id,
+        "visuals_max": p.visuals_max,
+        "visuals_max_mb": p.visuals_max_mb,
+        "visual_renders_per_day": p.visual_renders_per_day,
+        "visual_video_renders_per_day": p.visual_video_renders_per_day,
     }
 
 

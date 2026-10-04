@@ -265,6 +265,13 @@ class Plan(Base):
     is_active: Mapped[int] = mapped_column(nullable=False, default=1)
     # F7: id del precio recurrente en Stripe (price_...) que corresponde a este plan
     stripe_price_id: Mapped[str | None] = mapped_column(Text)
+    # Visuals: cuántos y cuánto espacio. NULL = el valor por defecto del plan
+    # (quota.VISUALS_DEFAULT_LIMITS); -1 = ilimitado.
+    visuals_max: Mapped[int | None] = mapped_column()
+    visuals_max_mb: Mapped[int | None] = mapped_column()
+    # Renders de Visuals por día (imágenes / vídeos). NULL = por defecto del plan.
+    visual_renders_per_day: Mapped[int | None] = mapped_column()
+    visual_video_renders_per_day: Mapped[int | None] = mapped_column()
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -901,3 +908,140 @@ class TeamIssueVinculo(Base):
     estado: Mapped[str | None] = mapped_column(Text)                # abierto|fusionado|cerrado
     url: Mapped[str | None] = mapped_column(Text)
     creado_en: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+
+class Visual(Base):
+    """Un visual de Lixbon: diseño de interfaz o pieza de marketing que crean el
+    chat web, el CLI o un agente del IDE. El contenido vive en `visual_files`."""
+    __tablename__ = "visuals"
+    __table_args__ = (
+        Index("idx_visuals_user", "user_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # vis_<16 urlsafe>
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)          # design | marketing
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False, default=0)
+    share_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    meta_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class VisualFile(Base):
+    """Archivo de un visual en una versión. La versión N lee el último registro
+    de cada ruta con `version <= N` (copia en escritura)."""
+    __tablename__ = "visual_files"
+    __table_args__ = (
+        UniqueConstraint("visual_id", "path", "version", name="uq_visual_files_version"),
+        Index("idx_visual_files_visual", "visual_id", "path"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    visual_id: Mapped[str] = mapped_column(
+        ForeignKey("visuals.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)          # source | output
+    mime: Mapped[str] = mapped_column(Text, nullable=False)
+    size: Mapped[int] = mapped_column(nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    content_text: Mapped[str | None] = mapped_column(Text)          # HTML, MD, SVG, JSON
+    content_blob: Mapped[bytes | None] = mapped_column(LargeBinary)  # PNG, MP4…
+    # Salidas renderizadas: {"source": ruta, "source_sha256": …}. Así una salida
+    # sabe de qué contenido exacto de su HTML viene (desactualizada si cambió).
+    meta_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class VisualRenderJob(Base):
+    """Cola de renders (HTML → PNG/MP4) que procesa el worker de render. Un trabajo
+    en `running` con `lease_until` vencido vuelve a estar disponible."""
+    __tablename__ = "visual_render_jobs"
+    __table_args__ = (
+        Index("idx_render_jobs_status", "status", "created_at"),
+        Index("idx_render_jobs_visual", "visual_id", "created_at"),
+        Index("idx_render_jobs_user", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # rj_<urlsafe>
+    visual_id: Mapped[str] = mapped_column(ForeignKey("visuals.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)           # HTML fuente
+    kind: Mapped[str] = mapped_column(Text, nullable=False)           # image | video
+    status: Mapped[str] = mapped_column(Text, nullable=False)         # queued|running|done|failed
+    attempts: Mapped[int] = mapped_column(nullable=False, default=0)
+    worker: Mapped[str | None] = mapped_column(Text)
+    lease_until: Mapped[str | None] = mapped_column(Text)
+    output_path: Mapped[str | None] = mapped_column(Text)
+    output_version: Mapped[int | None] = mapped_column()
+    error: Mapped[str | None] = mapped_column(Text)
+    origin: Mapped[str | None] = mapped_column(Text)                  # web | mcp | auto | api
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[str | None] = mapped_column(Text)
+
+
+class Skill(Base):
+    """Skill oficial del catálogo (`/adversary`, `/marketing-lxo`). Solo la publican
+    los administradores; el paquete de cada versión vive en `skill_versions`."""
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(Text, unique=True, nullable=False)  # = name del SKILL.md = comando
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)          # una línea, para la tarjeta
+    description_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    category: Mapped[str | None] = mapped_column(Text)
+    published: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SkillVersion(Base):
+    __tablename__ = "skill_versions"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "version", name="uq_skill_versions_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[str] = mapped_column(Text, nullable=False)          # 1.2.0
+    changelog: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    package: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # zip con <slug>/...
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    files_json: Mapped[str] = mapped_column(Text, nullable=False)       # [{"path","size"}]
+    published_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SkillRating(Base):
+    __tablename__ = "skill_ratings"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "user_id", name="uq_skill_ratings_user"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    stars: Mapped[int] = mapped_column(nullable=False)                  # 1..5
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SkillInstall(Base):
+    """Cada descarga del paquete. Cuenta instalaciones en el catálogo."""
+    __tablename__ = "skill_installs"
+    __table_args__ = (
+        Index("idx_skill_installs_skill", "skill_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
+    version_id: Mapped[int] = mapped_column(ForeignKey("skill_versions.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    client: Mapped[str | None] = mapped_column(Text)                    # ide | web | cli
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)

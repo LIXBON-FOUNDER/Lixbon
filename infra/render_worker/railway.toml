@@ -1,0 +1,6 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "infra/render_worker/Dockerfile"
+
+[deploy]
+restartPolicyType = "always"

@@ -134,6 +134,11 @@ def init_db() -> None:
         # /remote: qué agente maneja la sesión (Lixbon o Claude Code) y en qué carpeta
         "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS agent TEXT",
         "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS workspace TEXT",
+        # Visuals: límites por plan (NULL = valor por defecto del plan en código)
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max INTEGER",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max_mb INTEGER",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visual_renders_per_day INTEGER",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visual_video_renders_per_day INTEGER",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:
