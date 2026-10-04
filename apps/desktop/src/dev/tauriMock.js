@@ -57,6 +57,7 @@ const store = new Map([
 ]);
 // ?server=…&key=… apunta el mock a un gateway de verdad (p. ej. uno local).
 const qs = new URLSearchParams(location.search);
+const skillsMock = new Map([['adversary', [{ agent: 'claude', version: null, external: true }]]]);
 if (qs.get('server')) store.set('serverUrl', qs.get('server'));
 if (qs.get('key')) store.set('apiKey', qs.get('key'));
 // ?auth abre la pantalla de entrada; ?onboarding, el recorrido inicial.
@@ -242,6 +243,19 @@ const handlers = {
     ? { modo: 'latigo', personaje: 'gael', fuera: '2 min', texto: '«Checkout» lleva 2 min esperando tu revisión.' }
     : { modo: 'aviso', personaje: 'leya', texto: '¡Fase 2 lista! Te espero para seguir con «Checkout».' }),
   mascota_volver: () => null,
+  // Ajustes › Skills: instalaciones en memoria (sin tocar el disco).
+  skills_agents: () => [
+    { id: 'claude', label: 'Claude Code', detected: true, dir: 'C:/Users/demo/.claude/skills' },
+    { id: 'codex', label: 'Codex', detected: true, dir: 'C:/Users/demo/.codex/skills' },
+    { id: 'gemini', label: 'Gemini CLI', detected: false, dir: 'C:/Users/demo/.gemini/skills' },
+  ],
+  skills_installed: ({ slugs }) => Object.fromEntries(slugs.map((s) => [s, skillsMock.get(s) || []])),
+  skill_install: ({ slug, version, agents }) => {
+    const rest = (skillsMock.get(slug) || []).filter((i) => !agents.includes(i.agent));
+    skillsMock.set(slug, [...rest, ...agents.map((agent) => ({ agent, version, external: false }))]);
+    return agents;
+  },
+  skill_uninstall: ({ slug, agents }) => { skillsMock.set(slug, (skillsMock.get(slug) || []).filter((i) => !agents.includes(i.agent))); },
   secret_get: () => store.get('apiKey'),
   secret_set: ({ value }) => { store.set('apiKey', value); },
   secret_delete: () => { store.delete('apiKey'); },

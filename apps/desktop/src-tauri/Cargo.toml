@@ -1,6 +1,6 @@
 [package]
 name = "lixbon"
-version = "2.0.25"
+version = "2.0.26"
 description = "Lixbon"
 authors = ["Lixbon by GBX"]
 edition = "2021"
@@ -38,6 +38,10 @@ ignore = "0.4"
 trash = "5"
 tauri-plugin-http = "~2.6"
 tauri-plugin-single-instance = "2"
+# Catálogo de skills: paquete zip verificado por sha256 (Ajustes › Skills).
+zip = { version = "4", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+base64 = "0.22"
 
 # Windows Credential Manager para guardar la API key cifrada (DPAPI) en vez
 # de en claro en el JSON de settings. Solo Windows: en otros SO el frontend

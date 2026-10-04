@@ -10,13 +10,14 @@ import { EditorPage } from '../sections/Settings/pages/EditorPage';
 import { ServerPage } from '../sections/Settings/pages/ServerPage';
 import { OrchestratorPage } from '../sections/Settings/pages/OrchestratorPage';
 import { McpPage } from '../sections/Settings/pages/McpPage';
+import { SkillsPage } from '../sections/Settings/pages/SkillsPage';
 import { GitPage } from '../sections/Settings/pages/GitPage';
 import { MascotaPage } from '../sections/Settings/pages/MascotaPage';
 import { Keybindings } from '../sections/Settings/Keybindings';
 import { getAppVersion } from '../lib/tauri';
 import {
   IconChevronLeft, IconSearch, IconUser, IconChart, IconShield, IconNodes, IconPuzzle,
-  IconCode, IconKeyboard, IconServer, IconExtensions, IconMascota, IconGitBranch,
+  IconCode, IconKeyboard, IconServer, IconExtensions, IconMascota, IconGitBranch, IconBook,
 } from '../components/Icons';
 
 const GROUPS = [
@@ -28,6 +29,7 @@ const GROUPS = [
     { id: 'agent', label: 'Agente y permisos', icon: IconShield, keywords: 'agente permisos aprobar comandos permitidos allowlist herramientas autonomia modo', Page: AgentPage },
     { id: 'orch', label: 'Orquestador', icon: IconNodes, keywords: 'orquestador agentes coordinador hijos roles explorador implementador revisor skill lxo worktree experimental', Page: OrchestratorPage },
     { id: 'mcp', label: 'Servidores MCP', icon: IconPuzzle, keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
+    { id: 'skills', label: 'Skills', icon: IconBook, keywords: 'skills comandos catalogo instalar adversary marketing calificar version', Page: SkillsPage },
   ] },
   { label: 'Espacio de trabajo', items: [
     { id: 'editor', label: 'Interfaz y editor', icon: IconCode, keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
@@ -50,7 +52,7 @@ export function SettingsPage() {
 
   useEffect(() => { getAppVersion().then(setVersion).catch(() => {}); }, []);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.confirm__overlay')) closePage(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.confirm__overlay, .modal__overlay')) closePage(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [closePage]);
