@@ -41,6 +41,7 @@ export default defineConfig({
       // vía proxy para que la cookie de sesión funcione sin CORS.
       '/api': 'http://localhost:8000',
       '/v1': 'http://localhost:8000',
+      '/mcp': 'http://localhost:8000',
     },
   },
 })
