@@ -9,3 +9,12 @@
   Delete "$SMPROGRAMS\Lixbon Team.lnk"
   Delete "$DESKTOP\Lixbon Team.lnk"
 !macroend
+
+; El instalador de actualizaciones también ejecuta el desinstalador: ahí los datos deben conservarse.
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+    RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    RmDir /r "$APPDATA\${BUNDLEID}"
+    RmDir /r "$PROFILE\.lixbon"
+  ${EndIf}
+!macroend
