@@ -92,6 +92,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cmdDoneMsg:
 		return m, m.finishAsync(msg)
 
+	case runCommandMsg:
+		return m, m.runCommand(msg.name, msg.arg)
+
+	case promptMsg:
+		m.promptFor(msg.label, msg.onSubmit)
+		return m, nil
+
 	case doneMsg:
 		if msg.turn != m.turn {
 			return m, nil

@@ -131,6 +131,10 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdKey("")
 	case "logout":
 		return m.cmdLogout()
+	case "doctor":
+		return m.cmdDoctor()
+	case "config":
+		return m.cmdConfig()
 	case "bar":
 		m.print(note("La barra de estado de la versión Go va siempre al pie; /bar no hace falta."))
 	case "exit":
