@@ -17,3 +17,23 @@ jobs:
           python-version: '3.12'
       - run: pip install pytest rich pypdf
       - run: python -m pytest apps/cli/tests -q
+
+  cli-go:
+    name: CLI Go · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: apps/cli/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/cli/go/go.mod
+          cache-dependency-path: apps/cli/go/go.sum
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+      - run: go build -o ${{ runner.temp }}/lixbon ./cmd/lixbon
