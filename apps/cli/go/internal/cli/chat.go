@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
 	"lixbon.com/cli/internal/api"
 	"lixbon.com/cli/internal/config"
+	"lixbon.com/cli/internal/history"
+	sessions "lixbon.com/cli/internal/session"
 	"lixbon.com/cli/internal/sse"
+	ws "lixbon.com/cli/internal/workspace"
 )
 
 type sessionState int
@@ -119,13 +123,18 @@ func (a *App) runOnce(ctx context.Context, message, modelOverride, clientID, tit
 	case "agent":
 		return a.agentOnce(ctx, client, &cfg, model, message, clientID, title, autoRun)
 	case "delegate":
-		return a.delegateOnce(ctx, client, message)
+		return a.delegateOnce(ctx, client, message, model, title)
 	}
 
 	conversationID := newUUID()
+	workspace, _ := os.Getwd()
+	messages := []map[string]any{{"role": "user", "content": message}}
+	if project := ws.ProjectContext(workspace); project != "" {
+		messages = append([]map[string]any{{"role": "system", "content": "Contexto del proyecto (LIXBON.md):\n" + project}}, messages...)
+	}
 	request := api.ChatRequest{
 		Model:          model,
-		Messages:       []map[string]any{{"role": "user", "content": message}},
+		Messages:       messages,
 		ConversationID: &conversationID,
 		ClientID:       clientID,
 		Title:          &title,
@@ -137,7 +146,12 @@ func (a *App) runOnce(ctx context.Context, message, modelOverride, clientID, tit
 		return a.failure(ctx, err)
 	}
 	defer stream.Close()
-	return a.printStream(ctx, stream)
+	code, answer, tokens := a.printStream(ctx, stream)
+	if code == 0 && answer != "" {
+		a.saveSession(conversationID, []history.Message{history.User(message), history.Assistant(answer)},
+			sessions.SaveOptions{Title: title, Model: model, Mode: "ask", Workspace: workspace, Tokens: tokens})
+	}
+	return code
 }
 
 func (a *App) resolveModel(cfg *config.Config, acc account, override string) (string, bool) {
@@ -157,14 +171,16 @@ func (a *App) resolveModel(cfg *config.Config, acc account, override string) (st
 	return "", false
 }
 
-func (a *App) printStream(ctx context.Context, stream *api.ChatStream) int {
+// printStream escribe la respuesta según llega y devuelve el código de salida,
+// el texto completo y los tokens que contó el servidor.
+func (a *App) printStream(ctx context.Context, stream *api.ChatStream) (code int, answer string, tokens int) {
 	var sources []map[string]any
 	var body strings.Builder
 	var endsWithNewline bool
 	for ev, err := range stream.Events() {
 		if err != nil {
 			a.finishBody(body.Len() > 0, endsWithNewline)
-			return a.failure(ctx, err)
+			return a.failure(ctx, err), "", 0
 		}
 		switch ev.Kind {
 		case sse.Content:
@@ -173,6 +189,13 @@ func (a *App) printStream(ctx context.Context, stream *api.ChatStream) int {
 			endsWithNewline = strings.HasSuffix(ev.Text, "\n")
 		case sse.Sources:
 			_ = json.Unmarshal(ev.Value, &sources)
+		case sse.Usage:
+			var usage struct {
+				TotalTokens int `json:"total_tokens"`
+			}
+			if json.Unmarshal(ev.Value, &usage) == nil {
+				tokens += usage.TotalTokens
+			}
 		}
 	}
 	a.finishBody(body.Len() > 0, endsWithNewline)
@@ -182,7 +205,7 @@ func (a *App) printStream(ctx context.Context, stream *api.ChatStream) int {
 	if line := sourcesLine(sources); line != "" {
 		fmt.Fprintln(a.Stdout, line)
 	}
-	return 0
+	return 0, strings.TrimSpace(body.String()), tokens
 }
 
 func (a *App) finishBody(hasBody, endsWithNewline bool) {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	sessions "lixbon.com/cli/internal/session"
 )
 
 // scriptedGateway responde a cada POST de chat con la siguiente función y
@@ -231,5 +233,81 @@ func TestDelegateModeUsesTheRouter(t *testing.T) {
 		if !strings.Contains(h.errOut.String(), want) {
 			t.Errorf("falta %q en:\n%s", want, h.errOut)
 		}
+	}
+}
+
+func sessionStoreOf(h *harness) *sessions.Store { return sessions.NewStore(filepath.Dir(h.path)) }
+
+func TestAgentOnceSavesTheSessionAndLoadsProjectContext(t *testing.T) {
+	h, script, ws := agentHarness(t, nil,
+		replyToolCall("c1", "write_file", map[string]any{"path": "a.txt", "content": "x"}),
+		replyText("Hecho."))
+	if err := os.WriteFile(filepath.Join(ws, "LIXBON.md"), []byte("# Mi proyecto\nUsa tabuladores."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run("chat", "--once", "crea a.txt", "--title", "Mi sesión"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.errOut)
+	}
+	system := bodyMessages(script.bodies[0])[0]["content"].(string)
+	if !strings.Contains(system, "=== CONTEXTO DEL PROYECTO (LIXBON.md) ===\n# Mi proyecto\nUsa tabuladores.") {
+		t.Fatalf("el system prompt no lleva LIXBON.md: %.200s", system)
+	}
+	list := sessionStoreOf(h).List(10)
+	if len(list) != 1 {
+		t.Fatalf("sesiones guardadas: %d", len(list))
+	}
+	head := list[0]
+	if head.Title != "Mi sesión" || head.Model != "qwen" || head.Mode != "agent" || head.Workspace != ws || head.Tools != 2 || head.Messages != 2 {
+		t.Fatalf("cabecera: %+v", head)
+	}
+	record, _ := sessionStoreOf(h).Load(head.ID)
+	if got := record.Messages[len(record.Messages)-1]; got.Role != "assistant" || got.Content != "Hecho." {
+		t.Fatalf("último mensaje: %+v", got)
+	}
+	if body := script.bodies[0]; body["conversation_id"] != head.ID {
+		t.Fatalf("la sesión debe usar el conversation_id enviado al gateway: %v vs %s", body["conversation_id"], head.ID)
+	}
+}
+
+func TestAskOnceSavesTheSessionWithTokensAndProjectContext(t *testing.T) {
+	g := newFakeGateway(t)
+	g.chat = sseHandler(delta("Respuesta."), `{"usage":{"total_tokens":42}}`)
+	h := newHarness(t, g, map[string]any{"api_key": "k", "model": "qwen", "mode": "ask"})
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	os.WriteFile(filepath.Join(workspace, "lixbon.md"), []byte("Reglas del proyecto"), 0o644)
+	if code := h.run("chat", "--once", "hola"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.errOut)
+	}
+	msgs := bodyMessages(g.chatBody)
+	if msgs[0]["role"] != "system" || msgs[0]["content"] != "Contexto del proyecto (LIXBON.md):\nReglas del proyecto" {
+		t.Fatalf("mensajes: %v", msgs)
+	}
+	list := sessionStoreOf(h).List(10)
+	if len(list) != 1 || list[0].Tokens != 42 || list[0].Mode != "ask" || list[0].Title != "hola" {
+		t.Fatalf("sesión: %+v", list)
+	}
+}
+
+func TestFailedTurnsLeaveNoSession(t *testing.T) {
+	h, _, _ := agentHarness(t, nil, replyError(500, "boom"))
+	if code := h.run("chat", "--once", "hola"); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if list := sessionStoreOf(h).List(10); len(list) != 0 {
+		t.Fatalf("no debe guardarse un turno fallido: %+v", list)
+	}
+}
+
+func TestDelegateOnceSavesTheSession(t *testing.T) {
+	g := newFakeGateway(t)
+	g.srv.Config.Handler.(*http.ServeMux).HandleFunc("/api/delegate", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"response":"ok","routing":{"model":"m","type":"PLAN"},"classification":{},"execution_time_ms":1}`)
+	})
+	h := newHarness(t, g, map[string]any{"api_key": "k", "model": "qwen", "mode": "delegate"})
+	t.Chdir(t.TempDir())
+	h.run("chat", "--once", "haz algo")
+	if list := sessionStoreOf(h).List(10); len(list) != 1 || list[0].Mode != "delegate" {
+		t.Fatalf("sesión: %+v", list)
 	}
 }

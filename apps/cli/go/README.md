@@ -18,13 +18,15 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/tools` (`Toolbox`) | `run_command`, `read_output`, `stop_command`, `fetch_url`, `web_search`, `todo`, `ask_user` con estado de sesión | `html_cases` del corpus + pruebas con servidores falsos |
 | `internal/history` | Ventana de contexto: estimación de tokens, recorte, poda segura y compactación | `fixtures/agent_corpus.json` (sección `history`, incluye la longitud `repr` de Python) |
 | `internal/agent` | Bucle del turno (pasos, reintentos, rescate del razonamiento, repeticiones), aprobaciones, vista previa y diff, checkpoints/undo, verificadores, política de comandos y prompts | `agent_corpus.json` (política, prompts byte a byte, árbol, diff con `SequenceMatcher`, vista previa, resúmenes) + 50 pruebas del bucle con un modelo falso |
+| `internal/session` | Historial persistente en `~/.lixbon/sessions/` (mismo formato que Python), retención de 200, índice con candado y auto-reparación | `state_corpus.json`: Go lee lo que escribió Python y reproduce sus archivos con el mismo reloj |
+| `internal/workspace` | `LIXBON.md` / `lixbon.md` y comandos propios (`.lixbon/commands/*.md`, `$ARGUMENTS`) | `state_corpus.json` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway). Pendiente: chat interactivo con Bubble Tea (aprobaciones con diff, `/undo`, `/plan`…), `LIXBON.md` y comandos personalizados, sesiones persistentes, MCP, remoto, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
+Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway). Pendiente: chat interactivo con Bubble Tea (aprobaciones con diff, `/undo`, `/plan`…), `LIXBON.md` y comandos personalizados, reanudar sesiones (`/history`), MCP, remoto, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
 
 ## Diferencias deliberadas con Python
 
-- `chat --once` respeta `mode` (por defecto `agent`). Aún sin `LIXBON.md`, adjuntos `@ruta`, comandos personalizados ni historial persistente.
+- `chat --once` respeta `mode` (por defecto `agent`). Carga `LIXBON.md` y guarda la sesión en `~/.lixbon/sessions/`; aún sin adjuntos `@ruta` ni comandos personalizados (se cargan, pero la barra `/` llega con la interfaz).
 - En `--once` no hay nadie al teclado: las ediciones se aprueban según `auto_approve_tools` y los comandos solo si están en `allowed_commands`, `auto_run_commands` o se pasa `--auto-run` (opción propia del CLI Go); lo rechazado se explica en stderr y el modelo recibe «Ejecución cancelada por el usuario».
 - El registro de acciones del agente va a stderr y la respuesta final a stdout, para poder encadenar el comando.
 - Los errores de `chat` van a stderr; `status` y `models` siguen imprimiendo a stdout como Python.
@@ -47,6 +49,9 @@ Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la
 - Los verificadores no escriben nada junto al archivo (Python creaba `__pycache__` con `py_compile`), un verificador que no puede ejecutarse cuenta como «sin errores», y los `.go` se comprueban con `go/parser` en proceso.
 - El prompt de herramientas MCP en protocolo de texto sí llega al modelo (en Python se añadía después de crear el mensaje y se perdía).
 - Los diffs de más de 5.000 líneas por lado se muestran como sustitución completa para acotar el coste.
+- `LIXBON.md` entra también en el prompt del agente (en Python solo llegaba en modo `ask`).
+- `config.json` se guarda de forma atómica y, si el existente está corrupto, se conserva una copia `config.json.corrupt-<fecha>` antes de reemplazarlo.
+- El índice de sesiones se actualiza bajo un candado (`.index.lock`, caduca a los 30 s) y `List` rehace el índice si falta alguna sesión en disco: dos CLI (o el CLI Python) guardando a la vez no pierden entradas.
 - `read_file` de PDF y Word devuelve «aún no disponible» hasta decidir la biblioteca de extracción.
 
 ## Desarrollo

@@ -76,6 +76,9 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	if native {
 		content = NativeSystemPrompt(s.Workspace)
 	}
+	if s.ProjectContext != "" {
+		content += "\n\n=== CONTEXTO DEL PROYECTO (LIXBON.md) ===\n" + s.ProjectContext
+	}
 	content += TodoPrompt
 	if s.PlanMode {
 		content += PlanModePrompt

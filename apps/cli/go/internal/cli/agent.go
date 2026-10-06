@@ -12,9 +12,11 @@ import (
 	"lixbon.com/cli/internal/api"
 	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/history"
+	sessions "lixbon.com/cli/internal/session"
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
 	"lixbon.com/cli/internal/tools"
+	ws "lixbon.com/cli/internal/workspace"
 )
 
 // agentOnce ejecuta un turno completo del agente sobre la carpeta actual y
@@ -50,18 +52,27 @@ func (a *App) agentOnce(ctx context.Context, client *api.Client, cfg *config.Con
 		return client.Chat(ctx, model, toMaps(messages), clientID)
 	}
 
+	session.ProjectContext = ws.ProjectContext(workspace)
+
+	conversationID := newUUID()
 	var sources []map[string]any
+	var tokens int
 	turn := &agent.Turn{
 		S:      session,
-		Stream: a.streamer(client, cfg, model, clientID, title, newUUID(), &sources),
+		Stream: a.streamer(client, cfg, model, clientID, title, conversationID, &sources, &tokens),
 		Emit:   a.renderEvent,
 	}
 	session.BeginTurn()
-	answer, _, err := turn.Run(ctx, []history.Message{history.User(message)})
+	answer, working, err := turn.Run(ctx, []history.Message{history.User(message)})
 	session.EndTurn()
 	if err != nil {
 		return a.failure(ctx, err)
 	}
+	if n := len(working); n == 0 || working[n-1].Role != "assistant" || working[n-1].Content != answer {
+		working = append(working, history.Assistant(answer))
+	}
+	a.saveSession(conversationID, working, sessions.SaveOptions{
+		Title: title, Model: model, Mode: "agent", Workspace: workspace, Tokens: tokens})
 	if answer = textutil.Strip(answer); answer == "" {
 		a.printError("(sin respuesta) el modelo no devolvió texto.")
 	} else {
@@ -85,7 +96,7 @@ func toMaps(messages []history.Message) []map[string]any {
 
 // streamer adapta el cliente del gateway a la interfaz que consume el bucle:
 // recoge el texto, el razonamiento y las llamadas nativas de un paso.
-func (a *App) streamer(client *api.Client, cfg *config.Config, model, clientID, title, conversationID string, sources *[]map[string]any) agent.Streamer {
+func (a *App) streamer(client *api.Client, cfg *config.Config, model, clientID, title, conversationID string, sources *[]map[string]any, tokens *int) agent.Streamer {
 	return func(ctx context.Context, messages []history.Message, toolList []map[string]any) (agent.StreamResult, error) {
 		req := api.ChatRequest{
 			Model:          model,
@@ -124,6 +135,13 @@ func (a *App) streamer(client *api.Client, cfg *config.Config, model, clientID, 
 				var found []map[string]any
 				if json.Unmarshal(ev.Value, &found) == nil {
 					*sources = found
+				}
+			case sse.Usage:
+				var usage struct {
+					TotalTokens int `json:"total_tokens"`
+				}
+				if json.Unmarshal(ev.Value, &usage) == nil {
+					*tokens += usage.TotalTokens
 				}
 			}
 		}
@@ -192,7 +210,7 @@ func (a *App) printTurnSummary(stats agent.TurnStats) {
 }
 
 // delegateOnce envía el mensaje al enrutador del gateway (modo delegate).
-func (a *App) delegateOnce(ctx context.Context, client *api.Client, message string) int {
+func (a *App) delegateOnce(ctx context.Context, client *api.Client, message, model, title string) int {
 	result, err := client.Delegate(ctx, message)
 	if err != nil {
 		return a.failure(ctx, err)
@@ -212,5 +230,13 @@ func (a *App) delegateOnce(ctx context.Context, client *api.Client, message stri
 		response = "(sin respuesta)"
 	}
 	fmt.Fprintln(a.Stdout, response)
+	workspace, _ := os.Getwd()
+	a.saveSession(newUUID(), []history.Message{history.User(message), history.Assistant(result.Response)},
+		sessions.SaveOptions{Title: title, Model: model, Mode: "delegate", Workspace: workspace})
 	return 0
+}
+
+// saveSession guarda la conversación en el historial local; nunca falla el turno.
+func (a *App) saveSession(id string, messages []history.Message, opts sessions.SaveOptions) {
+	_ = sessions.NewStore(filepath.Dir(a.ConfigPath)).Save(id, messages, opts)
 }

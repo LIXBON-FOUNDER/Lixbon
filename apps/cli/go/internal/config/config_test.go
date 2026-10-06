@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,35 @@ func TestMaskKey(t *testing.T) {
 	for in, want := range cases {
 		if got := MaskKey(in); got != want {
 			t.Errorf("MaskKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSaveKeepsACopyOfACorruptFile(t *testing.T) {
+	path := writeFile(t, `{"api_key": "lixbon_sk_a_mano", rota`)
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	backups, _ := filepath.Glob(path + ".corrupt-*")
+	if len(backups) != 1 {
+		t.Fatalf("copias: %v", backups)
+	}
+	if data, _ := os.ReadFile(backups[0]); !strings.Contains(string(data), "lixbon_sk_a_mano") {
+		t.Fatalf("la copia perdió el contenido: %q", data)
+	}
+	if cfg := Load(path); cfg.BaseURL != DefaultBaseURL {
+		t.Fatalf("el archivo nuevo debe ser válido: %+v", cfg)
+	}
+}
+
+func TestSaveDoesNotCopyValidOrEmptyFiles(t *testing.T) {
+	for _, content := range []string{`{"api_key":"k"}`, "\xef\xbb\xbf" + `{"api_key":"k"}`, "", "  \n"} {
+		path := writeFile(t, content)
+		if err := Save(path, Default()); err != nil {
+			t.Fatal(err)
+		}
+		if backups, _ := filepath.Glob(path + ".corrupt-*"); len(backups) != 0 {
+			t.Errorf("%q no debía generar copia: %v", content, backups)
 		}
 	}
 }

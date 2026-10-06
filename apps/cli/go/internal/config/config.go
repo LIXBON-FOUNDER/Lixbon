@@ -5,10 +5,12 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -197,6 +199,7 @@ func Save(path string, cfg Config) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	backupIfCorrupt(path)
 	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
 	if err != nil {
 		return err
@@ -285,4 +288,19 @@ func (c Config) ExtraStringList(key string) []string {
 func (c *Config) SetExtraStringList(key string, list []string) {
 	encoded, _ := marshalNoEscape(list)
 	c.Extra[key] = encoded
+}
+
+// backupIfCorrupt conserva una copia del archivo si no es un objeto JSON
+// válido: Load lo ignora y usa los valores por defecto, y guardar encima
+// destruiría lo que el usuario hubiera escrito a mano (la API key, por ejemplo).
+func backupIfCorrupt(path string) {
+	raw, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+		return
+	}
+	var stored map[string]json.RawMessage
+	if json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &stored) == nil {
+		return
+	}
+	_ = os.WriteFile(fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix()), raw, 0o600)
 }

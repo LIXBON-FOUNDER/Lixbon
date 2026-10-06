@@ -110,6 +110,8 @@ type Session struct {
 	Estimator *history.Estimator
 	// Model es el nombre mostrado al avisar de que no admite herramientas nativas.
 	Model string
+	// ProjectContext es el LIXBON.md del workspace; viaja en el system prompt.
+	ProjectContext string
 
 	AutoApprove     bool
 	AutoRunCommands bool

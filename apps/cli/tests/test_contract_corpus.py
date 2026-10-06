@@ -80,3 +80,14 @@ def test_agent_corpus_matches_python_oracle():
         "agent_corpus.json no coincide con context.py/agent.py. "
         "Regenera con: python apps/cli/validation/gen_agent_corpus.py"
     )
+
+
+def test_state_corpus_matches_python_oracle():
+    spec = importlib.util.spec_from_file_location(
+        "gen_state_corpus", CLI_DIR / "validation" / "gen_state_corpus.py")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    assert generator.CORPUS.read_text(encoding="utf-8") == generator.render(), (
+        "state_corpus.json no coincide con sessions.py/commands.py. "
+        "Regenera con: python apps/cli/validation/gen_state_corpus.py"
+    )
