@@ -25,6 +25,8 @@ type Options struct {
 	// Account es el resultado de sondear la cuenta al arrancar.
 	Account chat.Account
 	Offline bool
+	// Warning se imprime bajo la cabecera (p. ej. que el servidor no publica modelos).
+	Warning string
 }
 
 type liveState struct {

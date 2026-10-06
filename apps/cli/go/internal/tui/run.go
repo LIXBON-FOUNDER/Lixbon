@@ -49,9 +49,9 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		return 1
 	}
 	needsPick, err := c.ResolveModel(acc)
+	warning := ""
 	if err != nil {
-		fmt.Fprintln(stderr, "Error:", err)
-		return 1
+		warning = err.Error()
 	}
 	c.LoadCustomCommands(reservedNames())
 
@@ -60,6 +60,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		Version:     config.Version,
 		Account:     acc,
 		Offline:     acc.State == chat.AccountOffline,
+		Warning:     warning,
 	})
 	if err := runProgram(ctx, m, needsPick, acc.State == chat.AccountOffline, nil, nil); err != nil &&
 		!errors.Is(err, tea.ErrInterrupted) && !errors.Is(err, context.Canceled) {
@@ -88,6 +89,9 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 	m.printHeader()
 	if offline {
 		m.print(warnLine("No se pudo contactar con el servidor; se trabajará con la configuración local."))
+	}
+	if m.opts.Warning != "" {
+		m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
 	}
 	if pickModel {
 		m.queueModelPicker()
