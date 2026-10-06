@@ -13,9 +13,9 @@
 
 ## 0.-5 CLI en Go — port en curso (2026-10-06)
 
-- El CLI se reescribe en Go (`apps/cli/go/`, Bubble Tea v2) para distribuir binarios sin Python ni pip. Estado: 14 de 31 requisitos implementados con pruebas (CI verde en Linux, macOS y Windows), 7 parciales, 10 pendientes. Python sigue siendo el cliente distribuido (`client_cli.py`) y la referencia hasta aceptar la paridad.
-- Hecho: chat `--once`, protocolo SSE, agente con las 20 herramientas, aprobaciones, `/undo`, sesiones y configuración compatibles con Python, TUI con 35 de 41 comandos `/`, perfiles de proveedor (LM Studio, Ollama, OpenAI) y modo genérico.
-- Pendiente: MCP, `/remote`, adjuntos, PDF/Word, `/paste`, `/visual`, `setup`, `usage`, `update` y distribución. Backlog en issues #12–#25 de LIXBON-FOUNDER/Lixbon; estado completo y plan de retirada de Python en `.planning/STATE.md` y `.planning/ROADMAP.md`.
+- El CLI se reescribe en Go (`apps/cli/go/`, Bubble Tea v2) para distribuir binarios sin Python ni pip. Estado: 15 de 31 requisitos implementados con pruebas (CI verde en Linux, macOS y Windows), 8 parciales, 8 pendientes. Python sigue siendo el cliente distribuido (`client_cli.py`) y la referencia hasta aceptar la paridad.
+- Hecho: chat `--once`, protocolo SSE, agente con las 20 herramientas, aprobaciones, `/undo`, sesiones y configuración compatibles con Python, cliente MCP (stdio y HTTP), TUI con 36 de 41 comandos `/`, perfiles de proveedor (LM Studio, Ollama, OpenAI) y modo genérico.
+- Pendiente: `/remote`, adjuntos, PDF/Word, `/paste`, `/visual`, `setup`, `usage`, `update` y distribución. Backlog en issues #12–#25 de LIXBON-FOUNDER/Lixbon; estado completo y plan de retirada de Python en `.planning/STATE.md` y `.planning/ROADMAP.md`.
 - Cuidado: el CI Python del upstream falla en `master` por `state_corpus.json` desactualizado (regenerado en el fork, pendiente de llevarlo al upstream).
 
 ---

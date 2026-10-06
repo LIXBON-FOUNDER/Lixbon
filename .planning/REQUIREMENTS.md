@@ -7,7 +7,7 @@
 
 Alcance de la primera sustitución aceptada. Derivado de la evaluación conservada y de la decisión posterior del usuario.
 
-Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en Linux, macOS y Windows); `[~]` parcial; `[ ]` pendiente. Una casilla marcada **no significa aceptada**: la aceptación formal (REL-05) exige además evidencia con gateway real, terminales físicas, móvil y release por plataforma. Recuento: 14 hechos, 7 parciales, 10 pendientes.
+Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en Linux, macOS y Windows); `[~]` parcial; `[ ]` pendiente. Una casilla marcada **no significa aceptada**: la aceptación formal (REL-05) exige además evidencia con gateway real, terminales físicas, móvil y release por plataforma. Recuento: 15 hechos, 8 parciales, 8 pendientes.
 
 ### Contratos y línea base
 
@@ -43,9 +43,9 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 - [~] **TERM-02**: El usuario puede mantener sesiones largas sin reconstrucción ilimitada del texto por delta; ingesta y dibujo tienen presupuestos independientes y la terminal permanece utilizable bajo respuestas largas.
 - [ ] **DOC-01**: El usuario puede adjuntar texto, PDF, Word e imágenes base64 con límites actuales de tamaño/páginas, orden/tablas compatibles y errores claros; extracción local sin subida silenciosa, PDF con adaptador elegido por corpus/calidad/licencia y helpers declarados.
 - [~] **DOC-02**: El usuario puede usar portapapeles por OS y funciones Visuals/delegación con paridad explícita del inventario; la beta identifica funciones pendientes.
-- [ ] **MCP-01**: El usuario puede usar servidores MCP stdio desde configuración usuario/proyecto, servers o mcpServers, precedencia, command/args/env/cwd y nombres mcp__..., con negociación, tools/list paginado, diagnóstico, cancelación y cierre acotado.
+- [x] **MCP-01**: El usuario puede usar servidores MCP stdio desde configuración usuario/proyecto, servers o mcpServers, precedencia, command/args/env/cwd y nombres mcp__..., con negociación, tools/list paginado, diagnóstico, cancelación y cierre acotado.
 - [ ] **REMOTE-01**: El usuario puede controlar sesión desde móvil preservando rutas/campos y eventos hello/deltas/done/tools/snapshot/aprobaciones/bye, lotes cada 250 ms, cancelación independiente, cola limitada en bytes con prioridades y snapshot al recuperarse; no se promete entrega exactamente una vez.
-- [ ] **CONNECT-01**: El usuario conserva políticas de aprobación para efectos MCP/remotos y puede cerrar conexiones bloqueadas sin dejar streams ni procesos abiertos.
+- [~] **CONNECT-01**: El usuario conserva políticas de aprobación para efectos MCP/remotos y puede cerrar conexiones bloqueadas sin dejar streams ni procesos abiertos.
 
 ### Distribución y sustitución
 
@@ -92,13 +92,13 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 | STATE-02 | Phase 3 | Hecho | `internal/session`; candado, índice reconstruible, retención de 200 |
 | BOUND-01 | Phase 3 | Hecho | Lecturas, búsqueda y shell acotados |
 | BOUND-02 | Phase 3 | Hecho | `internal/process`; mata el árbol en Windows y Unix |
-| TERM-01 | Phase 4 | Parcial | TUI y 35/41 comandos `/`; faltan `setup`, `usage`, `/image`, `/paste`, `/visual`, `/mcp`, `/remote`, `/update`; sin matriz de terminales (#19, #22) |
+| TERM-01 | Phase 4 | Parcial | TUI y 36/41 comandos `/`; faltan `setup`, `usage`, `/image`, `/paste`, `/visual`, `/remote`, `/update`; sin matriz de terminales (#19, #22) |
 | TERM-02 | Phase 4 | Parcial | Pantalla completa con scroll propio; sin presupuestos medidos (#22) |
 | DOC-01 | Phase 4 | Pendiente | Sin adjuntos, imágenes ni PDF/Word (#13, #14) |
 | DOC-02 | Phase 4 | Parcial | `/copy` hecho; `/paste` y `/visual` pendientes (#15, #16) |
-| MCP-01 | Phase 4 | Pendiente | Solo ganchos de aprobación; sin cliente (#12) |
+| MCP-01 | Phase 4 | Hecho | `internal/mcp` (stdio y HTTP) con `mcp_corpus.json` y servidor real en Windows; falta probar en Linux/macOS con un servidor real |
 | REMOTE-01 | Phase 4 | Pendiente | Sin implementar (#17) |
-| CONNECT-01 | Phase 4 | Pendiente | Depende de MCP y remoto (#12, #17) |
+| CONNECT-01 | Phase 4 | Parcial | Aprobaciones y cierre acotado de MCP hechos; falta la parte remota (#17) |
 | REL-01 | Phase 5 | Pendiente | CI compila y prueba; sin artefactos (#20) |
 | REL-02 | Phase 5 | Pendiente | Sin firma ni digest (#18) |
 | REL-03 | Phase 5 | Pendiente | `update` no disponible (#18) |
@@ -111,7 +111,7 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 - Mapped to phases: 31
 - Unmapped: 0
 - Duplicated: 0
-- Hechos: 14 · Parciales: 7 · Pendientes: 10
+- Hechos: 15 · Parciales: 8 · Pendientes: 8
 
 ## Sources
 

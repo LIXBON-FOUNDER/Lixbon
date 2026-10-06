@@ -12,7 +12,7 @@ El usuario instala y ejecuta un binario CLI soportado sin Python ni pip, conserv
 
 ### Validated
 
-Implementado en Go con pruebas automáticas, verde en el CI de Linux, macOS y Windows (14 de 31 requisitos v1, ver REQUIREMENTS.md): `status`, `models` y `chat --once` cancelable; protocolo SSE; agente con las 20 herramientas, aprobaciones, `/plan`, `/diff`, `/undo` y verificadores; contexto y compactación; sesiones y configuración compatibles con Python; límites de lectura/shell y limpieza del árbol de procesos; TUI Bubble Tea con 35 de 41 comandos `/`; perfiles de proveedor para servidores compatibles con OpenAI.
+Implementado en Go con pruebas automáticas, verde en el CI de Linux, macOS y Windows (15 de 31 requisitos v1, ver REQUIREMENTS.md): `status`, `models` y `chat --once` cancelable; protocolo SSE; agente con las 20 herramientas, aprobaciones, `/plan`, `/diff`, `/undo` y verificadores; contexto y compactación; sesiones y configuración compatibles con Python; límites de lectura/shell y limpieza del árbol de procesos; cliente MCP (stdio y HTTP); TUI Bubble Tea con 36 de 41 comandos `/`; perfiles de proveedor para servidores compatibles con OpenAI.
 
 Nada está **aceptado**: falta evidencia con gateway autenticado, modelos reales, terminales físicas, móvil y release por plataforma.
 
@@ -21,7 +21,7 @@ Nada está **aceptado**: falta evidencia con gateway autenticado, modelos reales
 - [~] Congelar contratos y reproducir la línea base Python (parcial: referencia y 6 corpus; faltan acta, matriz de destinos y mediciones).
 - [~] Entregar chat --once Go cancelable en los destinos acordados (implementado; falta `setup` y validarlo contra gateway real).
 - [x] Conservar agente, 20 herramientas, aprobaciones, workspace y JSON local (implementado con pruebas; falta PDF/Word en `read_file`).
-- [ ] Alcanzar paridad de terminal, documentos, MCP y control remoto (en curso: TUI hecha; faltan MCP, remoto, adjuntos, PDF/Word, `/paste`, `/visual`, `setup`, `usage`).
+- [ ] Alcanzar paridad de terminal, documentos, MCP y control remoto (en curso: TUI y MCP hechos; faltan remoto, adjuntos, PDF/Word, `/paste`, `/visual`, `setup`, `usage`).
 - [ ] Distribuir, actualizar y recuperar binarios con autenticidad y aceptación de sustitución (no iniciado).
 - [ ] Retirar la base Python del CLI y reorganizar el repositorio una vez aceptada la paridad (ver «Retirada de Python» en ROADMAP.md).
 
@@ -57,7 +57,7 @@ El README afirma Python estándar sin dependencias externas; la evaluación iden
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Go elegido por el usuario el 2026-10-05 tras debate Orca | Prioridad: binarios autónomos y distribución CLI; supersede la recomendación anterior de esperar un spike Rust | Confirmada: 14/31 requisitos implementados en Go; entrega aún no aceptada |
+| Go elegido por el usuario el 2026-10-05 tras debate Orca | Prioridad: binarios autónomos y distribución CLI; supersede la recomendación anterior de esperar un spike Rust | Confirmada: 15/31 requisitos implementados en Go; entrega aún no aceptada |
 | Adelantar Go sin cerrar Phase 1 (opción B, 2026-10-06) | Avanzar el producto sin esperar acta, matriz ni mediciones | Desviación asumida; esos entregables siguen pendientes (issue #25) |
 | Bubble Tea v2 a pantalla completa con scroll propio (2026-10-06) | El modo inline duplicaba la caja de entrada al encogerse la vista | Adoptada; se pierde el scrollback nativo y la selección exige Mayús |
 | Perfiles de proveedor y modo genérico OpenAI (2026-10-06) | Usar el CLI con LM Studio, Ollama u OpenAI además del gateway Lixbon | Implementada; sin probar contra proveedores reales (issue #21) |
@@ -72,5 +72,5 @@ El README afirma Python estándar sin dependencias externas; la evaluación iden
 Después de cada fase, actualizar Active/Validated/Out of Scope y decisiones con evidencia; no marcar aceptación por resultados parciales. Al cerrar el hito revisar alcance, valor principal, paridad y reversibilidad.
 
 ---
-*Last updated: 2026-10-06 tras alinear los documentos con el estado real del código (14/31 requisitos implementados).*
+*Last updated: 2026-10-06 tras alinear los documentos con el estado real del código (15/31 requisitos implementados).*
 

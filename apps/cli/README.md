@@ -7,7 +7,7 @@ como un único archivo (`client_cli.py`) que el propio gateway sirve.
 
 Rama de trabajo: **`cli`** (ver `docs/RAMAS_Y_RELEASES.md`).
 
-> **Port a Go en curso.** `go/` contiene el reemplazo (binario sin Python ni pip) con 14 de 31 requisitos implementados; estado en `go/README.md` y `.planning/`. Python sigue siendo el cliente distribuido y la referencia hasta aceptar la paridad.
+> **Port a Go en curso.** `go/` contiene el reemplazo (binario sin Python ni pip) con 15 de 31 requisitos implementados; estado en `go/README.md` y `.planning/`. Python sigue siendo el cliente distribuido y la referencia hasta aceptar la paridad.
 
 ## Instalar
 
