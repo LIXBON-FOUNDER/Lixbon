@@ -311,3 +311,45 @@ func TestLoginAsksForAnIssuedKeyUnderTheCLIName(t *testing.T) {
 		t.Fatalf("cuerpo: %v", body)
 	}
 }
+
+func TestRedirectToAnotherServerNeverCarriesTheKey(t *testing.T) {
+	var leaked atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Store(true)
+		}
+		io.WriteString(w, `{"data":[]}`)
+	}))
+	defer other.Close()
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/v1/models", http.StatusTemporaryRedirect)
+	}))
+	defer gateway.Close()
+
+	_, err := New(gateway.URL+"/v1", "lixbon_sk_secreta").Models(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no permitida") {
+		t.Fatalf("la redirección a otro servidor debe rechazarse: %v", err)
+	}
+	if leaked.Load() {
+		t.Fatal("la API key llegó a otro servidor")
+	}
+}
+
+func TestRedirectWithinTheSameServerStillWorks(t *testing.T) {
+	var mux http.ServeMux
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/v1/otra", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/v1/otra", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer k" {
+			t.Errorf("auth: %q", r.Header.Get("Authorization"))
+		}
+		io.WriteString(w, `{"data":[{"id":"qwen"}]}`)
+	})
+	srv := httptest.NewServer(&mux)
+	defer srv.Close()
+	models, err := New(srv.URL+"/v1", "k").Models(context.Background())
+	if err != nil || len(models) != 1 || models[0] != "qwen" {
+		t.Fatalf("models %v err %v", models, err)
+	}
+}

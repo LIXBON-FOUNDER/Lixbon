@@ -440,8 +440,10 @@ def main() -> int:
             if old.get(section) != new[section]:
                 print(f"{section}: cambió", file=sys.stderr)
                 return 1
-        old_x = [(c["name"], c.get("expected"), "error" in c) for c in old.get("extraction", [])]
         new_x = [(c["name"], c.get("expected"), "error" in c) for c in new["extraction"]]
+        # El PDF del navegador solo se genera donde hay Edge: se compara lo que ambos tienen.
+        names = {name for name, _, _ in new_x}
+        old_x = [(c["name"], c.get("expected"), "error" in c) for c in old.get("extraction", []) if c["name"] in names]
         if old_x != new_x:
             print("extraction: cambió", file=sys.stderr)
             return 1

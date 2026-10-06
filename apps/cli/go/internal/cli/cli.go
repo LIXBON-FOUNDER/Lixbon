@@ -68,7 +68,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.setup(ctx)
 	case "usage":
 		return a.usageReport(ctx)
-	case "update", "ui-demo":
+	case "ui-demo":
+		fmt.Fprintln(a.Stderr, "«ui-demo» es una demo interna de la interfaz Python y no se porta al CLI Go.")
+		return 1
+	case "update":
 		fmt.Fprintf(a.Stderr, "«%s» aún no está disponible en el CLI Go.\n", name)
 		return 1
 	case "-h", "--help", "help":

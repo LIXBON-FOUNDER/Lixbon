@@ -27,10 +27,10 @@ Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión
 | 1. Contratos y línea base | Parcial: referencia Python y 6 corpus portables hechos; faltan acta, matriz de destinos, mediciones y harness 01-01 | `apps/cli/validation/` |
 | 2. Chat usable y cancelable | Implementada; falta validar contra un gateway real y completar CHAT-02 (login) | pruebas `internal/{sse,api,config,cli}` |
 | 3. Agente, herramientas y estado | Implementada; falta verificación en terminal real y con modelos reales | pruebas `internal/{agent,tools,process,history,session,workspace}` |
-| 4. Terminal y conexiones | En curso: TUI, MCP y 36 de 41 comandos `/` del catálogo (más `/provider`) listos; faltan remoto, adjuntos, PDF/Word, `/paste`, `/visual`, `/update`, `setup`, `usage` | `internal/{tui,chat,mcp}` |
+| 4. Terminal y conexiones | En curso: TUI, MCP, adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage` y 40 de 41 comandos `/` listos (más `/provider` y `/mouse`); falta `/update` | `internal/{tui,chat,mcp,documents,clipboard,remote}` |
 | 5. Distribución y sustitución | No iniciada (el CI solo compila y prueba) | `.github/workflows/ci.yml` job `cli-go` |
 
-Requisitos v1: **15 hechos, 8 parciales, 8 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
+Requisitos v1: **20 hechos, 5 parciales, 6 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
 
 Last activity: 2026-10-06 — cliente MCP (stdio y HTTP) y `/mcp` en Go (issue #12); documentos alineados con el código; backlog abierto como issues #12–#25 en LIXBON-FOUNDER/Lixbon.
 
@@ -76,15 +76,15 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 
-- #13 adjuntos `@ruta` e `/image` · #14 PDF y Word · #15 `/paste` · #16 `/visual` · #17 `/remote`
-- #18 `update` y `/update` · #19 `setup`, `usage`, `ui-demo` · #20 distribución, instaladores y Docker
+- #13 a #17 y #19 (menos `ui-demo`) implementados en local; falta validarlos con la app móvil, modelos y un gateway reales
+- #18 `update` y `/update` · #20 distribución, instaladores y Docker (exigen decidir productos nuevos en el gateway, almacenamiento y firma)
 - #21 validación contra modelos y gateway reales · #22 terminales reales · #23 `lixbon.exe~` versionado · #25 cierre de Phase 1
 - Retirada de Python: ver «Retirada de Python» en ROADMAP.md.
 - Llevar al upstream la regeneración de `state_corpus.json` para recuperar el CI Python.
 
 ### Blockers/Concerns
 
-- Phase 1 sin cerrar: no hay matriz de destinos acordada ni política CGO escrita; hay que decidirlas antes de elegir biblioteca PDF (#14) y de empaquetar (#20).
+- Phase 1 sin cerrar: no hay matriz de destinos acordada ni política CGO escrita; hay que decidirlas antes de empaquetar (#20). La biblioteca PDF (#14) ya se eligió con criterio propio en `DECISION-PDF-GO.md`: sin CGO ni helpers, a falta de que la matriz lo confirme.
 - Mediciones Python vs Go inexistentes: ninguna afirmación de rendimiento está respaldada.
 - Eliminar Python exige antes congelar los corpus: los `gen_*_corpus.py` usan el código Python como oráculo.
 - `apps/cli/go/lixbon.exe~` está versionado (#23).

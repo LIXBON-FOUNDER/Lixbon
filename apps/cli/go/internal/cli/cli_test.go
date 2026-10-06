@@ -347,3 +347,14 @@ func TestChatOnceRefusesAMessageWhoseOnlyAttachmentFails(t *testing.T) {
 		t.Fatalf("stderr %q, cuerpo %v", h.errOut, g.chatBody)
 	}
 }
+
+func TestSubcommandsNotPortedSayWhy(t *testing.T) {
+	h := newHarness(t, nil, map[string]any{"api_key": "k"})
+	if code := h.run("ui-demo"); code != 1 || !strings.Contains(h.errOut.String(), "no se porta") {
+		t.Fatalf("ui-demo: code %d %q", code, h.errOut)
+	}
+	h.errOut.Reset()
+	if code := h.run("update"); code != 1 || !strings.Contains(h.errOut.String(), "aún no está disponible") {
+		t.Fatalf("update: code %d %q", code, h.errOut)
+	}
+}

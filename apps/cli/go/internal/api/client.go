@@ -70,8 +70,23 @@ func New(baseURL, apiKey string) *Client {
 		BaseURL: baseURL,
 		Server:  config.ServerBase(baseURL),
 		APIKey:  apiKey,
-		HTTP:    &http.Client{Transport: transport},
+		HTTP:    &http.Client{Transport: transport, CheckRedirect: sameOriginOnly},
 	}
+}
+
+const maxRedirects = 5
+
+// sameOriginOnly impide que una redirección lleve la API key a otro servidor.
+// Go solo quita Authorization si cambia el nombre de host, no el puerto.
+func sameOriginOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return errors.New("demasiadas redirecciones")
+	}
+	first := via[0].URL
+	if req.URL.Host != first.Host || req.URL.Scheme != first.Scheme {
+		return fmt.Errorf("redirección a otro servidor (%s) no permitida", req.URL.Host)
+	}
+	return nil
 }
 
 func (c *Client) open(ctx context.Context, method, url string, payload any, auth bool) (*http.Response, error) {

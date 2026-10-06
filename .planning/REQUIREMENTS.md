@@ -7,7 +7,7 @@
 
 Alcance de la primera sustitución aceptada. Derivado de la evaluación conservada y de la decisión posterior del usuario.
 
-Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en Linux, macOS y Windows); `[~]` parcial; `[ ]` pendiente. Una casilla marcada **no significa aceptada**: la aceptación formal (REL-05) exige además evidencia con gateway real, terminales físicas, móvil y release por plataforma. Recuento: 15 hechos, 8 parciales, 8 pendientes.
+Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en Linux, macOS y Windows); `[~]` parcial; `[ ]` pendiente. Una casilla marcada **no significa aceptada**: la aceptación formal (REL-05) exige además evidencia con gateway real, terminales físicas, móvil y release por plataforma. Recuento: 20 hechos, 5 parciales, 6 pendientes.
 
 ### Contratos y línea base
 
@@ -19,7 +19,7 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 ### Chat Go y gateway
 
 - [x] **CHAT-01**: El usuario puede ejecutar status, models y chat --once en un binario Go para cada destino acordado, conservando flags, salida y códigos del subconjunto; el estado local aparece sin esperar consultas auxiliares de red.
-- [~] **CHAT-02**: El usuario puede configurar/login con Bearer API key, User-Agent Lixbon-CLI/<version>, issue_api_key=true y key_name="lixbon CLI", preservando identidad y rotación; redirects entre hosts no filtran credenciales.
+- [x] **CHAT-02**: El usuario puede configurar/login con Bearer API key, User-Agent Lixbon-CLI/<version>, issue_api_key=true y key_name="lixbon CLI", preservando identidad y rotación; redirects entre hosts no filtran credenciales.
 - [x] **CHAT-03**: El usuario puede conversar mediante /v1/chat/completions preservando source="cli", conversation_id, client_id, título, num_ctx, think, web_search y tools, con errores de cuota/autenticación/offline distinguibles y sin reintento automático del POST de chat.
 - [x] **CHAT-04**: El usuario recibe lixbon_sources, reasoning_content, content, tool_calls, usage y [DONE] correctamente con UTF-8/eventos fragmentados, CRLF, keepalives, <think> dividido y campos nuevos; fin válido y error se distinguen y el parser mantiene límites explícitos.
 - [x] **CHAT-05**: El usuario puede cancelar un chat incluso con SSE silencioso; la petición y cuerpos se cierran con límites y timeouts definidos, y salir por --once usa la misma limpieza de recursos.
@@ -41,11 +41,11 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 
 - [~] **TERM-01**: El usuario puede abrir chat sin comando, usar run/start, init/setup/usage y todos los slash commands del inventario con paridad interactiva/no interactiva, Markdown/transcript, entrada en cola, resize, terminal angosta, Unicode y scrollback en terminales acordadas.
 - [~] **TERM-02**: El usuario puede mantener sesiones largas sin reconstrucción ilimitada del texto por delta; ingesta y dibujo tienen presupuestos independientes y la terminal permanece utilizable bajo respuestas largas.
-- [ ] **DOC-01**: El usuario puede adjuntar texto, PDF, Word e imágenes base64 con límites actuales de tamaño/páginas, orden/tablas compatibles y errores claros; extracción local sin subida silenciosa, PDF con adaptador elegido por corpus/calidad/licencia y helpers declarados.
-- [~] **DOC-02**: El usuario puede usar portapapeles por OS y funciones Visuals/delegación con paridad explícita del inventario; la beta identifica funciones pendientes.
+- [x] **DOC-01**: El usuario puede adjuntar texto, PDF, Word e imágenes base64 con límites actuales de tamaño/páginas, orden/tablas compatibles y errores claros; extracción local sin subida silenciosa, PDF con adaptador elegido por corpus/calidad/licencia y helpers declarados.
+- [x] **DOC-02**: El usuario puede usar portapapeles por OS y funciones Visuals/delegación con paridad explícita del inventario; la beta identifica funciones pendientes.
 - [x] **MCP-01**: El usuario puede usar servidores MCP stdio desde configuración usuario/proyecto, servers o mcpServers, precedencia, command/args/env/cwd y nombres mcp__..., con negociación, tools/list paginado, diagnóstico, cancelación y cierre acotado.
-- [ ] **REMOTE-01**: El usuario puede controlar sesión desde móvil preservando rutas/campos y eventos hello/deltas/done/tools/snapshot/aprobaciones/bye, lotes cada 250 ms, cancelación independiente, cola limitada en bytes con prioridades y snapshot al recuperarse; no se promete entrega exactamente una vez.
-- [~] **CONNECT-01**: El usuario conserva políticas de aprobación para efectos MCP/remotos y puede cerrar conexiones bloqueadas sin dejar streams ni procesos abiertos.
+- [x] **REMOTE-01**: El usuario puede controlar sesión desde móvil preservando rutas/campos y eventos hello/deltas/done/tools/snapshot/aprobaciones/bye, lotes cada 250 ms, cancelación independiente, cola limitada en bytes con prioridades y snapshot al recuperarse; no se promete entrega exactamente una vez.
+- [x] **CONNECT-01**: El usuario conserva políticas de aprobación para efectos MCP/remotos y puede cerrar conexiones bloqueadas sin dejar streams ni procesos abiertos.
 
 ### Distribución y sustitución
 
@@ -78,13 +78,13 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 | BASE-03 | Phase 1 | Parcial | Discrepancia del README documentada en REFERENCE.md; matriz y política CGO sin acordar (#25) |
 | BASE-04 | Phase 1 | Pendiente | Solo línea base Python histórica; sin mediciones Go (#25) |
 | CHAT-01 | Phase 2 | Hecho | `status`, `models`, `chat --once`; CI en 3 SO |
-| CHAT-02 | Phase 2 | Parcial | Bearer y User-Agent sí; falta login/emisión de API key (#19) y prueba de redirects entre hosts |
+| CHAT-02 | Phase 2 | Hecho | Bearer, User-Agent, `lixbon setup` con `issue_api_key` y `key_name` «lixbon CLI», y redirecciones solo al mismo origen (con prueba). Falta validar con un gateway real (#21) |
 | CHAT-03 | Phase 2 | Hecho | Gateway falso; sin gateway real (#21) |
 | CHAT-04 | Phase 2 | Hecho | `sse_corpus.json` |
 | CHAT-05 | Phase 2 | Hecho | Pruebas de cancelación, cierre e inactividad en `api`, `sse` y `cli` |
 | AGNT-01 | Phase 3 | Hecho | `internal/agent`, `toolparse`; 50 pruebas del bucle |
 | AGNT-02 | Phase 3 | Hecho | `internal/history`; 16.384 y 65 % |
-| TOOL-01 | Phase 3 | Hecho | 20 herramientas; PDF/Word en `read_file` pendiente (#14) |
+| TOOL-01 | Phase 3 | Hecho | 20 herramientas, con PDF y Word en `read_file` |
 | TOOL-02 | Phase 3 | Hecho | Aprobaciones, `/plan`, rutas seguras y symlinks |
 | TOOL-03 | Phase 3 | Hecho | `/diff`, `/undo`, `/commit`, verificadores |
 | WORK-01 | Phase 3 | Hecho | `LIXBON.md`, `.lixbon/commands`, búsqueda propia sin `rg` |
@@ -92,13 +92,13 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 | STATE-02 | Phase 3 | Hecho | `internal/session`; candado, índice reconstruible, retención de 200 |
 | BOUND-01 | Phase 3 | Hecho | Lecturas, búsqueda y shell acotados |
 | BOUND-02 | Phase 3 | Hecho | `internal/process`; mata el árbol en Windows y Unix |
-| TERM-01 | Phase 4 | Parcial | TUI y 36/41 comandos `/`; faltan `setup`, `usage`, `/image`, `/paste`, `/visual`, `/remote`, `/update`; sin matriz de terminales (#19, #22) |
+| TERM-01 | Phase 4 | Parcial | TUI, `setup`, `usage` y 40/41 comandos `/` (falta `/update`, #18); `ui-demo` descartado; sin matriz de terminales (#22) |
 | TERM-02 | Phase 4 | Parcial | Pantalla completa con scroll propio; sin presupuestos medidos (#22) |
-| DOC-01 | Phase 4 | Pendiente | Sin adjuntos, imágenes ni PDF/Word (#13, #14) |
-| DOC-02 | Phase 4 | Parcial | `/copy` hecho; `/paste` y `/visual` pendientes (#15, #16) |
+| DOC-01 | Phase 4 | Hecho | `internal/documents` con `documents_corpus.json` (oráculo Python); PDF con `ledongthuc/pdf` (`DECISION-PDF-GO.md`). Solo probado con PDF de Edge y sintéticos; los de Word y LaTeX no (#14) |
+| DOC-02 | Phase 4 | Hecho | `/copy`, `/paste` (probado con el portapapeles real de Windows; Linux y macOS solo con helpers simulados) y `/visual` sobre el MCP de Lixbon (servidor simulado) |
 | MCP-01 | Phase 4 | Hecho | `internal/mcp` (stdio y HTTP) con `mcp_corpus.json` y servidor real en Windows; falta probar en Linux/macOS con un servidor real |
-| REMOTE-01 | Phase 4 | Pendiente | Sin implementar (#17) |
-| CONNECT-01 | Phase 4 | Parcial | Aprobaciones y cierre acotado de MCP hechos; falta la parte remota (#17) |
+| REMOTE-01 | Phase 4 | Hecho | `internal/remote` y `/remote` probados con un relay simulado (en memoria y por HTTP); falta validar con la app móvil y el gateway reales (#17, #21) |
+| CONNECT-01 | Phase 4 | Hecho | Aprobaciones y cierre acotado de MCP y de `/remote` (sin goroutines ni conexiones abiertas) |
 | REL-01 | Phase 5 | Pendiente | CI compila y prueba; sin artefactos (#20) |
 | REL-02 | Phase 5 | Pendiente | Sin firma ni digest (#18) |
 | REL-03 | Phase 5 | Pendiente | `update` no disponible (#18) |
