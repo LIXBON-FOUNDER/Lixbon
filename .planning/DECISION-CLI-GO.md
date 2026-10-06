@@ -31,6 +31,13 @@ Run: `run_d06dd487975f`. Las terminales y worktrees del debate se conservan.
 6. Optimizar crecimiento del streaming, lectura parcial y límites de salida por diseño y medición; cambiar de lenguaje por sí mismo no demuestra una mejora.
 7. Conservar compatibilidad de configuración, sesiones, permisos, aprobaciones, snapshots/undo, MCP y conexión remota hasta aceptar el reemplazo.
 
+## Decisiones posteriores (2026-10-06)
+
+- El usuario eligió **adelantar Go sin esperar el cierre de Phase 1** (opción B). Acta, matriz de destinos y mediciones siguen pendientes.
+- La comprobación de Bubble Tea previa a Phase 3 dio un resultado negativo para el modo inline: la versión 2.0.10 duplicaba la caja de entrada al encogerse la vista (reproducido con el emulador `x/vt`). Se adoptó **pantalla completa con transcript y scroll propios**; se pierde el scrollback nativo y la selección con ratón exige Mayús (`/copy` como alternativa).
+- El CLI Go habla con cualquier servidor compatible con OpenAI mediante **perfiles de proveedor** (`lixbon profile`, `/provider`). Una suscripción de ChatGPT o Claude no es una API key y se descarta como vía.
+- El objetivo declarado es **retirar la base Python** una vez aceptada la paridad. El plan de retirada está en `.planning/ROADMAP.md`, sección «Retirada de Python»; Python sigue como referencia y rollback hasta entonces.
+
 ## Evidencia y puntos que resolver
 
 - Fuente principal: `apps/cli/audit/EVALUACION_PYTHON_GO.md`, conservada sin modificar.

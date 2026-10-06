@@ -1,6 +1,22 @@
 # División de trabajo — migración CLI Go
 Fecha: 2026-10-05. Propuesta de despacho futuro por Orca; ningún worker/worktree creado por esta planificación. Phase 1 tiene planes ejecutables; fases 2–5 son backlog acotado que debe replantearse con evidencia de prerrequisitos. No se modifica backend ni desktop ni audit; Go futuro convive bajo apps/cli/go/. Roles propuestos, autoridad por propiedad y revisión, no por modelo.
 
+## Estado real (2026-10-06)
+
+Este documento es la propuesta original de despacho y se conserva como historial. La ejecución real difirió: el usuario eligió adelantar Go (opción B) y el trabajo de las fases 2–4 se hizo en una sola rama (`cli`), sin worktrees por dueño ni planes GSD, y con rutas distintas a las candidatas de las tablas de abajo.
+
+| Fase propuesta | Rutas candidatas | Rutas reales en `apps/cli/go/` | Estado |
+|---|---|---|---|
+| 1 / BASE | `validation/` | `../validation/` (`REFERENCE.md`, `gen_*_corpus.py`, 6 corpus) | Parcial: faltan 01-01 (harness), 01-03 (matriz), 01-04 (mediciones) y acta |
+| 2 / CHAT | `cmd/lixbon`, `internal/{config,api,sse,chat}` | `cmd/lixbon`, `internal/{config,api,sse,cli}` | Implementada; CHAT-02 parcial |
+| 3 / agente, herramientas, estado | `internal/{agent,context,tools,process,workspace,state}` | `internal/{agent,history,toolspec,toolparse,tools,process,session,workspace,textutil}` | Implementada |
+| 4 / terminal | `internal/terminal` | `internal/{chat,tui}` | En curso |
+| 4 / documentos | `internal/{documents,clipboard}` | sin crear | Pendiente (#13, #14, #15) |
+| 4 / MCP y remoto | `internal/{mcp,remote}` | sin crear | Pendiente (#12, #17) |
+| 5 / binarios, actualización, cutover | `internal/update`, CI, instaladores | solo job `cli-go` en `ci.yml` | No iniciada (#18, #20) |
+
+Lo que falta se rastrea en las issues #12–#25 de LIXBON-FOUNDER/Lixbon. Los roles Implementador/Validador/Revisor de las tablas siguientes no se aplicaron; la validación independiente de lo ya hecho es una tarea pendiente.
+
 ## Planes Phase 1 y propiedad
 | Ola | Paquete | Módulos / propiedad exclusiva | Necesita / produce | Implementador | Validador | Revisor |
 |---|---|---|---|---|---|---|

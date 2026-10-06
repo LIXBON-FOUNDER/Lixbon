@@ -1,48 +1,58 @@
 ---
 gsd_state_version: '1.0'
-status: planning
+status: executing
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 4
   completed_plans: 0
-  percent: 0
+  percent: 45
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-05)
+See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** El usuario instala y ejecuta un binario CLI soportado sin Python ni pip, conservando los contratos funcionales del cliente existente.
-**Current focus:** Phase 1 — Contratos y línea base reproducible
+**Current focus:** completar Phase 4 (MCP, documentos, remoto, `setup`/`usage`/`update`) y abrir Phase 5 (distribución y retirada de Python). Phase 1 sigue abierta en sus entregables de aceptación.
 
 ## Current Position
 
-Phase: 1 of 5 (Contratos y línea base reproducible)
-Plan: 0 of 4 in current phase
-Status: Planned and independently reviewed; ready for execution when requested
-Last activity: 2026-10-05 — Cuatro planes Phase 1; segunda revisión independiente aprobada con 0 blockers y 0 warnings; sin implementación ni pruebas.
+Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión `2.3.0-go.0`).
 
-Progress: [░░░░░░░░░░] 0%
+| Fase | Estado real | Evidencia |
+|------|-------------|-----------|
+| 1. Contratos y línea base | Parcial: referencia Python y 6 corpus portables hechos; faltan acta, matriz de destinos, mediciones y harness 01-01 | `apps/cli/validation/` |
+| 2. Chat usable y cancelable | Implementada; falta validar contra un gateway real y completar CHAT-02 (login) | pruebas `internal/{sse,api,config,cli}` |
+| 3. Agente, herramientas y estado | Implementada; falta verificación en terminal real y con modelos reales | pruebas `internal/{agent,tools,process,history,session,workspace}` |
+| 4. Terminal y conexiones | En curso: TUI y 35 de 41 comandos `/` del catálogo (más `/provider`) listos; faltan MCP, remoto, adjuntos, PDF/Word, `/paste`, `/visual`, `/update`, `setup`, `usage` | `internal/{tui,chat}` |
+| 5. Distribución y sustitución | No iniciada (el CI solo compila y prueba) | `.github/workflows/ci.yml` job `cli-go` |
+
+Requisitos v1: **14 hechos, 7 parciales, 10 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
+
+Last activity: 2026-10-06 — documentos de planificación alineados con el código; backlog abierto como issues #12–#25 en LIXBON-FOUNDER/Lixbon.
+
+Progress: [████░░░░░░] 45% de requisitos implementados (0 % aceptados)
+
+## Verified Evidence (2026-10-06)
+
+- `go vet ./...` y `go test -count=1 ./...` en `apps/cli/go`: todos los paquetes con pruebas pasan (Windows 11, Go 1.26.5, ejecución local).
+- CI (`ci.yml`, job `cli-go`): verde en ubuntu, macos y windows en el fork (`PR3S1G4zZ/Lixbon`, PR #2) y en el upstream (ejecución 37503221140: los tres jobs Go en success).
+- CI upstream en `master`/`cli`: el job Python `CLI · tests + artefacto al día` **falla** (`state_corpus.json` no coincide con `sessions.py`/`commands.py`). La regeneración está en el fork (commit 8c95435) pero aún no llegó al upstream.
+- Referencia Python: 133 passed, 0 failed (Windows, Python 3.13.14, `apps/cli/validation/REFERENCE.md`). Los dos fallos históricos de `test_input_box.py` no se reproducen; causa original no determinada.
+- Sin evidencia todavía: gateway autenticado, LM Studio/Ollama/OpenAI reales, terminales físicas Linux/macOS, móvil, mediciones Go y release por plataforma.
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: N/A
-- Total execution time: 0 hours
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | 0 | 0 | N/A |
+- Total plans completed: 0 de 4 (los planes 01-0x no se ejecutaron como estaban escritos; el trabajo se hizo fuera de ellos, ver Decisions)
+- Commits que tocan `apps/cli/go` desde 2026-10-05: 22
 
 **Recent Trend:**
-- Last 5 plans: None
-- Trend: N/A
+- Last 5 commits: proveedores externos, sincronización de `/visual`, pruebas estables entre sistemas operativos
+- Trend: implementación por delante de la validación y la documentación
 
 ## Accumulated Context
 
@@ -50,23 +60,33 @@ Progress: [░░░░░░░░░░] 0%
 
 Decisions are logged in PROJECT.md Key Decisions table.
 
-- Go elegido por usuario/debate; supersede recomendación anterior del SPEC sin modificarlo.
-- Python conserva referencia y rollback hasta paridad/cutover aceptados.
-- Compartir fixtures portables; Rust opcional fuera del camino crítico con gates y dueño/fecha desktop.
+- 2026-10-05: Go elegido por el usuario tras debate; supersede la recomendación anterior del SPEC sin modificarlo. Python conserva referencia y rollback hasta paridad/cutover aceptados. Rust opcional y fuera del camino crítico.
+- 2026-10-06: el usuario eligió adelantar Go sin esperar el cierre de Phase 1 (opción B). Es una desviación del gate de TASK-DIVISION: acta, matriz de destinos (01-03) y mediciones (01-04) siguen pendientes.
+- 2026-10-06: UI con Bubble Tea v2. El modo inline duplicaba la caja de entrada al encogerse la vista; se pasó a pantalla completa con transcript y scroll propios. A cambio se pierde el scrollback nativo y la selección con ratón exige Mayús (`/copy` como alternativa).
+- 2026-10-06: perfiles de proveedor (`lixbon profile`, `/provider`) y modo genérico compatible con OpenAI. `/provider` es un comando solo de Go, fuera del catálogo contrastado con Python. Una suscripción de ChatGPT o Claude no es una API key y se descarta como vía.
+- 2026-10-06: tras el merge del upstream (`/visual` sobre MCP), `state_corpus.json` se regeneró y el catálogo Go se sincronizó.
+- Pruebas que dependían del sistema operativo (LF/CR del emulador, enlaces simbólicos en `/workspace`, orden de recorrido de Python en el corpus de workspace) se corrigieron al estrenar el CI de Go.
 
-- 2026-10-06: el usuario eligió la opción B (adelantar Go sin esperar el cierre de Phase 1). Hecho en `apps/cli/go/` (sse, config, api, `init/status/models/chat --once`) y `apps/cli/validation/` (corpus SSE portable, referencia Python 133 passed, `REFERENCE.md`). Es una desviación del gate de TASK-DIVISION (Phase 2 tras acta de Phase 1): el acta, la matriz de destinos (01-03) y las mediciones (01-04) siguen pendientes. Harness completo de 01-01 (preflight/self-check/hashes) no construido. Avance 2026-10-06 (Fase 3, primer corte): `toolspec`, `toolparse` y `tools` de solo lectura con corpus portables; UI decidida: Bubble Tea. Avance posterior (commits ede098b…d7d95f7): herramientas de escritura y shell con árbol de procesos, `internal/history` (contexto), `internal/agent` (bucle, aprobaciones, diff, undo, verificadores), `internal/session` y `internal/workspace`, y `chat --once` ejecutando el agente. Fase 3 queda funcionalmente cubierta salvo lo que depende de la UI (aprobaciones interactivas con diff, `/undo`, `/plan`, `/workspace`, `/allow`) y la verificación en Linux/macOS (Docker no estaba disponible: pendiente de CI). Avance 2026-10-06 (Fase 4, primer corte, commit f16680e): `internal/chat` (estado sin UI) e `internal/tui` con Bubble Tea v2 inline: caja multilínea, menú `/`, aprobaciones con diff, preguntas del agente, cola de mensajes, interrupción, historial de entrada compartido con Python y 33 comandos `/` con catálogo contrastado con el corpus. Pendiente en Fase 4: `/image /paste /visual /mcp /remote /update` (`/config` y `/doctor` ya hechos), adjuntos `@ruta`/imágenes/PDF/Word (decisión de biblioteca), MCP, remoto, y una prueba manual del binario en terminal real (hasta ahora solo E/S inyectada). Avance 2026-10-06 (Fase 4, prueba manual del usuario, commit cab6aeb): el modo inline de Bubble Tea 2.0.10 duplicaba la caja de entrada al encogerse la vista (reproducido con el emulador `x/vt`); se pasó a pantalla completa con transcript propio y scroll (RePág/AvPág y rueda), caja y barra de estado fijas al pie, menú `/` sobre la caja, logo del favicon en pixel art y volcado del transcript al salir. A cambio se pierde el scrollback nativo y la selección con ratón exige Mayús (`/copy` como alternativa). El chat abre sin modelos (servidor con GPUs apagadas). Verificado con un servidor falso compatible con OpenAI que el CLI funciona con `base_url` local (LM Studio/Ollama) usando cualquier clave. Primer CI Go (vet, tests y build en Linux/macOS/Windows) añadido en `ci.yml`; la verificación Linux/macOS queda pendiente del primer resultado del PR. PR #1 (`cli` → `master` del fork) fusionado el 2026-10-06; el primer CI de Go destapó pruebas dependientes del sistema operativo (LF/CR del emulador, enlaces simbólicos en `/workspace`, orden del recorrido de Python en el corpus de workspace) y se corrigieron. Avance 2026-10-06 (proveedores externos, commit 1f766fe): perfiles de proveedor (`profiles`/`profile` en `config.json`, los campos de nivel superior son los del activo y Python sigue leyendo el mismo archivo), `lixbon profile add|use|remove`, `/provider` (comando solo de Go, fuera del catálogo contrastado con Python) y modo genérico: a un servidor compatible con OpenAI solo se le envía `model`, `messages`, `stream`, `stream_options` y `tools`, la clave es opcional y no se consultan los endpoints `/api` de Lixbon. Verificado con un servidor falso y con el binario; sin probar contra LM Studio, Ollama u OpenAI reales. Una suscripción de ChatGPT/Claude no es una API key: se descarta como vía directa. Tras el merge del upstream (`/visual` redefinido en Python) se regeneró `state_corpus.json` y se actualizó el catálogo Go. Siguiente: probar con un modelo local real, los comandos pendientes (`/image /paste /visual /mcp /remote /update`) y Fase 5 (distribución, `update`, cutover).
+### Hecho en Go (resumen)
+
+`sse`, `config`, `api`, `cli` (`init status models profile chat`), `toolspec`, `toolparse`, `tools` (20 herramientas), `process` (árbol de procesos), `history`, `agent` (bucle, aprobaciones, diff, undo, verificadores), `session`, `workspace`, `chat`, `tui` (Bubble Tea v2). Detalle por paquete en `apps/cli/go/README.md`.
 
 ### Pending Todos
 
-- Siguiente acción prevista: ejecutar Phase 1 empezando por 01-01 cuando el usuario solicite implementación; comando $gsd-execute-phase 1.
-- Acordar matriz OS/arquitectura/terminal y política CGO/nativos/helpers en Phase 1.
-- Reconciliar dependencias README y clasificar los dos fallos históricos; no ejecutados ahora.
+Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
+
+- #12 MCP stdio y `/mcp` · #13 adjuntos `@ruta` e `/image` · #14 PDF y Word · #15 `/paste` · #16 `/visual` · #17 `/remote`
+- #18 `update` y `/update` · #19 `setup`, `usage`, `ui-demo` · #20 distribución, instaladores y Docker
+- #21 validación contra modelos y gateway reales · #22 terminales reales · #23 `lixbon.exe~` versionado · #25 cierre de Phase 1
+- Retirada de Python: ver «Retirada de Python» en ROADMAP.md.
+- Llevar al upstream la regeneración de `state_corpus.json` para recuperar el CI Python.
 
 ### Blockers/Concerns
 
-- No hay implementación ni mediciones Go. Los 131 PASS/2 fallos provienen de auditoría histórica.
-- Selección terminal/PDF y presupuestos medibles pendientes antes del port completo.
-- Gateway autenticado, terminal física, móvil, CI y distribución por plataforma aún no aceptados.
+- Phase 1 sin cerrar: no hay matriz de destinos acordada ni política CGO escrita; hay que decidirlas antes de elegir biblioteca PDF (#14) y de empaquetar (#20).
+- Mediciones Python vs Go inexistentes: ninguna afirmación de rendimiento está respaldada.
+- Eliminar Python exige antes congelar los corpus: los `gen_*_corpus.py` usan el código Python como oráculo.
+- `apps/cli/go/lixbon.exe~` está versionado (#23).
 
 ## Deferred Items
 
@@ -77,6 +97,6 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ## Session Continuity
 
-Last session: 2026-10-05
-Stopped at: Roadmap de cinco fases, división de trabajo y cuatro planes Phase 1 listos; revisión independiente aprobada, validación draft, ningún runtime PASS.
+Last session: 2026-10-06
+Stopped at: documentos alineados con el estado real; siguiente trabajo previsto: continuar la migración (MCP, documentos, remoto, `setup`/`usage`/`update`) para poder retirar Python.
 Resume file: None
