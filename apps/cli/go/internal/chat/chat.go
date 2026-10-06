@@ -286,7 +286,7 @@ func (a Account) NoModelsError() error {
 	if a.ModelsErr != nil {
 		return fmt.Errorf("No se pudieron obtener los modelos: %v", a.ModelsErr)
 	}
-	return fmt.Errorf("El servidor respondió con una lista de modelos vacía.")
+	return fmt.Errorf("El servidor no tiene modelos disponibles ahora (¿nodos apagados?). Prueba más tarde.")
 }
 
 // ── persistencia ────────────────────────────────────────────────────────
