@@ -42,6 +42,7 @@ Comandos:
   init     Guardar base_url, api_key y modelo
   status   Ver configuración local
   models   Listar modelos disponibles
+  profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
 `
 
@@ -56,6 +57,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.status()
 	case "models":
 		return a.models(ctx)
+	case "profile":
+		return a.profile(rest)
 	case "chat", "run", "start":
 		return a.chat(ctx, rest)
 	case "setup", "usage", "update", "ui-demo":
@@ -160,6 +163,9 @@ func (a *App) status() int {
 	}
 	fmt.Fprintf(a.Stdout, "lixbon CLI v%s\n", config.Version)
 	fmt.Fprintf(a.Stdout, "- Config:              %s\n", a.ConfigPath)
+	if cfg.ActiveProfile() != config.DefaultProfile {
+		fmt.Fprintf(a.Stdout, "- Proveedor:           %s\n", cfg.ActiveProfile())
+	}
 	fmt.Fprintf(a.Stdout, "- Base URL:            %s\n", baseURL)
 	fmt.Fprintf(a.Stdout, "- API key:             %s\n", config.MaskKey(cfg.APIKey))
 	fmt.Fprintf(a.Stdout, "- Cuenta:              %s\n", orDefault(cfg.ExtraString("account_email"), "-"))

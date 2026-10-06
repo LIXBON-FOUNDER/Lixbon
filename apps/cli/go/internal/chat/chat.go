@@ -206,6 +206,8 @@ type Account struct {
 	Models        []api.Model
 	RoleChatModel string
 	ModelsErr     error
+	// Generic: el proveedor no es un gateway Lixbon.
+	Generic bool
 }
 
 // Probe distingue sesión válida, clave rechazada y servidor inalcanzable, y
@@ -218,6 +220,18 @@ func (c *Chat) Probe(ctx context.Context) Account {
 		authFailed = api.IsAuth(err)
 	}
 	acc.Models, acc.ModelsErr = models, err
+	acc.Generic = c.Client.Generic
+	if acc.Generic {
+		// Un servidor externo puede no pedir clave (LM Studio, Ollama) y no
+		// tiene plan ni roles: solo importa si responde.
+		switch {
+		case authFailed:
+			acc.State = AccountAuth
+		case err != nil:
+			acc.State = AccountOffline
+		}
+		return acc
+	}
 	acc.RoleChatModel = c.Client.RoleChatModel(ctx)
 	if c.Cfg.APIKey == "" {
 		acc.State = AccountAuth
@@ -243,6 +257,24 @@ func (c *Chat) Probe(ctx context.Context) Account {
 		acc.State = AccountAuth
 	}
 	return acc
+}
+
+// UseProfile cambia de proveedor: guarda el que se deja, apunta el cliente al
+// nuevo y recupera su modelo y su ventana de contexto. El modo delegate solo
+// existe en un gateway Lixbon, así que pasa a ask en un proveedor genérico.
+func (c *Chat) UseProfile(name string) error {
+	if err := c.Cfg.UseProfile(name); err != nil {
+		return err
+	}
+	c.Client.Configure(c.Cfg)
+	c.Model = firstNonEmpty(c.Cfg.KeyModel, c.Cfg.Model)
+	c.Session.Model = c.Model
+	c.Session.ContextWindow = c.Cfg.ContextWindow
+	c.anchor = nil
+	if c.Client.Generic && c.Mode == ModeDelegate {
+		c.Mode, c.Cfg.Mode = ModeAsk, ModeAsk
+	}
+	return c.SaveConfig()
 }
 
 // ClearSession olvida la sesión local (logout o clave rechazada).
@@ -285,6 +317,9 @@ func (c *Chat) ResolveModel(acc Account) (needsPick bool, err error) {
 func (a Account) NoModelsError() error {
 	if a.ModelsErr != nil {
 		return fmt.Errorf("No se pudieron obtener los modelos: %v", a.ModelsErr)
+	}
+	if a.Generic {
+		return fmt.Errorf("El proveedor no ha listado ningún modelo. ¿Hay uno cargado en el servidor?")
 	}
 	return fmt.Errorf("El servidor no tiene modelos disponibles ahora (¿nodos apagados?). Prueba más tarde.")
 }
@@ -331,7 +366,7 @@ func (c *Chat) Open(id string) bool {
 
 func (c *Chat) maybeAutotitle(sink Sink) {
 	c.mu.Lock()
-	if !c.autotitle || c.title != "" || len(c.History) < 2 || c.titling {
+	if !c.autotitle || c.Client.Generic || c.title != "" || len(c.History) < 2 || c.titling {
 		c.mu.Unlock()
 		return
 	}
@@ -392,6 +427,9 @@ func (c *Chat) Send(ctx context.Context, text string, sink Sink) (string, error)
 }
 
 func (c *Chat) delegateTurn(ctx context.Context, text string, sink Sink) (string, error) {
+	if c.Client.Generic {
+		return "", fmt.Errorf("El modo delegate necesita un gateway Lixbon; con este proveedor usa el modo ask o agent.")
+	}
 	result, err := c.Client.Delegate(ctx, text)
 	if err != nil {
 		return "", err

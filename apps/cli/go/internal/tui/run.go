@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
@@ -24,23 +26,27 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		return 1
 	}
 	cfg := config.Load(configPath)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.IsGeneric() {
 		fmt.Fprintln(stderr, "No hay sesión. Configúrala con: lixbon init --api-key <clave>")
 		return 1
 	}
 	opts.ConfigPath = configPath
 	opts.Autotitle = true
-	c, err := chat.New(cfg, api.New(cfg.BaseURL, cfg.APIKey), opts)
+	c, err := chat.New(cfg, api.FromConfig(cfg), opts)
 	if err != nil {
 		fmt.Fprintln(stderr, "Error:", err)
 		return 1
 	}
 	defer c.Close()
 
-	fmt.Fprintln(stdout, sDim2.Render("conectando con Lixbon…"))
+	fmt.Fprintln(stdout, sDim2.Render("conectando con "+providerHost(cfg.BaseURL)+"…"))
 	acc := c.Probe(ctx)
 	switch acc.State {
 	case chat.AccountAuth:
+		if acc.Generic {
+			fmt.Fprintln(stderr, providerHost(cfg.BaseURL)+" rechazó la clave. Cámbiala con: lixbon profile add (o lixbon init --api-key <clave>)")
+			return 1
+		}
 		c.ClearSession()
 		fmt.Fprintln(stderr, "Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
 		fmt.Fprintln(stderr, "Configúrala de nuevo con: lixbon init --api-key <clave>")
@@ -98,8 +104,9 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 }
 
 func reservedNames() []string {
-	names := make([]string, len(Specs))
-	for i, s := range Specs {
+	all := slices.Concat(Specs, GoSpecs)
+	names := make([]string, len(all))
+	for i, s := range all {
 		names[i] = s.Name
 	}
 	return names
@@ -108,11 +115,14 @@ func reservedNames() []string {
 func (m *Model) printHeader() {
 	c := m.chat
 	title := sBold.Render("Lixbon CLI") + sDim.Render(" v"+m.opts.Version)
-	if plan := c.Cfg.ExtraString("plan_name"); plan != "" {
+	if plan := c.Cfg.ExtraString("plan_name"); plan != "" && !c.Client.Generic {
 		title += sDim2.Render("  " + glyphSep + "  plan " + plan)
 	}
-	info := sDim.Render(fmt.Sprintf("%s %s %s %s %s",
-		firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), glyphSep, c.Mode, glyphSep, shortPath(c.Workspace)))
+	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode, shortPath(c.Workspace)}
+	if profile := c.Cfg.ActiveProfile(); profile != config.DefaultProfile {
+		parts = slices.Insert(parts, 0, profile)
+	}
+	info := sDim.Render(strings.Join(parts, " "+glyphSep+" "))
 	tips := []string{
 		"/ comandos  " + glyphSep + "  Enter envía",
 		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",

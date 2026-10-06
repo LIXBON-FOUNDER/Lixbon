@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -300,7 +301,7 @@ func (m *Model) historyNext() bool {
 // ── menú de comandos ─────────────────────────────────────────────────────
 
 func (m *Model) allSpecs() []Spec {
-	specs := Ordered()
+	specs := order(slices.Concat(Specs, GoSpecs))
 	for name, c := range m.chat.Custom {
 		specs = append(specs, Spec{Name: name, Desc: c.Description, Group: "propios"})
 	}

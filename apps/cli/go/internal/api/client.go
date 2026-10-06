@@ -34,8 +34,27 @@ type Client struct {
 	Server  string
 	APIKey  string
 	HTTP    *http.Client
+	// Generic es un servidor compatible con OpenAI que no es un gateway
+	// Lixbon: solo recibe model, messages, stream y tools, y sus endpoints
+	// /api quedan fuera de alcance.
+	Generic bool
 
 	StreamIdle time.Duration
+}
+
+var errNotGateway = &Error{Message: "Este proveedor no es un gateway Lixbon: esa función no está disponible."}
+
+func FromConfig(cfg config.Config) *Client {
+	c := New(cfg.BaseURL, cfg.APIKey)
+	c.Generic = cfg.IsGeneric()
+	return c
+}
+
+// Configure apunta el cliente a otro proveedor conservando su identidad: la
+// caja de herramientas guarda el mismo puntero.
+func (c *Client) Configure(cfg config.Config) {
+	fresh := FromConfig(cfg)
+	c.BaseURL, c.Server, c.APIKey, c.Generic = fresh.BaseURL, fresh.Server, fresh.APIKey, fresh.Generic
 }
 
 // New desactiva la compresión transparente: con gzip el transporte podría
@@ -89,6 +108,9 @@ func (c *Client) open(ctx context.Context, method, url string, payload any, auth
 }
 
 func (c *Client) doJSON(ctx context.Context, method, url string, payload any, timeout time.Duration, auth bool, out any) error {
+	if c.Generic && strings.HasPrefix(url, c.Server+"/api/") {
+		return errNotGateway
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	resp, err := c.open(ctx, method, url, payload, auth)

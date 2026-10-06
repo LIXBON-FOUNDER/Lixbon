@@ -67,6 +67,10 @@ func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 }
 
 func (m *Model) runCommand(name, arg string) tea.Cmd {
+	if m.chat.Client.Generic && slices.Contains(gatewayOnly, name) {
+		m.print(note(fmt.Sprintf("«/%s» solo funciona con un gateway Lixbon (proveedor actual: %s). /provider cambia de proveedor.", name, m.chat.Cfg.ActiveProfile())))
+		return nil
+	}
 	switch name {
 	case "help":
 		return m.cmdHelp(arg)
@@ -131,6 +135,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdKey("")
 	case "logout":
 		return m.cmdLogout()
+	case "provider":
+		return m.cmdProvider(arg)
 	case "doctor":
 		return m.cmdDoctor()
 	case "config":
@@ -1119,9 +1125,12 @@ func (m *Model) cmdInit() tea.Cmd {
 // ── cuenta y sistema ─────────────────────────────────────────────────────
 
 func (m *Model) cmdStatus() tea.Cmd {
+	generic, online := m.chat.Client.Generic, m.online
 	return m.async("consultando la cuenta", func(ctx context.Context) cmdDoneMsg {
 		quota := "sin conexión"
-		if u, err := m.chat.Client.Usage(ctx); err == nil {
+		if generic {
+			quota = "no aplica"
+		} else if u, err := m.chat.Client.Usage(ctx); err == nil {
 			pct := func(b api.Bucket) string {
 				if b.Unlimited {
 					return "∞"
@@ -1139,7 +1148,9 @@ func (m *Model) cmdStatus() tea.Cmd {
 			commands = "sin preguntar"
 		}
 		plan := "desconocido"
-		if p := m.chat.Cfg.ExtraString("plan_name"); p != "" {
+		if p := m.chat.Cfg.ExtraString("plan_name"); generic {
+			plan = "proveedor externo"
+		} else if p != "" {
 			plan = "Lixbon " + p
 		}
 		project := "sin LIXBON.md (/init)"
@@ -1151,10 +1162,11 @@ func (m *Model) cmdStatus() tea.Cmd {
 			window = "se envía el turno entero"
 		}
 		conn := "conectado"
-		if quota == "sin conexión" {
+		if quota == "sin conexión" || generic && !online {
 			conn = "sin conexión"
 		}
 		rows := [][3]string{
+			{"Proveedor", m.chat.Cfg.ActiveProfile(), providerHost(m.chat.Client.BaseURL)},
 			{"Modelo", firstNonEmpty(m.chat.Model, "no configurado"), ""},
 			{"Plan", plan, ""},
 			{"Cuota", quota, ""},

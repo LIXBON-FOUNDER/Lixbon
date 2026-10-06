@@ -24,7 +24,26 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/tui` | Interfaz interactiva con **Bubble Tea v2** (inline): caja de entrada multilínea, menú `/`, aprobaciones con diff, `/undo`, `/plan`, `/history`… | pruebas del modelo y de un programa real con E/S inyectada; catálogo de comandos contrastado con `state_corpus.json` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). Comandos `/` ya disponibles: `help model mode compact history web copy save approve plan todo tools diff undo ps check allow workspace run commit init status cost usage nodes context key logout config doctor` y los personalizados de `.lixbon/commands/`. Pendiente: `/image /paste /visual /mcp /remote /update`, adjuntos `@ruta`, MCP, remoto, `setup`, `update`. Los paquetes de este módulo no dependen de la UI.
+Comandos: `init`, `status`, `models`, `profile`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). Comandos `/` ya disponibles: `help model mode compact history web copy save approve plan todo tools diff undo ps check allow workspace run commit init status cost usage nodes context key logout config doctor` y los personalizados de `.lixbon/commands/`. Pendiente: `/image /paste /visual /mcp /remote /update`, adjuntos `@ruta`, MCP, remoto, `setup`, `update`. Los paquetes de este módulo no dependen de la UI.
+
+## Proveedores de modelos
+
+El CLI puede hablar con cualquier servidor compatible con OpenAI además de con un gateway Lixbon. Cada proveedor es un perfil; los campos de nivel superior de `config.json` (`base_url`, `api_key`, `model`…) son los del perfil activo, así que el CLI Python sigue funcionando con el mismo archivo.
+
+```bash
+lixbon profile add lmstudio --use              # http://localhost:1234/v1, sin clave
+lixbon profile add ollama --model llama3
+lixbon profile add openrouter --api-key <clave> --model <modelo>
+lixbon profile add nube --base-url https://mi-servidor/v1 --api-key <clave>
+lixbon profile                                 # listar
+lixbon profile use lixbon                      # volver al gateway
+```
+
+En el chat, `/provider` abre el selector (también permite añadir uno) y `/provider nombre` cambia directamente. Presets: `lmstudio`, `ollama`, `openai`, `openrouter`.
+
+Un perfil sin `--gateway` es genérico: solo se envían `model`, `messages`, `stream`, `stream_options` y `tools` (OpenAI rechaza los parámetros desconocidos), la clave es opcional y no se consultan los endpoints `/api` de Lixbon (plan, uso, nodos, búsqueda web, título automático). `/usage /nodes /login /logout /key /web` lo avisan y el modo `delegate` pasa a `ask`. La ventana de contexto por defecto es de 8192 tokens; ajústala a la que cargaste en el servidor con `--context-window`.
+
+Una suscripción de ChatGPT o Claude no es una API key y no sirve aquí: hace falta una clave de API del proveedor (o un enrutador como OpenRouter).
 
 ## Diferencias deliberadas con Python
 

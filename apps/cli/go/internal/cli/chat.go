@@ -39,11 +39,11 @@ func (a *App) chat(ctx context.Context, args []string) int {
 // registro de acciones y los avisos van a stderr.
 func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) int {
 	cfg := config.Load(a.ConfigPath)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.IsGeneric() {
 		a.printError("No hay sesión. Configúrala con: lixbon init --api-key <clave>")
 		return 1
 	}
-	client := api.New(cfg.BaseURL, cfg.APIKey)
+	client := api.FromConfig(cfg)
 	c, err := chat.New(cfg, client, opts)
 	if err != nil {
 		a.printError(err.Error())
@@ -57,6 +57,10 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 	}
 	switch acc.State {
 	case chat.AccountAuth:
+		if acc.Generic {
+			a.printError("El proveedor rechazó la clave. Cámbiala con: lixbon profile add (o lixbon init --api-key <clave>).")
+			return 1
+		}
 		c.ClearSession()
 		a.printError("Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
 		return 1

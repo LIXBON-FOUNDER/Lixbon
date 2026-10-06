@@ -206,6 +206,9 @@ func (m *Model) statusBar() string {
 }
 
 func (m *Model) sessionLabel() string {
+	if m.chat.Client.Generic {
+		return m.chat.Cfg.ActiveProfile()
+	}
 	if m.chat.Cfg.APIKey == "" {
 		return "sin sesión"
 	}
