@@ -267,6 +267,12 @@ async def web_search_endpoint(
     }
 
 
+def _sin_errores(catalog: list[Any]) -> list[Any]:
+    """fetch_models() usa una entrada `error: …` como centinela interno cuando
+    no hay ningún modelo alcanzable; a los clientes no les sirve como modelo."""
+    return [e for e in catalog if not (isinstance(e, dict) and str(e.get("id", "")).startswith("error:"))]
+
+
 @router.get("/v1/models")
 async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     """Catálogo + `num_ctx` efectivo por modelo (lo que la web usa para el
@@ -274,8 +280,8 @@ async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     catalog = await fetch_models()
     chat_role = resolve_all(catalog)["chat"]
     data = []
-    for entry in catalog:
-        if isinstance(entry, dict) and not str(entry.get("id", "")).startswith("error:"):
+    for entry in _sin_errores(catalog):
+        if isinstance(entry, dict):
             entry = {**entry, "num_ctx": resolve_num_ctx(None, chat_role.num_ctx, catalog, entry.get("id")) or 4096}
         data.append(entry)
     return {"object": "list", "data": public_catalog(data, include_raw=user_data.get("role") == "admin")}
@@ -299,7 +305,7 @@ async def model_roles(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     return {
         "roles": roles,
         "capability_by_role": REQUIRED_CAPABILITY,
-        "models": catalog,
+        "models": _sin_errores(catalog),
     }
 
 

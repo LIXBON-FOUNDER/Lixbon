@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Acceso directo «Lixbon Team»: el mismo ejecutable con el flag «team», que abre
+     solo la ventana de Team. Uno en el menú Inicio (junto al de Lixbon) y otro
+     en el escritorio. Los ids Path, ProductIcon, INSTALLDIR,
+     ApplicationProgramsFolder y DesktopFolder son los de la plantilla MSI de Tauri. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="LixbonTeamMenuInicio" Guid="7C1F4B2E-3D5A-4E8B-9A61-2F0C8D4B6E17">
+        <Shortcut Id="LixbonTeamAccesoInicio"
+                  Name="Lixbon Team"
+                  Description="Abre solo Lixbon Team: chat, issues, proyectos y ciclos"
+                  Target="[!Path]"
+                  Arguments="--team"
+                  Icon="ProductIcon"
+                  WorkingDirectory="INSTALLDIR" />
+        <RegistryValue Root="HKCU" Key="Software\Lixbon\Lixbon Team" Name="Menu Inicio" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="LixbonTeamEscritorio" Guid="B4E9D1A7-6C2F-4F3B-8E05-91A7C3D2F648">
+        <Shortcut Id="LixbonTeamAccesoEscritorio"
+                  Name="Lixbon Team"
+                  Description="Abre solo Lixbon Team: chat, issues, proyectos y ciclos"
+                  Target="[!Path]"
+                  Arguments="--team"
+                  Icon="ProductIcon"
+                  WorkingDirectory="INSTALLDIR" />
+        <RegistryValue Root="HKCU" Key="Software\Lixbon\Lixbon Team" Name="Escritorio" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

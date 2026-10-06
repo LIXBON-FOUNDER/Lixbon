@@ -23,11 +23,12 @@ from core.persistence.queries import (
     archive_old_inactive_keys,
     init_db,
     purge_expired_sessions,
+    purge_remote_sessions,
     sweep_remote_sessions,
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, team, versions, ws_status, monitor
+from core.gateway.routers import admin, admin_panel, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor
 
 
 # ── Ciclo de vida ──────────────────────────────────────────────────────────
@@ -106,6 +107,7 @@ app.middleware("http")(security_headers_middleware)
 app.include_router(auth.router)
 app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
 app.include_router(team.router)       # /api/team/* + /ws/team (Lixbon Team)
+app.include_router(team_issues.router)  # /api/team/* de las issues propias
 app.include_router(oauth.router)
 app.include_router(keys.router)
 app.include_router(chat.router)
@@ -122,6 +124,7 @@ app.include_router(remote.router)
 app.include_router(ws_status.router)
 app.include_router(monitor.router)
 app.include_router(status.router)    # /api/status público (página /status)
+app.include_router(support.router)   # /api/support: formulario de soporte
 app.include_router(nodes_admin.router)
 app.include_router(nodes_link.router)
 app.include_router(images.router)     # /api/images/* (nodos con modelo de difusión)
@@ -170,6 +173,9 @@ def _start_archiver_cron() -> None:
                 for _sid in _hub.live_host_sessions():
                     touch_remote_session(_sid)
                 sweep_remote_sessions()
+                purged = purge_remote_sessions()
+                if purged:
+                    _log.getLogger("lixbon").info(f"[cron] {purged} sesiones remotas inactivas borradas.")
             except Exception as exc:
                 _log.getLogger("lixbon").warning(f"[cron] Error en sweep de sesiones remotas: {exc}")
 

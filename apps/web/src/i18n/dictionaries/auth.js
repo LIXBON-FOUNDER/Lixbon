@@ -30,7 +30,9 @@ export default {
     backToLogin: 'Volver a iniciar sesión',
     or: 'O',
     google: 'Google',
-    apple: 'Apple',
+    github: 'GitHub',
+    oauthCancelled: 'Cancelaste el inicio de sesión.',
+    oauthWorking: 'Entrando…',
 
     resetSeoTitle: 'Restablecer contraseña',
     invalidLinkTitle: 'Enlace inválido',
@@ -73,7 +75,9 @@ export default {
     backToLogin: 'Back to login',
     or: 'OR',
     google: 'Google',
-    apple: 'Apple',
+    github: 'GitHub',
+    oauthCancelled: 'You cancelled the sign-in.',
+    oauthWorking: 'Signing in…',
 
     resetSeoTitle: 'Reset password',
     invalidLinkTitle: 'Invalid link',

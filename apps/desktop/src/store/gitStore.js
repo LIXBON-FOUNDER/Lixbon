@@ -5,6 +5,10 @@
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
 import { gitRun, gitClone } from '../lib/tauri';
+import { streamChatCompletion } from '../lib/stream';
+import { splitThinking } from '../lib/agentProtocol';
+import { useAppStore } from './appStore';
+import { useOutputStore } from './outputStore';
 
 // Cada cuánto se consulta al remoto si hay commits nuevos.
 const AUTO_FETCH_MS = 3 * 60 * 1000;
@@ -34,6 +38,25 @@ function unquoteGitPath(p) {
   try { return new TextDecoder().decode(new Uint8Array(bytes)); } catch { return inner; }
 }
 
+/** `git diff --numstat` → { ruta: { added, removed } } (binarios: sin cifras). */
+function parseNumstat(stdout) {
+  const map = {};
+  for (const line of (stdout || '').split('\n')) {
+    const [a, r, ...rest] = line.split('\t');
+    if (!rest.length) continue;
+    let path = rest.join('\t');
+    if (path.includes(' => ')) path = path.replace(/\{[^}]* => ([^}]*)\}/, '$1').split(' => ').pop();
+    map[unquoteGitPath(path)] = { added: parseInt(a, 10) || 0, removed: parseInt(r, 10) || 0 };
+  }
+  return map;
+}
+
+const COMMIT_SYSTEM = 'Escribes mensajes de commit. Responde SOLO con el mensaje: una primera línea de máximo 72 caracteres '
+  + 'y, si hace falta, una línea en blanco y 1-4 viñetas breves. Sigue el estilo de los commits recientes del repositorio '
+  + '(idioma, prefijos tipo feat/fix, ámbito entre paréntesis). Sin comillas ni bloques de código.';
+
+const cleanMessage = (raw) => splitThinking(raw).visible.replace(/^```\w*\n?|```\s*$/g, '');
+
 /** Parsea `git status --porcelain=v1` a una lista de cambios. */
 function parseStatus(stdout) {
   const changes = [];
@@ -45,8 +68,9 @@ function parseStatus(stdout) {
     if (path.includes(' -> ')) path = path.split(' -> ')[1]; // renombrado
     path = unquoteGitPath(path.trim());
     const untracked = index === '?' && wt === '?';
-    const staged = !untracked && index !== ' ';
-    changes.push({ path, index, wt, staged, untracked });
+    // Preparado y además modificado después: sale en los dos grupos.
+    if (!untracked && index !== ' ') changes.push({ path, index, wt, staged: true, untracked });
+    if (untracked || wt !== ' ') changes.push({ path, index, wt, staged: false, untracked });
   }
   return changes;
 }
@@ -55,6 +79,9 @@ export const useGitStore = create((set, get) => ({
   isRepo: null, // null = sin comprobar
   branch: '',
   changes: [],
+  stats: { wt: {}, idx: {} },
+  hasUpstream: false,
+  generating: false,
   hasRemote: false, // sin remoto no hay nada que sincronizar: hay que publicar
   remoteUrl: '',    // URL de origin (para casar el repo con un proyecto de Lixbon Team)
   ahead: 0,         // commits locales sin subir (se acumulan: Push (2), (3)…)
@@ -82,13 +109,15 @@ export const useGitStore = create((set, get) => ({
       // lo que la más lenta, no la suma (se nota en repos grandes).
       // `branch --show-current` da el nombre incluso sin commits (HEAD naciente),
       // donde `rev-parse --abbrev-ref HEAD` falla y dejaba un "(sin commits)".
-      const [branch, remotes, counts, originUrl] = await Promise.all([
+      const [branch, remotes, counts, originUrl, numWt, numIdx] = await Promise.all([
         gitRun(['branch', '--show-current']),
         gitRun(['remote']),
         // Cuánto nos separa del upstream. Falla (y da 0/0) si la rama no tiene
         // upstream todavía: es justo el caso de un repo recién publicado.
         gitRun(['rev-list', '--left-right', '--count', 'HEAD...@{u}']),
         gitRun(['remote', 'get-url', 'origin']),
+        gitRun(['diff', '--numstat']),
+        gitRun(['diff', '--cached', '--numstat']),
       ]);
       const name = branch.code === 0 ? branch.stdout.trim() : '';
       const hasRemote = remotes.code === 0 && !!remotes.stdout.trim();
@@ -105,7 +134,9 @@ export const useGitStore = create((set, get) => ({
         isRepo: true,
         branch: name || '(HEAD suelto)',
         changes: parseStatus(status.stdout),
+        stats: { wt: parseNumstat(numWt.stdout), idx: parseNumstat(numIdx.stdout) },
         hasRemote,
+        hasUpstream: counts.code === 0,
         remoteUrl: originUrl.code === 0 ? originUrl.stdout.trim() : '',
         ahead,
         behind,
@@ -134,6 +165,56 @@ export const useGitStore = create((set, get) => ({
   },
 
   init: async () => { await gitRun(['init']); await get().refresh(); },
+
+  /** Deshace los cambios del árbol de trabajo de `path` (o lo borra si es nuevo). */
+  discard: async (path, untracked) => {
+    const res = await gitRun(untracked ? ['clean', '-f', '--', path] : ['checkout', '--', path]);
+    await get().refresh();
+    return res.code === 0 ? { ok: true } : { ok: false, error: (res.stderr || res.stdout).trim() };
+  },
+
+  commitAndPush: async () => {
+    const res = await get().commit();
+    if (!res.ok) return res;
+    if (!get().hasRemote) return { ok: false, error: 'Commit hecho. Publica la rama en GitHub para poder subirla.' };
+    return get().push();
+  },
+
+  /** Propone un mensaje de commit a partir del diff preparado (o del árbol
+      de trabajo si no hay nada preparado) y del estilo de los últimos commits. */
+  generateMessage: async () => {
+    if (get().generating) return { ok: false };
+    const { serverUrl, apiKey, currentModel } = useAppStore.getState();
+    if (!currentModel) return { ok: false, error: 'Elige un modelo en el chat primero.' };
+    set({ generating: true });
+    try {
+      const staged = get().changes.some((c) => c.staged);
+      const [diff, recent] = await Promise.all([
+        gitRun(['diff', ...(staged ? ['--cached'] : []), '--stat', '--patch', '--no-color']),
+        gitRun(['log', '--pretty=format:%s', '-n', '12']),
+      ]);
+      const patch = (diff.stdout || '').slice(0, 14000);
+      if (!patch.trim()) return { ok: false, error: 'No hay cambios que describir.' };
+      let raw = '';
+      await streamChatCompletion({
+        serverUrl, apiKey, model: currentModel, noPersist: true,
+        messages: [
+          { role: 'system', content: COMMIT_SYSTEM },
+          { role: 'user', content: `Commits recientes:\n${recent.stdout || '(ninguno)'}\n\nDiff:\n${patch}` },
+        ],
+        onDelta: (d) => {
+          raw += d;
+          set({ message: cleanMessage(raw).trimStart() });
+        },
+      });
+      set({ message: cleanMessage(raw).trim() });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    } finally {
+      set({ generating: false });
+    }
+  },
 
   // ── Diff / historial / ramas (C1–C3), todo vía gitRun ──────────────
   /** Diff unified de un archivo (staged o del árbol de trabajo). */
@@ -198,6 +279,7 @@ export const useGitStore = create((set, get) => ({
     set({ netBusy: kind, netError: '' });
     try {
       const res = await gitRun(args);
+      useOutputStore.getState().append('Git', [`$ git ${args.join(' ')}`, res.stdout, res.stderr].filter((x) => x && x.trim()).join('\n'));
       if (res.code !== 0) {
         const error = (res.stderr || res.stdout).trim() || `git ${args[0]} falló.`;
         set({ netError: error });
@@ -216,7 +298,9 @@ export const useGitStore = create((set, get) => ({
 
   fetch: () => get()._net('fetch', ['fetch', '--all', '--prune']),
   pull: () => get()._net('pull', ['pull']),
-  push: () => get()._net('push', ['push']),
+  push: () => (get().hasUpstream
+    ? get()._net('push', ['push'])
+    : get()._net('push', ['push', '-u', 'origin', get().branch])),
 
   /** Sincronizar (como en VSCode): traer y luego subir. Si el pull falla no se
       sube nada: subir encima de un rechazo solo encadena otro error. */

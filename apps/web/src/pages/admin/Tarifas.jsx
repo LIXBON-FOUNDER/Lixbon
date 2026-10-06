@@ -1,32 +1,34 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useConfirmar } from '../../hooks/useConfirmar';
-import { IconCheck, IconPlus, IconTrash } from '../../components/Icons';
+import { IconCheck, IconPlus, IconTrash, IconX } from '../../components/Icons';
 import {
   Aviso, Boton, Cabecera, Cargando, Celda, Chip, Fila, Tabla, Tarjeta, Vacio,
-  errMsg,
+  errMsg, fmtNum,
 } from './comunes';
 
-const COLS = 'minmax(0,1.4fr) minmax(0,1fr) 132px 132px 110px 168px';
-
-const CABECERAS = [
-  { label: 'Prefijo' }, { label: 'Nombre' },
-  { label: '$ entrada / Mtok' }, { label: '$ salida / Mtok' },
-  { label: 'Estado' }, { label: '', key: 'acciones' },
+// Cuatro cosas distintas que antes iban en una sola columna: se reparten en
+// pestañas y cada una trae su tabla y su alta plegada.
+const SECCIONES = [
+  { id: 'cupo', label: 'Cupo del chat' },
+  { id: 'pesos', label: 'Pesos por modelo' },
+  { id: 'api', label: 'Precios de API' },
+  { id: 'stripe', label: 'Stripe' },
 ];
+
+const COLS = 'minmax(0,1.3fr) minmax(0,1fr) 140px 140px 104px 132px';
+const COLS_PLAN = 'minmax(0,1fr) 110px 110px minmax(0,1fr) minmax(0,1fr) 120px';
+const COLS_STRIPE = 'minmax(0,160px) minmax(0,1fr) 120px';
 
 const NUEVA = { model_prefix: '', display_name: '', input: '', output: '' };
-
-const CABECERAS_PESOS = [
-  { label: 'Prefijo' }, { label: 'Nombre' },
-  { label: 'créditos entrada / Mtok' }, { label: 'créditos salida / Mtok' },
-  { label: 'Estado' }, { label: '', key: 'acciones' },
-];
-
 const NUEVO_PESO = { model_prefix: '', display_name: '', input: '', output: '' };
 
 export default function Tarifas() {
   const confirmar = useConfirmar();
+  const [params, setParams] = useSearchParams();
+  const seccion = SECCIONES.some((x) => x.id === params.get('s')) ? params.get('s') : 'cupo';
+  const [altaAbierta, setAltaAbierta] = useState(false);
   const [filas, setFilas] = useState(null);
   const [borrador, setBorrador] = useState({});
   const [nueva, setNueva] = useState(NUEVA);
@@ -147,6 +149,7 @@ export default function Tarifas() {
         output_usd_per_mtok: parseFloat(nueva.output) || 0,
       });
       setNueva(NUEVA);
+      setAltaAbierta(false);
       cargar();
     } catch (e) {
       setError(errMsg(e, 'No se pudo crear la tarifa'));
@@ -251,6 +254,7 @@ export default function Tarifas() {
         output_credits_per_mtok: parseInt(nuevoPeso.output, 10) || 0,
       });
       setNuevoPeso(NUEVO_PESO);
+      setAltaAbierta(false);
       cargarPesos();
     } catch (e) {
       setError(errMsg(e, 'No se pudo crear el peso'));
@@ -259,355 +263,341 @@ export default function Tarifas() {
     }
   };
 
+  const irA = (id) => {
+    setAltaAbierta(false);
+    setParams(id === 'cupo' ? {} : { s: id }, { replace: true });
+  };
+
+  const baseSesion = Number(politica?.session_base_credits);
+  const baseSemana = Number(politica?.week_base_credits);
+  const cupo = (base, mult) => {
+    if (!Number.isFinite(base) || base < 0) return 'Sin límite';
+    const n = Math.round(base * (parseFloat(mult) || 0));
+    return fmtNum(n);
+  };
+
   return (
     <>
       <Cabecera
         titulo="Tarifas"
-        lead="Cupo de sesión/semana del chat (créditos internos) y precio del crédito de API en USD por millón de tokens. Gana el prefijo más largo que encaje."
+        lead="Lo que consume el chat de cada plan y lo que se cobra por la API. Gana el prefijo de modelo más largo que encaje."
       />
 
       <div className="adm__body">
+        <div className="adm-pestanas" role="tablist" aria-label="Secciones de tarifas">
+          {SECCIONES.map((x) => (
+            <button
+              key={x.id}
+              type="button"
+              role="tab"
+              aria-selected={seccion === x.id}
+              className={seccion === x.id ? 'adm-pestana is-on' : 'adm-pestana'}
+              onClick={() => irA(x.id)}
+            >
+              {x.label}
+            </button>
+          ))}
+        </div>
+
         <Aviso error>{error}</Aviso>
 
-        <Tarjeta titulo="Política de sesión (4h) + semana">
-          {!politica ? <Cargando /> : (
-            <>
-              <div className="adm-campos">
-                <label className="adm-campo">
-                  <span className="adm-campo__label">Duración de la sesión (horas)</span>
-                  <input
-                    className="adm-input adm-input--mono"
-                    inputMode="decimal"
-                    value={politica.session_window_hours}
-                    onChange={(e) => setPolitica({ ...politica, session_window_hours: e.target.value })}
-                  />
-                </label>
-                <label className="adm-campo">
-                  <span className="adm-campo__label">Créditos base por sesión</span>
-                  <input
-                    className="adm-input adm-input--mono"
-                    inputMode="numeric"
-                    value={politica.session_base_credits}
-                    onChange={(e) => setPolitica({ ...politica, session_base_credits: e.target.value })}
-                  />
-                </label>
-                <label className="adm-campo">
-                  <span className="adm-campo__label">Créditos base por semana</span>
-                  <input
-                    className="adm-input adm-input--mono"
-                    inputMode="numeric"
-                    value={politica.week_base_credits}
-                    onChange={(e) => setPolitica({ ...politica, week_base_credits: e.target.value })}
-                  />
-                </label>
-              </div>
-              <div className="adm-card__pie">
-                <Boton variante="primary" onClick={guardarPolitica}>
-                  <IconCheck size={15} />
-                  {guardado === 'politica' ? 'Guardado' : 'Guardar'}
-                </Boton>
-              </div>
+        {seccion === 'cupo' && (
+          <>
+            <Tarjeta titulo="Base para todos los planes">
+              {!politica ? <Cargando /> : (
+                <>
+                  <div className="adm-tarifa-base">
+                    <label className="adm-campo">
+                      <span className="adm-campo__label">Duración de la sesión (horas)</span>
+                      <input
+                        className="adm-input adm-input--mono"
+                        inputMode="decimal"
+                        value={politica.session_window_hours}
+                        onChange={(e) => setPolitica({ ...politica, session_window_hours: e.target.value })}
+                      />
+                    </label>
+                    <label className="adm-campo">
+                      <span className="adm-campo__label">Créditos por sesión</span>
+                      <input
+                        className="adm-input adm-input--mono"
+                        inputMode="numeric"
+                        value={politica.session_base_credits}
+                        onChange={(e) => setPolitica({ ...politica, session_base_credits: e.target.value })}
+                      />
+                    </label>
+                    <label className="adm-campo">
+                      <span className="adm-campo__label">Créditos por semana</span>
+                      <input
+                        className="adm-input adm-input--mono"
+                        inputMode="numeric"
+                        value={politica.week_base_credits}
+                        onChange={(e) => setPolitica({ ...politica, week_base_credits: e.target.value })}
+                      />
+                    </label>
+                    <Boton variante="primary" onClick={guardarPolitica}>
+                      <IconCheck size={15} />
+                      {guardado === 'politica' ? 'Guardado' : 'Guardar'}
+                    </Boton>
+                  </div>
+                  <p className="adm-card__nota">
+                    Un valor negativo desactiva ese límite para todos los planes.
+                  </p>
+                </>
+              )}
+            </Tarjeta>
+
+            <Tarjeta titulo="Por plan" tabla>
+              {planes.length === 0 ? <Cargando /> : (
+                <Tabla
+                  cols={COLS_PLAN}
+                  ancho={760}
+                  cabeceras={[
+                    { label: 'Plan' }, { label: '× sesión' }, { label: '× semana' },
+                    { label: 'Créditos / sesión', num: true }, { label: 'Créditos / semana', num: true },
+                    { label: '', key: 'acciones' },
+                  ]}
+                >
+                  {planes.map((p) => (
+                    <Fila key={p.id} cols={COLS_PLAN}>
+                      <Celda><span className="adm-lista__label">{p.name}</span></Celda>
+                      <Celda>
+                        <input
+                          className="adm-input adm-input--mono adm-input--sm"
+                          inputMode="decimal"
+                          aria-label={`Multiplicador de sesión de ${p.name}`}
+                          value={multiplicadores[p.id]?.session ?? ''}
+                          onChange={(e) => setMultiplicadores({
+                            ...multiplicadores, [p.id]: { ...multiplicadores[p.id], session: e.target.value },
+                          })}
+                        />
+                      </Celda>
+                      <Celda>
+                        <input
+                          className="adm-input adm-input--mono adm-input--sm"
+                          inputMode="decimal"
+                          aria-label={`Multiplicador semanal de ${p.name}`}
+                          value={multiplicadores[p.id]?.week ?? ''}
+                          onChange={(e) => setMultiplicadores({
+                            ...multiplicadores, [p.id]: { ...multiplicadores[p.id], week: e.target.value },
+                          })}
+                        />
+                      </Celda>
+                      <Celda num><span className="mono">{cupo(baseSesion, multiplicadores[p.id]?.session)}</span></Celda>
+                      <Celda num><span className="mono">{cupo(baseSemana, multiplicadores[p.id]?.week)}</span></Celda>
+                      <Celda acciones>
+                        <Boton sm variante="primary" onClick={() => guardarMultiplicadores(p.id)}>
+                          {guardado === `mult-${p.id}` ? 'Guardado' : 'Guardar'}
+                        </Boton>
+                      </Celda>
+                    </Fila>
+                  ))}
+                </Tabla>
+              )}
               <p className="adm-card__nota">
-                Cada plan multiplica esta base por su propio multiplicador de sesión/semana
-                (más abajo). Un valor negativo en la base desactiva ese bucket para todos los
-                planes sin tocar los multiplicadores.
+                El cupo de cada plan es la base por su multiplicador. Las dos últimas columnas
+                lo calculan con lo que hay escrito, antes de guardar.
               </p>
-            </>
-          )}
-        </Tarjeta>
+            </Tarjeta>
+          </>
+        )}
 
-        <Tarjeta titulo="Multiplicadores por plan">
-          {planes.length === 0 ? <Cargando /> : planes.map((p) => (
-            <div key={p.id} className="adm-plan-fila">
-              <span className="adm-lista__label">{p.name}</span>
-              <div className="adm-fila-campo">
-                <label className="adm-campo" style={{ maxWidth: 140 }}>
-                  <span className="adm-campo__label">× sesión</span>
-                  <input
-                    className="adm-input adm-input--mono"
-                    inputMode="decimal"
-                    aria-label={`Multiplicador de sesión de ${p.name}`}
-                    value={multiplicadores[p.id]?.session ?? ''}
-                    onChange={(e) => setMultiplicadores({
-                      ...multiplicadores, [p.id]: { ...multiplicadores[p.id], session: e.target.value },
-                    })}
-                  />
-                </label>
-                <label className="adm-campo" style={{ maxWidth: 140 }}>
-                  <span className="adm-campo__label">× semana</span>
-                  <input
-                    className="adm-input adm-input--mono"
-                    inputMode="decimal"
-                    aria-label={`Multiplicador semanal de ${p.name}`}
-                    value={multiplicadores[p.id]?.week ?? ''}
-                    onChange={(e) => setMultiplicadores({
-                      ...multiplicadores, [p.id]: { ...multiplicadores[p.id], week: e.target.value },
-                    })}
-                  />
-                </label>
-                <Boton variante="primary" onClick={() => guardarMultiplicadores(p.id)}>
-                  <IconCheck size={15} />
-                  {guardado === `mult-${p.id}` ? 'Guardado' : 'Guardar'}
-                </Boton>
-              </div>
-            </div>
-          ))}
-        </Tarjeta>
+        {seccion === 'pesos' && (
+          <TablaPorModelo
+            titulo="Créditos que gasta cada modelo"
+            nota={<>Créditos por millón de tokens que se descuentan del cupo de sesión y semana. No es dinero: el cobro en USD está en «Precios de API». La fila <span className="mono">*</span> es el peso por defecto.</>}
+            unidad="Créditos"
+            entero
+            filas={pesos}
+            borrador={borradorPesos}
+            setBorrador={setBorradorPesos}
+            guardadoId={(f) => guardado === `peso-${f.id}`}
+            onGuardar={guardarPeso}
+            onAlternar={alternarPeso}
+            onEliminar={eliminarPeso}
+            estado={(activo) => (activo ? 'Activo' : 'Pausado')}
+            alta={{
+              abierta: altaAbierta,
+              setAbierta: setAltaAbierta,
+              valor: nuevoPeso,
+              setValor: setNuevoPeso,
+              ejemplo: ['1000000', '4000000'],
+              etiqueta: 'Añadir peso',
+              onCrear: crearPeso,
+              busy,
+            }}
+          />
+        )}
 
-        <div className="adm-card adm-card--tabla">
-          {pesos === null ? <Cargando /> : pesos.length === 0 ? (
-            <Vacio>No hay ningún peso cargado.</Vacio>
-          ) : (
-            <Tabla cols={COLS} cabeceras={CABECERAS_PESOS} ancho={900}>
-              {pesos.map((f) => (
-                <Fila key={f.id} cols={COLS}>
-                  <Celda><span className="mono">{f.model_prefix}</span></Celda>
-                  <Celda>
-                    <span className="adm-lista__label">{f.display_name || '—'}</span>
-                  </Celda>
-                  <Celda>
-                    <input
-                      className="adm-input adm-input--mono adm-input--sm"
-                      inputMode="numeric"
-                      aria-label={`Créditos de entrada de ${f.model_prefix}`}
-                      value={borradorPesos[f.id]?.input ?? ''}
-                      onChange={(e) => setBorradorPesos({
-                        ...borradorPesos, [f.id]: { ...borradorPesos[f.id], input: e.target.value },
-                      })}
-                    />
-                  </Celda>
-                  <Celda>
-                    <input
-                      className="adm-input adm-input--mono adm-input--sm"
-                      inputMode="numeric"
-                      aria-label={`Créditos de salida de ${f.model_prefix}`}
-                      value={borradorPesos[f.id]?.output ?? ''}
-                      onChange={(e) => setBorradorPesos({
-                        ...borradorPesos, [f.id]: { ...borradorPesos[f.id], output: e.target.value },
-                      })}
-                    />
-                  </Celda>
-                  <Celda>
-                    <button type="button" className="adm-chip-btn" onClick={() => alternarPeso(f)}>
-                      <Chip tono={f.is_active ? 'ok' : 'off'} punto>
-                        {f.is_active ? 'Activo' : 'Pausado'}
-                      </Chip>
-                    </button>
-                  </Celda>
-                  <Celda acciones>
-                    <Boton sm variante="primary" onClick={() => guardarPeso(f)}>
-                      {guardado === `peso-${f.id}` ? 'Guardado' : 'Guardar'}
-                    </Boton>
-                    {f.model_prefix !== '*' && (
-                      <Boton sm peligro aria-label={`Eliminar ${f.model_prefix}`} onClick={() => eliminarPeso(f)}>
-                        <IconTrash size={13} />
+        {seccion === 'api' && (
+          <TablaPorModelo
+            titulo="Precio por millón de tokens (USD)"
+            nota={<>Lo que paga el tráfico de API externo con créditos prepago. El costo se congela al cobrar: editar una tarifa solo afecta a las peticiones nuevas. La fila <span className="mono">*</span> es la tarifa por defecto.</>}
+            unidad="$"
+            filas={filas}
+            borrador={borrador}
+            setBorrador={setBorrador}
+            guardadoId={(f) => guardado === f.id}
+            onGuardar={guardar}
+            onAlternar={alternar}
+            onEliminar={eliminar}
+            estado={(activo) => (activo ? 'Activa' : 'Pausada')}
+            alta={{
+              abierta: altaAbierta,
+              setAbierta: setAltaAbierta,
+              valor: nueva,
+              setValor: setNueva,
+              ejemplo: ['0.45', '1.20'],
+              etiqueta: 'Añadir tarifa',
+              onCrear: crear,
+              busy,
+            }}
+          />
+        )}
+
+        {seccion === 'stripe' && (
+          <Tarjeta titulo="Price id de cada plan de pago" tabla>
+            {planes.length === 0 ? <Cargando /> : (
+              <Tabla
+                cols={COLS_STRIPE}
+                ancho={560}
+                cabeceras={[{ label: 'Plan' }, { label: 'Price id' }, { label: '', key: 'acciones' }]}
+              >
+                {planes.filter((p) => p.price_monthly_cents > 0).map((p) => (
+                  <Fila key={p.id} cols={COLS_STRIPE}>
+                    <Celda><span className="adm-lista__label">{p.name}</span></Celda>
+                    <Celda>
+                      <input
+                        className="adm-input adm-input--mono adm-input--sm"
+                        placeholder="price_…"
+                        aria-label={`Price id de ${p.name}`}
+                        value={precios[p.id] ?? ''}
+                        onChange={(e) => setPrecios({ ...precios, [p.id]: e.target.value })}
+                      />
+                    </Celda>
+                    <Celda acciones>
+                      <Boton sm variante="primary" onClick={() => guardarPrecio(p.id)}>
+                        {guardado === `precio-${p.id}` ? 'Guardado' : 'Guardar'}
                       </Boton>
-                    )}
-                  </Celda>
-                </Fila>
-              ))}
-            </Tabla>
-          )}
-          <p className="adm-card__nota">
-            Créditos por millón de tokens que este modelo consume del pool de sesión/semana
-            (F8) — no confundir con la tarifa en USD de abajo, que es el cobro de créditos
-            prepago para tráfico de API externo. La fila <span className="mono">*</span> es el
-            peso por defecto y no se puede eliminar.
-          </p>
-        </div>
-
-        <Tarjeta titulo="Nuevo peso por modelo">
-          <div className="adm-campos">
-            <label className="adm-campo">
-              <span className="adm-campo__label">Prefijo del modelo</span>
-              <input
-                className="adm-input adm-input--mono"
-                placeholder="qwen2.5"
-                value={nuevoPeso.model_prefix}
-                onChange={(e) => setNuevoPeso({ ...nuevoPeso, model_prefix: e.target.value })}
-              />
-            </label>
-            <label className="adm-campo">
-              <span className="adm-campo__label">Nombre visible (opcional)</span>
-              <input
-                className="adm-input"
-                placeholder="Qwen 2.5"
-                value={nuevoPeso.display_name}
-                onChange={(e) => setNuevoPeso({ ...nuevoPeso, display_name: e.target.value })}
-              />
-            </label>
-            <label className="adm-campo">
-              <span className="adm-campo__label">Créditos entrada / Mtok</span>
-              <input
-                className="adm-input adm-input--mono"
-                inputMode="numeric"
-                placeholder="1000000"
-                value={nuevoPeso.input}
-                onChange={(e) => setNuevoPeso({ ...nuevoPeso, input: e.target.value })}
-              />
-            </label>
-            <label className="adm-campo">
-              <span className="adm-campo__label">Créditos salida / Mtok</span>
-              <input
-                className="adm-input adm-input--mono"
-                inputMode="numeric"
-                placeholder="4000000"
-                value={nuevoPeso.output}
-                onChange={(e) => setNuevoPeso({ ...nuevoPeso, output: e.target.value })}
-              />
-            </label>
-          </div>
-          <div className="adm-card__pie">
-            <Boton
-              variante="primary"
-              disabled={busy || !nuevoPeso.model_prefix.trim()}
-              onClick={crearPeso}
-            >
-              <IconPlus size={15} /> Añadir peso
-            </Boton>
-          </div>
-        </Tarjeta>
-
-        <div className="adm-card adm-card--tabla">
-          {!filas ? <Cargando /> : filas.length === 0 ? (
-            <Vacio>No hay ninguna tarifa cargada.</Vacio>
-          ) : (
-            <Tabla cols={COLS} cabeceras={CABECERAS} ancho={900}>
-              {filas.map((f) => (
-                <Fila key={f.id} cols={COLS}>
-                  <Celda><span className="mono">{f.model_prefix}</span></Celda>
-                  <Celda>
-                    <span className="adm-lista__label">{f.display_name || '—'}</span>
-                  </Celda>
-                  <Celda>
-                    <input
-                      className="adm-input adm-input--mono adm-input--sm"
-                      inputMode="decimal"
-                      aria-label={`Entrada de ${f.model_prefix}`}
-                      value={borrador[f.id]?.input ?? ''}
-                      onChange={(e) => setBorrador({
-                        ...borrador, [f.id]: { ...borrador[f.id], input: e.target.value },
-                      })}
-                    />
-                  </Celda>
-                  <Celda>
-                    <input
-                      className="adm-input adm-input--mono adm-input--sm"
-                      inputMode="decimal"
-                      aria-label={`Salida de ${f.model_prefix}`}
-                      value={borrador[f.id]?.output ?? ''}
-                      onChange={(e) => setBorrador({
-                        ...borrador, [f.id]: { ...borrador[f.id], output: e.target.value },
-                      })}
-                    />
-                  </Celda>
-                  <Celda>
-                    <button type="button" className="adm-chip-btn" onClick={() => alternar(f)}>
-                      <Chip tono={f.is_active ? 'ok' : 'off'} punto>
-                        {f.is_active ? 'Activa' : 'Pausada'}
-                      </Chip>
-                    </button>
-                  </Celda>
-                  <Celda acciones>
-                    <Boton sm variante="primary" onClick={() => guardar(f)}>
-                      {guardado === f.id ? 'Guardado' : 'Guardar'}
-                    </Boton>
-                    {f.model_prefix !== '*' && (
-                      <Boton sm peligro aria-label={`Eliminar ${f.model_prefix}`} onClick={() => eliminar(f)}>
-                        <IconTrash size={13} />
-                      </Boton>
-                    )}
-                  </Celda>
-                </Fila>
-              ))}
-            </Tabla>
-          )}
-          <p className="adm-card__nota">
-            La fila <span className="mono">*</span> es la tarifa por defecto y no se puede
-            eliminar. El costo se congela al cobrar: editar una tarifa no recalcula lo ya
-            facturado, solo afecta a las peticiones nuevas.
-          </p>
-        </div>
-
-        <Tarjeta titulo="Nueva tarifa">
-          <div className="adm-campos">
-            <label className="adm-campo">
-              <span className="adm-campo__label">Prefijo del modelo</span>
-              <input
-                className="adm-input adm-input--mono"
-                placeholder="qwen2.5"
-                value={nueva.model_prefix}
-                onChange={(e) => setNueva({ ...nueva, model_prefix: e.target.value })}
-              />
-            </label>
-            <label className="adm-campo">
-              <span className="adm-campo__label">Nombre visible (opcional)</span>
-              <input
-                className="adm-input"
-                placeholder="Qwen 2.5"
-                value={nueva.display_name}
-                onChange={(e) => setNueva({ ...nueva, display_name: e.target.value })}
-              />
-            </label>
-            <label className="adm-campo">
-              <span className="adm-campo__label">$ entrada / Mtok</span>
-              <input
-                className="adm-input adm-input--mono"
-                inputMode="decimal"
-                placeholder="0.45"
-                value={nueva.input}
-                onChange={(e) => setNueva({ ...nueva, input: e.target.value })}
-              />
-            </label>
-            <label className="adm-campo">
-              <span className="adm-campo__label">$ salida / Mtok</span>
-              <input
-                className="adm-input adm-input--mono"
-                inputMode="decimal"
-                placeholder="1.20"
-                value={nueva.output}
-                onChange={(e) => setNueva({ ...nueva, output: e.target.value })}
-              />
-            </label>
-          </div>
-          <div className="adm-card__pie">
-            <Boton
-              variante="primary"
-              disabled={busy || !nueva.model_prefix.trim()}
-              onClick={crear}
-            >
-              <IconPlus size={15} /> Añadir tarifa
-            </Boton>
-          </div>
-        </Tarjeta>
-
-        <Tarjeta titulo="Precios de Stripe">
-          <p className="adm-card__nota">
-            El <span className="mono">price_…</span> de cada plan de pago, creado en
-            Stripe → Productos. Es lo que conecta el plan con el checkout; el plan
-            gratuito se deja vacío.
-          </p>
-          {planes.filter((p) => p.price_monthly_cents > 0).map((p) => (
-            <div key={p.id} className="adm-plan-fila">
-              <span className="adm-lista__label">{p.name}</span>
-              <div className="adm-fila-campo">
-                <input
-                  className="adm-input adm-input--mono"
-                  placeholder="price_…"
-                  aria-label={`Price id de ${p.name}`}
-                  value={precios[p.id] ?? ''}
-                  onChange={(e) => setPrecios({ ...precios, [p.id]: e.target.value })}
-                />
-                <Boton variante="primary" onClick={() => guardarPrecio(p.id)}>
-                  <IconCheck size={15} />
-                  {guardado === `precio-${p.id}` ? 'Guardado' : 'Guardar'}
-                </Boton>
-              </div>
-            </div>
-          ))}
-          {planes.length === 0 && <Vacio>Cargando los planes…</Vacio>}
-        </Tarjeta>
+                    </Celda>
+                  </Fila>
+                ))}
+              </Tabla>
+            )}
+            <p className="adm-card__nota">
+              Se crea en Stripe → Productos y es lo que conecta el plan con el checkout. El plan
+              gratuito no lleva.
+            </p>
+          </Tarjeta>
+        )}
       </div>
     </>
+  );
+}
+
+// Pesos y tarifas tienen la misma forma (prefijo, nombre, entrada, salida,
+// estado): una sola tabla con el alta plegada en la cabecera.
+function TablaPorModelo({
+  titulo, nota, unidad, entero, filas, borrador, setBorrador, guardadoId,
+  onGuardar, onAlternar, onEliminar, estado, alta,
+}) {
+  const modo = entero ? 'numeric' : 'decimal';
+  const cabeceras = [
+    { label: 'Prefijo' }, { label: 'Nombre' },
+    { label: `${unidad} entrada / Mtok` }, { label: `${unidad} salida / Mtok` },
+    { label: 'Estado' }, { label: '', key: 'acciones' },
+  ];
+  const cambiar = (id, campo, v) => setBorrador({ ...borrador, [id]: { ...borrador[id], [campo]: v } });
+  const nuevo = alta.valor;
+  const poner = (campo) => (e) => alta.setValor({ ...nuevo, [campo]: e.target.value });
+
+  return (
+    <Tarjeta
+      titulo={titulo}
+      tabla
+      extra={!alta.abierta && (
+        <Boton sm onClick={() => alta.setAbierta(true)}>
+          <IconPlus size={13} /> {alta.etiqueta}
+        </Boton>
+      )}
+    >
+      {alta.abierta && (
+        <form
+          className="adm-alta"
+          onSubmit={(e) => { e.preventDefault(); if (nuevo.model_prefix.trim()) alta.onCrear(); }}
+        >
+          <label className="adm-campo">
+            <span className="adm-campo__label">Prefijo del modelo</span>
+            <input className="adm-input adm-input--mono" placeholder="qwen2.5" autoFocus value={nuevo.model_prefix} onChange={poner('model_prefix')} />
+          </label>
+          <label className="adm-campo">
+            <span className="adm-campo__label">Nombre visible (opcional)</span>
+            <input className="adm-input" placeholder="Qwen 2.5" value={nuevo.display_name} onChange={poner('display_name')} />
+          </label>
+          <label className="adm-campo">
+            <span className="adm-campo__label">{unidad} entrada / Mtok</span>
+            <input className="adm-input adm-input--mono" inputMode={modo} placeholder={alta.ejemplo[0]} value={nuevo.input} onChange={poner('input')} />
+          </label>
+          <label className="adm-campo">
+            <span className="adm-campo__label">{unidad} salida / Mtok</span>
+            <input className="adm-input adm-input--mono" inputMode={modo} placeholder={alta.ejemplo[1]} value={nuevo.output} onChange={poner('output')} />
+          </label>
+          <div className="adm-alta__acciones">
+            <button type="submit" className="adm-btn adm-btn--primary" disabled={alta.busy || !nuevo.model_prefix.trim()}>
+              <IconPlus size={15} /> {alta.etiqueta}
+            </button>
+            <Boton aria-label="Cancelar" onClick={() => alta.setAbierta(false)}>
+              <IconX size={15} />
+            </Boton>
+          </div>
+        </form>
+      )}
+
+      {filas === null || filas === undefined ? <Cargando /> : filas.length === 0 ? (
+        <Vacio>Todavía no hay ninguna fila.</Vacio>
+      ) : (
+        <Tabla cols={COLS} cabeceras={cabeceras} ancho={860}>
+          {filas.map((f) => (
+            <Fila key={f.id} cols={COLS}>
+              <Celda><span className="mono">{f.model_prefix}</span></Celda>
+              <Celda><span className="adm-lista__label">{f.display_name || '—'}</span></Celda>
+              <Celda>
+                <input
+                  className="adm-input adm-input--mono adm-input--sm"
+                  inputMode={modo}
+                  aria-label={`Entrada de ${f.model_prefix}`}
+                  value={borrador[f.id]?.input ?? ''}
+                  onChange={(e) => cambiar(f.id, 'input', e.target.value)}
+                />
+              </Celda>
+              <Celda>
+                <input
+                  className="adm-input adm-input--mono adm-input--sm"
+                  inputMode={modo}
+                  aria-label={`Salida de ${f.model_prefix}`}
+                  value={borrador[f.id]?.output ?? ''}
+                  onChange={(e) => cambiar(f.id, 'output', e.target.value)}
+                />
+              </Celda>
+              <Celda>
+                <button type="button" className="adm-chip-btn" onClick={() => onAlternar(f)}>
+                  <Chip tono={f.is_active ? 'ok' : 'off'} punto>{estado(f.is_active)}</Chip>
+                </button>
+              </Celda>
+              <Celda acciones>
+                <Boton sm variante="primary" onClick={() => onGuardar(f)}>
+                  {guardadoId(f) ? 'Guardado' : 'Guardar'}
+                </Boton>
+                {f.model_prefix === '*' ? <span className="adm-acciones__hueco" /> : (
+                  <Boton sm peligro aria-label={`Eliminar ${f.model_prefix}`} onClick={() => onEliminar(f)}>
+                    <IconTrash size={13} />
+                  </Boton>
+                )}
+              </Celda>
+            </Fila>
+          ))}
+        </Tabla>
+      )}
+      <p className="adm-card__nota">{nota}</p>
+    </Tarjeta>
   );
 }

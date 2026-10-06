@@ -7,7 +7,6 @@ import { useParams } from 'react-router-dom';
 import { Link, Navigate, useNavigate } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
-import { FiCamera } from 'react-icons/fi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
@@ -22,7 +21,7 @@ import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconLogout,
-  IconCheck,
+  IconCheck, IconCamera,
 } from '../components/Icons';
 
 const unlimited = (v) => v === -1;
@@ -165,7 +164,7 @@ function AvatarField({ user, onSaved }) {
           <span className="set-avatar">{initialOf(user)}</span>
         )}
         <span className="avatar-edit__overlay">
-          {busy ? <span className="avatar-edit__spinner" /> : <FiCamera size={17} />}
+          {busy ? <span className="avatar-edit__spinner" /> : <IconCamera size={17} />}
         </span>
       </button>
 

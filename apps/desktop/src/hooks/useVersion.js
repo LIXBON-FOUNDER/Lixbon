@@ -1,125 +1,147 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
+import { create } from 'zustand';
 import { check as checkUpdater } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
-import { useAppStore } from '../store/appStore';
 import { api } from '../lib/api';
 import { getAppVersion } from '../lib/tauri';
 
-export function useVersion() {
-  const { serverUrl, connectionStatus } = useAppStore();
-  const [currentVersion, setCurrentVersion] = useState('');
-  const [updateInfo, setUpdateInfo] = useState(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [dismissed, setDismissed] = useState(false);
+const CHECK_EVERY_MS = 10 * 60 * 1000;
+const RETRY_MS = 60 * 1000;
+// Al volver a la ventana o recuperar la red también se mira, pero no más a menudo.
+const MIN_GAP_MS = 3 * 60 * 1000;
+// "Ahora no" calla esa versión un rato, no para siempre.
+const SNOOZE_MS = 6 * 60 * 60 * 1000;
 
-  const dismissUpdate = () => setDismissed(true);
-
-  // Compara "x.y.z[-pre]" numéricamente. Devuelve >0 si a > b, 0 si iguales,
-  // <0 si a < b, o null si alguna no es parseable (en ese caso no se decide aquí).
-  const compareVersions = (a, b) => {
-    const parse = (v) => {
-      const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || '').trim());
-      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
-    };
-    const pa = parse(a);
-    const pb = parse(b);
-    if (!pa || !pb) return null;
-    for (let i = 0; i < 3; i++) {
-      if (pa[i] !== pb[i]) return pa[i] - pb[i];
-    }
-    return 0;
+// Compara "x.y.z[-pre]" numéricamente. >0 si a > b, 0 si iguales, <0 si a < b,
+// o null si alguna no es parseable (en ese caso no se decide aquí).
+function compareVersions(a, b) {
+  const parse = (v) => {
+    const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || '').trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
   };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
 
-  const fetchTauriVersion = async () => {
+let pending = null;
+let started = false;
+
+// Un solo estado para toda la app: antes cada pantalla que usaba el hook
+// tenía el suyo, y lo que encontraba Ajustes nunca llegaba al aviso superior.
+const useUpdateStore = create((set, get) => ({
+  currentVersion: '',
+  updateInfo: null,
+  isDownloading: false,
+  downloadProgress: 0,
+  dismissed: false,
+  dismissedAt: 0,
+  error: '',
+
+  dismissUpdate: () => set({ dismissed: true, dismissedAt: Date.now() }),
+
+  fetchVersion: async () => {
     try {
       const v = await getAppVersion();
-      setCurrentVersion(v);
+      set({ currentVersion: v });
       return v;
     } catch (e) {
       console.error('[updater] Error obteniendo versión de Rust:', e);
-      return currentVersion;
+      return get().currentVersion;
     }
-  };
+  },
 
-  const checkForUpdates = async () => {
-    if (!serverUrl || connectionStatus !== 'connected') return;
-
-    try {
-      // 1. Preguntar al backend de Rust la versión instalada real
-      const current = await fetchTauriVersion();
-
-      // 2. Comprobar contra el endpoint del servidor si hay actualización.
-      //    Además del veredicto del servidor se re-verifica aquí que la versión
-      //    ofrecida sea realmente mayor que la instalada: un release mal
-      //    registrado en el servidor no debe provocar un bucle de aviso.
-      const res = await api.get(`/api/updates/check?v=${current}`);
-      const cmp = res ? compareVersions(res.latest_version, current) : null;
-      if (res && res.update_available && (cmp === null || cmp > 0)) {
-        setUpdateInfo(res);
-        setDismissed(false); // una versión nueva vuelve a mostrar el aviso
-      } else {
-        setUpdateInfo(null);
-      }
-    } catch (e) {
-      console.error('[updater] Error al verificar actualizaciones:', e);
+  // Se pregunta al updater de Tauri, no al servidor conectado: el manifiesto
+  // firmado vive en lixbon.com y así el aviso llega aunque el IDE esté
+  // apuntando a otro servidor o todavía no haya conectado.
+  checkForUpdates: async () => {
+    const current = await get().fetchVersion();
+    const update = await checkUpdater();
+    const cmp = update ? compareVersions(update.version, current) : null;
+    if (!update || (cmp !== null && cmp <= 0)) {
+      pending = null;
+      set({ updateInfo: null });
+      return null;
     }
-  };
+    let extra = null;
+    try { extra = await api.get(`/api/updates/check?v=${current}`); } catch { /* solo son las notas */ }
+    const same = extra?.latest_version === update.version;
+    const notes = String(update.body || '').split('\n').map((l) => l.replace(/^\s*-\s*/, '').trim()).filter(Boolean);
+    pending = update;
+    const info = {
+      ...(same ? extra : {}),
+      latest_version: update.version,
+      release_date: extra?.release_date || update.date,
+      changelog: same && extra?.changelog?.length ? extra.changelog : notes,
+    };
+    const known = get().updateInfo?.latest_version === update.version;
+    const snoozed = known && get().dismissed && Date.now() - get().dismissedAt < SNOOZE_MS;
+    set({ updateInfo: info, ...(known ? {} : { error: '' }), ...(snoozed ? {} : { dismissed: false }) });
+    return info;
+  },
 
-  const installUpdate = async () => {
+  showUpdate: () => set({ dismissed: false }),
+
+  installUpdate: async () => {
+    set({ isDownloading: true, downloadProgress: 0, error: '' });
     try {
-      setIsDownloading(true);
-      const update = await checkUpdater();
-      if (update) {
-        let downloaded = 0;
-        let contentLength = 0;
-        
-        await update.downloadAndInstall((event) => {
-          switch (event.event) {
-            case 'Started':
-              contentLength = event.data.contentLength || 0;
-              break;
-            case 'Progress':
-              downloaded += event.data.chunkLength;
-              if (contentLength > 0) {
-                setDownloadProgress(Math.round((downloaded / contentLength) * 100));
-              }
-              break;
-            case 'Finished':
-              break;
-          }
-        });
-        // Instalado: reiniciar la app para arrancar en la versión nueva.
-        await relaunch();
-      } else {
-        setIsDownloading(false);
-        alert('No se detectó la actualización al intentar instalar. Verifica que la versión sea superior a la actual.');
+      const update = pending || await checkUpdater();
+      if (!update) {
+        set({ isDownloading: false, error: 'No se encontró la actualización. Vuelve a buscarla en Ajustes.' });
+        return;
       }
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === 'Started') total = event.data.contentLength || 0;
+        if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          if (total > 0) set({ downloadProgress: Math.round((downloaded / total) * 100) });
+        }
+      });
+      await relaunch();
     } catch (error) {
       console.error('[updater] Error instalando actualización:', error);
-      setIsDownloading(false);
-      alert('Error al instalar la actualización. Es posible que el archivo esté corrupto o que la firma (.sig) sea inválida. Detalle: ' + error.message);
+      set({ isDownloading: false, error: `No se pudo instalar: ${error?.message || error}` });
     }
-  };
+  },
+}));
 
+let timer = null;
+let lastCheck = 0;
+
+async function runCheck() {
+  clearTimeout(timer);
+  lastCheck = Date.now();
+  try {
+    await useUpdateStore.getState().checkForUpdates();
+    timer = setTimeout(runCheck, CHECK_EVERY_MS);
+  } catch (e) {
+    // Al arrancar la red a veces no está lista: se reintenta pronto.
+    console.error('[updater] Error al verificar actualizaciones:', e);
+    timer = setTimeout(runCheck, RETRY_MS);
+  }
+}
+
+// Con el equipo suspendido los temporizadores se congelan: al volver a la
+// ventana se mira enseguida en lugar de esperar al siguiente ciclo.
+const checkSoon = () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastCheck > MIN_GAP_MS && !useUpdateStore.getState().isDownloading) runCheck();
+};
+
+export function useVersion() {
+  const state = useUpdateStore();
   useEffect(() => {
-    fetchTauriVersion();
+    if (started) return;
+    started = true;
+    runCheck();
+    window.addEventListener('focus', checkSoon);
+    window.addEventListener('online', checkSoon);
+    document.addEventListener('visibilitychange', checkSoon);
   }, []);
-
-  useEffect(() => {
-    checkForUpdates();
-    const interval = setInterval(checkForUpdates, 30 * 60 * 1000); // Cada 30 minutos
-    return () => clearInterval(interval);
-  }, [serverUrl, connectionStatus]);
-
-  return {
-    currentVersion,
-    updateInfo,
-    isDownloading,
-    downloadProgress,
-    dismissed,
-    dismissUpdate,
-    checkForUpdates,
-    installUpdate
-  };
+  return state;
 }

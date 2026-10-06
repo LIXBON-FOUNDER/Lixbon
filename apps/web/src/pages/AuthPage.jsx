@@ -1,8 +1,9 @@
 // AuthPage.jsx — acceso y registro sobre el fondo del clúster.
 // Incluye el modo "olvidé mi contraseña" (request-password-reset).
-// Botones OAuth Google/Apple: SOLO visuales por ahora (sin funcionalidad).
+// Google y GitHub: PKCE contra core/gateway/routers/oauth.py; el verificador
+// se queda en sessionStorage y el navegador solo lleva su hash.
 import { useSeo } from '../lib/seo';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useNavigate, Link } from '../i18n/link';
 import { useT } from '../i18n/useT';
@@ -23,13 +24,23 @@ function GoogleLogo() {
   );
 }
 
-function AppleLogo() {
+function GitHubLogo() {
   return (
     <svg viewBox="0 0 24 24" width="17" height="17" fill="#141414" aria-hidden="true">
-      <path d="M16.7 12.8c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9s-1.8-.9-3-.8c-1.5 0-2.9.9-3.7 2.3-1.6 2.7-.4 6.7 1.1 8.9.8 1.1 1.7 2.3 2.9 2.2 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1.1 2.8-2.2c.9-1.2 1.2-2.4 1.2-2.5 0 0-2.4-.9-2.4-3.5Z" />
-      <path d="M14.6 5.9c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-.9 2.9 1 .1 2-.5 2.7-1.3Z" />
+      <path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.7.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5Z" />
     </svg>
   );
+}
+
+const OAUTH_KEY = 'lixbon_oauth';
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function empezarOAuth(provider, next) {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  sessionStorage.setItem(OAUTH_KEY, JSON.stringify({ verifier, next }));
+  const q = new URLSearchParams({ redirect_uri: `${window.location.origin}${window.location.pathname}`, code_challenge: challenge });
+  window.location.assign(`/api/auth/oauth/${provider}/start?${q}`);
 }
 
 export default function AuthPage() {
@@ -50,8 +61,50 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const { login, register } = useAuth();
+  const { login, register, setUser } = useAuth();
+  const [providers, setProviders] = useState([]);
+  const [oauthBusy, setOauthBusy] = useState('');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    api.get('/api/auth/oauth/providers').then((res) => setProviders(res.data.providers || [])).catch(() => {});
+  }, []);
+
+  // Vuelta del proveedor: ?lixbon_code=… se canjea con el verificador guardado.
+  useEffect(() => {
+    const code = params.get('lixbon_code');
+    const fallo = params.get('lixbon_error');
+    if (!code && !fallo) return;
+    let guardado = {};
+    try { guardado = JSON.parse(sessionStorage.getItem(OAUTH_KEY) || '{}'); } catch { /* vacío */ }
+    sessionStorage.removeItem(OAUTH_KEY);
+    window.history.replaceState(null, '', window.location.pathname);
+    if (fallo || !guardado.verifier) {
+      setError(fallo ? t('oauthCancelled') : t('genericError'));
+      return;
+    }
+    setOauthBusy('exchange');
+    api.post('/api/auth/oauth/exchange', { code, code_verifier: guardado.verifier })
+      .then(async (res) => {
+        setUser(res.data.user);
+        api.get('/api/auth/me').then((me) => setUser(me.data.user)).catch(() => {});
+        const next = typeof guardado.next === 'string' && guardado.next.startsWith('/') && !guardado.next.startsWith('//') ? guardado.next : '/chat';
+        navigate(next, { replace: true });
+      })
+      .catch((err) => setError(err.response?.data?.detail || t('genericError')))
+      .finally(() => setOauthBusy(''));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const conProveedor = async (provider) => {
+    setError('');
+    setOauthBusy(provider);
+    try {
+      await empezarOAuth(provider, nextPath);
+    } catch {
+      setOauthBusy('');
+      setError(t('genericError'));
+    }
+  };
 
   const switchMode = (next) => {
     setMode(next);
@@ -182,17 +235,20 @@ export default function AuthPage() {
             )}
           </div>
 
-          {/* OAuth: solo visual por ahora (sin funcionalidad) */}
-          {mode !== 'forgot' && (
+          {mode !== 'forgot' && providers.length > 0 && (
             <>
               <div className="auth__divider"><span>{t('or')}</span></div>
               <div className="auth__social">
-                <button type="button" className="auth__social-btn">
-                  <GoogleLogo /> {t('google')}
-                </button>
-                <button type="button" className="auth__social-btn">
-                  <AppleLogo /> {t('apple')}
-                </button>
+                {providers.includes('google') && (
+                  <button type="button" className="auth__social-btn" onClick={() => conProveedor('google')} disabled={!!oauthBusy}>
+                    <GoogleLogo /> {t('google')}
+                  </button>
+                )}
+                {providers.includes('github') && (
+                  <button type="button" className="auth__social-btn" onClick={() => conProveedor('github')} disabled={!!oauthBusy}>
+                    <GitHubLogo /> {oauthBusy === 'exchange' ? t('oauthWorking') : t('github')}
+                  </button>
+                )}
               </div>
             </>
           )}

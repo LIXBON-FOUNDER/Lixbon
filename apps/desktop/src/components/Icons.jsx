@@ -189,6 +189,10 @@ export const IconChevronDown = (p) => (
   <Svg {...p}><path d="m6 9 6 6 6-6" /></Svg>
 );
 
+export const IconChevronUp = (p) => (
+  <Svg {...p}><path d="m6 15 6-6 6 6" /></Svg>
+);
+
 export const IconTerminal = (p) => (
   <Svg {...p}><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" /><path d="m7 9 3 3-3 3M13 15h4" /></Svg>
 );
@@ -265,10 +269,122 @@ export const IconChevronLeft = (p) => (
   <Svg {...p}><path d="M14 6l-6 6 6 6" /></Svg>
 );
 
+export const IconArrowRight = (p) => (
+  <Svg {...p}><path d="M5 12h14M13 6l6 6-6 6" /></Svg>
+);
+
 export const IconExternal = (p) => (
   <Svg {...p}><path d="M14 5h5v5M19 5l-8 8M8 5H5v14h14v-3" /></Svg>
 );
 
 export const IconHistory = (p) => (
   <Svg {...p}><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></Svg>
+);
+
+// ── Workbench ──────────────────────────────────────────────────────────
+
+export const IconLayoutLeft = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></Svg>
+);
+
+export const IconLayoutBottom = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 15h18" /></Svg>
+);
+
+export const IconLayoutRight = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></Svg>
+);
+
+export const IconSplit = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" /></Svg>
+);
+
+export const IconExpand = (p) => (
+  <Svg {...p}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></Svg>
+);
+
+export const IconRotate = (p) => (
+  <Svg {...p}><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8" /><path d="M20 3v5h-5" /></Svg>
+);
+
+export const IconCursor = (p) => (
+  <Svg {...p}><path d="M5 3l14 7-6 2-2 6z" /></Svg>
+);
+
+export const IconSliders = (p) => (
+  <Svg {...p}>
+    <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
+    <circle cx="15" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="17" cy="18" r="2" />
+  </Svg>
+);
+
+export const IconExtensions = (p) => (
+  <Svg {...p}>
+    <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" /><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" /><path d="M16.75 13.5v6.5M13.5 16.75H20" />
+  </Svg>
+);
+
+export const IconPullRequest = (p) => (
+  <Svg {...p}>
+    <circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" />
+    <path d="M6 8v8M18 16V9a2 2 0 0 0-2-2h-4M14 5l-2 2 2 2" />
+  </Svg>
+);
+
+export const IconAt = (p) => (
+  <Svg {...p}><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></Svg>
+);
+
+export const IconImage = (p) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-9 9" /></Svg>
+);
+
+export const IconDevice = (p) => (
+  <Svg {...p}><rect x="7" y="2" width="10" height="20" rx="2.5" /><path d="M11 18h2" /></Svg>
+);
+
+export const IconCode = (p) => (
+  <Svg {...p}><path d="m8 7-5 5 5 5M16 7l5 5-5 5" /></Svg>
+);
+
+/* ── Ajustes ─────────────────────────────────────────────────────────── */
+
+export const IconShield = (p) => (
+  <Svg {...p}><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></Svg>
+);
+
+export const IconCpu = (p) => (
+  <Svg {...p}>
+    <rect x="6" y="6" width="12" height="12" rx="2" /><rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+    <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" />
+  </Svg>
+);
+
+export const IconNodes = (p) => (
+  <Svg {...p}>
+    <circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="19" r="2.5" /><circle cx="19" cy="19" r="2.5" />
+    <path d="M12 7.5V12M12 12l-5.3 4.9M12 12l5.3 4.9" />
+  </Svg>
+);
+
+export const IconKeyboard = (p) => (
+  <Svg {...p}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6.5 14h.01M17.5 14h.01M9.5 14h5" />
+  </Svg>
+);
+
+export const IconDatabase = (p) => (
+  <Svg {...p}>
+    <ellipse cx="12" cy="5.5" rx="7.5" ry="2.5" />
+    <path d="M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5" />
+  </Svg>
+);
+
+export const IconServer = (p) => (
+  <Svg {...p}>
+    <rect x="3.5" y="4" width="17" height="7" rx="1.5" /><rect x="3.5" y="13" width="17" height="7" rx="1.5" />
+    <path d="M7 7.5h.01M7 16.5h.01" />
+  </Svg>
 );

@@ -1,9 +1,11 @@
 # Lixbon móvil (Android)
 
 App Android de Lixbon en **React Native + Expo**: chat con streaming,
-historial compartido con la web, uso del plan y gestión de cuenta. Mismo
-diseño que la web (tokens de `docs/DISENO_WEB.md`, Bruno Ace SC + Bricolage
-Grotesque embebidas en `assets/fonts/`, temas claro/oscuro).
+historial propio, control remoto del IDE/CLI, uso del plan y gestión de
+cuenta. Usa el sistema de estilos del IDE (`apps/desktop/src/styles/base.css`):
+superficies por peldaños sin bordes, radio de 7px, acento reservado para el
+estado, Hanken Grotesk + JetBrains Mono + Bruno Ace SC embebidas en
+`assets/fonts/`, temas oscuro/claro.
 
 Rama de trabajo: **`mobile`** (ver `docs/RAMAS_Y_RELEASES.md`).
 
@@ -26,20 +28,33 @@ debug (instalable, no Play Store).
 ## Estructura
 
 ```
-App.js                  raíz: fuentes, providers, gate de auth y shell con drawer
-src/theme.js            tokens de diseño (espejo de apps/web/src/styles/base.css)
+App.js                  raíz: fuentes, providers, gate de auth, armazón, paleta y comandos
+src/theme.js            tokens del IDE y acentos elegibles (buildTheme)
+src/pins.js             conversaciones fijadas (por usuario) y grupos por fecha
+src/share.js            exportar una conversación a Markdown (hoja de compartir)
 src/api.js              cliente HTTP del gateway (Bearer API key, 401 → logout)
 src/sse.js              streaming del chat vía XHR (fetch de RN no streamea)
 src/oauth.js            PKCE + Custom Tab para Google/Apple
 src/state.js            contextos: prefs (AsyncStorage), sesión (SecureStore), chat
-src/components/         iconos (mismos paths que la web), UI de marca, sidebar, diálogos
-src/screens/            Auth, Chat (principal), Uso y Cuenta (apiladas con volver)
+src/components/         primitivas del IDE (ui.js), barra de título, paleta, barra de
+                        estado, sidebar, diálogos e iconos
+src/screens/            Auth, Chat y Remoto (secciones), Uso, Cuenta y Personalizar (apiladas)
 assets/                 fuentes embebidas + iconos de la app (desde favicon.svg)
 ```
 
-El shell es tipo Claude/web: el chat es la pantalla principal, el botón ☰ abre
-el **sidebar** (Nueva conversación, búsqueda, historial, Uso, Documentación y
-footer de perfil con engranaje → Cuenta).
+El armazón replica el del IDE: **barra de título** (☰, isotipo, selector
+Chat · Remoto, buscar, cuenta), el panel activo sobre un fondo con luz
+ambiente y una **barra de estado** en mono bajo el compositor. La lupa abre
+la **paleta de comandos** (conversaciones, comandos y «preguntar», con
+prefijos `>` `#` `?`). El ☰ abre el panel lateral con el historial agrupado
+por fecha y las fijadas (mantener pulsado: fijar, renombrar, compartir,
+eliminar).
+
+**Personalizar** (panel lateral o Cuenta): tema, 7 acentos, tamaño de texto,
+densidad, enviar con Enter, barra de estado, luz ambiente y animaciones; se
+guarda en AsyncStorage (`uiPrefs`). Cada respuesta tiene Copiar y, la última,
+Regenerar (usa `POST /api/conversations/{id}/rewind` para no duplicar el
+turno guardado).
 
 ## Detalles útiles
 

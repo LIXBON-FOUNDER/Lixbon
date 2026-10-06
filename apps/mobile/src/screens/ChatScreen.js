@@ -1,62 +1,85 @@
-// ChatScreen.js — conversación con streaming SSE, markdown en respuestas y
-// selector de modelo. Espejo del chat de la web (chat.css): cabecera limpia
-// con el título en pill y punto de estado, hero de marca centrado
-// ("¿Qué investigaremos hoy?" + atajos de arranque) cuando no hay mensajes,
-// burbuja del usuario invertida (radius-box con esquina 15), y compositor caja
-// (.chat-input): texto arriba y barra inferior con búsqueda web + modelo a la
-// izquierda y enviar (círculo tinta 40px) a la derecha.
+// ChatScreen.js — el chat dentro del panel del armazón: cabecera del panel con
+// título y opciones, hilo con markdown y acciones por mensaje (copiar,
+// compartir, regenerar), bienvenida con sugerencias y el compositor del IDE
+// con la barra de estado debajo.
+import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  KeyboardAvoidingView,
-  Linking,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { composeMessage, splitMessage } from '../attachments';
+import { AttachmentTray, useAttachments } from '../components/Attachments';
 import Icon from '../components/Icon';
+import StatusStrip from '../components/StatusStrip';
 import { useDialogs } from '../components/dialogs';
-import { ChatHeader, FadeUp, useColors } from '../components/ui';
+import { markdownStyles } from '../components/markdown';
+import { FadeUp, KeyboardAware, LogoMark, useColors, useKeyboardOpen, useScale, useUi } from '../components/ui';
+import { togglePin, usePins } from '../pins';
+import { shareConversation } from '../share';
 import { useApi, useAuth, useChat } from '../state';
-import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS, RADIUS_BOX } from '../theme';
 
-// Atajos del hero: rellenan el compositor con un arranque de conversación en
-// vez de enviarlo, para que el usuario complete la idea antes de disparar.
+// Rellenan el compositor en vez de enviar: el usuario completa la idea.
 const STARTERS = [
   { icon: 'target', label: 'Investigar un tema a fondo', prompt: 'Investiga a fondo ' },
-  { icon: 'doc', label: 'Analizar un documento', prompt: 'Analiza este documento y resume lo importante:\n\n' },
+  { icon: 'doc', label: 'Analizar un documento', prompt: 'Analiza este documento y resume lo importante.', attach: true },
   { icon: 'waves', label: 'Comparar datos y fuentes', prompt: 'Compara estos datos y contrasta las fuentes:\n\n' },
+  { icon: 'terminal', label: 'Revisar un fragmento de código', prompt: 'Revisa este código y dime qué mejorarías:\n\n' },
 ];
 
-export default function ChatScreen({ onMenu }) {
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
+}
+
+export default function ChatScreen({ inputRef: externalInputRef }) {
   const c = useColors();
   const chat = useChat();
   const auth = useAuth();
   const api = useApi();
   const { sheet, prompt, confirm, toast } = useDialogs();
   const [input, setInput] = useState(chat.draftRef.current);
+  const pins = usePins(auth.user?.id);
+  const ownInputRef = React.useRef(null);
+  const inputRef = externalInputRef || ownInputRef;
+  const attachments = useAttachments();
 
   React.useEffect(() => {
     if (chat.models.length === 0) chat.loadModels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Menú ⋮ de la cabecera. Las acciones sobre la conversación solo tienen
-  // sentido cuando ya existe en el servidor, así que se ocultan si no la hay.
+  const saved = !!chat.conversationId && chat.messages.length > 0;
+  const pinned = saved && pins.includes(chat.conversationId);
+  const lastAssistant = [...chat.messages].reverse().find((m) => m.role === 'assistant' && m.content);
+
+  const copy = async (text) => {
+    await Clipboard.setStringAsync(text);
+    toast('Copiado');
+  };
+
+  const pickModel = async () => {
+    const value = await sheet({
+      title: 'Modelo',
+      emptyLabel: 'No hay modelos disponibles.',
+      items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model, mono: true })),
+    });
+    if (value) chat.setModel(value);
+  };
+
   const openOptions = async () => {
-    const saved = !!chat.conversationId && chat.messages.length > 0;
     const action = await sheet({
       title: chat.title || 'Nueva conversación',
       items: [
         { label: 'Nueva conversación', icon: 'plus', value: 'new' },
-        { label: 'Cambiar de modelo', icon: 'activity', value: 'model' },
+        { label: 'Cambiar de modelo', icon: 'layers', value: 'model' },
+        { label: chat.webSearch ? 'Desactivar búsqueda web' : 'Activar búsqueda web', icon: 'globe', value: 'web' },
+        ...(lastAssistant ? [{ label: 'Copiar la última respuesta', icon: 'copy', value: 'copy' }] : []),
+        ...(chat.messages.length > 0 ? [{ label: 'Compartir como Markdown', icon: 'share', value: 'share' }] : []),
         ...(saved
           ? [
+              { label: pinned ? 'Quitar de fijadas' : 'Fijar arriba', icon: 'pin', value: 'pin' },
               { label: 'Renombrar', icon: 'pencil', value: 'rename' },
               { label: 'Eliminar', icon: 'trash', danger: true, value: 'delete' },
             ]
@@ -65,6 +88,10 @@ export default function ChatScreen({ onMenu }) {
     });
     if (action === 'new') chat.newChat();
     if (action === 'model') await pickModel();
+    if (action === 'web') chat.setWebSearch(!chat.webSearch);
+    if (action === 'copy') copy(lastAssistant.content);
+    if (action === 'share') shareConversation(chat.title, chat.messages);
+    if (action === 'pin') togglePin(auth.user?.id, chat.conversationId);
     if (action === 'rename') {
       const value = await prompt({
         title: 'Renombrar conversación',
@@ -98,150 +125,139 @@ export default function ChatScreen({ onMenu }) {
     }
   };
 
-  const pickModel = async () => {
-    const value = await sheet({
-      title: 'Modelo',
-      emptyLabel: 'No hay modelos disponibles.',
-      items: chat.models.map((m) => ({ label: m, value: m, selected: m === chat.model })),
-    });
-    if (value) chat.setModel(value);
-  };
-
-  // El draft sobrevive al cambio de pestaña (vive en el contexto).
   const onChangeInput = (v) => {
     setInput(v);
     chat.draftRef.current = v;
   };
 
+  const fill = (text) => {
+    onChangeInput(text);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
   const send = () => {
     const text = input.trim();
-    if (!text || chat.streaming) return;
+    if ((!text && attachments.ready.length === 0) || attachments.reading || chat.streaming) return;
     setInput('');
     chat.draftRef.current = '';
-    chat.send(text);
+    chat.send(composeMessage(text, attachments.ready));
+    attachments.clear();
+  };
+
+  const onUserLongPress = async (text) => {
+    const action = await sheet({
+      items: [
+        { label: 'Copiar', icon: 'copy', value: 'copy' },
+        { label: 'Editar y volver a enviar', icon: 'pencil', value: 'edit' },
+      ],
+    });
+    if (action === 'copy') copy(text);
+    if (action === 'edit') fill(splitMessage(text).text);
   };
 
   const empty = chat.messages.length === 0 && !chat.loadingMessages;
   const firstName = typeof auth.user?.first_name === 'string' ? auth.user.first_name : null;
-
-  // Subtítulo: modelo activo, o el aviso de que está respondiendo.
-  const subtitle = chat.streaming
-    ? 'Respondiendo…'
-    : chat.model || (chat.models.length === 0 ? 'Sin modelos' : '');
+  const subtitle = chat.streaming ? 'respondiendo…' : chat.model || (chat.models.length === 0 ? 'sin modelos' : '');
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      {/* KeyboardAvoidingView es lo que faltaba: con edge-to-edge la ventana ya
-          no se redimensiona sola y el compositor quedaba DEBAJO del teclado, así
-          que no se veía lo que se escribía. React Native mide el teclado con
-          WindowInsets.ime() y descuenta la barra de navegación, por eso el
-          inset inferior del compositor y este padding se suman sin solaparse. */}
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <ChatHeader
-          title={chat.title || 'Nueva conversación'}
-          subtitle={subtitle}
-          onLeading={onMenu}
-          leadingIcon="menu"
-          onOptions={openOptions}
-          dot={chat.streaming ? 'live' : 'idle'}
-        />
-
+    <KeyboardAware>
+      <Pressable
+        onPress={openOptions}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          height: 50,
+          paddingLeft: 16,
+          paddingRight: 8,
+          backgroundColor: pressed ? c.pressed : 'transparent',
+        })}
+      >
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: chat.streaming ? c.accent : c.inkFaint }} />
         <View style={{ flex: 1 }}>
-          {chat.loadingMessages ? (
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-              <ActivityIndicator color={c.inkSoft} />
-            </View>
-          ) : empty ? (
-            <Hero firstName={firstName} onPick={onChangeInput} />
-          ) : (
-            <MessageList />
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.ink }}>
+            {chat.title || 'Nueva conversación'}
+          </Text>
+          {!!subtitle && (
+            <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>
+              {subtitle}
+            </Text>
           )}
         </View>
+        {pinned && (
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: c.accentDeep, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 5, backgroundColor: c.accentSoft }}>
+            fijada
+          </Text>
+        )}
+        <Icon name="dots" size={18} color={c.inkSoft} />
+      </Pressable>
 
-        <Composer
-          input={input}
-          onChangeInput={onChangeInput}
-          onSend={send}
-          onPickModel={pickModel}
-        />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      <View style={{ flex: 1 }}>
+        {chat.loadingMessages ? (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <ActivityIndicator color={c.inkSoft} />
+          </View>
+        ) : empty ? (
+          <Hero
+            firstName={firstName}
+            onPick={(starter) => {
+              fill(starter.prompt);
+              if (starter.attach) attachments.pick();
+            }}
+          />
+        ) : (
+          <MessageList onCopy={copy} onUserLongPress={onUserLongPress} />
+        )}
+      </View>
+
+      <Composer
+        input={input}
+        inputRef={inputRef}
+        onChangeInput={onChangeInput}
+        onSend={send}
+        onPickModel={pickModel}
+        attachments={attachments}
+      />
+    </KeyboardAware>
   );
 }
 
-// Hero del chat vacío (.chat-hero): marca, saludo, título grande centrado y
-// atajos de arranque que precargan el compositor.
 function Hero({ firstName, onPick }) {
   const c = useColors();
   return (
-    <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 26, paddingBottom: 20 }}>
-      <FadeUp style={{ alignItems: 'center', gap: 8 }}>
-        <View
-          style={{
-            width: 58,
-            height: 58,
-            borderRadius: 20,
-            backgroundColor: c.bgSecondary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 8,
-          }}
-        >
-          <Text style={{ fontFamily: FONTS.brand, fontSize: 26, color: c.inkSoft }}>L</Text>
+    <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 20, paddingBottom: 12 }}>
+      <FadeUp style={{ alignItems: 'center', gap: 10 }}>
+        <View style={{ padding: 14, borderRadius: RADIUS_BOX, backgroundColor: c.accentSoft, marginBottom: 6 }}>
+          <LogoMark size={34} />
         </View>
-        {!!firstName && (
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.inkSoft }}>
-            Hola, {firstName}.
-          </Text>
-        )}
-        <Text
-          style={{
-            textAlign: 'center',
-            fontFamily: FONTS.uiBold,
-            fontSize: 34,
-            lineHeight: 40,
-            letterSpacing: -0.5,
-            color: c.ink,
-          }}
-        >
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.accentDeep }}>
+          {greeting()}
+          {firstName ? `, ${firstName}` : ''}
+        </Text>
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.uiSemiBold, fontSize: 28, lineHeight: 34, letterSpacing: -0.4, color: c.ink }}>
           ¿Qué investigaremos hoy?
         </Text>
       </FadeUp>
 
-      <View style={{ gap: 10, marginTop: 34 }}>
+      <View style={{ gap: 6, marginTop: 28 }}>
         {STARTERS.map((s, i) => (
-          <FadeUp key={s.icon} delay={80 + i * 60}>
+          <FadeUp key={s.icon} delay={80 + i * 50}>
             <Pressable
-              onPress={() => onPick(s.prompt)}
+              onPress={() => onPick(s)}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
-                gap: 14,
-                padding: 12,
-                borderRadius: 18,
-                borderWidth: 1,
-                borderColor: c.borderSoft,
-                backgroundColor: pressed ? c.bgInput : c.bgSecondary,
+                gap: 12,
+                height: 46,
+                paddingHorizontal: 12,
+                borderRadius: RADIUS,
+                backgroundColor: pressed ? c.surface4 : c.surface2,
+                transform: [{ scale: pressed ? 0.98 : 1 }],
               })}
             >
-              <View
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 12,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: c.bg,
-                }}
-              >
-                <Icon name={s.icon} size={18} color={c.accent} />
-              </View>
-              <Text
-                style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, lineHeight: 20, color: c.ink }}
-              >
-                {s.label}
-              </Text>
-              <Icon name="chevron-right" size={16} color={c.inkMuted} />
+              <Icon name={s.icon} size={16} color={c.accentDeep} />
+              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: c.ink70 }}>{s.label}</Text>
+              <Icon name="chevron-right" size={15} color={c.inkFaint} />
             </Pressable>
           </FadeUp>
         ))}
@@ -250,10 +266,32 @@ function Hero({ firstName, onPick }) {
   );
 }
 
-function MessageList() {
+function ActionButton({ icon, label, onPress }) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        height: 28,
+        paddingHorizontal: 8,
+        borderRadius: RADIUS,
+        backgroundColor: pressed ? c.pressed : 'transparent',
+      })}
+    >
+      <Icon name={icon} size={13} color={c.inkLabel} />
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkLabel }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function MessageList({ onCopy, onUserLongPress }) {
   const c = useColors();
   const chat = useChat();
-  // Lista invertida: el índice 0 es el último mensaje → auto-scroll natural.
+  const { t, s } = useScale();
   const items = [...chat.messages].reverse();
 
   return (
@@ -261,37 +299,54 @@ function MessageList() {
       inverted
       data={items}
       keyExtractor={(_, i) => String(chat.messages.length - i)}
-      contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 14 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12 }}
       keyboardShouldPersistTaps="handled"
       renderItem={({ item, index }) => {
         const isLast = index === 0;
         if (item.role === 'user') {
+          const { files, text } = splitMessage(item.content);
           return (
-            <FadeUp style={{ alignItems: 'flex-end', marginVertical: 8 }}>
-              <View
-                style={{
-                  maxWidth: '80%',
-                  backgroundColor: c.primary,
-                  paddingHorizontal: 19,
-                  paddingVertical: 11,
-                  borderRadius: RADIUS_BOX,
-                  borderBottomRightRadius: 15,
-                }}
+            <FadeUp style={{ alignItems: 'flex-end', marginVertical: s(9) }}>
+              <Pressable
+                onLongPress={() => onUserLongPress(item.content)}
+                delayLongPress={300}
+                style={({ pressed }) => ({
+                  maxWidth: '84%',
+                  backgroundColor: pressed ? c.surface4 : c.surface3,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: RADIUS,
+                })}
               >
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 15, lineHeight: 22, color: c.onPrimary }}>
-                  {item.content}
-                </Text>
-              </View>
+                {files.length > 0 && (
+                  <View style={{ gap: 4, marginBottom: text ? 8 : 0 }}>
+                    {files.map((f, i) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Icon name={f.kind === 'image' ? 'image' : 'file'} size={13} color={c.accentDeep} />
+                        <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: t(11.5), color: c.ink70 }}>
+                          {f.name}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {!!text && (
+                  <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(14.5), lineHeight: t(21), color: c.ink }}>
+                    {text}
+                  </Text>
+                )}
+              </Pressable>
             </FadeUp>
           );
         }
+        const words = item.content ? item.content.trim().split(/\s+/).length : 0;
         return (
-          <View style={{ marginVertical: 8 }}>
+          <View style={{ marginVertical: s(9) }}>
             {Array.isArray(item.sources) && item.sources.length > 0 && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                {item.sources.slice(0, 4).map((s, i) => {
-                  const title = String(s?.title || s?.url || '');
-                  const url = typeof s?.url === 'string' ? s.url : null;
+                {item.sources.slice(0, 4).map((src, i) => {
+                  const title = String(src?.title || src?.url || '');
+                  const url = typeof src?.url === 'string' ? src.url : null;
                   return (
                     <Pressable
                       key={i}
@@ -300,20 +355,14 @@ function MessageList() {
                         flexDirection: 'row',
                         alignItems: 'center',
                         gap: 6,
-                        paddingLeft: 10,
-                        paddingRight: 8,
-                        paddingVertical: 5,
-                        borderRadius: RADIUS_PILL,
-                        borderWidth: 1,
-                        borderColor: c.borderSoft,
-                        backgroundColor: pressed ? c.bgSecondary : c.bg,
+                        paddingHorizontal: 8,
+                        height: 26,
+                        borderRadius: RADIUS,
+                        backgroundColor: pressed ? c.surface4 : c.surface3,
                       })}
                     >
-                      <Icon name="globe" size={12} color={c.inkSoft} />
-                      <Text
-                        numberOfLines={1}
-                        style={{ maxWidth: 150, fontFamily: FONTS.ui, fontSize: 12, color: c.inkSoft }}
-                      >
+                      <Icon name="globe" size={12} color={c.inkLabel} />
+                      <Text numberOfLines={1} style={{ maxWidth: 150, fontFamily: FONTS.ui, fontSize: 12, color: c.ink70 }}>
                         {title}
                       </Text>
                     </Pressable>
@@ -323,7 +372,7 @@ function MessageList() {
             )}
             {item.content ? (
               <Markdown
-                style={markdownStyles(c)}
+                style={markdownStyles(c, t)}
                 onLinkPress={(url) => {
                   Linking.openURL(url);
                   return false;
@@ -333,12 +382,17 @@ function MessageList() {
               </Markdown>
             ) : isLast && chat.streaming ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <ActivityIndicator size="small" color={c.inkSoft} />
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
-                  Pensando…
-                </Text>
+                <ActivityIndicator size="small" color={c.accent} />
+                <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkLabel }}>pensando…</Text>
               </View>
             ) : null}
+            {!!item.content && !(isLast && chat.streaming) && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginLeft: -8 }}>
+                <ActionButton icon="copy" label="Copiar" onPress={() => onCopy(item.content)} />
+                {isLast && <ActionButton icon="refresh" label="Regenerar" onPress={chat.regenerate} />}
+                <Text style={{ marginLeft: 6, fontFamily: FONTS.mono, fontSize: 10, color: c.inkFaint }}>{words} palabras</Text>
+              </View>
+            )}
           </View>
         );
       }}
@@ -346,40 +400,28 @@ function MessageList() {
   );
 }
 
-// Compositor (.chat-composer / .chat-input): caja crema redondeada con el
-// texto arriba y una barra inferior de acciones.
-function Composer({ input, onChangeInput, onSend, onPickModel }) {
+function Composer({
+  input,
+  inputRef,
+  onChangeInput,
+  onSend,
+  onPickModel,
+  attachments,
+}) {
   const c = useColors();
   const chat = useChat();
+  const ui = useUi();
   const insets = useSafeAreaInsets();
-
-  const canSend = !!input.trim() || chat.streaming;
+  const [focused, setFocused] = useState(false);
+  const keyboardOpen = useKeyboardOpen();
+  const hasContent = !!input.trim() || attachments.ready.length > 0;
+  const canSend = chat.streaming || (hasContent && !attachments.reading);
 
   return (
-    <View
-      style={{
-        paddingHorizontal: 14,
-        paddingTop: 6,
-        // Con edge-to-edge la barra de navegación se superpone al contenido:
-        // sin este inset el compositor quedaba medio tapado por ella.
-        paddingBottom: Math.max(insets.bottom, 12),
-      }}
-    >
+    <View style={{ paddingHorizontal: 10, paddingTop: 6, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 10) }}>
       {!!chat.error && (
-        <View
-          style={{
-            marginBottom: 8,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            borderRadius: 10,
-            backgroundColor: c.dangerSoft,
-            flexDirection: 'row',
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>
-            {chat.error}
-          </Text>
+        <View style={{ marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS, backgroundColor: c.dangerSoft, flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.danger }}>{chat.error}</Text>
           <Pressable onPress={chat.clearError} hitSlop={8} style={{ padding: 2 }}>
             <Icon name="x" size={15} color={c.danger} />
           </Pressable>
@@ -388,22 +430,30 @@ function Composer({ input, onChangeInput, onSend, onPickModel }) {
 
       <View
         style={{
-          backgroundColor: c.bgInput,
+          backgroundColor: focused ? c.surface4 : c.surface3,
           borderRadius: RADIUS_BOX,
-          paddingHorizontal: 15,
-          paddingTop: 11,
-          paddingBottom: 9,
+          paddingHorizontal: 12,
+          paddingTop: 10,
+          paddingBottom: 8,
         }}
       >
+        <AttachmentTray items={attachments.items} onRemove={attachments.remove} />
         <TextInput
+          ref={inputRef}
           value={input}
           onChangeText={onChangeInput}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder="Escribe un mensaje…"
-          placeholderTextColor={c.inkSoft}
+          placeholderTextColor={c.inkLabel}
+          selectionColor={c.accent}
           multiline
+          submitBehavior={ui.sendOnEnter ? 'submit' : 'newline'}
+          returnKeyType={ui.sendOnEnter ? 'send' : 'default'}
+          onSubmitEditing={ui.sendOnEnter ? onSend : undefined}
           style={{
-            maxHeight: 130,
-            paddingHorizontal: 6,
+            maxHeight: 140,
+            paddingHorizontal: 4,
             paddingTop: 2,
             paddingBottom: 6,
             fontFamily: FONTS.ui,
@@ -412,139 +462,84 @@ function Composer({ input, onChangeInput, onSend, onPickModel }) {
             color: c.ink,
           }}
         />
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: 4,
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }}>
-            {/* Búsqueda web: activo = círculo de tinta (is-active de la web) */}
-            <Pressable
-              onPress={() => chat.setWebSearch(!chat.webSearch)}
-              hitSlop={6}
-              style={({ pressed }) => ({
-                width: 34,
-                height: 34,
-                borderRadius: 17,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: chat.webSearch ? 0 : 1,
-                borderColor: c.borderSoft,
-                backgroundColor: chat.webSearch ? c.primary : pressed ? c.pressed : 'transparent',
-              })}
-            >
-              <Icon name="globe" size={18} color={chat.webSearch ? c.onPrimary : c.ink} />
-            </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          <Pressable
+            onPress={attachments.pick}
+            hitSlop={6}
+            accessibilityLabel="Adjuntar"
+            style={({ pressed }) => ({
+              width: 32,
+              height: 32,
+              borderRadius: RADIUS,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? c.pressed : 'transparent',
+            })}
+          >
+            <Icon name="clip" size={17} color={c.inkSoft} />
+          </Pressable>
 
-            {/* Selector de modelo (.chat-input__model: pill con borde suave) */}
-            <Pressable
-              onPress={onPickModel}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                marginLeft: 6,
-                paddingLeft: 13,
-                paddingRight: 9,
-                paddingVertical: 6,
-                borderRadius: RADIUS_PILL,
-                borderWidth: 1,
-                borderColor: c.borderSoft,
-                backgroundColor: pressed ? c.pressed : 'transparent',
-                maxWidth: 190,
-              })}
-            >
-              <Text
-                numberOfLines={1}
-                style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.ink }}
-              >
-                {chat.model || 'Sin modelos'}
-              </Text>
-              <Icon name="chevron-down" size={13} color={c.inkSoft} />
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => chat.setWebSearch(!chat.webSearch)}
+            hitSlop={6}
+            accessibilityLabel="Búsqueda web"
+            style={({ pressed }) => ({
+              width: 32,
+              height: 32,
+              borderRadius: RADIUS,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: chat.webSearch ? c.accentSoft : pressed ? c.pressed : 'transparent',
+            })}
+          >
+            <Icon name="globe" size={17} color={chat.webSearch ? c.accentDeep : c.inkSoft} />
+          </Pressable>
 
-          {/* Enviar / detener (.chat-input__send: círculo tinta 40px) */}
+          <Pressable
+            onPress={onPickModel}
+            style={({ pressed }) => ({
+              flexShrink: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              height: 28,
+              paddingHorizontal: 9,
+              borderRadius: RADIUS,
+              backgroundColor: pressed ? c.surface6 : c.surface5,
+            })}
+          >
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.mono, fontSize: 11.5, color: c.ink70 }}>
+              {chat.model || 'sin modelos'}
+            </Text>
+            <Icon name="chevron-down" size={12} color={c.inkLabel} />
+          </Pressable>
+
+          <View style={{ flex: 1 }} />
+
           <Pressable
             onPress={chat.streaming ? chat.stop : onSend}
             disabled={!canSend}
+            accessibilityLabel={chat.streaming ? 'Detener' : 'Enviar'}
             style={({ pressed }) => ({
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: c.primary,
+              width: 36,
+              height: 36,
+              borderRadius: RADIUS,
+              backgroundColor: canSend ? c.primary : c.surface5,
               alignItems: 'center',
               justifyContent: 'center',
-              opacity: !canSend ? 0.45 : pressed ? 0.85 : 1,
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             })}
           >
-            <Icon name={chat.streaming ? 'stop' : 'arrow-up'} size={17} color={c.onPrimary} />
+            <Icon name={chat.streaming ? 'stop' : 'arrow-up'} size={17} color={canSend ? c.onPrimary : c.inkLabel} />
           </Pressable>
         </View>
       </View>
+
+      {ui.statusBar && (
+        <View style={{ marginTop: 5 }}>
+          <StatusStrip onPickModel={onPickModel} />
+        </View>
+      )}
     </View>
   );
-}
-
-// Estilos del markdown con los tokens de marca. Un único estilo de código
-// (fondo bgSecondary) cubre inline y bloques para que el texto tinta sea
-// legible en los dos temas.
-function markdownStyles(c) {
-  return {
-    body: { fontFamily: FONTS.ui, fontSize: 15, lineHeight: 23, color: c.ink },
-    heading1: { fontFamily: FONTS.uiSemiBold, fontSize: 20, color: c.ink, marginTop: 8, marginBottom: 4 },
-    heading2: { fontFamily: FONTS.uiSemiBold, fontSize: 18, color: c.ink, marginTop: 8, marginBottom: 4 },
-    heading3: { fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink, marginTop: 6, marginBottom: 3 },
-    strong: { fontFamily: FONTS.uiBold, color: c.ink },
-    em: { fontStyle: 'italic', color: c.ink },
-    link: { color: c.accentDeep, textDecorationLine: 'underline' },
-    bullet_list_icon: { color: c.inkSoft },
-    ordered_list_icon: { color: c.inkSoft, fontFamily: FONTS.ui },
-    blockquote: {
-      backgroundColor: c.bgSecondary,
-      borderLeftWidth: 1,
-      borderLeftColor: c.borderSoft,
-      borderRadius: 6,
-      paddingHorizontal: 12,
-      marginVertical: 4,
-    },
-    code_inline: {
-      fontFamily: 'monospace',
-      fontSize: 13,
-      color: c.ink,
-      backgroundColor: c.bgSecondary,
-      borderRadius: 4,
-      paddingHorizontal: 4,
-    },
-    code_block: {
-      fontFamily: 'monospace',
-      fontSize: 13,
-      color: c.ink,
-      backgroundColor: c.bgSecondary,
-      borderColor: c.borderSoft,
-      borderWidth: 1,
-      borderRadius: 12,
-      padding: 12,
-      marginVertical: 6,
-    },
-    fence: {
-      fontFamily: 'monospace',
-      fontSize: 13,
-      color: c.ink,
-      backgroundColor: c.bgSecondary,
-      borderColor: c.borderSoft,
-      borderWidth: 1,
-      borderRadius: 12,
-      padding: 12,
-      marginVertical: 6,
-    },
-    hr: { backgroundColor: c.borderSoft, height: 1, marginVertical: 10 },
-    table: { borderColor: c.borderSoft, borderWidth: 1, borderRadius: 10 },
-    th: { fontFamily: FONTS.uiSemiBold, fontSize: 13, color: c.ink, padding: 6 },
-    td: { fontFamily: FONTS.ui, fontSize: 13, color: c.ink, padding: 6 },
-    tr: { borderColor: c.borderSoft },
-  };
 }

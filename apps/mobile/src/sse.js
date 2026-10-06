@@ -19,6 +19,7 @@ export function streamChatCompletion({
   webSearch,
   onDelta,
   onSources,
+  onUsage,
   onDone,
   onError,
 }) {
@@ -62,6 +63,10 @@ export function streamChatCompletion({
         if (obj && Array.isArray(obj.lixbon_sources)) {
           onSources(obj.lixbon_sources);
           continue;
+        }
+        if (obj?.usage && onUsage) {
+          const used = (obj.usage.prompt_tokens || 0) + (obj.usage.completion_tokens || 0);
+          onUsage({ used, total: obj.lixbon_context?.num_ctx || null });
         }
         const delta = obj?.choices?.[0]?.delta?.content;
         if (typeof delta === 'string' && delta) onDelta(delta);

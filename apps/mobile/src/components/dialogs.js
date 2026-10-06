@@ -1,4 +1,4 @@
-// dialogs.js — diálogos, hoja inferior y toasts con la estética de la marca
+// dialogs.js — diálogos, hoja inferior y toasts con el sistema del IDE
 // (Modal de RN, nada del look nativo). API por promesas:
 //   const { prompt, confirm, sheet, toast } = useDialogs();
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FONTS, RADIUS_BOX, RADIUS_PILL } from '../theme';
+import { FONTS, RADIUS, RADIUS_BOX } from '../theme';
 import Icon from './Icon';
 import { useColors } from './ui';
 
@@ -99,11 +99,9 @@ export function DialogProvider({ children }) {
         >
           <View
             style={{
-              backgroundColor: c.bg,
+              backgroundColor: c.surface2,
               borderRadius: RADIUS_BOX,
-              borderWidth: 1,
-              borderColor: c.borderSoft,
-              padding: 20,
+              padding: 18,
             }}
           >
             <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }}>
@@ -118,7 +116,8 @@ export function DialogProvider({ children }) {
               <TextInput
                 defaultValue={dialog.initialValue || ''}
                 placeholder={dialog.placeholder || ''}
-                placeholderTextColor={c.inkMuted}
+                placeholderTextColor={c.inkLabel}
+                selectionColor={c.accent}
                 secureTextEntry={!!dialog.secure}
                 autoFocus
                 autoCapitalize="none"
@@ -129,10 +128,10 @@ export function DialogProvider({ children }) {
                 onSubmitEditing={() => closeDialog(inputRef.current)}
                 style={{
                   marginTop: 14,
-                  backgroundColor: c.bgInput,
-                  borderRadius: RADIUS_PILL,
-                  paddingHorizontal: 20,
-                  paddingVertical: 13,
+                  backgroundColor: c.surface3,
+                  borderRadius: RADIUS,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
                   fontFamily: FONTS.ui,
                   fontSize: 15,
                   color: c.ink,
@@ -142,25 +141,27 @@ export function DialogProvider({ children }) {
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 18, gap: 8 }}>
               <Pressable
                 onPress={() => closeDialog(dialog?.kind === 'confirm' ? false : null)}
-                style={{ paddingHorizontal: 16, paddingVertical: 11 }}
+                style={({ pressed }) => ({ paddingHorizontal: 14, height: 38, justifyContent: 'center', borderRadius: RADIUS, backgroundColor: pressed ? c.pressed : c.surface5 })}
               >
-                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.inkSoft }}>
+                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.inkBody }}>
                   Cancelar
                 </Text>
               </Pressable>
               <Pressable
                 onPress={() => closeDialog(dialog?.kind === 'confirm' ? true : inputRef.current)}
-                style={{
-                  backgroundColor: dialog?.danger ? c.danger : c.primary,
-                  borderRadius: RADIUS_PILL,
-                  paddingHorizontal: 20,
-                  paddingVertical: 11,
-                }}
+                style={({ pressed }) => ({
+                  backgroundColor: dialog?.danger ? c.dangerStrong : c.primary,
+                  borderRadius: RADIUS,
+                  paddingHorizontal: 16,
+                  height: 38,
+                  justifyContent: 'center',
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                })}
               >
                 <Text
                   style={{
-                    fontFamily: FONTS.uiMedium,
-                    fontSize: 14,
+                    fontFamily: FONTS.uiSemiBold,
+                    fontSize: 13.5,
                     color: dialog?.danger ? '#FFFFFF' : c.onPrimary,
                   }}
                 >
@@ -177,11 +178,11 @@ export function DialogProvider({ children }) {
         <Pressable style={{ flex: 1, backgroundColor: c.scrim }} onPress={() => closeSheet(null)} />
         <View
           style={{
-            backgroundColor: c.bg,
+            backgroundColor: c.surface2,
             borderTopLeftRadius: RADIUS_BOX,
             borderTopRightRadius: RADIUS_BOX,
             paddingTop: 10,
-            paddingHorizontal: 12,
+            paddingHorizontal: 8,
             paddingBottom: 14 + insets.bottom,
           }}
         >
@@ -191,21 +192,22 @@ export function DialogProvider({ children }) {
               width: 36,
               height: 4,
               borderRadius: 2,
-              backgroundColor: c.borderSoft,
+              backgroundColor: c.surface5,
               marginBottom: 10,
             }}
           />
           {!!sheetState?.title && (
             <Text
               style={{
-                fontFamily: FONTS.uiSemiBold,
-                fontSize: 13,
-                color: c.inkSoft,
-                marginLeft: 10,
-                marginBottom: 8,
+                fontFamily: FONTS.uiMedium,
+                fontSize: 11,
+                letterSpacing: 0.8,
+                color: c.inkLabel,
+                marginLeft: 12,
+                marginBottom: 6,
               }}
             >
-              {sheetState.title}
+              {String(sheetState.title).toUpperCase()}
             </Text>
           )}
           {(sheetState?.items || []).map((item) => (
@@ -217,20 +219,20 @@ export function DialogProvider({ children }) {
                 alignItems: 'center',
                 gap: 12,
                 paddingHorizontal: 12,
-                paddingVertical: 13,
-                borderRadius: 14,
-                backgroundColor: item.selected ? c.accentSoft : pressed ? c.bgSecondary : 'transparent',
+                minHeight: 46,
+                borderRadius: RADIUS,
+                backgroundColor: item.selected ? c.accentSoft : pressed ? c.surface4 : 'transparent',
               })}
             >
               {!!item.icon && (
-                <Icon name={item.icon} size={19} color={item.danger ? c.danger : c.inkSoft} />
+                <Icon name={item.icon} size={18} color={item.danger ? c.danger : c.inkSoft} />
               )}
               <Text
                 style={{
                   flex: 1,
-                  fontFamily: item.selected ? FONTS.uiMedium : FONTS.ui,
-                  fontSize: 15,
-                  color: item.danger ? c.danger : c.ink,
+                  fontFamily: item.mono ? FONTS.mono : item.selected ? FONTS.uiMedium : FONTS.ui,
+                  fontSize: item.mono ? 13 : 14.5,
+                  color: item.danger ? c.danger : item.selected ? c.ink : c.inkBody,
                 }}
               >
                 {item.label}
@@ -265,9 +267,9 @@ export function DialogProvider({ children }) {
           <View
             style={{
               backgroundColor: c.primary,
-              borderRadius: RADIUS_PILL,
-              paddingHorizontal: 18,
-              paddingVertical: 11,
+              borderRadius: RADIUS,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
             }}
           >
             <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13, color: c.onPrimary }}>

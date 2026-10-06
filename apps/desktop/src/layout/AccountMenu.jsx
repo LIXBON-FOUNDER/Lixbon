@@ -155,7 +155,7 @@ function UsagePage({ user, serverUrl, usage, onBack, onClose }) {
   );
 }
 
-export function AccountMenu() {
+export function AccountMenu({ compact = false }) {
   const { user, serverUrl, apiKey } = useAppStore();
 
   const [open, setOpen] = useState(false);
@@ -166,7 +166,7 @@ export function AccountMenu() {
   const rootRef = useRef(null);
   const popRef = useRef(null);
   const fileRef = useRef(null);
-  const pos = useAnchoredAbove(rootRef, open, { align: 'left' });
+  const pos = useAnchoredAbove(rootRef, open, compact ? { align: 'right', below: true } : { align: 'left' });
 
   useEffect(() => {
     if (!open) return;
@@ -199,6 +199,7 @@ export function AccountMenu() {
   if (!user) {
     // apiKey ya cargó (por eso se ve el sidebar) pero el perfil todavía no
     // llegó del servidor: un hueco vacío aquí es más confuso que un esqueleto.
+    if (compact) return <span className="skeleton acctavatar" />;
     return (
       <div className="acctwrap">
         <div className="acctcard">
@@ -256,17 +257,27 @@ export function AccountMenu() {
 
   return (
     <div className="acctwrap" ref={rootRef}>
-      <button
-        className={`acctcard ${open ? 'is-open' : ''}`}
-        onClick={() => { setOpen((v) => !v); setError(''); }}
-        title={`${displayName} · Cuenta`}
-      >
-        <Avatar user={user} serverUrl={serverUrl} size={30} />
-        <div className="acctcard__id">
-          <div className="acctcard__name">{displayName}</div>
-          <div className="acctcard__plan">Plan {user.plan_name || 'Gratuito'}</div>
-        </div>
-      </button>
+      {compact ? (
+        <button
+          className={`acctavatar ${open ? 'is-open' : ''}`}
+          onClick={() => { setOpen((v) => !v); setError(''); }}
+          title={`${displayName} · Cuenta`}
+        >
+          <Avatar user={user} serverUrl={serverUrl} size={26} />
+        </button>
+      ) : (
+        <button
+          className={`acctcard ${open ? 'is-open' : ''}`}
+          onClick={() => { setOpen((v) => !v); setError(''); }}
+          title={`${displayName} · Cuenta`}
+        >
+          <Avatar user={user} serverUrl={serverUrl} size={30} />
+          <div className="acctcard__id">
+            <div className="acctcard__name">{displayName}</div>
+            <div className="acctcard__plan">Plan {user.plan_name || 'Gratuito'}</div>
+          </div>
+        </button>
+      )}
 
       <input ref={fileRef} type="file" accept={AVATAR_ACCEPT} hidden onChange={onPick} />
 

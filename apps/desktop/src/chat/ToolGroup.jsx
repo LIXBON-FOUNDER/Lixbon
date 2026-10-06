@@ -3,20 +3,42 @@
 // el mockup. Nada queda oculto detrás de un "N acciones" plegado.
 import { useState } from 'react';
 import { useChatStore } from '../store/chatStore';
+import { useAppStore } from '../store/appStore';
+import { absFromRoot, openFilePreview, previewKind } from '../lib/preview';
+
+const WRITES = new Set(['write_file', 'edit_file', 'multi_edit', 'append_file', 'insert_at_line']);
+
+function PreviewButton({ path }) {
+  const root = useAppStore((s) => s.workspaceRoot);
+  const kind = previewKind(path);
+  return (
+    <button className="activity-row__toggle activity-row__open" onClick={() => openFilePreview(absFromRoot(root, path))}>
+      {kind === 'markdown' ? 'Vista previa' : 'Ver visual'}
+    </button>
+  );
+}
 
 const VERB = {
   read_file: 'leyó', write_file: 'escribió', edit_file: 'editó', append_file: 'añadió a',
   delete_file: 'eliminó', rename_file: 'movió', mkdir: 'creó carpeta', search: 'buscó',
-  list_files: 'listó', run_command: 'ejecutó',
+  list_files: 'listó', run_command: 'ejecutó', ask_user: 'preguntó',
 };
 
 const VERB_GERUND = {
   read_file: 'leyendo', write_file: 'escribiendo', edit_file: 'editando', append_file: 'añadiendo a',
   delete_file: 'eliminando', rename_file: 'moviendo', mkdir: 'creando carpeta', search: 'buscando',
-  list_files: 'listando', run_command: 'ejecutando',
+  list_files: 'listando', run_command: 'ejecutando', ask_user: 'esperando tu respuesta',
 };
 
 const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+export const fmtMs = (ms) => (ms < 10000 ? `${(ms / 1000).toFixed(1).replace('.', ',')} s` : `${Math.round(ms / 1000)} s`);
+
+/** `mcp__github__create_issue` → { server: 'github', tool: 'create_issue' } */
+const mcpParts = (tool) => {
+  const m = /^mcp__(.+?)__(.+)$/.exec(tool || '');
+  return m ? { server: m[1], tool: m[2] } : null;
+};
 
 function ActivityIcon({ pending, failed }) {
   return (
@@ -46,7 +68,8 @@ function LiveRow({ message }) {
 function ActivityRow({ message, index, delay, live }) {
   const [showDiff, setShowDiff] = useState(false);
   const a = message.args || {};
-  const target = a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
+  const mcp = mcpParts(message.tool);
+  const target = message.tool === 'ask_user' ? '' : mcp ? mcp.tool : a.command || a.path || a.pattern || (a.src ? `${a.src} → ${a.dst}` : '');
   const pending = !!message.pending;
   const failed = message.ok === false;
   const change = message.change;
@@ -58,7 +81,9 @@ function ActivityRow({ message, index, delay, live }) {
 
   if (live) return <LiveRow message={message} />;
 
-  const verb = capitalize(pending ? (VERB_GERUND[message.tool] || message.tool) : (VERB[message.tool] || message.tool));
+  const verb = mcp
+    ? `MCP · ${mcp.server}`
+    : capitalize(pending ? (VERB_GERUND[message.tool] || message.tool) : (VERB[message.tool] || message.tool));
 
   return (
     <div className={`activity-row ${failed ? 'is-err' : ''}`} style={{ animationDelay: `${delay}ms` }}>
@@ -77,8 +102,17 @@ function ActivityRow({ message, index, delay, live }) {
             {showDiff ? 'Ocultar' : 'Ver'}
           </button>
         )}
+        {!pending && !failed && WRITES.has(message.tool) && previewKind(a.path) && <PreviewButton path={a.path} />}
+        {!pending && message.ms >= 100 && <span className="activity-row__ms">{fmtMs(message.ms)}</span>}
       </div>
-      {failed && message.content && <p className="toolrow__err">{message.content}</p>}
+      {failed && message.content && (
+        <p className="toolrow__err">
+          {message.content}
+          {message.content !== 'rechazado por el usuario' && (
+            <button className="toolrow__retry" onClick={() => useChatStore.getState().retryTool(index)}>Reintentar</button>
+          )}
+        </p>
+      )}
       {showDiff && hasDiff && (
         <pre className="toolrow__diff">
           {change.sampleOld.map((line, i) => (
@@ -92,10 +126,18 @@ function ActivityRow({ message, index, delay, live }) {
           )}
         </pre>
       )}
-      {!failed && !pending && message.content && !hasDiff && message.tool === 'run_command' && (
+      {message.answers?.length > 0 && (
+        <dl className="toolrow__answers">
+          {message.answers.map((p, i) => (
+            <div key={i}><dt>{p.question}</dt><dd>{p.answer}</dd></div>
+          ))}
+        </dl>
+      )}
+      {!failed && !pending && message.content && !hasDiff && (message.tool === 'run_command' || mcp) && (
         <p className="toolrow__result">{message.content}</p>
       )}
-      {message.snapshot && !failed && (
+      {message.snapshot && !failed && message.accepted && !message.reverted && <span className="toolrow__revert is-done">Aceptado ✓</span>}
+      {message.snapshot && !failed && !message.accepted && (
         <button
           className="toolrow__revert"
           disabled={message.reverted}
