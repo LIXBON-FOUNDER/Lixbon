@@ -16,9 +16,11 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/tools` (escritura) | `write_file`, `edit_file` (con coincidencia tolerante), `multi_edit`, `insert_at_line`, `append_file`, `mkdir`, `delete_file`, `rename_file` | `fixtures/edit_corpus.json` (61 casos con árbol inicial y final) |
 | `internal/process` | Shell con timeout, cancelación, muerte del árbol de procesos, captura acotada y procesos en segundo plano | pruebas con procesos reales (árbol de 2 niveles) |
 | `internal/tools` (`Toolbox`) | `run_command`, `read_output`, `stop_command`, `fetch_url`, `web_search`, `todo`, `ask_user` con estado de sesión | `html_cases` del corpus + pruebas con servidores falsos |
+| `internal/history` | Ventana de contexto: estimación de tokens, recorte, poda segura y compactación | `fixtures/agent_corpus.json` (sección `history`, incluye la longitud `repr` de Python) |
+| `internal/agent` | Política de comandos, prompts del sistema, nudges, saneado de historial | `agent_corpus.json` (política, prompts byte a byte, árbol del workspace) |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: aprobaciones, snapshots y `/undo`, bucle del agente, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
+Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: aprobaciones, snapshots y `/undo`, verificadores, bucle del agente, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
 
 ## Diferencias deliberadas con Python
 
@@ -37,6 +39,8 @@ Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: aprobaci
 - `run_command`: la salida se captura con memoria acotada (inicio y final, nunca el total); el timeout y la cancelación matan el árbol entero (`taskkill /T` en Windows, grupo de procesos en Unix). En Windows la salida que no es UTF-8 se decodifica con la página OEM de la consola en vez de la ANSI. `cmd` se lanza con `/d`.
 - `fetch_url` admite los juegos de caracteres UTF-8, ISO-8859-1 y Windows-1252; otros se leen como UTF-8 con sustitución. Sigue sin bloquear direcciones locales o internas (igual que Python): las aprobaciones del agente son la defensa.
 - `todo` y `ask_user` viven en el `Toolbox` y avisan a la interfaz por callbacks (`OnTodo`, `AskUser`): la capa Bubble Tea los conectará.
+- Política de comandos: un prefijo vacío o solo de espacios no permite nada (en Python actuaba de comodín).
+- La firma de repetición de llamadas (`MAX_REPEATED_CALLS`) usará un hash del JSON canónico completo en vez de los primeros 400 caracteres.
 - `read_file` de PDF y Word devuelve «aún no disponible» hasta decidir la biblioteca de extracción.
 
 ## Desarrollo
