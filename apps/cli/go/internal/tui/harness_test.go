@@ -205,6 +205,8 @@ func (h *harness) key(s string) {
 		msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 	case "tab":
 		msg = tea.KeyPressMsg{Code: tea.KeyTab}
+	case "backspace":
+		msg = tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "up":
 		msg = tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":

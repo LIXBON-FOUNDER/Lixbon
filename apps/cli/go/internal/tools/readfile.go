@@ -3,9 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"unicode/utf8"
+
+	"lixbon.com/cli/internal/documents"
 )
 
 const truncatedLineMark = "…[línea truncada]"
@@ -29,7 +32,11 @@ func ReadFile(ctx context.Context, root, relPath string, startLine, endLine int)
 		return fmt.Sprintf("[imagen] %s (%d kB): se te adjunta como imagen en el siguiente mensaje para que la veas directamente.",
 			info.Name(), info.Size()/1024), nil
 	case ".pdf", ".docx":
-		return fmt.Sprintf("[no disponible] %s: el CLI Go aún no extrae texto de %s.", info.Name(), ext), nil
+		text, err := documentText(target, ext)
+		if err != nil {
+			return "", err
+		}
+		return readLines(ctx, strings.NewReader(text), startLine, endLine)
 	}
 	if isBinary(target) {
 		return fmt.Sprintf("[binario] %s (%s): no es texto ni un formato que sepa leer (pdf, docx, png/jpg/webp).",
@@ -40,8 +47,18 @@ func ReadFile(ctx context.Context, root, relPath string, startLine, endLine int)
 		return "", err
 	}
 	defer f.Close()
-	reader := newLineReader(f, maxLineBytes, true)
+	return readLines(ctx, f, startLine, endLine)
+}
 
+func documentText(path, ext string) (string, error) {
+	if ext == ".pdf" {
+		return documents.PDFText(path)
+	}
+	return documents.DocxText(path)
+}
+
+func readLines(ctx context.Context, r io.Reader, startLine, endLine int) (string, error) {
+	reader := newLineReader(r, maxLineBytes, true)
 	if startLine != 0 || endLine != 0 {
 		return readRange(ctx, reader, startLine, endLine)
 	}

@@ -33,7 +33,7 @@ type ChatRequest struct {
 // rechazan los parámetros desconocidos (conversation_id, client_id, source…).
 func (r ChatRequest) generic() map[string]any {
 	body := map[string]any{
-		"model": r.Model, "messages": r.Messages, "stream": true,
+		"model": r.Model, "messages": openAIVision(r.Messages), "stream": true,
 		"stream_options": map[string]any{"include_usage": true},
 	}
 	if len(r.Tools) > 0 {
@@ -139,7 +139,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []map[string]a
 		"client_id": clientID, "title": "interno", "source": "cli",
 	}
 	if c.Generic {
-		payload = map[string]any{"model": model, "messages": messages}
+		payload = map[string]any{"model": model, "messages": openAIVision(messages)}
 	}
 	var data struct {
 		Choices []struct {

@@ -316,3 +316,34 @@ func TestChatWithoutOnceAndUnknownCommand(t *testing.T) {
 		t.Fatalf("flag desconocida debe dar 2, dio %d", code)
 	}
 }
+
+func TestChatOnceAttachesAtPathFiles(t *testing.T) {
+	g := newFakeGateway(t)
+	g.chat = sseHandler(delta("leído"))
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "datos.txt"), []byte("cinco\n"), 0o644)
+	t.Chdir(root)
+	h := newHarness(t, g, map[string]any{"api_key": "k", "model": "qwen"})
+	if code := h.run("chat", "--once", "resume @datos.txt"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.errOut)
+	}
+	content := g.chatBody["messages"].([]any)[0].(map[string]any)["content"].(string)
+	if !strings.Contains(content, "resume datos.txt") || !strings.Contains(content, "Archivo adjunto `datos.txt`") || !strings.Contains(content, "cinco") {
+		t.Fatalf("contenido: %q", content)
+	}
+	if !strings.Contains(h.errOut.String(), "adjuntó datos.txt") {
+		t.Fatalf("stderr: %q", h.errOut)
+	}
+}
+
+func TestChatOnceRefusesAMessageWhoseOnlyAttachmentFails(t *testing.T) {
+	g := newFakeGateway(t)
+	t.Chdir(t.TempDir())
+	h := newHarness(t, g, map[string]any{"api_key": "k", "model": "qwen"})
+	if code := h.run("chat", "--once", "@fantasma.png"); code == 0 {
+		t.Fatal("debe fallar sin enviar nada")
+	}
+	if g.chatBody != nil || !strings.Contains(h.errOut.String(), "No existe la imagen: fantasma.png") {
+		t.Fatalf("stderr %q, cuerpo %v", h.errOut, g.chatBody)
+	}
+}

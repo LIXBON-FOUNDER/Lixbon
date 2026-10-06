@@ -93,6 +93,10 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdWeb(arg)
 	case "copy":
 		m.cmdCopy()
+	case "image":
+		m.cmdImage(arg)
+	case "paste":
+		m.pasteImage()
 	case "mouse":
 		m.wheel = !m.wheel
 		if m.wheel {

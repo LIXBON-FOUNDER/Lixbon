@@ -140,6 +140,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.scrollBy(-max(1, m.height-6))
 		return m, nil
+	case "alt+v":
+		m.pasteImage()
+		return m, nil
+	case "backspace":
+		if m.dropMarkerBeforeCursor() {
+			return m, nil
+		}
 	case "ctrl+c":
 		return m, m.onInterrupt()
 	case "esc":

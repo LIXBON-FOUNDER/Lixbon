@@ -91,13 +91,14 @@ type Chat struct {
 	ProjectContext string
 	Custom         map[string]workspace.Command
 
-	reserved  []string
-	mu        sync.Mutex
-	persistMu sync.Mutex
-	title     string
-	autotitle bool
-	titling   bool
-	anchor    *anchor
+	reserved      []string
+	pendingImages []string
+	mu            sync.Mutex
+	persistMu     sync.Mutex
+	title         string
+	autotitle     bool
+	titling       bool
+	anchor        *anchor
 }
 
 // New prepara la conversación a partir de la configuración. No hace red.
@@ -405,16 +406,25 @@ func (c *Chat) Send(ctx context.Context, text string, sink Sink) (string, error)
 	if sink == nil {
 		sink = nopSink{}
 	}
+	message, err := c.prepare(text)
+	if err != nil {
+		return "", err
+	}
+	for _, problem := range message.skipped {
+		sink.Note("adjunto omitido: " + problem)
+	}
+	for _, file := range message.files {
+		sink.Note(fmt.Sprintf("adjuntó %s · %d líneas", file.Name, strings.Count(file.Content, "\n")+1))
+	}
 	c.TurnTokens = 0
 	c.Sources = nil
-	c.History = append(c.History, history.User(text))
+	c.History = append(c.History, message.message)
 	prior := len(c.History) - 1
 
 	var answer string
-	var err error
 	switch c.Mode {
 	case ModeDelegate:
-		answer, err = c.delegateTurn(ctx, text, sink)
+		answer, err = c.delegateTurn(ctx, message.text, sink)
 	case ModeAgent:
 		answer, err = c.agentTurn(ctx, sink)
 	default:

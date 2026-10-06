@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -212,5 +214,42 @@ func TestUnavailableAndUnknownTools(t *testing.T) {
 	}
 	if got := Execute(ctx, t.TempDir(), "inventada", nil); got != "[ERROR] Herramienta no soportada: inventada" {
 		t.Errorf("inventada: %q", got)
+	}
+}
+
+func writeDocx(t *testing.T, path, body string) {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("word/document.xml")
+	fmt.Fprintf(w, `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>%s</w:body></w:document>`, body)
+	zw.Close()
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadFileExtractsDocxText(t *testing.T) {
+	root := t.TempDir()
+	writeDocx(t, filepath.Join(root, "informe.docx"),
+		`<w:p><w:r><w:t>uno</w:t></w:r></w:p><w:p><w:r><w:t>dos</w:t></w:r></w:p><w:p><w:r><w:t>tres</w:t></w:r></w:p>`)
+	got, err := ReadFile(context.Background(), root, "informe.docx", 0, 0)
+	if err != nil || got != "uno\ndos\ntres" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	got, err = ReadFile(context.Background(), root, "informe.docx", 2, 3)
+	if err != nil || got != "(líneas 2-3 de 3)\ndos\ntres" {
+		t.Fatalf("rango: %q, %v", got, err)
+	}
+}
+
+func TestReadFileReportsAnUnreadableDocument(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "roto.docx"), []byte("no es un zip"), 0o644)
+	os.WriteFile(filepath.Join(root, "roto.pdf"), []byte("no es un pdf"), 0o644)
+	for _, name := range []string{"roto.docx", "roto.pdf"} {
+		if _, err := ReadFile(context.Background(), root, name, 0, 0); err == nil {
+			t.Fatalf("%s: esperaba un error claro", name)
+		}
 	}
 }
