@@ -33,6 +33,8 @@ import (
 type cmdDoneMsg struct {
 	lines []string
 	apply func(*Model)
+	// then arranca lo que sigue al comando, p. ej. el turno que prepara /visual.
+	then func(*Model) tea.Cmd
 }
 
 // async ejecuta un trabajo lento fuera de la goroutine de la interfaz. Mientras
@@ -58,6 +60,9 @@ func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 		msg.apply(m)
 	}
 	m.refreshContext()
+	if msg.then != nil {
+		return msg.then(m)
+	}
 	if len(m.queue) > 0 && !m.running {
 		next := m.queue[0]
 		m.queue = m.queue[1:]
@@ -93,6 +98,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdWeb(arg)
 	case "copy":
 		m.cmdCopy()
+	case "visual":
+		return m.cmdVisual(arg)
 	case "image":
 		m.cmdImage(arg)
 	case "paste":
@@ -1314,7 +1321,7 @@ func (m *Model) cmdContextWindow(arg string) {
 
 func (m *Model) cmdKey(arg string) tea.Cmd {
 	if arg == "" {
-		m.promptFor("Pega tu API key (lixbon_sk_…)", func(text string) tea.Cmd { return m.applyKey(strings.TrimSpace(text)) })
+		m.promptFor("Pega tu API key (lixbon_sk_…) — con correo y contraseña usa: lixbon setup", func(text string) tea.Cmd { return m.applyKey(strings.TrimSpace(text)) })
 		return nil
 	}
 	return m.applyKey(arg)

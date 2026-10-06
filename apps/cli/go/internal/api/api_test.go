@@ -293,3 +293,21 @@ func TestModelsDetailSurfacesGatewayErrorEntries(t *testing.T) {
 		t.Fatalf("el motivo debe llegar al usuario: %v", err)
 	}
 }
+
+func TestLoginAsksForAnIssuedKeyUnderTheCLIName(t *testing.T) {
+	var body map[string]any
+	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/login" || r.Header.Get("Authorization") != "" {
+			t.Errorf("ruta %s, auth %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		io.WriteString(w, `{"api_key":"lixbon_sk_x"}`)
+	})
+	key, err := c.Login(context.Background(), "a@b.c", "pw")
+	if err != nil || key != "lixbon_sk_x" {
+		t.Fatalf("key %q err %v", key, err)
+	}
+	if body["issue_api_key"] != true || body["key_name"] != "lixbon CLI" || body["email"] != "a@b.c" || body["password"] != "pw" {
+		t.Fatalf("cuerpo: %v", body)
+	}
+}

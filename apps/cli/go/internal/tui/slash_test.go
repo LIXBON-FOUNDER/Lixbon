@@ -436,7 +436,7 @@ func TestDiffAndCommitNeedGit(t *testing.T) {
 
 func TestUnavailableCommandsSayso(t *testing.T) {
 	h := newHarness(t, nil)
-	for _, name := range []string{"remote", "update", "visual"} {
+	for _, name := range []string{"remote", "update"} {
 		h.send("/" + name)
 		contains(t, h.out(), "«/"+name+"» aún no está disponible en el CLI Go.")
 	}

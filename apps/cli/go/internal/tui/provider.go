@@ -17,7 +17,7 @@ import (
 const addProviderValue = "\x00add"
 
 // gatewayOnly son los comandos que dependen de endpoints del gateway Lixbon.
-var gatewayOnly = []string{"usage", "nodes", "key", "login", "logout", "web"}
+var gatewayOnly = []string{"usage", "nodes", "key", "login", "logout", "web", "visual"}
 
 func providerHost(baseURL string) string {
 	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {

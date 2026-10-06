@@ -24,6 +24,7 @@ type gateway struct {
 	bodies []map[string]any
 	steps  []func(w http.ResponseWriter, r *http.Request)
 	title  string
+	mcp    http.HandlerFunc
 }
 
 func (g *gateway) bodyAt(i int) map[string]any {
@@ -75,6 +76,13 @@ func newGateway(t *testing.T, steps ...func(http.ResponseWriter, *http.Request))
 		io.WriteString(w, `{"data":[{"id":"qwen","name":"Qwen"},{"id":"llama","name":"Llama"}]}`)
 	})
 	mux.HandleFunc("/api/model-roles", http.NotFound)
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if g.mcp == nil {
+			http.NotFound(w, r)
+			return
+		}
+		g.mcp(w, r)
+	})
 	mux.HandleFunc("/api/key/info", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"plan":{"name":"Pro"}}`) })
 	mux.HandleFunc("/api/account/usage", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"plan":{"name":"Pro"},"buckets":{"session":{"percent":30},"week":{"unlimited":true}}}`)

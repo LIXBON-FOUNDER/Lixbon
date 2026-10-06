@@ -2,7 +2,10 @@ package chat
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
+	"time"
 
 	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/mcp"
@@ -54,4 +57,37 @@ func (c *Chat) StopMCP() {
 	if c.MCP != nil {
 		c.MCP.Close()
 	}
+}
+
+const visualStartupWait = 15 * time.Second
+
+// VisualPrompt prepara /visual: pide al servidor MCP de Lixbon el prompt que
+// guía al agente por las herramientas visual_*.
+func (c *Chat) VisualPrompt(ctx context.Context, request string) (string, error) {
+	if c.Cfg.APIKey == "" {
+		return "", errors.New("Visuals necesita tu cuenta de Lixbon: inicia sesión con /login.")
+	}
+	c.StartMCP()
+	waitCtx, cancel := context.WithTimeout(ctx, visualStartupWait)
+	c.WaitMCP(waitCtx)
+	cancel()
+	var server *mcp.Server
+	if c.MCP != nil {
+		server, _ = c.MCP.Server(lixbonMCP)
+	}
+	if server == nil {
+		return "", errors.New("No se pudo preparar el servidor MCP de Lixbon. Revisa /mcp.")
+	}
+	if !server.Alive() {
+		reason := server.Err()
+		if reason == "" {
+			reason = "sin respuesta"
+		}
+		return "", fmt.Errorf("No hay conexión con Lixbon Visuals: %s", reason)
+	}
+	text, err := server.GetPrompt(ctx, "visual", map[string]any{"peticion": request})
+	if err != nil {
+		return "", fmt.Errorf("Lixbon Visuals: %v", err)
+	}
+	return text, nil
 }

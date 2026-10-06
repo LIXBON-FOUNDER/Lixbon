@@ -18,6 +18,7 @@ import (
 type App struct {
 	Stdout     io.Writer
 	Stderr     io.Writer
+	Stdin      io.Reader
 	ConfigPath string
 	Hostname   string
 	// Interactive abre el chat de terminal; nil si no hay interfaz disponible.
@@ -33,15 +34,17 @@ func NewApp() (*App, error) {
 	if hostname == "" {
 		hostname = "cli-client"
 	}
-	return &App{Stdout: os.Stdout, Stderr: os.Stderr, ConfigPath: path, Hostname: hostname}, nil
+	return &App{Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, ConfigPath: path, Hostname: hostname}, nil
 }
 
 const usage = `lixbon — asistente de código en tu terminal
 
 Comandos:
   init     Guardar base_url, api_key y modelo
+  setup    Iniciar sesión (interactivo)
   status   Ver configuración local
   models   Listar modelos disponibles
+  usage    Ver uso global de la cuenta
   profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
 `
@@ -61,7 +64,11 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.profile(rest)
 	case "chat", "run", "start":
 		return a.chat(ctx, rest)
-	case "setup", "usage", "update", "ui-demo":
+	case "setup":
+		return a.setup(ctx)
+	case "usage":
+		return a.usageReport(ctx)
+	case "update", "ui-demo":
 		fmt.Fprintf(a.Stderr, "«%s» aún no está disponible en el CLI Go.\n", name)
 		return 1
 	case "-h", "--help", "help":
