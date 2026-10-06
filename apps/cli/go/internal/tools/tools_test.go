@@ -207,8 +207,8 @@ func TestUppercaseExtensionAndDotfiles(t *testing.T) {
 
 func TestUnavailableAndUnknownTools(t *testing.T) {
 	ctx := context.Background()
-	if got := Execute(ctx, t.TempDir(), "write_file", map[string]any{}); !strings.Contains(got, "aún no disponible") {
-		t.Errorf("write_file: %q", got)
+	if got := Execute(ctx, t.TempDir(), "run_command", map[string]any{}); !strings.Contains(got, "aún no disponible") {
+		t.Errorf("run_command: %q", got)
 	}
 	if got := Execute(ctx, t.TempDir(), "inventada", nil); got != "[ERROR] Herramienta no soportada: inventada" {
 		t.Errorf("inventada: %q", got)

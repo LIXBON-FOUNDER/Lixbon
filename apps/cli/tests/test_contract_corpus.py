@@ -58,3 +58,14 @@ def test_workspace_corpus_matches_python_oracle():
         "workspace_corpus.json no coincide con las herramientas de agent.py. "
         "Regenera con: python apps/cli/validation/gen_workspace_corpus.py"
     )
+
+
+def test_edit_corpus_matches_python_oracle():
+    spec = importlib.util.spec_from_file_location(
+        "gen_edit_corpus", CLI_DIR / "validation" / "gen_edit_corpus.py")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    assert generator.CORPUS.read_text(encoding="utf-8") == generator.render(), (
+        "edit_corpus.json no coincide con las herramientas de escritura de agent.py. "
+        "Regenera con: python apps/cli/validation/gen_edit_corpus.py"
+    )

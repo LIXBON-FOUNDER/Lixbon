@@ -97,6 +97,72 @@ func dispatch(ctx context.Context, root, name string, args map[string]any) (stri
 			}
 		}
 		return Search(ctx, root, pattern, path, glob, truthy(args["ignore_case"]), truthy(args["regex"]))
+	case "write_file", "append_file":
+		path, err := textArg(args, "path", "")
+		if err != nil {
+			return "", err
+		}
+		content, err := textArg(args, "content", "")
+		if err != nil {
+			return "", err
+		}
+		if name == "write_file" {
+			return WriteFile(ctx, root, path, content)
+		}
+		return AppendFile(ctx, root, path, content)
+	case "edit_file":
+		path, err := textArg(args, "path", "")
+		if err != nil {
+			return "", err
+		}
+		oldText, err := textArg(args, "old_text", "")
+		if err != nil {
+			return "", err
+		}
+		newText, err := textArg(args, "new_text", "")
+		if err != nil {
+			return "", err
+		}
+		return EditFile(ctx, root, path, oldText, newText, truthy(args["all"]))
+	case "multi_edit":
+		path, err := textArg(args, "path", "")
+		if err != nil {
+			return "", err
+		}
+		return MultiEdit(ctx, root, path, args["edits"])
+	case "insert_at_line":
+		path, err := textArg(args, "path", "")
+		if err != nil {
+			return "", err
+		}
+		line, err := intArg(args, "line")
+		if err != nil {
+			return "", err
+		}
+		content, err := textArg(args, "content", "")
+		if err != nil {
+			return "", err
+		}
+		return InsertAtLine(ctx, root, path, line, content)
+	case "mkdir", "delete_file":
+		path, err := textArg(args, "path", "")
+		if err != nil {
+			return "", err
+		}
+		if name == "mkdir" {
+			return Mkdir(ctx, root, path)
+		}
+		return DeleteFile(ctx, root, path)
+	case "rename_file":
+		src, err := textArg(args, "src", "")
+		if err != nil {
+			return "", err
+		}
+		dst, err := textArg(args, "dst", "")
+		if err != nil {
+			return "", err
+		}
+		return RenameFile(ctx, root, src, dst)
 	}
 	if slicesContains(toolspec.Names(), name) {
 		return "", fmt.Errorf("Herramienta aún no disponible en el CLI Go: %s", name)
@@ -130,6 +196,24 @@ func truthy(v any) bool {
 		return len(x) > 0
 	}
 	return true
+}
+
+// pyStr replica str(valor) para los campos opcionales de una edición.
+func pyStr(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case bool:
+		if x {
+			return "True"
+		}
+		return "False"
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	}
+	return fmt.Sprint(v)
 }
 
 func textArg(args map[string]any, key, def string) (string, error) {
