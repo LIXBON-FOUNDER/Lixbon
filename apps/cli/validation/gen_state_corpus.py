@@ -191,10 +191,24 @@ def command_cases() -> dict:
     }
 
 
+MATCH_PREFIXES = ["", "h", "mo", "mode", "c", "co", "u", "x", "MODE", "re", "wo", "con", "s", "p"]
+
+
+def command_catalog() -> dict:
+    return {
+        "groups": list(commands.COMMAND_GROUPS),
+        "specs": [list(spec) for spec in commands.COMMAND_SPECS],
+        "ordered": [spec[0] for spec in commands.COMMAND_ORDER],
+        "name_width": commands.COMMAND_NAME_WIDTH,
+        "matches": {p: [spec[0] for spec in commands.command_matches(p)] for p in MATCH_PREFIXES},
+    }
+
+
 def build() -> dict:
     return {
         "version": 1,
         "oracle": "apps/cli/lixbon_cli/sessions.py y commands.py",
+        "catalog": command_catalog(),
         "sessions": session_cases(),
         "relative_time": relative_cases(),
         "titles": title_cases(),

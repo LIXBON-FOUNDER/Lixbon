@@ -73,6 +73,9 @@ const (
 	EventActionResult EventKind = "result"
 	EventReadGroup    EventKind = "read_group"
 	EventRescued      EventKind = "rescued"
+	// EventStep marca el inicio de un paso del modelo: la interfaz cierra con
+	// él lo que llevaba del paso anterior.
+	EventStep EventKind = "step"
 )
 
 // Event es lo que el bucle cuenta a la interfaz; no sabe cómo se pinta.

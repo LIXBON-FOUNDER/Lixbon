@@ -88,6 +88,7 @@ type Chat struct {
 	ProjectContext string
 	Custom         map[string]workspace.Command
 
+	reserved  []string
 	mu        sync.Mutex
 	persistMu sync.Mutex
 	title     string
@@ -136,7 +137,7 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 	s.ContextWindow = cfg.ContextWindow
 	s.ProjectContext = c.ProjectContext
 	s.OnAllowedCommands = c.saveAllowedCommands
-	s.Ask = c.askQuiet
+	s.Ask = c.AskQuiet
 	s.Model = c.Model
 	c.Session = s
 	return c, nil
@@ -160,9 +161,25 @@ func (c *Chat) SetTitle(title string) {
 	c.mu.Unlock()
 }
 
+// SetWorkspace cambia la carpeta de trabajo para esta sesión (no se guarda):
+// recarga LIXBON.md y los comandos propios del proyecto.
+func (c *Chat) SetWorkspace(path string) {
+	c.Workspace = path
+	c.Toolbox.Root = path
+	c.Session.Workspace = path
+	c.ProjectContext = workspace.ProjectContext(path)
+	c.Session.ProjectContext = c.ProjectContext
+	if c.Custom != nil {
+		reserved := make([]string, 0, len(c.reserved))
+		reserved = append(reserved, c.reserved...)
+		c.LoadCustomCommands(reserved)
+	}
+}
+
 // LoadCustomCommands lee los comandos propios del usuario y del proyecto.
 // reserved son los nombres de los comandos del CLI, que nunca se pisan.
 func (c *Chat) LoadCustomCommands(reserved []string) {
+	c.reserved = reserved
 	c.Custom = workspace.LoadCommands(c.Workspace, filepath.Dir(c.ConfigPath), reserved)
 }
 
@@ -445,16 +462,17 @@ func (c *Chat) autoCompact(ctx context.Context, sink Sink) {
 		return
 	}
 	sink.Note("La conversación llena la ventana de contexto: compactando…")
-	if err := c.Compact(ctx); err != nil {
+	if err := c.Compact(ctx, history.CompactKeepRecent); err != nil {
 		sink.Note(fmt.Sprintf("No se pudo compactar (%v).", err))
 	}
 }
 
-// Compact sustituye lo antiguo del historial por un resumen del modelo.
-func (c *Chat) Compact(ctx context.Context) error {
+// Compact sustituye lo antiguo del historial por un resumen del modelo y
+// conserva los últimos keepRecent mensajes.
+func (c *Chat) Compact(ctx context.Context, keepRecent int) error {
 	compacted, err := history.CompactMessages(c.History, func(m []history.Message) (string, error) {
-		return c.askQuiet(ctx, m)
-	}, history.CompactKeepRecent)
+		return c.AskQuiet(ctx, m)
+	}, keepRecent)
 	if err != nil {
 		return err
 	}
@@ -463,8 +481,8 @@ func (c *Chat) Compact(ctx context.Context) error {
 	return nil
 }
 
-// askQuiet es un chat sin streaming ni historial, para trabajo interno.
-func (c *Chat) askQuiet(ctx context.Context, messages []history.Message) (string, error) {
+// AskQuiet es un chat sin streaming ni historial, para trabajo interno.
+func (c *Chat) AskQuiet(ctx context.Context, messages []history.Message) (string, error) {
 	return c.Client.Chat(ctx, c.Model, toMaps(messages), c.ClientID)
 }
 
@@ -488,6 +506,7 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 		if agentMode || c.Session.PlanMode {
 			req.Think = "high"
 		}
+		sink.Event(agent.Event{Kind: agent.EventStep})
 		sentChars := history.PayloadChars(messages, toolList)
 		sentImages := history.ImageCount(messages)
 

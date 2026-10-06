@@ -1,6 +1,410 @@
 {
  "version": 1,
  "oracle": "apps/cli/lixbon_cli/sessions.py y commands.py",
+ "catalog": {
+  "groups": [
+   "conversación",
+   "agente",
+   "cuenta",
+   "sistema"
+  ],
+  "specs": [
+   [
+    "help",
+    "",
+    "Ver todos los comandos",
+    "conversación"
+   ],
+   [
+    "model",
+    "[nombre]",
+    "Cambiar de modelo (sin argumento abre el selector)",
+    "conversación"
+   ],
+   [
+    "mode",
+    "[ask|agent|delegate]",
+    "Cambiar modo de trabajo",
+    "conversación"
+   ],
+   [
+    "new",
+    "",
+    "Empezar una conversación nueva",
+    "conversación"
+   ],
+   [
+    "compact",
+    "",
+    "Compactar la conversación para liberar contexto",
+    "conversación"
+   ],
+   [
+    "history",
+    "[mensajes]",
+    "Ver y reabrir conversaciones anteriores",
+    "conversación"
+   ],
+   [
+    "image",
+    "<ruta>",
+    "Escribir una imagen en el mensaje (también @ruta)",
+    "conversación"
+   ],
+   [
+    "paste",
+    "",
+    "Escribir la imagen del portapapeles en el mensaje (Alt+V)",
+    "conversación"
+   ],
+   [
+    "web",
+    "[auto|on|off]",
+    "Búsqueda web: el modelo decide, siempre o nunca",
+    "conversación"
+   ],
+   [
+    "copy",
+    "",
+    "Copiar la última respuesta al portapapeles",
+    "conversación"
+   ],
+   [
+    "save",
+    "[ruta]",
+    "Guardar la conversación en un archivo Markdown",
+    "conversación"
+   ],
+   [
+    "clear",
+    "",
+    "Vaciar el contexto y empezar de cero",
+    "conversación"
+   ],
+   [
+    "approve",
+    "[on|off]",
+    "Auto-aprobar herramientas del agente",
+    "agente"
+   ],
+   [
+    "plan",
+    "[on|off]",
+    "Modo plan: el agente solo explora y propone, sin tocar nada",
+    "agente"
+   ],
+   [
+    "todo",
+    "",
+    "Ver la lista de pasos del agente",
+    "agente"
+   ],
+   [
+    "tools",
+    "",
+    "Ver las herramientas que puede usar el agente",
+    "agente"
+   ],
+   [
+    "diff",
+    "[ruta]",
+    "Ver los cambios sin confirmar del workspace",
+    "agente"
+   ],
+   [
+    "undo",
+    "",
+    "Revertir los archivos que tocó el último turno del agente",
+    "agente"
+   ],
+   [
+    "ps",
+    "",
+    "Comandos en segundo plano del agente (y pararlos)",
+    "agente"
+   ],
+   [
+    "check",
+    "[on|off]",
+    "Verificar con el linter cada archivo que edita el agente",
+    "agente"
+   ],
+   [
+    "allow",
+    "[comando]",
+    "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)",
+    "agente"
+   ],
+   [
+    "commit",
+    "[mensaje]",
+    "Commit de los cambios con mensaje redactado por el modelo",
+    "agente"
+   ],
+   [
+    "mcp",
+    "",
+    "Servidores MCP conectados y sus herramientas",
+    "agente"
+   ],
+   [
+    "run",
+    "<comando>",
+    "Ejecutar un comando y darle la salida al modelo",
+    "agente"
+   ],
+   [
+    "workspace",
+    "[ruta]",
+    "Carpeta de trabajo del modo agent",
+    "agente"
+   ],
+   [
+    "init",
+    "",
+    "Generar LIXBON.md con el contexto del proyecto",
+    "agente"
+   ],
+   [
+    "visual",
+    "<id o enlace> [stack]",
+    "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)",
+    "agente"
+   ],
+   [
+    "status",
+    "",
+    "Ver estado de la sesión",
+    "cuenta"
+   ],
+   [
+    "cost",
+    "",
+    "Tokens y contexto consumidos en esta sesión",
+    "cuenta"
+   ],
+   [
+    "usage",
+    "",
+    "Ver uso global de la cuenta",
+    "cuenta"
+   ],
+   [
+    "nodes",
+    "",
+    "Ver nodos del clúster",
+    "cuenta"
+   ],
+   [
+    "login",
+    "",
+    "Iniciar sesión de nuevo",
+    "cuenta"
+   ],
+   [
+    "logout",
+    "",
+    "Cerrar la sesión de esta máquina",
+    "cuenta"
+   ],
+   [
+    "key",
+    "<api_key>",
+    "Usar otra API key",
+    "cuenta"
+   ],
+   [
+    "config",
+    "",
+    "Ajustes del CLI en un menú",
+    "sistema"
+   ],
+   [
+    "context-window",
+    "<n>",
+    "Tokens de la ventana de contexto (para la barra)",
+    "sistema"
+   ],
+   [
+    "bar",
+    "[on|off]",
+    "Barra de estado fija al pie de la terminal",
+    "sistema"
+   ],
+   [
+    "doctor",
+    "",
+    "Diagnóstico de terminal, conexión y sesión",
+    "sistema"
+   ],
+   [
+    "remote",
+    "",
+    "Controlar esta sesión desde la app móvil (link + QR)",
+    "sistema"
+   ],
+   [
+    "update",
+    "",
+    "Actualizar el CLI desde el servidor",
+    "sistema"
+   ],
+   [
+    "exit",
+    "",
+    "Salir",
+    "sistema"
+   ]
+  ],
+  "ordered": [
+   "clear",
+   "compact",
+   "copy",
+   "help",
+   "history",
+   "image",
+   "mode",
+   "model",
+   "new",
+   "paste",
+   "save",
+   "web",
+   "allow",
+   "approve",
+   "check",
+   "commit",
+   "diff",
+   "init",
+   "mcp",
+   "plan",
+   "ps",
+   "run",
+   "todo",
+   "tools",
+   "undo",
+   "visual",
+   "workspace",
+   "cost",
+   "key",
+   "login",
+   "logout",
+   "nodes",
+   "status",
+   "usage",
+   "bar",
+   "config",
+   "context-window",
+   "doctor",
+   "exit",
+   "remote",
+   "update"
+  ],
+  "name_width": 15,
+  "matches": {
+   "": [
+    "clear",
+    "compact",
+    "copy",
+    "help",
+    "history",
+    "image",
+    "mode",
+    "model",
+    "new",
+    "paste",
+    "save",
+    "web",
+    "allow",
+    "approve",
+    "check",
+    "commit",
+    "diff",
+    "init",
+    "mcp",
+    "plan",
+    "ps",
+    "run",
+    "todo",
+    "tools",
+    "undo",
+    "visual",
+    "workspace",
+    "cost",
+    "key",
+    "login",
+    "logout",
+    "nodes",
+    "status",
+    "usage",
+    "bar",
+    "config",
+    "context-window",
+    "doctor",
+    "exit",
+    "remote",
+    "update"
+   ],
+   "h": [
+    "help",
+    "history"
+   ],
+   "mo": [
+    "mode",
+    "model"
+   ],
+   "mode": [
+    "mode",
+    "model"
+   ],
+   "c": [
+    "clear",
+    "compact",
+    "copy",
+    "check",
+    "commit",
+    "cost",
+    "config",
+    "context-window"
+   ],
+   "co": [
+    "compact",
+    "copy",
+    "commit",
+    "cost",
+    "config",
+    "context-window"
+   ],
+   "u": [
+    "undo",
+    "usage",
+    "update"
+   ],
+   "x": [],
+   "MODE": [
+    "mode",
+    "model"
+   ],
+   "re": [
+    "remote"
+   ],
+   "wo": [
+    "workspace"
+   ],
+   "con": [
+    "config",
+    "context-window"
+   ],
+   "s": [
+    "save",
+    "status"
+   ],
+   "p": [
+    "paste",
+    "plan",
+    "ps"
+   ]
+  }
+ },
  "sessions": {
   "files": {
    "index.json": "{\n \"sessions\": [\n  {\n   \"id\": \"s-agente\",\n   \"title\": \"crea una API REST\",\n   \"created_at\": 1700000010.0,\n   \"updated_at\": 1700000150.0,\n   \"model\": \"qwen\",\n   \"mode\": \"agent\",\n   \"workspace\": \"/proj\",\n   \"tokens\": 2000,\n   \"messages\": 4,\n   \"user_messages\": 2,\n   \"tools\": 2\n  },\n  {\n   \"id\": \"s-solo-tool-result-primero\",\n   \"title\": \"pregunta real\",\n   \"created_at\": 1700000130.0,\n   \"updated_at\": 1700000140.0,\n   \"model\": \"\",\n   \"mode\": \"\",\n   \"workspace\": \"\",\n   \"tokens\": 0,\n   \"messages\": 2,\n   \"user_messages\": 2,\n   \"tools\": 0\n  },\n  {\n   \"id\": \"s-titulo-largo\",\n   \"title\": \"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…\",\n   \"created_at\": 1700000110.0,\n   \"updated_at\": 1700000120.0,\n   \"model\": \"\",\n   \"mode\": \"\",\n   \"workspace\": \"\",\n   \"tokens\": 0,\n   \"messages\": 1,\n   \"user_messages\": 1,\n   \"tools\": 0\n  },\n  {\n   \"id\": \"s-unicode\",\n   \"title\": \"canción 🎵 con espacios y salto\",\n   \"created_at\": 1700000090.0,\n   \"updated_at\": 1700000100.0,\n   \"model\": \"\",\n   \"mode\": \"\",\n   \"workspace\": \"C:\\\\proj\\\\ñandú\",\n   \"tokens\": 0,\n   \"messages\": 2,\n   \"user_messages\": 1,\n   \"tools\": 0\n  },\n  {\n   \"id\": \"s-titulo-fijo\",\n   \"title\": \"Mi título\",\n   \"created_at\": 1700000070.0,\n   \"updated_at\": 1700000080.0,\n   \"model\": \"m\",\n   \"mode\": \"ask\",\n   \"workspace\": \"\",\n   \"tokens\": 0,\n   \"messages\": 2,\n   \"user_messages\": 1,\n   \"tools\": 0\n  },\n  {\n   \"id\": \"s-imagen\",\n   \"title\": \"mira esto\",\n   \"created_at\": 1700000050.0,\n   \"updated_at\": 1700000060.0,\n   \"model\": \"\",\n   \"mode\": \"\",\n   \"workspace\": \"\",\n   \"tokens\": 0,\n   \"messages\": 1,\n   \"user_messages\": 1,\n   \"tools\": 0\n  },\n  {\n   \"id\": \"s-largo\",\n   \"title\": \"lee el archivo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…\",\n   \"created_at\": 1700000030.0,\n   \"updated_at\": 1700000040.0,\n   \"model\": \"llama\",\n   \"mode\": \"\",\n   \"workspace\": \"\",\n   \"tokens\": 0,\n   \"messages\": 2,\n   \"user_messages\": 1,\n   \"tools\": 0\n  }\n ]\n}",

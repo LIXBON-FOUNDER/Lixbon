@@ -20,13 +20,15 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/agent` | Bucle del turno (pasos, reintentos, rescate del razonamiento, repeticiones), aprobaciones, vista previa y diff, checkpoints/undo, verificadores, política de comandos y prompts | `agent_corpus.json` (política, prompts byte a byte, árbol, diff con `SequenceMatcher`, vista previa, resúmenes) + 50 pruebas del bucle con un modelo falso |
 | `internal/session` | Historial persistente en `~/.lixbon/sessions/` (mismo formato que Python), retención de 200, índice con candado y auto-reparación | `state_corpus.json`: Go lee lo que escribió Python y reproduce sus archivos con el mismo reloj |
 | `internal/workspace` | `LIXBON.md` / `lixbon.md` y comandos propios (`.lixbon/commands/*.md`, `$ARGUMENTS`) | `state_corpus.json` |
+| `internal/chat` | Estado de la conversación sin interfaz: modelo, modo, sesión, compactación, título automático, contexto de workspace | pruebas contra un gateway falso |
+| `internal/tui` | Interfaz interactiva con **Bubble Tea v2** (inline): caja de entrada multilínea, menú `/`, aprobaciones con diff, `/undo`, `/plan`, `/history`… | pruebas del modelo y de un programa real con E/S inyectada; catálogo de comandos contrastado con `state_corpus.json` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway). Pendiente: chat interactivo con Bubble Tea (aprobaciones con diff, `/undo`, `/plan`…), `LIXBON.md` y comandos personalizados, reanudar sesiones (`/history`), MCP, remoto, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
+Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). Comandos `/` ya disponibles: `help model mode compact history web copy save approve plan todo tools diff undo ps check allow workspace run commit init status cost usage nodes context key logout` y los personalizados de `.lixbon/commands/`. Pendiente: `/image /paste /visual /mcp /config /doctor /remote /update`, adjuntos `@ruta`, MCP, remoto, `setup`, `update`. Los paquetes de este módulo no dependen de la UI.
 
 ## Diferencias deliberadas con Python
 
-- `chat --once` respeta `mode` (por defecto `agent`). Carga `LIXBON.md` y guarda la sesión en `~/.lixbon/sessions/`; aún sin adjuntos `@ruta` ni comandos personalizados (se cargan, pero la barra `/` llega con la interfaz).
+- `chat --once` respeta `mode` (por defecto `agent`). Carga `LIXBON.md` y guarda la sesión en `~/.lixbon/sessions/`; aún sin adjuntos `@ruta`.
 - En `--once` no hay nadie al teclado: las ediciones se aprueban según `auto_approve_tools` y los comandos solo si están en `allowed_commands`, `auto_run_commands` o se pasa `--auto-run` (opción propia del CLI Go); lo rechazado se explica en stderr y el modelo recibe «Ejecución cancelada por el usuario».
 - El registro de acciones del agente va a stderr y la respuesta final a stdout, para poder encadenar el comando.
 - Los errores de `chat` van a stderr; `status` y `models` siguen imprimiendo a stdout como Python.
@@ -36,9 +38,7 @@ Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la
 
 - `search` usa un recorrido propio en Go (poda carpetas ignoradas, lee por líneas, respeta cancelación) en lugar de ripgrep; el orden de salida es el léxico del recorrido.
 - Las lecturas están acotadas: líneas de más de 1 MiB se recortan, un rango de más de 120.000 caracteres se corta con aviso, y `end_line` negativo se trata como ausente.
-- Las escrituras son atómicas (temporal + renombrado) y conservan los bytes y el modo del archivo: `write_file` no convierte `
-` en `
-` en Windows como hace Python.
+- Las escrituras son atómicas (temporal + renombrado) y conservan los bytes y el modo del archivo: `write_file` no convierte `\n` en `\r\n` en Windows como hace Python.
 - `edit_file` e `insert_at_line` se niegan a editar archivos que no son UTF-8 válido (Python los reescribía con U+FFFD); `delete_file` se niega a borrar la raíz del workspace; `multi_edit` sobre un archivo inexistente dice «no encontrado» en vez de contarlo como éxito.
 - `run_command`: la salida se captura con memoria acotada (inicio y final, nunca el total); el timeout y la cancelación matan el árbol entero (`taskkill /T` en Windows, grupo de procesos en Unix). En Windows la salida que no es UTF-8 se decodifica con la página OEM de la consola en vez de la ANSI. `cmd` se lanza con `/d`.
 - `fetch_url` admite los juegos de caracteres UTF-8, ISO-8859-1 y Windows-1252; otros se leen como UTF-8 con sustitución. Sigue sin bloquear direcciones locales o internas (igual que Python): las aprobaciones del agente son la defensa.

@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 
+	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/cli"
+	"lixbon.com/cli/internal/tui"
 )
 
 func main() {
@@ -14,6 +16,9 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lixbon: %v\n", err)
 		os.Exit(1)
+	}
+	app.Interactive = func(ctx context.Context, opts chat.Options) int {
+		return tui.Interactive(ctx, app.Stdout, app.Stderr, app.ConfigPath, opts)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
