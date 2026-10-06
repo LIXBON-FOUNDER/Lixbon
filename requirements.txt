@@ -16,3 +16,4 @@ python-docx
 ddgs
 PyJWT[crypto]
 segno
+PyYAML

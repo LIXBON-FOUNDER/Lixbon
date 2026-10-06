@@ -57,7 +57,10 @@ def sync_versions_to_db():
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-VALID_PRODUCTS = ("desktop", "android")
+# `desktop` es el instalador de Windows (histórico). En macOS van dos filas con
+# la misma versión: el .dmg que descarga la gente (`desktop-mac`) y el
+# .app.tar.gz firmado que consume el updater de Tauri (`desktop-mac-updater`).
+VALID_PRODUCTS = ("desktop", "android", "desktop-mac", "desktop-mac-updater")
 
 
 def _public_download_url(request: Request, version: str, channel: str,
@@ -164,16 +167,27 @@ async def get_tauri_manifest(channel: str, request: Request):
         raise HTTPException(status_code=404, detail="No se encontró versión para este canal")
 
     notes = "\n".join(f"- {item}" for item in latest["changelog"])
+    platforms = {
+        "windows-x86_64": {
+            "url": _public_download_url(request, latest["version"], channel),
+            "signature": latest["checksum_sha256"] or "",
+        }
+    }
+    # macOS: solo si el bundle del updater es de ESTA versión; si no, el
+    # updater de Tauri anunciaría una versión que ese SO no puede descargar.
+    mac = db.get_latest_version(channel=channel, product="desktop-mac-updater")
+    if mac and mac["version"] == latest["version"] and mac["checksum_sha256"]:
+        entry = {
+            "url": _public_download_url(request, mac["version"], channel, "desktop-mac-updater"),
+            "signature": mac["checksum_sha256"],
+        }
+        platforms["darwin-aarch64"] = entry
+        platforms["darwin-x86_64"] = entry
     return {
         "version": latest["version"],
         "notes": notes,
         "pub_date": latest["created_at"],
-        "platforms": {
-            "windows-x86_64": {
-                "url": _public_download_url(request, latest["version"], channel),
-                "signature": latest["checksum_sha256"] or "",
-            }
-        },
+        "platforms": platforms,
     }
 
 
@@ -248,7 +262,8 @@ async def api_upload_version(
     except Exception:
         changelog_list = [changelog]
 
-    suffix = Path(file.filename or "").suffix or ".bin"
+    nombre = file.filename or ""
+    suffix = ".tar.gz" if nombre.endswith(".tar.gz") else (Path(nombre).suffix or ".bin")
     # El nombre histórico del desktop no cambia (hay URLs de R2 ya registradas
     # con ese patrón); los demás productos llevan el suyo en el nombre.
     if product == "desktop":

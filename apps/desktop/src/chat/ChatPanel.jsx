@@ -10,6 +10,8 @@ import { ApprovalCard } from './ApprovalCard';
 import { QuestionCard } from './QuestionCard';
 import { ClaudeDock } from './ClaudeDock';
 import { LogoMark, ClaudeMark } from '../components/Logo';
+import { MascotaAgente, PistaAgente } from './MascotaAgente';
+import { ObraAgente, useModoObra } from './ObraAgente';
 
 /** Agrupa las filas de herramienta CONSECUTIVAS en un ToolGroup plegable;
     el resto se renderiza como mensajes normales. */
@@ -51,6 +53,7 @@ export function ChatPanel({ wide = false }) {
   const compacting = useChatStore((s) => s.ccCompacting);
   const background = useChatStore((s) => s.ccBackground);
   const activeKey = useSessionsStore((s) => s.activeKey);
+  const modoObra = useModoObra();
   const feedRef = useRef(null);
   const stickToBottom = useRef(true);
   const restoredKey = useRef(null);
@@ -99,6 +102,16 @@ export function ChatPanel({ wide = false }) {
       <ApprovalCard />
       <QuestionCard />
       {engine === 'claude' && <ClaudeDock />}
+      {/* La mascota se apoya en el borde superior del compositor, a la
+          derecha; en el panel lateral del Editor, en pequeño. */}
+      <div className="mascota-anclaje">
+        {modoObra ? <ObraAgente tam={wide ? 96 : 48} /> : (
+          <>
+            <PistaAgente tam={wide ? 96 : 48} />
+            <MascotaAgente tam={wide ? 96 : 48} />
+          </>
+        )}
+      </div>
       <ChatInputBar />
     </div>
   );

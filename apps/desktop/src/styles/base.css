@@ -21,13 +21,12 @@
 }
 
 /* ── Tokens ──────────────────────────────────────────────────────────── */
-/* Solo tema oscuro. La jerarquía la dan seis peldaños de relleno y la
+/* Oscuro por defecto y claro bajo [data-theme='light']. La jerarquía la dan seis peldaños de relleno y la
    elevación del panel con foco: sin bordes ni sombras. Los nombres heredados
    (--bg-secondary, --ink-50…) se mantienen porque todo el CSS legacy los usa. */
 
 :root,
-[data-theme='dark'],
-[data-theme='light'] {
+[data-theme='dark'] {
   color-scheme: dark;
 
   --surface-0: #070707;
@@ -63,6 +62,7 @@
   --on-accent: #0B0B0B;
   --primary: #F2F2EE;
   --on-primary: #0B0B0B;
+  --on-primary-rgb: 23, 23, 19;
   --run-ink: #D4E37E;
   --info: #8EC5FF;
   --scrim: rgba(4, 4, 4, 0.62);
@@ -74,6 +74,23 @@
   --good-soft: rgba(134, 214, 148, 0.12);
   --warn: #E8C872;
   --warn-soft: rgba(232, 200, 114, 0.14);
+  --accent-rgb: 198, 214, 110;
+  --good-rgb: 134, 214, 148;
+  --danger-rgb: 240, 140, 124;
+  --warn-rgb: 232, 200, 114;
+  --info-rgb: 142, 197, 255;
+  --merged: #B69CFF;
+  --merged-rgb: 182, 156, 255;
+  --diff-add-ink: #B4E4BC;
+  --diff-del-ink: #F4B3A8;
+  --ink-dim: #6A6A65;
+  --ink-mid: #8A8A84;
+  --claude: #D97757;
+  --claude-ink: #E8A38B;
+  --claude-rgb: 217, 119, 87;
+  --claude-surface: #221D1B;
+  --claude-surface-hi: #26211F;
+  --claude-surface-focus: #2B2522;
 
   --font-brand: 'Bruno Ace SC', sans-serif;
   --font-ui: 'Hanken Grotesk Variable', 'Hanken Grotesk', system-ui, sans-serif;
@@ -87,6 +104,64 @@
   --gap: 6px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --spring: cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --surface-0: #E6E7DD;
+  --surface-1: #F3F4EB;
+  --surface-2: #F8F9F2;
+  --surface-3: #ECEDE2;
+  --surface-4: #E4E5D8;
+  --surface-5: #DADBCB;
+  --surface-6: #CFD0BE;
+  --code-bg: #FBFBF6;
+
+  --ink: #171713;
+  --ink-rgb: 23, 23, 19;
+  --ink-body: #2E2E28;
+  --ink-soft: #5C5C54;
+  --ink-70: #45453F;
+  --ink-50: #66665E;
+  --ink-35: #85857B;
+  --ink-faint: #B0B0A4;
+
+  --accent: #5E7014;
+  --accent-deep: #4A5A0C;
+  --accent-soft: rgba(94, 112, 20, 0.12);
+  --on-accent: #FFFFFF;
+  --primary: #171713;
+  --on-primary: #FFFFFF;
+  --on-primary-rgb: 255, 255, 255;
+  --run-ink: #3F5410;
+  --info: #1F6FC2;
+  --scrim: rgba(23, 23, 19, 0.28);
+  --shadow-rgb: 23, 23, 19;
+  --danger: #B3321F;
+  --danger-strong: #C0392B;
+  --danger-soft: rgba(179, 50, 31, 0.1);
+  --good: #1E7A38;
+  --good-soft: rgba(30, 122, 56, 0.12);
+  --warn: #8F6410;
+  --warn-soft: rgba(143, 100, 16, 0.12);
+  --accent-rgb: 94, 112, 20;
+  --good-rgb: 30, 122, 56;
+  --danger-rgb: 179, 50, 31;
+  --warn-rgb: 143, 100, 16;
+  --info-rgb: 31, 111, 194;
+  --merged: #6B45C8;
+  --merged-rgb: 107, 69, 200;
+  --diff-add-ink: #1E6B35;
+  --diff-del-ink: #9E2F20;
+  --ink-dim: #6E6E64;
+  --ink-mid: #5C5C54;
+  --claude: #C4562F;
+  --claude-ink: #A6431F;
+  --claude-rgb: 196, 86, 47;
+  --claude-surface: #F6E9E3;
+  --claude-surface-hi: #F3E4DC;
+  --claude-surface-focus: #F0DDD3;
 }
 
 /* ── Error boundary (evita la pantalla en blanco) ────────────────────── */

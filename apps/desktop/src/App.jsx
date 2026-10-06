@@ -19,6 +19,13 @@ export default function App() {
     hydrate();
   }, [hydrate]);
 
+  useEffect(() => {
+    if (!apiKey) return undefined;
+    const refresh = () => useAppStore.getState().refreshUser();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [apiKey]);
+
   // La ventana no tiene decoraciones del SO: la TitleBar propia va siempre,
   // en modo minimal (solo logo + controles) hasta que haya sesión.
   const renderBody = () => {

@@ -11,10 +11,10 @@
 .terminal-tab__n { font-family: var(--font-mono); font-size: 10px; color: var(--ink-35); }
 .terminal-tab__close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; color: var(--ink-35); opacity: 0; transition: opacity 0.15s ease; }
 .terminal-tab:hover .terminal-tab__close, .terminal-tab.is-active .terminal-tab__close { opacity: 1; }
-.terminal-tab__close:hover { color: var(--ink); background: rgba(242, 242, 238, 0.08); }
+.terminal-tab__close:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.08); }
 .terminal-tabs__shell { flex-shrink: 0; }
 
-.terminal-body { flex: 1; min-height: 0; position: relative; margin: 0 8px 8px; border-radius: var(--radius); background: #111111; overflow: hidden; }
+.terminal-body { flex: 1; min-height: 0; position: relative; margin: 0 8px 8px; border-radius: var(--radius); background: var(--surface-1); overflow: hidden; }
 :root[data-theme="light"] .terminal-body { background: #f6f7ed; }
 .terminal-instance { position: absolute; inset: 0; padding: 10px 6px 6px 14px; }
 .terminal-instance .xterm, .terminal-instance .xterm-viewport { height: 100% !important; }

@@ -244,6 +244,58 @@ SETTINGS_DEFAULTS: dict[str, bool] = {
 }
 
 
+# La mascota (Gael y Leya) tiene sus propias preferencias, guardadas con la
+# cuenta (y no en cada equipo): `mascot` las de la web y `mascot_ide` las del
+# IDE de escritorio. Son independientes; comparten forma y valores válidos.
+MASCOT_DEFAULTS: dict[str, Any] = {
+    "activa": False,       # mostrarla en todas partes; la activa el usuario
+    "personaje": "gael",   # gael | leya | ambos (se turnan)
+    "trabajo": "auto",     # IDE: escribir | conducir | auto (según la tarea)
+    "preguntar": True,     # IDE: proponer el siguiente paso al terminar
+    "flotante": True,      # IDE: aviso sobre otras apps al terminar
+    "latigo": True,        # IDE: "tlabaja" si no vuelves
+    "latigo_min": 2,
+    "dormir": True,        # siesta con inactividad
+    "dormir_min": 5,
+    "guia": True,          # web: acompaña la lectura en lixbon.com, docs y guías
+    "reducir": False,      # sin animaciones
+    # IDE: forma de los agentes hijos del orquestador por rol (el color lo da el rol).
+    "obrero_explorador": "gota",
+    "obrero_implementador": "robot",
+    "obrero_revisor": "gota",
+    "obrero_escalado": "monitor",
+}
+_FORMAS_OBRERO = ("robot", "monitor", "gota")
+_MASCOT_ENUMS = {
+    "personaje": ("gael", "leya", "ambos"),
+    "trabajo": ("escribir", "conducir", "auto"),
+    **{f"obrero_{rol}": _FORMAS_OBRERO for rol in ("explorador", "implementador", "revisor", "escalado")},
+}
+_MASCOT_RANGES = {"latigo_min": (1, 30), "dormir_min": (1, 60)}
+MASCOT_KEYS = ("mascot", "mascot_ide")
+
+
+def _clean_mascot(raw: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Mezcla `raw` sobre `base` quedándose solo con claves y valores válidos."""
+    out = dict(base or MASCOT_DEFAULTS)
+    if not isinstance(raw, dict):
+        return out
+    for k, default in MASCOT_DEFAULTS.items():
+        if k not in raw:
+            continue
+        v = raw[k]
+        if k in _MASCOT_ENUMS:
+            if v in _MASCOT_ENUMS[k]:
+                out[k] = v
+        elif k in _MASCOT_RANGES:
+            lo, hi = _MASCOT_RANGES[k]
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = max(lo, min(hi, int(v)))
+        elif isinstance(default, bool) and isinstance(v, bool):
+            out[k] = v
+    return out
+
+
 def _parse_settings(raw: str | None) -> dict[str, Any]:
     try:
         stored = _json.loads(raw or "{}")
@@ -251,7 +303,11 @@ def _parse_settings(raw: str | None) -> dict[str, Any]:
         stored = {}
     if not isinstance(stored, dict):
         stored = {}
-    return {k: bool(stored.get(k, v)) for k, v in SETTINGS_DEFAULTS.items()}
+    settings: dict[str, Any] = {k: bool(stored.get(k, v)) for k, v in SETTINGS_DEFAULTS.items()}
+    # La web y el IDE tienen cada uno sus ajustes de mascota, independientes.
+    for clave in MASCOT_KEYS:
+        settings[clave] = _clean_mascot(stored.get(clave))
+    return settings
 
 
 def get_user_settings(user_id: int) -> dict[str, Any]:
@@ -269,6 +325,9 @@ def update_user_settings(user_id: int, patch: dict[str, Any]) -> dict[str, Any]:
             return dict(SETTINGS_DEFAULTS)
         current = _parse_settings(user.settings_json)
         current.update({k: bool(v) for k, v in patch.items() if k in SETTINGS_DEFAULTS})
+        for clave in MASCOT_KEYS:
+            if clave in patch:
+                current[clave] = _clean_mascot(patch[clave], current[clave])
         user.settings_json = _json.dumps(current)
         return current
 
@@ -694,6 +753,10 @@ def _plan_to_dict(p: Plan) -> dict[str, Any]:
         "sort_order": p.sort_order,
         "is_active": bool(p.is_active),
         "stripe_price_id": p.stripe_price_id,
+        "visuals_max": p.visuals_max,
+        "visuals_max_mb": p.visuals_max_mb,
+        "visual_renders_per_day": p.visual_renders_per_day,
+        "visual_video_renders_per_day": p.visual_video_renders_per_day,
     }
 
 
@@ -1961,6 +2024,7 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
         # de dónde salió cada conversación cuando lista todas juntas.
         # Las legacy (NULL) son de la web, igual que en el filtro de listado.
         "source": c.source or "web",
+        "archived": bool(c.archived),
         "created_at": c.created_at,
         "updated_at": c.updated_at,
     }
@@ -1968,10 +2032,11 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
 
 def list_conversations(
     user_id: int, limit: int = 50, offset: int = 0, q: str | None = None,
-    source: str | None = None,
+    source: str | None = None, archived: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Conversaciones del usuario, más recientes primero. `q` busca en el título.
-    `source` filtra por superficie (web/ide/cli); 'web' incluye las legacy (NULL)."""
+    `source` filtra por superficie (web/ide/cli); 'web' incluye las legacy (NULL).
+    `archived` None = todas."""
     with get_session() as s:
         stmt = (
             select(Conversation)
@@ -1986,7 +2051,39 @@ def list_conversations(
             stmt = stmt.where(Conversation.source == source)
         if q:
             stmt = stmt.where(Conversation.title.ilike(f"%{q}%"))
+        if archived is not None:
+            stmt = stmt.where(Conversation.archived == int(archived))
         return [_conversation_to_dict(c) for c in s.scalars(stmt).all()]
+
+
+def set_conversation_archived(conversation_id: str, user_id: int, archived: bool) -> bool:
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        conv.archived = int(archived)
+        # Desarchivar cuenta como actividad: si no, una vieja se purgaría al instante.
+        if not archived:
+            conv.updated_at = now_iso()
+        return True
+
+
+def purge_inactive_conversations(user_id: int, source: str, days: int) -> int:
+    """Borra las conversaciones sin archivar de `source` sin actividad en `days` días."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_session() as s:
+        stale = select(Conversation.id).where(
+            Conversation.user_id == user_id,
+            Conversation.source == source,
+            Conversation.archived == 0,
+            Conversation.updated_at < cutoff,
+        )
+        ids = list(s.scalars(stale).all())
+        if not ids:
+            return 0
+        s.execute(delete(Message).where(Message.conversation_id.in_(ids)))
+        s.execute(delete(Conversation).where(Conversation.id.in_(ids)))
+        return len(ids)
 
 
 def get_conversation(conversation_id: str, user_id: int) -> dict[str, Any] | None:

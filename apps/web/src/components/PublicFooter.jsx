@@ -8,7 +8,7 @@ import { useRevelar } from '../hooks/useRevelar';
 import { useT } from '../i18n/useT';
 import { Logo } from './Logo';
 
-const SOPORTE = 'soporte@lixbon.com';
+const SOPORTE = 'support@lixbon.com';
 
 export function PublicFooter() {
   const t = useT('nav');
@@ -33,6 +33,7 @@ export function PublicFooter() {
         { to: '/docs', label: t('docs') },
         { to: '/guides', label: t('guides') },
         { to: '/apps', label: t('apps') },
+        { to: '/skills', label: t('skills') },
         { to: '/news', label: t('footerNews') },
         { to: '/status', label: t('footerStatus') },
       ],

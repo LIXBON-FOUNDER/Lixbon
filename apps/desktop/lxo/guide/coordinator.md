@@ -11,7 +11,10 @@ su worktree, y trabaja en autónomo.
 1. `lxo status` comprueba que el orquestador está activo.
 2. `lxo run create --objective "<objetivo del usuario en una frase>" --agent <tu agente: claude|codex|lixbon…>`
    Cada objetivo nuevo del usuario (cada /orquestar) es un run nuevo, aunque `lxo status` diga que
-   ya coordinas otro. A partir de ahí eres el coordinador de ese run.
+   ya coordinas otro. A partir de ahí eres el coordinador de ese run. Si el run anterior terminó, está
+   cerrado o se borró desde la interfaz, `run create` lo sustituye solo. Si dice que el run anterior
+   sigue abierto, y ese objetivo ya terminó, ciérralo primero con `lxo run close` y vuelve a crear el
+   run; no lo cierres si es de otro chat que aún trabaja en esta carpeta.
 3. **Haz commit** de lo que las hijas deban ver: parten de tu último commit, no de los cambios sin guardar.
 4. `lxo roles`: los roles del equipo y el modelo que el usuario asignó a cada uno.
 5. **Si el objetivo nombra una issue de Lixbon Team** (una clave como `LXB-12`, típico cuando llega
@@ -31,6 +34,7 @@ Lixbon según esa configuración, y no puedes cambiarlo (así el usuario control
 | `implementador` | Programar un encargo en su rama y worktree, con tests. |
 | `revisor` | Revisar el diff de otra hija (`git diff <base>...<rama>`). Solo lectura. |
 | `escalado` | Solo cuando un implementador falló dos veces en lo mismo. |
+| `adversario` | Atacar lo que hizo otra hija: busca cómo se rompe, no si funciona. Solo lectura. |
 
 Tú eres el modelo caro del equipo: **no leas tú el código a fondo**. El flujo normal es:
 
@@ -44,6 +48,8 @@ Tú eres el modelo caro del equipo: **no leas tú el código a fondo**. El flujo
    no vuelve a explorar desde cero.
 4. **Revisar** (opcional): un `revisor` para cambios delicados (seguridad, datos, APIs públicas).
    En cambios pequeños te basta con leer tú el `lxo diff`.
+5. **Atacar** (opcional): tras un implementador, un `adversario` sobre su diff. Ver «Réplica del
+   adversario» en la sección 3.
 
 Cada encargo (`--task`) debe ser autocontenido y nombrar:
 
@@ -57,6 +63,7 @@ Cada encargo (`--task`) debe ser autocontenido y nombrar:
 lxo spawn --role explorador --name "Mapa del login" --task "<pregunta concreta>"
 lxo spawn --role implementador --name "API de reseñas" --task "<encargo con contexto>"
 lxo spawn --role revisor --name "Revisión reseñas" --task "Revisa git diff main...lx/... Busca …"
+lxo spawn --role adversario --name "Ataque reseñas" --task "Ataca git diff <base>...lx/... Contexto y decisiones: …"
 ```
 
 - Los roles de solo lectura trabajan en tu carpeta, sin rama, y no pueden editar archivos.
@@ -90,6 +97,21 @@ Para corregir o ampliar lo que entregó una hija, sin perder su contexto:
 sigue fallando, lanza un `escalado` con el encargo original, lo que se intentó y por qué falló (el
 informe y el error); si tampoco lo resuelve, pregúntale al usuario. A una hija en marcha: `lxo send <tarea> "<mensaje>"`.
 
+### Réplica del adversario
+
+El adversario no sustituye al revisor: no demuestra que algo funciona, intenta romperlo. Su informe
+es una lista de hallazgos numerados por gravedad, cada uno con escenario, evidencia y una pregunta
+para el creador. Úsalo en cambios delicados o cuando el usuario pida `/adversary`.
+
+1. Con el implementador terminado, lanza un `adversario` sobre su diff (`git diff <base>...<rama>`).
+   Cópiale en el `--task` el encargo original y las decisiones que tomó el implementador.
+2. Lee sus hallazgos y pásaselos al implementador: `lxo continue <tarea> --task "<hallazgos>"`.
+   Debe responder a **cada** hallazgo: corregirlo (con un test) o justificar por qué no aplica.
+3. **Como máximo dos rondas** adversario → creador. Para la segunda, lanza el adversario sobre el
+   diff nuevo con las respuestas del creador.
+4. Lo que siga sin resolverse tras la segunda ronda, cuéntaselo al usuario: no lo ocultes ni abras
+   una tercera.
+
 ## 4. Integra
 
 Por cada hija terminada con éxito:
@@ -101,7 +123,8 @@ Por cada hija terminada con éxito:
 4. Si tu rama tiene remoto, haz `git push` de tu rama. Nunca uses `--force` ni hagas push a
    `main`/`master` salvo que el usuario lo haya pedido. Si el usuario prefiere revisión, usa
    `lxo pr <tarea>` en lugar de fusionar.
-5. `lxo release <tarea>` borra su worktree (y su rama, si ya está fusionada).
+5. `lxo release <tarea>` borra su worktree (y su rama, si ya está fusionada). No hace falta una a
+   una al final: `lxo run close` libera de golpe todos los worktrees ya fusionados.
 
 ## 5. Cierra la issue, si la hay
 
@@ -117,6 +140,21 @@ Con el webhook de GitHub del equipo, las ramas y PR que citan la clave se vincul
 
 ## 6. Informa al usuario
 
-Una línea por tarea con: rol y modelo, resultado, informe (`.lixbon/informes/...`), archivos
+**Paso final obligatorio: `lxo run close`**, cuando el objetivo está cumplido e integrado (y la
+issue, si la hay, actualizada). Cierra las terminales de todas las hijas, libera los worktrees cuyas
+ramas ya están fusionadas en la tuya, marca el run como terminado y borra tu sesión de esta carpeta:
+así el árbol del modo Orquestar queda limpio y el siguiente /orquestar empieza de cero. Si quedan
+worktrees conservados, la sesión se mantiene para que puedas seguir con `lxo merge` y `lxo release`.
+
+- Un run sin actividad (ni hijas en marcha, preguntas ni terminales) se cierra solo a los 30 min,
+  pero no cuentes con ello: ciérralo tú explícitamente.
+- Si quedan hijas en marcha, lo rechaza: espera a que terminen o páralas con `lxo stop <tarea>`.
+  `lxo run close --force` las para y libera también los worktrees limpios sin fusionar (las ramas
+  sin fusionar y los worktrees con cambios sin commit nunca se borran).
+- Las ramas sin fusionar se conservan y la salida las lista: intégralas o dile al usuario qué queda.
+- No lo ejecutes si el usuario aún puede pedirte cambios sobre este run: tras cerrarlo ya no puedes
+  lanzar hijas en él.
+
+Después informa al usuario. Una línea por tarea con: rol y modelo, resultado, informe (`.lixbon/informes/...`), archivos
 principales y evidencia (tests). Después, lo que se integró y se subió, y las decisiones que
 necesitas de él. Sin narrar el ciclo interno.

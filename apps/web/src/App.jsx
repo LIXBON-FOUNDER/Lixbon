@@ -6,6 +6,7 @@ import { ConfirmarProvider } from './hooks/useConfirmar';
 import { useViewportHeight } from './hooks/useViewportHeight';
 import { RouteFade } from './components/RouteFade';
 import { LocaleProvider } from './i18n/LocaleContext';
+import { MascotaSync } from './components/Mascota';
 
 import ChatPage from './pages/ChatPage';
 import AuthPage from './pages/AuthPage';
@@ -19,6 +20,7 @@ import AdminModelos from './pages/admin/Modelos';
 import AdminRoles from './pages/admin/Roles';
 import AdminAlias from './pages/admin/Alias';
 import VisualsPage from './pages/VisualsPage';
+import SharedVisualPage from './pages/SharedVisualPage';
 import AdminTarifas from './pages/admin/Tarifas';
 import AdminProveedores from './pages/admin/Proveedores';
 import AdminNodos from './pages/admin/Nodos';
@@ -37,6 +39,8 @@ import NotFoundPage from './pages/NotFoundPage';
 import LegalPage from './pages/LegalPage';
 import StatusPage from './pages/StatusPage';
 import SupportPage from './pages/SupportPage';
+import SkillsPage from './pages/SkillsPage';
+import AdminSkills from './pages/admin/Skills';
 
 // Árbol de rutas públicas y de app: se monta dos veces (ver AppRoutes), una
 // vez en / (español, idioma por defecto) y otra en /en (inglés). El slug es
@@ -52,6 +56,7 @@ function LocalizedRoutes() {
       <Route path="/c/:id" element={<ChatPage />} />
       <Route path="/visuals" element={<VisualsPage />} />
       <Route path="/visuals/:id" element={<VisualsPage />} />
+      <Route path="/s/v/:token" element={<SharedVisualPage />} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/account" element={<AccountPage />} />
@@ -73,8 +78,11 @@ function LocalizedRoutes() {
         <Route path="pagos/pasarela" element={<AdminPasarela />} />
         <Route path="usuarios" element={<AdminUsuarios />} />
         <Route path="releases" element={<AdminReleases />} />
+        <Route path="skills" element={<AdminSkills />} />
         <Route path="auditoria" element={<AdminAuditoria />} />
       </Route>
+      <Route path="/skills" element={<SkillsPage />} />
+      <Route path="/skills/:slug" element={<SkillsPage />} />
       <Route path="/apps" element={<DownloadsPage />} />
       <Route path="/news" element={<ReleasesPage />} />
       <Route path="/status" element={<StatusPage />} />
@@ -102,6 +110,7 @@ export function AppRoutes() {
   return (
     <LocaleProvider locale={locale}>
       <AuthProvider>
+        <MascotaSync />
         <ConfirmarProvider>
           <RouteFade>
             <Routes>

@@ -1,0 +1,306 @@
+/* mascota.css — Gael y Leya en el IDE (chat/MascotaAgente.jsx y la ventana
+   flotante de src/mascota). Sprites de 48×48 por cuadro escalados a
+   múltiplos enteros; el bocadillo lleva esquinas en escalón a juego con el
+   píxel, por eso no sigue el radio de la interfaz. */
+
+.mascota-sprite {
+  --w: 96px;
+  --n: 1;
+  --d: 0.7s;
+  display: block;
+  width: var(--w);
+  height: var(--w);
+  flex-shrink: 0;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: calc(var(--n) * var(--w)) var(--w);
+  animation: mascota-cuadros var(--d) steps(var(--n)) infinite;
+}
+@keyframes mascota-cuadros { to { background-position-x: calc(var(--n) * var(--w) * -1); } }
+
+.mascota-sprite--kart {
+  width: calc(var(--w) * 1.5);
+  background-size: calc(var(--w) * 3) var(--w);
+  animation-name: mascota-kart;
+}
+@keyframes mascota-kart { to { background-position-x: calc(var(--w) * -3); } }
+
+.mascota-sprite.is-espejo { transform: scaleX(-1); }
+.mascota-sprite.is-quieta { animation: none; }
+
+/* ── Bocadillo ───────────────────────────────────────────────────────── */
+
+.mascota-bocadillo {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: 260px;
+  padding: 9px 11px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-wrap: pretty;
+  box-shadow:
+    0 -3px 0 0 var(--ink),
+    0 3px 0 0 var(--ink),
+    -3px 0 0 0 var(--ink),
+    3px 0 0 0 var(--ink);
+  transform-origin: calc(100% - 30px) calc(100% + 9px);
+  animation: mascota-abre 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.mascota-bocadillo.is-cerrando { animation: mascota-cierra 0.2s ease-in both; }
+.mascota-bocadillo__texto { display: grid; }
+.mascota-bocadillo__molde, .mascota-bocadillo__escrito { grid-area: 1 / 1; }
+.mascota-bocadillo__molde { visibility: hidden; }
+@keyframes mascota-abre {
+  0% { opacity: 0; transform: scale(0.3) translateY(10px); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes mascota-cierra { to { opacity: 0; transform: scale(0.6) translateY(6px); } }
+.mascota-bocadillo::after {
+  content: '';
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 30px;
+  width: 6px;
+  height: 6px;
+  background: var(--ink);
+  box-shadow: 6px -3px 0 0 var(--ink);
+}
+@keyframes mascota-pop { from { opacity: 0; transform: translateY(6px); } }
+
+.mascota-bocadillo__nombre {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.mascota-opciones { display: flex; flex-direction: column; gap: 4px; }
+
+.mascota-opcion {
+  animation: mascota-abre 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--on-primary-rgb), 0.12);
+  color: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.mascota-opcion:hover { background: rgba(var(--on-primary-rgb), 0.22); }
+.mascota-opcion.is-principal { background: var(--bg); color: var(--ink); }
+.mascota-opcion.is-principal:hover { background: var(--surface-3); }
+.mascota-opcion:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 1px; }
+
+.mascota-puntos { position: absolute; bottom: calc(100% - 6px); right: 14px; display: flex; gap: 4px; }
+.mascota-puntos i { width: 5px; height: 5px; background: var(--ink-70); animation: mascota-punto 1.2s steps(2) infinite; }
+.mascota-puntos i:nth-child(2) { animation-delay: 0.2s; }
+.mascota-puntos i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes mascota-punto { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+.mascota-zzz { position: absolute; top: 0; right: 16px; pointer-events: none; }
+.mascota-zzz i {
+  position: absolute; right: 0; top: 0;
+  font-family: var(--font-mono); font-style: normal; font-weight: 500;
+  color: var(--ink-50); opacity: 0;
+  animation: mascota-zzz 2.4s linear infinite;
+}
+.mascota-zzz i:nth-child(1) { font-size: 11px; }
+.mascota-zzz i:nth-child(2) { font-size: 14px; animation-delay: 0.8s; }
+.mascota-zzz i:nth-child(3) { font-size: 17px; animation-delay: 1.6s; }
+@keyframes mascota-zzz {
+  0% { opacity: 0; transform: translate(0, 0); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(14px, -30px); }
+}
+
+/* ── Junto al chat del agente ────────────────────────────────────────── */
+
+/* Ancla de alto cero entre el feed y el compositor: la mascota se apoya en
+   el borde de arriba de la caja, en el margen derecho del feed centrado. */
+.mascota-anclaje { position: relative; height: 0; z-index: 3; }
+
+.mascota-agente {
+  position: absolute;
+  right: 18px;
+  bottom: -14px;
+}
+.mascota-agente.is-chica { right: 12px; bottom: -8px; }
+.mascota-agente.is-chica .mascota-bocadillo { right: 0; max-width: 240px; }
+.mascota-agente.is-chica .mascota-zzz,
+.mascota-agente.is-chica .mascota-puntos { right: 2px; }
+.mascota-agente__boton { display: block; border-radius: var(--radius); cursor: pointer; }
+.mascota-agente__boton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Pista del kart ──────────────────────────────────────────────────── */
+
+/* Superpuesta al final del feed, sin empujar nada ni capturar clics. */
+.pista {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--tam);
+  overflow: hidden;
+  pointer-events: none;
+}
+.pista--chica .pista__accion { display: none; }
+.pista--chica .pista__rotulo { top: 2px; }
+
+.pista__carril { position: absolute; left: 0; right: 0; bottom: 6px; height: 2px;
+  background: repeating-linear-gradient(90deg, var(--surface-4) 0 12px, transparent 12px 24px); }
+.pista__hecho { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-deep); transition: width 0.6s var(--ease); }
+.pista__bandera { position: absolute; bottom: 2px; width: 2px; height: 26px; background: var(--ink-35); transform: translateX(-1px); }
+.pista__bandera::after { content: ''; position: absolute; left: 2px; top: 0; width: 9px; height: 7px; background: var(--good, #6E9E3E); }
+.pista__meta {
+  position: absolute; right: 14px; bottom: 2px; width: 16px; height: 32px;
+  background: repeating-conic-gradient(var(--ink) 0 25%, var(--bg) 0 50%) 0 0 / 8px 8px;
+}
+
+.pista__rotulo { position: absolute; right: 48px; top: 10px; text-align: right; font-size: 10.5px; letter-spacing: 0.08em; color: var(--ink-50); }
+.pista__accion { position: absolute; right: 48px; top: 26px; max-width: 40%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-70); }
+
+.pista__kart { position: absolute; bottom: 2px; transition: left 0.9s var(--ease); animation: pista-bote 1.2s steps(2) infinite; }
+@keyframes pista-bote { 50% { transform: translateY(-1px); } }
+.pista__polvo { position: absolute; left: -6px; bottom: 14px; width: 4px; height: 4px; background: var(--ink-35); animation: pista-polvo 0.6s steps(3) infinite; }
+@keyframes pista-polvo { from { opacity: 0.9; transform: translateX(0); } to { opacity: 0; transform: translateX(-14px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mascota-sprite, .mascota-bocadillo, .mascota-puntos i, .pista__kart, .pista__polvo { animation: none; }
+  .mascota-zzz i { animation: none; opacity: 1; position: static; }
+}
+
+/* ── Ajustes › Mascota ───────────────────────────────────────────────── */
+
+.mascota-ajustes { justify-content: flex-start; }
+.mascota-ajustes .srow__text { flex: 1; }
+.mascota-ajustes__escena {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 150px;
+  height: 104px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.mascota-ajustes__escena .mascota-sprite + .mascota-sprite { margin-left: -28px; }
+
+.ssec.is-apagada { opacity: 0.45; pointer-events: none; }
+
+.mascota-elegir { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mascota-elegir__op {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  text-align: left;
+  transition: background 0.15s ease;
+}
+.mascota-elegir__op:hover:not(:disabled) { background: var(--surface-4); }
+.mascota-elegir__op.is-activa,
+.mascota-elegir__op.is-activa:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.mascota-elegir__op:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mascota-elegir__retrato { display: flex; margin-bottom: 6px; }
+.mascota-elegir__retrato .mascota-sprite + .mascota-sprite { margin-left: -16px; }
+.mascota-elegir__nombre { font-size: 13px; font-weight: 600; }
+.mascota-elegir__sub { font-size: 11.5px; opacity: 0.7; }
+
+.mascota-formas { display: flex; gap: 6px; flex-shrink: 0; }
+.mascota-formas__op {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 5px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+.mascota-formas__op:hover:not(:disabled):not(.is-activa) { background: var(--surface-4); }
+.mascota-formas__op.is-activa { background: var(--ink); color: var(--bg); }
+.mascota-formas__op.is-fija { cursor: default; opacity: 0.8; }
+.mascota-formas__op:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.mascota-fila__controles { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.mascota-minutos { width: 104px; }
+.mascota-minutos .select__btn { width: 100%; min-width: 0; padding: 6px 8px 6px 11px; }
+
+/* ── Obra: Gael y Leya coordinando robots obreros (chat/ObraAgente.jsx) ─ */
+
+.obra {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -14px;
+  height: var(--tam);
+  pointer-events: none;
+}
+.obra--chica { bottom: -8px; }
+.obra-coord, .obra-bot { position: absolute; bottom: 0; }
+.obra-bot { transition: right 1.6s linear; }
+.obra-bot--trabaja, .obra-bot--recibe, .obra-bot--duda, .obra-bot--cae { transition-duration: 0.6s; transition-timing-function: var(--ease); }
+.obra-bot--entrega, .obra-bot--celebra { transition-duration: 0.3s; }
+
+.obra-globo {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  z-index: 2;
+  width: max-content;
+  max-width: 170px;
+  padding: 5px 8px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 11.5px;
+  line-height: 1.35;
+  transform: translateX(-50%);
+  box-shadow: 0 -2px 0 0 var(--ink), 0 2px 0 0 var(--ink), -2px 0 0 0 var(--ink), 2px 0 0 0 var(--ink);
+  animation: obra-globo 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.obra-globo--der { left: auto; right: 4px; transform: none; max-width: 200px; }
+@keyframes obra-globo { from { opacity: 0; scale: 0.7; } }
+
+.obra-papel {
+  position: absolute;
+  bottom: var(--alto);
+  z-index: 3;
+  width: 14px;
+  height: 18px;
+  animation: obra-vuela 0.9s ease-in-out both;
+}
+.obra-papel i {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, #7a756a 3px 4px) 3px 4px / 8px 12px no-repeat,
+    #f7f4ee;
+  box-shadow: 0 0 0 2px #14191d;
+  animation: obra-arco 0.9s ease-out both;
+}
+.obra-papel--informe i { border-top: 3px solid #7be0a5; }
+@keyframes obra-vuela { from { right: var(--de); } to { right: var(--a); } }
+@keyframes obra-arco { 50% { transform: translateY(-30px) rotate(-10deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .obra-bot { transition: none; }
+  .obra-papel, .obra-papel i, .obra-globo { animation: none; }
+}

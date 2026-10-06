@@ -2,7 +2,7 @@
 // cálida: titulares en Lancelot, mucho aire, secciones numeradas y cuatro
 // paisajes pintados (Paisajes.jsx) que se mueven despacio con el scroll. Es
 // la página que posiciona: todo el texto va en HTML, con FAQPage.
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
@@ -13,6 +13,8 @@ import { PaisajeAmanecer, PaisajeCosta, PaisajeCrepusculo, PaisajeValle } from '
 import { useRevelar } from '../hooks/useRevelar';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
 import { useAuth } from '../hooks/useAuth';
+import { MascotaGuia } from '../components/Mascota';
+import { PreguntaLixbon } from '../components/PreguntaLixbon';
 
 const CODIGO = `from openai import OpenAI
 
@@ -34,6 +36,7 @@ export default function LandingPage() {
   const locale = useLocale();
   const t = useT('landing');
   const revelar = useRevelar();
+  const [preguntando, setPreguntando] = useState(false);
 
   const jsonLd = useMemo(() => [
     ORGANIZACION,
@@ -58,7 +61,7 @@ export default function LandingPage() {
       <PublicNav />
 
       <main>
-        <section className="landing__hero landing__wrap">
+        <section className="landing__hero landing__wrap" data-mascota="hero">
           <p className="landing__eyebrow">{t('heroEyebrow')}</p>
           <h1 className="landing__h1">{t('heroTitle')}</h1>
           <div className="landing__hero-pie">
@@ -85,7 +88,7 @@ export default function LandingPage() {
         </figure>
 
         <section className="landing__fila landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="private">
             <span className="landing__num">{t('section1Num')}</span>
             <h2 className="landing__h2">{t('section1Title')}</h2>
             <p className="landing__p">{t('section1P1')}</p>
@@ -98,7 +101,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__bloque landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="products">
             <span className="landing__num">{t('section2Num')}</span>
             <h2 className="landing__h2 landing__h2--ancho">{t('section2Title')}</h2>
           </div>
@@ -117,7 +120,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__fila landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="api">
             <span className="landing__num">{t('section3Num')}</span>
             <h2 className="landing__h2">{t('section3Title')}</h2>
             <p className="landing__p">{t('section3P')}</p>
@@ -127,7 +130,7 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__bloque landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="plans">
             <span className="landing__num">{t('section4Num')}</span>
             <h2 className="landing__h2">{t('section4Title')}</h2>
             <p className="landing__p">{t('section4P')}</p>
@@ -145,21 +148,26 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__fila landing__fila--faq landing__wrap">
-          <div data-revelar>
+          <div data-revelar data-mascota="faq">
             <span className="landing__num">{t('section5Num')}</span>
             <h2 className="landing__h2">{t('faqTitle')}</h2>
           </div>
-          <div className="landing__faq" data-revelar>
-            {t('faq').map(({ q, a }) => (
-              <details key={q}>
-                <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
-                <p>{a}</p>
-              </details>
-            ))}
+          <div data-revelar>
+            <div className={`landing__faqbox ${preguntando ? 'is-preguntando' : ''}`}>
+              <div className="landing__faq" inert={preguntando}>
+                {t('faq').map(({ q, a }) => (
+                  <details key={q}>
+                    <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
+                    <p>{a}</p>
+                  </details>
+                ))}
+              </div>
+              <PreguntaLixbon abierta={preguntando} onAbrir={() => setPreguntando(true)} onCerrar={() => setPreguntando(false)} />
+            </div>
           </div>
         </section>
 
-        <section className="landing__final" data-revelar>
+        <section className="landing__final" data-revelar data-mascota="final">
           <PaisajeCrepusculo className="landing__final-fondo" />
           <div className="landing__final-texto">
             <h2 className="landing__h2">{t('finalTitle')}</h2>
@@ -170,6 +178,7 @@ export default function LandingPage() {
       </main>
 
       <PublicFooter />
+      <MascotaGuia selector="[data-mascota]" />
     </div>
   );
 }

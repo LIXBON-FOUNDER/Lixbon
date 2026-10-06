@@ -244,6 +244,37 @@ export const IconWindow = (p) => (
   </Svg>
 );
 
+export const IconTablet = (p) => (
+  <Svg {...p}>
+    <Tinta d="M8 3h8a3.5 3.5 0 0 1 3.5 3.5v11A3.5 3.5 0 0 1 16 21H8a3.5 3.5 0 0 1-3.5-3.5v-11A3.5 3.5 0 0 1 8 3Z" />
+    <rect x="4.5" y="3" width="15" height="18" rx="3.5" />
+    <path d="M11 18h2" />
+  </Svg>
+);
+
+export const IconUndo = (p) => (
+  <Svg {...p}>
+    <path d="M8.5 5 4.5 9l4 4" />
+    <path d="M4.5 9h10a5 5 0 0 1 0 10H11" />
+  </Svg>
+);
+
+export const IconRedo = (p) => (
+  <Svg {...p}>
+    <path d="m15.5 5 4 4-4 4" />
+    <path d="M19.5 9h-10a5 5 0 0 0 0 10H13" />
+  </Svg>
+);
+
+export const IconRows = (p) => (
+  <Svg {...p}>
+    <Tinta d="M6.5 4.5h3a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2Z" />
+    <rect x="4.5" y="4.5" width="7" height="5" rx="2" />
+    <rect x="4.5" y="14.5" width="7" height="5" rx="2" />
+    <path d="M14.5 6h5M14.5 8h3M14.5 16h5M14.5 18h3" />
+  </Svg>
+);
+
 export const IconPhone = (p) => (
   <Svg {...p}>
     <Tinta d="M9.5 2.5h5a3.5 3.5 0 0 1 3.5 3.5v12a3.5 3.5 0 0 1-3.5 3.5h-5A3.5 3.5 0 0 1 6 18V6a3.5 3.5 0 0 1 3.5-3.5Z" />
@@ -347,6 +378,17 @@ export const IconUser = (p) => (
     <Tinta d="M12 4.75a3.75 3.75 0 1 1 0 7.5 3.75 3.75 0 0 1 0-7.5Z" />
     <circle cx="12" cy="8.5" r="3.75" />
     <path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" />
+  </Svg>
+);
+
+// Gael y Leya, en cabeza de chibi: la sección de Ajustes de la mascota.
+export const IconMascota = (p) => (
+  <Svg {...p}>
+    <Tinta d="M12 4.5a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z" />
+    <circle cx="12" cy="10.5" r="6" />
+    <path d="M6.3 9c1.3-1.4 3.2-2.2 5.7-2.2s4.4.8 5.7 2.2" />
+    <path d="M9.6 11.2v.6M14.4 11.2v.6" />
+    <path d="M7.5 20.5c1-1.5 2.6-2.3 4.5-2.3s3.5.8 4.5 2.3" />
   </Svg>
 );
 
