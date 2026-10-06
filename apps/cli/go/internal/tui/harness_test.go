@@ -25,6 +25,7 @@ type gateway struct {
 	steps  []func(w http.ResponseWriter, r *http.Request)
 	title  string
 	mcp    http.HandlerFunc
+	relay  *fakeRelay
 }
 
 func (g *gateway) bodyAt(i int) map[string]any {
@@ -76,6 +77,13 @@ func newGateway(t *testing.T, steps ...func(http.ResponseWriter, *http.Request))
 		io.WriteString(w, `{"data":[{"id":"qwen","name":"Qwen"},{"id":"llama","name":"Llama"}]}`)
 	})
 	mux.HandleFunc("/api/model-roles", http.NotFound)
+	mux.HandleFunc("/api/remote/", func(w http.ResponseWriter, r *http.Request) {
+		if g.relay == nil {
+			http.NotFound(w, r)
+			return
+		}
+		g.relay.serve(w, r)
+	})
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		if g.mcp == nil {
 			http.NotFound(w, r)

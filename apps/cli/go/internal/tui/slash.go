@@ -98,6 +98,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdWeb(arg)
 	case "copy":
 		m.cmdCopy()
+	case "remote":
+		return m.cmdRemote(arg)
 	case "visual":
 		return m.cmdVisual(arg)
 	case "image":
@@ -346,6 +348,7 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 
 func (m *Model) newConversation(label string) {
 	m.chat.NewConversation()
+	m.refreshRemoteSnapshot()
 	m.lastAnswer = ""
 	m.todo = nil
 	m.print("\n" + sDim2.Render(strings.Repeat("─", 3)+" "+label+" "+strings.Repeat("─", max(3, m.width-len(label)-8))))

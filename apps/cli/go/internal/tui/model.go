@@ -73,6 +73,7 @@ type Model struct {
 	queue       []string
 	spin        int
 
+	remote     *remoteHost
 	picker     *picker
 	prompt     *promptState
 	busy       string

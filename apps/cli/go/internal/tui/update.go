@@ -40,10 +40,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.remote != nil {
+			return m, m.handleRemoteKey(msg)
+		}
 		return m.handleKey(msg)
 
+	case remoteMsg:
+		return m, m.onRemote(msg)
+
+	case remoteClosedMsg:
+		if m.remote != nil && m.remote.link == msg.link {
+			m.leaveRemote(false)
+		}
+		return m, nil
+
 	case tea.PasteMsg:
-		if m.picker != nil {
+		if m.picker != nil || m.remote != nil {
 			return m, nil
 		}
 		m.input.InsertString(strings.ReplaceAll(strings.ReplaceAll(msg.Content, "\r\n", "\n"), "\r", "\n"))
@@ -226,6 +238,10 @@ func (m *Model) onInterrupt() tea.Cmd {
 
 func (m *Model) quit() tea.Cmd {
 	m.quitting = true
+	if m.remote != nil {
+		m.remote.link.Stop(true)
+		m.remote = nil
+	}
 	return tea.Quit
 }
 

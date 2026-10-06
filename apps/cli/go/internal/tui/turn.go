@@ -58,7 +58,11 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	if shown != "" {
 		m.print("\n" + renderUserMessage(shown, m.width))
 	}
-	sink := &uiSink{send: m.send, turn: id}
+	var sink chat.Sink = &uiSink{send: m.send, turn: id}
+	if m.remote != nil {
+		sink = remoteSink{Sink: sink, link: m.remote.link}
+		m.remoteTurnStarted(prompt)
+	}
 	c := m.chat
 	send := m.send
 	go func() {
@@ -105,6 +109,9 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	m.notice = ""
 	cancelled := m.interrupted || errors.Is(msg.err, context.Canceled)
 	m.interrupted = false
+	if m.remote != nil {
+		m.remoteTurnDone(msg, cancelled)
+	}
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil

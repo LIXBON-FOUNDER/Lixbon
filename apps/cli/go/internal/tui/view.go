@@ -126,6 +126,9 @@ func (m *Model) borderColor() lipgloss.Style {
 }
 
 func (m *Model) inputBox() string {
+	if m.remote != nil {
+		return m.remoteBanner()
+	}
 	return m.borderColor().Render(m.input.View())
 }
 
@@ -193,6 +196,9 @@ func (m *Model) statusBar() string {
 	var flags []string
 	if m.chat.WebMode == "on" {
 		flags = append(flags, "web")
+	}
+	if m.remote != nil {
+		flags = append(flags, "remoto")
 	}
 	if m.chat.ProjectContext != "" {
 		flags = append(flags, "LIXBON.md")
