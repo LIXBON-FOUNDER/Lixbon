@@ -1,0 +1,909 @@
+{
+  "version": 1,
+  "oracle": "apps/cli/lixbon_cli/agent.py",
+  "text_cases": [
+    {
+      "name": "classic_format",
+      "description": "Formato {tool,args}.",
+      "text": "{\"tool\":\"edit_file\",\"args\":{\"path\":\"a.js\",\"old_text\":\"const x = 1;\",\"new_text\":\"const total = 1;\"}}",
+      "extract_all": [
+        {
+          "tool": "edit_file",
+          "args": {
+            "path": "a.js",
+            "old_text": "const x = 1;",
+            "new_text": "const total = 1;"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"edit_file\",\"args\":{\"path\":\"a.js\",\"old_text\":\"const x = 1;\",\"new_text\":\"const total = 1;\"}}",
+      "cut_unclosed": "{\"tool\":\"edit_file\",\"args\":{\"path\":\"a.js\",\"old_text\":\"const x = 1;\",\"new_text\":\"const total = 1;\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "openai_name_arguments",
+      "description": "Formato {name,arguments} con arguments objeto.",
+      "text": "{\"name\":\"mkdir\",\"arguments\":{\"path\":\"src\"}}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "src"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"mkdir\",\"arguments\":{\"path\":\"src\"}}",
+      "cut_unclosed": "{\"name\":\"mkdir\",\"arguments\":{\"path\":\"src\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "openai_arguments_as_string",
+      "description": "arguments como string JSON.",
+      "text": "{\"name\":\"mkdir\",\"arguments\":\"{\\\"path\\\": \\\"src\\\"}\"}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "src"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"mkdir\",\"arguments\":\"{\\\"path\\\": \\\"src\\\"}\"}",
+      "cut_unclosed": "{\"name\":\"mkdir\",\"arguments\":\"{\\\"path\\\": \\\"src\\\"}\"}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "arguments_string_not_object",
+      "description": "arguments string que no es un objeto: args vacío.",
+      "text": "{\"name\":\"mkdir\",\"arguments\":\"[1,2]\"}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {}
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"mkdir\",\"arguments\":\"[1,2]\"}",
+      "cut_unclosed": "{\"name\":\"mkdir\",\"arguments\":\"[1,2]\"}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "arguments_string_invalid",
+      "description": "arguments string inválido: args vacío.",
+      "text": "{\"name\":\"mkdir\",\"arguments\":\"{no json\"}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {}
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"mkdir\",\"arguments\":\"{no json\"}",
+      "cut_unclosed": "{\"name\":\"mkdir\",\"arguments\":\"{no json\"}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "name_without_arguments",
+      "description": "{name} sin arguments no es una llamada, pero cuenta como intento roto.",
+      "text": "{\"name\":\"mkdir\"}",
+      "extract_all": [],
+      "has_invalid_call": true,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"mkdir\"}",
+      "cut_unclosed": "{\"name\":\"mkdir\"}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "name_with_null_arguments",
+      "description": "arguments null no es una llamada.",
+      "text": "{\"name\":\"mkdir\",\"arguments\":null}",
+      "extract_all": [],
+      "has_invalid_call": true,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"mkdir\",\"arguments\":null}",
+      "cut_unclosed": "{\"name\":\"mkdir\",\"arguments\":null}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "tool_args_not_object",
+      "description": "args que no es objeto: se normaliza a {}.",
+      "text": "{\"tool\":\"list_files\",\"args\":\".\"}",
+      "extract_all": [
+        {
+          "tool": "list_files",
+          "args": {}
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"list_files\",\"args\":\".\"}",
+      "cut_unclosed": "{\"tool\":\"list_files\",\"args\":\".\"}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "tool_without_args",
+      "description": "tool sin args.",
+      "text": "{\"tool\":\"list_files\"}",
+      "extract_all": [
+        {
+          "tool": "list_files",
+          "args": {}
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"list_files\"}",
+      "cut_unclosed": "{\"tool\":\"list_files\"}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "empty_tool_name",
+      "description": "tool vacío no es llamada.",
+      "text": "{\"tool\":\"\",\"args\":{}}",
+      "extract_all": [],
+      "has_invalid_call": true,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"\",\"args\":{}}",
+      "cut_unclosed": "{\"tool\":\"\",\"args\":{}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "python_style_quotes",
+      "description": "Comillas simples estilo Python en content.",
+      "text": "{\"name\": \"mkdir\", \"arguments\": {\"path\": \"demo\"}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"demo/package.json\", \"content\": '{\"name\": \"demo\"}'}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"demo/index.js\", \"content\": 'console.log(\"hola\");'}}\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"cd demo && node index.js\"}}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "demo"
+          }
+        },
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "demo/package.json",
+            "content": "{\"name\": \"demo\"}"
+          }
+        },
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "demo/index.js",
+            "content": "console.log(\"hola\");"
+          }
+        },
+        {
+          "tool": "run_command",
+          "args": {
+            "command": "cd demo && node index.js"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "\n\n\n",
+      "truncate_fabricated": "{\"name\": \"mkdir\", \"arguments\": {\"path\": \"demo\"}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"demo/package.json\", \"content\": '{\"name\": \"demo\"}'}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"demo/index.js\", \"content\": 'console.log(\"hola\");'}}\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"cd demo && node index.js\"}}",
+      "cut_unclosed": "{\"name\": \"mkdir\", \"arguments\": {\"path\": \"demo\"}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"demo/package.json\", \"content\": '{\"name\": \"demo\"}'}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"demo/index.js\", \"content\": 'console.log(\"hola\");'}}\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"cd demo && node index.js\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "single_quote_escapes_kept",
+      "description": "Escapes dentro de comillas simples se conservan.",
+      "text": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.py\",\"content\":'print(\"hola\")\\nprint(2)\\n'}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.py",
+            "content": "print(\"hola\")\nprint(2)\n"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.py\",\"content\":'print(\"hola\")\\nprint(2)\\n'}}",
+      "cut_unclosed": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.py\",\"content\":'print(\"hola\")\\nprint(2)\\n'}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "single_quote_escaped_apostrophe",
+      "description": "Apóstrofo escapado dentro de comillas simples.",
+      "text": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":'it\\'s ok'}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.txt",
+            "content": "it\"s ok"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":'it\\'s ok'}}",
+      "cut_unclosed": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":'it\\'s ok'}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "real_newlines_single_quotes",
+      "description": "Saltos de línea reales dentro de comillas simples.",
+      "text": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":'linea1\nlinea2'}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.txt",
+            "content": "linea1\nlinea2"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":'linea1\nlinea2'}}",
+      "cut_unclosed": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":'linea1\nlinea2'}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "real_newlines_double_quotes",
+      "description": "Saltos de línea reales dentro de comillas dobles (strict=False).",
+      "text": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"linea1\nlinea2\ttab\"}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.txt",
+            "content": "linea1\nlinea2\ttab"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"linea1\nlinea2\ttab\"}}",
+      "cut_unclosed": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"linea1\nlinea2\ttab\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "real_newlines_generic_path",
+      "description": "Salto real en comillas dobles en formato {name,arguments} (ruta genérica, strict=False).",
+      "text": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":\"l1\nl2\tx\"}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.txt",
+            "content": "l1\nl2\tx"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":\"l1\nl2\tx\"}}",
+      "cut_unclosed": "{\"name\":\"write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":\"l1\nl2\tx\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "real_newlines_multi_edit",
+      "description": "Salto real dentro de multi_edit (ruta genérica).",
+      "text": "{\"tool\":\"multi_edit\",\"args\":{\"path\":\"a.py\",\"edits\":[{\"old_text\":\"a\nb\",\"new_text\":\"c\"}]}}",
+      "extract_all": [
+        {
+          "tool": "multi_edit",
+          "args": {
+            "path": "a.py",
+            "edits": [
+              {
+                "old_text": "a\nb",
+                "new_text": "c"
+              }
+            ]
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"multi_edit\",\"args\":{\"path\":\"a.py\",\"edits\":[{\"old_text\":\"a\nb\",\"new_text\":\"c\"}]}}",
+      "cut_unclosed": "{\"tool\":\"multi_edit\",\"args\":{\"path\":\"a.py\",\"edits\":[{\"old_text\":\"a\nb\",\"new_text\":\"c\"}]}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "apostrophe_in_double_quotes",
+      "description": "Apóstrofo y llaves dentro de string con comillas dobles.",
+      "text": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"don't {stop} now\"}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.txt",
+            "content": "don't {stop} now"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"don't {stop} now\"}}",
+      "cut_unclosed": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"don't {stop} now\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "indented_json",
+      "description": "JSON indentado en varias líneas.",
+      "text": "{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"a.py\",\n    \"start_line\": 3\n  }\n}",
+      "extract_all": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "a.py",
+            "start_line": 3
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"a.py\",\n    \"start_line\": 3\n  }\n}",
+      "cut_unclosed": "{\n  \"tool\": \"read_file\",\n  \"args\": {\n    \"path\": \"a.py\",\n    \"start_line\": 3\n  }\n}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "nbsp_whitespace",
+      "description": "Espacio no separable entre llave y clave.",
+      "text": "{ \"tool\":\"mkdir\",\"args\":{\"path\":\"x\"}}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "x"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{ \"tool\":\"mkdir\",\"args\":{\"path\":\"x\"}}",
+      "cut_unclosed": "{ \"tool\":\"mkdir\",\"args\":{\"path\":\"x\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "repair_unescaped_quotes",
+      "description": "Comillas sin escapar dentro de un content largo: reparación por esquema.",
+      "text": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.css\",\"content\":\"body { color: red; font-family: \"Helvetica\"; }\"}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.css",
+            "content": "body { color: red; font-family: \"Helvetica\"; }"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.css\",\"content\":\"body { color: red; font-family: \"Helvetica\"; }\"}}",
+      "cut_unclosed": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.css\",\"content\":\"body { color: red; font-family: \"Helvetica\"; }\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "repair_with_numbers_and_bool",
+      "description": "Reparación campo a campo con primitivos.",
+      "text": "{\"tool\":\"read_file\",\"args\":{\"path\":\"a.py\",\"start_line\":2,\"end_line\":9.5}}",
+      "extract_all": [
+        {
+          "tool": "read_file",
+          "args": {
+            "path": "a.py",
+            "start_line": 2,
+            "end_line": 9.5
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"read_file\",\"args\":{\"path\":\"a.py\",\"start_line\":2,\"end_line\":9.5}}",
+      "cut_unclosed": "{\"tool\":\"read_file\",\"args\":{\"path\":\"a.py\",\"start_line\":2,\"end_line\":9.5}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "repair_edit_with_flag",
+      "description": "Reparación con comillas sin escapar y flag booleano.",
+      "text": "{\"tool\":\"edit_file\",\"args\":{\"path\":\"a.html\",\"old_text\":\"<a href=\"x\">\",\"new_text\":\"<a href=\"y\">\",\"all\":true}}",
+      "extract_all": [
+        {
+          "tool": "edit_file",
+          "args": {
+            "path": "a.html",
+            "old_text": "<a href=\"x\">",
+            "new_text": "<a href=\"y\">",
+            "all": true
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"edit_file\",\"args\":{\"path\":\"a.html\",\"old_text\":\"<a href=\"x\">\",\"new_text\":\"<a href=\"y\">\",\"all\":true}}",
+      "cut_unclosed": "{\"tool\":\"edit_file\",\"args\":{\"path\":\"a.html\",\"old_text\":\"<a href=\"x\">\",\"new_text\":\"<a href=\"y\">\",\"all\":true}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "repair_unescape_sequences",
+      "description": "La reparación desescapa \\n, \\t, \\\" y \\\\.",
+      "text": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"l1\\nl2\\t\\\"q\\\" \\\\ fin\"}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "a.txt",
+            "content": "l1\nl2\t\"q\" \\ fin"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"l1\\nl2\\t\\\"q\\\" \\\\ fin\"}}",
+      "cut_unclosed": "{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"l1\\nl2\\t\\\"q\\\" \\\\ fin\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "multi_edit_generic_path",
+      "description": "multi_edit (edits anidado) cae al escaneo genérico.",
+      "text": "{\"tool\":\"multi_edit\",\"args\":{\"path\":\"a.py\",\"edits\":[{\"old_text\":\"a\",\"new_text\":\"b\"},{\"old_text\":\"c\",\"new_text\":\"d\"}]}}",
+      "extract_all": [
+        {
+          "tool": "multi_edit",
+          "args": {
+            "path": "a.py",
+            "edits": [
+              {
+                "old_text": "a",
+                "new_text": "b"
+              },
+              {
+                "old_text": "c",
+                "new_text": "d"
+              }
+            ]
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"multi_edit\",\"args\":{\"path\":\"a.py\",\"edits\":[{\"old_text\":\"a\",\"new_text\":\"b\"},{\"old_text\":\"c\",\"new_text\":\"d\"}]}}",
+      "cut_unclosed": "{\"tool\":\"multi_edit\",\"args\":{\"path\":\"a.py\",\"edits\":[{\"old_text\":\"a\",\"new_text\":\"b\"},{\"old_text\":\"c\",\"new_text\":\"d\"}]}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "todo_nested",
+      "description": "todo con lista anidada.",
+      "text": "{\"tool\":\"todo\",\"args\":{\"items\":[{\"text\":\"uno\",\"status\":\"done\"},{\"text\":\"dos\",\"status\":\"pending\"}]}}",
+      "extract_all": [
+        {
+          "tool": "todo",
+          "args": {
+            "items": [
+              {
+                "text": "uno",
+                "status": "done"
+              },
+              {
+                "text": "dos",
+                "status": "pending"
+              }
+            ]
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"todo\",\"args\":{\"items\":[{\"text\":\"uno\",\"status\":\"done\"},{\"text\":\"dos\",\"status\":\"pending\"}]}}",
+      "cut_unclosed": "{\"tool\":\"todo\",\"args\":{\"items\":[{\"text\":\"uno\",\"status\":\"done\"},{\"text\":\"dos\",\"status\":\"pending\"}]}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "unknown_tool_is_still_a_call",
+      "description": "Una herramienta desconocida se extrae igual.",
+      "text": "{\"tool\":\"inventada\",\"args\":{\"x\":1}}",
+      "extract_all": [
+        {
+          "tool": "inventada",
+          "args": {
+            "x": 1
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"inventada\",\"args\":{\"x\":1}}",
+      "cut_unclosed": "{\"tool\":\"inventada\",\"args\":{\"x\":1}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "prose_around_calls",
+      "description": "La prosa alrededor sobrevive.",
+      "text": "Creo el archivo.\n{\"name\":\"mkdir\",\"arguments\":{\"path\":\"src\"}}\nListo.",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "src"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "Creo el archivo.\n\nListo.",
+      "truncate_fabricated": "Creo el archivo.\n{\"name\":\"mkdir\",\"arguments\":{\"path\":\"src\"}}\nListo.",
+      "cut_unclosed": "Creo el archivo.\n{\"name\":\"mkdir\",\"arguments\":{\"path\":\"src\"}}\nListo.",
+      "has_unclosed": false,
+      "clean_prose": "Creo el archivo.\n\nListo."
+    },
+    {
+      "name": "two_calls_with_prose",
+      "description": "Dos llamadas con prosa entre medias.",
+      "text": "Primero.\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\nLuego.\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"b\"}}\nFin.",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "a"
+          }
+        },
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "b"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "Primero.\n\nLuego.\n\nFin.",
+      "truncate_fabricated": "Primero.\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\nLuego.\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"b\"}}\nFin.",
+      "cut_unclosed": "Primero.\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\nLuego.\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"b\"}}\nFin.",
+      "has_unclosed": false,
+      "clean_prose": "Primero.\n\nLuego.\n\nFin."
+    },
+    {
+      "name": "unclosed_call_at_end",
+      "description": "Llamada sin cerrar al final (salida truncada).",
+      "text": "Voy a crearlo.\n{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"hola",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "Voy a crearlo.\n{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"hola",
+      "truncate_fabricated": "Voy a crearlo.\n{\"tool\":\"write_file\",\"args\":{\"path\":\"a.txt\",\"content\":\"hola",
+      "cut_unclosed": "Voy a crearlo.\n",
+      "has_unclosed": true,
+      "clean_prose": "Voy a crearlo."
+    },
+    {
+      "name": "unclosed_after_complete",
+      "description": "Una completa y otra sin cerrar.",
+      "text": "{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\ntexto\n{\"tool\":\"write_file\",\"args\":{\"path\":\"b\",\"content\":\"x",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "a"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "\ntexto\n{\"tool\":\"write_file\",\"args\":{\"path\":\"b\",\"content\":\"x",
+      "truncate_fabricated": "{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\ntexto\n{\"tool\":\"write_file\",\"args\":{\"path\":\"b\",\"content\":\"x",
+      "cut_unclosed": "{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\ntexto\n",
+      "has_unclosed": true,
+      "clean_prose": "texto"
+    },
+    {
+      "name": "broken_json_closed",
+      "description": "Objeto cerrado pero con JSON roto: intento inválido.",
+      "text": "{\"tool\":\"mkdir\",\"args\":{path: src}}",
+      "extract_all": [],
+      "has_invalid_call": true,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"mkdir\",\"args\":{path: src}}",
+      "cut_unclosed": "{\"tool\":\"mkdir\",\"args\":{path: src}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "broken_then_valid",
+      "description": "Intento roto seguido de una llamada válida.",
+      "text": "{\"tool\":\"x\",\"args\":{bad}}\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"ok\"}}",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "ok"
+          }
+        }
+      ],
+      "has_invalid_call": true,
+      "strip": "\n",
+      "truncate_fabricated": "{\"tool\":\"x\",\"args\":{bad}}\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"ok\"}}",
+      "cut_unclosed": "{\"tool\":\"x\",\"args\":{bad}}\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"ok\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "fabricated_tool_result",
+      "description": "El modelo fabrica un TOOL_RESULT: lo posterior se descarta.",
+      "text": "Hecho.\nTOOL_RESULT write_file: ok\nTodo listo, he terminado.",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "Hecho.\nTOOL_RESULT write_file: ok\nTodo listo, he terminado.",
+      "truncate_fabricated": "Hecho.",
+      "cut_unclosed": "Hecho.\nTOOL_RESULT write_file: ok\nTodo listo, he terminado.",
+      "has_unclosed": false,
+      "clean_prose": "Hecho."
+    },
+    {
+      "name": "tool_result_inline",
+      "description": "TOOL_RESULT sin salto de línea previo.",
+      "text": "texto TOOL_RESULT inventado",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "texto TOOL_RESULT inventado",
+      "truncate_fabricated": "texto ",
+      "cut_unclosed": "texto TOOL_RESULT inventado",
+      "has_unclosed": false,
+      "clean_prose": "texto"
+    },
+    {
+      "name": "empty_fences",
+      "description": "Vallas de código vacías tras quitar la llamada.",
+      "text": "Ahí va:\n```json\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\n```\nListo.",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "a"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "Ahí va:\n```json\n\n```\nListo.",
+      "truncate_fabricated": "Ahí va:\n```json\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\n```\nListo.",
+      "cut_unclosed": "Ahí va:\n```json\n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\n```\nListo.",
+      "has_unclosed": false,
+      "clean_prose": "Ahí va:\n\nListo."
+    },
+    {
+      "name": "fence_with_language_unicode",
+      "description": "Valla vacía con lenguaje con acento.",
+      "text": "```ñandú\n```\nresto",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "```ñandú\n```\nresto",
+      "truncate_fabricated": "```ñandú\n```\nresto",
+      "cut_unclosed": "```ñandú\n```\nresto",
+      "has_unclosed": false,
+      "clean_prose": "resto"
+    },
+    {
+      "name": "unicode_content",
+      "description": "Contenido con acentos y emoji.",
+      "text": "{\"tool\":\"write_file\",\"args\":{\"path\":\"é.txt\",\"content\":\"canción 🎵 日本\"}}",
+      "extract_all": [
+        {
+          "tool": "write_file",
+          "args": {
+            "path": "é.txt",
+            "content": "canción 🎵 日本"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "{\"tool\":\"write_file\",\"args\":{\"path\":\"é.txt\",\"content\":\"canción 🎵 日本\"}}",
+      "cut_unclosed": "{\"tool\":\"write_file\",\"args\":{\"path\":\"é.txt\",\"content\":\"canción 🎵 日本\"}}",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "no_calls",
+      "description": "Texto sin llamadas.",
+      "text": "Solo prosa, sin herramientas.",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "Solo prosa, sin herramientas.",
+      "truncate_fabricated": "Solo prosa, sin herramientas.",
+      "cut_unclosed": "Solo prosa, sin herramientas.",
+      "has_unclosed": false,
+      "clean_prose": "Solo prosa, sin herramientas."
+    },
+    {
+      "name": "empty_text",
+      "description": "Texto vacío.",
+      "text": "",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "",
+      "truncate_fabricated": "",
+      "cut_unclosed": "",
+      "has_unclosed": false,
+      "clean_prose": ""
+    },
+    {
+      "name": "braces_in_prose",
+      "description": "Llaves en prosa que no son llamadas.",
+      "text": "Usa {x: 1} o {\"a\": 1} en tu código.",
+      "extract_all": [],
+      "has_invalid_call": false,
+      "strip": "Usa {x: 1} o {\"a\": 1} en tu código.",
+      "truncate_fabricated": "Usa {x: 1} o {\"a\": 1} en tu código.",
+      "cut_unclosed": "Usa {x: 1} o {\"a\": 1} en tu código.",
+      "has_unclosed": false,
+      "clean_prose": "Usa {x: 1} o {\"a\": 1} en tu código."
+    },
+    {
+      "name": "prose_whitespace_only_after_strip",
+      "description": "Solo una llamada: la prosa queda vacía.",
+      "text": "  \n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\n  ",
+      "extract_all": [
+        {
+          "tool": "mkdir",
+          "args": {
+            "path": "a"
+          }
+        }
+      ],
+      "has_invalid_call": false,
+      "strip": "  \n\n  ",
+      "truncate_fabricated": "  \n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\n  ",
+      "cut_unclosed": "  \n{\"tool\":\"mkdir\",\"args\":{\"path\":\"a\"}}\n  ",
+      "has_unclosed": false,
+      "clean_prose": ""
+    }
+  ],
+  "native_cases": [
+    {
+      "name": "arguments_string",
+      "call": {
+        "id": "c1",
+        "function": {
+          "name": "mkdir",
+          "arguments": "{\"path\": \"src\"}"
+        }
+      },
+      "expected": {
+        "tool": "mkdir",
+        "args": {
+          "path": "src"
+        }
+      }
+    },
+    {
+      "name": "arguments_object",
+      "call": {
+        "id": "c2",
+        "function": {
+          "name": "mkdir",
+          "arguments": {
+            "path": "src"
+          }
+        }
+      },
+      "expected": {
+        "tool": "mkdir",
+        "args": {
+          "path": "src"
+        }
+      }
+    },
+    {
+      "name": "arguments_empty_string",
+      "call": {
+        "function": {
+          "name": "list_files",
+          "arguments": ""
+        }
+      },
+      "expected": {
+        "tool": "list_files",
+        "args": {}
+      }
+    },
+    {
+      "name": "arguments_invalid_string",
+      "call": {
+        "function": {
+          "name": "list_files",
+          "arguments": "{no"
+        }
+      },
+      "expected": {
+        "tool": "list_files",
+        "args": {}
+      }
+    },
+    {
+      "name": "arguments_array",
+      "call": {
+        "function": {
+          "name": "list_files",
+          "arguments": [
+            1
+          ]
+        }
+      },
+      "expected": {
+        "tool": "list_files",
+        "args": {}
+      }
+    },
+    {
+      "name": "arguments_missing",
+      "call": {
+        "function": {
+          "name": "list_files"
+        }
+      },
+      "expected": {
+        "tool": "list_files",
+        "args": {}
+      }
+    },
+    {
+      "name": "no_function",
+      "call": {
+        "id": "c3"
+      },
+      "expected": {
+        "tool": "",
+        "args": {}
+      }
+    },
+    {
+      "name": "function_null",
+      "call": {
+        "function": null
+      },
+      "expected": {
+        "tool": "",
+        "args": {}
+      }
+    },
+    {
+      "name": "arguments_string_not_object",
+      "call": {
+        "function": {
+          "name": "x",
+          "arguments": "[1]"
+        }
+      },
+      "expected": {
+        "tool": "x",
+        "args": {}
+      }
+    }
+  ]
+}

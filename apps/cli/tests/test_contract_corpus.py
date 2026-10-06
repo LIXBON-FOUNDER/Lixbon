@@ -34,3 +34,27 @@ def test_sse_corpus_covers_every_event_kind():
     corpus = _load_generator().build()
     kinds = {event[0] for case in corpus["cases"] for event in case["events"]}
     assert kinds == {"sources", "reasoning", "content", "tool_calls", "usage", "done"}
+
+
+def test_tool_corpus_and_catalog_match_python_oracle():
+    spec = importlib.util.spec_from_file_location(
+        "gen_tool_corpus", CLI_DIR / "validation" / "gen_tool_corpus.py")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    for path, data in ((generator.CATALOG, generator.build_catalog()),
+                       (generator.CORPUS, generator.build_corpus())):
+        assert path.read_text(encoding="utf-8") == generator.render(data), (
+            f"{path.name} no coincide con lixbon_cli/agent.py. "
+            "Regenera con: python apps/cli/validation/gen_tool_corpus.py"
+        )
+
+
+def test_workspace_corpus_matches_python_oracle():
+    spec = importlib.util.spec_from_file_location(
+        "gen_workspace_corpus", CLI_DIR / "validation" / "gen_workspace_corpus.py")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    assert generator.CORPUS.read_text(encoding="utf-8") == generator.render(), (
+        "workspace_corpus.json no coincide con las herramientas de agent.py. "
+        "Regenera con: python apps/cli/validation/gen_workspace_corpus.py"
+    )
