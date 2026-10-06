@@ -318,11 +318,11 @@ export function ChatInputBar() {
       setText('');
       return;
     }
-    const orch = /^\/orquestar(?:\s+([\s\S]+))?$/i.exec(text.trim());
+    const orch = /^\/(?:orquestar|adversary)(?:\s+([\s\S]+))?$/i.exec(text.trim());
     if (orch) {
       if (!orch[1]?.trim()) return;
       // Este mismo chat es el coordinador: el mensaje sigue su camino normal
-      // (Claude Code lo resuelve con la skill /orquestar; el agente de Lixbon, con su prompt).
+      // (Claude Code lo resuelve con las skills /orquestar y /adversary; el agente de Lixbon, con su prompt).
       const message = text;
       setText('');
       prepareOrchestrate().then((ok) => { if (ok) send(message, null, [], []); else setText(message); });

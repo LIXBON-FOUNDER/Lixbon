@@ -37,13 +37,14 @@ export const SLASH_COMMANDS = [
   { cmd: 'config', desc: 'Ajustes', Icon: IconGear, run: () => runCommand('workbench.openSettings') },
   { cmd: 'remote', desc: 'Control remoto por QR', Icon: IconTerminal, run: () => runCommand('remote.open') },
   { cmd: 'orquestar', desc: 'Este chat pasa a coordinar un equipo de agentes (experimental)', hint: '<objetivo>', Icon: IconPuzzle },
+  { cmd: 'adversary', desc: 'Un agente adversario busca cómo se rompe lo que se hizo', hint: '<qué atacar>', Icon: IconPuzzle },
   { cmd: 'help', desc: 'Ver todos los comandos', Icon: IconList, run: () => runCommand('workbench.commandPalette') },
 ];
 
 // En una sesión de Claude Code solo valen las acciones del IDE que tienen
 // sentido para él (las que cambian lo que el IDE muestra: conversación nueva,
 // modelo, modo); el resto de "/" son los comandos del propio Claude Code.
-const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace', 'remote', 'orquestar']);
+const CLAUDE_LOCAL = new Set(['new', 'clear', 'mode', 'plan', 'undo', 'diff', 'model', 'copy', 'save', 'history', 'workspace', 'remote', 'orquestar', 'adversary']);
 
 export const GROUP_LABELS = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' };
 

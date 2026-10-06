@@ -48,12 +48,13 @@ from lixbon_cli.commands import (
     parse_attachments,
     slash_rprompt,
     parse_image_markers,
-    visual_project_prompt,
     wants_completion,
 )
 from lixbon_cli.clipboard import paste_image
 from lixbon_cli.inputq import InputQueue
-from lixbon_cli.mcp import McpRegistry, load_mcp_config
+from lixbon_cli.mcp import McpError, McpRegistry, load_mcp_config
+
+LIXBON_MCP = "lixbon"
 from lixbon_cli.config import (
     CLI_VERSION,
     web_mode_from_config,
@@ -63,6 +64,7 @@ from lixbon_cli.config import (
     load_config,
     mask_key,
     save_config,
+    server_base,
 )
 from lixbon_cli.sessions import SessionStore, relative_time
 from lixbon_cli.term import (
@@ -1263,10 +1265,20 @@ class ChatApp:
             except OSError:
                 return
 
+    def _mcp_config(self) -> dict[str, dict]:
+        """Servidores declarados más el de Lixbon (Visuals), si hay cuenta y no se
+        desactivó con "lixbon_mcp": false en config.json."""
+        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        key = self.cfg.get("api_key")
+        if key and self.cfg.get("lixbon_mcp", True) and LIXBON_MCP not in config:
+            config[LIXBON_MCP] = {"url": f"{server_base(self.cfg.get('base_url', ''))}/mcp",
+                                  "headers": {"Authorization": f"Bearer {key}"}}
+        return config
+
     def _start_mcp(self) -> None:
         """Arranca los servidores MCP declarados en segundo plano: el modelo los
         ve en cuanto responden; el arranque del CLI no espera."""
-        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        config = self._mcp_config()
         if not config:
             return
         registry = McpRegistry()
@@ -1279,7 +1291,7 @@ class ChatApp:
 
     def cmd_mcp(self, arg: str):
         registry = self.session.get("mcp")
-        config = load_mcp_config(self.workspace, CONFIG_DIR)
+        config = self._mcp_config()
         if not config:
             print_note("Sin servidores MCP. Declara alguno en .lixbon/mcp.json (proyecto) o ~/.lixbon/mcp.json:")
             print_note('{"servers": {"nombre": {"command": "npx", "args": ["-y", "@paquete/servidor"], "env": {}}}}')
@@ -2323,63 +2335,50 @@ class ChatApp:
         return True
 
     def cmd_visual(self, arg: str):
-        """Descarga al workspace las páginas de un diseño de Visuals (por id o
-        por el enlace /visuals/<id>) y, si se quiere, pone al agente a
-        replicarlo como proyecto real (React + Vite, con API…)."""
-        import re as _re
-
-        m = _re.search(r"([0-9a-f]{8}-[0-9a-f-]{27})", arg or "")
-        if not m:
-            print_error("Uso: /visual <id o enlace de https://lixbon.com/visuals/...> [stack]")
-            print_note("  /visual <id>                  elige qué hacer con el diseño en un menú")
-            print_note("  /visual <id> react            React + Vite")
-            print_note("  /visual <id> react api        React + Vite + API Express")
-            print_note("  /visual <id> vue + fastapi    cualquier stack, en tus palabras")
+        """Diseña en Lixbon Visuals con el agente: crear, editar un visual o pasarlo a
+        código. Las instrucciones las da el prompt `visual` del MCP de Lixbon y el
+        agente trabaja con sus herramientas visual_*."""
+        peticion = (arg or "").strip()
+        if not peticion:
+            print_error("Uso: /visual <qué diseñar>")
+            print_note("  /visual una landing para mi API             crea un visual nuevo")
+            print_note("  /visual vis_… haz el título más grande       edita uno existente (id o enlace)")
+            print_note("  /visual codigo vis_… react                   lo implementa en este proyecto")
             return True
-        stack = (arg or "")[m.end():].strip()
+        if not self.cfg.get("api_key"):
+            print_error("Visuals necesita tu cuenta de Lixbon: inicia sesión con /login.")
+            return True
+        server = self._lixbon_mcp()
+        if server is None:
+            return True
         try:
-            with spinner("trayendo el diseño…"):
-                data = self.api.visual_files(m.group(1))
-        except ApiError as exc:
-            self._report_api_error(exc)
-            return True
-        files = data.get("files") or []
-        if not files:
-            print_error("Ese diseño todavía no tiene páginas.")
-            return True
-        carpeta = _re.sub(r"[^a-z0-9]+", "-", (data.get("title") or "visual").lower()).strip("-") or "visual"
-        destino = self.workspace / carpeta
-        destino.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            (destino / f["name"]).write_text(f["code"], encoding="utf-8")
-        print_ok(f"{len(files)} archivo{'s' if len(files) != 1 else ''} en {carpeta}/  "
-                 f"({data.get('versions', 1)} versiones en la web)")
-        for f in files:
-            print_note(f"  {carpeta}/{f['name']}")
-        rutas = ", ".join(f"{carpeta}/{f['name']}" for f in files)
-        titulo = data.get("title") or carpeta
-        if not stack:
-            stack = select("¿Qué hago con el diseño?", [
-                Option("Dejarlo en HTML", "", "solo los archivos; le pides cambios al agente"),
-                Option("Replicarlo en React + Vite", "react", f"proyecto en {carpeta}-app/ con una ruta por página"),
-                Option("React + Vite + API Express", "react api", "lo mismo, con backend para formularios y datos"),
-                Option("Otro stack", "otro", f"escríbelo: /visual {m.group(1)[:8]}… vue + fastapi"),
-            ], hint="↑↓ elegir · Enter confirmar · Esc dejarlo en HTML") or ""
-        if stack == "otro":
-            print_note(f"Repite el comando con el stack: /visual {m.group(1)} <stack>")
-            stack = ""
-        if not stack:
-            self.history.append({"role": "user", "content": (
-                f"[He traído al workspace el diseño «{titulo}» de Lixbon Visuals: {rutas}. "
-                "Son páginas HTML autocontenidas (Tailwind por CDN). Cuando te pida cambios, edita esos archivos.]")})
+            with spinner("preparando Lixbon Visuals…"):
+                instrucciones = server.get_prompt("visual", {"peticion": peticion})
+        except McpError as exc:
+            print_error(f"Lixbon Visuals: {exc}")
             return True
         self.mode = "agent"
         self.cfg["mode"] = "agent"
         save_config(self.cfg)
         self.session["plan_mode"] = False
         self._refresh_status()
-        self.send_message(visual_project_prompt(titulo, carpeta, [f["name"] for f in files], stack))
+        self.send_message(instrucciones)
         return True
+
+    def _lixbon_mcp(self, espera: float = 15.0):
+        """El servidor MCP de Lixbon ya conectado, esperando a que arranque si hace falta."""
+        fin = time.monotonic() + espera
+        while self.session.get("mcp") is None and time.monotonic() < fin:
+            time.sleep(0.2)
+        registry = self.session.get("mcp")
+        server = registry.servers.get(LIXBON_MCP) if registry else None
+        if server is None:
+            print_error("No se pudo preparar el servidor MCP de Lixbon. Revisa /mcp.")
+            return None
+        if not server.alive:
+            print_error(f"No hay conexión con Lixbon Visuals: {server.error or 'sin respuesta'}")
+            return None
+        return server
 
     def cmd_init(self, arg: str):
         """Genera LIXBON.md: el contexto del proyecto que el CLI carga solo."""

@@ -106,6 +106,31 @@ def model_allowed(plan: dict[str, Any], model: str | None) -> bool:
     return any(model.startswith(prefix) for prefix in allowed)
 
 
+# (máx. visuals, máx. MB) cuando la columna del plan es NULL; -1 = ilimitado.
+VISUALS_DEFAULT_LIMITS = {"pro": (50, 500), "advance": (200, 2000)}
+
+
+def visual_limits(user_data: dict[str, Any], plan: dict[str, Any]) -> tuple[int, int]:
+    if user_data.get("role") == "admin":
+        return -1, -1
+    base = VISUALS_DEFAULT_LIMITS.get(plan.get("id"), (0, 0))
+    count, mb = plan.get("visuals_max"), plan.get("visuals_max_mb")
+    return (base[0] if count is None else int(count), base[1] if mb is None else int(mb))
+
+
+# Renders por día (imágenes, vídeos) cuando la columna del plan es NULL. PROVISIONAL:
+# pendiente de que negocio fije los valores (ver docs/ESPECIFICACION_VISUALS.md).
+VISUAL_RENDERS_DEFAULT = {"pro": (100, 10), "advance": (500, 50)}
+
+
+def render_limits(user_data: dict[str, Any], plan: dict[str, Any]) -> tuple[int, int]:
+    if user_data.get("role") == "admin":
+        return -1, -1
+    base = VISUAL_RENDERS_DEFAULT.get(plan.get("id"), (0, 0))
+    images, videos = plan.get("visual_renders_per_day"), plan.get("visual_video_renders_per_day")
+    return (base[0] if images is None else int(images), base[1] if videos is None else int(videos))
+
+
 def ensure_can_use_visuals(user_data: dict[str, Any], plan: dict[str, Any]) -> None:
     """Visuals es de Pro y Advance; los admins lo ven siempre."""
     if user_data.get("role") == "admin" or plan.get("id") in PLANES_CON_VISUALS:

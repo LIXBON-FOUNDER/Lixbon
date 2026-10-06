@@ -62,3 +62,20 @@ def test_sanear_html_arregla_apply_y_focus_visible():
     assert ":focus-visible { outline" in out and ".focus-visible {" not in out
     assert 'class="px-3 focus-visible"' in out
     assert sanear_html("<style>p{color:red}</style>") == "<style>p{color:red}</style>"
+
+
+def test_paginas_sin_nombre_toman_el_de_sus_enlaces():
+    nav = ('<nav><a href="index.html">Inicio</a><a href="proyectos.html">Proyectos</a>'
+           '<a href="estudio.html">Estudio</a><a href="contacto.html">Contacto</a><a href="casa-la-loma.html">Ver</a></nav>')
+    pg = lambda t, h1: f"```html\n<!doctype html><html><head><title>{t}</title></head><body>{nav}<h1>{h1}</h1></body></html>\n```"
+    texto = "\n\n".join([
+        pg("Nimbus Arquitectura", "Casas"),
+        pg("Proyectos | Nimbus Arquitectura", "Trabajos seleccionados"),
+        pg("Casa La Loma | Nimbus Arquitectura", "Casa La Loma"),
+        pg("Sobre nosotros | Nimbus Arquitectura", "Quiénes somos"),  # sin palabras en común: por descarte
+        pg("Contacto — Nimbus Arquitectura", "Hablemos"),
+    ])
+    assert [f["name"] for f in extract_files(texto)] == ["index.html", "proyectos.html", "casa-la-loma.html", "estudio.html", "contacto.html"]
+    # Sin enlaces que las nombren, el primer tramo del título.
+    solo = extract_files(pg("Inicio", "x").replace(nav, "") + "\n" + pg("Precios | Marca", "y").replace(nav, ""))
+    assert [f["name"] for f in solo] == ["index.html", "precios.html"]

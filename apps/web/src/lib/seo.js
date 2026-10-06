@@ -120,6 +120,6 @@ export const ORGANIZACION = {
   name: SITE_NAME,
   url: SITE_URL,
   logo: `${SITE_URL}/icon-512.png`,
-  email: 'soporte@lixbon.com',
+  email: 'support@lixbon.com',
   ...(PERFILES.length ? { sameAs: PERFILES } : {}),
 };

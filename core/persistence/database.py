@@ -101,6 +101,7 @@ def init_db() -> None:
         # Origen de la conversación (web/ide/cli): historial independiente por
         # superficie. NULL = legacy (se muestra en la web).
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source TEXT",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived INTEGER NOT NULL DEFAULT 0",
         # Releases multi-producto (desktop/android): la unicidad pasa de
         # version → (product, version). El DROP del constraint viejo es
         # imprescindible: con él, registrar el APK 0.1.0 pisaría el MSI 0.1.0.
@@ -133,6 +134,11 @@ def init_db() -> None:
         # /remote: qué agente maneja la sesión (Lixbon o Claude Code) y en qué carpeta
         "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS agent TEXT",
         "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS workspace TEXT",
+        # Visuals: límites por plan (NULL = valor por defecto del plan en código)
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max INTEGER",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max_mb INTEGER",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visual_renders_per_day INTEGER",
+        "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visual_video_renders_per_day INTEGER",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

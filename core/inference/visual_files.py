@@ -46,6 +46,7 @@ def extract_files(texto: str) -> list[dict]:
     for m in FENCE.finditer(texto or ""):
         previa, info, code = m.group(2) or "", (m.group(3) or "").strip(), m.group(4)
         name = None
+        anonimo = False
         enc = NOMBRE.search(f" {info}")
         if enc:
             name = enc.group(1)
@@ -74,9 +75,108 @@ def extract_files(texto: str) -> list[dict]:
                 name = "logo.svg"
             else:
                 t = TITULO.search(code)
-                name = "index.html" if anonimos == 0 else f"{_slug(t.group(1) if t else f'pagina-{anonimos + 1}')}.html"
+                name = "index.html" if anonimos == 0 else f"{_slug(_primer_segmento(t.group(1)) if t else f'pagina-{anonimos + 1}')}.html"
+                anonimo = anonimos > 0
             anonimos += 1
-        out.append({"name": _limpiar(name), "code": sanear_html(code)})
+        out.append({"name": _limpiar(name), "code": sanear_html(code), **({"anonimo": True} if anonimo else {})})
+    return _nombrar_por_enlaces(out)
+
+
+# ── Nombres de las páginas sin nombre (mismo criterio que nombrarPorEnlaces) ─
+# El nombre sacado del <title> rara vez coincide con los href de las otras
+# páginas; se empareja cada página sin nombre con el destino de enlace que
+# mejor encaja con su título y su <h1>.
+
+VACIAS = {"para", "por", "con", "los", "las", "del", "una", "uno", "que", "mas", "the", "and", "for", "our", "your", "html", "htm", "page", "pagina"}
+ENLACE = re.compile(r"""<a\b[^>]*\bhref\s*=\s*["']([^"'#?][^"']*)["'][^>]*>(.*?)</a>""", re.I | re.S)
+
+
+def _primer_segmento(titulo: str) -> str:
+    """«Proyectos | Nimbus Arquitectura» → «Proyectos»."""
+    return re.split(r"\s+[|·—–:-]\s+|\s*[|·—–]\s*", titulo or "")[0].strip() or (titulo or "")
+
+
+def _slug_simple(texto: str) -> str:
+    plano = unicodedata.normalize("NFD", texto or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", plano).strip("-")
+
+
+def _fichas(texto: str) -> set[str]:
+    return {re.sub(r"(es|s)$", "", w) for w in _slug_simple(texto).split("-") if len(w) >= 3 and w not in VACIAS}
+
+
+def _plano(html: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).strip()
+
+
+def _rotulo(code: str) -> str:
+    t = re.search(r"<title>([^<]{1,120})</title>", code or "", re.I)
+    h = re.search(r"<h1\b[^>]*>(.{1,300}?)</h1>", code or "", re.I | re.S)
+    return f"{t.group(1) if t else ''} {_plano(h.group(1)) if h else ''}".strip()
+
+
+def _destinos(codigos: list[str]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for code in codigos:
+        for m in ENLACE.finditer(code or ""):
+            href = m.group(1).strip()
+            if re.match(r"([a-z][a-z0-9+.-]*:|//)", href, re.I):
+                continue
+            partes = [p for p in re.split(r"[?#]", href)[0].split("/") if p]
+            ruta = partes[-1] if partes else ""
+            if not ruta or (re.search(r"\.[a-z0-9]+$", ruta, re.I) and not re.search(r"\.html?$", ruta, re.I)):
+                continue
+            name = ruta if re.search(r"\.html?$", ruta, re.I) else f"{ruta}.html"
+            out.setdefault(name, []).append(_plano(m.group(2)))
+    return out
+
+
+def _nombrar_por_enlaces(files: list[dict]) -> list[dict]:
+    sueltos = [f for f in files if f.get("anonimo")]
+    if not sueltos:
+        return files
+    destinos = _destinos([f["code"] for f in files])
+    ocupados = {f["name"].lower() for f in files if not f.get("anonimo")}
+    parejas = []
+    for i, f in enumerate(sueltos):
+        t = re.search(r"<title>([^<]{1,120})</title>", f["code"], re.I)
+        principal = _slug_simple(_primer_segmento(t.group(1))) if t else ""
+        propias = _fichas(f"{_rotulo(f['code'])} {f['name']}")
+        for destino, textos in destinos.items():
+            if destino.lower() in ocupados:
+                continue
+            base = _slug_simple(re.sub(r"\.html?$", "", destino, flags=re.I))
+            puntos = 0
+            if principal and base == principal:
+                puntos += 100
+            if principal and any(_slug_simple(tx) == principal for tx in textos):
+                puntos += 60
+            puntos += 10 * len(_fichas(f"{base} {' '.join(textos)}") & propias)
+            if puntos > 0:
+                parejas.append((puntos, i, destino))
+    parejas.sort(key=lambda p: -p[0])  # estable: a igualdad, el orden de aparición
+    asignado: dict[int, str] = {}
+    for _, i, destino in parejas:
+        if i in asignado or destino.lower() in ocupados:
+            continue
+        asignado[i] = destino
+        ocupados.add(destino.lower())
+    sin_pareja = [i for i in range(len(sueltos)) if i not in asignado]
+    libres = [d for d in destinos if d.lower() not in ocupados]
+    if len(sin_pareja) == 1 and len(libres) == 1:
+        asignado[sin_pareja[0]] = libres[0]
+        ocupados.add(libres[0].lower())
+    out = []
+    for f in files:
+        if not f.get("anonimo"):
+            out.append(f)
+            continue
+        i = sueltos.index(f)
+        name = asignado.get(i, f["name"])
+        if i not in asignado and name.lower() in ocupados:
+            name = re.sub(r"\.html$", "-2.html", name)
+        ocupados.add(name.lower())
+        out.append({"name": name, "code": f["code"]})
     return out
 
 

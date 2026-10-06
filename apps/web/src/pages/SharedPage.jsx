@@ -9,7 +9,7 @@ import { useT } from '../i18n/useT';
 import { api } from '../lib/api';
 import { Logo } from '../components/Logo';
 import { Markdown } from '../components/Markdown';
-import { construirVersiones, documentoPreview, extraerImagen } from '../lib/visuals';
+import { construirVersiones, documentoPreview, extraerImagen, resolverPagina, rotuloDe } from '../lib/visuals';
 
 export default function SharedPage() {
   const t = useT('shared');
@@ -97,7 +97,9 @@ function DisenoCompartido({ data, t }) {
   useEffect(() => {
     const onMessage = (e) => {
       const m = e.data || {};
-      if (m.type === 'lixbon:navigate' && paginas.some((f) => f.name === m.page)) setPagina(m.page);
+      if (m.type !== 'lixbon:navigate') return;
+      const destino = resolverPagina(paginas.map((f) => f.name), m.page, m.texto, Object.fromEntries(paginas.map((f) => [f.name, rotuloDe(f.code)])));
+      if (destino) setPagina(destino);
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);

@@ -8,10 +8,15 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
-  // Dos documentos: el IDE y la ventana de Lixbon Team (src-tauri/src/team.rs).
+  // Tres documentos: el IDE, la ventana de Lixbon Team (src-tauri/src/team.rs)
+  // y el aviso flotante de la mascota (src-tauri/src/mascota.rs).
   build: {
     rollupOptions: {
-      input: { main: resolve(__dirname, "index.html"), team: resolve(__dirname, "team.html") },
+      input: {
+        main: resolve(__dirname, "index.html"),
+        team: resolve(__dirname, "team.html"),
+        mascota: resolve(__dirname, "mascota.html"),
+      },
     },
   },
 

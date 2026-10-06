@@ -88,7 +88,7 @@ async def crear_caso(payload: CasoSoporte, request: Request,
     ip = request.client.host if request.client else "unknown"
     claves = [f"ip:{ip}"] + ([f"u:{usuario['id']}"] if usuario and usuario.get("id") else [])
     if not all(_permitido(c) for c in claves):
-        raise HTTPException(status_code=429, detail="Has enviado varios casos seguidos. Espera un rato o escríbenos a soporte@lixbon.com.")
+        raise HTTPException(status_code=429, detail="Has enviado varios casos seguidos. Espera un rato o escríbenos a support@lixbon.com.")
 
     nombre = (payload.name or "").strip() or None
     if usuario and not nombre:
@@ -104,7 +104,7 @@ async def crear_caso(payload: CasoSoporte, request: Request,
         user_agent=request.headers.get("user-agent"),
     )
     if not enviado:
-        raise HTTPException(status_code=503, detail="No pudimos enviar tu caso ahora mismo. Inténtalo de nuevo en unos minutos o escríbenos a soporte@lixbon.com.")
+        raise HTTPException(status_code=503, detail="No pudimos enviar tu caso ahora mismo. Inténtalo de nuevo en unos minutos o escríbenos a support@lixbon.com.")
     # Si el acuse falla no es un error: el caso ya está en el buzón.
     await send_support_receipt(correo, ticket=ticket, categoria=categoria, asunto=asunto, mensaje=mensaje)
     return {"ok": True, "ticket": ticket, "email": correo}

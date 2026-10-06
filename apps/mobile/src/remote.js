@@ -89,9 +89,16 @@ export const initialRemoteState = {
   items: [],
   approvals: [], // [{ id, tool, summary, risk }]
   agentState: 'idle', // idle | thinking
+  activity: null, // 'compacting' mientras Claude Code compacta
   hostConnected: false,
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
+  // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
+  orch: null,
+  orchDiff: {},
+  orchTerm: {},
+  orchAgents: null,
+  orchError: null,
   session: null,
   ended: false,
   lastSeq: 0,
@@ -107,7 +114,7 @@ function mapSnapshotMessages(messages) {
     if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
-      items.push(withKey({ kind: 'tool', tool: m.tool || 'tool', summary: '', result: m.content || '', error: m.ok === false, running: false }));
+      items.push(withKey({ kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: !!m.pending }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
   }
   return items;
@@ -137,7 +144,18 @@ export function remoteReducer(state, ev) {
         hostConnected: !!ev.host_connected,
         session: ev.session || s.session,
         meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
+        orch: ev.orch || s.orch,
       };
+    case 'orch':
+      return { ...s, orch: ev };
+    case 'orch_diff':
+      return { ...s, orchDiff: { ...s.orchDiff, [ev.task]: ev } };
+    case 'orch_term':
+      return { ...s, orchTerm: { ...s.orchTerm, [ev.task]: ev } };
+    case 'orch_agents':
+      return { ...s, orchAgents: Array.isArray(ev.agents) ? ev.agents : [] };
+    case 'orch_error':
+      return { ...s, orchError: { message: ev.message || 'Error', action: ev.action, at: Date.now() } };
     case 'hello':
       return {
         ...s,
@@ -198,13 +216,15 @@ export function remoteReducer(state, ev) {
       return {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
-          kind: 'tool', tool: ev.tool || 'tool', summary: ev.summary || '',
+          kind: 'tool', id: ev.id || '', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
           readonly: !!ev.readonly, running: true, result: '', error: false,
         })],
       };
     case 'tool_result': {
       const items = [...s.items];
-      const idx = items.findLastIndex((it) => it.kind === 'tool' && it.running && it.tool === ev.tool);
+      const idx = ev.id
+        ? items.findLastIndex((it) => it.kind === 'tool' && it.id === ev.id)
+        : items.findLastIndex((it) => it.kind === 'tool' && it.running && it.tool === ev.tool);
       const patch = { running: false, result: ev.result || '', error: !!ev.error };
       if (idx === -1) {
         items.push(withKey({ kind: 'tool', tool: ev.tool || 'tool', summary: '', ...patch }));
@@ -214,7 +234,7 @@ export function remoteReducer(state, ev) {
       return { ...s, items };
     }
     case 'status':
-      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle' };
+      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle', activity: ev.state === 'thinking' ? ev.activity || null : null };
     case 'approval_request':
       if (s.approvals.some((a) => a.id === ev.id)) return s;
       return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit' }] };

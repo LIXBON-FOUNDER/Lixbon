@@ -1,5 +1,5 @@
-// GitMode.jsx — control de código: cambios y commit a la izquierda; diff o
-// pull request de la rama en el centro.
+// GitMode.jsx — control de código: cambios y commit a la izquierda; diff,
+// pull requests o GitHub Actions en el centro.
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
@@ -12,6 +12,7 @@ import { Segmented } from '../components/Segmented';
 import { SourceControl } from '../sections/SourceControl/SourceControl';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { GitHubView } from '../sections/SourceControl/GitHubView';
+import { ActionsView } from '../sections/SourceControl/ActionsView';
 
 const readMode = () => { try { return localStorage.getItem('lx_diff_mode') || 'inline'; } catch { return 'inline'; } };
 
@@ -23,6 +24,7 @@ export function GitMode() {
   const { stage, unstage, discard, fileDiff } = useGitStore();
   const [tab, setTab] = useState(diffData ? 'diff' : 'pr');
   const [viewMode, setViewMode] = useState(readMode);
+  const [runId, setRunId] = useState(null);
   const meta = diffData?.meta;
 
   useEffect(() => { if (diffData) setTab('diff'); }, [diffData]);
@@ -59,8 +61,8 @@ export function GitMode() {
           <Segmented
             value={tab}
             onChange={setTab}
-            width={112}
-            options={[{ value: 'diff', label: 'Cambios' }, { value: 'pr', label: 'Pull request' }]}
+            width={104}
+            options={[{ value: 'diff', label: 'Cambios' }, { value: 'pr', label: 'Pull requests' }, { value: 'actions', label: 'Actions' }]}
           />
           {tab === 'diff' && diffData && <span className="mono panelhead__meta">{diffData.title}</span>}
           <div className="panelhead__fill" />
@@ -84,7 +86,9 @@ export function GitMode() {
         <div className="gitmain__body scroll">
           {tab === 'diff'
             ? (diffData ? <DiffView mode={viewMode} /> : <div className="changes__empty">Elige un archivo o un commit a la izquierda para ver su diff.</div>)
-            : <GitHubView />}
+            : tab === 'pr'
+              ? <GitHubView onOpenRun={(id) => { setRunId(id); setTab('actions'); }} />
+              : <ActionsView runId={runId} onRunChange={setRunId} />}
         </div>
       </Panel>
     </div>

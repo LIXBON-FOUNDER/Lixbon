@@ -147,6 +147,10 @@ function HowTo() {
         elige qué agente y qué modelo hace cada tarea, espera sus informes, integra y te cuenta el resultado. Tú solo hablas con él.
       </span>
       <span className="orch__hint">
+        Para verificar lo hecho, escribe <span className="mono">/adversary &lt;qué atacar&gt;</span>: un agente adversario busca cómo
+        se rompe y quien lo hizo tiene que corregir o justificar cada hallazgo.
+      </span>
+      <span className="orch__hint">
         Aquí puedes seguir qué hace cada agente: su terminal en vivo, sus fases, sus mensajes, su informe y sus cambios.
       </span>
     </div>
@@ -326,9 +330,14 @@ export function OrchestratorMode() {
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
   const { snap, selected, select, init, call } = useOrchStore();
   const [allRepos, setAllRepos] = useState(false);
+  const [expanded, setExpanded] = useState(() => new Set());
   const root = useAppStore((s) => s.workspaceRoot);
 
   useEffect(() => { init(); }, [init]);
+
+  const removedText = (res) => (res?.kept?.length
+    ? `Run quitado. Worktrees conservados en disco: ${res.kept.map((k) => `${k.task} (${k.reason})`).join(', ')}`
+    : 'Run quitado');
 
   const allRuns = useMemo(() => Object.values(snap?.runs || {}).sort((a, b) => b.created - a.created), [snap]);
   const runs = useMemo(
@@ -353,18 +362,25 @@ export function OrchestratorMode() {
           </div>
           <div className="orch__runs scroll">
             {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
-            {runs.map((r) => (
-              <section key={r.id} className="orch__run">
+            {runs.map((r) => {
+              const folded = r.closed && !expanded.has(r.id);
+              const toggle = () => setExpanded((s) => { const n = new Set(s); if (!n.delete(r.id)) n.add(r.id); return n; });
+              return (
+              <section key={r.id} className={`orch__run${r.closed ? ' orch__run--closed' : ''}`}>
                 <div className="orch__run-head">
-                  <span className="orch__run-title" title={r.objective}>{r.objective}</span>
-                  <RunProgress tasks={taskTree(snap.tasks, r.id)} />
-                  <button className="ic" title="Quitar este run de la lista (no borra ramas)" onClick={() => call('remove_run', { run: r.id })}><IconTrash size={12} /></button>
+                  {r.closed
+                    ? <button className="orch__run-title orch__run-fold" title={r.objective} aria-expanded={!folded} onClick={toggle}>{r.objective}</button>
+                    : <span className="orch__run-title" title={r.objective}>{r.objective}</span>}
+                  {r.closed && <span className="orch__run-tag">cerrado</span>}
+                  {!r.closed && <RunProgress tasks={taskTree(snap.tasks, r.id)} />}
+                  <button className="ic" title="Quitar este run de la lista (libera los worktrees fusionados y borra sus ramas)" onClick={() => call('remove_run', { run: r.id }, removedText)}><IconTrash size={12} /></button>
                 </div>
-                {taskTree(snap.tasks, r.id).map((t) => (
+                {!folded && taskTree(snap.tasks, r.id).map((t) => (
                   <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={select} />
                 ))}
               </section>
-            ))}
+              );
+            })}
           </div>
           {(hidden > 0 || allRepos) && (
             <button className="lk orch__repos" onClick={() => setAllRepos((v) => !v)}>
