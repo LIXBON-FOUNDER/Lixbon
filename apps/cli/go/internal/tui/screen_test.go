@@ -26,6 +26,9 @@ type screenRig struct {
 func startScreen(t *testing.T, h *harness, cols, rows int) *screenRig {
 	t.Helper()
 	emu := vt.NewSafeEmulator(cols, rows)
+	// Sin un TTY real, en Unix Bubble Tea emite LF sin CR esperando que el
+	// terminal lo traduzca; el emulador necesita el modo LNM para hacerlo.
+	emu.WriteString("\x1b[20h")
 	go io.Copy(io.Discard, emu)
 	pr, pw := io.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

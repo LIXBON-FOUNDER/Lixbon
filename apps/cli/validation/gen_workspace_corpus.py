@@ -325,6 +325,7 @@ def build() -> dict:
             case = {"name": name, "tool": tool, "args": args}
             if unordered:
                 case["unordered"] = True
+                result = "\n".join(sorted(result.split("\n")))
             cases.append({**case, **output_fields(result)})
     return {
         "version": 1,

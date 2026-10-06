@@ -680,7 +680,7 @@
     "pattern": "total"
    },
    "unordered": true,
-   "output": ".hidden/oculto.txt:1:total oculto\ncon espacios/a b.txt:1:total con espacios\nñandú/é.txt:1:contenido con total\nprof/a/b/c/d/e/f/g/h.txt:1:total profundo"
+   "output": ".hidden/oculto.txt:1:total oculto\ncon espacios/a b.txt:1:total con espacios\nprof/a/b/c/d/e/f/g/h.txt:1:total profundo\nñandú/é.txt:1:contenido con total"
   },
   {
    "name": "search_ignore_case",
@@ -690,7 +690,7 @@
     "ignore_case": true
    },
    "unordered": true,
-   "output": ".env.example:1:TOTAL=1\n.hidden/oculto.txt:1:total oculto\ncon espacios/a b.txt:1:total con espacios\nsrc/notas.txt:1:Total de notas: 3\nsrc/notas.txt:2:TOTAL en mayúsculas\nñandú/é.txt:1:contenido con total\nprof/a/b/c/d/e/f/g/h.txt:1:total profundo"
+   "output": ".env.example:1:TOTAL=1\n.hidden/oculto.txt:1:total oculto\ncon espacios/a b.txt:1:total con espacios\nprof/a/b/c/d/e/f/g/h.txt:1:total profundo\nsrc/notas.txt:1:Total de notas: 3\nsrc/notas.txt:2:TOTAL en mayúsculas\nñandú/é.txt:1:contenido con total"
   },
   {
    "name": "search_regex",
@@ -719,7 +719,7 @@
     "glob": "*.py"
    },
    "unordered": true,
-   "output": "src/app.py:7:def metodo(self, x):\nsrc/app.py:10:async def asincrono(self):\nsrc/app.py:14:def principal():\nsrc/app.py:18:async def tarea():\nsrc/app.py:22:def función_ñ():\nsrc/app.py:26:x = 1  # def no_es_definicion():\nsrc/sep.py:1:def a():\nsrc/sep.py:2:def b():\nsrc/sep.py:3:def c():"
+   "output": "src/app.py:10:async def asincrono(self):\nsrc/app.py:14:def principal():\nsrc/app.py:18:async def tarea():\nsrc/app.py:22:def función_ñ():\nsrc/app.py:26:x = 1  # def no_es_definicion():\nsrc/app.py:7:def metodo(self, x):\nsrc/sep.py:1:def a():\nsrc/sep.py:2:def b():\nsrc/sep.py:3:def c():"
   },
   {
    "name": "search_glob_with_dir",
@@ -751,7 +751,7 @@
     "path": "src/app.py"
    },
    "unordered": true,
-   "output": "src/app.py:7:def metodo(self, x):\nsrc/app.py:10:async def asincrono(self):\nsrc/app.py:14:def principal():\nsrc/app.py:18:async def tarea():\nsrc/app.py:22:def función_ñ():\nsrc/app.py:26:x = 1  # def no_es_definicion():"
+   "output": "src/app.py:10:async def asincrono(self):\nsrc/app.py:14:def principal():\nsrc/app.py:18:async def tarea():\nsrc/app.py:22:def función_ñ():\nsrc/app.py:26:x = 1  # def no_es_definicion():\nsrc/app.py:7:def metodo(self, x):"
   },
   {
    "name": "search_no_results",

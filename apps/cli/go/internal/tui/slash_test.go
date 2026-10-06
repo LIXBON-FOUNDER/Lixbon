@@ -248,8 +248,8 @@ func TestWorkspaceCommandReloadsProjectContext(t *testing.T) {
 		t.Fatalf("contexto: %q", h.chat.ProjectContext)
 	}
 	contains(t, h.out(), "LIXBON.md encontrado")
-	if !strings.HasPrefix(h.chat.Toolbox.Root, filepath.Dir(other)) {
-		t.Fatalf("la raíz de las herramientas no cambió: %s", h.chat.Toolbox.Root)
+	if want, _ := filepath.EvalSymlinks(other); h.chat.Toolbox.Root != want {
+		t.Fatalf("la raíz de las herramientas es %s, se esperaba %s", h.chat.Toolbox.Root, want)
 	}
 	h.send("/workspace /no/existe/seguro")
 	contains(t, h.out(), "Ruta inválida o no es una carpeta.")
