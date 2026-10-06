@@ -60,6 +60,8 @@ func (t *transcript) window(rows, scroll int) []string {
 	return out
 }
 
+func (t *transcript) reset() { t.lines, t.wrapped = nil, nil }
+
 func (t *transcript) maxScroll(rows int) int { return max(0, len(t.wrapped)-rows) }
 
 func (t *transcript) text() string { return strings.Join(t.lines, "\n") }

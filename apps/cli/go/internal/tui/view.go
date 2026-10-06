@@ -53,7 +53,9 @@ func (m *Model) View() tea.View {
 
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	if m.wheel {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.WindowTitle = m.windowTitle()
 	return v
 }

@@ -178,7 +178,7 @@ func (a *App) failure(ctx context.Context, err error) int {
 	case 402:
 		a.printError("Sin créditos disponibles: " + apiErr.Message)
 	case 429:
-		a.printError("Demasiadas peticiones seguidas; espera unos segundos.")
+		a.printError(apiErr.RateLimitText())
 	default:
 		a.printError(apiErr.Message)
 	}

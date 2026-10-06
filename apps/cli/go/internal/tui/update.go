@@ -279,7 +279,7 @@ func (m *Model) historyPrev() bool {
 	m.histPos--
 	m.input.SetValue(m.hist.entries[m.histPos])
 	m.input.MoveToEnd()
-	m.refreshMenu()
+	m.hideMenuWhileBrowsing()
 	return true
 }
 
@@ -294,8 +294,16 @@ func (m *Model) historyNext() bool {
 		m.input.SetValue(m.hist.entries[m.histPos])
 	}
 	m.input.MoveToEnd()
-	m.refreshMenu()
+	m.hideMenuWhileBrowsing()
 	return true
+}
+
+// hideMenuWhileBrowsing evita que una entrada del historial que empieza por «/»
+// abra el menú de comandos: el menú se quedaría con las flechas y no dejaría
+// seguir recorriendo el historial.
+func (m *Model) hideMenuWhileBrowsing() {
+	m.refreshMenu()
+	m.menu = nil
 }
 
 // ── menú de comandos ─────────────────────────────────────────────────────

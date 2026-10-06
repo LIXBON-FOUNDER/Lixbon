@@ -179,7 +179,7 @@ func (m *Model) reportError(err error) string {
 	case 402:
 		return errLine("Sin créditos disponibles: " + apiErr.Message)
 	case 429:
-		return errLine("Demasiadas peticiones seguidas; espera unos segundos.")
+		return errLine(apiErr.RateLimitText())
 	}
 	return errLine(apiErr.Message)
 }

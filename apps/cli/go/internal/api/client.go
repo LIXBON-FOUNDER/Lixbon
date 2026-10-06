@@ -131,6 +131,32 @@ func (c *Client) doJSON(ctx context.Context, method, url string, payload any, ti
 	return nil
 }
 
+// providerMessage lee el error de los proveedores compatibles con OpenAI, que
+// usan "error" o "message" en lugar del "detail" del gateway Lixbon.
+func providerMessage(data map[string]json.RawMessage, fallback string) string {
+	for _, key := range []string{"message", "error"} {
+		var text string
+		if json.Unmarshal(data[key], &text) == nil && text != "" {
+			return text
+		}
+		var nested struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(data[key], &nested) == nil && nested.Message != "" {
+			return nested.Message
+		}
+	}
+	return fallback
+}
+
+func (e *Error) RateLimitText() string {
+	text := "Demasiadas peticiones seguidas; espera unos segundos."
+	if e.Message != "" {
+		text += " Respuesta del servidor: " + e.Message
+	}
+	return text
+}
+
 func friendlyDetail(body string) string {
 	if strings.Contains(body, "error code: 10") {
 		return fmt.Sprintf("Conexión bloqueada por el filtro del servidor (%s).", truncateRunes(strings.TrimSpace(body), 40))
@@ -141,7 +167,7 @@ func friendlyDetail(body string) string {
 	}
 	raw, ok := data["detail"]
 	if !ok {
-		return body
+		return providerMessage(data, body)
 	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {

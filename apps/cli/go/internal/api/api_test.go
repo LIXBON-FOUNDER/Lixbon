@@ -29,6 +29,9 @@ func TestFriendlyDetail(t *testing.T) {
 		`{"detail":{"message":"Sin créditos","code":402}}`: "Sin créditos",
 		`{"detail":{"code":1}}`:                            `{"code":1}`,
 		`{"otro":1}`:                                       `{"otro":1}`,
+		`{"error":"model not found","message":"detalle"}`:  "detalle",
+		`{"error":{"message":"Rate limit","code":429}}`:    "Rate limit",
+		`{"error":"solo error"}`:                           "solo error",
 		"error code: 1010":                                 "Conexión bloqueada por el filtro del servidor (error code: 1010).",
 		"<html>502</html>":                                 "<html>502</html>",
 	}

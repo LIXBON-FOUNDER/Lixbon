@@ -82,6 +82,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		m.newConversation("conversación nueva")
 		m.print(note("Conversación nueva: contexto vacío. La anterior queda en /history."))
 	case "clear":
+		m.log.reset()
+		m.scroll = 0
 		m.newConversation("contexto limpio")
 	case "compact":
 		return m.cmdCompact()
@@ -91,6 +93,13 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdWeb(arg)
 	case "copy":
 		m.cmdCopy()
+	case "mouse":
+		m.wheel = !m.wheel
+		if m.wheel {
+			m.print(note("Rueda del ratón activa: ya no se puede seleccionar texto (Shift + arrastrar sí, en la mayoría de terminales). /mouse la quita."))
+		} else {
+			m.print(note("Rueda del ratón desactivada: selecciona y copia con normalidad; AvPág y RePág desplazan."))
+		}
 	case "save":
 		m.cmdSave(arg)
 	case "approve":

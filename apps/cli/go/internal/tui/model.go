@@ -62,6 +62,7 @@ type Model struct {
 
 	log    transcript
 	scroll int
+	wheel  bool
 
 	running     bool
 	interrupted bool
