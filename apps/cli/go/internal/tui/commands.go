@@ -46,7 +46,7 @@ var Specs = []Spec{
 	{"run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"},
 	{"workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"},
 	{"init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"},
-	{"visual", "<id o enlace> [stack]", "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)", "agente"},
+	{"visual", "<qué diseñar> | <id> <cambio> | codigo <id> [stack]", "Diseñar en Lixbon Visuals: crear, editar o pasar a código", "agente"},
 	{"status", "", "Ver estado de la sesión", "cuenta"},
 	{"cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"},
 	{"usage", "", "Ver uso global de la cuenta", "cuenta"},
