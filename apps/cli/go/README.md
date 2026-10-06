@@ -17,10 +17,10 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/process` | Shell con timeout, cancelación, muerte del árbol de procesos, captura acotada y procesos en segundo plano | pruebas con procesos reales (árbol de 2 niveles) |
 | `internal/tools` (`Toolbox`) | `run_command`, `read_output`, `stop_command`, `fetch_url`, `web_search`, `todo`, `ask_user` con estado de sesión | `html_cases` del corpus + pruebas con servidores falsos |
 | `internal/history` | Ventana de contexto: estimación de tokens, recorte, poda segura y compactación | `fixtures/agent_corpus.json` (sección `history`, incluye la longitud `repr` de Python) |
-| `internal/agent` | Política de comandos, prompts del sistema, nudges, saneado de historial | `agent_corpus.json` (política, prompts byte a byte, árbol del workspace) |
+| `internal/agent` | Bucle del turno (pasos, reintentos, rescate del razonamiento, repeticiones), aprobaciones, vista previa y diff, checkpoints/undo, verificadores, política de comandos y prompts | `agent_corpus.json` (política, prompts byte a byte, árbol, diff con `SequenceMatcher`, vista previa, resúmenes) + 50 pruebas del bucle con un modelo falso |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: aprobaciones, snapshots y `/undo`, verificadores, bucle del agente, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
+Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: conectar el agente a `chat --once` y al chat interactivo, MCP, remoto, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
 
 ## Diferencias deliberadas con Python
 
@@ -41,6 +41,10 @@ Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: aprobaci
 - `todo` y `ask_user` viven en el `Toolbox` y avisan a la interfaz por callbacks (`OnTodo`, `AskUser`): la capa Bubble Tea los conectará.
 - Política de comandos: un prefijo vacío o solo de espacios no permite nada (en Python actuaba de comodín).
 - La firma de repetición de llamadas (`MAX_REPEATED_CALLS`) usará un hash del JSON canónico completo en vez de los primeros 400 caracteres.
+- La vista previa de aprobación se calcula con las mismas funciones puras que la herramienta (`ApplyEdit`, `ApplyMultiEdit`, `ApplyInsert`): el diff que se aprueba es lo que se escribe. Python mostraba un diff distinto en inserciones, ediciones ambiguas o tolerantes y `multi_edit` con un fallo intermedio.
+- Los verificadores no escriben nada junto al archivo (Python creaba `__pycache__` con `py_compile`), un verificador que no puede ejecutarse cuenta como «sin errores», y los `.go` se comprueban con `go/parser` en proceso.
+- El prompt de herramientas MCP en protocolo de texto sí llega al modelo (en Python se añadía después de crear el mensaje y se perdía).
+- Los diffs de más de 5.000 líneas por lado se muestran como sustitución completa para acotar el coste.
 - `read_file` de PDF y Word devuelve «aún no disponible» hasta decidir la biblioteca de extracción.
 
 ## Desarrollo

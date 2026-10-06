@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -37,6 +38,44 @@ type agentCorpus struct {
 		Native    string            `json:"native"`
 		Text      string            `json:"text"`
 	} `json:"prompts"`
+	Diff []struct {
+		Name        string  `json:"name"`
+		Old         string  `json:"old"`
+		New         string  `json:"new"`
+		Rows        [][]any `json:"rows"`
+		ContextRows [][]any `json:"context_rows"`
+		Adds        int     `json:"adds"`
+		Dels        int     `json:"dels"`
+	} `json:"diff"`
+	Change struct {
+		Files map[string]struct {
+			Text string `json:"text"`
+			B64  string `json:"b64"`
+		} `json:"files"`
+		Cases []struct {
+			Name   string         `json:"name"`
+			Tool   string         `json:"tool"`
+			Args   map[string]any `json:"args"`
+			Change *struct {
+				Kind    string `json:"kind"`
+				Path    string `json:"path"`
+				OldText string `json:"old_text"`
+				NewText string `json:"new_text"`
+				Detail  string `json:"detail"`
+			} `json:"change"`
+		} `json:"cases"`
+	} `json:"change"`
+	Summary struct {
+		Args []struct {
+			Tool   string         `json:"tool"`
+			Args   map[string]any `json:"args"`
+			Output string         `json:"output"`
+		} `json:"args"`
+		Result []struct {
+			Result string `json:"result"`
+			Output string `json:"output"`
+		} `json:"result"`
+	} `json:"summary"`
 	Misc struct {
 		Constants map[string]any `json:"constants"`
 		Sanitize  []struct {
@@ -210,5 +249,77 @@ func TestMCPTextPromptCorpus(t *testing.T) {
 			}
 		}
 		t.Fatalf("longitudes: got %d, want %d", len(got), len(c.Output))
+	}
+}
+
+func rowsToAny(rows []DiffRow) [][]any {
+	out := make([][]any, len(rows))
+	for i, r := range rows {
+		out[i] = []any{r.Kind, float64(r.OldNo), float64(r.NewNo), r.Text}
+	}
+	return out
+}
+
+func TestDiffCorpus(t *testing.T) {
+	for _, c := range loadCorpus(t).Diff {
+		t.Run(c.Name, func(t *testing.T) {
+			change := Change{Kind: "update", Path: "f.txt", OldText: c.Old, NewText: c.New}
+			if got := rowsToAny(DiffRows(change, DiffContext)); !reflect.DeepEqual(append([][]any{}, got...), append([][]any{}, c.Rows...)) {
+				t.Errorf("filas (contexto 3)\n got: %v\nwant: %v", got, c.Rows)
+			}
+			if got := rowsToAny(DiffRows(change, 1)); !reflect.DeepEqual(append([][]any{}, got...), append([][]any{}, c.ContextRows...)) {
+				t.Errorf("filas (contexto 1)\n got: %v\nwant: %v", got, c.ContextRows)
+			}
+			if adds, dels := DiffCounts(change); adds != c.Adds || dels != c.Dels {
+				t.Errorf("conteo +%d -%d, esperaba +%d -%d", adds, dels, c.Adds, c.Dels)
+			}
+		})
+	}
+}
+
+func TestComputeChangeCorpus(t *testing.T) {
+	c := loadCorpus(t).Change
+	root := t.TempDir()
+	for rel, f := range c.Files {
+		data := []byte(f.Text)
+		if f.B64 != "" {
+			data, _ = base64.StdEncoding.DecodeString(f.B64)
+		}
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range c.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := ComputeChange(root, tc.Tool, tc.Args)
+			if tc.Change == nil {
+				if got != nil {
+					t.Fatalf("esperaba nil, obtuve %+v", got)
+				}
+				return
+			}
+			want := Change{Kind: tc.Change.Kind, Path: tc.Change.Path, OldText: tc.Change.OldText, NewText: tc.Change.NewText, Detail: tc.Change.Detail}
+			if got == nil || *got != want {
+				t.Fatalf("got %+v\nwant %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestSummaryCorpus(t *testing.T) {
+	c := loadCorpus(t).Summary
+	for _, a := range c.Args {
+		if got := ArgsSummary(a.Tool, a.Args); got != a.Output {
+			t.Errorf("ArgsSummary(%s, %v) = %q, want %q", a.Tool, a.Args, got, a.Output)
+		}
+	}
+	for _, r := range c.Result {
+		if got := ResultSummary(r.Result); got != r.Output {
+			t.Errorf("ResultSummary(%.30q) = %q, want %q", r.Result, got, r.Output)
+		}
 	}
 }

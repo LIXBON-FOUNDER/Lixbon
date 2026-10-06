@@ -6993,5 +6993,2081 @@
    ],
    "output": "\n\n=== HERRAMIENTAS EXTERNAS (MCP) ===\n{\"tool\":\"orden_servidor\",\"args\":{\"zeta\":…, \"alfa\":…, \"medio\":…, \"p3\":…, \"b\":…, \"a\":…, \"z9\":…, \"m\":…}}  propiedades fuera de orden alfabético\n{\"tool\":\"descripcion_ñ\",\"args\":{}}  ññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ\n{\"tool\":\"mcp__srv__tool0\",\"args\":{}}  dddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool1\",\"args\":{\"p0\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool2\",\"args\":{\"p0\":…, \"p1\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool3\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool4\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool5\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool6\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool7\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool8\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…, \"p7\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool9\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…, \"p7\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool10\",\"args\":{}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool11\",\"args\":{\"p0\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool12\",\"args\":{\"p0\":…, \"p1\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool13\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool14\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool15\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool16\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool17\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool18\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…, \"p7\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool19\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…, \"p7\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool20\",\"args\":{}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool21\",\"args\":{\"p0\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool22\",\"args\":{\"p0\":…, \"p1\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool23\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool24\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool25\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool26\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool27\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool28\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…, \"p7\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool29\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…, \"p7\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool30\",\"args\":{}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool31\",\"args\":{\"p0\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool32\",\"args\":{\"p0\":…, \"p1\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool33\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool34\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool35\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool36\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n{\"tool\":\"mcp__srv__tool37\",\"args\":{\"p0\":…, \"p1\":…, \"p2\":…, \"p3\":…, \"p4\":…, \"p5\":…, \"p6\":…}}  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   }
+ },
+ "diff": [
+  {
+   "name": "identical",
+   "old": "a\nb\nc\n",
+   "new": "a\nb\nc\n",
+   "rows": [],
+   "context_rows": [],
+   "adds": 0,
+   "dels": 0
+  },
+  {
+   "name": "both_empty",
+   "old": "",
+   "new": "",
+   "rows": [],
+   "context_rows": [],
+   "adds": 0,
+   "dels": 0
+  },
+  {
+   "name": "empty_to_text",
+   "old": "",
+   "new": "a\nb\n",
+   "rows": [
+    [
+     "add",
+     0,
+     1,
+     "a"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "b"
+    ]
+   ],
+   "context_rows": [
+    [
+     "add",
+     0,
+     1,
+     "a"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "b"
+    ]
+   ],
+   "adds": 2,
+   "dels": 0
+  },
+  {
+   "name": "text_to_empty",
+   "old": "a\nb\n",
+   "new": "",
+   "rows": [
+    [
+     "del",
+     1,
+     0,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ]
+   ],
+   "context_rows": [
+    [
+     "del",
+     1,
+     0,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ]
+   ],
+   "adds": 0,
+   "dels": 2
+  },
+  {
+   "name": "insert_in_middle",
+   "old": "a\nb\nc\n",
+   "new": "a\nb\nX\nc\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "X"
+    ],
+    [
+     "ctx",
+     3,
+     4,
+     "c"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "X"
+    ],
+    [
+     "ctx",
+     3,
+     4,
+     "c"
+    ]
+   ],
+   "adds": 1,
+   "dels": 0
+  },
+  {
+   "name": "delete_in_middle",
+   "old": "a\nb\nc\nd\n",
+   "new": "a\nd\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "c"
+    ],
+    [
+     "ctx",
+     4,
+     2,
+     "d"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "c"
+    ],
+    [
+     "ctx",
+     4,
+     2,
+     "d"
+    ]
+   ],
+   "adds": 0,
+   "dels": 2
+  },
+  {
+   "name": "replace_line",
+   "old": "a\nb\nc\n",
+   "new": "a\nB\nc\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "B"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "c"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "B"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "c"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "replace_block_of_different_size",
+   "old": "a\nb\nc\nd\ne\n",
+   "new": "a\nX\nY\nZ\ne\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "c"
+    ],
+    [
+     "del",
+     4,
+     0,
+     "d"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "X"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "Y"
+    ],
+    [
+     "add",
+     0,
+     4,
+     "Z"
+    ],
+    [
+     "ctx",
+     5,
+     5,
+     "e"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "c"
+    ],
+    [
+     "del",
+     4,
+     0,
+     "d"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "X"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "Y"
+    ],
+    [
+     "add",
+     0,
+     4,
+     "Z"
+    ],
+    [
+     "ctx",
+     5,
+     5,
+     "e"
+    ]
+   ],
+   "adds": 3,
+   "dels": 3
+  },
+  {
+   "name": "long_file_three_hunks",
+   "old": "linea 1\nlinea 2\nlinea 3\nlinea 4\nlinea 5\nlinea 6\nlinea 7\nlinea 8\nlinea 9\nlinea 10\nlinea 11\nlinea 12\nlinea 13\nlinea 14\nlinea 15\nlinea 16\nlinea 17\nlinea 18\nlinea 19\nlinea 20\nlinea 21\nlinea 22\nlinea 23\nlinea 24\nlinea 25\nlinea 26\nlinea 27\nlinea 28\nlinea 29\nlinea 30\nlinea 31\nlinea 32\nlinea 33\nlinea 34\nlinea 35\nlinea 36\nlinea 37\nlinea 38\nlinea 39\nlinea 40\nlinea 41\nlinea 42\nlinea 43\nlinea 44\nlinea 45\nlinea 46\nlinea 47\nlinea 48\nlinea 49\nlinea 50\nlinea 51\nlinea 52\nlinea 53\nlinea 54\nlinea 55\nlinea 56\nlinea 57\nlinea 58\nlinea 59\nlinea 60\n",
+   "new": "linea 1\nlinea 2\nlinea 3\nlinea 4\nLINEA 5\nlinea 6\nlinea 7\nlinea 8\nlinea 9\nlinea 10\nlinea 11\nlinea 12\nlinea 13\nlinea 14\nlinea 15\nlinea 16\nlinea 17\nlinea 18\nlinea 19\nlinea 20\nlinea 21\nlinea 22\nlinea 23\nlinea 24\nlinea 25\nlinea 26\nlinea 27\nlinea 28\nlinea 29\nlinea 30\nnueva A\nnueva B\nlinea 31\nlinea 32\nlinea 33\nlinea 34\nlinea 35\nlinea 36\nlinea 37\nlinea 38\nlinea 39\nlinea 40\nlinea 41\nlinea 42\nlinea 43\nlinea 44\nlinea 45\nlinea 46\nlinea 47\nlinea 48\nlinea 49\nlinea 50\nlinea 51\nlinea 52\nlinea 53\nlinea 54\nlinea 55\nlinea 56\nlinea 57\nlinea 59\nlinea 60\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "linea 1"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "linea 2"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "linea 3"
+    ],
+    [
+     "ctx",
+     4,
+     4,
+     "linea 4"
+    ],
+    [
+     "del",
+     5,
+     0,
+     "linea 5"
+    ],
+    [
+     "add",
+     0,
+     5,
+     "LINEA 5"
+    ],
+    [
+     "ctx",
+     6,
+     6,
+     "linea 6"
+    ],
+    [
+     "ctx",
+     7,
+     7,
+     "linea 7"
+    ],
+    [
+     "ctx",
+     8,
+     8,
+     "linea 8"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     28,
+     28,
+     "linea 28"
+    ],
+    [
+     "ctx",
+     29,
+     29,
+     "linea 29"
+    ],
+    [
+     "ctx",
+     30,
+     30,
+     "linea 30"
+    ],
+    [
+     "add",
+     0,
+     31,
+     "nueva A"
+    ],
+    [
+     "add",
+     0,
+     32,
+     "nueva B"
+    ],
+    [
+     "ctx",
+     31,
+     33,
+     "linea 31"
+    ],
+    [
+     "ctx",
+     32,
+     34,
+     "linea 32"
+    ],
+    [
+     "ctx",
+     33,
+     35,
+     "linea 33"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     55,
+     57,
+     "linea 55"
+    ],
+    [
+     "ctx",
+     56,
+     58,
+     "linea 56"
+    ],
+    [
+     "ctx",
+     57,
+     59,
+     "linea 57"
+    ],
+    [
+     "del",
+     58,
+     0,
+     "linea 58"
+    ],
+    [
+     "ctx",
+     59,
+     60,
+     "linea 59"
+    ],
+    [
+     "ctx",
+     60,
+     61,
+     "linea 60"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     4,
+     4,
+     "linea 4"
+    ],
+    [
+     "del",
+     5,
+     0,
+     "linea 5"
+    ],
+    [
+     "add",
+     0,
+     5,
+     "LINEA 5"
+    ],
+    [
+     "ctx",
+     6,
+     6,
+     "linea 6"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     30,
+     30,
+     "linea 30"
+    ],
+    [
+     "add",
+     0,
+     31,
+     "nueva A"
+    ],
+    [
+     "add",
+     0,
+     32,
+     "nueva B"
+    ],
+    [
+     "ctx",
+     31,
+     33,
+     "linea 31"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     57,
+     59,
+     "linea 57"
+    ],
+    [
+     "del",
+     58,
+     0,
+     "linea 58"
+    ],
+    [
+     "ctx",
+     59,
+     60,
+     "linea 59"
+    ],
+    [
+     "ctx",
+     60,
+     61,
+     "linea 60"
+    ]
+   ],
+   "adds": 3,
+   "dels": 2
+  },
+  {
+   "name": "change_at_start",
+   "old": "linea 1\nlinea 2\nlinea 3\nlinea 4\nlinea 5\nlinea 6\nlinea 7\nlinea 8\nlinea 9\nlinea 10\nlinea 11\nlinea 12\nlinea 13\nlinea 14\nlinea 15\nlinea 16\nlinea 17\nlinea 18\nlinea 19\nlinea 20\nlinea 21\nlinea 22\nlinea 23\nlinea 24\nlinea 25\nlinea 26\nlinea 27\nlinea 28\nlinea 29\nlinea 30\nlinea 31\nlinea 32\nlinea 33\nlinea 34\nlinea 35\nlinea 36\nlinea 37\nlinea 38\nlinea 39\nlinea 40\nlinea 41\nlinea 42\nlinea 43\nlinea 44\nlinea 45\nlinea 46\nlinea 47\nlinea 48\nlinea 49\nlinea 50\nlinea 51\nlinea 52\nlinea 53\nlinea 54\nlinea 55\nlinea 56\nlinea 57\nlinea 58\nlinea 59\nlinea 60\n",
+   "new": "primera\nlinea 2\nlinea 3\nlinea 4\nlinea 5\nlinea 6\nlinea 7\nlinea 8\nlinea 9\nlinea 10\nlinea 11\nlinea 12\nlinea 13\nlinea 14\nlinea 15\nlinea 16\nlinea 17\nlinea 18\nlinea 19\nlinea 20\nlinea 21\nlinea 22\nlinea 23\nlinea 24\nlinea 25\nlinea 26\nlinea 27\nlinea 28\nlinea 29\nlinea 30\nlinea 31\nlinea 32\nlinea 33\nlinea 34\nlinea 35\nlinea 36\nlinea 37\nlinea 38\nlinea 39\nlinea 40\nlinea 41\nlinea 42\nlinea 43\nlinea 44\nlinea 45\nlinea 46\nlinea 47\nlinea 48\nlinea 49\nlinea 50\nlinea 51\nlinea 52\nlinea 53\nlinea 54\nlinea 55\nlinea 56\nlinea 57\nlinea 58\nlinea 59\nlinea 60\n",
+   "rows": [
+    [
+     "del",
+     1,
+     0,
+     "linea 1"
+    ],
+    [
+     "add",
+     0,
+     1,
+     "primera"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "linea 2"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "linea 3"
+    ],
+    [
+     "ctx",
+     4,
+     4,
+     "linea 4"
+    ]
+   ],
+   "context_rows": [
+    [
+     "del",
+     1,
+     0,
+     "linea 1"
+    ],
+    [
+     "add",
+     0,
+     1,
+     "primera"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "linea 2"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "change_at_end",
+   "old": "linea 1\nlinea 2\nlinea 3\nlinea 4\nlinea 5\nlinea 6\nlinea 7\nlinea 8\nlinea 9\nlinea 10\nlinea 11\nlinea 12\nlinea 13\nlinea 14\nlinea 15\nlinea 16\nlinea 17\nlinea 18\nlinea 19\nlinea 20\nlinea 21\nlinea 22\nlinea 23\nlinea 24\nlinea 25\nlinea 26\nlinea 27\nlinea 28\nlinea 29\nlinea 30\nlinea 31\nlinea 32\nlinea 33\nlinea 34\nlinea 35\nlinea 36\nlinea 37\nlinea 38\nlinea 39\nlinea 40\nlinea 41\nlinea 42\nlinea 43\nlinea 44\nlinea 45\nlinea 46\nlinea 47\nlinea 48\nlinea 49\nlinea 50\nlinea 51\nlinea 52\nlinea 53\nlinea 54\nlinea 55\nlinea 56\nlinea 57\nlinea 58\nlinea 59\nlinea 60\n",
+   "new": "linea 1\nlinea 2\nlinea 3\nlinea 4\nlinea 5\nlinea 6\nlinea 7\nlinea 8\nlinea 9\nlinea 10\nlinea 11\nlinea 12\nlinea 13\nlinea 14\nlinea 15\nlinea 16\nlinea 17\nlinea 18\nlinea 19\nlinea 20\nlinea 21\nlinea 22\nlinea 23\nlinea 24\nlinea 25\nlinea 26\nlinea 27\nlinea 28\nlinea 29\nlinea 30\nlinea 31\nlinea 32\nlinea 33\nlinea 34\nlinea 35\nlinea 36\nlinea 37\nlinea 38\nlinea 39\nlinea 40\nlinea 41\nlinea 42\nlinea 43\nlinea 44\nlinea 45\nlinea 46\nlinea 47\nlinea 48\nlinea 49\nlinea 50\nlinea 51\nlinea 52\nlinea 53\nlinea 54\nlinea 55\nlinea 56\nlinea 57\nlinea 58\nlinea 59\nultima\n",
+   "rows": [
+    [
+     "ctx",
+     57,
+     57,
+     "linea 57"
+    ],
+    [
+     "ctx",
+     58,
+     58,
+     "linea 58"
+    ],
+    [
+     "ctx",
+     59,
+     59,
+     "linea 59"
+    ],
+    [
+     "del",
+     60,
+     0,
+     "linea 60"
+    ],
+    [
+     "add",
+     0,
+     60,
+     "ultima"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     59,
+     59,
+     "linea 59"
+    ],
+    [
+     "del",
+     60,
+     0,
+     "linea 60"
+    ],
+    [
+     "add",
+     0,
+     60,
+     "ultima"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "one_equal_line_between_hunks",
+   "old": "a\nb\nc\nd\ne\n",
+   "new": "A\nb\nC\nd\nE\n",
+   "rows": [
+    [
+     "del",
+     1,
+     0,
+     "a"
+    ],
+    [
+     "add",
+     0,
+     1,
+     "A"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "b"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "c"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "C"
+    ],
+    [
+     "ctx",
+     4,
+     4,
+     "d"
+    ],
+    [
+     "del",
+     5,
+     0,
+     "e"
+    ],
+    [
+     "add",
+     0,
+     5,
+     "E"
+    ]
+   ],
+   "context_rows": [
+    [
+     "del",
+     1,
+     0,
+     "a"
+    ],
+    [
+     "add",
+     0,
+     1,
+     "A"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "b"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "c"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "C"
+    ],
+    [
+     "ctx",
+     4,
+     4,
+     "d"
+    ],
+    [
+     "del",
+     5,
+     0,
+     "e"
+    ],
+    [
+     "add",
+     0,
+     5,
+     "E"
+    ]
+   ],
+   "adds": 3,
+   "dels": 3
+  },
+  {
+   "name": "repeated_lines_tie_breaking",
+   "old": "x\nx\nx\ny\nx\nx\n",
+   "new": "x\nx\ny\nx\nx\nx\n",
+   "rows": [
+    [
+     "del",
+     1,
+     0,
+     "x"
+    ],
+    [
+     "ctx",
+     2,
+     1,
+     "x"
+    ],
+    [
+     "ctx",
+     3,
+     2,
+     "x"
+    ],
+    [
+     "ctx",
+     4,
+     3,
+     "y"
+    ],
+    [
+     "ctx",
+     5,
+     4,
+     "x"
+    ],
+    [
+     "ctx",
+     6,
+     5,
+     "x"
+    ],
+    [
+     "add",
+     0,
+     6,
+     "x"
+    ]
+   ],
+   "context_rows": [
+    [
+     "del",
+     1,
+     0,
+     "x"
+    ],
+    [
+     "ctx",
+     2,
+     1,
+     "x"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     6,
+     5,
+     "x"
+    ],
+    [
+     "add",
+     0,
+     6,
+     "x"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "many_duplicates",
+   "old": "a\nb\na\nb\na\nb\n",
+   "new": "b\na\nb\na\nb\na\n",
+   "rows": [
+    [
+     "add",
+     0,
+     1,
+     "b"
+    ],
+    [
+     "ctx",
+     1,
+     2,
+     "a"
+    ],
+    [
+     "ctx",
+     2,
+     3,
+     "b"
+    ],
+    [
+     "ctx",
+     3,
+     4,
+     "a"
+    ],
+    [
+     "ctx",
+     4,
+     5,
+     "b"
+    ],
+    [
+     "ctx",
+     5,
+     6,
+     "a"
+    ],
+    [
+     "del",
+     6,
+     0,
+     "b"
+    ]
+   ],
+   "context_rows": [
+    [
+     "add",
+     0,
+     1,
+     "b"
+    ],
+    [
+     "ctx",
+     1,
+     2,
+     "a"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     5,
+     6,
+     "a"
+    ],
+    [
+     "del",
+     6,
+     0,
+     "b"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "reordered_blocks",
+   "old": "uno\ndos\ntres\ncuatro\n",
+   "new": "tres\ncuatro\nuno\ndos\n",
+   "rows": [
+    [
+     "add",
+     0,
+     1,
+     "tres"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "cuatro"
+    ],
+    [
+     "ctx",
+     1,
+     3,
+     "uno"
+    ],
+    [
+     "ctx",
+     2,
+     4,
+     "dos"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "tres"
+    ],
+    [
+     "del",
+     4,
+     0,
+     "cuatro"
+    ]
+   ],
+   "context_rows": [
+    [
+     "add",
+     0,
+     1,
+     "tres"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "cuatro"
+    ],
+    [
+     "ctx",
+     1,
+     3,
+     "uno"
+    ],
+    [
+     "ctx",
+     2,
+     4,
+     "dos"
+    ],
+    [
+     "del",
+     3,
+     0,
+     "tres"
+    ],
+    [
+     "del",
+     4,
+     0,
+     "cuatro"
+    ]
+   ],
+   "adds": 2,
+   "dels": 2
+  },
+  {
+   "name": "trailing_newline_only",
+   "old": "a\nb",
+   "new": "a\nb\n",
+   "rows": [],
+   "context_rows": [],
+   "adds": 0,
+   "dels": 0
+  },
+  {
+   "name": "crlf_text",
+   "old": "a\r\nb\r\nc\r\n",
+   "new": "a\r\nB\r\nc\r\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "B"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "c"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "B"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "c"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "unicode_separators",
+   "old": "a b\u000bc\n",
+   "new": "a B\u000bc\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "B"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "c"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "a"
+    ],
+    [
+     "del",
+     2,
+     0,
+     "b"
+    ],
+    [
+     "add",
+     0,
+     2,
+     "B"
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     "c"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "tabs_and_unicode",
+   "old": "\tañadir 🎵\n",
+   "new": "\tañadir 🎶\n",
+   "rows": [
+    [
+     "del",
+     1,
+     0,
+     "\tañadir 🎵"
+    ],
+    [
+     "add",
+     0,
+     1,
+     "\tañadir 🎶"
+    ]
+   ],
+   "context_rows": [
+    [
+     "del",
+     1,
+     0,
+     "\tañadir 🎵"
+    ],
+    [
+     "add",
+     0,
+     1,
+     "\tañadir 🎶"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "swap_adjacent",
+   "old": "1\n2\n3\n4\n5\n6\n7\n8\n",
+   "new": "1\n2\n4\n3\n5\n6\n7\n8\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "1"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "2"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "4"
+    ],
+    [
+     "ctx",
+     3,
+     4,
+     "3"
+    ],
+    [
+     "del",
+     4,
+     0,
+     "4"
+    ],
+    [
+     "ctx",
+     5,
+     5,
+     "5"
+    ],
+    [
+     "ctx",
+     6,
+     6,
+     "6"
+    ],
+    [
+     "ctx",
+     7,
+     7,
+     "7"
+    ],
+    [
+     "ctx",
+     8,
+     8,
+     "8"
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     1,
+     1,
+     "1"
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     "2"
+    ],
+    [
+     "add",
+     0,
+     3,
+     "4"
+    ],
+    [
+     "ctx",
+     3,
+     4,
+     "3"
+    ],
+    [
+     "del",
+     4,
+     0,
+     "4"
+    ],
+    [
+     "ctx",
+     5,
+     5,
+     "5"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "shifted_block",
+   "old": "p\nq\nr\ns\nt\nu\n",
+   "new": "q\nr\ns\nt\nu\np\n",
+   "rows": [
+    [
+     "del",
+     1,
+     0,
+     "p"
+    ],
+    [
+     "ctx",
+     2,
+     1,
+     "q"
+    ],
+    [
+     "ctx",
+     3,
+     2,
+     "r"
+    ],
+    [
+     "ctx",
+     4,
+     3,
+     "s"
+    ],
+    [
+     "ctx",
+     5,
+     4,
+     "t"
+    ],
+    [
+     "ctx",
+     6,
+     5,
+     "u"
+    ],
+    [
+     "add",
+     0,
+     6,
+     "p"
+    ]
+   ],
+   "context_rows": [
+    [
+     "del",
+     1,
+     0,
+     "p"
+    ],
+    [
+     "ctx",
+     2,
+     1,
+     "q"
+    ],
+    [
+     "gap",
+     0,
+     0,
+     ""
+    ],
+    [
+     "ctx",
+     6,
+     5,
+     "u"
+    ],
+    [
+     "add",
+     0,
+     6,
+     "p"
+    ]
+   ],
+   "adds": 1,
+   "dels": 1
+  },
+  {
+   "name": "only_blank_lines",
+   "old": "\n\n\n",
+   "new": "\n\n\n\n\n",
+   "rows": [
+    [
+     "ctx",
+     1,
+     1,
+     ""
+    ],
+    [
+     "ctx",
+     2,
+     2,
+     ""
+    ],
+    [
+     "ctx",
+     3,
+     3,
+     ""
+    ],
+    [
+     "add",
+     0,
+     4,
+     ""
+    ],
+    [
+     "add",
+     0,
+     5,
+     ""
+    ]
+   ],
+   "context_rows": [
+    [
+     "ctx",
+     3,
+     3,
+     ""
+    ],
+    [
+     "add",
+     0,
+     4,
+     ""
+    ],
+    [
+     "add",
+     0,
+     5,
+     ""
+    ]
+   ],
+   "adds": 2,
+   "dels": 0
+  }
+ ],
+ "change": {
+  "files": {
+   "a.txt": {
+    "text": "uno\ndos\ntres\n"
+   },
+   "c.py": {
+    "text": "def f():\n    return 1\n"
+   },
+   "dup.txt": {
+    "text": "x\nx\n"
+   },
+   "crlf.txt": {
+    "b64": "dW5vDQpkb3MNCg=="
+   },
+   "d/inner.txt": {
+    "text": "dentro\n"
+   }
+  },
+  "cases": [
+   {
+    "name": "write_new",
+    "tool": "write_file",
+    "args": {
+     "path": "nuevo.txt",
+     "content": "hola\n"
+    },
+    "change": {
+     "kind": "create",
+     "path": "nuevo.txt",
+     "old_text": "",
+     "new_text": "hola\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "write_overwrite",
+    "tool": "write_file",
+    "args": {
+     "path": "a.txt",
+     "content": "uno\nDOS\ntres\n"
+    },
+    "change": {
+     "kind": "update",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "uno\nDOS\ntres\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "write_over_directory",
+    "tool": "write_file",
+    "args": {
+     "path": "d",
+     "content": "x"
+    },
+    "change": {
+     "kind": "create",
+     "path": "d",
+     "old_text": "",
+     "new_text": "x",
+     "detail": ""
+    }
+   },
+   {
+    "name": "write_outside",
+    "tool": "write_file",
+    "args": {
+     "path": "../fuera.txt",
+     "content": "x"
+    },
+    "change": {
+     "kind": "create",
+     "path": "../fuera.txt",
+     "old_text": "",
+     "new_text": "x",
+     "detail": ""
+    }
+   },
+   {
+    "name": "append_existing",
+    "tool": "append_file",
+    "args": {
+     "path": "a.txt",
+     "content": "cuatro\n"
+    },
+    "change": {
+     "kind": "append",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "uno\ndos\ntres\ncuatro\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "append_new",
+    "tool": "append_file",
+    "args": {
+     "path": "n.txt",
+     "content": "x"
+    },
+    "change": {
+     "kind": "append",
+     "path": "n.txt",
+     "old_text": "",
+     "new_text": "x",
+     "detail": ""
+    }
+   },
+   {
+    "name": "edit_single",
+    "tool": "edit_file",
+    "args": {
+     "path": "a.txt",
+     "old_text": "dos",
+     "new_text": "DOS"
+    },
+    "change": {
+     "kind": "update",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "uno\nDOS\ntres\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "edit_all",
+    "tool": "edit_file",
+    "args": {
+     "path": "dup.txt",
+     "old_text": "x",
+     "new_text": "y",
+     "all": true
+    },
+    "change": {
+     "kind": "update",
+     "path": "dup.txt",
+     "old_text": "x\nx\n",
+     "new_text": "y\ny\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "edit_not_found_keeps_old",
+    "tool": "edit_file",
+    "args": {
+     "path": "a.txt",
+     "old_text": "zzz",
+     "new_text": "y"
+    },
+    "change": {
+     "kind": "update",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "uno\ndos\ntres\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "edit_missing_file",
+    "tool": "edit_file",
+    "args": {
+     "path": "nada.txt",
+     "old_text": "a",
+     "new_text": "b"
+    },
+    "change": {
+     "kind": "update",
+     "path": "nada.txt",
+     "old_text": "",
+     "new_text": "",
+     "detail": ""
+    }
+   },
+   {
+    "name": "edit_crlf_file_universal_newlines",
+    "tool": "edit_file",
+    "args": {
+     "path": "crlf.txt",
+     "old_text": "uno",
+     "new_text": "UNO"
+    },
+    "change": {
+     "kind": "update",
+     "path": "crlf.txt",
+     "old_text": "uno\ndos\n",
+     "new_text": "UNO\ndos\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "multi_edit_two",
+    "tool": "multi_edit",
+    "args": {
+     "path": "c.py",
+     "edits": [
+      {
+       "old_text": "def f",
+       "new_text": "def g"
+      },
+      {
+       "old_text": "return 1",
+       "new_text": "return 2"
+      }
+     ]
+    },
+    "change": {
+     "kind": "update",
+     "path": "c.py",
+     "old_text": "def f():\n    return 1\n",
+     "new_text": "def g():\n    return 2\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "multi_edit_not_list",
+    "tool": "multi_edit",
+    "args": {
+     "path": "a.txt",
+     "edits": "x"
+    },
+    "change": {
+     "kind": "update",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "uno\ndos\ntres\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "insert_middle",
+    "tool": "insert_at_line",
+    "args": {
+     "path": "a.txt",
+     "line": 2,
+     "content": "X\n"
+    },
+    "change": {
+     "kind": "update",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "uno\nX\ndos\ntres\n",
+     "detail": ""
+    }
+   },
+   {
+    "name": "delete_file",
+    "tool": "delete_file",
+    "args": {
+     "path": "a.txt"
+    },
+    "change": {
+     "kind": "delete",
+     "path": "a.txt",
+     "old_text": "uno\ndos\ntres\n",
+     "new_text": "",
+     "detail": ""
+    }
+   },
+   {
+    "name": "delete_dir",
+    "tool": "delete_file",
+    "args": {
+     "path": "d"
+    },
+    "change": {
+     "kind": "delete",
+     "path": "d",
+     "old_text": "",
+     "new_text": "",
+     "detail": ""
+    }
+   },
+   {
+    "name": "delete_missing",
+    "tool": "delete_file",
+    "args": {
+     "path": "nada"
+    },
+    "change": {
+     "kind": "delete",
+     "path": "nada",
+     "old_text": "",
+     "new_text": "",
+     "detail": ""
+    }
+   },
+   {
+    "name": "rename",
+    "tool": "rename_file",
+    "args": {
+     "src": "a.txt",
+     "dst": "b.txt"
+    },
+    "change": {
+     "kind": "rename",
+     "path": "a.txt",
+     "old_text": "",
+     "new_text": "",
+     "detail": "b.txt"
+    }
+   },
+   {
+    "name": "mkdir",
+    "tool": "mkdir",
+    "args": {
+     "path": "x/y"
+    },
+    "change": {
+     "kind": "mkdir",
+     "path": "x/y",
+     "old_text": "",
+     "new_text": "",
+     "detail": ""
+    }
+   },
+   {
+    "name": "command",
+    "tool": "run_command",
+    "args": {
+     "command": "npm test"
+    },
+    "change": {
+     "kind": "command",
+     "path": "",
+     "old_text": "",
+     "new_text": "",
+     "detail": "npm test"
+    }
+   },
+   {
+    "name": "read_only_is_none",
+    "tool": "read_file",
+    "args": {
+     "path": "a.txt"
+    },
+    "change": null
+   },
+   {
+    "name": "search_is_none",
+    "tool": "search",
+    "args": {
+     "pattern": "x"
+    },
+    "change": null
+   }
+  ]
+ },
+ "summary": {
+  "args": [
+   {
+    "tool": "run_command",
+    "args": {
+     "command": "npm test"
+    },
+    "output": "npm test"
+   },
+   {
+    "tool": "run_command",
+    "args": {
+     "command": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "background": true
+    },
+    "output": "(fondo) xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   {
+    "tool": "run_command",
+    "args": {},
+    "output": ""
+   },
+   {
+    "tool": "read_output",
+    "args": {
+     "id": "p1"
+    },
+    "output": "p1"
+   },
+   {
+    "tool": "stop_command",
+    "args": {
+     "id": "p2"
+    },
+    "output": "p2"
+   },
+   {
+    "tool": "ask_user",
+    "args": {
+     "question": "¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?"
+    },
+    "output": "¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a?¿a"
+   },
+   {
+    "tool": "rename_file",
+    "args": {
+     "src": "a",
+     "dst": "b"
+    },
+    "output": "a → b"
+   },
+   {
+    "tool": "rename_file",
+    "args": {},
+    "output": "? → ?"
+   },
+   {
+    "tool": "search",
+    "args": {
+     "pattern": "foo",
+     "path": "src"
+    },
+    "output": "«foo» en src"
+   },
+   {
+    "tool": "search",
+    "args": {
+     "pattern": "foo"
+    },
+    "output": "«foo» en ."
+   },
+   {
+    "tool": "search",
+    "args": {
+     "pattern": "f",
+     "path": ""
+    },
+    "output": "«f» en ."
+   },
+   {
+    "tool": "web_search",
+    "args": {
+     "query": "go"
+    },
+    "output": "«go»"
+   },
+   {
+    "tool": "fetch_url",
+    "args": {
+     "url": "https://x.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "output": "https://x.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   {
+    "tool": "edit_file",
+    "args": {
+     "path": "a.py",
+     "old_text": "abc"
+    },
+    "output": "a.py (reemplaza 3 chars)"
+   },
+   {
+    "tool": "edit_file",
+    "args": {},
+    "output": "? (reemplaza 0 chars)"
+   },
+   {
+    "tool": "multi_edit",
+    "args": {
+     "path": "a.py",
+     "edits": [
+      1,
+      2,
+      3
+     ]
+    },
+    "output": "a.py (3 ediciones)"
+   },
+   {
+    "tool": "multi_edit",
+    "args": {
+     "path": "a.py"
+    },
+    "output": "a.py (0 ediciones)"
+   },
+   {
+    "tool": "insert_at_line",
+    "args": {
+     "path": "a.py",
+     "line": 7
+    },
+    "output": "a.py (inserta en la línea 7)"
+   },
+   {
+    "tool": "insert_at_line",
+    "args": {},
+    "output": "? (inserta en la línea ?)"
+   },
+   {
+    "tool": "write_file",
+    "args": {
+     "path": "a.py",
+     "content": "ñandú"
+    },
+    "output": "a.py (5 chars)"
+   },
+   {
+    "tool": "append_file",
+    "args": {
+     "path": "a.py"
+    },
+    "output": "a.py (0 chars)"
+   },
+   {
+    "tool": "mkdir",
+    "args": {
+     "path": "d/e"
+    },
+    "output": "d/e"
+   },
+   {
+    "tool": "delete_file",
+    "args": {
+     "path": "x"
+    },
+    "output": "x"
+   },
+   {
+    "tool": "read_file",
+    "args": {
+     "path": "a.txt"
+    },
+    "output": "a.txt"
+   },
+   {
+    "tool": "list_files",
+    "args": {},
+    "output": "{}"
+   },
+   {
+    "tool": "find_files",
+    "args": {
+     "pattern": "*.py"
+    },
+    "output": "*.py"
+   }
+  ],
+  "result": [
+   {
+    "result": "Archivo editado: a.py (1 reemplazo en la línea 3)",
+    "output": "1 reemplazo en la línea 3"
+   },
+   {
+    "result": "Archivo creado: x.txt (14 chars)",
+    "output": "14 chars"
+   },
+   {
+    "result": "Archivo sobrescrito: x (2 chars)",
+    "output": "2 chars"
+   },
+   {
+    "result": "Archivo actualizado: ñ.txt (+4 chars)",
+    "output": "+4 chars"
+   },
+   {
+    "result": "[EXIT 0] ok\nmás",
+    "output": "[EXIT 0] ok"
+   },
+   {
+    "result": "  [ERROR] algo  \nsegunda",
+    "output": "[ERROR] algo"
+   },
+   {
+    "result": "Archivo editado: a (2 ediciones: 1 reemplazo; 1 reemplazo)",
+    "output": "2 ediciones: 1 reemplazo; 1 reemplazo"
+   },
+   {
+    "result": "",
+    "output": ""
+   },
+   {
+    "result": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   {
+    "result": "Archivo editado: a b.py (1 reemplazo)",
+    "output": "Archivo editado: a b.py (1 reemplazo)"
+   }
+  ]
  }
 }

@@ -89,3 +89,38 @@ func Head(s string, n int) string {
 }
 
 func RuneLen(s string) int { return utf8.RuneCountInString(s) }
+
+// SplitLines replica str.splitlines() de Python: parte en \n, \r, \r\n, \v,
+// \f, \x1c-\x1e, U+0085, U+2028 y U+2029, y no produce un último elemento
+// vacío tras un separador final.
+func SplitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch r {
+		case '\n', '\v', '\f', 0x1c, 0x1d, 0x1e, 0x85, 0x2028, 0x2029:
+			lines = append(lines, s[start:i])
+			i += size
+			start = i
+		case '\r':
+			lines = append(lines, s[start:i])
+			i += size
+			if i < len(s) && s[i] == '\n' {
+				i++
+			}
+			start = i
+		default:
+			i += size
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+var universalNewlines = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
+// UniversalNewlines traduce \r\n y \r a \n, como la lectura en modo texto de Python.
+func UniversalNewlines(s string) string { return universalNewlines.Replace(s) }

@@ -216,3 +216,6 @@ func (c *Client) WebSearch(ctx context.Context, query string, limit int) ([]map[
 	}
 	return data.Results, nil
 }
+
+// APIStatus es el código HTTP del error (0 si no hubo respuesta).
+func (e *Error) APIStatus() int { return e.Status }

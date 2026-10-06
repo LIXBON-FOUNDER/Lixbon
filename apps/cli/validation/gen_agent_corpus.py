@@ -15,7 +15,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from lixbon_cli import agent, context  # noqa: E402
+from lixbon_cli import agent, context, diffs  # noqa: E402
 
 CORPUS = HERE / "fixtures" / "agent_corpus.json"
 
@@ -332,6 +332,131 @@ def misc_cases() -> dict:
     }
 
 
+# ── diffs.py y resúmenes ─────────────────────────────────────────────────────
+
+def numbered(prefix, n, every=1, changed=()):
+    return "\n".join(f"{prefix}{i}{'*' if i in changed else ''}" for i in range(1, n + 1, every))
+
+
+LONG_A = "\n".join(f"linea {i}" for i in range(1, 61)) + "\n"
+LONG_B = LONG_A.replace("linea 5\n", "LINEA 5\n").replace("linea 30\n", "linea 30\nnueva A\nnueva B\n") \
+    .replace("linea 58\n", "")
+
+DIFF_CASES: list[tuple[str, str, str]] = [
+    ("identical", "a\nb\nc\n", "a\nb\nc\n"),
+    ("both_empty", "", ""),
+    ("empty_to_text", "", "a\nb\n"),
+    ("text_to_empty", "a\nb\n", ""),
+    ("insert_in_middle", "a\nb\nc\n", "a\nb\nX\nc\n"),
+    ("delete_in_middle", "a\nb\nc\nd\n", "a\nd\n"),
+    ("replace_line", "a\nb\nc\n", "a\nB\nc\n"),
+    ("replace_block_of_different_size", "a\nb\nc\nd\ne\n", "a\nX\nY\nZ\ne\n"),
+    ("long_file_three_hunks", LONG_A, LONG_B),
+    ("change_at_start", LONG_A, LONG_A.replace("linea 1\n", "primera\n", 1)),
+    ("change_at_end", LONG_A, LONG_A.replace("linea 60\n", "ultima\n")),
+    ("one_equal_line_between_hunks", "a\nb\nc\nd\ne\n", "A\nb\nC\nd\nE\n"),
+    ("repeated_lines_tie_breaking", "x\nx\nx\ny\nx\nx\n", "x\nx\ny\nx\nx\nx\n"),
+    ("many_duplicates", "a\nb\na\nb\na\nb\n", "b\na\nb\na\nb\na\n"),
+    ("reordered_blocks", "uno\ndos\ntres\ncuatro\n", "tres\ncuatro\nuno\ndos\n"),
+    ("trailing_newline_only", "a\nb", "a\nb\n"),
+    ("crlf_text", "a\r\nb\r\nc\r\n", "a\r\nB\r\nc\r\n"),
+    ("unicode_separators", "a b\x0bc\n", "a B\x0bc\n"),
+    ("tabs_and_unicode", "\tañadir 🎵\n", "\tañadir 🎶\n"),
+    ("swap_adjacent", "1\n2\n3\n4\n5\n6\n7\n8\n", "1\n2\n4\n3\n5\n6\n7\n8\n"),
+    ("shifted_block", "p\nq\nr\ns\nt\nu\n", "q\nr\ns\nt\nu\np\n"),
+    ("only_blank_lines", "\n\n\n", "\n\n\n\n\n"),
+]
+
+
+def diff_cases() -> list:
+    out = []
+    for name, old, new in DIFF_CASES:
+        change = diffs.FileChange("update", "f.txt", old, new)
+        rows = diffs.diff_rows(change)
+        adds, dels = diffs.diff_counts(change)
+        out.append({"name": name, "old": old, "new": new, "rows": [list(r) for r in rows],
+                    "context_rows": [list(r) for r in diffs.diff_rows(change, context=1)],
+                    "adds": adds, "dels": dels})
+    return out
+
+
+CHANGE_FILES = {"a.txt": "uno\ndos\ntres\n", "c.py": "def f():\n    return 1\n", "dup.txt": "x\nx\n",
+                "crlf.txt": b"uno\r\ndos\r\n", "d/inner.txt": "dentro\n"}
+CHANGE_CASES: list[tuple[str, str, dict]] = [
+    ("write_new", "write_file", {"path": "nuevo.txt", "content": "hola\n"}),
+    ("write_overwrite", "write_file", {"path": "a.txt", "content": "uno\nDOS\ntres\n"}),
+    ("write_over_directory", "write_file", {"path": "d", "content": "x"}),
+    ("write_outside", "write_file", {"path": "../fuera.txt", "content": "x"}),
+    ("append_existing", "append_file", {"path": "a.txt", "content": "cuatro\n"}),
+    ("append_new", "append_file", {"path": "n.txt", "content": "x"}),
+    ("edit_single", "edit_file", {"path": "a.txt", "old_text": "dos", "new_text": "DOS"}),
+    ("edit_all", "edit_file", {"path": "dup.txt", "old_text": "x", "new_text": "y", "all": True}),
+    ("edit_not_found_keeps_old", "edit_file", {"path": "a.txt", "old_text": "zzz", "new_text": "y"}),
+    ("edit_missing_file", "edit_file", {"path": "nada.txt", "old_text": "a", "new_text": "b"}),
+    ("edit_crlf_file_universal_newlines", "edit_file", {"path": "crlf.txt", "old_text": "uno", "new_text": "UNO"}),
+    ("multi_edit_two", "multi_edit", {"path": "c.py", "edits": [{"old_text": "def f", "new_text": "def g"},
+                                                                {"old_text": "return 1", "new_text": "return 2"}]}),
+    ("multi_edit_not_list", "multi_edit", {"path": "a.txt", "edits": "x"}),
+    ("insert_middle", "insert_at_line", {"path": "a.txt", "line": 2, "content": "X\n"}),
+    ("delete_file", "delete_file", {"path": "a.txt"}),
+    ("delete_dir", "delete_file", {"path": "d"}),
+    ("delete_missing", "delete_file", {"path": "nada"}),
+    ("rename", "rename_file", {"src": "a.txt", "dst": "b.txt"}),
+    ("mkdir", "mkdir", {"path": "x/y"}),
+    ("command", "run_command", {"command": "npm test"}),
+    ("read_only_is_none", "read_file", {"path": "a.txt"}),
+    ("search_is_none", "search", {"pattern": "x"}),
+]
+
+
+def change_cases() -> dict:
+    cases = []
+    with tempfile.TemporaryDirectory(prefix="lxc") as tmp:
+        root = Path(tmp).resolve()
+        for rel, data in CHANGE_FILES.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))
+        for name, tool, args in CHANGE_CASES:
+            change = diffs.compute_change(root, tool, args, agent.resolve_safe_path)
+            cases.append({"name": name, "tool": tool, "args": args,
+                          "change": None if change is None else {
+                              "kind": change.kind, "path": change.path, "old_text": change.old_text,
+                              "new_text": change.new_text, "detail": change.detail}})
+    files = {rel: ({"b64": __import__("base64").b64encode(d).decode()} if isinstance(d, bytes) else {"text": d})
+             for rel, d in CHANGE_FILES.items()}
+    return {"files": files, "cases": cases}
+
+
+SUMMARY_ARGS = [
+    ("run_command", {"command": "npm test"}), ("run_command", {"command": "x" * 300, "background": True}),
+    ("run_command", {}), ("read_output", {"id": "p1"}), ("stop_command", {"id": "p2"}),
+    ("ask_user", {"question": "¿a?" * 100}), ("rename_file", {"src": "a", "dst": "b"}), ("rename_file", {}),
+    ("search", {"pattern": "foo", "path": "src"}), ("search", {"pattern": "foo"}), ("search", {"pattern": "f", "path": ""}),
+    ("web_search", {"query": "go"}), ("fetch_url", {"url": "https://x.test/" + "a" * 300}),
+    ("edit_file", {"path": "a.py", "old_text": "abc"}), ("edit_file", {}),
+    ("multi_edit", {"path": "a.py", "edits": [1, 2, 3]}), ("multi_edit", {"path": "a.py"}),
+    ("insert_at_line", {"path": "a.py", "line": 7}), ("insert_at_line", {}),
+    ("write_file", {"path": "a.py", "content": "ñandú"}), ("append_file", {"path": "a.py"}),
+    ("mkdir", {"path": "d/e"}), ("delete_file", {"path": "x"}), ("read_file", {"path": "a.txt"}),
+    ("list_files", {}), ("find_files", {"pattern": "*.py"}),
+]
+RESULTS = [
+    "Archivo editado: a.py (1 reemplazo en la línea 3)", "Archivo creado: x.txt (14 chars)",
+    "Archivo sobrescrito: x (2 chars)", "Archivo actualizado: ñ.txt (+4 chars)", "[EXIT 0] ok\nmás",
+    "  [ERROR] algo  \nsegunda", "Archivo editado: a (2 ediciones: 1 reemplazo; 1 reemplazo)", "",
+    "x" * 300, "Archivo editado: a b.py (1 reemplazo)",
+]
+
+
+def summary_cases() -> dict:
+    from lixbon_cli.remote import _args_summary
+    return {
+        "args": [{"tool": t, "args": a, "output": _args_summary(t, a)} for t, a in SUMMARY_ARGS],
+        "result": [{"result": r, "output": agent._result_summary(r)} for r in RESULTS],
+    }
+
+
 def build() -> dict:
     return {
         "version": 1,
@@ -341,6 +466,9 @@ def build() -> dict:
         "tree": tree_cases(),
         "prompts": prompt_cases(),
         "misc": misc_cases(),
+        "diff": diff_cases(),
+        "change": change_cases(),
+        "summary": summary_cases(),
     }
 
 
