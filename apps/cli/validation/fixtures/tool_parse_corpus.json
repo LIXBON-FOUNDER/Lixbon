@@ -784,6 +784,88 @@
       "clean_prose": ""
     }
   ],
+  "html_cases": [
+    {
+      "name": "plain_paragraphs",
+      "html": "<p>Uno</p><p>Dos</p>",
+      "text": "Uno\n\nDos"
+    },
+    {
+      "name": "script_and_style_removed",
+      "html": "<style>a{}</style><p>Hola</p><script>alert('x')</script>fin",
+      "text": "Hola\nfin"
+    },
+    {
+      "name": "noscript_and_svg_removed",
+      "html": "<noscript>no</noscript><svg><path d='x'/></svg>texto",
+      "text": "texto"
+    },
+    {
+      "name": "script_case_insensitive_multiline",
+      "html": "<SCRIPT type='x'>\nvar a;\n</Script>visible",
+      "text": "visible"
+    },
+    {
+      "name": "block_tags_become_newlines",
+      "html": "<div>a</div><br><li>b</li><tr>c</tr><h2>d</h2>",
+      "text": "a\n\nb\n\nc\n\nd"
+    },
+    {
+      "name": "inline_tags_become_spaces",
+      "html": "<b>negrita</b><i>cursiva</i>",
+      "text": "negrita cursiva"
+    },
+    {
+      "name": "entities",
+      "html": "&amp; &lt;b&gt; &eacute; &#233; &#x1F600; &copy &quot;q&quot;",
+      "text": "& <b> é é 😀 © \"q\""
+    },
+    {
+      "name": "numeric_entity_cp1252",
+      "html": "&#x80; &#150;",
+      "text": "€ –"
+    },
+    {
+      "name": "whitespace_collapsed",
+      "html": "a \t\t  b   \n   c",
+      "text": "a b\nc"
+    },
+    {
+      "name": "many_blank_lines",
+      "html": "<p>a</p>\n\n\n\n<p>b</p>",
+      "text": "a\n\nb"
+    },
+    {
+      "name": "nbsp_survives_inline_collapse",
+      "html": "a&nbsp;&nbsp;b",
+      "text": "a  b"
+    },
+    {
+      "name": "comment_without_gt",
+      "html": "antes<!-- nota -->después",
+      "text": "antes después"
+    },
+    {
+      "name": "attributes_with_gt_in_quotes",
+      "html": "<a title=\"a>b\">link</a>",
+      "text": "b\">link"
+    },
+    {
+      "name": "empty",
+      "html": "",
+      "text": ""
+    },
+    {
+      "name": "only_tags",
+      "html": "<div><span></span></div>",
+      "text": ""
+    },
+    {
+      "name": "unicode_text",
+      "html": "<p>canción 🎵 日本</p>",
+      "text": "canción 🎵 日本"
+    }
+  ],
   "native_cases": [
     {
       "name": "arguments_string",

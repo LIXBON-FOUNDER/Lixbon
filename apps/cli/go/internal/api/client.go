@@ -203,3 +203,16 @@ func (c *Client) PlanName(ctx context.Context) (string, error) {
 	err := c.doJSON(ctx, http.MethodGet, c.Server+"/api/key/info", nil, 15*time.Second, true, &data)
 	return data.Plan.Name, err
 }
+
+// WebSearch consulta el buscador del gateway; cada resultado conserva todos
+// sus campos (title, url, snippet…).
+func (c *Client) WebSearch(ctx context.Context, query string, limit int) ([]map[string]any, error) {
+	var data struct {
+		Results []map[string]any `json:"results"`
+	}
+	payload := map[string]any{"query": query, "limit": limit}
+	if err := c.doJSON(ctx, http.MethodPost, c.Server+"/api/websearch", payload, 60*time.Second, true, &data); err != nil {
+		return nil, err
+	}
+	return data.Results, nil
+}

@@ -14,7 +14,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from lixbon_cli import agent  # noqa: E402
+from lixbon_cli import agent, documents  # noqa: E402
 
 CATALOG = HERE.parent / "go" / "internal" / "toolspec" / "catalog.json"
 CORPUS = HERE / "fixtures" / "tool_parse_corpus.json"
@@ -122,6 +122,26 @@ NATIVE_CASES: list[tuple[str, dict]] = [
 ]
 
 
+HTML_CASES: list[tuple[str, str]] = [
+    ("plain_paragraphs", "<p>Uno</p><p>Dos</p>"),
+    ("script_and_style_removed", "<style>a{}</style><p>Hola</p><script>alert('x')</script>fin"),
+    ("noscript_and_svg_removed", "<noscript>no</noscript><svg><path d='x'/></svg>texto"),
+    ("script_case_insensitive_multiline", "<SCRIPT type='x'>\nvar a;\n</Script>visible"),
+    ("block_tags_become_newlines", "<div>a</div><br><li>b</li><tr>c</tr><h2>d</h2>"),
+    ("inline_tags_become_spaces", "<b>negrita</b><i>cursiva</i>"),
+    ("entities", "&amp; &lt;b&gt; &eacute; &#233; &#x1F600; &copy &quot;q&quot;"),
+    ("numeric_entity_cp1252", "&#x80; &#150;"),
+    ("whitespace_collapsed", "a \t\t  b   \n   c"),
+    ("many_blank_lines", "<p>a</p>\n\n\n\n<p>b</p>"),
+    ("nbsp_survives_inline_collapse", "a&nbsp;&nbsp;b"),
+    ("comment_without_gt", "antes<!-- nota -->después"),
+    ("attributes_with_gt_in_quotes", "<a title=\"a>b\">link</a>"),
+    ("empty", ""),
+    ("only_tags", "<div><span></span></div>"),
+    ("unicode_text", "<p>canción 🎵 日本</p>"),
+]
+
+
 def parse_text(text: str) -> dict:
     return {
         "extract_all": agent.extract_all_tool_calls(text),
@@ -154,6 +174,10 @@ def build_corpus() -> dict:
         "text_cases": [
             {"name": name, "description": desc, "text": text, **parse_text(text)}
             for name, desc, text in TEXT_CASES
+        ],
+        "html_cases": [
+            {"name": name, "html": page, "text": documents.html_to_text(page)}
+            for name, page in HTML_CASES
         ],
         "native_cases": [
             {"name": name, "call": call, "expected": agent.native_call_to_internal(call)}
