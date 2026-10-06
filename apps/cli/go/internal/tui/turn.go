@@ -18,6 +18,7 @@ import (
 
 // dispatch ejecuta lo que el usuario envió: un comando «/» o un mensaje.
 func (m *Model) dispatch(text string) tea.Cmd {
+	m.scroll = 0
 	if !strings.HasPrefix(text, "/") {
 		return m.startTurn(text, text)
 	}

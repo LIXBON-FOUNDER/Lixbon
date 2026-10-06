@@ -26,6 +26,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.SetWidth(max(10, msg.Width-4))
+		m.log.resize(msg.Width)
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.scrollBy(wheelStep)
+		case tea.MouseWheelDown:
+			m.scrollBy(-wheelStep)
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -108,6 +118,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+const wheelStep = 3
+
+func (m *Model) scrollBy(rows int) {
+	m.scroll = max(0, m.scroll+rows)
+}
+
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.picker != nil {
 		cmd, closed := m.picker.key(msg)
@@ -117,6 +133,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch msg.String() {
+	case "pgup":
+		m.scrollBy(max(1, m.height-6))
+		return m, nil
+	case "pgdown":
+		m.scrollBy(-max(1, m.height-6))
+		return m, nil
 	case "ctrl+c":
 		return m, m.onInterrupt()
 	case "esc":

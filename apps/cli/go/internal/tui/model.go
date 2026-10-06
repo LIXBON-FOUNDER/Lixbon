@@ -57,8 +57,11 @@ type Model struct {
 	input         textarea.Model
 	width, height int
 
-	send  func(tea.Msg)
-	print func(string)
+	send    func(tea.Msg)
+	observe func(string)
+
+	log    transcript
+	scroll int
 
 	running     bool
 	interrupted bool
@@ -123,21 +126,33 @@ func New(c *chat.Chat, opts Options) *Model {
 		height: 24,
 		hist:   loadInputHistory(opts.HistoryFile),
 		online: !opts.Offline,
-		print:  func(string) {},
 		send:   func(tea.Msg) {},
 	}
+	m.log.resize(m.width)
 	m.histPos = len(m.hist.entries)
 	m.refreshContext()
 	return m
 }
 
 // Wire conecta la interfaz con el programa: send entrega mensajes desde otras
-// goroutines y print escribe sobre la zona viva, en orden.
-func (m *Model) Wire(send func(tea.Msg), print func(string)) {
-	m.send, m.print = send, print
+// goroutines; observe (opcional) ve cada texto que entra en el transcript.
+func (m *Model) Wire(send func(tea.Msg), observe func(string)) {
+	m.send, m.observe = send, observe
 	m.chat.Session.Approver = &uiApprover{send: send}
 	m.chat.Toolbox.AskUser = askUser(send)
 	m.chat.Toolbox.OnTodo = func(items, previous []tools.TodoItem) { send(todoMsg{items, previous}) }
+}
+
+// print añade texto al transcript. Si el usuario había subido con el scroll,
+// la vista se queda donde estaba en vez de saltar al final.
+func (m *Model) print(text string) {
+	added := m.log.add(text)
+	if m.scroll > 0 {
+		m.scroll += added
+	}
+	if m.observe != nil {
+		m.observe(text)
+	}
 }
 
 func placeholderFor(c *chat.Chat) string {
