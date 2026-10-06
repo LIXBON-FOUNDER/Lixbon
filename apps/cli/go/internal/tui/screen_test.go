@@ -57,7 +57,13 @@ func (r *screenRig) screen() string { return strings.Join(r.lines(), "\n") }
 
 func (r *screenRig) waitFor(text string) {
 	r.t.Helper()
-	waitFor(r.t, text, func() bool { return strings.Contains(r.screen(), text) })
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(r.screen(), text) {
+		if time.Now().After(deadline) {
+			r.t.Fatalf("no se cumplió: %s%s", text, r.dump())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func (r *screenRig) rowOf(text string) int {
