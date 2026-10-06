@@ -1,0 +1,39 @@
+{
+  "commit": "e1698683c0e9a787e0709f57bc8b6c880419db5d",
+  "python": "3.12.14",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "repetitions": 3,
+  "artifact_fresh": true,
+  "limitations": [
+    "Mediana local; no comparacion con Go ni medicion de RSS.",
+    "El replay incluye join y clean_prose; excluye Rich, terminal y red.",
+    "La lectura usa tracemalloc y cache del sistema; no representa disco frio."
+  ],
+  "stream_prefix_reprocessing": [
+    {
+      "events": 1000,
+      "wall_ms": 55.993,
+      "cpu_ms": 46.875,
+      "result_chars": 63999
+    },
+    {
+      "events": 2000,
+      "wall_ms": 250.728,
+      "cpu_ms": 265.625,
+      "result_chars": 127999
+    },
+    {
+      "events": 4000,
+      "wall_ms": 984.869,
+      "cpu_ms": 937.5,
+      "result_chars": 255999
+    }
+  ],
+  "read_first_20_lines": {
+    "file_bytes": 16777216,
+    "wall_ms": 79.428,
+    "cpu_ms": 78.125,
+    "result_chars": 20502,
+    "peak_python_bytes": 34390686
+  }
+}
