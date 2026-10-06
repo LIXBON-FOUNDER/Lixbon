@@ -2,79 +2,17 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"slices"
 	"strings"
 
+	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/api"
+	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
-	"lixbon.com/cli/internal/history"
-	sessions "lixbon.com/cli/internal/session"
 	"lixbon.com/cli/internal/sse"
-	ws "lixbon.com/cli/internal/workspace"
+	"lixbon.com/cli/internal/textutil"
 )
-
-type sessionState int
-
-const (
-	sessionOK sessionState = iota
-	sessionAuth
-	sessionOffline
-)
-
-type account struct {
-	state         sessionState
-	models        []api.Model
-	roleChatModel string
-}
-
-// probeAccount distingue sesión válida, clave rechazada y servidor inalcanzable.
-func (a *App) probeAccount(ctx context.Context, client *api.Client, cfg *config.Config) account {
-	var acc account
-	authFailed := false
-	models, err := client.ModelsDetail(ctx)
-	if err != nil {
-		authFailed = api.IsAuth(err)
-	}
-	acc.models = models
-	acc.roleChatModel = client.RoleChatModel(ctx)
-	if cfg.APIKey == "" {
-		acc.state = sessionAuth
-		return acc
-	}
-	plan, err := client.PlanName(ctx)
-	if err != nil {
-		switch {
-		case api.IsAuth(err), authFailed:
-			acc.state = sessionAuth
-		case len(acc.models) > 0:
-			acc.state = sessionOK
-		default:
-			acc.state = sessionOffline
-		}
-		return acc
-	}
-	if plan != "" && plan != cfg.ExtraString("plan_name") {
-		cfg.SetExtraString("plan_name", plan)
-		_ = config.Save(a.ConfigPath, *cfg)
-	}
-	if authFailed {
-		acc.state = sessionAuth
-	}
-	return acc
-}
-
-func (a *App) clearSession(cfg *config.Config) {
-	cfg.APIKey = ""
-	cfg.KeyModel = ""
-	cfg.SetExtraString("account_email", "")
-	cfg.SetExtraString("plan_name", "")
-	_ = config.Save(a.ConfigPath, *cfg)
-}
 
 func (a *App) chat(ctx context.Context, args []string) int {
 	fs := a.flagSet("chat")
@@ -86,131 +24,108 @@ func (a *App) chat(ctx context.Context, args []string) int {
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
-	if *once == "" {
-		fmt.Fprintln(a.Stderr, "El chat interactivo aún no está disponible en el CLI Go. Usa: lixbon chat --once \"mensaje\"")
+	opts := chat.Options{ConfigPath: a.ConfigPath, Model: *modelFlag, ClientID: *clientID, Title: *title, AutoRun: *autoRun}
+	if *once != "" {
+		return a.runOnce(ctx, *once, opts)
+	}
+	if a.Interactive == nil {
+		fmt.Fprintln(a.Stderr, "El chat interactivo necesita una terminal. Usa: lixbon chat --once \"mensaje\"")
 		return 1
 	}
-	return a.runOnce(ctx, *once, *modelFlag, *clientID, *title, *autoRun)
+	return a.Interactive(ctx, opts)
 }
 
-func (a *App) runOnce(ctx context.Context, message, modelOverride, clientID, title string, autoRun bool) int {
+// runOnce envía un único mensaje y escribe la respuesta en stdout; el
+// registro de acciones y los avisos van a stderr.
+func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) int {
 	cfg := config.Load(a.ConfigPath)
 	if cfg.APIKey == "" {
 		a.printError("No hay sesión. Configúrala con: lixbon init --api-key <clave>")
 		return 1
 	}
 	client := api.New(cfg.BaseURL, cfg.APIKey)
+	c, err := chat.New(cfg, client, opts)
+	if err != nil {
+		a.printError(err.Error())
+		return 1
+	}
+	defer c.Toolbox.Close()
 
-	acc := a.probeAccount(ctx, client, &cfg)
+	acc := c.Probe(ctx)
 	if ctx.Err() != nil {
 		return a.interrupted()
 	}
-	switch acc.state {
-	case sessionAuth:
-		a.clearSession(&cfg)
+	switch acc.State {
+	case chat.AccountAuth:
+		c.ClearSession()
 		a.printError("Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
 		return 1
-	case sessionOffline:
+	case chat.AccountOffline:
 		a.printError("No se pudo contactar con el servidor; se trabajará con la configuración local.")
 	}
-
-	model, ok := a.resolveModel(&cfg, acc, modelOverride)
-	if !ok {
+	needsPick, err := c.ResolveModel(acc)
+	switch {
+	case err != nil:
+		a.printError(err.Error())
+		return 1
+	case needsPick:
+		a.printError("No hay modelo configurado. Indica uno con --model o lixbon init --model <id>.")
 		return 1
 	}
 
-	switch cfg.Mode {
-	case "agent":
-		return a.agentOnce(ctx, client, &cfg, model, message, clientID, title, autoRun)
-	case "delegate":
-		return a.delegateOnce(ctx, client, message, model, title)
-	}
-
-	conversationID := newUUID()
-	workspace, _ := os.Getwd()
-	messages := []map[string]any{{"role": "user", "content": message}}
-	if project := ws.ProjectContext(workspace); project != "" {
-		messages = append([]map[string]any{{"role": "system", "content": "Contexto del proyecto (LIXBON.md):\n" + project}}, messages...)
-	}
-	request := api.ChatRequest{
-		Model:          model,
-		Messages:       messages,
-		ConversationID: &conversationID,
-		ClientID:       clientID,
-		Title:          &title,
-		WebSearch:      webSearchValue(cfg.WebMode()),
-		NumCtx:         cfg.ContextWindow,
-	}
-	stream, err := client.ChatStream(ctx, request)
+	c.Session.Approver = &headlessApprover{app: a}
+	sink := &onceSink{app: a, live: c.Mode != chat.ModeAgent}
+	answer, err := c.Send(ctx, message, sink)
+	sink.finish()
 	if err != nil {
 		return a.failure(ctx, err)
 	}
-	defer stream.Close()
-	code, answer, tokens := a.printStream(ctx, stream)
-	if code == 0 && answer != "" {
-		a.saveSession(conversationID, []history.Message{history.User(message), history.Assistant(answer)},
-			sessions.SaveOptions{Title: title, Model: model, Mode: "ask", Workspace: workspace, Tokens: tokens})
-	}
-	return code
-}
-
-func (a *App) resolveModel(cfg *config.Config, acc account, override string) (string, bool) {
-	if model := firstNonEmpty(cfg.KeyModel, override, cfg.Model); model != "" {
-		return model, true
-	}
-	if len(acc.models) == 0 {
-		a.printError("El servidor no está publicando modelos ahora mismo.")
-		return "", false
-	}
-	if slices.ContainsFunc(acc.models, func(m api.Model) bool { return m.ID == acc.roleChatModel }) {
-		cfg.Model = acc.roleChatModel
-		_ = config.Save(a.ConfigPath, *cfg)
-		return cfg.Model, true
-	}
-	a.printError("No hay modelo configurado. Indica uno con --model o lixbon init --model <id>.")
-	return "", false
-}
-
-// printStream escribe la respuesta según llega y devuelve el código de salida,
-// el texto completo y los tokens que contó el servidor.
-func (a *App) printStream(ctx context.Context, stream *api.ChatStream) (code int, answer string, tokens int) {
-	var sources []map[string]any
-	var body strings.Builder
-	var endsWithNewline bool
-	for ev, err := range stream.Events() {
-		if err != nil {
-			a.finishBody(body.Len() > 0, endsWithNewline)
-			return a.failure(ctx, err), "", 0
+	switch {
+	case ctx.Err() != nil:
+		return a.interrupted()
+	case c.Mode == chat.ModeAgent:
+		if answer = textutil.Strip(answer); answer == "" {
+			a.printError("(sin respuesta) el modelo no devolvió texto.")
+		} else {
+			fmt.Fprintln(a.Stdout, answer)
 		}
-		switch ev.Kind {
-		case sse.Content:
-			body.WriteString(ev.Text)
-			fmt.Fprint(a.Stdout, ev.Text)
-			endsWithNewline = strings.HasSuffix(ev.Text, "\n")
-		case sse.Sources:
-			_ = json.Unmarshal(ev.Value, &sources)
-		case sse.Usage:
-			var usage struct {
-				TotalTokens int `json:"total_tokens"`
-			}
-			if json.Unmarshal(ev.Value, &usage) == nil {
-				tokens += usage.TotalTokens
-			}
-		}
-	}
-	a.finishBody(body.Len() > 0, endsWithNewline)
-	if body.Len() == 0 {
+	case !sink.wrote:
 		a.printError("(sin respuesta) el modelo no devolvió texto.")
 	}
-	if line := sourcesLine(sources); line != "" {
+	if line := sourcesLine(c.Sources); line != "" {
 		fmt.Fprintln(a.Stdout, line)
 	}
-	return 0, strings.TrimSpace(body.String()), tokens
+	if c.Mode == chat.ModeAgent {
+		a.printTurnSummary(c.Session.Stats)
+	}
+	return 0
 }
 
-func (a *App) finishBody(hasBody, endsWithNewline bool) {
-	if hasBody && !endsWithNewline {
-		fmt.Fprintln(a.Stdout)
+// onceSink escribe en texto plano: el contenido en stdout (en directo salvo en
+// modo agent, donde solo interesa la respuesta final) y el resto en stderr.
+type onceSink struct {
+	app             *App
+	live            bool
+	wrote           bool
+	endsWithNewline bool
+}
+
+func (s *onceSink) Delta(kind sse.Kind, text string) {
+	if kind != sse.Content || !s.live {
+		return
+	}
+	s.wrote = true
+	fmt.Fprint(s.app.Stdout, text)
+	s.endsWithNewline = strings.HasSuffix(text, "\n")
+}
+
+func (s *onceSink) Event(e agent.Event) { s.app.renderEvent(e) }
+func (s *onceSink) Note(text string)    { fmt.Fprintf(s.app.Stderr, "  · %s\n", text) }
+func (s *onceSink) Title(string)        {}
+
+func (s *onceSink) finish() {
+	if s.wrote && !s.endsWithNewline {
+		fmt.Fprintln(s.app.Stdout)
 	}
 }
 
@@ -264,31 +179,4 @@ func (a *App) interrupted() int {
 
 func (a *App) printError(message string) {
 	fmt.Fprintf(a.Stderr, "Error: %s\n", message)
-}
-
-func webSearchValue(mode string) any {
-	switch mode {
-	case "on":
-		return true
-	case "off":
-		return false
-	}
-	return "auto"
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func newUUID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }

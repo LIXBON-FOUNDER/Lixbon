@@ -219,3 +219,14 @@ func (c *Client) WebSearch(ctx context.Context, query string, limit int) ([]map[
 
 // APIStatus es el código HTTP del error (0 si no hubo respuesta).
 func (e *Error) APIStatus() int { return e.Status }
+
+// GenerateTitle pide al servidor el título de la conversación (el mismo
+// endpoint que usan la web y la app) tras el primer intercambio.
+func (c *Client) GenerateTitle(ctx context.Context, conversationID string) (string, error) {
+	var data struct {
+		Title string `json:"title"`
+	}
+	err := c.doJSON(ctx, http.MethodPost, c.Server+"/api/conversations/"+conversationID+"/generate-title",
+		map[string]any{}, 30*time.Second, true, &data)
+	return strings.TrimSpace(data.Title), err
+}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
 )
 
@@ -19,6 +20,8 @@ type App struct {
 	Stderr     io.Writer
 	ConfigPath string
 	Hostname   string
+	// Interactive abre el chat de terminal; nil si no hay interfaz disponible.
+	Interactive func(ctx context.Context, opts chat.Options) int
 }
 
 func NewApp() (*App, error) {
