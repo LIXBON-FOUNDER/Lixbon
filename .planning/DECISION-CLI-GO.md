@@ -23,7 +23,7 @@ Run: `run_d06dd487975f`. Las terminales y worktrees del debate se conservan.
 
 ## Decisiones
 
-1. Go es el lenguaje elegido para el nuevo CLI. La elección de biblioteca de terminal queda para una prueba concreta de compatibilidad; Ratatui pertenece a la alternativa Rust y no es una dependencia del camino Go.
+1. Go es el lenguaje elegido para el nuevo CLI. La interfaz de terminal usará **Bubble Tea** (decisión del usuario, 2026-10-06; supera la prueba de selección prevista). Queda por comprobar en Fase 2/4 su compatibilidad con scrollback inline, redimensionado, entrada en cola y las terminales acordadas. Ratatui pertenece a la alternativa Rust y no es una dependencia del camino Go. Los paquetes de agente, herramientas y API no dependen de la UI: emiten eventos que el modelo de Bubble Tea consume como mensajes.
 2. Congelar contratos observables en fixtures portables: payloads, SSE, limpieza de salida, tool calls, errores y cancelación. Python y desktop conservan su implementación mientras se comprueba la nueva implementación Go.
 3. La distribución debe producir artefactos por OS/arquitectura; confirmar la matriz soportada y dependencias nativas antes de prometer binarios autónomos para cada destino.
 4. Un experimento Rust es opcional, de uno a dos días, y no bloquea Go. Solo iniciarlo con responsable y fecha concretos para trasladar el agente desktop a Rust.

@@ -54,7 +54,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - Python conserva referencia y rollback hasta paridad/cutover aceptados.
 - Compartir fixtures portables; Rust opcional fuera del camino crítico con gates y dueño/fecha desktop.
 
-- 2026-10-06: el usuario eligió la opción B (adelantar Go sin esperar el cierre de Phase 1). Hecho en `apps/cli/go/` (sse, config, api, `init/status/models/chat --once`) y `apps/cli/validation/` (corpus SSE portable, referencia Python 133 passed, `REFERENCE.md`). Es una desviación del gate de TASK-DIVISION (Phase 2 tras acta de Phase 1): el acta, la matriz de destinos (01-03) y las mediciones (01-04) siguen pendientes. Harness completo de 01-01 (preflight/self-check/hashes) no construido.
+- 2026-10-06: el usuario eligió la opción B (adelantar Go sin esperar el cierre de Phase 1). Hecho en `apps/cli/go/` (sse, config, api, `init/status/models/chat --once`) y `apps/cli/validation/` (corpus SSE portable, referencia Python 133 passed, `REFERENCE.md`). Es una desviación del gate de TASK-DIVISION (Phase 2 tras acta de Phase 1): el acta, la matriz de destinos (01-03) y las mediciones (01-04) siguen pendientes. Harness completo de 01-01 (preflight/self-check/hashes) no construido. Avance 2026-10-06 (Fase 3, primer corte): `toolspec`, `toolparse` y `tools` de solo lectura con corpus portables; UI decidida: Bubble Tea. Pendiente de Fase 3: herramientas de escritura/shell, aprobaciones, bucle del agente, estado/sesiones.
 
 ### Pending Todos
 
