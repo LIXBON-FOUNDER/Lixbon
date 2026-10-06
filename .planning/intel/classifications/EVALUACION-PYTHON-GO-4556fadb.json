@@ -1,0 +1,28 @@
+{
+  "source_path": "C:\\Users\\USUARIO\\OneDrive\\Documentos\\ChatGPT\\Lixbon\\apps\\cli\\audit\\EVALUACION_PYTHON_GO.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Evaluación de la CLI: transición de Python a Go",
+  "summary": "Evalúa la migración de la CLI Python a Go o Rust y define arquitectura propuesta, contratos, mediciones y etapas con criterios de salida.",
+  "scope": [
+    "CLI",
+    "Python",
+    "Go",
+    "Rust",
+    "Tauri",
+    "Ratatui",
+    "Bubble Tea",
+    "MCP",
+    "SSE",
+    "gateway",
+    "contratos de protocolo",
+    "migración"
+  ],
+  "cross_refs": [
+    "ADR-001-CLI-GO.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}
