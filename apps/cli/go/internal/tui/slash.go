@@ -135,6 +135,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdKey("")
 	case "logout":
 		return m.cmdLogout()
+	case "mcp":
+		m.cmdMCP()
 	case "provider":
 		return m.cmdProvider(arg)
 	case "doctor":

@@ -17,6 +17,7 @@ import (
 	"lixbon.com/cli/internal/api"
 	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/history"
+	"lixbon.com/cli/internal/mcp"
 	"lixbon.com/cli/internal/session"
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
@@ -74,6 +75,8 @@ type Chat struct {
 	Store      *session.Store
 	Session    *agent.Session
 	Toolbox    *tools.Toolbox
+	// MCP es nil mientras no haya servidores MCP configurados.
+	MCP *mcp.Registry
 
 	Model          string
 	Mode           string
@@ -146,6 +149,7 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 // Close termina los procesos en segundo plano y guarda la conversación.
 func (c *Chat) Close() {
 	c.Persist()
+	c.StopMCP()
 	c.Toolbox.Close()
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/api"
@@ -13,6 +14,9 @@ import (
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
 )
+
+// mcpStartWait acota cuánto espera `--once` a que arranquen los servidores MCP.
+const mcpStartWait = 75 * time.Second
 
 func (a *App) chat(ctx context.Context, args []string) int {
 	fs := a.flagSet("chat")
@@ -50,6 +54,7 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 		return 1
 	}
 	defer c.Toolbox.Close()
+	defer c.StopMCP()
 
 	acc := c.Probe(ctx)
 	if ctx.Err() != nil {
@@ -77,6 +82,12 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 		return 1
 	}
 
+	if c.Mode != chat.ModeAsk {
+		c.StartMCP()
+		waitCtx, cancel := context.WithTimeout(ctx, mcpStartWait)
+		c.WaitMCP(waitCtx)
+		cancel()
+	}
 	c.Session.Approver = &headlessApprover{app: a}
 	sink := &onceSink{app: a, live: c.Mode != chat.ModeAgent}
 	answer, err := c.Send(ctx, message, sink)

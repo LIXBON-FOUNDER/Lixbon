@@ -91,3 +91,14 @@ def test_state_corpus_matches_python_oracle():
         "state_corpus.json no coincide con sessions.py/commands.py. "
         "Regenera con: python apps/cli/validation/gen_state_corpus.py"
     )
+
+
+def test_mcp_corpus_matches_python_oracle():
+    spec = importlib.util.spec_from_file_location(
+        "gen_mcp_corpus", CLI_DIR / "validation" / "gen_mcp_corpus.py")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    assert generator.CORPUS.read_text(encoding="utf-8") == generator.render(), (
+        "mcp_corpus.json no coincide con lixbon_cli/mcp.py. "
+        "Regenera con: python apps/cli/validation/gen_mcp_corpus.py"
+    )

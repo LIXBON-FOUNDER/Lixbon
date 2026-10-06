@@ -58,6 +58,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		warning = err.Error()
 	}
 	c.LoadCustomCommands(reservedNames())
+	c.StartMCP()
 
 	m := New(c, Options{
 		HistoryFile: filepath.Join(filepath.Dir(configPath), "history"),
