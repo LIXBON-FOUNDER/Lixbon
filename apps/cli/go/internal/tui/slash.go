@@ -218,7 +218,7 @@ func (m *Model) cmdModel(arg string) tea.Cmd {
 	models := m.opts.Account.Models
 	if arg == "" {
 		if len(models) == 0 {
-			m.print(errLine("El servidor no está publicando modelos ahora mismo."))
+			m.print(errLine(m.opts.Account.NoModelsError().Error()))
 			return nil
 		}
 		options := make([]option, 0, len(models))

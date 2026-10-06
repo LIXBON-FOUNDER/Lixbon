@@ -205,6 +205,7 @@ type Account struct {
 	State         AccountState
 	Models        []api.Model
 	RoleChatModel string
+	ModelsErr     error
 }
 
 // Probe distingue sesión válida, clave rechazada y servidor inalcanzable, y
@@ -216,7 +217,7 @@ func (c *Chat) Probe(ctx context.Context) Account {
 	if err != nil {
 		authFailed = api.IsAuth(err)
 	}
-	acc.Models = models
+	acc.Models, acc.ModelsErr = models, err
 	acc.RoleChatModel = c.Client.RoleChatModel(ctx)
 	if c.Cfg.APIKey == "" {
 		acc.State = AccountAuth
@@ -270,7 +271,7 @@ func (c *Chat) ResolveModel(acc Account) (needsPick bool, err error) {
 		return false, nil
 	}
 	if len(acc.Models) == 0 {
-		return false, fmt.Errorf("El servidor no está publicando modelos ahora mismo.")
+		return false, acc.NoModelsError()
 	}
 	for _, m := range acc.Models {
 		if m.ID == acc.RoleChatModel {
@@ -279,6 +280,13 @@ func (c *Chat) ResolveModel(acc Account) (needsPick bool, err error) {
 		}
 	}
 	return true, nil
+}
+
+func (a Account) NoModelsError() error {
+	if a.ModelsErr != nil {
+		return fmt.Errorf("No se pudieron obtener los modelos: %v", a.ModelsErr)
+	}
+	return fmt.Errorf("El servidor respondió con una lista de modelos vacía.")
 }
 
 // ── persistencia ────────────────────────────────────────────────────────

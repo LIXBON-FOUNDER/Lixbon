@@ -158,8 +158,13 @@ func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 	var models []Model
+	var failures []string
 	for _, m := range data.Data {
-		if m.ID == "" || strings.HasPrefix(m.ID, "error:") {
+		if strings.HasPrefix(m.ID, "error:") {
+			failures = append(failures, strings.TrimSpace(strings.TrimPrefix(m.ID, "error:")))
+			continue
+		}
+		if m.ID == "" {
 			continue
 		}
 		name := m.Name
@@ -167,6 +172,9 @@ func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 			name = m.ID
 		}
 		models = append(models, Model{ID: m.ID, Name: name})
+	}
+	if len(models) == 0 && len(failures) > 0 {
+		return nil, &Error{Message: "El servidor no pudo listar los modelos: " + strings.Join(failures, "; ")}
 	}
 	return models, nil
 }

@@ -280,3 +280,13 @@ func TestIdleTimeoutEndsSilentStream(t *testing.T) {
 		t.Fatalf("error: %v", got)
 	}
 }
+
+func TestModelsDetailSurfacesGatewayErrorEntries(t *testing.T) {
+	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":[{"id":"error: sin nodos activos"}]}`)
+	})
+	_, err := c.ModelsDetail(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "sin nodos activos") {
+		t.Fatalf("el motivo debe llegar al usuario: %v", err)
+	}
+}
