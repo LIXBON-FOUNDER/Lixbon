@@ -1,0 +1,719 @@
+{
+  "version": 1,
+  "oracle": "apps/cli/lixbon_cli/agent.py",
+  "schemas": [
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "Lista una carpeta del workspace con tamaños; con recursive ve el árbol completo.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa; \".\" para la raíz"
+            },
+            "recursive": {
+              "type": "boolean",
+              "description": "Incluir subcarpetas (por defecto no)"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "find_files",
+        "description": "Busca archivos por nombre con un patrón glob: '*.py', 'test_*', 'src/**/*.jsx'.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Patrón glob del nombre o de la ruta relativa"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Lee el contenido de un archivo. Admite rango de líneas. Un PDF o .docx devuelve su texto; una imagen (png/jpg/webp) se te adjunta para que la veas.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            },
+            "start_line": {
+              "type": "integer",
+              "description": "Primera línea (1-based), opcional"
+            },
+            "end_line": {
+              "type": "integer",
+              "description": "Última línea, opcional"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "outline",
+        "description": "Esqueleto de un archivo: funciones, clases, métodos y encabezados con su número de línea. Úsalo antes de read_file en archivos grandes para leer solo el rango que importa.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search",
+        "description": "Busca texto en los archivos del workspace (grep): devuelve archivo:línea:contenido.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Texto a buscar (literal, salvo regex=true)"
+            },
+            "path": {
+              "type": "string",
+              "description": "Carpeta o archivo donde buscar; \".\" para todo el workspace"
+            },
+            "glob": {
+              "type": "string",
+              "description": "Solo archivos que cumplan el patrón, p. ej. '*.py'"
+            },
+            "ignore_case": {
+              "type": "boolean",
+              "description": "Ignorar mayúsculas/minúsculas"
+            },
+            "regex": {
+              "type": "boolean",
+              "description": "Interpretar pattern como expresión regular"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Crea un archivo con su contenido completo, creando las carpetas que falten. Es la herramienta para crear archivos nuevos; para modificar uno existente usa edit_file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            },
+            "content": {
+              "type": "string",
+              "description": "Contenido completo del archivo"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "Reemplaza un fragmento EXACTO de un archivo existente (edición parcial). Preferir sobre write_file para modificar archivos ya creados.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            },
+            "old_text": {
+              "type": "string",
+              "description": "Fragmento actual a reemplazar, copiado EXACTO (con su indentación)"
+            },
+            "new_text": {
+              "type": "string",
+              "description": "Texto nuevo"
+            },
+            "all": {
+              "type": "boolean",
+              "description": "Reemplazar todas las apariciones (por defecto solo la primera)"
+            }
+          },
+          "required": [
+            "path",
+            "old_text",
+            "new_text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "multi_edit",
+        "description": "Varias sustituciones EXACTAS en un mismo archivo, en orden. Preferir a varios edit_file seguidos cuando el cambio toca varios sitios del archivo.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            },
+            "edits": {
+              "type": "array",
+              "description": "Sustituciones en orden",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_text": {
+                    "type": "string",
+                    "description": "Fragmento actual, copiado exacto"
+                  },
+                  "new_text": {
+                    "type": "string",
+                    "description": "Texto nuevo"
+                  }
+                },
+                "required": [
+                  "old_text",
+                  "new_text"
+                ]
+              }
+            }
+          },
+          "required": [
+            "path",
+            "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "insert_at_line",
+        "description": "Inserta texto ANTES de la línea indicada (1-based). line=0 o mayor que el total: al final.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            },
+            "line": {
+              "type": "integer",
+              "description": "Número de línea delante de la cual insertar"
+            },
+            "content": {
+              "type": "string",
+              "description": "Texto a insertar (con sus saltos de línea)"
+            }
+          },
+          "required": [
+            "path",
+            "line",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "append_file",
+        "description": "Añade texto al final de un archivo (lo crea si no existe).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa del archivo"
+            },
+            "content": {
+              "type": "string",
+              "description": "Texto a añadir"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "mkdir",
+        "description": "Crea una carpeta (y las intermedias si faltan).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa de la carpeta"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delete_file",
+        "description": "Elimina un archivo o carpeta.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta relativa"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "rename_file",
+        "description": "Mueve o renombra un archivo.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "src": {
+              "type": "string",
+              "description": "Ruta origen"
+            },
+            "dst": {
+              "type": "string",
+              "description": "Ruta destino"
+            }
+          },
+          "required": [
+            "src",
+            "dst"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_command",
+        "description": "Ejecuta un comando de shell en el workspace: inicializar proyectos (npm create, git init…), instalar dependencias, tests y builds. Con background=true arranca un proceso largo (servidor de desarrollo, watcher) y devuelve un id para read_output/stop_command.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Comando a ejecutar"
+            },
+            "timeout": {
+              "type": "integer",
+              "description": "Segundos máximos (por defecto 30, tope 600)"
+            },
+            "background": {
+              "type": "boolean",
+              "description": "No esperar: dejarlo corriendo y devolver un id"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_output",
+        "description": "Salida nueva (desde la última lectura) de un comando en segundo plano y si sigue vivo.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Id devuelto por run_command con background=true"
+            },
+            "wait": {
+              "type": "integer",
+              "description": "Segundos a esperar antes de leer (por defecto 0, tope 60)"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "stop_command",
+        "description": "Detiene un comando en segundo plano (y sus procesos hijos).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Id del comando"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "fetch_url",
+        "description": "Descarga una página web (o un JSON/texto) y devuelve su contenido como texto.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "URL http(s) completa"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "Busca en internet y devuelve título, URL y resumen de cada resultado. Úsala para documentación, errores o datos que no estén en el workspace; luego fetch_url para leer una página entera.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Consulta de búsqueda, concreta y en el idioma de la fuente"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Resultados máximos (por defecto 5)"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo",
+        "description": "Tu lista de pasos para la tarea actual. Llámala al empezar una tarea de varios pasos y cada vez que completes uno (envía la lista completa actualizada). El usuario la ve; te evita olvidar partes de la petición.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "description": "Pasos en orden",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Qué hay que hacer"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "doing",
+                      "done"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "Pregunta al usuario cuando la petición es ambigua o hay que elegir entre alternativas que cambian el resultado. No la uses para confirmar cada paso.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "Pregunta concreta"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Opciones cerradas (2 a 6); sin ellas la respuesta es texto libre"
+            }
+          },
+          "required": [
+            "question"
+          ]
+        }
+      }
+    }
+  ],
+  "specs": [
+    {
+      "name": "list_files",
+      "args": "path, recursive?",
+      "description": "Listar el contenido de una carpeta"
+    },
+    {
+      "name": "find_files",
+      "args": "pattern",
+      "description": "Buscar archivos por nombre o patrón glob"
+    },
+    {
+      "name": "read_file",
+      "args": "path, start_line?, end_line?",
+      "description": "Leer un archivo, PDF, Word o imagen"
+    },
+    {
+      "name": "outline",
+      "args": "path",
+      "description": "Funciones, clases y secciones de un archivo con su línea"
+    },
+    {
+      "name": "search",
+      "args": "pattern, path?, glob?, ignore_case?, regex?",
+      "description": "Buscar texto en el workspace"
+    },
+    {
+      "name": "write_file",
+      "args": "path, content",
+      "description": "Crear o reemplazar un archivo entero"
+    },
+    {
+      "name": "edit_file",
+      "args": "path, old_text, new_text",
+      "description": "Sustituir un fragmento exacto de un archivo"
+    },
+    {
+      "name": "multi_edit",
+      "args": "path, edits",
+      "description": "Varias sustituciones en un archivo, en una llamada"
+    },
+    {
+      "name": "insert_at_line",
+      "args": "path, line, content",
+      "description": "Insertar texto antes de una línea"
+    },
+    {
+      "name": "append_file",
+      "args": "path, content",
+      "description": "Añadir texto al final de un archivo"
+    },
+    {
+      "name": "mkdir",
+      "args": "path",
+      "description": "Crear una carpeta"
+    },
+    {
+      "name": "delete_file",
+      "args": "path",
+      "description": "Eliminar un archivo"
+    },
+    {
+      "name": "rename_file",
+      "args": "src, dst",
+      "description": "Mover o renombrar un archivo"
+    },
+    {
+      "name": "run_command",
+      "args": "command, timeout?, background?",
+      "description": "Ejecutar un comando de shell en el workspace"
+    },
+    {
+      "name": "read_output",
+      "args": "id, wait?",
+      "description": "Leer la salida nueva de un comando en segundo plano"
+    },
+    {
+      "name": "stop_command",
+      "args": "id",
+      "description": "Detener un comando en segundo plano"
+    },
+    {
+      "name": "fetch_url",
+      "args": "url",
+      "description": "Descargar una página web como texto"
+    },
+    {
+      "name": "web_search",
+      "args": "query, limit?",
+      "description": "Buscar en internet (vía el gateway)"
+    },
+    {
+      "name": "todo",
+      "args": "items",
+      "description": "Lista de pasos del turno (pendiente / en curso / hecho)"
+    },
+    {
+      "name": "ask_user",
+      "args": "question, options?",
+      "description": "Preguntar al usuario antes de seguir"
+    }
+  ],
+  "read_only": [
+    "ask_user",
+    "fetch_url",
+    "find_files",
+    "list_files",
+    "outline",
+    "read_file",
+    "read_output",
+    "search",
+    "stop_command",
+    "todo",
+    "web_search"
+  ],
+  "mutating": [
+    "append_file",
+    "delete_file",
+    "edit_file",
+    "insert_at_line",
+    "multi_edit",
+    "rename_file",
+    "write_file"
+  ],
+  "edit": [
+    "append_file",
+    "edit_file",
+    "insert_at_line",
+    "multi_edit",
+    "write_file"
+  ],
+  "arg_keys": {
+    "list_files": [
+      "path",
+      "recursive"
+    ],
+    "find_files": [
+      "pattern"
+    ],
+    "outline": [
+      "path"
+    ],
+    "fetch_url": [
+      "url"
+    ],
+    "web_search": [
+      "query",
+      "limit"
+    ],
+    "read_file": [
+      "path",
+      "start_line",
+      "end_line"
+    ],
+    "write_file": [
+      "path",
+      "content"
+    ],
+    "edit_file": [
+      "path",
+      "old_text",
+      "new_text",
+      "all"
+    ],
+    "insert_at_line": [
+      "path",
+      "line",
+      "content"
+    ],
+    "append_file": [
+      "path",
+      "content"
+    ],
+    "mkdir": [
+      "path"
+    ],
+    "search": [
+      "pattern",
+      "path",
+      "glob",
+      "ignore_case",
+      "regex"
+    ],
+    "delete_file": [
+      "path"
+    ],
+    "rename_file": [
+      "src",
+      "dst"
+    ],
+    "run_command": [
+      "command",
+      "timeout",
+      "background"
+    ],
+    "read_output": [
+      "id",
+      "wait"
+    ],
+    "stop_command": [
+      "id"
+    ]
+  }
+}

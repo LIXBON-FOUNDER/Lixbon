@@ -1,0 +1,863 @@
+{
+ "version": 1,
+ "oracle": "apps/cli/lixbon_cli/agent.py::execute_tool_call",
+ "files": {
+  "README.md": {
+   "text": "# demo\n"
+  },
+  "src/app.py": {
+   "text": "import os\n\n\nclass Servicio:\n    \"\"\"Docstring.\"\"\"\n\n    def metodo(self, x):\n        return x\n\n    async def asincrono(self):\n        pass\n\n\ndef principal():\n    return 1\n\n\nasync def tarea():\n    pass\n\n\ndef función_ñ():\n    return \"é\"\n\n\nx = 1  # def no_es_definicion():\n"
+  },
+  "src/util.js": {
+   "text": "export default class App {\n  render() {\n    return 1;\n  }\n  static async crear() {\n    return new App();\n  }\n}\n\nexport const sumar = (a, b) => a + b;\nconst doble = async (x) => x * 2;\nfunction* generador() {}\nexport async function cargar() {}\nlet valor = 3;\n"
+  },
+  "src/Servicio.java": {
+   "text": "package demo;\n\npublic class Servicio {\n    private int campo;\n\n    public static void main(String[] args) {\n    }\n\n    protected String nombre() throws Exception {\n        return \"x\";\n    }\n}\n\ninterface Contrato {}\n"
+  },
+  "src/lib.rs": {
+   "text": "pub struct Punto { x: i32 }\n\nimpl Punto {\n    pub fn nuevo() -> Self { Punto { x: 0 } }\n    fn privada(&self) {}\n}\n\npub(crate) async fn tarea() {}\nenum Estado { A, B }\nmod interno {}\n"
+  },
+  "src/main.go": {
+   "text": "package main\n\ntype Servidor struct{}\n\nfunc (s *Servidor) Iniciar() {}\n\nfunc main() {}\n"
+  },
+  "src/estilo.css": {
+   "text": "body {\n  color: red;\n}\n\n.tarjeta > .titulo {\n  margin: 0;\n}\n\n@media (max-width: 600px) {\n  .tarjeta {\n    display: none;\n  }\n}\n"
+  },
+  "src/sep.py": {
+   "text": "def a(): def b():\fdef c():\n"
+  },
+  "src/notas.txt": {
+   "text": "Total de notas: 3\nTOTAL en mayúsculas\n"
+  },
+  "src/solo_comentarios.py": {
+   "text": "# nada\n# que ver\n"
+  },
+  "docs/guide.md": {
+   "text": "# Título\n\nTexto.\n\n## Sección uno\n\n### Sub sección\n\n####### no es encabezado\n#sin-espacio\n"
+  },
+  "crlf.txt": {
+   "b64": "dW5vDQpkb3MNCnRyZXM="
+  },
+  "cr.txt": {
+   "b64": "dW5vDWRvcw10cmVzCg=="
+  },
+  "bom.txt": {
+   "b64": "77u/aG9sYQo="
+  },
+  "invalido.txt": {
+   "b64": "b2sg//4gZmluCmxpbmVhIOKCIGNvcnRhCg=="
+  },
+  "separadores.txt": {
+   "text": "a b\u000bc\u001dde\n"
+  },
+  "vacio.txt": {
+   "text": ""
+  },
+  "binario.dat": {
+   "b64": "YWJjAGRlZg=="
+  },
+  "imagen.png": {
+   "b64": "iVBORw0KGgowMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+  },
+  "grande.txt": {
+   "gen": {
+    "template": "línea número {i}\n",
+    "count": 20000
+   }
+  },
+  "medio.txt": {
+   "gen": {
+    "template": "fila {i}\n",
+    "count": 40
+   }
+  },
+  "muchos/f{i}.txt": {
+   "gen": {
+    "each": true,
+    "text": "x\n",
+    "count": 305
+   }
+  },
+  "ñandú/é.txt": {
+   "text": "contenido con total\n"
+  },
+  "con espacios/a b.txt": {
+   "text": "total con espacios\n"
+  },
+  ".hidden/oculto.txt": {
+   "text": "total oculto\n"
+  },
+  ".env.example": {
+   "text": "TOTAL=1\n"
+  },
+  "node_modules/x/index.js": {
+   "text": "total\n"
+  },
+  ".git/config": {
+   "text": "total\n"
+  },
+  "dist/out.js": {
+   "text": "total\n"
+  },
+  "__pycache__/m.pyc": {
+   "text": "total\n"
+  },
+  "prof/a/b/c/d/e/f/g/h.txt": {
+   "text": "total profundo\n"
+  }
+ },
+ "empty_dirs": [
+  "vacia",
+  "src/subvacia"
+ ],
+ "cases": [
+  {
+   "name": "list_root",
+   "tool": "list_files",
+   "args": {},
+   "output": "[D] .git/ (omitida)\n[D] .hidden/ (1 entradas)\n[D] __pycache__/ (omitida)\n[D] con espacios/ (1 entradas)\n[D] dist/ (omitida)\n[D] docs/ (1 entradas)\n[D] muchos/ (305 entradas)\n[D] node_modules/ (omitida)\n[D] prof/ (1 entradas)\n[D] src/ (10 entradas)\n[D] vacia/ (0 entradas)\n[D] ñandú/ (1 entradas)\n[F] .env.example (8 B)\n[F] binario.dat (7 B)\n[F] bom.txt (8 B)\n[F] cr.txt (13 B)\n[F] crlf.txt (14 B)\n[F] grande.txt (408.9 kB)\n[F] imagen.png (3.0 kB)\n[F] invalido.txt (25 B)\n[F] medio.txt (311 B)\n[F] README.md (7 B)\n[F] separadores.txt (13 B)\n[F] vacio.txt (0 B)"
+  },
+  {
+   "name": "list_explicit_dot",
+   "tool": "list_files",
+   "args": {
+    "path": "."
+   },
+   "output": "[D] .git/ (omitida)\n[D] .hidden/ (1 entradas)\n[D] __pycache__/ (omitida)\n[D] con espacios/ (1 entradas)\n[D] dist/ (omitida)\n[D] docs/ (1 entradas)\n[D] muchos/ (305 entradas)\n[D] node_modules/ (omitida)\n[D] prof/ (1 entradas)\n[D] src/ (10 entradas)\n[D] vacia/ (0 entradas)\n[D] ñandú/ (1 entradas)\n[F] .env.example (8 B)\n[F] binario.dat (7 B)\n[F] bom.txt (8 B)\n[F] cr.txt (13 B)\n[F] crlf.txt (14 B)\n[F] grande.txt (408.9 kB)\n[F] imagen.png (3.0 kB)\n[F] invalido.txt (25 B)\n[F] medio.txt (311 B)\n[F] README.md (7 B)\n[F] separadores.txt (13 B)\n[F] vacio.txt (0 B)"
+  },
+  {
+   "name": "list_empty_path",
+   "tool": "list_files",
+   "args": {
+    "path": ""
+   },
+   "output": "[D] .git/ (omitida)\n[D] .hidden/ (1 entradas)\n[D] __pycache__/ (omitida)\n[D] con espacios/ (1 entradas)\n[D] dist/ (omitida)\n[D] docs/ (1 entradas)\n[D] muchos/ (305 entradas)\n[D] node_modules/ (omitida)\n[D] prof/ (1 entradas)\n[D] src/ (10 entradas)\n[D] vacia/ (0 entradas)\n[D] ñandú/ (1 entradas)\n[F] .env.example (8 B)\n[F] binario.dat (7 B)\n[F] bom.txt (8 B)\n[F] cr.txt (13 B)\n[F] crlf.txt (14 B)\n[F] grande.txt (408.9 kB)\n[F] imagen.png (3.0 kB)\n[F] invalido.txt (25 B)\n[F] medio.txt (311 B)\n[F] README.md (7 B)\n[F] separadores.txt (13 B)\n[F] vacio.txt (0 B)"
+  },
+  {
+   "name": "list_root_recursive",
+   "tool": "list_files",
+   "args": {
+    "path": ".",
+    "recursive": true
+   },
+   "output_len": 7816,
+   "output_sha256": "00c6575ecd2fb31b84ce5835a9a184983cd5f9cdf9333c125fc6b630602c5c77",
+   "output_head": "[D] .git/ (omitida)\n[D] .hidden/ (1 entradas)\n[F] .hidden/oculto.txt (13 B)\n[D] __pycache__/ (omitida)\n[D] con espacios/ (1 entradas)\n[F] con espacios/a b.txt (19 B)\n[D] dist/ (omitida)\n[D] docs/ (1 entradas)\n[F] docs/guide.md (92 B)\n[D] muchos/ (305 entradas)\n[F] muchos/f001.txt (2 B)\n[F] muchos/f0"
+  },
+  {
+   "name": "list_src",
+   "tool": "list_files",
+   "args": {
+    "path": "src"
+   },
+   "output": "[D] src/subvacia/ (0 entradas)\n[F] src/app.py (271 B)\n[F] src/estilo.css (127 B)\n[F] src/lib.rs (183 B)\n[F] src/main.go (86 B)\n[F] src/notas.txt (39 B)\n[F] src/sep.py (29 B)\n[F] src/Servicio.java (215 B)\n[F] src/solo_comentarios.py (17 B)\n[F] src/util.js (258 B)"
+  },
+  {
+   "name": "list_file",
+   "tool": "list_files",
+   "args": {
+    "path": "src/app.py"
+   },
+   "output": "[F] src/app.py (271 B)"
+  },
+  {
+   "name": "list_missing",
+   "tool": "list_files",
+   "args": {
+    "path": "nada"
+   },
+   "output": "No existe: nada"
+  },
+  {
+   "name": "list_empty_dir",
+   "tool": "list_files",
+   "args": {
+    "path": "vacia"
+   },
+   "output": "(vacío)"
+  },
+  {
+   "name": "list_many_capped",
+   "tool": "list_files",
+   "args": {
+    "path": "muchos"
+   },
+   "output_len": 7815,
+   "output_sha256": "7679b84225af9b87c63c8aaa21ca50e342fe00f31c7708016e152ed9f5b34a5d",
+   "output_head": "[F] muchos/f001.txt (2 B)\n[F] muchos/f002.txt (2 B)\n[F] muchos/f003.txt (2 B)\n[F] muchos/f004.txt (2 B)\n[F] muchos/f005.txt (2 B)\n[F] muchos/f006.txt (2 B)\n[F] muchos/f007.txt (2 B)\n[F] muchos/f008.txt (2 B)\n[F] muchos/f009.txt (2 B)\n[F] muchos/f010.txt (2 B)\n[F] muchos/f011.txt (2 B)\n[F] muchos/f01"
+  },
+  {
+   "name": "list_depth_limit",
+   "tool": "list_files",
+   "args": {
+    "path": "prof",
+    "recursive": true
+   },
+   "output": "[D] prof/a/ (1 entradas)\n[D] prof/a/b/ (1 entradas)\n[D] prof/a/b/c/ (1 entradas)\n[D] prof/a/b/c/d/ (1 entradas)\n[D] prof/a/b/c/d/e/ (1 entradas)\n[D] prof/a/b/c/d/e/f/ (1 entradas)"
+  },
+  {
+   "name": "list_unicode_dir",
+   "tool": "list_files",
+   "args": {
+    "path": "ñandú"
+   },
+   "output": "[F] ñandú/é.txt (20 B)"
+  },
+  {
+   "name": "list_spaces_dir",
+   "tool": "list_files",
+   "args": {
+    "path": "con espacios"
+   },
+   "output": "[F] con espacios/a b.txt (19 B)"
+  },
+  {
+   "name": "list_ignored_dir_direct",
+   "tool": "list_files",
+   "args": {
+    "path": "node_modules"
+   },
+   "output": "[D] node_modules/x/ (1 entradas)"
+  },
+  {
+   "name": "list_outside",
+   "tool": "list_files",
+   "args": {
+    "path": "../fuera"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido"
+  },
+  {
+   "name": "list_recursive_flag_truthy",
+   "tool": "list_files",
+   "args": {
+    "path": "src",
+    "recursive": 1
+   },
+   "output": "[D] src/subvacia/ (0 entradas)\n[F] src/app.py (271 B)\n[F] src/estilo.css (127 B)\n[F] src/lib.rs (183 B)\n[F] src/main.go (86 B)\n[F] src/notas.txt (39 B)\n[F] src/sep.py (29 B)\n[F] src/Servicio.java (215 B)\n[F] src/solo_comentarios.py (17 B)\n[F] src/util.js (258 B)"
+  },
+  {
+   "name": "find_by_name",
+   "tool": "find_files",
+   "args": {
+    "pattern": "*.py"
+   },
+   "output": "src/app.py\nsrc/sep.py\nsrc/solo_comentarios.py"
+  },
+  {
+   "name": "find_js_skips_ignored",
+   "tool": "find_files",
+   "args": {
+    "pattern": "*.js"
+   },
+   "output": "src/util.js"
+  },
+  {
+   "name": "find_with_dir",
+   "tool": "find_files",
+   "args": {
+    "pattern": "src/*.js"
+   },
+   "output": "src/util.js"
+  },
+  {
+   "name": "find_double_star",
+   "tool": "find_files",
+   "args": {
+    "pattern": "src/**/*.go"
+   },
+   "output": "src/main.go"
+  },
+  {
+   "name": "find_md_anywhere",
+   "tool": "find_files",
+   "args": {
+    "pattern": "**/*.md"
+   },
+   "output": "README.md\ndocs/guide.md"
+  },
+  {
+   "name": "find_exact_name",
+   "tool": "find_files",
+   "args": {
+    "pattern": "README.md"
+   },
+   "output": "README.md"
+  },
+  {
+   "name": "find_none",
+   "tool": "find_files",
+   "args": {
+    "pattern": "*.xyz"
+   },
+   "output": "(sin resultados)"
+  },
+  {
+   "name": "find_empty",
+   "tool": "find_files",
+   "args": {
+    "pattern": ""
+   },
+   "output": "[ERROR] Falta pattern"
+  },
+  {
+   "name": "find_blank",
+   "tool": "find_files",
+   "args": {
+    "pattern": "   "
+   },
+   "output": "[ERROR] Falta pattern"
+  },
+  {
+   "name": "find_everything_in_src",
+   "tool": "find_files",
+   "args": {
+    "pattern": "src/*"
+   },
+   "output": "src/Servicio.java\nsrc/app.py\nsrc/estilo.css\nsrc/lib.rs\nsrc/main.go\nsrc/notas.txt\nsrc/sep.py\nsrc/solo_comentarios.py\nsrc/subvacia/\nsrc/util.js"
+  },
+  {
+   "name": "find_in_unicode_dir",
+   "tool": "find_files",
+   "args": {
+    "pattern": "ñandú/*"
+   },
+   "output": "ñandú/é.txt"
+  },
+  {
+   "name": "find_in_spaces_dir",
+   "tool": "find_files",
+   "args": {
+    "pattern": "con espacios/*"
+   },
+   "output": "con espacios/a b.txt"
+  },
+  {
+   "name": "find_backslash_pattern",
+   "tool": "find_files",
+   "args": {
+    "pattern": "src\\*.rs"
+   },
+   "output": "src/lib.rs"
+  },
+  {
+   "name": "find_question_mark",
+   "tool": "find_files",
+   "args": {
+    "pattern": "READM?.md"
+   },
+   "output": "README.md"
+  },
+  {
+   "name": "find_char_class",
+   "tool": "find_files",
+   "args": {
+    "pattern": "[ac]*.txt"
+   },
+   "output": "con espacios/a b.txt\ncr.txt\ncrlf.txt"
+  },
+  {
+   "name": "find_hidden",
+   "tool": "find_files",
+   "args": {
+    "pattern": ".env*"
+   },
+   "output": ".env.example"
+  },
+  {
+   "name": "read_small",
+   "tool": "read_file",
+   "args": {
+    "path": "README.md"
+   },
+   "output": "# demo\n"
+  },
+  {
+   "name": "read_range",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "start_line": 3,
+    "end_line": 5
+   },
+   "output": "(líneas 3-5 de 41)\nfila 3\nfila 4\nfila 5"
+  },
+  {
+   "name": "read_start_only",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "start_line": 38
+   },
+   "output": "(líneas 38-41 de 41)\nfila 38\nfila 39\nfila 40\n"
+  },
+  {
+   "name": "read_end_only",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "end_line": 2
+   },
+   "output": "(líneas 1-2 de 41)\nfila 1\nfila 2"
+  },
+  {
+   "name": "read_start_after_end",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "start_line": 9,
+    "end_line": 4
+   },
+   "output": "(líneas 9-4 de 41)\n"
+  },
+  {
+   "name": "read_start_beyond_file",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "start_line": 500
+   },
+   "output": "(líneas 500-41 de 41)\n"
+  },
+  {
+   "name": "read_end_beyond_file",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "start_line": 39,
+    "end_line": 500
+   },
+   "output": "(líneas 39-41 de 41)\nfila 39\nfila 40\n"
+  },
+  {
+   "name": "read_range_string_numbers",
+   "tool": "read_file",
+   "args": {
+    "path": "medio.txt",
+    "start_line": "2",
+    "end_line": "3"
+   },
+   "output": "(líneas 2-3 de 41)\nfila 2\nfila 3"
+  },
+  {
+   "name": "read_crlf",
+   "tool": "read_file",
+   "args": {
+    "path": "crlf.txt"
+   },
+   "output": "uno\ndos\ntres"
+  },
+  {
+   "name": "read_cr_only",
+   "tool": "read_file",
+   "args": {
+    "path": "cr.txt"
+   },
+   "output": "uno\ndos\ntres\n"
+  },
+  {
+   "name": "read_bom",
+   "tool": "read_file",
+   "args": {
+    "path": "bom.txt"
+   },
+   "output": "﻿hola\n"
+  },
+  {
+   "name": "read_invalid_utf8",
+   "tool": "read_file",
+   "args": {
+    "path": "invalido.txt"
+   },
+   "output": "ok �� fin\nlinea � corta\n"
+  },
+  {
+   "name": "read_empty",
+   "tool": "read_file",
+   "args": {
+    "path": "vacio.txt"
+   },
+   "output": ""
+  },
+  {
+   "name": "read_empty_range",
+   "tool": "read_file",
+   "args": {
+    "path": "vacio.txt",
+    "start_line": 1
+   },
+   "output": "(líneas 1-1 de 1)\n"
+  },
+  {
+   "name": "read_binary",
+   "tool": "read_file",
+   "args": {
+    "path": "binario.dat"
+   },
+   "output": "[binario] binario.dat (7 B): no es texto ni un formato que sepa leer (pdf, docx, png/jpg/webp)."
+  },
+  {
+   "name": "read_image",
+   "tool": "read_file",
+   "args": {
+    "path": "imagen.png"
+   },
+   "output": "[imagen] imagen.png (2 kB): se te adjunta como imagen en el siguiente mensaje para que la veas directamente."
+  },
+  {
+   "name": "read_big_truncated",
+   "tool": "read_file",
+   "args": {
+    "path": "grande.txt"
+   },
+   "output_len": 120068,
+   "output_sha256": "cfe45eae90d9a8cbe570d186c862776e380f90259e88f9020c7b12233a511c47",
+   "output_head": "(archivo grande: 20001 líneas; pide rangos con start_line/end_line)\nlínea número 1\nlínea número 2\nlínea número 3\nlínea número 4\nlínea número 5\nlínea número 6\nlínea número 7\nlínea número 8\nlínea número 9\nlínea número 10\nlínea número 11\nlínea número 12\nlínea número 13\nlínea número 14\nlínea número 15\nl"
+  },
+  {
+   "name": "read_big_with_range",
+   "tool": "read_file",
+   "args": {
+    "path": "grande.txt",
+    "start_line": 19999
+   },
+   "output": "(líneas 19999-20001 de 20001)\nlínea número 19999\nlínea número 20000\n"
+  },
+  {
+   "name": "read_unicode_path",
+   "tool": "read_file",
+   "args": {
+    "path": "ñandú/é.txt"
+   },
+   "output": "contenido con total\n"
+  },
+  {
+   "name": "read_spaces_path",
+   "tool": "read_file",
+   "args": {
+    "path": "con espacios/a b.txt"
+   },
+   "output": "total con espacios\n"
+  },
+  {
+   "name": "read_missing",
+   "tool": "read_file",
+   "args": {
+    "path": "nada.txt"
+   },
+   "output": "Archivo no encontrado: nada.txt"
+  },
+  {
+   "name": "read_directory",
+   "tool": "read_file",
+   "args": {
+    "path": "src"
+   },
+   "output": "Archivo no encontrado: src"
+  },
+  {
+   "name": "read_outside",
+   "tool": "read_file",
+   "args": {
+    "path": "../fuera.txt"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido"
+  },
+  {
+   "name": "read_missing_arg",
+   "tool": "read_file",
+   "args": {},
+   "output": "Archivo no encontrado: "
+  },
+  {
+   "name": "outline_python",
+   "tool": "outline",
+   "args": {
+    "path": "src/app.py"
+   },
+   "output": "src/app.py: 26 líneas\n    4  class Servicio:\n    7      def metodo(self, x):\n   10      async def asincrono(self):\n   14  def principal():\n   18  async def tarea():\n   22  def función_ñ():"
+  },
+  {
+   "name": "outline_js",
+   "tool": "outline",
+   "args": {
+    "path": "src/util.js"
+   },
+   "output": "src/util.js: 14 líneas\n    1  export default class App {\n    2    render() {\n    5    static async crear() {\n   10  export const sumar = (a, b) => a + b;\n   11  const doble = async (x) => x * 2;\n   12  function* generador() {}\n   13  export async function cargar() {}"
+  },
+  {
+   "name": "outline_java",
+   "tool": "outline",
+   "args": {
+    "path": "src/Servicio.java"
+   },
+   "output": "src/Servicio.java: 14 líneas\n    3  public class Servicio {\n    6      public static void main(String[] args) {\n    9      protected String nombre() throws Exception {\n   14  interface Contrato {}"
+  },
+  {
+   "name": "outline_rust",
+   "tool": "outline",
+   "args": {
+    "path": "src/lib.rs"
+   },
+   "output": "src/lib.rs: 10 líneas\n    1  pub struct Punto { x: i32 }\n    3  impl Punto {\n    4      pub fn nuevo() -> Self { Punto { x: 0 } }\n    5      fn privada(&self) {}\n    8  pub(crate) async fn tarea() {}\n    9  enum Estado { A, B }\n   10  mod interno {}"
+  },
+  {
+   "name": "outline_go",
+   "tool": "outline",
+   "args": {
+    "path": "src/main.go"
+   },
+   "output": "src/main.go: 7 líneas\n    3  type Servidor struct{}\n    5  func (s *Servidor) Iniciar() {}\n    7  func main() {}"
+  },
+  {
+   "name": "outline_css",
+   "tool": "outline",
+   "args": {
+    "path": "src/estilo.css"
+   },
+   "output": "src/estilo.css: 13 líneas\n    1  body {\n    5  .tarjeta > .titulo {\n    9  @media (max-width: 600px) {\n   10    .tarjeta {"
+  },
+  {
+   "name": "outline_markdown",
+   "tool": "outline",
+   "args": {
+    "path": "docs/guide.md"
+   },
+   "output": "docs/guide.md: 10 líneas\n    1  # Título\n    5  ## Sección uno\n    7  ### Sub sección"
+  },
+  {
+   "name": "outline_unicode_separators",
+   "tool": "outline",
+   "args": {
+    "path": "src/sep.py"
+   },
+   "output": "src/sep.py: 3 líneas\n    1  def a():\n    2  def b():\n    3  def c():"
+  },
+  {
+   "name": "outline_unsupported_ext",
+   "tool": "outline",
+   "args": {
+    "path": "src/notas.txt"
+   },
+   "output": "(sin esqueleto para .txt; usa read_file)"
+  },
+  {
+   "name": "outline_no_matches",
+   "tool": "outline",
+   "args": {
+    "path": "src/solo_comentarios.py"
+   },
+   "output": "(sin funciones ni clases reconocibles en 2 líneas)"
+  },
+  {
+   "name": "outline_empty_file",
+   "tool": "outline",
+   "args": {
+    "path": "vacio.txt"
+   },
+   "output": "(sin esqueleto para .txt; usa read_file)"
+  },
+  {
+   "name": "outline_missing",
+   "tool": "outline",
+   "args": {
+    "path": "nada.py"
+   },
+   "output": "Archivo no encontrado: nada.py"
+  },
+  {
+   "name": "outline_directory",
+   "tool": "outline",
+   "args": {
+    "path": "src"
+   },
+   "output": "Archivo no encontrado: src"
+  },
+  {
+   "name": "search_literal",
+   "tool": "search",
+   "args": {
+    "pattern": "total"
+   },
+   "unordered": true,
+   "output": ".hidden/oculto.txt:1:total oculto\ncon espacios/a b.txt:1:total con espacios\nprof/a/b/c/d/e/f/g/h.txt:1:total profundo\nñandú/é.txt:1:contenido con total"
+  },
+  {
+   "name": "search_ignore_case",
+   "tool": "search",
+   "args": {
+    "pattern": "total",
+    "ignore_case": true
+   },
+   "unordered": true,
+   "output": ".env.example:1:TOTAL=1\n.hidden/oculto.txt:1:total oculto\ncon espacios/a b.txt:1:total con espacios\nprof/a/b/c/d/e/f/g/h.txt:1:total profundo\nsrc/notas.txt:1:Total de notas: 3\nsrc/notas.txt:2:TOTAL en mayúsculas\nñandú/é.txt:1:contenido con total"
+  },
+  {
+   "name": "search_regex",
+   "tool": "search",
+   "args": {
+    "pattern": "^def \\w+",
+    "regex": true
+   },
+   "unordered": true,
+   "output": "src/app.py:14:def principal():\nsrc/app.py:22:def función_ñ():\nsrc/sep.py:1:def a():\nsrc/sep.py:2:def b():\nsrc/sep.py:3:def c():"
+  },
+  {
+   "name": "search_literal_not_regex",
+   "tool": "search",
+   "args": {
+    "pattern": "def \\w+"
+   },
+   "unordered": true,
+   "output": "(sin resultados)"
+  },
+  {
+   "name": "search_glob",
+   "tool": "search",
+   "args": {
+    "pattern": "def",
+    "glob": "*.py"
+   },
+   "unordered": true,
+   "output": "src/app.py:10:async def asincrono(self):\nsrc/app.py:14:def principal():\nsrc/app.py:18:async def tarea():\nsrc/app.py:22:def función_ñ():\nsrc/app.py:26:x = 1  # def no_es_definicion():\nsrc/app.py:7:def metodo(self, x):\nsrc/sep.py:1:def a():\nsrc/sep.py:2:def b():\nsrc/sep.py:3:def c():"
+  },
+  {
+   "name": "search_glob_with_dir",
+   "tool": "search",
+   "args": {
+    "pattern": "total",
+    "glob": "src/*",
+    "ignore_case": true
+   },
+   "unordered": true,
+   "output": "src/notas.txt:1:Total de notas: 3\nsrc/notas.txt:2:TOTAL en mayúsculas"
+  },
+  {
+   "name": "search_in_dir",
+   "tool": "search",
+   "args": {
+    "pattern": "total",
+    "path": "src",
+    "ignore_case": true
+   },
+   "unordered": true,
+   "output": "src/notas.txt:1:Total de notas: 3\nsrc/notas.txt:2:TOTAL en mayúsculas"
+  },
+  {
+   "name": "search_in_file",
+   "tool": "search",
+   "args": {
+    "pattern": "def",
+    "path": "src/app.py"
+   },
+   "unordered": true,
+   "output": "src/app.py:10:async def asincrono(self):\nsrc/app.py:14:def principal():\nsrc/app.py:18:async def tarea():\nsrc/app.py:22:def función_ñ():\nsrc/app.py:26:x = 1  # def no_es_definicion():\nsrc/app.py:7:def metodo(self, x):"
+  },
+  {
+   "name": "search_no_results",
+   "tool": "search",
+   "args": {
+    "pattern": "inexistente_zzz"
+   },
+   "unordered": true,
+   "output": "(sin resultados)"
+  },
+  {
+   "name": "search_missing_pattern",
+   "tool": "search",
+   "args": {
+    "pattern": ""
+   },
+   "unordered": true,
+   "output": "[ERROR] Falta pattern"
+  },
+  {
+   "name": "search_missing_path",
+   "tool": "search",
+   "args": {
+    "pattern": "x",
+    "path": "nada"
+   },
+   "unordered": true,
+   "output": "No existe: nada"
+  },
+  {
+   "name": "search_unicode",
+   "tool": "search",
+   "args": {
+    "pattern": "mayúsculas"
+   },
+   "unordered": true,
+   "output": "src/notas.txt:2:TOTAL en mayúsculas"
+  },
+  {
+   "name": "search_unicode_dir",
+   "tool": "search",
+   "args": {
+    "pattern": "total",
+    "path": "ñandú"
+   },
+   "unordered": true,
+   "output": "ñandú/é.txt:1:contenido con total"
+  },
+  {
+   "name": "search_hidden_included",
+   "tool": "search",
+   "args": {
+    "pattern": "oculto"
+   },
+   "unordered": true,
+   "output": ".hidden/oculto.txt:1:total oculto"
+  },
+  {
+   "name": "search_binary_skipped",
+   "tool": "search",
+   "args": {
+    "pattern": "abc"
+   },
+   "unordered": true,
+   "output": "(sin resultados)"
+  },
+  {
+   "name": "search_line_separators",
+   "tool": "search",
+   "args": {
+    "pattern": "e",
+    "path": "separadores.txt"
+   },
+   "unordered": true,
+   "output": "separadores.txt:5:e"
+  },
+  {
+   "name": "search_strips_line",
+   "tool": "search",
+   "args": {
+    "pattern": "return x",
+    "path": "src/app.py"
+   },
+   "unordered": true,
+   "output": "src/app.py:8:return x"
+  },
+  {
+   "name": "search_outside",
+   "tool": "search",
+   "args": {
+    "pattern": "x",
+    "path": ".."
+   },
+   "unordered": true,
+   "output": "[ERROR] Ruta fuera del workspace permitido"
+  },
+  {
+   "name": "search_capped",
+   "tool": "search",
+   "args": {
+    "pattern": "línea",
+    "path": "grande.txt"
+   },
+   "output_len": 9399,
+   "output_sha256": "a70ddf3ee32750514f92e754761241e0b8e695f830706dd9df6ee9a97a02ca1e",
+   "output_head": "grande.txt:1:línea número 1\ngrande.txt:2:línea número 2\ngrande.txt:3:línea número 3\ngrande.txt:4:línea número 4\ngrande.txt:5:línea número 5\ngrande.txt:6:línea número 6\ngrande.txt:7:línea número 7\ngrande.txt:8:línea número 8\ngrande.txt:9:línea número 9\ngrande.txt:10:línea número 10\ngrande.txt:11:líne"
+  }
+ ]
+}

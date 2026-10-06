@@ -1,0 +1,1358 @@
+{
+ "version": 1,
+ "oracle": "apps/cli/lixbon_cli/agent.py::execute_tool_call",
+ "cases": [
+  {
+   "name": "edit_exact",
+   "files": {
+    "a.py": {
+     "text": "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.py",
+    "old_text": "return 1",
+    "new_text": "return 10"
+   },
+   "output": "Archivo editado: a.py (1 reemplazo en la línea 2)",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "def a():\n    return 10\n\n\ndef b():\n    return 2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_exact_multiline",
+   "files": {
+    "a.py": {
+     "text": "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.py",
+    "old_text": "def a():\n    return 1\n",
+    "new_text": "def a():\n    return 0\n"
+   },
+   "output": "Archivo editado: a.py (1 reemplazo en la línea 1)",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "def a():\n    return 0\n\n\ndef b():\n    return 2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_all",
+   "files": {
+    "a.txt": {
+     "text": "x y x z x\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "x",
+    "new_text": "W",
+    "all": true
+   },
+   "output": "Archivo editado: a.txt (3 reemplazos)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "W y W z W\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_ambiguous",
+   "files": {
+    "a.txt": {
+     "text": "x y x\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "x",
+    "new_text": "W"
+   },
+   "output": "[ERROR] old_text aparece 2 veces en a.txt; añade más líneas de contexto para que sea único, o pasa \"all\":true para reemplazar todas",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x y x\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_delete_fragment",
+   "files": {
+    "a.txt": {
+     "text": "hola mundo\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": " mundo",
+    "new_text": ""
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 1)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "hola\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_missing_old_text",
+   "files": {
+    "a.txt": {
+     "text": "x\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "",
+    "new_text": "y"
+   },
+   "output": "[ERROR] Falta old_text (el fragmento exacto a reemplazar)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_not_found",
+   "files": {
+    "a.txt": {
+     "text": "x\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "inexistente",
+    "new_text": "y"
+   },
+   "output": "[ERROR] No se encontró old_text en a.txt. Debe coincidir con el archivo (usa read_file y copia el fragmento tal cual, con sus líneas completas)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_missing_file",
+   "files": {},
+   "tool": "edit_file",
+   "args": {
+    "path": "nada.txt",
+    "old_text": "a",
+    "new_text": "b"
+   },
+   "output": "Archivo no encontrado: nada.txt",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_directory",
+   "files": {
+    "d/x.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "d",
+    "old_text": "a",
+    "new_text": "b"
+   },
+   "output": "Archivo no encontrado: d",
+   "after": {
+    "files": {
+     "d/x.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": [
+     "d"
+    ]
+   }
+  },
+  {
+   "name": "edit_outside",
+   "files": {},
+   "tool": "edit_file",
+   "args": {
+    "path": "../fuera.txt",
+    "old_text": "a",
+    "new_text": "b"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_unicode_line_number",
+   "files": {
+    "a.txt": {
+     "text": "á\né\nmañana ñ\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "mañana",
+    "new_text": "tarde"
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 3)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "á\né\ntarde ñ\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_bom_preserved",
+   "files": {
+    "a.txt": {
+     "text": "﻿hola\nadiós\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "adiós",
+    "new_text": "chao"
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "﻿hola\nchao\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_crlf_exact",
+   "files": {
+    "a.txt": {
+     "b64": "dW5vDQpkb3MNCnRyZXMNCg=="
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "dos\r\n",
+    "new_text": "DOS\r\n"
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "b64": "dW5vDQpET1MNCnRyZXMNCg=="
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_crlf_loose",
+   "files": {
+    "a.txt": {
+     "b64": "dW5vDQpkb3MNCnRyZXMNCg=="
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "dos\ntres",
+    "new_text": "DOS\nTRES"
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 2; old_text coincidió ignorando espacios e indentación)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "b64": "dW5vDQpET1MNClRSRVMNCg=="
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_loose_trailing_whitespace",
+   "files": {
+    "a.txt": {
+     "text": "uno  \ndos\t\ntres\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "uno\ndos",
+    "new_text": "UNO\nDOS"
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 1; old_text coincidió ignorando espacios e indentación)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "UNO\nDOS\ntres\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_loose_reindent",
+   "files": {
+    "a.py": {
+     "text": "class C:\n    def m(self):\n        x = 1\n        y = 2\n        return x + y\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.py",
+    "old_text": "x = 1\ny = 2",
+    "new_text": "x = 10\n    y = 20"
+   },
+   "output": "Archivo editado: a.py (1 reemplazo en la línea 3; old_text coincidió ignorando espacios e indentación)",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "class C:\n    def m(self):\n        x = 10\n            y = 20\n        return x + y\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_loose_reindent_tabs",
+   "files": {
+    "a.py": {
+     "text": "if x:\n\tprint(1)\n\tprint(2)\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.py",
+    "old_text": "print(1)\nprint(2)",
+    "new_text": "print(3)\nprint(4)"
+   },
+   "output": "Archivo editado: a.py (1 reemplazo en la línea 2; old_text coincidió ignorando espacios e indentación)",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "if x:\n\tprint(3)\n\tprint(4)\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_loose_ambiguous",
+   "files": {
+    "a.txt": {
+     "text": "foo\nbar\nfoo\nbar\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "foo \nbar ",
+    "new_text": "X"
+   },
+   "output": "[ERROR] old_text (salvo espacios) aparece 2 veces en a.txt; añade más líneas de contexto para que sea único",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "foo\nbar\nfoo\nbar\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_loose_leading_newlines_stripped",
+   "files": {
+    "a.txt": {
+     "text": "a\nb\nc\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "\n\nb\n",
+    "new_text": "B"
+   },
+   "output": "Archivo editado: a.txt (1 reemplazo en la línea 2; old_text coincidió ignorando espacios e indentación)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "a\nB\nc\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "edit_string_all_flag_truthy",
+   "files": {
+    "a.txt": {
+     "text": "x x\n"
+    }
+   },
+   "tool": "edit_file",
+   "args": {
+    "path": "a.txt",
+    "old_text": "x",
+    "new_text": "y",
+    "all": 1
+   },
+   "output": "Archivo editado: a.txt (2 reemplazos)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "y y\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_ok",
+   "files": {
+    "a.py": {
+     "text": "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.py",
+    "edits": [
+     {
+      "old_text": "return 1",
+      "new_text": "return 10"
+     },
+     {
+      "old_text": "return 2",
+      "new_text": "return 20"
+     }
+    ]
+   },
+   "output": "Archivo editado: a.py (2 ediciones: 1 reemplazo en la línea 2; 1 reemplazo en la línea 6)",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "def a():\n    return 10\n\n\ndef b():\n    return 20\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_second_fails",
+   "files": {
+    "a.py": {
+     "text": "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.py",
+    "edits": [
+     {
+      "old_text": "return 1",
+      "new_text": "return 10"
+     },
+     {
+      "old_text": "no existe",
+      "new_text": "x"
+     }
+    ]
+   },
+   "output": "[ERROR] Edición 2 de 2: No se encontró old_text en a.py. Debe coincidir con el archivo (usa read_file y copia el fragmento tal cual, con sus líneas completas). Ya se aplicaron las 1 anteriores.",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "def a():\n    return 10\n\n\ndef b():\n    return 2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_first_fails",
+   "files": {
+    "a.py": {
+     "text": "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.py",
+    "edits": [
+     {
+      "old_text": "no existe",
+      "new_text": "x"
+     }
+    ]
+   },
+   "output": "[ERROR] Edición 1 de 1: No se encontró old_text en a.py. Debe coincidir con el archivo (usa read_file y copia el fragmento tal cual, con sus líneas completas).",
+   "after": {
+    "files": {
+     "a.py": {
+      "text": "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_with_all",
+   "files": {
+    "a.txt": {
+     "text": "x x\ny\n"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.txt",
+    "edits": [
+     {
+      "old_text": "x",
+      "new_text": "z",
+      "all": true
+     },
+     {
+      "old_text": "y",
+      "new_text": "w"
+     }
+    ]
+   },
+   "output": "Archivo editado: a.txt (2 ediciones: 2 reemplazos; 1 reemplazo en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "z z\nw\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_not_a_list",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.txt",
+    "edits": "x"
+   },
+   "output": "[ERROR] edits debe ser una lista de {old_text, new_text}",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_empty_list",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.txt",
+    "edits": []
+   },
+   "output": "[ERROR] edits debe ser una lista de {old_text, new_text}",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "multi_edit_item_not_object",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "multi_edit",
+   "args": {
+    "path": "a.txt",
+    "edits": [
+     "x"
+    ]
+   },
+   "output": "[ERROR] La edición 1 no es un objeto {old_text, new_text}",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_middle",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n3\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 2,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\nX\n2\n3\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_first_line",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 1,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 1)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "X\n1\n2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_zero_appends",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 0,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 3)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\n2\nX\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_beyond_end",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 99,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 3)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\n2\nX\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_negative_line",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": -3,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 3)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\n2\nX\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_without_trailing_newline_in_content",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 2,
+    "content": "X"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\nX\n2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_multiline",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 2,
+    "content": "A\nB\nC\n"
+   },
+   "output": "Archivo editado: a.txt (3 líneas insertadas en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\nA\nB\nC\n2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_crlf_file",
+   "files": {
+    "a.txt": {
+     "b64": "MQ0KMg0KMw0K"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 2,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "b64": "MQ0KWA0KMg0KMw0K"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_into_file_without_final_newline",
+   "files": {
+    "a.txt": {
+     "text": "1\n2"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 0,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 3)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\n2\nX"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_into_empty_file",
+   "files": {
+    "a.txt": {
+     "text": ""
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 1,
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 1)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "X\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_empty_content",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": 1,
+    "content": ""
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 1)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "\n1\n2\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_missing_file",
+   "files": {},
+   "tool": "insert_at_line",
+   "args": {
+    "path": "nada.txt",
+    "line": 1,
+    "content": "X"
+   },
+   "output": "Archivo no encontrado: nada.txt",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "insert_string_line_number",
+   "files": {
+    "a.txt": {
+     "text": "1\n2\n3\n"
+    }
+   },
+   "tool": "insert_at_line",
+   "args": {
+    "path": "a.txt",
+    "line": "2",
+    "content": "X\n"
+   },
+   "output": "Archivo editado: a.txt (1 líneas insertadas en la línea 2)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "1\nX\n2\n3\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "write_new_nested",
+   "files": {},
+   "tool": "write_file",
+   "args": {
+    "path": "src/nuevo/a.py",
+    "content": "print('hola')\n"
+   },
+   "output": "Archivo creado: src/nuevo/a.py (14 chars)",
+   "after": {
+    "files": {
+     "src/nuevo/a.py": {
+      "text": "print('hola')\n"
+     }
+    },
+    "dirs": [
+     "src",
+     "src/nuevo"
+    ]
+   }
+  },
+  {
+   "name": "write_overwrite",
+   "files": {
+    "a.txt": {
+     "text": "viejo\n"
+    }
+   },
+   "tool": "write_file",
+   "args": {
+    "path": "a.txt",
+    "content": "nuevo\n"
+   },
+   "output": "Archivo actualizado: a.txt (6 chars)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "nuevo\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "write_unicode",
+   "files": {},
+   "tool": "write_file",
+   "args": {
+    "path": "ñandú/é.txt",
+    "content": "canción 🎵\n"
+   },
+   "output": "Archivo creado: ñandú/é.txt (10 chars)",
+   "after": {
+    "files": {
+     "ñandú/é.txt": {
+      "text": "canción 🎵\n"
+     }
+    },
+    "dirs": [
+     "ñandú"
+    ]
+   }
+  },
+  {
+   "name": "write_empty",
+   "files": {},
+   "tool": "write_file",
+   "args": {
+    "path": "vacio.txt",
+    "content": ""
+   },
+   "output": "Archivo creado: vacio.txt (0 chars)",
+   "after": {
+    "files": {
+     "vacio.txt": {
+      "text": ""
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "write_outside",
+   "files": {},
+   "tool": "write_file",
+   "args": {
+    "path": "../fuera.txt",
+    "content": "x"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "append_existing",
+   "files": {
+    "a.txt": {
+     "text": "uno\n"
+    }
+   },
+   "tool": "append_file",
+   "args": {
+    "path": "a.txt",
+    "content": "dos\n"
+   },
+   "output": "Archivo actualizado: a.txt (+4 chars)",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "uno\ndos\n"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "append_creates_dirs_and_file",
+   "files": {},
+   "tool": "append_file",
+   "args": {
+    "path": "logs/app.log",
+    "content": "inicio\n"
+   },
+   "output": "Archivo actualizado: logs/app.log (+7 chars)",
+   "after": {
+    "files": {
+     "logs/app.log": {
+      "text": "inicio\n"
+     }
+    },
+    "dirs": [
+     "logs"
+    ]
+   }
+  },
+  {
+   "name": "append_outside",
+   "files": {},
+   "tool": "append_file",
+   "args": {
+    "path": "../fuera.txt",
+    "content": "x"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "mkdir_nested",
+   "files": {},
+   "tool": "mkdir",
+   "args": {
+    "path": "a/b/c"
+   },
+   "output": "Directorio creado/listo: a/b/c",
+   "after": {
+    "files": {},
+    "dirs": [
+     "a",
+     "a/b",
+     "a/b/c"
+    ]
+   }
+  },
+  {
+   "name": "mkdir_existing",
+   "files": {
+    "a/x.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "mkdir",
+   "args": {
+    "path": "a"
+   },
+   "output": "Directorio creado/listo: a",
+   "after": {
+    "files": {
+     "a/x.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": [
+     "a"
+    ]
+   }
+  },
+  {
+   "name": "mkdir_outside",
+   "files": {},
+   "tool": "mkdir",
+   "args": {
+    "path": "../fuera"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "delete_file",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    },
+    "b.txt": {
+     "text": "y"
+    }
+   },
+   "tool": "delete_file",
+   "args": {
+    "path": "a.txt"
+   },
+   "output": "Archivo eliminado: a.txt",
+   "after": {
+    "files": {
+     "b.txt": {
+      "text": "y"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "delete_directory_recursive",
+   "files": {
+    "d/x.txt": {
+     "text": "x"
+    },
+    "d/e/y.txt": {
+     "text": "y"
+    },
+    "z.txt": {
+     "text": "z"
+    }
+   },
+   "tool": "delete_file",
+   "args": {
+    "path": "d"
+   },
+   "output": "Directorio eliminado: d",
+   "after": {
+    "files": {
+     "z.txt": {
+      "text": "z"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "delete_missing",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "delete_file",
+   "args": {
+    "path": "nada.txt"
+   },
+   "output": "No encontrado: nada.txt",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "delete_outside",
+   "files": {},
+   "tool": "delete_file",
+   "args": {
+    "path": "../fuera.txt"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "rename_file",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "rename_file",
+   "args": {
+    "src": "a.txt",
+    "dst": "b.txt"
+   },
+   "output": "Movido: a.txt → b.txt",
+   "after": {
+    "files": {
+     "b.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "rename_into_new_dir",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "rename_file",
+   "args": {
+    "src": "a.txt",
+    "dst": "n/m/b.txt"
+   },
+   "output": "Movido: a.txt → n/m/b.txt",
+   "after": {
+    "files": {
+     "n/m/b.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": [
+     "n",
+     "n/m"
+    ]
+   }
+  },
+  {
+   "name": "rename_directory",
+   "files": {
+    "d/x.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "rename_file",
+   "args": {
+    "src": "d",
+    "dst": "e"
+   },
+   "output": "Movido: d → e",
+   "after": {
+    "files": {
+     "e/x.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": [
+     "e"
+    ]
+   }
+  },
+  {
+   "name": "rename_destination_exists",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    },
+    "b.txt": {
+     "text": "y"
+    }
+   },
+   "tool": "rename_file",
+   "args": {
+    "src": "a.txt",
+    "dst": "b.txt"
+   },
+   "output": "[ERROR] Ya existe el destino: b.txt",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x"
+     },
+     "b.txt": {
+      "text": "y"
+     }
+    },
+    "dirs": []
+   }
+  },
+  {
+   "name": "rename_missing_source",
+   "files": {},
+   "tool": "rename_file",
+   "args": {
+    "src": "nada.txt",
+    "dst": "b.txt"
+   },
+   "output": "No encontrado: nada.txt",
+   "after": {
+    "files": {},
+    "dirs": []
+   }
+  },
+  {
+   "name": "rename_outside_destination",
+   "files": {
+    "a.txt": {
+     "text": "x"
+    }
+   },
+   "tool": "rename_file",
+   "args": {
+    "src": "a.txt",
+    "dst": "../fuera.txt"
+   },
+   "output": "[ERROR] Ruta fuera del workspace permitido",
+   "after": {
+    "files": {
+     "a.txt": {
+      "text": "x"
+     }
+    },
+    "dirs": []
+   }
+  }
+ ]
+}

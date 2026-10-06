@@ -26,6 +26,8 @@ target/
 
 # ── Binarios y artefactos que no van en git ─────────────────────
 cloudflared.exe
+apps/cli/go/lixbon
+apps/cli/go/lixbon.exe*
 *.msi
 *.msi.sig
 app/static/releases/

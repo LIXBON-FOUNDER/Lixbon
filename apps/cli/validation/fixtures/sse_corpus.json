@@ -1,0 +1,483 @@
+{
+  "version": 1,
+  "oracle": "apps/cli/lixbon_cli/sse.py::events_from_stream",
+  "cases": [
+    {
+      "name": "content_basic",
+      "description": "Dos deltas de contenido y cierre con [DONE].",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"Hola\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \" mundo\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "Hola"
+        ],
+        [
+          "content",
+          " mundo"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "reasoning_then_content",
+      "description": "reasoning_content va antes del content.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"reasoning_content\": \"pienso\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"respondo\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "reasoning",
+          "pienso"
+        ],
+        [
+          "content",
+          "respondo"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "same_chunk_order",
+      "description": "En un mismo chunk: reasoning, tool_calls, content y usage en ese orden.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"texto\", \"tool_calls\": [{\"function\": {\"name\": \"read_file\"}}], \"reasoning_content\": \"r\"}}], \"usage\": {\"total_tokens\": 7}}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "reasoning",
+          "r"
+        ],
+        [
+          "tool_calls",
+          [
+            {
+              "function": {
+                "name": "read_file"
+              }
+            }
+          ]
+        ],
+        [
+          "content",
+          "texto"
+        ],
+        [
+          "usage",
+          {
+            "total_tokens": 7
+          }
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "think_tags_inline",
+      "description": "<think>…</think> dentro del content se reclasifica como reasoning.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"<think>razono</think>respuesta\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "reasoning",
+          "razono"
+        ],
+        [
+          "content",
+          "respuesta"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "think_tag_split_open",
+      "description": "La etiqueta de apertura llega partida entre chunks.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"antes <th\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"ink>dentro</think>fin\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "antes "
+        ],
+        [
+          "reasoning",
+          "dentro"
+        ],
+        [
+          "content",
+          "fin"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "think_tag_split_close",
+      "description": "La etiqueta de cierre llega partida entre chunks.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"<think>dentro</th\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"ink>fuera\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "reasoning",
+          "dentro"
+        ],
+        [
+          "content",
+          "fuera"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "think_tag_split_last_char",
+      "description": "Ambas etiquetas llegan completas salvo el último carácter '>'.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"<think\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \">razono</think\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \">fin\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "reasoning",
+          "razono"
+        ],
+        [
+          "content",
+          "fin"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "think_unclosed_flush",
+      "description": "Un <think> sin cerrar se vacía como reasoning al terminar el stream.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"<think>sin cierre\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "reasoning",
+          "sin cierre"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "partial_tag_lookalike",
+      "description": "Un '<' final retenido se libera en el flush como content.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"a <\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "a "
+        ],
+        [
+          "content",
+          "<"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "sources_first",
+      "description": "lixbon_sources se emite como sources y el chunk no se procesa más.",
+      "stream": "data: {\"lixbon_sources\": [{\"url\": \"https://a.test\", \"title\": \"A\"}], \"usage\": {\"total_tokens\": 1}}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"ok\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "sources",
+          [
+            {
+              "url": "https://a.test",
+              "title": "A"
+            }
+          ]
+        ],
+        [
+          "content",
+          "ok"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "tool_calls_native",
+      "description": "tool_calls completos en un chunk (Ollama).",
+      "stream": "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"id\": \"c1\", \"function\": {\"name\": \"list_dir\", \"arguments\": {\"path\": \".\"}}}]}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "tool_calls",
+          [
+            {
+              "id": "c1",
+              "function": {
+                "name": "list_dir",
+                "arguments": {
+                  "path": "."
+                }
+              }
+            }
+          ]
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "usage_last_chunk",
+      "description": "usage llega en el último chunk, sin choices.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"fin\"}}]}\n\ndata: {\"usage\": {\"prompt_tokens\": 3, \"completion_tokens\": 2, \"total_tokens\": 5}}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "fin"
+        ],
+        [
+          "usage",
+          {
+            "prompt_tokens": 3,
+            "completion_tokens": 2,
+            "total_tokens": 5
+          }
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "keepalive_comments",
+      "description": "Los comentarios ':' (keepalive) y líneas en blanco se ignoran.",
+      "stream": ": keepalive\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"a\"}}]}\n\n: ping\n\n\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"b\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "a"
+        ],
+        [
+          "content",
+          "b"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "crlf_endings",
+      "description": "Terminadores CRLF.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"uno\"}}]}\r\n\r\ndata: {\"choices\": [{\"delta\": {\"content\": \"dos\"}}]}\r\n\r\ndata: [DONE]\r\n\r\n",
+      "events": [
+        [
+          "content",
+          "uno"
+        ],
+        [
+          "content",
+          "dos"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "no_done_eof",
+      "description": "El stream termina sin [DONE]: igualmente se emite done.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"sin done\"}}]}\n\n",
+      "events": [
+        [
+          "content",
+          "sin done"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "last_line_without_newline",
+      "description": "La última línea data no termina en salto de línea.",
+      "stream": "data: {\"choices\":[{\"delta\":{\"content\":\"cola\"}}]}",
+      "events": [
+        [
+          "content",
+          "cola"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "done_stops_following_data",
+      "description": "Lo que venga después de [DONE] se descarta.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"antes\"}}]}\n\ndata: [DONE]\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"despues\"}}]}\n\n",
+      "events": [
+        [
+          "content",
+          "antes"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "malformed_json_skipped",
+      "description": "Un payload JSON inválido se ignora sin cortar el stream.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"a\"}}]}\n\ndata: {no es json}\n\ndata:\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"b\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "a"
+        ],
+        [
+          "content",
+          "b"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "unknown_fields_ignored",
+      "description": "Campos desconocidos no alteran los eventos.",
+      "stream": "data: {\"id\": \"x\", \"object\": \"chunk\", \"nuevo\": {\"a\": 1}, \"choices\": [{\"index\": 0, \"finish_reason\": null, \"delta\": {\"role\": \"assistant\", \"content\": \"ok\", \"extra\": 1}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "ok"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "non_data_fields_ignored",
+      "description": "event:, id: y retry: no son data y se ignoran.",
+      "stream": "event: message\nid: 7\nretry: 100\ndata: {\"choices\": [{\"delta\": {\"content\": \"x\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "x"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "data_without_space",
+      "description": "data: sin espacio tras los dos puntos.",
+      "stream": "data:{\"choices\":[{\"delta\":{\"content\":\"pegado\"}}]}\n\ndata:[DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "pegado"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "empty_values_skipped",
+      "description": "content/reasoning vacíos, delta nulo y choices vacío no emiten nada.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"reasoning_content\": \"\"}}]}\n\ndata: {\"choices\": [{\"delta\": null}]}\n\ndata: {\"choices\": []}\n\ndata: {\"usage\": {}}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"ok\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "ok"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "utf8_multibyte",
+      "description": "Texto multibyte (acentos, emoji, CJK) intacto.",
+      "stream": "data: {\"choices\": [{\"delta\": {\"content\": \"canción 🎵 漢字\"}}]}\n\ndata: [DONE]\n\n",
+      "events": [
+        [
+          "content",
+          "canción 🎵 漢字"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "invalid_utf8_single_byte",
+      "description": "Un byte inválido en el JSON se sustituye por U+FFFD.",
+      "stream_b64": "ZGF0YTogeyJjaG9pY2VzIjpbeyJkZWx0YSI6eyJjb250ZW50IjoiYf9iIn19XX0KCmRhdGE6IFtET05FXQoK",
+      "events": [
+        [
+          "content",
+          "a�b"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "invalid_utf8_truncated_sequence",
+      "description": "Una secuencia truncada se sustituye por un único U+FFFD.",
+      "stream_b64": "ZGF0YTogeyJjaG9pY2VzIjpbeyJkZWx0YSI6eyJjb250ZW50IjoiYeKCYiJ9fV19CgpkYXRhOiBbRE9ORV0KCg==",
+      "events": [
+        [
+          "content",
+          "a�b"
+        ],
+        [
+          "done",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "empty_stream",
+      "description": "Stream vacío: solo done.",
+      "stream": "",
+      "events": [
+        [
+          "done",
+          null
+        ]
+      ]
+    }
+  ]
+}
