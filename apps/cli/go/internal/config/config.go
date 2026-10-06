@@ -263,3 +263,26 @@ func MaskKey(key string) string {
 	}
 	return "***"
 }
+
+// ExtraBool lee un booleano de los campos que el CLI Go no tipa, con valor
+// por defecto si falta o no es booleano.
+func (c Config) ExtraBool(key string, def bool) bool {
+	var b bool
+	if raw, ok := c.Extra[key]; ok && json.Unmarshal(raw, &b) == nil {
+		return b
+	}
+	return def
+}
+
+func (c Config) ExtraStringList(key string) []string {
+	var list []string
+	if raw, ok := c.Extra[key]; ok && json.Unmarshal(raw, &list) == nil {
+		return list
+	}
+	return nil
+}
+
+func (c *Config) SetExtraStringList(key string, list []string) {
+	encoded, _ := marshalNoEscape(list)
+	c.Extra[key] = encoded
+}

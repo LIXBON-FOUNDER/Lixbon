@@ -20,11 +20,13 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/agent` | Bucle del turno (pasos, reintentos, rescate del razonamiento, repeticiones), aprobaciones, vista previa y diff, checkpoints/undo, verificadores, política de comandos y prompts | `agent_corpus.json` (política, prompts byte a byte, árbol, diff con `SequenceMatcher`, vista previa, resúmenes) + 50 pruebas del bucle con un modelo falso |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `status`, `models`, `chat --once "texto"`. Pendiente: conectar el agente a `chat --once` y al chat interactivo, MCP, remoto, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
+Comandos: `init`, `status`, `models`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway). Pendiente: chat interactivo con Bubble Tea (aprobaciones con diff, `/undo`, `/plan`…), `LIXBON.md` y comandos personalizados, sesiones persistentes, MCP, remoto, interfaz interactiva con **Bubble Tea**, `setup`, `usage`, `update`, MCP, remoto. Los paquetes de este módulo no dependen de la UI.
 
 ## Diferencias deliberadas con Python
 
-- `chat --once` equivale hoy al modo `ask`: sin herramientas, sin `LIXBON.md`, sin adjuntos ni historial persistente. Envía `think` solo cuando se añada el agente.
+- `chat --once` respeta `mode` (por defecto `agent`). Aún sin `LIXBON.md`, adjuntos `@ruta`, comandos personalizados ni historial persistente.
+- En `--once` no hay nadie al teclado: las ediciones se aprueban según `auto_approve_tools` y los comandos solo si están en `allowed_commands`, `auto_run_commands` o se pasa `--auto-run` (opción propia del CLI Go); lo rechazado se explica en stderr y el modelo recibe «Ejecución cancelada por el usuario».
+- El registro de acciones del agente va a stderr y la respuesta final a stdout, para poder encadenar el comando.
 - Los errores de `chat` van a stderr; `status` y `models` siguen imprimiendo a stdout como Python.
 - Si no hay modelo y el servidor no define uno para `chat`, falla con un mensaje en vez de abrir un selector.
 - Ctrl+C durante `--once` termina con código 0 (igual que Python) y escribe `— interrumpido —` en stderr.

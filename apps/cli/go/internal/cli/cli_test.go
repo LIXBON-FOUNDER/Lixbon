@@ -56,6 +56,7 @@ func newFakeGateway(t *testing.T) *fakeGateway {
 	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		g.chatHits.Add(1)
+		g.chatBody = nil
 		json.NewDecoder(r.Body).Decode(&g.chatBody)
 		g.chat(w, r)
 	})
@@ -90,6 +91,9 @@ func newHarness(t *testing.T, g *fakeGateway, cfg map[string]any) *harness {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
 	if cfg != nil {
+		if _, ok := cfg["mode"]; !ok {
+			cfg["mode"] = "ask"
+		}
 		if g != nil {
 			cfg["base_url"] = g.srv.URL + "/v1"
 		}

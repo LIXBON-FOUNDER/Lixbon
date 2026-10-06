@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -112,3 +113,53 @@ func (r *idleReader) Read(p []byte) (int, error) {
 func (r *idleReader) Close() error { return r.body.Close() }
 
 func (r *idleReader) stop() { r.timer.Stop() }
+
+// Chat es una petición sin streaming ni historial, para trabajo interno del
+// CLI (compactar el contexto). Devuelve el texto de la primera opción.
+func (c *Client) Chat(ctx context.Context, model string, messages []map[string]any, clientID string) (string, error) {
+	payload := map[string]any{
+		"model": model, "messages": messages, "conversation_id": nil,
+		"client_id": clientID, "title": "interno", "source": "cli",
+	}
+	var data struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, c.BaseURL+"/chat/completions", payload, 300*time.Second, true, &data); err != nil {
+		return "", err
+	}
+	if len(data.Choices) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(data.Choices[0].Message.Content), nil
+}
+
+type DelegateResult struct {
+	Response        string
+	Model           string
+	Type            string
+	ExecutionTimeMS int
+	Classification  map[string]any
+}
+
+// Delegate envía el mensaje al enrutador del gateway, que elige modelo y plan.
+func (c *Client) Delegate(ctx context.Context, userInput string) (DelegateResult, error) {
+	var data struct {
+		Response string `json:"response"`
+		Routing  struct {
+			Model string `json:"model"`
+			Type  string `json:"type"`
+		} `json:"routing"`
+		Classification  map[string]any `json:"classification"`
+		ExecutionTimeMS int            `json:"execution_time_ms"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, c.Server+"/api/delegate", map[string]any{"user_input": userInput},
+		180*time.Second, true, &data); err != nil {
+		return DelegateResult{}, err
+	}
+	return DelegateResult{Response: data.Response, Model: data.Routing.Model, Type: data.Routing.Type,
+		ExecutionTimeMS: data.ExecutionTimeMS, Classification: data.Classification}, nil
+}

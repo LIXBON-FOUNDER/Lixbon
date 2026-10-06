@@ -78,6 +78,7 @@ func (a *App) chat(ctx context.Context, args []string) int {
 	clientID := fs.String("client-id", a.Hostname, "identificador del cliente")
 	title := fs.String("title", "", "título fijo de la conversación")
 	once := fs.String("once", "", "enviar un único mensaje y salir")
+	autoRun := fs.Bool("auto-run", false, "permitir que el agente ejecute comandos sin preguntar (solo --once)")
 	if code, stop := parseFlags(fs, args); stop {
 		return code
 	}
@@ -85,10 +86,10 @@ func (a *App) chat(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.Stderr, "El chat interactivo aún no está disponible en el CLI Go. Usa: lixbon chat --once \"mensaje\"")
 		return 1
 	}
-	return a.runOnce(ctx, *once, *modelFlag, *clientID, *title)
+	return a.runOnce(ctx, *once, *modelFlag, *clientID, *title, *autoRun)
 }
 
-func (a *App) runOnce(ctx context.Context, message, modelOverride, clientID, title string) int {
+func (a *App) runOnce(ctx context.Context, message, modelOverride, clientID, title string, autoRun bool) int {
 	cfg := config.Load(a.ConfigPath)
 	if cfg.APIKey == "" {
 		a.printError("No hay sesión. Configúrala con: lixbon init --api-key <clave>")
@@ -112,6 +113,13 @@ func (a *App) runOnce(ctx context.Context, message, modelOverride, clientID, tit
 	model, ok := a.resolveModel(&cfg, acc, modelOverride)
 	if !ok {
 		return 1
+	}
+
+	switch cfg.Mode {
+	case "agent":
+		return a.agentOnce(ctx, client, &cfg, model, message, clientID, title, autoRun)
+	case "delegate":
+		return a.delegateOnce(ctx, client, message)
 	}
 
 	conversationID := newUUID()
