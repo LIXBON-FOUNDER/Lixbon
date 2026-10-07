@@ -50,7 +50,7 @@ Comandos:
   models   Listar modelos disponibles
   usage    Ver uso global de la cuenta
   profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
-  update   Actualizar el CLI a la última versión (--check solo comprueba)
+  update   Actualizar el CLI a la última versión (--check solo comprueba; también --update)
   version  Mostrar la versión (también --version)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
 `
@@ -77,7 +77,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "ui-demo":
 		fmt.Fprintln(a.Stderr, "«ui-demo» es una demo interna de la interfaz Python y no se porta al CLI Go.")
 		return 1
-	case "update":
+	case "update", "--update":
 		return a.update(ctx, rest)
 	case "version", "--version":
 		fmt.Fprintf(a.Stdout, "lixbon v%s %s/%s\n", config.Version, runtime.GOOS, runtime.GOARCH)

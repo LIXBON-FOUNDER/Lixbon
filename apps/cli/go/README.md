@@ -63,6 +63,7 @@ Una suscripción de ChatGPT o Claude no es una API key y no sirve aquí: hace fa
 - Si no hay modelo y el servidor no define uno para `chat`, falla con un mensaje en vez de abrir un selector.
 - Ctrl+C durante `--once` termina con código 0 (igual que Python) y escribe `— interrumpido —` en stderr.
 - La versión la inyecta `release-cli.yml` desde la etiqueta; se ve con `lixbon --version`, en `status` y en el `User-Agent` (una compilación local informa `0.0.0-dev`).
+- `lixbon update` (alias `lixbon --update`; `--check` solo comprueba) y `/update` instalan la última versión. Al abrir el chat se avisa en segundo plano, como mucho una vez al día (marca en `~/.lixbon/update_check`, sin enviar datos del usuario), si hay una versión nueva; se desactiva con `"update_check": false` en `config.json` o con `LIXBON_NO_UPDATE_CHECK=1`, y no corre con proveedores genéricos ni en `chat --once`.
 
 - `search` usa un recorrido propio en Go (poda carpetas ignoradas, lee por líneas, respeta cancelación) en lugar de ripgrep; el orden de salida es el léxico del recorrido.
 - Las lecturas están acotadas: líneas de más de 1 MiB se recortan, un rango de más de 120.000 caracteres se corta con aviso, y `end_line` negativo se trata como ausente.

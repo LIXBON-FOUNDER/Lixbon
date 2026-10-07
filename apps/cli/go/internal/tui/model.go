@@ -27,6 +27,8 @@ type Options struct {
 	Offline bool
 	// Warning se imprime bajo la cabecera (p. ej. que el servidor no publica modelos).
 	Warning string
+	// UpdateNotice consulta en segundo plano si hay una versión nueva; nil la desactiva.
+	UpdateNotice func(ctx context.Context) (version string, ok bool)
 }
 
 type liveState struct {
@@ -194,7 +196,7 @@ func (m *Model) modeName() string {
 	return m.chat.Mode
 }
 
-func (m *Model) Init() tea.Cmd { return m.input.Focus() }
+func (m *Model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.updateNoticeCmd()) }
 
 func (m *Model) markdown(text string) string {
 	width := max(40, m.width-4)
