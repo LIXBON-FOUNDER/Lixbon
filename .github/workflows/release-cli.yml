@@ -30,11 +30,15 @@ jobs:
         with:
           go-version-file: apps/cli/go/go.mod
           cache-dependency-path: apps/cli/go/go.sum
-      - name: La etiqueta coincide con la versión del código
+      - name: La versión sale de la etiqueta y el binario la informa
         run: |
-          version=$(sed -nE 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/config/config.go)
-          test "cli-v${version}" = "${GITHUB_REF_NAME}" || { echo "La etiqueta ${GITHUB_REF_NAME} no coincide con la versión ${version}"; exit 1; }
+          version="${GITHUB_REF_NAME#cli-v}"
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "La etiqueta ${GITHUB_REF_NAME} no tiene el formato cli-vX.Y.Z[-sufijo]"; exit 1; }
+          ldflags="-s -w -X lixbon.com/cli/internal/config.Version=${version}"
+          reported=$(go run -ldflags "${ldflags}" ./cmd/lixbon --version)
+          [[ "${reported}" == "lixbon v${version} "* ]] || { echo "El binario informa «${reported}», se esperaba v${version}"; exit 1; }
           echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "LDFLAGS=${ldflags}" >> "$GITHUB_ENV"
       - run: go test -count=1 ./...
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
       - name: Compilar y empaquetar
@@ -46,7 +50,7 @@ jobs:
           name="lixbon-${VERSION}-${GOOS}-${GOARCH}"
           binary=lixbon; [ "$GOOS" = windows ] && binary=lixbon.exe
           mkdir -p "dist/${name}"
-          go build -trimpath -ldflags "-s -w" -o "dist/${name}/${binary}" ./cmd/lixbon
+          go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${name}/${binary}" ./cmd/lixbon
           cp README.md "dist/${name}/"
           cd dist
           if [ "$GOOS" = windows ]; then zip -qr "${name}.zip" "${name}"; else tar -czf "${name}.tar.gz" "${name}"; fi
@@ -106,3 +110,35 @@ jobs:
                 -H "Content-Type: application/json" --data @- "${SERVER}/api/versions/register"
             echo
           done
+
+  smoke:
+    name: Instalar desde lixbon.com · ${{ matrix.os }}
+    needs: registrar
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
+    steps:
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          version="${GITHUB_REF_NAME#cli-v}"
+          export HOME="${RUNNER_TEMP}/home"; mkdir -p "$HOME"
+          curl -fsSL "${SERVER}/install.sh" | bash
+          reported=$("$HOME/.local/bin/lixbon" --version)
+          echo "${reported}"
+          [[ "${reported}" == "lixbon v${version} "* ]] || { echo "Se esperaba v${version}"; exit 1; }
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^cli-v', ''
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
+          New-Item -ItemType Directory -Force -Path $env:USERPROFILE | Out-Null
+          irm "$env:SERVER/install.ps1" | iex
+          $reported = & (Join-Path $env:USERPROFILE ".lixbon\lixbon.exe") --version
+          Write-Host $reported
+          if (-not $reported.StartsWith("lixbon v$version ")) { throw "Se esperaba v$version" }

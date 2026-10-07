@@ -85,12 +85,14 @@ el artefacto del CLI viven en `master`.
    `/install/client_cli.py`; los clientes la reciben con `lixbon update` o `/update`.
 
 ### CLI Go (`cli-vX.Y.Z`)
-1. Subir `Version` en `apps/cli/go/internal/config/config.go` (ej. `2.3.0-go.0`).
-2. Merge a `master` por PR.
-3. `git tag cli-v2.3.0-go.0 && git push origin cli-v2.3.0-go.0`.
-4. `.github/workflows/release-cli.yml` falla si la etiqueta no coincide con `Version`,
-   ejecuta `go test`, compila seis binarios (linux, darwin y windows en amd64 y arm64,
-   sin CGO), genera `SHA256SUMS` y publica una release *prerelease*.
+1. Merge a `master` por PR.
+2. `git tag cli-v2.3.0-go.1 && git push origin cli-v2.3.0-go.1`. La versión sale de la etiqueta: no hay constante que subir.
+3. `.github/workflows/release-cli.yml` la inyecta con `-ldflags "-X …config.Version"`, falla si
+   `lixbon --version` no informa exactamente esa versión, ejecuta `go test`, compila seis
+   binarios (linux, darwin y windows en amd64 y arm64, sin CGO), genera `SHA256SUMS` y
+   publica una release *prerelease*.
+
+Una compilación local (`go build`) informa `0.0.0-dev` y `lixbon update` no la toca.
 
 El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`POST /api/versions/register`, secreto `LIXBON_ADMIN_TOKEN`, variable `LIXBON_SERVER_URL`); a partir de ahí `/install.sh`, `/install.ps1`, `lixbon update` y `GET /api/updates/cli/beta` sirven ese binario. Primera ejecución: `cli-v2.3.0-go.0` (beta, 2026-10-07). Diseño en `.planning/DECISION-UPDATE-GO.md`.
 
@@ -105,10 +107,10 @@ El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`PO
 
 | Workflow | Disparador | Qué hace |
 |---|---|---|
-| `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI (`apps/cli/tests`) |
+| `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI Python (`apps/cli/tests`), del CLI Go y de los instaladores (`infra/ci/install_e2e.py`: ejecuta `install.sh`/`install.ps1` reales en Linux, macOS y Windows contra un servidor de releases local, con digest alterado, `SHA256SUMS` alterado y actualización con el binario en uso) |
 | `tauri.yml` | tag `desktop-v*`, manual | Build + release del MSI |
 | `mobile.yml` | tag `mobile-v*`, manual | Build + release del APK |
-| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway |
+| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway + smoke test: instala desde `lixbon.com/install.sh` e `install.ps1` y comprueba la versión |
 
 Los tests del gateway (`python -m pytest core`) se ejecutan en local por ahora:
 varios módulos comparten estado de BD y fallan al correr juntos; cuando eso se
