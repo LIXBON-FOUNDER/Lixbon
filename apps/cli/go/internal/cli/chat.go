@@ -63,7 +63,7 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 	switch acc.State {
 	case chat.AccountAuth:
 		if acc.Generic {
-			a.printError("El proveedor rechazó la clave. Cámbiala con: lixbon profile add (o lixbon init --api-key <clave>).")
+			a.printError(fmt.Sprintf("El proveedor rechazó la clave. Cámbiala con: lixbon profile set %s --api-key <clave>", cfg.ActiveProfile()))
 			return 1
 		}
 		c.ClearSession()

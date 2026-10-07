@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -27,6 +28,9 @@ func providerHost(baseURL string) string {
 }
 
 func (m *Model) cmdProvider(arg string) tea.Cmd {
+	if name, ok := strings.CutPrefix(arg, "key "); ok {
+		return m.cmdProviderKey(name)
+	}
 	if arg != "" {
 		return m.switchProvider(strings.ToLower(arg))
 	}
@@ -125,6 +129,12 @@ func (m *Model) switchProvider(name string) tea.Cmd {
 	if previousMode != m.chat.Mode {
 		m.print(note("El modo delegate solo existe en un gateway Lixbon: pasas al modo ask."))
 	}
+	return m.connect(name)
+}
+
+// connect consulta el proveedor activo y muestra qué se encontró: modelos,
+// problema de conexión o clave rechazada.
+func (m *Model) connect(name string) tea.Cmd {
 	m.opts.Account = chat.Account{Generic: m.chat.Client.Generic}
 	m.online = false
 	host := providerHost(m.chat.Client.BaseURL)
@@ -133,16 +143,71 @@ func (m *Model) switchProvider(name string) tea.Cmd {
 		lines := []string{okLine(fmt.Sprintf("Proveedor: %s %s %s", name, glyphSep, host))}
 		switch acc.State {
 		case chat.AccountOffline:
-			lines = append(lines, warnLine("No se pudo contactar con "+host+". ¿Está en marcha el servidor?"))
+			lines = append(lines, warnLine(serverProblem(acc, host)))
 		case chat.AccountAuth:
-			lines = append(lines, warnLine(host+" rechazó la clave. Vuelve a añadir el proveedor con la clave correcta."))
+			lines = append(lines, warnLine(host+" rechazó la clave."))
 		}
 		return cmdDoneMsg{lines: lines, apply: func(m *Model) {
 			m.opts.Account = acc
 			m.online = acc.State != chat.AccountOffline
+			if acc.State == chat.AccountAuth {
+				m.offerNewKey(name, acc.Generic)
+				return
+			}
 			m.afterProviderProbe(acc)
 		}}
 	})
+}
+
+// serverProblem distingue un servidor que no responde de uno que responde con
+// error, p. ej. una URL base sin /v1: decir «¿está en marcha?» despista.
+func serverProblem(acc chat.Account, host string) string {
+	var apiErr *api.Error
+	if errors.As(acc.ModelsErr, &apiErr) && apiErr.Status > 0 {
+		return fmt.Sprintf("%s respondió HTTP %d al listar los modelos: %s. Revisa la URL base (suele terminar en /v1): lixbon profile set NOMBRE --base-url URL", host, apiErr.Status, apiErr.Message)
+	}
+	return "No se pudo contactar con " + host + ". ¿Está en marcha el servidor?"
+}
+
+func (m *Model) offerNewKey(name string, generic bool) {
+	if !generic {
+		m.print(note("/login inicia sesión de nuevo y /key pega otra API key."))
+		return
+	}
+	m.promptFor("Nueva API key para «"+name+"» (Esc cancela)", func(key string) tea.Cmd {
+		return m.setProviderKey(name, strings.TrimSpace(key))
+	})
+}
+
+func (m *Model) setProviderKey(name, key string) tea.Cmd {
+	if key == "" {
+		return nil
+	}
+	if err := m.chat.Cfg.UpdateProfile(name, func(p *config.Profile) { p.APIKey = key }); err != nil {
+		m.print(errLine(err.Error()))
+		return nil
+	}
+	m.saveConfig()
+	m.print(okLine(fmt.Sprintf("Clave de «%s» actualizada (%s)", name, config.MaskKey(key))))
+	if name != m.chat.Cfg.ActiveProfile() {
+		return nil
+	}
+	m.chat.Client.Configure(m.chat.Cfg)
+	return m.connect(name)
+}
+
+func (m *Model) cmdProviderKey(name string) tea.Cmd {
+	name = strings.ToLower(strings.TrimSpace(name))
+	profile, ok := m.chat.Cfg.Profiles()[name]
+	switch {
+	case !ok:
+		m.print(errLine(fmt.Sprintf("No existe el proveedor «%s».", name)))
+	case !profile.Generic:
+		m.print(note("«" + name + "» es un gateway Lixbon: usa /login o /key."))
+	default:
+		m.offerNewKey(name, true)
+	}
+	return nil
 }
 
 func (m *Model) afterProviderProbe(acc chat.Account) {
@@ -153,8 +218,13 @@ func (m *Model) afterProviderProbe(acc chat.Account) {
 	case needsPick:
 		m.queueModelPicker()
 	case len(acc.Models) > 0 && !slices.ContainsFunc(acc.Models, func(mod api.Model) bool { return mod.ID == m.chat.Model }):
-		m.print(warnLine(fmt.Sprintf("El modelo «%s» no está en la lista de este proveedor. /model elige otro.", m.chat.Model)))
+		m.print(warnLine(fmt.Sprintf("El modelo «%s» no está en la lista de este proveedor (%d disponibles). /model elige otro.", m.chat.Model, len(acc.Models))))
+		m.queueModelPicker()
 	default:
-		m.print(note("Modelo: " + m.modelLabel(m.chat.Model)))
+		line := "Modelo: " + m.modelLabel(m.chat.Model)
+		if n := len(acc.Models); n > 1 && m.chat.Cfg.KeyModel == "" {
+			line += fmt.Sprintf(" %s %d modelos disponibles, /model para cambiar", glyphSep, n)
+		}
+		m.print(note(line))
 	}
 }
