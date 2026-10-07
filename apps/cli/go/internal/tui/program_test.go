@@ -27,6 +27,7 @@ func TestRealProgramEndToEnd(t *testing.T) {
 	rig.waitFor("Lixbon CLI")
 	rig.type_("buenas tardes\r")
 	rig.waitFor("Hola desde el modelo.")
+	rig.waitGone("trabajando…")
 	screen := rig.screen()
 	if i, j := strings.Index(screen, "buenas tardes"), strings.Index(screen, "Hola desde el modelo."); i < 0 || j < 0 || i > j {
 		t.Fatalf("el mensaje debe verse antes que la respuesta (%d, %d):\n%s", i, j, screen)

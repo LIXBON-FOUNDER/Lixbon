@@ -12,6 +12,9 @@ type transcript struct {
 	lines   []string
 	wrapped []string
 	width   int
+	// dynamic guarda cómo volver a dibujar las entradas que dependen del ancho
+	// (la cabecera con el logo), indexadas por su posición en lines.
+	dynamic map[int]func(width int) string
 }
 
 func (t *transcript) wrapLine(line string) []string {
@@ -32,13 +35,30 @@ func (t *transcript) add(text string) int {
 	return len(t.wrapped) - before
 }
 
+// addDynamic añade una entrada que se redibuja al cambiar el ancho.
+func (t *transcript) addDynamic(render func(width int) string) (string, int) {
+	if t.dynamic == nil {
+		t.dynamic = map[int]func(int) string{}
+	}
+	text := render(t.width)
+	t.dynamic[len(t.lines)] = render
+	t.lines = append(t.lines, text)
+	before := len(t.wrapped)
+	t.wrapped = append(t.wrapped, t.wrapLine(text)...)
+	return text, len(t.wrapped) - before
+}
+
 func (t *transcript) resize(width int) {
 	if width == t.width {
 		return
 	}
 	t.width = width
 	t.wrapped = t.wrapped[:0]
-	for _, line := range t.lines {
+	for i, line := range t.lines {
+		if render, ok := t.dynamic[i]; ok {
+			line = render(width)
+			t.lines[i] = line
+		}
 		t.wrapped = append(t.wrapped, t.wrapLine(line)...)
 	}
 }
@@ -59,6 +79,8 @@ func (t *transcript) window(rows, scroll int) []string {
 	}
 	return out
 }
+
+func (t *transcript) reset() { t.lines, t.wrapped, t.dynamic = nil, nil, nil }
 
 func (t *transcript) maxScroll(rows int) int { return max(0, len(t.wrapped)-rows) }
 

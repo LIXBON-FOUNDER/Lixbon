@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
 from pathlib import Path
@@ -20,8 +21,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from packaging.version import InvalidVersion, Version
+from pydantic import BaseModel
 
-from core.config import APP_VERSION, PUBLIC_BASE_URL, r2_configured
+from core.config import APP_VERSION, CLI_RELEASES_URL_PREFIX, PUBLIC_BASE_URL, r2_configured
 from core.persistence import queries as db
 from core.security.auth import admin_or_token
 from core.storage import r2
@@ -60,7 +62,34 @@ def sync_versions_to_db():
 # `desktop` es el instalador de Windows (histórico). En macOS van dos filas con
 # la misma versión: el .dmg que descarga la gente (`desktop-mac`) y el
 # .app.tar.gz firmado que consume el updater de Tauri (`desktop-mac-updater`).
-VALID_PRODUCTS = ("desktop", "android", "desktop-mac", "desktop-mac-updater")
+CLI_PLATFORMS = ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64",
+                 "windows-amd64", "windows-arm64")
+CLI_PRODUCTS = tuple(f"cli-{p}" for p in CLI_PLATFORMS)
+VALID_PRODUCTS = ("desktop", "android", "desktop-mac", "desktop-mac-updater", *CLI_PRODUCTS)
+
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_VERSION_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def latest_cli_release(channel: str) -> dict | None:
+    """Última release del CLI Go con sus binarios por plataforma. La versión es
+    la de la fila registrada más reciente; solo entran los binarios de esa
+    versión, así una plataforma rezagada no ofrece un binario viejo."""
+    rows = {p: db.get_latest_version(channel=channel, product=f"cli-{p}")
+            for p in CLI_PLATFORMS}
+    rows = {p: r for p, r in rows.items() if r and r["checksum_sha256"]}
+    if not rows:
+        return None
+    newest = max(rows.values(), key=lambda r: r["id"])
+    return {
+        "version": newest["version"],
+        "channel": channel,
+        "title": newest["title"],
+        "release_date": newest["release_date"],
+        "changelog": newest["changelog"],
+        "assets": {p: {"url": r["download_url"], "sha256": r["checksum_sha256"]}
+                   for p, r in rows.items() if r["version"] == newest["version"]},
+    }
 
 
 def _public_download_url(request: Request, version: str, channel: str,
@@ -192,22 +221,16 @@ async def get_tauri_manifest(channel: str, request: Request):
 
 
 @router.get("/api/updates/cli/{channel}")
-async def get_cli_manifest(channel: str, request: Request):
-    """Manifest del CLI (formato propio, consumido por `client_cli.py --update`)."""
+async def get_cli_manifest(channel: str):
+    """Manifest del CLI Go (`lixbon update` y los instaladores). Las URL apuntan
+    a GitHub Releases y el digest de cada archivo sale de aquí: el cliente solo
+    instala si coincide con el archivo y con el SHA256SUMS de la release."""
     if channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Canal de actualización inválido")
-    latest = db.get_latest_version(channel=channel, product="desktop")
-    if not latest:
+    release = latest_cli_release(channel)
+    if not release:
         raise HTTPException(status_code=404, detail="No se encontró versión para este canal")
-    return {
-        "version": latest["version"],
-        "channel": channel,
-        "title": latest["title"],
-        "release_date": latest["release_date"],
-        "changelog": latest["changelog"],
-        "download_url": _public_download_url(request, latest["version"], channel),
-        "checksum_sha256": latest["checksum_sha256"],
-    }
+    return release
 
 
 @router.get("/api/updates/download/{version}/{channel}")
@@ -304,6 +327,46 @@ async def api_upload_version(
 
     return {"success": True, "product": product, "version": version,
             "channel": channel, "storage": storage}
+
+
+class CliReleaseRegistration(BaseModel):
+    product: str
+    version: str
+    channel: str
+    title: str
+    changelog: list[str] = []
+    download_url: str
+    checksum_sha256: str
+
+
+@router.post("/api/versions/register")
+async def api_register_cli_release(body: CliReleaseRegistration,
+                                   _: None = Depends(admin_or_token)):
+    """Registra un binario del CLI ya publicado en GitHub Releases (no se sube
+    el archivo: solo su URL y su SHA-256)."""
+    if body.product not in CLI_PRODUCTS:
+        raise HTTPException(status_code=400, detail="Producto inválido")
+    if body.channel not in ("stable", "beta") or not _VERSION_RE.fullmatch(body.version):
+        raise HTTPException(status_code=400, detail="Versión o canal inválidos")
+    if not _SHA256_RE.fullmatch(body.checksum_sha256):
+        raise HTTPException(status_code=400, detail="checksum_sha256 inválido")
+    if not body.download_url.startswith(CLI_RELEASES_URL_PREFIX):
+        raise HTTPException(status_code=400, detail="La URL no pertenece a las releases del CLI")
+
+    db.add_app_version(
+        version=body.version,
+        channel=body.channel,
+        release_date=time.strftime("%Y-%m-%d"),
+        title=body.title,
+        changelog=body.changelog,
+        download_url=body.download_url,
+        checksum=body.checksum_sha256,
+        product=body.product,
+    )
+    db.log_audit_event("release_registered", version=body.version, channel=body.channel,
+                       product=body.product)
+    return {"success": True, "product": body.product, "version": body.version,
+            "channel": body.channel}
 
 
 @router.delete("/api/versions/{version}")

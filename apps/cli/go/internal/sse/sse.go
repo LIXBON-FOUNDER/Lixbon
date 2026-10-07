@@ -5,6 +5,7 @@ package sse
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,6 +43,7 @@ type chunk struct {
 	Choices []struct {
 		Delta *struct {
 			ReasoningContent string          `json:"reasoning_content"`
+			Reasoning        string          `json:"reasoning"`
 			ToolCalls        json.RawMessage `json:"tool_calls"`
 			Content          string          `json:"content"`
 		} `json:"delta"`
@@ -98,8 +100,10 @@ func classify(c *chunk, filter *ThinkFilter) []Event {
 	var out []Event
 	if len(c.Choices) > 0 && c.Choices[0].Delta != nil {
 		d := c.Choices[0].Delta
-		if d.ReasoningContent != "" {
-			out = append(out, Event{Kind: Reasoning, Text: d.ReasoningContent})
+		// OpenRouter y Kilo envían el razonamiento en "reasoning", no en "reasoning_content".
+		reasoning := cmp.Or(d.ReasoningContent, d.Reasoning)
+		if reasoning != "" {
+			out = append(out, Event{Kind: Reasoning, Text: reasoning})
 		}
 		if truthy(d.ToolCalls) {
 			out = append(out, Event{Kind: ToolCalls, Value: d.ToolCalls})

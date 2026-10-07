@@ -19,6 +19,9 @@ import (
 // dispatch ejecuta lo que el usuario envió: un comando «/» o un mensaje.
 func (m *Model) dispatch(text string) tea.Cmd {
 	m.scroll = 0
+	if command, ok := strings.CutPrefix(text, "!"); ok {
+		return m.shell(strings.TrimSpace(command))
+	}
 	if !strings.HasPrefix(text, "/") {
 		return m.startTurn(text, text)
 	}
@@ -40,6 +43,17 @@ func (m *Model) dispatch(text string) tea.Cmd {
 	return nil
 }
 
+// shell ejecuta lo que el usuario escribió tras «!» sin pasar por el modelo ni
+// pedir confirmación: lo ha escrito él.
+func (m *Model) shell(command string) tea.Cmd {
+	if command == "" {
+		m.print(note("Escribe un comando tras «!», p. ej. !git status. Se ejecuta en el workspace y el modelo ve la salida."))
+		return nil
+	}
+	m.print(renderCommandEcho("!" + command))
+	return m.execShell(command)
+}
+
 // startTurn envía un mensaje al modelo. shown es lo que se ve en el eco (vacío
 // si ya se imprimió, p. ej. el prompt de un comando propio).
 func (m *Model) startTurn(prompt, shown string) tea.Cmd {
@@ -58,7 +72,11 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	if shown != "" {
 		m.print("\n" + renderUserMessage(shown, m.width))
 	}
-	sink := &uiSink{send: m.send, turn: id}
+	var sink chat.Sink = &uiSink{send: m.send, turn: id}
+	if m.remote != nil {
+		sink = remoteSink{Sink: sink, link: m.remote.link}
+		m.remoteTurnStarted(prompt)
+	}
 	c := m.chat
 	send := m.send
 	go func() {
@@ -105,6 +123,9 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	m.notice = ""
 	cancelled := m.interrupted || errors.Is(msg.err, context.Canceled)
 	m.interrupted = false
+	if m.remote != nil {
+		m.remoteTurnDone(msg, cancelled)
+	}
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
@@ -179,7 +200,7 @@ func (m *Model) reportError(err error) string {
 	case 402:
 		return errLine("Sin créditos disponibles: " + apiErr.Message)
 	case 429:
-		return errLine("Demasiadas peticiones seguidas; espera unos segundos.")
+		return errLine(apiErr.RateLimitText())
 	}
 	return errLine(apiErr.Message)
 }

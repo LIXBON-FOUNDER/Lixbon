@@ -167,8 +167,8 @@
    ],
    [
     "visual",
-    "<id o enlace> [stack]",
-    "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)",
+    "<qué diseñar> | <id> <cambio> | codigo <id> [stack]",
+    "Diseñar en Lixbon Visuals: crear, editar o pasar a código",
     "agente"
    ],
    [

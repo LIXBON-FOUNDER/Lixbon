@@ -62,6 +62,7 @@ type Model struct {
 
 	log    transcript
 	scroll int
+	wheel  bool
 
 	running     bool
 	interrupted bool
@@ -72,6 +73,7 @@ type Model struct {
 	queue       []string
 	spin        int
 
+	remote     *remoteHost
 	picker     *picker
 	prompt     *promptState
 	busy       string
@@ -147,6 +149,17 @@ func (m *Model) Wire(send func(tea.Msg), observe func(string)) {
 // la vista se queda donde estaba en vez de saltar al final.
 func (m *Model) print(text string) {
 	added := m.log.add(text)
+	if m.scroll > 0 {
+		m.scroll += added
+	}
+	if m.observe != nil {
+		m.observe(text)
+	}
+}
+
+// printDynamic imprime una entrada que se redibuja cuando cambia el ancho.
+func (m *Model) printDynamic(render func(width int) string) {
+	text, added := m.log.addDynamic(render)
 	if m.scroll > 0 {
 		m.scroll += added
 	}

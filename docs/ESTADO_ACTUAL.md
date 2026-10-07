@@ -11,15 +11,12 @@
 
 ---
 
-## 0.-5 Visuals por MCP, versiones con nombre y editor integrado (2026-10-04)
+## 0.-5 CLI en Go — port en curso (2026-10-06)
 
-Detalle y decisiones en `docs/ESPECIFICACION_VISUALS.md` (§11 y §15).
-
-- **MCP** (`core/gateway/routers/mcp.py`, `lixbon.com/mcp`, API key como Bearer): `visual_create`, `visual_update` (`label`, `amend`), `visual_get`, `visual_list`, `visual_export`, `visual_render`, `visual_render_status`, `visual_view` y el prompt `visual`. Configuración lista por cliente (Claude Code, Cursor, VS Code, Antigravity, Codex, Gemini, CLI) en la web, Ajustes › MCP (`components/McpSection.jsx`, `i18n/dictionaries/mcp.js`). El CLI registra el servidor solo con su sesión (`"lixbon_mcp": false` lo apaga) y `/visual` crea, edita y pasa a código. Verificado con Claude Code real.
-- **Skills** (`core/persistence/skills.py`, `routers/skills.py`): catálogo oficial en `/skills` y Ajustes › Skills del IDE; `/marketing-lxo` y `/adversary`. Publicación en Admin › Skills (carpeta + semver mayor).
-- **Versiones**: modos `new`/`amend`/`attach` en `put_files`, tabla `visual_versions` (nombre y origen), `PATCH /api/visuals/{id}/versions/{n}`. El editor web guarda con `amend` (actualiza la versión en edición); el agente solo enmienda lo suyo (`last_origin`). El render del worker se adjunta a la versión actual en vez de crear otra.
-- **Web**: historial con nombres y renombrar; `PiezaEditor.jsx` embebido a la derecha del lienzo, con sliders de arrastre; `PiezaVista` muestra el HTML vivo en lugar del PNG. Render de imágenes a 2x (`core/render/renderer.py`).
-- **Pendiente de operar**: redesplegar el worker (`infra/render_worker/deploy.sh`), subir `marketing-lxo` 1.0.1 en Admin › Skills, migrar `railway.toml` antes de 2026-12-01 y registrar el MCP en los agentes del IDE (rama `desktop`).
+- El CLI se reescribe en Go (`apps/cli/go/`, Bubble Tea v2) para distribuir binarios sin Python ni pip. Estado: 20 de 31 requisitos implementados con pruebas (CI verde en Linux, macOS y Windows), 9 parciales, 2 pendientes. `lixbon update`, el manifest `/api/updates/cli/{channel}`, `POST /api/versions/register` y los instaladores Go están implementados (`.planning/DECISION-UPDATE-GO.md`) pero no hay ninguna release publicada: hasta que la haya, Python sigue siendo el cliente distribuido (`client_cli.py`) y la referencia hasta aceptar la paridad.
+- Hecho: chat `--once`, protocolo SSE, agente con las 20 herramientas, aprobaciones, `/undo`, sesiones y configuración compatibles con Python, cliente MCP (stdio y HTTP), TUI con 36 de 41 comandos `/`, perfiles de proveedor (LM Studio, Ollama, OpenAI) y modo genérico.
+- Pendiente: `/remote`, adjuntos, PDF/Word, `/paste`, `/visual`, `setup`, `usage`, `update` y distribución. Backlog en issues #12–#25 de LIXBON-FOUNDER/Lixbon; estado completo y plan de retirada de Python en `.planning/STATE.md` y `.planning/ROADMAP.md`.
+- Cuidado: el CI Python del upstream falla en `master` por `state_corpus.json` desactualizado (regenerado en el fork, pendiente de llevarlo al upstream).
 
 ---
 
@@ -423,7 +420,7 @@ ode`, instala Python/Ollama con winget si faltan y registra tarea de usuario al 
 - Config (`core/config.py`): `R2_ACCOUNT_ID/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_PRESIGN_TTL_MIN`, helpers `r2_configured()`/`r2_endpoint()`. **Las credenciales viven solo en `.env` local (gitignored) y deben definirse en Railway.**
 - `versions.py` reescrito: la subida (`POST /api/versions/upload`, sigue con `X-Admin-Token`) sube a R2 con key `releases/<archivo>` y guarda en la BD `download_url = "r2:<key>"` (sin cambiar el esquema). **Si R2 no está configurado, cae al disco local** (efímero, solo dev). Toda descarga pasa por `GET /api/updates/download/{version}/{channel}`, que genera una URL prefirmada al vuelo y redirige (302) — el binario nunca se expone y la URL pública es estable. Los manifests (`/api/updates/manifest/{channel}` Tauri, `/api/updates/cli/{channel}` nuevo, `/api/updates/check`) devuelven esa URL del gateway, nunca la key ni el binario. Audit log `release_uploaded`.
 - **Eliminada la página pública `/releases-info`** (era dark-theme viejo con fuentes de Google externas).
-- Bucket **privado**: R2 nunca queda expuesto; el gateway es el único que firma URLs. El CLI se auto-actualiza descargando su fuente desde `/install/client_cli.py` (mecanismo aparte, sin cambios); el nuevo `/api/updates/cli/{channel}` queda para consultar versión.
+- Bucket **privado**: R2 nunca queda expuesto; el gateway es el único que firma URLs. El CLI se auto-actualiza descargando su fuente desde `/install/client_cli.py` (mecanismo aparte, sin cambios); el nuevo `/api/updates/cli/{channel}` queda para consultar versión (histórico: devolvía la versión del producto `desktop`; ahora es el manifest del CLI Go por plataforma).
 - Verificado E2E contra R2 real (bucket `releases-lixbon`, account `071d1172…`): subida a R2, metadata pública apunta al gateway, descarga redirige a URL prefirmada de `r2.cloudflarestorage.com` que entrega el binario exacto, `/releases-info` eliminada.
 - **PENDIENTE OPERATIVO (Railway)** 🔴: definir en el servicio gateway las 4 vars R2 (`R2_ACCOUNT_ID=071d1172730bf91c22924d149b67f95d`, `R2_BUCKET=releases-lixbon`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — están en el `.env` local). Sin ellas, prod cae al disco efímero. `boto3` ya está en requirements (Docker lo instala).
 

@@ -7,6 +7,8 @@ como un único archivo (`client_cli.py`) que el propio gateway sirve.
 
 Rama de trabajo: **`cli`** (ver `docs/RAMAS_Y_RELEASES.md`).
 
+> **Port a Go en curso.** `go/` contiene el reemplazo (binario sin Python ni pip) con 15 de 31 requisitos implementados; estado en `go/README.md` y `.planning/`. Python sigue siendo el cliente distribuido y la referencia hasta aceptar la paridad.
+
 ## Instalar
 
 ```bash
@@ -54,6 +56,9 @@ tests/               pytest; test_build_fresh comprueba que el artefacto está a
 (cd apps/cli && python -m lixbon_cli chat)   # ejecutar la fuente modular
 python -m pytest apps/cli/tests             # 133 tests, ~7 s
 python apps/cli/build.py                    # regenerar client_cli.py tras cualquier cambio
+
+# CLI Go
+(cd apps/cli/go && go vet ./... && go test -count=1 ./...)
 ```
 
 Reglas de `build.py` para que la concatenación funcione: imports internos

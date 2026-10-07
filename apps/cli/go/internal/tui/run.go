@@ -7,8 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 
 	"lixbon.com/cli/internal/api"
@@ -24,23 +27,27 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		return 1
 	}
 	cfg := config.Load(configPath)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.IsGeneric() {
 		fmt.Fprintln(stderr, "No hay sesión. Configúrala con: lixbon init --api-key <clave>")
 		return 1
 	}
 	opts.ConfigPath = configPath
 	opts.Autotitle = true
-	c, err := chat.New(cfg, api.New(cfg.BaseURL, cfg.APIKey), opts)
+	c, err := chat.New(cfg, api.FromConfig(cfg), opts)
 	if err != nil {
 		fmt.Fprintln(stderr, "Error:", err)
 		return 1
 	}
 	defer c.Close()
 
-	fmt.Fprintln(stdout, sDim2.Render("conectando con Lixbon…"))
+	fmt.Fprintln(stdout, sDim2.Render("conectando con "+providerHost(cfg.BaseURL)+"…"))
 	acc := c.Probe(ctx)
 	switch acc.State {
 	case chat.AccountAuth:
+		if acc.Generic {
+			fmt.Fprintln(stderr, providerHost(cfg.BaseURL)+" rechazó la clave. Cámbiala con: lixbon profile add (o lixbon init --api-key <clave>)")
+			return 1
+		}
 		c.ClearSession()
 		fmt.Fprintln(stderr, "Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
 		fmt.Fprintln(stderr, "Configúrala de nuevo con: lixbon init --api-key <clave>")
@@ -52,6 +59,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		warning = err.Error()
 	}
 	c.LoadCustomCommands(reservedNames())
+	c.StartMCP()
 
 	m := New(c, Options{
 		HistoryFile: filepath.Join(filepath.Dir(configPath), "history"),
@@ -98,38 +106,81 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 }
 
 func reservedNames() []string {
-	names := make([]string, len(Specs))
-	for i, s := range Specs {
+	all := slices.Concat(Specs, GoSpecs)
+	names := make([]string, len(all))
+	for i, s := range all {
 		names[i] = s.Name
 	}
 	return names
 }
 
+func dimAll(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = sDim2.Render(l)
+	}
+	return out
+}
+
+const (
+	logoGap     = 3
+	logoMargin  = 1
+	minLogoRoom = logoSize + 2*logoMargin
+)
+
+// headerLayout pone el texto junto al logo si cabe y, si no, debajo; en una
+// terminal más estrecha que el logo lo omite. Nunca parte una fila del logo.
+func headerLayout(logo, text []string, width int) string {
+	var lines []string
+	pad := strings.Repeat(" ", logoMargin)
+	fit := func(s string, room int) string { return ansi.Truncate(s, max(room, 1), glyphEllipsis) }
+	switch {
+	case width >= minLogoRoom+logoGap+40:
+		for i, row := range logo {
+			line := pad + row
+			if i < len(text) && text[i] != "" {
+				line += strings.Repeat(" ", logoGap) + fit(text[i], width-minLogoRoom-logoGap)
+			}
+			lines = append(lines, line)
+		}
+	case width >= minLogoRoom:
+		for _, row := range logo {
+			lines = append(lines, pad+row)
+		}
+		for _, l := range text {
+			if l != "" {
+				lines = append(lines, pad+fit(l, width-2*logoMargin))
+			}
+		}
+	default:
+		for _, l := range text {
+			if l != "" {
+				lines = append(lines, fit(l, width))
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m *Model) printHeader() {
 	c := m.chat
 	title := sBold.Render("Lixbon CLI") + sDim.Render(" v"+m.opts.Version)
-	if plan := c.Cfg.ExtraString("plan_name"); plan != "" {
+	if plan := c.Cfg.ExtraString("plan_name"); plan != "" && !c.Client.Generic {
 		title += sDim2.Render("  " + glyphSep + "  plan " + plan)
 	}
-	info := sDim.Render(fmt.Sprintf("%s %s %s %s %s",
-		firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), glyphSep, c.Mode, glyphSep, shortPath(c.Workspace)))
+	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode, shortPath(c.Workspace)}
+	if profile := c.Cfg.ActiveProfile(); profile != config.DefaultProfile {
+		parts = slices.Insert(parts, 0, profile)
+	}
+	info := sDim.Render(strings.Join(parts, " "+glyphSep+" "))
 	tips := []string{
-		"/ comandos  " + glyphSep + "  Enter envía",
+		"/ comandos  " + glyphSep + "  ! shell  " + glyphSep + "  Enter envía",
 		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",
 		"Mayús+Tab cambia de modo  " + glyphSep + "  RePág/AvPág desplazan",
 	}
-	text := []string{"", title, info, ""}
-	for _, t := range tips {
-		text = append(text, sDim2.Render(t))
-	}
+	text := append([]string{"", title, info, ""}, dimAll(tips)...)
 	m.print("")
-	for i, row := range renderLogo() {
-		line := " " + row
-		if i < len(text) && text[i] != "" {
-			line += "   " + text[i]
-		}
-		m.print(line)
-	}
+	m.printDynamic(func(width int) string { return headerLayout(renderLogo(), text, width) })
 	if c.Mode == chat.ModeAsk {
 		m.print(note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos."))
 	}

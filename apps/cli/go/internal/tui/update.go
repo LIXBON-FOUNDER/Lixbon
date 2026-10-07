@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,10 +40,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.remote != nil {
+			return m, m.handleRemoteKey(msg)
+		}
 		return m.handleKey(msg)
 
+	case remoteMsg:
+		return m, m.onRemote(msg)
+
+	case remoteClosedMsg:
+		if m.remote != nil && m.remote.link == msg.link {
+			m.leaveRemote(false)
+		}
+		return m, nil
+
 	case tea.PasteMsg:
-		if m.picker != nil {
+		if m.picker != nil || m.remote != nil {
 			return m, nil
 		}
 		m.input.InsertString(strings.ReplaceAll(strings.ReplaceAll(msg.Content, "\r\n", "\n"), "\r", "\n"))
@@ -139,6 +152,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.scrollBy(-max(1, m.height-6))
 		return m, nil
+	case "alt+v":
+		m.pasteImage()
+		return m, nil
+	case "backspace":
+		if m.dropMarkerBeforeCursor() {
+			return m, nil
+		}
 	case "ctrl+c":
 		return m, m.onInterrupt()
 	case "esc":
@@ -218,6 +238,10 @@ func (m *Model) onInterrupt() tea.Cmd {
 
 func (m *Model) quit() tea.Cmd {
 	m.quitting = true
+	if m.remote != nil {
+		m.remote.link.Stop(true)
+		m.remote = nil
+	}
 	return tea.Quit
 }
 
@@ -278,7 +302,7 @@ func (m *Model) historyPrev() bool {
 	m.histPos--
 	m.input.SetValue(m.hist.entries[m.histPos])
 	m.input.MoveToEnd()
-	m.refreshMenu()
+	m.hideMenuWhileBrowsing()
 	return true
 }
 
@@ -293,14 +317,22 @@ func (m *Model) historyNext() bool {
 		m.input.SetValue(m.hist.entries[m.histPos])
 	}
 	m.input.MoveToEnd()
-	m.refreshMenu()
+	m.hideMenuWhileBrowsing()
 	return true
+}
+
+// hideMenuWhileBrowsing evita que una entrada del historial que empieza por «/»
+// abra el menú de comandos: el menú se quedaría con las flechas y no dejaría
+// seguir recorriendo el historial.
+func (m *Model) hideMenuWhileBrowsing() {
+	m.refreshMenu()
+	m.menu = nil
 }
 
 // ── menú de comandos ─────────────────────────────────────────────────────
 
 func (m *Model) allSpecs() []Spec {
-	specs := Ordered()
+	specs := order(slices.Concat(Specs, GoSpecs))
 	for name, c := range m.chat.Custom {
 		specs = append(specs, Spec{Name: name, Desc: c.Description, Group: "propios"})
 	}

@@ -34,8 +34,27 @@ type Client struct {
 	Server  string
 	APIKey  string
 	HTTP    *http.Client
+	// Generic es un servidor compatible con OpenAI que no es un gateway
+	// Lixbon: solo recibe model, messages, stream y tools, y sus endpoints
+	// /api quedan fuera de alcance.
+	Generic bool
 
 	StreamIdle time.Duration
+}
+
+var errNotGateway = &Error{Message: "Este proveedor no es un gateway Lixbon: esa función no está disponible."}
+
+func FromConfig(cfg config.Config) *Client {
+	c := New(cfg.BaseURL, cfg.APIKey)
+	c.Generic = cfg.IsGeneric()
+	return c
+}
+
+// Configure apunta el cliente a otro proveedor conservando su identidad: la
+// caja de herramientas guarda el mismo puntero.
+func (c *Client) Configure(cfg config.Config) {
+	fresh := FromConfig(cfg)
+	c.BaseURL, c.Server, c.APIKey, c.Generic = fresh.BaseURL, fresh.Server, fresh.APIKey, fresh.Generic
 }
 
 // New desactiva la compresión transparente: con gzip el transporte podría
@@ -51,8 +70,23 @@ func New(baseURL, apiKey string) *Client {
 		BaseURL: baseURL,
 		Server:  config.ServerBase(baseURL),
 		APIKey:  apiKey,
-		HTTP:    &http.Client{Transport: transport},
+		HTTP:    &http.Client{Transport: transport, CheckRedirect: sameOriginOnly},
 	}
+}
+
+const maxRedirects = 5
+
+// sameOriginOnly impide que una redirección lleve la API key a otro servidor.
+// Go solo quita Authorization si cambia el nombre de host, no el puerto.
+func sameOriginOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return errors.New("demasiadas redirecciones")
+	}
+	first := via[0].URL
+	if req.URL.Host != first.Host || req.URL.Scheme != first.Scheme {
+		return fmt.Errorf("redirección a otro servidor (%s) no permitida", req.URL.Host)
+	}
+	return nil
 }
 
 func (c *Client) open(ctx context.Context, method, url string, payload any, auth bool) (*http.Response, error) {
@@ -89,6 +123,9 @@ func (c *Client) open(ctx context.Context, method, url string, payload any, auth
 }
 
 func (c *Client) doJSON(ctx context.Context, method, url string, payload any, timeout time.Duration, auth bool, out any) error {
+	if c.Generic && strings.HasPrefix(url, c.Server+"/api/") {
+		return errNotGateway
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	resp, err := c.open(ctx, method, url, payload, auth)
@@ -109,6 +146,32 @@ func (c *Client) doJSON(ctx context.Context, method, url string, payload any, ti
 	return nil
 }
 
+// providerMessage lee el error de los proveedores compatibles con OpenAI, que
+// usan "error" o "message" en lugar del "detail" del gateway Lixbon.
+func providerMessage(data map[string]json.RawMessage, fallback string) string {
+	for _, key := range []string{"message", "error"} {
+		var text string
+		if json.Unmarshal(data[key], &text) == nil && text != "" {
+			return text
+		}
+		var nested struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(data[key], &nested) == nil && nested.Message != "" {
+			return nested.Message
+		}
+	}
+	return fallback
+}
+
+func (e *Error) RateLimitText() string {
+	text := "Demasiadas peticiones seguidas; espera unos segundos."
+	if e.Message != "" {
+		text += " Respuesta del servidor: " + e.Message
+	}
+	return text
+}
+
 func friendlyDetail(body string) string {
 	if strings.Contains(body, "error code: 10") {
 		return fmt.Sprintf("Conexión bloqueada por el filtro del servidor (%s).", truncateRunes(strings.TrimSpace(body), 40))
@@ -119,7 +182,7 @@ func friendlyDetail(body string) string {
 	}
 	raw, ok := data["detail"]
 	if !ok {
-		return body
+		return providerMessage(data, body)
 	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {

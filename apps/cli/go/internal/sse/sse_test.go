@@ -106,6 +106,19 @@ func TestCorpus(t *testing.T) {
 	}
 }
 
+func TestReasoningFieldFromOpenRouterAndKilo(t *testing.T) {
+	stream := `data: {"choices":[{"delta":{"reasoning":"pienso"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"reasoning_content":"también","reasoning":"ignorado"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"content":"391"}}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	want := [][2]any{
+		{"reasoning", "pienso"}, {"reasoning", "también"}, {"content", "391"}, {"done", nil},
+	}
+	if got := collect(t, strings.NewReader(stream)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("eventos distintos\n got: %v\nwant: %v", got, want)
+	}
+}
+
 func TestLineTooLong(t *testing.T) {
 	stream := "data: " + strings.Repeat("x", maxLineBytes+1)
 	for _, err := range Events(strings.NewReader(stream)) {

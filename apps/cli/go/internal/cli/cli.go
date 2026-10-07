@@ -13,15 +13,19 @@ import (
 
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
+	"lixbon.com/cli/internal/update"
 )
 
 type App struct {
 	Stdout     io.Writer
 	Stderr     io.Writer
+	Stdin      io.Reader
 	ConfigPath string
 	Hostname   string
 	// Interactive abre el chat de terminal; nil si no hay interfaz disponible.
 	Interactive func(ctx context.Context, opts chat.Options) int
+	// NewUpdater crea el actualizador; nil usa update.New.
+	NewUpdater func(manifestURL string) (*update.Updater, error)
 }
 
 func NewApp() (*App, error) {
@@ -33,15 +37,19 @@ func NewApp() (*App, error) {
 	if hostname == "" {
 		hostname = "cli-client"
 	}
-	return &App{Stdout: os.Stdout, Stderr: os.Stderr, ConfigPath: path, Hostname: hostname}, nil
+	return &App{Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, ConfigPath: path, Hostname: hostname}, nil
 }
 
 const usage = `lixbon — asistente de código en tu terminal
 
 Comandos:
   init     Guardar base_url, api_key y modelo
+  setup    Iniciar sesión (interactivo)
   status   Ver configuración local
   models   Listar modelos disponibles
+  usage    Ver uso global de la cuenta
+  profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
+  update   Actualizar el CLI a la última versión (--check solo comprueba)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
 `
 
@@ -56,11 +64,19 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.status()
 	case "models":
 		return a.models(ctx)
+	case "profile":
+		return a.profile(rest)
 	case "chat", "run", "start":
 		return a.chat(ctx, rest)
-	case "setup", "usage", "update", "ui-demo":
-		fmt.Fprintf(a.Stderr, "«%s» aún no está disponible en el CLI Go.\n", name)
+	case "setup":
+		return a.setup(ctx)
+	case "usage":
+		return a.usageReport(ctx)
+	case "ui-demo":
+		fmt.Fprintln(a.Stderr, "«ui-demo» es una demo interna de la interfaz Python y no se porta al CLI Go.")
 		return 1
+	case "update":
+		return a.update(ctx, rest)
 	case "-h", "--help", "help":
 		fmt.Fprint(a.Stdout, usage)
 		return 0
@@ -160,6 +176,9 @@ func (a *App) status() int {
 	}
 	fmt.Fprintf(a.Stdout, "lixbon CLI v%s\n", config.Version)
 	fmt.Fprintf(a.Stdout, "- Config:              %s\n", a.ConfigPath)
+	if cfg.ActiveProfile() != config.DefaultProfile {
+		fmt.Fprintf(a.Stdout, "- Proveedor:           %s\n", cfg.ActiveProfile())
+	}
 	fmt.Fprintf(a.Stdout, "- Base URL:            %s\n", baseURL)
 	fmt.Fprintf(a.Stdout, "- API key:             %s\n", config.MaskKey(cfg.APIKey))
 	fmt.Fprintf(a.Stdout, "- Cuenta:              %s\n", orDefault(cfg.ExtraString("account_email"), "-"))

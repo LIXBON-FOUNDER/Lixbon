@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from core.config import CLI_SOURCE_PATH, PUBLIC_BASE_URL
+from core.gateway.routers import installer_go
+from core.gateway.routers.versions import latest_cli_release
 
 router = APIRouter()
 
@@ -34,8 +36,12 @@ async def download_cli() -> FileResponse:
 
 @router.get("/install.sh")
 async def install_script(request: Request) -> PlainTextResponse:
-    """Genera un script bash de instalación del CLI para Linux/macOS."""
+    """Instalador del CLI para Linux/macOS: el binario Go registrado; sin release
+    registrada cae al instalador de Python (se borra al retirar Python)."""
     server_base = _server_base(request)
+    release = latest_cli_release("beta")
+    if release:
+        return PlainTextResponse(content=installer_go.install_sh(server_base, release))
     # rf-string: los \n y \033 tienen que llegar LITERALES al script; si Python
     # los interpretara, printf recibiría saltos de línea reales y se rompería.
     script = rf"""#!/usr/bin/env bash
@@ -87,8 +93,12 @@ printf '  %sSi el comando no se reconoce:%s export PATH="$HOME/.local/bin:$PATH"
 
 @router.get("/install.ps1")
 async def install_script_windows(request: Request) -> PlainTextResponse:
-    """Genera un script PowerShell de instalación del CLI para Windows."""
+    """Instalador del CLI para Windows: el binario Go registrado; sin release
+    registrada cae al instalador de Python (se borra al retirar Python)."""
     server_base = _server_base(request)
+    release = latest_cli_release("beta")
+    if release:
+        return PlainTextResponse(content=installer_go.install_ps1(server_base, release))
     # Los acentos viajan bien (existen en cp437/850), pero los checks y los
     # guiones largos NO: la consola de Windows los degrada a otro glifo.
     script = rf"""$ErrorActionPreference = "Stop"

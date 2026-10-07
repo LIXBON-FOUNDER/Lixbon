@@ -45,7 +45,10 @@ cd apps/desktop && npm install && npm run dev  # frontend; `npm run tauri dev` r
 ```bash
 cd apps/cli && python -m lixbon_cli chat       # fuente modular
 python apps/cli/build.py                       # regenera client_cli.py — OBLIGATORIO tras editar lixbon_cli/
+cd apps/cli/go && go vet ./... && go test -count=1 ./...   # CLI Go (port en curso)
 ```
+
+Si cambias el catálogo de comandos, sesiones o herramientas de Python, regenera los corpus que consume Go (`python apps/cli/validation/gen_state_corpus.py`, `gen_tool_corpus.py`…); el CI Python falla si `state_corpus.json` no coincide.
 
 ### Móvil
 ```bash
@@ -80,7 +83,7 @@ Ejemplos: `fix(billing): activa el gate de sesión/semana`,
 ## 5. Antes de abrir el PR
 
 - [ ] `python -m pytest core` si tocaste el gateway.
-- [ ] `python -m pytest apps/cli/tests` y `python apps/cli/build.py` si tocaste el CLI
+- [ ] `python -m pytest apps/cli/tests` y `python apps/cli/build.py` si tocaste el CLI Python; `go vet ./... && go test ./...` en `apps/cli/go` si tocaste el CLI Go
       (`test_build_fresh` falla si el artefacto no está regenerado).
 - [ ] Si cambias un **contrato gateway↔app** (nombre de API key, SSE, `/remote`,
       subida de instaladores, detección de archivos visuales — tabla en

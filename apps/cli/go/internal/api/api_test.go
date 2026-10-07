@@ -29,6 +29,9 @@ func TestFriendlyDetail(t *testing.T) {
 		`{"detail":{"message":"Sin créditos","code":402}}`: "Sin créditos",
 		`{"detail":{"code":1}}`:                            `{"code":1}`,
 		`{"otro":1}`:                                       `{"otro":1}`,
+		`{"error":"model not found","message":"detalle"}`:  "detalle",
+		`{"error":{"message":"Rate limit","code":429}}`:    "Rate limit",
+		`{"error":"solo error"}`:                           "solo error",
 		"error code: 1010":                                 "Conexión bloqueada por el filtro del servidor (error code: 1010).",
 		"<html>502</html>":                                 "<html>502</html>",
 	}
@@ -288,5 +291,65 @@ func TestModelsDetailSurfacesGatewayErrorEntries(t *testing.T) {
 	_, err := c.ModelsDetail(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "sin nodos activos") {
 		t.Fatalf("el motivo debe llegar al usuario: %v", err)
+	}
+}
+
+func TestLoginAsksForAnIssuedKeyUnderTheCLIName(t *testing.T) {
+	var body map[string]any
+	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/login" || r.Header.Get("Authorization") != "" {
+			t.Errorf("ruta %s, auth %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		io.WriteString(w, `{"api_key":"lixbon_sk_x"}`)
+	})
+	key, err := c.Login(context.Background(), "a@b.c", "pw")
+	if err != nil || key != "lixbon_sk_x" {
+		t.Fatalf("key %q err %v", key, err)
+	}
+	if body["issue_api_key"] != true || body["key_name"] != "lixbon CLI" || body["email"] != "a@b.c" || body["password"] != "pw" {
+		t.Fatalf("cuerpo: %v", body)
+	}
+}
+
+func TestRedirectToAnotherServerNeverCarriesTheKey(t *testing.T) {
+	var leaked atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Store(true)
+		}
+		io.WriteString(w, `{"data":[]}`)
+	}))
+	defer other.Close()
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/v1/models", http.StatusTemporaryRedirect)
+	}))
+	defer gateway.Close()
+
+	_, err := New(gateway.URL+"/v1", "lixbon_sk_secreta").Models(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no permitida") {
+		t.Fatalf("la redirección a otro servidor debe rechazarse: %v", err)
+	}
+	if leaked.Load() {
+		t.Fatal("la API key llegó a otro servidor")
+	}
+}
+
+func TestRedirectWithinTheSameServerStillWorks(t *testing.T) {
+	var mux http.ServeMux
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/v1/otra", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/v1/otra", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer k" {
+			t.Errorf("auth: %q", r.Header.Get("Authorization"))
+		}
+		io.WriteString(w, `{"data":[{"id":"qwen"}]}`)
+	})
+	srv := httptest.NewServer(&mux)
+	defer srv.Close()
+	models, err := New(srv.URL+"/v1", "k").Models(context.Background())
+	if err != nil || len(models) != 1 || models[0] != "qwen" {
+		t.Fatalf("models %v err %v", models, err)
 	}
 }

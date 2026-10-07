@@ -10,11 +10,11 @@ import (
 
 func (a *App) models(ctx context.Context) int {
 	cfg := config.Load(a.ConfigPath)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.IsGeneric() {
 		fmt.Fprintln(a.Stdout, "Primero inicia sesión: lixbon (o lixbon setup)")
 		return 1
 	}
-	models, err := api.New(cfg.BaseURL, cfg.APIKey).Models(ctx)
+	models, err := api.FromConfig(cfg).Models(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0

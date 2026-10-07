@@ -1,0 +1,622 @@
+{
+ "version": 1,
+ "oracle": "apps/cli/lixbon_cli/mcp.py",
+ "workspace_placeholder": "<ws>",
+ "format_result": [
+  {
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "a"
+     },
+     {
+      "type": "text",
+      "text": ""
+     },
+     {
+      "type": "text",
+      "text": "b"
+     }
+    ]
+   },
+   "text": "a\nb"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "AA"
+     }
+    ]
+   },
+   "text": "[imagen image/png: no se puede mostrar aquí]"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "resource",
+      "resource": {
+       "uri": "file:///x",
+       "text": "cuerpo"
+      }
+     }
+    ]
+   },
+   "text": "cuerpo"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "resource",
+      "resource": {
+       "uri": "file:///x"
+      }
+     }
+    ]
+   },
+   "text": "[recurso file:///x]"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "resource"
+     }
+    ]
+   },
+   "text": "[recurso ]"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "audio",
+      "data": "AA"
+     },
+     {
+      "type": "text",
+      "text": "tras audio"
+     }
+    ]
+   },
+   "text": "tras audio"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "  \n"
+     }
+    ]
+   },
+   "text": "(sin contenido)"
+  },
+  {
+   "result": {
+    "content": []
+   },
+   "text": "(sin contenido)"
+  },
+  {
+   "result": {
+    "content": null
+   },
+   "text": "(sin contenido)"
+  },
+  {
+   "result": {},
+   "text": "(sin contenido)"
+  },
+  {
+   "result": {
+    "isError": true,
+    "content": [
+     {
+      "type": "text",
+      "text": "mal"
+     }
+    ]
+   },
+   "text": "[ERROR] mal"
+  },
+  {
+   "result": {
+    "isError": true
+   },
+   "text": "[ERROR] (sin contenido)"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "línea 1\nlínea 2 ñandú 🎵"
+     }
+    ]
+   },
+   "text": "línea 1\nlínea 2 ñandú 🎵"
+  },
+  {
+   "result": {
+    "content": [
+     {
+      "type": "text",
+      "text": "  con espacios  "
+     }
+    ]
+   },
+   "text": "con espacios"
+  }
+ ],
+ "slug": [
+  {
+   "text": "github",
+   "slug": "github"
+  },
+  {
+   "text": "my server",
+   "slug": "my_server"
+  },
+  {
+   "text": "do-it",
+   "slug": "do_it"
+  },
+  {
+   "text": "ñandú",
+   "slug": "and"
+  },
+  {
+   "text": "a.b/c",
+   "slug": "a_b_c"
+  },
+  {
+   "text": "__x__",
+   "slug": "x"
+  },
+  {
+   "text": "!!!",
+   "slug": "x"
+  },
+  {
+   "text": "",
+   "slug": "x"
+  },
+  {
+   "text": "Ok_1",
+   "slug": "Ok_1"
+  },
+  {
+   "text": "mcp lixbon",
+   "slug": "mcp_lixbon"
+  }
+ ],
+ "schemas": [
+  {
+   "server": "demo srv",
+   "tools": [
+    {
+     "name": "echo",
+     "description": "Devuelve el texto",
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "zeta": {
+        "type": "string"
+       },
+       "alfa": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "alfa"
+      ]
+     }
+    },
+    {
+     "name": "sin descripción",
+     "inputSchema": {
+      "type": "object",
+      "properties": {}
+     }
+    },
+    {
+     "name": "sin schema"
+    },
+    {
+     "name": "schema vacío",
+     "description": "d",
+     "inputSchema": {}
+    },
+    {
+     "name": "larga",
+     "description": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+     "inputSchema": {
+      "type": "object"
+     }
+    }
+   ],
+   "schemas": [
+    {
+     "type": "function",
+     "function": {
+      "name": "mcp__demo_srv__echo",
+      "description": "[MCP demo srv] Devuelve el texto",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "zeta": {
+         "type": "string"
+        },
+        "alfa": {
+         "type": "integer"
+        }
+       },
+       "required": [
+        "alfa"
+       ]
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "mcp__demo_srv__sin_descripci_n",
+      "description": "[MCP demo srv] sin descripción",
+      "parameters": {
+       "type": "object",
+       "properties": {}
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "mcp__demo_srv__sin_schema",
+      "description": "[MCP demo srv] sin schema",
+      "parameters": {
+       "type": "object",
+       "properties": {}
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "mcp__demo_srv__schema_vac_o",
+      "description": "[MCP demo srv] d",
+      "parameters": {
+       "type": "object",
+       "properties": {}
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "mcp__demo_srv__larga",
+      "description": "[MCP demo srv] ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "parameters": {
+       "type": "object"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "prompt_text": [
+  {
+   "result": {
+    "messages": [
+     {
+      "role": "user",
+      "content": {
+       "type": "text",
+       "text": "uno"
+      }
+     },
+     {
+      "role": "assistant",
+      "content": {
+       "type": "text",
+       "text": "dos"
+      }
+     }
+    ]
+   },
+   "text": "uno\n\ndos"
+  },
+  {
+   "result": {
+    "messages": [
+     {
+      "role": "user",
+      "content": {
+       "type": "image",
+       "data": "AA"
+      }
+     },
+     {
+      "role": "user",
+      "content": {
+       "type": "text",
+       "text": "solo texto"
+      }
+     }
+    ]
+   },
+   "text": "solo texto"
+  },
+  {
+   "result": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "texto plano"
+     }
+    ]
+   },
+   "text": ""
+  },
+  {
+   "result": {
+    "messages": []
+   },
+   "text": ""
+  },
+  {
+   "result": {},
+   "text": ""
+  }
+ ],
+ "config": [
+  {
+   "name": "solo usuario",
+   "user": {
+    "servers": {
+     "a": {
+      "command": "uno",
+      "args": [
+       "x",
+       1
+      ]
+     }
+    }
+   },
+   "project": null,
+   "expected": [
+    {
+     "name": "a",
+     "command": "uno",
+     "args": [
+      "x",
+      "1"
+     ],
+     "env": {},
+     "cwd": "<ws>"
+    }
+   ]
+  },
+  {
+   "name": "mcpServers",
+   "user": null,
+   "project": {
+    "mcpServers": {
+     "a": {
+      "command": "uno"
+     }
+    }
+   },
+   "expected": [
+    {
+     "name": "a",
+     "command": "uno",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    }
+   ]
+  },
+  {
+   "name": "servers vacío cae a mcpServers",
+   "user": null,
+   "project": {
+    "servers": {},
+    "mcpServers": {
+     "a": {
+      "command": "uno"
+     }
+    }
+   },
+   "expected": [
+    {
+     "name": "a",
+     "command": "uno",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    }
+   ]
+  },
+  {
+   "name": "proyecto pisa al usuario sin mover su posición",
+   "user": {
+    "servers": {
+     "a": {
+      "command": "u-a"
+     },
+     "b": {
+      "command": "u-b"
+     },
+     "c": {
+      "command": "u-c"
+     }
+    }
+   },
+   "project": {
+    "servers": {
+     "b": {
+      "command": "p-b",
+      "cwd": "/otra"
+     },
+     "d": {
+      "command": "p-d"
+     }
+    }
+   },
+   "expected": [
+    {
+     "name": "a",
+     "command": "u-a",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    },
+    {
+     "name": "b",
+     "command": "p-b",
+     "args": [],
+     "env": {},
+     "cwd": "/otra"
+    },
+    {
+     "name": "c",
+     "command": "u-c",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    },
+    {
+     "name": "d",
+     "command": "p-d",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    }
+   ]
+  },
+  {
+   "name": "remoto",
+   "user": {
+    "servers": {
+     "r": {
+      "url": "https://ej.com/mcp",
+      "headers": {
+       "Authorization": "Bearer x",
+       "N": 7
+      }
+     }
+    }
+   },
+   "project": null,
+   "expected": [
+    {
+     "name": "r",
+     "url": "https://ej.com/mcp",
+     "headers": {
+      "Authorization": "Bearer x",
+      "N": "7"
+     }
+    }
+   ]
+  },
+  {
+   "name": "url gana a command",
+   "user": {
+    "servers": {
+     "r": {
+      "url": "https://ej.com/mcp",
+      "command": "x"
+     }
+    }
+   },
+   "project": null,
+   "expected": [
+    {
+     "name": "r",
+     "url": "https://ej.com/mcp",
+     "headers": {}
+    }
+   ]
+  },
+  {
+   "name": "entradas inválidas se ignoran",
+   "user": {
+    "servers": {
+     "sin": {
+      "nada": 1
+     },
+     "cadena": "no",
+     "lista": [
+      1
+     ],
+     "ok": {
+      "command": "c",
+      "env": {
+       "K": "v",
+       "N": 1
+      }
+     }
+    }
+   },
+   "project": null,
+   "expected": [
+    {
+     "name": "ok",
+     "command": "c",
+     "args": [],
+     "env": {
+      "K": "v",
+      "N": "1"
+     },
+     "cwd": "<ws>"
+    }
+   ]
+  },
+  {
+   "name": "orden del archivo",
+   "user": {
+    "servers": {
+     "z": {
+      "command": "z"
+     },
+     "a": {
+      "command": "a"
+     },
+     "m": {
+      "command": "m"
+     }
+    }
+   },
+   "project": null,
+   "expected": [
+    {
+     "name": "z",
+     "command": "z",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    },
+    {
+     "name": "a",
+     "command": "a",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    },
+    {
+     "name": "m",
+     "command": "m",
+     "args": [],
+     "env": {},
+     "cwd": "<ws>"
+    }
+   ]
+  }
+ ]
+}

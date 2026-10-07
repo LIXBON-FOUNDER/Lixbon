@@ -46,7 +46,7 @@ var Specs = []Spec{
 	{"run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"},
 	{"workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"},
 	{"init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"},
-	{"visual", "<id o enlace> [stack]", "Traer un diseño de Visuals y replicarlo como proyecto (React + Vite, API…)", "agente"},
+	{"visual", "<qué diseñar> | <id> <cambio> | codigo <id> [stack]", "Diseñar en Lixbon Visuals: crear, editar o pasar a código", "agente"},
 	{"status", "", "Ver estado de la sesión", "cuenta"},
 	{"cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"},
 	{"usage", "", "Ver uso global de la cuenta", "cuenta"},
@@ -63,10 +63,19 @@ var Specs = []Spec{
 	{"exit", "", "Salir", "sistema"},
 }
 
+// GoSpecs son comandos que solo existen en el CLI Go. Quedan fuera de Specs
+// porque este es el contrato con el catálogo de Python.
+var GoSpecs = []Spec{
+	{"provider", "[nombre]", "Cambiar de proveedor de modelos (lixbon.com, LM Studio, Ollama…)", "cuenta"},
+	{"mouse", "", "Activar o quitar la rueda del ratón (activa, el terminal no deja seleccionar texto)", "conversación"},
+}
+
 // Ordered devuelve el catálogo por grupo (en el orden de Groups) y, dentro,
 // alfabético: es el orden del menú y de /help.
-func Ordered() []Spec {
-	out := slices.Clone(Specs)
+func Ordered() []Spec { return order(Specs) }
+
+func order(specs []Spec) []Spec {
+	out := slices.Clone(specs)
 	slices.SortStableFunc(out, func(a, b Spec) int {
 		ga, gb := slices.Index(Groups, a.Group), slices.Index(Groups, b.Group)
 		if ga < 0 {
@@ -97,7 +106,7 @@ func Match(prefix string) []Spec {
 }
 
 func lookup(name string) (Spec, bool) {
-	for _, s := range Specs {
+	for _, s := range slices.Concat(Specs, GoSpecs) {
 		if s.Name == name {
 			return s, true
 		}

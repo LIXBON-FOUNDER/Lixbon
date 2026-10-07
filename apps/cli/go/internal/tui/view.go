@@ -42,6 +42,9 @@ func (m *Model) View() tea.View {
 	}
 	bottom = append(bottom, m.statusBar())
 	lower := strings.Split(strings.Join(bottom, "\n"), "\n")
+	for i, line := range lower {
+		lower[i] = ansi.Truncate(line, max(m.width, 1), "")
+	}
 
 	height := max(m.height, 1)
 	if len(lower) > height {
@@ -53,7 +56,9 @@ func (m *Model) View() tea.View {
 
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	if m.wheel {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.WindowTitle = m.windowTitle()
 	return v
 }
@@ -124,6 +129,9 @@ func (m *Model) borderColor() lipgloss.Style {
 }
 
 func (m *Model) inputBox() string {
+	if m.remote != nil {
+		return m.remoteBanner()
+	}
 	return m.borderColor().Render(m.input.View())
 }
 
@@ -153,7 +161,8 @@ func (m *Model) menuView() string {
 }
 
 // statusBar: a la izquierda quién eres y con qué trabajas; a la derecha cuánto
-// llevas gastado.
+// llevas gastado. En una terminal estrecha se van descartando detalles, de los
+// menos a los más importantes, en vez de dejar que la fila se parta.
 func (m *Model) statusBar() string {
 	dot := sOK.Render(glyphDot)
 	switch {
@@ -174,10 +183,12 @@ func (m *Model) statusBar() string {
 	case "plan":
 		modeStyle = sPlan
 	}
-	left := " " + dot + " " + sBeige.Render(model) + sep + sDim.Render(m.sessionLabel()) + sep + modeStyle.Render(m.modeName())
+	mode := modeStyle.Render(m.modeName())
+	left := " " + dot + " " + sBeige.Render(model) + sep + sDim.Render(m.sessionLabel()) + sep + mode
 	if m.notice != "" {
 		left += sep + sAccent.Render(m.notice)
 	}
+	lefts := []string{left, " " + dot + " " + sBeige.Render(model) + sep + mode, " " + dot + " " + mode}
 
 	barStyle := sAccent
 	switch {
@@ -186,26 +197,43 @@ func (m *Model) statusBar() string {
 	case m.ctxPct >= ctxWarn:
 		barStyle = sWarn
 	}
-	right := sDim.Render("contexto ") + barStyle.Render(contextBar(m.ctxPct)) + sDim.Render(fmt.Sprintf(" %.0f%%", m.ctxPct)) +
-		sep + sDim.Render(fmtTokens(max(m.chat.SessionTokens, m.ctxTokens))+" tokens")
+	percent := sDim.Render(fmt.Sprintf(" %.0f%%", m.ctxPct))
+	context := sDim.Render("contexto ") + barStyle.Render(contextBar(m.ctxPct)) + percent
+	tokens := sDim.Render(fmtTokens(max(m.chat.SessionTokens, m.ctxTokens)) + " tokens")
 	var flags []string
 	if m.chat.WebMode == "on" {
 		flags = append(flags, "web")
 	}
+	if m.remote != nil {
+		flags = append(flags, "remoto")
+	}
 	if m.chat.ProjectContext != "" {
 		flags = append(flags, "LIXBON.md")
 	}
+	full := context + sep + tokens
 	if len(flags) > 0 {
-		right += sep + sBeige.Render(strings.Join(flags, " "))
+		full += sep + sBeige.Render(strings.Join(flags, " "))
 	}
 	if m.ctxPct >= ctxFull {
-		right += sep + sWarn.Render("/compact")
+		full += sep + sWarn.Render("/compact")
 	}
-	right += " "
-	return twoCol(left, right, m.width)
+	rights := []string{full + " ", context + sep + tokens + " ", context + " ",
+		barStyle.Render(contextBar(m.ctxPct)) + percent + " ", barStyle.Render(fmt.Sprintf("%.0f%%", m.ctxPct)) + " ", ""}
+
+	for _, l := range lefts {
+		for _, r := range rights {
+			if ansi.StringWidth(l)+ansi.StringWidth(r)+2 <= m.width || r == "" && ansi.StringWidth(l) <= m.width {
+				return twoCol(l, r, m.width)
+			}
+		}
+	}
+	return ansi.Truncate(lefts[len(lefts)-1], max(m.width, 1), "")
 }
 
 func (m *Model) sessionLabel() string {
+	if m.chat.Client.Generic {
+		return m.chat.Cfg.ActiveProfile()
+	}
 	if m.chat.Cfg.APIKey == "" {
 		return "sin sesión"
 	}

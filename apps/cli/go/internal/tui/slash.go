@@ -33,6 +33,8 @@ import (
 type cmdDoneMsg struct {
 	lines []string
 	apply func(*Model)
+	// then arranca lo que sigue al comando, p. ej. el turno que prepara /visual.
+	then func(*Model) tea.Cmd
 }
 
 // async ejecuta un trabajo lento fuera de la goroutine de la interfaz. Mientras
@@ -58,6 +60,9 @@ func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 		msg.apply(m)
 	}
 	m.refreshContext()
+	if msg.then != nil {
+		return msg.then(m)
+	}
 	if len(m.queue) > 0 && !m.running {
 		next := m.queue[0]
 		m.queue = m.queue[1:]
@@ -67,6 +72,10 @@ func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 }
 
 func (m *Model) runCommand(name, arg string) tea.Cmd {
+	if m.chat.Client.Generic && slices.Contains(gatewayOnly, name) {
+		m.print(note(fmt.Sprintf("«/%s» solo funciona con un gateway Lixbon (proveedor actual: %s). /provider cambia de proveedor.", name, m.chat.Cfg.ActiveProfile())))
+		return nil
+	}
 	switch name {
 	case "help":
 		return m.cmdHelp(arg)
@@ -78,6 +87,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		m.newConversation("conversación nueva")
 		m.print(note("Conversación nueva: contexto vacío. La anterior queda en /history."))
 	case "clear":
+		m.log.reset()
+		m.scroll = 0
 		m.newConversation("contexto limpio")
 	case "compact":
 		return m.cmdCompact()
@@ -87,6 +98,21 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdWeb(arg)
 	case "copy":
 		m.cmdCopy()
+	case "remote":
+		return m.cmdRemote(arg)
+	case "visual":
+		return m.cmdVisual(arg)
+	case "image":
+		m.cmdImage(arg)
+	case "paste":
+		m.pasteImage()
+	case "mouse":
+		m.wheel = !m.wheel
+		if m.wheel {
+			m.print(note("Rueda del ratón activa: ya no se puede seleccionar texto (Shift + arrastrar sí, en la mayoría de terminales). /mouse la quita."))
+		} else {
+			m.print(note("Rueda del ratón desactivada: selecciona y copia con normalidad; AvPág y RePág desplazan."))
+		}
 	case "save":
 		m.cmdSave(arg)
 	case "approve":
@@ -131,8 +157,14 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdKey("")
 	case "logout":
 		return m.cmdLogout()
+	case "mcp":
+		m.cmdMCP()
+	case "provider":
+		return m.cmdProvider(arg)
 	case "doctor":
 		return m.cmdDoctor()
+	case "update":
+		return m.cmdUpdate()
 	case "config":
 		return m.cmdConfig()
 	case "bar":
@@ -318,6 +350,7 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 
 func (m *Model) newConversation(label string) {
 	m.chat.NewConversation()
+	m.refreshRemoteSnapshot()
 	m.lastAnswer = ""
 	m.todo = nil
 	m.print("\n" + sDim2.Render(strings.Repeat("─", 3)+" "+label+" "+strings.Repeat("─", max(3, m.width-len(label)-8))))
@@ -907,35 +940,40 @@ func (m *Model) cmdWorkspace(arg string) {
 	}
 }
 
+// execShell ejecuta un comando del usuario en el workspace y deja su salida en
+// el historial para que el modelo la vea en el siguiente turno.
+func (m *Model) execShell(command string) tea.Cmd {
+	return m.async("ejecutando "+truncateRunes(command, 40), func(ctx context.Context) cmdDoneMsg {
+		result := m.chat.Toolbox.Execute(ctx, "run_command", map[string]any{"command": command, "timeout": float64(300)})
+		body, code := result, "?"
+		if rest, ok := strings.CutPrefix(result, "[EXIT "); ok {
+			if n, after, found := strings.Cut(rest, "] "); found {
+				code, body = n, after
+			}
+		}
+		lines := []string{"", renderAction(agent.Event{Tool: "run_command", Change: &agent.Change{Kind: "command", Detail: command}}, m.width)}
+		for _, l := range firstLines(body, 80) {
+			lines = append(lines, renderLogLine(l, sDim, "", m.width))
+		}
+		lines = append(lines, renderResult("salida "+code, code != "0", "", m.width), "")
+		return cmdDoneMsg{lines: lines, apply: func(m *Model) {
+			text := body
+			if r := []rune(text); len(r) > 6000 {
+				text = string(r[:6000])
+			}
+			m.chat.History = append(m.chat.History, history.User(fmt.Sprintf("TOOL_RESULT run_command `%s` (EXIT %s):\n%s", command, code, text)))
+		}}
+	})
+
+}
+
 func (m *Model) cmdRun(arg string) tea.Cmd {
 	command := strings.TrimSpace(arg)
 	if command == "" {
 		m.print(errLine("Uso: /run npm test"))
 		return nil
 	}
-	exec := func() tea.Cmd {
-		return m.async("ejecutando "+truncateRunes(command, 40), func(ctx context.Context) cmdDoneMsg {
-			result := m.chat.Toolbox.Execute(ctx, "run_command", map[string]any{"command": command, "timeout": float64(300)})
-			body, code := result, "?"
-			if rest, ok := strings.CutPrefix(result, "[EXIT "); ok {
-				if n, after, found := strings.Cut(rest, "] "); found {
-					code, body = n, after
-				}
-			}
-			lines := []string{"", renderAction(agent.Event{Tool: "run_command", Change: &agent.Change{Kind: "command", Detail: command}}, m.width)}
-			for _, l := range firstLines(body, 80) {
-				lines = append(lines, renderLogLine(l, sDim, "", m.width))
-			}
-			lines = append(lines, renderResult("salida "+code, code != "0", "", m.width), "")
-			return cmdDoneMsg{lines: lines, apply: func(m *Model) {
-				text := body
-				if r := []rune(text); len(r) > 6000 {
-					text = string(r[:6000])
-				}
-				m.chat.History = append(m.chat.History, history.User(fmt.Sprintf("TOOL_RESULT run_command `%s` (EXIT %s):\n%s", command, code, text)))
-			}}
-		})
-	}
+	exec := func() tea.Cmd { return m.execShell(command) }
 	if m.chat.Session.AutoRunCommands {
 		return exec()
 	}
@@ -1119,9 +1157,12 @@ func (m *Model) cmdInit() tea.Cmd {
 // ── cuenta y sistema ─────────────────────────────────────────────────────
 
 func (m *Model) cmdStatus() tea.Cmd {
+	generic, online := m.chat.Client.Generic, m.online
 	return m.async("consultando la cuenta", func(ctx context.Context) cmdDoneMsg {
 		quota := "sin conexión"
-		if u, err := m.chat.Client.Usage(ctx); err == nil {
+		if generic {
+			quota = "no aplica"
+		} else if u, err := m.chat.Client.Usage(ctx); err == nil {
 			pct := func(b api.Bucket) string {
 				if b.Unlimited {
 					return "∞"
@@ -1139,7 +1180,9 @@ func (m *Model) cmdStatus() tea.Cmd {
 			commands = "sin preguntar"
 		}
 		plan := "desconocido"
-		if p := m.chat.Cfg.ExtraString("plan_name"); p != "" {
+		if p := m.chat.Cfg.ExtraString("plan_name"); generic {
+			plan = "proveedor externo"
+		} else if p != "" {
 			plan = "Lixbon " + p
 		}
 		project := "sin LIXBON.md (/init)"
@@ -1151,10 +1194,11 @@ func (m *Model) cmdStatus() tea.Cmd {
 			window = "se envía el turno entero"
 		}
 		conn := "conectado"
-		if quota == "sin conexión" {
+		if quota == "sin conexión" || generic && !online {
 			conn = "sin conexión"
 		}
 		rows := [][3]string{
+			{"Proveedor", m.chat.Cfg.ActiveProfile(), providerHost(m.chat.Client.BaseURL)},
 			{"Modelo", firstNonEmpty(m.chat.Model, "no configurado"), ""},
 			{"Plan", plan, ""},
 			{"Cuota", quota, ""},
@@ -1287,7 +1331,7 @@ func (m *Model) cmdContextWindow(arg string) {
 
 func (m *Model) cmdKey(arg string) tea.Cmd {
 	if arg == "" {
-		m.promptFor("Pega tu API key (lixbon_sk_…)", func(text string) tea.Cmd { return m.applyKey(strings.TrimSpace(text)) })
+		m.promptFor("Pega tu API key (lixbon_sk_…) — con correo y contraseña usa: lixbon setup", func(text string) tea.Cmd { return m.applyKey(strings.TrimSpace(text)) })
 		return nil
 	}
 	return m.applyKey(arg)

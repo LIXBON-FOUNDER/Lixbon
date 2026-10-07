@@ -29,6 +29,19 @@ type ChatRequest struct {
 	Think          any              `json:"think,omitempty"`
 }
 
+// generic es el cuerpo para un servidor compatible con OpenAI: OpenAI y otros
+// rechazan los parámetros desconocidos (conversation_id, client_id, source…).
+func (r ChatRequest) generic() map[string]any {
+	body := map[string]any{
+		"model": r.Model, "messages": openAIVision(r.Messages), "stream": true,
+		"stream_options": map[string]any{"include_usage": true},
+	}
+	if len(r.Tools) > 0 {
+		body["tools"] = r.Tools
+	}
+	return body
+}
+
 type ChatStream struct {
 	body   io.ReadCloser
 	cancel context.CancelFunc
@@ -43,7 +56,11 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (*ChatStream, 
 	req.Source = "cli"
 	ctx, cancel := context.WithCancel(ctx)
 	idle := newIdleReader(cancel, c.streamIdle())
-	resp, err := c.open(ctx, http.MethodPost, c.BaseURL+"/chat/completions", req, true)
+	var payload any = req
+	if c.Generic {
+		payload = req.generic()
+	}
+	resp, err := c.open(ctx, http.MethodPost, c.BaseURL+"/chat/completions", payload, true)
 	if err != nil {
 		idle.stop()
 		cancel()
@@ -120,6 +137,9 @@ func (c *Client) Chat(ctx context.Context, model string, messages []map[string]a
 	payload := map[string]any{
 		"model": model, "messages": messages, "conversation_id": nil,
 		"client_id": clientID, "title": "interno", "source": "cli",
+	}
+	if c.Generic {
+		payload = map[string]any{"model": model, "messages": openAIVision(messages)}
 	}
 	var data struct {
 		Choices []struct {
