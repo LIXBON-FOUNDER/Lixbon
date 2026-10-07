@@ -85,7 +85,7 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 - #23 resuelta en `cli` (c334599); falta fusionar a `master` · #24 en curso con esta actualización
 - Retirada de Python: ver «Retirada de Python» en ROADMAP.md.
 - Fusionar `cli` a `master` para recuperar el CI Python (regeneración de `state_corpus.json`).
-- `origin/cli` (fork) va 16 commits por detrás de `upstream/cli`; no se ha empujado nada desde esta sesión.
+- `cli` publicada en `origin` (fork) y en `upstream` (2026-10-06, hasta d4ba2fb); `master` aún no la tiene.
 
 ### Blockers/Concerns
 
