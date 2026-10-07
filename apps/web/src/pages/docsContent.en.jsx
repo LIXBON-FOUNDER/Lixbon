@@ -299,23 +299,24 @@ function Cli({ base }) {
       <p className="docs__lead">
         The lixbon CLI lets you chat with the cluster from the terminal and work
         with an agent that reads and edits your project, runs commands, and makes
-        commits. Requires Python 3.10 or newer.
+        commits. It is a single executable: no Python or anything else to install.
       </p>
 
       <h2>Install on Windows</h2>
       <p>Open <strong>PowerShell</strong> and run:</p>
       <CodeBlock code={`irm ${base}/install.ps1 | iex`} />
       <p>
-        This downloads the CLI to <code>%USERPROFILE%\\.lixbon</code> and adds the{' '}
-        <code>lixbon</code> command to your user PATH. Open a new terminal for the
-        command to become available.
+        This downloads the latest executable, checks its SHA-256 against the
+        server&apos;s and against the release&apos;s <code>SHA256SUMS</code>, puts it in{' '}
+        <code>%USERPROFILE%\\.lixbon</code> and adds the <code>lixbon</code> command to
+        your user PATH. Open a new terminal for the command to become available.
       </p>
 
       <h2>Install on Linux and macOS</h2>
       <p>Open your <strong>terminal</strong> and run:</p>
       <CodeBlock code={`curl -fsSL ${base}/install.sh | bash`} />
       <p>
-        Installs the CLI to <code>~/.lixbon</code> and creates the{' '}
+        Downloads the latest executable, checks its SHA-256 and installs it as the{' '}
         <code>lixbon</code> command in <code>~/.local/bin</code>. If{' '}
         <code>lixbon</code> isn&apos;t recognized, add that folder to your PATH:
       </p>
@@ -392,13 +393,36 @@ function Cli({ base }) {
         Express server for the forms.
       </p>
 
+      <h2>Update</h2>
+      <CodeBlock code={`lixbon update`} />
+      <p>
+        Downloads the latest version of your stage, verifies it and replaces the
+        executable; if anything fails, it keeps the one you have.{' '}
+        <code>lixbon update --check</code> only checks, <code>lixbon --update</code> is
+        an alias and <code>/update</code> works inside the chat. When you open the
+        chat, the CLI tells you if there is a new version (at most once a day); turn
+        it off with <code>"update_check": false</code> in <code>config.json</code> or
+        with the <code>LIXBON_NO_UPDATE_CHECK=1</code> variable.{' '}
+        <code>lixbon --version</code> shows the installed version.
+      </p>
+
+      <h2>Stages: beta and stable</h2>
+      <p>
+        Every version is published in a stage. A version without a suffix (<code>2.4.0</code>)
+        is stable; with a suffix (<code>2.4.0-beta.1</code>, <code>2.3.0-go.2</code>) it is
+        beta. If you are on a stable version you only get stable ones; if you are on a
+        beta you get stable ones too. A new install gets the latest stable and, while
+        there is none, the latest beta. The <Link to="/apps">Apps</Link> page shows
+        each version&apos;s stage, what&apos;s new and the history.
+      </p>
+
       <h2>Manual install</h2>
       <p>
-        If you&apos;d rather not run the script, download{' '}
-        <a href={`${base}/install/client_cli.py`}>client_cli.py</a> and run it with Python:
+        If you&apos;d rather not run the script, <Link to="/apps">Apps</Link> has each
+        system&apos;s release file with its SHA-256 and the commands to verify it and
+        copy the executable. If you came from the old Python CLI, run the install
+        command once more: its updater does not reach this version.
       </p>
-      <CodeBlock code={`python client_cli.py init --base-url ${base}/v1`} />
-      <CodeBlock code={`python client_cli.py chat`} />
     </>
   );
 }

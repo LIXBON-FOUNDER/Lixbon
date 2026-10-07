@@ -31,7 +31,6 @@ import (
 )
 
 const (
-	Channel        = "beta"
 	maxManifest    = 1 << 20
 	maxArchive     = 200 << 20
 	maxBinary      = 200 << 20
@@ -70,12 +69,24 @@ type Updater struct {
 	Verify func(ctx context.Context, path, version string) error
 }
 
+// channelFor decide qué canal sigue una instalación: una versión sin sufijo es
+// estable y solo recibe estables; con sufijo (2.3.0-go.1, 2.4.0-beta.1) es
+// beta y recibe también las estables, porque el gateway sirve la más nueva de
+// ambas.
+func channelFor(version string) string {
+	if v, err := parseSemver(version); err == nil && len(v.pre) == 0 {
+		return "stable"
+	}
+	return "beta"
+}
+
 // ManifestURLFor deriva la URL del manifest del gateway desde la base de la
-// API (https://lixbon.com/v1 → https://lixbon.com/api/updates/cli/beta).
-func ManifestURLFor(baseURL string) string {
+// API y la versión instalada (https://lixbon.com/v1 →
+// https://lixbon.com/api/updates/cli/stable).
+func ManifestURLFor(baseURL, installed string) string {
 	base := strings.TrimRight(baseURL, "/")
 	base = strings.TrimSuffix(base, "/v1")
-	return base + "/api/updates/cli/" + Channel
+	return base + "/api/updates/cli/" + channelFor(installed)
 }
 
 func New(manifestURL string) (*Updater, error) {
@@ -379,9 +390,9 @@ func ManifestURLForConfig(cfg config.Config) string {
 		return override
 	}
 	if cfg.IsGeneric() || cfg.BaseURL == "" {
-		return ManifestURLFor(config.DefaultBaseURL)
+		return ManifestURLFor(config.DefaultBaseURL, config.Version)
 	}
-	return ManifestURLFor(cfg.BaseURL)
+	return ManifestURLFor(cfg.BaseURL, config.Version)
 }
 
 // Run comprueba si hay una versión nueva y, salvo checkOnly, la instala. Devuelve

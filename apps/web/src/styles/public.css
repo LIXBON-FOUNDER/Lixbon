@@ -271,6 +271,22 @@
   align-self: center;
 }
 
+/* En pantallas estrechas las pestañas de sistema bajan a su propia línea en
+   vez de dejar el título del CLI en una columna de una palabra. */
+@media (max-width: 640px) {
+  .dl-card__head {
+    flex-wrap: wrap;
+  }
+
+  .dl-card__head .dl-card__heading {
+    flex: 1 1 11rem;
+  }
+
+  .dl-card__head .os-tabs {
+    align-self: flex-start;
+  }
+}
+
 .dl-card__logo {
   width: 36px;
   height: 36px;
@@ -412,6 +428,110 @@
 
 .dl-details summary:hover {
   color: var(--ink);
+}
+
+.dl-details[open] > summary {
+  margin-bottom: 8px;
+}
+
+.dl-details > .codeblock,
+.dl-details > .dl-card__note {
+  margin-top: 8px;
+}
+
+/* Versión, etapa y fecha del CLI en la cabecera de la tarjeta */
+.dl-cli-meta,
+.dl-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dl-stage {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--radius-chip);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.dl-stage--beta {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.dl-stage--stable {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* Novedades de cada versión */
+.dl-history {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dl-history__head strong {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.dl-history ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+
+.dl-history code {
+  padding: 1px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-3);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* Archivos de la instalación manual: sistema, enlace y SHA-256 */
+.dl-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+}
+
+.dl-files li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dl-files a,
+.dl-details .dl-card__note a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dl-files__sha {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-label);
+  word-break: break-all;
 }
 
 .downloads__foot {

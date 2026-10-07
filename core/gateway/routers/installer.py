@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from core.config import CLI_SOURCE_PATH, PUBLIC_BASE_URL
 from core.gateway.routers import installer_go
-from core.gateway.routers.versions import latest_cli_release
+from core.gateway.routers.versions import latest_cli_release_for_install
 
 router = APIRouter()
 
@@ -39,7 +39,7 @@ async def install_script(request: Request) -> PlainTextResponse:
     """Instalador del CLI para Linux/macOS: el binario Go registrado; sin release
     registrada cae al instalador de Python (se borra al retirar Python)."""
     server_base = _server_base(request)
-    release = latest_cli_release("beta")
+    release = latest_cli_release_for_install()
     if release:
         return PlainTextResponse(content=installer_go.install_sh(server_base, release))
     # rf-string: los \n y \033 tienen que llegar LITERALES al script; si Python
@@ -96,7 +96,7 @@ async def install_script_windows(request: Request) -> PlainTextResponse:
     """Instalador del CLI para Windows: el binario Go registrado; sin release
     registrada cae al instalador de Python (se borra al retirar Python)."""
     server_base = _server_base(request)
-    release = latest_cli_release("beta")
+    release = latest_cli_release_for_install()
     if release:
         return PlainTextResponse(content=installer_go.install_ps1(server_base, release))
     # Los acentos viajan bien (existen en cp437/850), pero los checks y los
