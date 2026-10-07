@@ -20,7 +20,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión `2.3.0-go.0`).
+Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión `2.3.0-go.6`).
 
 | Fase | Estado real | Evidencia |
 |------|-------------|-----------|
@@ -28,11 +28,11 @@ Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión
 | 2. Chat usable y cancelable | Implementada; falta validar contra un gateway real y completar CHAT-02 (login) | pruebas `internal/{sse,api,config,cli}` |
 | 3. Agente, herramientas y estado | Implementada; falta verificación en terminal real y con modelos reales | pruebas `internal/{agent,tools,process,history,session,workspace}` |
 | 4. Terminal y conexiones | En curso: TUI, MCP, adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage`, `update` y los 41 comandos `/` listos (más `/provider`) | `internal/{tui,chat,mcp,documents,clipboard,remote}` |
-| 5. Distribución y sustitución | En curso: `lixbon update`, /update, instaladores del gateway y manifest implementados con pruebas; beta `cli-v2.3.0-go.0` publicada (2026-10-07) con manifest y instalador de producción; sin Docker ni prueba en Linux/macOS | `internal/update`, `core/gateway/routers/installer_go.py`, `DECISION-UPDATE-GO.md` |
+| 5. Distribución y sustitución | En curso: `lixbon update`, /update, instaladores del gateway y manifest implementados con pruebas; betas `cli-v2.3.0-go.0` a `go.6` publicadas (2026-10-07) con manifest, instalador de producción, canal estable/beta y notas por versión; instalación y `update` comprobados en Windows y Linux; sin imagen Docker (descartada) ni prueba en macOS real | `internal/update`, `core/gateway/routers/installer_go.py`, `DECISION-UPDATE-GO.md` |
 
 Requisitos v1: **20 hechos, 9 parciales, 2 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
 
-Last activity: 2026-10-07 — PR #26 fusionado en `master`; beta `cli-v2.3.0-go.0` publicada y registrada en el gateway; issues #12–#17, #19, #23 y #24 cerradas; backlog nuevo #27–#36.
+Last activity: 2026-10-07 — PR #46 fusionado; betas hasta `cli-v2.3.0-go.6`; issues #12–#21, #23, #24 y #27–#33 cerradas; acta de Phase 1 (`01-ACTA.md`); job `Gateway · tests` en CI (#32).
 
 Progress: [█████░░░░░] 48% de requisitos implementados (0 % aceptados)
 
@@ -103,6 +103,6 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 
 ## Session Continuity
 
-Last session: 2026-10-06
-Stopped at: beta publicada. Siguiente: probar `install.sh` y `lixbon update` en Linux y macOS (#28, #22), Docker (#20), actualizar la web (#27), validación real (#21, #22) y, tras aceptar la paridad, la retirada de Python (#36).
+Last session: 2026-10-07
+Stopped at: acta de Phase 1 redactada con aceptación pendiente. Siguiente: terminales reales (#22), mediciones Python vs Go (#25), firma (#34), gestores de paquetes (#35) y, tras aceptar la paridad, la retirada de Python (#36).
 Resume file: None

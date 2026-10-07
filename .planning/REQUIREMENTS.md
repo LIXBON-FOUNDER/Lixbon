@@ -99,10 +99,10 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 | MCP-01 | Phase 4 | Hecho | `internal/mcp` (stdio y HTTP) con `mcp_corpus.json` y servidor real en Windows; falta probar en Linux/macOS con un servidor real |
 | REMOTE-01 | Phase 4 | Hecho | `internal/remote` y `/remote` probados con un relay simulado (en memoria y por HTTP); falta validar con la app móvil y el gateway reales (#17, #21) |
 | CONNECT-01 | Phase 4 | Hecho | Aprobaciones y cierre acotado de MCP y de `/remote` (sin goroutines ni conexiones abiertas) |
-| REL-01 | Phase 5 | Parcial | `release-cli.yml` (seis destinos, `SHA256SUMS`, registro en el gateway) e instaladores nuevos, **publicado como beta `cli-v2.3.0-go.0`** (seis binarios, manifest en producción) e `install.ps1` real probado en Windows 11; sin prueba de instalación en Linux ni macOS (#28, #22) ni Docker (#20) |
+| REL-01 | Phase 5 | Parcial | `release-cli.yml` (seis destinos, `SHA256SUMS`, registro en el gateway) e instaladores nuevos, **publicado como beta `cli-v2.3.0-go.0`** (seis binarios, manifest en producción) e `install.ps1` real probado en Windows 11; instalación y `update` comprobados en Windows y Linux, macOS solo en CI (#22); Docker fuera por ahora |
 | REL-02 | Phase 5 | Parcial | `internal/update` instala solo si el archivo coincide con el digest del gateway y con `SHA256SUMS` (pruebas de manipulación en `update_test.go`); sin firma de binarios del sistema operativo, decisión del usuario (#18) |
 | REL-03 | Phase 5 | Parcial | `lixbon update` y `/update` con reemplazo atómico y restauración; probado en Windows con el `.exe` en uso contra un servidor local. Falta Linux/macOS reales y una release real; el update desde Python se descartó (reinstalación) (#18) |
-| REL-04 | Phase 5 | Parcial | `install.sh`/`install.ps1` del gateway (`installer_go.py`) con digest embebido y `GET /api/updates/cli/beta`; con una release registrada sustituyen al instalador Python. Docker pendiente (#20) |
+| REL-04 | Phase 5 | Parcial | `install.sh`/`install.ps1` del gateway (`installer_go.py`) con digest embebido y `GET /api/updates/cli/beta`; con una release registrada sustituyen al instalador Python. Docker fuera por ahora (se distribuye por comando) |
 | REL-05 | Phase 5 | Pendiente | Requiere todo lo anterior y aceptación explícita |
 
 **Coverage:**

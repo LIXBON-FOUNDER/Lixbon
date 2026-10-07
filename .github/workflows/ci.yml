@@ -18,6 +18,18 @@ jobs:
       - run: pip install pytest rich pypdf
       - run: python -m pytest apps/cli/tests -q
 
+  gateway:
+    name: Gateway · tests (un proceso por módulo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python infra/ci/gateway_tests.py
+
   cli-go:
     name: CLI Go · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

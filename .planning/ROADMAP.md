@@ -4,7 +4,7 @@
 
 De una referencia Python reproducible a un binario Go aceptado por plataforma, mediante chat --once, agente/workspace y funciones conectadas. Go está elegido; Rust opcional no bloquea las fases. Ninguna fase autoriza publicación automática ni retirar Python sin aceptación explícita.
 
-**Estado a 2026-10-06:** por decisión del usuario (opción B) el código Go se adelantó a Phase 1: las fases 2 y 3 están implementadas y probadas en CI (Linux, macOS, Windows), Phase 4 está en curso (MCP hecho) y Phase 5 no ha empezado. Lo que falta de Phase 1 son los entregables de aceptación (acta, matriz de destinos, mediciones). «Implementada» no equivale a «aceptada»: la validación contra gateway real, terminales físicas y móvil sigue pendiente. Backlog en GitHub: LIXBON-FOUNDER/Lixbon, issues #12–#25.
+**Estado a 2026-10-07:** por decisión del usuario (opción B) el código Go se adelantó a Phase 1: las fases 2 y 3 están implementadas y probadas en CI (Linux, macOS, Windows), Phase 4 está casi completa (falta validar terminales físicas) y Phase 5 tiene publicadas las betas `cli-v2.3.0-go.0` a `go.6`. Lo que falta de Phase 1 son los entregables de aceptación (acta, matriz de destinos, mediciones). «Implementada» no equivale a «aceptada»: la validación contra gateway real, terminales físicas y móvil sigue pendiente. Backlog en GitHub: LIXBON-FOUNDER/Lixbon, issues #12–#36. El acta de Phase 1 está en `.planning/phases/01-contratos-y-l-nea-base-reproducible/01-ACTA.md`.
 
 **Granularity**: standard como calibración de planificación (config.json no define granularity).
 **Phase ID convention**: sequential por defecto (config.json no define phase_id_convention).
@@ -17,7 +17,7 @@ Leyenda: `[x]` implementada con pruebas y aceptada · `[~]` implementada o parci
 - [~] **Phase 2: Chat Go usable y cancelable** - El usuario puede ejecutar un primer chat --once Go compatible con el gateway y cancelarlo sin esperar nuevos eventos. *Implementada; falta CHAT-02 (login) y probar contra gateway real.*
 - [~] **Phase 3: Agente, herramientas y estado compatibles** - El usuario puede trabajar sobre su workspace con el agente Go, aprobaciones y sesiones preservadas sin recursos ilimitados. *Implementada; falta validarla con modelos reales y en terminales físicas.*
 - [~] **Phase 4: Terminal interactiva y funciones conectadas** - El usuario puede completar los flujos interactivos, documentales, MCP y remotos que ofrece el cliente Python. *En curso: TUI, MCP, documentos, portapapeles, `/visual`, `/remote`, `setup` y `usage` hechos con pruebas; faltan `/update`, la matriz de terminales y validar con la app móvil y un gateway reales.*
-- [~] **Phase 5: Distribución, actualización y sustitución aceptada** - El usuario instala y actualiza binarios auténticos sin Python/pip, con recuperación y paridad aceptada por plataforma. *En curso: `update`, instaladores y manifest implementados con pruebas; falta publicar la primera release y Docker.*
+- [~] **Phase 5: Distribución, actualización y sustitución aceptada** - El usuario instala y actualiza binarios auténticos sin Python/pip, con recuperación y paridad aceptada por plataforma. *En curso: `update`, instaladores y manifest implementados con pruebas; betas publicadas; instalación y `update` comprobados en Windows y Linux; sin Docker (se distribuye por comando); falta aceptar la paridad.*
 
 ## Phase Details
 
@@ -108,7 +108,7 @@ Plans:
 
 **Plans**: TBD
 
-**Estado (2026-10-06)**: en curso. Decidido con el usuario (`DECISION-UPDATE-GO.md`): `SHA256SUMS` de la release más el digest del gateway, canal beta, sin puente Python y sin firma de binarios por ahora. Implementado con pruebas: `internal/update` (`lixbon update`, `/update`; probado en Windows con el `.exe` en uso), manifest y registro en el gateway, instaladores nuevos (`installer_go.py`) y `release-cli.yml` con job de registro. **Publicada la beta `cli-v2.3.0-go.0`** (2026-10-07): seis binarios, manifest y `install.sh`/`install.ps1` de producción ya sirven el binario Go; `install.ps1` verificado en Windows 11. Sin Docker y sin prueba en Linux/macOS reales (issues #18, #20, #28). Ver «Retirada de Python» (#36).
+**Estado (2026-10-06)**: en curso. Decidido con el usuario (`DECISION-UPDATE-GO.md`): `SHA256SUMS` de la release más el digest del gateway, canal beta, sin puente Python y sin firma de binarios por ahora. Implementado con pruebas: `internal/update` (`lixbon update`, `/update`; probado en Windows con el `.exe` en uso), manifest y registro en el gateway, instaladores nuevos (`installer_go.py`) y `release-cli.yml` con job de registro. **Publicada la beta `cli-v2.3.0-go.0`** (2026-10-07): seis binarios, manifest y `install.sh`/`install.ps1` de producción ya sirven el binario Go; `install.ps1` verificado en Windows 11. Betas hasta `go.6`; instalación y `update` comprobados en Windows y Linux; macOS solo en CI; la imagen Docker queda fuera por ahora (decisión del 2026-10-07: se distribuye por comando). Issues #18, #20 y #28 cerradas. Ver «Retirada de Python» (#36).
 
 ## Acceptance Gates
 
