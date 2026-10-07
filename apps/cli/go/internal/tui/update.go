@@ -23,23 +23,48 @@ func tickCmd() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	_, cmd := m.update(msg)
+	return m, tea.Batch(cmd, m.syncOutput())
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.SetWidth(max(10, msg.Width-4))
 		m.log.resize(msg.Width)
+		if m.onReady != nil {
+			return m, tea.Tick(firstFrameDelay, func(time.Time) tea.Msg { return readyMsg{} })
+		}
+		return m, nil
+
+	case readyMsg:
+		if ready := m.onReady; ready != nil {
+			m.onReady = nil
+			return m, ready()
+		}
+		return m, nil
+
+	case resumePrintMsg:
+		m.resumePrint()
 		return m, nil
 
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.scrollBy(wheelStep)
-		case tea.MouseWheelDown:
-			m.scrollBy(-wheelStep)
+		if m.pagerActive() {
+			switch msg.Button {
+			case tea.MouseWheelUp:
+				m.pagerScroll(wheelStep)
+			case tea.MouseWheelDown:
+				m.pagerScroll(-wheelStep)
+			}
 		}
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.pagerActive() {
+			m.handlePagerKey(msg)
+			return m, nil
+		}
 		if m.remote != nil {
 			return m, m.handleRemoteKey(msg)
 		}
@@ -135,12 +160,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-const wheelStep = 3
-
-func (m *Model) scrollBy(rows int) {
-	m.scroll = max(0, m.scroll+rows)
-}
-
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.picker != nil {
 		cmd, closed := m.picker.key(msg)
@@ -151,10 +170,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "pgup":
-		m.scrollBy(max(1, m.height-6))
+		m.openPager(m.pageRows() - 1)
 		return m, nil
-	case "pgdown":
-		m.scrollBy(-max(1, m.height-6))
+	case "ctrl+t":
+		m.openPager(0)
 		return m, nil
 	case "alt+v":
 		m.pasteImage()
@@ -246,7 +265,15 @@ func (m *Model) quit() tea.Cmd {
 		m.remote.link.Stop(true)
 		m.remote = nil
 	}
-	return tea.Quit
+	return m.flushAndQuit
+}
+
+// flushAndQuit deja que lo último impreso llegue a la terminal antes de salir.
+func (m *Model) flushAndQuit() tea.Msg {
+	if m.out != nil {
+		m.out.flush(2 * time.Second)
+	}
+	return tea.QuitMsg{}
 }
 
 func (m *Model) cancelTurn() {

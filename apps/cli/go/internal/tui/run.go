@@ -62,7 +62,6 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		fmt.Fprintln(stderr, "Error:", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, m.log.text())
 	fmt.Fprintln(stdout, sDim2.Render("Hasta pronto."))
 	return 0
 }
@@ -102,19 +101,24 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 	}
 	program := tea.NewProgram(m, opts...)
 	m.Wire(program.Send, nil)
+	m.out = newPrinter(program.Send)
+	defer m.out.close()
 
-	m.printHeader()
-	if offline {
-		m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
-	}
-	for _, n := range m.opts.Notes {
-		m.print(warnLine(n))
-	}
-	if m.opts.Warning != "" {
-		m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
-	}
-	if pickModel {
-		m.queueModelPicker()
+	m.onReady = func() tea.Cmd {
+		m.printHeader()
+		if offline {
+			m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
+		}
+		for _, n := range m.opts.Notes {
+			m.print(warnLine(n))
+		}
+		if m.opts.Warning != "" {
+			m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
+		}
+		if pickModel {
+			return m.queueModelPicker()
+		}
+		return nil
 	}
 	_, err := program.Run()
 	return err
@@ -183,17 +187,18 @@ func (m *Model) printHeader() {
 	if plan := c.Cfg.ExtraString("plan_name"); plan != "" && !c.Client.Generic {
 		title += sDim2.Render("  " + glyphSep + "  plan " + plan)
 	}
-	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode, shortPath(c.Workspace)}
+	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode}
 	if profile := c.Cfg.ActiveProfile(); profile != config.DefaultProfile {
 		parts = slices.Insert(parts, 0, profile)
 	}
 	info := sDim.Render(strings.Join(parts, " "+glyphSep+" "))
+	folder := sBeige.Render(shortPath(c.Workspace))
 	tips := []string{
 		"/ comandos  " + glyphSep + "  ! shell  " + glyphSep + "  Enter envía",
 		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",
-		"Mayús+Tab cambia de modo  " + glyphSep + "  RePág/AvPág desplazan",
+		"Mayús+Tab cambia de modo  " + glyphSep + "  Ctrl+T ve el transcript",
 	}
-	text := append([]string{"", title, info, ""}, dimAll(tips)...)
+	text := append([]string{"", title, info, folder, ""}, dimAll(tips)...)
 	m.print("")
 	m.printDynamic(func(width int) string { return headerLayout(renderLogo(), text, width) })
 	if c.Mode == chat.ModeAsk {
@@ -207,6 +212,6 @@ func (m *Model) printHeader() {
 
 // queueModelPicker abre el selector de modelo al arrancar cuando ni la
 // configuración ni el servidor deciden cuál usar.
-func (m *Model) queueModelPicker() {
-	m.cmdModel("")
+func (m *Model) queueModelPicker() tea.Cmd {
+	return m.cmdModel("")
 }

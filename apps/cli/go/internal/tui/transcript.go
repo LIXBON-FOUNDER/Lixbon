@@ -24,19 +24,19 @@ func (t *transcript) wrapLine(line string) []string {
 	return strings.Split(ansi.Hardwrap(line, t.width, true), "\n")
 }
 
-// add añade texto (puede llevar saltos de línea) y devuelve cuántas filas
-// visibles ocupa.
-func (t *transcript) add(text string) int {
+// add añade texto (puede llevar saltos de línea) y devuelve las filas
+// visibles que ocupa.
+func (t *transcript) add(text string) []string {
 	before := len(t.wrapped)
 	for _, line := range strings.Split(text, "\n") {
 		t.lines = append(t.lines, line)
 		t.wrapped = append(t.wrapped, t.wrapLine(line)...)
 	}
-	return len(t.wrapped) - before
+	return t.wrapped[before:]
 }
 
 // addDynamic añade una entrada que se redibuja al cambiar el ancho.
-func (t *transcript) addDynamic(render func(width int) string) (string, int) {
+func (t *transcript) addDynamic(render func(width int) string) []string {
 	if t.dynamic == nil {
 		t.dynamic = map[int]func(int) string{}
 	}
@@ -45,7 +45,7 @@ func (t *transcript) addDynamic(render func(width int) string) (string, int) {
 	t.lines = append(t.lines, text)
 	before := len(t.wrapped)
 	t.wrapped = append(t.wrapped, t.wrapLine(text)...)
-	return text, len(t.wrapped) - before
+	return t.wrapped[before:]
 }
 
 func (t *transcript) resize(width int) {
