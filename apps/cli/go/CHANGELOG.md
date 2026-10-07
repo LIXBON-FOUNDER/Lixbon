@@ -4,6 +4,9 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.3.0-go.5
+- Corregido: con proveedores externos (OpenRouter, Kilo, OpenAI, Gemini…) las herramientas del agente fallaban con «Herramienta no soportada». Esos proveedores envían cada llamada partida en fragmentos y el CLI los trataba como llamadas distintas; ahora los une. El agente también conserva los campos extra que algunos proveedores exigen devolver (p. ej. `extra_content` de Gemini) y da un id a las llamadas que llegan sin él.
+
 ## 2.3.0-go.4
 - `lixbon` arranca aunque no tengas sesión en lixbon.com o tu clave haya dejado de valer: abre el chat con un aviso y desde `/provider` puedes conectar otro proveedor (OpenRouter, OpenAI, Kilo, LM Studio, Ollama…) sin salir.
 - Nuevo `lixbon auth login | list | logout` para conectar proveedores y gestionar sus claves, al estilo de `opencode auth`. La clave se pide sin mostrarla.
