@@ -108,10 +108,12 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		m.pasteImage()
 	case "mouse":
 		m.wheel = !m.wheel
+		m.chat.Cfg.Mouse = m.wheel
+		m.saveConfig()
 		if m.wheel {
-			m.print(note("Rueda del ratón activa: ya no se puede seleccionar texto (Shift + arrastrar sí, en la mayoría de terminales). /mouse la quita."))
+			m.print(note("Rueda del ratón activa y guardada: ya no se puede seleccionar texto (Shift + arrastrar sí, en la mayoría de terminales). /mouse la quita."))
 		} else {
-			m.print(note("Rueda del ratón desactivada: selecciona y copia con normalidad; AvPág y RePág desplazan."))
+			m.print(note("Rueda del ratón desactivada y guardada: selecciona y copia con normalidad; AvPág y RePág desplazan."))
 		}
 	case "save":
 		m.cmdSave(arg)
