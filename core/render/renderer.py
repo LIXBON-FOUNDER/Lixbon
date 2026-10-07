@@ -109,6 +109,12 @@ def _launch(p):
         return p.chromium.launch(channel="msedge")
 
 
+def _scale(kind: str, width: int, height: int) -> int:
+    # Las imágenes salen al doble de densidad (nítidas en pantallas retina y al
+    # ampliarlas); el vídeo y las piezas enormes, a 1x para no disparar el peso.
+    return 2 if kind == "image" and max(width, height) <= MAX_SIDE // 2 else 1
+
+
 def render(html: str, kind: str, width: int, height: int, seconds: float = 0, *,
            path: str = "pieza.html", assets: dict[str, bytes] | None = None) -> bytes:
     if not (16 <= width <= MAX_SIDE and 16 <= height <= MAX_SIDE):
@@ -133,7 +139,7 @@ def render(html: str, kind: str, width: int, height: int, seconds: float = 0, *,
         with sync_playwright() as p:
             browser = _launch(p)
             try:
-                page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
+                page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=_scale(kind, width, height))
                 page.route("**/*", lambda route: route.continue_() if allow_url(route.request.url, site, cache)
                            else route.abort("blockedbyclient"))
                 page.goto(html_file.as_uri(), timeout=NAV_TIMEOUT_MS, wait_until="load")

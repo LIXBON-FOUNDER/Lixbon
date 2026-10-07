@@ -21,13 +21,13 @@ export function sinBloquesVisuales(texto) {
   return (texto || '').replace(/```\s*(?:file|edit):\s*[\w./-]+\.(?:html?|svg)[^\n`]*\n[\s\S]*?(?:\n```|$)/g, '').trim();
 }
 
-export function VisualChip({ nombres, version, escribiendo, onOpen, t }) {
+export function VisualChip({ nombres, escribiendo, onOpen, t }) {
   return (
     <button type="button" className={`chat-vchip ${escribiendo ? 'is-busy' : ''}`} onClick={onOpen}>
       <IconLayers size={15} />
       <span className="chat-vchip__txt">
         <strong>{escribiendo ? t('visualWriting', { name: escribiendo }) : t('visualChip')}</strong>
-        <small>{nombres.join(', ')}{version ? ` · v${version}` : ''}</small>
+        <small>{nombres.join(', ')}</small>
       </span>
       {!escribiendo && <span className="chat-vchip__cta">{t('visualShow')}</span>}
     </button>
@@ -59,7 +59,7 @@ export function ChatVisualPanel({ visual, paginas, vivo, error, onClose, onDisca
         <IconLayers size={16} />
         <div className="chat-visual__titles">
           <strong>{visual?.title || t('visualPanelTitle')}</strong>
-          <small>{vivo ? t('visualLive') : visual ? `v${visual.version}` : t('visualNotSaved')}</small>
+          <small>{vivo ? t('visualLive') : visual ? (visual.label || t('visualSaved')) : t('visualNotSaved')}</small>
         </div>
         {visual && (
           <>

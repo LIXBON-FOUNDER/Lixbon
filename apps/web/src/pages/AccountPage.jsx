@@ -21,9 +21,10 @@ import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
   IconPlus, IconTrash, IconX, IconChevron, IconLogout,
-  IconCheck, IconCamera, IconMascota,
+  IconCheck, IconCamera, IconMascota, IconApps,
 } from '../components/Icons';
 import { Select } from '../components/Select';
+import { McpSection } from '../components/McpSection';
 import { SpriteMascota } from '../components/Mascota';
 import { fijarMascota, useMascota } from '../lib/mascota';
 
@@ -38,6 +39,7 @@ function useSections() {
     { id: 'privacy', label: t('sections.privacy'), Icon: IconShield },
     { id: 'billing', label: t('sections.billing'), Icon: IconCard },
     { id: 'usage', label: t('sections.usage'), Icon: IconChart },
+    { id: 'mcp', label: 'MCP', Icon: IconApps },
     { id: 'mascot', label: tm('settings.section'), Icon: IconMascota },
   ];
 }
@@ -853,6 +855,7 @@ export default function AccountPage() {
               {current.id === 'privacy' && <PrivacySection user={user} onUserChange={setUser} />}
               {current.id === 'billing' && <SeccionFacturacion plan={plan} />}
               {current.id === 'mascot' && <MascotSection />}
+              {current.id === 'mcp' && <McpSection onKeysChanged={loadKeys} />}
               {current.id === 'usage' && <UsageSection usage={account.usage} buckets={account.buckets} daily={account.daily} plan={plan} />}
             </div>
           )}

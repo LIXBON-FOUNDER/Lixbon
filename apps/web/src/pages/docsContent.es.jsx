@@ -158,7 +158,8 @@ function Visuals() {
       <p className="docs__lead">
         En <Link to="/visuals">Visuals</Link> describes lo que quieres y el modelo lo
         construye en HTML con Tailwind; luego lo afinas hablando con él o tocándolo en
-        el lienzo. Cada diseño vive en su propia conversación, con versiones.
+        el lienzo. Cada diseño es un visual con sus propias versiones, y también lo
+        pueden crear y editar tus agentes (Claude Code, Cursor, el CLI…) por MCP.
       </p>
 
       <h2>Qué puedes diseñar</h2>
@@ -167,6 +168,7 @@ function Visuals() {
         <li><strong>Logo / SVG</strong>: logotipos e ilustraciones vectoriales.</li>
         <li><strong>Prototipo</strong>: varias pantallas enlazadas entre sí (<code>index.html</code>, <code>contacto.html</code>…), navegables desde la vista previa.</li>
         <li><strong>Imagen</strong>: generación de imágenes, cuando hay un nodo del clúster que las genera.</li>
+        <li><strong>Piezas de marketing</strong>: imágenes, carruseles y vídeos con tamaño propio (post 1080×1350, story 1080×1920…). Se ven tal cual saldrán, se editan en el lienzo y se renderizan a PNG o MP4 desde el servidor.</li>
       </ul>
 
       <h2>Design systems</h2>
@@ -179,8 +181,9 @@ function Visuals() {
       <h2>El editor</h2>
       <ul>
         <li><strong>Páginas</strong>: el chip junto al nombre cambia de página o muestra el <strong>Lienzo</strong> con todas a la vez.</li>
-        <li><strong>Versiones</strong>: cada respuesta del modelo es una versión; vuelve a cualquiera desde el chip <code>v3 ▾</code>.</li>
+        <li><strong>Versiones con nombre</strong>: cada petición deja una versión con su nombre («Titular más grande», «Carrusel del plan Pro»), que sale del chat o del agente. Vuelve a cualquiera desde el botón del historial; renómbralas con el lápiz o con doble clic.</li>
         <li><strong>Seleccionar</strong>: haz clic en un elemento de la vista previa para cambiar su texto o sus estilos a mano, o para pedirle al modelo un cambio solo sobre ese elemento.</li>
+        <li><strong>Editar una pieza</strong>: «Editar» abre el panel de edición a la derecha del lienzo (Diseño y Código) y, en vídeo, la línea de tiempo. Arrastra los elementos para moverlos (con guías de alineación) y usa los tiradores para cambiar su tamaño; Shift mantiene la proporción, Alt desactiva las guías y las flechas mueven de 1 en 1. El panel tiene posición y tamaño exactos, disposición (fila, columna, separación), tipografía con cualquier fuente de Google Fonts, colores y degradados, bordes, sombras, efectos (desenfoque, fusión, capas), insertar texto, formas e imágenes, copiar y pegar estilo, y zoom con Ctrl + rueda. <strong>Guardar</strong> actualiza la versión que estás editando en lugar de crear otra. El chat se pliega y despliega para ganar espacio.</li>
         <li><strong>Código</strong>: el HTML de la página actual.</li>
         <li><strong>Presentar</strong>: abre el diseño a pantalla completa en otra pestaña, con la navegación entre páginas funcionando.</li>
       </ul>
@@ -193,14 +196,91 @@ function Visuals() {
       <h2>Compartir y exportar</h2>
       <ul>
         <li><strong>Enlace público</strong>: un enlace de solo lectura (<code>lixbon.com/s/…</code>) que puedes desactivar cuando quieras.</li>
-        <li><strong>Lixbon CLI</strong>: copia el comando <code>/visual &lt;id&gt;</code> y pégalo en el CLI para convertir el diseño en un proyecto real (React + Vite, con API Express si la pides).</li>
+        <li><strong>Pasar a código</strong>: con <code>/visual codigo &lt;id&gt; [stack]</code> en el CLI o en el agente que tengas conectado por MCP, el diseño se implementa como proyecto real (React + Vite, con API Express si la pides).</li>
         <li><strong>Descargar</strong>: un <code>.zip</code> con las páginas HTML (o el archivo suelto si es una sola), y <strong>Copiar el código</strong> de la página actual.</li>
       </ul>
+
+      <h2>Con tu agente (MCP)</h2>
+      <p>
+        El servidor MCP de Lixbon deja que Claude Code, Cursor, VS Code, Codex o
+        Gemini creen, lean, editen y rendericen tus visuals; los ves construirse en
+        vivo en la web. Configuración en <Link to="/docs/mcp">MCP y skills</Link>.
+      </p>
+      <p>
+        Cuando un agente corrige su propio trabajo no se acumulan versiones: una
+        petición deja una sola. Si retocas a mano y luego el agente sigue, su cambio
+        parte de tu versión y queda como una nueva, así no se pierde nada.
+      </p>
 
       <Callout>
         Visuals está incluido en los planes <strong>Pro</strong> y <strong>Advance</strong>
         y consume la cuota de tu plan igual que el chat. Con el plan Gratuito puedes
         ver la galería, pero no generar ni editar diseños.
+      </Callout>
+    </>
+  );
+}
+
+function McpYSkills() {
+  return (
+    <>
+      <h1>MCP y skills</h1>
+      <p className="docs__lead">
+        Lixbon habla con tus agentes por <strong>MCP</strong>: conectas Claude Code,
+        Cursor, VS Code, Codex, Gemini o el CLI y pueden crear, editar y renderizar
+        tus Visuals. Las <strong>skills</strong> son paquetes de instrucciones que
+        añaden comandos a tu agente, como <code>/marketing-lxo</code>.
+      </p>
+
+      <h2>Conectar un agente</h2>
+      <ol>
+        <li>Abre <Link to="/account/mcp">Ajustes › MCP</Link> y crea una clave (o pega una que ya tengas).</li>
+        <li>Elige tu cliente: la configuración sale ya completa, con la clave y la URL <code>{'https://lixbon.com/mcp'}</code>.</li>
+        <li>Reinicia el agente y comprueba que «lixbon» aparece conectado.</li>
+      </ol>
+      <p>Por ejemplo, en Claude Code:</p>
+      <CodeBlock code={`claude mcp add --transport http lixbon https://lixbon.com/mcp --header "Authorization: Bearer lixbon_sk_…" -s user`} />
+      <p>
+        La clave da acceso a tu cuenta: guárdala solo en la configuración global del
+        agente, nunca en un archivo que subas a git, y desactívala en Perfil › Claves
+        de API cuando no la uses. Crear visuals requiere el plan Pro o Advance.
+      </p>
+
+      <h2>Qué pueden hacer los agentes</h2>
+      <table>
+        <thead><tr><th>Herramienta</th><th>Para qué</th></tr></thead>
+        <tbody>
+          <tr><td><code>visual_create</code></td><td>Crear un visual (diseño o marketing) con sus archivos y el nombre de la versión</td></tr>
+          <tr><td><code>visual_update</code></td><td>Editar con archivos nuevos o con bloques de búsqueda y reemplazo; <code>amend</code> corrige la versión en curso sin crear otra</td></tr>
+          <tr><td><code>visual_get</code> · <code>visual_list</code></td><td>Leer un visual (con tus retoques) y listar los que tienes</td></tr>
+          <tr><td><code>visual_export</code></td><td>Archivos, estilos e instrucciones para implementarlo como proyecto</td></tr>
+          <tr><td><code>visual_render</code> · <code>visual_render_status</code></td><td>Renderizar piezas a PNG o MP4 en el servidor y esperar el resultado</td></tr>
+          <tr><td><code>visual_view</code></td><td>Ver la imagen renderizada para revisar el resultado antes de entregar</td></tr>
+        </tbody>
+      </table>
+      <p>
+        El prompt <code>visual</code> trae las reglas de diseño: en Claude Code se
+        usa como <code>/mcp__lixbon__visual &lt;qué diseñar&gt;</code>; en el CLI de
+        Lixbon, como <code>/visual</code>. Cada escritura exige la versión base que
+        leyó el agente: si tú guardaste mientras tanto, recibe <code>stale_base</code>,
+        vuelve a leer y no pisa tus cambios.
+      </p>
+
+      <h2>Skills</h2>
+      <p>
+        En <Link to="/skills">lixbon.com/skills</Link> (y en Ajustes › Skills del
+        IDE) hay un catálogo oficial con descripción, versión, fecha y calificación.
+        Descarga el paquete, o instálalo desde el IDE en los agentes que elijas: se
+        verifica su <code>sha256</code> y se pide confirmación.
+      </p>
+      <ul>
+        <li><strong><code>/marketing-lxo</code></strong>: genera campañas (posts, carruseles, stories, reels) con la marca de Lixbon, las publica como visuals de marketing por MCP, las renderiza y las mira antes de entregar.</li>
+        <li><strong><code>/adversary</code></strong>: revisión crítica de un cambio con otro agente.</li>
+      </ul>
+
+      <Callout>
+        Cada petición deja una versión con nombre. Pide a tu agente el nombre en tus
+        palabras («Landing inicial»); así el historial se lee sin números.
       </Callout>
     </>
   );
@@ -283,7 +363,7 @@ function Cli({ base }) {
           <tr><td><code>/commit [mensaje]</code></td><td>Commit de los cambios con mensaje redactado por el modelo</td></tr>
           <tr><td><code>/workspace [ruta]</code> · <code>/init</code></td><td>Carpeta de trabajo · generar <code>LIXBON.md</code> con el contexto del proyecto</td></tr>
           <tr><td><code>/mcp</code></td><td>Servidores MCP conectados y sus herramientas</td></tr>
-          <tr><td><code>/visual &lt;id o enlace&gt; [stack]</code></td><td>Traer un diseño de Visuals y replicarlo como proyecto (<code>react</code>, <code>react api</code> o el stack que escribas)</td></tr>
+          <tr><td><code>/visual &lt;qué diseñar&gt;</code> · <code>&lt;id&gt; &lt;cambio&gt;</code> · <code>codigo &lt;id&gt; [stack]</code></td><td>Crear, editar o pasar a código un diseño de Visuals (por el servidor MCP de Lixbon, que el CLI registra solo)</td></tr>
           <tr><td><code>/remote</code></td><td>Controlar esta sesión desde el móvil o la web (enlace + QR)</td></tr>
           <tr><td><code>/status</code> · <code>/cost</code> · <code>/usage</code></td><td>Estado de la sesión · tokens consumidos · uso global de la cuenta</td></tr>
           <tr><td><code>/nodes</code></td><td>Ver los nodos del clúster</td></tr>
@@ -293,16 +373,17 @@ function Cli({ base }) {
         </tbody>
       </table>
 
-      <h2>Replicar un diseño de Visuals</h2>
+      <h2>Diseñar con Visuals desde el CLI</h2>
+      <CodeBlock code={`/visual una landing para mi API
+/visual vis_… hazme el titular más grande
+/visual codigo vis_… react api`} />
       <p>
-        En Visuals, <strong>Compartir → Lixbon CLI</strong> copia el comando. En el CLI:
-      </p>
-      <CodeBlock code={`/visual 56f5bda7-… react api`} />
-      <p>
-        El CLI descarga las páginas HTML a una carpeta, pasa a modo agente y monta el
-        proyecto en <code>&lt;nombre&gt;-app/</code>: React 18 + Vite con una ruta por
-        página, Tailwind por npm y, con <code>api</code>, un servidor Express para los
-        formularios. Sin stack, pregunta qué hacer con el diseño.
+        El CLI trae conectado el servidor MCP de Lixbon con tu sesión (se desactiva
+        con <code>"lixbon_mcp": false</code> en <code>config.json</code>). Crear un
+        visual requiere Pro o Advance. Con <code>codigo</code> el agente lee el
+        diseño y monta el proyecto en <code>&lt;nombre&gt;-app/</code>: React 18 + Vite
+        con una ruta por página y, con <code>api</code>, un servidor Express para los
+        formularios.
       </p>
 
       <h2>Instalación manual</h2>
@@ -848,6 +929,7 @@ const CUERPOS = {
   'getting-started': PrimerosPasos,
   chat: ChatWeb,
   visuals: Visuals,
+  mcp: McpYSkills,
   cli: Cli,
   desktop: Desktop,
   remote: Remote,

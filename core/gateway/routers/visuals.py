@@ -56,6 +56,7 @@ class VisualCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     meta: dict[str, Any] | None = None
     files: list[FileIn] | None = Field(None, max_length=store.MAX_FILES_PER_PUSH)
+    label: str | None = Field(None, max_length=200)
 
 
 class RenderRequest(BaseModel):
@@ -66,6 +67,8 @@ class FilesPush(BaseModel):
     files: list[FileIn] = Field(..., min_length=1, max_length=store.MAX_FILES_PER_PUSH)
     title: str | None = Field(None, max_length=200)
     base_version: int | None = Field(None, ge=0)
+    amend: bool = False
+    label: str | None = Field(None, max_length=200)
 
 
 def decode_files(files: list[FileIn] | list[dict] | None) -> list[dict[str, Any]]:
@@ -105,7 +108,8 @@ async def api_create_visual(body: VisualCreate, request: Request,
                             user: dict[str, Any] = Depends(web_or_api_key_auth)):
     try:
         return svc.create(user, kind=body.kind, title=body.title, meta=body.meta,
-                          files=decode_files(body.files), origin="api", base=str(request.base_url))
+                          files=decode_files(body.files), origin="api", base=str(request.base_url),
+                          label=body.label)
     except store.VisualError as e:
         raise _fail(e)
 
@@ -144,6 +148,23 @@ async def api_list_versions(visual_id: str, user: dict[str, Any] = Depends(web_o
     return {"items": items}
 
 
+class VersionPatch(BaseModel):
+    label: str = Field(..., min_length=1, max_length=200)
+
+
+@router.patch("/api/visuals/{visual_id}/versions/{version}")
+async def api_rename_version(visual_id: str, version: int, body: VersionPatch,
+                             user: dict[str, Any] = Depends(web_or_api_key_auth)):
+    try:
+        row = store.rename_version(visual_id, user["id"], version, body.label)
+    except store.VisualError as e:
+        raise _fail(e)
+    if not row:
+        raise _not_found()
+    bus.publish(visual_id, {"type": "meta", "version": version, "label": row["label"]})
+    return row
+
+
 @router.get("/api/visuals/{visual_id}")
 async def api_get_visual(visual_id: str, request: Request, version: int | None = Query(None, ge=0),
                          user: dict[str, Any] = Depends(web_or_api_key_auth)):
@@ -158,7 +179,8 @@ async def api_push_files(visual_id: str, body: FilesPush, request: Request,
                          user: dict[str, Any] = Depends(web_or_api_key_auth)):
     try:
         return svc.write(user, visual_id, files=decode_files(body.files), title=body.title,
-                         base_version=body.base_version, origin="web", base=str(request.base_url))
+                         base_version=body.base_version, origin="web", base=str(request.base_url),
+                         amend=body.amend, label=body.label)
     except store.VisualError as e:
         raise _fail(e)
 

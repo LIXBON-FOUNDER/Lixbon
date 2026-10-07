@@ -80,8 +80,22 @@ export function contextoArchivos(files, version) {
 
 /** Guarda los archivos cambiados como versión nueva. Si otro (el editor, un
  *  agente) guardó antes, se reaplica la respuesta sobre su versión. */
-export async function guardarRespuesta(id, baseVersion, cambiadas, reaplicar) {
-  const enviar = (files, base) => pushFiles(id, files.map((f) => ({ path: f.name, role: 'source', text: f.code })), base);
+/** Nombre de una versión a partir de lo que pidió el usuario. */
+export function etiquetaDePedido(texto) {
+  const linea = (texto || '').replace(/\s+/g, ' ').trim();
+  return linea.length > 60 ? `${linea.slice(0, 57).trimEnd()}…` : linea;
+}
+
+/** Nombre visible de una versión: el suyo o uno deducido de lo que cambió. */
+export function nombreVersion(h, t, { primera = false } = {}) {
+  if (h?.label) return h.label;
+  if (primera) return t('versionFirst');
+  const archivos = [...(h?.sources || []), ...(h?.outputs || [])].map((p) => p.split('/').pop());
+  return archivos.length ? t('versionChanges', { files: archivos.slice(0, 2).join(', ') + (archivos.length > 2 ? '…' : '') }) : t('versionUnnamed');
+}
+
+export async function guardarRespuesta(id, baseVersion, cambiadas, reaplicar, label) {
+  const enviar = (files, base) => pushFiles(id, files.map((f) => ({ path: f.name, role: 'source', text: f.code })), base, { label });
   try {
     return { ...(await enviar(cambiadas, baseVersion)), reaplicada: false };
   } catch (err) {

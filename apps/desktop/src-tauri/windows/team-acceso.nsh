@@ -9,3 +9,15 @@
   Delete "$SMPROGRAMS\Lixbon Team.lnk"
   Delete "$DESKTOP\Lixbon Team.lnk"
 !macroend
+
+; El instalador de actualizaciones también ejecuta el desinstalador: ahí los datos deben conservarse.
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+    RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    RmDir /r "$APPDATA\${BUNDLEID}"
+    RmDir /r "$PROFILE\.lixbon"
+    ; La API key vive en el Credential Manager (keyring), que ninguna carpeta contiene.
+    nsExec::Exec `powershell -NoProfile -NonInteractive -Command "cmdkey /list | ForEach-Object { if ($$_ -match 'target=(\S*com\.usuario\.app-lixbon)') { cmdkey /delete:$$matches[1] } }"`
+    Pop $0
+  ${EndIf}
+!macroend

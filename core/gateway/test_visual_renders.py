@@ -91,7 +91,7 @@ def test_worker_guarda_la_salida_con_el_sha_de_su_fuente(cliente):
     assert hecho and eventos[0]["status"] == "done" and eventos[0]["output_path"] == "post-1.png"
     m = cliente.get(f"/api/visuals/{vid}").json()
     files = {f["path"]: f for f in m["files"]}
-    assert files["post-1.png"]["role"] == "output" and m["version"] == 2
+    assert files["post-1.png"]["role"] == "output" and m["version"] == 1  # se adjunta, no crea versión
     assert files["post-1.png"]["meta"]["source_sha256"] == files["post-1.html"]["sha256"]
     assert cliente.get(f"/api/visuals/{vid}/files/post-1.png").content.startswith(b"\x89PNG")
     assert renders.stale_outputs(vid, q.get_user_by_email("render@lixbon.test")["id"]) == []
@@ -106,7 +106,7 @@ def test_editar_una_pieza_renderizada_la_vuelve_a_renderizar(cliente):
     _procesar()
     r = cliente.post(f"/api/visuals/{vid}/files", json={
         "files": [{"path": "post-1.html", "text": PIEZA.format("uno editado")}, {"path": "post-2.html", "text": PIEZA.format("dos b")}],
-        "base_version": 2})
+        "base_version": 1})
     auto = r.json()["renders"]
     assert [(j["path"], j["status"]) for j in auto] == [("post-1.html", "queued")]  # post-2 nunca se renderizó
     _procesar()

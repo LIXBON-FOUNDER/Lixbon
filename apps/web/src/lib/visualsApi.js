@@ -12,8 +12,12 @@ export const getShared = (token) => api.get(`/api/shared-visuals/${token}`).then
 export const deleteVisual = (id) => api.delete(`/api/visuals/${id}`);
 export const setShare = (id, on) =>
   (on ? api.post(`/api/visuals/${id}/share`) : api.delete(`/api/visuals/${id}/share`)).then((r) => r.data);
-export const pushFiles = (id, files, baseVersion) =>
-  api.post(`/api/visuals/${id}/files`, { files, base_version: baseVersion }).then((r) => r.data);
+export const pushFiles = (id, files, baseVersion, { amend = false, label } = {}) =>
+  api.post(`/api/visuals/${id}/files`, {
+    files, base_version: baseVersion, ...(amend ? { amend: true } : {}), ...(label ? { label } : {}),
+  }).then((r) => r.data);
+export const renombrarVersion = (id, version, label) =>
+  api.patch(`/api/visuals/${id}/versions/${version}`, { label }).then((r) => r.data);
 export const eventsUrl = (id) => `/api/visuals/${id}/events`;
 export const requestRender = (id, paths) =>
   api.post(`/api/visuals/${id}/render`, { paths }).then((r) => r.data.jobs);

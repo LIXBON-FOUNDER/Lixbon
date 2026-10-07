@@ -1,6 +1,7 @@
+# Lo usa deploy.sh, que sube el worker desde una carpeta propia con su Dockerfile en la raíz.
 [build]
 builder = "dockerfile"
-dockerfilePath = "infra/render_worker/Dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 restartPolicyType = "always"

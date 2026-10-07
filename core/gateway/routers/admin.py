@@ -48,8 +48,8 @@ async def dashboard_init(
 # ── API de estado ──────────────────────────────────────────────────────────
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "lixbon DTC"}
+async def health():
+    return {"status": "ok"}
 
 
 @router.get("/api/status")

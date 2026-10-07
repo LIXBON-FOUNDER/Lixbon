@@ -59,19 +59,30 @@ def _auto_render(user: dict[str, Any], visual_id: str) -> list[dict[str, Any]]:
         return []
 
 
+def _puede_enmendar(user: dict[str, Any], visual_id: str, origin: str) -> bool:
+    """El usuario puede rehacer cualquier versión desde la web; un agente solo la que
+    escribió él mismo, para no fundir sus correcciones con retoques del usuario."""
+    if origin == "web":
+        return True
+    m = store.get_manifest(visual_id, user["id"])
+    return bool(m) and m["meta"].get("last_origin") == origin
+
+
 def _announce(visual_id: str, res: dict[str, Any], origin: str) -> None:
     bus.publish(visual_id, {"type": "version", "version": res["version"], "files": res.get("files", []),
-                            "title": res["title"], "origin": origin})
+                            "title": res["title"], "origin": origin, "label": res.get("label")})
 
 
 def create(user: dict[str, Any], *, kind: str, title: str, meta: dict | None = None,
-           files: list[dict] | None = None, origin: str = "web", base: str = "") -> dict[str, Any]:
+           files: list[dict] | None = None, origin: str = "web", base: str = "",
+           label: str | None = None) -> dict[str, Any]:
     max_count, max_mb = creator_limits(user)
     vis = store.create_visual(user["id"], kind, title, meta, max_count=max_count)
     log_audit_event("visual_created", user_id=user["id"], kind=kind, origin=origin)
     if files:
         try:
-            vis = store.put_files(vis["id"], user["id"], files, base_version=0, max_storage_mb=max_mb)
+            vis = store.put_files(vis["id"], user["id"], files, base_version=0, max_storage_mb=max_mb,
+                                  origin=origin, label=label)
         except VisualError:
             store.delete_visual(vis["id"], user["id"])
             raise
@@ -81,17 +92,19 @@ def create(user: dict[str, Any], *, kind: str, title: str, meta: dict | None = N
 
 def write(user: dict[str, Any], visual_id: str, *, files: list[dict] | None = None,
           edits: list[dict] | None = None, base_version: int | None = None, title: str | None = None,
-          origin: str = "web", base: str = "") -> dict[str, Any]:
+          origin: str = "web", base: str = "", amend: bool = False, label: str | None = None) -> dict[str, Any]:
     _, max_mb = creator_limits(user)
     if edits and files:
         raise VisualError("invalid_params", "Envía edits o files, no ambos en la misma llamada")
+    mode = "amend" if amend and _puede_enmendar(user, visual_id, origin) else "new"
     if edits:
         if base_version is None:
             raise VisualError("invalid_params", "Las ediciones necesitan base_version")
         res = store.edit_files(visual_id, user["id"], edits, base_version=base_version,
-                               title=title, max_storage_mb=max_mb)
+                               title=title, max_storage_mb=max_mb, mode=mode, origin=origin, label=label)
     else:
         res = store.put_files(visual_id, user["id"], files or [], title=title,
-                              base_version=base_version, max_storage_mb=max_mb)
+                              base_version=base_version, max_storage_mb=max_mb, mode=mode, origin=origin,
+                              label=label)
     _announce(visual_id, res, origin)
     return {**res, "url": url_for(visual_id, base), "renders": _auto_render(user, visual_id)}
