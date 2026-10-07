@@ -1,0 +1,80 @@
+name: Release CLI
+
+on:
+  push:
+    tags: ['cli-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Binario · ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    defaults:
+      run:
+        working-directory: apps/cli/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/cli/go/go.mod
+          cache-dependency-path: apps/cli/go/go.sum
+      - name: La etiqueta coincide con la versión del código
+        run: |
+          version=$(sed -nE 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/config/config.go)
+          test "cli-v${version}" = "${GITHUB_REF_NAME}" || { echo "La etiqueta ${GITHUB_REF_NAME} no coincide con la versión ${version}"; exit 1; }
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+      - run: go test -count=1 ./...
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+      - name: Compilar y empaquetar
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          name="lixbon-${VERSION}-${GOOS}-${GOARCH}"
+          binary=lixbon; [ "$GOOS" = windows ] && binary=lixbon.exe
+          mkdir -p "dist/${name}"
+          go build -trimpath -ldflags "-s -w" -o "dist/${name}/${binary}" ./cmd/lixbon
+          cp README.md "dist/${name}/"
+          cd dist
+          if [ "$GOOS" = windows ]; then zip -qr "${name}.zip" "${name}"; else tar -czf "${name}.tar.gz" "${name}"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lixbon-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            apps/cli/go/dist/*.zip
+            apps/cli/go/dist/*.tar.gz
+
+  release:
+    name: Publicar la release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Sumas de verificación
+        working-directory: assets
+        run: sha256sum * > SHA256SUMS
+      - name: Crear la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" assets/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Lixbon CLI ${GITHUB_REF_NAME#cli-v}" \
+            --prerelease \
+            --generate-notes
