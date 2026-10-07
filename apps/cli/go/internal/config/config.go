@@ -14,9 +14,15 @@ import (
 )
 
 const (
-	Version        = "2.3.0-go.0"
+	DevVersion     = "0.0.0-dev"
 	DefaultBaseURL = "https://lixbon.com/v1"
-	UserAgent      = "Lixbon-CLI/" + Version
+)
+
+// Version la fija release-cli.yml con -ldflags "-X" a partir de la etiqueta;
+// una compilación local conserva DevVersion.
+var (
+	Version   = DevVersion
+	UserAgent = "Lixbon-CLI/" + Version
 )
 
 type Config struct {
@@ -30,6 +36,9 @@ type Config struct {
 	Workspace          string
 	AutoApproveTools   bool
 	InputQueue         bool
+	// Mouse guarda lo que decide /mouse: la rueda del ratón en la pantalla
+	// completa. Sin persistirlo había que volver a encenderla en cada arranque.
+	Mouse bool
 
 	// Extra conserva los campos que el CLI Go no interpreta (plan_name,
 	// web_search, allowed_commands…) para no perderlos al guardar.
@@ -96,6 +105,7 @@ func Load(path string) Config {
 var knownKeys = []string{
 	"base_url", "api_key", "model", "key_model", "max_context_messages",
 	"context_window", "mode", "workspace", "auto_approve_tools", "input_queue",
+	"mouse",
 }
 
 func (c *Config) field(key string) any {
@@ -120,6 +130,8 @@ func (c *Config) field(key string) any {
 		return &c.AutoApproveTools
 	case "input_queue":
 		return &c.InputQueue
+	case "mouse":
+		return &c.Mouse
 	}
 	return nil
 }

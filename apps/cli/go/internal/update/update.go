@@ -387,6 +387,9 @@ func ManifestURLForConfig(cfg config.Config) string {
 // Run comprueba si hay una versión nueva y, salvo checkOnly, la instala. Devuelve
 // el mensaje para el usuario.
 func Run(ctx context.Context, u *Updater, checkOnly bool) (string, error) {
+	if u.Current == config.DevVersion {
+		return "Esta es una compilación local sin versión: no se actualiza. Instala una release con el comando de lixbon.com.", nil
+	}
 	rel, err := u.Check(ctx)
 	if err != nil {
 		return "", err

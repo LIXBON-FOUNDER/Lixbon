@@ -37,3 +37,23 @@ jobs:
       - run: go vet ./...
       - run: go test -count=1 ./...
       - run: go build -o ${{ runner.temp }}/lixbon ./cmd/lixbon
+
+  cli-install:
+    name: CLI Go · instaladores · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/cli/go/go.mod
+          cache-dependency-path: apps/cli/go/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python infra/ci/install_e2e.py
+        env:
+          PYTHONIOENCODING: utf-8

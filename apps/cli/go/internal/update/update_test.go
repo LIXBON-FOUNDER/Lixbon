@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"lixbon.com/cli/internal/config"
 )
 
 func TestCompareVersions(t *testing.T) {
@@ -235,6 +237,14 @@ func TestCheckVersions(t *testing.T) {
 		if err != nil || rel.Newer != wantNewer {
 			t.Errorf("Current %s: Newer = %v, %v; quería %v", current, rel.Newer, err, wantNewer)
 		}
+	}
+}
+
+func TestRunSkipsLocalBuilds(t *testing.T) {
+	u := &Updater{Current: config.DevVersion}
+	message, err := Run(context.Background(), u, false)
+	if err != nil || !strings.Contains(message, "compilación local") {
+		t.Fatalf("mensaje %q, err %v", message, err)
 	}
 }
 

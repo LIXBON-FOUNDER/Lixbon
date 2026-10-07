@@ -82,7 +82,7 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 - #12–#17 y #19 cerradas (implementadas y fusionadas; `ui-demo` descartado); falta validarlas con la app móvil, modelos y un gateway reales (#21, #22)
 - #18 `update` y `/update` y #20 distribución: implementados y publicados como beta; siguen abiertas por Linux/macOS reales y la imagen Docker
 - #21 validación contra modelos y gateway reales · #22 terminales reales · #25 cierre de Phase 1
-- Backlog nuevo (2026-10-07): #27 web y docs sin Python · #28 prueba de instalación en CI · #29 `--version` y versión inyectada · #30 aviso de versión nueva · #31 prueba intermitente del TUI · #32 `pytest core` en CI · #33 canal estable y notas · #34 firma de binarios · #35 Homebrew, Scoop y winget · #36 retirada de Python
+- Backlog nuevo (2026-10-07): #27 web y docs sin Python · #28 prueba de instalación en CI (hecha; falta verla en verde en Linux y macOS) · #29 `--version` y versión inyectada (hecha) · #30 aviso de versión nueva · #31 prueba intermitente del TUI (hecha: el harness llamaba al lixbon.com real al volver a «lixbon») · #32 `pytest core` en CI · #33 canal estable y notas · #34 firma de binarios · #35 Homebrew, Scoop y winget · #36 retirada de Python
 - Retirada de Python: ver «Retirada de Python» en ROADMAP.md.
 - Fusionar `cli` a `master` para recuperar el CI Python (regeneración de `state_corpus.json`).
 - `cli` y `master` están al día en `origin` y `upstream`; el trabajo nuevo va por PR de `cli` a `master`.
@@ -92,7 +92,6 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 - Phase 1 sin cerrar: no hay matriz de destinos acordada ni política CGO escrita; hay que decidirlas antes de empaquetar (#20). La biblioteca PDF (#14) ya se eligió con criterio propio en `DECISION-PDF-GO.md`: sin CGO ni helpers, a falta de que la matriz lo confirme.
 - Mediciones Python vs Go inexistentes: ninguna afirmación de rendimiento está respaldada.
 - Eliminar Python exige antes congelar los corpus: los `gen_*_corpus.py` usan el código Python como oráculo.
-- Prueba intermitente `TestProviderCommandSwitchesToAnExternalServerAndBack` (≈15 % de fallos, también en `HEAD` previo): tras `/provider lixbon` el `settle` del harness no termina. Puede tumbar el CI; sin diagnosticar.
 
 ## Deferred Items
 
