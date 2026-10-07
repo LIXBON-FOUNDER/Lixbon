@@ -71,25 +71,46 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _VERSION_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 
+def _semver_key(version: str) -> tuple:
+    """Precedencia de semver 2.0, la misma que aplica `lixbon update`: una
+    versión con sufijo (2.3.0-go.1) es anterior a la misma sin sufijo y los
+    identificadores numéricos se comparan como números (go.10 > go.9). Los
+    tags -go.N no son PEP 440, así que packaging.Version no sirve aquí."""
+    core, _, pre = version.partition("+")[0].partition("-")
+    try:
+        numbers = tuple(int(part) for part in core.split("."))
+    except ValueError:
+        return ((-1,), 0, ())
+    ids = tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split(".")) if pre else ()
+    return (numbers, 0 if pre else 1, ids)
+
+
 def latest_cli_release(channel: str) -> dict | None:
-    """Última release del CLI Go con sus binarios por plataforma. La versión es
-    la de la fila registrada más reciente; solo entran los binarios de esa
-    versión, así una plataforma rezagada no ofrece un binario viejo."""
-    rows = {p: db.get_latest_version(channel=channel, product=f"cli-{p}")
-            for p in CLI_PLATFORMS}
-    rows = {p: r for p, r in rows.items() if r and r["checksum_sha256"]}
+    """Última release del CLI Go con sus binarios por plataforma. `stable` solo
+    ve versiones estables; `beta` ve la más nueva entre beta y estable, así
+    quien prueba betas recibe también las estables. Solo entran los binarios de
+    la versión elegida, así una plataforma rezagada no ofrece un binario viejo."""
+    channels = ("stable",) if channel == "stable" else ("stable", "beta")
+    rows = [r for r in db.get_all_versions()
+            if r["product"] in CLI_PRODUCTS and r["channel"] in channels and r["checksum_sha256"]]
     if not rows:
         return None
-    newest = max(rows.values(), key=lambda r: r["id"])
+    newest = max(rows, key=lambda r: (_semver_key(r["version"]), r["id"]))
     return {
         "version": newest["version"],
-        "channel": channel,
+        "channel": newest["channel"],
         "title": newest["title"],
         "release_date": newest["release_date"],
         "changelog": newest["changelog"],
-        "assets": {p: {"url": r["download_url"], "sha256": r["checksum_sha256"]}
-                   for p, r in rows.items() if r["version"] == newest["version"]},
+        "assets": {r["product"].removeprefix("cli-"): {"url": r["download_url"], "sha256": r["checksum_sha256"]}
+                   for r in rows if r["version"] == newest["version"]},
     }
+
+
+def latest_cli_release_for_install() -> dict | None:
+    """Lo que instala una instalación nueva: la última estable y, mientras no
+    haya ninguna, la última beta."""
+    return latest_cli_release("stable") or latest_cli_release("beta")
 
 
 def _public_download_url(request: Request, version: str, channel: str,

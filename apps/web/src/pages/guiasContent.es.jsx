@@ -216,7 +216,7 @@ function AgenteTerminal() {
       <CodeBlock label="bash (Linux y macOS)" code={`curl -fsSL ${BASE}/install.sh | bash`} />
       <p>
         Abre una terminal nueva, ejecuta <code>lixbon</code> y entra con tu correo y contraseña
-        (o con una API key). Necesitas Python 3.10 o superior.
+        (o con una API key). Es un solo ejecutable: no necesitas Python.
       </p>
 
       <h2>2. Colócate en tu proyecto</h2>

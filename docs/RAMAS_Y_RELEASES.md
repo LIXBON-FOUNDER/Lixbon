@@ -85,16 +85,21 @@ el artefacto del CLI viven en `master`.
    `/install/client_cli.py`; los clientes la reciben con `lixbon update` o `/update`.
 
 ### CLI Go (`cli-vX.Y.Z`)
-1. Merge a `master` por PR.
-2. `git tag cli-v2.3.0-go.1 && git push origin cli-v2.3.0-go.1`. La versión sale de la etiqueta: no hay constante que subir.
-3. `.github/workflows/release-cli.yml` la inyecta con `-ldflags "-X …config.Version"`, falla si
-   `lixbon --version` no informa exactamente esa versión, ejecuta `go test`, compila seis
-   binarios (linux, darwin y windows en amd64 y arm64, sin CGO), genera `SHA256SUMS` y
-   publica una release *prerelease*.
+1. Escribir las notas de la versión en `apps/cli/go/CHANGELOG.md`: una sección `## <versión>` con viñetas (`- …`) en español, pensadas para quien usa el CLI. Sin esa sección la release falla antes de compilar.
+2. Merge a `master` por PR.
+3. `git tag cli-v2.4.0 && git push origin cli-v2.4.0`. La versión sale de la etiqueta: no hay constante que subir. **La etapa también:** sin sufijo (`cli-v2.4.0`) es *estable*; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es *beta*.
+4. `.github/workflows/release-cli.yml`:
+   - `preparar`: valida la etiqueta, decide la etapa y comprueba que existan las notas.
+   - `build`: inyecta la versión con `-ldflags "-X …config.Version"`, falla si `lixbon --version` no informa exactamente esa versión, ejecuta `go test` y compila seis binarios (linux, darwin y windows en amd64 y arm64, sin CGO).
+   - `release`: genera `SHA256SUMS` y publica la release con las notas del CHANGELOG; solo las betas se marcan *prerelease*.
+   - `registrar`: guarda en el gateway la URL, el SHA-256, la etapa (`channel`) y las notas (`changelog`) de cada binario.
+   - `smoke`: instala desde `lixbon.com` en Linux, macOS y Windows y comprueba la versión que sirven los instaladores.
 
 Una compilación local (`go build`) informa `0.0.0-dev` y `lixbon update` no la toca.
 
-El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`POST /api/versions/register`, secreto `LIXBON_ADMIN_TOKEN`, variable `LIXBON_SERVER_URL`); a partir de ahí `/install.sh`, `/install.ps1`, `lixbon update` y `GET /api/updates/cli/beta` sirven ese binario. Primera ejecución: `cli-v2.3.0-go.0` (beta, 2026-10-07). Diseño en `.planning/DECISION-UPDATE-GO.md`.
+**Qué sirve el gateway.** `GET /api/updates/cli/stable` devuelve la última estable; `GET /api/updates/cli/beta`, la más nueva entre beta y estable (el orden es semver, `go.10` > `go.9`). `lixbon update` elige el canal por la versión instalada: sin sufijo sigue `stable`; con sufijo, `beta`. `/install.sh` e `/install.ps1` sirven la última estable y, mientras no haya ninguna, la última beta. La página `/apps` lee `GET /api/versions` y muestra la etapa, las notas y el historial de cada versión. Diseño en `.planning/DECISION-UPDATE-GO.md`; primera ejecución: `cli-v2.3.0-go.0` (beta, 2026-10-07).
+
+Para corregir las notas de una versión ya publicada, vuelve a registrarla (`POST /api/versions/register` actualiza la fila de cada plataforma por producto y versión).
 
 ### Móvil (`mobile-vX.Y.Z`)
 1. Subir `version` en `apps/mobile/package.json` (única fuente; `app.config.js` la lee).
