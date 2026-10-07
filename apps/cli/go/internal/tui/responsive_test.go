@@ -11,7 +11,7 @@ import (
 func assertFits(t *testing.T, h *harness, state string, width, height int) {
 	t.Helper()
 	lines := strings.Split(h.m.View().Content, "\n")
-	if len(lines) > height {
+	if len(lines) != height {
 		t.Errorf("%s %dx%d: la pantalla tiene %d filas", state, width, height, len(lines))
 	}
 	for i, line := range lines {

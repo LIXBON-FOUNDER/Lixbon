@@ -87,7 +87,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		m.newConversation("conversación nueva")
 		m.print(note("Conversación nueva: contexto vacío. La anterior queda en /history."))
 	case "clear":
-		m.clearScreen()
+		m.log.reset()
+		m.scroll, m.sel = 0, nil
 		m.printHeader()
 		m.newConversation("contexto limpio")
 	case "compact":

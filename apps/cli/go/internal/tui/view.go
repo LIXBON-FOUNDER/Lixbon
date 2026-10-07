@@ -21,13 +21,10 @@ const (
 	ctxFull      = 85.0
 )
 
-// View compone solo la parte de abajo: el texto en vivo, el menú, la caja de
-// entrada y la barra de estado. El transcript no se dibuja aquí: se imprime en
-// el scrollback de la terminal. Con el visor abierto ocupa la pantalla entera.
+// View compone la pantalla completa: el transcript arriba y, pegado al borde
+// inferior, el texto en vivo, el menú, la caja de entrada y la barra de estado.
+// La altura total es siempre la de la terminal.
 func (m *Model) View() tea.View {
-	if m.quitting {
-		return tea.NewView("")
-	}
 	if m.pagerActive() {
 		return m.pagerView()
 	}
@@ -47,15 +44,28 @@ func (m *Model) View() tea.View {
 		bottom = append(bottom, m.inputBox())
 	}
 	bottom = append(bottom, m.statusBar())
-	lines := strings.Split(strings.Join(bottom, "\n"), "\n")
-	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, max(m.width, 1), "")
-	}
-	if height := max(m.height, 1); len(lines) > height {
-		lines = lines[len(lines)-height:]
+	lower := strings.Split(strings.Join(bottom, "\n"), "\n")
+	for i, line := range lower {
+		lower[i] = ansi.Truncate(line, max(m.width, 1), "")
 	}
 
-	v := tea.NewView(strings.Join(lines, "\n"))
+	height := max(m.height, 1)
+	if len(lower) > height {
+		lower = lower[len(lower)-height:]
+	}
+	rows := height - len(lower)
+	m.scroll = min(m.scroll, m.log.maxScroll(rows))
+	window := m.log.window(rows, m.scroll)
+	m.winRows, m.winTop = rows, max(0, len(m.log.wrapped)-m.scroll-rows)
+	if !m.sel.empty() {
+		for y, line := range window {
+			window[y] = m.highlight(m.winTop+y, line)
+		}
+	}
+
+	v := tea.NewView(strings.Join(append(window, lower...), "\n"))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = m.windowTitle()
 	return v
 }
