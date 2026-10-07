@@ -157,6 +157,17 @@ func (m *Model) print(text string) {
 	}
 }
 
+// printDynamic imprime una entrada que se redibuja cuando cambia el ancho.
+func (m *Model) printDynamic(render func(width int) string) {
+	text, added := m.log.addDynamic(render)
+	if m.scroll > 0 {
+		m.scroll += added
+	}
+	if m.observe != nil {
+		m.observe(text)
+	}
+}
+
 func placeholderFor(c *chat.Chat) string {
 	switch {
 	case c.Session.PlanMode:

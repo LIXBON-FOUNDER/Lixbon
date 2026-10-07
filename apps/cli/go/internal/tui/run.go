@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 
 	"lixbon.com/cli/internal/api"
@@ -113,6 +114,54 @@ func reservedNames() []string {
 	return names
 }
 
+func dimAll(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = sDim2.Render(l)
+	}
+	return out
+}
+
+const (
+	logoGap     = 3
+	logoMargin  = 1
+	minLogoRoom = logoSize + 2*logoMargin
+)
+
+// headerLayout pone el texto junto al logo si cabe y, si no, debajo; en una
+// terminal más estrecha que el logo lo omite. Nunca parte una fila del logo.
+func headerLayout(logo, text []string, width int) string {
+	var lines []string
+	pad := strings.Repeat(" ", logoMargin)
+	fit := func(s string, room int) string { return ansi.Truncate(s, max(room, 1), glyphEllipsis) }
+	switch {
+	case width >= minLogoRoom+logoGap+40:
+		for i, row := range logo {
+			line := pad + row
+			if i < len(text) && text[i] != "" {
+				line += strings.Repeat(" ", logoGap) + fit(text[i], width-minLogoRoom-logoGap)
+			}
+			lines = append(lines, line)
+		}
+	case width >= minLogoRoom:
+		for _, row := range logo {
+			lines = append(lines, pad+row)
+		}
+		for _, l := range text {
+			if l != "" {
+				lines = append(lines, pad+fit(l, width-2*logoMargin))
+			}
+		}
+	default:
+		for _, l := range text {
+			if l != "" {
+				lines = append(lines, fit(l, width))
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m *Model) printHeader() {
 	c := m.chat
 	title := sBold.Render("Lixbon CLI") + sDim.Render(" v"+m.opts.Version)
@@ -125,22 +174,13 @@ func (m *Model) printHeader() {
 	}
 	info := sDim.Render(strings.Join(parts, " "+glyphSep+" "))
 	tips := []string{
-		"/ comandos  " + glyphSep + "  Enter envía",
+		"/ comandos  " + glyphSep + "  ! shell  " + glyphSep + "  Enter envía",
 		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",
 		"Mayús+Tab cambia de modo  " + glyphSep + "  RePág/AvPág desplazan",
 	}
-	text := []string{"", title, info, ""}
-	for _, t := range tips {
-		text = append(text, sDim2.Render(t))
-	}
+	text := append([]string{"", title, info, ""}, dimAll(tips)...)
 	m.print("")
-	for i, row := range renderLogo() {
-		line := " " + row
-		if i < len(text) && text[i] != "" {
-			line += "   " + text[i]
-		}
-		m.print(line)
-	}
+	m.printDynamic(func(width int) string { return headerLayout(renderLogo(), text, width) })
 	if c.Mode == chat.ModeAsk {
 		m.print(note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos."))
 	}
