@@ -155,3 +155,66 @@ def test_instalador_ignora_filas_con_datos_raros(cliente):
     script = installer_go.install_sh("https://lixbon.com", release)
     assert "rm -rf ~" not in script and "no-hex" not in script
     assert "darwin-amd64)" in script
+
+
+def _borrar(cliente, version, channel):
+    for platform in versions.CLI_PLATFORMS:
+        r = cliente.delete(f"/api/versions/{version}?channel={channel}&product=cli-{platform}", headers=ADMIN)
+        assert r.status_code == 200, r.text
+
+
+def _registrar(cliente, version, platform, n, channel):
+    r = cliente.post("/api/versions/register", headers=ADMIN, json=_registro(
+        platform, n, version=version, channel=channel, title=f"Lixbon CLI {version}",
+        changelog=[f"notas de {version}"],
+        download_url=f"{CLI_RELEASES_URL_PREFIX}cli-v{version}/lixbon-{version}-{platform}."
+                     f"{'zip' if platform.startswith('windows') else 'tar.gz'}"))
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("menor,mayor", [
+    ("2.3.0-go.9", "2.3.0-go.10"),
+    ("2.3.0-go.1", "2.3.0"),
+    ("2.3.0", "2.3.1-beta.1"),
+    ("2.3.0-beta.1", "2.3.0-go.1"),
+    ("2.9.0", "2.10.0"),
+])
+def test_orden_semver_de_versiones_del_cli(menor, mayor):
+    assert versions._semver_key(menor) < versions._semver_key(mayor)
+
+
+def test_etapas_estable_y_beta(cliente):
+    _borrar(cliente, VERSION, "beta")
+    for n, platform in enumerate(versions.CLI_PLATFORMS, start=1):
+        _registrar(cliente, "2.4.0", platform, 20 + n, "stable")
+    assert cliente.get("/api/updates/cli/stable").json()["version"] == "2.4.0"
+    assert cliente.get("/api/updates/cli/stable").json()["channel"] == "stable"
+    assert cliente.get("/api/updates/cli/beta").json()["version"] == "2.4.0"
+
+    for n, platform in enumerate(versions.CLI_PLATFORMS, start=1):
+        _registrar(cliente, "2.5.0-beta.1", platform, 40 + n, "beta")
+    beta = cliente.get("/api/updates/cli/beta").json()
+    assert beta["version"] == "2.5.0-beta.1" and beta["channel"] == "beta"
+    assert beta["changelog"] == ["notas de 2.5.0-beta.1"]
+    assert cliente.get("/api/updates/cli/stable").json()["version"] == "2.4.0"
+
+
+def test_instaladores_sirven_la_ultima_estable_aunque_haya_una_beta_mas_nueva(cliente):
+    sh = cliente.get("/install.sh").text
+    assert "lixbon-2.4.0-linux-amd64.tar.gz" in sh and "2.5.0-beta.1" not in sh
+    ps1 = cliente.get("/install.ps1").text
+    assert "lixbon-2.4.0-windows-amd64.zip" in ps1 and "2.5.0-beta.1" not in ps1
+
+
+def test_historial_publico_trae_etapa_y_notas(cliente):
+    filas = [v for v in cliente.get("/api/versions").json() if v["product"] == "cli-linux-amd64"]
+    por_version = {v["version"]: v for v in filas}
+    assert por_version["2.4.0"]["channel"] == "stable"
+    assert por_version["2.5.0-beta.1"]["channel"] == "beta"
+    assert por_version["2.5.0-beta.1"]["changelog"] == ["notas de 2.5.0-beta.1"]
+
+
+def test_sin_estable_los_instaladores_sirven_la_ultima_beta(cliente):
+    _borrar(cliente, "2.4.0", "stable")
+    assert cliente.get("/api/updates/cli/stable").status_code == 404
+    assert "lixbon-2.5.0-beta.1-linux-amd64.tar.gz" in cliente.get("/install.sh").text

@@ -57,8 +57,24 @@ func TestManifestURLFor(t *testing.T) {
 		"https://lixbon.com/v1/": "https://lixbon.com/api/updates/cli/beta",
 		"https://lixbon.com":     "https://lixbon.com/api/updates/cli/beta",
 	} {
-		if got := ManifestURLFor(in); got != want {
+		if got := ManifestURLFor(in, "2.3.0-go.1"); got != want {
 			t.Errorf("ManifestURLFor(%q) = %q; quería %q", in, got, want)
+		}
+	}
+}
+
+func TestChannelFollowsTheInstalledVersion(t *testing.T) {
+	for version, want := range map[string]string{
+		"2.4.0":        "stable",
+		"v2.4.0":       "stable",
+		"2.3.0-go.1":   "beta",
+		"2.5.0-beta.1": "beta",
+		"0.0.0-dev":    "beta",
+		"no-es-semver": "beta",
+	} {
+		got := ManifestURLFor("https://lixbon.com/v1", version)
+		if !strings.HasSuffix(got, "/"+want) {
+			t.Errorf("versión %q: %s; quería el canal %s", version, got, want)
 		}
 	}
 }

@@ -293,25 +293,26 @@ function Cli({ base }) {
       <p className="docs__lead">
         El CLI de lixbon te deja chatear con el clúster desde la terminal y trabajar
         con un agente que lee y edita tu proyecto, ejecuta comandos y hace commits.
-        Requiere Python 3.10 o superior.
+        Es un solo ejecutable: no necesitas Python ni instalar nada más.
       </p>
 
       <h2>Instalación en Windows</h2>
       <p>Abre <strong>PowerShell</strong> y ejecuta:</p>
       <CodeBlock code={`irm ${base}/install.ps1 | iex`} />
       <p>
-        Esto descarga el CLI en <code>%USERPROFILE%\\.lixbon</code> y agrega el comando{' '}
-        <code>lixbon</code> a tu PATH de usuario. Abre una terminal nueva para que el
-        comando quede disponible.
+        Esto descarga el ejecutable de la última versión, comprueba su SHA-256 contra el
+        del servidor y contra el <code>SHA256SUMS</code> de la release, lo deja en{' '}
+        <code>%USERPROFILE%\\.lixbon</code> y agrega el comando <code>lixbon</code> a tu
+        PATH de usuario. Abre una terminal nueva para que el comando quede disponible.
       </p>
 
       <h2>Instalación en Linux y macOS</h2>
       <p>Abre tu <strong>terminal</strong> y ejecuta:</p>
       <CodeBlock code={`curl -fsSL ${base}/install.sh | bash`} />
       <p>
-        Instala el CLI en <code>~/.lixbon</code> y crea el comando <code>lixbon</code>{' '}
-        en <code>~/.local/bin</code>. Si <code>lixbon</code> no se reconoce, añade esa
-        carpeta a tu PATH:
+        Descarga el ejecutable de la última versión, comprueba su SHA-256 y lo instala
+        como el comando <code>lixbon</code> en <code>~/.local/bin</code>. Si{' '}
+        <code>lixbon</code> no se reconoce, añade esa carpeta a tu PATH:
       </p>
       <CodeBlock code={`export PATH="$HOME/.local/bin:$PATH"`} />
 
@@ -386,13 +387,38 @@ function Cli({ base }) {
         formularios.
       </p>
 
+      <h2>Actualizar</h2>
+      <CodeBlock code={`lixbon update`} />
+      <p>
+        Descarga la última versión de tu etapa, la verifica y reemplaza el ejecutable;
+        si algo falla, conserva el que tienes. <code>lixbon update --check</code> solo
+        comprueba, <code>lixbon --update</code> es un alias y dentro del chat
+        funciona <code>/update</code>. Al abrir el chat, el CLI te avisa si hay una
+        versión nueva (como mucho una vez al día); se desactiva con{' '}
+        <code>"update_check": false</code> en <code>config.json</code> o con la variable{' '}
+        <code>LIXBON_NO_UPDATE_CHECK=1</code>. <code>lixbon --version</code> muestra la
+        versión instalada.
+      </p>
+
+      <h2>Etapas: beta y estable</h2>
+      <p>
+        Cada versión se publica en una etapa. Una versión sin sufijo (<code>2.4.0</code>)
+        es estable; con sufijo (<code>2.4.0-beta.1</code>, <code>2.3.0-go.2</code>) es beta.
+        Quien tiene una versión estable solo recibe estables; quien tiene una beta
+        recibe también las estables. Una instalación nueva trae la última estable y,
+        mientras no haya ninguna, la última beta. La página{' '}
+        <Link to="/apps">Aplicaciones</Link> muestra la etapa de cada versión, sus
+        novedades y el historial.
+      </p>
+
       <h2>Instalación manual</h2>
       <p>
-        Si prefieres no ejecutar el script, descarga{' '}
-        <a href={`${base}/install/client_cli.py`}>client_cli.py</a> y córrelo con Python:
+        Si prefieres no ejecutar el script, en <Link to="/apps">Aplicaciones</Link> están
+        los archivos de la release de cada sistema con su SHA-256 y los comandos para
+        verificarlos y copiar el ejecutable. Si venías del CLI antiguo de Python, vuelve
+        a ejecutar el comando de instalación una vez: su actualizador no llega a esta
+        versión.
       </p>
-      <CodeBlock code={`python client_cli.py init --base-url ${base}/v1`} />
-      <CodeBlock code={`python client_cli.py chat`} />
     </>
   );
 }
