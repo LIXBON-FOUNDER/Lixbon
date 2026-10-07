@@ -27,6 +27,8 @@ type Options struct {
 	Offline bool
 	// Warning se imprime bajo la cabecera (p. ej. que el servidor no publica modelos).
 	Warning string
+	// Notes se imprimen bajo la cabecera: por qué no hay sesión o proveedor y qué hacer.
+	Notes []string
 	// UpdateNotice consulta en segundo plano si hay una versión nueva; nil la desactiva.
 	UpdateNotice func(ctx context.Context) (version string, ok bool)
 }

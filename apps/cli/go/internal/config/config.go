@@ -99,6 +99,7 @@ func Load(path string) Config {
 		}
 		cfg.Extra[key] = value
 	}
+	cfg.adoptActiveProfile()
 	return cfg
 }
 
@@ -203,6 +204,7 @@ func marshalNoEscape(v any) ([]byte, error) {
 // Save escribe de forma atómica y con permisos de solo dueño: el archivo
 // contiene la API key.
 func Save(path string, cfg Config) error {
+	cfg.syncActiveProfile()
 	body, err := cfg.MarshalIndent()
 	if err != nil {
 		return err

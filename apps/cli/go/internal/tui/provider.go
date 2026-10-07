@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -15,7 +14,12 @@ import (
 	"lixbon.com/cli/internal/config"
 )
 
-const addProviderValue = "\x00add"
+const (
+	addProviderValue = "\x00add"
+	customValue      = "\x00custom"
+	// addArg empieza por «-», que un nombre de proveedor nunca puede tener.
+	addArg = "--add"
+)
 
 // gatewayOnly son los comandos que dependen de endpoints del gateway Lixbon.
 var gatewayOnly = []string{"usage", "nodes", "key", "login", "logout", "web", "visual", "remote"}
@@ -30,6 +34,13 @@ func providerHost(baseURL string) string {
 func (m *Model) cmdProvider(arg string) tea.Cmd {
 	if name, ok := strings.CutPrefix(arg, "key "); ok {
 		return m.cmdProviderKey(name)
+	}
+	if arg == addArg {
+		m.pickPresetToAdd()
+		return nil
+	}
+	if name, ok := strings.CutPrefix(arg, addArg+" "); ok {
+		return m.addPreset(name)
 	}
 	if arg != "" {
 		return m.switchProvider(strings.ToLower(arg))
@@ -51,18 +62,54 @@ func (m *Model) cmdProvider(arg string) tea.Cmd {
 		options = append(options, o)
 	}
 	options = append(options, option{Label: "Añadir proveedor…", Value: addProviderValue,
-		Desc: "LM Studio, Ollama, OpenAI, OpenRouter u otro servidor compatible"})
+		Desc: "OpenRouter, OpenAI, Kilo, LM Studio, Ollama u otro servidor compatible"})
 	p := newPicker("Proveedor de modelos", options, func(value string, cancelled bool) tea.Cmd {
 		switch {
 		case cancelled:
 			return nil
 		case value == addProviderValue:
-			return promptCmd("Nombre del proveedor (p. ej. "+strings.Join(config.PresetNames(), ", ")+")", m.askProviderURL)
+			return func() tea.Msg { return runCommandMsg{name: "provider", arg: addArg} }
 		}
 		return func() tea.Msg { return runCommandMsg{name: "provider", arg: value} }
 	})
 	p.cursor = cursor
 	m.picker = p
+	return nil
+}
+
+func (m *Model) pickPresetToAdd() {
+	saved := m.chat.Cfg.Profiles()
+	var options []option
+	for _, name := range config.PresetNames() {
+		if _, exists := saved[name]; exists {
+			continue
+		}
+		options = append(options, option{Label: name, Value: name, Desc: providerHost(config.Presets[name])})
+	}
+	options = append(options, option{Label: "otro…", Value: customValue, Desc: "servidor compatible con OpenAI: nombre y URL"})
+	m.picker = newPicker("Añadir proveedor", options, func(value string, cancelled bool) tea.Cmd {
+		switch {
+		case cancelled:
+			return nil
+		case value == customValue:
+			return promptCmd("Nombre del proveedor", m.askProviderURL)
+		}
+		return func() tea.Msg { return runCommandMsg{name: "provider", arg: addArg + " " + value} }
+	})
+}
+
+func (m *Model) addPreset(name string) tea.Cmd {
+	baseURL, ok := config.Presets[name]
+	if !ok {
+		m.print(errLine(fmt.Sprintf("No existe el preset «%s».", name)))
+		return nil
+	}
+	if slices.Contains(config.LocalPresets, name) {
+		return m.addProvider(name, baseURL, "")
+	}
+	m.promptFor("API key de «"+name+"» (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
+		return m.addProvider(name, baseURL, strings.TrimSpace(key))
+	})
 	return nil
 }
 
@@ -159,14 +206,8 @@ func (m *Model) connect(name string) tea.Cmd {
 	})
 }
 
-// serverProblem distingue un servidor que no responde de uno que responde con
-// error, p. ej. una URL base sin /v1: decir «¿está en marcha?» despista.
 func serverProblem(acc chat.Account, host string) string {
-	var apiErr *api.Error
-	if errors.As(acc.ModelsErr, &apiErr) && apiErr.Status > 0 {
-		return fmt.Sprintf("%s respondió HTTP %d al listar los modelos: %s. Revisa la URL base (suele terminar en /v1): lixbon profile set NOMBRE --base-url URL", host, apiErr.Status, apiErr.Message)
-	}
-	return "No se pudo contactar con " + host + ". ¿Está en marcha el servidor?"
+	return api.ExplainListError(acc.ModelsErr, host)
 }
 
 func (m *Model) offerNewKey(name string, generic bool) {
