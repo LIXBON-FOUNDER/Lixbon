@@ -92,7 +92,7 @@ el artefacto del CLI viven en `master`.
    ejecuta `go test`, compila seis binarios (linux, darwin y windows en amd64 y arm64,
    sin CGO), genera `SHA256SUMS` y publica una release *prerelease*.
 
-El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`POST /api/versions/register`, secreto `LIXBON_ADMIN_TOKEN`, variable `LIXBON_SERVER_URL`); a partir de ahí `/install.sh`, `/install.ps1`, `lixbon update` y `GET /api/updates/cli/beta` sirven ese binario. El workflow no se ha ejecutado todavía. Diseño en `.planning/DECISION-UPDATE-GO.md`.
+El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`POST /api/versions/register`, secreto `LIXBON_ADMIN_TOKEN`, variable `LIXBON_SERVER_URL`); a partir de ahí `/install.sh`, `/install.ps1`, `lixbon update` y `GET /api/updates/cli/beta` sirven ese binario. Primera ejecución: `cli-v2.3.0-go.0` (beta, 2026-10-07). Diseño en `.planning/DECISION-UPDATE-GO.md`.
 
 ### Móvil (`mobile-vX.Y.Z`)
 1. Subir `version` en `apps/mobile/package.json` (única fuente; `app.config.js` la lee).

@@ -108,7 +108,7 @@ Plans:
 
 **Plans**: TBD
 
-**Estado (2026-10-06)**: en curso. Decidido con el usuario (`DECISION-UPDATE-GO.md`): `SHA256SUMS` de la release más el digest del gateway, canal beta, sin puente Python y sin firma de binarios por ahora. Implementado con pruebas: `internal/update` (`lixbon update`, `/update`; probado en Windows con el `.exe` en uso), manifest y registro en el gateway, instaladores nuevos (`installer_go.py`) y `release-cli.yml` con job de registro. **Ninguna release publicada todavía**, sin Docker y sin prueba en Linux/macOS reales (issues #18, #20). Ver «Retirada de Python».
+**Estado (2026-10-06)**: en curso. Decidido con el usuario (`DECISION-UPDATE-GO.md`): `SHA256SUMS` de la release más el digest del gateway, canal beta, sin puente Python y sin firma de binarios por ahora. Implementado con pruebas: `internal/update` (`lixbon update`, `/update`; probado en Windows con el `.exe` en uso), manifest y registro en el gateway, instaladores nuevos (`installer_go.py`) y `release-cli.yml` con job de registro. **Publicada la beta `cli-v2.3.0-go.0`** (2026-10-07): seis binarios, manifest y `install.sh`/`install.ps1` de producción ya sirven el binario Go; `install.ps1` verificado en Windows 11. Sin Docker y sin prueba en Linux/macOS reales (issues #18, #20, #28). Ver «Retirada de Python» (#36).
 
 ## Acceptance Gates
 
@@ -131,7 +131,7 @@ Plans:
 
 ## Coverage
 
-31/31 requisitos v1 asignados exactamente una vez; 0 huérfanos y 0 duplicados. REQUIREMENTS.md contiene trazabilidad, estado real por requisito y fuentes: 20 hechos, 5 parciales, 6 pendientes. Phase 1 conserva sus cuatro planes sin ejecutar; fases 2–4 se implementaron sin planes GSD y 5 sigue como backlog en TASK-DIVISION.md.
+31/31 requisitos v1 asignados exactamente una vez; 0 huérfanos y 0 duplicados. REQUIREMENTS.md contiene trazabilidad, estado real por requisito y fuentes: 20 hechos, 9 parciales, 2 pendientes. Phase 1 conserva sus cuatro planes sin ejecutar; fases 2–4 se implementaron sin planes GSD y 5 sigue como backlog en TASK-DIVISION.md.
 
 ## Retirada de Python
 

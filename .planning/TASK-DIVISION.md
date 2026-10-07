@@ -13,7 +13,7 @@ Este documento es la propuesta original de despacho y se conserva como historial
 | 4 / terminal | `internal/terminal` | `internal/{chat,tui}` | En curso |
 | 4 / documentos | `internal/{documents,clipboard}` | `internal/{documents,clipboard}` | Implementada (#13, #14, #15) |
 | 4 / MCP y remoto | `internal/{mcp,remote}` | `internal/{mcp,remote}` | Implementada (#12, #17) |
-| 5 / binarios, actualización, cutover | `internal/update`, CI, instaladores | job `cli-go` en `ci.yml` y `release-cli.yml` (sin ejecutar) | Investigada en `DECISION-UPDATE-GO.md`; sin implementar (#18, #20) |
+| 5 / binarios, actualización, cutover | `internal/update`, CI, instaladores | job `cli-go` en `ci.yml` y `release-cli.yml` | Implementada y publicada como beta `cli-v2.3.0-go.0` (`DECISION-UPDATE-GO.md`); faltan Docker y Linux/macOS (#20, #28) |
 
 Lo que falta se rastrea en las issues #12–#25 de LIXBON-FOUNDER/Lixbon. Los roles Implementador/Validador/Revisor de las tablas siguientes no se aplicaron; la validación independiente de lo ya hecho es una tarea pendiente.
 
