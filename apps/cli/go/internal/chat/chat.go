@@ -590,7 +590,7 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 		defer stream.Close()
 
 		var text, reasoning strings.Builder
-		var calls []json.RawMessage
+		var assembler toolCallAssembler
 		var usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
@@ -613,7 +613,7 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 			case sse.ToolCalls:
 				var batch []json.RawMessage
 				if json.Unmarshal(ev.Value, &batch) == nil {
-					calls = append(calls, batch...)
+					assembler.add(batch)
 				}
 			case sse.Sources:
 				var found []map[string]any
@@ -624,6 +624,7 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 				_ = json.Unmarshal(ev.Value, &usage)
 			}
 		}
+		calls := assembler.calls()
 		c.registerUsage(usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, sentChars, sentImages, text.Len()+len(fmt.Sprint(calls)))
 		return agent.StreamResult{Text: text.String(), ToolCalls: calls, Reasoning: textutil.Strip(reasoning.String())}, nil
 	}
