@@ -1,65 +1,52 @@
-# Investigación: instalación y actualización del CLI Go
+# Decisión: instalación y actualización del CLI Go
 
-Fecha: 2026-10-06 · Issues #18 y #20 · Requisitos REL-01 a REL-04 · Estado: investigación; falta que el usuario elija las decisiones abiertas del final.
+Fecha: 2026-10-06 · Issues #18 y #20 · Requisitos REL-01 a REL-04 · Estado: aceptada por el usuario; cliente, gateway e instaladores implementados con pruebas, sin ninguna release publicada todavía.
 
-## Qué existe hoy en Python
+## Decisiones del usuario
 
-| Pieza | Dónde | Qué hace |
+1. **Autenticidad**: `SHA256SUMS` de la release **más** el digest que sirve el gateway. Se instala solo si el archivo coincide con los dos.
+2. **Canal**: todo es beta por ahora. El gateway publica el canal `beta` y las releases salen como *prerelease*.
+3. **Python**: no habrá puente ni coexistencia. El objetivo es pasar todo a Go y eliminar el código y las dependencias de Python. Quien tenga el CLI Python reinstala con el mismo comando de siempre (`curl … | bash` / `irm … | iex`), que ahora instala el binario.
+4. **Firma del sistema operativo**: de momento no hay firmas digitales de binarios. La instalación sigue siendo un comando desde la página. Se resuelve más adelante.
+
+## Qué había en Python (contrato que se sustituye)
+
+| Pieza | Dónde | Qué hacía |
 |---|---|---|
-| Descarga del CLI | `core/gateway/routers/installer.py` → `GET /install/client_cli.py` | Sirve `apps/cli/client_cli.py` (artefacto generado por `build.py`). El `Dockerfile` lo copia a la imagen: cada versión nueva del CLI exige desplegar el gateway (merge a `master`). |
-| Instaladores | `installer.py` → `GET /install.sh` y `GET /install.ps1` | Scripts generados en una cadena de Python. Bajan `client_cli.py` a `~/.lixbon/`, ejecutan `init --base-url`, crean el lanzador (`~/.local/bin/lixbon` que llama a `python3`, o `~/.lixbon/lixbon.cmd` que llama a `python`) y editan el PATH. **Exigen Python instalado, no verifican ningún hash.** |
-| `lixbon update` | `apps/cli/lixbon_cli/cli.py` (`download_update`) | Descarga `/install/client_cli.py?ts=…` (solo HTTPS, salvo localhost), comprueba que `compile()` funcione y que el texto contenga «lixbon», compara el SHA-256 con el archivo instalado, sobrescribe y se relanza. **No compara números de versión, no verifica firma, no hace rollback.** |
-| Manifest del CLI | `core/gateway/routers/versions.py` → `GET /api/updates/cli/{channel}` | **Nadie lo consume** (ni `client_cli.py` ni la web) y devuelve la última versión del producto `desktop`, no la de un CLI: `VALID_PRODUCTS` no tiene un producto CLI. Su docstring («consumido por `client_cli.py --update`») y `docs/ESTADO_ACTUAL.md` línea 421 lo describen mal. |
-| Almacenamiento de releases | `versions.py`, `core/storage/r2.py`, tabla `app_versions` | Binarios en un bucket privado de Cloudflare R2; la BD guarda `r2:<key>` y `checksum_sha256`; `GET /api/updates/download/{version}/{channel}` redirige a una URL prefirmada. Subida con token admin (`POST /api/versions/upload`), que usan `tauri.yml` y `mobile.yml`. Clave única `(product, version)`. |
-| Web y documentación | `DownloadsPage.jsx`, `docsContent.*.jsx`, `guiasContent.*.jsx`, `README.md`, `apps/cli/README.md` | Publican `curl -fsSL …/install.sh \| bash` e `irm …/install.ps1 \| iex`, y la descarga manual de `client_cli.py`. |
+| Descarga del CLI | `routers/installer.py` → `GET /install/client_cli.py` | Servía `apps/cli/client_cli.py`; el `Dockerfile` lo copia a la imagen. |
+| Instaladores | `installer.py` → `GET /install.sh`, `GET /install.ps1` | Bajaban `client_cli.py`, creaban un lanzador que llama a `python`, sin verificar ningún hash. |
+| `lixbon update` (Python) | `lixbon_cli/cli.py` (`download_update`) | Descargaba `/install/client_cli.py`, comprobaba que compilara y sobrescribía. Sin versión, firma ni rollback. |
+| Manifest del CLI | `routers/versions.py` → `/api/updates/cli/{channel}` | Nadie lo consumía y devolvía la versión del producto `desktop`. |
 
-Lo que ya hay del lado Go: `.github/workflows/release-cli.yml` (commit 13a2fb9). Con una etiqueta `cli-v<versión>` compila seis destinos (linux, darwin y windows en amd64 y arm64) con `CGO_ENABLED=0`, comprueba que la etiqueta coincida con `config.Version`, empaqueta (`lixbon-<versión>-<os>-<arch>.tar.gz`, `.zip` en Windows), genera `SHA256SUMS` y crea una release marcada como *prerelease*. **No se ha ejecutado nunca**: no hay ninguna release `cli-v*` en GitHub (la etiqueta `cli-v2.2.0` es del CLI Python y no tiene release).
+## Diseño implementado
 
-## Restricciones que se desprenden
+**Dónde viven los binarios y los digest.** Los binarios están en GitHub Releases (`cli-v<versión>`, assets `lixbon-<versión>-<os>-<arch>.tar.gz|.zip`, más `SHA256SUMS`), producidos por `release-cli.yml`. El gateway guarda, por plataforma, la URL y el SHA-256 en la tabla `app_versions` con productos `cli-<os>-<arch>` (clave única `(producto, versión)`, canal `beta`). No hay almacenamiento propio: el gateway no sirve binarios.
 
-1. **Un cliente Python solo puede recibir código por `/install/client_cli.py`** y solo lo acepta si es Python válido. Para pasar a un usuario de Python a Go hace falta publicar una última versión «puente» de `client_cli.py` cuyo `update` descargue el binario, lo verifique, lo instale y reescriba el lanzador. Ninguna de las dos opciones evita esto: el gateway se toca igualmente.
-2. **`client_cli.py` no se puede borrar del gateway al retirar Python**: los clientes antiguos seguirán consultándolo. Lo que se retira es el código fuente (`lixbon_cli/`, `build.py`, pruebas); el artefacto congelado (o un puente mínimo) debe seguir sirviéndose durante un periodo largo. Esto corrige el paso 6 de «Retirada de Python» del ROADMAP.
-3. **`install.sh` e `install.ps1` están dentro de `installer.py`**: cambiar lo que instalan es un despliegue del gateway, igual que hoy. La URL pública (`lixbon.com/install.sh`) no cambia.
-4. **GitHub `releases/latest` no sirve**: ignora borradores y *prereleases*, y el repositorio ya tiene releases de `desktop-v*` y `mobile-v*` (borradores). El cliente tiene que listar las releases y filtrar por el prefijo de etiqueta `cli-v`, o resolver la etiqueta por otro medio.
-5. El repositorio `LIXBON-FOUNDER/Lixbon` es **público** (`gh repo view`), así que no hace falta autenticación para descargar de las releases; si se hiciera privado habría que reabrir la opción.
-6. **`SHA256SUMS` dentro de la misma release solo protege de corrupción**: quien pueda reemplazar el archivo puede reemplazar también la suma. REL-02 pide «firma o digest esperado autenticado», así que el digest o la firma tienen que venir de otro origen o de una clave que el cliente ya conozca.
-7. **Windows con el ejecutable en uso**: Windows permite renombrar un `.exe` en ejecución pero no borrarlo ni sobrescribirlo. El reemplazo es: renombrar `lixbon.exe` a `lixbon.exe.old`, escribir el nuevo, y borrar `.old` en el siguiente arranque; si falla, volver a renombrar.
-8. **Configuración y sesiones**: Go ya lee y escribe `~/.lixbon/config.json` y `~/.lixbon/sessions/` con el formato de Python, así que el cambio de cliente no migra datos.
+**Registro.** El job `registrar` de `release-cli.yml` llama a `POST /api/versions/register` (token admin, secreto `LIXBON_ADMIN_TOKEN`) por cada archivo. El gateway valida producto, canal, versión, digest hexadecimal y que la URL empiece por `CLI_RELEASES_URL_PREFIX` (por defecto las releases de `LIXBON-FOUNDER/Lixbon`).
 
-## Opciones
+**Manifest.** `GET /api/updates/cli/{channel}` devuelve `{version, channel, title, release_date, changelog, assets: {"<os>-<arch>": {url, sha256}}}`. La versión es la de la fila registrada más reciente y solo incluye los binarios de esa versión.
 
-| | A. GitHub Releases como fuente | B. El gateway como intermediario | C. Híbrida (recomendada) |
-|---|---|---|---|
-| Binarios | Assets de la release `cli-v*` | R2 (o redirección a GitHub) detrás de `/api/updates/cli/...` | Assets de GitHub |
-| Metadatos y digest | `SHA256SUMS` de la misma release | Manifest del gateway con digest por plataforma | Manifest del gateway (`version`, URL por `os-arch`, `sha256`) **y** URL de descarga en GitHub |
-| Backend | Solo `installer.py` y el puente de `client_cli.py` | Producto CLI nuevo, manifest por plataforma, endpoint de registro desde CI, firma de URLs | `installer.py`, el puente, un manifest por plataforma y un endpoint que registre el digest desde CI |
-| Control de acceso por plan, cambio de almacén | No | Sí | Posible más adelante |
-| Autenticidad (restricción 6) | No cubierta con solo `SHA256SUMS` | Digest servido por TLS desde el gateway | Digest del gateway + bytes de GitHub: hay que comprometer los dos orígenes |
-| Se puede probar sin backend | Sí, entero | No | El cliente sí (fuente intercambiable); el manifest, con el gateway local |
-| Riesgo | Depende de GitHub; la suma no autentica | Más trabajo; el gateway sirve binarios o redirige | Dos piezas que mantener coherentes |
+**Cliente (`apps/cli/go/internal/update`).** `lixbon update [--check]` y `/update`:
 
-La corrección más importante a lo planteado antes: la opción A no es «sin backend» (restricciones 1 y 3), y la B es menos costosa de lo que parecía porque R2, `checksum_sha256`, la subida con token admin desde CI y la redirección prefirmada ya existen para el desktop y el móvil.
+1. Pide el manifest (`<gateway>/api/updates/cli/beta`; con un proveedor genérico usa `lixbon.com`; `LIXBON_UPDATE_URL` lo sustituye para pruebas). Solo HTTPS (localhost exento).
+2. Compara versiones con semver (`2.3.0-go.0` es anterior a `2.3.0`).
+3. Descarga el archivo de la URL del manifest, calcula su SHA-256 y lo contrasta con el del gateway **y** con la línea correspondiente del `SHA256SUMS` de la misma release. Si cualquiera falla, no instala nada.
+4. Extrae el binario de la plataforma (`.tar.gz` o `.zip`, con límites de tamaño), lo deja junto al ejecutable actual y comprueba que arranca y que `status` informa la versión esperada.
+5. Reemplaza el ejecutable: en Linux y macOS con un `rename` atómico; en Windows renombra el `.exe` en uso a `lixbon.exe.old`, instala el nuevo y restaura el anterior si falla. El arranque siguiente borra el `.old` (`update.CleanupOld`).
 
-## Recomendación: C, por fases, con la fuente detrás de una interfaz
+**Instaladores.** `routers/installer_go.py` genera `install.sh` e `install.ps1` con la tabla de binarios (URL y digest) embebida por el gateway. Detectan SO y arquitectura, descargan, verifican contra el digest embebido y contra `SHA256SUMS`, instalan en `~/.local/bin/lixbon` (Linux y macOS) o `%USERPROFILE%\.lixbon\lixbon.exe` (Windows, que ya estaba en el PATH), retiran el lanzador y `client_cli.py` antiguos y ejecutan `lixbon init --base-url`. Las URL públicas no cambian.
 
-1. **Cliente Go (`internal/update`)**, probable con un servidor de releases falso, sin depender del backend: `Source` intercambiable (GitHub Releases filtrando `cli-v`; manifest del gateway después), selección por `runtime.GOOS`/`GOARCH`, comparación semver (`2.3.0-go.0` es anterior a `2.3.0`), descarga a temporal, verificación del SHA-256 esperado, extracción, reemplazo atómico con rollback y la mecánica de Windows de la restricción 7. Comandos `lixbon update` y `/update`. Cubre las casillas de #18 que no dependen del gateway.
-2. **Primera release real** de `release-cli.yml` con una etiqueta de prueba, para comprobar la matriz de seis destinos y los nombres de los assets antes de escribir los instaladores.
-3. **Gateway**: manifest por plataforma en `/api/updates/cli/{channel}` (corrigiendo que hoy devuelva el desktop) y un endpoint de registro que `release-cli.yml` llame con el token admin tras publicar. Fuera de este paso, el cliente funciona con la opción A.
-4. **Instaladores** `install.sh` y `install.ps1` nuevos en `installer.py`: detectan SO y arquitectura, descargan el archivo, verifican el digest (`sha256sum`/`shasum -a 256`, `Get-FileHash`), instalan en `~/.lixbon/bin`, enlazan `~/.local/bin/lixbon` o añaden el directorio al PATH de usuario, y retiran el lanzador de Python. Mismas URL públicas.
-5. **Puente Python** (`client_cli.py` final): su `update` detecta plataforma, descarga y verifica el binario, lo instala, reescribe el lanzador y conserva `client_cli.py` como respaldo para volver atrás.
-6. **Docker**: una imagen que incluya el binario es independiente del update; se decide en #20.
+**Transición hasta la primera release.** Mientras no haya ninguna release del CLI registrada, `install.sh` e `install.ps1` siguen sirviendo el instalador de Python, para no dejar la página sin instalador al desplegar el gateway antes de publicar. Ese camino y `/install/client_cli.py` se borran en la retirada de Python.
 
-Pruebas necesarias (de #18): digest incorrecto, plataforma errónea, corte de red a mitad de descarga, archivo truncado, Windows con el ejecutable en uso, y comprobar que tras cada fallo el binario anterior sigue funcionando.
+## Verificado
 
-## Decisiones abiertas para el usuario
+- `internal/update`: pruebas con un servidor de releases falso (digest del gateway distinto, `SHA256SUMS` distinto o sin el archivo, archivo alterado, sin binario, corrupto, error HTTP, descarga cortada, verificación fallida, restauración en Windows, HTTP no local); en todos los casos el binario actual queda intacto y sin archivos sobrantes.
+- Prueba real en Windows 11: un `lixbon.exe` 2.3.0-go.0 en ejecución se actualiza solo a 2.4.0-go.0 contra un servidor local; queda el `.old` y el arranque siguiente lo borra.
+- Gateway: `core/gateway/test_cli_release.py` (registro con y sin permisos, datos inválidos, manifest, instaladores con digest embebido).
 
-1. **Autenticidad**: (a) quedarse con `SHA256SUMS` de la release (integridad, no autenticidad), (b) digest servido por el gateway (opción C), o (c) además firmar con una clave cuya parte pública va dentro del binario. Recomendación: (b); (c) solo si se quiere sobrevivir al compromiso de ambos orígenes.
-2. **Canales**: `release-cli.yml` publica siempre como *prerelease*. Hay que decidir cuándo deja de serlo y si habrá canal `beta`/`stable` como en el desktop (`-beta`/`-rc` en la versión).
-3. **Puente Python**: cuánto tiempo se sigue sirviendo `/install/client_cli.py` después de que Go sea el cliente por defecto, y si el instalador nuevo se activa para todos a la vez o con una variable (`LIXBON_CLIENT=go`) durante la coexistencia.
-4. **Firma de los binarios del sistema operativo**: macOS (Gatekeeper, notarización) y Windows (SmartScreen) no están probados. Los binarios descargados por `curl` o por el propio cliente no llevan la marca de cuarentena, pero hay que confirmarlo en máquinas reales (#22); firmar para el sistema operativo se decide aparte.
+## Pendiente
 
-## Consecuencias
-
-- Se actualizan #18 y #20 con este reparto, y REL-02/03/04 apuntan a este documento.
-- El paso 6 de «Retirada de Python» pasa a conservar el artefacto congelado de `client_cli.py` en el gateway.
-- Nada de esto cambia la lógica de inferencia, y no se publica ni se sustituye Python sin la aceptación de REL-05.
+- Ejecutar `release-cli.yml` con una etiqueta real (`cli-v2.3.0-go.0`), comprobar que los seis destinos compilan y se registran, y probar `install.sh`/`install.ps1` y `lixbon update` contra esa release (#22 para Linux y macOS).
+- Imagen Docker con el binario (#20).
+- Firma de binarios para macOS (Gatekeeper) y Windows (SmartScreen); los archivos descargados por `curl` o por el propio cliente no llevan la marca de cuarentena, pero hay que confirmarlo en máquinas reales.
+- Retirada de Python: borrar `/install/client_cli.py`, `CLI_SOURCE_PATH`, la copia del `Dockerfile`, el instalador de respaldo y `apps/cli/lixbon_cli` (ver ROADMAP, «Retirada de Python»). Los clientes Python existentes no pueden actualizarse solos a Go: reinstalan con el comando de la página.

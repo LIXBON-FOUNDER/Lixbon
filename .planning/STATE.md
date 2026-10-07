@@ -16,7 +16,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-06)
 
 **Core value:** El usuario instala y ejecuta un binario CLI soportado sin Python ni pip, conservando los contratos funcionales del cliente existente.
-**Current focus:** completar Phase 4 (documentos, remoto, `setup`/`usage`/`update`) y abrir Phase 5 (distribución y retirada de Python). Phase 1 sigue abierta en sus entregables de aceptación.
+**Current focus:** publicar la primera release `cli-v*` y comprobar instaladores y `update` contra ella (Phase 5), validar con gateway, modelos y terminales reales (#21, #22) y retirar Python. Phase 1 sigue abierta en sus entregables de aceptación.
 
 ## Current Position
 
@@ -27,10 +27,10 @@ Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión
 | 1. Contratos y línea base | Parcial: referencia Python y 6 corpus portables hechos; faltan acta, matriz de destinos, mediciones y harness 01-01 | `apps/cli/validation/` |
 | 2. Chat usable y cancelable | Implementada; falta validar contra un gateway real y completar CHAT-02 (login) | pruebas `internal/{sse,api,config,cli}` |
 | 3. Agente, herramientas y estado | Implementada; falta verificación en terminal real y con modelos reales | pruebas `internal/{agent,tools,process,history,session,workspace}` |
-| 4. Terminal y conexiones | En curso: TUI, MCP, adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage` y 40 de 41 comandos `/` listos (más `/provider` y `/mouse`); falta `/update` | `internal/{tui,chat,mcp,documents,clipboard,remote}` |
-| 5. Distribución y sustitución | Iniciada solo en investigación: `release-cli.yml` compila seis destinos pero nunca se ejecutó; sin `update`, instaladores Go ni Docker | `.github/workflows/release-cli.yml`, `DECISION-UPDATE-GO.md` |
+| 4. Terminal y conexiones | En curso: TUI, MCP, adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage`, `update` y los 41 comandos `/` listos (más `/provider` y `/mouse`) | `internal/{tui,chat,mcp,documents,clipboard,remote}` |
+| 5. Distribución y sustitución | En curso: `lixbon update`, /update, instaladores del gateway y manifest implementados con pruebas; `release-cli.yml` sin ejecutar (ninguna release publicada), sin Docker | `internal/update`, `core/gateway/routers/installer_go.py`, `DECISION-UPDATE-GO.md` |
 
-Requisitos v1: **20 hechos, 5 parciales, 6 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
+Requisitos v1: **20 hechos, 9 parciales, 2 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
 
 Last activity: 2026-10-06 — investigación de instalación y actualización (`DECISION-UPDATE-GO.md`); workflow de release de binarios; `!comando`, cabecera adaptable al ancho y `lixbon.exe~` fuera de git; documentos alineados con el código.
 
@@ -67,7 +67,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - 2026-10-06: perfiles de proveedor (`lixbon profile`, `/provider`) y modo genérico compatible con OpenAI. `/provider` es un comando solo de Go, fuera del catálogo contrastado con Python. Una suscripción de ChatGPT o Claude no es una API key y se descarta como vía.
 - 2026-10-06: tras el merge del upstream (`/visual` sobre MCP), `state_corpus.json` se regeneró y el catálogo Go se sincronizó.
 - 2026-10-06: cliente MCP en `internal/mcp` (stdio y Streamable HTTP, paginación, cancelación con `notifications/cancelled`, cierre acotado que mata el árbol, redirecciones solo al mismo origen) y `/mcp`. Paridad con Python comprobada con `mcp_corpus.json`; probado en Windows con `@modelcontextprotocol/server-filesystem` real y sin procesos huérfanos. Desviaciones: respalda `structuredContent`, añade `type: object` a schemas sin tipo, desambigua nombres repetidos y limita el nombre a 64 caracteres (APIs OpenAI), y arranca los servidores en paralelo con un límite de 60 s (la primera ejecución de `npx` descarga el paquete). El servidor `lixbon` (Visuals) se añade solo con cuenta Lixbon y `lixbon_mcp` no desactivado.
-- 2026-10-06: investigación de instalación y actualización (`DECISION-UPDATE-GO.md`). Hallazgos que cambian el plan: la opción «solo GitHub Releases» no es independiente del gateway (el puente Python y los instaladores viven en `installer.py`), `client_cli.py` debe seguir sirviéndose tras retirar Python, y `/api/updates/cli/{channel}` hoy devuelve la versión del desktop. Recomendación: binarios en GitHub, digest en el gateway.
+- 2026-10-06: instalación y actualización decididas con el usuario (`DECISION-UPDATE-GO.md`): `SHA256SUMS` de la release más el digest del gateway, canal beta, sin puente ni coexistencia con Python (se reinstala con el comando de la página) y sin firma de binarios por ahora. Implementado: `internal/update` (`lixbon update`, `/update`), manifest `GET /api/updates/cli/{channel}`, `POST /api/versions/register`, instaladores `installer_go.py` y el job `registrar` de `release-cli.yml`.
 - 2026-10-06: `!comando` ejecuta un comando de shell desde la caja, el modo ask del proveedor genérico lleva su propio prompt, y la cabecera, el logo y las barras se adaptan al ancho de la terminal.
 - Pruebas que dependían del sistema operativo (LF/CR del emulador, enlaces simbólicos en `/workspace`, orden de recorrido de Python en el corpus de workspace) se corrigieron al estrenar el CI de Go.
 
@@ -80,7 +80,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 
 - #13 a #17 y #19 (menos `ui-demo`) implementados en local; falta validarlos con la app móvil, modelos y un gateway reales
-- #18 `update` y `/update` · #20 distribución, instaladores y Docker: investigados en `DECISION-UPDATE-GO.md` (opción híbrida: binarios en GitHub Releases, digest en el gateway, puente Python); esperan las cuatro decisiones abiertas del documento
+- #18 `update` y `/update`: implementado y probado (Windows real con el `.exe` en uso); falta Linux/macOS y una release real · #20 distribución: workflow, registro e instaladores hechos; falta publicar la primera release, la imagen Docker y la prueba de instalación real por plataforma
 - #21 validación contra modelos y gateway reales · #22 terminales reales · #25 cierre de Phase 1
 - #23 resuelta en `cli` (c334599); falta fusionar a `master` · #24 en curso con esta actualización
 - Retirada de Python: ver «Retirada de Python» en ROADMAP.md.
@@ -104,5 +104,5 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 ## Session Continuity
 
 Last session: 2026-10-06
-Stopped at: paridad funcional hecha salvo `update`. Siguiente: que el usuario decida las cuatro cuestiones de `DECISION-UPDATE-GO.md`; después `internal/update` con un servidor de releases falso (#18), primera release `cli-v*` de prueba y nuevos instaladores (#20), para poder retirar Python.
+Stopped at: paridad funcional implementada, incluido `update`. Siguiente: etiquetar `cli-v2.3.0-go.0` (con `LIXBON_ADMIN_TOKEN` en los secretos y el gateway desplegado), probar instaladores y `lixbon update` contra esa release, Docker (#20), validación real (#21, #22) y la retirada de Python.
 Resume file: None

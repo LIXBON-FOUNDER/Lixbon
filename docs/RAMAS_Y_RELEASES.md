@@ -92,8 +92,7 @@ el artefacto del CLI viven en `master`.
    ejecuta `go test`, compila seis binarios (linux, darwin y windows en amd64 y arm64,
    sin CGO), genera `SHA256SUMS` y publica una release *prerelease*.
 
-Aún no hay instaladores ni `update` que consuman estas releases: ver
-`.planning/DECISION-UPDATE-GO.md`. El workflow no se ha ejecutado todavía.
+El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`POST /api/versions/register`, secreto `LIXBON_ADMIN_TOKEN`, variable `LIXBON_SERVER_URL`); a partir de ahí `/install.sh`, `/install.ps1`, `lixbon update` y `GET /api/updates/cli/beta` sirven ese binario. El workflow no se ha ejecutado todavía. Diseño en `.planning/DECISION-UPDATE-GO.md`.
 
 ### Móvil (`mobile-vX.Y.Z`)
 1. Subir `version` en `apps/mobile/package.json` (única fuente; `app.config.js` la lee).
@@ -109,7 +108,7 @@ Aún no hay instaladores ni `update` que consuman estas releases: ver
 | `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI (`apps/cli/tests`) |
 | `tauri.yml` | tag `desktop-v*`, manual | Build + release del MSI |
 | `mobile.yml` | tag `mobile-v*`, manual | Build + release del APK |
-| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` |
+| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway |
 
 Los tests del gateway (`python -m pytest core`) se ejecutan en local por ahora:
 varios módulos comparten estado de BD y fallan al correr juntos; cuando eso se

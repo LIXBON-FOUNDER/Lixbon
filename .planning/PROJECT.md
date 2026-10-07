@@ -22,7 +22,7 @@ Nada está **aceptado**: falta evidencia con gateway autenticado, modelos reales
 - [~] Entregar chat --once Go cancelable en los destinos acordados (implementado, incluido `setup`; falta validarlo contra un gateway real).
 - [x] Conservar agente, 20 herramientas, aprobaciones, workspace y JSON local (implementado con pruebas, incluido PDF/Word en `read_file`).
 - [~] Alcanzar paridad de terminal, documentos, MCP y control remoto (implementado salvo `update`; falta validar con la app móvil, modelos, gateway y terminales reales).
-- [ ] Distribuir, actualizar y recuperar binarios con autenticidad y aceptación de sustitución (investigado en `DECISION-UPDATE-GO.md`; sin implementar).
+- [~] Distribuir, actualizar y recuperar binarios con autenticidad y aceptación de sustitución (`update`, instaladores y manifest implementados; falta publicar la primera release y Docker, ver `DECISION-UPDATE-GO.md`).
 - [ ] Retirar la base Python del CLI y reorganizar el repositorio una vez aceptada la paridad (ver «Retirada de Python» en ROADMAP.md).
 
 El detalle y la trazabilidad están en REQUIREMENTS.md.

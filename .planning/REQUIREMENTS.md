@@ -7,7 +7,7 @@
 
 Alcance de la primera sustitución aceptada. Derivado de la evaluación conservada y de la decisión posterior del usuario.
 
-Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en Linux, macOS y Windows); `[~]` parcial; `[ ]` pendiente. Una casilla marcada **no significa aceptada**: la aceptación formal (REL-05) exige además evidencia con gateway real, terminales físicas, móvil y release por plataforma. Recuento: 20 hechos, 5 parciales, 6 pendientes.
+Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en Linux, macOS y Windows); `[~]` parcial; `[ ]` pendiente. Una casilla marcada **no significa aceptada**: la aceptación formal (REL-05) exige además evidencia con gateway real, terminales físicas, móvil y release por plataforma. Recuento: 20 hechos, 9 parciales, 2 pendientes.
 
 ### Contratos y línea base
 
@@ -49,10 +49,10 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 
 ### Distribución y sustitución
 
-- [ ] **REL-01**: El usuario puede descargar e instalar artefactos por cada OS/arquitectura acordado y ejecutar el núcleo CLI sin Python/pip; CI y aceptación de instalación real cubren cada destino, y helpers opcionales están declarados.
-- [ ] **REL-02**: El usuario puede verificar autenticidad/integridad de release y update mediante firma o digest esperado autenticado, rechazando artefactos alterados o de plataforma incorrecta antes de reemplazar.
-- [ ] **REL-03**: El usuario puede actualizar desde Python y entre binarios mediante descarga temporal y reemplazo recuperable, incluido ejecutable Windows en uso; descarga o reemplazo fallido conserva una versión usable y rollback.
-- [ ] **REL-04**: El usuario recibe el artefacto correcto desde instaladores/distribución del gateway y Docker, preservando transición desde client_cli.py sin cambiar lógica de inferencia.
+- [~] **REL-01**: El usuario puede descargar e instalar artefactos por cada OS/arquitectura acordado y ejecutar el núcleo CLI sin Python/pip; CI y aceptación de instalación real cubren cada destino, y helpers opcionales están declarados.
+- [~] **REL-02**: El usuario puede verificar autenticidad/integridad de release y update mediante firma o digest esperado autenticado, rechazando artefactos alterados o de plataforma incorrecta antes de reemplazar.
+- [~] **REL-03**: El usuario puede actualizar entre binarios mediante descarga temporal y reemplazo recuperable, incluido ejecutable Windows en uso; descarga o reemplazo fallido conserva una versión usable y rollback.
+- [~] **REL-04**: El usuario recibe el artefacto correcto desde instaladores/distribución del gateway y Docker, sin cambiar lógica de inferencia; quien tenga el CLI Python reinstala con el mismo comando de la página (decisión del usuario: sin puente ni coexistencia).
 - [ ] **REL-05**: El usuario puede aceptar la sustitución con matriz completa de paridad y evidencia por plataforma/terminal/MCP/remoto/documentos y mediciones equivalentes; Python permanece disponible como referencia y rollback hasta dicha aceptación.
 
 ## v2 Requirements
@@ -92,17 +92,17 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 | STATE-02 | Phase 3 | Hecho | `internal/session`; candado, índice reconstruible, retención de 200 |
 | BOUND-01 | Phase 3 | Hecho | Lecturas, búsqueda y shell acotados |
 | BOUND-02 | Phase 3 | Hecho | `internal/process`; mata el árbol en Windows y Unix |
-| TERM-01 | Phase 4 | Parcial | TUI, `setup`, `usage` y 40/41 comandos `/` (falta `/update`, #18); `ui-demo` descartado; sin matriz de terminales (#22) |
+| TERM-01 | Phase 4 | Parcial | TUI, `setup`, `usage` y los 41 comandos `/` (incluido `/update`); `ui-demo` descartado; sin matriz de terminales (#22) |
 | TERM-02 | Phase 4 | Parcial | Pantalla completa con scroll propio; sin presupuestos medidos (#22) |
 | DOC-01 | Phase 4 | Hecho | `internal/documents` con `documents_corpus.json` (oráculo Python); PDF con `ledongthuc/pdf` (`DECISION-PDF-GO.md`). Solo probado con PDF de Edge y sintéticos; los de Word y LaTeX no (#14) |
 | DOC-02 | Phase 4 | Hecho | `/copy`, `/paste` (probado con el portapapeles real de Windows; Linux y macOS solo con helpers simulados) y `/visual` sobre el MCP de Lixbon (servidor simulado) |
 | MCP-01 | Phase 4 | Hecho | `internal/mcp` (stdio y HTTP) con `mcp_corpus.json` y servidor real en Windows; falta probar en Linux/macOS con un servidor real |
 | REMOTE-01 | Phase 4 | Hecho | `internal/remote` y `/remote` probados con un relay simulado (en memoria y por HTTP); falta validar con la app móvil y el gateway reales (#17, #21) |
 | CONNECT-01 | Phase 4 | Hecho | Aprobaciones y cierre acotado de MCP y de `/remote` (sin goroutines ni conexiones abiertas) |
-| REL-01 | Phase 5 | Pendiente | CI compila y prueba; `release-cli.yml` define seis destinos pero nunca se ejecutó, sin artefactos publicados (#20) |
-| REL-02 | Phase 5 | Pendiente | Sin firma ni digest autenticado; opciones en `DECISION-UPDATE-GO.md` (#18) |
-| REL-03 | Phase 5 | Pendiente | `update` no disponible; diseño del reemplazo en Windows y del puente Python en `DECISION-UPDATE-GO.md` (#18) |
-| REL-04 | Phase 5 | Pendiente | Instaladores y Docker siguen sirviendo `client_cli.py` (#20); el cambio vive en `installer.py` |
+| REL-01 | Phase 5 | Parcial | `release-cli.yml` (seis destinos, `SHA256SUMS`, registro en el gateway) e instaladores nuevos escritos y probados con servidores falsos; **ninguna release publicada**, sin prueba de instalación real por plataforma ni Docker (#20) |
+| REL-02 | Phase 5 | Parcial | `internal/update` instala solo si el archivo coincide con el digest del gateway y con `SHA256SUMS` (pruebas de manipulación en `update_test.go`); sin firma de binarios del sistema operativo, decisión del usuario (#18) |
+| REL-03 | Phase 5 | Parcial | `lixbon update` y `/update` con reemplazo atómico y restauración; probado en Windows con el `.exe` en uso contra un servidor local. Falta Linux/macOS reales y una release real; el update desde Python se descartó (reinstalación) (#18) |
+| REL-04 | Phase 5 | Parcial | `install.sh`/`install.ps1` del gateway (`installer_go.py`) con digest embebido y `GET /api/updates/cli/beta`; con una release registrada sustituyen al instalador Python. Docker pendiente (#20) |
 | REL-05 | Phase 5 | Pendiente | Requiere todo lo anterior y aceptación explícita |
 
 **Coverage:**
