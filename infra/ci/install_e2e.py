@@ -33,6 +33,7 @@ OS = {"linux": "linux", "darwin": "darwin", "win32": "windows"}[sys.platform]
 ARCH = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "amd64"
 PLATFORM = f"{OS}-{ARCH}"
 EXE = "lixbon.exe" if OS == "windows" else "lixbon"
+LEGACY_FILES = ["client_cli.py", "lixbon.cmd"] if OS == "windows" else ["client_cli.py"]
 
 
 def load_installer_go():
@@ -139,7 +140,8 @@ class Sandbox:
     def __init__(self, fake: FakeReleases, installer):
         self.fake, self.installer = fake, installer
         self.home = pathlib.Path(tempfile.mkdtemp(prefix="lixbon-e2e-"))
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("LIXBON_")}
+        skipped = ("psmodulepath",)  # el 5.1 hereda las rutas de PowerShell 7 del runner y pierde Get-FileHash
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("LIXBON_") and k.lower() not in skipped}
         self.env.update(HOME=str(self.home), USERPROFILE=str(self.home))
         self.exe = self.home / (".lixbon" if OS == "windows" else ".local/bin") / EXE
 
@@ -160,7 +162,7 @@ class Sandbox:
                               encoding="utf-8", timeout=60)
 
     def leftovers(self) -> list[str]:
-        names = ["client_cli.py", "lixbon.cmd"]
+        names = LEGACY_FILES
         return [n for n in names if (self.home / ".lixbon" / n).exists()]
 
     def cleanup(self) -> None:
@@ -195,13 +197,13 @@ def fresh_install(fake, installer):
     box = Sandbox(fake, installer)
     try:
         (box.home / ".lixbon").mkdir()
-        for decoy in ("client_cli.py", "lixbon.cmd"):
+        for decoy in LEGACY_FILES:
             (box.home / ".lixbon" / decoy).write_text("viejo")
         fake.latest = V1
         result = box.install(fake.release(V1))
         expect(result.returncode == 0, f"instala {V1} sin errores\n{output(result)}")
         expect(box.exe.exists(), f"el binario queda en {box.exe}")
-        expect(not box.leftovers(), "no quedan client_cli.py ni lixbon.cmd")
+        expect(not box.leftovers(), f"no quedan {' ni '.join(LEGACY_FILES)}")
         status = box.lixbon("status")
         expect(f"lixbon CLI v{V1}" in status.stdout, "status informa la versión instalada")
         expect(f"{fake.url}/v1" in status.stdout, "el instalador guarda base_url del servidor")
