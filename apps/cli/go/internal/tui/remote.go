@@ -377,9 +377,11 @@ func (m *Model) handleRemoteKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.leaveRemote(true)
 	case "pgup":
-		m.openPager(m.pageRows() - 1)
+		m.scrollBy(max(1, m.height-6))
+	case "pgdown":
+		m.scrollBy(-max(1, m.height-6))
 	case "ctrl+t":
-		m.openPager(0)
+		m.pager = &pager{}
 	}
 	return nil
 }

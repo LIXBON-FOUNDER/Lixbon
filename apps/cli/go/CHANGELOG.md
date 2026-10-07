@@ -5,9 +5,9 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
 ## 2.3.0-go.6
-- La rueda del ratón desplaza todo el chat sin activar nada, y seleccionar y copiar texto funciona como en cualquier terminal. Desaparece `/mouse`.
-- Nuevo Ctrl+T: abre un visor a pantalla completa con la conversación, las herramientas ejecutadas y lo que el modelo está escribiendo ahora. Se mueve con las flechas, RePág/AvPág, Inicio/Fin o la rueda; q, Esc o Ctrl+T lo cierran.
-- `/clear` borra la pantalla y el scrollback, pero mantiene el logo y la cabecera, y la cabecera muestra ahora la carpeta de trabajo en su propia línea.
+- La rueda del ratón desplaza el chat sin activar nada y desaparece `/mouse`. Arrastrar con el ratón selecciona texto y lo copia al soltar.
+- Nuevo Ctrl+T: abre un visor con la conversación, las herramientas ejecutadas y lo que el modelo está escribiendo ahora. Se mueve con las flechas, RePág/AvPág, Inicio/Fin o la rueda; q, Esc o Ctrl+T lo cierran.
+- `/clear` mantiene el logo y la cabecera, y la cabecera muestra ahora la carpeta de trabajo en su propia línea.
 
 ## 2.3.0-go.5
 - Corregido: con proveedores externos (OpenRouter, Kilo, OpenAI, Gemini…) las herramientas del agente fallaban con «Herramienta no soportada». Esos proveedores envían cada llamada partida en fragmentos y el CLI los trataba como llamadas distintas; ahora los une. El agente también conserva los campos extra que algunos proveedores exigen devolver (p. ej. `extra_content` de Gemini) y da un id a las llamadas que llegan sin él.

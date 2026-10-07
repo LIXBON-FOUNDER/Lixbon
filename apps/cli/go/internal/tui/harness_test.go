@@ -124,6 +124,7 @@ type harness struct {
 	msgs    chan tea.Msg
 	mu      sync.Mutex
 	printed []string
+	copied  []string
 	quit    bool
 	root    string
 }
@@ -157,6 +158,12 @@ func newHarness(t *testing.T, mutate func(*config.Config), steps ...func(http.Re
 		h.printed = append(h.printed, s)
 		h.mu.Unlock()
 	})
+	h.m.copyText = func(text string) error {
+		h.mu.Lock()
+		h.copied = append(h.copied, text)
+		h.mu.Unlock()
+		return nil
+	}
 	h.update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return h
 }
@@ -261,11 +268,7 @@ func (h *harness) out() string {
 	return ansi.Strip(strings.Join(h.printed, "\n"))
 }
 
-// view es lo que el usuario tendría a la vista: lo impreso en el scrollback y,
-// debajo, la parte viva de la pantalla.
-func (h *harness) view() string {
-	return ansi.Strip(h.m.log.text() + "\n" + h.m.View().Content)
-}
+func (h *harness) view() string { return ansi.Strip(h.m.View().Content) }
 
 func (h *harness) quitRequested() bool {
 	h.mu.Lock()

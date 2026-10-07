@@ -62,6 +62,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		fmt.Fprintln(stderr, "Error:", err)
 		return 1
 	}
+	fmt.Fprintln(stdout, m.log.text())
 	fmt.Fprintln(stdout, sDim2.Render("Hasta pronto."))
 	return 0
 }
@@ -101,24 +102,19 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 	}
 	program := tea.NewProgram(m, opts...)
 	m.Wire(program.Send, nil)
-	m.out = newPrinter(program.Send)
-	defer m.out.close()
 
-	m.onReady = func() tea.Cmd {
-		m.printHeader()
-		if offline {
-			m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
-		}
-		for _, n := range m.opts.Notes {
-			m.print(warnLine(n))
-		}
-		if m.opts.Warning != "" {
-			m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
-		}
-		if pickModel {
-			return m.queueModelPicker()
-		}
-		return nil
+	m.printHeader()
+	if offline {
+		m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
+	}
+	for _, n := range m.opts.Notes {
+		m.print(warnLine(n))
+	}
+	if m.opts.Warning != "" {
+		m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
+	}
+	if pickModel {
+		m.queueModelPicker()
 	}
 	_, err := program.Run()
 	return err
@@ -196,7 +192,7 @@ func (m *Model) printHeader() {
 	tips := []string{
 		"/ comandos  " + glyphSep + "  ! shell  " + glyphSep + "  Enter envía",
 		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",
-		"Mayús+Tab cambia de modo  " + glyphSep + "  Ctrl+T ve el transcript",
+		"Mayús+Tab cambia de modo  " + glyphSep + "  Ctrl+T transcript  " + glyphSep + "  arrastra para copiar",
 	}
 	text := append([]string{"", title, info, folder, ""}, dimAll(tips)...)
 	m.print("")
@@ -212,6 +208,6 @@ func (m *Model) printHeader() {
 
 // queueModelPicker abre el selector de modelo al arrancar cuando ni la
 // configuración ni el servidor deciden cuál usar.
-func (m *Model) queueModelPicker() tea.Cmd {
-	return m.cmdModel("")
+func (m *Model) queueModelPicker() {
+	m.cmdModel("")
 }

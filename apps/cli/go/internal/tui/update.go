@@ -23,30 +23,11 @@ func tickCmd() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	_, cmd := m.update(msg)
-	return m, tea.Batch(cmd, m.syncOutput())
-}
-
-func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.SetWidth(max(10, msg.Width-4))
 		m.log.resize(msg.Width)
-		if m.onReady != nil {
-			return m, tea.Tick(firstFrameDelay, func(time.Time) tea.Msg { return readyMsg{} })
-		}
-		return m, nil
-
-	case readyMsg:
-		if ready := m.onReady; ready != nil {
-			m.onReady = nil
-			return m, ready()
-		}
-		return m, nil
-
-	case resumePrintMsg:
-		m.resumePrint()
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -57,10 +38,28 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseWheelDown:
 				m.pagerScroll(-wheelStep)
 			}
+		} else {
+			m.wheel(msg.Button)
 		}
 		return m, nil
 
+	case tea.MouseClickMsg:
+		if !m.pagerActive() {
+			m.onMouseDown(msg)
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if !m.pagerActive() {
+			m.onMouseDrag(msg)
+		}
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		return m, m.onMouseUp()
+
 	case tea.KeyPressMsg:
+		m.sel = nil
 		if m.pagerActive() {
 			m.handlePagerKey(msg)
 			return m, nil
@@ -170,10 +169,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "pgup":
-		m.openPager(m.pageRows() - 1)
+		m.scrollBy(max(1, m.height-6))
+		return m, nil
+	case "pgdown":
+		m.scrollBy(-max(1, m.height-6))
 		return m, nil
 	case "ctrl+t":
-		m.openPager(0)
+		m.pager = &pager{}
 		return m, nil
 	case "alt+v":
 		m.pasteImage()
@@ -265,15 +267,7 @@ func (m *Model) quit() tea.Cmd {
 		m.remote.link.Stop(true)
 		m.remote = nil
 	}
-	return m.flushAndQuit
-}
-
-// flushAndQuit deja que lo último impreso llegue a la terminal antes de salir.
-func (m *Model) flushAndQuit() tea.Msg {
-	if m.out != nil {
-		m.out.flush(2 * time.Second)
-	}
-	return tea.QuitMsg{}
+	return tea.Quit
 }
 
 func (m *Model) cancelTurn() {
