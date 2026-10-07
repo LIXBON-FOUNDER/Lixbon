@@ -57,6 +57,10 @@ func (m *Model) shell(command string) tea.Cmd {
 // startTurn envía un mensaje al modelo. shown es lo que se ve en el eco (vacío
 // si ya se imprimió, p. ej. el prompt de un comando propio).
 func (m *Model) startTurn(prompt, shown string) tea.Cmd {
+	if !m.chat.Client.Generic && m.chat.Cfg.APIKey == "" {
+		m.print(errLine(noSessionHint))
+		return nil
+	}
 	if m.chat.Model == "" {
 		m.print(errLine("Todavía no hay un modelo elegido. /model abre el selector cuando el servidor publique modelos."))
 		return nil

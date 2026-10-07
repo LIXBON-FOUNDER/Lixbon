@@ -49,6 +49,7 @@ Comandos:
   status   Ver configuración local
   models   Listar modelos disponibles
   usage    Ver uso global de la cuenta
+  auth     Conectar proveedores y gestionar sus claves (lixbon auth --help)
   profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
   update   Actualizar el CLI a la última versión (--check solo comprueba; también --update)
   version  Mostrar la versión (también --version)
@@ -66,6 +67,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.status()
 	case "models":
 		return a.models(ctx)
+	case "auth":
+		return a.auth(ctx, rest)
 	case "profile":
 		return a.profile(rest)
 	case "chat", "run", "start":

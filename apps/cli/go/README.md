@@ -31,13 +31,29 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/update` | `lixbon update [--check]` y `/update`: manifest del gateway, descarga de la release de GitHub, verificación contra el digest del gateway **y** `SHA256SUMS`, comprobación del binario nuevo y reemplazo atómico (en Windows renombra el `.exe` en uso a `.old` y restaura si falla) | pruebas con un servidor de releases falso (digests y archivos manipulados, corte de red, binario roto) y una prueba real en Windows con el `.exe` en uso; diseño en `.planning/DECISION-UPDATE-GO.md` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `setup`, `status`, `models`, `usage`, `update`, `profile`, `chat`/`run`/`start`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). `!comando` en la caja ejecuta un comando en el workspace sin pasar por el modelo y deja su salida en el historial (el control remoto lo ignora). Comandos `/` disponibles (los 41 del catálogo, más `/provider` y `/mouse`): `help model mode new clear compact history web copy paste image save approve plan todo tools diff undo ps check allow workspace run mcp commit init status cost usage nodes context-window key login logout config bar doctor visual remote exit` y los personalizados de `.lixbon/commands/`.
+Comandos: `init`, `setup`, `status`, `models`, `usage`, `update`, `auth`, `profile`, `chat`/`run`/`start`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). `!comando` en la caja ejecuta un comando en el workspace sin pasar por el modelo y deja su salida en el historial (el control remoto lo ignora). Comandos `/` disponibles (los 41 del catálogo, más `/provider` y `/mouse`): `help model mode new clear compact history web copy paste image save approve plan todo tools diff undo ps check allow workspace run mcp commit init status cost usage nodes context-window key login logout config bar doctor visual remote exit` y los personalizados de `.lixbon/commands/`.
 
 Pendiente, con su issue: publicar la primera release e imagen Docker (#20); `ui-demo` no se porta (es una demo interna y oculta de la interfaz Python). Falta validar con modelos, terminales y un gateway reales (#21, #22). Los paquetes de este módulo no dependen de la UI.
 
 ## Proveedores de modelos
 
 El CLI puede hablar con cualquier servidor compatible con OpenAI además de con un gateway Lixbon. Cada proveedor es un perfil; los campos de nivel superior de `config.json` (`base_url`, `api_key`, `model`…) son los del perfil activo, así que el CLI Python sigue funcionando con el mismo archivo.
+
+La forma más corta de conectar uno es `lixbon auth`, como `opencode auth`:
+
+```bash
+lixbon auth login                              # elegir de una lista (presets, guardados u «otro»)
+lixbon auth login openrouter                   # pide la clave sin mostrarla y activa el proveedor
+lixbon auth login kilo --api-key <clave>       # presets: openrouter, openai, kilo, groq, deepseek, mistral, gemini, lmstudio, ollama
+lixbon auth login nube --base-url https://mi-servidor/v1
+lixbon auth login lixbon                       # volver a iniciar sesión en lixbon.com
+lixbon auth list                               # qué proveedor tiene clave (enmascarada)
+lixbon auth logout nube                        # quita la clave, conserva el proveedor
+```
+
+`lixbon` arranca aunque no haya sesión en lixbon.com (o aunque la clave haya dejado de valer): abre el chat con un aviso y `/provider` conecta otro proveedor desde dentro, `/login` vuelve a lixbon.com. Enviar un mensaje sin proveedor conectado explica qué hacer en lugar de fallar.
+
+Los mismos perfiles se pueden gestionar con `lixbon profile`:
 
 ```bash
 lixbon profile add lmstudio --use              # http://localhost:1234/v1, sin clave
@@ -49,9 +65,9 @@ lixbon profile use lixbon                      # volver al gateway
 lixbon profile set nube --api-key <clave>      # cambiar solo la clave (también --base-url, --model, --context-window)
 ```
 
-Cada proveedor guarda su propia URL, clave y modelo. `lixbon init`, `/model` y `/key` modifican siempre el proveedor activo; para tocar otro, `profile set`. Al cambiar de proveedor el CLI lo consulta y muestra cuántos modelos ofrece; si el modelo guardado no está en su lista o no hay ninguno, abre el selector. Un error HTTP al listar los modelos se muestra tal cual (una URL sin `/v1` responde 404) y una clave rechazada pide la nueva en el momento.
+Cada proveedor guarda su propia URL, clave y modelo, y el perfil guardado es la fuente de verdad: si los campos de nivel superior de `config.json` no coinciden con los del perfil activo, al cargar manda el perfil. Eso significa que editar a mano `base_url` o `api_key` fuera del bloque `profiles` ya no tiene efecto cuando hay perfiles (el CLI Python, que solo toca los campos de nivel superior, deja de ser compatible con un archivo que use varios proveedores). `lixbon init`, `/model` y `/key` modifican siempre el proveedor activo; para tocar otro, `profile set` o `auth login`. Al cambiar de proveedor el CLI lo consulta y muestra cuántos modelos ofrece; si el modelo guardado no está en su lista o no hay ninguno, abre el selector. Un error HTTP al listar los modelos se muestra tal cual (una URL sin `/v1` responde 404) y una clave rechazada pide la nueva en el momento.
 
-En el chat, `/provider` abre el selector (también permite añadir uno), `/provider nombre` cambia directamente y `/provider key nombre` cambia la clave de un proveedor sin activarlo. Presets: `lmstudio`, `ollama`, `openai`, `openrouter`.
+En el chat, `/provider` abre el selector (también permite añadir uno eligiendo un preset y pegando solo la clave), `/provider nombre` cambia directamente y `/provider key nombre` cambia la clave de un proveedor sin activarlo.
 
 Un perfil sin `--gateway` es genérico: solo se envían `model`, `messages`, `stream`, `stream_options` y `tools` (OpenAI rechaza los parámetros desconocidos), la clave es opcional y no se consultan los endpoints `/api` de Lixbon (plan, uso, nodos, búsqueda web, título automático). `/usage /nodes /login /logout /key /web` lo avisan y el modo `delegate` pasa a `ask`. La ventana de contexto por defecto es de 8192 tokens; ajústala a la que cargaste en el servidor con `--context-window`.
 
