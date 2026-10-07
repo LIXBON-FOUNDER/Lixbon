@@ -78,3 +78,31 @@ jobs:
             --title "Lixbon CLI ${GITHUB_REF_NAME#cli-v}" \
             --prerelease \
             --generate-notes
+
+  registrar:
+    name: Registrar en el gateway
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Registrar la URL y el SHA-256 de cada binario
+        env:
+          ADMIN_TOKEN: ${{ secrets.LIXBON_ADMIN_TOKEN }}
+          SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
+        working-directory: assets
+        run: |
+          version="${GITHUB_REF_NAME#cli-v}"
+          for file in lixbon-*.tar.gz lixbon-*.zip; do
+            platform="${file#lixbon-${version}-}"; platform="${platform%.tar.gz}"; platform="${platform%.zip}"
+            digest=$(sha256sum "$file" | cut -d' ' -f1)
+            jq -n --arg product "cli-${platform}" --arg version "$version" --arg title "Lixbon CLI ${version}" \
+               --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${file}" \
+               --arg sha "$digest" \
+               '{product: $product, version: $version, channel: "beta", title: $title, changelog: [], download_url: $url, checksum_sha256: $sha}' |
+              curl --fail-with-body --show-error -X POST -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+                -H "Content-Type: application/json" --data @- "${SERVER}/api/versions/register"
+            echo
+          done

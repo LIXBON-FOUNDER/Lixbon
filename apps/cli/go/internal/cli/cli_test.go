@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"lixbon.com/cli/internal/config"
+	"lixbon.com/cli/internal/update"
 )
 
 type fakeGateway struct {
@@ -348,13 +349,50 @@ func TestChatOnceRefusesAMessageWhoseOnlyAttachmentFails(t *testing.T) {
 	}
 }
 
-func TestSubcommandsNotPortedSayWhy(t *testing.T) {
+func TestUiDemoIsNotPorted(t *testing.T) {
 	h := newHarness(t, nil, map[string]any{"api_key": "k"})
 	if code := h.run("ui-demo"); code != 1 || !strings.Contains(h.errOut.String(), "no se porta") {
 		t.Fatalf("ui-demo: code %d %q", code, h.errOut)
 	}
-	h.errOut.Reset()
-	if code := h.run("update"); code != 1 || !strings.Contains(h.errOut.String(), "aún no está disponible") {
-		t.Fatalf("update: code %d %q", code, h.errOut)
+}
+
+func updateHarness(t *testing.T, status int, body string) *harness {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	h := newHarness(t, nil, map[string]any{"api_key": "k"})
+	h.app.NewUpdater = func(string) (*update.Updater, error) {
+		return &update.Updater{
+			HTTP: srv.Client(), ManifestURL: srv.URL, Current: "2.3.0-go.0", GOOS: "linux", GOARCH: "amd64",
+			Exe: filepath.Join(t.TempDir(), "lixbon"),
+		}, nil
+	}
+	return h
+}
+
+const platformManifest = `{"version":"%s","assets":{"linux-amd64":{"url":"https://x/lixbon.tar.gz","sha256":"` +
+	"1111111111111111111111111111111111111111111111111111111111111111" + `"}}}`
+
+func TestUpdateCheckReportsNewerVersion(t *testing.T) {
+	h := updateHarness(t, 200, strings.Replace(platformManifest, "%s", "2.4.0", 1))
+	if code := h.run("update", "--check"); code != 0 || !strings.Contains(h.out.String(), "Hay una versión nueva: v2.4.0") {
+		t.Fatalf("code %d, salida %q, error %q", code, h.out, h.errOut)
+	}
+}
+
+func TestUpdateReportsUpToDate(t *testing.T) {
+	h := updateHarness(t, 200, strings.Replace(platformManifest, "%s", "2.3.0-go.0", 1))
+	if code := h.run("update"); code != 0 || !strings.Contains(h.out.String(), "ya está actualizado") {
+		t.Fatalf("code %d, salida %q, error %q", code, h.out, h.errOut)
+	}
+}
+
+func TestUpdateFailureExitsNonZero(t *testing.T) {
+	h := updateHarness(t, 503, "caído")
+	if code := h.run("update"); code != 1 || !strings.Contains(h.errOut.String(), "no se pudo consultar") {
+		t.Fatalf("code %d, error %q", code, h.errOut)
 	}
 }

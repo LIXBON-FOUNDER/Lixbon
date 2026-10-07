@@ -163,6 +163,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdProvider(arg)
 	case "doctor":
 		return m.cmdDoctor()
+	case "update":
+		return m.cmdUpdate()
 	case "config":
 		return m.cmdConfig()
 	case "bar":

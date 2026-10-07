@@ -103,6 +103,10 @@ STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 # URL base pública para las páginas de retorno del checkout (success/cancel)
 PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+# Los binarios del CLI Go viven en GitHub Releases: el gateway solo registra
+# su digest y solo acepta URLs bajo este prefijo.
+CLI_RELEASES_URL_PREFIX: str = os.getenv(
+    "CLI_RELEASES_URL_PREFIX", "https://github.com/LIXBON-FOUNDER/Lixbon/releases/download/")
 
 
 def stripe_configured() -> bool:

@@ -434,14 +434,6 @@ func TestDiffAndCommitNeedGit(t *testing.T) {
 	contains(t, h.out(), "No hay cambios que confirmar.")
 }
 
-func TestUnavailableCommandsSayso(t *testing.T) {
-	h := newHarness(t, nil)
-	for _, name := range []string{"update"} {
-		h.send("/" + name)
-		contains(t, h.out(), "«/"+name+"» aún no está disponible en el CLI Go.")
-	}
-}
-
 func TestExitQuits(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/exit")

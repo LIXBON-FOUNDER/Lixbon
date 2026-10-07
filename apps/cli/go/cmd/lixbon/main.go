@@ -9,9 +9,11 @@ import (
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/cli"
 	"lixbon.com/cli/internal/tui"
+	"lixbon.com/cli/internal/update"
 )
 
 func main() {
+	update.CleanupOld()
 	app, err := cli.NewApp()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lixbon: %v\n", err)

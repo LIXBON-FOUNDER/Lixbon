@@ -13,6 +13,7 @@ import (
 
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
+	"lixbon.com/cli/internal/update"
 )
 
 type App struct {
@@ -23,6 +24,8 @@ type App struct {
 	Hostname   string
 	// Interactive abre el chat de terminal; nil si no hay interfaz disponible.
 	Interactive func(ctx context.Context, opts chat.Options) int
+	// NewUpdater crea el actualizador; nil usa update.New.
+	NewUpdater func(manifestURL string) (*update.Updater, error)
 }
 
 func NewApp() (*App, error) {
@@ -46,6 +49,7 @@ Comandos:
   models   Listar modelos disponibles
   usage    Ver uso global de la cuenta
   profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
+  update   Actualizar el CLI a la última versión (--check solo comprueba)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
 `
 
@@ -72,8 +76,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.Stderr, "«ui-demo» es una demo interna de la interfaz Python y no se porta al CLI Go.")
 		return 1
 	case "update":
-		fmt.Fprintf(a.Stderr, "«%s» aún no está disponible en el CLI Go.\n", name)
-		return 1
+		return a.update(ctx, rest)
 	case "-h", "--help", "help":
 		fmt.Fprint(a.Stdout, usage)
 		return 0
