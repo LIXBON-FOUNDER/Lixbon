@@ -43,9 +43,9 @@ cd apps/desktop && npm install && npm run dev  # frontend; `npm run tauri dev` r
 
 ### CLI
 ```bash
-cd apps/cli && python -m lixbon_cli chat       # fuente modular
+cd apps/cli && python -m lixbon_cli chat       # cliente Python anterior (fuente modular)
 python apps/cli/build.py                       # regenera client_cli.py — OBLIGATORIO tras editar lixbon_cli/
-cd apps/cli/go && go vet ./... && go test -count=1 ./...   # CLI Go (port en curso)
+cd apps/cli/go && go vet ./... && go test -count=1 ./...   # CLI Go (el que se distribuye)
 ```
 
 Si cambias el catálogo de comandos, sesiones o herramientas de Python, regenera los corpus que consume Go (`python apps/cli/validation/gen_state_corpus.py`, `gen_tool_corpus.py`…); el CI Python falla si `state_corpus.json` no coincide.
