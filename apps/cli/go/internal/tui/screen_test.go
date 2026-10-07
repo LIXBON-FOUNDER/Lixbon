@@ -155,3 +155,103 @@ func TestTranscriptScrollsWithPageKeys(t *testing.T) {
 	}
 	rig.waitFor("línea 100")
 }
+
+func TestLogoAndHeaderShowTheWorkspaceFolder(t *testing.T) {
+	h := newHarness(t, nil)
+	rig := startScreen(t, h, 100, 30)
+	rig.waitFor("Lixbon CLI")
+	if !strings.Contains(rig.screen(), shortPath(h.chat.Workspace)) {
+		t.Fatalf("la cabecera muestra la carpeta de trabajo%s", rig.dump())
+	}
+}
+
+func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
+	h := newHarness(t, nil, textReply("respuesta vieja"))
+	rig := startScreen(t, h, 100, 30)
+	rig.waitFor("Lixbon CLI")
+	rig.type_("mensaje viejo\r")
+	rig.waitFor("respuesta vieja")
+	rig.waitGone("trabajando…")
+
+	rig.type_("/clear\r")
+	rig.waitFor("contexto limpio")
+	screen := rig.screen()
+	if strings.Contains(screen, "respuesta vieja") || strings.Contains(screen, "mensaje viejo") {
+		t.Fatalf("/clear debe borrar la conversación de la pantalla%s", rig.dump())
+	}
+	for _, want := range []string{"Lixbon CLI", shortPath(h.chat.Workspace)} {
+		if !strings.Contains(screen, want) {
+			t.Fatalf("tras /clear debe seguir viéndose %q%s", want, rig.dump())
+		}
+	}
+	if !strings.ContainsAny(screen, "▀▄") {
+		t.Fatalf("tras /clear debe seguir el logo%s", rig.dump())
+	}
+	if rig.rowOf("╭") != rig.rows-4 {
+		t.Fatalf("la caja debe seguir fija abajo%s", rig.dump())
+	}
+}
+
+func TestCtrlTShowsTheTranscriptViewer(t *testing.T) {
+	h := newHarness(t, nil)
+	for i := 1; i <= 100; i++ {
+		h.m.print(fmt.Sprintf("línea %03d", i))
+	}
+	rig := startScreen(t, h, 100, 30)
+	rig.waitFor("línea 100")
+
+	rig.type_("\x14")
+	rig.waitFor("Ctrl+T cierran")
+	if rig.count("╭") != 0 {
+		t.Fatalf("el visor ocupa toda la pantalla%s", rig.dump())
+	}
+	rig.type_("\x1b[5~")
+	if rig.rowOf("línea 100") >= 0 {
+		t.Fatalf("RePág debe subir por el transcript%s", rig.dump())
+	}
+	rig.type_("g")
+	rig.waitFor("línea 001")
+	rig.type_("G")
+	rig.waitFor("línea 100")
+	rig.type_("q")
+	rig.waitGone("Ctrl+T cierran")
+	rig.waitFor("╭")
+}
+
+func TestWheelScrollsWithoutAnyCommand(t *testing.T) {
+	h := newHarness(t, nil)
+	for i := 1; i <= 100; i++ {
+		h.m.print(fmt.Sprintf("línea %03d", i))
+	}
+	rig := startScreen(t, h, 100, 30)
+	rig.waitFor("línea 100")
+	for i := 0; i < 10; i++ {
+		rig.type_("\x1b[<64;10;5M")
+	}
+	if rig.rowOf("línea 100") >= 0 {
+		t.Fatalf("la rueda debe subir por el transcript%s", rig.dump())
+	}
+	for i := 0; i < 20; i++ {
+		rig.type_("\x1b[<65;10;5M")
+	}
+	rig.waitFor("línea 100")
+}
+
+func TestDraggingSelectsAndCopiesTranscriptText(t *testing.T) {
+	h := newHarness(t, nil)
+	h.m.print("alfa beta gamma")
+	h.m.print("segunda fila")
+	rig := startScreen(t, h, 100, 30)
+	rig.waitFor("segunda fila")
+	row := rig.rowOf("alfa beta gamma")
+
+	rig.type_(fmt.Sprintf("\x1b[<0;%d;%dM", 6, row+1))
+	rig.type_(fmt.Sprintf("\x1b[<32;%d;%dM", 9, row+1))
+	rig.type_(fmt.Sprintf("\x1b[<0;%d;%dm", 9, row+1))
+	rig.waitFor("4 caracteres copiados")
+	waitFor(t, "texto en el portapapeles", func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.copied) == 1 && h.copied[0] == "beta"
+	})
+}

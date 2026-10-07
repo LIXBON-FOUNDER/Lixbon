@@ -25,6 +25,9 @@ const (
 // inferior, el texto en vivo, el menú, la caja de entrada y la barra de estado.
 // La altura total es siempre la de la terminal.
 func (m *Model) View() tea.View {
+	if m.pagerActive() {
+		return m.pagerView()
+	}
 	var bottom []string
 	if m.running {
 		bottom = append(bottom, m.liveView())
@@ -52,13 +55,17 @@ func (m *Model) View() tea.View {
 	}
 	rows := height - len(lower)
 	m.scroll = min(m.scroll, m.log.maxScroll(rows))
-	lines := append(m.log.window(rows, m.scroll), lower...)
-
-	v := tea.NewView(strings.Join(lines, "\n"))
-	v.AltScreen = true
-	if m.wheel {
-		v.MouseMode = tea.MouseModeCellMotion
+	window := m.log.window(rows, m.scroll)
+	m.winRows, m.winTop = rows, max(0, len(m.log.wrapped)-m.scroll-rows)
+	if !m.sel.empty() {
+		for y, line := range window {
+			window[y] = m.highlight(m.winTop+y, line)
+		}
 	}
+
+	v := tea.NewView(strings.Join(append(window, lower...), "\n"))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = m.windowTitle()
 	return v
 }

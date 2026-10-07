@@ -18,7 +18,7 @@ import (
 
 // dispatch ejecuta lo que el usuario envió: un comando «/» o un mensaje.
 func (m *Model) dispatch(text string) tea.Cmd {
-	m.scroll = 0
+	m.scroll, m.sel = 0, nil
 	if command, ok := strings.CutPrefix(text, "!"); ok {
 		return m.shell(strings.TrimSpace(command))
 	}

@@ -183,17 +183,18 @@ func (m *Model) printHeader() {
 	if plan := c.Cfg.ExtraString("plan_name"); plan != "" && !c.Client.Generic {
 		title += sDim2.Render("  " + glyphSep + "  plan " + plan)
 	}
-	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode, shortPath(c.Workspace)}
+	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode}
 	if profile := c.Cfg.ActiveProfile(); profile != config.DefaultProfile {
 		parts = slices.Insert(parts, 0, profile)
 	}
 	info := sDim.Render(strings.Join(parts, " "+glyphSep+" "))
+	folder := sBeige.Render(shortPath(c.Workspace))
 	tips := []string{
 		"/ comandos  " + glyphSep + "  ! shell  " + glyphSep + "  Enter envía",
 		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",
-		"Mayús+Tab cambia de modo  " + glyphSep + "  RePág/AvPág desplazan",
+		"Mayús+Tab cambia de modo  " + glyphSep + "  Ctrl+T transcript  " + glyphSep + "  arrastra para copiar",
 	}
-	text := append([]string{"", title, info, ""}, dimAll(tips)...)
+	text := append([]string{"", title, info, folder, ""}, dimAll(tips)...)
 	m.print("")
 	m.printDynamic(func(width int) string { return headerLayout(renderLogo(), text, width) })
 	if c.Mode == chat.ModeAsk {

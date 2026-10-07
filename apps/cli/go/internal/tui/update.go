@@ -31,15 +31,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.scrollBy(wheelStep)
-		case tea.MouseWheelDown:
-			m.scrollBy(-wheelStep)
+		if m.pagerActive() {
+			switch msg.Button {
+			case tea.MouseWheelUp:
+				m.pagerScroll(wheelStep)
+			case tea.MouseWheelDown:
+				m.pagerScroll(-wheelStep)
+			}
+		} else {
+			m.wheel(msg.Button)
 		}
 		return m, nil
 
+	case tea.MouseClickMsg:
+		if !m.pagerActive() {
+			m.onMouseDown(msg)
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if !m.pagerActive() {
+			m.onMouseDrag(msg)
+		}
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		return m, m.onMouseUp()
+
 	case tea.KeyPressMsg:
+		m.sel = nil
+		if m.pagerActive() {
+			m.handlePagerKey(msg)
+			return m, nil
+		}
 		if m.remote != nil {
 			return m, m.handleRemoteKey(msg)
 		}
@@ -135,12 +159,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-const wheelStep = 3
-
-func (m *Model) scrollBy(rows int) {
-	m.scroll = max(0, m.scroll+rows)
-}
-
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.picker != nil {
 		cmd, closed := m.picker.key(msg)
@@ -155,6 +173,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "pgdown":
 		m.scrollBy(-max(1, m.height-6))
+		return m, nil
+	case "ctrl+t":
+		m.pager = &pager{}
 		return m, nil
 	case "alt+v":
 		m.pasteImage()
