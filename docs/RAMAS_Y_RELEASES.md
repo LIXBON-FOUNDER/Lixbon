@@ -117,9 +117,12 @@ Para corregir las notas de una versión ya publicada, vuelve a registrarla (`POS
 | `mobile.yml` | tag `mobile-v*`, manual | Build + release del APK |
 | `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway + smoke test: instala desde `lixbon.com/install.sh` e `install.ps1` y comprueba la versión |
 
-Los tests del gateway (`python -m pytest core`) se ejecutan en local por ahora:
-varios módulos comparten estado de BD y fallan al correr juntos; cuando eso se
-aísle se añaden a `ci.yml`.
+El job `Gateway · tests` de `ci.yml` ejecuta cada `core/gateway/test_*.py` en un proceso
+aparte (`python infra/ci/gateway_tests.py`, SQLite temporal), porque los módulos fijan
+`DATABASE_URL` al importarse y fallan al correr juntos. Cubre los 23 módulos del gateway,
+incluidos `/api/updates/cli/*`, `/api/versions/register` y los instaladores. Siguen fuera
+los tests de los demás paquetes de `core` (`billing`, `inference`, `delegation`,
+`orchestration`, `persistence`, `node_agent`).
 
 ## Protección de ramas (recomendado en GitHub → Settings → Branches)
 
