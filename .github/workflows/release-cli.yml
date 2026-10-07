@@ -110,3 +110,35 @@ jobs:
                 -H "Content-Type: application/json" --data @- "${SERVER}/api/versions/register"
             echo
           done
+
+  smoke:
+    name: Instalar desde lixbon.com · ${{ matrix.os }}
+    needs: registrar
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
+    steps:
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          version="${GITHUB_REF_NAME#cli-v}"
+          export HOME="${RUNNER_TEMP}/home"; mkdir -p "$HOME"
+          curl -fsSL "${SERVER}/install.sh" | bash
+          reported=$("$HOME/.local/bin/lixbon" --version)
+          echo "${reported}"
+          [[ "${reported}" == "lixbon v${version} "* ]] || { echo "Se esperaba v${version}"; exit 1; }
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^cli-v', ''
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
+          New-Item -ItemType Directory -Force -Path $env:USERPROFILE | Out-Null
+          irm "$env:SERVER/install.ps1" | iex
+          $reported = & (Join-Path $env:USERPROFILE ".lixbon\lixbon.exe") --version
+          Write-Host $reported
+          if (-not $reported.StartsWith("lixbon v$version ")) { throw "Se esperaba v$version" }
