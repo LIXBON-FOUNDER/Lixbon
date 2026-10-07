@@ -44,7 +44,7 @@ func (a *App) chat(ctx context.Context, args []string) int {
 func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) int {
 	cfg := config.Load(a.ConfigPath)
 	if cfg.APIKey == "" && !cfg.IsGeneric() {
-		a.printError("No hay sesión. Configúrala con: lixbon init --api-key <clave>")
+		a.printError("No hay sesión. Inicia sesión con: lixbon setup, o usa otro proveedor: lixbon auth login")
 		return 1
 	}
 	client := api.FromConfig(cfg)
@@ -63,7 +63,7 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 	switch acc.State {
 	case chat.AccountAuth:
 		if acc.Generic {
-			a.printError(fmt.Sprintf("El proveedor rechazó la clave. Cámbiala con: lixbon profile set %s --api-key <clave>", cfg.ActiveProfile()))
+			a.printError(fmt.Sprintf("El proveedor rechazó la clave. Cámbiala con: lixbon auth login %s", cfg.ActiveProfile()))
 			return 1
 		}
 		c.ClearSession()
@@ -93,7 +93,7 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 	answer, err := c.Send(ctx, message, sink)
 	sink.finish()
 	if err != nil {
-		return a.failure(ctx, err)
+		return a.failure(ctx, err, cfg)
 	}
 	switch {
 	case ctx.Err() != nil:
@@ -163,7 +163,7 @@ func sourcesLine(sources []map[string]any) string {
 }
 
 // failure traduce un error del gateway a la acción que lo resuelve.
-func (a *App) failure(ctx context.Context, err error) int {
+func (a *App) failure(ctx context.Context, err error, cfg config.Config) int {
 	if ctx.Err() != nil {
 		return a.interrupted()
 	}
@@ -174,7 +174,11 @@ func (a *App) failure(ctx context.Context, err error) int {
 	}
 	switch apiErr.Status {
 	case 401, 403:
-		a.printError("Tu sesión ya no es válida. Ejecuta: lixbon init --api-key <clave>")
+		if cfg.IsGeneric() {
+			a.printError(fmt.Sprintf("«%s» rechazó la clave. Cámbiala con: lixbon auth login %s", cfg.ActiveProfile(), cfg.ActiveProfile()))
+		} else {
+			a.printError("Tu sesión ya no es válida. Inicia sesión con: lixbon auth login lixbon")
+		}
 	case 402:
 		a.printError("Sin créditos disponibles: " + apiErr.Message)
 	case 429:

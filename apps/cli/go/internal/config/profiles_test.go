@@ -1,7 +1,10 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -156,5 +159,48 @@ func TestUpdateProfileEditsActiveAndInactiveProviders(t *testing.T) {
 
 	if err := cfg.UpdateProfile("nada", func(*Profile) {}); err == nil {
 		t.Fatal("un proveedor inexistente debe fallar")
+	}
+}
+
+func TestLoadPrefersTheStoredActiveProfileOverStaleTopLevelFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	stale := `{"base_url":"https://lixbon.com/v1","api_key":"clave-kilo","model":"laguna","context_window":256000,
+	"profile":"kilo","profiles":{"kilo":{"base_url":"https://api.kilo.ai/api/gateway","api_key":"clave-kilo","model":"kilo/auto","context_window":8192,"generic":true}}}`
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load(path)
+	if cfg.BaseURL != "https://api.kilo.ai/api/gateway" || cfg.Model != "kilo/auto" || cfg.ContextWindow != 8192 || !cfg.IsGeneric() {
+		t.Fatalf("debe mandar el perfil guardado: %+v", cfg)
+	}
+
+	cfg.APIKey = "clave-nueva"
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		BaseURL  string `json:"base_url"`
+		APIKey   string `json:"api_key"`
+		Profiles map[string]Profile
+	}
+	raw, _ := os.ReadFile(path)
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	kilo := saved.Profiles["kilo"]
+	if saved.BaseURL != kilo.BaseURL || saved.APIKey != kilo.APIKey || kilo.APIKey != "clave-nueva" {
+		t.Fatalf("el archivo debe tener una sola versión del perfil activo: top=%q/%q perfil=%+v", saved.BaseURL, saved.APIKey, kilo)
+	}
+}
+
+func TestSaveWithoutProfilesKeepsTheLegacyShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(path, lixbonConfig()); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(string(raw), `"profiles"`) {
+		t.Fatalf("un config de un solo proveedor no debe ganar un campo profiles:\n%s", raw)
 	}
 }

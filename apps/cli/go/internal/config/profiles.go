@@ -22,7 +22,15 @@ var Presets = map[string]string{
 	"ollama":     "http://localhost:11434/v1",
 	"openai":     "https://api.openai.com/v1",
 	"openrouter": "https://openrouter.ai/api/v1",
+	"kilo":       "https://api.kilo.ai/api/gateway",
+	"groq":       "https://api.groq.com/openai/v1",
+	"deepseek":   "https://api.deepseek.com/v1",
+	"mistral":    "https://api.mistral.ai/v1",
+	"gemini":     "https://generativelanguage.googleapis.com/v1beta/openai",
 }
+
+// LocalPresets no piden clave.
+var LocalPresets = []string{"lmstudio", "ollama"}
 
 // Profile es un proveedor de modelos. Generic marca un servidor compatible con
 // OpenAI que no es un gateway Lixbon: no se le envían los campos propios de
@@ -104,6 +112,24 @@ func (c Config) ProfileNames() []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// adoptActiveProfile resuelve un archivo desajustado: si los campos de nivel
+// superior no son los del perfil activo (algo los cambió sin cambiar de perfil),
+// manda el perfil guardado. Un perfil sin URL es una entrada incompleta, hecha
+// a mano, y no se toma como referencia.
+func (c *Config) adoptActiveProfile() {
+	if p, ok := c.storedProfiles()[c.ActiveProfile()]; ok && p.BaseURL != "" {
+		c.applyTopLevel(p)
+	}
+}
+
+// syncActiveProfile guarda los campos de nivel superior en el perfil activo
+// para que el archivo nunca quede con dos versiones distintas del mismo perfil.
+func (c *Config) syncActiveProfile() {
+	if _, ok := c.Extra["profiles"]; ok {
+		c.storeProfiles(c.Profiles())
+	}
 }
 
 func (c *Config) storeProfiles(profiles map[string]Profile) {

@@ -27,10 +27,6 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		return 1
 	}
 	cfg := config.Load(configPath)
-	if cfg.APIKey == "" && !cfg.IsGeneric() {
-		fmt.Fprintln(stderr, "No hay sesión. Configúrala con: lixbon init --api-key <clave>")
-		return 1
-	}
 	opts.ConfigPath = configPath
 	opts.Autotitle = true
 	c, err := chat.New(cfg, api.FromConfig(cfg), opts)
@@ -40,23 +36,13 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 	}
 	defer c.Close()
 
-	fmt.Fprintln(stdout, sDim2.Render("conectando con "+providerHost(cfg.BaseURL)+"…"))
-	acc := c.Probe(ctx)
-	switch acc.State {
-	case chat.AccountAuth:
-		if acc.Generic {
-			fmt.Fprintf(stderr, "%s rechazó la clave. Cámbiala con: lixbon profile set %s --api-key <clave>\n", providerHost(cfg.BaseURL), cfg.ActiveProfile())
-			return 1
+	acc, notes := startupAccount(ctx, c, stdout)
+	needsPick, warning := false, ""
+	if acc.State != chat.AccountAuth {
+		var err error
+		if needsPick, err = c.ResolveModel(acc); err != nil {
+			warning = err.Error()
 		}
-		c.ClearSession()
-		fmt.Fprintln(stderr, "Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
-		fmt.Fprintln(stderr, "Configúrala de nuevo con: lixbon init --api-key <clave>")
-		return 1
-	}
-	needsPick, err := c.ResolveModel(acc)
-	warning := ""
-	if err != nil {
-		warning = err.Error()
 	}
 	c.LoadCustomCommands(reservedNames())
 	c.StartMCP()
@@ -67,6 +53,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		Account:     acc,
 		Offline:     acc.State == chat.AccountOffline,
 		Warning:     warning,
+		Notes:       notes,
 
 		UpdateNotice: updateNotice(cfg, configPath),
 	})
@@ -78,6 +65,29 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 	fmt.Fprintln(stdout, m.log.text())
 	fmt.Fprintln(stdout, sDim2.Render("Hasta pronto."))
 	return 0
+}
+
+const noSessionHint = "Sin sesión en lixbon.com. /login inicia sesión; /provider conecta otro proveedor (OpenRouter, OpenAI, Kilo, LM Studio, Ollama…)."
+
+// startupAccount sondea el proveedor activo. Sin sesión o con la clave
+// rechazada el chat arranca igual: así se puede conectar otro proveedor desde
+// dentro cuando el servidor de Lixbon no está disponible.
+func startupAccount(ctx context.Context, c *chat.Chat, stdout io.Writer) (chat.Account, []string) {
+	if !c.Client.Generic && c.Cfg.APIKey == "" {
+		return chat.Account{State: chat.AccountAuth}, []string{noSessionHint}
+	}
+	host := providerHost(c.Client.BaseURL)
+	fmt.Fprintln(stdout, sDim2.Render("conectando con "+host+"…"))
+	acc := c.Probe(ctx)
+	if acc.State != chat.AccountAuth {
+		return acc, nil
+	}
+	if acc.Generic {
+		name := c.Cfg.ActiveProfile()
+		return acc, []string{host + " rechazó la clave de «" + name + "». /provider key " + name + " la cambia; /provider usa otro proveedor."}
+	}
+	c.ClearSession()
+	return acc, []string{"Tu sesión de lixbon.com ya no es válida (se cerró desde otro sitio o la clave fue revocada). /login vuelve a entrar; /provider usa otro proveedor."}
 }
 
 // runProgram arranca Bubble Tea con el modelo. in y out son opcionales (para
@@ -96,6 +106,9 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 	m.printHeader()
 	if offline {
 		m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
+	}
+	for _, n := range m.opts.Notes {
+		m.print(warnLine(n))
 	}
 	if m.opts.Warning != "" {
 		m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
