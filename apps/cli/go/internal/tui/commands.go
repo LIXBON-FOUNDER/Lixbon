@@ -66,7 +66,7 @@ var Specs = []Spec{
 // GoSpecs son comandos que solo existen en el CLI Go. Quedan fuera de Specs
 // porque este es el contrato con el catálogo de Python.
 var GoSpecs = []Spec{
-	{"provider", "[nombre]", "Cambiar de proveedor de modelos (lixbon.com, LM Studio, Ollama…)", "cuenta"},
+	{"provider", "[nombre | key nombre]", "Cambiar de proveedor de modelos o de clave de uno (lixbon.com, LM Studio, Ollama…)", "cuenta"},
 	{"mouse", "", "Activar o quitar la rueda del ratón (se guarda; activa, no deja seleccionar texto)", "conversación"},
 }
 

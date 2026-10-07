@@ -139,3 +139,35 @@ func TestRejectedKeyOnAnExternalProviderIsNotErased(t *testing.T) {
 		t.Fatalf("la clave del proveedor externo no debe borrarse: %q", got)
 	}
 }
+
+func TestProfileSetChangesOnlyWhatIsGiven(t *testing.T) {
+	h := newHarness(t, nil, map[string]any{"api_key": "lixbon_sk_abc", "model": "qwen"})
+	if code := h.run("profile", "add", "remoto", "--base-url", "http://10.0.0.5:8000/v1", "--api-key", "vieja", "--model", "m"); code != 0 {
+		t.Fatalf("add (%d): %s", code, h.errOut)
+	}
+
+	if code := h.run("profile", "set", "remoto", "--api-key", "nueva"); code != 0 {
+		t.Fatalf("set (%d): %s", code, h.errOut)
+	}
+	got := config.Load(h.path).Profiles()["remoto"]
+	if got.APIKey != "nueva" || got.BaseURL != "http://10.0.0.5:8000/v1" || got.Model != "m" || !got.Generic {
+		t.Fatalf("solo debe cambiar la clave: %+v", got)
+	}
+
+	if code := h.run("profile", "set", "remoto", "--base-url", "ollama", "--model", ""); code != 0 {
+		t.Fatalf("set url (%d): %s", code, h.errOut)
+	}
+	got = config.Load(h.path).Profiles()["remoto"]
+	if got.BaseURL != "http://localhost:11434/v1" || got.Model != "" || got.APIKey != "nueva" {
+		t.Fatalf("url y modelo: %+v", got)
+	}
+	if cfg := config.Load(h.path); cfg.ActiveProfile() != config.DefaultProfile || cfg.APIKey != "lixbon_sk_abc" {
+		t.Fatal("set no debe cambiar el proveedor activo ni su clave")
+	}
+
+	for _, args := range [][]string{{"profile", "set"}, {"profile", "set", "remoto"}, {"profile", "set", "nada", "--model", "x"}, {"profile", "set", "remoto", "--base-url", "localhost"}} {
+		if code := h.run(args...); code == 0 {
+			t.Fatalf("%v debe fallar", args)
+		}
+	}
+}

@@ -160,6 +160,9 @@ func (a *App) initConfig(args []string) int {
 		return 1
 	}
 	fmt.Fprintf(a.Stdout, "Configuración guardada en: %s\n", a.ConfigPath)
+	if profile := cfg.ActiveProfile(); profile != config.DefaultProfile {
+		fmt.Fprintf(a.Stdout, "Los cambios son del proveedor activo «%s». Para otro: lixbon profile set NOMBRE …\n", profile)
+	}
 	return 0
 }
 

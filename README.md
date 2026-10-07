@@ -50,7 +50,7 @@ la rama es *dónde se trabaja*, y se integra a `master` por PR.
 | **Gateway** + node agent | `core/`, `BD/`, `infra/` | Python 3.12 · FastAPI · SQLAlchemy · Postgres · Redis | `master` | — | Railway despliega cada push a `master` |
 | **Web** — lixbon.com | `apps/web` | React 19 · Vite · SSR estático | `master` | — | Dentro de la imagen del gateway |
 | **Desktop** — Windows | `apps/desktop` | Tauri 2 · Rust · React | `desktop` | 1.2.0 | Tag `desktop-vX.Y.Z` → CI → MSI con auto-update |
-| **CLI** | `apps/cli` | Python 3, sin dependencias | `cli` | 2.3.0 | `build.py` → un solo archivo servido por el gateway |
+| **CLI** | `apps/cli` | Go · un solo ejecutable, sin Python (el cliente Python anterior sigue en el repo hasta su retirada, #36) | `cli` | 2.3.0-go.2 (beta) | Tag `cli-vX.Y.Z` → CI → binarios en GitHub Releases registrados en el gateway; la etapa (beta o estable) sale de la etiqueta |
 | **Móvil** — Android | `apps/mobile` | React Native · Expo | `mobile` | 0.3.4 | Tag `mobile-vX.Y.Z` → CI → APK |
 
 ```
@@ -81,7 +81,7 @@ Detalle del flujo, convención de commits y pasos de release: [`docs/RAMAS_Y_REL
 ├── apps/
 │   ├── web/             lixbon.com
 │   ├── desktop/         app de escritorio
-│   ├── cli/             lixbon_cli/ (fuente) + client_cli.py (artefacto)
+│   ├── cli/             go/ (el CLI que se distribuye) · lixbon_cli/ + client_cli.py (cliente Python anterior)
 │   └── mobile/          app Android
 ├── assets/brand/        iconos y favicon oficiales
 ├── docs/                documentación técnica y de producto
@@ -181,17 +181,22 @@ agotada, modelo no permitido) llegan en español con la fecha de reinicio.
 curl -fsSL https://lixbon.com/install.sh | bash     # Linux / macOS
 irm https://lixbon.com/install.ps1 | iex             # Windows
 lixbon setup && lixbon chat
+lixbon update                                        # o lixbon --update; lixbon --version muestra la versión
 ```
+
+Es un único ejecutable (no necesita Python). Los instaladores verifican su SHA-256 contra el gateway y contra el `SHA256SUMS` de la release; la página [lixbon.com/apps](https://lixbon.com/apps) muestra la etapa, las novedades y el historial de versiones, y la instalación manual con verificación. Las notas de cada versión se escriben en `apps/cli/go/CHANGELOG.md`.
 
 ## Tests
 
 ```bash
 python -m pytest core             # gateway — los tests viven junto al módulo que prueban
-python -m pytest apps/cli/tests   # CLI — incluye la verificación de que client_cli.py está al día
+(cd apps/cli/go && go test ./...) # CLI Go
+python -m pytest apps/cli/tests   # cliente Python anterior — incluye la verificación de que client_cli.py está al día
+python infra/ci/install_e2e.py    # instaladores install.sh / install.ps1 contra un servidor de releases local
 cd apps/web && npm run lint       # web
 ```
 
-`ci.yml` corre los tests del CLI en cada PR a `master`. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
+`ci.yml` corre en cada PR a `master` los tests del CLI Go (Linux, macOS y Windows), los del cliente Python anterior y la prueba de los instaladores. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Despliegue
 

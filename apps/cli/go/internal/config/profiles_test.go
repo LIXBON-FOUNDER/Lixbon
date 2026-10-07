@@ -123,3 +123,38 @@ func TestNormalizeNamesAndURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateProfileEditsActiveAndInactiveProviders(t *testing.T) {
+	cfg := Default()
+	cfg.APIKey, cfg.Model = "lixbon_sk_a", "qwen"
+	if err := cfg.AddProfile("local", Profile{BaseURL: "http://localhost:1234/v1", Generic: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cfg.UpdateProfile("local", func(p *Profile) { p.APIKey, p.Model = "sk-local", "llama" }); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIKey != "lixbon_sk_a" || cfg.Model != "qwen" {
+		t.Fatalf("editar un proveedor inactivo no debe tocar el activo: %q %q", cfg.APIKey, cfg.Model)
+	}
+	if got := cfg.Profiles()["local"]; got.APIKey != "sk-local" || got.Model != "llama" || !got.Generic {
+		t.Fatalf("local: %+v", got)
+	}
+
+	if err := cfg.UpdateProfile("lixbon", func(p *Profile) { p.APIKey = "lixbon_sk_b" }); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIKey != "lixbon_sk_b" {
+		t.Fatalf("editar el activo debe llegar a los campos de nivel superior: %q", cfg.APIKey)
+	}
+	if err := cfg.UseProfile("local"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIKey != "sk-local" || cfg.Profiles()["lixbon"].APIKey != "lixbon_sk_b" {
+		t.Fatalf("tras cambiar: activa=%q lixbon=%q", cfg.APIKey, cfg.Profiles()["lixbon"].APIKey)
+	}
+
+	if err := cfg.UpdateProfile("nada", func(*Profile) {}); err == nil {
+		t.Fatal("un proveedor inexistente debe fallar")
+	}
+}

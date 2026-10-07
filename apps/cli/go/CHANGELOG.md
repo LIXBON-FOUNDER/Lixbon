@@ -4,6 +4,13 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.3.0-go.3
+- Al cambiar de proveedor con `/provider` se indica cuántos modelos ofrece y se abre el selector si el modelo guardado no está en su lista.
+- Si un proveedor responde con error al listar los modelos (por ejemplo una URL sin `/v1`), el CLI muestra el código HTTP y el mensaje en lugar de «¿Está en marcha el servidor?».
+- Una clave rechazada por un proveedor genérico pide la nueva al momento.
+- Nuevo `lixbon profile set NOMBRE` y `/provider key NOMBRE` para cambiar la URL, la clave, el modelo o el contexto de un proveedor sin activarlo.
+- `lixbon init` avisa de que modifica el proveedor activo.
+
 ## 2.3.0-go.2
 - Nuevo aviso al abrir el chat cuando hay una versión más reciente: «Hay una versión nueva (vX). Ejecuta /update». Se comprueba como mucho una vez al día y se desactiva con `"update_check": false` en `config.json` o con `LIXBON_NO_UPDATE_CHECK=1`.
 - `lixbon --update` actualiza el CLI, igual que `lixbon update`.

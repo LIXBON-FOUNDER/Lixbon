@@ -46,9 +46,12 @@ lixbon profile add openrouter --api-key <clave> --model <modelo>
 lixbon profile add nube --base-url https://mi-servidor/v1 --api-key <clave>
 lixbon profile                                 # listar
 lixbon profile use lixbon                      # volver al gateway
+lixbon profile set nube --api-key <clave>      # cambiar solo la clave (también --base-url, --model, --context-window)
 ```
 
-En el chat, `/provider` abre el selector (también permite añadir uno) y `/provider nombre` cambia directamente. Presets: `lmstudio`, `ollama`, `openai`, `openrouter`.
+Cada proveedor guarda su propia URL, clave y modelo. `lixbon init`, `/model` y `/key` modifican siempre el proveedor activo; para tocar otro, `profile set`. Al cambiar de proveedor el CLI lo consulta y muestra cuántos modelos ofrece; si el modelo guardado no está en su lista o no hay ninguno, abre el selector. Un error HTTP al listar los modelos se muestra tal cual (una URL sin `/v1` responde 404) y una clave rechazada pide la nueva en el momento.
+
+En el chat, `/provider` abre el selector (también permite añadir uno), `/provider nombre` cambia directamente y `/provider key nombre` cambia la clave de un proveedor sin activarlo. Presets: `lmstudio`, `ollama`, `openai`, `openrouter`.
 
 Un perfil sin `--gateway` es genérico: solo se envían `model`, `messages`, `stream`, `stream_options` y `tools` (OpenAI rechaza los parámetros desconocidos), la clave es opcional y no se consultan los endpoints `/api` de Lixbon (plan, uso, nodos, búsqueda web, título automático). `/usage /nodes /login /logout /key /web` lo avisan y el modo `delegate` pasa a `ask`. La ventana de contexto por defecto es de 8192 tokens; ajústala a la que cargaste en el servidor con `--context-window`.
 
