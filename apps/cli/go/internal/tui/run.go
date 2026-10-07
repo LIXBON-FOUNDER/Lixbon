@@ -45,7 +45,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 	switch acc.State {
 	case chat.AccountAuth:
 		if acc.Generic {
-			fmt.Fprintln(stderr, providerHost(cfg.BaseURL)+" rechazó la clave. Cámbiala con: lixbon profile add (o lixbon init --api-key <clave>)")
+			fmt.Fprintf(stderr, "%s rechazó la clave. Cámbiala con: lixbon profile set %s --api-key <clave>\n", providerHost(cfg.BaseURL), cfg.ActiveProfile())
 			return 1
 		}
 		c.ClearSession()
@@ -95,7 +95,7 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 
 	m.printHeader()
 	if offline {
-		m.print(warnLine("No se pudo contactar con el servidor; se trabajará con la configuración local."))
+		m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
 	}
 	if m.opts.Warning != "" {
 		m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))

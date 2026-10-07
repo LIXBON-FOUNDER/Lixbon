@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"lixbon.com/cli/internal/config"
@@ -166,4 +169,74 @@ func TestSwitchingToAnExternalProviderLeavesDelegateMode(t *testing.T) {
 	if h.chat.Mode != "ask" {
 		t.Fatalf("modo: %q", h.chat.Mode)
 	}
+}
+
+func providerServer(t *testing.T, handler http.HandlerFunc) string {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func serverWithKey(t *testing.T, want string) string {
+	return providerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+want {
+			http.Error(w, `{"error":{"message":"clave inválida"}}`, http.StatusUnauthorized)
+			return
+		}
+		io.WriteString(w, `{"data":[{"id":"qwen","name":"Qwen"},{"id":"llama","name":"Llama"}]}`)
+	})
+}
+
+func TestProviderSwitchShowsTheRealServerErrorInsteadOfAskingIfItIsRunning(t *testing.T) {
+	url := providerServer(t, http.NotFound)
+	h := newHarness(t, func(cfg *config.Config) {
+		if err := cfg.AddProfile("local", config.Profile{BaseURL: url, Generic: true}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	h.send("/provider local")
+	h.pump(func() bool { return h.m.busy == "" && strings.Contains(h.out(), "HTTP 404") })
+	contains(t, h.out(), "Revisa la URL base")
+	if strings.Contains(h.out(), "¿Está en marcha") {
+		t.Fatalf("un 404 no es un servidor apagado: %s", h.out())
+	}
+}
+
+func TestProviderRejectedKeyAsksForANewOneAndReconnects(t *testing.T) {
+	url := serverWithKey(t, "buena")
+	h := newHarness(t, func(cfg *config.Config) {
+		if err := cfg.AddProfile("local", config.Profile{BaseURL: url, APIKey: "mala", Model: "llama", Generic: true}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	h.send("/provider local")
+	h.pump(func() bool { return h.m.prompt != nil })
+	contains(t, h.out(), "rechazó la clave")
+
+	h.send("buena")
+	h.pump(func() bool { return strings.Contains(h.out(), "modelos disponibles") })
+	contains(t, h.out(), "Clave de «local» actualizada")
+	contains(t, h.out(), "Modelo: Llama")
+	if got := configLoad(h.chat.ConfigPath).Profiles()["local"].APIKey; got != "buena" {
+		t.Fatalf("clave guardada: %q", got)
+	}
+}
+
+func TestProviderKeyCommandEditsAnotherProviderWithoutSwitching(t *testing.T) {
+	_, _, add := withExternalProvider(t)
+	h := newHarness(t, add)
+	h.send("/provider key local")
+	h.pump(func() bool { return h.m.prompt != nil })
+	h.send("nueva-clave")
+	h.pump(func() bool { return h.m.prompt == nil })
+	cfg := configLoad(h.chat.ConfigPath)
+	if cfg.ActiveProfile() != "lixbon" || cfg.Profiles()["local"].APIKey != "nueva-clave" || cfg.APIKey != "k" {
+		t.Fatalf("activo=%q local=%+v clave activa=%q", cfg.ActiveProfile(), cfg.Profiles()["local"], cfg.APIKey)
+	}
+
+	h.send("/provider key lixbon")
+	contains(t, h.out(), "gateway Lixbon: usa /login")
+	h.send("/provider key nada")
+	contains(t, h.out(), "No existe el proveedor «nada»")
 }

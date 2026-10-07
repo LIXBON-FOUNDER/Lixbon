@@ -129,11 +129,33 @@ func (c *Config) UseProfile(name string) error {
 	if !ok {
 		return fmt.Errorf("No existe el proveedor «%s».", name)
 	}
-	c.BaseURL, c.APIKey, c.Model, c.KeyModel = target.BaseURL, target.APIKey, target.Model, target.KeyModel
-	if target.ContextWindow > 0 {
-		c.ContextWindow = target.ContextWindow
-	}
+	c.applyTopLevel(target)
 	c.SetExtraString("profile", name)
+	c.storeProfiles(profiles)
+	return nil
+}
+
+func (c *Config) applyTopLevel(p Profile) {
+	c.BaseURL, c.APIKey, c.Model, c.KeyModel = p.BaseURL, p.APIKey, p.Model, p.KeyModel
+	if p.ContextWindow > 0 {
+		c.ContextWindow = p.ContextWindow
+	}
+}
+
+// UpdateProfile edita un proveedor existente, sea el activo o no. Cambiar la
+// URL, la clave o el modelo del activo también actualiza los campos de nivel
+// superior, que son los que usa el cliente.
+func (c *Config) UpdateProfile(name string, edit func(*Profile)) error {
+	profiles := c.Profiles()
+	p, ok := profiles[name]
+	if !ok {
+		return fmt.Errorf("No existe el proveedor «%s».", name)
+	}
+	edit(&p)
+	profiles[name] = p
+	if name == c.ActiveProfile() {
+		c.applyTopLevel(p)
+	}
 	c.storeProfiles(profiles)
 	return nil
 }
