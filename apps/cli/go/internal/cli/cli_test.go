@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -110,6 +112,16 @@ func newHarness(t *testing.T, g *fakeGateway, cfg map[string]any) *harness {
 
 func (h *harness) run(args ...string) int {
 	return h.app.Run(context.Background(), args)
+}
+
+func TestVersionDoesNotNeedConfigOrNetwork(t *testing.T) {
+	for _, arg := range []string{"version", "--version"} {
+		h := newHarness(t, nil, nil)
+		want := fmt.Sprintf("lixbon v%s %s/%s\n", config.Version, runtime.GOOS, runtime.GOARCH)
+		if code := h.run(arg); code != 0 || h.out.String() != want {
+			t.Errorf("%s: code %d, salida %q, quería %q", arg, code, h.out, want)
+		}
+	}
 }
 
 func TestStatus(t *testing.T) {

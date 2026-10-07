@@ -62,7 +62,7 @@ Una suscripción de ChatGPT o Claude no es una API key y no sirve aquí: hace fa
 - Los errores de `chat` van a stderr; `status` y `models` siguen imprimiendo a stdout como Python.
 - Si no hay modelo y el servidor no define uno para `chat`, falla con un mensaje en vez de abrir un selector.
 - Ctrl+C durante `--once` termina con código 0 (igual que Python) y escribe `— interrumpido —` en stderr.
-- Versión `2.3.0-go.0` en `status` y en el `User-Agent`.
+- La versión la inyecta `release-cli.yml` desde la etiqueta; se ve con `lixbon --version`, en `status` y en el `User-Agent` (una compilación local informa `0.0.0-dev`).
 
 - `search` usa un recorrido propio en Go (poda carpetas ignoradas, lee por líneas, respeta cancelación) en lugar de ripgrep; el orden de salida es el léxico del recorrido.
 - Las lecturas están acotadas: líneas de más de 1 MiB se recortan, un rango de más de 120.000 caracteres se corta con aviso, y `end_line` negativo se trata como ausente.
