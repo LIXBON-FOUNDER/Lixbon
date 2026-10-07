@@ -4,6 +4,13 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.3.0-go.4
+- `lixbon` arranca aunque no tengas sesión en lixbon.com o tu clave haya dejado de valer: abre el chat con un aviso y desde `/provider` puedes conectar otro proveedor (OpenRouter, OpenAI, Kilo, LM Studio, Ollama…) sin salir.
+- Nuevo `lixbon auth login | list | logout` para conectar proveedores y gestionar sus claves, al estilo de `opencode auth`. La clave se pide sin mostrarla.
+- `/provider` → «Añadir proveedor» ofrece una lista de presets (OpenRouter, OpenAI, Kilo, Groq, DeepSeek, Mistral, Gemini, LM Studio, Ollama) y solo pide la clave.
+- Corregido: el proveedor activo y los campos de `config.json` podían quedar desajustados (por ejemplo, la clave de Kilo enviada a lixbon.com). Ahora manda siempre el perfil guardado y el archivo se corrige al cargarlo.
+- Los errores de clave rechazada indican el comando que existe (`lixbon auth login NOMBRE`) en lugar de `init`.
+
 ## 2.3.0-go.3
 - Al cambiar de proveedor con `/provider` se indica cuántos modelos ofrece y se abre el selector si el modelo guardado no está en su lista.
 - Si un proveedor responde con error al listar los modelos (por ejemplo una URL sin `/v1`), el CLI muestra el código HTTP y el mensaje en lugar de «¿Está en marcha el servidor?».

@@ -242,6 +242,16 @@ func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 	return models, nil
 }
 
+// ExplainListError distingue un servidor que no responde de uno que responde
+// con error, p. ej. una URL base sin /v1: decir «¿está en marcha?» despista.
+func ExplainListError(err error, host string) string {
+	var apiErr *Error
+	if errors.As(err, &apiErr) && apiErr.Status > 0 {
+		return fmt.Sprintf("%s respondió HTTP %d al listar los modelos: %s. Revisa la URL base (suele terminar en /v1): lixbon profile set NOMBRE --base-url URL", host, apiErr.Status, apiErr.Message)
+	}
+	return "No se pudo contactar con " + host + ". ¿Está en marcha el servidor?"
+}
+
 func (c *Client) Models(ctx context.Context) ([]string, error) {
 	detail, err := c.ModelsDetail(ctx)
 	ids := make([]string, len(detail))

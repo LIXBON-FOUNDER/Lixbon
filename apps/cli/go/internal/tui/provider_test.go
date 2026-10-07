@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"lixbon.com/cli/internal/api"
+	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
 )
 
@@ -69,10 +73,7 @@ func TestProviderAddFlowCreatesAndActivatesAGenericProvider(t *testing.T) {
 	_, url, _ := withExternalProvider(t)
 	h := newHarness(t, nil)
 
-	h.send("/provider")
-	h.key("down")
-	h.key("enter")
-	h.pump(func() bool { return h.m.prompt != nil })
+	openCustomProviderPrompt(h)
 	h.send("Mi-Local")
 	h.pump(func() bool { return h.m.prompt != nil })
 	h.send(url)
@@ -98,20 +99,14 @@ func TestProviderAddFlowCreatesAndActivatesAGenericProvider(t *testing.T) {
 
 func TestProviderAddFlowRejectsBadInput(t *testing.T) {
 	h := newHarness(t, nil)
-	h.send("/provider")
-	h.key("down")
-	h.key("enter")
-	h.pump(func() bool { return h.m.prompt != nil })
+	openCustomProviderPrompt(h)
 	h.send("con espacios")
 	contains(t, h.out(), "Nombre no válido")
 	if h.m.prompt != nil {
 		t.Fatal("un nombre inválido cancela el alta")
 	}
 
-	h.send("/provider")
-	h.key("down")
-	h.key("enter")
-	h.pump(func() bool { return h.m.prompt != nil })
+	openCustomProviderPrompt(h)
 	h.send("ok")
 	h.pump(func() bool { return h.m.prompt != nil })
 	h.send("localhost:1234")
@@ -239,4 +234,103 @@ func TestProviderKeyCommandEditsAnotherProviderWithoutSwitching(t *testing.T) {
 	contains(t, h.out(), "gateway Lixbon: usa /login")
 	h.send("/provider key nada")
 	contains(t, h.out(), "No existe el proveedor «nada»")
+}
+
+func openCustomProviderPrompt(h *harness) {
+	h.t.Helper()
+	h.send("/provider")
+	h.key("down")
+	h.key("enter")
+	h.pump(func() bool { return h.m.picker != nil && strings.Contains(h.view(), "Añadir proveedor") })
+	for range config.PresetNames() {
+		h.key("down")
+	}
+	h.key("enter")
+	h.pump(func() bool { return h.m.prompt != nil })
+}
+
+func TestProviderAddOffersThePresetsAndAsksOnlyForTheKey(t *testing.T) {
+	h := newHarness(t, nil)
+	h.send("/provider")
+	h.key("down")
+	h.key("enter")
+	h.pump(func() bool { return h.m.picker != nil && strings.Contains(h.view(), "Añadir proveedor") })
+	for _, want := range []string{"openrouter", "openai", "kilo", "groq", "otro…"} {
+		contains(t, h.view(), want)
+	}
+	h.key("esc")
+
+	h.send("/provider --add groq")
+	h.pump(func() bool { return h.m.prompt != nil })
+	contains(t, h.out(), "API key de «groq»")
+	h.key("esc")
+	if len(h.chat.Cfg.Profiles()) != 1 {
+		t.Fatal("cancelar no debe crear el proveedor")
+	}
+	h.send("/provider --add inventado")
+	contains(t, h.out(), "No existe el preset «inventado»")
+}
+
+func TestStartupWithoutSessionStillOpensAndExplainsHowToConnect(t *testing.T) {
+	h := newHarness(t, func(cfg *config.Config) { cfg.APIKey = "" })
+	var stdout strings.Builder
+	acc, notes := startupAccount(context.Background(), h.chat, &stdout)
+	if acc.State != chat.AccountAuth || len(notes) != 1 || !strings.Contains(notes[0], "/login") || !strings.Contains(notes[0], "/provider") {
+		t.Fatalf("estado=%v notas=%v", acc.State, notes)
+	}
+	if stdout.Len() != 0 || h.gw.count() != 0 {
+		t.Fatal("sin clave no hay nada que sondear")
+	}
+
+	h.send("hola")
+	contains(t, h.out(), "Sin sesión en lixbon.com")
+	if h.gw.count() != 0 {
+		t.Fatal("sin sesión no se envía el mensaje")
+	}
+}
+
+func TestStartupWithARejectedKeyClearsItAndKeepsRunning(t *testing.T) {
+	url := serverWithKey(t, "buena")
+	cfg := config.Default()
+	cfg.BaseURL, cfg.APIKey, cfg.Mode = url, "mala", "ask"
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	c, err := chat.New(cfg, api.FromConfig(cfg), chat.Options{ConfigPath: configPath, Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Toolbox.Close)
+
+	acc, notes := startupAccount(context.Background(), c, io.Discard)
+	if acc.State != chat.AccountAuth || len(notes) != 1 || !strings.Contains(notes[0], "ya no es válida") {
+		t.Fatalf("estado=%v notas=%v", acc.State, notes)
+	}
+	if got := configLoad(configPath).APIKey; got != "" {
+		t.Fatalf("la clave rechazada se borra: %q", got)
+	}
+}
+
+func TestStartupWithARejectedExternalKeyKeepsItAndPointsToProviderKey(t *testing.T) {
+	url := serverWithKey(t, "buena")
+	cfg := config.Default()
+	cfg.BaseURL = url
+	if err := cfg.AddProfile("nube", config.Profile{BaseURL: url, APIKey: "mala", Generic: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.UseProfile("nube"); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	c, err := chat.New(cfg, api.FromConfig(cfg), chat.Options{ConfigPath: configPath, Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Toolbox.Close)
+
+	acc, notes := startupAccount(context.Background(), c, io.Discard)
+	if acc.State != chat.AccountAuth || len(notes) != 1 || !strings.Contains(notes[0], "/provider key nube") {
+		t.Fatalf("estado=%v notas=%v", acc.State, notes)
+	}
+	if c.Cfg.APIKey != "mala" {
+		t.Fatal("la clave de un proveedor externo no se borra")
+	}
 }
