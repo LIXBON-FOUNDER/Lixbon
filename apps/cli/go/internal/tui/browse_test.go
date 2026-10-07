@@ -1,10 +1,6 @@
 package tui
 
-import (
-	"testing"
-
-	tea "charm.land/bubbletea/v2"
-)
+import "testing"
 
 func TestArrowsWalkTheWholeHistoryThroughSlashEntries(t *testing.T) {
 	h := newHarness(t, nil)
@@ -50,36 +46,5 @@ func TestClearWipesTheScreenNotJustTheContext(t *testing.T) {
 	contains(t, h.view(), "contexto limpio")
 	if len(h.chat.History) != 0 {
 		t.Fatal("/clear vacía el historial")
-	}
-}
-
-func TestMouseCaptureIsOffUntilRequested(t *testing.T) {
-	h := newHarness(t, nil)
-	if got := h.m.View().MouseMode; got != tea.MouseModeNone {
-		t.Fatalf("por defecto el terminal debe poder seleccionar texto, modo %v", got)
-	}
-	h.send("/mouse")
-	if got := h.m.View().MouseMode; got != tea.MouseModeCellMotion {
-		t.Fatalf("/mouse activa la rueda, modo %v", got)
-	}
-	h.send("/mouse")
-	if got := h.m.View().MouseMode; got != tea.MouseModeNone {
-		t.Fatalf("/mouse otra vez la quita, modo %v", got)
-	}
-}
-
-func TestMouseChoicePersistsAcrossRestarts(t *testing.T) {
-	h := newHarness(t, nil)
-	h.send("/mouse")
-	if !configLoad(h.chat.ConfigPath).Mouse {
-		t.Fatal("/mouse no guardó la preferencia")
-	}
-	restarted := New(h.chat, Options{HistoryFile: h.m.opts.HistoryFile, Version: "test"})
-	if got := restarted.View().MouseMode; got != tea.MouseModeCellMotion {
-		t.Fatalf("al reabrir debe seguir activa, modo %v", got)
-	}
-	h.send("/mouse")
-	if configLoad(h.chat.ConfigPath).Mouse {
-		t.Fatal("/mouse off no se guardó")
 	}
 }

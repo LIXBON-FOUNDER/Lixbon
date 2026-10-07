@@ -66,7 +66,13 @@ type Model struct {
 
 	log    transcript
 	scroll int
-	wheel  bool
+	pager  *pager
+	sel    *selection
+	// copyText escribe en el portapapeles del sistema; las pruebas lo sustituyen.
+	copyText func(string) error
+	// winTop y winRows describen la ventana del transcript del último fotograma:
+	// con ellas el ratón se traduce a filas del transcript.
+	winTop, winRows int
 
 	running     bool
 	interrupted bool
@@ -130,8 +136,8 @@ func New(c *chat.Chat, opts Options) *Model {
 		input:  ta,
 		width:  80,
 		height: 24,
-		wheel:  c.Cfg.Mouse,
 		hist:   loadInputHistory(opts.HistoryFile),
+		copyText: copyToClipboard,
 		online: !opts.Offline,
 		send:   func(tea.Msg) {},
 	}
@@ -153,7 +159,7 @@ func (m *Model) Wire(send func(tea.Msg), observe func(string)) {
 // print añade texto al transcript. Si el usuario había subido con el scroll,
 // la vista se queda donde estaba en vez de saltar al final.
 func (m *Model) print(text string) {
-	added := m.log.add(text)
+	added := len(m.log.add(text))
 	if m.scroll > 0 {
 		m.scroll += added
 	}
@@ -164,12 +170,12 @@ func (m *Model) print(text string) {
 
 // printDynamic imprime una entrada que se redibuja cuando cambia el ancho.
 func (m *Model) printDynamic(render func(width int) string) {
-	text, added := m.log.addDynamic(render)
+	rows := m.log.addDynamic(render)
 	if m.scroll > 0 {
-		m.scroll += added
+		m.scroll += len(rows)
 	}
 	if m.observe != nil {
-		m.observe(text)
+		m.observe(strings.Join(rows, "\n"))
 	}
 }
 

@@ -44,7 +44,7 @@ func TestHeaderLogoStaysWholeWhenTheWindowChanges(t *testing.T) {
 	logo := renderLogo()
 	for _, width := range []int{120, 70, 40, 30, 18, 12, 90} {
 		h.update(tea.WindowSizeMsg{Width: width, Height: 30})
-		screen := ansi.Strip(h.m.View().Content)
+		screen := h.view()
 		if width >= logoSize+4 {
 			for i, row := range logo {
 				if !strings.Contains(screen, ansi.Strip(row)) {

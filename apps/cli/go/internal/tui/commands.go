@@ -67,7 +67,6 @@ var Specs = []Spec{
 // porque este es el contrato con el catálogo de Python.
 var GoSpecs = []Spec{
 	{"provider", "[nombre | key nombre]", "Cambiar de proveedor de modelos o de clave de uno (lixbon.com, LM Studio, Ollama…)", "cuenta"},
-	{"mouse", "", "Activar o quitar la rueda del ratón (se guarda; activa, no deja seleccionar texto)", "conversación"},
 }
 
 // Ordered devuelve el catálogo por grupo (en el orden de Groups) y, dentro,
