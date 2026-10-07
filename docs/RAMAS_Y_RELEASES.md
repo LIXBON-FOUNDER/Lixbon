@@ -107,10 +107,10 @@ El job `registrar` guarda la URL y el SHA-256 de cada binario en el gateway (`PO
 
 | Workflow | Disparador | Qué hace |
 |---|---|---|
-| `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI (`apps/cli/tests`) |
+| `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI Python (`apps/cli/tests`), del CLI Go y de los instaladores (`infra/ci/install_e2e.py`: ejecuta `install.sh`/`install.ps1` reales en Linux, macOS y Windows contra un servidor de releases local, con digest alterado, `SHA256SUMS` alterado y actualización con el binario en uso) |
 | `tauri.yml` | tag `desktop-v*`, manual | Build + release del MSI |
 | `mobile.yml` | tag `mobile-v*`, manual | Build + release del APK |
-| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway |
+| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway + smoke test: instala desde `lixbon.com/install.sh` e `install.ps1` y comprueba la versión |
 
 Los tests del gateway (`python -m pytest core`) se ejecutan en local por ahora:
 varios módulos comparten estado de BD y fallan al correr juntos; cuando eso se
