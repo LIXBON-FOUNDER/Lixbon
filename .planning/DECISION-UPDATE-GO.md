@@ -1,6 +1,6 @@
 # Decisión: instalación y actualización del CLI Go
 
-Fecha: 2026-10-06 · Issues #18 y #20 · Requisitos REL-01 a REL-04 · Estado: aceptada por el usuario; cliente, gateway e instaladores implementados con pruebas, sin ninguna release publicada todavía.
+Fecha: 2026-10-06 · Issues #18 y #20 · Requisitos REL-01 a REL-04 · Estado: aceptada por el usuario; implementada y publicada como beta (`cli-v2.3.0-go.0`, 2026-10-07); falta probar Linux y macOS reales y Docker.
 
 ## Decisiones del usuario
 
@@ -36,7 +36,7 @@ Fecha: 2026-10-06 · Issues #18 y #20 · Requisitos REL-01 a REL-04 · Estado: a
 
 **Instaladores.** `routers/installer_go.py` genera `install.sh` e `install.ps1` con la tabla de binarios (URL y digest) embebida por el gateway. Detectan SO y arquitectura, descargan, verifican contra el digest embebido y contra `SHA256SUMS`, instalan en `~/.local/bin/lixbon` (Linux y macOS) o `%USERPROFILE%\.lixbon\lixbon.exe` (Windows, que ya estaba en el PATH), retiran el lanzador y `client_cli.py` antiguos y ejecutan `lixbon init --base-url`. Las URL públicas no cambian.
 
-**Transición hasta la primera release.** Mientras no haya ninguna release del CLI registrada, `install.sh` e `install.ps1` siguen sirviendo el instalador de Python, para no dejar la página sin instalador al desplegar el gateway antes de publicar. Ese camino y `/install/client_cli.py` se borran en la retirada de Python.
+**Instalador de respaldo.** Si no hubiera ninguna release del CLI registrada, `install.sh` e `install.ps1` caerían al instalador de Python. Desde `cli-v2.3.0-go.0` hay release registrada y producción sirve el instalador Go; ese camino de respaldo y `/install/client_cli.py` se borran en la retirada de Python.
 
 ## Verificado
 
@@ -46,7 +46,11 @@ Fecha: 2026-10-06 · Issues #18 y #20 · Requisitos REL-01 a REL-04 · Estado: a
 
 ## Pendiente
 
-- Ejecutar `release-cli.yml` con una etiqueta real (`cli-v2.3.0-go.0`), comprobar que los seis destinos compilan y se registran, y probar `install.sh`/`install.ps1` y `lixbon update` contra esa release (#22 para Linux y macOS).
-- Imagen Docker con el binario (#20).
-- Firma de binarios para macOS (Gatekeeper) y Windows (SmartScreen); los archivos descargados por `curl` o por el propio cliente no llevan la marca de cuarentena, pero hay que confirmarlo en máquinas reales.
-- Retirada de Python: borrar `/install/client_cli.py`, `CLI_SOURCE_PATH`, la copia del `Dockerfile`, el instalador de respaldo y `apps/cli/lixbon_cli` (ver ROADMAP, «Retirada de Python»). Los clientes Python existentes no pueden actualizarse solos a Go: reinstalan con el comando de la página.
+- Probar `install.sh` y `lixbon update` en Linux y macOS reales y en CI (#28, #22). Imagen Docker con el binario (#20).
+- Firma de binarios para macOS (Gatekeeper) y Windows (SmartScreen); los archivos descargados por `curl` o por el propio cliente no llevan la marca de cuarentena, pero hay que confirmarlo en máquinas reales (#34).
+- Retirada de Python: borrar `/install/client_cli.py`, `CLI_SOURCE_PATH`, la copia del `Dockerfile`, el instalador de respaldo y `apps/cli/lixbon_cli` (#36; ver ROADMAP, «Retirada de Python»). Los clientes Python existentes no pueden actualizarse solos a Go: reinstalan con el comando de la página.
+- Mejoras rastreadas: web y documentación sin Python (#27), `lixbon --version` y versión inyectada (#29), aviso de versión nueva (#30), pruebas del gateway en CI (#32), canal estable y notas de release (#33), gestores de paquetes (#35).
+
+## Release publicada (2026-10-07)
+
+Etiqueta `cli-v2.3.0-go.0` sobre el merge del PR #26: el workflow compiló los seis destinos, publicó la *prerelease* con `SHA256SUMS` y el job `registrar` dio de alta los seis binarios. El manifest de producción (`https://lixbon.com/api/updates/cli/beta`) devuelve la versión con la URL y el digest de cada plataforma, y `https://lixbon.com/install.sh` sirve ya el instalador Go. `install.ps1` real, ejecutado en Windows 11 con una carpeta de usuario temporal, instaló el binario, verificó los dos digests, retiró `lixbon.cmd` y `client_cli.py` y dejó `lixbon status` y `lixbon update --check` funcionando. `install.sh` no se ha ejecutado en Linux ni macOS.

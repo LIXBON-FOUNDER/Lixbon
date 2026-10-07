@@ -28,11 +28,11 @@ Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión
 | 2. Chat usable y cancelable | Implementada; falta validar contra un gateway real y completar CHAT-02 (login) | pruebas `internal/{sse,api,config,cli}` |
 | 3. Agente, herramientas y estado | Implementada; falta verificación en terminal real y con modelos reales | pruebas `internal/{agent,tools,process,history,session,workspace}` |
 | 4. Terminal y conexiones | En curso: TUI, MCP, adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage`, `update` y los 41 comandos `/` listos (más `/provider` y `/mouse`) | `internal/{tui,chat,mcp,documents,clipboard,remote}` |
-| 5. Distribución y sustitución | En curso: `lixbon update`, /update, instaladores del gateway y manifest implementados con pruebas; `release-cli.yml` sin ejecutar (ninguna release publicada), sin Docker | `internal/update`, `core/gateway/routers/installer_go.py`, `DECISION-UPDATE-GO.md` |
+| 5. Distribución y sustitución | En curso: `lixbon update`, /update, instaladores del gateway y manifest implementados con pruebas; beta `cli-v2.3.0-go.0` publicada (2026-10-07) con manifest y instalador de producción; sin Docker ni prueba en Linux/macOS | `internal/update`, `core/gateway/routers/installer_go.py`, `DECISION-UPDATE-GO.md` |
 
 Requisitos v1: **20 hechos, 9 parciales, 2 pendientes** de 31 (detalle en REQUIREMENTS.md). «Hecho» significa implementado con pruebas automáticas, no aceptado: la aceptación del reemplazo (REL-05) sigue pendiente.
 
-Last activity: 2026-10-06 — investigación de instalación y actualización (`DECISION-UPDATE-GO.md`); workflow de release de binarios; `!comando`, cabecera adaptable al ancho y `lixbon.exe~` fuera de git; documentos alineados con el código.
+Last activity: 2026-10-07 — PR #26 fusionado en `master`; beta `cli-v2.3.0-go.0` publicada y registrada en el gateway; issues #12–#17, #19, #23 y #24 cerradas; backlog nuevo #27–#36.
 
 Progress: [█████░░░░░] 48% de requisitos implementados (0 % aceptados)
 
@@ -41,7 +41,7 @@ Progress: [█████░░░░░] 48% de requisitos implementados (0 % 
 - `go vet ./...` y `go test -count=1 ./...` en `apps/cli/go`: todos los paquetes con pruebas pasan (Windows 11, Go 1.26.5, ejecución local).
 - CI (`ci.yml`, job `cli-go`): verde en ubuntu, macos y windows en el fork (`PR3S1G4zZ/Lixbon`, PR #2) y en el upstream (ejecución 37503221140: los tres jobs Go en success).
 - CI upstream en `cli` (13a2fb9): **success**. En `master` sigue fallando el job Python `CLI · tests + artefacto al día` (`state_corpus.json` no coincide con `sessions.py`/`commands.py`) hasta que `cli` se fusione.
-- `release-cli.yml` (etiquetas `cli-v*`) no se ha ejecutado: no hay ninguna release `cli-v*` en GitHub, así que la matriz de seis destinos y los nombres de los assets no están comprobados.
+- `release-cli.yml` ejecutado con `cli-v2.3.0-go.0` (2026-10-07): los seis destinos compilaron, la *prerelease* se publicó con `SHA256SUMS` y el job `registrar` dio de alta los seis binarios en `lixbon.com`. `https://lixbon.com/install.ps1`, ejecutado en Windows 11 con una carpeta de usuario temporal, instaló el binario con la doble verificación; `lixbon update --check` informó «ya está actualizado». `install.sh` sin ejecutar en Linux ni macOS (Docker Desktop no estaba arrancado).
 - Referencia Python: 133 passed, 0 failed (Windows, Python 3.13.14, `apps/cli/validation/REFERENCE.md`). Los dos fallos históricos de `test_input_box.py` no se reproducen; causa original no determinada.
 - Sin evidencia todavía: gateway autenticado, LM Studio/Ollama/OpenAI reales, terminales físicas Linux/macOS, móvil, mediciones Go y release por plataforma.
 
@@ -79,13 +79,13 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 
-- #13 a #17 y #19 (menos `ui-demo`) implementados en local; falta validarlos con la app móvil, modelos y un gateway reales
-- #18 `update` y `/update`: implementado y probado (Windows real con el `.exe` en uso); falta Linux/macOS y una release real · #20 distribución: workflow, registro e instaladores hechos; falta publicar la primera release, la imagen Docker y la prueba de instalación real por plataforma
+- #12–#17 y #19 cerradas (implementadas y fusionadas; `ui-demo` descartado); falta validarlas con la app móvil, modelos y un gateway reales (#21, #22)
+- #18 `update` y `/update` y #20 distribución: implementados y publicados como beta; siguen abiertas por Linux/macOS reales y la imagen Docker
 - #21 validación contra modelos y gateway reales · #22 terminales reales · #25 cierre de Phase 1
-- #23 resuelta en `cli` (c334599); falta fusionar a `master` · #24 en curso con esta actualización
+- Backlog nuevo (2026-10-07): #27 web y docs sin Python · #28 prueba de instalación en CI · #29 `--version` y versión inyectada · #30 aviso de versión nueva · #31 prueba intermitente del TUI · #32 `pytest core` en CI · #33 canal estable y notas · #34 firma de binarios · #35 Homebrew, Scoop y winget · #36 retirada de Python
 - Retirada de Python: ver «Retirada de Python» en ROADMAP.md.
 - Fusionar `cli` a `master` para recuperar el CI Python (regeneración de `state_corpus.json`).
-- `cli` publicada en `origin` (fork) y en `upstream` (2026-10-06, hasta d4ba2fb); `master` aún no la tiene.
+- `cli` y `master` están al día en `origin` y `upstream`; el trabajo nuevo va por PR de `cli` a `master`.
 
 ### Blockers/Concerns
 
@@ -104,5 +104,5 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 ## Session Continuity
 
 Last session: 2026-10-06
-Stopped at: paridad funcional implementada, incluido `update`. Siguiente: etiquetar `cli-v2.3.0-go.0` (con `LIXBON_ADMIN_TOKEN` en los secretos y el gateway desplegado), probar instaladores y `lixbon update` contra esa release, Docker (#20), validación real (#21, #22) y la retirada de Python.
+Stopped at: beta publicada. Siguiente: probar `install.sh` y `lixbon update` en Linux y macOS (#28, #22), Docker (#20), actualizar la web (#27), validación real (#21, #22) y, tras aceptar la paridad, la retirada de Python (#36).
 Resume file: None
