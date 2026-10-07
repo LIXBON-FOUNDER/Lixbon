@@ -408,3 +408,10 @@ func TestUpdateFailureExitsNonZero(t *testing.T) {
 		t.Fatalf("code %d, error %q", code, h.errOut)
 	}
 }
+
+func TestUpdateFlagIsAnAliasOfTheUpdateCommand(t *testing.T) {
+	h := updateHarness(t, 200, strings.Replace(platformManifest, "%s", "2.4.0", 1))
+	if code := h.run("--update", "--check"); code != 0 || !strings.Contains(h.out.String(), "Hay una versión nueva: v2.4.0") {
+		t.Fatalf("code %d, salida %q, error %q", code, h.out, h.errOut)
+	}
+}
