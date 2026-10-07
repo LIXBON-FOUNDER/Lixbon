@@ -67,6 +67,8 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		Account:     acc,
 		Offline:     acc.State == chat.AccountOffline,
 		Warning:     warning,
+
+		UpdateNotice: updateNotice(cfg, configPath),
 	})
 	if err := runProgram(ctx, m, needsPick, acc.State == chat.AccountOffline, nil, nil); err != nil &&
 		!errors.Is(err, tea.ErrInterrupted) && !errors.Is(err, context.Canceled) {

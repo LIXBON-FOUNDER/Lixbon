@@ -115,6 +115,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cmdDoneMsg:
 		return m, m.finishAsync(msg)
 
+	case updateNoticeMsg:
+		m.print(note(fmt.Sprintf("Hay una versión nueva (v%s). Ejecuta /update.", msg.version)))
+		return m, nil
+
 	case runCommandMsg:
 		return m, m.runCommand(msg.name, msg.arg)
 
