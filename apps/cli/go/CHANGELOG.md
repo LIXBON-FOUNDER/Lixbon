@@ -7,7 +7,10 @@ La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (
 ## 2.3.0-go.2
 - Nuevo aviso al abrir el chat cuando hay una versión más reciente: «Hay una versión nueva (vX). Ejecuta /update». Se comprueba como mucho una vez al día y se desactiva con `"update_check": false` en `config.json` o con `LIXBON_NO_UPDATE_CHECK=1`.
 - `lixbon --update` actualiza el CLI, igual que `lixbon update`.
-- Los instaladores y `lixbon update` entienden las etapas: una versión sin sufijo es estable y solo la reciben quienes ya están en estable; las betas reciben también las estables.
+- Cada versión tiene una etapa que sale de su etiqueta: sin sufijo es estable y con sufijo (`-go.2`, `-beta.1`) es beta. `lixbon update` sigue la etapa de tu versión: quien está en estable solo recibe estables y quien está en beta recibe también las estables.
+- Una instalación nueva con `install.ps1` o `install.sh` trae la última estable y, mientras no haya ninguna, la última beta.
+- La página de descargas (`lixbon.com/apps`) muestra ahora la etapa de cada versión, sus novedades y el historial, y una instalación manual con enlaces a la release de GitHub, el SHA-256 de cada archivo y los comandos para verificarlo.
+- La documentación y las guías ya no piden Python: el CLI es un solo ejecutable.
 
 ## 2.3.0-go.1
 - Nuevo `lixbon --version` (y `lixbon version`): muestra la versión, el sistema y la arquitectura sin leer la configuración ni usar la red.

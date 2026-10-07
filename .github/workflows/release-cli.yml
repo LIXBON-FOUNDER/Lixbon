@@ -83,12 +83,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No es «assets»: el repo ya tiene esa carpeta en la raíz y se mezclarían.
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: dist-cli
           merge-multiple: true
       - name: Sumas de verificación
-        working-directory: assets
+        working-directory: dist-cli
         run: sha256sum * > SHA256SUMS
       - name: Crear la release
         env:
@@ -98,7 +99,7 @@ jobs:
           version="${GITHUB_REF_NAME#cli-v}"
           .github/scripts/cli-release-notes.sh "${version}" > "${RUNNER_TEMP}/notas.md"
           flags=(); [ "${CHANNEL}" = beta ] && flags+=(--prerelease)
-          gh release create "${GITHUB_REF_NAME}" assets/* \
+          gh release create "${GITHUB_REF_NAME}" dist-cli/* \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Lixbon CLI ${version}" \
             --notes-file "${RUNNER_TEMP}/notas.md" \
@@ -112,14 +113,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: dist-cli
           merge-multiple: true
       - name: Registrar la URL, el SHA-256 y las notas de cada binario
         env:
           ADMIN_TOKEN: ${{ secrets.LIXBON_ADMIN_TOKEN }}
           SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
           CHANNEL: ${{ needs.preparar.outputs.channel }}
-        working-directory: assets
+        working-directory: dist-cli
         run: |
           version="${GITHUB_REF_NAME#cli-v}"
           changelog=$("${GITHUB_WORKSPACE}/.github/scripts/cli-release-notes.sh" "${version}" | jq -R -s 'split("\n") | map(select(length > 0) | ltrimstr("- "))')
