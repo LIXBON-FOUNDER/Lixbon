@@ -367,8 +367,8 @@ func (m *Model) remoteModel(arg string) string {
 	return "Modelo cambiado a " + match + "."
 }
 
-// handleRemoteKey: con el control remoto activo solo Ctrl+C y el desplazamiento
-// responden; el resto del teclado queda en pausa.
+// handleRemoteKey: con el control remoto activo solo Ctrl+C y el visor del
+// transcript responden; el resto del teclado queda en pausa.
 func (m *Model) handleRemoteKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+c":
@@ -377,9 +377,9 @@ func (m *Model) handleRemoteKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.leaveRemote(true)
 	case "pgup":
-		m.scrollBy(max(1, m.height-6))
-	case "pgdown":
-		m.scrollBy(-max(1, m.height-6))
+		m.openPager(m.pageRows() - 1)
+	case "ctrl+t":
+		m.openPager(0)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
@@ -64,9 +65,16 @@ type Model struct {
 	send    func(tea.Msg)
 	observe func(string)
 
-	log    transcript
-	scroll int
-	wheel  bool
+	log transcript
+	// out lleva lo impreso al scrollback de la terminal; es nil sin programa
+	// (pruebas), donde el transcript es lo único que se conserva.
+	out          *printer
+	pager        *pager
+	printHeld    bool
+	resumeQueued bool
+	// onReady corre con el primer tamaño de ventana conocido, cuando ya se
+	// puede dibujar la cabecera al ancho real.
+	onReady func() tea.Cmd
 
 	running     bool
 	interrupted bool
@@ -130,7 +138,6 @@ func New(c *chat.Chat, opts Options) *Model {
 		input:  ta,
 		width:  80,
 		height: 24,
-		wheel:  c.Cfg.Mouse,
 		hist:   loadInputHistory(opts.HistoryFile),
 		online: !opts.Offline,
 		send:   func(tea.Msg) {},
@@ -150,27 +157,48 @@ func (m *Model) Wire(send func(tea.Msg), observe func(string)) {
 	m.chat.Toolbox.OnTodo = func(items, previous []tools.TodoItem) { send(todoMsg{items, previous}) }
 }
 
-// print añade texto al transcript. Si el usuario había subido con el scroll,
-// la vista se queda donde estaba en vez de saltar al final.
+// print añade texto al transcript y lo manda al scrollback de la terminal, de
+// modo que la rueda, la selección y la copia son las de la propia terminal.
 func (m *Model) print(text string) {
-	added := m.log.add(text)
-	if m.scroll > 0 {
-		m.scroll += added
-	}
+	m.emit(m.log.add(text))
 	if m.observe != nil {
 		m.observe(text)
 	}
 }
 
-// printDynamic imprime una entrada que se redibuja cuando cambia el ancho.
+// printDynamic imprime una entrada que se redibuja al cambiar el ancho en el
+// visor del transcript; en el scrollback queda como se dibujó.
 func (m *Model) printDynamic(render func(width int) string) {
-	text, added := m.log.addDynamic(render)
-	if m.scroll > 0 {
-		m.scroll += added
-	}
+	rows := m.log.addDynamic(render)
+	m.emit(rows)
 	if m.observe != nil {
-		m.observe(text)
+		m.observe(strings.Join(rows, "\n"))
 	}
+}
+
+func (m *Model) emit(rows []string) {
+	if m.out == nil {
+		return
+	}
+	// insertAbove ignora el texto vacío; una fila en blanco ha de llevar algo.
+	text := strings.Join(rows, "\n")
+	if text == "" {
+		text = " "
+	}
+	m.out.put(tea.Println(text)())
+}
+
+// clearScreen vacía la pantalla, el scrollback y el transcript, para que la rueda
+// no enseñe conversaciones anteriores; la cabecera la
+// reimprime quien llama.
+func (m *Model) clearScreen() {
+	m.log.reset()
+	if m.out == nil {
+		return
+	}
+	m.out.put(tea.Raw(ansi.EraseEntireScreen + ansi.EraseEntireDisplay + ansi.CursorHomePosition)())
+	m.out.put(tea.ClearScreen())
+	m.out.put(firstFrameDelay)
 }
 
 func placeholderFor(c *chat.Chat) string {

@@ -261,7 +261,11 @@ func (h *harness) out() string {
 	return ansi.Strip(strings.Join(h.printed, "\n"))
 }
 
-func (h *harness) view() string { return ansi.Strip(h.m.View().Content) }
+// view es lo que el usuario tendría a la vista: lo impreso en el scrollback y,
+// debajo, la parte viva de la pantalla.
+func (h *harness) view() string {
+	return ansi.Strip(h.m.log.text() + "\n" + h.m.View().Content)
+}
 
 func (h *harness) quitRequested() bool {
 	h.mu.Lock()
