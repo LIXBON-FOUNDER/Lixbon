@@ -17,7 +17,7 @@ Leyenda: `[x]` implementada con pruebas y aceptada · `[~]` implementada o parci
 - [~] **Phase 2: Chat Go usable y cancelable** - El usuario puede ejecutar un primer chat --once Go compatible con el gateway y cancelarlo sin esperar nuevos eventos. *Implementada; falta CHAT-02 (login) y probar contra gateway real.*
 - [~] **Phase 3: Agente, herramientas y estado compatibles** - El usuario puede trabajar sobre su workspace con el agente Go, aprobaciones y sesiones preservadas sin recursos ilimitados. *Implementada; falta validarla con modelos reales y en terminales físicas.*
 - [~] **Phase 4: Terminal interactiva y funciones conectadas** - El usuario puede completar los flujos interactivos, documentales, MCP y remotos que ofrece el cliente Python. *En curso: TUI, MCP, documentos, portapapeles, `/visual`, `/remote`, `setup` y `usage` hechos con pruebas; faltan `/update`, la matriz de terminales y validar con la app móvil y un gateway reales.*
-- [ ] **Phase 5: Distribución, actualización y sustitución aceptada** - El usuario instala y actualiza binarios auténticos sin Python/pip, con recuperación y paridad aceptada por plataforma. *No iniciada; el CI solo compila y prueba.*
+- [ ] **Phase 5: Distribución, actualización y sustitución aceptada** - El usuario instala y actualiza binarios auténticos sin Python/pip, con recuperación y paridad aceptada por plataforma. *Solo investigación y un workflow de release sin ejecutar; sin `update`, instaladores Go ni Docker.*
 
 ## Phase Details
 
@@ -91,7 +91,7 @@ Plans:
 
 **Plans**: TBD
 
-**Estado (2026-10-06)**: en curso. Hecho: TUI Bubble Tea v2 a pantalla completa, cliente MCP stdio/HTTP y `/mcp`, adjuntos `@ruta` e imágenes (#13), PDF y Word (#14), `/paste` y Alt+V (#15), `/visual` (#16), `/remote` (#17), `setup` y `usage` (#19), 40 de 41 comandos `/`, `/provider` y perfiles de proveedor. Pendiente: `/update` y `update` (#18), la matriz de terminales (#22) y la validación con la app móvil, modelos y un gateway reales (#21). `ui-demo` no se porta.
+**Estado (2026-10-06)**: en curso. Hecho: TUI Bubble Tea v2 a pantalla completa, cliente MCP stdio/HTTP y `/mcp`, `!comando`, cabecera y barras adaptables al ancho, adjuntos `@ruta` e imágenes (#13), PDF y Word (#14), `/paste` y Alt+V (#15), `/visual` (#16), `/remote` (#17), `setup` y `usage` (#19), 40 de 41 comandos `/`, `/provider` y perfiles de proveedor. Pendiente: `/update` y `update` (#18), la matriz de terminales (#22) y la validación con la app móvil, modelos y un gateway reales (#21). `ui-demo` no se porta.
 **UI hint**: yes
 
 ### Phase 5: Distribución, actualización y sustitución aceptada
@@ -108,7 +108,7 @@ Plans:
 
 **Plans**: TBD
 
-**Estado (2026-10-06)**: no iniciada. Existe CI de compilación y pruebas en tres sistemas operativos; no hay empaquetado, firma, actualización ni instaladores Go (issues #18, #20). Ver «Retirada de Python».
+**Estado (2026-10-06)**: investigada, sin implementar. Hay CI de compilación y pruebas en tres sistemas operativos y `.github/workflows/release-cli.yml` (etiquetas `cli-v*`: seis destinos, `SHA256SUMS`, release *prerelease*), que **nunca se ha ejecutado**. No hay firma, `update`, instaladores Go ni Docker (issues #18, #20). `DECISION-UPDATE-GO.md` recoge el contrato Python actual, las opciones (GitHub Releases, gateway, híbrida) y la recomendación: binarios en GitHub, digest en el gateway y un puente Python; esperan cuatro decisiones del usuario. Ver «Retirada de Python».
 
 ## Acceptance Gates
 
@@ -127,7 +127,7 @@ Plans:
 | 2. Chat Go usable y cancelable | n/a (sin planes GSD) | Implementada; 4/5 requisitos hechos, CHAT-02 parcial | - |
 | 3. Agente, herramientas y estado compatibles | n/a (sin planes GSD) | Implementada; 10/10 requisitos hechos | - |
 | 4. Terminal interactiva y funciones conectadas | n/a (sin planes GSD) | En curso; 5/7 hechos, 2 parciales (TERM-01, TERM-02) | - |
-| 5. Distribución, actualización y sustitución aceptada | 0/TBD | Not started | - |
+| 5. Distribución, actualización y sustitución aceptada | 0/TBD | Investigada (`DECISION-UPDATE-GO.md`); workflow de release sin ejecutar | - |
 
 ## Coverage
 
@@ -140,7 +140,7 @@ Objetivo del usuario: terminar la migración para poder eliminar la base Python 
 1. **Paridad funcional** (Phase 4): implementada salvo `update` (#18). Adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage` y MCP están hechos con pruebas (issues #12–#17, #19); falta validarlos con la app móvil, modelos y un gateway reales.
 2. **Evidencia de aceptación** (Phase 1 y #21, #22): matriz de destinos, mediciones, validación con gateway/modelos/terminales reales.
 3. **Congelar los corpus**: los `apps/cli/validation/gen_*_corpus.py` usan el código Python como oráculo (`sessions.py`, `commands.py`, `agent.py`…). Antes de borrarlo hay que conservar los JSON de `validation/fixtures/` como contrato versionado y decidir qué hacer con los generadores y con `test_contract_corpus.py`.
-4. **Distribución** (#20): `core/gateway/routers/installer.py` sirve `/install/client_cli.py` y sus scripts `install.sh`/`install.ps1` ejecutan `python`; `core/gateway/routers/versions.py` publica el manifest que consume `client_cli.py --update`; `core/config.py` define `CLI_SOURCE_PATH`; el `Dockerfile` copia `apps/cli/client_cli.py`.
+4. **Distribución** (#18, #20; contrato y opciones en `DECISION-UPDATE-GO.md`): `core/gateway/routers/installer.py` sirve `/install/client_cli.py` y sus scripts `install.sh`/`install.ps1` ejecutan `python`; `client_cli.py update` descarga ese mismo archivo (no usa el manifest); `core/gateway/routers/versions.py` expone `/api/updates/cli/{channel}`, que nadie consume y que devuelve la versión del desktop; `core/config.py` define `CLI_SOURCE_PATH`; el `Dockerfile` copia `apps/cli/client_cli.py`. Hace falta una última versión «puente» de `client_cli.py` que instale el binario Go.
 5. **CI y contribución**: `.github/workflows/ci.yml` (job `CLI · tests + artefacto al día`), `.github/pull_request_template.md` y `CONTRIBUTING.md` (`build.py`, `pytest`).
-6. **Borrado**: `apps/cli/lixbon_cli/`, `client_cli.py`, `build.py`, `tests/`, tras un periodo de coexistencia y con la tag/rama de rollback acordada. `apps/cli/audit/` se conserva como historial.
+6. **Borrado**: `apps/cli/lixbon_cli/`, `build.py` y `tests/`, tras un periodo de coexistencia y con la tag/rama de rollback acordada. **`client_cli.py` no se borra del gateway** mientras queden clientes Python: `lixbon update` y los instaladores antiguos lo descargan de `/install/client_cli.py`; se congela el artefacto puente (o un stub) y se retira con otra decisión. `apps/cli/audit/` se conserva como historial.
 7. **Reorganización**: mover `apps/cli/go/` a la raíz de `apps/cli/` y actualizar rutas de CI, README y documentos.

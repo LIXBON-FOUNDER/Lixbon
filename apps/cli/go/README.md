@@ -2,7 +2,7 @@
 
 Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DECISION-CLI-GO.md`. Python sigue siendo la referencia y el rollback hasta aceptar la paridad.
 
-**Estado a 2026-10-06:** 20 de 31 requisitos v1 implementados con pruebas (CI en Linux, macOS y Windows), 5 parciales y 6 pendientes; detalle en `.planning/REQUIREMENTS.md`. Versión `2.3.0-go.0`, aún sin distribuir: los instaladores del gateway siguen sirviendo `client_cli.py`. Backlog: issues #12–#25 de LIXBON-FOUNDER/Lixbon.
+**Estado a 2026-10-06:** 20 de 31 requisitos v1 implementados con pruebas (CI en Linux, macOS y Windows), 5 parciales y 6 pendientes; detalle en `.planning/REQUIREMENTS.md`. Versión `2.3.0-go.0`, aún sin distribuir: los instaladores del gateway siguen sirviendo `client_cli.py`; `.github/workflows/release-cli.yml` compila los binarios con una etiqueta `cli-v<versión>` pero no se ha ejecutado (diseño de instalación y actualización en `.planning/DECISION-UPDATE-GO.md`). Backlog: issues #12–#25 de LIXBON-FOUNDER/Lixbon.
 
 ## Estado
 
@@ -30,7 +30,7 @@ Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DE
 | `internal/tui` | Interfaz interactiva con **Bubble Tea v2** a pantalla completa (transcript y scroll propios, caja y barra fijas al pie): caja de entrada multilínea, menú `/`, aprobaciones con diff, `/undo`, `/plan`, `/history`, `/provider`… | pruebas del modelo y de un programa real con E/S inyectada; catálogo de comandos contrastado con `state_corpus.json` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `setup`, `status`, `models`, `usage`, `profile`, `chat`/`run`/`start`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). Comandos `/` disponibles (40 de 41 del catálogo, más `/provider` y `/mouse`): `help model mode new clear compact history web copy paste image save approve plan todo tools diff undo ps check allow workspace run mcp commit init status cost usage nodes context-window key login logout config bar doctor visual remote exit` y los personalizados de `.lixbon/commands/`.
+Comandos: `init`, `setup`, `status`, `models`, `usage`, `profile`, `chat`/`run`/`start`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` solo conversa, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). `!comando` en la caja ejecuta un comando en el workspace sin pasar por el modelo y deja su salida en el historial (el control remoto lo ignora). Comandos `/` disponibles (40 de 41 del catálogo, más `/provider` y `/mouse`): `help model mode new clear compact history web copy paste image save approve plan todo tools diff undo ps check allow workspace run mcp commit init status cost usage nodes context-window key login logout config bar doctor visual remote exit` y los personalizados de `.lixbon/commands/`.
 
 Pendiente, con su issue: `/update` y `update` (#18) y la distribución (#20), que dependen del gateway y de los instaladores; `ui-demo` no se porta (es una demo interna y oculta de la interfaz Python). Falta validar con modelos, terminales y un gateway reales (#21, #22). Los paquetes de este módulo no dependen de la UI.
 

@@ -99,10 +99,10 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 | MCP-01 | Phase 4 | Hecho | `internal/mcp` (stdio y HTTP) con `mcp_corpus.json` y servidor real en Windows; falta probar en Linux/macOS con un servidor real |
 | REMOTE-01 | Phase 4 | Hecho | `internal/remote` y `/remote` probados con un relay simulado (en memoria y por HTTP); falta validar con la app móvil y el gateway reales (#17, #21) |
 | CONNECT-01 | Phase 4 | Hecho | Aprobaciones y cierre acotado de MCP y de `/remote` (sin goroutines ni conexiones abiertas) |
-| REL-01 | Phase 5 | Pendiente | CI compila y prueba; sin artefactos (#20) |
-| REL-02 | Phase 5 | Pendiente | Sin firma ni digest (#18) |
-| REL-03 | Phase 5 | Pendiente | `update` no disponible (#18) |
-| REL-04 | Phase 5 | Pendiente | Instaladores y Docker siguen sirviendo `client_cli.py` (#20) |
+| REL-01 | Phase 5 | Pendiente | CI compila y prueba; `release-cli.yml` define seis destinos pero nunca se ejecutó, sin artefactos publicados (#20) |
+| REL-02 | Phase 5 | Pendiente | Sin firma ni digest autenticado; opciones en `DECISION-UPDATE-GO.md` (#18) |
+| REL-03 | Phase 5 | Pendiente | `update` no disponible; diseño del reemplazo en Windows y del puente Python en `DECISION-UPDATE-GO.md` (#18) |
+| REL-04 | Phase 5 | Pendiente | Instaladores y Docker siguen sirviendo `client_cli.py` (#20); el cambio vive en `installer.py` |
 | REL-05 | Phase 5 | Pendiente | Requiere todo lo anterior y aceptación explícita |
 
 **Coverage:**

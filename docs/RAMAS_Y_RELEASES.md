@@ -84,6 +84,17 @@ el artefacto del CLI viven en `master`.
 3. Merge a `master`: el siguiente deploy del gateway sirve la nueva versión en
    `/install/client_cli.py`; los clientes la reciben con `lixbon update` o `/update`.
 
+### CLI Go (`cli-vX.Y.Z`)
+1. Subir `Version` en `apps/cli/go/internal/config/config.go` (ej. `2.3.0-go.0`).
+2. Merge a `master` por PR.
+3. `git tag cli-v2.3.0-go.0 && git push origin cli-v2.3.0-go.0`.
+4. `.github/workflows/release-cli.yml` falla si la etiqueta no coincide con `Version`,
+   ejecuta `go test`, compila seis binarios (linux, darwin y windows en amd64 y arm64,
+   sin CGO), genera `SHA256SUMS` y publica una release *prerelease*.
+
+Aún no hay instaladores ni `update` que consuman estas releases: ver
+`.planning/DECISION-UPDATE-GO.md`. El workflow no se ha ejecutado todavía.
+
 ### Móvil (`mobile-vX.Y.Z`)
 1. Subir `version` en `apps/mobile/package.json` (única fuente; `app.config.js` la lee).
 2. Merge a `master`.
@@ -98,6 +109,7 @@ el artefacto del CLI viven en `master`.
 | `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI (`apps/cli/tests`) |
 | `tauri.yml` | tag `desktop-v*`, manual | Build + release del MSI |
 | `mobile.yml` | tag `mobile-v*`, manual | Build + release del APK |
+| `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` |
 
 Los tests del gateway (`python -m pytest core`) se ejecutan en local por ahora:
 varios módulos comparten estado de BD y fallan al correr juntos; cuando eso se
