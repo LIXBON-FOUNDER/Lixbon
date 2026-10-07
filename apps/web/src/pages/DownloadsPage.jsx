@@ -1,7 +1,9 @@
 // DownloadsPage.jsx — descargas públicas (/apps): app de escritorio,
 // app de Android y CLI. Escritorio y Android van como dos cuadros iguales;
 // el CLI se instala con un comando (PowerShell en Windows, bash en
-// Linux/macOS) que baja e instala client_cli.py y crea el lanzador `lixbon`.
+// Linux/macOS) que descarga el binario de la release, verifica su SHA-256 y
+// lo deja en el PATH. La tarjeta del CLI muestra su etapa (beta o estable),
+// las notas de cada versión y la instalación manual con verificación.
 import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
@@ -46,6 +48,124 @@ function versionesDe(lista, producto) {
       return true;
     })
     .slice(0, MAX_VERSIONES);
+}
+
+// El historial del CLI no necesita todas las versiones, solo las últimas.
+const MAX_HISTORIAL_CLI = 8;
+
+const ARCHIVOS_CLI = {
+  windows: [['windows-amd64', 'Windows x64'], ['windows-arm64', 'Windows ARM64']],
+  unix: [
+    ['linux-amd64', 'Linux x64'], ['linux-arm64', 'Linux ARM64'],
+    ['darwin-arm64', 'macOS Apple Silicon'], ['darwin-amd64', 'macOS Intel'],
+  ],
+};
+
+// Una fila por plataforma en la BD → una entrada por versión del CLI, de la
+// más nueva a la más vieja, con su etapa, sus notas y el archivo de cada sistema.
+function versionesCli(lista) {
+  const porVersion = new Map();
+  for (const fila of lista) {
+    if (!String(fila.product || '').startsWith('cli-')) continue;
+    const entrada = porVersion.get(fila.version) || {
+      version: fila.version,
+      channel: fila.channel,
+      release_date: fila.release_date,
+      changelog: Array.isArray(fila.changelog) ? fila.changelog : [],
+      archivos: {},
+    };
+    if (fila.download_url && fila.checksum_sha256) {
+      entrada.archivos[fila.product.slice('cli-'.length)] = { url: fila.download_url, sha256: fila.checksum_sha256 };
+    }
+    porVersion.set(fila.version, entrada);
+  }
+  return [...porVersion.values()].sort((a, b) => compararVersiones(b.version, a.version));
+}
+
+const nombreDeArchivo = (url) => url.slice(url.lastIndexOf('/') + 1);
+const sumasDe = (url) => `${url.slice(0, url.lastIndexOf('/'))}/SHA256SUMS`;
+
+// Las notas se escriben en Markdown mínimo: lo que va entre `comillas` es código.
+function Nota({ texto }) {
+  return String(texto).split('`').map((trozo, i) => (i % 2 ? <code key={i}>{trozo}</code> : trozo));
+}
+
+function EtapaCli({ channel, t }) {
+  return (
+    <span className={`dl-stage dl-stage--${channel === 'stable' ? 'stable' : 'beta'}`}>
+      {channel === 'stable' ? t('stable') : t('beta')}
+    </span>
+  );
+}
+
+function HistorialCli({ versiones, t }) {
+  return (
+    <details className="dl-details" open>
+      <summary>{t('cliHistory')}</summary>
+      <ol className="dl-history">
+        {versiones.map((v) => (
+          <li key={v.version}>
+            <div className="dl-history__head">
+              <strong>v{v.version}</strong>
+              <EtapaCli channel={v.channel} t={t} />
+              <span className="dl-card__meta">{v.release_date}</span>
+            </div>
+            {v.changelog.length ? (
+              <ul>{v.changelog.map((nota, i) => <li key={i}><Nota texto={nota} /></li>)}</ul>
+            ) : (
+              <p className="dl-card__note">{t('cliNoNotes')}</p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function InstalacionManualCli({ version, os, base, t }) {
+  const archivos = ARCHIVOS_CLI[os].filter(([plataforma]) => version.archivos[plataforma]);
+  if (!archivos.length) return null;
+  const [primera] = archivos;
+  const archivo = nombreDeArchivo(version.archivos[primera[0]].url);
+  const comandos = os === 'windows'
+    ? [
+      `$f = "${archivo}"`,
+      '(Get-FileHash $f -Algorithm SHA256).Hash.ToLower()',
+      'Expand-Archive $f -DestinationPath "$env:TEMP\\lixbon-descarga" -Force',
+      'New-Item -ItemType Directory -Force "$env:USERPROFILE\\.lixbon" | Out-Null',
+      'Copy-Item "$env:TEMP\\lixbon-descarga\\*\\lixbon.exe" "$env:USERPROFILE\\.lixbon\\lixbon.exe" -Force',
+      `& "$env:USERPROFILE\\.lixbon\\lixbon.exe" init --base-url ${base}/v1`,
+    ]
+    : [
+      `f=${archivo}`,
+      'sha256sum "$f"   # en macOS: shasum -a 256 "$f"',
+      'tar -xzf "$f"',
+      'mkdir -p ~/.local/bin && install -m 755 lixbon-*/lixbon ~/.local/bin/lixbon',
+      `~/.local/bin/lixbon init --base-url ${base}/v1`,
+    ];
+  return (
+    <details className="dl-details">
+      <summary>{t('manualInstall')}</summary>
+      <p className="dl-card__note">{t('manualIntro', { version: version.version })}</p>
+      <ul className="dl-files">
+        {archivos.map(([plataforma, nombre]) => {
+          const { url, sha256 } = version.archivos[plataforma];
+          return (
+            <li key={plataforma}>
+              <a href={url}>{nombre}</a>
+              <code className="dl-files__sha" title="SHA-256">{sha256}</code>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="dl-card__note">
+        <a href={sumasDe(version.archivos[primera[0]].url)}>SHA256SUMS</a> {t('manualSums')}
+      </p>
+      <p className="dl-card__note">{t('manualSteps')}</p>
+      <CodeBlock code={comandos.join('\n')} label={os === 'windows' ? 'powershell' : 'bash'} />
+      <p className="dl-card__note">{t('manualPath', { path: os === 'windows' ? '%USERPROFILE%\\.lixbon' : '~/.local/bin' })}</p>
+    </details>
+  );
 }
 
 const claveDe = (v) => `${v.version}@${v.channel}`;
@@ -101,6 +221,7 @@ export default function DownloadsPage() {
   const [escritorio, setEscritorio] = useState(null);
   const [escritorioMac, setEscritorioMac] = useState(null);
   const [android, setAndroid] = useState(null);
+  const [cli, setCli] = useState(null);
   const [os, setOs] = useState('windows');
   // Plataforma de la app de escritorio (la pestaña del CLI tiene la suya).
   const [plataforma, setPlataforma] = useState('windows');
@@ -115,8 +236,9 @@ export default function DownloadsPage() {
         setEscritorio(versionesDe(lista, 'desktop'));
         setEscritorioMac(versionesDe(lista, 'desktop-mac'));
         setAndroid(versionesDe(lista, 'android'));
+        setCli(versionesCli(lista));
       })
-      .catch(() => { setEscritorio([]); setEscritorioMac([]); setAndroid([]); });
+      .catch(() => { setEscritorio([]); setEscritorioMac([]); setAndroid([]); setCli([]); });
     if (/Mac|Linux|X11/.test(navigator.platform) && !/Win/.test(navigator.platform)) {
       setOs('unix');
     }
@@ -125,6 +247,8 @@ export default function DownloadsPage() {
 
   const winCmd = `irm ${base}/install.ps1 | iex`;
   const unixCmd = `curl -fsSL ${base}/install.sh | bash`;
+  // Es la que instalan los comandos: la última estable y, sin estables, la última beta.
+  const cliRecomendada = cli?.length ? recomendadaDe(cli) : null;
 
   return (
     <div className="page">
@@ -222,6 +346,15 @@ export default function DownloadsPage() {
               </div>
             </div>
 
+            {cliRecomendada && (
+              <div className="dl-cli-meta">
+                <span className="dl-card__meta">v{cliRecomendada.version}</span>
+                <EtapaCli channel={cliRecomendada.channel} t={t} />
+                <span className="dl-card__meta">{cliRecomendada.release_date}</span>
+              </div>
+            )}
+            {cliRecomendada?.channel === 'beta' && <p className="dl-card__note">{t('cliBetaNote')}</p>}
+
             {os === 'windows' ? (
               <>
                 <p className="dl-card__step">{t('step1Win')} <strong>PowerShell</strong> {t('step1WinRest')}</p>
@@ -235,7 +368,7 @@ export default function DownloadsPage() {
                 <p className="dl-card__step">{t('step1Unix')} <strong>terminal</strong> {t('step1UnixRest')}</p>
                 <CodeBlock code={unixCmd} label="bash" />
                 <p className="dl-card__note">
-                  {t('noteUnix', { home: '~/.lixbon', cmd: 'lixbon', bin: '~/.local/bin' })}
+                  {t('noteUnix', { cmd: 'lixbon', bin: '~/.local/bin' })}
                 </p>
               </>
             )}
@@ -243,14 +376,12 @@ export default function DownloadsPage() {
             <p className="dl-card__step">{t('step2')}</p>
             <CodeBlock code={`lixbon`} />
 
-            <details className="dl-details">
-              <summary>{t('manualInstall')}</summary>
-              <p className="dl-card__note">
-                {t('manualNote')} <a href={`${base}/install/client_cli.py`}>client_cli.py</a> {t('manualNoteRest')}
-              </p>
-              <CodeBlock code={`python client_cli.py init --base-url ${base}/v1`} />
-              <CodeBlock code={`python client_cli.py chat`} />
-            </details>
+            <p className="dl-card__step">{t('step3')}</p>
+            <CodeBlock code={`lixbon update`} />
+            <p className="dl-card__note">{t('cliUpdateNote')}</p>
+
+            {!!cli?.length && <HistorialCli versiones={cli.slice(0, MAX_HISTORIAL_CLI)} t={t} />}
+            {cliRecomendada && <InstalacionManualCli version={cliRecomendada} os={os} base={base} t={t} />}
           </section>
         </div>
 

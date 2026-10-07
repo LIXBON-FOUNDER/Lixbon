@@ -8,8 +8,25 @@ permissions:
   contents: write
 
 jobs:
+  preparar:
+    name: Etapa y notas de la versión
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.etapa.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: etapa
+        run: |
+          version="${GITHUB_REF_NAME#cli-v}"
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "La etiqueta ${GITHUB_REF_NAME} no tiene el formato cli-vX.Y.Z[-sufijo]"; exit 1; }
+          channel=stable; [[ "${version}" == *-* ]] && channel=beta
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "Etapa: ${channel}"
+          .github/scripts/cli-release-notes.sh "${version}"
+
   build:
     name: Binario · ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: preparar
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -33,7 +50,6 @@ jobs:
       - name: La versión sale de la etiqueta y el binario la informa
         run: |
           version="${GITHUB_REF_NAME#cli-v}"
-          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "La etiqueta ${GITHUB_REF_NAME} no tiene el formato cli-vX.Y.Z[-sufijo]"; exit 1; }
           ldflags="-s -w -X lixbon.com/cli/internal/config.Version=${version}"
           reported=$(go run -ldflags "${ldflags}" ./cmd/lixbon --version)
           [[ "${reported}" == "lixbon v${version} "* ]] || { echo "El binario informa «${reported}», se esperaba v${version}"; exit 1; }
@@ -63,9 +79,10 @@ jobs:
 
   release:
     name: Publicar la release
-    needs: build
+    needs: [preparar, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: assets
@@ -76,36 +93,43 @@ jobs:
       - name: Crear la release
         env:
           GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.preparar.outputs.channel }}
         run: |
+          version="${GITHUB_REF_NAME#cli-v}"
+          .github/scripts/cli-release-notes.sh "${version}" > "${RUNNER_TEMP}/notas.md"
+          flags=(); [ "${CHANNEL}" = beta ] && flags+=(--prerelease)
           gh release create "${GITHUB_REF_NAME}" assets/* \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "Lixbon CLI ${GITHUB_REF_NAME#cli-v}" \
-            --prerelease \
-            --generate-notes
+            --title "Lixbon CLI ${version}" \
+            --notes-file "${RUNNER_TEMP}/notas.md" \
+            "${flags[@]}"
 
   registrar:
     name: Registrar en el gateway
-    needs: release
+    needs: [preparar, release]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: assets
           merge-multiple: true
-      - name: Registrar la URL y el SHA-256 de cada binario
+      - name: Registrar la URL, el SHA-256 y las notas de cada binario
         env:
           ADMIN_TOKEN: ${{ secrets.LIXBON_ADMIN_TOKEN }}
           SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
+          CHANNEL: ${{ needs.preparar.outputs.channel }}
         working-directory: assets
         run: |
           version="${GITHUB_REF_NAME#cli-v}"
+          changelog=$("${GITHUB_WORKSPACE}/.github/scripts/cli-release-notes.sh" "${version}" | jq -R -s 'split("\n") | map(select(length > 0) | ltrimstr("- "))')
           for file in lixbon-*.tar.gz lixbon-*.zip; do
             platform="${file#lixbon-${version}-}"; platform="${platform%.tar.gz}"; platform="${platform%.zip}"
             digest=$(sha256sum "$file" | cut -d' ' -f1)
             jq -n --arg product "cli-${platform}" --arg version "$version" --arg title "Lixbon CLI ${version}" \
                --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${file}" \
-               --arg sha "$digest" \
-               '{product: $product, version: $version, channel: "beta", title: $title, changelog: [], download_url: $url, checksum_sha256: $sha}' |
+               --arg sha "$digest" --arg channel "$CHANNEL" --argjson changelog "$changelog" \
+               '{product: $product, version: $version, channel: $channel, title: $title, changelog: $changelog, download_url: $url, checksum_sha256: $sha}' |
               curl --fail-with-body --show-error -X POST -H "X-Admin-Token: ${ADMIN_TOKEN}" \
                 -H "Content-Type: application/json" --data @- "${SERVER}/api/versions/register"
             echo
@@ -122,10 +146,12 @@ jobs:
     env:
       SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
     steps:
+      # Los instaladores sirven la última estable si existe; si no, la última beta.
       - name: install.sh
         if: runner.os != 'Windows'
         run: |
-          version="${GITHUB_REF_NAME#cli-v}"
+          version=$(curl -fsS "${SERVER}/api/updates/cli/stable" | jq -r .version || true)
+          [ -n "${version}" ] && [ "${version}" != null ] || version="${GITHUB_REF_NAME#cli-v}"
           export HOME="${RUNNER_TEMP}/home"; mkdir -p "$HOME"
           curl -fsSL "${SERVER}/install.sh" | bash
           reported=$("$HOME/.local/bin/lixbon" --version)
@@ -135,7 +161,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          $version = $env:GITHUB_REF_NAME -replace '^cli-v', ''
+          try { $version = (Invoke-RestMethod "$env:SERVER/api/updates/cli/stable").version } catch { $version = $env:GITHUB_REF_NAME -replace '^cli-v', '' }
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
           New-Item -ItemType Directory -Force -Path $env:USERPROFILE | Out-Null
           irm "$env:SERVER/install.ps1" | iex
