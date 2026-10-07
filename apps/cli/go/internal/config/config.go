@@ -14,9 +14,15 @@ import (
 )
 
 const (
-	Version        = "2.3.0-go.0"
+	DevVersion     = "0.0.0-dev"
 	DefaultBaseURL = "https://lixbon.com/v1"
-	UserAgent      = "Lixbon-CLI/" + Version
+)
+
+// Version la fija release-cli.yml con -ldflags "-X" a partir de la etiqueta;
+// una compilación local conserva DevVersion.
+var (
+	Version   = DevVersion
+	UserAgent = "Lixbon-CLI/" + Version
 )
 
 type Config struct {

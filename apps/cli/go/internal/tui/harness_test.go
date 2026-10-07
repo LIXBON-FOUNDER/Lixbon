@@ -132,6 +132,9 @@ func newHarness(t *testing.T, mutate func(*config.Config), steps ...func(http.Re
 	t.Helper()
 	gw, client := newGateway(t, steps...)
 	cfg := config.Default()
+	// UseProfile reconstruye el cliente desde cfg.BaseURL: sin esto, volver a
+	// «lixbon» llamaba al servidor real y la prueba dependía de la red.
+	cfg.BaseURL = client.BaseURL
 	cfg.APIKey, cfg.Model, cfg.Mode = "k", "qwen", "ask"
 	cfg.AutoApproveTools = true
 	if mutate != nil {

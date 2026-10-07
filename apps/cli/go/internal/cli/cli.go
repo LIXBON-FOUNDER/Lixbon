@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"lixbon.com/cli/internal/chat"
@@ -50,6 +51,7 @@ Comandos:
   usage    Ver uso global de la cuenta
   profile  Proveedores de modelos: lixbon.com, LM Studio, Ollama, OpenAI… (lixbon profile --help)
   update   Actualizar el CLI a la última versión (--check solo comprueba)
+  version  Mostrar la versión (también --version)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
 `
 
@@ -77,6 +79,9 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 1
 	case "update":
 		return a.update(ctx, rest)
+	case "version", "--version":
+		fmt.Fprintf(a.Stdout, "lixbon v%s %s/%s\n", config.Version, runtime.GOOS, runtime.GOARCH)
+		return 0
 	case "-h", "--help", "help":
 		fmt.Fprint(a.Stdout, usage)
 		return 0
