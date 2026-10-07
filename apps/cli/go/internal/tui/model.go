@@ -126,6 +126,7 @@ func New(c *chat.Chat, opts Options) *Model {
 		input:  ta,
 		width:  80,
 		height: 24,
+		wheel:  c.Cfg.Mouse,
 		hist:   loadInputHistory(opts.HistoryFile),
 		online: !opts.Offline,
 		send:   func(tea.Msg) {},

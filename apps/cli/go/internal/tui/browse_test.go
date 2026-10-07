@@ -67,3 +67,19 @@ func TestMouseCaptureIsOffUntilRequested(t *testing.T) {
 		t.Fatalf("/mouse otra vez la quita, modo %v", got)
 	}
 }
+
+func TestMouseChoicePersistsAcrossRestarts(t *testing.T) {
+	h := newHarness(t, nil)
+	h.send("/mouse")
+	if !configLoad(h.chat.ConfigPath).Mouse {
+		t.Fatal("/mouse no guardó la preferencia")
+	}
+	restarted := New(h.chat, Options{HistoryFile: h.m.opts.HistoryFile, Version: "test"})
+	if got := restarted.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Fatalf("al reabrir debe seguir activa, modo %v", got)
+	}
+	h.send("/mouse")
+	if configLoad(h.chat.ConfigPath).Mouse {
+		t.Fatal("/mouse off no se guardó")
+	}
+}

@@ -30,6 +30,9 @@ type Config struct {
 	Workspace          string
 	AutoApproveTools   bool
 	InputQueue         bool
+	// Mouse guarda lo que decide /mouse: la rueda del ratón en la pantalla
+	// completa. Sin persistirlo había que volver a encenderla en cada arranque.
+	Mouse bool
 
 	// Extra conserva los campos que el CLI Go no interpreta (plan_name,
 	// web_search, allowed_commands…) para no perderlos al guardar.
@@ -96,6 +99,7 @@ func Load(path string) Config {
 var knownKeys = []string{
 	"base_url", "api_key", "model", "key_model", "max_context_messages",
 	"context_window", "mode", "workspace", "auto_approve_tools", "input_queue",
+	"mouse",
 }
 
 func (c *Config) field(key string) any {
@@ -120,6 +124,8 @@ func (c *Config) field(key string) any {
 		return &c.AutoApproveTools
 	case "input_queue":
 		return &c.InputQueue
+	case "mouse":
+		return &c.Mouse
 	}
 	return nil
 }
