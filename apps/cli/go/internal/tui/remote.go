@@ -197,6 +197,8 @@ func (m *Model) onRemote(msg remoteMsg) tea.Cmd {
 		text := strings.TrimSpace(msg.cmd.Text)
 		switch {
 		case text == "":
+		case strings.HasPrefix(text, "!"):
+			m.print(note("Se ignoró un «!» recibido por control remoto: los comandos manuales solo se escriben en esta terminal."))
 		case strings.HasPrefix(text, "/"):
 			m.print(renderCommandEcho(text + "  [remoto]"))
 			m.remoteCommand(text)

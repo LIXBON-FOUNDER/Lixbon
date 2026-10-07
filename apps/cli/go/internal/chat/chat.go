@@ -504,12 +504,25 @@ func (c *Chat) contextMessages() []history.Message {
 	if limit := c.Cfg.MaxContextMessages; limit > 0 && len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}
-	if c.ProjectContext != "" {
-		system := history.Message{Role: "system", Content: "Contexto del proyecto (LIXBON.md):\n" + c.ProjectContext}
-		return append([]history.Message{system}, messages...)
+	var system []history.Message
+	if c.Client.Generic {
+		system = append(system, history.Message{Role: "system", Content: askSystemPrompt})
 	}
-	return messages
+	if c.ProjectContext != "" {
+		system = append(system, history.Message{Role: "system", Content: "Contexto del proyecto (LIXBON.md):\n" + c.ProjectContext})
+	}
+	return append(system, messages...)
 }
+
+// askSystemPrompt evita que un modelo externo conteste «no tengo acceso a tu
+// equipo» sin más. Solo va a proveedores genéricos: el gateway Lixbon pone su
+// propio prompt y el contrato con él no lleva mensaje de sistema.
+const askSystemPrompt = "Eres el asistente de Lixbon CLI, una terminal de programación. Ahora está en modo ask: " +
+	"solo conversas y no tienes herramientas, así que no puedes leer, crear ni editar archivos ni ejecutar " +
+	"comandos. Si el usuario te pide algo que requiere el equipo o el proyecto, dile que escriba /mode agent " +
+	"(o pulse Mayús+Tab) para que trabajes sobre su workspace; no digas que es imposible. " +
+	"El usuario puede ejecutar un comando él mismo con !comando (p. ej. !git status); su salida te llega " +
+	"como mensaje en la conversación. Responde en el idioma del usuario."
 
 // autoCompact, en modo ask, resume la conversación cuando se acerca a la
 // ventana (en agent lo hace el propio bucle, paso a paso).

@@ -19,6 +19,9 @@ import (
 // dispatch ejecuta lo que el usuario envió: un comando «/» o un mensaje.
 func (m *Model) dispatch(text string) tea.Cmd {
 	m.scroll = 0
+	if command, ok := strings.CutPrefix(text, "!"); ok {
+		return m.shell(strings.TrimSpace(command))
+	}
 	if !strings.HasPrefix(text, "/") {
 		return m.startTurn(text, text)
 	}
@@ -38,6 +41,17 @@ func (m *Model) dispatch(text string) tea.Cmd {
 	m.print(renderCommandEcho(text))
 	m.print(errLine("Comando desconocido: /" + name + ". /help muestra los disponibles."))
 	return nil
+}
+
+// shell ejecuta lo que el usuario escribió tras «!» sin pasar por el modelo ni
+// pedir confirmación: lo ha escrito él.
+func (m *Model) shell(command string) tea.Cmd {
+	if command == "" {
+		m.print(note("Escribe un comando tras «!», p. ej. !git status. Se ejecuta en el workspace y el modelo ve la salida."))
+		return nil
+	}
+	m.print(renderCommandEcho("!" + command))
+	return m.execShell(command)
 }
 
 // startTurn envía un mensaje al modelo. shown es lo que se ve en el eco (vacío

@@ -333,3 +333,18 @@ func TestQuittingWhileRemoteClosesTheSession(t *testing.T) {
 		t.Fatal("al salir se cierra la sesión remota")
 	}
 }
+
+func TestRemoteCannotRunShellCommandsWithBang(t *testing.T) {
+	h, relay := remoteHarness(t, nil)
+	startRemote(t, h, relay)
+	relay.push(prompt("!echo no-debe-ejecutarse"))
+	h.waitFor("aviso", func() bool { return strings.Contains(h.out(), "Se ignoró un «!»") })
+	notContains(t, h.out(), "salida 0")
+	for _, m := range h.chat.History {
+		if strings.Contains(m.Content, "TOOL_RESULT") {
+			t.Fatalf("se ejecutó un comando recibido por remoto: %+v", m)
+		}
+	}
+	h.key("ctrl+c")
+	h.waitFor("sesión terminada", relay.isEnded)
+}

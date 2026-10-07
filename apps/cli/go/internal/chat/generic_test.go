@@ -158,3 +158,33 @@ func TestUseProfileSwitchesProviderModelAndMode(t *testing.T) {
 		t.Fatal("un perfil inexistente debe fallar")
 	}
 }
+
+func TestAskModeTellsAGenericModelHowToGetTools(t *testing.T) {
+	s := newExternalServer(t)
+	c := genericChat(t, s, nil)
+	if _, err := c.Send(context.Background(), "lista mis archivos", nil); err != nil {
+		t.Fatal(err)
+	}
+	messages := s.bodies[0]["messages"].([]any)
+	system, _ := messages[0].(map[string]any)
+	if system["role"] != "system" {
+		t.Fatalf("el primer mensaje debe ser el prompt del modo ask: %v", messages)
+	}
+	for _, want := range []string{"/mode agent", "!comando"} {
+		if !strings.Contains(system["content"].(string), want) {
+			t.Fatalf("el prompt del modo ask no menciona %q: %v", want, system["content"])
+		}
+	}
+}
+
+func TestAskModeSendsNoSystemPromptToTheLixbonGateway(t *testing.T) {
+	g, client := newGateway(t)
+	c := newChat(t, client, nil, Options{})
+	if _, err := c.Send(context.Background(), "hola", nil); err != nil {
+		t.Fatal(err)
+	}
+	messages := g.bodyAt(0)["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("el contrato con el gateway no lleva mensaje de sistema: %v", messages)
+	}
+}

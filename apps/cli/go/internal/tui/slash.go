@@ -938,35 +938,40 @@ func (m *Model) cmdWorkspace(arg string) {
 	}
 }
 
+// execShell ejecuta un comando del usuario en el workspace y deja su salida en
+// el historial para que el modelo la vea en el siguiente turno.
+func (m *Model) execShell(command string) tea.Cmd {
+	return m.async("ejecutando "+truncateRunes(command, 40), func(ctx context.Context) cmdDoneMsg {
+		result := m.chat.Toolbox.Execute(ctx, "run_command", map[string]any{"command": command, "timeout": float64(300)})
+		body, code := result, "?"
+		if rest, ok := strings.CutPrefix(result, "[EXIT "); ok {
+			if n, after, found := strings.Cut(rest, "] "); found {
+				code, body = n, after
+			}
+		}
+		lines := []string{"", renderAction(agent.Event{Tool: "run_command", Change: &agent.Change{Kind: "command", Detail: command}}, m.width)}
+		for _, l := range firstLines(body, 80) {
+			lines = append(lines, renderLogLine(l, sDim, "", m.width))
+		}
+		lines = append(lines, renderResult("salida "+code, code != "0", "", m.width), "")
+		return cmdDoneMsg{lines: lines, apply: func(m *Model) {
+			text := body
+			if r := []rune(text); len(r) > 6000 {
+				text = string(r[:6000])
+			}
+			m.chat.History = append(m.chat.History, history.User(fmt.Sprintf("TOOL_RESULT run_command `%s` (EXIT %s):\n%s", command, code, text)))
+		}}
+	})
+
+}
+
 func (m *Model) cmdRun(arg string) tea.Cmd {
 	command := strings.TrimSpace(arg)
 	if command == "" {
 		m.print(errLine("Uso: /run npm test"))
 		return nil
 	}
-	exec := func() tea.Cmd {
-		return m.async("ejecutando "+truncateRunes(command, 40), func(ctx context.Context) cmdDoneMsg {
-			result := m.chat.Toolbox.Execute(ctx, "run_command", map[string]any{"command": command, "timeout": float64(300)})
-			body, code := result, "?"
-			if rest, ok := strings.CutPrefix(result, "[EXIT "); ok {
-				if n, after, found := strings.Cut(rest, "] "); found {
-					code, body = n, after
-				}
-			}
-			lines := []string{"", renderAction(agent.Event{Tool: "run_command", Change: &agent.Change{Kind: "command", Detail: command}}, m.width)}
-			for _, l := range firstLines(body, 80) {
-				lines = append(lines, renderLogLine(l, sDim, "", m.width))
-			}
-			lines = append(lines, renderResult("salida "+code, code != "0", "", m.width), "")
-			return cmdDoneMsg{lines: lines, apply: func(m *Model) {
-				text := body
-				if r := []rune(text); len(r) > 6000 {
-					text = string(r[:6000])
-				}
-				m.chat.History = append(m.chat.History, history.User(fmt.Sprintf("TOOL_RESULT run_command `%s` (EXIT %s):\n%s", command, code, text)))
-			}}
-		})
-	}
+	exec := func() tea.Cmd { return m.execShell(command) }
 	if m.chat.Session.AutoRunCommands {
 		return exec()
 	}

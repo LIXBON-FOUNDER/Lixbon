@@ -448,3 +448,22 @@ func TestExitQuits(t *testing.T) {
 	h.pump(h.quitRequested)
 	contains(t, h.out(), "Hasta pronto.")
 }
+
+func TestBangRunsTheCommandWithoutAskingAndFeedsTheModel(t *testing.T) {
+	h := newHarness(t, nil)
+	h.send("!")
+	contains(t, h.out(), "Escribe un comando tras «!»")
+	h.send("!echo hola")
+	h.settle()
+	notContains(t, h.view(), "Ejecutar «")
+	contains(t, h.out(), "!echo hola")
+	contains(t, h.out(), "hola")
+	contains(t, h.out(), "salida 0")
+	last := h.chat.History[len(h.chat.History)-1]
+	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
+		t.Fatalf("historial: %+v", last)
+	}
+	if h.chat.Session.AutoRunCommands {
+		t.Fatal("«!» no debe activar la ejecución automática del modelo")
+	}
+}
