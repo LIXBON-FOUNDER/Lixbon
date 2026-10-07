@@ -19,6 +19,10 @@ func TestOpenAIVisionTurnsImagesIntoContentParts(t *testing.T) {
 	if !reflect.DeepEqual(got[0], in[0]) {
 		t.Fatalf("un mensaje sin imágenes no cambia: %v", got[0])
 	}
+	got[0]["content"] = "cambiado"
+	if in[0]["content"] != "hola" {
+		t.Fatal("un mensaje sin imágenes no debe compartir el mapa con la salida")
+	}
 	parts, _ := got[1]["content"].([]map[string]any)
 	if len(parts) != 4 || parts[0]["text"] != "mira" {
 		t.Fatalf("partes: %v", got[1]["content"])

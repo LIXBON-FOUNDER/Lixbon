@@ -11,9 +11,13 @@ import (
 func openAIVision(messages []map[string]any) []map[string]any {
 	out := make([]map[string]any, len(messages))
 	for i, m := range messages {
+		converted := make(map[string]any, len(m))
+		for k, v := range m {
+			converted[k] = v
+		}
 		images, _ := m["images"].([]any)
 		if len(images) == 0 {
-			out[i] = m
+			out[i] = converted
 			continue
 		}
 		text, _ := m["content"].(string)
@@ -24,10 +28,6 @@ func openAIVision(messages []map[string]any) []map[string]any {
 				"type":      "image_url",
 				"image_url": map[string]any{"url": "data:" + imageMIME(encoded) + ";base64," + encoded},
 			})
-		}
-		converted := make(map[string]any, len(m))
-		for k, v := range m {
-			converted[k] = v
 		}
 		delete(converted, "images")
 		converted["content"] = parts
