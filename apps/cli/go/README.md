@@ -2,7 +2,7 @@
 
 Port gradual del CLI Python (`../lixbon_cli`). Decisión y plan en `.planning/DECISION-CLI-GO.md`. Python sigue siendo la referencia y el rollback hasta aceptar la paridad.
 
-**Estado a 2026-10-06:** 20 de 31 requisitos v1 implementados con pruebas (CI en Linux, macOS y Windows), 9 parciales y 2 pendientes; detalle en `.planning/REQUIREMENTS.md`. Versión `2.3.0-go.0`, aún sin publicar: `.github/workflows/release-cli.yml` compila y registra los binarios en el gateway con una etiqueta `cli-v<versión>`, pero no se ha ejecutado; hasta entonces los instaladores del gateway siguen sirviendo `client_cli.py` (diseño en `.planning/DECISION-UPDATE-GO.md`). Backlog: issues #12–#25 de LIXBON-FOUNDER/Lixbon.
+**Estado a 2026-10-06:** 20 de 31 requisitos v1 implementados con pruebas (CI en Linux, macOS y Windows), 9 parciales y 2 pendientes; detalle en `.planning/REQUIREMENTS.md`. Versión `2.3.0-go.0`, publicada como beta (`cli-v2.3.0-go.0`): `.github/workflows/release-cli.yml` compila los seis destinos y los registra en el gateway, y `lixbon.com/install.sh` e `install.ps1` ya instalan el binario (diseño en `.planning/DECISION-UPDATE-GO.md`). Backlog: issues abiertas de LIXBON-FOUNDER/Lixbon (#18, #20–#22, #25 y #27–#36).
 
 ## Estado
 
