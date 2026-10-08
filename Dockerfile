@@ -17,7 +17,6 @@ COPY core/ core/
 COPY BD/ BD/
 COPY infra/node/ infra/node/
 COPY alembic.ini ./
-COPY apps/cli/client_cli.py apps/cli/client_cli.py
 COPY --from=web-build /build/dist apps/web/dist
 
 # Railway inyecta PORT; 8000 como default para ejecución local del contenedor
