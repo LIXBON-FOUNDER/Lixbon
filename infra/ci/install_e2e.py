@@ -25,7 +25,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-GO_DIR = ROOT / "apps" / "cli" / "go"
+GO_DIR = ROOT / "apps" / "cli"
 FAKE_HOST = "https://releases.invalid"
 V1, V2 = "9.0.0-e2e.1", "9.0.0-e2e.2"
 

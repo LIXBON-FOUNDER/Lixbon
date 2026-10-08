@@ -55,7 +55,7 @@ router = APIRouter()
 
 SESSION_COOKIE = "lixbon_session"
 DESKTOP_KEY_NAME = "lixbon Desktop"
-CLI_KEY_NAME = "lixbon CLI"        # apps/cli/lixbon_cli/api.py lo manda explícito
+CLI_KEY_NAME = "lixbon CLI"        # apps/cli/internal/api lo manda explícito
 MOBILE_KEY_NAME = "Lixbon Mobile"  # debe coincidir exactamente con apps/mobile/src/state.js
 # El login OAuth del desktop emitía su key con este nombre; se sigue reconociendo
 # para que esas keys ya emitidas cuenten como desktop sin obligar a re-login.
