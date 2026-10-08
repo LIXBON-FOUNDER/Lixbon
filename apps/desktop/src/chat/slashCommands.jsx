@@ -8,7 +8,7 @@ import {
 } from '../components/Icons';
 
 /** Comandos "/" del composer: acciones instantáneas, no texto para el modelo.
-    Espejo de apps/cli/lixbon_cli/commands.py::COMMAND_SPECS — mismo nombre
+    Espejo del catálogo de apps/cli/internal/tui/commands.go — mismo nombre
     de comando para quien viene del CLI. Lo que allí es solo de terminal
     (doctor, ps, nodes, bar…) no tiene equivalente aquí y se omite. */
 export const SLASH_COMMANDS = [

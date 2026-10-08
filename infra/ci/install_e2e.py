@@ -33,7 +33,6 @@ OS = {"linux": "linux", "darwin": "darwin", "win32": "windows"}[sys.platform]
 ARCH = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "amd64"
 PLATFORM = f"{OS}-{ARCH}"
 EXE = "lixbon.exe" if OS == "windows" else "lixbon"
-LEGACY_FILES = ["client_cli.py", "lixbon.cmd"] if OS == "windows" else ["client_cli.py"]
 
 
 def load_installer_go():
@@ -161,10 +160,6 @@ class Sandbox:
         return subprocess.run([str(self.exe), *args], env=self.env, capture_output=True, text=True,
                               encoding="utf-8", timeout=60)
 
-    def leftovers(self) -> list[str]:
-        names = LEGACY_FILES
-        return [n for n in names if (self.home / ".lixbon" / n).exists()]
-
     def cleanup(self) -> None:
         shutil.rmtree(self.home, ignore_errors=True)
 
@@ -196,14 +191,10 @@ def restore_user_path(value: str) -> None:
 def fresh_install(fake, installer):
     box = Sandbox(fake, installer)
     try:
-        (box.home / ".lixbon").mkdir()
-        for decoy in LEGACY_FILES:
-            (box.home / ".lixbon" / decoy).write_text("viejo")
         fake.latest = V1
         result = box.install(fake.release(V1))
         expect(result.returncode == 0, f"instala {V1} sin errores\n{output(result)}")
         expect(box.exe.exists(), f"el binario queda en {box.exe}")
-        expect(not box.leftovers(), f"no quedan {' ni '.join(LEGACY_FILES)}")
         status = box.lixbon("status")
         expect(f"lixbon CLI v{V1}" in status.stdout, "status informa la versión instalada")
         expect(f"{fake.url}/v1" in status.stdout, "el instalador guarda base_url del servidor")

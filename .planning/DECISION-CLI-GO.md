@@ -44,7 +44,7 @@ Run: `run_d06dd487975f`. Las terminales y worktrees del debate se conservan.
 - Fuente principal: `apps/cli/audit/EVALUACION_PYTHON_GO.md`, conservada sin modificar.
 - El ADR existente refleja una recomendación anterior de comparar Rust antes de elegir; esta conversación aporta la decisión posterior de Go. Se conserva el ADR original como historial.
 - La evaluación registra 131 pruebas aprobadas y dos fallos de fixture; son resultados del documento, no ejecuciones de esta planificación. Reproducir y clasificar antes de usarlos como línea base.
-- El README declara Python estándar sin dependencias externas, mientras `apps/cli/lixbon_cli/cli.py` instala `prompt_toolkit`, `rich` y `pypdf`. Resolver la discrepancia en el inventario y documentación de dependencias.
+- El README declara Python estándar sin dependencias externas, mientras el cliente Python instala `prompt_toolkit`, `rich` y `pypdf`. Resolver la discrepancia en el inventario y documentación de dependencias.
 - No hay benchmark equivalente de Go aportado por el debate; cualquier comparación futura debe usar escenarios y mediciones reproducibles.
 
 ## Ejecución posterior

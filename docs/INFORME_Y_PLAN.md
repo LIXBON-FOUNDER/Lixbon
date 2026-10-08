@@ -160,7 +160,7 @@ lixbon/
 │   │   ├── src/               #    React del desktop
 │   │   └── src-tauri/         #    Rust + updater
 │   └── cli/                   # ⌨️ CLI: cliente terminal estilo Claude Code
-│       └── lixbon_cli/         #    dividir client_cli.py (1.900 líneas) en módulos
+│       └── internal/           #    CLI en Go, un paquete por responsabilidad
 │
 ├── infra/                     # 🚀 INFRAESTRUCTURA
 │   ├── docker/                #    Dockerfile del gateway, docker-compose
@@ -221,7 +221,7 @@ Antes de tocar arquitectura. No se publica nada hasta cerrar esto.
 - [ ] Crear la estructura `core/ apps/ infra/ docs/`.
 - [ ] Mover backend a `core/` con los submódulos por dominio (sin cambiar lógica, solo ubicación + imports).
 - [ ] **Unificar los dos frontends**: quedarte con uno (recomiendo `frontend/` como base web) y **un solo cliente API**. El desktop reusa componentes compartidos.
-- [ ] Partir `client_cli.py` (1.900 líneas) en módulos dentro de `apps/cli/lixbon_cli/`.
+- [x] El CLI pasó a Go en `apps/cli/` con un paquete por responsabilidad.
 - [ ] Mover CI a `infra/ci/` con secretos correctos.
 
 ### FASE 5 — Calidad y preparación de lanzamiento (3–5 días)

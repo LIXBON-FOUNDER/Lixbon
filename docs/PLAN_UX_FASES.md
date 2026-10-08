@@ -14,8 +14,7 @@
 
 Lo que ya está bien y no se toca:
 
-- El CLI tiene una arquitectura modular sana (`lixbon_cli/*.py` → `client_cli.py`
-  generado) y una paleta propia derivada del ícono.
+- El CLI tiene una arquitectura modular sana (un paquete Go por responsabilidad) y una paleta propia derivada del ícono.
 - El IDE tiene tokens compartidos con la web (Bruno Ace SC / Bricolage
   Grotesque, crema `#F6F7ED`, tinta `#171717`) y un modo oscuro definido.
 - El modo agente, el PTY, Git y las extensiones funcionan.
@@ -280,10 +279,8 @@ nada.
 
 - Pruebas del selector con entrada simulada (`create_pipe_input`): filtro,
   paginado, cabeceras deshabilitadas, cancelación. Ya existen como comprobación
-  manual; falta fijarlas en `apps/cli/tests/`.
+  manual; falta fijarlas en las pruebas Go de `apps/cli/internal/tui`.
 - Prueba de que todo comando de `COMMAND_SPECS` tiene handler y viceversa.
-- Prueba de que `client_cli.py` regenerado coincide con las fuentes
-  (`test_build_fresh.py` ya lo cubre; mantenerlo verde).
 - `docs/VERIFICACION_IDE.md` ampliado con las pantallas nuevas.
 
 ---
@@ -304,9 +301,8 @@ nada.
 ## 5. Cómo verificar
 
 ```bash
-# CLI: sintaxis, artefacto único y pruebas
-python apps/cli/build.py
-python -m pytest apps/cli/tests -q
+# CLI: pruebas
+(cd apps/cli && go vet ./... && go test -count=1 ./...)
 
 # IDE
 cd apps/desktop && npm run build

@@ -1,5 +1,7 @@
 # Evaluación de la CLI: transición de Python a Go
 
+> **Documento histórico.** Describe el cliente Python, ya retirado del repositorio. Las referencias de archivo y línea (`agent`, `app`, `cli`, `sessions`…) apuntan a su código en la etiqueta `python-cli-final`.
+
 Fecha: 2026-10-05. Alcance acordado: primero la CLI; backend después.
 Base: rama `cli`, commit `e1698683c0e9a787e0709f57bc8b6c880419db5d`, CLI 2.3.0.
 Repositorio: `https://github.com/PR3S1G4zZ/Lixbon.git`.
@@ -14,7 +16,7 @@ La decisión propuesta y las opciones se documentan en [ADR-001](ADR-001-CLI-GO.
 
 ## Stack concreto y duplicación entre CLI y desktop
 
-El desktop usa Tauri 2 con una biblioteca Rust (`apps/desktop/src-tauri/Cargo.toml`), pero el protocolo del agente está implementado en `apps/desktop/src/lib/agentProtocol.js` y se describe como espejo de `apps/cli/lixbon_cli/agent.py`. Si queremos evitar mantener ese parser tres veces después de sumar Go, una opción concreta es mover el núcleo puro a un crate Rust que consuman tanto el host Tauri como la CLI Ratatui. JS quedaría como presentación y puente de UI. Las herramientas del host y sus reglas de autorización seguirían siendo adaptadores separados cuando las capacidades difieran.
+El desktop usa Tauri 2 con una biblioteca Rust (`apps/desktop/src-tauri/Cargo.toml`), pero el protocolo del agente está implementado en `apps/desktop/src/lib/agentProtocol.js` y se describe como espejo de el cliente Python. Si queremos evitar mantener ese parser tres veces después de sumar Go, una opción concreta es mover el núcleo puro a un crate Rust que consuman tanto el host Tauri como la CLI Ratatui. JS quedaría como presentación y puente de UI. Las herramientas del host y sus reglas de autorización seguirían siendo adaptadores separados cuando las capacidades difieran.
 
 Stack a prototipar: `crates/lixbon-core` (Serde, JSON, parser/estado de agente, límites y contratos); CLI con Ratatui 0.30.2, Crossterm 0.29, Tokio, reqwest y RMCP oficial; desktop Tauri invocando el core por comandos/canales de streaming. La documentación de Ratatui muestra renderizado con diff de celdas y ofrece backend Crossterm; Tauri recomienda canales para streaming. El SDK MCP oficial existe tanto para Rust como para Go.
 
@@ -32,7 +34,7 @@ La carpeta inicial solo contenía un Git vacío. Se configuró `origin`, se obtu
 |---|---|
 | Fuente modular | 21 archivos Python; 9.963 líneas, incluyendo comentarios y módulos de entrada |
 | Concentración | `app.py`: 2.848; `agent.py`: 2.047; `ui.py`: 1.301; juntos, 62,2 % de la fuente |
-| Distribución actual | `client_cli.py` generado: 9.835 líneas y 448.308 bytes en este checkout |
+| Distribución actual | el cliente Python generado: 9.835 líneas y 448.308 bytes en este checkout |
 | Artefacto | `build.generate()` coincide con el archivo actual; comprobación sin regenerarlo |
 | Catálogo de herramientas | 20 herramientas locales; MCP amplía el catálogo en ejecución |
 | Pruebas existentes | 19 archivos; 133 pruebas ejecutadas |
@@ -51,7 +53,7 @@ Ambas terminan con `KeyError: 'rows'` en `test_input_box.py:67`: la variable que
 Comando de suite, con las dependencias temporales en `PYTHONPATH` y plugins externos desactivados:
 
 ```powershell
-python -m pytest apps/cli/tests -q -p no:cacheprovider --basetemp <carpeta-temporal-de-auditoria>
+las pruebas del cliente Python
 ```
 
 No se verificó una sesión autenticada contra el gateway, producción, el móvil ni una terminal física. La evidencia local no permite afirmar paridad funcional completa o mejores tiempos de respuesta del modelo.
@@ -90,10 +92,10 @@ La prueba de terminal propuesta en la etapa 1 debe ocurrir antes de comprometer 
 
 ### Mediciones locales reproducibles
 
-[benchmark_baseline.py](benchmark_baseline.py) ejecuta dos operaciones sintéticas del código actual, tres veces por tamaño, y guarda medianas. Resultados completos: [baseline-python.json](baseline-python.json).
+El script de medición del cliente Python (en la etiqueta `python-cli-final`) ejecuta dos operaciones sintéticas del código actual, tres veces por tamaño, y guarda medianas. Resultados completos: [baseline-python.json](baseline-python.json).
 
 ```powershell
-python apps/cli/audit/benchmark_baseline.py --output apps/cli/audit/baseline-python.json
+la suite del cliente Python
 ```
 
 | Operación | Tiempo de pared, mediana | Memoria o salida |
@@ -121,7 +123,7 @@ Duplicar 2.000 a 4.000 eventos multiplicó el tiempo por aproximadamente 3,9. Es
 | Remoto | Crear sesión; POST de lotes cada 250 ms; comandos por SSE; eventos hello/deltas/done/tools/snapshot/aprobaciones/bye | Mantener rutas y campos; cancelación independiente; cola acotada por bytes, prioridades y snapshot al recuperarse; no prometer exactamente una entrega sin soporte servidor |
 | Archivos | Texto, PDF, Word, imágenes base64; límites actuales de tamaño y páginas; portapapeles por OS | Corpus documental y de imágenes; errores claros; conservar lectura local y no enviar documentos al backend silenciosamente |
 | Funciones auxiliares | `/diff`, `/undo`, `/commit`, verificadores, procesos, búsquedas, Visuals y delegación | Mapear handlers de slash commands, catálogo y comportamiento; matriz explícita de funciones pendientes durante beta |
-| Release | Gateway sirve `client_cli.py` y scripts Python; Docker incluye el artefacto | Nueva distribución binaria necesita trabajo de integración en el gateway, aunque la lógica del backend siga en Python |
+| Release | Gateway sirve el cliente Python y scripts Python; Docker incluye el artefacto | Nueva distribución binaria necesita trabajo de integración en el gateway, aunque la lógica del backend siga en Python |
 
 `core/gateway/routers/attachments.py:66-69` ofrece extracción documental con `cookie_auth_required`; no es un reemplazo directo para la extracción local con API key de la CLI. Usarlo exigiría acordar autenticación, consentimiento para subir archivos y cambios de backend. Se propone resolver PDF localmente mediante un adaptador y comparar extractores sobre documentos reales antes de elegir una biblioteca o helper. DOCX puede usar ZIP/XML de Go, con pruebas de tablas y orden del contenido. OCR no forma parte de la paridad actual.
 

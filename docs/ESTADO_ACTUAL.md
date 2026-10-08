@@ -115,7 +115,7 @@ autocompletado: `ollama pull qwen2.5-coder:1.5b` y asignarlo al rol `fim`.
 
 Tests: `core/inference/test_roles.py`, `core/orchestration/test_orchestrator_routing.py`,
 `core/delegation/test_delegation_routing.py`, `core/node_agent/test_capabilities_cache.py`
-(`python -m pytest core apps/cli/tests -q`).
+(`python -m pytest core` y `go test ./...` en `apps/cli`).
 
 ---
 
@@ -152,7 +152,7 @@ Tres quejas del usuario, en el mismo bloque:
 Diseño completo en `docs/PLAN_REMOTE.md` (fases R0–R6; **R0–R5 implementadas**). El IDE o el CLI actúan de host (solo conexiones salientes: SSE de comandos + POST de eventos, sin WS porque el CLI es stdlib puro), el gateway releva con `core/gateway/remote_hub.py` (memoria, 1 réplica) y la app móvil / web son el mando: transcript en vivo, prompts, interrupción y **aprobaciones de herramientas en el teléfono**.
 
 - **Backend**: tablas `remote_sessions` (share token hasheado, 24 h, revocable) y `device_tokens` (push Expo); router `core/gateway/routers/remote.py` (11 rutas `/api/remote/*`, QR con `segno` en png/svg/txt, claim con rate-limit + audit); sweep cada 5 min en `app.py`. Tests: `core/gateway/test_remote_hub.py`.
-- **CLI 2.1.0**: `/remote` imprime link + QR unicode y entra en **takeover** (teclado local en pausa, Ctrl+C termina y recupera); `lixbon_cli/remote.py` (hilos lector/flusher), aprobaciones remotas en `agent.py` vía `session["remote"]`.
+- **CLI 2.1.0**: `/remote` imprime link + QR unicode y entra en **takeover** (teclado local en pausa, Ctrl+C termina y recupera); `apps/cli/internal/remote` (host del relay), aprobaciones remotas desde el agente.
 - **IDE**: `/remote` en el chat o paleta → modal con QR; `src/store/remoteStore.js` deriva los eventos **suscribiéndose a chatStore** (sin tocar `send`); las `pendingApproval` se resuelven también desde el móvil; indicador "Remote" en la status bar.
 - **Móvil 0.3.0**: sección **Remote** en el drawer (lista en vivo vía `/api/remote/subscribe` — la sesión aparece al instante al ejecutar `/remote`), detalle con transcript/composer/aprobaciones, deep link `lixbon.com/remote/*`, push best-effort (`expo-notifications`).
 - **Web**: `/remote/:token` (llegada por QR/link; **exige login con la cuenta dueña** — sin sesión redirige a `/auth?next=…` y vuelve) y `/remote` (lista con sesión web). El token del link solo identifica la sesión, nunca es credencial.
@@ -163,7 +163,7 @@ Diseño completo en `docs/PLAN_REMOTE.md` (fases R0–R6; **R0–R5 implementada
 ## 0.b CLI v2 (2026-07-11) — reescritura completa, terminal pura
 
 - **Textual (TUI) eliminado.** Interfaz estilo Claude Code: transcript inline, streaming SSE en vivo, thinking del modelo en gris (`delta.reasoning_content` + tags `<think>` inline), selectores con flechas/mouse (nunca números), menú de slash-commands al escribir `/`, barra de estado inferior (modelo | sesión | % contexto | tokens | UTF-8).
-- **Código fuente modular** en `apps/cli/lixbon_cli/` (term/theme/config/sse/api/ui/diffs/agent/commands/app/cli); `apps/cli/build.py` lo concatena en el `client_cli.py` de siempre (la distribución `/install/client_cli.py`, install.sh/ps1 y el self-update NO cambian). Test anti-drift: `apps/cli/tests/test_build_fresh.py`. **No editar client_cli.py a mano: editar módulos + `python apps/cli/build.py`.**
+- **CLI** reescrito en Go en `apps/cli/` (paquetes `internal/*`); el cliente Python anterior se retiró (etiqueta `python-cli-final`). Se distribuye como binario por plataforma desde `release-cli.yml`.
 - Deps de la interfaz (`prompt_toolkit` + `rich`) se autoinstalan solo para `chat`; `init/status/models/usage/update` siguen siendo stdlib puro.
 - **Login interactivo**: Credenciales (email+password → `issue_api_key:true`, mismo flujo que la desktop), Crear cuenta, o pegar `lixbon_sk_...` (valida con `/api/key/info`).
 - **Modo agent**: diffs colapsados `● Update(archivo) +N -M` con aprobación de 3 vías (Sí / Sí y no preguntar más / No); herramientas de solo lectura no piden confirmación. `/compact` (resumen client-side), `/image ruta` y `@ruta.png` inline (imágenes base64).
@@ -265,7 +265,7 @@ Tres peticiones del usuario en el mismo bloque, con capturas de Claude Code como
 
 **3. Escribir mientras el agente trabaja** (`inputq.py` nuevo, `input_queue: true` en el config para apagarlo). Durante un turno prompt_toolkit no corre y el teclado estaba muerto. Ahora un hilo lee las teclas, lo tecleado se ve en la vista viva (`❯ texto█   2 en cola · se envía al terminar`) y las líneas completas se ejecutan **cuando el turno acaba**, en orden, desde `_prompt_loop`. **Deliberadamente NO se ejecutan a mitad de turno**: un `/model` o un `/workspace` aplicados mientras el modelo razona cambiarían el suelo bajo sus pies. Reglas de convivencia: en POSIX se usa `cbreak` y no `raw` (cbreak deja las señales, así que Ctrl+C sigue siendo Ctrl+C) y en Windows `msvcrt`, que no toca el modo de la consola; todo prompt interactivo pasa por `suspend_input()` en `ui.select()`, que pausa la lectura y devuelve la terminal; `atexit` restaura el modo si el proceso muere de mala manera; con el lector activo Ctrl+C llega como `\x03` y no como señal, así que el bucle del stream lo consulta igual que la interrupción remota; y lo que quedó escrito sin Enter se precarga en el prompt siguiente (`take_partial()`). No se activa con `/remote` (ahí conduce el móvil) ni en terminales sin `ui_capable()`.
 
-15 tests nuevos en `apps/cli/tests/test_diff_and_input.py` (filas y cortes del diff, DIB→PNG con el orden de color y el volteo, cola con Enter/Backspace/Esc/Ctrl+C y cesión del teclado). Batería del CLI: 32 en verde.
+15 tests nuevos del diff y la entrada (en el cliente Python anterior; filas y cortes del diff, DIB→PNG con el orden de color y el volteo, cola con Enter/Backspace/Esc/Ctrl+C y cesión del teclado). Batería del CLI: 32 en verde.
 
 ---
 
@@ -420,7 +420,7 @@ ode`, instala Python/Ollama con winget si faltan y registra tarea de usuario al 
 - Config (`core/config.py`): `R2_ACCOUNT_ID/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_PRESIGN_TTL_MIN`, helpers `r2_configured()`/`r2_endpoint()`. **Las credenciales viven solo en `.env` local (gitignored) y deben definirse en Railway.**
 - `versions.py` reescrito: la subida (`POST /api/versions/upload`, sigue con `X-Admin-Token`) sube a R2 con key `releases/<archivo>` y guarda en la BD `download_url = "r2:<key>"` (sin cambiar el esquema). **Si R2 no está configurado, cae al disco local** (efímero, solo dev). Toda descarga pasa por `GET /api/updates/download/{version}/{channel}`, que genera una URL prefirmada al vuelo y redirige (302) — el binario nunca se expone y la URL pública es estable. Los manifests (`/api/updates/manifest/{channel}` Tauri, `/api/updates/cli/{channel}` nuevo, `/api/updates/check`) devuelven esa URL del gateway, nunca la key ni el binario. Audit log `release_uploaded`.
 - **Eliminada la página pública `/releases-info`** (era dark-theme viejo con fuentes de Google externas).
-- Bucket **privado**: R2 nunca queda expuesto; el gateway es el único que firma URLs. El CLI se auto-actualiza descargando su fuente desde `/install/client_cli.py` (mecanismo aparte, sin cambios); el nuevo `/api/updates/cli/{channel}` queda para consultar versión (histórico: devolvía la versión del producto `desktop`; ahora es el manifest del CLI Go por plataforma).
+- Bucket **privado**: R2 nunca queda expuesto; el gateway es el único que firma URLs. El CLI se actualiza con `lixbon update` desde el manifest del gateway; el nuevo `/api/updates/cli/{channel}` queda para consultar versión (histórico: devolvía la versión del producto `desktop`; ahora es el manifest del CLI Go por plataforma).
 - Verificado E2E contra R2 real (bucket `releases-lixbon`, account `071d1172…`): subida a R2, metadata pública apunta al gateway, descarga redirige a URL prefirmada de `r2.cloudflarestorage.com` que entrega el binario exacto, `/releases-info` eliminada.
 - **PENDIENTE OPERATIVO (Railway)** 🔴: definir en el servicio gateway las 4 vars R2 (`R2_ACCOUNT_ID=071d1172730bf91c22924d149b67f95d`, `R2_BUCKET=releases-lixbon`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — están en el `.env` local). Sin ellas, prod cae al disco efímero. `boto3` ya está en requirements (Docker lo instala).
 
@@ -602,7 +602,7 @@ Versión unificada **0.5.3** (package.json estaba en 0.5.2 con tauri.conf/Cargo 
 | Agente GPU | `core/node_agent/agent.py` (puerto 8765, token en `.env` `NODE_SHARED_SECRET`) |
 | Web vieja (a reemplazar en F4) | `apps/web/` (React+Vite; mantener organización components/pages/styles) |
 | Desktop Tauri | `apps/desktop/` |
-| CLI | `apps/cli/client_cli.py` (monolito, se moderniza post-F4) |
+| CLI | `apps/cli/` (Go) |
 | Esquema BD + scripts | `BD/` (schema.sql se regenera con `python BD/scripts/dump_schema.py`) |
 | Diseño web (specs) | `docs/DISENO_WEB.md` |
 | Plan por fases | `docs/PLAN_MAESTRO.md` |

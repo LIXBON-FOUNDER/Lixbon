@@ -54,7 +54,7 @@ de casa. Escribe `/remote` y, sin abrir puertos ni configurar nada:
 
 ### 2.1 Transporte: SSE + POST (decisión clave)
 
-El CLI es **stdlib puro** (`urllib` + parser SSE propio en `lixbon_cli/sse.py`)
+El CLI usa solo la biblioteca estándar de Go y un parser SSE propio (`apps/cli/internal/sse`)
 — no hay cliente WebSocket disponible y no queremos añadir dependencias. El
 móvil (`src/sse.js`), la web y el IDE ya consumen SSE del chat. Por tanto el
 relay usa el mismo patrón **en los cuatro clientes**:
@@ -201,7 +201,7 @@ nativas — una línea en `requirements.txt`). Así el CLI sigue siendo stdlib.
 
 ## 6. Integración por cliente
 
-### 6.1 CLI (`apps/cli/lixbon_cli/`) — recordar: `client_cli.py` se regenera con `build.py`, nunca a mano
+### 6.1 CLI (`apps/cli/internal/remote`)
 
 - Nuevo `remote.py`: clase `RemoteLink` con un **hilo lector** del SSE de
   comandos (urllib, igual que el chat) y un publicador con cola + batching
@@ -260,7 +260,7 @@ nativas — una línea en `requirements.txt`). Así el CLI sigue siendo stdlib.
 | Fase | Alcance | Toca |
 |---|---|---|
 | **R0** | Backend: modelo + migración, `remote_hub.py`, router `remote.py`, QR (`segno`), auditoría | core |
-| **R1** | CLI `/remote` (host): remote.py, cmd_remote, instrumentación del agente, QR unicode | apps/cli (+ regenerar client_cli.py) |
+| **R1** | CLI `/remote` (host): remote.py, cmd_remote, instrumentación del agente, QR unicode | apps/cli |
 | **R2** | IDE `/remote` (host): remoteStore, modal QR, status bar, aprobaciones compartidas | apps/desktop (solo JS) |
 | **R3** | Móvil: sección Remote (lista + detalle en vivo + deep link) | apps/mobile |
 | **R4** | Web: `RemotePage.jsx` + claim por token | apps/web |

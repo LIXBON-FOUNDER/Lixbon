@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "oracle": "apps/cli/lixbon_cli/sse.py::events_from_stream",
+  "oracle": "cliente Python retirado",
   "cases": [
     {
       "name": "content_basic",

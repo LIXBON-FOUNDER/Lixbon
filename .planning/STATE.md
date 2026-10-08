@@ -40,7 +40,7 @@ Progress: [█████░░░░░] 48% de requisitos implementados (0 % 
 
 - `go vet ./...` y `go test -count=1 ./...` en `apps/cli/go`: todos los paquetes con pruebas pasan (Windows 11, Go 1.26.5, ejecución local).
 - CI (`ci.yml`, job `cli-go`): verde en ubuntu, macos y windows en el fork (`PR3S1G4zZ/Lixbon`, PR #2) y en el upstream (ejecución 37503221140: los tres jobs Go en success).
-- CI upstream en `cli` (13a2fb9): **success**. En `master` sigue fallando el job Python `CLI · tests + artefacto al día` (`state_corpus.json` no coincide con `sessions.py`/`commands.py`) hasta que `cli` se fusione.
+- CI upstream en `cli` (13a2fb9): **success**. El job Python del CLI se eliminó del CI.
 - `release-cli.yml` ejecutado con `cli-v2.3.0-go.0` (2026-10-07): los seis destinos compilaron, la *prerelease* se publicó con `SHA256SUMS` y el job `registrar` dio de alta los seis binarios en `lixbon.com`. `https://lixbon.com/install.ps1`, ejecutado en Windows 11 con una carpeta de usuario temporal, instaló el binario con la doble verificación; `lixbon update --check` informó «ya está actualizado». `install.sh` sin ejecutar en Linux ni macOS (Docker Desktop no estaba arrancado).
 - Referencia Python: 133 passed, 0 failed (Windows, Python 3.13.14, `apps/cli/validation/REFERENCE.md`). Los dos fallos históricos de `test_input_box.py` no se reproducen; causa original no determinada.
 - Sin evidencia todavía: gateway autenticado, LM Studio/Ollama/OpenAI reales, terminales físicas Linux/macOS, móvil, mediciones Go y release por plataforma.
@@ -92,7 +92,7 @@ Backlog en GitHub (LIXBON-FOUNDER/Lixbon):
 
 - Phase 1 sin cerrar: no hay matriz de destinos acordada ni política CGO escrita; hay que decidirlas antes de empaquetar (#20). La biblioteca PDF (#14) ya se eligió con criterio propio en `DECISION-PDF-GO.md`: sin CGO ni helpers, a falta de que la matriz lo confirme.
 - Mediciones Python vs Go inexistentes: ninguna afirmación de rendimiento está respaldada.
-- Eliminar Python exige antes congelar los corpus: los `gen_*_corpus.py` usan el código Python como oráculo.
+- Python retirado (2026-10-08): los corpus de `apps/cli/validation/fixtures/` son el contrato congelado; el código Python y sus generadores están en la etiqueta `python-cli-final`.
 
 ## Deferred Items
 

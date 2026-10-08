@@ -1,6 +1,6 @@
 {
  "version": 1,
- "oracle": "apps/cli/lixbon_cli/sessions.py y commands.py",
+ "oracle": "cliente Python retirado",
  "catalog": {
   "groups": [
    "conversación",
