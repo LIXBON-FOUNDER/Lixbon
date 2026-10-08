@@ -1,7 +1,7 @@
 // agent.js — modo agente del chat del IDE: el modelo pide herramientas con
 // JSON embebido ({"tool":...,"args":{...}}) y aquí se parsean y ejecutan sobre
 // la carpeta de trabajo usando los comandos Rust existentes (sandbox incluido).
-// Mismo protocolo que el CLI (apps/cli/lixbon_cli/agent.py); sin run_command:
+// Mismo protocolo que el CLI (apps/cli/internal/agent); sin run_command:
 // el IDE no tiene un primitivo de ejecución con captura de salida.
 
 import {
@@ -197,7 +197,7 @@ async function toolSearch(root, pattern) {
 }
 
 // Carpetas que find_files/outline nunca deben ofrecer: espejo de
-// IGNORED_TREE_DIRS en apps/cli/lixbon_cli/agent.py.
+// los directorios que ignora apps/cli/internal/tools.
 const IGNORED_TREE_DIRS = new Set([
   '.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build',
   'target', '.next', '.idea', '.vscode', '.mypy_cache', '.pytest_cache',
@@ -245,8 +245,8 @@ async function toolFindFiles(root, pattern) {
   return shown.join('\n') + (extra > 0 ? `\n… (${extra} más)` : '');
 }
 
-// Esqueleto reconocible por extensión: espejo de _OUTLINE_PATTERNS en
-// apps/cli/lixbon_cli/agent.py (misma intención, un lenguaje por bloque).
+// Esqueleto reconocible por extensión: espejo de apps/cli/internal/tools/outline.go
+// (misma intención, un lenguaje por bloque).
 const OUTLINE_PATTERNS = {
   '.py': [/^(?:\s*)(?:async\s+)?(?:def|class)\s+\w+.*?(?::|$)/],
   '.js': [

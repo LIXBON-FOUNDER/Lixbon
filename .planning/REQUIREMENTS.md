@@ -118,7 +118,7 @@ Estado a 2026-10-06. Leyenda: `[x]` implementado con pruebas automáticas (CI en
 - apps/cli/audit/EVALUACION_PYTHON_GO.md: contratos, costos, propuestas y evidencia histórica.
 - .planning/intel/SYNTHESIS.md y constraints.md: ingest sin IDs; las recomendaciones técnicas no son decisiones bloqueadas.
 - .planning/DECISION-CLI-GO.md: decisión del usuario posterior al SPEC.
-- apps/cli/lixbon_cli/agent.py: catálogo nominal de 20 herramientas.
+- el cliente Python: catálogo nominal de 20 herramientas.
 - apps/cli/README.md: declaración de dependencia pendiente de reconciliación.
 
 ---

@@ -8,14 +8,14 @@ CLI de Lixbon en Go. Decisión y plan en `.planning/DECISION-CLI-GO.md`. El clie
 
 | Paquete | Qué hace | Contrato |
 |---|---|---|
-| `internal/sse` | Stream SSE → eventos tipados, filtro `<think>` | `../validation/fixtures/sse_corpus.json` (oráculo: `sse.py`) |
+| `internal/sse` | Stream SSE → eventos tipados, filtro `<think>` | `../validation/fixtures/sse_corpus.json` |
 | `internal/config` | `~/.lixbon/config.json` compatible con Python | BOM, campos desconocidos preservados, escritura atómica 0600 |
 | `internal/api` | Cliente del gateway, stream cancelable, login/registro, control remoto, imágenes en formato de visión de OpenAI para proveedores genéricos | sin reintentos del POST, inactividad 300 s, sin gzip |
 | `internal/cli` | `init`, `status`, `models`, `usage`, `setup`, `profile`, `chat --once` | pruebas contra un gateway falso; `usage` contrastado con la salida de Python |
-| `internal/documents` | Adjuntos `@ruta` (texto, imágenes, PDF), marcadores `[IMG#n]`, extracción de PDF y de `.docx` | `validation/fixtures/documents_corpus.json` (oráculo: `commands.py` y `documents.py` con pypdf y python-docx) |
+| `internal/documents` | Adjuntos `@ruta` (texto, imágenes, PDF), marcadores `[IMG#n]`, extracción de PDF y de `.docx` | `validation/fixtures/documents_corpus.json` |
 | `internal/clipboard` | `/paste` y Alt+V: imagen del portapapeles como PNG en `~/.lixbon/pastes` (DIB→PNG a mano, Win32 sin CGO, `wl-paste`/`xclip`/`pngpaste`) | casos DIB del mismo corpus, helpers simulados y una prueba con el portapapeles real de Windows |
 | `internal/remote` | Host de `/remote`: sesión en el relay, lotes de eventos cada 250 ms, SSE de comandos con reconexión, aprobaciones, snapshot | relay simulado en memoria y por HTTP |
-| `internal/toolspec` | Catálogo de las 20 herramientas (schemas, conjuntos, claves) | `catalog.json` generado por `gen_tool_corpus.py` |
+| `internal/toolspec` | Catálogo de las 20 herramientas (schemas, conjuntos, claves) | `catalog.json` (contrato congelado) |
 | `internal/toolparse` | Extrae tool-calls del texto del modelo y limpia la prosa | `fixtures/tool_parse_corpus.json` (40 casos de texto + 9 nativos) |
 | `internal/tools` | `list_files`, `find_files`, `read_file`, `outline`, `search` | `fixtures/workspace_corpus.json` (87 casos sobre un workspace sintético) |
 | `internal/tools` (escritura) | `write_file`, `edit_file` (con coincidencia tolerante), `multi_edit`, `insert_at_line`, `append_file`, `mkdir`, `delete_file`, `rename_file` | `fixtures/edit_corpus.json` (61 casos con árbol inicial y final) |
@@ -26,7 +26,7 @@ CLI de Lixbon en Go. Decisión y plan en `.planning/DECISION-CLI-GO.md`. El clie
 | `internal/session` | Historial persistente en `~/.lixbon/sessions/` (mismo formato que Python), retención de 200, índice con candado y auto-reparación | `state_corpus.json`: Go lee lo que escribió Python y reproduce sus archivos con el mismo reloj |
 | `internal/workspace` | `LIXBON.md` / `lixbon.md` y comandos propios (`.lixbon/commands/*.md`, `$ARGUMENTS`) | `state_corpus.json` |
 | `internal/chat` | Estado de la conversación sin interfaz: modelo, modo, sesión, compactación, título automático, contexto de workspace | pruebas contra un gateway falso |
-| `internal/mcp` | Cliente MCP por stdio y Streamable HTTP: `mcp.json` de usuario y proyecto, herramientas `mcp__<servidor>__<herramienta>`, paginación, cancelación, cierre que mata el árbol de procesos | `validation/fixtures/mcp_corpus.json` (oráculo: `mcp.py`) + servidor stdio de mentira (el propio binario de pruebas) + servidor HTTP falso |
+| `internal/mcp` | Cliente MCP por stdio y Streamable HTTP: `mcp.json` de usuario y proyecto, herramientas `mcp__<servidor>__<herramienta>`, paginación, cancelación, cierre que mata el árbol de procesos | `validation/fixtures/mcp_corpus.json` + servidor stdio de mentira (el propio binario de pruebas) + servidor HTTP falso |
 | `internal/tui` | Interfaz interactiva con **Bubble Tea v2** a pantalla completa (limpia la terminal al entrar; transcript y scroll propios, caja y barra fijas al pie; la rueda siempre desplaza y arrastrar con el ratón selecciona y copia; Ctrl+T abre un visor del transcript): caja de entrada multilínea, menú `/`, aprobaciones con diff, `/undo`, `/plan`, `/history`, `/provider`… | pruebas del modelo y de un programa real con E/S inyectada; catálogo de comandos contrastado con `state_corpus.json` |
 | `internal/update` | `lixbon update [--check]` y `/update`: manifest del gateway, descarga de la release de GitHub, verificación contra el digest del gateway **y** `SHA256SUMS`, comprobación del binario nuevo y reemplazo atómico (en Windows renombra el `.exe` en uso a `.old` y restaura si falla) | pruebas con un servidor de releases falso (digests y archivos manipulados, corte de red, binario roto) y una prueba real en Windows con el `.exe` en uso; diseño en `.planning/DECISION-UPDATE-GO.md` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |

@@ -1,5 +1,5 @@
 // Package toolspec expone el catálogo de herramientas del agente. catalog.json
-// lo genera validation/gen_tool_corpus.py a partir del código Python.
+// es el contrato congelado de las herramientas.
 package toolspec
 
 import (

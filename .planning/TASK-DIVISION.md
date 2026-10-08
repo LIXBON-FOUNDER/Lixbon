@@ -7,7 +7,7 @@ Este documento es la propuesta original de despacho y se conserva como historial
 
 | Fase propuesta | Rutas candidatas | Rutas reales en `apps/cli/go/` | Estado |
 |---|---|---|---|
-| 1 / BASE | `validation/` | `../validation/` (`REFERENCE.md`, `gen_*_corpus.py`, 6 corpus) | Parcial: faltan 01-01 (harness), 01-03 (matriz), 01-04 (mediciones) y acta |
+| 1 / BASE | `validation/` | `../validation/` (`REFERENCE.md`, 6 corpus) | Parcial: faltan 01-01 (harness), 01-03 (matriz), 01-04 (mediciones) y acta |
 | 2 / CHAT | `cmd/lixbon`, `internal/{config,api,sse,chat}` | `cmd/lixbon`, `internal/{config,api,sse,cli}` | Implementada; CHAT-02 parcial |
 | 3 / agente, herramientas, estado | `internal/{agent,context,tools,process,workspace,state}` | `internal/{agent,history,toolspec,toolparse,tools,process,session,workspace,textutil}` | Implementada |
 | 4 / terminal | `internal/terminal` | `internal/{chat,tui}` | En curso |

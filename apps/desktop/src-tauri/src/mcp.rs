@@ -1,6 +1,6 @@
 //! Servidores MCP (Model Context Protocol) por stdio. El backend solo lanza el
 //! proceso y mueve líneas JSON-RPC en ambos sentidos; el protocolo lo habla el
-//! frontend (`src/lib/mcp.js`), igual que el CLI hace en `lixbon_cli/mcp.py`.
+//! frontend (`src/lib/mcp.js`), igual que el CLI hace en `apps/cli/internal/mcp`.
 
 use std::collections::HashMap;
 use std::fs;

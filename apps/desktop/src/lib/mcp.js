@@ -1,5 +1,5 @@
 // mcp.js — cliente MCP (JSON-RPC 2.0 por stdio). Mismo formato de
-// configuración y de nombres que el CLI (apps/cli/lixbon_cli/mcp.py):
+// configuración y de nombres que el CLI (apps/cli/internal/mcp):
 //   <workspace>/.lixbon/mcp.json  y  ~/.lixbon/mcp.json
 //   {"servers": {"github": {"command": "npx", "args": [...], "env": {...}}}}
 // Cada tool se expone al agente como `mcp__<servidor>__<tool>`.

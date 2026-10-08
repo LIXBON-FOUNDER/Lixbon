@@ -1,6 +1,6 @@
 // agentProtocol.js — parte PURA del modo agente (sin Tauri ni DOM):
 // parseo de tool calls embebidos, limpieza de texto y diff barato.
-// Espejo del protocolo del CLI (apps/cli/lixbon_cli/agent.py).
+// Espejo del protocolo del CLI (apps/cli/internal/agent y internal/toolparse).
 
 // Tope de pasos por turno. Es un cortafuegos contra bucles, NO un presupuesto
 // de trabajo: leer varios archivos, editarlos, lanzar los tests y corregir se

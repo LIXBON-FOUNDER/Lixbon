@@ -225,8 +225,3 @@ def test_instaladores_responden_503_sin_release_registrada(cliente, monkeypatch)
     monkeypatch.setattr(installer, "latest_cli_release_for_install", lambda: None)
     assert cliente.get("/install.sh").status_code == 503
     assert cliente.get("/install.ps1").status_code == 503
-
-
-def test_el_cliente_python_ya_no_se_sirve(cliente):
-    r = cliente.get("/install/client_cli.py")
-    assert "text/x-python" not in r.headers.get("content-type", "")

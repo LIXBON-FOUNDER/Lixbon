@@ -83,7 +83,7 @@ lixbon/
 │   │       ├── lib/               # cliente API único, helpers
 │   │       └── hooks/ store/      # lógica separada de la presentación
 │   ├── desktop/                   # Tauri (hoy "App lixbon")
-│   └── cli/                       # CLI modularizado (hoy client_cli.py)
+│   └── cli/                       # CLI en Go
 ├── BD/                            # Scripts de base de datos (esquema, migraciones, seeds)
 │   ├── schema.sql
 │   ├── migrations/                # Alembic

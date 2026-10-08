@@ -31,7 +31,7 @@ el conflicto sale por varios sitios a la vez.
 
 | # | Rol | Entrada en el código | Requisito dominante | Modelo hoy |
 |---|-----|----------------------|---------------------|------------|
-| 1 | Chat + **agente** | `POST /v1/chat/completions` con `tools` (`core/gateway/routers/chat.py:85`), loop en `apps/cli/lixbon_cli/agent.py` y `apps/desktop/src/store/chatStore.js` | tool calling fiable + calidad de código + contexto grande | el de chat |
+| 1 | Chat + **agente** | `POST /v1/chat/completions` con `tools` (`core/gateway/routers/chat.py:85`), loop en `apps/cli/internal/agent` y `apps/desktop/src/store/chatStore.js` | tool calling fiable + calidad de código + contexto grande | el de chat |
 | 2 | **Ghost text / FIM** | `POST /api/fim` (`core/gateway/routers/chat.py:482`) → `ollama.generate(suffix=…)`; cliente en `apps/desktop/src/lib/fim.js` | **latencia** (dispara por pulsación) + tokens FIM | autodetectado |
 | 3 | **Visión** | `POST /api/vision/describe` (`core/gateway/routers/chat.py:423`) + `ChatMessage.images` | multimodal | `moondream` |
 | 4 | **Embeddings / RAG** | `core/delegation/embeddings.py:13`, búsqueda semántica del codebase | vector estable, barato | `nomic-embed-text` |
@@ -135,8 +135,8 @@ Medido contra Ollama local el 2026-07-30 con `qwen2.5-coder:7b`:
 
 Consecuencia observada: creaba carpetas y ejecutaba comandos, pero **nunca escribía
 archivos**, y el loop se atascaba repitiendo el mismo paso. Mitigado en
-`apps/cli/lixbon_cli/agent.py` con parseo tolerante (`_scan_object`, `_quotes_to_json`,
-`_loads_lenient`) + regresión en `apps/cli/tests/test_agent_parsing.py`.
+`apps/cli/internal/toolparse` con parseo tolerante + regresión en
+`apps/cli/internal/toolparse/toolparse_test.go` (corpus `tool_parse_corpus.json`).
 
 **`apps/desktop/src/lib/agentProtocol.js:75` (`parseLoose`) sigue con el mismo defecto: el
 IDE fallará igual con este modelo.**
@@ -262,7 +262,7 @@ silencio, ahora dicho en voz alta.
 ### Qué queda pendiente
 
 - **F** — portar `parseLoose` (`apps/desktop/src/lib/agentProtocol.js:75`) al parseo
-  tolerante que ya existe en `apps/cli/lixbon_cli/agent.py`.
+  tolerante que ya existe en `apps/cli/internal/toolparse`.
 - **G** — sandbox de rutas para `run_command`.
 - **FIM sin modelo**: hasta que se instale uno con `insert` (p. ej.
   `ollama pull qwen2.5-coder:1.5b`) el ghost text queda apagado **a propósito**.
@@ -273,5 +273,5 @@ silencio, ahora dicho en voz alta.
 - `core/inference/roles.py` — el resolvedor rol→modelo (y sus tests al lado)
 - `core/gateway/model_router.py` — cómo se aplica a cada petición HTTP
 - `docs/ESTADO_ACTUAL.md` — estado general del proyecto
-- `apps/cli/tests/test_agent_parsing.py` — regresión del contrato de tool calling
+- `apps/cli/internal/toolparse/toolparse_test.go` — regresión del contrato de tool calling
 - `core/gateway/routers/chat.py` — todos los endpoints de inferencia
