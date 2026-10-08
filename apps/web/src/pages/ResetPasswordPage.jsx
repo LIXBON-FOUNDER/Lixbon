@@ -1,5 +1,4 @@
-// ResetPasswordPage.jsx — establece la nueva contraseña desde el enlace del
-// email (/reset-password?token=...). El backend rota las API keys al cambiarla.
+// El backend rota las API keys al cambiar la contraseña.
 import { useSeo } from '../lib/seo';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';

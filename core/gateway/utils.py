@@ -1,6 +1,3 @@
-"""
-utils.py — Utilidades compartidas entre routers de lixbon DTC.
-"""
 from __future__ import annotations
 
 import asyncio

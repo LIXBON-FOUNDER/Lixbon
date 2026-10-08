@@ -1,13 +1,7 @@
-// DocsToc.jsx — índice de la página que se está leyendo ("En esta página").
-//
-// Los títulos no se declaran en ningún sitio: viven dentro del cuerpo de cada
-// sección (docsContent.jsx), que es prosa suelta. Así que se leen del DOM ya
-// pintado, se les pone un ancla estable y se observa cuál está en pantalla.
-// Si la sección no tiene títulos, la columna no se dibuja.
+// Los títulos viven en la prosa de docsContent: se leen del DOM ya pintado.
 import { useEffect, useState } from 'react';
 import { useT } from '../i18n/useT';
 
-// "URL base y puertos" → "url-base-y-puertos"
 function anclaDe(texto, i) {
   const slug = texto
     .toLowerCase()

@@ -1,7 +1,7 @@
 export default {
   es: {
     seoTitle: 'Planes y precios',
-    seoDescription: 'Gratuito, Pro ($9.90/mes) y Advance ($24.90/mes): chat con IA, Visuals, CLI con agente y app de escritorio sobre GPUs propias. La API se paga por tokens con créditos prepago.',
+    seoDescription: 'Gratuito, Pro ($9.90/mes) y Advance ($24.90/mes): chat con IA, Visuals, CLI con agente y app de escritorio sobre GPUs que operamos. La API se paga por tokens con créditos prepago.',
     title: 'Planes',
     subtitle: 'Elige cómo quieres usar lixbon.',
     onlinePaymentsSoon: ' Los pagos en línea llegan pronto.',
@@ -22,7 +22,7 @@ export default {
     unlimitedApiKeys: 'API keys ilimitadas',
     apiKeyCount: '{{count}} API key{{plural}}',
     requestsPerMinute: '{{rate}} peticiones por minuto',
-    smallModels: 'Modelos pequeños del clúster',
+    smallModels: 'Modelos ligeros',
     allModels: 'Todos los modelos activos',
     visualsFeature: 'Visuals: diseños web con IA',
     apiNoteBefore: 'Las peticiones hechas con una',
@@ -31,7 +31,7 @@ export default {
   },
   en: {
     seoTitle: 'Plans and pricing',
-    seoDescription: 'Free, Pro ($9.90/mo) and Advance ($24.90/mo): AI chat, Visuals, a CLI with an agent, and a desktop app, all on our own GPUs. The API is billed per token with prepaid credits.',
+    seoDescription: 'Free, Pro ($9.90/mo) and Advance ($24.90/mo): AI chat, Visuals, a CLI with an agent, and a desktop app, all on GPUs we operate. The API is billed per token with prepaid credits.',
     title: 'Plans',
     subtitle: 'Choose how you want to use lixbon.',
     onlinePaymentsSoon: ' Online payments are coming soon.',
@@ -52,7 +52,7 @@ export default {
     unlimitedApiKeys: 'Unlimited API keys',
     apiKeyCount: '{{count}} API key{{plural}}',
     requestsPerMinute: '{{rate}} requests per minute',
-    smallModels: 'Smaller cluster models',
+    smallModels: 'Lighter models',
     allModels: 'All active models',
     visualsFeature: 'Visuals: AI-designed websites',
     apiNoteBefore: 'Requests made with an',

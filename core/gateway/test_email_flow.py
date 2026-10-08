@@ -179,8 +179,6 @@ def test_todos_los_correos_llevan_version_de_texto(verificada, registrada):
         assert mensaje["texto"].strip(), f"sin texto plano: {mensaje['asunto']}"
 
 
-# ── El correo que no sale, y la cuenta que no lo ha verificado ─────────────
-
 def test_un_correo_perdido_no_se_cuenta_como_enviado(cliente, monkeypatch):
     # Decir siempre "verification_email_sent: true" dejaba al recién registrado
     # esperando indefinidamente un correo que nadie llegó a enviar.
@@ -230,8 +228,6 @@ def test_sin_verificar_no_se_puede_usar_el_servicio(monkeypatch):
     assert caida.value.status_code == 403
     assert caida.value.detail["error"] == "email_not_verified"
 
-
-# ── Los tres avisos que faltaban ──────────────────────────────────────────
 
 @pytest.fixture(scope="module")
 def plan_pro(_esquema):

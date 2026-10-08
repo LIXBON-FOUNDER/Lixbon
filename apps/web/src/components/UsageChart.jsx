@@ -1,6 +1,3 @@
-// UsageChart.jsx — barras de tokens/día (30 días) para Mi cuenta.
-// Una sola serie: color tinta uniforme (la identidad la da el título, no el color),
-// barras finas con extremo redondeado, tooltip por barra, labels selectivos.
 import { useMemo, useState } from 'react';
 import { useT } from '../i18n/useT';
 
@@ -37,7 +34,7 @@ export function UsageChart({ daily }) {
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
   const step = innerW / data.length;
-  const barW = Math.max(4, step - 4); // 4px de aire entre barras
+  const barW = Math.max(4, step - 4);
   const y = (v) => PAD.top + innerH * (1 - v / max);
   const maxIdx = data.findIndex((d) => d.tokens === max);
 
@@ -69,7 +66,6 @@ export function UsageChart({ daily }) {
           const h = Math.max(d.tokens > 0 ? 3 : 0, innerH * (d.tokens / max));
           return (
             <g key={d.date}>
-              {/* hit target más ancho que la barra */}
               <rect
                 x={PAD.left + i * step} y={PAD.top} width={step} height={innerH}
                 fill="transparent"
@@ -83,7 +79,6 @@ export function UsageChart({ daily }) {
                   pointerEvents="none"
                 />
               )}
-              {/* label directo solo en el máximo (selectivo) */}
               {i === maxIdx && d.tokens > 0 && hover === null && (
                 <text x={x + barW / 2} y={y(d.tokens) - 6} className="uchart__label" textAnchor="middle">
                   {fmt(d.tokens)}
@@ -93,7 +88,6 @@ export function UsageChart({ daily }) {
           );
         })}
 
-        {/* etiquetas de fecha: primera, media y última */}
         {[0, 14, 29].map((i) => (
           <text
             key={i}

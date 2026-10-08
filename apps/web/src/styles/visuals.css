@@ -1,8 +1,4 @@
-/* Visuals: chat estrecho a la izquierda, lienzo a la derecha. */
-
 .vis-main { overflow: hidden; }
-
-/* ── Inicio ───────────────────────────────────────────────────────────── */
 
 .vis-hero {
   flex: 1;
@@ -72,8 +68,6 @@
 @media (max-width: 640px) { .vis-bloqueo { flex-direction: column; gap: 12px; padding: 20px; } }
 .vis-hero__input .chat-composer { padding: 0; }
 
-/* ── Vista dividida ───────────────────────────────────────────────────── */
-
 .vis-split {
   --chat-w: clamp(340px, 30vw, 420px);
   --lienzo-w: calc(100vw - var(--chat-w));
@@ -115,8 +109,6 @@
 
 .vis-version-chip.is-active { background: var(--accent-soft); color: var(--ink); }
 .vis-version-chip.is-building { color: var(--ink-muted); cursor: default; }
-
-/* ── Lienzo ───────────────────────────────────────────────────────────── */
 
 .vis-canvas {
   display: flex;
@@ -258,8 +250,6 @@
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
 
-/* Móvil: un panel cada vez */
-
 .vis-panel-toggle {
   display: flex;
   gap: 2px;
@@ -288,8 +278,6 @@
   .vis-stage { padding: 8px; }
   .vis-hero__title { font-size: 24px; }
 }
-
-/* ── Design system ────────────────────────────────────────────────────── */
 
 .vis-ds { position: relative; }
 
@@ -361,8 +349,6 @@
 .vis-ds__colores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .vis-ds__colores input[type="color"] { width: 100%; height: 32px; border: 0; border-radius: var(--radius-chip); background: transparent; cursor: pointer; }
 
-/* ── Artboards (todas las páginas) ───────────────────────────────────── */
-
 .vis-stage--todas { align-items: flex-start; }
 
 .vis-artboards {
@@ -412,10 +398,6 @@
 @container (min-width: 500px) { .vis-artboard__frame iframe { --escala: 0.39; } }
 
 .vis-paginas { flex-wrap: wrap; }
-
-/* ── Inspector ───────────────────────────────────────────────────────
-   Columna propia a la derecha del lienzo: no tapa el diseño ni se recorta.
-   Todo por relleno, sin líneas; el acento solo marca la etiqueta. */
 
 .vis-canvas { flex-direction: row; }
 .vis-lienzo { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -502,7 +484,6 @@
 .vis-insp__clase-nueva:focus { background: var(--surface-3); }
 .vis-insp__clase-nueva::placeholder { color: var(--ink-muted); }
 
-/* Caja de margen y relleno */
 .vis-insp__caja { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; border-radius: var(--radius-chip); background: var(--surface-3); }
 .vis-insp__caja--dentro { flex: 1; min-width: 0; padding: 6px; border-radius: 5px; background: var(--surface-4); }
 .vis-insp__caja-nombre { position: absolute; top: 5px; left: 8px; font-size: 10px; color: var(--ink-label); }
@@ -513,7 +494,6 @@
 .vis-insp__lado:focus-within { background: var(--field-focus); }
 .vis-insp__medida { flex: 1; min-width: 0; padding: 3px 6px; border-radius: 4px; background: var(--surface-5); color: var(--ink); font-family: var(--font-mono); font-size: 11px; text-align: center; white-space: nowrap; }
 
-/* Pestaña CSS */
 .vis-insp__props { display: flex; flex-direction: column; gap: 2px; }
 .vis-insp__prop { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); align-items: center; gap: 6px; padding: 0 0 0 8px; border-radius: var(--radius-chip); }
 .vis-insp__prop:hover { background: var(--surface-2); }
@@ -537,7 +517,6 @@
 .vis-insp__pedir:hover { background: var(--surface-4); }
 .vis-insp__nota { margin: 0; font-size: 11px; line-height: 1.5; color: var(--ink-label); }
 
-/* El marco del diseño descuenta la columna del inspector. */
 .vis-split.con-inspector .vis-frame { width: calc(var(--lienzo-w) - var(--insp-w) - 2 * var(--stage-pad, 16px)); }
 
 @media (max-width: 900px) {
@@ -545,8 +524,6 @@
   .vis-insp { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; width: auto; max-height: 62%; border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--sombra-menu); }
   .vis-split.con-inspector .vis-frame { width: calc(var(--lienzo-w) - 2 * var(--stage-pad, 16px)); }
 }
-
-/* ── Lienzo libre ─────────────────────────────────────────────────────── */
 
 .vis-board {
   position: absolute;
@@ -563,19 +540,16 @@
 .vis-board__artboard {
   position: absolute;
   top: 0;
-  border-radius: 12px;
+  border-radius: 6px;
   background: #fff;
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.35);
   overflow: hidden;
   cursor: grab;
 }
 .vis-board__artboard:active { cursor: grabbing; }
-/* El contorno va con outline para no mover el contenido; grueso porque el
-   tablero se ve a escala. */
 .vis-board__artboard.is-elegido { outline: 6px solid var(--accent); outline-offset: 4px; }
 .vis-board__artboard iframe { width: 100%; height: 100%; border: 0; pointer-events: none; display: block; }
 
-/* Cabecera de cada tablero, a tamaño de pantalla sobre su esquina. */
 .vis-board__cab {
   position: absolute;
   display: flex; align-items: center; gap: 8px;
@@ -591,7 +565,6 @@
 .vis-board__titulo small { flex-shrink: 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-label); }
 .vis-board__cab.is-elegido .vis-board__titulo strong { color: var(--accent); }
 .vis-board__cab.is-estrecho .vis-board__titulo small { display: none; }
-/* Estrecho y elegido: los botones bajan una fila para no tapar el título. */
 .vis-board__cab.is-estrecho .vis-board__acciones { position: absolute; left: 0; top: -24px; padding: 1px; border-radius: 6px; background: var(--surface-2); box-shadow: var(--sombra-menu); }
 .vis-board__titulo-input {
   flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; outline: none;
@@ -623,8 +596,6 @@
 
 .vis-board__hint { margin-left: 8px; color: var(--ink-muted); }
 
-/* Carga del iframe */
-
 .vis-stage__loading {
   position: absolute;
   inset: 0;
@@ -650,8 +621,6 @@
 .vis-stage__loading > span { display: inline-flex; align-items: center; }
 @keyframes vis-spin { to { transform: rotate(360deg); } }
 
-/* Trabajo del modelo (en vez del código) */
-
 .vis-trabajo {
   display: flex;
   align-items: center;
@@ -668,8 +637,6 @@
 @keyframes vis-pulse { 50% { opacity: .3; } }
 .vis-trabajo__meta { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
 
-/* Disposición: chat y lienzo ocultables */
-
 .vis-split.is-solo-lienzo { grid-template-columns: 0px 1fr; --lienzo-w: 100vw; }
 /* El marco toma su ancho final de golpe y la columna lo destapa al animarse:
    así el iframe recalcula su layout una vez y no en cada fotograma. */
@@ -678,8 +645,6 @@
 .vis-split.is-solo-chat { grid-template-columns: 1fr; }
 .vis-split.is-solo-chat .vis-canvas { display: none; }
 .vis-split.is-solo-chat .vis-thread, .vis-split.is-solo-chat .vis-composer { max-width: 760px; margin-inline: auto; width: 100%; }
-
-/* ── Página y barra superior (editor y galería) ──────────────────────── */
 
 .vis-page {
   display: flex;
@@ -713,8 +678,6 @@
 .vis-tool--blanco { background: var(--primary); color: var(--on-primary); font-weight: 600; }
 .vis-tool--blanco:hover:not(:disabled) { background: var(--primary-hover); color: var(--on-primary); }
 
-/* Título, chip de página y chip de versión */
-
 .vis-titulo { display: flex; align-items: center; gap: 2px; margin-left: 4px; min-width: 0; }
 .vis-titulo__nombre {
   padding: 4px 8px; border: 0; border-radius: var(--radius-chip);
@@ -745,8 +708,6 @@
   background: var(--field-focus); outline: none; color: var(--ink); font-weight: 600; min-width: 260px;
 }
 
-/* Menús desplegables */
-
 .vis-menu { position: relative; }
 .vis-menu__panel {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
@@ -774,8 +735,6 @@
 .vis-menu__item-text small { color: var(--ink-muted); font-size: 11.5px; white-space: normal; }
 .vis-menu__sep { height: 0; margin: 4px 0; }
 .vis-menu__vacio { margin: 0; padding: 8px 10px; color: var(--ink-muted); font-size: 12.5px; }
-
-/* Panel Compartir */
 
 .vis-share { display: flex; flex-direction: column; gap: 14px; width: 360px; padding: 14px; }
 .vis-share__head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
@@ -816,8 +775,6 @@
 .vis-tile strong { font-size: 12.5px; font-weight: 600; }
 .vis-tile small { color: var(--ink-muted); font-size: 11.5px; }
 
-/* ── Galería ─────────────────────────────────────────────────────────── */
-
 .vis-galeria { flex: 1; overflow: auto; }
 .vis-hero--galeria { flex: 0 0 auto; padding: 56px 24px 32px; }
 .vis-galeria__lista { max-width: 1240px; margin: 0 auto; padding: 8px 24px 48px; }
@@ -825,8 +782,6 @@
 .vis-galeria__titulo small { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--ink-label); }
 .vis-galeria__vacio { padding: 24px; text-align: center; color: var(--ink-muted); }
 
-/* Lista, no cuadrícula: una fila por diseño con su miniatura pequeña a la
-   izquierda; se recorre de un vistazo aunque haya decenas. */
 .vis-cards {
   display: flex;
   flex-direction: column;
@@ -881,8 +836,6 @@
   cursor: pointer;
 }
 
-/* ── Barra del lienzo: pestañas de páginas, retoques y ancho ─────────── */
-
 .vis-stagebar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 8px 16px 0; min-height: 40px;
@@ -929,7 +882,6 @@
   background: rgba(0, 0, 0, .62); color: #fff; font-family: var(--font-mono); font-size: 11px; pointer-events: none;
 }
 
-/* Código con números de línea */
 .vis-code {
   display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0;
   border-radius: var(--radius); background: var(--code-bg); overflow: hidden;
@@ -951,8 +903,6 @@
   color: var(--ink-label); opacity: .7; user-select: none;
 }
 .vis-code__l:hover { background: rgba(var(--ink-rgb), .04); }
-
-/* ── Galería: barra, búsqueda, cuadrícula e ideas ────────────────────── */
 
 .vis-hero--galeria { grid-template-columns: minmax(0, 1fr); }
 .vis-hero__inner { min-width: 0; }
@@ -993,8 +943,6 @@
 }
 .vis-idea:hover { background: var(--surface-3); border-color: transparent; color: var(--ink); }
 
-/* ── Pantallas estrechas: un panel cada vez ──────────────────────────── */
-
 .vis-movil { display: none; }
 .vis-panel-toggle__n { margin-left: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
 @media (max-width: 900px) {
@@ -1010,7 +958,6 @@
   .vis-top__right .vis-seg, .vis-top__right .vis-ds, .vis-top__right > .vis-tool:not(.vis-tool--blanco) { display: none; }
 }
 
-/* ── Estudio sobre visuals con versiones: piezas, documentos, galería ── */
 .vis-pestana__nueva.is-warn { background: var(--warn, #d9a23b); }
 .vis-pieza { display: flex; justify-content: center; align-items: flex-start; width: 100%; height: 100%; }
 .vis-pieza__media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius); background: var(--surface-2); }
@@ -1023,7 +970,6 @@
 .vis-card__kind.is-marketing { background: var(--accent-soft); color: var(--accent); }
 .vis-card__preview img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 
-/* ── Piezas: vista a tamaño real escalada y editor en la columna derecha ── */
 .pe-vista { display: flex; justify-content: center; align-items: flex-start; width: 100%; height: 100%; min-height: 0; overflow: auto; }
 .pe-wrap { position: relative; flex: none; overflow: hidden; border-radius: 6px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .18), 0 12px 32px rgba(0, 0, 0, .22); }
 .pe-wrap iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; }
@@ -1082,7 +1028,6 @@
 .pe-f:has(.pe-color) { align-items: start; }
 .pe-f:has(.pe-color) .pe-f__k { line-height: 32px; }
 
-/* ── Historial con nombres ── */
 .vis-chip__nombre { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .vis-versiones { display: flex; flex-direction: column; gap: 2px; width: 340px; max-height: min(460px, 70vh); overflow-y: auto; }
 .vis-version-item { position: relative; display: flex; align-items: center; border-radius: var(--radius-chip); transition: background .15s ease; }
@@ -1097,7 +1042,6 @@
 .vis-version-item__edit:hover { background: var(--surface-5); color: var(--ink); }
 .vis-version-item__input { flex: 1; min-width: 0; height: 34px; margin: 4px; padding: 0 9px; border: 0; border-radius: var(--radius-chip); background: var(--field-focus); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; outline: 2px solid var(--accent-soft); }
 
-/* ── Slider de propiedades: la barra entera es el control; se arrastra o se escribe el valor ── */
 .pe-slider { position: relative; flex: 1; min-width: 0; height: 32px; border-radius: var(--radius-chip); background: var(--surface-3); overflow: hidden; transition: background .15s, box-shadow .15s; }
 .pe-slider:hover { background: var(--surface-4); }
 .pe-slider:has(input[type=range]:focus-visible) { box-shadow: 0 0 0 2px var(--accent-soft); }
@@ -1111,7 +1055,6 @@
 .pe-slider__num input::-webkit-outer-spin-button, .pe-slider__num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .pe-slider__num span { color: var(--ink-label); font-size: 11px; }
 
-/* ── Editor profesional: secciones plegables, campos compactos, fuentes, selección con tiradores ── */
 .pe-panel .vis-insp__cuerpo { gap: 6px; }
 .pe-sec { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle, rgba(128, 128, 128, .14)); }
 .pe-sec:last-child { border-bottom: 0; }
@@ -1138,7 +1081,7 @@
 .pe-acciones--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pe-mas { justify-content: center; width: 100%; border: 1px dashed var(--surface-5); background: transparent; color: var(--ink-muted); }
 .pe-mas:hover { border-color: var(--accent); color: var(--ink); }
-.pe-sub { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: var(--surface-2); }
+.pe-sub { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 6px; background: var(--surface-2); }
 .pe-sub__cab { display: flex; align-items: center; justify-content: space-between; color: var(--ink-soft); font-size: 12.5px; }
 .pe-sub__cab .vis-tool { height: 24px; padding: 0 8px; font-size: 11.5px; }
 
@@ -1146,7 +1089,7 @@
 .pe-fuente__actual { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-chip); background: var(--surface-3); color: var(--ink); font-size: 14px; cursor: pointer; }
 .pe-fuente__actual:hover { background: var(--surface-4); }
 .pe-fuente__actual span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pe-fuente__panel { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 6px; border-radius: 10px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--surface-4); }
+.pe-fuente__panel { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 6px; border-radius: 6px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--surface-4); }
 .pe-fuente__buscar { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: var(--radius-chip); background: var(--surface-3); color: var(--ink-label); }
 .pe-fuente__buscar input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; outline: none; }
 .pe-fuente__lista { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }

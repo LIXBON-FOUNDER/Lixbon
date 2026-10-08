@@ -1,4 +1,3 @@
-// index.js — junta los diccionarios de cada namespace para useT().
 import common from './common';
 import nav from './nav';
 import sidebar from './sidebar';
@@ -23,6 +22,7 @@ import mascota from './mascota';
 import visual from './visual';
 import skills from './skills';
 import mcp from './mcp';
+import company from './company';
 
 export const DICTIONARIES = {
   common,
@@ -49,4 +49,5 @@ export const DICTIONARIES = {
   visual,
   skills,
   mcp,
+  company,
 };

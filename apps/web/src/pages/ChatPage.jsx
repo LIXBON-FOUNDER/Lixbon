@@ -1,6 +1,3 @@
-// ChatPage.jsx — pantalla principal (mockups 2.1 y 2.2).
-// Con sesión: chat con streaming SSE, memoria de conversación e historial.
-// Sin sesión: se VE la interfaz ("¿Qué investigaremos hoy?"); al enviar → registro.
 import { useSeo } from '../lib/seo';
 import { WaveText } from '../components/WaveText';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -75,28 +72,26 @@ export default function ChatPage() {
   const [msgsLoading, setMsgsLoading] = useState(false);
   const [title, setTitle] = useState(null);
   const [models, setModels] = useState([]);
-  const [modelInfo, setModelInfo] = useState({});   // id → {num_ctx, context_length}
-  const [contextUso, setContextUso] = useState(null); // {used, total, estimado}
+  const [modelInfo, setModelInfo] = useState({});
+  const [contextUso, setContextUso] = useState(null);
   const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const abortRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
-  // En compacto el panel es un cajón sobre el chat, no una columna.
   const compact = useIsCompact();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [toast, setToast] = useState(null); // { text, leaving }
+  const [toast, setToast] = useState(null);
   const [showJump, setShowJump] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [webSearch, setWebSearch] = useState(false);
   const [searching, setSearching] = useState(false);
-  // Visual de esta conversación (si el modelo entregó páginas) y su panel.
-  const [visual, setVisual] = useState(null);       // { id, title, version }
+  const [visual, setVisual] = useState(null);
   const [paginasVisual, setPaginasVisual] = useState([]);
   const [panelVisual, setPanelVisual] = useState(false);
   const [errorVisual, setErrorVisual] = useState('');
 
   const scrollRef = useRef(null);
-  const loadedConvRef = useRef(null); // conversación ya cargada (evita refetch tras navigate)
+  const loadedConvRef = useRef(null);
   const stickToBottomRef = useRef(true);
   const toastTimers = useRef([]);
 
@@ -111,12 +106,10 @@ export default function ChatPage() {
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
-  // Al pasar a escritorio el cajón deja de tener sentido (el panel es fijo).
   useEffect(() => {
     if (!compact) setDrawerOpen(false);
   }, [compact]);
 
-  // ── Datos iniciales (usuario con sesión) ─────────────────────────────
   const loadConversations = useCallback(async () => {
     try {
       const res = await api.get('/api/conversations');
@@ -146,7 +139,6 @@ export default function ChatPage() {
     loadModels().catch(() => setModels([]));
   }, [user, loadConversations, loadModels]);
 
-  // ── Cargar/limpiar conversación según la ruta ────────────────────────
   useEffect(() => {
     if (!routeConvId) {
       loadedConvRef.current = null;
@@ -183,7 +175,6 @@ export default function ChatPage() {
       .finally(() => setMsgsLoading(false));
   }, [routeConvId, user, navigate]);
 
-  // ── Scroll: auto-follow durante el stream + botón "más ↓" ───────────
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -202,7 +193,6 @@ export default function ChatPage() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
 
-  // ── Enviar mensaje ───────────────────────────────────────────────────
   const modelVision = Boolean(modelInfo[model]?.capabilities?.includes('vision'));
 
   const cargarVisual = async (vid) => {
@@ -213,8 +203,6 @@ export default function ChatPage() {
     return paginas;
   };
 
-  // Lo que el modelo escribió en bloques file:/edit: pasa a ser una versión del
-  // visual de la conversación (se crea la primera vez).
   const guardarVisual = async (respuesta, convId, base, patchLast, pedido) => {
     const r = aplicarRespuesta(base.paginas, respuesta, { estricto: true });
     if (r.fallos.length) patchLast((last) => ({ ...last, aviso: t('visualEditFailed', { names: r.fallos.map((f) => f.name).join(', ') }) }));
@@ -282,7 +270,7 @@ export default function ChatPage() {
     const base = { visual, paginas: paginasVisual };
 
     if (!routeConvId && saveHistory) {
-      loadedConvRef.current = convId; // evita el refetch al cambiar la URL
+      loadedConvRef.current = convId;
       navigate(`/c/${convId}`, { replace: true });
     }
 
@@ -386,13 +374,9 @@ export default function ChatPage() {
 
   const stop = () => abortRef.current?.abort();
 
-  // La ventana total viene con el `usage` de cada respuesta; hasta entonces,
-  // la del modelo elegido según /v1/models.
   const usoCtx = contextUso && { ...contextUso, total: contextUso.total || modelInfo[model]?.num_ctx || null };
 
-  // ── Acciones del historial ───────────────────────────────────────────
   const renameConversation = async (id, newTitle) => {
-    // Optimista: la UI cambia ya; si el backend falla se recarga la verdad.
     setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)));
     if (id === routeConvId) setTitle(newTitle);
     try {
@@ -443,7 +427,6 @@ export default function ChatPage() {
   }
 
   const empty = messages.length === 0;
-  // Para la mascota: con texto ya en la respuesta escribe; antes, piensa.
   const ultimo = messages[messages.length - 1];
   const escribiendo = busy && ultimo?.role === 'assistant' && Boolean(ultimo.content);
 
@@ -514,8 +497,6 @@ export default function ChatPage() {
           </>
         ) : empty ? (
           <div className="chat-hero">
-            {/* Sin sesión el encabezado explica el límite en vez de invitar a
-                escribir: es lo primero que hay que saber antes de empezar. */}
             <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
               {user ? t('emptyTitleUser') : t('emptyTitleGuest')}
             </h2>
@@ -576,8 +557,6 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="chat-composer">
-              {/* Dentro del compositor: se apoya en su borde superior y lo sigue
-                  cuando la caja crece o el teclado móvil la empuja. */}
               {showJump && (
                 <button className="chat-jump" onClick={jumpToBottom} aria-label={t('jumpMore')} title={t('jumpMore')}>
                   <IconArrowDown size={16} />

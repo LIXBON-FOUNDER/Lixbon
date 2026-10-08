@@ -1,4 +1,3 @@
-// LegalPage.jsx — /legal/:doc (privacy, terms, refunds). Pública.
 import { useParams } from 'react-router-dom';
 import { Link, Navigate } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
@@ -28,7 +27,7 @@ export default function LegalPage() {
   const Body = actual.Body[locale];
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       <div className="legal">
         <nav className="legal__nav" aria-label={t('ariaLabel')}>

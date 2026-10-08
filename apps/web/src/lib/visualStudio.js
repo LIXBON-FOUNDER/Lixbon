@@ -1,6 +1,3 @@
-// visualStudio.js — lo que comparten el estudio de Visuals y el panel del chat:
-// aplicar la respuesta del modelo (bloques file: y edit:) sobre los archivos
-// guardados del visual, el contexto que se le da al modelo y el guardado.
 import { aplicarEdiciones, extraerArchivos, extraerEdiciones } from './visuals';
 import { api } from './api';
 import { fileUrl, getText, getVisual, pushFiles } from './visualsApi';
@@ -10,7 +7,6 @@ export const esPagina = (path) => /\.(html?|svg)$/i.test(path || '');
 const ordenar = (files) => files.slice().sort((a, b) => (a.name === 'index.html' ? -1 : b.name === 'index.html' ? 1
   : a.name.localeCompare(b.name)));
 
-/** Las páginas (HTML/SVG fuente) de una versión, con su código. */
 export async function cargarPaginas(id, manifest) {
   const fuentes = manifest.files.filter((f) => esPagina(f.path) && f.role === 'source');
   const codes = await Promise.all(fuentes.map((f) => getText(fileUrl(id, f.path, manifest.viewing)).catch(() => '')));
@@ -25,9 +21,6 @@ export function tieneVisual(texto) {
   return /```\s*(?:file|edit):\s*[\w./-]+\.(?:html?|svg)/i.test(texto || '');
 }
 
-/** Aplica una respuesta del modelo sobre `actuales` ([{name, code}]).
- *  `enCurso`: incluye el archivo que aún se está escribiendo (vista en vivo).
- *  Devuelve todos los archivos, los que cambian, los fallos de edición y el abierto. */
 export function aplicarRespuesta(actuales, texto, { enCurso = false, estricto = false } = {}) {
   const nombrados = estricto ? new Set([...(texto || '').matchAll(NOMBRADO)].map((m) => m[1].replace(/^\.?\//, ''))) : null;
   const archivos = extraerArchivos(texto).filter((a) => (a.cerrado || enCurso) && (!nombrados || nombrados.has(a.name)));
@@ -78,15 +71,12 @@ export function contextoArchivos(files, version) {
     + `Para cambiarlos usa bloques edit: copiando el SEARCH de aquí.\n\n${bloques.join('\n\n')}`;
 }
 
-/** Guarda los archivos cambiados como versión nueva. Si otro (el editor, un
- *  agente) guardó antes, se reaplica la respuesta sobre su versión. */
-/** Nombre de una versión a partir de lo que pidió el usuario. */
+// Si otro (el editor, un agente) guardó antes, se reaplica sobre su versión.
 export function etiquetaDePedido(texto) {
   const linea = (texto || '').replace(/\s+/g, ' ').trim();
   return linea.length > 60 ? `${linea.slice(0, 57).trimEnd()}…` : linea;
 }
 
-/** Nombre visible de una versión: el suyo o uno deducido de lo que cambió. */
 export function nombreVersion(h, t, { primera = false } = {}) {
   if (h?.label) return h.label;
   if (primera) return t('versionFirst');

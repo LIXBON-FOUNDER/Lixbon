@@ -1,10 +1,5 @@
-/* titulares.css — Lancelot en los productos (chat, Visuals, Ajustes, acceso,
-   diálogos, Remote y la conversación compartida). Solo los titulares: los
-   mensajes, la lista de conversaciones y los controles siguen en Geist, que
-   se lee mejor a tamaño de interfaz.
-
-   Lancelot tiene un solo peso y el ojo pequeño: siempre a 400, sin tracking
-   negativo y unos puntos más grande que la Geist a la que sustituye. */
+/* Lancelot solo en titulares: mensajes, listas y controles siguen en Geist, que
+   se lee mejor a tamaño de interfaz. Un solo peso: siempre a 400. */
 
 .chat-hero__title,
 .chat-header__title,
@@ -25,12 +20,10 @@
   letter-spacing: 0;
 }
 
-/* Portadas de los productos: lo primero que se ve al abrir. */
 .chat-hero__title { font-size: 46px; line-height: 1.05; }
 .chat-hero__title--invitado { font-size: 36px; line-height: 1.15; }
 .vis-hero__title { font-size: 46px; line-height: 1.05; }
 
-/* Título de la conversación abierta, en la cabecera del chat. */
 .chat-header__title { font-size: 19px; line-height: 1.3; color: var(--ink); }
 
 .vis-galeria__titulo { font-size: 24px; color: var(--ink); }
@@ -44,7 +37,6 @@
 .remote__title { font-size: 22px; }
 .remote__empty-title { font-size: 30px; line-height: 1.12; }
 
-/* Titulares dentro de las respuestas del modelo. */
 .md h1 { font-size: 28px; line-height: 1.15; }
 .md h2 { font-size: 23px; line-height: 1.2; }
 .md h3 { font-size: 19px; line-height: 1.25; }

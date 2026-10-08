@@ -1,5 +1,4 @@
 """
-chat.py — Endpoints de chat y completions (compatibles con OpenAI API).
 Cubre: /v1/models, /v1/chat/completions, /v1/completions, /api/chat, /api/delegate
 
 F2: TODA la inferencia se enruta por el orquestador (ollama_target), que elige
@@ -86,8 +85,6 @@ def _is_external_api(user_data: dict[str, Any], plan: dict[str, Any]) -> bool:
         return plan.get("id") == "free"
     return False  # móvil: siempre el pool de sesión/semana
 
-
-# ── Modelos Pydantic ───────────────────────────────────────────────────────
 
 class ChatMessage(BaseModel):
     role: str
@@ -179,8 +176,6 @@ class DelegateRequest(BaseModel):
     conversation_id: str | None = None
 
 
-# ── Helper: chat no-streaming con fallback local ───────────────────────────
-
 async def _routed_chat(model: str, messages: list[dict], num_ctx: int | None = None,
                        keep_alive: str | None = None, think: bool | str | None = None) -> tuple[dict[str, Any], str]:
     """
@@ -243,8 +238,6 @@ def _persist_assistant(conv_id: str, model: str, text: str,
             record_tokens(user_id, prompt_tokens + completion_tokens)  # F5 legacy (stats + credits.py)
             record_session_week_tokens(user_id, model, prompt_tokens, completion_tokens)  # F8: gate real
 
-
-# ── Endpoints ──────────────────────────────────────────────────────────────
 
 class WebSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=400)

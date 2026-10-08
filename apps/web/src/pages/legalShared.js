@@ -1,12 +1,10 @@
-// legalShared.js — datos del responsable y fecha de vigencia, iguales en los
-// dos idiomas salvo el formato de la fecha; lo comparten legalContent.es.jsx
-// y legalContent.en.jsx para no duplicarlos ni desincronizarlos.
+// Compartido por los textos legales de los dos idiomas y la página de empresa.
 export const RESPONSABLE = {
-  nombre: '[Nombre o razón social del responsable]',
-  nit: '[NIT o documento]',
-  direccion: '[Dirección], Medellín, Colombia',
+  nombre: 'Gabriel José Durango Morales',
+  nit: 'persona natural, C.C. 1065843799',
+  direccion: 'Medellín, Colombia',
   correo: 'privacidad@lixbon.com',
   soporte: 'support@lixbon.com',
 };
 
-export const VIGENCIA = { es: '15 de septiembre de 2026', en: 'September 15, 2026' };
+export const VIGENCIA = { es: '7 de octubre de 2026', en: 'October 7, 2026' };

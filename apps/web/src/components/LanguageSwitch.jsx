@@ -1,22 +1,19 @@
-// LanguageSwitch.jsx — selector de idioma (no un interruptor ciego): al pulsar
-// se abre un menú con "Español" e "English" y se navega a la opción elegida,
-// conservando la página actual. Los nombres de los idiomas nunca se traducen
-// (un hispanohablante debe poder reconocer "English" tal cual).
+// Los nombres de los idiomas nunca se traducen.
 import { useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
 import { useDismiss } from '../hooks/useDismiss';
-import { otherLocalePath } from '../i18n/paths';
+import { guardarIdioma, otherLocalePath } from '../i18n/paths';
 import { Desplegable } from './Desplegable';
-import { IconGlobe, IconCheck } from './Icons';
+import { IconGlobe, IconCheck, IconChevron } from './Icons';
 
 const OPTIONS = [
   { code: 'es', label: 'Español' },
   { code: 'en', label: 'English' },
 ];
 
-export function LanguageSwitch({ className = 'icon-btn' }) {
+export function LanguageSwitch({ className = 'icon-btn', conCodigo = false }) {
   const locale = useLocale();
   const t = useT('nav');
   const { pathname, search, hash } = useLocation();
@@ -28,8 +25,7 @@ export function LanguageSwitch({ className = 'icon-btn' }) {
   const elegir = (code) => {
     setOpen(false);
     if (code === locale) return;
-    // Solo hay dos idiomas: si no es el actual, es el otro. El slug es el
-    // mismo en los dos — alcanza con anteponer o quitar /en.
+    guardarIdioma(code);
     navigate(`${otherLocalePath(pathname)}${search}${hash}`);
   };
 
@@ -44,6 +40,7 @@ export function LanguageSwitch({ className = 'icon-btn' }) {
         aria-label={t('language')}
       >
         <IconGlobe size={16} />
+        {conCodigo && <>{locale.toUpperCase()}<IconChevron size={12} open={open} /></>}
       </button>
       <Desplegable abierto={open} className="lang-switch__menu" role="listbox" aria-label={t('language')}>
         {OPTIONS.map((o) => (

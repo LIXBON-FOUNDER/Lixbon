@@ -1,6 +1,4 @@
 """
-model_router.py — Resolución del modelo de cada petición HTTP.
-
 `core/inference/roles.py` decide qué modelo sirve cada rol; este módulo aplica
 esa decisión a una petición concreta y traduce los fallos a errores HTTP claros.
 

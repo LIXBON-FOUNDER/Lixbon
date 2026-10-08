@@ -1,5 +1,3 @@
-// DocsPage.jsx — lixbon Docs (/docs y /docs/:section). Índice lateral por grupos +
-// contenido central. Pública. Estilo tipo code.claude.com.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Link, Navigate, useNavigate } from '../i18n/link';
@@ -16,7 +14,6 @@ import { useSeo } from '../lib/seo';
 import { LEGACY_DOC_IDS } from '../i18n/paths';
 
 
-// Lo que la mascota puede comentar mientras lees: avisos, código y apartados.
 const SELECTOR_MASCOTA = '.docs__content [data-mascota], .docs__content .docs__callout, .docs__content .codeblock, .docs__content h2';
 export default function DocsPage() {
   const { section } = useParams();
@@ -38,7 +35,6 @@ export default function DocsPage() {
     path: `/docs/${current.id}`,
   });
 
-  // Agrupa las secciones por su `group`, conservando el orden de aparición
   const groups = useMemo(() => {
     const acc = [];
     for (const s of SECTIONS) {
@@ -50,7 +46,6 @@ export default function DocsPage() {
     return acc;
   }, [locale]);
 
-  // Skeleton breve al montar y al cambiar de sección, para una transición suave.
   useEffect(() => {
     window.scrollTo(0, 0);
     setMenuOpen(false);
@@ -66,7 +61,7 @@ export default function DocsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       <div className="docs">
         <button
@@ -88,7 +83,6 @@ export default function DocsPage() {
                   to={`/docs/${s.id}`}
                   className={`docs__nav-link ${s.id === current.id ? 'is-active' : ''}`}
                   onClick={(e) => {
-                    // navegación SPA sin recargar
                     e.preventDefault();
                     navigate(`/docs/${s.id}`);
                   }}

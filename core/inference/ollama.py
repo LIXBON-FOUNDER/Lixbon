@@ -1,5 +1,4 @@
 """
-ollama.py — Cliente único de inferencia contra Ollama (directo o vía node_agent).
 Única implementación de chat y streaming SSE del proyecto.
 
 - `base_url` puede ser el Ollama local (http://127.0.0.1:11434), el proxy del
@@ -250,8 +249,6 @@ async def show_capabilities(
 ) -> list[str] | None:
     return (await show_model(base_url, model, headers=headers, client=client))["capabilities"]
 
-
-# ── Streaming con keep-alive real ──────────────────────────────────────────
 
 async def _lines_with_keepalive(
     aiter: AsyncIterator[str],

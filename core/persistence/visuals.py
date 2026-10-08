@@ -1,8 +1,3 @@
-"""
-visuals.py — Persistencia de Visuals: diseños y piezas de marketing que crean el
-chat web, el CLI y los agentes del IDE. Versionado lineal por copia en escritura:
-cada escritura crea una versión nueva con los archivos que cambian y hereda el resto.
-"""
 from __future__ import annotations
 
 import hashlib

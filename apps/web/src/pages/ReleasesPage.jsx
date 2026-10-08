@@ -1,5 +1,3 @@
-// ReleasesPage.jsx — novedades públicas (/news): historial de versiones de
-// la app de escritorio con su changelog. La app enlaza aquí con #v<version>.
 import { useSeo } from '../lib/seo';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
@@ -27,7 +25,6 @@ export default function ReleasesPage() {
       .catch(() => setVersions([]));
   }, []);
 
-  // Al llegar con un ancla (#v0.3.2), desplazar hasta esa versión.
   useEffect(() => {
     if (versions && window.location.hash) {
       const el = document.getElementById(window.location.hash.slice(1));
@@ -36,7 +33,7 @@ export default function ReleasesPage() {
   }, [versions]);
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">{t('seoTitle')}</h1>

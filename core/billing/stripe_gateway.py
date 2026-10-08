@@ -1,6 +1,4 @@
 """
-stripe_gateway.py — Pagos con Stripe, cobrados desde lixbon.
-
 Los secretos viven en variables de entorno (STRIPE_*). Sin configurar,
 `enabled()` es False y los endpoints devuelven 503 — la web muestra
 "Próximamente".
@@ -73,8 +71,6 @@ def _iso(ts: int | None) -> str | None:
         return None
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
-
-# ── Cliente y plan ──────────────────────────────────────────────────────────
 
 def _ensure_customer(stripe, user: dict[str, Any]) -> str:
     """Devuelve el customer de Stripe del usuario, creándolo si hace falta."""
@@ -346,8 +342,6 @@ def cancel_subscription_immediately(user_id: int) -> None:
         logger.warning(f"No se pudo cancelar la suscripción de Stripe al eliminar la cuenta: {exc}")
 
 
-# ── Tarjetas guardadas ──────────────────────────────────────────────────────
-
 def _customer_id(user: dict[str, Any]) -> str | None:
     sub = get_subscription(user["id"])
     return sub.get("stripe_customer_id") if sub else None
@@ -461,8 +455,6 @@ def payment_method_summary(user: dict[str, Any]) -> dict[str, Any] | None:
             return {"brand": m["brand"], "last4": m["last4"]}
     return None
 
-
-# ── Cobro ───────────────────────────────────────────────────────────────────
 
 def _cargo_de(pi):
     """El cargo de un PaymentIntent colgaba de `charges.data` y en las versiones
@@ -765,8 +757,6 @@ def _a_dict(objeto) -> dict[str, Any]:
     return dict(objeto)
 
 
-# ── Créditos ────────────────────────────────────────────────────────────────
-
 def _acreditar(user_id: int, pack: dict[str, Any], referencia: str) -> bool:
     return credit_purchase(
         user_id, pack["credit_microusd"],
@@ -905,8 +895,6 @@ def list_charges(user: dict[str, Any], limit: int = 10) -> list[dict[str, Any]]:
     return cobros
 
 
-# ── Recarga automática ──────────────────────────────────────────────────────
-
 _recargas_en_curso: set[int] = set()
 
 
@@ -980,8 +968,6 @@ def _avisar_autorecarga_fallida(user_id: int, pack: dict[str, Any]) -> None:
     except Exception as exc:
         logger.warning(f"No se pudo avisar de la recarga fallida: {exc}")
 
-
-# ── Panel de administración ─────────────────────────────────────────────────
 
 def _inicio_del_dia() -> int:
     from datetime import time as _time
@@ -1123,8 +1109,6 @@ def admin_gateway() -> dict[str, Any]:
         "events_pending": pendientes,
     }
 
-
-# ── Webhooks ────────────────────────────────────────────────────────────────
 
 def verify_and_parse(payload: bytes, sig_header: str | None) -> dict[str, Any]:
     """Verifica la firma del webhook y devuelve el evento como DICT PLANO.

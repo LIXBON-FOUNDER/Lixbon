@@ -1,10 +1,4 @@
-/* auth.css — acceso, registro y restablecer contraseña.
-   La tarjeta flota sobre el clúster animado: un solo panel con su pestaña,
-   sin bordes, y el fondo cuenta lo que hace lixbon mientras se escribe. */
-
 .auth {
-  /* La tarjeta sube un punto sobre el fondo para despegarse del clúster sin
-     necesitar una línea. */
   --auth-card: #161616;
 
   position: relative;
@@ -21,8 +15,6 @@
   overflow: hidden;
 }
 
-/* ── Fondo: el clúster ───────────────────────────────────────────────── */
-
 .cluster {
   position: absolute;
   inset: 0;
@@ -30,8 +22,6 @@
   height: 100%;
 }
 
-/* Los nodos respiran, desfasados entre sí: el clúster está vivo aunque nadie
-   esté preguntando nada. */
 .cluster__nodo {
   animation: latido 7s ease-in-out infinite;
 }
@@ -41,8 +31,6 @@
   50% { opacity: 0.72; }
 }
 
-/* Cada 18 s un nodo se cae. Dura poco y no pide nada: es el sistema contando
-   que sabe perder una máquina. */
 .cluster__roto {
   opacity: 0;
   animation: roto 18s ease-in-out infinite;
@@ -53,7 +41,6 @@
   82%, 92% { opacity: 0.6; }
 }
 
-/* La petición viaja por la arista hasta el nodo que la va a atender. */
 .cluster__viaje {
   transform-box: view-box;
   transform-origin: 0 0;
@@ -89,8 +76,6 @@
   100% { transform: translate(170px, 140px); opacity: 0; }
 }
 
-/* ── La tarjeta ──────────────────────────────────────────────────────── */
-
 .auth__panel {
   position: relative;
   display: flex;
@@ -124,8 +109,6 @@
   box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
 }
 
-/* En claro la tarjeta es papel sobre papel: un escalón más clara que el
-   fondo y con una sombra cálida y amplia en vez de la negra. */
 :root[data-theme="light"] .auth { --auth-card: var(--surface-1); }
 :root[data-theme="light"] .auth__card { box-shadow: 0 30px 70px -20px rgba(60, 52, 30, 0.22); }
 
@@ -159,9 +142,6 @@
   grid-template-columns: 1fr 1fr;
   gap: 11px;
 }
-
-/* ── Campos ──────────────────────────────────────────────────────────── */
-/* Sin bordes: el estado se lee en el relleno, y el error además en texto. */
 
 .ffield {
   display: flex;
@@ -203,8 +183,6 @@
   font-size: 12px;
   color: var(--danger-ink);
 }
-
-/* ── Acciones ────────────────────────────────────────────────────────── */
 
 .auth__actions {
   display: flex;
@@ -284,8 +262,6 @@
   animation: fade-in 0.2s ease;
 }
 
-/* ── Acceso con proveedor (solo visual por ahora) ────────────────────── */
-
 .auth__divider {
   display: flex;
   align-items: center;
@@ -325,8 +301,6 @@
 .auth__social-btn:hover {
   opacity: 0.88;
 }
-
-/* ── Responsive ──────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {
   .auth {

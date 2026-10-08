@@ -1,6 +1,6 @@
 """
-worker.py — Worker de render de Visuals: toma trabajos de la cola en la base de
-datos, renderiza el HTML (PNG o MP4) y guarda la salida como versión nueva.
+Toma trabajos de render de la cola en la BD, renderiza el HTML (PNG o MP4) y
+guarda la salida como versión nueva.
 
   python -m core.render.worker
 

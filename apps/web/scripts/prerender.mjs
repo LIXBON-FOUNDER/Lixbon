@@ -1,16 +1,12 @@
-// prerender.mjs — HTML estático de las páginas públicas para los buscadores.
-//
-// Tras `vite build`, renderiza cada ruta de rutasPublicas.js con React en Node
-// y escribe dist/_prerender/<ruta>/index.html: el shell de dist/index.html con
-// el contenido ya pintado y las etiquetas SEO de esa página en el <head>. El
-// gateway sirve ese archivo cuando la petición no trae cookie de sesión; con
-// sesión sigue sirviendo el shell de la SPA.
+// El gateway sirve dist/_prerender/<ruta>/index.html a las peticiones sin cookie
+// de sesión; con sesión, el shell de la SPA.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 const dist = resolve('dist');
-const { render } = await import(pathToFileURL(resolve('dist-ssr/entry-server.js')).href);
+const { render, precargar } = await import(pathToFileURL(resolve('dist-ssr/entry-server.js')).href);
+await precargar();
 const { RUTAS_PUBLICAS } = await import(pathToFileURL(resolve('src/rutasPublicas.js')).href);
 const plantilla = await readFile(resolve(dist, 'index.html'), 'utf8');
 
@@ -33,7 +29,7 @@ function conCabecera(html, seo, locale) {
     `<meta name="robots" content="${seo.noindex ? 'noindex, nofollow' : 'index, follow'}" />`,
     `<link rel="alternate" hreflang="es" href="${escapar(seo.alternates.es)}" />`,
     `<link rel="alternate" hreflang="en" href="${escapar(seo.alternates.en)}" />`,
-    `<link rel="alternate" hreflang="x-default" href="${escapar(seo.alternates.es)}" />`,
+    `<link rel="alternate" hreflang="x-default" href="${escapar(seo.alternates.en)}" />`,
     seo.jsonLd ? `<script type="application/ld+json">${JSON.stringify(seo.jsonLd).replace(/</g, '\\u003c')}</script>` : '',
   ].filter(Boolean).join('\n    ');
   return out.replace('</head>', `    ${extra}\n  </head>`);

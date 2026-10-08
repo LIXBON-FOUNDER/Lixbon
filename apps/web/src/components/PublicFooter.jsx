@@ -1,7 +1,3 @@
-// PublicFooter.jsx — pie común de las páginas públicas. Oscuro en los dos
-// temas: cierra la página como la noche cierra el paisaje. Arriba una frase y
-// la llamada, en medio el mapa del sitio y abajo el wordmark a todo lo ancho,
-// que se monta letra a letra al entrar en vista.
 import { Link } from '../i18n/link';
 import { useAuth } from '../hooks/useAuth';
 import { useRevelar } from '../hooks/useRevelar';
@@ -41,6 +37,8 @@ export function PublicFooter() {
     {
       titulo: t('footerLegal'),
       enlaces: [
+        { to: '/about', label: t('footerCompany') },
+        { to: '/team', label: t('footerTeam') },
         { to: '/legal/privacy', label: t('footerPrivacy') },
         { to: '/legal/terms', label: t('footerTerms') },
         { to: '/legal/refunds', label: t('footerRefunds') },

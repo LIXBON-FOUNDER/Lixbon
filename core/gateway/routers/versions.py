@@ -1,6 +1,4 @@
 """
-versions.py — Releases y actualizaciones (F6.5).
-
 Los instaladores viven en Cloudflare R2 (bucket privado); la BD solo guarda la
 key del objeto (`download_url = "r2:<key>"`). Las descargas pasan siempre por el
 gateway (`/api/updates/download/...`), que genera una URL prefirmada al vuelo —
@@ -56,8 +54,6 @@ def sync_versions_to_db():
     except Exception as e:
         logger.warning(f"[versions] Error al sincronizar versiones: {e}")
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────
 
 # `desktop` es el instalador de Windows (histórico). En macOS van dos filas con
 # la misma versión: el .dmg que descarga la gente (`desktop-mac`) y el
@@ -141,8 +137,6 @@ def _find_version(version: str, channel: str, product: str = "desktop") -> dict 
             return v
     return None
 
-
-# ── Lectura pública ────────────────────────────────────────────────────────
 
 @router.get("/api/versions")
 async def get_versions():
@@ -280,8 +274,6 @@ async def download_release(version: str, channel: str,
     # Compatibilidad: releases antiguos (ruta local o URL absoluta)
     return RedirectResponse(url=url, status_code=302)
 
-
-# ── Subida (admin) ─────────────────────────────────────────────────────────
 
 @router.post("/api/versions/upload")
 async def api_upload_version(

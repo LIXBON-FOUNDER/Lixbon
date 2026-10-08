@@ -60,7 +60,6 @@ export default function AdminLayout() {
 
   const cerrarMenu = useCallback(() => setMenuPerfil(false), []);
   useDismiss(menuPerfil, perfilRef, cerrarMenu);
-  // Un grupo se abre solo cuando estás dentro, y se puede plegar a mano.
   const [abiertos, setAbiertos] = useState(
     () => AREAS.filter((a) => a.grupo && pathname.startsWith(a.grupo)).map((a) => a.grupo),
   );
@@ -150,8 +149,6 @@ export default function AdminLayout() {
           })}
         </nav>
 
-        {/* Pie de la navegación: volver al chat y el tema en una misma fila,
-            alineados con los enlaces de arriba. */}
         <div className="adm__util">
           <Link to="/chat" className="adm-link adm__back">
             <IconChat size={18} />

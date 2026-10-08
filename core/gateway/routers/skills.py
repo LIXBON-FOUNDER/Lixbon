@@ -1,6 +1,4 @@
 """
-skills.py — Catálogo de skills oficiales (`/adversary`, `/marketing-lxo`).
-
 - GET    /api/skills                         : catálogo publicado (público)
 - GET    /api/skills/{slug}                  : detalle, versiones y archivos (público)
 - GET    /api/skills/{slug}/download         : paquete zip (sesión o API key); cuenta la instalación

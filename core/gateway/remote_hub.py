@@ -1,6 +1,4 @@
 """
-remote_hub.py — Relay en memoria de las sesiones /remote.
-
 El host (IDE/CLI) publica eventos del transcript y consume comandos; los
 controllers (app móvil / web) consumen eventos y publican comandos. El hub
 solo reenvía: no ejecuta nada ni persiste el transcript. Válido con 1 réplica
@@ -57,8 +55,6 @@ class RemoteHub:
         # Suscriptores de la lista de sesiones por usuario (pantalla Remote de la app)
         self._user_subs: dict[int, set[asyncio.Queue]] = {}
 
-    # ── canales ──────────────────────────────────────────────────────────
-
     def channel(self, session_id: str, user_id: int) -> RemoteChannel:
         ch = self._channels.get(session_id)
         if ch is None:
@@ -79,8 +75,6 @@ class RemoteHub:
         if ch:
             # Despierta a los controllers colgados del stream con un fin de sesión
             self._fanout(ch, {"type": "session_ended", "seq": ch.last_seq, "ts": time.time()})
-
-    # ── eventos (host → controllers) ─────────────────────────────────────
 
     def publish_events(self, ch: RemoteChannel, events: list[dict[str, Any]]) -> int:
         """Asigna seq, guarda en el buffer de replay y reparte. Devuelve el último seq."""
@@ -109,16 +103,12 @@ class RemoteHub:
     def replay(self, ch: RemoteChannel, from_seq: int) -> list[dict[str, Any]]:
         return [ev for ev in ch.buffer if ev.get("seq", 0) > from_seq]
 
-    # ── comandos (controller → host) ─────────────────────────────────────
-
     def push_command(self, ch: RemoteChannel, command: dict[str, Any]) -> bool:
         try:
             ch.host_queue.put_nowait(command)
             return True
         except asyncio.QueueFull:
             return False
-
-    # ── controllers ──────────────────────────────────────────────────────
 
     def attach_controller(self, ch: RemoteChannel) -> tuple[int, asyncio.Queue] | None:
         if len(ch.controllers) >= MAX_CONTROLLERS:
@@ -131,8 +121,6 @@ class RemoteHub:
 
     def detach_controller(self, ch: RemoteChannel, cid: int) -> None:
         ch.controllers.pop(cid, None)
-
-    # ── avisos de la lista de sesiones (pantalla Remote) ─────────────────
 
     def subscribe_user(self, user_id: int) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)

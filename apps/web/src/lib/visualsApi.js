@@ -23,7 +23,6 @@ export const requestRender = (id, paths) =>
   api.post(`/api/visuals/${id}/render`, { paths }).then((r) => r.data.jobs);
 export const listRenders = (id) => api.get(`/api/visuals/${id}/renders`).then((r) => r.data.jobs);
 
-// Último trabajo de render por fuente: path → {status, error}.
 export function rendersPorFuente(jobs) {
   const out = {};
   for (const j of jobs) if (!out[j.path] || j.created_at > out[j.path].created_at) out[j.path] = j;
@@ -68,8 +67,6 @@ export function metaDePieza(html) {
   return m ? { kind: m[1].toLowerCase(), size: m[2], seconds: m[3] ? parseFloat(m[3]) : 12 } : null;
 }
 
-// Agrupa los archivos de un manifiesto: cada HTML fuente con su salida (mismo
-// nombre, .png o .mp4) y aparte los documentos .md.
 export function piezasDe(manifest) {
   const byPath = new Map(manifest.files.map((f) => [f.path, f]));
   const stem = (p) => p.replace(/\.[^.]+$/, '');

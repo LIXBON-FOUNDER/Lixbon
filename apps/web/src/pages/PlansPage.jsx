@@ -1,5 +1,3 @@
-// PlansPage.jsx — página de precios. Con los pagos activos, el plan se cobra en
-// un modal sin salir de lixbon; si no, las tarjetas muestran "Próximamente".
 import { tieneVisuals } from '../lib/planes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from '../i18n/link';
@@ -20,7 +18,7 @@ export default function PlansPage() {
   const navigate = useNavigate();
   const [plans, setPlans] = useState([]);
   const [billingEnabled, setBillingEnabled] = useState(false);
-  const [pagando, setPagando] = useState(null); // plan cuyo modal está abierto
+  const [pagando, setPagando] = useState(null);
   const [error, setError] = useState('');
 
   // Cupo semanal expresado como múltiplo del plan Gratuito, no en créditos
@@ -72,13 +70,12 @@ export default function PlansPage() {
     api.get('/api/auth/me').then((me) => setUser(me.data.user)).catch(() => {});
   };
 
-  // Precio del plan actual del usuario (para distinguir upgrade de alta nueva)
   const currentPrice = user
     ? (plans.find((p) => p.id === user.plan_id)?.price_monthly_cents ?? 0)
     : 0;
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
 
       <main className="page__body page__body--wide">
@@ -106,8 +103,6 @@ export default function PlansPage() {
                 </p>
                 <p className="plan-card__desc">{p.description}</p>
 
-                {/* La acción va antes de la lista: quien ya sabe qué plan
-                    quiere no tiene que leerse seis viñetas para llegar a ella. */}
                 {current ? (
                   <span className="pill-btn pill-btn--outline plan-card__cta is-current">{t('currentPlan')}</span>
                 ) : !paid ? (

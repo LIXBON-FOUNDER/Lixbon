@@ -1,7 +1,5 @@
-// useMediaQuery.js — puntos de corte compartidos entre CSS y JSX.
-// El layout lo resuelve el CSS; estos hooks existen solo para lo que el CSS no
-// puede hacer: atributos de accesibilidad (aria-hidden, inert) y estado que
-// cambia de significado entre escritorio y móvil (el panel lateral es un cajón).
+// Solo para lo que el CSS no puede: atributos de accesibilidad y estado que
+// cambia de significado entre escritorio y móvil.
 import { useCallback, useSyncExternalStore } from 'react';
 
 // Mantener en sintonía con los @media de los .css:

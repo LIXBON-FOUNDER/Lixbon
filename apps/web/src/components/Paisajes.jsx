@@ -1,22 +1,9 @@
-// Paisajes.jsx — las ilustraciones de la web pública: cuatro paisajes pintados
-// a mano en SVG (sierra al amanecer, costa, valle de lavanda y crepúsculo).
-//
-// Van por capas: cada <g className="capa"> lleva una profundidad (--d) y se
-// desplaza con el scroll según --p, que pone useParallax en el contenedor.
-// Cada capa lleva su propio degradado vertical (más clara arriba, como la
-// luz que la baña) para que la profundidad la haga el aire, no una línea.
-// El grano de papel es un ::after del marco (landing.css), no un filtro SVG,
-// para que el navegador lo rasterice una vez y no en cada fotograma.
-//
-// Todo lo "aleatorio" (flores, estrellas, destellos) sale de una semilla fija:
-// el servidor y el navegador pintan exactamente lo mismo.
-import { useEffect, useId, useRef } from 'react';
-
-// ── Utilidades de dibujo ─────────────────────────────────────────────────
+// Lo "aleatorio" (flores, estrellas, destellos) sale de una semilla fija para
+// que el prerender y el navegador pinten lo mismo.
+import { createContext, useContext, useEffect, useId, useRef } from 'react';
 
 const r1 = (n) => Math.round(n * 10) / 10;
 
-// Generador pseudoaleatorio con semilla (Park–Miller).
 function azar(semilla) {
   let s = semilla;
   return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
@@ -38,12 +25,10 @@ function cresta(pts, base) {
   return `${d}L${pts[pts.length - 1][0]} ${base}Z`;
 }
 
-// Solo el filo de una cresta, abierto: para la espuma que la sigue.
 function filo(pts) {
   return cresta(pts, 0).replace(/^M[^L]+L/, 'M').replace(/L[^L]*Z$/, '');
 }
 
-// Degradado vertical de dos o más paradas.
 function Vertical({ id, paradas }) {
   return (
     <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
@@ -52,13 +37,11 @@ function Vertical({ id, paradas }) {
   );
 }
 
-// Ciprés: una llama alargada. `x, y` es el pie del árbol.
 function ciPres(x, y, h) {
   const w = h * 0.17;
   return `M${x} ${y}C${x - w} ${y - h * 0.3} ${x - w * 0.55} ${y - h * 0.86} ${x} ${y - h}C${x + w * 0.55} ${y - h * 0.86} ${x + w} ${y - h * 0.3} ${x} ${y}Z`;
 }
 
-// Pino: tres pisos de ramas.
 function pino(x, y, h) {
   const w = h * 0.5;
   return `M${x} ${r1(y - h)}L${r1(x + w * 0.34)} ${r1(y - h * 0.64)}L${r1(x + w * 0.18)} ${r1(y - h * 0.64)}L${r1(x + w * 0.5)} ${r1(y - h * 0.32)}L${r1(x + w * 0.28)} ${r1(y - h * 0.32)}L${r1(x + w * 0.62)} ${y}L${r1(x - w * 0.62)} ${y}L${r1(x - w * 0.28)} ${r1(y - h * 0.32)}L${r1(x - w * 0.5)} ${r1(y - h * 0.32)}L${r1(x - w * 0.18)} ${r1(y - h * 0.64)}L${r1(x - w * 0.34)} ${r1(y - h * 0.64)}Z`;
@@ -68,7 +51,6 @@ const Arboles = ({ forma, lista, fill, opacity }) => (
   <path d={lista.map(([x, y, h]) => forma(x, y, h)).join('')} fill={fill} opacity={opacity} />
 );
 
-// Olivo: copa redonda de tres manchas sobre un tronco corto.
 function Olivos({ arboles, fill, sombra }) {
   return (
     <g>
@@ -87,7 +69,6 @@ function Olivos({ arboles, fill, sombra }) {
   );
 }
 
-// Nube de varios lóbulos con la panza en sombra.
 function Nube({ x, y, s = 1, luz = '#FBF4E6', sombra = '#E6D8BE', opacity = 0.85 }) {
   return (
     <g transform={`translate(${x} ${y}) scale(${s})`} opacity={opacity}>
@@ -113,7 +94,6 @@ function Pajaros({ aves, color, grosor = 2.2 }) {
   );
 }
 
-// Casa encalada con tejado de teja: la de la costa y la del valle.
 function Casas({ casas, pared = '#F6F0E4', sombra = '#E2D6C0', teja = '#B8664A', ventana = '#6B5B45' }) {
   return (
     <g>
@@ -129,7 +109,6 @@ function Casas({ casas, pared = '#F6F0E4', sombra = '#E2D6C0', teja = '#B8664A',
   );
 }
 
-// Matas de hierba y flores silvestres del primer plano.
 function Pradera({ semilla, x0, x1, y0, y1, n, colores, hierba }) {
   const rnd = azar(semilla);
   const matas = [];
@@ -149,24 +128,32 @@ function Pradera({ semilla, x0, x1, y0, y1, n, colores, hierba }) {
   );
 }
 
-// Pone --p (de -1 a 1) en el marco según dónde esté respecto al centro de la
-// ventana. Solo mientras se ve, y nada si el sistema pide menos movimiento.
-export function useParallax() {
+// Cada capa es un <svg> propio: un transform sobre un <g> interno obliga a
+// re-rasterizar el SVG entero en cada fotograma; sobre el <svg> solo se compone.
+// El transform se escribe en cada capa y no como variable en el marco, que
+// invalidaría el estilo de todos los nodos del dibujo.
+function useParallax() {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    if (!el) return undefined;
+    const capas = [...el.querySelectorAll('.capa')].map((c) => [c, Number(c.dataset.d)]);
+    const quieto = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let visible = false;
     let raf = 0;
     const pintar = () => {
       raf = 0;
       const r = el.getBoundingClientRect();
       const vh = window.innerHeight;
-      const p = (r.top + r.height / 2 - vh / 2) / (vh / 2 + r.height / 2);
-      el.style.setProperty('--p', Math.max(-1, Math.min(1, p)).toFixed(3));
+      const p = Math.max(-1, Math.min(1, (r.top + r.height / 2 - vh / 2) / (vh / 2 + r.height / 2)));
+      for (const [c, d] of capas) c.style.transform = `translate3d(0, ${(p * d).toFixed(1)}px, 0)`;
     };
-    const alMover = () => { if (visible && !raf) raf = requestAnimationFrame(pintar); };
-    const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; if (visible) alMover(); });
+    const alMover = () => { if (visible && !quieto && !raf) raf = requestAnimationFrame(pintar); };
+    const io = new IntersectionObserver(([e]) => {
+      visible = e.isIntersecting;
+      el.classList.toggle('paisaje--fuera', !visible);
+      alMover();
+    });
     io.observe(el);
     window.addEventListener('scroll', alMover, { passive: true });
     window.addEventListener('resize', alMover);
@@ -180,24 +167,39 @@ export function useParallax() {
   return ref;
 }
 
-const capa = (d) => ({ className: 'capa', style: { '--d': d } });
+const MarcoVb = createContext('');
 
-function usarIds() {
+function Marco({ vb, className, children }) {
+  const ref = useParallax();
+  return (
+    <div ref={ref} className={className}>
+      <MarcoVb.Provider value={vb}>{children}</MarcoVb.Provider>
+    </div>
+  );
+}
+
+function Capa({ d, children }) {
+  const vb = useContext(MarcoVb);
+  return (
+    <svg className={d ? 'capa' : undefined} data-d={d} viewBox={vb} preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+      {children}
+    </svg>
+  );
+}
+
+function useIds() {
   const base = useId().replace(/:/g, '');
   return (n) => `${base}${n}`;
 }
 
-// ── Sierra al amanecer (portada) ─────────────────────────────────────────
-
 const RAYOS = Array.from({ length: 14 }, (_, i) => i * (360 / 14));
 
 export function PaisajeAmanecer({ className = '' }) {
-  const id = usarIds();
-  const ref = useParallax();
+  const id = useIds();
   const u = (n) => `url(#${id(n)})`;
   return (
-    <div ref={ref} className={`paisaje ${className}`}>
-      <svg viewBox="0 0 1600 760" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <Marco vb="0 0 1600 760" className={`paisaje ${className}`}>
+        <Capa>
         <defs>
           <Vertical id={id('cielo')} paradas={[[0, '#CFCBBC'], [0.4, '#E6D8BD'], [0.72, '#F4E1BF'], [1, '#F8E8CC']]} />
           <radialGradient id={id('sol')} cx="990" cy="360" r="560" gradientUnits="userSpaceOnUse">
@@ -217,7 +219,8 @@ export function PaisajeAmanecer({ className = '' }) {
         <rect width="1600" height="760" fill={u('cielo')} />
         <rect width="1600" height="760" fill={u('sol')} />
 
-        <g {...capa(3)}>
+        </Capa>
+        <Capa d={3}>
           <g transform="translate(990 362)" fill="#FFF6E2" opacity=".09">
             {RAYOS.map((a) => <path key={a} d="M-9 0L9 0L3 -620L-3 -620Z" transform={`rotate(${a})`} />)}
           </g>
@@ -227,63 +230,59 @@ export function PaisajeAmanecer({ className = '' }) {
           <Nube x={1340} y={140} s={0.9} />
           <Nube x={860} y={262} s={0.6} opacity={0.7} />
           <Nube x={120} y={300} s={0.5} opacity={0.6} />
-        </g>
+        </Capa>
 
-        <g {...capa(8)}>
+        <Capa d={8}>
           <path d={cresta([[-40, 468], [90, 420], [180, 438], [300, 356], [380, 398], [470, 376], [560, 428], [700, 404], [820, 448], [960, 416], [1080, 382], [1180, 338], [1260, 386], [1380, 366], [1500, 408], [1640, 386]], 820)} fill={u('c1')} />
           <path d="M300 356l-22 26 14-4 8 10 10-12 12 6z M1180 338l-20 24 12-3 9 9 9-10 13 5z" fill="#F4EEDD" opacity=".7" />
-        </g>
-        <rect {...capa(10)} y="430" width="1600" height="130" fill={u('niebla')} />
+        </Capa>
+        <Capa d={10}><rect y="430" width="1600" height="130" fill={u('niebla')} /></Capa>
 
-        <g {...capa(16)}>
+        <Capa d={16}>
           <path d={cresta([[-40, 522], [140, 488], [300, 512], [470, 470], [640, 506], [820, 480], [980, 522], [1160, 492], [1340, 516], [1500, 480], [1640, 500]], 820)} fill={u('c2')} />
           <Arboles forma={pino} fill="#8E956C" opacity=".8" lista={[[430, 486, 20], [448, 482, 26], [466, 478, 18], [1470, 490, 22], [1490, 486, 28], [1512, 488, 18], [800, 488, 16], [816, 486, 20]]} />
-        </g>
+        </Capa>
 
-        <g {...capa(10)}>
+        <Capa d={10}>
           <Pajaros color="#6D6A56" aves={[[620, 250, 11], [656, 236, 8], [690, 262, 9], [720, 244, 7], [598, 272, 6], [1210, 300, 7], [1236, 290, 5]]} />
-        </g>
+        </Capa>
 
-        <g {...capa(26)}>
+        <Capa d={26}>
           <path d={cresta([[-40, 592], [180, 552], [380, 580], [560, 546], [760, 584], [980, 560], [1200, 590], [1420, 556], [1640, 578]], 840)} fill={u('c3')} />
           <rect y="560" width="1600" height="56" fill={u('niebla')} opacity=".45" />
           <Casas casas={[[448, 574, 20, 14], [474, 570, 16, 12], [496, 576, 22, 15], [524, 572, 14, 11]]} teja="#B46A4C" />
           <path d="M506 544v-14" stroke="#EFE6D4" strokeWidth="3" strokeLinecap="round" />
           <path d="M504 530h4" stroke="#B46A4C" strokeWidth="3" strokeLinecap="round" />
-        </g>
+        </Capa>
 
-        <g {...capa(34)}>
+        <Capa d={34}>
           <path d="M982 596C966 616 1004 636 988 656C960 688 870 700 884 730C896 756 830 790 760 860L1150 860C1072 800 1062 760 1044 728C1024 700 1092 680 1062 654C1040 634 1000 618 990 596Z" fill={u('rio')} />
           <g stroke="#FFF4DC" strokeLinecap="round" opacity=".75">
             <path d="M980 640h22M968 676h40M944 712h58M920 752h86M900 796h120" strokeWidth="2.2" />
           </g>
-        </g>
+        </Capa>
 
-        <g {...capa(42)}>
+        <Capa d={42}>
           <path d={cresta([[-40, 668], [160, 630], [360, 652], [560, 618], [760, 650], [880, 690], [940, 760]], 880)} fill={u('c4')} />
           <path d={cresta([[1120, 760], [1180, 690], [1260, 640], [1400, 652], [1640, 630]], 880)} fill={u('c4')} />
           <Arboles forma={ciPres} fill="#3F4722" lista={[[1216, 668, 92], [1244, 660, 70], [1272, 652, 106], [1300, 650, 64], [1328, 652, 84]]} />
           <Arboles forma={pino} fill="#46502A" lista={[[220, 640, 54], [250, 642, 40], [120, 646, 46], [640, 628, 48]]} />
           <Olivos fill="#4C5628" sombra="#2E3418" arboles={[[420, 652, 12], [460, 650, 11], [500, 646, 12], [700, 646, 11], [1460, 652, 12], [1500, 650, 11], [1540, 648, 12]]} />
-        </g>
+        </Capa>
 
-        <g {...capa(62)}>
+        <Capa d={62}>
           <path d={cresta([[-40, 730], [220, 700], [480, 724], [720, 744], [860, 800]], 900)} fill={u('c5')} />
           <path d={cresta([[1180, 800], [1300, 712], [1420, 700], [1640, 712]], 900)} fill={u('c5')} />
           <Arboles forma={ciPres} fill="#232812" lista={[[140, 716, 150], [176, 720, 112], [1470, 704, 170], [1508, 710, 124], [1540, 706, 96]]} />
           <Pradera semilla={11} x0={20} x1={680} y0={736} y1={770} n={46} hierba="#56612E" colores={['#E8C77A', '#D98B6A', '#F4EEDD', '#C9A9C9']} />
           <Pradera semilla={29} x0={1260} x1={1600} y0={726} y1={770} n={26} hierba="#56612E" colores={['#E8C77A', '#F4EEDD', '#D98B6A']} />
-        </g>
-      </svg>
-    </div>
+        </Capa>
+    </Marco>
   );
 }
 
-// ── Costa con faro (privacidad) ──────────────────────────────────────────
-
 export function PaisajeCosta({ className = '' }) {
-  const id = usarIds();
-  const ref = useParallax();
+  const id = useIds();
   const u = (n) => `url(#${id(n)})`;
   const rnd = azar(7);
   const destellos = Array.from({ length: 34 }, (_, i) => {
@@ -298,8 +297,8 @@ export function PaisajeCosta({ className = '' }) {
     return `M${r1(x)} ${r1(y)}h${r1(40 + rnd() * 110)}`;
   }).join('');
   return (
-    <div ref={ref} className={`paisaje ${className}`}>
-      <svg viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <Marco vb="0 0 1200 900" className={`paisaje ${className}`}>
+        <Capa>
         <defs>
           <Vertical id={id('cielo')} paradas={[[0, '#D9D8D0'], [0.45, '#E9DDCB'], [0.8, '#F2D4B6'], [1, '#F4C9A6']]} />
           <radialGradient id={id('sol')} cx="360" cy="520" r="360" gradientUnits="userSpaceOnUse">
@@ -314,21 +313,22 @@ export function PaisajeCosta({ className = '' }) {
         <rect width="1200" height="900" fill={u('cielo')} />
         <rect width="1200" height="900" fill={u('sol')} />
 
-        <g {...capa(5)}>
+        </Capa>
+        <Capa d={5}>
           <circle cx="360" cy="522" r="70" fill="#F4C79A" opacity=".5" />
           <circle cx="360" cy="522" r="50" fill="#EDA774" />
           <Nube x={240} y={200} s={0.9} luz="#FBF1E6" sombra="#EAD6C4" />
           <Nube x={860} y={250} s={0.75} luz="#FBF1E6" sombra="#EAD6C4" />
           <Nube x={560} y={130} s={0.45} luz="#FBF1E6" sombra="#EAD6C4" opacity={0.6} />
           <Pajaros color="#7A6F5E" aves={[[520, 330, 10], [552, 318, 7], [580, 340, 8], [700, 300, 6]]} />
-        </g>
+        </Capa>
 
-        <g {...capa(9)}>
+        <Capa d={9}>
           <path d="M-20 532C40 506 110 500 170 514C200 520 226 528 250 532Z" fill="#A9B4AB" opacity=".85" />
           <path d="M-20 532C30 518 80 516 120 524L140 532Z" fill="#94A29A" opacity=".8" />
-        </g>
+        </Capa>
 
-        <g {...capa(12)}>
+        <Capa d={12}>
           <rect y="530" width="1200" height="420" fill={u('mar')} />
           <path d={olas} stroke="#E4ECE7" strokeWidth="2" strokeLinecap="round" opacity=".4" />
           <path d={destellos} stroke="#FCE6C4" strokeWidth="2.6" strokeLinecap="round" opacity=".85" />
@@ -338,9 +338,9 @@ export function PaisajeCosta({ className = '' }) {
             <path d="M-3 -2V-44L-24 -4Z" fill="#EFE6D6" />
             <path d="M-20 13h40" stroke="#4A4436" strokeWidth="2" opacity=".25" strokeLinecap="round" />
           </g>
-        </g>
+        </Capa>
 
-        <g {...capa(24)}>
+        <Capa d={24}>
           <path d="M1240 950V560C1180 540 1120 520 1060 536C1010 548 960 530 900 556C850 578 820 640 800 700C780 780 740 860 700 950Z" fill={u('acant')} />
           <path d="M1240 950V640C1150 660 1060 700 1000 780C960 840 940 900 930 950Z" fill={u('sombra')} />
           <g stroke="#7E6644" strokeWidth="2" fill="none" opacity=".35" strokeLinecap="round">
@@ -360,104 +360,28 @@ export function PaisajeCosta({ className = '' }) {
             <circle cx="0" cy="-8" r="4.5" fill="#F7D59C" />
             <path d="M0 -8L-150 -30L-150 14Z" fill="#FBE8C2" opacity=".18" />
           </g>
-        </g>
+        </Capa>
 
-        <g {...capa(40)}>
+        <Capa d={40}>
           <path d={filo([[-40, 820], [80, 760], [200, 790], [320, 812], [440, 860], [520, 960]])} transform="translate(6 -7)" stroke="#F6F3EC" strokeWidth="4" fill="none" strokeLinecap="round" opacity=".5" />
           <path d={cresta([[-40, 820], [80, 760], [200, 790], [320, 812], [440, 860], [520, 960]], 980)} fill={u('roca')} />
           <path d={cresta([[-40, 870], [60, 842], [180, 870], [300, 900], [380, 980]], 1000)} fill="#26291B" />
           <Pajaros color="#F6F3EC" grosor={2} aves={[[240, 700, 12], [280, 684, 9]]} />
-        </g>
-      </svg>
-    </div>
+        </Capa>
+    </Marco>
   );
 }
-
-// ── Valle de lavanda y olivos (los productos) ────────────────────────────
-
-export function PaisajeValle({ className = '' }) {
-  const id = usarIds();
-  const ref = useParallax();
-  const u = (n) => `url(#${id(n)})`;
-  const fila = (y0, x0, x1, paso, s) => Array.from({ length: Math.floor((x1 - x0) / paso) + 1 }, (_, i) => [x0 + i * paso, r1(y0 + Math.sin(i * 0.7) * 3), s]);
-  // Surcos de lavanda que convergen hacia un punto de fuga detrás de la colina.
-  const surcos = Array.from({ length: 30 }, (_, i) => `M${800 + (i - 15) * 10} 470L${-400 + i * 88} 700`).join('');
-  const lavanda = cresta([[-40, 500], [200, 476], [420, 492], [640, 470], [820, 480], [1000, 470]], 700);
-  return (
-    <div ref={ref} className={`paisaje ${className}`}>
-      <svg viewBox="0 0 1600 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
-        <defs>
-          <Vertical id={id('cielo')} paradas={[[0, '#DCDFD6'], [0.6, '#EFEADA'], [1, '#F6EEDB']]} />
-          <radialGradient id={id('sol')} cx="1320" cy="120" r="600" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#F9E6BE" stopOpacity=".9" />
-            <stop offset="1" stopColor="#F9E6BE" stopOpacity="0" />
-          </radialGradient>
-          <Vertical id={id('m')} paradas={[[0, '#C9CDC3'], [1, '#BFC2B0']]} />
-          <Vertical id={id('c1')} paradas={[[0, '#C8C39A'], [1, '#B7B083']]} />
-          <Vertical id={id('c2')} paradas={[[0, '#A9AC72'], [1, '#8E955C']]} />
-          <Vertical id={id('c3')} paradas={[[0, '#7F8849'], [1, '#626B34']]} />
-          <Vertical id={id('lav')} paradas={[[0, '#B9AACB'], [1, '#8E7EAA']]} />
-          <clipPath id={id('recorte')}><path d={lavanda} /></clipPath>
-        </defs>
-        <rect width="1600" height="640" fill={u('cielo')} />
-        <rect width="1600" height="640" fill={u('sol')} />
-        <g {...capa(3)}>
-          <circle cx="1320" cy="120" r="44" fill="#F7DCA6" />
-          <Nube x={300} y={120} s={1} luz="#FBF7EC" sombra="#E8E1CC" />
-          <Nube x={900} y={80} s={0.7} luz="#FBF7EC" sombra="#E8E1CC" opacity={0.75} />
-        </g>
-        <g {...capa(6)}>
-          <path d={cresta([[-40, 290], [140, 240], [300, 262], [460, 218], [620, 256], [780, 232], [940, 268], [1120, 226], [1300, 252], [1460, 230], [1640, 250]], 700)} fill={u('m')} />
-        </g>
-        <g {...capa(12)}>
-          <path d={cresta([[-40, 344], [200, 312], [420, 336], [660, 304], [900, 334], [1120, 300], [1360, 330], [1640, 310]], 700)} fill={u('c1')} />
-          <Arboles forma={ciPres} fill="#7E8450" opacity=".85" lista={[[520, 330, 30], [534, 330, 22], [1180, 316, 34], [1194, 318, 24]]} />
-        </g>
-        <g {...capa(20)}>
-          <path d={cresta([[-40, 410], [240, 376], [520, 400], [780, 372], [1060, 404], [1320, 374], [1640, 396]], 720)} fill={u('c2')} />
-          <g stroke="#B8B37A" strokeWidth="6" opacity=".45" strokeLinecap="round">
-            <path d="M880 420C980 404 1080 412 1180 400M900 440C1010 424 1120 432 1240 420M930 462C1050 448 1170 456 1300 444" />
-          </g>
-          <Casas casas={[[640, 400, 60, 34], [706, 402, 36, 24]]} />
-          <g fill="#D8B870">
-            <path d="M1010 452a18 14 0 0 1 36 0z" /><path d="M1060 456a16 12 0 0 1 32 0z" /><path d="M1110 450a18 14 0 0 1 36 0z" />
-          </g>
-          <Arboles forma={ciPres} fill="#4A5228" lista={[[616, 404, 56], [760, 404, 64], [778, 406, 48]]} />
-        </g>
-        <g {...capa(30)}>
-          <path d={lavanda} fill={u('lav')} />
-          <g clipPath={u('recorte')}>
-            <path d={surcos} stroke="#6E5E8C" strokeWidth="7" opacity=".45" />
-            <path d={surcos} stroke="#CFC4DE" strokeWidth="2" opacity=".5" transform="translate(5 0)" />
-          </g>
-          <path d={cresta([[560, 720], [700, 580], [840, 490], [1000, 458], [1200, 478], [1400, 452], [1640, 470]], 720)} fill={u('c2')} />
-          <Olivos fill="#56602F" sombra="#3A4120" arboles={fila(488, 900, 1560, 52, 13)} />
-          <path d="M760 720C790 640 830 580 900 540C960 506 1040 492 1120 486" fill="none" stroke="#E9DEC4" strokeWidth="16" strokeLinecap="round" />
-          <Arboles forma={ciPres} fill="#3F4722" lista={[[900, 528, 70], [960, 510, 56], [1020, 500, 46], [1070, 494, 38], [1112, 490, 30]]} />
-        </g>
-        <g {...capa(46)}>
-          <path d={cresta([[-40, 580], [300, 546], [640, 572], [980, 540], [1320, 566], [1640, 544]], 760)} fill={u('c3')} />
-          <Olivos fill="#3F4722" sombra="#262B14" arboles={[...fila(596, 40, 520, 76, 21), ...fila(584, 1080, 1580, 76, 21)]} />
-          <Pradera semilla={5} x0={560} x1={1040} y0={600} y1={636} n={34} hierba="#4A5327" colores={['#B8A6D0', '#F4EEDD', '#E8C77A']} />
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-// ── Crepúsculo sobre el lago (llamada final) ─────────────────────────────
 
 export function PaisajeCrepusculo({ className = '' }) {
-  const id = usarIds();
-  const ref = useParallax();
+  const id = useIds();
   const u = (n) => `url(#${id(n)})`;
   const rnd = azar(42);
   const estrellas = Array.from({ length: 90 }, () => [r1(rnd() * 1600), r1(rnd() * 400), r1(0.6 + rnd() * 1.8), r1(rnd() * 4)]);
   const bosque = Array.from({ length: 46 }, (_, i) => [r1(i * 36 + rnd() * 20 - 20), r1(560 + Math.sin(i * 0.5) * 10 + rnd() * 6), r1(26 + rnd() * 34)]);
   const luciernagas = Array.from({ length: 14 }, () => [r1(120 + rnd() * 520), r1(640 + rnd() * 110), r1(rnd() * 3)]);
   return (
-    <div ref={ref} className={`paisaje paisaje--noche ${className}`}>
-      <svg viewBox="0 0 1600 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <Marco vb="0 0 1600 800" className={`paisaje paisaje--noche ${className}`}>
+        <Capa>
         <defs>
           <Vertical id={id('cielo')} paradas={[[0, '#1B1F2A'], [0.35, '#34344A'], [0.58, '#6E5563'], [0.72, '#B8795C'], [0.8, '#E3A366']]} />
           <radialGradient id={id('via')} cx="0.5" cy="0.5" r="0.5">
@@ -483,7 +407,8 @@ export function PaisajeCrepusculo({ className = '' }) {
         </defs>
         <rect width="1600" height="800" fill={u('cielo')} />
 
-        <g {...capa(2)}>
+        </Capa>
+        <Capa d={2}>
           <ellipse cx="760" cy="180" rx="720" ry="90" fill={u('via')} transform="rotate(-14 760 180)" />
           <g fill="#F6EEDC">
             {estrellas.map(([x, y, r, dl], i) => (
@@ -493,18 +418,18 @@ export function PaisajeCrepusculo({ className = '' }) {
           <path className="fugaz" d="M300 90L480 150" stroke={u('fugaz')} strokeWidth="2.2" strokeLinecap="round" />
           <circle cx="1262" cy="210" r="150" fill={u('luna')} />
           <path d="M1250 164a52 52 0 1 0 40 86a44 44 0 1 1 -40 -86z" fill="#F6EEDC" />
-        </g>
+        </Capa>
 
-        <g {...capa(8)}>
+        <Capa d={8}>
           <path d={cresta([[-40, 498], [120, 452], [260, 474], [420, 404], [560, 456], [720, 428], [880, 470], [1040, 420], [1200, 468], [1380, 430], [1520, 466], [1640, 444]], 900)} fill={u('m1')} />
           <rect y="440" width="1600" height="120" fill={u('bruma')} />
-        </g>
-        <g {...capa(18)}>
+        </Capa>
+        <Capa d={18}>
           <path d={cresta([[-40, 566], [220, 522], [460, 552], [700, 512], [960, 550], [1200, 516], [1440, 544], [1640, 524]], 900)} fill={u('m2')} />
           <Arboles forma={pino} fill="#222226" lista={bosque} />
-        </g>
+        </Capa>
 
-        <g {...capa(28)}>
+        <Capa d={28}>
           <rect y="584" width="1600" height="320" fill={u('lago')} />
           <g stroke="#F2C58F" strokeLinecap="round" opacity=".55" strokeWidth="2">
             <path d="M700 604h200M740 628h120M660 654h280M760 690h80M720 730h160M780 770h60" />
@@ -515,9 +440,9 @@ export function PaisajeCrepusculo({ className = '' }) {
           <g stroke="#F6EEDC" strokeLinecap="round" opacity=".14" strokeWidth="1.6">
             <path d="M120 640h140M1300 800h180M240 720h120M1080 700h160M460 780h110" />
           </g>
-        </g>
+        </Capa>
 
-        <g {...capa(40)}>
+        <Capa d={40}>
           <path d={cresta([[-40, 660], [140, 626], [320, 640], [480, 664], [620, 710], [700, 820]], 920)} fill="#1C1D1A" />
           <circle cx="258" cy="612" r="46" fill={u('ventana')} />
           <g transform="translate(222 632)">
@@ -536,8 +461,7 @@ export function PaisajeCrepusculo({ className = '' }) {
           <g fill="#F6D98A">
             {luciernagas.map(([x, y, dl], i) => <circle key={i} className="luciernaga" cx={x} cy={y} r="2.2" style={{ animationDelay: `${dl}s` }} />)}
           </g>
-        </g>
-      </svg>
-    </div>
+        </Capa>
+    </Marco>
   );
 }

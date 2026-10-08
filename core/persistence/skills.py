@@ -1,8 +1,3 @@
-"""
-skills.py — Catálogo de skills oficiales de Lixbon: paquetes versionados, instalaciones
-y calificaciones. Solo los administradores publican; el IDE y la web descargan el
-paquete (zip con `<slug>/SKILL.md` y el resto de archivos) y verifican su sha256.
-"""
 from __future__ import annotations
 
 import hashlib
