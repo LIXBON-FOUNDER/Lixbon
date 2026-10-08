@@ -1,7 +1,3 @@
-// LandingPage.jsx — la portada pública de lixbon.com (/). Minimalista y
-// cálida: titulares en Lancelot, mucho aire, secciones numeradas y cuatro
-// paisajes pintados (Paisajes.jsx) que se mueven despacio con el scroll. Es
-// la página que posiciona: todo el texto va en HTML, con FAQPage.
 import { useMemo, useState } from 'react';
 import { Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
@@ -9,44 +5,33 @@ import { useT } from '../i18n/useT';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 import { IconArrowLeft } from '../components/Icons';
-import { PaisajeAmanecer, PaisajeCosta, PaisajeCrepusculo, PaisajeValle } from '../components/Paisajes';
+import { PaisajeAmanecer, PaisajeCosta, PaisajeCrepusculo } from '../components/Paisajes';
 import { useRevelar } from '../hooks/useRevelar';
 import { ORGANIZACION, SITE_URL, useSeo } from '../lib/seo';
 import { useAuth } from '../hooks/useAuth';
 import { MascotaGuia } from '../components/Mascota';
-import { PreguntaLixbon } from '../components/PreguntaLixbon';
-
-const CODIGO = `from openai import OpenAI
-
-client = OpenAI(
-    base_url="https://lixbon.com/v1",
-    api_key="lixbon_sk_tu_clave",
-)
-
-resp = client.chat.completions.create(
-    model="lixbon-1",
-    messages=[{"role": "user", "content": "Hola"}],
-)
-print(resp.choices[0].message.content)`;
 
 const Flecha = () => <IconArrowLeft size={15} style={{ transform: 'rotate(180deg)' }} />;
+
+// Los videos se suben a apps/web/public/landing/; hasta entonces queda el hueco vacío.
+function VideoProducto({ src }) {
+  const [falta, setFalta] = useState(false);
+  return (
+    <div className="landing__video">
+      {!falta && <video src={src} autoPlay muted loop playsInline preload="metadata" onError={() => setFalta(true)} />}
+    </div>
+  );
+}
 
 export default function LandingPage() {
   const { user } = useAuth();
   const locale = useLocale();
   const t = useT('landing');
   const revelar = useRevelar();
-  const [preguntando, setPreguntando] = useState(false);
 
   const jsonLd = useMemo(() => [
     ORGANIZACION,
     { '@context': 'https://schema.org', '@type': 'WebSite', name: 'lixbon', url: SITE_URL, inLanguage: locale },
-    {
-      '@context': 'https://schema.org',
-      '@type': 'FAQPage',
-      mainEntity: t('faq').map(({ q, a }) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
-    },
-    // eslint-disable-next-line
   ], [locale]);
 
   useSeo({
@@ -57,26 +42,23 @@ export default function LandingPage() {
   });
 
   return (
-    <div className="page landing" ref={revelar}>
+    <div className="page web landing" ref={revelar}>
       <PublicNav />
 
       <main>
         <section className="landing__hero landing__wrap" data-mascota="hero">
-          <p className="landing__eyebrow">{t('heroEyebrow')}</p>
           <h1 className="landing__h1">{t('heroTitle')}</h1>
           <div className="landing__hero-pie">
             <p className="landing__lead">{t('heroLead')}</p>
             <div>
-              <div className="landing__cta">
-                {user ? (
-                  <Link to="/chat" className="pill-btn pill-btn--primary landing__btn">{t('ctaGoToChat')}</Link>
-                ) : (
-                  <>
-                    <Link to="/auth?mode=register" className="pill-btn pill-btn--primary landing__btn">{t('ctaStartFree')}</Link>
-                    <Link to="/chat" className="landing__enlace">{t('ctaTryChat')} <Flecha /></Link>
-                  </>
-                )}
-              </div>
+              {user ? (
+                <Link to="/chat" className="btn-negro landing__btn">{t('ctaGoToChat')}</Link>
+              ) : (
+                <div className="btn-grupo btn-grupo--grande">
+                  <Link to="/auth?mode=register" className="btn-grupo__item">{t('ctaStartFree')}</Link>
+                  <Link to="/chat" className="btn-grupo__item">{t('ctaTryChat')}</Link>
+                </div>
+              )}
               {!user && <p className="landing__nota">{t('freeNote')}</p>}
             </div>
           </div>
@@ -89,10 +71,8 @@ export default function LandingPage() {
 
         <section className="landing__fila landing__wrap">
           <div data-revelar data-mascota="private">
-            <span className="landing__num">{t('section1Num')}</span>
             <h2 className="landing__h2">{t('section1Title')}</h2>
             <p className="landing__p">{t('section1P1')}</p>
-            <p className="landing__p">{t('section1P2')}</p>
           </div>
           <figure className="landing__lienzo landing__lienzo--retrato" data-revelar>
             <PaisajeCosta />
@@ -101,70 +81,18 @@ export default function LandingPage() {
         </section>
 
         <section className="landing__bloque landing__wrap">
-          <div data-revelar data-mascota="products">
-            <span className="landing__num">{t('section2Num')}</span>
-            <h2 className="landing__h2 landing__h2--ancho">{t('section2Title')}</h2>
-          </div>
-          <figure className="landing__lienzo landing__lienzo--banda" data-revelar>
-            <PaisajeValle />
-            <figcaption>{t('paintingValley')}</figcaption>
-          </figure>
+          <h2 className="landing__h2" data-revelar data-mascota="products">{t('section2Title')}</h2>
           <ul className="landing__productos">
-            {t('products').map(({ title, text, href }, i) => (
-              <li key={title} data-revelar style={{ '--retraso': `${i * 90}ms` }}>
-                <h3><Link to={href}>{title} <Flecha /></Link></h3>
-                <p>{text}</p>
+            {t('products').map(({ title, text, href, video }, i) => (
+              <li key={title} data-revelar style={{ '--retraso': `${i * 70}ms` }}>
+                <Link to={href}>
+                  <VideoProducto src={video} />
+                  <h3>{title}<Flecha /></h3>
+                  <p>{text}</p>
+                </Link>
               </li>
             ))}
           </ul>
-        </section>
-
-        <section className="landing__fila landing__wrap">
-          <div data-revelar data-mascota="api">
-            <span className="landing__num">{t('section3Num')}</span>
-            <h2 className="landing__h2">{t('section3Title')}</h2>
-            <p className="landing__p">{t('section3P')}</p>
-            <Link to="/docs/using-your-api-key" className="landing__enlace">{t('section3Link')} <Flecha /></Link>
-          </div>
-          <pre className="landing__codigo" data-revelar><code>{CODIGO}</code></pre>
-        </section>
-
-        <section className="landing__bloque landing__wrap">
-          <div data-revelar data-mascota="plans">
-            <span className="landing__num">{t('section4Num')}</span>
-            <h2 className="landing__h2">{t('section4Title')}</h2>
-            <p className="landing__p">{t('section4P')}</p>
-          </div>
-          <div className="landing__precios">
-            {t('plans').map(({ name, price, period, lines }, i) => (
-              <div key={name} className="landing__precio" data-revelar style={{ '--retraso': `${i * 90}ms` }}>
-                <h3>{name}</h3>
-                <p className="landing__cifra">{price}{period && <span> {period}</span>}</p>
-                <ul>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
-              </div>
-            ))}
-          </div>
-          <p className="landing__enlaces"><Link to="/plans" className="landing__enlace">{t('seePlans')} <Flecha /></Link><Link to="/docs/api-pricing" className="landing__enlace">{t('apiPricingLink')} <Flecha /></Link></p>
-        </section>
-
-        <section className="landing__fila landing__fila--faq landing__wrap">
-          <div data-revelar data-mascota="faq">
-            <span className="landing__num">{t('section5Num')}</span>
-            <h2 className="landing__h2">{t('faqTitle')}</h2>
-          </div>
-          <div data-revelar>
-            <div className={`landing__faqbox ${preguntando ? 'is-preguntando' : ''}`}>
-              <div className="landing__faq" inert={preguntando}>
-                {t('faq').map(({ q, a }) => (
-                  <details key={q}>
-                    <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
-                    <p>{a}</p>
-                  </details>
-                ))}
-              </div>
-              <PreguntaLixbon abierta={preguntando} onAbrir={() => setPreguntando(true)} onCerrar={() => setPreguntando(false)} />
-            </div>
-          </div>
         </section>
 
         <section className="landing__final" data-revelar data-mascota="final">

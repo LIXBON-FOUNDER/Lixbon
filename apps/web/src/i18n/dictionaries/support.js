@@ -4,7 +4,8 @@ export default {
     seoDescription: 'Cuéntanos qué pasa y te respondemos por correo: cuenta, pagos, reembolsos, la API, las apps o cualquier otra cosa.',
     eyebrow: 'Soporte',
     title: '¿En qué podemos ayudarte?',
-    lead: 'Elige el tipo de caso y cuéntanoslo con detalle. Te llega un acuse con el número de caso y te respondemos a tu correo, normalmente en menos de 24 horas hábiles.',
+    lead: 'Mira primero las preguntas frecuentes. Si no está tu respuesta, escríbenos y te contestamos por correo, normalmente en menos de 24 horas hábiles.',
+    formTitle: 'Escríbenos',
     categoryLabel: 'Tipo de caso',
     categories: {
       account: ['Cuenta y acceso', 'Contraseña, verificación, inicio de sesión'],
@@ -53,7 +54,8 @@ export default {
     seoDescription: 'Tell us what’s going on and we’ll reply by email: account, payments, refunds, the API, the apps or anything else.',
     eyebrow: 'Support',
     title: 'How can we help?',
-    lead: 'Pick the kind of case and tell us the details. You’ll get a receipt with a case number, and we’ll reply to your email, usually within one business day.',
+    lead: 'Check the frequently asked questions first. If your answer isn’t there, write to us and we’ll reply by email, usually within one business day.',
+    formTitle: 'Write to us',
     categoryLabel: 'Kind of case',
     categories: {
       account: ['Account and sign-in', 'Password, verification, logging in'],

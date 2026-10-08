@@ -1,8 +1,3 @@
-"""
-app.py — Punto de entrada del Gateway lixbon.
-Configura FastAPI, middlewares, ciclo de vida (lifespan) y registra los routers.
-Entry point de uvicorn: `uvicorn core.gateway.app:app`
-"""
 from __future__ import annotations
 import mimetypes
 import threading
@@ -30,8 +25,6 @@ from core.persistence.queries import (
 from core.security.auth import security_headers_middleware
 from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills
 
-
-# ── Ciclo de vida ──────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -80,8 +73,6 @@ async def lifespan(app: FastAPI):
         await deps.http_client_chat.aclose()
 
 
-# ── App FastAPI ────────────────────────────────────────────────────────────
-
 app = FastAPI(
     title=APP_TITLE,
     version=APP_VERSION,
@@ -93,7 +84,6 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# ── Middleware: CORS ───────────────────────────────────────────────────────
 _cors_origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 _cors_origins.append("http://localhost:5173")  # Vite dev server
 _cors_origins.append("http://localhost:1420")  # Tauri dev (app desktop)
@@ -108,10 +98,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Middleware: Headers de seguridad HTTP ──────────────────────────────────
 app.middleware("http")(security_headers_middleware)
 
-# ── Routers ────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
 app.include_router(team.router)       # /api/team/* + /ws/team (Lixbon Team)
@@ -142,8 +130,6 @@ app.include_router(mcp.router)        # /mcp: servidor MCP remoto (Visuals para 
 app.include_router(skills.router)     # /api/skills/*: catálogo de skills oficiales
 app.include_router(admin.router)
 
-
-# ── Cron daemon de archivado de keys ──────────────────────────────────────
 
 def _start_archiver_cron() -> None:
     """Hilo daemon que archiva API keys inactivas cada 24 horas."""
@@ -193,8 +179,6 @@ def _start_archiver_cron() -> None:
 
     threading.Thread(target=_run_remote_sweep, daemon=True, name="remote-sweeper").start()
 
-
-# ── Archivos estáticos y frontend (React SPA) ──────────────────────────────
 
 _static_dir = Path(__file__).resolve().parent / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)

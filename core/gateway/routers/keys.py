@@ -1,6 +1,3 @@
-"""
-keys.py — Endpoints de gestión de API keys en lixbon DTC.
-"""
 from __future__ import annotations
 from typing import Any
 

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 
-/** Mantiene montado un elemento unos ms tras cerrarlo para animar la salida. */
 export function useSalida(abierto, ms = 150) {
   const [montado, setMontado] = useState(abierto);
   useEffect(() => {

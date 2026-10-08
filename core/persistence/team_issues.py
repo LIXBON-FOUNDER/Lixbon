@@ -1,6 +1,4 @@
 """
-team_issues.py — Las issues propias de Lixbon Team.
-
 Viven dentro de un proyecto de Team (el «equipo» en pantalla): estados,
 etiquetas, ciclos, iniciativas (los «Proyectos» de la interfaz), issues,
 comentarios, actividad y vínculos con ramas y PR. Sustituye a Linear: de él solo
@@ -140,8 +138,6 @@ def miembros(proyecto_id: str) -> list[int]:
     with get_session() as s:
         return list(s.scalars(select(TeamMiembro.usuario_id).where(TeamMiembro.proyecto_id == proyecto_id)))
 
-
-# ── Tablero: estados, etiquetas, ciclos, iniciativas, ajustes ──────────────
 
 def asegurar_tablero(s, p: TeamProyecto, config: dict[str, Any] | None = None,
                      etiquetas: list[str] | None = None) -> None:
@@ -451,8 +447,6 @@ def borrar_iniciativa(iniciativa_id: str, uid: int) -> tuple[str, list[str]]:
         s.delete(x)
         return x.proyecto_id, tocadas
 
-
-# ── Issues ─────────────────────────────────────────────────────────────────
 
 def _registrar(s, i: TeamIssue, actor: int | None, campo: str, antes: Any, despues: Any) -> None:
     s.add(TeamIssueActividad(issue_id=i.id, actor_id=actor, campo=campo,
@@ -823,8 +817,6 @@ def buscar_por_clave(uid: int, clave: str) -> dict[str, Any] | None:
     return None
 
 
-
-# ── GitHub ─────────────────────────────────────────────────────────────────
 
 def secreto_webhook(proyecto_id: str, uid: int, rotar: bool = False) -> dict[str, Any]:
     """El secreto con el que GitHub firma los avisos de este equipo. Solo lo ve

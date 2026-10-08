@@ -1,7 +1,5 @@
-// AuthPage.jsx — acceso y registro sobre el fondo del clúster.
-// Incluye el modo "olvidé mi contraseña" (request-password-reset).
-// Google y GitHub: PKCE contra core/gateway/routers/oauth.py; el verificador
-// se queda en sessionStorage y el navegador solo lleva su hash.
+// OAuth: PKCE contra core/gateway/routers/oauth.py; el verificador se queda en
+// sessionStorage y el navegador solo lleva su hash.
 import { useSeo } from '../lib/seo';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -52,7 +50,7 @@ export default function AuthPage() {
   // un next externo sería un open-redirect.
   const rawNext = params.get('next') || '';
   const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/chat';
-  const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'forgot'
+  const [mode, setMode] = useState(initialMode);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -153,7 +151,6 @@ export default function AuthPage() {
             <h1 className="auth__title">{t(`titles.${mode}`)}</h1>
           </div>
 
-          {/* key={mode}: remonta el bloque para animar la entrada al cambiar de modo */}
           <div className="auth__fields" key={mode}>
             {mode === 'register' && (
               <div className="auth__row">

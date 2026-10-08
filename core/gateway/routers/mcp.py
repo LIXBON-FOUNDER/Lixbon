@@ -1,6 +1,6 @@
 """
-mcp.py — Servidor MCP remoto de Lixbon en /mcp (transporte Streamable HTTP, sin
-sesión: cada POST lleva un mensaje JSON-RPC y se responde con JSON).
+Transporte Streamable HTTP sin sesión: cada POST lleva un mensaje JSON-RPC y se
+responde con JSON.
 
 Expone Visuals a cualquier agente con MCP (Claude Code, Codex, Cursor, Gemini,
 OpenCode, el CLI de Lixbon): herramientas visual_* y el prompt `visual`.

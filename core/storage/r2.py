@@ -1,6 +1,4 @@
 """
-r2.py — Almacenamiento de releases en Cloudflare R2 (F6.5).
-
 El disco de Railway es efímero: los instaladores subidos se perderían en cada
 redeploy. R2 (S3-compatible, sin costo de egreso) es el almacén persistente.
 El bucket es PRIVADO: el gateway sube los objetos y genera URLs prefirmadas de

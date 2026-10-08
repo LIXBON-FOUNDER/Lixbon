@@ -127,8 +127,6 @@ async def _tragando_errores(envio: Awaitable[bool]) -> None:
         logger.error(f"Envío en segundo plano fallido: {exc}")
 
 
-# ── Datos que los correos necesitan ────────────────────────────────────────
-
 def fecha_larga(iso: str | None) -> str | None:
     if not iso:
         return None
@@ -214,8 +212,6 @@ def limites_de_plan(plan: dict[str, Any]) -> list[str]:
         limites.append(f"{ritmo} peticiones por minuto")
     return limites
 
-
-# ── Los correos ────────────────────────────────────────────────────────────
 
 async def send_verification_email(to: str, token: str) -> bool:
     url = f"{PUBLIC_BASE_URL}/api/auth/verify-email?token={token}"

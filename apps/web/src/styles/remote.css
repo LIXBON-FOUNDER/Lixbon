@@ -1,5 +1,3 @@
-/* remote.css — página de control remoto (/remote y /remote/:token). */
-
 .remote-page {
   display: flex;
   flex-direction: column;
@@ -39,8 +37,6 @@
   font-family: var(--font-mono);
   color: var(--code-inline);
 }
-
-/* ── Lista de sesiones ── */
 
 .remote__list {
   width: min(680px, 100% - 32px);
@@ -110,8 +106,6 @@
   50% { opacity: 0.35; }
 }
 
-/* ── Sesión en vivo ── */
-
 .remote__session {
   flex: 1;
   display: flex;
@@ -175,8 +169,6 @@
   justify-content: flex-end;
 }
 
-/* La sesión ocupa justo la pantalla: el hilo hace scroll por dentro y la caja
-   de escritura queda fija abajo, como en cualquier chat. */
 .remote-page--session {
   height: 100vh;
   height: 100dvh;
@@ -240,8 +232,6 @@
 .remote__extra { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 5px; background: var(--surface-5); font-size: 11.5px; color: var(--ink-soft); }
 .remote__notice { padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 13px; color: var(--ink-soft); }
 
-/* ── Actividad del agente: una línea por tramo ── */
-
 .actline-group { display: flex; flex-direction: column; animation: remote-rise 0.3s ease both; }
 .actline {
   display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%;
@@ -288,8 +278,6 @@
   .actline__pulse { animation: none; }
 }
 
-/* ── Pestañas de la sesión y orquestador ── */
-
 .rseg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius); background: var(--surface-3); }
 .rseg button {
   position: relative; display: inline-flex; align-items: center; gap: 6px;
@@ -333,7 +321,6 @@
 .rorch-pill.is-ok { background: var(--ok-soft); color: var(--ok); }
 .rorch-pill.is-ask { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
 
-/* Estado de una tarea: caja redondeada que cambia con el estado. */
 .rorch-st { position: relative; flex-shrink: 0; display: inline-block; border-radius: 4px; background: var(--surface-5); }
 .rorch-st--running, .rorch-st--starting { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .rorch-st--running::after { content: ''; position: absolute; inset: 30%; border-radius: 2px; background: var(--accent); animation: actline-pulse 1.4s ease-in-out infinite; }
@@ -462,8 +449,6 @@
   .rorch-detail-acts { flex-direction: row; width: 100%; justify-content: flex-start; padding-left: 32px; }
 }
 
-/* ── Responsive ──────────────────────────────────────────────────────── */
-
 @media (max-width: 640px) {
   .remote__session {
     width: min(760px, 100% - 24px);
@@ -501,7 +486,6 @@
   }
 }
 
-/* Modelo y esfuerzo de la sesión en la caja de escritura (mismo selector que el chat). */
 .remote__config { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .remote__config .chat-input__model { max-width: 200px; }
 @media (max-width: 640px) {

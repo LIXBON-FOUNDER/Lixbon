@@ -1,6 +1,4 @@
 """
-payments.py — Endpoints de pagos.
-
 El cobro ocurre dentro de lixbon: no hay Checkout alojado ni portal de cliente.
 El navegador guarda la tarjeta contra Stripe con Elements y aquí solo entra un
 `pm_...`; con ese id se crean la suscripción y las recargas de saldo. Si Stripe
@@ -115,8 +113,6 @@ async def billing_config():
     return {"enabled": sg.enabled(), "publishable_key": STRIPE_PUBLISHABLE_KEY or None}
 
 
-# ── Tarjetas guardadas ──────────────────────────────────────────────────────
-
 @router.post("/setup-intent")
 async def create_setup_intent(user_data: dict[str, Any] = Depends(cookie_auth_required)):
     """Secreto para que el navegador guarde una tarjeta nueva sin cobrar."""
@@ -157,8 +153,6 @@ async def delete_payment_method(
         raise _fallo(exc, "No se pudo quitar la tarjeta")
     return {"payment_methods": sg.list_payment_methods(user_data)}
 
-
-# ── Suscripción ─────────────────────────────────────────────────────────────
 
 @router.post("/subscribe")
 async def subscribe(
@@ -226,8 +220,6 @@ async def billing_status(user_data: dict[str, Any] = Depends(cookie_auth_require
         "invoices": sg.list_invoices(user_data) if paid else [],
     }
 
-
-# ── Créditos prepago de la API ──────────────────────────────────────────────
 
 def _ledger_row_public(row: dict[str, Any]) -> dict[str, Any]:
     return {

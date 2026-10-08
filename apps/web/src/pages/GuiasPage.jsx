@@ -1,4 +1,3 @@
-// GuiasPage.jsx — /guides (índice) y /guides/:slug (artículo). Pública.
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { Link, Navigate } from '../i18n/link';
@@ -12,7 +11,6 @@ import { GUIAS } from './guiasContent';
 import { LEGACY_GUIDE_IDS, withLocale } from '../i18n/paths';
 
 
-// Lo que la mascota puede comentar mientras lees: avisos, código y apartados.
 const SELECTOR_MASCOTA = '.docs__content [data-mascota], .docs__content .docs__callout, .docs__content .codeblock, .docs__content h2';
 export default function GuiasPage() {
   const { slug } = useParams();
@@ -52,7 +50,7 @@ export default function GuiasPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       {guia ? <Articulo guia={guia} locale={locale} t={t} /> : <Indice locale={locale} t={t} />}
       <PublicFooter />

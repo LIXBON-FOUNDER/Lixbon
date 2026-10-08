@@ -1,7 +1,3 @@
-"""
-visuals_service.py — Reglas de Visuals compartidas por la API REST y el servidor
-MCP: quién puede crear (Pro/Advance), límites del plan, URL pública y avisos en vivo.
-"""
 from __future__ import annotations
 
 from typing import Any

@@ -1,9 +1,3 @@
-/* pagos.css — el modal de cobro y la sección de Facturación.
-   El diálogo se apoya en var(--surface-2), un escalón por encima del fondo, para
-   despegarse del velo sin pedir borde. Sin bordes: la jerarquía la da el
-   relleno.
-   var(--surface-2) diálogo · var(--surface-3) bloque y campo · var(--surface-4) elegido */
-
 .pago-overlay {
   position: fixed;
   inset: 0;
@@ -29,7 +23,7 @@
   width: 104px;
   height: 12px;
   margin-left: 34px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 6px 6px 0 0;
   background: var(--surface-2);
 }
 
@@ -68,8 +62,6 @@
   flex-direction: column;
   gap: 20px;
 }
-
-/* ── Resumen de lo que se cobra ─────────────────────────────────────────── */
 
 .pago__resumen {
   display: flex;
@@ -118,8 +110,6 @@
   color: var(--ink-muted);
   text-wrap: pretty;
 }
-
-/* ── Elegir tarjeta ─────────────────────────────────────────────────────── */
 
 .pago__campo {
   display: flex;
@@ -251,8 +241,6 @@
   color: var(--ink-muted);
 }
 
-/* ── Guardar la tarjeta ─────────────────────────────────────────────────── */
-
 .pago__guardar,
 .pago__nota-guardar {
   display: flex;
@@ -298,8 +286,6 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-
-/* ── Acciones ───────────────────────────────────────────────────────────── */
 
 .pago__cta {
   display: flex;
@@ -374,8 +360,6 @@
 .pago__pie svg {
   flex-shrink: 0;
 }
-
-/* ── Desenlaces ─────────────────────────────────────────────────────────── */
 
 .pago__desenlace {
   display: flex;
@@ -466,8 +450,6 @@
   color: var(--ink-body);
 }
 
-/* ── Packs de recarga ───────────────────────────────────────────────────── */
-
 .pago__packs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -508,10 +490,6 @@
   color: var(--ink-label);
 }
 
-/* ── Ajustes → Facturación ──────────────────────────────────────────────── */
-
-/* La columna del saldo es fija: el número grande no debe encogerse con la
-   ventana mientras la lista de al lado sí puede. */
 .pago-cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;

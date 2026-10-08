@@ -1,10 +1,3 @@
-// Logo.jsx — la marca: el isotipo real (el mismo de favicon.svg) junto al
-// wordmark LIXBON en Bruno Ace SC.
-
-// Isotipo suelto, para donde no cabe el wordmark (favicon del cajón, avatares
-// del sistema, pantalla de carga).
-// Las piezas llevan clase para que la versión animada (landing.css) pueda
-// montarlas una a una; sin `.logo--animado` no hacen nada.
 export function LogoMark({ size = 26 }) {
   return (
     <svg className="logo__mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
@@ -24,14 +17,8 @@ export function LogoMark({ size = 26 }) {
   );
 }
 
-// `mark={false}` deja solo el wordmark (pie de página, correos embebidos).
-// Bruno Ace SC es una versalita angosta: a igual `size` que el isotipo se ve
-// más chica, así que el wordmark usa un tamaño mayor para que ambos pesen
-// lo mismo en la barra.
-// `animado` monta el isotipo pieza a pieza y levanta las letras en cascada
-// (landing.css). Corre al montarse; dentro de un contenedor de useRevelar
-// espera a que el wordmark entre en vista (así lo usa el pie).
-// `size={null}` deja el cuerpo del wordmark al CSS (el pie lo hace enorme).
+// Bruno Ace SC se ve más chica a igual `size` que el isotipo: el wordmark usa
+// un tamaño mayor. `size={null}` deja el cuerpo al CSS.
 export function Logo({ size = 15, mark = true, animado = false, className = '' }) {
   return (
     <span className={`logo ${animado ? 'logo--animado' : ''} ${className}`}>

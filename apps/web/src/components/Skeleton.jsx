@@ -1,4 +1,3 @@
-// Skeleton.jsx — placeholder con shimmer para estados de carga.
 import { useT } from '../i18n/useT';
 
 export function Skeleton({ w, h = 14, r = 8, className = '', style = {} }) {
@@ -11,7 +10,6 @@ export function Skeleton({ w, h = 14, r = 8, className = '', style = {} }) {
   );
 }
 
-// Skeleton del historial de conversaciones (sidebar).
 export function HistorySkeleton({ rows = 6 }) {
   const t = useT('chat');
   return (
@@ -23,7 +21,6 @@ export function HistorySkeleton({ rows = 6 }) {
   );
 }
 
-// Skeleton del hilo de mensajes (al abrir una conversación).
 export function ThreadSkeleton() {
   const t = useT('chat');
   return (
@@ -42,8 +39,6 @@ export function ThreadSkeleton() {
       <div className="sk-msg sk-msg--assistant">
         <Skeleton w="84%" h={14} />
         <Skeleton w="92%" h={14} />
-        {/* El hueco del bloque de código: casi toda respuesta larga lleva uno,
-            y sin él el salto al contenido real reacomoda media pantalla. */}
         <Skeleton w="100%" h={52} />
         <Skeleton w="66%" h={14} />
       </div>
@@ -51,7 +46,6 @@ export function ThreadSkeleton() {
   );
 }
 
-// Skeleton del contenido de la documentación.
 export function DocsSkeleton() {
   const t = useT('chat');
   return (

@@ -1,7 +1,4 @@
-/* mascota.css — Gael y Leya (components/Mascota.jsx). Sprites pixel art de
-   48×48 por cuadro, escalados a múltiplos enteros para que el píxel se vea
-   nítido. Es la única pieza de la web con "píxeles": el bocadillo lleva las
-   esquinas recortadas a juego, y por eso no sigue el radio de la interfaz. */
+/* Sprites de 48×48 escalados a múltiplos enteros para que el píxel se vea nítido. */
 
 .mascota-sprite {
   --w: 96px;
@@ -35,8 +32,6 @@
 .mascota-sprite.is-espejo { transform: scaleX(-1); }
 .mascota-sprite.is-quieta { animation: none; }
 
-/* ── Bocadillo ───────────────────────────────────────────────────────── */
-
 .mascota-bocadillo {
   position: absolute;
   bottom: calc(100% + 12px);
@@ -51,13 +46,11 @@
   line-height: 1.35;
   text-wrap: pretty;
   pointer-events: none;
-  /* Esquinas en escalón: un píxel de 3px recortado en cada una. */
   box-shadow:
     0 -3px 0 0 var(--primary),
     0 3px 0 0 var(--primary),
     -3px 0 0 0 var(--primary),
     3px 0 0 0 var(--primary);
-  /* Se abre desde la cola, con un rebote. */
   transform-origin: 18px calc(100% + 9px);
   animation: mascota-abre 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
@@ -75,7 +68,6 @@
   box-shadow: -6px -3px 0 0 var(--primary);
 }
 
-/* El texto completo reserva el sitio; encima se va escribiendo. */
 .mascota-bocadillo__texto { display: grid; }
 .mascota-bocadillo__molde,
 .mascota-bocadillo__escrito { grid-area: 1 / 1; }
@@ -91,7 +83,6 @@
   to { opacity: 0; transform: scale(0.6) translateY(6px); }
 }
 
-/* Puntos de "pensando" y zetas de la siesta, sobre la cabeza. */
 .mascota-puntos {
   position: absolute;
   bottom: calc(100% - 6px);
@@ -144,12 +135,8 @@
   100% { opacity: 0; transform: translate(14px, -30px); }
 }
 
-/* ── En el chat ──────────────────────────────────────────────────────── */
-
 .chat-hero__input { position: relative; }
 
-/* Con sitio, se sienta fuera de la columna, a la izquierda del compositor y
-   a ras de la caja de texto: no tapa ningún mensaje. */
 .mascota-chat {
   position: absolute;
   right: calc(100% - 8px);
@@ -171,27 +158,28 @@
 
 .mascota-chat__chica { display: none; }
 
-/* Sin margen al lado (pantallas estrechas o panel abierto): pequeña, sentada
-   sobre el borde superior de la caja. */
 @media (max-width: 1240px) {
   .mascota-chat {
     right: auto;
     left: 34px;
     bottom: calc(100% - 22px);
   }
-  /* En la portada del chat el título queda justo encima: sin sitio, no sale. */
   .chat-hero__input .mascota-chat { display: none; }
   .mascota-chat__grande { display: none; }
   .mascota-chat__chica { display: block; }
   .mascota-chat .mascota-zzz { right: 0; }
 }
 
-/* ── Guía de las páginas públicas ────────────────────────────────────── */
-
 .mascota-guia {
   position: fixed;
   z-index: 30;
-  transition: top 0.35s cubic-bezier(0.4, 0, 0.2, 1), left 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mascota-guia--margen {
+  left: 0;
+  top: 0;
+  will-change: transform;
 }
 
 .mascota-guia--esquina {
@@ -229,7 +217,6 @@
   outline-offset: 2px;
 }
 
-/* Oculta: queda un botón con la mascota en pequeño para traerla de vuelta. */
 .mascota-volver {
   position: fixed;
   right: calc(16px + var(--safe-r));
@@ -267,8 +254,6 @@
   .mascota-guia,
   .mascota-volver { display: none; }
 }
-
-/* ── Ajustes › Mascota ───────────────────────────────────────────────── */
 
 .mascota-ajustes__cabecera {
   display: flex;

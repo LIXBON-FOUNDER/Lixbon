@@ -1,8 +1,5 @@
-// VisualsPage.jsx — Visuals: inicio y galería (/visuals) y el estudio de un visual
-// (/visuals/vis_…). El estudio junta el chat con el modelo, el lienzo de páginas
-// con inspector y retoques, las piezas de marketing con su render y editor, y el
-// historial: todo guardado como versiones del visual en el servidor, así que lo
-// que hacen los agentes (MCP) y lo que se hace aquí es el mismo visual.
+// Todo se guarda como versiones del visual en el servidor: lo que hacen los
+// agentes (MCP) y lo que se hace aquí es el mismo visual.
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -48,7 +45,6 @@ const CONTEXT_WINDOW = 30;
 const esVideo = (p) => /\.(mp4|webm)$/i.test(p || '');
 const nombreCorto = (p) => p.split('/').pop().replace(/\.(html?|svg|md)$/, '');
 
-/** Las páginas viven en el lienzo: el chat solo cuenta qué hace el modelo. */
 const BLOQUE_PAGINA = /```\s*(file|edit):\s*([\w./-]+\.(?:html?|svg))[^\n`]*\n[\s\S]*?(?:\n```|$)/g;
 const sinArchivos = (texto) => (texto || '').replace(BLOQUE_PAGINA, '').trim();
 const paginasDe = (texto) => [...new Set([...(texto || '').matchAll(BLOQUE_PAGINA)].map((m) => m[2]))];
@@ -92,8 +88,6 @@ function Cargando() {
     </div>
   );
 }
-
-// ── Inicio: crear un visual y la galería ─────────────────────────────────────
 
 function Inicio() {
   const t = useT('visuals');
@@ -237,8 +231,6 @@ function Portada({ v, t }) {
   return <span className={`vis-card__sin ${doc === null && v.cover ? 'is-cargando' : ''}`}>{doc === null && v.cover ? '' : t('noPreview')}</span>;
 }
 
-/** Galería: todos los visuals del usuario (estudio, chat y agentes), con
- *  búsqueda, filtro por tipo, orden y vista en lista o cuadrícula. */
 function Galeria({ t, tc }) {
   const locale = useLocale();
   const confirmar = useConfirmar();
@@ -347,8 +339,6 @@ function Galeria({ t, tc }) {
   );
 }
 
-// ── Estudio de un visual ─────────────────────────────────────────────────────
-
 function Salida({ id, version, piece, t }) {
   const [html, setHtml] = useState(null);
   const fuente = piece.source;
@@ -386,7 +376,7 @@ function Estudio({ id }) {
   const [error, setError] = useState('');
   const [verNum, setVerNum] = useState(null);         // null = la última
   const [historial, setHistorial] = useState([]);
-  const [nueva, setNueva] = useState(null);           // { v, label } que llegó mientras mirabas otra
+  const [nueva, setNueva] = useState(null);
   const [renombrando, setRenombrando] = useState(null);
   const [messages, setMessages] = useState([]);
   const [models, setModels] = useState([]);
@@ -396,7 +386,7 @@ function Estudio({ id }) {
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState('');
   const [pagina, setPagina] = useState(null);
-  const [vista, setVista] = useState('pagina');       // 'pagina' | 'lienzo'
+  const [vista, setVista] = useState('pagina');
   const [chatAbierto, setChatAbierto] = useState(true);
   const [verCodigo, setVerCodigo] = useState(false);
   const [copiado, setCopiado] = useState('');
@@ -430,7 +420,6 @@ function Estudio({ id }) {
   busyRef.current = busy;
   verNumRef.current = verNum;
 
-  // ── Carga del visual, su chat y su historial ──────────────────────────
   const cargar = useCallback(async (v) => {
     try {
       const m = await getVisual(id, v);
@@ -506,7 +495,6 @@ function Estudio({ id }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // ── Lo que se ve: la versión guardada o, mientras el modelo escribe, en vivo ──
   const ultimo = messages[messages.length - 1];
   const vivo = useMemo(() => (busy && ultimo?.role === 'assistant' && ultimo.content
     ? aplicarRespuesta(paginasSrv, ultimo.content, { enCurso: true }) : null), [busy, ultimo, paginasSrv]);
@@ -534,7 +522,6 @@ function Estudio({ id }) {
     getText(fileUrl(id, docActual.path, versionVista)).then(setDoc).catch(() => setDoc(''));
   }, [docActual, id, versionVista]);
 
-  // ── Ancho de vista previa ─────────────────────────────────────────────
   const [anchoStage, setAnchoStage] = useState(0);
   useEffect(() => {
     const el = stageRef.current;
@@ -546,7 +533,6 @@ function Estudio({ id }) {
   const anchoFijo = ANCHOS.find((a) => a.id === ancho)?.ancho || 0;
   const marco = anchoFijo && anchoStage ? { ancho: anchoFijo, escala: Math.min(1, anchoStage / anchoFijo), visible: Math.min(anchoFijo, anchoStage) } : null;
 
-  // ── Mensajes del iframe (selección, navegación entre páginas) ──────────
   useEffect(() => {
     const onMessage = (e) => {
       const m = e.data || {};
@@ -571,7 +557,6 @@ function Estudio({ id }) {
     if (!inspeccion) setSeleccion(null);
   }, [inspeccion, docPreview]);
 
-  // ── Retoques manuales: se guardan en el navegador hasta convertirlos en versión ──
   const guardarOps = (fn) => setOps((prev) => {
     const next = fn(prev);
     local.set(`lixbon.visuals.ops.${id}`, next);
@@ -691,7 +676,6 @@ function Estudio({ id }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Chat del estudio ──────────────────────────────────────────────────
   const asegurarConversacion = async () => {
     if (convId) return convId;
     const nuevo = crypto.randomUUID();
@@ -797,7 +781,6 @@ function Estudio({ id }) {
     }
   };
 
-  // Convierte lo que escribió el modelo en una versión nueva del visual.
   const guardarDe = async (respuesta, base, patchLast, pedido) => {
     const r = aplicarRespuesta(base.paginas, respuesta);
     if (r.fallos.length) patchLast((last) => ({ ...last, fallos: r.fallos }));
@@ -817,7 +800,6 @@ function Estudio({ id }) {
 
   const stop = () => abortRef.current?.abort();
 
-  // Primer mensaje que trae el inicio de Visuals al crear el visual.
   useEffect(() => {
     const p = primeroRef.current;
     if (!p || !manifest || loading) return;
@@ -840,7 +822,6 @@ function Estudio({ id }) {
     try { await actualizarVisual(id, { title: limpio }); } catch { cargar(verNum); }
   };
 
-  // ── Piezas de marketing: render y editor ──────────────────────────────
   const renderizar = async (path) => {
     setAviso('');
     try {
@@ -879,7 +860,6 @@ function Estudio({ id }) {
     setEditandoPieza(null);
   };
 
-  // ── Exportar y compartir ──────────────────────────────────────────────
   const codigoFinal = (f) => (esSvg(f.name) ? f.code : aplicarOps(f.code, ops[`${versionVista}:${f.name}`] || []));
   const marcarCopiado = (que) => { setCopiado(que); setTimeout(() => setCopiado(''), 1800); };
   const descargar = async () => {
@@ -1307,7 +1287,6 @@ function Estudio({ id }) {
   );
 }
 
-/** Código de la página con números de línea; incluye los retoques manuales. */
 function CodigoVista({ nombre, codigo, retoques, copiado, onCopiar, t }) {
   const lineas = useMemo(() => codigo.split('\n'), [codigo]);
   return (

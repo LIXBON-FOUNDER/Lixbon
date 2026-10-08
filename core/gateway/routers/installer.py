@@ -1,8 +1,3 @@
-"""
-installer.py — Endpoints de distribución del Lixbon CLI.
-Sirve los scripts de instalación para Linux/macOS y Windows,
-y el archivo client_cli.py descargable.
-"""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request

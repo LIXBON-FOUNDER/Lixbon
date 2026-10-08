@@ -1,8 +1,3 @@
-// FloatingField.jsx — campo de formulario del acceso.
-//
-// La etiqueta ya no flota sobre un borde: va encima del campo, y el campo se
-// distingue por su relleno (#1C1C1C en reposo, #242424 con el foco). Un campo
-// con error cambia de relleno y lo dice con texto, nunca solo con color.
 import { useId } from 'react';
 
 export function FloatingField({

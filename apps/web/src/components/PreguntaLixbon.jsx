@@ -1,7 +1,3 @@
-// PreguntaLixbon.jsx — tarjeta "pregúntale a lixbon" al final de la FAQ de la
-// portada. En reposo mide lo mismo que una pregunta; al preguntar crece hasta
-// ocupar el sitio de las preguntas genéricas (la caja de la FAQ conserva su
-// alto, así que nada de lo que hay debajo se mueve).
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useLocale } from '../i18n/LocaleContext';

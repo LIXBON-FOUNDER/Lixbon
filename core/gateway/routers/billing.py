@@ -1,7 +1,3 @@
-"""
-billing.py — Planes públicos, uso y datos de la cuenta (F5+).
-Los endpoints de administración viven en admin_panel.py (F6).
-"""
 from __future__ import annotations
 
 import hashlib

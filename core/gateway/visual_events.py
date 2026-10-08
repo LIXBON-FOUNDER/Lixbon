@@ -1,6 +1,5 @@
 """
-visual_events.py — Avisos en vivo de Visuals (versión nueva, render terminado) para
-la web y el panel del IDE. Bus en memoria del proceso: con varias réplicas del
+Bus en memoria del proceso: con varias réplicas del
 gateway hará falta moverlo a Redis (docs/ESPECIFICACION_VISUALS.md, punto abierto 5).
 `publish` se puede llamar desde otro hilo (el worker de render en modo inline).
 """

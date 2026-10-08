@@ -1,10 +1,3 @@
-// ClusterCaido.jsx — la ilustración de la página no encontrada.
-//
-// El mismo clúster de ClusterFondo, contado al revés: las aristas se trazan al
-// cargar, los nodos aparecen y respiran, las peticiones viajan y, cada 18 s,
-// un nodo se apaga en rojo y sus aristas se desvanecen. La ruta que no existe
-// es ese nodo. El grafo ocupa la mitad derecha para no pisar el texto.
-
 // [x1, y1, x2, y2, retardo del trazado en s, aislable]. Las tres aristas del
 // nodo J (1000,560) son las que se apagan con él.
 const ARISTAS = [

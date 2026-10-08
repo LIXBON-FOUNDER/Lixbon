@@ -1,5 +1,3 @@
-// Tipografías para el editor de piezas: las de marca (las inyecta paraWeb y el
-// renderizador) y una selección de Google Fonts que se enlazan en la propia pieza.
 export const FUENTES_MARCA = ['Geist', 'Geist Mono', 'Bruno Ace SC'];
 
 export const FUENTES_GOOGLE = {
@@ -50,18 +48,28 @@ const cargaLink = (doc, href) => new Promise((ok) => {
   doc.head.append(link);
 });
 
-/** Enlaza la fuente en la pieza (se guarda con ella y la usa el render). */
+async function sondear(doc, nombre) {
+  for (const ejes of EJES) {
+    const link = await cargaLink(doc, url([familia(nombre, ejes)]));
+    if (link) return link;
+  }
+  return null;
+}
+
 export async function enlazarFuente(doc, nombre) {
   if (FUENTES_MARCA.includes(nombre)) return true;
   const ya = [...doc.querySelectorAll('link[data-lixbon-gfont]')].some((l) => l.dataset.lixbonGfont === nombre);
   if (ya) return true;
-  for (const ejes of EJES) {
-    const link = await cargaLink(doc, url([familia(nombre, ejes)]));
-    if (link) {
-      link.dataset.lixbonGfont = nombre;
-      await doc.fonts?.load(`16px "${nombre}"`).catch(() => {});
-      return true;
-    }
-  }
-  return false;
+  const link = await sondear(doc, nombre);
+  if (!link) return false;
+  link.dataset.lixbonGfont = nombre;
+  await doc.fonts?.load(`16px "${nombre}"`).catch(() => {});
+  return true;
+}
+
+const hrefs = new Map();
+// Se prueba en este documento: el de un diseño no es accesible desde aquí.
+export async function hrefDeFuente(nombre) {
+  if (!hrefs.has(nombre)) hrefs.set(nombre, sondear(document, nombre).then((l) => l?.href || null));
+  return hrefs.get(nombre);
 }

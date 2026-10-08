@@ -1,7 +1,4 @@
 """
-quota.py — Enforcement de límites por plan (F5) + pool de créditos de sesión
-(4h, inicio dinámico) y semana (fija, anclada por cuenta) — F8.
-
 F8 reemplaza a messages_per_day/tokens_per_month como GATE del chat de las 4
 apps de primera parte (web por cookie; desktop/CLI/móvil por su API key propia,
 ver FIRST_PARTY_KEY_NAMES en core.gateway.routers.auth). Esos dos campos viejos
@@ -52,8 +49,6 @@ _WEEK_EPOCH = datetime(2024, 1, 1, tzinfo=timezone.utc)
 _WEEK_SECONDS = 7 * 86400
 
 
-# ── Períodos (UTC) ─────────────────────────────────────────────────────────
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -95,8 +90,6 @@ def _limit_error(code: str, scope: str, message: str, reset: datetime) -> HTTPEx
         "reset_at": reset.isoformat(),
     })
 
-
-# ── Reglas ─────────────────────────────────────────────────────────────────
 
 def model_allowed(plan: dict[str, Any], model: str | None) -> bool:
     """allowed_models NULL ⇒ todos; si no, match por prefijo del id del modelo."""
@@ -141,8 +134,6 @@ def ensure_can_use_visuals(user_data: dict[str, Any], plan: dict[str, Any]) -> N
         "message": "Visuals está incluido en los planes Pro y Advance. Mejora tu plan para usarlo.",
     })
 
-
-# ── F8: pool de créditos de sesión (4h) + semana ────────────────────────────
 
 _weights_cache: dict[str, Any] = {"at": 0.0, "rows": []}
 _WEIGHTS_TTL_S = 60
@@ -319,8 +310,6 @@ def credit_buckets_snapshot(user_id: int, plan: dict[str, Any]) -> dict[str, Any
 
     return {"session": _bucket(session, session_limit), "week": _bucket(week, week_limit)}
 
-
-# ── F5 (legacy, ver docstring del módulo) ───────────────────────────────────
 
 def ensure_can_chat(user_id: int, plan: dict[str, Any], model: str | None = None) -> None:
     """

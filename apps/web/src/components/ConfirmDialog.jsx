@@ -1,5 +1,3 @@
-// ConfirmDialog.jsx — modal de confirmación para acciones destructivas.
-// Con requirePassword pide la contraseña (reautenticación) y la pasa a onConfirm.
 import { useState } from 'react';
 import { IconX } from './Icons';
 import { useCierreAnimado } from '../hooks/useCierreAnimado';

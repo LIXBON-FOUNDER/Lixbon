@@ -1,12 +1,6 @@
-/* landing.css — la portada pública (/) y lo que comparte la web pública: los
-   titulares en Lancelot, los paisajes, la animación del logo y las entradas
-   al hacer scroll. Minimalista y cálida: mucho aire, ninguna línea, la
-   jerarquía la hacen el tamaño y el relleno.
-
-   Las entradas de aquí pasan de los ~350 ms de motion.css a propósito: son
+/* Las entradas de aquí pasan de los ~350 ms de motion.css a propósito: son
    decorado de una página que se lee despacio, no respuesta a un clic. */
 
-/* ── Titulares de la web pública en Lancelot ─────────────────────────── */
 /* Lancelot tiene un solo peso y un ojo pequeño: se usa más grande que la
    Geist a la que sustituye y siempre a 400. Solo en páginas con la barra
    pública (`.pubnav ~ …`), no en el chat ni en Ajustes. */
@@ -33,19 +27,11 @@
   line-height: 1.1;
 }
 
-/* ── Portada ─────────────────────────────────────────────────────────── */
-
 .landing { background: var(--bg); color: var(--ink); transition: background .25s ease, color .25s ease; }
-.landing .pubnav { padding-inline: max(32px, calc((100% - 1200px) / 2)); }
 
-.landing__wrap { width: min(1200px, calc(100% - 96px)); margin: 0 auto; font-size: 16px; }
+.landing__wrap { width: min(var(--web-ancho), calc(100% - var(--web-margen))); margin: 0 auto; font-size: 16px; }
 
-.landing__hero { padding: 88px 0 64px; }
-.landing__eyebrow {
-  display: inline-flex; align-items: center; gap: 10px; margin: 0 0 28px;
-  font-size: 13.5px; color: var(--ink-muted);
-}
-.landing__eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.landing__hero { padding: 104px 0 72px; }
 .landing__h1 {
   margin: 0; max-width: 1100px;
   font-family: var(--font-display); font-weight: 400;
@@ -66,13 +52,12 @@
   padding-bottom: 3px; transition: color .2s ease, background-size .45s var(--ease-out);
 }
 .landing__enlace:hover { color: var(--accent); background-size: 100% 1px; }
-.landing__enlace svg, .landing__productos h3 svg { transition: transform .35s var(--ease-out); }
-.landing__enlace:hover svg, .landing__productos h3 a:hover svg { transform: rotate(180deg) translateX(-3px) !important; }
+.landing__enlace svg, .landing__productos svg { transition: transform .35s var(--ease-out); }
+.landing__enlace:hover svg, .landing__productos a:hover svg { transform: rotate(180deg) translateX(-3px) !important; }
 .landing__nota { margin: 16px 0 0; font-size: 13.5px; color: var(--ink-muted); }
 .landing__enlaces { display: flex; gap: 32px; flex-wrap: wrap; margin: 40px 0 0; }
 
-/* Entrada del hero: sin JavaScript, al cargar. */
-.landing__eyebrow, .landing__h1, .landing__hero-pie { animation: landing-sube 1.1s var(--ease-out) both; }
+.landing__h1, .landing__hero-pie { animation: landing-sube 1.1s var(--ease-out) both; }
 .landing__h1 { animation-delay: .12s; }
 .landing__hero-pie { animation-delay: .32s; }
 .landing__lienzo--hero { animation: landing-destapa 1.6s var(--ease-out) .4s both; }
@@ -85,8 +70,6 @@
   to { opacity: 1; clip-path: inset(0 0 0 0 round var(--radius)); }
 }
 
-/* ── Lienzos: los paisajes enmarcados con su título ──────────────────── */
-
 .landing__lienzo { margin: 0; }
 .landing__lienzo .paisaje { border-radius: var(--radius); }
 .landing__lienzo figcaption {
@@ -95,18 +78,17 @@
 }
 .landing__lienzo figcaption::before { content: ''; width: 18px; height: 1px; background: currentColor; opacity: .6; }
 
-.landing__lienzo--hero { width: min(1360px, calc(100% - 48px)); margin: 0 auto; }
+.landing__lienzo--hero { width: min(var(--web-ancho), calc(100% - var(--web-margen))); margin: 0 auto; }
 .landing__lienzo--hero .paisaje { aspect-ratio: 1600 / 700; min-height: 340px; }
-.landing__lienzo--hero figcaption { width: min(1200px, calc(100% - 48px)); margin-inline: auto; }
 .landing__lienzo--retrato .paisaje { aspect-ratio: 5 / 4; }
 .landing__lienzo--banda { margin-top: 56px; }
 .landing__lienzo--banda .paisaje { aspect-ratio: 1600 / 540; min-height: 260px; }
 
-/* ── Paisajes (Paisajes.jsx) ─────────────────────────────────────────── */
-
 .paisaje { position: relative; overflow: hidden; isolation: isolate; background: #EFE6D2; }
-.paisaje svg { display: block; width: 100%; height: 100%; }
-.paisaje .capa { transform: translate3d(0, calc(var(--p, 0) * var(--d, 0) * 1px), 0); }
+.paisaje svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.paisaje .capa { will-change: transform; }
+.paisaje--fuera .capa { will-change: auto; }
+.paisaje--fuera * { animation-play-state: paused !important; }
 
 /* Grano de papel: una tesela de ruido rasterizada una vez, en multiplicar. */
 .paisaje::after {
@@ -118,8 +100,6 @@
 .paisaje .estrella { animation: landing-titila 3.6s ease-in-out infinite alternate; }
 @keyframes landing-titila { from { opacity: .35; } to { opacity: 1; } }
 
-/* El crepúsculo vive: una estrella fugaz cada tantos segundos, luciérnagas
-   junto a la orilla y el humo de la cabaña. */
 .paisaje .fugaz { opacity: 0; animation: landing-fugaz 9s ease-in 2s infinite; }
 @keyframes landing-fugaz {
   0% { opacity: 0; transform: translate(-60px, -20px); }
@@ -138,13 +118,10 @@
   50% { opacity: .45; transform: translate(4px, -6px); }
 }
 
-/* En oscuro los paisajes de día bajan un punto de luz, como al atardecer. */
 :root[data-theme="dark"] .paisaje:not(.paisaje--noche)::before {
   content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
   background: rgba(14, 14, 14, 0.22);
 }
-
-/* ── Secciones ───────────────────────────────────────────────────────── */
 
 .landing__fila { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 88px; align-items: center; padding: 136px 0 0; }
 .landing__bloque { padding: 136px 0 0; }
@@ -158,28 +135,21 @@
 .landing__h2--ancho { max-width: 900px; }
 .landing__p { margin: 0 0 20px; max-width: 480px; font-size: 17px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
 
-.landing__productos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; margin: 56px 0 0; padding: 0; list-style: none; }
-.landing__productos h3 { margin: 0 0 12px; font-family: var(--font-display); font-weight: 400; font-size: 30px; line-height: 1.05; }
-.landing__productos h3 a { display: inline-flex; align-items: baseline; gap: 8px; color: var(--ink); text-decoration: none; transition: color .2s ease; }
-.landing__productos h3 a:hover { color: var(--accent); }
-.landing__productos h3 svg { align-self: center; opacity: .55; }
-.landing__productos p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
+.landing__productos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin: 48px 0 0; padding: 0; list-style: none; }
+.landing__productos a { display: flex; flex-direction: column; gap: 12px; color: inherit; text-decoration: none; }
+.landing__video { aspect-ratio: 3 / 4; margin-bottom: 8px; overflow: hidden; border-radius: var(--radius); background: var(--surface-2); }
+.landing__video video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.landing__productos h3 { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(28px, 2.6vw, 36px); line-height: 1.05; color: var(--ink); transition: color .2s ease; }
+.landing__productos p { margin: 0; font-size: 16px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
+.landing__productos svg { flex-shrink: 0; color: var(--ink-muted); }
+.landing__productos a:hover h3 { color: var(--accent); }
+.landing__productos a:hover svg { color: var(--ink); }
 
 .landing__codigo {
   margin: 0; padding: 30px 32px; overflow: auto; border-radius: var(--radius);
   background: var(--code-bg); color: var(--code-ink);
   font-family: var(--font-mono); font-size: 13px; line-height: 1.7;
 }
-
-.landing__precios { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 40px; }
-.landing__precio { padding: 32px 32px 36px; border-radius: var(--radius); background: var(--surface-1); transition: transform .4s var(--ease-out), background-color .2s ease; }
-.landing__precio:hover { transform: translateY(-3px); }
-.landing__precio h3 { margin: 0 0 20px; font-size: 14px; font-weight: 500; color: var(--ink-soft); }
-.landing__cifra { margin: 0 0 24px; font-family: var(--font-display); font-size: 64px; line-height: 1; color: var(--ink); }
-.landing__cifra span { font-family: var(--font-ui); font-size: 14px; color: var(--ink-muted); }
-.landing__precio ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.landing__precio li { display: flex; align-items: baseline; gap: 10px; font-size: 15px; color: var(--ink-soft); }
-.landing__precio li::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); transform: translateY(-2px); }
 
 /* Preguntas: cada una es una tarjeta que se despliega. Donde el navegador
    sabe animar a `auto` (interpolate-size), se abre deslizando. */
@@ -204,9 +174,6 @@
   .landing__faq details[open]::details-content { block-size: auto; }
 }
 
-/* Pregunta a lixbon: la tarjeta vive pegada al fondo de la caja de la FAQ, que
-   reserva su alto en reposo. Al preguntar crece hasta cubrir la caja entera (que
-   no cambia de tamaño) y las preguntas genéricas se desvanecen debajo. */
 .landing__faqbox { --ask-alto: 69px; position: relative; padding-bottom: calc(var(--ask-alto) + 8px); }
 .landing__faq { transition: opacity .35s ease, transform .5s var(--ease-out); }
 .landing__faqbox.is-preguntando .landing__faq { opacity: 0; transform: translateY(-12px) scale(.985); pointer-events: none; }
@@ -240,10 +207,9 @@
 .landing__ask-enviar:disabled { opacity: .18; cursor: default; }
 .landing__ask-enviar:not(:disabled):active { transform: scale(.92); }
 
-/* Llamada final: el crepúsculo detrás del texto. */
 .landing__final {
   position: relative; display: grid; place-items: center; overflow: hidden;
-  width: min(1360px, calc(100% - 48px)); min-height: 560px; margin: 152px auto 0;
+  width: min(var(--web-ancho), calc(100% - var(--web-margen))); min-height: 560px; margin: 136px auto 0;
   border-radius: var(--radius); text-align: center;
 }
 .landing__final-fondo { position: absolute; inset: 0; }
@@ -257,8 +223,6 @@
 }
 .landing__btn--claro:hover { background: #FFFFFF; transform: translateY(-1px); }
 
-/* ── Entradas al hacer scroll (hooks/useRevelar.js) ──────────────────── */
-
 .revelar-listo [data-revelar],
 .revelar-listo[data-revelar] {
   opacity: 0; transform: translateY(32px);
@@ -267,11 +231,6 @@
 }
 .revelar-listo [data-revelar].is-visible,
 .revelar-listo[data-revelar].is-visible { opacity: 1; transform: none; }
-
-/* ── Logo animado (Logo.jsx, `animado`) ──────────────────────────────── */
-/* El isotipo se arma: el fondo aparece, las cuatro piezas llegan cada una
-   desde su esquina y la chispa se enciende al final. Luego las letras suben
-   en cascada. Todo en ~1,2 s y una sola vez. */
 
 .logo--animado .logo__fondo,
 .logo--animado .logo__p,
@@ -290,42 +249,33 @@
 @keyframes logo-chispa { from { opacity: 0; transform: scale(0) rotate(-120deg); } }
 @keyframes logo-letra { from { opacity: 0; transform: translateY(.5em); filter: blur(4px); } }
 
-/* En el pie el wordmark es enorme: las letras suben más lento y esperan a
-   que el bloque entre en vista. */
 .pubfoot__wordmark .logo__letra { animation-duration: 1.1s; animation-delay: calc(var(--i) * 90ms); }
 .pubfoot__wordmark .logo__letra { animation-name: logo-letra-grande; }
 @keyframes logo-letra-grande { from { opacity: 0; transform: translateY(70%); } }
 .revelar-listo .pubfoot__marca:not(.is-visible) .logo__letra { animation: none; opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .logo--animado *, .landing__eyebrow, .landing__h1, .landing__hero-pie, .landing__lienzo--hero, .paisaje .estrella, .paisaje .fugaz, .paisaje .luciernaga, .paisaje .humo { animation: none !important; }
-  .paisaje .capa { transform: none; }
+  .logo--animado *, .landing__h1, .landing__hero-pie, .landing__lienzo--hero, .paisaje .estrella, .paisaje .fugaz, .paisaje .luciernaga, .paisaje .humo { animation: none !important; }
+  .paisaje .capa { transform: none !important; }
   .landing__ask, .landing__faq, .landing__ask-panel { transition-duration: .01s; }
 }
 
-/* ── Compacto ────────────────────────────────────────────────────────── */
-
-@media (max-width: 1080px) {
-  .landing__productos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 32px; }
+@media (max-width: 900px) {
+  .landing__productos { grid-template-columns: 1fr; gap: 48px; }
 }
 
 @media (max-width: 900px) {
-  .landing__wrap { width: calc(100% - 40px); }
   .landing__hero { padding: 64px 0 44px; }
   .landing__hero-pie { grid-template-columns: 1fr; gap: 32px; margin-top: 32px; }
   .landing__hero-pie > div { justify-self: start; }
   .landing__lead { font-size: 17px; }
-  .landing__lienzo--hero { width: calc(100% - 24px); }
   .landing__lienzo--hero .paisaje { min-height: 300px; }
-  .landing__lienzo--hero figcaption { width: calc(100% - 16px); }
   .landing__fila { grid-template-columns: 1fr; gap: 40px; padding-top: 88px; }
   .landing__bloque { padding-top: 88px; }
-  .landing__precios { grid-template-columns: 1fr; }
-  .landing__final { width: calc(100% - 24px); min-height: 480px; margin-top: 104px; }
+  .landing__final { min-height: 480px; margin-top: 96px; }
 }
 
 @media (max-width: 560px) {
-  .landing__productos { grid-template-columns: 1fr; }
   .landing__faq summary { padding: 18px 18px; }
   .landing__faq p { padding: 0 18px 20px; }
 }

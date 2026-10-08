@@ -1,6 +1,3 @@
-// useConfirmar.jsx — sustituto de window.confirm con el diálogo de la casa.
-// `confirmar({...})` devuelve una promesa que resuelve true/false, así el
-// código que antes hacía `if (!window.confirm(...)) return` cambia solo el await.
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useT } from '../i18n/useT';

@@ -1,8 +1,9 @@
-// LocaleContext.jsx — idioma activo (es/en), determinado por el prefijo /en de la URL.
 import { createContext, useContext, useEffect } from 'react';
 
 export const SUPPORTED_LOCALES = ['es', 'en'];
-export const DEFAULT_LOCALE = 'es';
+export const DEFAULT_LOCALE = 'en';
+// Idioma en el que se escriben los diccionarios: el respaldo si falta una clave.
+export const SOURCE_LOCALE = 'es';
 
 const LocaleContext = createContext(DEFAULT_LOCALE);
 

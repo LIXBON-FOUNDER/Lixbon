@@ -1,5 +1,3 @@
-// remote.js — cliente del control remoto (/remote) en la web: SSE por fetch
-// (permite from_seq y reconexión controlada) y reducer del transcript.
 // Mismo protocolo y reducción que la app móvil (apps/mobile/src/remote.js).
 
 export function openEventStream({ path, signal, onEvent }) {
@@ -37,8 +35,6 @@ export function openEventStream({ path, signal, onEvent }) {
   })();
 }
 
-// ── Reducer del transcript remoto ───────────────────────────────────────────
-
 export const initialRemoteState = {
   items: [],
   approvals: [],
@@ -47,7 +43,6 @@ export const initialRemoteState = {
   hostConnected: false,
   meta: null,
   files: null,
-  // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
   orch: null,
   orchDiff: {},
   orchTerm: {},

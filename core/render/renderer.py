@@ -1,6 +1,4 @@
 """
-renderer.py — HTML de una pieza → PNG o MP4 con Chromium (Playwright) y ffmpeg.
-
 El HTML es contenido no confiable que corre en el servidor. Toda petición de red
 pasa por `_allow`: solo salen http(s) a IPs públicas (nada de la red privada de
 Railway, metadatos de la nube ni localhost), archivos del directorio de assets

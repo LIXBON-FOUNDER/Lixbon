@@ -1,10 +1,5 @@
-// DialogoPago.jsx — el modal de cobro, con sus tres desenlaces.
-//
-// El cobro no sale de lixbon. La tarjeta nueva se guarda contra Stripe con un
-// SetupIntent y de ahí solo sale un `pm_...`; el cargo se pide al backend con
-// ese id. Si el banco pide confirmación, Stripe abre su propio marco encima:
-// esa pantalla es del emisor y no se puede vestir, así que aquí solo se pinta
-// la espera alrededor.
+// La tarjeta se guarda contra Stripe con un SetupIntent y al backend solo llega
+// el `pm_...`. El marco de confirmación del banco es del emisor y no se viste.
 import { useCallback, useEffect, useState } from 'react';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { api } from '../../lib/api';

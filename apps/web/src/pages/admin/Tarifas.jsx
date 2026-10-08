@@ -8,8 +8,6 @@ import {
   errMsg, fmtNum,
 } from './comunes';
 
-// Cuatro cosas distintas que antes iban en una sola columna: se reparten en
-// pestañas y cada una trae su tabla y su alta plegada.
 const SECCIONES = [
   { id: 'cupo', label: 'Cupo del chat' },
   { id: 'pesos', label: 'Pesos por modelo' },
@@ -494,8 +492,6 @@ export default function Tarifas() {
   );
 }
 
-// Pesos y tarifas tienen la misma forma (prefijo, nombre, entrada, salida,
-// estado): una sola tabla con el alta plegada en la cabecera.
 function TablaPorModelo({
   titulo, nota, unidad, entero, filas, borrador, setBorrador, guardadoId,
   onGuardar, onAlternar, onEliminar, estado, alta,

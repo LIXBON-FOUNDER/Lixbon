@@ -1,10 +1,7 @@
-// stripe.js — carga de Stripe.js y la piel de sus campos.
-//
-// Los campos de tarjeta son iframes servidos por Stripe: el número no pasa por
-// nuestro dominio ni por nuestro servidor, que es lo que mantiene el alcance
-// PCI en el cuestionario corto. Lo único que podemos hacer es vestirlos, y de
-// eso se encarga `apariencia`.
-import { loadStripe } from '@stripe/stripe-js';
+// Los campos de tarjeta son iframes de Stripe: el número no pasa por nuestro
+// servidor (alcance PCI mínimo). La entrada principal de @stripe/stripe-js
+// inyecta el script al importarse; /pure espera a que se llame a loadStripe.
+import { loadStripe } from '@stripe/stripe-js/pure';
 import { api } from './api';
 
 let promesa = null;

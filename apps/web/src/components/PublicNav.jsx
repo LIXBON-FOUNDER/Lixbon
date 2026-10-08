@@ -1,36 +1,64 @@
-// PublicNav.jsx — barra superior común de las páginas públicas
-// (Aplicaciones, Documentación, Planes). Marca el enlace activo y adapta los
-// botones de la derecha según haya sesión.
-// En compacto los enlaces no desaparecen: se recogen en un menú desplegable.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Link } from '../i18n/link';
+import { stripLocale } from '../i18n/paths';
 import { useAuth } from '../hooks/useAuth';
 import { useDismiss } from '../hooks/useDismiss';
 import { useT } from '../i18n/useT';
-import { Logo } from './Logo';
-import { IconMenu, IconX } from './Icons';
-import { TemaBoton } from './TemaBoton';
+import { LogoFounderScroll } from './LogoFounder';
+import { IconChevron, IconMenu, IconX } from './Icons';
 import { LanguageSwitch } from './LanguageSwitch';
 
-// El logo se monta animado una vez por visita: al navegar entre páginas
-// públicas la barra se vuelve a montar y repetirlo cansaría.
-let logoYaAnimado = false;
+function useMenu(t) {
+  return [
+    {
+      id: 'product',
+      label: t('menuProduct'),
+      items: [
+        { to: '/chat', label: t('itemChat'), desc: t('itemChatDesc') },
+        { to: '/visuals', label: t('itemVisuals'), desc: t('itemVisualsDesc') },
+        { to: '/apps', label: t('itemApps'), desc: t('itemAppsDesc') },
+        { to: '/skills', label: t('itemSkills'), desc: t('itemSkillsDesc') },
+      ],
+    },
+    {
+      id: 'developers',
+      label: t('menuDevelopers'),
+      items: [
+        { to: '/docs', label: t('itemDocs'), desc: t('itemDocsDesc') },
+        { to: '/docs/using-your-api-key', label: t('itemApi'), desc: t('itemApiDesc') },
+        { to: '/guides', label: t('itemGuides'), desc: t('itemGuidesDesc') },
+        { to: '/status', label: t('itemStatus'), desc: t('itemStatusDesc') },
+      ],
+    },
+    {
+      id: 'company',
+      label: t('menuCompany'),
+      items: [
+        { to: '/about', label: t('itemAbout'), desc: t('itemAboutDesc') },
+        { to: '/team', label: t('itemLeadership'), desc: t('itemLeadershipDesc') },
+        { to: '/news', label: t('itemNews'), desc: t('itemNewsDesc') },
+        { to: '/support', label: t('itemSupport'), desc: t('itemSupportDesc') },
+      ],
+    },
+    { id: 'plans', label: t('plans'), to: '/plans' },
+  ];
+}
+
+const coincide = (ruta, to) => ruta === to || (to !== '/docs' && ruta.startsWith(`${to}/`)) || (to === '/docs' && ruta.startsWith('/docs') && !ruta.startsWith('/docs/using-your-api-key'));
 
 export function PublicNav() {
   const { pathname } = useLocation();
+  const ruta = stripLocale(pathname);
   const { user } = useAuth();
   const t = useT('nav');
   const tc = useT('common');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [abierto, setAbierto] = useState(null);
   const navRef = useRef(null);
-  const [animarLogo] = useState(() => !logoYaAnimado);
   const [scrolled, setScrolled] = useState(false);
+  const menu = useMenu(t);
 
-  useEffect(() => { logoYaAnimado = true; }, []);
-
-  // La barra es fija: al bajar gana un velo y una sombra para separarse del
-  // contenido que pasa por debajo.
   useEffect(() => {
     const alMover = () => setScrolled(window.scrollY > 8);
     alMover();
@@ -38,77 +66,77 @@ export function PublicNav() {
     return () => window.removeEventListener('scroll', alMover);
   }, []);
 
-  const LINKS = [
-    { to: '/docs', label: t('docs') },
-    { to: '/guides', label: t('guides') },
-    { to: '/apps', label: t('apps') },
-    { to: '/skills', label: t('skills') },
-    { to: '/plans', label: t('plans') },
-  ];
-
-  const close = useCallback(() => setMenuOpen(false), []);
-  useDismiss(menuOpen, navRef, close);
-
-  // Cambiar de página cierra el menú (los enlaces son SPA).
+  const close = useCallback(() => { setMenuOpen(false); setAbierto(null); }, []);
+  useDismiss(menuOpen || abierto !== null, navRef, close);
   useEffect(() => { close(); }, [pathname, close]);
+
+  const grupoActivo = (g) => (g.to ? coincide(ruta, g.to) : g.items.some((i) => coincide(ruta, i.to)));
 
   return (
     <header className={`pubnav ${scrolled ? 'is-scrolled' : ''}`} ref={navRef}>
-      <Link to="/" className="pubnav__logo" aria-label={t('home')}><Logo animado={animarLogo} /></Link>
+      <div className="pubnav__in">
+        <Link to="/" className="pubnav__logo" aria-label={t('home')}><LogoFounderScroll /></Link>
 
-      <nav className="pubnav__links">
-        {LINKS.map((l) => (
-          <Link
-            key={l.to}
-            to={l.to}
-            className={`pubnav__link ${pathname.startsWith(l.to) ? 'is-active' : ''}`}
+        <nav className="pubnav__links" aria-label={t('home')}>
+          {menu.map((g) => (g.to ? (
+            <Link key={g.id} to={g.to} className={`pubnav__link ${grupoActivo(g) ? 'is-active' : ''}`}>{g.label}</Link>
+          ) : (
+            <div
+              key={g.id}
+              className={`pubnav__grupo ${abierto === g.id ? 'is-open' : ''}`}
+              onMouseEnter={() => setAbierto(g.id)}
+              onMouseLeave={() => setAbierto((a) => (a === g.id ? null : a))}
+            >
+              <button
+                type="button"
+                className={`pubnav__link ${grupoActivo(g) ? 'is-active' : ''}`}
+                aria-expanded={abierto === g.id}
+                aria-controls={`pubnav-${g.id}`}
+                onClick={() => setAbierto((a) => (a === g.id ? null : g.id))}
+              >
+                {g.label}<IconChevron size={13} open={abierto === g.id} />
+              </button>
+              <div id={`pubnav-${g.id}`} className="pubnav__panel" hidden={abierto !== g.id}>
+                {g.items.map((i) => (
+                  <Link key={i.to} to={i.to} className={`pubnav__item ${coincide(ruta, i.to) ? 'is-active' : ''}`}>
+                    <strong>{i.label}</strong>
+                    <span>{i.desc}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )))}
+        </nav>
+
+        <div className="pubnav__actions">
+          <div className="btn-grupo pubnav__cta">
+            <Link to="/chat" className="btn-grupo__item">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
+            <LanguageSwitch className="btn-grupo__item pubnav__idioma" conCodigo />
+          </div>
+
+          <button
+            className="icon-btn pubnav__toggle"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={menuOpen ? t('closeMenu') : t('openMenu')}
+            aria-expanded={menuOpen}
+            aria-controls="pubnav-menu"
           >
-            {l.label}
-          </Link>
-        ))}
-      </nav>
-
-      <div className="pubnav__actions">
-        {/* Estos se recogen en .pubnav__menu al pasar a compacto. Van en
-            su propio contenedor porque .pubnav__btn lo reusan otras páginas
-            (la conversación compartida) que no tienen menú donde recogerlos. */}
-        <LanguageSwitch />
-        <TemaBoton />
-        <div className="pubnav__wide">
-          <Link to="/support" className={`pill-btn pill-btn--outline pubnav__btn ${pathname.startsWith('/support') ? 'is-active' : ''}`}>
-            {tc('support')}
-          </Link>
-          {!user && (
-            <Link to="/auth" className="pubnav__login">{tc('logIn')}</Link>
-          )}
-          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
+            {menuOpen ? <IconX /> : <IconMenu />}
+          </button>
         </div>
-
-        <button
-          className="icon-btn pubnav__toggle"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label={menuOpen ? t('closeMenu') : t('openMenu')}
-          aria-expanded={menuOpen}
-          aria-controls="pubnav-menu"
-        >
-          {menuOpen ? <IconX /> : <IconMenu />}
-        </button>
       </div>
 
-      {/* Mismo contenido que la barra ancha, apilado. Solo visible en compacto. */}
       <div id="pubnav-menu" className={`pubnav__menu ${menuOpen ? 'is-open' : ''}`} hidden={!menuOpen}>
-        {LINKS.map((l) => (
-          <Link
-            key={l.to}
-            to={l.to}
-            className={`pubnav__menu-link ${pathname.startsWith(l.to) ? 'is-active' : ''}`}
-          >
-            {l.label}
-          </Link>
-        ))}
-        <Link to="/support" className={`pubnav__menu-link ${pathname.startsWith('/support') ? 'is-active' : ''}`}>{tc('support')}</Link>
-        {!user && <Link to="/auth" className="pubnav__menu-link">{tc('logIn')}</Link>}
-        <Link to="/chat" className="pill-btn pill-btn--primary pubnav__menu-cta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
+        {menu.map((g) => (g.to ? (
+          <Link key={g.id} to={g.to} className="pubnav__menu-solo">{g.label}</Link>
+        ) : (
+          <div key={g.id} className="pubnav__menu-grupo">
+            <span className="pubnav__menu-titulo">{g.label}</span>
+            {g.items.map((i) => (
+              <Link key={i.to} to={i.to} className={`pubnav__menu-link ${coincide(ruta, i.to) ? 'is-active' : ''}`}>{i.label}</Link>
+            ))}
+          </div>
+        )))}
       </div>
     </header>
   );

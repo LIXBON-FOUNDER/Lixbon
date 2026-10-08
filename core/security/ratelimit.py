@@ -1,5 +1,4 @@
 """
-ratelimit.py — Rate limiting y bloqueo anti-brute-force.
 Backend Redis (REDIS_URL) para funcionar entre múltiples workers/réplicas en Railway;
 fallback en memoria de proceso cuando no hay Redis (desarrollo sin red).
 Si Redis falla en runtime se degrada al fallback en memoria (fail-open controlado).
@@ -17,8 +16,6 @@ from fastapi import HTTPException
 from core.config import AUTH_BLOCK_MINUTES, AUTH_RATE_LIMIT, RATE_LIMIT_PER_MIN, REDIS_URL
 
 logger = logging.getLogger("lixbon.ratelimit")
-
-# ── Cliente Redis (perezoso) ───────────────────────────────────────────────
 
 _redis = None
 _redis_failed = False
@@ -46,16 +43,12 @@ def _key_id(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()[:16]
 
 
-# ── Fallback en memoria (un solo proceso) ──────────────────────────────────
-
 _rate_lock = threading.Lock()
 _rate_hits: dict[str, deque[float]] = defaultdict(deque)
 _auth_lock = threading.Lock()
 _auth_attempts: dict[str, list[float]] = defaultdict(list)
 _auth_blocked: dict[str, float] = {}
 
-
-# ── Rate limiting general (por API key) ────────────────────────────────────
 
 def enforce_rate_limit(identifier: str, limit: int | None = None) -> None:
     """
@@ -90,8 +83,6 @@ def enforce_rate_limit(identifier: str, limit: int | None = None) -> None:
             raise HTTPException(status_code=429, detail=detail)
         bucket.append(now_ts)
 
-
-# ── Anti-brute-force por IP ────────────────────────────────────────────────
 
 def check_auth_rate_limit(ip: str) -> None:
     """Lanza 429 si la IP está bloqueada por intentos de login fallidos."""

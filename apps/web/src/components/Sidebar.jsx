@@ -1,16 +1,10 @@
-// Sidebar.jsx — panel izquierdo del chat (mockup 2.1): logo + buscar + colapsar,
-// navegación, Historial colapsable y footer de perfil con plan.
-// El colapso anima el ancho: el contenido completo vive en __body y el modo
-// colapsado en __rail; ambos se funden con opacidad durante la transición.
-// En compacto (≤860px) el panel deja de ser columna y se comporta como cajón:
-// `compact` llega desde ChatPage y cambia el colapsar por un cerrar.
 import { tieneVisuals } from '../lib/planes';
 import { useTema } from '../hooks/useTema';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate as useRawNavigate } from 'react-router-dom';
 import { useNavigate, Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
-import { otherLocalePath } from '../i18n/paths';
+import { guardarIdioma, otherLocalePath } from '../i18n/paths';
 import { useT } from '../i18n/useT';
 import { Logo } from './Logo';
 import { planBadge } from '../lib/planColors';
@@ -29,7 +23,7 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
   const t = useT('sidebar');
   const tc = useT('common');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState(null); // { left, top } en coordenadas de viewport
+  const [menuPos, setMenuPos] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const navigate = useNavigate();
@@ -150,7 +144,6 @@ export function Sidebar({
     if (compact && open) closeBtnRef.current?.focus();
   }, [compact, open]);
 
-  // Escape cierra el cajón.
   useEffect(() => {
     if (!compact || !open) return undefined;
     const onKeyDown = (e) => { if (e.key === 'Escape') onClose?.(); };
@@ -158,7 +151,6 @@ export function Sidebar({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [compact, open, onClose]);
 
-  // Navegar desde el cajón lo cierra: en móvil tapa todo el chat.
   const go = (path) => {
     navigate(path);
     if (compact) onClose?.();
@@ -178,7 +170,6 @@ export function Sidebar({
       aria-hidden={drawerHidden || undefined}
       inert={drawerHidden || undefined}
     >
-      {/* Modo colapsado: columna de iconos */}
       <div className="sidebar__rail" aria-hidden={!collapsed}>
         <button className="icon-btn" onClick={onToggleCollapse} aria-label={t('openPanel')} tabIndex={collapsed ? 0 : -1}>
           <IconPanel />
@@ -188,7 +179,6 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* Contenido completo */}
       <div className="sidebar__body" aria-hidden={collapsed && !compact}>
         <div className="sidebar__header">
           <Link to="/chat" className="sidebar__logo" onClick={compact ? onClose : undefined}>
@@ -282,8 +272,6 @@ export function Sidebar({
         )}
 
         <div className="sidebar__foot">
-        {/* La pestaña que asoma sobre la tarjeta: la misma pieza que llevan
-            los avisos y los diálogos. */}
         <span className="tab" aria-hidden="true" />
         <div className="sidebar__profile" ref={profileRef}>
           {user ? (
@@ -338,7 +326,9 @@ export function Sidebar({
                           className={locale === o.code ? 'is-active' : ''}
                           onClick={() => {
                             setProfileMenu(false);
-                            if (locale !== o.code) rawNavigate(otherLocalePath(pathname));
+                            if (locale === o.code) return;
+                            guardarIdioma(o.code);
+                            rawNavigate(otherLocalePath(pathname));
                           }}
                         >
                           {o.label}

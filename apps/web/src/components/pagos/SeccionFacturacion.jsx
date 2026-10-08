@@ -1,5 +1,3 @@
-// SeccionFacturacion.jsx — Ajustes → Facturación: tarjetas guardadas, cobros
-// automáticos, saldo y últimos cobros. Todo se cobra desde aquí, sin salir.
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from '../../i18n/link';
 import { useLocale } from '../../i18n/LocaleContext';

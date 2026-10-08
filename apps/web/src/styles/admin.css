@@ -1,10 +1,3 @@
-/* admin.css — panel de administración: marco con barra lateral y una página
-   por área. Sin bordes; la jerarquía la da el relleno.
-   var(--surface-0) fondo · var(--surface-1) tarjeta y barra · var(--surface-2) fila · var(--surface-3) campo
-   var(--surface-4) activo · var(--surface-4) celda destacada */
-
-/* ── Marco ───────────────────────────────────────────────────────────── */
-
 .adm {
   display: flex;
   gap: var(--shell-gap);
@@ -12,8 +5,6 @@
   padding: var(--shell-gap);
   background: var(--surface-0);
 }
-
-/* ── Barra lateral ───────────────────────────────────────────────────── */
 
 .adm__nav {
   display: flex;
@@ -190,8 +181,6 @@
   font-weight: 600;
 }
 
-/* ── Página ──────────────────────────────────────────────────────────── */
-
 .adm__main {
   display: flex;
   flex-direction: column;
@@ -246,8 +235,6 @@
   padding-bottom: 4px;
   overflow-y: auto;
 }
-
-/* ── Botones ─────────────────────────────────────────────────────────── */
 
 .adm-btn {
   display: inline-flex;
@@ -308,8 +295,6 @@
   color: var(--danger-ink);
 }
 
-/* ── Tarjetas ────────────────────────────────────────────────────────── */
-
 .adm-card {
   display: flex;
   flex-direction: column;
@@ -352,8 +337,6 @@
   margin-top: auto;
 }
 
-/* ── Cifras ──────────────────────────────────────────────────────────── */
-
 .adm-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -388,8 +371,6 @@
   font-size: 12px;
   color: var(--ink-muted);
 }
-
-/* ── Chips de estado ─────────────────────────────────────────────────── */
 
 .adm-chip {
   display: inline-flex;
@@ -443,9 +424,6 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-
-/* ── Tabla ───────────────────────────────────────────────────────────── */
-/* Rejilla, no <table>: así la fila entera es una superficie con su radio. */
 
 .adm-tabla {
   display: flex;
@@ -571,8 +549,6 @@ a.adm-btn {
   white-space: nowrap;
 }
 
-/* ── Buscador y filtros ──────────────────────────────────────────────── */
-
 .adm-filtros {
   display: flex;
   align-items: center;
@@ -607,8 +583,6 @@ a.adm-btn {
 .adm-buscar input::placeholder {
   color: var(--ink-label);
 }
-
-/* ── Campos ──────────────────────────────────────────────────────────── */
 
 .adm-campos {
   display: grid;
@@ -712,8 +686,6 @@ a.adm-btn {
   color: var(--ink-label);
 }
 
-/* ── Barras de medida ────────────────────────────────────────────────── */
-
 .adm-medida {
   display: flex;
   flex-direction: column;
@@ -772,8 +744,6 @@ a.adm-btn {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
-
-/* ── Avisos ──────────────────────────────────────────────────────────── */
 
 .adm-aviso {
   display: flex;
@@ -858,8 +828,6 @@ a.adm-btn {
   white-space: pre-wrap;
 }
 
-/* ── Estados de la página ────────────────────────────────────────────── */
-
 .adm-vacio {
   padding: 18px 16px;
   color: var(--ink-muted);
@@ -883,8 +851,6 @@ a.adm-btn {
   font-size: 13.5px;
 }
 
-/* ── Paginación ──────────────────────────────────────────────────────── */
-
 .adm-pie {
   display: flex;
   align-items: center;
@@ -897,8 +863,6 @@ a.adm-btn {
   font-size: 12.5px;
   color: var(--ink-label);
 }
-
-/* ── Leyenda ─────────────────────────────────────────────────────────── */
 
 .adm-leyenda {
   display: flex;
@@ -921,8 +885,6 @@ a.adm-btn {
   height: 9px;
   border-radius: 2px;
 }
-
-/* ── Rejillas de la página ───────────────────────────────────────────── */
 
 .adm-rejilla-3 {
   display: grid;
@@ -955,8 +917,6 @@ a.adm-btn {
   gap: 16px;
   min-width: 0;
 }
-
-/* ── Inicio ──────────────────────────────────────────────────────────── */
 
 .adm-inicio {
   display: grid;
@@ -1056,8 +1016,6 @@ a.adm-btn {
   background: var(--surface-1);
 }
 
-/* ── Nodos ───────────────────────────────────────────────────────────── */
-
 .adm-nodo {
   display: flex;
   flex-direction: column;
@@ -1124,8 +1082,6 @@ a.adm-btn {
   font-size: 17px;
   color: var(--ink);
 }
-
-/* ── Proveedores ─────────────────────────────────────────────────────── */
 
 .adm-prov__cab {
   display: flex;
@@ -1257,8 +1213,6 @@ a.adm-btn {
   background: var(--surface-0);
 }
 
-/* ── Modelos y costo ─────────────────────────────────────────────────── */
-
 .adm-modelos {
   display: flex;
   flex-direction: column;
@@ -1333,8 +1287,6 @@ a.adm-btn {
   gap: 14px;
   align-items: center;
 }
-
-/* ── Detalle lateral ─────────────────────────────────────────────────── */
 
 .adm-detalle {
   display: flex;
@@ -1431,8 +1383,6 @@ a.adm-btn {
   gap: 10px;
 }
 
-/* ── Adaptación ──────────────────────────────────────────────────────── */
-
 @media (max-width: 1180px) {
   .adm-inicio,
   .adm-rejilla-3,
@@ -1450,7 +1400,6 @@ a.adm-btn {
   }
 }
 
-/* En móvil la barra pasa a ser la cabecera de la página. */
 @media (max-width: 860px) {
   .adm {
     flex-direction: column;
@@ -1510,9 +1459,6 @@ a.adm-btn {
   }
 }
 
-/* ── Complementos ────────────────────────────────────────────────────── */
-
-/* El selector de filtro lleva la piel del chip. */
 .adm-btn.select__btn {
   gap: 8px;
 }
@@ -1629,8 +1575,6 @@ a.adm-btn {
 }
 
 
-/* ── Pestañas de una página (Tarifas) ─────────────────────────────────── */
-
 .adm-pestanas {
   display: flex;
   gap: 4px;
@@ -1662,7 +1606,6 @@ a.adm-btn {
   color: var(--ink);
 }
 
-/* Base del cupo: tres campos y el botón en la misma línea. */
 .adm-tarifa-base {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
@@ -1670,7 +1613,6 @@ a.adm-btn {
   gap: 10px;
 }
 
-/* Alta plegada encima de la tabla. */
 .adm-alta {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto;

@@ -1,6 +1,5 @@
-// stream.js — cliente SSE del chat (POST /v1/chat/completions con stream:true).
-// El backend emite chunks en formato OpenAI, comentarios ": keep-alive" y
-// termina con "data: [DONE]". La cookie de sesión autentica (F4).
+// El backend emite chunks OpenAI, comentarios «: keep-alive» y termina con
+// «data: [DONE]».
 
 import { FILE_PROMPT } from './archivos';
 
@@ -31,7 +30,7 @@ export async function streamChatCompletion({
     let detail = `Error del servidor (${res.status})`;
     try {
       const body = await res.json();
-      // F5: los 429/403 de cuota traen detail estructurado {code, message, ...}
+      // Los 429/403 de cuota traen detail estructurado {code, message, ...}
       if (typeof body.detail === 'string') detail = body.detail;
       else if (body.detail?.message) detail = body.detail.message;
     } catch { /* cuerpo no-JSON */ }
@@ -52,7 +51,7 @@ export async function streamChatCompletion({
 
     for (const event of events) {
       const line = event.trim();
-      if (!line.startsWith('data:')) continue; // ignora keep-alives
+      if (!line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
       if (data === '[DONE]') return;
       try {

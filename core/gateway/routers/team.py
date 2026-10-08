@@ -1,6 +1,4 @@
 """
-team.py — El gateway de Lixbon Team.
-
 Implementa entero `docs/team-protocolo.md` (repo del IDE): `/api/team/*` y el
 WebSocket `/ws/team`. El cliente de `src/team/` está escrito contra ese
 documento y `tools/fake-team/server.mjs` lo implementa como referencia
@@ -58,8 +56,6 @@ EXT_PROHIBIDAS = {
 # cliente las renueva con `/url`, que es exactamente para lo que existe esa ruta.
 _URL_SECRETO = (os.getenv("TEAM_URL_SECRET") or secrets.token_hex(32)).encode("utf-8")
 
-
-# ── Utilidades ─────────────────────────────────────────────────────────────
 
 def _base_publico(peticion) -> str:
     """El origen que verá el cliente. Las URLs de adjuntos tienen que ser
@@ -138,8 +134,6 @@ def _borrar_de_r2(claves: list[str]) -> None:
             logger.warning("[team] no se pudo borrar %s de R2", clave)
 
 
-# ── Cuerpos ────────────────────────────────────────────────────────────────
-
 class IssuesIniciales(BaseModel):
     """El paso Issues del asistente de «Nuevo equipo». Todo opcional: lo que
     falte se queda en los valores de siempre."""
@@ -195,8 +189,6 @@ class PresenciaNueva(BaseModel):
     estado: str
 
 
-# ── Arranque ───────────────────────────────────────────────────────────────
-
 @router.get("/api/team/bootstrap")
 async def team_bootstrap(yo: dict[str, Any] = Depends(cookie_auth_required)):
     """Todo lo que la ventana necesita para pintarse. UNA sola llamada: la
@@ -204,8 +196,6 @@ async def team_bootstrap(yo: dict[str, Any] = Depends(cookie_auth_required)):
     uid = yo["id"]
     return tq.bootstrap(uid, hub.estado_real(uid), hub.estado_publico)
 
-
-# ── Proyectos ──────────────────────────────────────────────────────────────
 
 @router.post("/api/team/projects", status_code=201)
 async def crear_proyecto(cuerpo: ProyectoNuevo, yo: dict[str, Any] = Depends(cookie_auth_required)):
@@ -254,8 +244,6 @@ async def borrar_proyecto(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_
         hub.a_usuarios(miembros, {"tipo": "canal_borrado", "canal_id": cid})
     return Response(status_code=204)
 
-
-# ── Miembros ───────────────────────────────────────────────────────────────
 
 @router.get("/api/team/projects/{proyecto_id}/members")
 async def listar_miembros(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_auth_required)):
@@ -307,8 +295,6 @@ async def quitar_miembro(proyecto_id: str, usuario_id: int,
     hub.a_usuario(usuario_id, aviso)   # ya no está en la lista: hay que avisarle aparte
     return Response(status_code=204)
 
-
-# ── Canales ────────────────────────────────────────────────────────────────
 
 @router.post("/api/team/projects/{proyecto_id}/channels", status_code=201)
 async def crear_canal(proyecto_id: str, cuerpo: CanalNuevo,
@@ -397,8 +383,6 @@ async def sacar_de_canal(canal_id: str, usuario_id: int,
     tq.sacar_de_canal(canal_id, usuario_id)
     return Response(status_code=204)
 
-
-# ── Mensajes ───────────────────────────────────────────────────────────────
 
 @router.get("/api/team/channels/{canal_id}/messages")
 async def listar_mensajes(canal_id: str, peticion: Request, antes_de: int = 0,
@@ -523,8 +507,6 @@ async def borrar_mensaje(mensaje_id: str, peticion: Request,
     return Response(status_code=204)
 
 
-# ── Directos, amigos y búsqueda ────────────────────────────────────────────
-
 @router.get("/api/team/dms")
 async def listar_directos(yo: dict[str, Any] = Depends(cookie_auth_required)):
     return [tq.canal_salida(cid, yo["id"], hub.estado_publico)
@@ -590,8 +572,6 @@ async def quitar_amigo(usuario_id: int, yo: dict[str, Any] = Depends(cookie_auth
     return Response(status_code=204)
 
 
-# ── Presencia ──────────────────────────────────────────────────────────────
-
 @router.put("/api/team/presence")
 async def poner_presencia(cuerpo: PresenciaNueva,
                           yo: dict[str, Any] = Depends(cookie_auth_required)):
@@ -601,8 +581,6 @@ async def poner_presencia(cuerpo: PresenciaNueva,
     _difundir_presencia(yo["id"])
     return {"estado": cuerpo.estado}
 
-
-# ── Adjuntos ───────────────────────────────────────────────────────────────
 
 def _limpiar_nombre(nombre: str) -> str:
     """Quita rutas y caracteres raros: el nombre se enseña y se usa al
@@ -736,8 +714,6 @@ async def servir_adjunto(adjunto_id: str, exp: str = "", sig: str = ""):
         raise _no(502, "No se pudo servir el archivo.") from exc
 
 
-# ── WebSocket ──────────────────────────────────────────────────────────────
-
 @router.websocket("/ws/team")
 async def ws_team(websocket: WebSocket):
     """Un solo canal bidireccional para todo lo que ocurre en vivo.
@@ -830,8 +806,6 @@ async def _marco_entrante(ev: dict[str, Any], uid: int, con, firmar) -> None:
             _difundir_presencia(uid)
         return
 
-
-# ── Mantenimiento ──────────────────────────────────────────────────────────
 
 def purgar_adjuntos_huerfanos() -> int:
     """Los que se subieron y nunca llegaron a un mensaje: alguien eligió una

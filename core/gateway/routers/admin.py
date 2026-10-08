@@ -1,7 +1,3 @@
-"""
-admin.py — Endpoints de administración de lixbon DTC.
-Incluye: dashboard, health, estado del sistema, nodos y uso.
-"""
 from __future__ import annotations
 from typing import Any
 
@@ -24,8 +20,6 @@ from core.gateway.utils import fetch_models
 router = APIRouter()
 
 
-# ── Dashboard API ──────────────────────────────────────────────────────────
-
 @router.get("/api/dashboard/init")
 async def dashboard_init(
     request: Request,
@@ -44,8 +38,6 @@ async def dashboard_init(
         "server_base_url": str(request.base_url).rstrip("/"),
     }
 
-
-# ── API de estado ──────────────────────────────────────────────────────────
 
 @router.get("/health")
 async def health():
@@ -69,8 +61,6 @@ async def api_usage(user_data: dict[str, Any] = Depends(cookie_auth_required)):
     return get_usage_summary(user_data["id"])
 
 
-# ── API de nodos (F6: métricas internas del cluster ⇒ solo admin) ─────────
-
 @router.get("/api/nodes")
 async def api_nodos(user_data: dict[str, Any] = Depends(admin_required)):
     """Lista todos los nodos con su estado y métricas actuales."""
@@ -92,8 +82,6 @@ async def api_reload_nodes(user_data: dict[str, Any] = Depends(admin_required)):
     deps.orquestador.cargar_nodos()
     return {"reloaded": True, "nodos": len(deps.orquestador._nodos)}
 
-
-# ── API de audit log ───────────────────────────────────────────────────────
 
 @router.get("/api/audit")
 async def api_audit(

@@ -36,7 +36,6 @@ def test_no_deja_un_tool_huerfano_al_principio():
     assert out[0]["role"] != "tool"
 
 
-# ── num_ctx global ───────────────────────────────────────────────────────────
 from core import config
 from core.inference.roles import context_length_of, resolve_num_ctx
 

@@ -1,10 +1,6 @@
-// Pasarela.jsx — estado de la pasarela, de solo lectura.
-//
-// El diseño traía un formulario con la clave secreta y un botón de rotar. No
-// se implementa así a propósito: las claves viven en variables de entorno del
-// despliegue, y editarlas desde el panel significaría guardarlas en la base de
-// datos y servirlas por HTTP a quien tenga una sesión de admin. Se rotan en
-// Stripe y se cambian en Railway.
+// Solo lectura a propósito: las claves viven en variables de entorno; editarlas
+// aquí obligaría a guardarlas en BD y servirlas por HTTP. Se rotan en Stripe y
+// se cambian en Railway.
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { IconRefresh } from '../../components/Icons';

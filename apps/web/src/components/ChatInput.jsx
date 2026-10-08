@@ -1,12 +1,5 @@
-// ChatInput.jsx — caja de escritura del chat.
-//
-// Un archivo entra por tres puertas, y las tres acaban en la misma función:
-// el clip, pegar con Ctrl+V y soltarlo sobre la ventana. Documentos (PDF,
-// Word, texto y código) se leen en el servidor; las imágenes las describe un modelo de
-// visión y esa descripción viaja como contexto, así que valen con cualquier
-// modelo. El audio no se acepta todavía: el gateway no transcribe, y decirlo es
-// mejor que adjuntar algo que el modelo nunca va a leer. Para hablar en vez de
-// escribir está el micrófono, que dicta en el propio navegador.
+// Las imágenes las describe un modelo de visión y viajan como contexto, así que
+// valen con cualquier modelo. El audio no se acepta: el gateway no transcribe.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconStop, IconX,
@@ -29,7 +22,6 @@ const ALTO_MAX = 180;
 
 let siguienteId = 0;
 
-// Anillo que se llena con el contexto usado, como en Claude Desktop.
 function ContextRing({ uso }) {
   const t = useT('chat');
   if (!uso) return null;
@@ -71,10 +63,8 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
 
   const leyendo = attachments.some((a) => a.estado === 'leyendo');
 
-  // ── Crecer con lo escrito ───────────────────────────────────────────
-  // Se mide con la altura en `auto` y se restaura antes de que el navegador
-  // pinte, para que la transición de CSS salga del alto anterior y no de cero:
-  // sin esto la caja da un salto seco cada vez que el texto pasa de línea.
+  // Se mide con la altura en `auto` y se restaura antes de pintar para que la
+  // transición parta del alto anterior y no de cero.
   const ajustarAlto = useCallback(() => {
     const el = ref.current;
     if (!el) return;
@@ -87,7 +77,6 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     el.style.overflowY = el.scrollHeight > ALTO_MAX ? 'auto' : 'hidden';
   }, []);
 
-  // Texto inicial (p. ej. Visuals rellena el prompt desde un elemento del lienzo).
   useEffect(() => {
     if (!initialText || !ref.current) return;
     ref.current.value = initialText;
@@ -105,8 +94,6 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       el.focus();
     }, [ajustarAlto]),
   );
-
-  // ── Adjuntar ────────────────────────────────────────────────────────
 
   const anadirArchivos = useCallback(async (archivos) => {
     const lista = Array.from(archivos || []);
@@ -172,8 +159,6 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     }
   }, [modelVision, t]);
 
-  // Soltar en cualquier punto de la ventana, no solo sobre la caja: quien
-  // arrastra un archivo apunta al chat, no a un rectángulo de 40 píxeles.
   useEffect(() => {
     let dentro = 0;
 
@@ -212,14 +197,12 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
 
   const alPegar = (e) => {
     const archivos = Array.from(e.clipboardData?.files || []);
-    if (archivos.length === 0) return; // pegar texto sigue siendo pegar texto
+    if (archivos.length === 0) return;
     e.preventDefault();
     anadirArchivos(archivos);
   };
 
   const quitar = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id));
-
-  // ── Enviar ──────────────────────────────────────────────────────────
 
   const send = () => {
     const el = ref.current;
@@ -262,8 +245,6 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
 
   const aviso = error || dictado.error;
 
-  // Todo vive dentro de la caja: el texto arriba y, debajo, una barra con las
-  // herramientas, el modelo con su anillo de contexto y el botón de enviar.
   return (
     <div className={arrastrando ? 'chat-input is-dropping' : 'chat-input'}>
       <div className="chat-input__box">

@@ -1,8 +1,5 @@
-// toolText.js — la actividad del agente remoto contada en palabras (versión
-// web, en español e inglés): qué hace ahora («Revisando el diff») y qué hizo
-// en un tramo («Ejecutó 3 comandos y leyó 2 archivos»). El host del IDE ya
-// manda la frase hecha (`label`); con un host que no la manda (el CLI, una
-// versión vieja) se deduce aquí del nombre de la herramienta y su resumen.
+// El host del IDE ya manda la frase hecha (`label`); con uno que no la manda
+// (el CLI, una versión vieja) se deduce aquí.
 
 const base = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() || p || '';
 const short = (s, n = 40) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s || '');
@@ -91,11 +88,8 @@ const KIND_OF = {
   fetch_url: 'web', web_search: 'web', WebFetch: 'web', WebSearch: 'web',
 };
 
-/** Comando ya terminado con su línea a la vista: en el detalle se muestra el
-    comando tal cual (la descripción solo acompaña mientras está en curso). */
 export const shownCommand = (item) => (KIND_OF[item.tool] === 'cmd' && !item.running && item.summary ? item.summary : '');
 
-/** Frase en curso para una herramienta del transcript remoto. */
 export function describeRemoteTool(item, locale = 'es') {
   if (item.label) return item.label;
   const t = T[locale] || T.es;
@@ -121,7 +115,6 @@ export function describeRemoteTool(item, locale = 'es') {
   return t.using(mcp ? `${mcp[1]} · ${mcp[2].replace(/_/g, ' ')}` : item.tool);
 }
 
-/** «Ejecutó 3 comandos, leyó 2 archivos y editó uno». */
 export function summarizeRemoteTools(items, locale = 'es') {
   const t = T[locale] || T.es;
   const counts = {};

@@ -1,25 +1,16 @@
-// seo.js — título, descripción, canónica y datos estructurados por ruta.
-// La web es una SPA: los buscadores que ejecutan JS leen estas etiquetas al
-// renderizar; las páginas privadas se marcan noindex. Cada página existe en
-// /... (es) y /en/... (en): aquí se añaden los <link rel="alternate"
-// hreflang> entre las dos versiones.
 import { useEffect } from 'react';
-import { otherLocalePath } from '../i18n/paths';
+import { localeDePath, otherLocalePath } from '../i18n/paths';
 
 export const SITE_URL = 'https://lixbon.com';
 export const SITE_NAME = 'lixbon';
 const DESCRIPCION_BASE = {
-  es: 'Chat con modelos de IA sobre GPUs propias: web, CLI con modo agente, '
+  es: 'Chat con modelos de IA sobre GPUs que operamos: web, CLI con modo agente, '
     + 'app de escritorio, Visuals para diseñar webs y una API compatible con OpenAI.',
-  en: 'Chat with AI models on our own GPUs: web, CLI with agent mode, '
+  en: 'Chat with AI models on GPUs we operate: web, CLI with agent mode, '
     + 'desktop app, Visuals to design websites, and an OpenAI-compatible API.',
 };
-const TITULO_BASE = { es: `${SITE_NAME} — IA en tus propias GPUs`, en: `${SITE_NAME} — AI on your own GPUs` };
+const TITULO_BASE = { es: `${SITE_NAME} — IA en GPUs que operamos`, en: `${SITE_NAME} — AI on GPUs we operate` };
 const OG_LOCALE = { es: 'es_ES', en: 'en_US' };
-
-function localeDePath(path) {
-  return path === '/en' || path.startsWith('/en/') ? 'en' : 'es';
-}
 
 function meta(selector, attrs) {
   let el = document.head.querySelector(selector);
@@ -47,7 +38,7 @@ function setJsonLd(datos) {
 function etiquetas({ title, description, path, noindex, jsonLd }) {
   const locale = localeDePath(path);
   const titulo = title ? `${title} · ${SITE_NAME}` : TITULO_BASE[locale];
-  const limpio = path === '/' || path === '/en' ? path : path.replace(/\/$/, '');
+  const limpio = path === '/' || path === '/es' ? path : path.replace(/\/$/, '');
   const url = `${SITE_URL}${limpio}`;
   const urlEs = `${SITE_URL}${locale === 'en' ? otherLocalePath(limpio) : limpio}`;
   const urlEn = `${SITE_URL}${locale === 'es' ? otherLocalePath(limpio) : limpio}`;
@@ -73,7 +64,7 @@ function setAlternates(alternates) {
       el.hreflang = hreflang;
       document.head.appendChild(el);
     }
-    el.href = hreflang === 'x-default' ? alternates.es : alternates[hreflang];
+    el.href = hreflang === 'x-default' ? alternates.en : alternates[hreflang];
   });
 }
 

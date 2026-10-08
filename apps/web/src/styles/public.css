@@ -1,160 +1,3 @@
-/* public.css — páginas públicas (Aplicaciones, Documentación, Novedades, la
-   conversación compartida), la barra superior común, el bloque de código y los
-   diálogos. Todo sobre el mismo escalón de superficies, sin una sola línea. */
-
-/* ── Barra de navegación pública ─────────────────────────────────────── */
-/* Fija arriba al hacer scroll. Arriba del todo es transparente; al bajar
-   (`.is-scrolled`, PublicNav.jsx) gana un velo del fondo con desenfoque y una
-   sombra difusa, nunca una línea. También es el ancla del menú compacto. */
-
-:root { --pubnav-h: 60px; }
-
-.pubnav {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  background: transparent;
-  transition: background-color var(--dur-3, .32s) ease, box-shadow var(--dur-3, .32s) ease, backdrop-filter var(--dur-3, .32s) ease;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  height: 60px;
-  flex-shrink: 0;
-  padding: 0 32px;
-  padding-top: var(--safe-t);
-}
-
-.pubnav.is-scrolled {
-  background: color-mix(in srgb, var(--bg) 84%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  backdrop-filter: blur(14px) saturate(1.3);
-  box-shadow: 0 12px 32px -22px rgba(var(--shadow-rgb), 0.45);
-}
-
-.pubnav__logo {
-  text-decoration: none;
-}
-
-.pubnav__links {
-  display: flex;
-  gap: 4px;
-  margin-left: 12px;
-  flex: 1;
-}
-
-.pubnav__link {
-  padding: 7px 12px;
-  border-radius: var(--radius);
-  font-size: 13.5px;
-  color: var(--ink-muted);
-  text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.pubnav__link:hover {
-  color: var(--ink);
-  background: var(--surface-2);
-}
-
-.pubnav__link.is-active {
-  color: var(--ink);
-  background: var(--surface-3);
-}
-
-.pubnav__actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Lo que se recoge en el menú compacto (ver PublicNav.jsx) */
-.pubnav__wide {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.pubnav__btn {
-  height: 32px;
-  padding: 0 12px;
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.pubnav__login {
-  font-size: 13.5px;
-  color: var(--ink-soft);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.pubnav__login:hover {
-  color: var(--ink);
-}
-
-/* ── Menú compacto de la barra pública ───────────────────────────────── */
-/* Los enlaces no se esconden: se recogen aquí. Mismo contenido, apilado. */
-
-.pubnav__toggle {
-  display: none;
-}
-
-.pubnav__menu {
-  display: none;
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 4px);
-  left: 12px;
-  right: 12px;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px;
-  border-radius: var(--radius);
-  background: var(--surface-3);
-  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5);
-}
-
-.pubnav__menu.is-open {
-  display: flex;
-  animation: pubnav-menu-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes pubnav-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-}
-
-.pubnav__menu-link {
-  padding: 12px 14px;
-  border-radius: var(--radius);
-  font-size: 15px;
-  color: var(--ink-soft);
-  text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.pubnav__menu-link:active,
-.pubnav__menu-link:hover {
-  background: var(--surface-5);
-  color: var(--ink);
-}
-
-.pubnav__menu-link.is-active {
-  background: var(--surface-5);
-  color: var(--ink);
-}
-
-.pubnav__menu-cta {
-  margin-top: 8px;
-  text-decoration: none;
-}
-
-/* ── Bloque de código con copiar ─────────────────────────────────────── */
-/* Dos alturas: una cabecera con el lenguaje y el copiar, y el código debajo.
-   Sobre la página va en var(--surface-1); dentro de una tarjeta baja a var(--surface-0). */
-
 .codeblock {
   display: flex;
   flex-direction: column;
@@ -216,10 +59,6 @@
   color: var(--ink);
 }
 
-/* ── Aplicaciones ────────────────────────────────────────────────────── */
-
-/* Arriba las dos apps como cuadros gemelos (escritorio + Android) y debajo
-   el CLI a todo el ancho. En pantallas angostas se apila todo. */
 /* minmax(0, 1fr) y no 1fr: el mínimo de `1fr` es el min-content de la tarjeta
    (bloques de código, rutas largas) y desbordaba la página en móvil. */
 .downloads {
@@ -250,8 +89,6 @@
   background: var(--bg-card);
 }
 
-/* Cabecera de la tarjeta: el icono a la izquierda y, apilados, el nombre y
-   para qué sirve. El CLI mete además su selector de sistema a la derecha. */
 .dl-card__head {
   display: flex;
   align-items: flex-start;
@@ -271,8 +108,6 @@
   align-self: center;
 }
 
-/* En pantallas estrechas las pestañas de sistema bajan a su propia línea en
-   vez de dejar el título del CLI en una columna de una palabra. */
 @media (max-width: 640px) {
   .dl-card__head {
     flex-wrap: wrap;
@@ -316,7 +151,6 @@
   color: var(--ink-label);
 }
 
-/* Empuja la descarga al borde inferior: las dos tarjetas quedan alineadas. */
 .dl-card__bottom {
   margin-top: auto;
   padding-top: 6px;
@@ -392,8 +226,6 @@
   font-size: 0.9em;
 }
 
-/* Selector de sistema operativo */
-
 .os-tabs {
   display: inline-flex;
   gap: 2px;
@@ -439,7 +271,6 @@
   margin-top: 8px;
 }
 
-/* Versión, etapa y fecha del CLI en la cabecera de la tarjeta */
 .dl-cli-meta,
 .dl-history__head {
   display: flex;
@@ -468,7 +299,6 @@
   color: var(--ok);
 }
 
-/* Novedades de cada versión */
 .dl-history {
   display: flex;
   flex-direction: column;
@@ -503,7 +333,6 @@
   font-size: 0.9em;
 }
 
-/* Archivos de la instalación manual: sistema, enlace y SHA-256 */
 .dl-files {
   display: flex;
   flex-direction: column;
@@ -541,10 +370,6 @@
   font-size: 13px;
 }
 
-/* ── Diálogos ────────────────────────────────────────────────────────── */
-/* Claros sobre la aplicación oscura, con su pestaña: una decisión no es
-   una pantalla más, se lee de un vistazo y se responde. */
-
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -571,7 +396,6 @@
   animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* La pestaña, sin tener que montarla en cada diálogo. */
 .modal::before {
   content: '';
   position: absolute;
@@ -579,7 +403,7 @@
   left: 24px;
   width: 78px;
   height: 11px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 6px 6px 0 0;
   background: var(--modal-bg);
 }
 
@@ -623,7 +447,6 @@
   text-wrap: pretty;
 }
 
-/* Dentro del diálogo claro, el texto y los avisos cambian de bando. */
 .modal .card__muted {
   color: #5A5A57;
 }
@@ -657,7 +480,6 @@
   margin-top: 6px;
 }
 
-/* Dentro del diálogo claro los botones cambian de bando. */
 .modal .pill-btn--primary {
   background: #3C6420;
   color: #F0F6E7;
@@ -730,8 +552,6 @@
   color: #6B241C;
 }
 
-/* ── Conversación compartida (pública) ───────────────────────────────── */
-
 .shared__badge {
   padding: 3px 10px;
   border-radius: var(--radius-chip);
@@ -776,8 +596,6 @@
   font-size: 13px;
   text-wrap: pretty;
 }
-
-/* ── lixbon Docs ─────────────────────────────────────────────────────── */
 
 .docs {
   display: grid;
@@ -835,8 +653,6 @@
   background: var(--surface-3);
 }
 
-/* Contenido */
-
 .docs__content {
   min-width: 0;
   max-width: 760px;
@@ -844,7 +660,6 @@
   animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* De qué grupo del índice viene esta página, antes de decir cuál es. */
 .docs__eyebrow {
   display: block;
   margin-bottom: 8px;
@@ -961,8 +776,6 @@
   font-weight: 500;
 }
 
-/* ── Índice de la página que se está leyendo ─────────────────────────── */
-
 .docs__toc {
   position: sticky;
   top: calc(var(--pubnav-h) + 24px);
@@ -981,8 +794,6 @@
   color: var(--ink-label);
 }
 
-/* La barra de la izquierda es el único indicador de posición de la interfaz:
-   no es un borde de contenedor, es dónde estás. */
 .docs__toc-link {
   padding: 4px 0 4px 11px;
   border-left: 2px solid var(--surface-4);
@@ -1083,8 +894,6 @@
   color: var(--ink);
 }
 
-/* ── Novedades (/novedades) ──────────────────────────────────────────── */
-
 .releases {
   list-style: none;
   margin: 26px auto 0;
@@ -1103,7 +912,6 @@
   transition: background 0.2s ease;
 }
 
-/* Llegar por enlace directo: la versión se señala sin dibujarle un marco. */
 .release:target {
   background: var(--surface-3);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -1173,10 +981,6 @@
   margin-top: 40px;
   color: var(--ink-muted);
 }
-
-/* ── Página no encontrada ────────────────────────────────────────────── */
-/* El clúster va detrás de todo (ClusterCaido) y el contenido se apoya en el
-   borde inferior; el 404 gigante es una superficie más, no un titular. */
 
 .notfound {
   position: relative;
@@ -1254,8 +1058,6 @@
   text-decoration: none;
 }
 
-/* La ilustración: las aristas se trazan una vez, los nodos aparecen después y
-   desde ahí respiran con el mismo latido que el clúster del acceso. */
 .caido__arista {
   stroke-dasharray: 1;
   animation: caido-trazar 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -1279,8 +1081,6 @@
   from { opacity: 0; }
 }
 
-/* El nodo caído tarda en caer lo mismo que en el acceso, pero espera a que el
-   grafo se haya dibujado; sus aristas se apagan con él. */
 .caido__roto {
   animation-delay: 2s;
 }
@@ -1319,39 +1119,6 @@
   12%, 88% { opacity: 0.9; }
   100% { transform: translate(220px, 30px); opacity: 0; }
 }
-
-/* ── Responsive ──────────────────────────────────────────────────────── */
-
-/* La barra pública se recoge a ≤980px: medido, su contenido completo (logo +
-   3 enlaces + Soporte + Iniciar sesión + CTA) necesita casi todo ese ancho.
-   Es un punto de corte distinto al del índice de Docs a propósito: cada
-   componente rompe donde rompe su contenido. */
-
-@media (max-width: 980px) {
-  .pubnav {
-    gap: 10px;
-    padding: 0 16px;
-    padding-right: calc(16px + var(--safe-r));
-    padding-left: calc(16px + var(--safe-l));
-  }
-
-  /* Los enlaces y botones viven ahora en .pubnav__menu */
-  .pubnav__links,
-  .pubnav__wide {
-    display: none;
-  }
-
-  .pubnav__actions {
-    margin-left: auto;
-    gap: 4px;
-  }
-
-  .pubnav__toggle {
-    display: inline-flex;
-  }
-}
-
-/* Compacto (≤860px): el índice lateral de Docs se pliega tras un botón. */
 
 @media (max-width: 1180px) {
   .docs {
@@ -1408,10 +1175,7 @@
   }
 }
 
-/* Teléfono (≤640px) */
-
 @media (max-width: 640px) {
-  /* El selector de sistema no cabe junto al título: baja a su propia línea. */
   .dl-card__head {
     flex-wrap: wrap;
   }
@@ -1420,8 +1184,6 @@
     align-self: flex-start;
   }
 
-  /* La barra de la conversación compartida lleva logo + distintivo + CTA y no
-     tiene menú donde recogerlos: se reparten en dos líneas antes que desbordar. */
   .pubnav {
     height: auto;
     flex-wrap: wrap;
@@ -1443,8 +1205,6 @@
     font-size: 14px;
   }
 
-  /* Las tablas de 3-5 columnas no caben: se desplazan en horizontal dentro de
-     su propio carril, sin arrastrar la página. */
   .docs__table {
     display: block;
     overflow-x: auto;
@@ -1464,7 +1224,6 @@
     margin-left: 0;
   }
 
-  /* El botón de copiar deja de competir por el ancho con el código. */
   .codeblock__row {
     flex-direction: column;
     align-items: stretch;
@@ -1493,7 +1252,6 @@
     padding: 18px;
   }
 
-  /* Diálogo → hoja inferior: al alcance del pulgar y con más ancho útil. */
   .modal-overlay {
     align-items: flex-end;
     padding: 0;
@@ -1554,8 +1312,6 @@
   }
 }
 
-/* ── Legal ───────────────────────────────────────────────────────────── */
-
 .legal {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
@@ -1581,10 +1337,77 @@
   .legal__nav { position: static; flex-direction: row; flex-wrap: wrap; padding: 0; }
 }
 
-/* ── Pie público ─────────────────────────────────────────────────────── */
-/* Oscuro en los dos temas, con los colores del isotipo: el fondo #1B1A17 y el
-   crema de sus piezas. Arriba frase y llamada; en medio el mapa del sitio;
-   abajo el wordmark a todo lo ancho, cortado por el borde inferior. */
+.empresa { width: min(1200px, calc(100% - 96px)); margin: 0 auto; padding-top: 40px; }
+
+.empresa__subnav { display: flex; gap: 4px; }
+.empresa__subnav a {
+  padding: 6px 12px; border-radius: var(--radius-chip);
+  color: var(--ink-muted); font-size: 13.5px; text-decoration: none;
+  transition: background .15s ease, color .15s ease;
+}
+.empresa__subnav a:hover { color: var(--ink); background: var(--surface-3); }
+.empresa__subnav a.is-active { color: var(--ink); background: var(--surface-4); }
+
+.empresa__hero { padding: 64px 0 88px; }
+.empresa__titulo { margin: 0; max-width: 18ch; font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 6vw, 88px); line-height: 1; color: var(--ink); text-wrap: balance; }
+.empresa__lead { margin: 28px 0 0; max-width: 640px; font-size: 18px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
+.empresa__cta { margin-top: 32px; }
+
+.empresa__seccion { padding: 56px 0; border-top: 1px solid rgba(var(--ink-rgb), 0.1); }
+.empresa__seccion--partida { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 48px; }
+.empresa__h2 { margin: 0 0 32px; font-family: var(--font-display); font-weight: 400; font-size: clamp(30px, 3.2vw, 44px); line-height: 1.05; color: var(--ink); }
+.empresa__seccion--partida .empresa__h2 { margin: 0; }
+.empresa__intro { margin: 0; font-size: 18px; line-height: 1.6; color: var(--ink-body); text-wrap: pretty; }
+
+.empresa__seccion h3 { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: var(--ink-title); }
+.empresa__seccion p { margin: 0; font-size: 14.5px; line-height: 1.65; color: var(--ink-soft); text-wrap: pretty; }
+
+.empresa__puntos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 40px; }
+
+.empresa__tarjetas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.empresa__tarjeta {
+  display: block; padding: 24px; border-radius: var(--radius); background: var(--surface-1);
+  text-decoration: none; transition: background .15s ease;
+}
+.empresa__tarjeta:hover { background: var(--surface-3); }
+
+.empresa__valores { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.empresa__valor { padding: 24px; border-radius: var(--radius); background: var(--surface-1); }
+.empresa__num { display: block; margin-bottom: 32px; font-family: var(--font-mono); font-size: 13px; color: var(--accent); }
+
+.empresa__datos { display: grid; margin: 32px 0 0; }
+.empresa__datos > div { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; padding: 14px 0; border-top: 1px solid rgba(var(--ink-rgb), 0.08); font-size: 14.5px; line-height: 1.6; }
+.empresa__datos dt { color: var(--ink-muted); }
+.empresa__datos dd { margin: 0; color: var(--ink-body); }
+
+.empresa__banda {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+  margin-top: 24px; padding: 48px; border-radius: var(--radius); background: var(--surface-1);
+}
+.empresa__banda-titulo { margin: 0; font-family: var(--font-display); font-size: clamp(28px, 3vw, 40px); line-height: 1.1; color: var(--ink); }
+
+.empresa__personas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 24px; }
+.empresa__persona .empresa__retrato { margin-bottom: 18px; }
+.empresa__retrato { display: block; width: 100%; aspect-ratio: 1; border-radius: var(--radius); object-fit: cover; background: var(--surface-2); }
+.empresa__retrato--iniciales { display: grid; place-items: center; font-family: var(--font-display); font-size: 72px; color: var(--ink-muted); }
+.empresa__persona h3 { margin: 0; font-size: 20px; }
+.empresa__rol { display: block; margin: 4px 0 12px; font-size: 14px; color: var(--ink-muted); }
+.empresa__enlaces { display: flex; gap: 16px; margin-top: 14px; font-size: 14px; }
+.empresa__volver { margin-top: 8px; }
+
+@media (max-width: 900px) {
+  .empresa { padding-top: 24px; }
+  .empresa__hero { padding: 40px 0 56px; }
+  .empresa__seccion--partida { grid-template-columns: 1fr; gap: 20px; }
+  .empresa__puntos, .empresa__valores { grid-template-columns: 1fr; }
+  .empresa__tarjetas, .empresa__personas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .empresa__datos > div { grid-template-columns: 1fr; gap: 2px; }
+  .empresa__banda { padding: 28px; }
+}
+
+@media (max-width: 560px) {
+  .empresa__tarjetas, .empresa__personas { grid-template-columns: 1fr; }
+}
 
 .pubfoot {
   --pf-bg: #1B1A17;
@@ -1596,7 +1419,7 @@
   background: var(--pf-bg);
   color: var(--pf-ink);
 }
-.pubfoot__in { width: min(1200px, calc(100% - 96px)); margin: 0 auto; padding-top: 96px; }
+.pubfoot__in { width: min(var(--web-ancho), calc(100% - var(--web-margen))); margin: 0 auto; padding-top: 96px; }
 
 .pubfoot__arriba { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
 .pubfoot__frase { margin: 0; max-width: 13ch; font-family: var(--font-display); font-size: clamp(40px, 5vw, 68px); line-height: 1.02; color: var(--pf-ink); text-wrap: balance; }
@@ -1629,12 +1452,10 @@
 
 @media (max-width: 900px) {
   .pubfoot { margin-top: 72px; }
-  .pubfoot__in { width: calc(100% - 40px); padding-top: 64px; }
+  .pubfoot__in { padding-top: 64px; }
   .pubfoot__mapa { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 24px; margin-top: 64px; }
   .pubfoot__marca { margin-top: 64px; }
 }
-
-/* ── Guías ───────────────────────────────────────────────────────────── */
 
 .guias { width: min(1100px, calc(100% - 64px)); margin: 0 auto; padding: 32px 0 80px; }
 .guias__cabecera { max-width: 640px; margin-bottom: 28px; }
@@ -1661,8 +1482,6 @@
   .guias__lista, .guias--articulo { grid-template-columns: 1fr; }
   .guias__mas { position: static; }
 }
-
-/* ── Estado del servicio (/status) ───────────────────────────────────── */
 
 .status { gap: 22px; }
 .status__punto { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-round); background: var(--ink-faint); }
@@ -1729,7 +1548,6 @@
   .status__barra { border-radius: 1px; }
 }
 
-/* Selector de versión del escritorio: una lista y un solo botón. */
 .dl-picker {
   display: flex;
   gap: 8px;
@@ -1767,10 +1585,6 @@
 .dl-picker__select svg { position: absolute; right: 12px; color: var(--ink-muted); pointer-events: none; }
 .dl-picker .dl-card__cta { align-self: auto; flex-shrink: 0; }
 
-
-/* ── Soporte (/support) ──────────────────────────────────────────────── */
-/* Formulario a la izquierda, atajos a la derecha. Los tipos de caso son
-   tarjetas de relleno: la elegida se tiñe de acento, sin bordes. */
 
 .soporte__wrap { width: min(1200px, calc(100% - 96px)); margin: 0 auto; padding-top: 72px; }
 .soporte__titulo { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 5.6vw, 80px); line-height: 1; color: var(--ink); text-wrap: balance; }
@@ -1823,7 +1637,6 @@
 .soporte__ticket strong { font-family: var(--font-mono); font-size: 28px; font-weight: 500; color: var(--ink); }
 
 .soporte__lado { display: flex; flex-direction: column; gap: 18px; }
-.soporte__lienzo .paisaje { aspect-ratio: 4 / 3; }
 .soporte__lado-titulo { margin: 8px 0 0; font-family: var(--font-display); font-weight: 400; font-size: 28px; line-height: 1.1; color: var(--ink); }
 .soporte__atajos { display: flex; flex-direction: column; gap: 6px; }
 .soporte__atajo { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface-1); color: var(--ink-muted); text-decoration: none; transition: background-color .15s ease; }
@@ -1837,7 +1650,7 @@
 .soporte__directo a { color: var(--ink); }
 
 @media (max-width: 980px) {
-  .soporte__wrap { width: calc(100% - 40px); padding-top: 48px; }
+  .soporte__wrap { padding-top: 48px; }
   .soporte__rejilla { grid-template-columns: 1fr; gap: 48px; margin-top: 40px; }
   .soporte__tipos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -1846,10 +1659,7 @@
   .soporte__hecho { padding: 28px 22px; }
 }
 
-/* Selector Windows / macOS dentro de la tarjeta de escritorio. */
 .dl-card__plataformas { align-self: flex-start; }
-
-/* ── Skills (/skills) ────────────────────────────────────────────────── */
 
 .sk-grid {
   display: grid;

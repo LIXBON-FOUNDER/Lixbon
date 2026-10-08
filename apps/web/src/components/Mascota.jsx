@@ -1,14 +1,3 @@
-// Mascota.jsx — Gael y Leya en la web. Tres piezas:
-//   · SpriteMascota: un estado animado (tira de cuadros pixel art).
-//   · MascotaChat: sentada junto al compositor; piensa, escribe, celebra al
-//     terminar, saluda, comenta y se duerme.
-//   · MascotaGuia: acompaña la lectura en las páginas públicas y comenta la
-//     sección que estás viendo, siempre en un margen o en la esquina, nunca
-//     encima del texto. Un clic la despide; queda un botoncito para traerla.
-// Para que no se vea seca: entra y sale caminando desde el borde de la
-// pantalla, el bocadillo se abre con rebote y escribe el texto mientras habla,
-// y en reposo hace gestos (mira a los lados, se estira, se rasca la cabeza).
-// Las preferencias viven en lib/mascota.js (Ajustes › Mascota).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useT } from '../i18n/useT';
@@ -16,7 +5,6 @@ import {
   CUADROS, MS_CUADRO, NOMBRES, VERSION_SPRITES, alAzar, duracion, fijarMascota, personajeDe, sincronizarConCuenta, useMascota,
 } from '../lib/mascota';
 
-/** Al iniciar o cerrar sesión, la mascota toma los ajustes de la cuenta. */
 export function MascotaSync() {
   const { user } = useAuth();
   useEffect(() => { sincronizarConCuenta(user); }, [user]);
@@ -66,7 +54,6 @@ function useMontado() {
 const sinMovimiento = () => typeof window !== 'undefined'
   && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-/** true tras `minutos` sin que el usuario mueva el ratón, toque o escriba. */
 function useInactivo(minutos, activo) {
   const [inactivo, setInactivo] = useState(false);
   useEffect(() => {
@@ -88,9 +75,8 @@ function useInactivo(minutos, activo) {
   return inactivo;
 }
 
-/** Lo que dice: aparece, se escribe solo y se va pasado `ms`. */
 function useBocadillo(quieta) {
-  const [b, setB] = useState(null); // { texto, n, cerrando }
+  const [b, setB] = useState(null);
   const timers = useRef([]);
   const limpiar = () => { timers.current.forEach(clearTimeout); timers.current = []; };
 
@@ -107,7 +93,6 @@ function useBocadillo(quieta) {
     timers.current.push(setTimeout(() => callar(), ms + texto.length * 26));
   }, [quieta, callar]);
 
-  // Máquina de escribir: una letra cada ~26 ms.
   useEffect(() => {
     if (!b || b.n >= b.texto.length) return undefined;
     const t = setTimeout(() => setB((x) => (x ? { ...x, n: Math.min(x.texto.length, x.n + 1) } : x)), 26);
@@ -126,7 +111,6 @@ function useBocadillo(quieta) {
   };
 }
 
-/** Una acción que dura un rato (celebrar, saludar…) y luego se acaba. */
 function useAccion() {
   const [accion, setAccion] = useState(null);
   const t = useRef(null);
@@ -139,7 +123,6 @@ function useAccion() {
   return [accion, hacer];
 }
 
-/** Gestos sueltos en reposo, cada 7–16 s: mira a los lados, se estira… */
 const GESTOS = ['look', 'look', 'look', 'scratch', 'stretch', 'wave'];
 function useGestos(activo, hacer) {
   useEffect(() => {
@@ -157,10 +140,7 @@ function useGestos(activo, hacer) {
   }, [activo, hacer]);
 }
 
-/** Entrar y salir caminando desde el borde de la pantalla. `clave` cambia
-    cuando la mascota aparece en un sitio nuevo; `lado` es el borde desde el
-    que llega ('izq' | 'der'). Devuelve el estilo a aplicar al envoltorio. */
-const VELOCIDAD = 150; // px por segundo
+const VELOCIDAD = 150;
 function useCaminata(ref, clave, lado, quieta) {
   const [estilo, setEstilo] = useState(null);
   const [caminando, setCaminando] = useState(false);
@@ -185,7 +165,6 @@ function useCaminata(ref, clave, lado, quieta) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clave]);
 
-  /** Se va caminando hacia el borde más cercano y luego llama a `fin`. */
   const salir = useCallback((fin) => {
     const el = ref.current;
     if (!el || quieta || sinMovimiento()) { fin(); return; }
@@ -209,10 +188,6 @@ function saludoDeLaHora(t) {
   return alAzar(t(h < 6 ? 'greet.night' : h < 13 ? 'greet.morning' : h < 20 ? 'greet.afternoon' : 'greet.night'));
 }
 
-// ── Chat ────────────────────────────────────────────────────────────────
-
-/** `ocupado`: el modelo está respondiendo. `escribiendo`: ya llegan tokens
-    (si no, está pensando). */
 export function MascotaChat({ ocupado, escribiendo }) {
   const prefs = useMascota();
   const montado = useMontado();
@@ -229,7 +204,6 @@ export function MascotaChat({ ocupado, escribiendo }) {
   const nombre = NOMBRES[quien];
   const libre = !ocupado && !dormido && !bocadillo.abierto && !accion && !caminando;
 
-  // Saludo al llegar (una vez por visita).
   useEffect(() => {
     if (!visible || caminando) return;
     try {
@@ -241,7 +215,6 @@ export function MascotaChat({ ocupado, escribiendo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, caminando]);
 
-  // Fin de una respuesta: celebra y comenta. Despertar: se excusa.
   useEffect(() => {
     const prev = antes.current;
     antes.current = { ocupado, dormido };
@@ -255,7 +228,6 @@ export function MascotaChat({ ocupado, escribiendo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ocupado, dormido]);
 
-  // Si piensa mucho rato, lo dice.
   useEffect(() => {
     if (!ocupado || escribiendo) return undefined;
     const tt = setTimeout(() => bocadillo.decir(alAzar(t('chat.thinkingLong')), 3000), 9000);
@@ -263,7 +235,6 @@ export function MascotaChat({ ocupado, escribiendo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ocupado, escribiendo]);
 
-  // Gestos en reposo y, de vez en cuando, un comentario suelto.
   useGestos(visible && libre && !quieta, hacer);
   useEffect(() => {
     if (!visible || !libre) return undefined;
@@ -307,28 +278,25 @@ export function MascotaChat({ ocupado, escribiendo }) {
   );
 }
 
-// ── Guía de las páginas públicas ────────────────────────────────────────
-
 const ANCHO_BOCADILLO = 150;
-// Bajo la barra pública (60px) y con sitio para el bocadillo encima.
 const TOPE_SUPERIOR = 140;
 
-// Lo que cuenta como contenido: si la mascota (o su bocadillo) cae encima de
-// algo de esto, ese sitio no vale.
 const CONTENIDO = 'figure, img, svg, video, canvas, p, h1, h2, h3, h4, li, pre, table, a, button, input, textarea, label, .codeblock, .docs__callout, nav, header, footer';
 
-/** ¿Está libre de contenido la caja (en coordenadas de la ventana)? Se mira
-    por rectángulos y no con elementsFromPoint, que se salta lo que tiene
-    pointer-events: none (las ilustraciones, por ejemplo). */
-function cajaLibre(x, y, w, h) {
+// Por rectángulos y no con elementsFromPoint, que se salta lo que tiene
+// pointer-events: none (las ilustraciones, por ejemplo).
+function cajaLibre(contenido, x, y, w, h) {
   if (x < 0 || y < 0 || x + w > window.innerWidth || y + h > window.innerHeight) return false;
-  for (const el of document.querySelectorAll(CONTENIDO)) {
-    if (el.closest('.mascota-guia, .mascota-volver')) continue;
+  for (const el of contenido) {
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
     if (r.left < x + w && r.right > x && r.top < y + h && r.bottom > y) return false;
   }
   return true;
+}
+
+function moverCaja(el, xy) {
+  if (el && xy) el.style.transform = `translate3d(${xy[0]}px, ${xy[1]}px, 0)`;
 }
 
 function clasificar(el, i, t) {
@@ -341,23 +309,26 @@ function clasificar(el, i, t) {
   return frases[(i + Math.floor(Math.random() * 3)) % frases.length];
 }
 
-/** `selector`: los elementos que puede comentar, en orden de lectura. */
 export function MascotaGuia({ selector }) {
   const prefs = useMascota();
   const montado = useMontado();
   const t = useT('mascota');
   const ref = useRef(null);
+  const caja = useRef(null);
+  const coords = useRef(null);
+  const modoPintado = useRef(null);
   const quieta = prefs.reducir;
   const bocadillo = useBocadillo(quieta);
   const [accion, hacer] = useAccion();
   const dormido = useInactivo(prefs.dormir_min, prefs.activa && prefs.guia && prefs.dormir);
-  const [pos, setPos] = useState(null);        // { modo, left, top, tam, ancho, burbuja }
+  // En modo margen la posición exacta va por coords + transform, fuera de React,
+  // para no re-renderizar en cada fotograma de scroll.
+  const [pos, setPos] = useState(null);
   const [objetivo, setObjetivo] = useState(null);
   const [yendose, setYendose] = useState(false);
   const volvio = useRef(false);
 
   const visible = montado && prefs.activa && prefs.guia;
-  // Cada vez que cambia de sitio (margen ↔ esquina) entra caminando desde su lado.
   const sitio = pos && pos.modo !== 'fuera' ? pos.modo : null;
   const lado = sitio === 'esquina' ? 'der' : 'izq';
   const { estilo, caminando, haciaIzq, salir } = useCaminata(ref, visible && sitio ? sitio : null, lado, quieta);
@@ -365,14 +336,21 @@ export function MascotaGuia({ selector }) {
   useEffect(() => {
     if (!visible) return undefined;
     let raf = 0;
+    let lista = [];
+    let contenido = [];
+    let sucio = true;
+    const recoger = () => {
+      sucio = false;
+      lista = Array.from(document.querySelectorAll(selector));
+      contenido = Array.from(document.querySelectorAll(CONTENIDO)).filter((el) => !el.closest('.mascota-guia, .mascota-volver'));
+    };
+    const fijar = (sig) => setPos((prev) => (prev && prev.modo === sig.modo && prev.tam === sig.tam && prev.ancho === sig.ancho && prev.burbuja === sig.burbuja ? prev : sig));
     const medir = () => {
       raf = 0;
+      if (sucio) recoger();
       const vh = window.innerHeight;
       const vw = window.innerWidth;
       const tam = vw < 720 ? 48 : 96;
-      const lista = Array.from(document.querySelectorAll(selector));
-      // El último que ya entró en la franja de lectura (algo menos de media
-      // pantalla); al principio de la página, el primero.
       let elegido = null;
       let idx = -1;
       lista.forEach((el, i) => {
@@ -384,40 +362,44 @@ export function MascotaGuia({ selector }) {
       if (!elegido) return;
       const r = elegido.getBoundingClientRect();
       const margen = r.left;
-      const alto = tam + 70; // la mascota y su bocadillo encima
-      // En el margen izquierdo, a la altura de lo que señala, si cabe con su
-      // bocadillo y no pisa nada; si no, en una esquina libre de abajo.
+      const alto = tam + 70;
       if (margen >= Math.max(tam, ANCHO_BOCADILLO) + 32) {
         const top = Math.min(Math.max(r.top + 12, TOPE_SUPERIOR), vh - tam - 16);
         const ancho = Math.min(220, Math.round(margen - 32));
         const left = Math.round(margen - tam - 16);
-        if (cajaLibre(Math.min(left, margen - ancho - 16), top - 70, Math.max(tam, ancho), alto)) {
-          setPos({ modo: 'margen', left, top: Math.round(top), tam, ancho, burbuja: true });
+        if (cajaLibre(contenido, Math.min(left, margen - ancho - 16), top - 70, Math.max(tam, ancho), alto)) {
+          coords.current = [left, Math.round(top)];
+          if (modoPintado.current === 'margen') moverCaja(caja.current, coords.current);
+          fijar({ modo: 'margen', tam, ancho, burbuja: true });
           setObjetivo((prev) => (prev?.el === elegido ? prev : { el: elegido, idx }));
           return;
         }
       }
-      // El bocadillo solo sale si también le queda sitio.
       const yMascota = vh - tam - 16;
       const yBocadillo = yMascota - 76;
       let modo = 'fuera';
       let burbuja = false;
-      if (cajaLibre(vw - tam - 16, yMascota, tam, tam)) {
+      if (cajaLibre(contenido, vw - tam - 16, yMascota, tam, tam)) {
         modo = 'esquina';
-        burbuja = cajaLibre(vw - 236, yBocadillo, 220, 64);
-      } else if (cajaLibre(16, yMascota, tam, tam)) {
+        burbuja = cajaLibre(contenido, vw - 236, yBocadillo, 220, 64);
+      } else if (cajaLibre(contenido, 16, yMascota, tam, tam)) {
         modo = 'esquina-izq';
-        burbuja = cajaLibre(16, yBocadillo, 220, 64);
+        burbuja = cajaLibre(contenido, 16, yBocadillo, 220, 64);
       }
-      setPos((prev) => (prev && prev.modo === modo && prev.burbuja === burbuja && prev.tam === tam ? prev : { modo, tam, burbuja }));
+      fijar({ modo, tam, burbuja });
       setObjetivo((prev) => (prev?.el === elegido ? prev : { el: elegido, idx }));
     };
     const pedir = () => { if (!raf) raf = requestAnimationFrame(medir); };
     medir();
     window.addEventListener('scroll', pedir, { passive: true });
     window.addEventListener('resize', pedir);
-    // El contenido de las docs llega tras un skeleton: volver a medir cuando cambie.
-    const obs = new MutationObserver(pedir);
+    // El contenido de las docs llega tras un skeleton: volver a recoger cuando
+    // cambie, sin contar los cambios de la propia mascota (el bocadillo escribe).
+    const obs = new MutationObserver((cambios) => {
+      if (cambios.every((c) => c.target.closest?.('.mascota-guia'))) return;
+      sucio = true;
+      pedir();
+    });
     obs.observe(document.body, { childList: true, subtree: true });
     return () => {
       cancelAnimationFrame(raf);
@@ -427,7 +409,21 @@ export function MascotaGuia({ selector }) {
     };
   }, [visible, selector]);
 
-  // Cada sección nueva, un comentario (cuando ya llegó caminando).
+  useLayoutEffect(() => {
+    const el = caja.current;
+    const modo = el ? pos?.modo : null;
+    if (modo === modoPintado.current) return;
+    modoPintado.current = modo;
+    if (!el) return;
+    // Al entrar en el margen se coloca sin transición: si no, cruzaría la
+    // pantalla desde la esquina superior.
+    el.style.transition = 'none';
+    if (modo === 'margen') moverCaja(el, coords.current);
+    else el.style.transform = '';
+    void el.offsetWidth;
+    el.style.transition = '';
+  });
+
   useEffect(() => {
     if (!objetivo || caminando || yendose) return undefined;
     const entrar = setTimeout(() => {
@@ -440,7 +436,6 @@ export function MascotaGuia({ selector }) {
 
   const libre = visible && !caminando && !yendose && !bocadillo.abierto && !accion && !dormido;
   useGestos(libre && !quieta, hacer);
-  // Si te quedas un rato en el mismo sitio, comenta algo.
   useEffect(() => {
     if (!libre) return undefined;
     const tt = setTimeout(() => { bocadillo.decir(alAzar(t('guide.idle'))); hacer('look'); }, 40_000 + Math.random() * 30_000);
@@ -481,12 +476,11 @@ export function MascotaGuia({ selector }) {
   else if (dormido) estado = 'sleep';
 
   const enEsquina = pos.modo !== 'margen';
-  // Mira hacia el contenido; mientras camina, hacia donde va.
   const espejo = caminando ? haciaIzq : pos.modo === 'esquina';
-  const colocacion = enEsquina ? { '--w': `${pos.tam}px` } : { left: pos.left, top: pos.top, '--w': `${pos.tam}px`, '--ancho': `${pos.ancho}px` };
+  const colocacion = enEsquina ? { '--w': `${pos.tam}px` } : { '--w': `${pos.tam}px`, '--ancho': `${pos.ancho}px` };
 
   return (
-    <div className={`mascota-guia mascota-guia--${pos.modo}`} style={colocacion}>
+    <div ref={caja} className={`mascota-guia mascota-guia--${pos.modo}`} style={colocacion}>
       <div className="mascota-guia__cuerpo" ref={ref} style={estilo || undefined}>
         {hablando && !caminando && <Bocadillo texto={bocadillo.texto} mostrado={bocadillo.mostrado} cerrando={bocadillo.cerrando} />}
         {estado === 'sleep' && <span className="mascota-zzz" aria-hidden="true"><i>z</i><i>z</i><i>Z</i></span>}
