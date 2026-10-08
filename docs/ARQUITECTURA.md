@@ -46,7 +46,7 @@ Routers principales (`core/gateway/routers/`):
 - `nodes_link`, `nodes_admin`, `monitor`, `status`, `ws_status` — clúster y estado público
 - `remote` — control remoto de sesiones CLI/desktop desde el móvil (`docs/PLAN_REMOTE.md`)
 - `team` — Lixbon Team (proyectos, canales, mensajes, `/ws/team`)
-- `installer`, `versions` — sirve `client_cli.py`, `install.sh`/`install.ps1` y los instaladores subidos por CI
+- `installer`, `installer_go`, `versions` — sirven `install.sh`/`install.ps1` (binario Go de la última release), el manifest de actualización del CLI y los instaladores subidos por CI
 - `admin`, `admin_panel` — panel de administración
 
 Convención: los tests viven **junto al módulo** que prueban (`core/gateway/test_*.py`).
@@ -96,10 +96,11 @@ equipos, terminal y chat con el clúster. Se autentica con la cuenta web
 
 ### CLI — `apps/cli`
 
-Python sin dependencias externas. Fuente modular en `lixbon_cli/`; `build.py`
-concatena todo en `client_cli.py`, que el gateway sirve y actualiza en los
-clientes. Modo chat y modo agente con herramientas, MCP por stdio, sesiones,
-`/remote`.
+Go (Bubble Tea v2), un solo ejecutable sin runtime. Lo publica `release-cli.yml`
+con un archivo por plataforma y `SHA256SUMS`; el gateway lo registra y sirve
+los instaladores y el manifest de `lixbon update`. Modo chat y modo agente con
+herramientas, MCP por stdio, sesiones, `/remote`. El cliente Python anterior
+se retiró; la etiqueta `python-cli-final` conserva su último estado.
 
 ### Móvil — `apps/mobile`
 
@@ -113,16 +114,16 @@ la app en su rama):
 
 | Contrato | Gateway | Cliente |
 |---|---|---|
-| Nombre de la API key por producto | `routers/auth.py` (`CLI_KEY_NAME`, `MOBILE_KEY_NAME`) | `apps/cli/lixbon_cli/api.py`, `apps/mobile/src/state.js` |
-| Streaming SSE del chat | `routers/chat.py` | `apps/cli/lixbon_cli/sse.py`, `apps/mobile/src/sse.js`, `apps/web/src/lib/stream.js` |
+| Nombre de la API key por producto | `routers/auth.py` (`CLI_KEY_NAME`, `MOBILE_KEY_NAME`) | `apps/cli/internal/api`, `apps/mobile/src/state.js` |
+| Streaming SSE del chat | `routers/chat.py` | `apps/cli/internal/sse`, `apps/mobile/src/sse.js`, `apps/web/src/lib/stream.js` |
 | Detección de archivos visuales | `core/inference/visual_files.py` | `apps/web/src/lib/visuals.js` |
-| Protocolo `/remote` | `gateway/remote_hub.py` | `lixbon_cli/remote.py`, `desktop/src/store/remoteStore.js`, `mobile/src/remote.js` |
+| Protocolo `/remote` | `gateway/remote_hub.py` | `apps/cli/internal/remote`, `desktop/src/store/remoteStore.js`, `mobile/src/remote.js` |
 | Subida de instaladores | `routers/versions.py` | `.github/workflows/tauri.yml`, `mobile.yml` |
 | Tokens de diseño | — | `apps/web/src/styles/base.css` → copiados por desktop y mobile |
 
 ## Despliegue
 
 `railway.toml` → `Dockerfile` (multi-stage: build de la web con Node, luego
-Python 3.12 con `core/`, `BD/`, `infra/node/`, `apps/cli/client_cli.py` y el
+Python 3.12 con `core/`, `BD/`, `infra/node/` y el
 `dist` de la web). Uvicorn con `--proxy-headers` porque Railway/Cloudflare
 terminan TLS fuera. Health check en `/health`.

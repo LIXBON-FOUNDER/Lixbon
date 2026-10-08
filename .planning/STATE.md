@@ -20,7 +20,7 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 
 ## Current Position
 
-Rama de trabajo: `cli`. Módulo Go en `apps/cli/go/` (`lixbon.com/cli`, versión `2.3.0-go.6`).
+Rama de trabajo: `cli`. Módulo Go en `apps/cli/` (movido desde `apps/cli/go/` al retirar Python el 2026-10-08) (`lixbon.com/cli`, versión `2.3.0-go.6`).
 
 | Fase | Estado real | Evidencia |
 |------|-------------|-----------|

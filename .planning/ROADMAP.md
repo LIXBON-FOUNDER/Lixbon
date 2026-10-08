@@ -135,6 +135,8 @@ Plans:
 
 ## Retirada de Python
 
+**Ejecutada (2026-10-08)**, con #25 cerrada por el usuario. Rollback: etiqueta `python-cli-final` (último commit con `lixbon_cli/`, `client_cli.py`, `build.py` y `tests/`). Se borraron el CLI Python y sus generadores de corpus, `/install/client_cli.py`, `CLI_SOURCE_PATH`, el `COPY` del `Dockerfile`, el instalador de respaldo (ahora `install.sh`/`install.ps1` responden 503 sin release registrada) y el job Python de CI. Se conservaron `validation/fixtures/` como contrato congelado y `audit/` como historial. El módulo Go subió de `apps/cli/go/` a `apps/cli/`. Los pasos de abajo quedan como registro.
+
 Objetivo del usuario: terminar la migración para poder eliminar la base Python del CLI y dejar el repositorio mejor organizado. Es el contenido de REL-04 y REL-05 y **no debe ejecutarse hasta aceptar la paridad**. Dependencias actuales que hay que reemplazar o retirar, en orden:
 
 1. **Paridad funcional** (Phase 4): implementada salvo `update` (#18). Adjuntos, PDF/Word, `/paste`, `/visual`, `/remote`, `setup`, `usage` y MCP están hechos con pruebas (issues #12–#17, #19); falta validarlos con la app móvil, modelos y un gateway reales.

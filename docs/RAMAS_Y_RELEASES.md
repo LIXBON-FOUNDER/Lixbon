@@ -65,8 +65,7 @@ Los tags llevan prefijo de producto para que los workflows no se pisen.
 
 ### Gateway + web
 No hay tag: cada push a `master` despliega en Railway (`railway.toml` → `Dockerfile`).
-La imagen compila `apps/web` y copia `apps/cli/client_cli.py`, por eso la web y
-el artefacto del CLI viven en `master`.
+La imagen compila `apps/web`. El CLI no viaja en la imagen: sale de su propia release (`cli-vX.Y.Z`).
 
 ### Desktop (`desktop-vX.Y.Z`)
 1. Subir la versión en **`apps/desktop/src-tauri/tauri.conf.json`** y `apps/desktop/package.json` (deben coincidir).
@@ -77,15 +76,8 @@ el artefacto del CLI viven en `master`.
    El CI falla si el tag no coincide con `tauri.conf.json`. Sufijo `-beta`/`-rc`
    → canal beta.
 
-### CLI (sin tag)
-1. Subir `CLI_VERSION` en `apps/cli/lixbon_cli/config.py`.
-2. `python apps/cli/build.py` regenera `apps/cli/client_cli.py` (el test
-   `test_build_fresh` falla si se olvida).
-3. Merge a `master`: el siguiente deploy del gateway sirve la nueva versión en
-   `/install/client_cli.py`; los clientes la reciben con `lixbon update` o `/update`.
-
-### CLI Go (`cli-vX.Y.Z`)
-1. Escribir las notas de la versión en `apps/cli/go/CHANGELOG.md`: una sección `## <versión>` con viñetas (`- …`) en español, pensadas para quien usa el CLI. Sin esa sección la release falla antes de compilar.
+### CLI (`cli-vX.Y.Z`)
+1. Escribir las notas de la versión en `apps/cli/CHANGELOG.md`: una sección `## <versión>` con viñetas (`- …`) en español, pensadas para quien usa el CLI. Sin esa sección la release falla antes de compilar.
 2. Merge a `master` por PR.
 3. `git tag cli-v2.4.0 && git push origin cli-v2.4.0`. La versión sale de la etiqueta: no hay constante que subir. **La etapa también:** sin sufijo (`cli-v2.4.0`) es *estable*; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es *beta*.
 4. `.github/workflows/release-cli.yml`:
@@ -112,7 +104,7 @@ Para corregir las notas de una versión ya publicada, vuelve a registrarla (`POS
 
 | Workflow | Disparador | Qué hace |
 |---|---|---|
-| `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI Python (`apps/cli/tests`), del CLI Go y de los instaladores (`infra/ci/install_e2e.py`: ejecuta `install.sh`/`install.ps1` reales en Linux, macOS y Windows contra un servidor de releases local, con digest alterado, `SHA256SUMS` alterado y actualización con el binario en uso) |
+| `ci.yml` | PR a `master`, push a `master`/`cli` | Tests del CLI Go y de los instaladores (`infra/ci/install_e2e.py`: ejecuta `install.sh`/`install.ps1` reales en Linux, macOS y Windows contra un servidor de releases local, con digest alterado, `SHA256SUMS` alterado y actualización con el binario en uso) |
 | `tauri.yml` | tag `desktop-v*`, manual | Build + release del MSI |
 | `mobile.yml` | tag `mobile-v*`, manual | Build + release del APK |
 | `release-cli.yml` | tag `cli-v*` | Binarios del CLI Go por plataforma + `SHA256SUMS` + registro en el gateway + smoke test: instala desde `lixbon.com/install.sh` e `install.ps1` y comprueba la versión |

@@ -43,12 +43,10 @@ cd apps/desktop && npm install && npm run dev  # frontend; `npm run tauri dev` r
 
 ### CLI
 ```bash
-cd apps/cli && python -m lixbon_cli chat       # cliente Python anterior (fuente modular)
-python apps/cli/build.py                       # regenera client_cli.py — OBLIGATORIO tras editar lixbon_cli/
-cd apps/cli/go && go vet ./... && go test -count=1 ./...   # CLI Go (el que se distribuye)
+cd apps/cli && go vet ./... && go test -count=1 ./...   # CLI Go
 ```
 
-Si cambias el catálogo de comandos, sesiones o herramientas de Python, regenera los corpus que consume Go (`python apps/cli/validation/gen_state_corpus.py`, `gen_tool_corpus.py`…); el CI Python falla si `state_corpus.json` no coincide.
+Los JSON de `apps/cli/validation/fixtures/` son el contrato congelado del CLI: si un cambio de comportamiento los contradice, se actualiza el JSON a propósito en el mismo PR.
 
 ### Móvil
 ```bash
@@ -83,8 +81,7 @@ Ejemplos: `fix(billing): activa el gate de sesión/semana`,
 ## 5. Antes de abrir el PR
 
 - [ ] `python -m pytest core` si tocaste el gateway.
-- [ ] `python -m pytest apps/cli/tests` y `python apps/cli/build.py` si tocaste el CLI Python; `go vet ./... && go test ./...` en `apps/cli/go` si tocaste el CLI Go
-      (`test_build_fresh` falla si el artefacto no está regenerado).
+- [ ] `go vet ./... && go test -count=1 ./...` en `apps/cli` si tocaste el CLI.
 - [ ] Si cambias un **contrato gateway↔app** (nombre de API key, SSE, `/remote`,
       subida de instaladores, detección de archivos visuales — tabla en
       `docs/ARQUITECTURA.md`), el PR toca ambos lados o enlaza el PR pareja.

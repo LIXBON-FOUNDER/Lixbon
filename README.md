@@ -50,7 +50,7 @@ la rama es *dónde se trabaja*, y se integra a `master` por PR.
 | **Gateway** + node agent | `core/`, `BD/`, `infra/` | Python 3.12 · FastAPI · SQLAlchemy · Postgres · Redis | `master` | — | Railway despliega cada push a `master` |
 | **Web** — lixbon.com | `apps/web` | React 19 · Vite · SSR estático | `master` | — | Dentro de la imagen del gateway |
 | **Desktop** — Windows | `apps/desktop` | Tauri 2 · Rust · React | `desktop` | 1.2.0 | Tag `desktop-vX.Y.Z` → CI → MSI con auto-update |
-| **CLI** | `apps/cli` | Go · un solo ejecutable, sin Python (el cliente Python anterior sigue en el repo hasta su retirada, #36) | `cli` | 2.3.0-go.2 (beta) | Tag `cli-vX.Y.Z` → CI → binarios en GitHub Releases registrados en el gateway; la etapa (beta o estable) sale de la etiqueta |
+| **CLI** | `apps/cli` | Go · un solo ejecutable, sin Python | `cli` | 2.3.0-go.2 (beta) | Tag `cli-vX.Y.Z` → CI → binarios en GitHub Releases registrados en el gateway; la etapa (beta o estable) sale de la etiqueta |
 | **Móvil** — Android | `apps/mobile` | React Native · Expo | `mobile` | 0.3.4 | Tag `mobile-vX.Y.Z` → CI → APK |
 
 ```
@@ -81,12 +81,12 @@ Detalle del flujo, convención de commits y pasos de release: [`docs/RAMAS_Y_REL
 ├── apps/
 │   ├── web/             lixbon.com
 │   ├── desktop/         app de escritorio
-│   ├── cli/             go/ (el CLI que se distribuye) · lixbon_cli/ + client_cli.py (cliente Python anterior)
+│   ├── cli/             el CLI en Go (el que se distribuye) · validation/ (corpus congelados) · audit/ (historial)
 │   └── mobile/          app Android
 ├── assets/brand/        iconos y favicon oficiales
 ├── docs/                documentación técnica y de producto
 ├── .github/             ci.yml, tauri.yml, mobile.yml, plantilla de PR
-├── Dockerfile           imagen del gateway (compila la web e incluye el CLI)
+├── Dockerfile           imagen del gateway (compila la web)
 ├── railway.toml         despliegue
 ├── alembic.ini          migraciones → BD/migrations
 ├── requirements.txt     dependencias del gateway
@@ -184,25 +184,24 @@ lixbon setup && lixbon chat
 lixbon update                                        # o lixbon --update; lixbon --version muestra la versión
 ```
 
-Es un único ejecutable (no necesita Python). Los instaladores verifican su SHA-256 contra el gateway y contra el `SHA256SUMS` de la release; la página [lixbon.com/apps](https://lixbon.com/apps) muestra la etapa, las novedades y el historial de versiones, y la instalación manual con verificación. Las notas de cada versión se escriben en `apps/cli/go/CHANGELOG.md`.
+Es un único ejecutable (no necesita Python). Los instaladores verifican su SHA-256 contra el gateway y contra el `SHA256SUMS` de la release; la página [lixbon.com/apps](https://lixbon.com/apps) muestra la etapa, las novedades y el historial de versiones, y la instalación manual con verificación. Las notas de cada versión se escriben en `apps/cli/CHANGELOG.md`.
 
 ## Tests
 
 ```bash
 python -m pytest core             # gateway — los tests viven junto al módulo que prueban
-(cd apps/cli/go && go test ./...) # CLI Go
-python -m pytest apps/cli/tests   # cliente Python anterior — incluye la verificación de que client_cli.py está al día
+(cd apps/cli && go test ./...) # CLI Go
 python infra/ci/install_e2e.py    # instaladores install.sh / install.ps1 contra un servidor de releases local
 cd apps/web && npm run lint       # web
 ```
 
-`ci.yml` corre en cada PR a `master` los tests del CLI Go (Linux, macOS y Windows), los del cliente Python anterior y la prueba de los instaladores. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
+`ci.yml` corre en cada PR a `master` los tests del CLI Go (Linux, macOS y Windows) y la prueba de los instaladores. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Despliegue
 
 `railway.toml` → `Dockerfile` multi-stage: Node compila `apps/web`, y la
-imagen final de Python 3.12 lleva `core/`, `BD/`, `infra/node/`, el `dist` de
-la web y `apps/cli/client_cli.py`. Uvicorn arranca con `--proxy-headers`
+imagen final de Python 3.12 lleva `core/`, `BD/`, `infra/node/` y el `dist` de
+la web. Uvicorn arranca con `--proxy-headers`
 porque Railway/Cloudflare terminan TLS fuera. Health check en `/health`.
 
 Migraciones: `alembic upgrade head` (usa `DATABASE_URL`).
