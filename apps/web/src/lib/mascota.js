@@ -1,7 +1,5 @@
-// mascota.js — preferencias de la mascota (Gael y Leya), compartidas por toda
-// la web. Un solo estado (como useTema): se guarda en localStorage para que
-// funcione sin sesión y, con sesión, en la cuenta (settings.mascot). Lo de la
-// cuenta manda al iniciar sesión. El IDE tiene los suyos (settings.mascot_ide).
+// Sin sesión, localStorage; con sesión, también settings.mascot, que manda al
+// iniciar sesión. El IDE usa settings.mascot_ide.
 import { useSyncExternalStore } from 'react';
 import { api } from './api';
 import { CUADROS } from './mascotaSprites';
@@ -10,30 +8,27 @@ export const CLAVE_MASCOTA = 'lixbon-mascota';
 
 // Mismo contrato que MASCOT_DEFAULTS en core/persistence/queries.py.
 export const MASCOTA_DEFAULTS = {
-  activa: false,       // la activa el usuario
+  activa: false,
   personaje: 'gael',   // gael | leya | ambos
   trabajo: 'auto',     // IDE: escribir | conducir | auto
-  preguntar: true,     // IDE
-  flotante: true,      // IDE
-  latigo: true,        // IDE
+  preguntar: true,
+  flotante: true,
+  latigo: true,
   latigo_min: 2,
   dormir: true,
   dormir_min: 5,
-  guia: true,          // lixbon.com, docs y guías
+  guia: true,
   reducir: false,
 };
 
 // Cuadros de cada tira y versión de los PNG: los escribe el generador.
 export { CUADROS, VERSION_SPRITES } from './mascotaSprites';
-// Milisegundos por cuadro: el ritmo de cada animación.
 export const MS_CUADRO = {
   idle: 220, talk: 130, look: 280, walk: 140, wave: 170, celebrate: 150, stretch: 420, scratch: 220,
   think: 480, point: 420, type: 180, sleep: 1200, whip: 250, kart: 120,
 };
-/** Lo que dura una vuelta completa de una animación. */
 export const duracion = (estado) => (CUADROS[estado] || 1) * (MS_CUADRO[estado] || 200);
 
-/** Un elemento al azar de una lista (o el valor tal cual si no es lista). */
 export const alAzar = (v) => (Array.isArray(v) ? v[Math.floor(Math.random() * v.length)] : v);
 
 const oyentes = new Set();
@@ -66,8 +61,6 @@ function guardarLocal() {
 
 function avisar() { oyentes.forEach((f) => f()); }
 
-/** Cambia una o varias preferencias. Con sesión se guarda también en la
-    cuenta, agrupando cambios seguidos en un solo PATCH. */
 export function fijarMascota(patch) {
   estado = { ...leer(), ...patch };
   guardarLocal();
@@ -82,7 +75,6 @@ export function fijarMascota(patch) {
   }, 400);
 }
 
-/** La sesión cambió: con cuenta se adopta lo guardado en ella. */
 let cuentaAdoptada = null;
 export function sincronizarConCuenta(user) {
   conCuenta = Boolean(user);

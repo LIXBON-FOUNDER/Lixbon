@@ -1,6 +1,4 @@
 """
-push.py — Notificaciones push a la app móvil.
-
 Android solo despierta una app cerrada a través de Firebase Cloud Messaging, así
 que el gateway habla con FCM (HTTP v1) con la cuenta de servicio del proyecto de
 Firebase en FCM_SERVICE_ACCOUNT (el JSON tal cual o en base64). Sin esa variable

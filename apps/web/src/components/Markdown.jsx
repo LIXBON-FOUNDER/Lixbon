@@ -1,5 +1,3 @@
-// Markdown.jsx — render de respuestas de la IA. Títulos en Semibold según diseño.
-// Los bloques ```file:nombre.ext son archivos: van como tarjeta descargable.
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { FileCard } from './FileCard';

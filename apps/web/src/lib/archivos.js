@@ -1,8 +1,5 @@
-// archivos.js — archivos que el modelo "escribe" en la respuesta.
-//
-// Convención: un bloque de código cuyo lenguaje es `file:nombre.ext`. El chat
-// lo enseña como tarjeta y construye el archivo en el navegador al descargar:
-// Word y Excel desde Markdown; el resto (csv, md, txt, json, código) tal cual.
+// Convención: un bloque ```file:nombre.ext. Word y Excel se generan desde
+// Markdown; el resto va tal cual.
 
 const TIPOS = {
   docx: { label: 'Word', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
@@ -53,8 +50,6 @@ export async function construirArchivo(info, contenido) {
   return new Blob([contenido], { type: `${info.mime};charset=utf-8` });
 }
 
-// ── Markdown → Word ─────────────────────────────────────────────────────────
-
 function esFilaTabla(linea) {
   return /^\s*\|.*\|\s*$/.test(linea);
 }
@@ -67,7 +62,6 @@ function celdas(linea) {
   return linea.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
 }
 
-// Negrita, cursiva y código en línea → runs con formato.
 function runs(texto, TextRun, base = {}) {
   const out = [];
   const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
@@ -144,8 +138,6 @@ async function markdownADocx(md) {
   return Packer.toBlob(doc);
 }
 
-// ── Markdown/CSV → Excel ────────────────────────────────────────────────────
-
 function valorCelda(texto) {
   const t = texto.trim();
   if (t === '') return null;
@@ -205,8 +197,6 @@ async function markdownAXlsx(md) {
   const out = XLSX.write(libro, { bookType: 'xlsx', type: 'array' });
   return new Blob([out], { type: TIPOS.xlsx.mime });
 }
-
-// ── Instrucción para el modelo ──────────────────────────────────────────────
 
 export const FILE_PROMPT =
   'Cuando el usuario pida un documento, hoja de cálculo o archivo descargable, escríbelo ENTERO dentro de un ' +

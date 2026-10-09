@@ -1,5 +1,4 @@
 """
-agent.py — Node Agent de lixbon (corre en cada máquina con GPU).
 Ollama NUNCA se expone directo a internet: todo pasa por este agente.
 
 Dos modos:
@@ -79,8 +78,6 @@ STATE_FILE = Path(os.getenv("LIXBON_STATE_FILE") or Path.home() / ".lixbon" / "n
 app = FastAPI(title="lixbon Node Agent", version=AGENT_VERSION)
 
 
-# ── Autenticación ──────────────────────────────────────────────────────────
-
 def require_node_token(x_node_token: str | None = Header(default=None)) -> None:
     if not NODE_SHARED_SECRET:
         raise HTTPException(status_code=503, detail="Agente sin NODE_SHARED_SECRET configurado")
@@ -88,7 +85,6 @@ def require_node_token(x_node_token: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Token de nodo inválido")
 
 
-# ── Generación de imágenes (diffusers) ──────────────────────────────────────
 # Un solo pipeline por nodo, cargado en la primera petición y liberado tras
 # IMAGE_IDLE_S sin uso: la VRAM vuelve a estar disponible para los modelos de
 # chat. Las peticiones se serializan (una GPU, una imagen a la vez).
@@ -244,8 +240,6 @@ async def images_generate(request: Request, _: None = Depends(require_node_token
     return data
 
 
-# ── Métricas ───────────────────────────────────────────────────────────────
-
 def _gpu_metrics() -> dict:
     """Lee GPU via nvidia-smi. Valores neutrales si no hay GPU."""
     try:
@@ -279,7 +273,6 @@ def _gpu_metrics() -> dict:
         }
 
 
-# ── Capabilities de los modelos ────────────────────────────────────────────
 # El gateway necesita saber qué puede hacer cada modelo (tools / vision /
 # embedding / insert) para asignar los roles de inferencia sin adivinar por el
 # nombre. Eso solo lo dice `POST /api/show`, así que se consulta aquí y viaja
@@ -410,7 +403,6 @@ async def info(_: None = Depends(require_node_token)):
     }
 
 
-# ── Proxy autenticado hacia Ollama ─────────────────────────────────────────
 # Allowlist explícita: solo los endpoints que el gateway necesita.
 
 @app.get("/ollama/api/tags")
@@ -473,8 +465,6 @@ async def proxy_generate(request: Request, _: None = Depends(require_node_token)
         return resp.json()
 
 
-# ── Watchdog de Ollama (sin procesos duplicados) ───────────────────────────
-
 _ollama_proc: subprocess.Popen | None = None
 
 
@@ -505,7 +495,6 @@ def _watchdog_ollama() -> None:
             print(f"[lixbon Watchdog] No se pudo reiniciar Ollama: {exc}")
 
 
-# ── Modo conexión: el nodo llama al gateway ────────────────────────────────
 # Frames JSON por WebSocket. nodo→gateway: hello, metrics, response, chunk,
 # end, error. gateway→nodo: welcome, request, cancel. Cada petición viaja con
 # su `id`; varias comparten el socket.
@@ -751,8 +740,6 @@ def _modo_conexion(gateway: str) -> None:
     asyncio.run(_bucle())
 
 
-# ── Registro en Task Scheduler de Windows ──────────────────────────────────
-
 def instalar_tarea() -> bool:
     python = sys.executable
     extra = " ".join(a for a in sys.argv[1:] if a != "--install")
@@ -781,8 +768,6 @@ def desinstalar_tarea() -> None:
     else:
         print(f"[node_agent] No se encontró la tarea:\n{resultado.stderr}")
 
-
-# ── Punto de entrada ───────────────────────────────────────────────────────
 
 def main() -> None:
     if "--install" in sys.argv:

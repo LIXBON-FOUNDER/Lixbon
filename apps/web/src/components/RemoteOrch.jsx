@@ -1,7 +1,5 @@
-// RemoteOrch.jsx — el orquestador de agentes del IDE, visto desde /remote en
-// la web. El IDE manda un snapshot (`state.orch`) cada vez que cambia y atiende
-// las acciones que se le piden (`orch` + action): parar una tarea, ver su
-// terminal o su diff, cambiar el modelo de un rol… Aquí solo se pinta y se pide.
+// El IDE manda un snapshot (`state.orch`) cada vez que cambia y atiende las
+// acciones (`orch` + action): aquí solo se pinta y se pide.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n/useT';
 import { Select } from './Select';
@@ -30,7 +28,6 @@ const dur = (ms) => {
 };
 const elapsed = (task, now) => dur((isFinal(task.status) ? task.updated : now) - task.created);
 
-/** Tareas de un run como árbol: el padre y debajo sus hijas. */
 function tree(tasks, run) {
   const list = tasks.filter((t) => t.run === run);
   const kids = new Map();
@@ -75,10 +72,6 @@ function Seg({ value, onChange, options }) {
   );
 }
 
-// ── Detalle de una tarea ────────────────────────────────────────────────────
-
-// ── Encargo por secciones ───────────────────────────────────────────────────
-
 // El coordinador escribe los encargos con apartados en mayúsculas
 // («OBJETIVO:», «ARCHIVOS EN ALCANCE:»…): cada uno se pinta como bloque.
 const SECTION = /^([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ0-9 /.-]{2,40}(?:\s*\([^)\n]{0,60}\))?):[ \t]*/gm;
@@ -97,7 +90,6 @@ function specSections(text) {
   return out;
 }
 
-// Líneas con pinta de código (contratos, comandos de aceptación) en mono.
 const CODEY = /^\s{2,}\S|^(?:const|let|var|function|import|export|node|npm|npx|git|python3?)\b|[{};]\s*$|=>/;
 
 function SpecBody({ text }) {
@@ -189,7 +181,6 @@ function Activity({ task, orch, t }) {
   );
 }
 
-/** Pantalla de la terminal: sigue el final mientras no subas a leer. */
 function TermScreen({ text }) {
   const ref = useRef(null);
   const stick = useRef(true);
@@ -223,8 +214,6 @@ function Terminal({ task, state, send, t }) {
     </div>
   );
 }
-
-// ── Cambios: el patch por archivo, con números de línea ─────────────────────
 
 function parsePatch(text) {
   const files = [];
@@ -365,8 +354,6 @@ function TaskDetail({ task, state, send, onBack, t }) {
   );
 }
 
-// ── Runs ────────────────────────────────────────────────────────────────────
-
 function Runs({ state, send, onOpen, t }) {
   const orch = state.orch;
   const asking = useMemo(() => new Set(pendingQuestions(orch.messages).map((q) => q.from)), [orch.messages]);
@@ -428,8 +415,6 @@ function Runs({ state, send, onOpen, t }) {
     </div>
   );
 }
-
-// ── Ajustes ─────────────────────────────────────────────────────────────────
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -518,8 +503,6 @@ function Settings({ state, send, t }) {
     </div>
   );
 }
-
-// ── Vista ───────────────────────────────────────────────────────────────────
 
 export function RemoteOrch({ state, sendCommand }) {
   const t = useT('remote');

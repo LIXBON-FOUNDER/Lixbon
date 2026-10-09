@@ -1,6 +1,4 @@
 """
-nodes_link.py — Lado gateway de los nodos por conexión inversa.
-
 - POST /api/nodes/enroll : una máquina nueva canjea un token de enrolamiento
   (generado por el admin) por su `node_id` + secreto. Sin sesión: el token es
   la credencial.

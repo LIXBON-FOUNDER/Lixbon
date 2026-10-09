@@ -1,6 +1,3 @@
-// zip.js — ZIP sin compresión (método "store"), suficiente para unas páginas
-// HTML y sin traer una librería.
-
 const TABLA = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
@@ -23,7 +20,6 @@ function fechaDos(d = new Date()) {
   return { hora, fecha };
 }
 
-/** `archivos`: [{ name, code }] → Blob application/zip */
 export function crearZip(archivos) {
   const enc = new TextEncoder();
   const partes = [];

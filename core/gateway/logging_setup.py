@@ -1,8 +1,3 @@
-"""
-logging_setup.py — Logging estructurado (JSON) para el gateway.
-En Railway los logs se leen mejor como JSON de una línea; en desarrollo
-se puede desactivar con LOG_FORMAT=plain.
-"""
 from __future__ import annotations
 import json
 import logging

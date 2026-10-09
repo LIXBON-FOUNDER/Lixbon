@@ -17,8 +17,6 @@ CATALOGO = [
 ]
 
 
-# ── Candidatos ──────────────────────────────────────────────────────────────
-
 def test_los_embeddings_no_son_candidatos():
     """Antes `pick()` podía devolver available_models[0] — el de embeddings."""
     assert "nomic-embed-text:latest" not in rank_candidates(CATALOGO)
@@ -44,8 +42,6 @@ def test_acepta_strings_sueltos():
     assert rank_candidates(["llama3.1:8b", "phi3:mini"]) == ["llama3.1:8b", "phi3:mini"]
     assert pick_route_model(["llama3.1:8b", "phi3:mini"], "light") == "llama3.1:8b"
 
-
-# ── Tiers ───────────────────────────────────────────────────────────────────
 
 def test_heavy_es_el_mas_grande_del_mejor_tramo():
     assert pick_route_model(CATALOGO, "heavy") == "deepseek-r1:8b"
@@ -87,8 +83,6 @@ def test_sin_tamanos_conserva_el_orden_del_catalogo():
     assert pick_route_model(catalogo, "heavy") == "a"
     assert pick_route_model(catalogo, "light") == "a"
 
-
-# ── route_request ───────────────────────────────────────────────────────────
 
 def test_riesgo_critico_sigue_delegando_sin_modelo():
     r = route_request({"riskLevel": "critical"}, CATALOGO)

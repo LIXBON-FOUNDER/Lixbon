@@ -33,15 +33,11 @@ def _orq(**nodos):
     return orq
 
 
-# ── Normalización ───────────────────────────────────────────────────────────
-
 def test_normalizar_modelo():
     assert _normalizar_modelo("nomic-embed-text:latest") == "nomic-embed-text"
     assert _normalizar_modelo(" qwen3:4b ") == "qwen3:4b"
     assert _normalizar_modelo(None) == ""
 
-
-# ── best_node_for_model ─────────────────────────────────────────────────────
 
 def test_strict_sin_nodo_con_el_modelo_devuelve_none():
     orq = _orq(a=_estado_nodo("a", ["qwen3:4b"]))
@@ -103,8 +99,6 @@ def test_el_match_normaliza_latest_en_ambos_sentidos():
         orq2.detener()
 
 
-# ── ollama_target ───────────────────────────────────────────────────────────
-
 def test_target_strict_levanta_model_unavailable():
     orq = _orq(a=_estado_nodo("a", ["qwen3:4b"]))
     try:
@@ -155,8 +149,6 @@ def test_target_sin_modelo_usa_el_mejor_nodo():
     finally:
         orq.detener()
 
-
-# ── Agregación del catálogo ─────────────────────────────────────────────────
 
 def test_todos_los_modelos_une_capabilities_y_omite_las_desconocidas():
     orq = _orq(

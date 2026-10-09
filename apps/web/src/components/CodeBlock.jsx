@@ -1,4 +1,3 @@
-// CodeBlock.jsx — bloque de comando con botón de copiar.
 import { useState } from 'react';
 import { IconCopy, IconCheck } from './Icons';
 import { useT } from '../i18n/useT';
@@ -17,9 +16,6 @@ export function CodeBlock({ code, label }) {
 
   return (
     <div className="codeblock">
-      {/* La etiqueta (cuando la hay) va en su propia línea, pegada al código;
-          el botón de copiar vive junto al código para no dejar una cabecera
-          casi vacía en los comandos de una sola línea. */}
       {label && (
         <div className="codeblock__head">
           <span className="codeblock__label">{label}</span>

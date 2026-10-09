@@ -1,6 +1,4 @@
 """
-visual_renders.py — Cola de renders de Visuals (HTML → PNG/MP4) en la base de datos.
-
 El gateway encola; el worker (core/render/worker.py) reclama con arrendamiento,
 renderiza y adjunta la salida a la última versión del visual. Cada salida registra
 el sha256 del HTML del que sale, así se sabe si quedó desactualizada.

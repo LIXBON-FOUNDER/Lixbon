@@ -1,4 +1,3 @@
-// SkillsPage.jsx — catálogo público de skills (/skills) y su ficha (/skills/:slug).
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSeo } from '../lib/seo';
@@ -201,7 +200,7 @@ export default function SkillsPage() {
   const t = useT('skills');
   const { slug } = useParams();
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       <main className="page__body page__body--wide">
         {slug ? <Ficha slug={slug} t={t} /> : <Catalogo t={t} />}

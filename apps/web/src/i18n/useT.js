@@ -1,9 +1,7 @@
-// useT.js — t(key, vars) para un namespace del diccionario. Admite claves con
-// puntos ("a.b") y variables "{{var}}". Si falta la clave en el idioma activo
-// cae al español y, si tampoco existe, devuelve la clave (para no romper la UI).
+// Si falta la clave cae al español y, si tampoco existe, devuelve la clave.
 import { useLocale } from './LocaleContext';
 import { DICTIONARIES } from './dictionaries';
-import { DEFAULT_LOCALE } from './LocaleContext';
+import { SOURCE_LOCALE } from './LocaleContext';
 
 function lookup(obj, path) {
   return path.split('.').reduce((acc, k) => (acc && acc[k] !== undefined ? acc[k] : undefined), obj);
@@ -21,7 +19,7 @@ export function useT(namespace) {
     throw new Error(`useT: namespace desconocido "${namespace}"`);
   }
   return (key, vars) => {
-    const value = lookup(dict[locale], key) ?? lookup(dict[DEFAULT_LOCALE], key) ?? key;
+    const value = lookup(dict[locale], key) ?? lookup(dict[SOURCE_LOCALE], key) ?? key;
     return interpolate(value, vars);
   };
 }

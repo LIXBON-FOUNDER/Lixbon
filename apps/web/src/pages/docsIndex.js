@@ -1,13 +1,11 @@
-// docsIndex.js — índice de las docs sin JSX: lo comparten la página de docs
-// (menú, título y descripción de cada sección) y el sitemap que genera Vite.
-// id es el slug de la URL (/docs/:id) y es el mismo en los dos idiomas; group,
-// title y description sí cambian por idioma.
+// Sin JSX: lo lee también el sitemap. `id` es el slug y es el mismo en los dos
+// idiomas.
 export const DOCS_INDEX = [
   { id: 'introduction', group: { es: 'Empezar', en: 'Get started' },
     title: { es: 'Introducción', en: 'Introduction' },
     description: {
-      es: 'Qué es lixbon: chat con modelos de IA sobre GPUs propias, desde la web, el CLI, la app de escritorio, Visuals o la API.',
-      en: 'What lixbon is: chat with AI models on our own GPUs, from the web, the CLI, the desktop app, Visuals or the API.',
+      es: 'Qué es lixbon: chat con modelos de IA sobre GPUs que operamos, desde la web, el CLI, la app de escritorio, Visuals o la API.',
+      en: 'What lixbon is: chat with AI models on GPUs we operate, from the web, the CLI, the desktop app, Visuals or the API.',
     } },
   { id: 'getting-started', group: { es: 'Empezar', en: 'Get started' },
     title: { es: 'Primeros pasos', en: 'Getting started' },

@@ -1,7 +1,3 @@
-"""
-database.py — Motor SQLAlchemy y sesiones para Postgres (Railway).
-La única fuente de conexión es DATABASE_URL. No hay SQLite ni MySQL.
-"""
 from __future__ import annotations
 from contextlib import contextmanager
 
@@ -75,7 +71,6 @@ def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
 
-    # ── Migraciones de columnas sobre tablas preexistentes (Postgres) ──
     _column_migrations = [
         # F3: login por email, nombres, roles y verificación
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
@@ -153,7 +148,6 @@ def init_db() -> None:
             "WHERE week_anchor_slot IS NULL"
         ))
 
-    # ── Seed: los 3 planes (F5). ON CONFLICT DO NOTHING: los límites se editan
     #    en la BD y ningún redeploy los pisa. -1 = ilimitado. ──
     _plans_seed = """
         INSERT INTO plans (id, name, description, price_monthly_cents, currency,
@@ -177,7 +171,6 @@ def init_db() -> None:
            -1, 20000000, 20, 120, NULL, 2, 2, 1, :ts, :ts)
         ON CONFLICT (id) DO NOTHING
     """
-    # ── Migración: el allowed_models obsoleto del plan gratuito. ──
     #    El seed de arriba no toca una BD existente (ON CONFLICT DO NOTHING), así
     #    que la lista rota sigue ahí y deja al plan gratuito sin ningún modelo
     #    usable. Se corrige solo si el valor es EXACTAMENTE el del seed viejo
@@ -188,7 +181,6 @@ def init_db() -> None:
            AND allowed_models LIKE '%llama3.2%'
            AND allowed_models LIKE '%qwen2.5:0.5b%'
     """
-    # ── Multiplicadores de créditos por plan: 0.5x (free) / 2x (pro) / 5x
     #    (advance) de la unidad base en usage_policy. El AND final evita pisar
     #    un valor que un admin ya haya ajustado a mano (mismo espíritu que
     #    _free_plan_fix: un UPDATE dirigido, no un seed que se repita a ciegas). ──
@@ -200,7 +192,6 @@ def init_db() -> None:
         UPDATE plans SET session_credit_multiplier = 5.0, week_credit_multiplier = 5.0
          WHERE id = 'advance' AND session_credit_multiplier = 1.0 AND week_credit_multiplier = 1.0;
     """
-    # ── Ajuste F8 #2: Pro/Advance necesitaban más cupo por sesión para el uso
     #    agéntico real (un turno pesado de escritura de archivo se comía el
     #    cupo en pocos turnos); Free se deja EXACTAMENTE igual, así que en vez
     #    de tocar la base compartida (que también habría subido a Free) se
@@ -225,7 +216,6 @@ def init_db() -> None:
             if stmt.strip():
                 conn.execute(text(stmt))
 
-    # ── Seed: tarifa por defecto y packs de créditos (cobro por tokens de la
     #    API). ON CONFLICT DO NOTHING: el admin los edita y nada los pisa.
     #    El comodín '*' se siembra INACTIVO: cobrar un modelo sin tarifa
     #    publicada no es legal; el admin lo activa a sabiendas si lo quiere. ──
@@ -245,7 +235,6 @@ def init_db() -> None:
           ('power', 'Power', 50000000, 5000, 'USD', 1, 2, :ts)
         ON CONFLICT (id) DO NOTHING
     """
-    # ── Seed: las 5 filas del mapa rol→modelo, con model=NULL para que los
     #    defaults de core/config.py (MODEL_ROLE_*) manden hasta que el admin
     #    asigne algo. ON CONFLICT DO NOTHING: ningún redeploy pisa lo elegido. ──
     _roles_seed = """
@@ -259,7 +248,6 @@ def init_db() -> None:
           ('route',  NULL, NULL, NULL, 1, 'Clasificador de delegación y títulos', :ts, :ts)
         ON CONFLICT (role) DO NOTHING
     """
-    # ── Seed: política del pool de créditos (fila única) y peso estándar por
     #    token. A diferencia de model_pricing, la fila '*' aquí nace ACTIVA:
     #    el gate de sesión/semana no es opt-in. Las cifras base son un punto de
     #    partida deliberadamente conservador — se recalibran desde el panel
@@ -297,7 +285,6 @@ def init_db() -> None:
         conn.execute(text(_usage_policy_week_fix), {"ts": datetime.now(timezone.utc).isoformat()})
         conn.execute(text(_model_weights_seed), {"ts": datetime.now(timezone.utc).isoformat()})
 
-    # ── Seed: promover admins definidos por entorno ──
     import os
     admin_emails = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
     if admin_emails:

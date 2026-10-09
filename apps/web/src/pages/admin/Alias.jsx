@@ -1,5 +1,4 @@
-// Alias.jsx — nombre público de cada modelo. Con un alias definido, los
-// usuarios ven "Lixbon 1" (id `lixbon-1`) y nunca el nombre del proveedor; los
+// Con alias, el usuario ve «Lixbon 1» y nunca el nombre del proveedor; los
 // modelos sin alias desaparecen de su catálogo.
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';

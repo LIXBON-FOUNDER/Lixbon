@@ -82,7 +82,6 @@ def extract_files(texto: str) -> list[dict]:
     return _nombrar_por_enlaces(out)
 
 
-# ── Nombres de las páginas sin nombre (mismo criterio que nombrarPorEnlaces) ─
 # El nombre sacado del <title> rara vez coincide con los href de las otras
 # páginas; se empareja cada página sin nombre con el destino de enlace que
 # mejor encaja con su título y su <h1>.

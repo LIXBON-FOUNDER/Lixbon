@@ -1,12 +1,9 @@
-// PiezaEditor.jsx — editor visual de una pieza HTML (imagen o vídeo de marketing),
-// dentro del estudio: la pieza ocupa el lienzo y las propiedades van en la columna
-// de la derecha. Las ediciones se aplican sobre el DOM del iframe y al guardar se
-// serializa de vuelta a HTML.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n/useT';
 import { paraGuardar, paraWeb } from '../lib/visualsApi';
-import { FUENTES_GOOGLE, FUENTES_MARCA, cargarMuestras, enlazarFuente, pilaDe, primeraFamilia } from '../lib/googleFonts';
-import { IconCheck, IconChevron, IconPencil, IconPlay, IconRedo, IconSearch, IconStop, IconUndo } from './Icons';
+import { FUENTES_MARCA, enlazarFuente, pilaDe, primeraFamilia } from '../lib/googleFonts';
+import { Fila, Num, Range, Sec, Seg, SelectorFuente } from './EditorCampos';
+import { IconCheck, IconPencil, IconPlay, IconRedo, IconStop, IconUndo } from './Icons';
 
 const PALETA = ['#B4C64E', '#8CA038', '#4B5327', '#171717', '#F6F7ED', '#DCD6BC', '#FFFFFF', '#C4553D'];
 const TEMAS = ['lima', 'tinta', 'crema'];
@@ -75,7 +72,6 @@ function leerGiro(el) {
   return m ? +m[1] : 0;
 }
 
-/** El borde más cercano a una guía, si está a menos de `umbral`. */
 function ajustar(bordes, guias, umbral) {
   let mejor = null;
   for (const b of bordes) {
@@ -102,8 +98,6 @@ const pathOf = (body, el) => {
 const fromPath = (body, p) => p.reduce((el, i) => el && el.children[i], body);
 const hijos = (el) => [...el.children].filter((c) => !['SCRIPT', 'STYLE', 'LINK'].includes(c.tagName));
 
-/** Escala para que una pieza de w×h quepa en `nodo`. Las muy altas (páginas
- *  enteras) se ajustan al ancho y se recorren con scroll. */
 function useEncaje(nodoRef, w, h) {
   const [escala, setEscala] = useState(0.4);
   useLayoutEffect(() => {
@@ -126,7 +120,6 @@ function useEncaje(nodoRef, w, h) {
 
 const medidas = (meta) => (meta?.size || '1080x1350').split('x').map(Number);
 
-/** Vista de una pieza a su tamaño real, escalada para caber: nítida a cualquier zoom. */
 export function PiezaVista({ html, meta, baseHref, title }) {
   const [w, h] = medidas(meta);
   const ref = useRef(null);
@@ -139,102 +132,6 @@ export function PiezaVista({ html, meta, baseHref, title }) {
         <iframe title={title} sandbox="allow-same-origin" srcDoc={paraWeb(html, baseHref)}
           style={{ width: w, height: h, transform: `scale(${escala})` }} />
       </div>
-    </div>
-  );
-}
-
-const CERRADAS_KEY = 'lixbon.pieza.secciones';
-const leerCerradas = () => {
-  try { return JSON.parse(localStorage.getItem(CERRADAS_KEY) || '{}'); } catch { return {}; }
-};
-
-function Sec({ id, title, abierta: inicial = true, children }) {
-  const [abierta, setAbierta] = useState(() => leerCerradas()[id] ?? inicial);
-  const alternar = () => {
-    const v = !abierta;
-    setAbierta(v);
-    try { localStorage.setItem(CERRADAS_KEY, JSON.stringify({ ...leerCerradas(), [id]: v })); } catch { /* sin almacenamiento */ }
-  };
-  return (
-    <section className={`vis-insp__sec pe-sec ${abierta ? '' : 'is-cerrada'}`}>
-      <button className="pe-sec__cab" onClick={alternar} aria-expanded={abierta}>
-        <h3 className="vis-insp__eyebrow">{title}</h3>
-        <IconChevron size={12} open={abierta} />
-      </button>
-      {abierta && children}
-    </section>
-  );
-}
-
-function Fila({ label, children }) {
-  return (
-    <div className="pe-f">
-      <span className="pe-f__k">{label}</span>
-      <div className="pe-f__v">{children}</div>
-    </div>
-  );
-}
-
-function Range({ label, min, max, step, unit = '', get, set, commit }) {
-  const [v, setV] = useState(() => get());
-  const cambiar = (n) => { if (Number.isNaN(n)) return; setV(n); set(n); };
-  const pct = ((Math.min(max, Math.max(min, v)) - min) / (max - min)) * 100;
-  return (
-    <Fila label={label}>
-      <div className="pe-slider" style={{ '--p': `${pct}%` }}>
-        <span className="pe-slider__fill" />
-        <input type="range" min={min} max={max} step={step} value={v} aria-label={label}
-          onChange={(e) => cambiar(+e.target.value)} onPointerUp={commit} onKeyUp={commit} />
-        <label className="pe-slider__num">
-          <input type="number" step={step} value={+Number(v).toFixed(3)} aria-label={label}
-            onChange={(e) => cambiar(+e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
-          {unit && <span>{unit}</span>}
-        </label>
-      </div>
-    </Fila>
-  );
-}
-
-/** Campo numérico compacto; arrastrar la etiqueta cambia el valor, como en Figma. */
-function Num({ label, title, value, step = 1, min, unit, onChange, onCommit }) {
-  const [v, setV] = useState(value);
-  const cambiar = (n) => {
-    if (Number.isNaN(n)) return;
-    const x = min != null ? Math.max(min, n) : n;
-    setV(x);
-    onChange(x);
-  };
-  const arrastrar = (e) => {
-    e.preventDefault();
-    const nodo = e.currentTarget;
-    const x0 = e.clientX;
-    const v0 = +v || 0;
-    nodo.setPointerCapture(e.pointerId);
-    const mover = (ev) => cambiar(+(v0 + Math.round(ev.clientX - x0) * step * (ev.shiftKey ? 10 : 1)).toFixed(2));
-    nodo.addEventListener('pointermove', mover);
-    nodo.addEventListener('pointerup', () => { nodo.removeEventListener('pointermove', mover); onCommit(); }, { once: true });
-  };
-  return (
-    <label className="pe-num" title={title}>
-      <span className="pe-num__k" onPointerDown={arrastrar}>{label}</span>
-      <input type="number" step={step} value={+Number(v).toFixed(2)} aria-label={title || label}
-        onChange={(e) => cambiar(+e.target.value)} onBlur={onCommit} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
-      {unit && <span className="pe-num__u">{unit}</span>}
-    </label>
-  );
-}
-
-function Seg({ opciones, valor, cambiar, multi = false }) {
-  return (
-    <div className="vis-insp__seg pe-seg">
-      {opciones.map(([k, rotulo, titulo]) => {
-        const on = multi ? valor.includes(k) : valor === k;
-        return (
-          <button key={k} className={on ? 'is-on' : ''} title={titulo} aria-label={titulo} aria-pressed={on} onClick={() => cambiar(k)}>
-            {rotulo}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -379,12 +276,8 @@ function Disposicion({ el, commit, touch, t }) {
   );
 }
 
-function SelectorFuente({ doc, el, commit, t }) {
+function FuentePieza({ doc, el, commit, t }) {
   const [actual, setActual] = useState(() => primeraFamilia(cssOf(el).fontFamily));
-  const [abierto, setAbierto] = useState(false);
-  const [q, setQ] = useState('');
-  const [cargando, setCargando] = useState(null);
-  const [error, setError] = useState('');
   const enPieza = useMemo(() => {
     const vistas = new Set();
     for (const n of [doc.body, ...doc.body.querySelectorAll('*')]) {
@@ -393,65 +286,14 @@ function SelectorFuente({ doc, el, commit, t }) {
     }
     return [...vistas].filter(Boolean);
   }, [doc]);
-
-  const grupos = [['piece', enPieza], ['brand', FUENTES_MARCA], ...Object.entries(FUENTES_GOOGLE)];
-  const filtro = q.trim().toLowerCase();
-  const visibles = grupos
-    .map(([k, fs]) => [k, fs.filter((f) => f.toLowerCase().includes(filtro))])
-    .filter(([, fs]) => fs.length);
-  const exacta = grupos.some(([, fs]) => fs.some((f) => f.toLowerCase() === filtro));
-
   const elegir = async (nombre) => {
-    setError('');
-    setCargando(nombre);
-    const titulo = nombre.replace(/\b\p{L}/gu, (c) => c.toUpperCase());
-    let elegido = nombre;
-    let ok = await enlazarFuente(doc, nombre);
-    if (!ok && titulo !== nombre) { ok = await enlazarFuente(doc, titulo); elegido = titulo; }
-    setCargando(null);
-    if (!ok) { setError(t('editor.fontNotFound', { name: nombre })); return; }
-    el.style.fontFamily = pilaDe(elegido);
-    setActual(elegido);
-    setAbierto(false);
-    setQ('');
+    if (!(await enlazarFuente(doc, nombre))) return false;
+    el.style.fontFamily = pilaDe(nombre);
+    setActual(nombre);
     commit(true);
+    return true;
   };
-
-  return (
-    <div className="pe-fuente">
-      <button className="pe-fuente__actual" onClick={() => { cargarMuestras(Object.values(FUENTES_GOOGLE).flat()); setAbierto(!abierto); }}
-        aria-expanded={abierto} style={{ fontFamily: `"${actual}", sans-serif` }}>
-        <span>{actual || '—'}</span>
-        <IconChevron size={12} open={abierto} />
-      </button>
-      {abierto && (
-        <div className="pe-fuente__panel">
-          <label className="pe-fuente__buscar">
-            <IconSearch size={13} />
-            <input autoFocus value={q} placeholder={t('editor.fontSearch')} spellCheck={false}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) elegir(visibles[0]?.[1][0] && !exacta && filtro ? q.trim() : (visibles[0]?.[1][0] || q.trim())); if (e.key === 'Escape') setAbierto(false); }} />
-          </label>
-          <div className="pe-fuente__lista">
-            {filtro && !exacta && (
-              <button className="pe-fuente__google" onClick={() => elegir(q.trim())}>{t('editor.fontUseGoogle', { name: q.trim() })}</button>
-            )}
-            {visibles.map(([k, fs]) => (
-              <div key={k} className="pe-fuente__grupo">
-                <span className="pe-fuente__cat">{t(`editor.fontGroups.${k}`)}</span>
-                {fs.map((f) => (
-                  <button key={f} className={f === actual ? 'is-on' : ''} onClick={() => elegir(f)} style={{ fontFamily: `"${f}", sans-serif` }}>
-                    {f}{cargando === f && <small>{t('editor.fontLoading')}</small>}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {error && <p className="pe-error">{error}</p>}
-    </div>
-  );
+  return <SelectorFuente actual={actual} enUso={enPieza} fijas={FUENTES_MARCA} elegir={elegir} t={t} />;
 }
 
 function Tipografia({ doc, el, cs, commit, touch, t }) {
@@ -477,7 +319,7 @@ function Tipografia({ doc, el, cs, commit, touch, t }) {
   return (
     <Sec id="type" title={t('editor.typography')}>
       <Fila label={t('editor.font')}>
-        <SelectorFuente doc={doc} el={el} commit={commit} t={t} />
+        <FuentePieza doc={doc} el={el} commit={commit} t={t} />
       </Fila>
       <Range label={t('editor.size')} min={8} max={260} step={1} unit="px" commit={commit}
         get={() => parseFloat(cs.fontSize)} set={(v) => { el.style.fontSize = px(v); touch(); }} />
@@ -847,7 +689,6 @@ export function PiezaEditor({ html, meta, baseHref, nombre, onSave, onClose, sav
     refreshBoxes();
   }, [isVideo, refreshBoxes]);
 
-  /** Registra el estado en el historial; `refrescar` vuelve a leer el panel. */
   const commit = useCallback((refrescar = false) => {
     refreshBoxes();
     if (refrescar === true) setSelKey((k) => k + 1);
@@ -949,7 +790,6 @@ export function PiezaEditor({ html, meta, baseHref, nombre, onSave, onClose, sav
     commit();
   };
 
-  /** Mover (dir = 'move') o redimensionar desde un tirador, con guías de alineación. */
   const arrastrar = (e, dir) => {
     const d = docRef.current;
     const el = selRef.current;

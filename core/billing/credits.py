@@ -1,6 +1,4 @@
 """
-credits.py — Créditos prepago para el tráfico con API key (Bearer).
-
 El chat con sesión (web/IDE) sigue bajo la cuota del plan (quota.py). Las
 peticiones autenticadas con `lixbon_sk_` se cobran por tokens reales × tarifa
 del modelo (tabla model_pricing, micro-USD por millón de tokens):

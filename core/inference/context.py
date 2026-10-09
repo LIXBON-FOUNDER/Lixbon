@@ -1,6 +1,4 @@
 """
-context.py — Ajuste del historial a la ventana de contexto de Ollama.
-
 Ollama no falla cuando el prompt desborda `num_ctx`: descarta el principio
 (system prompt incluido) y, si además el modelo razona antes de responder,
 puede no quedar sitio para la respuesta y devolver vacío. Aquí se recortan los

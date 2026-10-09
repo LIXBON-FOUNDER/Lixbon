@@ -1,9 +1,5 @@
-// RemotePage.jsx — control remoto desde la web.
-//   /remote/:token → llegada por el link/QR de /remote; el token solo
-//                    identifica la sesión: SIEMPRE exige iniciar sesión con la
-//                    cuenta dueña (sin sesión web → /auth?next=… y vuelve)
-//   /remote        → lista de sesiones del usuario con sesión iniciada
-// Transcript en vivo (SSE), envío de prompts, interrupción y aprobaciones.
+// El token solo identifica la sesión: SIEMPRE exige iniciar sesión con la
+// cuenta dueña (sin sesión → /auth?next=… y vuelve).
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -36,8 +32,6 @@ export default function RemotePage() {
   const [error, setError] = useState('');
   const [claiming, setClaiming] = useState(!!token);
 
-  // Con token (QR/link): resolverlo a su sesión. El gateway exige estar
-  // autenticado como el dueño; sin sesión web se pasa por /auth y se vuelve.
   useEffect(() => {
     if (!token) return;
     api.post('/api/remote/claim', { token })
@@ -79,8 +73,6 @@ export default function RemotePage() {
     </div>
   );
 }
-
-// ── Lista (usuario con sesión web) ──────────────────────────────────────────
 
 function RemoteList({ onOpen, t, tc }) {
   const [sessions, setSessions] = useState(null);
@@ -148,8 +140,6 @@ function RemoteList({ onOpen, t, tc }) {
   );
 }
 
-// ── Actividad del agente: una línea por tramo de herramientas ───────────────
-
 function ToolLine({ items, t, locale }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(null);
@@ -202,7 +192,6 @@ function ToolLine({ items, t, locale }) {
   );
 }
 
-/** Agrupa las herramientas consecutivas para pintarlas como una sola línea. */
 function groupItems(items) {
   const out = [];
   for (const it of items) {
@@ -214,16 +203,12 @@ function groupItems(items) {
   return out;
 }
 
-// ── Modelo y esfuerzo de la sesión ──────────────────────────────────────────
-
-/** Selectores de modelo y esfuerzo, los mismos que ofrece el composer del IDE.
-    El cambio se pinta al momento y lo confirma el siguiente hello del host. */
+// El cambio se pinta al momento y lo confirma el siguiente hello del host.
 function SessionConfig({ state, sendCommand, t, disabled }) {
   const meta = state.meta || {};
   const canConfig = (meta.capabilities || []).includes('config') && meta.models?.length > 0;
   const [model, setModel] = useState(null);
   const [effort, setEffort] = useState(null);
-  // Cuando llega el hello con el valor nuevo, manda el host.
   useEffect(() => { setModel(null); }, [meta.model_value]);
   useEffect(() => { setEffort(null); }, [meta.effort]);
   if (!canConfig) return meta.model ? <span className="remote__model">{meta.model}</span> : null;
@@ -259,8 +244,6 @@ function SessionConfig({ state, sendCommand, t, disabled }) {
   );
 }
 
-// ── Caja de escritura ───────────────────────────────────────────────────────
-
 const ACCEPT = [
   'image/*',
   '.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.py,.js,.jsx,.ts,.tsx',
@@ -294,7 +277,6 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
   const leyendo = adjuntos.some((a) => a.estado === 'leyendo');
   const listos = adjuntos.filter((a) => a.estado === 'listo');
 
-  // Alto automático hasta un tope.
   useEffect(() => {
     const el = textRef.current;
     if (!el) return;
@@ -312,8 +294,6 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
     ? state.files.items.filter((f) => !mentions.some((m) => m.path === f.path)).slice(0, 8)
     : [];
 
-  // El menú «/» aparece mientras se escribe el nombre (antes del primer
-  // espacio); a partir de ahí lo que se teclea es el argumento.
   const commands = state.meta?.commands?.length ? state.meta.commands : FALLBACK_COMMANDS;
   const slashQuery = !disabled && input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null;
   const slashMatches = useMemo(
@@ -404,7 +384,6 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
       if (e.key === 'Escape') { e.preventDefault(); setInput(''); return; }
       if ((e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) || e.key === 'Tab') {
         const cmd = slashMatches[Math.min(slashIdx, n - 1)];
-        // Con el nombre ya completo y Enter, se envía tal cual.
         if (e.key === 'Enter' && input.slice(1).toLowerCase() === cmd.name.toLowerCase()) { e.preventDefault(); enviar(); return; }
         e.preventDefault();
         pickCommand(cmd);
@@ -526,8 +505,6 @@ function RemoteComposer({ state, sendCommand, t, tc }) {
   );
 }
 
-// ── Sesión en vivo ──────────────────────────────────────────────────────────
-
 function RemoteSession({ session, t, tc }) {
   const locale = useLocale();
   const [state, dispatch] = useReducer(remoteReducer, initialRemoteState);
@@ -539,8 +516,6 @@ function RemoteSession({ session, t, tc }) {
 
   useEffect(() => { seqRef.current = state.lastSeq; }, [state.lastSeq]);
 
-  // Auto-scroll al fondo con cada evento nuevo, salvo que el usuario haya
-  // subido a leer.
   useEffect(() => {
     const el = threadRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;

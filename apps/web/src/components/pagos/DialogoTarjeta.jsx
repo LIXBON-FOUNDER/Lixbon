@@ -1,4 +1,3 @@
-// DialogoTarjeta.jsx — guardar una tarjeta sin cobrar nada (SetupIntent).
 import { useEffect, useState } from 'react';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { api } from '../../lib/api';

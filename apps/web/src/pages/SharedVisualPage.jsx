@@ -1,5 +1,3 @@
-// SharedVisualPage.jsx — vista pública de solo lectura de un visual (/s/v/:token).
-// Sin sesión: muestra los resultados (imágenes y vídeos) y los documentos.
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Link } from '../i18n/link';

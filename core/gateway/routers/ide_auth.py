@@ -1,6 +1,4 @@
 """
-ide_auth.py — Iniciar sesión en Lixbon IDE con la cuenta de lixbon.com.
-
 El IDE no puede leer la sesión del navegador, y una app libre que cualquiera
 puede compilar no puede repartir el secreto de una aplicación OAuth: iría dentro
 del binario, a la vista. Así que el intercambio es al revés, y es este:
@@ -80,7 +78,6 @@ def _consulta(peticion: Request) -> dict[str, str]:
     return {k: peticion.query_params.get(k, "") for k in PARAMS}
 
 
-# ── La página ──────────────────────────────────────────────────────────────
 # Servida por el gateway y no por la SPA a propósito: el IDE abre el navegador
 # en esta dirección y tiene que encontrar una página completa en la PRIMERA
 # respuesta, sin depender de que arranque un router de cliente. Es también la
@@ -182,8 +179,6 @@ def _pagina_autorizar(usuario: dict[str, Any], consulta: dict[str, str]) -> HTML
          navegador. Podrás revocarlo cuando quieras desde Cuenta → Claves.</p>""")
 
 
-# ── Las rutas del navegador ────────────────────────────────────────────────
-
 def _sesion(cookie: str | None) -> dict[str, Any] | None:
     from core.persistence.queries import validate_web_session
     return validate_web_session(cookie) if cookie else None
@@ -270,8 +265,6 @@ async def ide_connect_authorize(peticion: Request, lixbon_session: str | None = 
         status_code=303,
     )
 
-
-# ── El canje ───────────────────────────────────────────────────────────────
 
 class Canje(BaseModel):
     token: str

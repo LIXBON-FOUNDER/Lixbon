@@ -1,6 +1,4 @@
 """
-roles.py — Mapa rol→modelo del gateway.
-
 La aplicación tiene cinco roles de inferencia con requisitos incompatibles entre
 sí (ver docs/CUELLO_DE_BOTELLA_MODELOS.md): el agente quiere el modelo más grande,
 el autocompletado el más rápido, la visión uno multimodal, los embeddings un vector
@@ -106,7 +104,6 @@ class RoleResolution:
         }
 
 
-# ── Catálogo ────────────────────────────────────────────────────────────────
 # El catálogo es lo que devuelve core.gateway.utils.fetch_models(): lista de
 # dicts {"id", "capabilities"?, "size"?}. Se aceptan strings sueltos por
 # tolerancia (⇒ capabilities desconocidas).
@@ -246,8 +243,6 @@ def _any_capabilities_known(catalog: Iterable[Any] | None) -> bool:
     return any(e.get("capabilities") for e in _entries(catalog))
 
 
-# ── Resolución ──────────────────────────────────────────────────────────────
-
 def resolve_from(
     role: str,
     db_rows: Sequence[dict[str, Any]] | None = None,
@@ -325,8 +320,6 @@ def _find_row(db_rows: Sequence[dict[str, Any]] | None, role: str) -> dict[str, 
             return row
     return None
 
-
-# ── Envoltorios con BD y config ─────────────────────────────────────────────
 
 _ROLES_TTL_S = 60
 _roles_cache: dict[str, Any] = {"at": 0.0, "rows": []}

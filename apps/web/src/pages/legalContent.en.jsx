@@ -1,6 +1,5 @@
-// legalContent.en.jsx — English legal text for lixbon (/legal/:doc). This is
-// a translation of legalContent.es.jsx; RESPONSABLE/VIGENCIA come from
-// legalShared.js so both language versions stay in sync on the facts.
+// Traducción de legalContent.es.jsx; RESPONSABLE/VIGENCIA vienen de
+// legalShared.js.
 import { Link } from '../i18n/link';
 import { RESPONSABLE, VIGENCIA as VIGENCIA_POR_IDIOMA } from './legalShared';
 

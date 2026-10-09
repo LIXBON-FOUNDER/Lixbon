@@ -213,7 +213,7 @@ export default function Nodos() {
   const confirmar = useConfirmar();
   const [data, setData] = useState(null);
   const [enrollments, setEnrollments] = useState([]);
-  const [form, setForm] = useState(null); // null = cerrado; {} = alta por URL
+  const [form, setForm] = useState(null);
   const [enrolando, setEnrolando] = useState(false);
   const [token, setToken] = useState(null);
   const [reintentando, setReintentando] = useState(null);

@@ -1,6 +1,3 @@
-// McpSection.jsx — Ajustes › MCP: conecta el servidor MCP de Lixbon a cada
-// agente con la configuración ya armada (URL y API key) en el formato exacto de
-// cada cliente, para copiar o instalar con un clic.
 import { useState } from 'react';
 import { useT } from '../i18n/useT';
 import { api } from '../lib/api';

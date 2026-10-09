@@ -1,4 +1,3 @@
-// ShareDialog.jsx — modal para compartir una conversación por enlace público.
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { IconX, IconCopy, IconCheck, IconTrash } from './Icons';

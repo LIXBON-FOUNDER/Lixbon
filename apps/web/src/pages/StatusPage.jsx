@@ -1,5 +1,3 @@
-// StatusPage.jsx — estado público de los servicios (/status): estado vivo de
-// cada componente, disponibilidad de 90 días e incidentes. Se refresca solo.
 import { useEffect, useState } from 'react';
 import { useSeo } from '../lib/seo';
 import { api } from '../lib/api';
@@ -153,7 +151,7 @@ export default function StatusPage() {
   const haceSeg = data ? Math.max(0, Math.round((ahora - new Date(data.updated_at).getTime()) / 1000)) : 0;
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       <main className="page__body page__body--wide status">
         <h1 className="page__title page__title--center">{t('seoTitle')}</h1>

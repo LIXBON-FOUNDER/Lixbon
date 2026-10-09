@@ -1,5 +1,5 @@
-// guiasContent.es.jsx — artículos en español de /guides. Cada uno responde a
-// una búsqueda concreta y solo cuenta lo que lixbon hace de verdad.
+// Cada guía responde a una búsqueda concreta y solo cuenta lo que lixbon hace
+// de verdad.
 import { Link } from '../i18n/link';
 import { CodeBlock } from '../components/CodeBlock';
 

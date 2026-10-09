@@ -1,5 +1,4 @@
-// legalIndex.js — índice de los documentos legales (sin JSX: lo lee el sitemap).
-// id es el mismo en los dos idiomas; title/description cambian.
+// Sin JSX: lo lee el sitemap.
 export const LEGAL_INDEX = [
   { id: 'privacy',
     title: { es: 'Política de privacidad', en: 'Privacy policy' },

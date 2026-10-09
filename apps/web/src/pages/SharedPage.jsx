@@ -1,5 +1,3 @@
-// SharedPage.jsx — vista pública de solo lectura de una conversación compartida
-// (/s/:token). Sin sesión; muestra el hilo y un CTA para probar lixbon.
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
@@ -85,7 +83,6 @@ export default function SharedPage() {
   );
 }
 
-/** Un diseño de Visuals compartido: la última versión, página a página. */
 function DisenoCompartido({ data, t }) {
   const versiones = useMemo(() => construirVersiones(data.messages), [data.messages]);
   const ultima = versiones[versiones.length - 1];

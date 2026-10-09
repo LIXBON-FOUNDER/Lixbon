@@ -101,8 +101,6 @@ def proyecto(cliente, gente):
     return {"id": p["id"], "general": p["canales"][0]["id"]}
 
 
-# ── Arranque y modelo ──────────────────────────────────────────────────────
-
 def test_proyecto_nace_con_general_y_su_creador_de_lider(cliente, gente, proyecto):
     r = cliente.get("/api/team/bootstrap", headers=gente["ana"]["h"])
     assert r.status_code == 200
@@ -148,8 +146,6 @@ def test_un_extrano_no_ve_el_canal(cliente, gente, proyecto):
     assert r.status_code == 404
 
 
-# ── Regla 3: la autorización vive en el emisor ─────────────────────────────
-
 def test_un_canal_privado_no_se_esconde_no_se_emite(cliente, gente, proyecto):
     r = cliente.post(f"/api/team/projects/{proyecto['id']}/channels",
                      json={"nombre": "dirección", "tipo": "privado"}, headers=gente["ana"]["h"])
@@ -169,8 +165,6 @@ def test_un_canal_privado_no_se_esconde_no_se_emite(cliente, gente, proyecto):
                         headers=gente["beto"]["h"]).status_code == 403
 
 
-# ── Regla 1: idempotencia por client_id ────────────────────────────────────
-
 def test_reenviar_el_mismo_client_id_no_duplica(cliente, gente, proyecto):
     ruta = f"/api/team/channels/{proyecto['general']}/messages"
     cid = _cid()
@@ -180,8 +174,6 @@ def test_reenviar_el_mismo_client_id_no_duplica(cliente, gente, proyecto):
     assert uno.json()["id"] == dos.json()["id"]
     assert uno.json()["seq"] == dos.json()["seq"]
 
-
-# ── Regla 2: seq monotónico por canal ──────────────────────────────────────
 
 def test_el_seq_sube_de_uno_en_uno_por_canal(cliente, gente, proyecto):
     ruta = f"/api/team/channels/{proyecto['general']}/messages"
@@ -203,8 +195,6 @@ def test_paginacion_hacia_atras(cliente, gente, proyecto):
                           headers=gente["ana"]["h"]).json()
     assert [m["id"] for m in previos["mensajes"]] == [m["id"] for m in todos[-4:-2]]
 
-
-# ── Sección 6: hilos ───────────────────────────────────────────────────────
 
 def test_un_hilo_tiene_un_solo_nivel(cliente, gente, proyecto):
     ruta = f"/api/team/channels/{proyecto['general']}/messages"
@@ -249,8 +239,6 @@ def test_no_se_responde_a_un_mensaje_de_otro_canal(cliente, gente, proyecto):
                      headers=gente["ana"]["h"])
     assert r.status_code == 400
 
-
-# ── Reglas 8, 9 y 10: editar y borrar ──────────────────────────────────────
 
 def test_editar_y_borrar_son_del_autor(cliente, gente, proyecto):
     m = cliente.post(f"/api/team/channels/{proyecto['general']}/messages",
@@ -311,8 +299,6 @@ def test_un_mensaje_no_puede_quedarse_vacio_editando(cliente, gente, proyecto):
     assert r.status_code == 400
 
 
-# ── Directos y presencia ───────────────────────────────────────────────────
-
 def test_un_directo_es_idempotente_y_solo_con_relacionados(cliente, gente, proyecto):
     uno = cliente.post("/api/team/dms", json={"usuario_id": gente["beto"]["id"]},
                        headers=gente["ana"]["h"])
@@ -346,8 +332,6 @@ def test_estado_desconocido_se_rechaza(cliente, gente):
     assert cliente.put("/api/team/presence", json={"estado": "de_fiesta"},
                        headers=gente["ana"]["h"]).status_code == 400
 
-
-# ── WebSocket: replay y reparto ────────────────────────────────────────────
 
 def test_el_replay_solo_manda_lo_que_falta(cliente, gente, proyecto):
     """Regla 2. Nunca el historial entero: solo lo que se perdió."""
@@ -428,8 +412,6 @@ def test_la_presencia_se_apaga_con_la_ultima_conexion(cliente, gente):
         assert hub.estado_real(uid) == "en_linea"
     assert hub.estado_real(uid) == "desconectado"
 
-
-# ── El canje del IDE: las cuatro reglas ────────────────────────────────────
 
 def _reto(verificador: str) -> str:
     d = hashlib.sha256(verificador.encode()).digest()

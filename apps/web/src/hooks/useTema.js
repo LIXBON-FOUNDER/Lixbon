@@ -1,7 +1,3 @@
-// useTema.js — tema claro/oscuro de toda la web. Un solo estado compartido
-// (varios botones lo cambian), guardado en localStorage y aplicado como
-// data-theme en <html>; index.html lo lee antes del primer pintado. El claro
-// es el de partida: el oscuro solo si alguien lo eligió.
 import { useSyncExternalStore } from 'react';
 
 export const CLAVE_TEMA = 'lixbon-tema';

@@ -1,8 +1,5 @@
-// useViewportHeight.js — el teclado no debe tapar el compositor.
-// Chrome Android encoge el layout (interactive-widget=resizes-content en el
-// meta viewport), pero iOS Safari no: superpone el teclado y `100dvh` sigue
-// midiendo la pantalla entera. Publicamos la altura del viewport *visual* en
-// --app-vh y las superficies a pantalla completa la usan como alto.
+// iOS Safari no encoge el layout con el teclado y `100dvh` mide la pantalla
+// entera: se publica la altura del viewport visual en --app-vh.
 import { useEffect } from 'react';
 
 export function useViewportHeight() {

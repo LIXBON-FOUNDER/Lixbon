@@ -1,7 +1,5 @@
-// Select.jsx — selector propio en lugar del <select> nativo.
-// La lista va en un portal con `position: fixed`: así ni el overflow de las
-// tarjetas/tablas ni ningún stacking context del contenedor la recortan.
-// El foco se queda en el botón y el teclado se resuelve con aria-activedescendant.
+// La lista va en un portal con `position: fixed` para que ningún overflow ni
+// stacking context la recorte; el teclado va por aria-activedescendant.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconCheck, IconChevron } from './Icons';

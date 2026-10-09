@@ -1,6 +1,4 @@
 """
-team_hub.py — Las conexiones vivas de Lixbon Team.
-
 Guarda, POR USUARIO, el conjunto de sus conexiones abiertas, y la presencia de
 cada uno. Dos cosas que parecen detalles y no lo son:
 
@@ -53,8 +51,6 @@ class TeamHub:
         self._conexiones: dict[int, set[Conexion]] = {}
         self._presencia: dict[int, str] = {}
 
-    # ── Conexiones ───────────────────────────────────────────────────────
-
     def entrar(self, usuario_id: int) -> Conexion:
         con = Conexion(usuario_id)
         self._conexiones.setdefault(usuario_id, set()).add(con)
@@ -78,8 +74,6 @@ class TeamHub:
     def cuantas(self, usuario_id: int) -> int:
         return len(self._conexiones.get(usuario_id, ()))
 
-    # ── Presencia ────────────────────────────────────────────────────────
-
     def estado_real(self, usuario_id: int) -> str:
         """El de verdad. Solo lo ve su dueño."""
         return self._presencia.get(usuario_id, "desconectado")
@@ -94,8 +88,6 @@ class TeamHub:
 
     def poner_estado(self, usuario_id: int, estado: str) -> None:
         self._presencia[usuario_id] = estado
-
-    # ── Emisión ──────────────────────────────────────────────────────────
 
     def a_usuario(self, usuario_id: int, evento: dict[str, Any]) -> None:
         for con in tuple(self._conexiones.get(usuario_id, ())):

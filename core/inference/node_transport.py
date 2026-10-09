@@ -1,6 +1,4 @@
 """
-node_transport.py — Transporte httpx para URLs `node://<node_id>/api/...`.
-
 Permite que core/inference/ollama.py hable con un nodo conectado por WebSocket
 exactamente igual que con un Ollama por HTTP: el orquestador devuelve
 `node://gpu-a1b2` como base_url y este transporte reenvía la petición por el

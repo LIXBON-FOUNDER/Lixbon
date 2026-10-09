@@ -1,14 +1,5 @@
-// Icons.jsx — la iconografía de lixbon, dibujada para la marca.
-//
-// Reglas del juego, para que un icono nuevo encaje con los demás:
-//   · Rejilla de 24 con zona viva de 3 a 21; los contornos cerrados que
-//     llenan la caja (ventanas, tarjetas, archivos) llevan radio 3–4, como
-//     los 8px de la interfaz a escala.
-//   · Trazo de 1.5 con puntas y uniones redondas. Todo en currentColor.
-//   · Duotono: las formas principales llevan además un relleno del mismo
-//     color al 14 % (<Tinta>). Da cuerpo sin añadir líneas y funciona igual
-//     en claro que en oscuro.
-// Tamaño por prop `size` (18 por defecto); el resto de props van al <svg>.
+// Rejilla 24 (zona viva 3–21), trazo 1.5 redondeado en currentColor y duotono:
+// relleno del mismo color al 14 % (<Tinta>).
 
 function Svg({ size = 18, children, ...rest }) {
   return (
@@ -30,10 +21,7 @@ function Svg({ size = 18, children, ...rest }) {
   );
 }
 
-// El relleno suave del duotono: misma forma que el trazo, sin trazo.
 const Tinta = ({ d }) => <path d={d} fill="currentColor" fillOpacity=".14" stroke="none" />;
-
-// ── Navegación y acciones básicas ─────────────────────────────────────────
 
 export const IconPlus = (p) => (
   <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>
@@ -172,9 +160,6 @@ export const IconHistory = (p) => (
   </Svg>
 );
 
-// ── Productos y secciones ────────────────────────────────────────────────
-
-// Burbuja de conversación: un óvalo limpio con la cola abajo a la izquierda.
 export const IconChat = (p) => {
   const d = 'M12 4.5c4.7 0 8.5 3 8.5 6.75S16.7 18 12 18c-.9 0-1.8-.1-2.6-.3L5 19.5l1.3-3.4c-1.7-1.2-2.8-3-2.8-4.85C3.5 7.5 7.3 4.5 12 4.5Z';
   return (
@@ -291,7 +276,6 @@ export const IconLayers = (p) => (
   </Svg>
 );
 
-// Rellenas, no de trazo: el lanzador de aplicaciones.
 export const IconApps = ({ size = 18, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false" {...p}>
     {[5.5, 12, 18.5].map((cy) => [5.5, 12, 18.5].map((cx) => (
@@ -307,8 +291,6 @@ export const IconGear = (p) => (
     <circle cx="12" cy="12" r="2.75" />
   </Svg>
 );
-
-// ── Contenido y adjuntos ─────────────────────────────────────────────────
 
 export const IconClip = (p) => (
   <Svg {...p}>
@@ -371,8 +353,6 @@ export const IconPointer = (p) => (
   </Svg>
 );
 
-// ── Cuenta, pagos y estado ───────────────────────────────────────────────
-
 export const IconUser = (p) => (
   <Svg {...p}>
     <Tinta d="M12 4.75a3.75 3.75 0 1 1 0 7.5 3.75 3.75 0 0 1 0-7.5Z" />
@@ -381,7 +361,6 @@ export const IconUser = (p) => (
   </Svg>
 );
 
-// Gael y Leya, en cabeza de chibi: la sección de Ajustes de la mascota.
 export const IconMascota = (p) => (
   <Svg {...p}>
     <Tinta d="M12 4.5a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z" />
@@ -475,8 +454,6 @@ export const IconAlert = (p) => {
     </Svg>
   );
 };
-
-// ── Tema ─────────────────────────────────────────────────────────────────
 
 export const IconSun = (p) => (
   <Svg {...p}>

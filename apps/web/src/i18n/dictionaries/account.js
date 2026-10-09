@@ -74,7 +74,7 @@ export default {
 
     privacy: {
       title: 'Privacidad',
-      lead: 'En lixbon tus conversaciones son tuyas. La inferencia ocurre en nuestro propio clúster y no compartimos tus datos con terceros.',
+      lead: 'En lixbon tus conversaciones son tuyas. Los modelos corren en GPUs propias o alquiladas que operamos nosotros, y no enviamos tus datos a proveedores externos de modelos de IA.',
       anonymousUsage: 'Datos de uso anónimos',
       anonymousUsageHint: 'Métricas agregadas para mejorar el servicio',
       history: 'Historial de conversaciones',
@@ -352,7 +352,7 @@ export default {
 
     privacy: {
       title: 'Privacy',
-      lead: 'At lixbon, your conversations are yours. Inference runs on our own cluster and we don’t share your data with third parties.',
+      lead: 'At lixbon, your conversations are yours. The models run on owned or rented GPUs that we operate, and we don’t send your data to external AI model providers.',
       anonymousUsage: 'Anonymous usage data',
       anonymousUsageHint: 'Aggregated metrics to improve the service',
       history: 'Conversation history',

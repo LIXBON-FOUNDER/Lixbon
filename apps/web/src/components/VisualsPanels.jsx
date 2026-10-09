@@ -1,5 +1,3 @@
-// VisualsPanels.jsx — piezas de Visuals: selector de design system (con uno
-// propio) e inspector del elemento seleccionado en el lienzo.
 import { useEffect, useRef, useState } from 'react';
 import { DESIGN_SYSTEMS, designSystemPersonalizado } from '../lib/visuals';
 import { IconChevron, IconSearch, IconX } from './Icons';
@@ -91,8 +89,6 @@ const legibleColor = (color) => {
 const primeraFuente = (f) => (f || '').split(',')[0].replace(/["']/g, '').trim();
 const aKebab = (k) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
-/** Campo de texto que confirma al salir o con Enter; se reinicia al cambiar
- *  el valor calculado (otra selección, o el iframe devolviendo el nuevo). */
 function Valor({ valor, onCommit, etiqueta, prefijo, mono = true, className = '' }) {
   const confirmar = (e) => {
     const v = e.target.value.trim();
@@ -149,8 +145,6 @@ const ALINEACIONES = [
   { v: 'right', d: 'M4 6h16M10 12h10M7 18h13' },
 ];
 
-/** Panel del elemento seleccionado: pestaña Diseño (texto, clases, tipografía,
- *  color, caja) y pestaña CSS con todo lo calculado que no es por defecto. */
 export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
   const t = useT('visuals');
   const [pestana, setPestana] = useState('diseno');
@@ -360,7 +354,6 @@ export function Inspector({ seleccion, onAplicar, onPedir, onCerrar }) {
   );
 }
 
-// Tamaños de tablero en el lienzo (px de la página, antes del zoom).
 const TABLEROS = {
   escritorio: { w: 1280, h: 800 },
   tablet: { w: 820, h: 1180 },
@@ -375,8 +368,6 @@ const tituloDe = (f) => {
   return (m && m[1].trim()) || f.name.replace(/\.(html?|svg)$/, '');
 };
 
-/** Coloca en fila (y salta de fila al pasar de ~4400 px) las páginas sin
- *  posición, a la derecha y debajo de lo ya colocado. */
 function colocar(paginas, layout) {
   const out = { ...layout };
   const puestas = paginas.filter((f) => out[f.name]?.x != null);
@@ -399,11 +390,6 @@ function colocar(paginas, layout) {
   return out;
 }
 
-/** Lienzo libre al estilo de un tablero de diseño: cada página es un
- *  tablero con su título que se mueve por separado (arrastrando el tablero
- *  o su cabecera), cambia de tamaño (escritorio/tablet/móvil) y se renombra
- *  con doble clic en el título. El fondo se arrastra para desplazarse y
- *  Ctrl+rueda hace zoom. Posiciones, tamaños y títulos se guardan por diseño. */
 export function Board({ paginas, documento, onAbrir, clave, activa }) {
   const t = useT('visuals');
   const ref = useRef(null);
@@ -413,7 +399,7 @@ export function Board({ paginas, documento, onAbrir, clave, activa }) {
   });
   const [vista, setVista] = useState({ x: 40, y: 60, z: 0.25 });
   const [elegido, setElegido] = useState(activa || null);
-  const [encima, setEncima] = useState([]);       // orden de apilado: el último, arriba
+  const [encima, setEncima] = useState([]);
   const [renombrando, setRenombrando] = useState(null);
   const arrastre = useRef(null);
   const vistaRef = useRef(vista);
@@ -425,7 +411,6 @@ export function Board({ paginas, documento, onAbrir, clave, activa }) {
     setLayout(next);
     try { localStorage.setItem(almacen, JSON.stringify(next)); } catch { /* sin almacenamiento */ }
   };
-  // Páginas nuevas (otra versión) entran colocadas sin mover las demás.
   useEffect(() => {
     setLayout((prev) => (paginas.every((f) => prev[f.name]?.x != null) ? prev : colocar(paginas, prev)));
   }, [paginas]);
@@ -454,7 +439,6 @@ export function Board({ paginas, documento, onAbrir, clave, activa }) {
     guardar(colocar(paginas, limpio));
     reencuadrar.current = true;
   };
-  // Tras «Ordenar», encuadrar con las posiciones ya aplicadas.
   const reencuadrar = useRef(false);
   useEffect(() => { if (reencuadrar.current) { reencuadrar.current = false; ajustar(); } });  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -479,7 +463,6 @@ export function Board({ paginas, documento, onAbrir, clave, activa }) {
   }, []);
   const zoomCentro = (f) => { const el = ref.current; zoomEn(f, el.clientWidth / 2, el.clientHeight / 2); };
 
-  // Un solo gestor de arrastre: fondo = desplazar; tablero o cabecera = moverlo.
   const empezar = (e, nombre) => {
     if (e.button !== 0 || e.target.closest('button, input')) return;
     e.stopPropagation();

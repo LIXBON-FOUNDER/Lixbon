@@ -1,5 +1,3 @@
-// guiasContent.en.jsx — English articles for /guides. Each one answers a
-// specific search and only describes what lixbon actually does.
 import { Link } from '../i18n/link';
 import { CodeBlock } from '../components/CodeBlock';
 

@@ -1,6 +1,4 @@
 """
-security.py — Hashing seguro con scrypt, rate limiting por IP y dependencias de auth.
-
 Cambios respecto a la versión anterior:
 - hash_password ahora usa scrypt + salt aleatorio (SHA-256 es solo para legacy)
 - verify_password soporta ambos formatos con fallback automático
@@ -14,7 +12,6 @@ from fastapi import Cookie, Header, HTTPException, Request, Response
 
 from core.persistence.queries import validate_api_key
 
-# ── Hashing de contraseñas ─────────────────────────────────────────────────
 # Implementación ÚNICA en core/persistence/queries.py (scrypt + salt, con
 # compare_digest en tiempo constante). Se re-exportan aquí para no tener dos
 # copias que puedan divergir — la duplicada de este módulo comparaba con `==`.
@@ -24,7 +21,6 @@ from core.persistence.queries import (  # noqa: E402, F401
 )
 
 
-# ── Rate limiting y anti-brute-force ───────────────────────────────────────
 # Implementación en core/security/ratelimit.py (Redis con fallback en memoria).
 # Se re-exportan aquí para mantener los imports de los routers.
 from core.security.ratelimit import (  # noqa: E402, F401
@@ -35,8 +31,6 @@ from core.security.ratelimit import (  # noqa: E402, F401
 )
 
 
-# ── Helpers de token ───────────────────────────────────────────────────────
-
 def get_bearer_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
@@ -45,8 +39,6 @@ def get_bearer_token(authorization: str | None) -> str | None:
         return None
     return parts[1].strip()
 
-
-# ── Verificación de correo ─────────────────────────────────────────────────
 
 def exigir_correo_verificado(user_data: dict[str, Any]) -> dict[str, Any]:
     """Deja pasar solo a quien haya verificado su correo, si el gateway lo pide.
@@ -74,8 +66,6 @@ def exigir_correo_verificado(user_data: dict[str, Any]) -> dict[str, Any]:
         },
     )
 
-
-# ── Dependencias FastAPI ───────────────────────────────────────────────────
 
 def api_key_required(
     request: Request,
@@ -195,8 +185,6 @@ def validate_model_access(user_data: dict[str, Any], requested_model: str) -> No
         )
 
 
-# ── Dependencia de admin (token compartido hasta que lleguen los roles en F3) ──
-
 def require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
     """Valida X-Admin-Token contra ADMIN_TOKEN. Sin token configurado ⇒ 503 (deshabilitado)."""
     import secrets as _secrets
@@ -206,8 +194,6 @@ def require_admin_token(x_admin_token: str | None = Header(default=None)) -> Non
     if not x_admin_token or not _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
         raise HTTPException(status_code=401, detail="Token de administrador inválido")
 
-
-# ── Middleware de headers de seguridad HTTP ────────────────────────────────
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",

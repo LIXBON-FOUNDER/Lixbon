@@ -1,6 +1,4 @@
 """
-websearch.py — Búsqueda en internet para el chat ("modo investigar").
-
 Con el toggle activo, el propio modelo decide QUÉ buscar (`plan_queries`: 1-3
 consultas a partir de la conversación, resolviendo referencias a mensajes
 anteriores), se buscan en paralelo (`research`) y los resultados se le dan
@@ -164,8 +162,6 @@ def _search_sync(query: str, limit: int) -> list[dict]:
     return []
 
 
-# ── Descarga del texto real de la página ────────────────────────────────────
-
 _TAG_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _HTML_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\r\f\v]+")
@@ -291,8 +287,6 @@ async def research(queries: list[str]) -> list[dict]:
             logger.debug(f"Enriquecimiento de páginas falló: {exc}")
     return unidos
 
-
-# ── El modelo decide qué buscar ──────────────────────────────────────────────
 
 _PLAN_HISTORY = 6          # mensajes previos que ve el planificador
 _PLAN_CHARS = 1500         # recorte por mensaje (adjuntos largos no aportan a la consulta)

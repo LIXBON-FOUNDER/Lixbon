@@ -1,10 +1,3 @@
-// ClusterFondo.jsx — el fondo de las pantallas de acceso.
-//
-// Es lo que hace lixbon, dibujado: nodos de la LAN conectados, una petición que
-// viaja por la arista hasta el nodo que la va a atender y, cada 18 s, un nodo
-// que se cae y queda aislado. CSS y SVG puros, sin librerías; si el sistema
-// pide menos movimiento (motion.css) se queda quieto y sigue siendo legible.
-
 const ARISTAS = [
   [130, 180, 300, 300], [300, 300, 170, 520], [170, 520, 340, 660],
   [340, 660, 120, 790], [130, 180, 170, 520], [300, 300, 340, 660],
@@ -56,7 +49,6 @@ export function ClusterFondo() {
         />
       ))}
 
-      {/* Un nodo se cae y se aísla; vuelve solo. */}
       <circle className="cluster__roto" cx="1150" cy="500" r="7" fill="#C4553D" />
 
       {VIAJES.map(([cx, cy, anim, dur, delay], i) => (

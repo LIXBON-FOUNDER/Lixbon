@@ -1,31 +1,23 @@
-// SupportPage.jsx — /support: formulario de soporte. El caso sale por correo
-// desde el gateway (POST /api/support) al buzón del equipo, con Reply-To del
-// usuario, y el usuario recibe un acuse con el número de caso. Con sesión no
-// pide el correo: responde al de la cuenta.
-import { useState } from 'react';
+// Con sesión no pide el correo: responde al de la cuenta.
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Link } from '../i18n/link';
 import { useT } from '../i18n/useT';
 import { useSeo } from '../lib/seo';
+import { useLocale } from '../i18n/LocaleContext';
+import { PreguntaLixbon } from '../components/PreguntaLixbon';
+import { MascotaGuia } from '../components/Mascota';
 import { api } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
-import { PaisajeCosta } from '../components/Paisajes';
-import {
-  IconAlert, IconBolt, IconBook, IconCard, IconChat, IconCheck, IconCode,
-  IconRefresh, IconShield, IconTerminal, IconUser, IconArrowLeft,
-} from '../components/Icons';
+import { IconAlert, IconCheck, IconArrowLeft } from '../components/Icons';
 
 const SOPORTE = 'support@lixbon.com';
 const MIN_MENSAJE = 20;
 const MAX_MENSAJE = 5000;
 
-const CATEGORIAS = [
-  ['account', IconUser], ['billing', IconCard], ['refund', IconRefresh],
-  ['bug', IconAlert], ['api', IconCode], ['apps', IconTerminal],
-  ['privacy', IconShield], ['feedback', IconBolt], ['other', IconChat],
-];
+const CATEGORIAS = ['account', 'billing', 'refund', 'bug', 'api', 'apps', 'privacy', 'feedback', 'other'];
 
 const Flecha = () => <IconArrowLeft size={15} style={{ transform: 'rotate(180deg)' }} />;
 
@@ -33,7 +25,7 @@ export default function SupportPage() {
   const t = useT('support');
   const { user } = useAuth();
   const [params] = useSearchParams();
-  const inicial = CATEGORIAS.some(([c]) => c === params.get('type')) ? params.get('type') : 'bug';
+  const inicial = CATEGORIAS.includes(params.get('type')) ? params.get('type') : 'bug';
 
   const [categoria, setCategoria] = useState(inicial);
   const [asunto, setAsunto] = useState('');
@@ -45,7 +37,16 @@ export default function SupportPage() {
   const [error, setError] = useState('');
   const [hecho, setHecho] = useState(null);
 
-  useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/support' });
+  const tl = useT('landing');
+  const locale = useLocale();
+  const [preguntando, setPreguntando] = useState(false);
+  const jsonLd = useMemo(() => ({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: tl('faq').map(({ q, a }) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
+    // eslint-disable-next-line
+  }), [locale]);
+  useSeo({ title: t('seoTitle'), description: t('seoDescription'), path: '/support', jsonLd });
 
   const pista = t(`hints.${categoria}`);
   const tienePista = pista !== `hints.${categoria}`;
@@ -83,15 +84,31 @@ export default function SupportPage() {
   };
 
   return (
-    <div className="page soporte">
+    <div className="page web soporte">
       <PublicNav />
 
       <main className="soporte__wrap">
         <header className="soporte__cabecera">
-          <p className="landing__eyebrow">{t('eyebrow')}</p>
           <h1 className="soporte__titulo">{hecho ? t('doneTitle') : t('title')}</h1>
           {!hecho && <p className="soporte__lead">{t('lead')}</p>}
         </header>
+
+        {!hecho && (
+          <section className="soporte__faq" data-mascota="faq">
+            <h2 className="soporte__h2">{tl('faqTitle')}</h2>
+            <div className={`landing__faqbox ${preguntando ? 'is-preguntando' : ''}`}>
+              <div className="landing__faq" inert={preguntando}>
+                {tl('faq').map(({ q, a }) => (
+                  <details key={q}>
+                    <summary><h3>{q}</h3><span className="landing__faq-mas" aria-hidden="true" /></summary>
+                    <p>{a}</p>
+                  </details>
+                ))}
+              </div>
+              <PreguntaLixbon abierta={preguntando} onAbrir={() => setPreguntando(true)} onCerrar={() => setPreguntando(false)} />
+            </div>
+          </section>
+        )}
 
         <div className="soporte__rejilla">
           {hecho ? (
@@ -106,15 +123,15 @@ export default function SupportPage() {
             </section>
           ) : (
             <form className="soporte__form" onSubmit={enviar} noValidate>
+              <h2 className="soporte__h2">{t('formTitle')}</h2>
               <fieldset className="soporte__tipos">
                 <legend className="soporte__etiqueta">{t('categoryLabel')}</legend>
-                {CATEGORIAS.map(([id, Icono]) => {
+                {CATEGORIAS.map((id) => {
                   const [titulo, desc] = t(`categories.${id}`);
                   return (
-                    <label key={id} className={`soporte__tipo ${categoria === id ? 'is-on' : ''}`}>
+                    <label key={id} className={`soporte__tipo ${categoria === id ? 'is-on' : ''}`} title={desc}>
                       <input type="radio" name="categoria" value={id} checked={categoria === id} onChange={() => setCategoria(id)} />
-                      <Icono size={18} />
-                      <span><strong>{titulo}</strong><small>{desc}</small></span>
+                      {titulo}
                     </label>
                   );
                 })}
@@ -162,19 +179,17 @@ export default function SupportPage() {
           )}
 
           <aside className="soporte__lado">
-            <figure className="landing__lienzo soporte__lienzo"><PaisajeCosta /></figure>
             <h2 className="soporte__lado-titulo">{t('asideTitle')}</h2>
             <nav className="soporte__atajos">
               {[
-                ['/docs', 'asideDocs', IconBook],
-                ['/status', 'asideStatus', IconBolt],
-                ['/account/billing', 'asideBilling', IconCard],
-                ['/legal/refunds', 'asideRefunds', IconRefresh],
-              ].map(([to, clave, Icono]) => {
+                ['/docs', 'asideDocs'],
+                ['/status', 'asideStatus'],
+                ['/account/billing', 'asideBilling'],
+                ['/legal/refunds', 'asideRefunds'],
+              ].map(([to, clave]) => {
                 const [titulo, desc] = t(clave);
                 return (
                   <Link key={to} to={to} className="soporte__atajo">
-                    <Icono size={18} />
                     <span><strong>{titulo} <Flecha /></strong><small>{desc}</small></span>
                   </Link>
                 );
@@ -186,6 +201,7 @@ export default function SupportPage() {
       </main>
 
       <PublicFooter />
+      <MascotaGuia selector="[data-mascota]" />
     </div>
   );
 }

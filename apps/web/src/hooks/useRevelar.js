@@ -1,8 +1,5 @@
-// useRevelar.js — entradas al hacer scroll en la web pública. Marca el
-// contenedor con `.revelar-listo` y añade `.is-visible` a cada [data-revelar]
-// de dentro la primera vez que entra en la ventana. Sin JavaScript (o en el
-// HTML prerenderizado) no se oculta nada: el estado inicial lo pone la clase
-// del contenedor, no el marcado.
+// Sin JS (o en el prerender) no se oculta nada: el estado inicial lo pone la
+// clase del contenedor, no el marcado.
 import { useEffect, useRef } from 'react';
 
 export function useRevelar() {

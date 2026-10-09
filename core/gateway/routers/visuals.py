@@ -1,6 +1,4 @@
 """
-visuals.py — API de Visuals: diseños y piezas de marketing con versiones.
-
 - POST   /api/visuals                       : crea un visual (opcionalmente con archivos)
 - GET    /api/visuals                       : lista del usuario
 - GET    /api/visuals/{id}                  : manifiesto de una versión

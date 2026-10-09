@@ -1,13 +1,8 @@
-"""
-config.py — Configuración centralizada de lixbon DTC
-Carga variables de entorno y soporta archivo .env opcional sin dependencias externas.
-"""
 from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
 
-# ── Carga de .env (sin dependencias externas) ──────────────────────────────
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 if _ENV_FILE.exists():
     for _line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
@@ -19,7 +14,6 @@ if _ENV_FILE.exists():
             if _key:
                 os.environ.setdefault(_key, _val)
 
-# ── Variables principales ───────────────────────────────────────────────────
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "*")
 RATE_LIMIT_PER_MIN: int = int(os.getenv("RATE_LIMIT_PER_MIN", "120"))
@@ -27,7 +21,6 @@ AUTH_RATE_LIMIT: int = int(os.getenv("AUTH_RATE_LIMIT", "5"))
 AUTH_BLOCK_MINUTES: int = int(os.getenv("AUTH_BLOCK_MINUTES", "15"))
 ADMIN_TOKEN: Optional[str] = os.getenv("ADMIN_TOKEN") or None
 
-# ── Roles de inferencia (mapa rol→modelo) ──────────────────────────────────
 # La app tiene cinco roles con requisitos incompatibles (ver
 # docs/CUELLO_DE_BOTELLA_MODELOS.md). Estos son los DEFAULTS; la tabla
 # `model_roles` los sobreescribe desde el panel admin, y si un rol queda vacío
@@ -72,14 +65,11 @@ MODEL_ROLES_TTL_S: int = int(os.getenv("MODEL_ROLES_TTL_S", "60"))
 # que dispara una petición por pulsación de tecla.
 MODELS_CACHE_TTL_S: int = int(os.getenv("MODELS_CACHE_TTL_S", "10"))
 
-# ── Base de datos (Postgres — Railway staging/prod) ────────────────────────
 # postgresql://user:pass@host:port/db  (Railway la provee; en local apunta a lixbon-staging)
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-# ── Redis (rate limiting, sesiones) ─────────────────────────────────────────
 REDIS_URL: str = os.getenv("REDIS_URL", "")
 
-# ── Cloudflare R2 (releases privados — F6.5) ───────────────────────────────
 # Bucket privado; el gateway sube y genera URLs prefirmadas al vuelo.
 R2_ACCOUNT_ID: str = os.getenv("R2_ACCOUNT_ID", "")
 R2_BUCKET: str = os.getenv("R2_BUCKET", "")
@@ -97,7 +87,6 @@ def r2_endpoint() -> str:
     return f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 
-# ── Stripe (pagos — F7) ────────────────────────────────────────────────────
 STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -112,30 +101,25 @@ CLI_RELEASES_URL_PREFIX: str = os.getenv(
 def stripe_configured() -> bool:
     return bool(STRIPE_SECRET_KEY)
 
-# ── Identidad de la app ─────────────────────────────────────────────────────
 APP_TITLE: str = "lixbon DTC"
 APP_VERSION: str = "2.4.0" # Actualizado a la versión del diseño del CLI
 APP_DESCRIPTION: str = "Data & Task Center — Distributed LLM Gateway"
 
-# ── Rutas del proyecto ──────────────────────────────────────────────────────
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent  # core/config.py → raíz del monorepo
 WEB_DIST_DIR: Path = PROJECT_ROOT / "apps" / "web" / "dist"
 LOGS_DIR: Path = PROJECT_ROOT / "logs"
 
-# ── Verificación de correo ──────────────────────────────────────────────────
 # "1" = una cuenta con el correo sin verificar puede entrar y ver su cuenta,
 # pero no usar el servicio. Por defecto "0": encenderlo con el correo mal
 # configurado dejaría fuera a todo el mundo a la vez y sin salida, porque la
 # única forma de desbloquearse es recibir un correo.
 REQUIRE_EMAIL_VERIFICATION: bool = os.getenv("REQUIRE_EMAIL_VERIFICATION", "0") == "1"
 
-# ── Límites de sesión (4h) + semana ─────────────────────────────────────────
 # "1" (default): ensure_session_week_credits devuelve 429 cuando el pool de
 # sesión o semana se agota. Puesto en "0" solo se calcula y se escribe en cada
 # chat sin bloquear — útil para verificar en producción que las cifras de
 # usage_policy/model_weights son razonables antes de cortar tráfico real.
 SESSION_QUOTA_ENFORCE: bool = os.getenv("SESSION_QUOTA_ENFORCE", "1") == "1"
 
-# ── Seguridad de claves ─────────────────────────────────────────────────────
 KEY_EXPIRY_DAYS: int = int(os.getenv("KEY_EXPIRY_DAYS", "90"))
 SESSION_EXPIRY_HOURS: int = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))
