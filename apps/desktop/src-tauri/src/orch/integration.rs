@@ -78,8 +78,12 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
         let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
         st.record_decision(&id, "merge", "human", &detail)
     };
-    // El destino solo puede haberse movido por orch_integrate: si no, se avisa y no se integra.
-    if let Some(exp) = expected.as_ref().filter(|e| found.as_ref() != Some(*e)) {
+    // El destino solo puede haberse movido por orch_integrate: si no, se avisa y no
+    // se integra, salvo que la persona acepte exactamente el commit que vio.
+    let accept = args.get("accept_moved_target").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty());
+    let moved = expected.as_ref().filter(|e| found.as_ref() != Some(*e)).cloned();
+    let accepted = matches!((&moved, accept, &found), (Some(_), Some(a), Some(f)) if a == f);
+    if let Some(exp) = moved.as_ref().filter(|_| !accepted) {
         let detail = json!({ "outcome": "target_moved", "branch": branch, "into": into, "squash": squash,
             "expected_commit": exp, "found_commit": found });
         let decision = st_rec(detail);
@@ -97,17 +101,28 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
         }
         Err(e) => ("error", Value::Null, e.clone()),
     };
-    let detail = json!({
+    let mut detail = json!({
         "outcome": outcome, "branch": branch, "into": into, "squash": squash,
         "base_commit": found, "result_commit": result, "conflicts": conflicts,
         "base_check": if expected.is_some() { "ok" } else { "sin_referencia" },
     });
+    if accepted {
+        detail["accepted_moved_target"] = json!(true);
+        detail["expected_commit"] = json!(moved);
+        detail["found_commit"] = json!(found);
+    }
     let decision = st_rec(detail);
     if outcome == "merged" {
         state.lock().unwrap_or_else(|e| e.into_inner()).task_mut(&id)?.merged = true;
     }
-    Ok(json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
-        "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message }))
+    let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
+        "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message });
+    if accepted {
+        out["accepted_moved_target"] = json!(true);
+        out["expected_commit"] = json!(moved);
+        out["found_commit"] = json!(found);
+    }
+    Ok(out)
 }
 
 fn outcome_of(d: &super::state::Decision) -> String {
@@ -174,15 +189,14 @@ pub fn publish_pr(state: &Mutex<State>, from_user: bool, args: &Value, create: C
     let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let decision = st.record_decision(&id, "pr", "human", &detail);
-    match err {
-        None => {
-            if url.is_some() {
-                st.task_mut(&id)?.pr_url = url.clone();
-            }
-            Ok(json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url }))
-        }
-        Some(e) => Err(format!("{e}\n(decisión #{decision} registrada: error)")),
+    if url.is_some() {
+        st.task_mut(&id)?.pr_url = url.clone();
     }
+    let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
+    if let Some(e) = err {
+        out["message"] = json!(e);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -351,6 +365,41 @@ mod tests {
     }
 
     #[test]
+    fn aceptar_destino_movido_solo_con_el_commit_visto() {
+        let (st, id, dir) = setup("acepta", false);
+        let expected = git(&dir, &["rev-parse", "HEAD"]);
+        std::fs::write(dir.join("b.txt"), "1\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "manual 1"]);
+        let seen = git(&dir, &["rev-parse", "HEAD"]);
+        // Sin el parámetro: sigue target_moved.
+        assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true }))
+            .unwrap()["found_commit"].as_str(), Some(seen.as_str()));
+        // Se movió otra vez después de que la persona lo viera: commit distinto, no integra.
+        std::fs::write(dir.join("b.txt"), "2\n").unwrap();
+        git(&dir, &["commit", "-qam", "manual 2"]);
+        let now = git(&dir, &["rev-parse", "HEAD"]);
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true, "accept_moved_target": seen })).unwrap();
+        assert_eq!(out["outcome"], "target_moved");
+        assert_eq!((out["expected_commit"].as_str(), out["found_commit"].as_str()), (Some(expected.as_str()), Some(now.as_str())));
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), now);
+        // Sin confirm, aunque acepte, se rechaza.
+        assert_eq!(integrate(&st, true, &json!({ "task": id, "accept_moved_target": now })).unwrap_err(), NEED_CONFIRM);
+        // Aceptando el commit actual: integra contra él y lo registra.
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true, "accept_moved_target": now })).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["accepted_moved_target"].as_bool()), (Some("merged"), Some(true)));
+        assert_eq!(git(&dir, &["rev-parse", "HEAD^1"]), now);
+        let s = st.lock().unwrap();
+        assert!(s.task(&id).unwrap().merged);
+        let d: Value = serde_json::from_str(s.decisions.last().unwrap().detail_json.as_deref().unwrap()).unwrap();
+        assert_eq!(d["accepted_moved_target"], true);
+        assert_eq!((d["expected_commit"].as_str(), d["found_commit"].as_str(), d["base_commit"].as_str()),
+            (Some(expected.as_str()), Some(now.as_str()), Some(now.as_str())));
+        assert_eq!(s.decisions.len(), 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn integrar_dos_hermanas_seguidas_no_es_destino_movido() {
         // La segunda espera el result_commit de la primera, no su base_commit.
         let (st, id, dir) = setup("hermanas", false);
@@ -463,8 +512,10 @@ mod tests {
         // Sin remoto: push falla → error registrado, sin PR.
         let (st2, id2, dir2) = setup("pr-error", false);
         let ok_gh = |_: &str, _: &str, _: &str, _: &str, _: &str| Ok("https://x".to_string());
-        let e = publish_pr(&st2, true, &json!({ "task": id2, "confirm": true }), &ok_gh).unwrap_err();
-        assert!(e.contains("decisión #1 registrada: error"));
+        let out = publish_pr(&st2, true, &json!({ "task": id2, "confirm": true }), &ok_gh).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["decision"].as_u64(), out["branch"].as_str()), (Some("error"), Some(1), Some("lx/t")));
+        assert!(out["pr_url"].is_null() && out["remote"].is_null());
+        assert!(out["message"].as_str().unwrap().contains("push"));
         assert_eq!(detail(&st2, 0), json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null }));
         assert!(st2.lock().unwrap().task(&id2).unwrap().pr_url.is_none());
         for d in [dir, bare, dir2] { let _ = std::fs::remove_dir_all(d); }
