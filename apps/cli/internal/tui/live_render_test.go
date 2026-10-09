@@ -118,3 +118,34 @@ func TestLiveViewCatchesUpAfterRefresh(t *testing.T) {
 		t.Fatalf("el texto en vivo quedó atrasado:\n%s", v)
 	}
 }
+
+// TestStreamEndPrintsFinalTailImmediately: al terminar el stream la cola final
+// se imprime en el mismo Update del doneMsg, sin esperar al tic de liveRefresh
+// ni al spinner, aunque la caché de la vista en vivo esté atrasada.
+func TestStreamEndPrintsFinalTailImmediately(t *testing.T) {
+	for _, mode := range []string{"ask", "agent"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newHarness(t, func(c *config.Config) { c.Mode = mode })
+			h.update(tea.WindowSizeMsg{Width: 120, Height: 40})
+			h.m.running = true
+			h.m.Update(deltaMsg{turn: h.m.turn, kind: sse.Content, text: longReply(20000)})
+			_ = h.m.View()
+			h.m.Update(deltaMsg{turn: h.m.turn, kind: sse.Content, text: "\nCOLA-FINAL"})
+			// La caché sigue vigente: la vista en vivo aún no muestra la cola.
+			if v := h.view(); strings.Contains(v, "COLA-FINAL") {
+				t.Skip("la caché ya se refrescó; la máquina fue demasiado lenta para esta prueba")
+			}
+			start := time.Now()
+			h.m.Update(doneMsg{turn: h.m.turn})
+			if !strings.Contains(h.out(), "COLA-FINAL") {
+				t.Fatalf("la cola final no se imprimió al terminar el stream")
+			}
+			if d := time.Since(start); d >= liveRefresh {
+				t.Fatalf("imprimir la cola tardó %v (>= liveRefresh)", d)
+			}
+			if h.m.live.content.Len() != 0 || h.m.live.viewLines != nil {
+				t.Fatalf("el texto en vivo no se vació tras terminar")
+			}
+		})
+	}
+}
