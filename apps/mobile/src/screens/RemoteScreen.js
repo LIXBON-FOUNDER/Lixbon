@@ -28,7 +28,6 @@ import RemoteOrch from './RemoteOrch';
 const GROUP_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' };
 const MENTION_AT_END = /(^|\s)@([^\s@]*)$/;
 const TOOL_ICON = { Ejecuta: 'terminal', Ejecutó: 'terminal', Edita: 'pencil', Editó: 'pencil', Lee: 'file', Leyó: 'file', Busca: 'search', Buscó: 'search', Consulta: 'globe', Consultó: 'globe' };
-const VISIBLE_TOOLS = 6;
 
 // Catálogo de reserva: si el host es de una versión anterior a que el `hello`
 // publicara sus comandos, la hoja sigue ofreciendo lo básico en vez de nada.
@@ -692,56 +691,85 @@ function groupItems(items) {
   return out;
 }
 
-/** Herramientas de un tramo en filas cortas: verbo, destino y, al tocar, la
-    salida. Con muchas, se ven las últimas y el resto se despliega. */
+function ToolLine({ it, waitingTool, trailing, onPress }) {
+  const c = useColors();
+  const waiting = it.running && waitingTool && it.tool === waitingTool;
+  const { verb, target, mono } = toolParts(it, waiting);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={describeRemoteTool(it)}
+      style={({ pressed }) => ({ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed && onPress ? 0.7 : 1 })}
+    >
+      <Icon name={it.error ? 'warning' : TOOL_ICON[verb] || 'layers'} size={15} color={it.error ? c.danger : c.inkMuted} />
+      {it.running ? (
+        <View style={{ width: 56 }}>
+          <ShimmerText text={verb} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
+        </View>
+      ) : (
+        <Text style={{ width: 56, fontFamily: FONTS.ui, fontSize: 13.5, color: it.error ? c.danger : c.inkMuted }}>{verb}</Text>
+      )}
+      <Text numberOfLines={1} style={{ flex: 1, fontFamily: mono ? FONTS.mono : FONTS.ui, fontSize: mono ? 12.5 : 13.5, color: c.inkBody }}>
+        {target}
+      </Text>
+      {trailing}
+    </Pressable>
+  );
+}
+
+/** Las herramientas de un tramo en una sola línea que va cambiando a la que
+    corre ahora; al tocarla se despliega el historial con la salida de cada una. */
 function ToolCard({ items, waitingTool }) {
   const c = useColors();
   const { s } = useScale();
-  const [all, setAll] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [shown, setShown] = useState(null);
-  const hidden = all ? 0 : Math.max(0, items.length - VISIBLE_TOOLS);
-  const rows = items.slice(hidden);
+  const last = items[items.length - 1];
+  const toggle = () => setExpanded((v) => !v);
+
+  if (!expanded) {
+    return (
+      <View style={{ marginVertical: s(4) }}>
+        <FadeUp key={last.key} distance={4}>
+          <ToolLine
+            it={last}
+            waitingTool={waitingTool}
+            onPress={toggle}
+            trailing={
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                {items.length > 1 && <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint }}>{items.length}</Text>}
+                <Icon name="chevron-right" size={13} color={c.inkFaint} />
+              </View>
+            }
+          />
+        </FadeUp>
+      </View>
+    );
+  }
+
   return (
-    <FadeUp style={{ marginVertical: s(7), paddingVertical: 4, borderRadius: RADIUS, backgroundColor: c.surface1 }}>
-      {hidden > 0 && (
-        <Pressable onPress={() => setAll(true)} style={{ height: 34, paddingHorizontal: 12, justifyContent: 'center' }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
-            Ver {hidden} {hidden === 1 ? 'paso anterior' : 'pasos anteriores'}
-          </Text>
-        </Pressable>
-      )}
-      {rows.map((it) => {
-        const waiting = it.running && waitingTool && it.tool === waitingTool;
-        const { verb, target, mono } = toolParts(it, waiting);
+    <FadeUp style={{ marginVertical: s(4) }}>
+      {items.map((it) => {
         const open = shown === it.key;
         return (
           <View key={it.key}>
-            <Pressable
+            <ToolLine
+              it={it}
+              waitingTool={waitingTool}
               onPress={it.result ? () => setShown(open ? null : it.key) : undefined}
-              accessibilityLabel={describeRemoteTool(it)}
-              style={({ pressed }) => ({ minHeight: 38, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: pressed && it.result ? c.pressed : 'transparent' })}
-            >
-              <Icon name={it.error ? 'warning' : TOOL_ICON[verb] || 'layers'} size={15} color={it.error ? c.danger : c.inkMuted} />
-              {it.running ? (
-                <View style={{ width: 56 }}>
-                  <ShimmerText text={verb} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
-                </View>
-              ) : (
-                <Text style={{ width: 56, fontFamily: FONTS.ui, fontSize: 13.5, color: it.error ? c.danger : c.inkMuted }}>{verb}</Text>
-              )}
-              <Text numberOfLines={1} style={{ flex: 1, fontFamily: mono ? FONTS.mono : FONTS.ui, fontSize: mono ? 12.5 : 13.5, color: c.inkBody }}>
-                {target}
-              </Text>
-              {!!it.result && <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} />}
-            </Pressable>
+              trailing={!!it.result && <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} />}
+            />
             {open && (
-              <Text selectable style={{ marginHorizontal: 8, marginBottom: 6, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.bg, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody }}>
+              <Text selectable style={{ marginBottom: 6, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody }}>
                 {it.result}
               </Text>
             )}
           </View>
         );
       })}
+      <Pressable onPress={toggle} style={{ height: 30, justifyContent: 'center' }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Contraer</Text>
+      </Pressable>
     </FadeUp>
   );
 }
