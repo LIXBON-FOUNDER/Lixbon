@@ -1,3 +1,6 @@
+import { useEffect } from 'react';
+import { cargarFuente } from './LogoFounder';
+
 export function LogoMark({ size = 26 }) {
   return (
     <svg className="logo__mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
@@ -28,6 +31,16 @@ export function Logo({ size = 15, mark = true, animado = false, className = '' }
           ? [...'LIXBON'].map((l, i) => <span key={i} className="logo__letra" style={{ '--i': i }}>{l}</span>)
           : 'LIXBON'}
       </span>
+    </span>
+  );
+}
+
+export function LogoLixbon({ size = 26 }) {
+  useEffect(() => { cargarFuente().catch(() => {}); }, []);
+  return (
+    <span className="logo">
+      <LogoMark size={size} />
+      <span className="logo-lixbon">lixbon</span>
     </span>
   );
 }
