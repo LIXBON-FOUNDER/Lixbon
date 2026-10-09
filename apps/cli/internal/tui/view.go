@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -104,19 +105,7 @@ func (m *Model) liveView() string {
 		}
 	}
 	if m.live.content.Len() > 0 {
-		text := m.live.content.String()
-		if m.chat.Mode == chat.ModeAgent {
-			text = toolparse.CleanProse(text)
-			if text == "" {
-				lines = append(lines, sDim.Render("  "+glyphThink+" preparando acciones…"))
-			}
-		}
-		if text = strings.TrimSpace(text); text != "" {
-			wrapped := strings.Split(ansi.Wrap(text, max(20, m.width-2), ""), "\n")
-			for _, l := range wrapped[max(0, len(wrapped)-liveTailRows):] {
-				lines = append(lines, "  "+sPrimary.Render(l))
-			}
-		}
+		lines = append(lines, m.liveContentLines()...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -248,4 +237,76 @@ func (m *Model) sessionLabel() string {
 		return email
 	}
 	return "API key"
+}
+
+// liveRefresh es cada cuánto se recalcula como mucho el texto en vivo. Bubble
+// Tea llama a View tras cada mensaje (un fragmento SSE), y en modo agente
+// limpiar la prosa recorre toda la respuesta; recalcular con cada fragmento
+// volvía cuadrático el costo del stream (TERM-02).
+const liveRefresh = 50 * time.Millisecond
+
+// liveContentLines devuelve las filas del texto en vivo, reutilizando las de
+// la última vez si no pasó liveRefresh desde entonces.
+func (m *Model) liveContentLines() []string {
+	live := &m.live
+	n := live.content.Len()
+	if live.viewLines != nil && live.viewWidth == m.width &&
+		(live.viewLen == n || time.Since(live.viewAt) < liveRefresh) {
+		return live.viewLines
+	}
+	var lines []string
+	text := live.content.String()
+	if m.chat.Mode == chat.ModeAgent {
+		text = toolparse.CleanProse(text)
+		if text == "" {
+			lines = append(lines, sDim.Render("  "+glyphThink+" preparando acciones…"))
+		}
+	}
+	if text = strings.TrimSpace(text); text != "" {
+		width := max(20, m.width-2)
+		wrapped := strings.Split(ansi.Wrap(liveTail(text, liveTailRows, width), width, ""), "\n")
+		for _, l := range wrapped[max(0, len(wrapped)-liveTailRows):] {
+			lines = append(lines, "  "+sPrimary.Render(l))
+		}
+	}
+	if lines == nil {
+		lines = []string{}
+	}
+	live.viewLines, live.viewLen, live.viewWidth, live.viewAt = lines, n, m.width, time.Now()
+	return lines
+}
+
+// liveTail recorta el texto en vivo a lo último que puede verse: las últimas
+// rows líneas duras y, si una sola línea es enorme, solo su final. Así envolver
+// en cada fragmento cuesta según lo visible y no según todo lo recibido; antes
+// se envolvía la respuesta completa en cada View y el costo crecía con el
+// cuadrado del tamaño (TERM-02).
+func liveTail(text string, rows, width int) string {
+	// Cada fila envuelta ocupa como mucho width celdas; 4 bytes por celda
+	// cubren UTF-8 y un margen para secuencias de escape.
+	budget := (rows + 1) * width * 4
+	start, lines := len(text), 0
+	for start > 0 && lines < rows {
+		i := strings.LastIndexByte(text[:start], '\n')
+		if i < 0 {
+			start = 0
+			break
+		}
+		start = i
+		lines++
+	}
+	if start > 0 {
+		start++ // tras el salto de línea
+	}
+	if len(text)-start > budget {
+		start = len(text) - budget
+		for start < len(text) && !utf8.RuneStart(text[start]) {
+			start++
+		}
+		// Empezar en un límite de palabra evita una primera fila partida.
+		if i := strings.IndexAny(text[start:], " \n"); i >= 0 && i < width*4 {
+			start += i + 1
+		}
+	}
+	return text[start:]
 }
