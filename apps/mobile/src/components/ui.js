@@ -1,28 +1,29 @@
-// ui.js — primitivas del sistema del IDE llevadas a la app: tema activo con
-// acento elegible, marca, campos y botones de relleno (sin bordes), selector
-// deslizante, interruptor, tarjetas, cabeceras y la luz ambiente del fondo.
+// ui.js — primitivas del sistema visual: tema activo con acento elegible,
+// marca, campos y botones de relleno (sin bordes), selector deslizante,
+// interruptor, tarjetas, cabeceras, filas de ajustes y la luz ambiente.
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
   Easing,
+  Image,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useColorScheme,
 } from 'react-native';
 import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, Path, Polygon, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
 
-import { FONTS, RADIUS, buildTheme } from '../theme';
+import { FONTS, MOTION, RADIUS, RADIUS_SM, buildTheme } from '../theme';
 import { UI_DEFAULTS, usePrefs } from '../state';
 import Icon from './Icon';
 
-export const EASE = Easing.bezier(0.2, 0.8, 0.2, 1);
-export const SPRING = Easing.bezier(0.3, 1.25, 0.5, 1);
+export const EASE = Easing.bezier(0.22, 1, 0.36, 1);
+export const SPRING = Easing.bezier(0.3, 1.2, 0.5, 1);
 
 // ── Tema activo ──────────────────────────────────────────────────────────────
 
@@ -40,6 +41,13 @@ export function ThemeProvider({ children }) {
 export const useColors = () => useContext(ThemeContext);
 export const useIsDark = () => useColors().dark;
 export const useUi = () => usePrefs()?.ui || UI_DEFAULTS;
+
+/// URL absoluta de la foto de perfil (el gateway la devuelve relativa).
+export function avatarUri(base, user) {
+  const url = user?.avatar_url;
+  if (typeof url !== 'string' || !url) return null;
+  return /^https?:/.test(url) ? url : `${base}${url}`;
+}
 
 // Sin animaciones si el sistema lo pide o si el usuario las apagó.
 export function useReducedMotion() {
@@ -82,11 +90,14 @@ export function useScale() {
 
 // ── Marca ────────────────────────────────────────────────────────────────────
 
+// La marca de lixbon.com es Fraunces cursiva fina en minúsculas: a igual
+// `size` que el isotipo se ve pequeña, así que el cuerpo real va un 45% más.
 export function LixLogo({ size = 28, color }) {
   const c = useColors();
+  const fontSize = Math.round(size * 1.45);
   return (
-    <Text style={{ fontFamily: FONTS.brand, fontSize: size, letterSpacing: size * 0.04, color: color || c.ink }}>
-      LIXBON
+    <Text style={{ fontFamily: FONTS.brand, fontSize, lineHeight: Math.round(fontSize * 1.15), letterSpacing: -fontSize * 0.01, color: color || c.ink }}>
+      lixbon
     </Text>
   );
 }
@@ -108,8 +119,6 @@ export function LogoMark({ size = 26 }) {
     </Svg>
   );
 }
-
-const SPARK_PATH = 'M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z';
 
 export function ClaudeMark({ size = 18 }) {
   return (
@@ -138,14 +147,6 @@ export function agentStyle(agent, c) {
 
 export function AgentMark({ agent, size = 18 }) {
   return agent === 'claude' ? <ClaudeMark size={size} /> : <LogoMark size={size} />;
-}
-
-export function Spark({ size = 18, color }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path d={SPARK_PATH} fill={color} />
-    </Svg>
-  );
 }
 
 export function GoogleLogo({ size = 19 }) {
@@ -196,139 +197,61 @@ export function AmbientGlow() {
   );
 }
 
-// ── Campos ───────────────────────────────────────────────────────────────────
-
-/// Campo de relleno con etiqueta flotante dentro (sin contorno): el foco se
-/// dice con el relleno y una línea de acento abajo, como el .field del IDE.
-export function FloatingField({
-  label,
-  value,
-  onChangeText,
-  secure = false,
-  keyboardType,
-  autoCapitalize = 'none',
-  onSubmitEditing,
-}) {
-  const c = useColors();
-  const reduced = useReducedMotion();
-  const [focused, setFocused] = useState(false);
-  const lifted = focused || !!value;
-  const anim = useRef(new Animated.Value(lifted ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: lifted ? 1 : 0,
-      duration: reduced ? 0 : 180,
-      easing: EASE,
-      useNativeDriver: false,
-    }).start();
-  }, [lifted, anim, reduced]);
-
-  return (
-    <View
-      style={{
-        borderRadius: RADIUS,
-        backgroundColor: focused ? c.surface4 : c.surface3,
-        overflow: 'hidden',
-      }}
-    >
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        secureTextEntry={secure}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={false}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onSubmitEditing={onSubmitEditing}
-        selectionColor={c.accent}
-        style={{
-          paddingHorizontal: 14,
-          paddingTop: 22,
-          paddingBottom: 8,
-          fontFamily: FONTS.ui,
-          fontSize: 15,
-          color: c.ink,
-        }}
-      />
-      <Animated.Text
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: 14,
-          top: anim.interpolate({ inputRange: [0, 1], outputRange: [16, 7] }),
-          fontSize: anim.interpolate({ inputRange: [0, 1], outputRange: [15, 11] }),
-          fontFamily: lifted ? FONTS.uiMedium : FONTS.ui,
-          color: focused ? c.accentDeep : c.inkLabel,
-        }}
-      >
-        {label}
-      </Animated.Text>
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: 2,
-          backgroundColor: focused ? c.accent : 'transparent',
-        }}
-      />
-    </View>
-  );
-}
-
 // ── Botones ──────────────────────────────────────────────────────────────────
 
-/// Botón del IDE (.btn): primario invertido, secundario de relleno, peligro
-/// en rojo apagado. Pulsar encoge un poco, como el :active del escritorio.
-export function PillButton({ label, onPress, disabled = false, danger = false, outline = false, size = 'md', icon }) {
+/// Principal en tinta, secundario de relleno, acento para la acción positiva
+/// del contexto y peligro en rojo apagado. Pulsar encoge un poco.
+export function PillButton({ label, onPress, disabled = false, danger = false, outline = false, accent = false, size = 'md', icon, style }) {
   const c = useColors();
   const lg = size === 'lg';
-  const bg = danger ? c.dangerSoft : outline ? c.surface5 : c.primary;
-  const fg = danger ? c.danger : outline ? c.inkBody : c.onPrimary;
+  const sm = size === 'sm';
+  const bg = danger ? c.dangerSoft : outline ? c.surface4 : accent ? c.accent : c.primary;
+  const fg = danger ? c.danger : outline ? c.ink : accent ? c.onAccent : c.onPrimary;
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        gap: 8,
-        borderRadius: RADIUS,
-        paddingHorizontal: 18,
-        height: lg ? 48 : 38,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: bg,
-        opacity: disabled ? 0.45 : 1,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
-      })}
+      style={({ pressed }) => [
+        {
+          flexDirection: 'row',
+          gap: 8,
+          borderRadius: sm ? RADIUS_SM : RADIUS,
+          paddingHorizontal: sm ? 12 : 18,
+          height: lg ? 50 : sm ? 36 : 44,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: bg,
+          opacity: disabled ? 0.45 : 1,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
+        },
+        style,
+      ]}
     >
       {icon ? <Icon name={icon} size={16} color={fg} /> : null}
-      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: lg ? 15 : 13.5, color: fg }}>{label}</Text>
+      <Text style={{ fontFamily: danger || outline ? FONTS.uiMedium : FONTS.uiSemiBold, fontSize: sm ? 13.5 : 15, color: fg }}>{label}</Text>
     </Pressable>
   );
 }
 
-/// Botón de icono (.ic del IDE): cuadrado de radio 7, relleno solo al pulsar.
-export function IconButton({ children, onPress, onLongPress, size = 36, bg = 'transparent', active = false, label }) {
+/// Botón de icono: 44 de lado (objetivo táctil), relleno solo al pulsar.
+export function IconButton({ children, onPress, onLongPress, size = 44, bg = 'transparent', active = false, label, disabled = false }) {
   const c = useColors();
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
-      hitSlop={6}
+      disabled={disabled}
+      hitSlop={4}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => ({
         width: size,
         height: size,
-        borderRadius: RADIUS,
+        borderRadius: size >= 40 ? RADIUS : RADIUS_SM,
         alignItems: 'center',
         justifyContent: 'center',
+        opacity: disabled ? 0.4 : 1,
         backgroundColor: pressed ? c.pressed : active ? c.surface4 : bg,
-        transform: [{ scale: pressed ? 0.9 : 1 }],
       })}
     >
       {children}
@@ -336,29 +259,31 @@ export function IconButton({ children, onPress, onLongPress, size = 36, bg = 'tr
   );
 }
 
-/// Chip del IDE: relleno, texto suave; activo en acento.
+/// Ficha de filtro: tinta cuando está elegida, relleno suave si no.
 export function Chip({ label, icon, onPress, active = false, mono = false }) {
   const c = useColors();
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        height: 30,
-        paddingHorizontal: 11,
-        borderRadius: RADIUS,
-        backgroundColor: active ? c.accentSoft : pressed ? c.surface5 : c.surface3,
+        height: 32,
+        paddingHorizontal: 12,
+        borderRadius: RADIUS_SM,
+        backgroundColor: active ? c.primary : pressed ? c.surface4 : c.surface2,
       })}
     >
-      {icon ? <Icon name={icon} size={14} color={active ? c.accentDeep : c.inkSoft} /> : null}
+      {icon ? <Icon name={icon} size={14} color={active ? c.onPrimary : c.inkSoft} /> : null}
       <Text
         numberOfLines={1}
         style={{
-          fontFamily: mono ? FONTS.mono : active ? FONTS.uiSemiBold : FONTS.ui,
-          fontSize: mono ? 11.5 : 12.5,
-          color: active ? c.accentDeep : c.ink70,
+          fontFamily: mono ? FONTS.mono : active ? FONTS.uiMedium : FONTS.ui,
+          fontSize: mono ? 12 : 13.5,
+          color: active ? c.onPrimary : c.ink70,
         }}
       >
         {label}
@@ -369,8 +294,9 @@ export function Chip({ label, icon, onPress, active = false, mono = false }) {
 
 // ── Selector deslizante e interruptor ────────────────────────────────────────
 
-/// Selector con indicador deslizante (.seg / .modeswitch del IDE).
-export function Segmented({ options, value, onChange, stretch = false, size = 'md' }) {
+/// Selector con indicador que se desliza. `icon` sin `label` vuelve la opción
+/// un botón cuadrado (el tema en la búsqueda); `dot` marca actividad.
+export function Segmented({ options, value, onChange, stretch = false, size = 'md', bg }) {
   const c = useColors();
   const reduced = useReducedMotion();
   const [layouts, setLayouts] = useState({});
@@ -389,20 +315,22 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
       return;
     }
     Animated.parallel([
-      Animated.timing(x, { toValue: l.x, duration: 380, easing: SPRING, useNativeDriver: false }),
-      Animated.timing(w, { toValue: l.width, duration: 300, easing: EASE, useNativeDriver: false }),
+      Animated.timing(x, { toValue: l.x, duration: MOTION.fade, easing: EASE, useNativeDriver: false }),
+      Animated.timing(w, { toValue: l.width, duration: MOTION.fade, easing: EASE, useNativeDriver: false }),
     ]).start();
   }, [value, layouts, x, w, reduced]);
 
-  const h = size === 'sm' ? 26 : 30;
+  const lg = size === 'lg';
+  const h = size === 'xl' ? 38 : lg ? 36 : size === 'sm' ? 30 : 32;
   return (
     <View
+      accessibilityRole="radiogroup"
       style={{
         flexDirection: 'row',
         alignSelf: stretch ? 'stretch' : 'flex-start',
         padding: 3,
-        borderRadius: RADIUS,
-        backgroundColor: c.dark ? c.surface0 : c.surface4,
+        borderRadius: lg ? RADIUS : RADIUS_SM,
+        backgroundColor: bg || c.surface0,
       }}
     >
       {ready && (
@@ -413,13 +341,14 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
             left: x,
             width: w,
             height: h,
-            borderRadius: RADIUS,
-            backgroundColor: c.dark ? c.surface5 : c.surface2,
+            borderRadius: lg ? RADIUS_SM : 5,
+            backgroundColor: c.dark ? (lg ? c.surface4 : c.surface5) : c.surface2,
           }}
         />
       )}
       {options.map((o) => {
         const active = o.value === value;
+        const iconOnly = o.icon && !o.label;
         return (
           <Pressable
             key={String(o.value)}
@@ -429,19 +358,31 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
               setLayouts((cur) => (cur[o.value]?.x === lx && cur[o.value]?.width === width ? cur : { ...cur, [o.value]: { x: lx, width } }));
             }}
             accessibilityRole="radio"
+            accessibilityLabel={o.a11y || (typeof o.label === 'string' ? o.label : undefined)}
             accessibilityState={{ selected: active }}
-            style={[{ height: h, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' }, stretch && { flex: 1 }]}
+            style={[
+              {
+                height: h,
+                minWidth: iconOnly ? 36 : undefined,
+                paddingHorizontal: iconOnly ? 0 : 12,
+                flexDirection: 'row',
+                gap: 6,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              stretch && { flex: 1 },
+            ]}
           >
-            <Text
-              numberOfLines={1}
-              style={{
-                fontFamily: active ? FONTS.uiSemiBold : FONTS.ui,
-                fontSize: size === 'sm' ? 12 : 13,
-                color: active ? c.ink : c.inkMuted,
-              }}
-            >
-              {o.label}
-            </Text>
+            {o.icon ? <Icon name={o.icon} size={16} color={active ? c.ink : c.inkMuted} /> : null}
+            {o.label ? (
+              <Text
+                numberOfLines={1}
+                style={{ fontFamily: active ? FONTS.uiMedium : FONTS.ui, fontSize: o.size || (lg ? 14 : 13.5), color: active ? c.ink : c.inkMuted }}
+              >
+                {o.label}
+              </Text>
+            ) : null}
+            {o.dot ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent }} /> : null}
           </Pressable>
         );
       })}
@@ -449,19 +390,17 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
   );
 }
 
-/// Interruptor del IDE: pista de radio 7 y perilla cuadrada que se estira
-/// al pulsar; encendido en acento.
+/// Interruptor: pista redonda de 44×26 y perilla circular; encendido en acento.
 export function Toggle({ value, onChange, disabled = false, label }) {
   const c = useColors();
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
-  const [pressed, setPressed] = useState(false);
 
   useEffect(() => {
     Animated.timing(anim, {
       toValue: value ? 1 : 0,
-      duration: reduced ? 0 : 320,
-      easing: SPRING,
+      duration: reduced ? 0 : MOTION.fade,
+      easing: EASE,
       useNativeDriver: false,
     }).start();
   }, [value, anim, reduced]);
@@ -469,10 +408,8 @@ export function Toggle({ value, onChange, disabled = false, label }) {
   return (
     <Pressable
       onPress={() => onChange(!value)}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
       disabled={disabled}
-      hitSlop={8}
+      hitSlop={10}
       accessibilityRole="switch"
       accessibilityLabel={label}
       accessibilityState={{ checked: value, disabled }}
@@ -480,21 +417,21 @@ export function Toggle({ value, onChange, disabled = false, label }) {
     >
       <Animated.View
         style={{
-          width: 40,
-          height: 24,
-          borderRadius: RADIUS,
+          width: 44,
+          height: 26,
+          borderRadius: 13,
           backgroundColor: anim.interpolate({ inputRange: [0, 1], outputRange: [c.surface5, c.accent] }),
         }}
       >
         <Animated.View
           style={{
             position: 'absolute',
-            top: 4,
-            left: anim.interpolate({ inputRange: [0, 1], outputRange: [4, pressed ? 14 : 20] }),
-            width: pressed ? 22 : 16,
-            height: 16,
-            borderRadius: 5,
-            backgroundColor: value ? c.onAccent : c.inkMuted,
+            top: 3,
+            left: anim.interpolate({ inputRange: [0, 1], outputRange: [3, 21] }),
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            backgroundColor: anim.interpolate({ inputRange: [0, 1], outputRange: [c.inkMuted, c.onAccent] }),
           }}
         />
       </Animated.View>
@@ -502,143 +439,223 @@ export function Toggle({ value, onChange, disabled = false, label }) {
   );
 }
 
-// ── Tarjetas, etiquetas y cabeceras ──────────────────────────────────────────
+// ── Tarjetas, grupos y cabeceras ─────────────────────────────────────────────
 
-/// Panel del IDE: relleno un peldaño por encima del fondo, sin borde.
 export function Card({ children, style }) {
   const c = useColors();
-  return (
-    <View style={[{ backgroundColor: c.surface1, borderRadius: RADIUS, padding: 16 }, style]}>{children}</View>
-  );
+  return <View style={[{ backgroundColor: c.sheet, borderRadius: RADIUS, padding: 16 }, style]}>{children}</View>;
 }
 
-export function CardTitle({ children, style }) {
-  const c = useColors();
-  return <Text style={[{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }, style]}>{children}</Text>;
-}
-
-/// Etiqueta en versalitas que encabeza un grupo (HOY, FIJADAS…).
+/// Encabezado de grupo (Fijadas, Hoy, Plan…): sin versalitas, apagado.
 export function Eyebrow({ children, style }) {
   const c = useColors();
+  return <Text style={[{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkMuted }, style]}>{children}</Text>;
+}
+
+/// Sección de ajustes: encabezado y un bloque de filas sobre la tarjeta.
+export function Section({ title, children, delay = 0, style }) {
+  const c = useColors();
   return (
-    <Text style={[{ fontFamily: FONTS.uiMedium, fontSize: 10.5, letterSpacing: 1, color: c.inkLabel }, style]}>
-      {String(children).toUpperCase()}
-    </Text>
+    <FadeUp delay={delay} style={[{ gap: 8 }, style]}>
+      {!!title && <Eyebrow style={{ paddingHorizontal: 4 }}>{title}</Eyebrow>}
+      <View style={{ borderRadius: RADIUS, backgroundColor: c.sheet, paddingVertical: 4, overflow: 'hidden' }}>{children}</View>
+    </FadeUp>
   );
 }
 
-/// Cabecera de pantalla apilada (.panelhead): volver + título.
+/// Fila de ajustes: título con detalle opcional, valor o control a la derecha
+/// y flecha cuando lleva a otra pantalla.
+export function Row({ title, detail, value, right, onPress, chevron = !!onPress, external = false, danger = false, icon }) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      style={({ pressed }) => ({
+        minHeight: detail ? 64 : 52,
+        paddingHorizontal: 14,
+        paddingVertical: detail ? 10 : 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: pressed && onPress ? c.pressed : 'transparent',
+      })}
+    >
+      {icon ? <Icon name={icon} size={18} color={danger ? c.danger : c.inkSoft} /> : null}
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 15, color: danger ? c.danger : c.ink }}>
+          {title}
+        </Text>
+        {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{detail}</Text>}
+      </View>
+      {right}
+      {value != null && (
+        <Text numberOfLines={1} style={{ maxWidth: 170, fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>
+          {value}
+        </Text>
+      )}
+      {chevron && <Icon name={external ? 'external' : 'chevron-right'} size={external ? 15 : 16} color={c.inkFaint} />}
+    </Pressable>
+  );
+}
+
+/// Barra fina de progreso (uso del plan).
+export function Meter({ value, width, color }) {
+  const c = useColors();
+  const pct = Math.max(0, Math.min(1, value || 0));
+  return (
+    <View style={{ width, flex: width ? undefined : 1, height: 3, borderRadius: 2, backgroundColor: c.surface5, overflow: 'hidden' }}>
+      <View style={{ width: `${pct * 100}%`, height: 3, borderRadius: 2, backgroundColor: color || (pct >= 0.9 ? c.danger : c.ink70) }} />
+    </View>
+  );
+}
+
+/// Cabecera de pantalla apilada: volver + título.
 export function StackHeader({ title, onBack, right = null }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, height: 50 }}>
-      <IconButton onPress={onBack} size={38} label="Volver">
-        <Icon name="arrow-left" size={19} color={c.ink} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: 8, height: 60 }}>
+      <IconButton onPress={onBack} label="Volver">
+        <Icon name="arrow-left" size={20} color={c.inkBody} />
       </IconButton>
-      <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>{title}</Text>
+      <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }}>
+        {title}
+      </Text>
       {right}
     </View>
   );
 }
 
-export function ScreenTitle({ children }) {
+/// Titular en serif (bienvenidas, acceso).
+export function ScreenTitle({ children, style }) {
   const c = useColors();
   return (
-    <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 22, color: c.ink, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 14 }}>
+    <Text style={[{ fontFamily: FONTS.serif, fontSize: 32, lineHeight: 37, letterSpacing: -0.3, color: c.ink }, style]}>
       {children}
     </Text>
   );
 }
 
-/// Cabecera de conversación: acción izquierda, título con subtítulo en mono y
-/// menú de opciones. Todo el bloque central abre las opciones.
-export function ChatHeader({ title, subtitle, onLeading, leadingIcon = 'menu', onOptions, dot = null }) {
+/// Cabecera de sección: menú, título centrado que abre las acciones y una
+/// acción a la derecha.
+export function ChatHeader({ title, onLeading, leadingIcon = 'menu', onTitle, trailing, onTrailing, trailingLabel, dot = null }) {
   const c = useColors();
-  const dotColor = dot === 'live' ? c.accent : c.inkFaint;
+  const insets = useSafeAreaInsets();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, height: 52 }}>
-      <IconButton onPress={onLeading} size={40}>
-        <Icon name={leadingIcon} size={20} color={c.ink} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 8, height: insets.top + 60 }}>
+      <IconButton onPress={onLeading} label={leadingIcon === 'menu' ? 'Abrir menú' : 'Volver'}>
+        <Icon name={leadingIcon} size={leadingIcon === 'menu' ? 22 : 20} color={c.inkBody} />
       </IconButton>
 
       <Pressable
-        onPress={onOptions}
-        disabled={!onOptions}
+        onPress={onTitle}
+        disabled={!onTitle}
         style={({ pressed }) => ({
           flex: 1,
-          alignItems: 'flex-start',
-          paddingHorizontal: 6,
-          paddingVertical: 3,
+          height: 44,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
           borderRadius: RADIUS,
-          backgroundColor: pressed && onOptions ? c.pressed : 'transparent',
+          backgroundColor: pressed && onTitle ? c.pressed : 'transparent',
         })}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, maxWidth: '100%' }}>
-          {dot !== null && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />}
-          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.ink }}>
+        {dot && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot === 'live' ? c.accent : c.inkFaint }} />}
+        {!!title && (
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>
             {title}
           </Text>
-        </View>
-        {!!subtitle && (
-          <Text numberOfLines={1} style={{ maxWidth: '100%', marginTop: 1, fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkLabel }}>
-            {subtitle}
-          </Text>
         )}
+        {!!title && !!onTitle && <Icon name="chevron-down" size={14} color={c.inkMuted} />}
       </Pressable>
 
-      {onOptions ? (
-        <IconButton onPress={onOptions} size={40}>
-          <Icon name="dots" size={19} color={c.ink} />
+      {trailing ? (
+        <IconButton onPress={onTrailing} label={trailingLabel}>
+          <Icon name={trailing} size={trailing === 'search' ? 20 : 21} color={trailing === 'search' ? c.ink70 : c.inkBody} />
         </IconButton>
       ) : (
-        <View style={{ width: 40 }} />
+        <View style={{ width: 44 }} />
       )}
     </View>
   );
 }
 
-/// Etiqueta de plan: velo de acento, texto en acento.
-export function PlanPill({ children }) {
+/// Plan del usuario: solo texto en acento, sin cápsula.
+export function PlanPill({ children, size = 11.5 }) {
   const c = useColors();
-  return (
-    <View style={{ alignSelf: 'flex-start', backgroundColor: c.accentSoft, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 }}>
-      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 11, color: c.accentDeep }}>{children}</Text>
-    </View>
-  );
+  return <Text style={{ fontFamily: FONTS.uiMedium, fontSize: size, color: c.accent }}>{children}</Text>;
 }
 
-/// Avatar cuadrado de radio 7 (el del IDE): inicial sobre tinta.
-export function Avatar({ name, size = 34 }) {
+/// Avatar cuadrado de radio 8: la foto de perfil o la inicial sobre tinta.
+export function Avatar({ name, size = 38, uri }) {
   const c = useColors();
   const initial = (String(name || '?').trim()[0] || '?').toUpperCase();
+  if (uri) return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: RADIUS, backgroundColor: c.surface4 }} />;
   return (
     <View style={{ width: size, height: size, borderRadius: RADIUS, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontFamily: FONTS.uiBold, fontSize: size * 0.42, color: c.onPrimary }}>{initial}</Text>
+      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: size * 0.4, color: c.onPrimary }}>{initial}</Text>
     </View>
   );
 }
 
-/// Entrada suave (fade + subida) para mensajes y cambios de vista.
-export function FadeUp({ children, delay = 0, style }) {
+/// Entrada suave (fundido + subida) para mensajes, secciones y vistas.
+export function FadeUp({ children, delay = 0, distance = 8, duration = MOTION.fade, style, ...rest }) {
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   useEffect(() => {
     Animated.timing(anim, {
       toValue: 1,
-      duration: reduced ? 0 : 280,
+      duration: reduced ? 0 : duration,
       delay: reduced ? 0 : delay,
       easing: EASE,
       useNativeDriver: true,
     }).start();
-  }, [anim, delay, reduced]);
+  }, [anim, delay, duration, reduced]);
   return (
     <Animated.View
+      {...rest}
       style={[
         style,
-        { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
+        { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] }) }] },
       ]}
     >
       {children}
     </Animated.View>
+  );
+}
+
+/// Opacidad que respira (puntos de estado y esqueletos de carga).
+export function Breathe({ children, delay = 0, style, from = 0.35, to = 0.8 }) {
+  const reduced = useReducedMotion();
+  const anim = useRef(new Animated.Value(reduced ? to : from)).current;
+  useEffect(() => {
+    if (reduced) {
+      anim.setValue(to);
+      return undefined;
+    }
+    const half = { duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true };
+    const loop = Animated.loop(
+      Animated.sequence([Animated.timing(anim, { ...half, toValue: to }), Animated.timing(anim, { ...half, toValue: from })]),
+    );
+    const t = setTimeout(() => loop.start(), delay);
+    return () => {
+      clearTimeout(t);
+      loop.stop();
+    };
+  }, [anim, delay, from, to, reduced]);
+  return <Animated.View style={[style, { opacity: anim }]}>{children}</Animated.View>;
+}
+
+/// Esqueleto de carga: barras que respiran en cascada.
+export function SkeletonLines({ widths = ['70%', '52%', '62%'], height = 12, gap = 10, style }) {
+  const c = useColors();
+  return (
+    <View style={[{ gap }, style]} accessibilityLabel="Cargando">
+      {widths.map((w, i) => (
+        <Breathe key={i} delay={i * 200} style={{ width: w, height, borderRadius: 4, backgroundColor: c.surface4 }} />
+      ))}
+    </View>
   );
 }

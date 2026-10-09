@@ -1,22 +1,25 @@
 // RemoteOrch.js — el orquestador de agentes del IDE, visto desde el control
-// remoto de la app. El IDE manda un snapshot (`state.orch`) cada vez que cambia
-// y atiende las acciones que se le piden (`orch` + action): parar una tarea,
-// ver su terminal o su diff, cambiar el modelo de un rol… Aquí solo se pinta
-// y se pide, con los componentes de la app (tarjetas, hojas, interruptores).
+// remoto. El IDE manda un snapshot (`state.orch`) cada vez que cambia y atiende
+// las acciones que se le piden (`orch` + action): parar una tarea, ver su
+// terminal o su diff, cambiar el modelo de un rol… Aquí solo se pinta y se
+// pide: el run en curso arriba con sus fases y agentes, los anteriores debajo,
+// el detalle de cada agente como línea de tiempo y los ajustes en secciones.
 import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+
 import Icon from '../components/Icon';
-import WaveText from '../components/WaveText';
+import { LiveDot } from '../components/RemoteSessionList';
+import ShimmerText from '../components/ShimmerText';
 import { useDialogs } from '../components/dialogs';
-import { Card, Eyebrow, PillButton, Segmented, Toggle, useColors } from '../components/ui';
-import { FONTS, RADIUS } from '../theme';
+import { Eyebrow, FadeUp, IconButton, PillButton, Row, Section, Segmented, Toggle, useColors } from '../components/ui';
+import { FONTS, RADIUS, RADIUS_SM } from '../theme';
 
 const FINAL = ['done', 'failed', 'stopped', 'exited'];
 const isFinal = (st) => FINAL.includes(st);
 const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador' };
-const STATUS = { starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada' };
+const STATUS = { starting: 'arrancando', running: 'trabajando', waiting: 'esperando', done: 'entregó', failed: 'falló', stopped: 'detenida', exited: 'cerrada' };
 const ROLE = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
-const KIND = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
+const KIND = { phase: 'Fase', done: 'Entregó su informe', question: 'Preguntó', reply: 'Respuesta', note: 'Nota', exited: 'Se cerró' };
 const EFFORT = { low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo' };
 
 function useNow(active, ms = 1000) {
@@ -36,6 +39,16 @@ const dur = (ms) => {
   return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
 };
 const elapsed = (task, now) => dur((isFinal(task.status) ? task.updated : now) - task.created);
+const pad = (n) => String(n).padStart(2, '0');
+const clock = (ms) => {
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? '' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const ago = (ms) => {
+  const days = Math.floor((Date.now() - ms) / 86400000);
+  return days <= 0 ? 'hoy' : days === 1 ? 'ayer' : `${days} d`;
+};
+const roleName = (t) => (t.role ? ROLE[t.role] || t.role : t.parent ? t.title || t.id : 'Coordinador');
 
 function tree(tasks, run) {
   const list = tasks.filter((t) => t.run === run);
@@ -46,7 +59,13 @@ function tree(tasks, run) {
     kids.get(k).push(t);
   }
   const out = [];
-  const walk = (p) => (kids.get(p) || []).sort((a, b) => a.created - b.created).forEach((t) => { out.push(t); walk(t.id); });
+  const walk = (p) =>
+    (kids.get(p) || [])
+      .sort((a, b) => a.created - b.created)
+      .forEach((t) => {
+        out.push(t);
+        walk(t.id);
+      });
   walk('');
   return out;
 }
@@ -56,97 +75,86 @@ function pendingQuestions(messages) {
   return messages.filter((m) => m.kind === 'question' && !answered.has(m.id));
 }
 
-/** Estado de una tarea: caja redondeada que cambia con el estado. */
-function Status({ status, size = 14 }) {
+/** Estado de un agente en 16px: entregó (check), trabaja (punto que late),
+    espera (punto ámbar), falló (rojo) o en cola (aro). */
+function StatusMark({ status }) {
   const c = useColors();
-  const ring = (color) => ({ width: size, height: size, borderRadius: 4, borderWidth: 1.5, borderColor: color, alignItems: 'center', justifyContent: 'center' });
-  if (status === 'running' || status === 'starting') {
-    return (
-      <View style={ring(c.accent)}>
-        {status === 'running' && <View style={{ width: size * 0.4, height: size * 0.4, borderRadius: 2, backgroundColor: c.accent }} />}
-      </View>
-    );
-  }
-  if (status === 'stopped') return <View style={ring(c.inkFaint)} />;
-  const bg = status === 'done' ? c.good : status === 'waiting' ? c.warn : status === 'failed' || status === 'exited' ? c.danger : c.surface5;
-  return <View style={{ width: size, height: size, borderRadius: 4, backgroundColor: bg }} />;
+  let mark;
+  if (status === 'done') mark = <Icon name="check" size={15} color={c.accent} strokeWidth={2} />;
+  else if (status === 'running' || status === 'starting') mark = <LiveDot size={8} />;
+  else if (status === 'waiting') mark = <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.warn }} />;
+  else if (status === 'failed' || status === 'exited') mark = <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.danger }} />;
+  else mark = <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 1.5, borderColor: c.inkFaint }} />;
+  return <View style={{ width: 16, alignItems: 'center' }}>{mark}</View>;
 }
 
-function Pill({ children, tone }) {
-  const c = useColors();
-  const bg = tone === 'ok' ? 'rgba(134,214,148,0.14)' : tone === 'ask' ? c.warnSoft : c.surface4;
-  const fg = tone === 'ok' ? c.good : tone === 'ask' ? c.warn : c.inkSoft;
-  return (
-    <View style={{ paddingHorizontal: 7, height: 20, borderRadius: 5, backgroundColor: bg, justifyContent: 'center' }}>
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 11, color: fg }}>{children}</Text>
-    </View>
-  );
-}
+const mono = (c) => ({ fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody });
 
-function Link({ icon, label, onPress, danger }) {
-  const c = useColors();
-  return (
-    <Pressable onPress={onPress} hitSlop={8} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: pressed ? 0.6 : 1 })}>
-      {icon && <Icon name={icon} size={14} color={danger ? c.danger : c.inkSoft} />}
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13, color: danger ? c.danger : c.inkSoft }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-const mono = (c) => ({ fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody });
-
-// ── Detalle de una tarea ────────────────────────────────────────────────────
+// ── Detalle de un agente ────────────────────────────────────────────────────
 
 function Activity({ task, orch }) {
   const c = useColors();
-  const name = (id) => orch.tasks.find((x) => x.id === id)?.title || id;
-  const mine = orch.messages.filter((m) => m.from === task.id || m.to === task.id);
+  const name = (id) => roleName(orch.tasks.find((x) => x.id === id) || { id, title: id });
   const open = pendingQuestions(orch.messages).filter((q) => q.to === task.id || q.from === task.id);
-  const body = { fontFamily: FONTS.ui, fontSize: 14, lineHeight: 21, color: c.inkBody };
+  const timeline = useMemo(() => {
+    const events = [
+      ...(task.phases || []).map((p) => ({ at: p.at, title: p.done ? `Fase terminada · ${p.name}` : `Empezó la fase · ${p.name}`, detail: p.note })),
+      ...orch.messages
+        .filter((m) => m.from === task.id || m.to === task.id)
+        .map((m) => ({
+          at: m.at,
+          title: m.from === task.id ? KIND[m.kind] || m.kind : `${KIND[m.kind] || m.kind} de ${name(m.from)}`,
+          detail: m.body,
+          ask: m.kind === 'question' && open.some((q) => q.id === m.id),
+        })),
+    ];
+    return events.filter((e) => e.at).sort((a, b) => a.at - b.at);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.phases, orch.messages, task.id]);
+
   return (
-    <View style={{ gap: 18 }}>
-      {open.map((q) => (
-        <View key={q.id} style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.warnSoft, gap: 6 }}>
-          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 11.5, color: c.warn }}>Pregunta de {name(q.from)} para {name(q.to)}</Text>
-          <Text style={[body, { color: c.ink }]}>{q.body}</Text>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>La responde el coordinador; si necesita tu decisión, te la pedirá en la conversación.</Text>
+    <View style={{ gap: 22 }}>
+      {!!task.spec && (
+        <View style={{ gap: 6 }}>
+          <Eyebrow>Encargo</Eyebrow>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkBody }}>
+            {task.spec}
+          </Text>
         </View>
-      ))}
-      {!!task.spec && <View style={{ gap: 8 }}><Eyebrow>Encargo</Eyebrow><Text selectable style={body}>{task.spec}</Text></View>}
+      )}
+      {timeline.length > 0 ? (
+        <View style={{ gap: 18 }}>
+          {timeline.map((e, i) => (
+            <FadeUp key={i} delay={Math.min(i, 8) * 30} style={{ flexDirection: 'row', gap: 14 }}>
+              <Text style={{ width: 42, paddingTop: 2, fontFamily: FONTS.mono, fontSize: 12, color: e.ask ? c.warn : c.inkMuted }}>{clock(e.at)}</Text>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: e.ask ? c.warn : c.ink }}>{e.title}</Text>
+                {!!e.detail && (
+                  <Text selectable numberOfLines={6} style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+                    {e.detail}
+                  </Text>
+                )}
+              </View>
+            </FadeUp>
+          ))}
+        </View>
+      ) : (
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Aún no ha informado de nada.</Text>
+      )}
       {!!task.summary && (
-        <View style={{ gap: 8 }}>
-          <Eyebrow>Resumen final</Eyebrow>
-          <Text selectable style={body}>{task.summary}</Text>
+        <View style={{ gap: 6 }}>
+          <Eyebrow>Informe final</Eyebrow>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkBody }}>
+            {task.summary}
+          </Text>
           {task.files?.length > 0 && <Text style={[mono(c), { color: c.inkMuted }]}>{task.files.join(' · ')}</Text>}
         </View>
       )}
-      <View style={{ gap: 10 }}>
-        <Eyebrow>Fases</Eyebrow>
-        {task.phases?.length ? task.phases.map((p, i) => {
-          const st = p.done ? 'done' : isFinal(task.status) ? 'stopped' : 'running';
-          return (
-            <View key={i} style={{ gap: 3 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-                <Status status={st} size={12} />
-                <Text style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 14, color: c.inkBody }}>{p.name}</Text>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>{p.done ? 'terminada' : st === 'running' ? 'en curso' : 'sin cerrar'}</Text>
-              </View>
-              {!!p.note && <Text style={{ marginLeft: 21, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{p.note}</Text>}
-            </View>
-          );
-        }) : <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Aún no ha informado de ninguna fase.</Text>}
-      </View>
-      <View style={{ gap: 10 }}>
-        <Eyebrow>Mensajes</Eyebrow>
-        {mine.length ? mine.slice().reverse().map((m) => (
-          <View key={m.id} style={{ gap: 3 }}>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>
-              <Text style={{ fontFamily: FONTS.uiSemiBold, color: c.inkSoft }}>{KIND[m.kind] || m.kind}</Text> {name(m.from)} → {name(m.to)}
-            </Text>
-            <Text selectable style={[body, { fontSize: 13.5 }]}>{m.body}</Text>
-          </View>
-        )) : <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Sin mensajes todavía.</Text>}
-      </View>
+      {open.length > 0 && (
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+          Las preguntas las responde el coordinador; si necesita tu decisión, te la pide en la conversación.
+        </Text>
+      )}
     </View>
   );
 }
@@ -162,13 +170,15 @@ function Terminal({ task, state, send }) {
     return () => clearInterval(id);
   }, [task.id, live, send]);
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{live ? 'En vivo · se actualiza sola' : 'La terminal ya se cerró'}</Text>
-        <Link icon="refresh" label="Actualizar" onPress={() => send('term', { task: task.id })} />
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{live ? 'En vivo · se actualiza sola' : 'La terminal ya se cerró'}</Text>
+        <PillButton size="sm" outline icon="refresh" label="Actualizar" onPress={() => send('term', { task: task.id })} />
       </View>
-      <ScrollView horizontal={false} nestedScrollEnabled style={{ maxHeight: 420, borderRadius: RADIUS, backgroundColor: c.codeBg }} contentContainerStyle={{ padding: 12 }}>
-        <Text selectable style={[mono(c), { color: '#D6D6D3' }]}>{term ? term.text || 'Sin salida todavía.' : 'Cargando…'}</Text>
+      <ScrollView nestedScrollEnabled style={{ maxHeight: 460, borderRadius: RADIUS, backgroundColor: c.codeBg }} contentContainerStyle={{ padding: 12 }}>
+        <Text selectable style={mono(c)}>
+          {term ? term.text || 'Sin salida todavía.' : 'Cargando…'}
+        </Text>
       </ScrollView>
     </View>
   );
@@ -177,12 +187,16 @@ function Terminal({ task, state, send }) {
 function Diff({ task, state, send }) {
   const c = useColors();
   const d = state.orchDiff[task.id];
-  useEffect(() => { send('diff', { task: task.id }); }, [task.id, task.updated, send]);
-  if (!d) return <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Cargando…</Text>;
+  useEffect(() => {
+    send('diff', { task: task.id });
+  }, [task.id, task.updated, send]);
+  if (!d) return <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Cargando…</Text>;
   const lines = (d.diff || '').split('\n').slice(0, 1500);
   return (
     <View style={{ gap: 10 }}>
-      <Text selectable style={[mono(c), { padding: 10, borderRadius: RADIUS, backgroundColor: c.surface2, color: c.inkSoft }]}>{d.stat || 'Sin commits nuevos en la rama.'}</Text>
+      <Text selectable style={[mono(c), { padding: 12, borderRadius: RADIUS, backgroundColor: c.sheet, color: c.inkSoft }]}>
+        {d.stat || 'Sin commits nuevos en la rama.'}
+      </Text>
       {lines.length > 1 && (
         <View style={{ borderRadius: RADIUS, backgroundColor: c.codeBg, paddingVertical: 8 }}>
           {lines.map((l, i) => {
@@ -191,11 +205,15 @@ function Diff({ task, state, send }) {
             return (
               <Text
                 key={i}
-                style={[mono(c), {
-                  paddingHorizontal: 10, fontSize: 11,
-                  color: add ? '#9BD59A' : del ? '#E79A86' : l.startsWith('@@') ? '#8EC5FF' : l.startsWith('diff ') ? '#F2F2EE' : '#BDBDB8',
-                  backgroundColor: add ? 'rgba(110,158,62,0.14)' : del ? 'rgba(196,85,61,0.14)' : 'transparent',
-                }]}
+                style={[
+                  mono(c),
+                  {
+                    paddingHorizontal: 10,
+                    fontSize: 11.5,
+                    color: add ? c.good : del ? c.danger : l.startsWith('@@') ? c.info : l.startsWith('diff ') ? c.ink : c.inkSoft,
+                    backgroundColor: add ? 'rgba(134,214,148,0.1)' : del ? 'rgba(240,140,124,0.1)' : 'transparent',
+                  },
+                ]}
               >
                 {l || ' '}
               </Text>
@@ -204,7 +222,7 @@ function Diff({ task, state, send }) {
         </View>
       )}
       {(d.truncated || (d.diff || '').split('\n').length > 1500) && (
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>El diff es muy largo: se muestra solo el principio.</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>El diff es muy largo: se muestra solo el principio.</Text>
       )}
     </View>
   );
@@ -213,38 +231,42 @@ function Diff({ task, state, send }) {
 function TaskDetail({ task, state, send, onBack }) {
   const c = useColors();
   const { confirm } = useDialogs();
-  const orch = state.orch;
   const [tab, setTab] = useState('activity');
   const final = isFinal(task.status);
   const now = useNow(!final);
-  const parent = task.parent ? orch.tasks.find((x) => x.id === task.parent) : null;
   const stop = async () => {
-    const ok = await confirm({ title: 'Detener la tarea', message: `«${task.title}» dejará de trabajar. El coordinador recibe el aviso.`, confirmLabel: 'Detener', danger: true });
+    const ok = await confirm({ title: '¿Detener esta tarea?', message: `«${task.title || roleName(task)}» deja de trabajar y el coordinador recibe el aviso.`, confirmLabel: 'Detener', danger: true });
     if (ok) send('stop', { task: task.id });
   };
+  const sub = [AGENTS[task.agent] || task.agent, task.effort ? `esfuerzo ${(EFFORT[task.effort] || task.effort).toLowerCase()}` : task.model, task.branch].filter(Boolean).join(' · ');
   return (
-    <View style={{ gap: 14 }}>
-      <Link icon="arrow-left" label="Runs" onPress={onBack} />
-      <Card style={{ gap: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Status status={task.status} size={18} />
-          <Text style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>{task.title || task.id}</Text>
+    <View style={{ gap: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginHorizontal: -4 }}>
+        <IconButton onPress={onBack} label="Volver al orquestador">
+          <Icon name="arrow-left" size={20} color={c.inkBody} />
+        </IconButton>
+        <View style={{ flex: 1, gap: 1 }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>
+            {roleName(task)}
+          </Text>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+            {sub} · {elapsed(task, now)}
+          </Text>
         </View>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 19, color: c.inkMuted }}>
-          {STATUS[task.status] || task.status} · {elapsed(task, now)} · {task.role ? `${ROLE[task.role] || task.role} · ` : ''}{AGENTS[task.agent] || task.agent}
-          {task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''}
-          {parent ? ` · hija de ${parent.title || parent.id}` : ' · coordinador'}
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-          {!!task.branch && <Text style={[mono(c), { fontSize: 11, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5, backgroundColor: c.surface3, color: c.inkSoft }]}>{task.branch}</Text>}
-          {task.merged && <Pill tone="ok">fusionada</Pill>}
-          {!!task.pr_url && <Link icon="external" label="Ver PR" onPress={() => Linking.openURL(task.pr_url)} />}
-          {!final && parent && <Link icon="stop" label="Detener" danger onPress={stop} />}
-        </View>
-      </Card>
+        {!final && task.parent ? (
+          <IconButton onPress={stop} label="Detener la tarea">
+            <View style={{ width: 12, height: 12, borderRadius: 2, borderWidth: 1.8, borderColor: c.danger }} />
+          </IconButton>
+        ) : task.pr_url ? (
+          <IconButton onPress={() => Linking.openURL(task.pr_url)} label="Ver el pull request">
+            <Icon name="external" size={18} color={c.inkBody} />
+          </IconButton>
+        ) : null}
+      </View>
       <Segmented
         stretch
-        size="sm"
+        size="lg"
+        bg={c.sheet}
         value={tab}
         onChange={setTab}
         options={[
@@ -253,7 +275,7 @@ function TaskDetail({ task, state, send, onBack }) {
           ...(task.branch ? [{ value: 'diff', label: 'Cambios' }] : []),
         ]}
       />
-      {tab === 'activity' && <Activity task={task} orch={orch} />}
+      {tab === 'activity' && <Activity task={task} orch={state.orch} />}
       {tab === 'term' && <Terminal task={task} state={state} send={send} />}
       {tab === 'diff' && <Diff task={task} state={state} send={send} />}
     </View>
@@ -262,200 +284,231 @@ function TaskDetail({ task, state, send, onBack }) {
 
 // ── Runs ────────────────────────────────────────────────────────────────────
 
+function ActiveRun({ run, orch, now, onOpen }) {
+  const c = useColors();
+  const tasks = tree(orch.tasks, run.id);
+  const root = tasks.find((x) => !x.parent);
+  const kids = tasks.filter((x) => x.parent);
+  const questions = pendingQuestions(orch.messages).filter((q) => tasks.some((t) => t.id === q.from));
+  const asking = questions[0] && tasks.find((t) => t.id === questions[0].from);
+  return (
+    <FadeUp style={{ padding: 16, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 14 }}>
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <LiveDot size={6} />
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+            {['En curso', run.repo, root && elapsed(root, now)].filter(Boolean).join(' · ')}
+          </Text>
+        </View>
+        <ShimmerText text={run.objective} base={c.ink} highlight={c.inkMuted} style={{ fontFamily: FONTS.uiMedium, fontSize: 16 }} />
+      </View>
+      {kids.length > 0 && (
+        <View accessibilityLabel={`${kids.filter((k) => k.status === 'done').length} de ${kids.length} tareas entregadas`} style={{ flexDirection: 'row', gap: 4 }}>
+          {kids.map((k) => (
+            <View
+              key={k.id}
+              style={{
+                flex: 1,
+                height: 3,
+                borderRadius: 2,
+                backgroundColor: k.status === 'done' ? c.accent : k.status === 'failed' || k.status === 'exited' ? c.danger : isFinal(k.status) ? c.surface5 : k.status === 'starting' ? c.surface5 : `rgba(${c.accentRgb},0.45)`,
+              }}
+            />
+          ))}
+        </View>
+      )}
+      {asking && (
+        <Pressable
+          onPress={() => onOpen(asking.id)}
+          style={({ pressed }) => ({ padding: 12, borderRadius: RADIUS, backgroundColor: c.warnSoft, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.85 : 1 })}
+        >
+          <Icon name="warning" size={17} color={c.warn} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>El {roleName(asking).toLowerCase()} está esperando una respuesta</Text>
+            <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.ink70 }}>
+              {questions[0].body}
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={16} color={c.inkMuted} />
+        </Pressable>
+      )}
+      <View>
+        {tasks.map((t) => (
+          <Pressable
+            key={t.id}
+            onPress={() => onOpen(t.id)}
+            style={({ pressed }) => ({ minHeight: 44, paddingLeft: t.depth > 1 ? (t.depth - 1) * 14 : 0, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.7 : 1 })}
+          >
+            <StatusMark status={t.status} />
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: t.status === 'starting' ? c.inkMuted : c.ink }}>
+              {roleName(t)}
+            </Text>
+            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+              {AGENTS[t.agent] || t.agent} · {STATUS[t.status] || t.status}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </FadeUp>
+  );
+}
+
 function Runs({ state, send, onOpen }) {
   const c = useColors();
-  const { confirm } = useDialogs();
+  const { sheet } = useDialogs();
   const orch = state.orch;
-  const asking = useMemo(() => new Set(pendingQuestions(orch.messages).map((q) => q.from)), [orch.messages]);
   const now = useNow(orch.tasks.some((x) => !isFinal(x.status)), 5000);
-  if (!orch.runs.length) {
+  const runs = orch.runs.map((r) => {
+    const tasks = orch.tasks.filter((t) => t.run === r.id);
+    const root = tasks.find((t) => !t.parent);
+    return { ...r, root, active: !!root && !isFinal(root.status), failed: root && (root.status === 'failed' || root.status === 'exited') };
+  });
+  const active = runs.filter((r) => r.active);
+  const past = runs.filter((r) => !r.active);
+
+  if (!runs.length) {
     return (
-      <View style={{ alignItems: 'center', gap: 12, paddingVertical: 40, paddingHorizontal: 16 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkSoft, textAlign: 'center' }}>Todavía no hay runs. Escribe en la conversación:</Text>
-        <Text style={[mono(c), { paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS, backgroundColor: c.surface3, color: c.ink }]}>/orquestar &lt;objetivo&gt;</Text>
-      </View>
+      <FadeUp style={{ alignItems: 'center', gap: 12, paddingVertical: 48, paddingHorizontal: 16 }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>Todavía no hay runs. Escribe en la conversación:</Text>
+        <Text style={[mono(c), { paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS_SM, backgroundColor: c.sheet, color: c.ink }]}>/orquestar &lt;objetivo&gt;</Text>
+      </FadeUp>
     );
   }
-  const remove = async (r) => {
-    const ok = await confirm({ title: 'Quitar el run', message: 'Se quita de la lista; las ramas se quedan en el repositorio.', confirmLabel: 'Quitar', danger: true });
-    if (ok) send('remove_run', { run: r.id });
+
+  const pastActions = async (r) => {
+    const action = await sheet({
+      title: r.objective,
+      items: [
+        ...(r.root ? [{ label: 'Ver el detalle', icon: 'chevron-right', value: 'open' }] : []),
+        ...(r.root?.pr_url ? [{ label: 'Abrir el pull request', icon: 'external', value: 'pr' }] : []),
+        { divider: true },
+        { label: 'Quitar de la lista', icon: 'trash', danger: true, value: 'remove' },
+      ],
+    });
+    if (action === 'open') onOpen(r.root.id);
+    if (action === 'pr') Linking.openURL(r.root.pr_url);
+    if (action === 'remove') send('remove_run', { run: r.id });
   };
+
   return (
-    <View style={{ gap: 14 }}>
-      {orch.runs.map((r) => {
-        const tasks = tree(orch.tasks, r.id);
-        const kids = tasks.filter((x) => x.parent);
-        const done = kids.filter((x) => x.status === 'done').length;
-        const bad = kids.filter((x) => x.status === 'failed' || x.status === 'exited').length;
-        const root = tasks.find((x) => !x.parent);
-        const working = root && !isFinal(root.status);
-        return (
-          <View key={r.id} style={{ borderRadius: RADIUS, backgroundColor: c.surface1, padding: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10 }}>
-              <View style={{ flex: 1, gap: 4 }}>
-                {working
-                  ? <WaveText text={r.objective} color={c.ink} accent={c.accent} style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5 }} />
-                  : <Text numberOfLines={2} style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{r.objective}</Text>}
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>{r.repo}{kids.length ? ` · ${done} de ${kids.length} tareas` : ''}</Text>
-                {kids.length > 0 && (
-                  <View style={{ flexDirection: 'row', height: 4, borderRadius: 3, backgroundColor: c.surface4, overflow: 'hidden', marginTop: 2 }}>
-                    <View style={{ width: `${(done / kids.length) * 100}%`, backgroundColor: c.good }} />
-                    <View style={{ width: `${(bad / kids.length) * 100}%`, backgroundColor: c.danger }} />
+    <View style={{ gap: 22 }}>
+      {active.map((r) => (
+        <ActiveRun key={r.id} run={r} orch={orch} now={now} onOpen={onOpen} />
+      ))}
+      {past.length > 0 && (
+        <FadeUp delay={80}>
+          <Eyebrow style={{ paddingHorizontal: 4, marginBottom: 4 }}>Anteriores</Eyebrow>
+          {past.map((r) => {
+            const pr = r.root?.pr_url && /\/pull\/(\d+)/.exec(r.root.pr_url)?.[1];
+            return (
+              <Pressable
+                key={r.id}
+                onPress={() => (r.root ? onOpen(r.root.id) : pastActions(r))}
+                onLongPress={() => pastActions(r)}
+                style={({ pressed }) => ({ minHeight: 58, paddingVertical: 8, paddingHorizontal: 4, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.7 : 1 })}
+              >
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>
+                    {r.objective}
+                  </Text>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: r.failed ? c.danger : c.inkMuted }}>
+                    {r.failed ? 'Fallida' : 'Cerrada'} · {ago(r.root?.updated || r.created)}
+                  </Text>
+                </View>
+                {!!pr && (
+                  <View style={{ height: 26, paddingHorizontal: 8, borderRadius: RADIUS_SM, backgroundColor: c.surface3, justifyContent: 'center' }}>
+                    <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.ink70 }}>PR #{pr}</Text>
                   </View>
                 )}
-              </View>
-              <Pressable onPress={() => remove(r)} hitSlop={10} accessibilityLabel="Quitar este run">
-                <Icon name="trash" size={16} color={c.inkFaint} />
               </Pressable>
-            </View>
-            {tasks.map((x) => {
-              const phase = x.phases?.[x.phases.length - 1];
-              return (
-                <Pressable
-                  key={x.id}
-                  onPress={() => onOpen(x.id)}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 50, paddingVertical: 7,
-                    paddingRight: 8, paddingLeft: 8 + x.depth * 16, borderRadius: RADIUS, backgroundColor: pressed ? c.surface3 : 'transparent',
-                  })}
-                >
-                  <Status status={x.status} />
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkBody }}>{x.title || x.id}</Text>
-                    <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>
-                      {x.role ? `${ROLE[x.role] || x.role} · ` : ''}{AGENTS[x.agent] || x.agent}{x.model ? ` · ${x.model}` : ''}{phase && !isFinal(x.status) ? ` · ${phase.name}` : ''}
-                    </Text>
-                  </View>
-                  {asking.has(x.id) && <Pill tone="ask">?</Pill>}
-                  <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: c.inkFaint }}>{elapsed(x, now)}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        );
-      })}
+            );
+          })}
+        </FadeUp>
+      )}
     </View>
   );
 }
 
 // ── Ajustes ─────────────────────────────────────────────────────────────────
 
-function Row({ label, hint, children, badge }) {
-  const c = useColors();
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 }}>
-      <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{label}</Text>
-          {badge}
-        </View>
-        {!!hint && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 18, color: c.inkMuted }}>{hint}</Text>}
-      </View>
-      {children}
-    </View>
-  );
-}
-
-function Picker({ value, onPress }) {
-  const c = useColors();
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 10, borderRadius: RADIUS, backgroundColor: pressed ? c.surface4 : c.surface3 })}>
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13, color: c.ink }}>{value}</Text>
-      <Icon name="chevron-down" size={13} color={c.inkMuted} />
-    </Pressable>
-  );
-}
-
-function Settings({ state, send }) {
+function Settings({ state, send, onBack }) {
   const c = useColors();
   const { sheet } = useDialogs();
   const orch = state.orch;
-  useEffect(() => { if (state.orchAgents === null) send('agents', {}); }, [state.orchAgents, send]);
+  useEffect(() => {
+    if (state.orchAgents === null) send('agents', {});
+  }, [state.orchAgents, send]);
   const claude = state.orchAgents?.find((a) => a.id === 'claude');
   const models = claude?.models?.length ? claude.models : ['haiku', 'sonnet', 'opus'];
   const efforts = claude?.efforts?.length ? claude.efforts : Object.keys(EFFORT);
 
-  const pickModel = async (r) => {
+  // Un toque por rol: primero el modelo y, si se elige, el esfuerzo en la
+  // hoja siguiente, en vez de dos selectores por fila.
+  const editRole = async (r) => {
     const model = await sheet({
-      title: `Modelo del ${r.label.toLowerCase()}`,
+      title: r.label,
+      detail: r.purpose,
       items: [...new Set([...models, r.model])].map((m) => ({ label: m, value: m, mono: true, selected: m === r.model })),
     });
-    if (model && model !== r.model) send('settings', { role: r.id, model });
-  };
-  const pickEffort = async (r) => {
+    if (!model) return;
+    if (model !== r.model) send('settings', { role: r.id, model });
     const effort = await sheet({
-      title: `Esfuerzo del ${r.label.toLowerCase()}`,
+      title: 'Esfuerzo',
       items: [{ label: 'Por defecto', value: '__default', selected: !r.effort }, ...efforts.map((e) => ({ label: EFFORT[e] || e, value: e, selected: e === r.effort }))],
     });
     if (effort) send('settings', { role: r.id, effort: effort === '__default' ? '' : effort });
   };
-  const sep = { height: 1, backgroundColor: c.surface3 };
 
   return (
-    <View style={{ gap: 12 }}>
-      <Card style={{ paddingVertical: 4 }}>
-        <Row label="Orquestador activo" hint={orch.lxo_exists ? 'Los agentes del IDE pueden coordinarse con /orquestar.' : 'Falta lxo junto al ejecutable de Lixbon: reinstala la app de escritorio.'}>
-          <Toggle value={orch.enabled} onChange={(on) => send('enable', { on })} label="Orquestador activo" />
-        </Row>
-      </Card>
-
-      <Eyebrow style={{ marginTop: 8 }}>Roles del equipo</Eyebrow>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 18, color: c.inkMuted }}>El coordinador lanza a cada hija por rol, con el modelo y el esfuerzo que elijas aquí.</Text>
-      <Card style={{ paddingVertical: 4 }}>
-        {orch.roles.map((r, i) => (
-          <View key={r.id}>
-            {i > 0 && <View style={sep} />}
-            <View style={{ paddingVertical: 12, gap: 10 }}>
-              <View style={{ gap: 3 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{r.label}</Text>
-                  {r.read_only && <Pill tone="ok">Solo lectura</Pill>}
-                </View>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 18, color: c.inkMuted }}>{r.purpose}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Picker value={r.model} onPress={() => pickModel(r)} />
-                <Picker value={r.effort ? `Esfuerzo ${(EFFORT[r.effort] || r.effort).toLowerCase()}` : 'Esfuerzo por defecto'} onPress={() => pickEffort(r)} />
-              </View>
-            </View>
-          </View>
-        ))}
-      </Card>
-
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-        <Eyebrow>Agentes instalados</Eyebrow>
-        <Link icon="refresh" label="Volver a consultar" onPress={() => send('agents', { refresh: true })} />
+    <View style={{ gap: 24 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginHorizontal: -4 }}>
+        <IconButton onPress={onBack} label="Volver al orquestador">
+          <Icon name="arrow-left" size={20} color={c.inkBody} />
+        </IconButton>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }}>Ajustes del orquestador</Text>
       </View>
-      <Card style={{ paddingVertical: 4 }}>
-        {state.orchAgents === null && <Text style={{ paddingVertical: 12, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Consultando a cada agente…</Text>}
-        {state.orchAgents?.length === 0 && <Text style={{ paddingVertical: 12, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>El IDE no encontró ningún agente compatible.</Text>}
-        {state.orchAgents?.map((a, i) => (
-          <View key={a.id}>
-            {i > 0 && <View style={sep} />}
-            <View style={{ paddingVertical: 12, gap: 3 }}>
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{a.label}</Text>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{a.strengths}</Text>
-              <Text numberOfLines={2} style={[mono(c), { color: c.inkLabel, fontSize: 11 }]}>{a.models.length ? a.models.slice(0, 8).join(', ') : 'No lista modelos'}</Text>
-            </View>
-          </View>
-        ))}
-      </Card>
 
-      <Eyebrow style={{ marginTop: 8 }}>Notificaciones del IDE</Eyebrow>
-      <Card style={{ paddingVertical: 4 }}>
-        {[
-          ['notify_phases', 'Fase terminada', 'Cada vez que un agente cierra una fase de su tarea.'],
-          ['notify_done', 'Tarea entregada o cerrada', 'Cuando un agente entrega su informe o su terminal se cierra.'],
-          ['notify_questions', 'Preguntas al coordinador', 'Cuando un agente se queda esperando una decisión.'],
-        ].map(([k, label, hint], i) => (
-          <View key={k}>
-            {i > 0 && <View style={sep} />}
-            <Row label={label} hint={hint}>
-              <Toggle value={!!orch.settings[k]} onChange={(v) => send('settings', { [k]: v })} label={label} />
-            </Row>
-          </View>
+      <Section>
+        <Row
+          title="Orquestador activo"
+          detail={orch.lxo_exists ? 'Los agentes del IDE se coordinan con /orquestar' : 'Falta lxo junto a Lixbon: reinstala la app de escritorio'}
+          right={<Toggle value={orch.enabled} onChange={(on) => send('enable', { on })} label="Orquestador activo" />}
+        />
+      </Section>
+
+      <Section title="Quién hace cada rol" delay={40}>
+        {orch.roles.map((r) => (
+          <Row
+            key={r.id}
+            title={r.label}
+            value={`${r.model}${r.effort ? ` · ${EFFORT[r.effort] || r.effort}` : ''}`}
+            onPress={() => editRole(r)}
+          />
         ))}
-      </Card>
+      </Section>
+
+      <Section title="Avisarme cuando" delay={80}>
+        {[
+          ['notify_questions', 'Un agente espera respuesta', 'Se queda parado hasta que decidas'],
+          ['notify_phases', 'Termina una fase', 'Cada paso intermedio de una tarea'],
+          ['notify_done', 'Entrega su informe', 'O cuando su terminal se cierra'],
+        ].map(([k, label, hint]) => (
+          <Row key={k} title={label} detail={hint} right={<Toggle value={!!orch.settings[k]} onChange={(v) => send('settings', { [k]: v })} label={label} />} />
+        ))}
+      </Section>
+
+      <Section title="Agentes instalados" delay={120}>
+        {state.orchAgents === null && <Row title="Consultando a cada agente…" />}
+        {state.orchAgents?.length === 0 && <Row title="El IDE no encontró ningún agente compatible" />}
+        {state.orchAgents?.map((a) => (
+          <Row key={a.id} title={a.label} detail={a.strengths || (a.models.length ? a.models.slice(0, 6).join(', ') : 'No lista modelos')} />
+        ))}
+        <Row title="Volver a consultar" icon="refresh" onPress={() => send('agents', { refresh: true })} chevron={false} />
+      </Section>
+
+      <Text style={{ paddingHorizontal: 4, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+        Los agentes del IDE lo activan con <Text style={{ fontFamily: FONTS.mono, color: c.ink70 }}>/orquestar</Text>.
+      </Text>
     </View>
   );
 }
@@ -471,43 +524,49 @@ export default function RemoteOrch({ state, sendCommand }) {
   const orch = state.orch;
   const task = taskId && orch?.tasks.find((x) => x.id === taskId);
 
-  useEffect(() => { if (state.orchError) toast(state.orchError.message); }, [state.orchError, toast]);
+  useEffect(() => {
+    if (state.orchError) toast(state.orchError.message);
+  }, [state.orchError, toast]);
 
   let body;
   if (!orch) {
     body = (
-      <View style={{ alignItems: 'center', gap: 12, paddingVertical: 48 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Cargando el orquestador…</Text>
-        <Link icon="refresh" label="Actualizar" onPress={() => send('refresh', {})} />
+      <View style={{ alignItems: 'center', gap: 14, paddingVertical: 48 }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkMuted }}>Cargando el orquestador…</Text>
+        <PillButton size="sm" outline icon="refresh" label="Actualizar" onPress={() => send('refresh', {})} />
       </View>
     );
   } else if (!orch.enabled) {
     body = (
-      <View style={{ alignItems: 'center', gap: 14, paddingVertical: 40, paddingHorizontal: 12 }}>
-        <Pill>Experimental</Pill>
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 19, color: c.ink }}>Orquestador de agentes</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14, lineHeight: 21, color: c.inkSoft, textAlign: 'center' }}>
-          Un chat pasa a ser el coordinador de un equipo de agentes (Claude Code, Codex, Gemini…): reparte el objetivo, elige agente y modelo para cada tarea, espera sus informes, integra y te cuenta el resultado. Está desactivado en el IDE.
+      <FadeUp style={{ alignItems: 'center', gap: 14, paddingVertical: 40, paddingHorizontal: 8 }}>
+        <Text style={{ fontFamily: FONTS.serif, fontSize: 28, lineHeight: 33, color: c.ink, textAlign: 'center' }}>Orquestador de agentes</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 22, color: c.inkMuted, textAlign: 'center' }}>
+          Un chat del IDE coordina a un equipo de agentes (Claude Code, Codex, Gemini…): reparte el objetivo, elige quién hace cada parte, espera sus informes y te cuenta el resultado.
         </Text>
-        <PillButton label="Activar en el IDE" onPress={() => send('enable', { on: true })} />
-      </View>
+        <PillButton label="Activar en el IDE" onPress={() => send('enable', { on: true })} style={{ marginTop: 6 }} />
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkFaint }}>Experimental</Text>
+      </FadeUp>
     );
   } else if (task) {
     body = <TaskDetail key={task.id} task={task} state={state} send={send} onBack={() => setTaskId(null)} />;
+  } else if (view === 'settings') {
+    body = <Settings state={state} send={send} onBack={() => setView('runs')} />;
   } else {
     body = (
       <View style={{ gap: 14 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Segmented size="sm" value={view} onChange={setView} options={[{ value: 'runs', label: 'Runs' }, { value: 'settings', label: 'Ajustes' }]} />
-          {!!orch.workspace && <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>{orch.workspace}</Text>}
+        <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44 }}>
+          <Text style={{ flex: 1, paddingLeft: 4, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{orch.workspace || ''}</Text>
+          <IconButton onPress={() => setView('settings')} label="Ajustes del orquestador">
+            <Icon name="gear" size={19} color={c.inkBody} />
+          </IconButton>
         </View>
-        {view === 'runs' ? <Runs state={state} send={send} onOpen={setTaskId} /> : <Settings state={state} send={send} />}
+        <Runs state={state} send={send} onOpen={setTaskId} />
       </View>
     );
   }
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 6, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       {body}
     </ScrollView>
   );

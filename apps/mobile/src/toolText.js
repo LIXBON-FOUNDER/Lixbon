@@ -140,3 +140,21 @@ export function summarizeRemoteTools(items, locale = 'es') {
   const text = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} ${t.and} ${parts.at(-1)}`;
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+const VERB = {
+  cmd: ['Ejecuta', 'Ejecutó'],
+  edit: ['Edita', 'Editó'],
+  read: ['Lee', 'Leyó'],
+  search: ['Busca', 'Buscó'],
+  web: ['Consulta', 'Consultó'],
+};
+
+/** Fila corta de una herramienta: verbo en una columna y el destino al lado
+    (la ruta, el comando o la búsqueda). Las que esperan permiso dicen «Espera». */
+export function toolParts(item, waiting = false) {
+  const kind = KIND_OF[item.tool];
+  const verbs = VERB[kind];
+  const verb = waiting ? 'Espera' : verbs ? verbs[item.running ? 0 : 1] : item.running ? 'Usa' : 'Usó';
+  const target = String(item.summary || '') || describeRemoteTool(item);
+  return { verb, target, mono: kind === 'cmd' || kind === 'edit' || kind === 'read' };
+}

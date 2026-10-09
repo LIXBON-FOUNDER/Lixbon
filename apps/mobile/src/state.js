@@ -26,14 +26,15 @@ export const DEFAULT_API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://lix
 const SECURE_KEY = 'lixbon_api_key';
 const MOBILE_KEY_NAME = 'Lixbon Mobile';
 const UI_KEY = 'uiPrefs';
+const DEFAULT_MODEL_KEY = 'defaultModel';
 
 export const UI_DEFAULTS = {
   accent: 'lima',
   textSize: 'md', // sm | md | lg — texto del chat
   density: 'normal', // compact | normal | roomy — aire entre mensajes y filas
   sendOnEnter: false,
-  statusBar: true,
-  ambient: true,
+  statusBar: false,
+  ambient: false,
   motion: true,
 };
 
@@ -304,6 +305,8 @@ export function AppState({ children }) {
 function ChatState({ api, apiKey, ready, children }) {
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
+  const [defaultModel, setDefaultModelState] = useState('');
+  const defaultModelRef = useRef('');
   const [conversationId, setConversationId] = useState(null);
   const [title, setTitle] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -327,12 +330,24 @@ function ChatState({ api, apiKey, ready, children }) {
       const ids = (Array.isArray(res?.data) ? res.data : [])
         .map((m) => m?.id)
         .filter((id) => typeof id === 'string' && !id.startsWith('error:'));
+      if (!defaultModelRef.current) {
+        defaultModelRef.current = (await AsyncStorage.getItem(DEFAULT_MODEL_KEY).catch(() => null)) || '';
+        setDefaultModelState(defaultModelRef.current);
+      }
+      const preferred = ids.includes(defaultModelRef.current) ? defaultModelRef.current : ids[0] || '';
       setModels(ids);
-      setModel((current) => (current && ids.includes(current) ? current : ids[0] || ''));
+      setModel((current) => (current && ids.includes(current) ? current : preferred));
     } catch {
       setModels([]);
     }
   }, [api]);
+
+  const setDefaultModel = useCallback((id) => {
+    defaultModelRef.current = id;
+    setDefaultModelState(id);
+    setModel(id);
+    AsyncStorage.setItem(DEFAULT_MODEL_KEY, id).catch(() => {});
+  }, []);
 
   const stop = useCallback(() => {
     handleRef.current?.cancel();
@@ -492,6 +507,8 @@ function ChatState({ api, apiKey, ready, children }) {
     () => ({
       models,
       model,
+      defaultModel,
+      setDefaultModel,
       conversationId,
       title,
       messages,
@@ -512,7 +529,7 @@ function ChatState({ api, apiKey, ready, children }) {
       regenerate,
       stop,
     }),
-    [models, model, conversationId, title, messages, streaming, loadingMessages, error, webSearch, usage, loadModels, newChat, openConversation, send, regenerate, stop],
+    [models, model, defaultModel, setDefaultModel, conversationId, title, messages, streaming, loadingMessages, error, webSearch, usage, loadModels, newChat, openConversation, send, regenerate, stop],
   );
 
   return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;

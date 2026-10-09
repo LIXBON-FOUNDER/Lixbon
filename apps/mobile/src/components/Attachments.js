@@ -1,11 +1,11 @@
 // Attachments.js — adjuntos del compositor (chat y control remoto): selector
-// de origen, lectura en segundo plano y las fichas que se ven mientras tanto.
+// de origen, lectura en segundo plano y las miniaturas que se ven mientras.
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { pickDocuments, pickImages, readAttachment } from '../attachments';
 import { useApi } from '../state';
-import { FONTS, RADIUS } from '../theme';
+import { FONTS, RADIUS_SM } from '../theme';
 import Icon from './Icon';
 import { useDialogs } from './dialogs';
 import { useColors } from './ui';
@@ -40,6 +40,18 @@ export function useAttachments({ describeImages = true, allowImages = true } = {
     [api, describeImages, allowImages, toast],
   );
 
+  const pickFrom = useCallback(
+    async (source) => {
+      try {
+        const files = source === 'doc' ? await pickDocuments() : await pickImages({ camera: source === 'camera' });
+        addFiles(files);
+      } catch (err) {
+        toast(err?.message || 'No se pudo abrir el selector');
+      }
+    },
+    [toast, addFiles],
+  );
+
   const pick = useCallback(async () => {
     const source = await sheet({
       title: 'Adjuntar',
@@ -53,14 +65,8 @@ export function useAttachments({ describeImages = true, allowImages = true } = {
           : []),
       ],
     });
-    if (!source) return;
-    try {
-      const files = source === 'doc' ? await pickDocuments() : await pickImages({ camera: source === 'camera' });
-      addFiles(files);
-    } catch (err) {
-      toast(err?.message || 'No se pudo abrir el selector');
-    }
-  }, [sheet, toast, addFiles, allowImages]);
+    if (source) pickFrom(source);
+  }, [sheet, pickFrom, allowImages]);
 
   const remove = useCallback((id) => setItems((prev) => prev.filter((a) => a.id !== id)), []);
   const clear = useCallback(() => setItems([]), []);
@@ -70,6 +76,8 @@ export function useAttachments({ describeImages = true, allowImages = true } = {
     ready: items.filter((a) => a.status === 'ready'),
     reading: items.some((a) => a.status === 'reading'),
     pick,
+    pickFrom,
+    addFiles,
     remove,
     clear,
   };
@@ -82,7 +90,7 @@ export function AttachmentTray({ items, onRemove, extra = null }) {
       horizontal
       showsHorizontalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ gap: 6, paddingBottom: 8 }}
+      contentContainerStyle={{ gap: 8, paddingBottom: 10 }}
     >
       {extra}
       {items.map((a) => (
@@ -92,42 +100,49 @@ export function AttachmentTray({ items, onRemove, extra = null }) {
   );
 }
 
+/// Imagen: miniatura cuadrada con la equis encima. Documento: ficha con el
+/// nombre y el tipo. Mientras se lee, el giro reemplaza la acción de quitar.
 export function AttachmentChip({ item, onRemove }) {
   const c = useColors();
   const reading = item.status === 'reading';
-  const kindLabel = item.kind === 'image' ? 'imagen' : 'documento';
+  if (item.preview) {
+    return (
+      <View style={{ width: 64, height: 64, borderRadius: RADIUS_SM, overflow: 'hidden', backgroundColor: c.surface4 }}>
+        <Image source={{ uri: item.preview }} style={{ width: 64, height: 64, opacity: reading ? 0.45 : 1 }} />
+        {reading ? (
+          <View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' }}>
+            <ActivityIndicator size="small" color={c.ink} />
+          </View>
+        ) : (
+          <Pressable
+            onPress={onRemove}
+            hitSlop={8}
+            accessibilityLabel={`Quitar ${item.name}`}
+            style={{ position: 'absolute', top: 3, right: 3, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(14,14,14,0.82)' }}
+          >
+            <Icon name="x" size={11} color="#F2F2F0" strokeWidth={2.2} />
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+  const ext = (item.name.split('.').pop() || '').toUpperCase();
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 7,
-        maxWidth: 200,
-        height: 40,
-        paddingLeft: item.preview ? 4 : 10,
-        paddingRight: 4,
-        borderRadius: RADIUS,
-        backgroundColor: c.surface5,
-      }}
-    >
-      {item.preview ? (
-        <Image source={{ uri: item.preview }} style={{ width: 32, height: 32, borderRadius: 5, opacity: reading ? 0.5 : 1 }} />
-      ) : (
-        <Icon name="file" size={15} color={c.accentDeep} />
-      )}
+    <View style={{ maxWidth: 230, height: 64, paddingLeft: 12, paddingRight: reading ? 14 : 4, borderRadius: RADIUS_SM, backgroundColor: c.surface4, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Icon name="file" size={20} color={c.inkSoft} />
       <View style={{ flexShrink: 1 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 12, color: c.ink }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.ink }}>
           {item.name}
         </Text>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 9.5, color: c.inkLabel }}>
-          {reading ? (item.kind !== 'image' ? 'leyendo…' : item.describe ? 'describiendo…' : 'preparando…') : kindLabel}
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>
+          {reading ? 'Leyendo…' : ext || 'Documento'}
         </Text>
       </View>
       {reading ? (
-        <ActivityIndicator size="small" color={c.accent} style={{ marginHorizontal: 6 }} />
+        <ActivityIndicator size="small" color={c.inkSoft} />
       ) : (
-        <Pressable onPress={onRemove} hitSlop={8} accessibilityLabel={`Quitar ${item.name}`} style={{ padding: 6 }}>
-          <Icon name="x" size={13} color={c.inkSoft} />
+        <Pressable onPress={onRemove} hitSlop={6} accessibilityLabel={`Quitar ${item.name}`} style={({ pressed }) => ({ width: 32, height: 32, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? c.pressed : 'transparent' })}>
+          <Icon name="x" size={14} color={c.inkMuted} />
         </Pressable>
       )}
     </View>
@@ -144,10 +159,10 @@ export function MentionChip({ mention, onRemove }) {
         alignItems: 'center',
         gap: 6,
         maxWidth: 220,
-        height: 40,
-        paddingLeft: 10,
+        height: 64,
+        paddingLeft: 12,
         paddingRight: 4,
-        borderRadius: RADIUS,
+        borderRadius: RADIUS_SM,
         backgroundColor: c.accentSoft,
       }}
     >
