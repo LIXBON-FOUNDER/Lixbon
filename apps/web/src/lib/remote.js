@@ -86,11 +86,13 @@ function closeOpenAssistant(items, finalText) {
 }
 
 export function remoteReducer(state, ev) {
-  const seq = typeof ev.seq === 'number' ? ev.seq : state.lastSeq;
-  if (typeof ev.seq === 'number' && ev.seq <= state.lastSeq && ev.type !== 'channel_status') {
+  // channel_status llega primero al reconectar con el seq más alto del canal:
+  // si avanzara lastSeq, el replay de lo perdido se descartaría como duplicado.
+  const status = ev.type === 'channel_status';
+  if (!status && typeof ev.seq === 'number' && ev.seq <= state.lastSeq) {
     return state;
   }
-  const s = { ...state, lastSeq: Math.max(state.lastSeq, seq) };
+  const s = status || typeof ev.seq !== 'number' ? state : { ...state, lastSeq: ev.seq };
 
   switch (ev.type) {
     case 'channel_status':

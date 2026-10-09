@@ -56,7 +56,6 @@ export default function LandingPage() {
               ) : (
                 <div className="btn-grupo btn-grupo--grande">
                   <Link to="/auth?mode=register" className="btn-grupo__item">{t('ctaStartFree')}</Link>
-                  <Link to="/chat" className="btn-grupo__item">{t('ctaTryChat')}</Link>
                 </div>
               )}
               {!user && <p className="landing__nota">{t('freeNote')}</p>}

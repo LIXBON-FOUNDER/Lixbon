@@ -9,7 +9,7 @@ export default {
     heroLead: 'Pídele ayuda para escribir un correo, resumir un documento, crear tu página web o programar. Lo que le cuentas se queda contigo: no lo compartimos con otras empresas ni lo usamos para entrenar.',
     ctaGoToChat: 'Ir al chat',
     ctaStartFree: 'Empieza gratis',
-    ctaTryChat: 'Probar el chat',
+
     ctaCreateAccount: 'Crear mi cuenta gratis',
     freeNote: 'Gratis: 30 mensajes al día. Sin tarjeta.',
     section1Title: 'Lo que escribes se queda contigo.',
@@ -47,7 +47,7 @@ export default {
     heroLead: 'Ask it to help you write an email, summarize a document, build your website or code. What you tell it stays with you: we never share it with other companies or use it for training.',
     ctaGoToChat: 'Go to chat',
     ctaStartFree: 'Start for free',
-    ctaTryChat: 'Try the chat',
+    
     ctaCreateAccount: 'Create my free account',
     freeNote: 'Free: 30 messages a day. No card required.',
     section1Title: 'What you write stays with you.',

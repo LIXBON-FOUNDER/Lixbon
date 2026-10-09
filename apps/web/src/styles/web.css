@@ -18,10 +18,11 @@
 .btn-grupo {
   display: inline-flex;
   align-items: stretch;
+  gap: 2px;
+  padding: 3px;
   border-radius: var(--radius);
   background: var(--primary);
-  overflow: hidden;
-  isolation: isolate;
+  box-shadow: 0 6px 18px rgba(var(--shadow-rgb), 0.14);
 }
 
 .btn-grupo__item,
@@ -37,23 +38,40 @@
   color: var(--on-primary);
   text-decoration: none;
   white-space: nowrap;
-  transition: background-color 0.18s ease;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
-.btn-grupo__item + .btn-grupo__item {
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--on-primary) 32%, transparent);
+.btn-grupo__item {
+  height: 32px;
+  border-radius: calc(var(--radius) - 3px);
+  background: var(--on-primary);
+  color: var(--primary);
+}
+.btn-grupo__item:hover { background: color-mix(in srgb, var(--on-primary) 88%, var(--primary)); }
+
+.btn-grupo__item--sec {
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--on-primary) 68%, var(--primary));
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.btn-grupo__item--sec:hover,
+.btn-grupo__item--sec[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--on-primary) 8%, transparent);
+  color: var(--on-primary);
 }
 
-.btn-grupo__item:hover,
-.btn-grupo__item.is-active { background: color-mix(in srgb, var(--on-primary) 12%, transparent); }
-
-.btn-grupo__item:focus-visible,
+.btn-grupo__item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn-negro:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .btn-negro { border-radius: var(--radius); background: var(--primary); }
 .btn-negro:hover { background: var(--primary-hover); }
 
-.btn-grupo--grande .btn-grupo__item,
+.btn-grupo--grande .btn-grupo__item { height: 44px; padding: 0 22px; font-size: 15px; }
 .btn-negro.landing__btn { height: 48px; padding: 0 24px; font-size: 15px; }
 
 .web .pill-btn { font-family: var(--font-sub); }
@@ -88,8 +106,11 @@
 .pubnav > .pubnav__actions { margin-left: auto; }
 .pubnav__btn { height: 32px; padding: 0 12px; font-size: 13px; text-decoration: none; }
 
+/* Columnas laterales iguales: el menú queda en el centro exacto aunque el
+   logo se pliegue al hacer scroll. */
 .pubnav__in {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   width: min(var(--web-ancho), calc(100% - var(--web-margen)));
@@ -97,6 +118,7 @@
   margin: 0 auto;
 }
 
+.pubnav__in > .pubnav__logo { justify-self: start; margin: 0; }
 .pubnav__logo { margin-right: auto; text-decoration: none; }
 .pubnav__logo:has(.logo-founder) { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); }
 .logo-founder {
@@ -112,8 +134,8 @@
   letter-spacing: -0.01em;
   white-space: pre;
 }
-/* Tiempos del diseño (versión A) a 0,6×. Las transiciones del estado abierto
-   deshacen el cierre en orden inverso: trazo, unión, peso y letras. */
+/* Las transiciones del estado abierto deshacen el cierre en orden inverso:
+   unión, peso y letras. */
 .logo-founder__l {
   display: inline-block;
   animation: logo-founder-sube 0.7s cubic-bezier(0.33, 1, 0.68, 1) calc(0.15s + var(--i) * 0.05s) backwards;
@@ -129,17 +151,6 @@
 .logo-founder__l--clave {
   transition: font-weight 0.45s cubic-bezier(0.65, 0, 0.35, 1) 0.15s, margin-left 0.4s cubic-bezier(0.65, 0, 0.35, 1) 0.1s;
 }
-.logo-founder__trazo {
-  position: absolute;
-  left: 0.02em;
-  right: 0.02em;
-  bottom: 0.12em;
-  height: 0.045em;
-  background: currentColor;
-  transform: scaleX(0);
-  transform-origin: 0 50%;
-  transition: transform 0.25s cubic-bezier(0.65, 0, 0.35, 1);
-}
 .logo-founder.is-cerrado .logo-founder__l--tono {
   width: 0;
   opacity: 0;
@@ -150,10 +161,17 @@
   font-weight: 680;
   transition: font-weight 0.6s cubic-bezier(0.65, 0, 0.35, 1) 0.18s, margin-left 0.54s cubic-bezier(0.65, 0, 0.35, 1) 0.42s;
 }
-.logo-founder.is-cerrado .logo-founder__l--f { margin-left: -0.07em; }
-.logo-founder.is-cerrado .logo-founder__trazo {
-  transform: scaleX(1);
-  transition: transform 0.42s cubic-bezier(0.33, 1, 0.68, 1) 0.78s;
+/* El gancho de la f monta sobre la l y las dos rebotan al tocarse. La entrada
+   va primero en la lista para que al reabrir no se repita. */
+.logo-founder.is-cerrado .logo-founder__l--f {
+  margin-left: -0.13em;
+  animation: logo-founder-sube 0.7s cubic-bezier(0.33, 1, 0.68, 1) calc(0.15s + var(--i) * 0.05s) backwards,
+    logo-founder-choque-f 0.5s cubic-bezier(0.33, 1, 0.68, 1) 0.8s;
+}
+.logo-founder.is-cerrado .logo-founder__l--l {
+  transform-origin: 50% 90%;
+  animation: logo-founder-sube 0.7s cubic-bezier(0.33, 1, 0.68, 1) calc(0.15s + var(--i) * 0.05s) backwards,
+    logo-founder-choque-l 0.5s cubic-bezier(0.33, 1, 0.68, 1) 0.8s;
 }
 .logo-founder__medida {
   position: absolute;
@@ -164,15 +182,24 @@
 @keyframes logo-founder-sube {
   from { opacity: 0; transform: translateY(0.38em); }
 }
+@keyframes logo-founder-choque-f {
+  35% { transform: translateX(-0.07em) scaleX(0.92); }
+  70% { transform: translateX(0.02em); }
+}
+@keyframes logo-founder-choque-l {
+  35% { transform: rotate(-7deg) translateX(-0.03em); }
+  70% { transform: rotate(2deg); }
+}
 @media (prefers-reduced-motion: reduce) {
   .logo-founder__l,
-  .logo-founder__trazo { animation: none; transition: none; }
+  .logo-founder.is-cerrado .logo-founder__l { animation: none; transition: none; }
 }
 @media (max-width: 640px) {
   .pubnav .logo-founder { font-size: 24px; }
 }
 
 .pubnav__links { display: flex; align-items: center; gap: 2px; }
+.pubnav__in > .pubnav__links { justify-self: center; }
 
 .pubnav__link {
   display: inline-flex;
@@ -231,18 +258,9 @@
 .pubnav__item strong { font-family: var(--font-sub); font-size: 14px; font-weight: 500; color: var(--ink); }
 .pubnav__item span { font-family: var(--font-text); font-size: 13.5px; line-height: 1.45; color: var(--ink-muted); }
 
-.pubnav__actions { display: flex; align-items: center; gap: 4px; margin-left: 16px; }
-/* Sin overflow: hidden, para que el menú de idioma salga del grupo. */
-.pubnav__cta { margin-left: 8px; overflow: visible; }
-.pubnav__cta > .btn-grupo__item { border-radius: var(--radius) 0 0 var(--radius); }
-.pubnav__cta .pubnav__idioma {
-  gap: 6px;
-  padding: 0 10px;
-  border-radius: 0 var(--radius) var(--radius) 0;
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--on-primary) 32%, transparent);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
+.pubnav__actions { display: flex; align-items: center; gap: 4px; }
+.pubnav__in > .pubnav__actions { grid-column: 3; justify-self: end; }
+.pubnav__cta .pubnav__idioma { gap: 4px; }
 .pubnav__toggle { display: none; }
 
 .pubnav__menu {

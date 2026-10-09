@@ -110,8 +110,8 @@ export function PublicNav() {
 
         <div className="pubnav__actions">
           <div className="btn-grupo pubnav__cta">
+            <LanguageSwitch className="btn-grupo__item btn-grupo__item--sec pubnav__idioma" conCodigo />
             <Link to="/chat" className="btn-grupo__item">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
-            <LanguageSwitch className="btn-grupo__item pubnav__idioma" conCodigo />
           </div>
 
           <button

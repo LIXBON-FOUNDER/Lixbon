@@ -1,5 +1,5 @@
 import { useSeo } from '../lib/seo';
-import { WaveText } from '../components/WaveText';
+import { ShimmerText } from '../components/ShimmerText';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useNavigate, Link } from '../i18n/link';
@@ -527,7 +527,7 @@ export default function ChatPage() {
                       )}
                       {searching && i === messages.length - 1 && !m.content && (
                         <span className="msg__searching">
-                          <IconGlobe size={14} /> <WaveText key="buscando" text={t('searchingWeb')} />
+                          <IconGlobe size={14} /> <ShimmerText text={t('searchingWeb')} />
                         </span>
                       )}
                       {m.reasoning && (
@@ -535,7 +535,7 @@ export default function ChatPage() {
                       )}
                       {(() => {
                         if (m.error) return <MensajeError>{m.content}</MensajeError>;
-                        if (!m.content) return !searching && !m.reasoning && <span className="msg__thinking"><WaveText key="pensando" text={t('thinking')} /></span>;
+                        if (!m.content) return !searching && !m.reasoning && <span className="msg__thinking"><ShimmerText text={t('thinking')} /></span>;
                         const activo = busy && i === messages.length - 1;
                         if (!tieneVisual(m.content)) return <Markdown streaming={activo}>{m.content}</Markdown>;
                         const r = aplicarRespuesta([], m.content, { enCurso: true, estricto: true });
