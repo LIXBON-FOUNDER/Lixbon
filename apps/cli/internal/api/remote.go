@@ -5,10 +5,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
-const remoteStreamIdle = 90 * time.Second
+const remoteStreamIdle = 45 * time.Second
 
 type RemoteSession struct {
 	ID       string
@@ -69,15 +70,16 @@ func (s *commandStream) Close() error {
 }
 
 // RemoteCommands abre el SSE de larga duración con los comandos del móvil o la
-// web. El gateway manda keepalives cada 15 s: sin tráfico durante 90 s la
-// conexión se da por perdida y el llamador reconecta.
-func (c *Client) RemoteCommands(ctx context.Context, sessionID string) (io.ReadCloser, error) {
+// web. El gateway manda keepalives cada 15 s: sin tráfico durante 45 s la
+// conexión se da por perdida y el llamador reconecta. lastCmd es el último
+// cmd_seq recibido: el gateway reentrega lo posterior que se perdió en el corte.
+func (c *Client) RemoteCommands(ctx context.Context, sessionID string, lastCmd int64) (io.ReadCloser, error) {
 	if c.Generic {
 		return nil, errNotGateway
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	idle := newIdleReader(cancel, remoteStreamIdle)
-	resp, err := c.open(ctx, http.MethodGet, c.Server+"/api/remote/sessions/"+sessionID+"/commands", nil, true)
+	resp, err := c.open(ctx, http.MethodGet, c.Server+"/api/remote/sessions/"+sessionID+"/commands?last_cmd="+strconv.FormatInt(lastCmd, 10), nil, true)
 	if err != nil {
 		idle.stop()
 		cancel()

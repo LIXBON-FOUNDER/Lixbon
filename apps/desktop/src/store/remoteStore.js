@@ -37,6 +37,13 @@ const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };
 let buffer = [];              // eventos pendientes de POST
 let flushTimer = null;
 let readerAbort = null;       // AbortController del SSE de comandos
+let lastCmd = 0;              // último cmd_seq recibido: el gateway reentrega lo posterior
+let flushing = false;
+let transport = null;         // 'ws' | 'legacy' (SSE + POST con un gateway sin WebSocket)
+let hostWs = null;            // { socket, open, dead, inflight, ping }
+let resend = null;            // lote sin acuse de un socket caído: se reenvía con su rid
+let batchSeq = 0;
+let flushSoon = null;
 let unsubChat = null;
 let unsubApp = null;
 let prevMessages = [];
@@ -66,6 +73,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function emit(type, fields = {}) {
   buffer.push({ type, ...fields });
+  // Por WebSocket no hay coste por envío: el texto sale casi al instante.
+  if (hostWs?.open && !flushSoon) flushSoon = setTimeout(() => { flushSoon = null; flushEvents(); }, 30);
 }
 
 function toolSummary(tool, args = {}) {
@@ -302,7 +311,7 @@ function startChannel(sessionId) {
   });
   startOrchBridge(emit);
   flushTimer = setInterval(flushEvents, FLUSH_MS);
-  readCommands(sessionId);
+  connectHostSocket(sessionId);
 }
 
 function stopChannel() {
@@ -311,17 +320,28 @@ function stopChannel() {
   stopOrchBridge();
   if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
   if (readerAbort) { readerAbort.abort(); readerAbort = null; }
+  if (flushSoon) { clearTimeout(flushSoon); flushSoon = null; }
+  closeHostSocket();
+  transport = null;
+  resend = null;
   buffer = [];
   remotePromptQueue = [];
   currentApprovalId = null;
+  lastCmd = 0;
 }
 
+// Un POST lento no debe solaparse con el siguiente: el gateway numera los
+// eventos por orden de llegada y los deltas desordenados rompían el texto.
 async function flushEvents() {
-  if (!buffer.length) return;
+  if (hostWs?.open) { flushSocket(hostWs); return; }
+  // Con el WebSocket reconectando, lo emitido espera en el buffer.
+  if (transport !== 'legacy') return;
+  if (!buffer.length || flushing) return;
   const { session, active } = useRemoteStore.getState();
   if (!active || !session) return;
   const batch = buffer;
   buffer = [];
+  flushing = true;
   try {
     await api.post(`/api/remote/sessions/${session.id}/events`, { events: batch });
   } catch (err) {
@@ -332,6 +352,8 @@ async function flushEvents() {
     }
     // Fallo transitorio: devolver el lote al frente (con tope defensivo)
     buffer = batch.concat(buffer).slice(-2000);
+  } finally {
+    flushing = false;
   }
 }
 
@@ -656,17 +678,155 @@ function handleCommand(cmd) {
   }
 }
 
+// ── WebSocket del host ──────────────────────────────────────────────────────
+// Comandos y eventos por una sola conexión, sin una petición HTTP por lote.
+// Si el gateway todavía no lo tiene (producción por detrás del IDE), tras dos
+// intentos sin llegar a abrir se usa SSE + POST.
+
+const WS_PING_MS = 15000;
+const WS_IDLE_MS = 45000;
+const WS_ATTEMPTS_BEFORE_LEGACY = 2;
+const MAX_BATCH = 200;
+
+function connectHostSocket(sessionId) {
+  transport = 'ws';
+  let failed = 0;
+  let everOpened = false;
+  let backoff = 1000;
+
+  const connect = () => {
+    const { active, session } = useRemoteStore.getState();
+    if (!active || session?.id !== sessionId || transport !== 'ws') return;
+    const { serverUrl, apiKey } = useAppStore.getState();
+    const url = `${serverUrl.replace(/^http/, 'ws')}/api/remote/sessions/${sessionId}/host?last_cmd=${lastCmd}`;
+    let socket;
+    try {
+      socket = new WebSocket(url);
+    } catch {
+      setTimeout(connect, backoff);
+      backoff = Math.min(backoff * 2, 15000);
+      return;
+    }
+    const link = { socket, open: false, dead: false, inflight: null, ping: null };
+    hostWs = link;
+    let lastIn = Date.now();
+
+    // Tras suspender el equipo el socket puede quedar medio abierto sin
+    // cerrarse nunca: sin nada del gateway (que hace ping cada 15 s) se suelta.
+    link.ping = setInterval(() => {
+      if (!link.open) return;
+      if (Date.now() - lastIn > WS_IDLE_MS) { finish(4008); return; }
+      try { socket.send(JSON.stringify({ op: 'ping' })); } catch { /* se cierra solo */ }
+    }, WS_PING_MS);
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ op: 'auth', token: apiKey }));
+      link.open = true;
+      everOpened = true;
+      failed = 0;
+      backoff = 1000;
+      lastIn = Date.now();
+      flushSocket(link);
+    };
+    socket.onmessage = (e) => {
+      if (link.dead) return;
+      lastIn = Date.now();
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === 'ping' || msg.type === 'pong') return;
+      if (msg.type === 'ack') { onAck(link, msg); return; }
+      if (msg.type === 'channel') { lastCmd = Math.min(lastCmd, msg.cmd_seq || 0); return; }
+      if (typeof msg.cmd_seq === 'number') {
+        if (msg.cmd_seq <= lastCmd) return;
+        lastCmd = msg.cmd_seq;
+      }
+      try { handleCommand(msg); } catch (err) { console.warn('[remote] comando fallido', err); }
+    };
+    socket.onerror = () => {};
+    socket.onclose = (e) => finish(e.code);
+
+    function finish(code) {
+      if (link.dead) return;
+      link.dead = true;
+      clearInterval(link.ping);
+      try { socket.close(); } catch { /* ya cerrado */ }
+      if (hostWs === link) hostWs = null;
+      if (link.inflight) { resend = link.inflight; link.inflight = null; }
+      if (code === 4404 || code === 4410) { useRemoteStore.getState()._endedRemotely(); return; }
+      if (!everOpened && ++failed >= WS_ATTEMPTS_BEFORE_LEGACY) {
+        transport = 'legacy';
+        if (resend) { buffer = resend.batch.concat(buffer); resend = null; }
+        readCommands(sessionId);
+        return;
+      }
+      setTimeout(connect, backoff);
+      backoff = Math.min(backoff * 2, 15000);
+    }
+  };
+  connect();
+}
+
+function closeHostSocket() {
+  const link = hostWs;
+  hostWs = null;
+  if (!link) return;
+  link.dead = true;
+  clearInterval(link.ping);
+  try { link.socket.close(1000); } catch { /* ya cerrado */ }
+}
+
+// Un lote en vuelo a la vez: el gateway numera por orden de llegada.
+function flushSocket(link) {
+  if (link.inflight || !link.open) return;
+  let next = resend;
+  resend = null;
+  if (!next) {
+    if (!buffer.length) return;
+    next = { rid: `e${Date.now().toString(36)}${++batchSeq}`, batch: buffer.splice(0, MAX_BATCH) };
+  }
+  link.inflight = next;
+  try {
+    link.socket.send(JSON.stringify({ op: 'events', rid: next.rid, events: next.batch }));
+  } catch {
+    link.inflight = null;
+    resend = next;
+  }
+}
+
+function onAck(link, msg) {
+  if (!link.inflight || msg.rid !== link.inflight.rid) return;
+  link.inflight = null;
+  if (!msg.ok && (msg.status === 404 || msg.status === 410)) {
+    useRemoteStore.getState()._endedRemotely();
+    return;
+  }
+  if (!msg.ok) console.warn('[remote] lote rechazado', msg.detail);
+  flushSocket(link);
+}
+
+// El gateway manda un ping cada 15 s. Tras suspender el equipo o cambiar de
+// red el socket puede quedar medio abierto sin error: sin bytes en 45 s se
+// corta y se reconecta, o el host seguiría "conectado" sin recibir nada.
+const COMMAND_IDLE_MS = 45000;
+
 async function readCommands(sessionId) {
   let backoff = 2000;
   for (;;) {
     const { active, session } = useRemoteStore.getState();
     if (!active || session?.id !== sessionId) return;
+    let idleTimer = null;
     try {
-      readerAbort = new AbortController();
+      const abort = new AbortController();
+      readerAbort = abort;
+      const kick = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => abort.abort(), COMMAND_IDLE_MS);
+      };
+      kick();
       const { serverUrl, apiKey } = useAppStore.getState();
-      const res = await fetch(`${serverUrl}/api/remote/sessions/${sessionId}/commands`, {
+      const res = await fetch(`${serverUrl}/api/remote/sessions/${sessionId}/commands?last_cmd=${lastCmd}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
-        signal: readerAbort.signal,
+        signal: abort.signal,
       });
       if (res.status === 404 || res.status === 410) {
         useRemoteStore.getState()._endedRemotely();
@@ -680,17 +840,30 @@ async function readCommands(sessionId) {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        kick();
         buf += decoder.decode(value, { stream: true });
         const parts = buf.split('\n\n');
         buf = parts.pop();
         for (const part of parts) {
           const line = part.trim();
           if (!line.startsWith('data:')) continue;
-          try { handleCommand(JSON.parse(line.slice(5).trim())); } catch { /* frame malformado */ }
+          let cmd;
+          try { cmd = JSON.parse(line.slice(5).trim()); } catch { continue; }
+          if (cmd.type === 'channel') {
+            lastCmd = Math.min(lastCmd, cmd.cmd_seq || 0);
+            continue;
+          }
+          if (typeof cmd.cmd_seq === 'number') {
+            if (cmd.cmd_seq <= lastCmd) continue;
+            lastCmd = cmd.cmd_seq;
+          }
+          try { handleCommand(cmd); } catch (err) { console.warn('[remote] comando fallido', err); }
         }
       }
     } catch {
       if (!useRemoteStore.getState().active) return;
+    } finally {
+      clearTimeout(idleTimer);
     }
     await sleep(backoff);
     backoff = Math.min(backoff * 2, 30000);

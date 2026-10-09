@@ -50,7 +50,7 @@ type Relay interface {
 	RemoteEvents(ctx context.Context, sessionID string, events []map[string]any) error
 	RemoteEnd(ctx context.Context, sessionID string) error
 	RemoteQR(ctx context.Context, data string) (string, error)
-	RemoteCommands(ctx context.Context, sessionID string) (io.ReadCloser, error)
+	RemoteCommands(ctx context.Context, sessionID string, lastCmd int64) (io.ReadCloser, error)
 }
 
 // CommandSpec es un comando que el host acepta desde la app, publicado en el
@@ -93,6 +93,8 @@ type Link struct {
 
 	sessionID string
 	shareURL  string
+	// Solo lo tocan readCommands y consume, en la misma goroutine.
+	lastCmd int64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -364,7 +366,7 @@ func (l *Link) readCommands() {
 	defer l.wg.Done()
 	backoff := reconnectMin
 	for l.ctx.Err() == nil && !l.ended.Load() {
-		body, err := l.Relay.RemoteCommands(l.ctx, l.sessionID)
+		body, err := l.Relay.RemoteCommands(l.ctx, l.sessionID, l.lastCmd)
 		switch {
 		case err == nil:
 			backoff = reconnectMin
@@ -400,9 +402,24 @@ func (l *Link) consume(body io.ReadCloser) {
 			Command
 			ID       string `json:"id"`
 			Decision string `json:"decision"`
+			CmdSeq   *int64 `json:"cmd_seq"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(payload)), &raw) != nil {
 			continue
+		}
+		// "channel" trae el contador actual: tras un reinicio del gateway
+		// vuelve a empezar y lo visto antes ya no sirve para descartar.
+		if raw.Type == "channel" {
+			if raw.CmdSeq != nil {
+				l.lastCmd = min(l.lastCmd, *raw.CmdSeq)
+			}
+			continue
+		}
+		if raw.CmdSeq != nil {
+			if *raw.CmdSeq <= l.lastCmd {
+				continue
+			}
+			l.lastCmd = *raw.CmdSeq
 		}
 		l.dispatch(raw.Command, raw.ID, raw.Decision)
 	}
