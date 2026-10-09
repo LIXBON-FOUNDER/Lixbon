@@ -5,7 +5,8 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
 ## 2.3.0-go.7
-- Sin cambios de comportamiento: el CLI en Go pasa a ser el único cliente. Se retira el cliente Python y el código vive ahora en `apps/cli`.
+- Corregido: el CLI ya no se vuelve lento con respuestas muy largas. Con un millón de caracteres, la pantalla tardaba unos 129 s en estabilizarse y ahora tarda unos 4 s. Mientras llega el texto solo se acomoda lo que se ve y el final se imprime al instante.
+- El CLI en Go pasa a ser el único cliente: se retira el cliente Python y el código vive ahora en `apps/cli`.
 
 ## 2.3.0-go.6
 - La rueda del ratón desplaza el chat sin activar nada y desaparece `/mouse`. Arrastrar con el ratón selecciona texto y lo copia al soltar.
