@@ -126,6 +126,11 @@ pub fn merge(parent_dir: &str, branch: &str, message: &str, squash: bool) -> Res
     Ok(o.stdout)
 }
 
+/// URL del remoto `origin`, si existe.
+pub fn remote_url(dir: &str) -> Option<String> {
+    ok(dir, &["remote", "get-url", "origin"]).ok().filter(|s| !s.is_empty())
+}
+
 pub fn push(dir: &str, branch: &str) -> Result<(), String> {
     ok(dir, &["push", "-u", "origin", branch]).map(|_| ())
 }

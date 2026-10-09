@@ -17,7 +17,7 @@ struct Skill {
 }
 
 const SKILLS: &[Skill] = &[
-    Skill { name: "orquestar", version: 6, md: orquestar_md },
+    Skill { name: "orquestar", version: 7, md: orquestar_md },
     Skill { name: "adversary", version: 1, md: adversary_md },
 ];
 
@@ -169,7 +169,7 @@ lxo guide
 
 - Sin `LXO_TASK_ID`: eres el **coordinador**. El texto que acompaña a /orquestar es el objetivo.
   Tú no implementas ni integras: repartes, esperas los informes, propones la integración
-  (la aprueba una persona en Lixbon) y respondes al usuario.
+  o el PR (los aprueba una persona en Lixbon; lxo merge y lxo pr se rechazan) y respondes al usuario.
 - Con `LXO_TASK_ID`: eres una **tarea hija**. Haz solo tu encargo y entrega tu informe.
 
 Sigue la guía al pie de la letra y añade `--json` cuando necesites leer la salida.

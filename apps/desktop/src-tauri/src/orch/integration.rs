@@ -20,6 +20,11 @@ use super::state::{State, Task};
 pub const AGENT_REJECT: &str = "La integración la aprueba una persona desde Lixbon: los agentes no pueden fusionar ramas. \
 Deja la rama lista, explica en tu informe qué hay que integrar y avisa al usuario.";
 
+pub const PR_REJECT: &str = "Publicar un PR lo aprueba una persona desde Lixbon: los agentes no pueden hacer push ni abrir PRs. \
+Deja la rama lista y propón en tu informe que se publique.";
+
+pub const NEED_CONFIRM_PR: &str = "Publicar el PR exige confirmación explícita de la persona (confirm: true)";
+
 pub const NEED_CONFIRM: &str = "Integrar exige confirmación explícita de la persona (confirm: true)";
 
 /// Punto de extensión para reglas de integración automática: **apagado y sin
@@ -93,6 +98,61 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
                 "base_commit": base, "result_commit": result, "output": output }))
         }
         Err(e) => Err(format!("{e}\n(decisión #{decision} registrada: {outcome})")),
+    }
+}
+
+/// Crea el PR (en la app, `git::gh_pr`; en pruebas, un gh simulado).
+pub type CreatePr<'a> = &'a dyn Fn(&str, &str, &str, &str, &str) -> Result<String, String>;
+
+fn first_url(text: &str) -> Option<String> {
+    text.split_whitespace().find(|w| w.starts_with("https://")).map(|w| w.trim_end_matches(['.', ',', ')']).to_string())
+}
+
+/// Publica la rama de una tarea (`git push -u origin <rama>` + `gh pr create`),
+/// aprobado por la persona. Idempotente: si la tarea ya tiene PR, o gh dice que
+/// ya existe, no crea otro. Cada llamada confirmada deja una decisión `pr`.
+pub fn publish_pr(state: &Mutex<State>, from_user: bool, args: &Value, create: CreatePr) -> Result<Value, String> {
+    if !from_user {
+        return Err(PR_REJECT.into());
+    }
+    let id = args.get("task").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    if id.is_empty() {
+        return Err("Falta la tarea a publicar".into());
+    }
+    if !bool_arg(args, "confirm") {
+        return Err(NEED_CONFIRM_PR.into());
+    }
+    let _one = INTEGRATING.lock().unwrap_or_else(|e| e.into_inner());
+    let (branch, base, dir, title, summary, existing) = {
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+        let t = st.task(&id)?;
+        let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que publicar"))?;
+        (branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone(), t.title.clone(), t.summary.clone(), t.pr_url.clone())
+    };
+    let remote = git::remote_url(&dir);
+    let (outcome, url, err) = match existing {
+        Some(u) => ("already_exists", Some(u), None),
+        None => {
+            let res = git::push(&dir, &branch).and_then(|_| create(&dir, &base, &branch, &title,
+                &format!("{summary}\n\n_Tarea {id} del orquestador de Lixbon._")));
+            match res {
+                Ok(u) => ("created", Some(u), None),
+                Err(e) if e.contains("already exists") => ("already_exists", first_url(&e), None),
+                Err(e) => ("error", None, Some(e)),
+            }
+        }
+    };
+    let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
+    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+    let decision = st.record_decision(&id, "pr", "human", &detail);
+    match err {
+        None => {
+            if url.is_some() {
+                st.task_mut(&id)?.pr_url = url.clone();
+            }
+            Ok(json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url }))
+        }
+        Some(e) => Err(format!("{e}\n(decisión #{decision} registrada: error)")),
     }
 }
 
@@ -245,6 +305,77 @@ mod tests {
         assert!(!AUTO_INTEGRATION_ENABLED);
         assert!(!auto_integration_rule(s.task(&id).unwrap()));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Remoto bare local como origin (sin red).
+    fn with_remote(dir: &Path) -> std::path::PathBuf {
+        let bare = dir.with_extension("remote.git");
+        let _ = std::fs::remove_dir_all(&bare);
+        git(dir, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        bare
+    }
+
+    fn detail(st: &Mutex<State>, i: usize) -> Value {
+        serde_json::from_str(st.lock().unwrap().decisions[i].detail_json.as_deref().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn pr_un_agente_no_puede_y_sin_confirmacion_se_rechaza() {
+        let (st, id, dir) = setup("pr-rechazo", false);
+        let calls = std::cell::Cell::new(0);
+        let gh = |_: &str, _: &str, _: &str, _: &str, _: &str| { calls.set(calls.get() + 1); Ok("https://x/pull/1".to_string()) };
+        assert_eq!(publish_pr(&st, false, &json!({ "task": id, "confirm": true }), &gh).unwrap_err(), PR_REJECT);
+        assert_eq!(publish_pr(&st, true, &json!({ "task": id }), &gh).unwrap_err(), NEED_CONFIRM_PR);
+        assert_eq!(calls.get(), 0);
+        assert!(st.lock().unwrap().decisions.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn pr_con_confirmacion_hace_push_y_registra_y_es_idempotente() {
+        let (st, id, dir) = setup("pr-ok", false);
+        let bare = with_remote(&dir);
+        let calls = std::cell::Cell::new(0);
+        let gh = |d: &str, base: &str, branch: &str, _: &str, _: &str| {
+            calls.set(calls.get() + 1);
+            assert_eq!((d, base, branch), (dir.to_str().unwrap(), "HEAD", "lx/t"));
+            Ok("https://github.com/o/r/pull/7".to_string())
+        };
+        let out = publish_pr(&st, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["pr_url"].as_str()), (Some("created"), Some("https://github.com/o/r/pull/7")));
+        // El push llegó al remoto bare.
+        assert_eq!(git(&bare, &["rev-parse", "lx/t"]), git(&dir, &["rev-parse", "lx/t"]));
+        let d = detail(&st, 0);
+        assert_eq!(d, json!({ "outcome": "created", "branch": "lx/t", "remote": bare.to_str().unwrap(), "pr_url": "https://github.com/o/r/pull/7" }));
+        { let s = st.lock().unwrap(); assert_eq!((s.decisions[0].kind.as_str(), s.decisions[0].actor.as_str()), ("pr", "human")); }
+        // Repetida: no vuelve a crear, deja constancia already_exists.
+        let again = publish_pr(&st, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
+        assert_eq!(again["outcome"], "already_exists");
+        assert_eq!(calls.get(), 1);
+        assert_eq!(detail(&st, 1)["outcome"], "already_exists");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(bare);
+    }
+
+    #[test]
+    fn pr_que_gh_dice_ya_existe_y_error_de_push() {
+        let (st, id, dir) = setup("pr-existe", false);
+        let bare = with_remote(&dir);
+        let gh = |_: &str, _: &str, _: &str, _: &str, _: &str| -> Result<String, String> {
+            Err("gh pr create: a pull request for branch \"lx/t\" into branch \"master\" already exists:\nhttps://github.com/o/r/pull/3".into())
+        };
+        let out = publish_pr(&st, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["pr_url"].as_str()), (Some("already_exists"), Some("https://github.com/o/r/pull/3")));
+        assert_eq!(st.lock().unwrap().task(&id).unwrap().pr_url.as_deref(), Some("https://github.com/o/r/pull/3"));
+        // Sin remoto: push falla → error registrado, sin PR.
+        let (st2, id2, dir2) = setup("pr-error", false);
+        let ok_gh = |_: &str, _: &str, _: &str, _: &str, _: &str| Ok("https://x".to_string());
+        let e = publish_pr(&st2, true, &json!({ "task": id2, "confirm": true }), &ok_gh).unwrap_err();
+        assert!(e.contains("decisión #1 registrada: error"));
+        assert_eq!(detail(&st2, 0), json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null }));
+        assert!(st2.lock().unwrap().task(&id2).unwrap().pr_url.is_none());
+        for d in [dir, bare, dir2] { let _ = std::fs::remove_dir_all(d); }
     }
 
     #[test]

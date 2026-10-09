@@ -484,21 +484,8 @@ impl Core {
             }
             // Integrar es decisión de una persona: `lxo merge` ya no integra.
             "merge" => Err(integration::AGENT_REJECT.into()),
-            "pr" => {
-                let id = s(args, "task");
-                let (branch, base, dir) = self.branch_of(&caller, &id)?;
-                let (title, summary) = {
-                    let st = self.lock();
-                    let t = st.task(&id)?;
-                    (t.title.clone(), t.summary.clone())
-                };
-                git::push(&dir, &branch)?;
-                let url = git::gh_pr(&dir, &base, &branch, &title, &format!("{summary}\n\n_Tarea {id} del orquestador de Lixbon._"))?;
-                let mut st = self.lock();
-                st.task_mut(&id)?.pr_url = Some(url.clone());
-                self.commit(&st, &[]);
-                Ok(json!({ "url": url }))
-            }
+            // Publicar (push + PR) es decisión de una persona: orch_publish_pr.
+            "pr" => Err(integration::PR_REJECT.into()),
             "stop" => {
                 let id = s(args, "task");
                 {
@@ -858,6 +845,14 @@ impl Core {
         })
     }
 
+    /// Publicación de PR aprobada por la persona (comando Tauri `orch_publish_pr`).
+    pub fn publish_pr_from_ui(&self, task: &str, confirm: bool) -> Result<Value, String> {
+        let res = integration::publish_pr(&self.state, true, &json!({ "task": task, "confirm": confirm }), &git::gh_pr);
+        let st = self.lock();
+        self.commit(&st, &[]);
+        res
+    }
+
     fn release(&self, caller: &Caller, id: &str, force: bool) -> Result<Value, String> {
         let (repo, worktree, branch, merged, open) = {
             let st = self.lock();
@@ -1124,6 +1119,13 @@ pub fn orch_integrate(orch: TauriState<'_, Orch>, task: String, confirm: bool, s
     orch.0.integrate_from_ui(&task, confirm, squash.unwrap_or(false))
 }
 
+/// Publica la rama de una tarea (push + `gh pr create`). Solo la interfaz: no
+/// está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe ser `true`.
+#[tauri::command(async)]
+pub fn orch_publish_pr(orch: TauriState<'_, Orch>, task: String, confirm: bool) -> Result<Value, String> {
+    orch.0.publish_pr_from_ui(&task, confirm)
+}
+
 #[tauri::command]
 pub fn orch_agents() -> Vec<skill::Detected> {
     skill::detect(&lxo_path().to_string_lossy())
@@ -1155,7 +1157,13 @@ mod tests {
         }
         let e = core.rpc(Caller::Agent(None), "", "merge", &json!({ "task": "t1" })).unwrap_err();
         assert_eq!(e, integration::AGENT_REJECT);
-        assert!(!include_str!("server.rs").contains("integrate"));
+        for caller in [Caller::Agent(Some("t1".into())), Caller::User] {
+            assert_eq!(core.rpc(caller, "", "pr", &json!({ "task": "t1" })).unwrap_err(), integration::PR_REJECT);
+        }
+        for c in ["publish_pr", "orch_publish_pr", "integrate"] {
+            assert_eq!(core.rpc(Caller::Agent(None), "", c, &json!({})).unwrap_err(), format!("Comando desconocido: {c}"));
+        }
+        assert!(!include_str!("server.rs").contains("integrate") && !include_str!("server.rs").contains("publish"));
     }
 
     #[test]
