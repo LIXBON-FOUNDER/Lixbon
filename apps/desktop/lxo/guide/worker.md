@@ -22,7 +22,7 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
 4. **Lee instrucciones nuevas** en cada punto de control (antes de un archivo nuevo, después de
    correr tests) y justo antes de terminar: `lxo check`.
 5. **Si tienes rama propia** (tu encargo lo dice), haz commit ahí con mensajes claros. No hagas
-   push ni cambies de rama: la integración la hace tu coordinador. En la carpeta compartida no
+   push ni cambies de rama: la integración la aprueba una persona desde Lixbon. En la carpeta compartida no
    hagas commits salvo que tu encargo lo pida.
 6. **Escribe tu informe** en `.lixbon/informe-<tu-id>.md`:
    ```
