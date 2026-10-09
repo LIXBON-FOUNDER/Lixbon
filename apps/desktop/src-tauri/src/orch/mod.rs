@@ -7,6 +7,7 @@
 mod agents;
 mod delivery;
 mod git;
+mod integration;
 mod issues;
 mod pty;
 mod roles;
@@ -481,7 +482,8 @@ impl Core {
                 let (stat, diff) = git::diff(&dir, &base, &branch)?;
                 Ok(json!({ "branch": branch, "base": base, "stat": stat, "diff": diff }))
             }
-            "merge" => self.merge(&caller, args),
+            // Integrar es decisión de una persona: `lxo merge` ya no integra.
+            "merge" => Err(integration::AGENT_REJECT.into()),
             "pr" => {
                 let id = s(args, "task");
                 let (branch, base, dir) = self.branch_of(&caller, &id)?;
@@ -845,25 +847,15 @@ impl Core {
         true
     }
 
-    fn merge(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
-        let id = s(args, "task");
-        let (branch, parent_dir, title, open) = {
-            let st = self.lock();
-            Self::check_manages(&st, caller, &id)?;
-            let t = st.task(&id)?;
-            let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia"))?;
-            let parent = t.parent.as_ref().and_then(|p| st.tasks.get(p)).ok_or("La tarea raíz no se fusiona en nadie")?;
-            (branch, parent.cwd.clone(), t.title.clone(), !t.status.is_final())
-        };
-        if open && !b(args, "force") {
-            return Err(format!("{id} aún está en marcha: espera a su lxo done o usa --force"));
-        }
-        let out = git::merge(&parent_dir, &branch, &format!("lxo: fusiona {id} · {title}"), b(args, "squash"))?;
-        let mut st = self.lock();
-        st.task_mut(&id)?.merged = true;
+    /// Integración aprobada por la persona (comando Tauri `orch_integrate`).
+    pub fn integrate_from_ui(&self, task: &str, confirm: bool, squash: bool) -> Result<Value, String> {
+        let res = integration::integrate(&self.state, true, &json!({ "task": task, "confirm": confirm, "squash": squash }));
+        let st = self.lock();
         self.commit(&st, &[]);
-        let hint = self.close_hint(&st, &id);
-        Ok(json!({ "task": id, "merged": branch, "into": parent_dir, "output": out, "hint": hint }))
+        res.map(|mut v| {
+            v["hint"] = json!(self.close_hint(&st, task));
+            v
+        })
     }
 
     fn release(&self, caller: &Caller, id: &str, force: bool) -> Result<Value, String> {
@@ -1124,6 +1116,14 @@ pub fn orch_resolve_policy(provider: String, profile: String, role: String, work
     agents::resolve_policy(&provider, &profile, &role, &worktree)
 }
 
+/// Integra la rama de una tarea en su padre. Solo la interfaz (la persona) llega
+/// aquí: no está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe
+/// ser `true` (diálogo de confirmación de la UI).
+#[tauri::command(async)]
+pub fn orch_integrate(orch: TauriState<'_, Orch>, task: String, confirm: bool, squash: Option<bool>) -> Result<Value, String> {
+    orch.0.integrate_from_ui(&task, confirm, squash.unwrap_or(false))
+}
+
 #[tauri::command]
 pub fn orch_agents() -> Vec<skill::Detected> {
     skill::detect(&lxo_path().to_string_lossy())
@@ -1137,4 +1137,40 @@ pub fn orch_skill_install(ids: Vec<String>) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
     skill::uninstall(&ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn el_servidor_de_lxo_no_conoce_la_integracion() {
+        // server.rs despacha todo por Core::rpc con Caller::Agent; orch_call de la UI
+        // usa el mismo rpc. Ninguno de los dos puede integrar.
+        let core = Orch::default().0;
+        core.settings.lock().unwrap().enabled = true;
+        for caller in [Caller::Agent(None), Caller::Agent(Some("t1".into())), Caller::User] {
+            let e = core.rpc(caller, "", "integrate", &json!({ "task": "t1", "confirm": true })).unwrap_err();
+            assert_eq!(e, "Comando desconocido: integrate");
+        }
+        let e = core.rpc(Caller::Agent(None), "", "merge", &json!({ "task": "t1" })).unwrap_err();
+        assert_eq!(e, integration::AGENT_REJECT);
+        assert!(!include_str!("server.rs").contains("integrate"));
+    }
+
+    #[test]
+    fn la_decision_persiste_en_state_json_y_sobrevive_recarga() {
+        let dir = std::env::temp_dir().join(format!("lxo-decisiones-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        let mut st = State::default();
+        let id = st.record_decision("t2", "merge", "human", &json!({ "outcome": "conflict", "conflict": ["a.txt"] }));
+        write_json(&path, &st).unwrap();
+        let back: State = read_json(&path).unwrap();
+        assert_eq!(back.decisions, st.decisions);
+        assert_eq!(back.decisions[0].id, id);
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["decisions"][0]["actor"], "human");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
