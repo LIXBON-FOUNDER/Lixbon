@@ -1,7 +1,7 @@
 export default {
   es: {
     menuProduct: 'Producto',
-    menuDevelopers: 'Desarrolladores',
+    menuDevelopers: 'Recursos',
     menuCompany: 'Empresa',
     itemChat: 'Chat',
     itemChatDesc: 'Pregunta, escribe y crea desde el navegador.',
@@ -58,7 +58,7 @@ export default {
   },
   en: {
     menuProduct: 'Product',
-    menuDevelopers: 'Developers',
+    menuDevelopers: 'Resources',
     menuCompany: 'Company',
     itemChat: 'Chat',
     itemChatDesc: 'Ask, write and create from your browser.',
