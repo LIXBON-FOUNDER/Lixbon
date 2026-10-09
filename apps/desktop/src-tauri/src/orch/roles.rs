@@ -76,7 +76,7 @@ pub fn resolve(cfg: &BTreeMap<String, RoleCfg>, id: &str) -> Result<Resolved, St
 pub fn validate(cfg: &BTreeMap<String, RoleCfg>) -> Result<(), String> {
     for r in ROLES {
         let res = resolve(cfg, r.id)?;
-        agents::launch(AGENT, Some(&res.model), res.effort.as_deref(), "x", agents::Profile::for_role(r.read_only))
+        agents::launch(AGENT, Some(&res.model), res.effort.as_deref(), "x", agents::Profile::for_role(r.read_only), Some(r.id))
             .map_err(|e| format!("{}: {e}", r.label))?;
     }
     Ok(())
