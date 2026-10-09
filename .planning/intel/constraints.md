@@ -1,4 +1,6 @@
 ## Recomendación
+
+> **Documento histórico.** Describe el cliente Python, ya retirado del repositorio. Las referencias de archivo y línea (`agent`, `app`, `cli`, `sessions`…) apuntan a su código en la etiqueta `python-cli-final`.
 - source: C:\Users\USUARIO\OneDrive\Documentos\ChatGPT\Lixbon\apps\cli\audit\EVALUACION_PYTHON_GO.md
 - type: nfr
 - content:
@@ -17,7 +19,7 @@ DATA_zlhvkyka_END
 - content:
 
 DATA_rzdtryx0_START
-El desktop usa Tauri 2 con una biblioteca Rust (`apps/desktop/src-tauri/Cargo.toml`), pero el protocolo del agente está implementado en `apps/desktop/src/lib/agentProtocol.js` y se describe como espejo de `apps/cli/lixbon_cli/agent.py`. Si queremos evitar mantener ese parser tres veces después de sumar Go, una opción concreta es mover el núcleo puro a un crate Rust que consuman tanto el host Tauri como la CLI Ratatui. JS quedaría como presentación y puente de UI. Las herramientas del host y sus reglas de autorización seguirían siendo adaptadores separados cuando las capacidades difieran.
+El desktop usa Tauri 2 con una biblioteca Rust (`apps/desktop/src-tauri/Cargo.toml`), pero el protocolo del agente está implementado en `apps/desktop/src/lib/agentProtocol.js` y se describe como espejo de el cliente Python. Si queremos evitar mantener ese parser tres veces después de sumar Go, una opción concreta es mover el núcleo puro a un crate Rust que consuman tanto el host Tauri como la CLI Ratatui. JS quedaría como presentación y puente de UI. Las herramientas del host y sus reglas de autorización seguirían siendo adaptadores separados cuando las capacidades difieran.
 
 Stack a prototipar: `crates/lixbon-core` (Serde, JSON, parser/estado de agente, límites y contratos); CLI con Ratatui 0.30.2, Crossterm 0.29, Tokio, reqwest y RMCP oficial; desktop Tauri invocando el core por comandos/canales de streaming. La documentación de Ratatui muestra renderizado con diff de celdas y ofrece backend Crossterm; Tauri recomienda canales para streaming. El SDK MCP oficial existe tanto para Rust como para Go.
 
@@ -66,10 +68,10 @@ La prueba de terminal propuesta en la etapa 1 debe ocurrir antes de comprometer 
 
 ### Mediciones locales reproducibles
 
-[benchmark_baseline.py](benchmark_baseline.py) ejecuta dos operaciones sintéticas del código actual, tres veces por tamaño, y guarda medianas. Resultados completos: [baseline-python.json](baseline-python.json).
+El script de medición del cliente Python (en la etiqueta `python-cli-final`) ejecuta dos operaciones sintéticas del código actual, tres veces por tamaño, y guarda medianas. Resultados completos: [baseline-python.json](../../apps/cli/audit/baseline-python.json).
 
 ```powershell
-python apps/cli/audit/benchmark_baseline.py --output apps/cli/audit/baseline-python.json
+la suite del cliente Python
 ```
 
 | Operación | Tiempo de pared, mediana | Memoria o salida |
@@ -102,7 +104,7 @@ DATA_4rscou5a_START
 | Remoto | Crear sesión; POST de lotes cada 250 ms; comandos por SSE; eventos hello/deltas/done/tools/snapshot/aprobaciones/bye | Mantener rutas y campos; cancelación independiente; cola acotada por bytes, prioridades y snapshot al recuperarse; no prometer exactamente una entrega sin soporte servidor |
 | Archivos | Texto, PDF, Word, imágenes base64; límites actuales de tamaño y páginas; portapapeles por OS | Corpus documental y de imágenes; errores claros; conservar lectura local y no enviar documentos al backend silenciosamente |
 | Funciones auxiliares | `/diff`, `/undo`, `/commit`, verificadores, procesos, búsquedas, Visuals y delegación | Mapear handlers de slash commands, catálogo y comportamiento; matriz explícita de funciones pendientes durante beta |
-| Release | Gateway sirve `client_cli.py` y scripts Python; Docker incluye el artefacto | Nueva distribución binaria necesita trabajo de integración en el gateway, aunque la lógica del backend siga en Python |
+| Release | Gateway sirve el cliente Python y scripts Python; Docker incluye el artefacto | Nueva distribución binaria necesita trabajo de integración en el gateway, aunque la lógica del backend siga en Python |
 
 `core/gateway/routers/attachments.py:66-69` ofrece extracción documental con `cookie_auth_required`; no es un reemplazo directo para la extracción local con API key de la CLI. Usarlo exigiría acordar autenticación, consentimiento para subir archivos y cambios de backend. Se propone resolver PDF localmente mediante un adaptador y comparar extractores sobre documentos reales antes de elegir una biblioteca o helper. DOCX puede usar ZIP/XML de Go, con pruebas de tablas y orden del contenido. OCR no forma parte de la paridad actual.
 DATA_4rscou5a_END

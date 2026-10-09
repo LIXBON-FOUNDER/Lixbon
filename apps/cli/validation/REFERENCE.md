@@ -1,5 +1,7 @@
 # Referencia Python — línea base (BASE-01, versión reducida)
 
+> **Documento histórico.** Describe el cliente Python, ya retirado del repositorio. Las referencias de archivo y línea (`agent`, `app`, `cli`, `sessions`…) apuntan a su código en la etiqueta `python-cli-final`.
+
 Ejecución nueva del 2026-10-06. Sustituye como evidencia a la cifra histórica 131/2 de `audit/EVALUACION_PYTHON_GO.md`, que se conserva sin modificar.
 
 ## Entorno
@@ -15,7 +17,7 @@ Ejecución nueva del 2026-10-06. Sustituye como evidencia a la cifra histórica 
 
 | Suite | Resultado |
 |---|---|
-| `apps/cli/tests` completa | **133 passed**, 0 failed, 0 skipped (21,9 s) |
+| las pruebas del cliente Python completa | **133 passed**, 0 failed, 0 skipped (21,9 s) |
 | Con `test_contract_corpus.py` (nuevo) | 135 passed |
 
 ## Los dos fallos históricos
@@ -35,8 +37,8 @@ Ejecución nueva del 2026-10-06. Sustituye como evidencia a la cifra histórica 
 ```bash
 python -m venv .venv && .venv/Scripts/python -m pip install -r apps/cli/validation/requirements.lock
 # con HOME/USERPROFILE apuntando a una carpeta vacía:
-.venv/Scripts/python -m pytest apps/cli/tests -p no:cacheprovider -q
-python apps/cli/validation/gen_sse_corpus.py --check
+.venv/Scripts/las pruebas del cliente Python
+la suite del cliente Python
 ```
 
 ## Pendiente respecto al plan 01-01

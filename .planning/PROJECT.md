@@ -44,7 +44,7 @@ El README afirma Python estándar sin dependencias externas; la evaluación iden
 
 ## Constraints
 
-- **Stack**: Go 1.26 (`go.mod`); módulo `lixbon.com/cli` en `apps/cli/go/`, coexistiendo con Python. Terminal: Bubble Tea v2 a pantalla completa (decisión del usuario; el modo inline falló). Biblioteca PDF y política CGO siguen sin decidir.
+- **Stack**: Go 1.26 (`go.mod`); módulo `lixbon.com/cli` en `apps/cli/` (Python retirado; rollback en la etiqueta `python-cli-final`). Terminal: Bubble Tea v2 a pantalla completa (decisión del usuario; el modo inline falló). Biblioteca PDF y política CGO siguen sin decidir.
 - **Compatibility**: Python y su artefacto siguen siendo referencia hasta aceptar paridad y cutover; JSON, contratos del gateway e identidad key_name deben preservarse.
 - **Platforms**: el CI ejecuta vet, pruebas y build en ubuntu, macOS y Windows, pero la matriz OS/arquitectura/terminales y la política CGO siguen sin acordar; no se promete soporte de destinos sin acuerdo y evidencia.
 - **Architecture**: Compartir JSON Schema/fixtures con Python y desktop; no introducir core Rust vía CGO ni copiar indiscriminadamente políticas del desktop.

@@ -5,8 +5,7 @@
 ## Cómo se probó
 
 - [ ] `python -m pytest core` (si toca gateway)
-- [ ] `python -m pytest apps/cli/tests` y `python apps/cli/build.py` (si toca el CLI Python)
-- [ ] `cd apps/cli/go && go vet ./... && go test ./...` (si toca el CLI Go)
+- [ ] `cd apps/cli && go vet ./... && go test ./...` (si toca el CLI Go)
 - [ ] Probado a mano en: <!-- web local / desktop dev / APK / … -->
 
 ## Checklist
