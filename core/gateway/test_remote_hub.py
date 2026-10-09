@@ -32,16 +32,15 @@ def test_replay_desde_seq():
     run(scenario())
 
 
-def test_limite_de_controllers():
+def test_tope_de_controllers_jubila_al_mas_antiguo():
     async def scenario():
         hub = RemoteHub()
         ch = hub.channel("s1", 1)
-        for _ in range(MAX_CONTROLLERS):
-            assert hub.attach_controller(ch) is not None
-        assert hub.attach_controller(ch) is None
-        # al soltar uno vuelve a haber sitio
-        hub.detach_controller(ch, 1)
-        assert hub.attach_controller(ch) is not None
+        colas = [hub.attach_controller(ch)[1] for _ in range(MAX_CONTROLLERS)]
+        cid, _ = hub.attach_controller(ch)
+        assert len(ch.controllers) == MAX_CONTROLLERS
+        assert 1 not in ch.controllers and cid in ch.controllers
+        assert colas[0].get_nowait() is None
 
     run(scenario())
 
@@ -116,5 +115,43 @@ def test_estado_del_orquestador_fuera_del_replay():
         # …pero el replay solo guarda el transcript, y del orquestador el último.
         assert [ev["type"] for ev in hub.replay(ch, 0)] == ["user_msg"]
         assert ch.orch["runs"] == [{"id": "r1"}]
+
+    run(scenario())
+
+
+def test_reconexion_del_host_no_lo_marca_offline_y_reentrega_comandos():
+    async def scenario():
+        hub = RemoteHub()
+        ch = hub.channel("s1", 1)
+        viejo, cola_vieja = hub.attach_host(ch, None)
+        hub.push_command(ch, {"type": "prompt", "text": "a"})
+        hub.push_command(ch, {"type": "prompt", "text": "b"})
+        # el stream zombi se traga "a" y el socket ya estaba muerto
+        assert cola_vieja.get_nowait()["text"] == "a"
+
+        nuevo, cola = hub.attach_host(ch, 0)
+        assert [cola.get_nowait()["text"] for _ in range(2)] == ["a", "b"]
+        assert cola_vieja.get_nowait() is None
+
+        assert hub.detach_host(ch, viejo) is False
+        assert ch.host_connected
+        assert hub.detach_host(ch, nuevo) is True
+        assert not ch.host_connected
+        assert hub.host_online(ch)
+
+    run(scenario())
+
+
+def test_reconexion_sin_last_cmd_no_reentrega_lo_ya_enviado():
+    async def scenario():
+        hub = RemoteHub()
+        ch = hub.channel("s1", 1)
+        _, cola_vieja = hub.attach_host(ch, None)
+        hub.push_command(ch, {"type": "prompt", "text": "a"})
+        hub.push_command(ch, {"type": "prompt", "text": "b"})
+        cola_vieja.get_nowait()
+        _, cola = hub.attach_host(ch, None)
+        assert cola.get_nowait()["text"] == "b"
+        assert cola.empty()
 
     run(scenario())

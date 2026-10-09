@@ -15,6 +15,12 @@ from typing import Any
 EVENT_BUFFER_SIZE = 500      # replay para controllers que (re)conectan
 QUEUE_MAX = 1000             # tope defensivo por cola
 MAX_CONTROLLERS = 5          # controllers simultáneos por sesión
+RECENT_COMMANDS = 50         # comandos que se pueden reentregar a un host que reconecta
+COMMAND_REPLAY_SECONDS = 300
+RECENT_REQUESTS = 200        # rid de comandos ya encolados: un reenvío del móvil no duplica
+# Un host que se reconecta tarda unos segundos: durante ese margen sigue
+# contando como conectado para el móvil y sus comandos se encolan.
+HOST_GRACE_SECONDS = 45
 
 
 # Lo que el host anuncia en su `hello` y un controller que llega tarde necesita:
@@ -45,6 +51,12 @@ class RemoteChannel:
     buffer: deque = field(default_factory=lambda: deque(maxlen=EVENT_BUFFER_SIZE))
     last_seq: int = 0
     host_connected: bool = False
+    host_gen: int = 0
+    host_left_at: float = 0.0
+    cmd_seq: int = 0
+    recent_cmds: deque = field(default_factory=lambda: deque(maxlen=RECENT_COMMANDS))
+    recent_rids: deque = field(default_factory=lambda: deque(maxlen=RECENT_REQUESTS))
+    last_touch: float = 0.0
     last_host_seen: float = field(default_factory=time.time)
     _next_controller_id: int = 0
 
@@ -104,15 +116,88 @@ class RemoteHub:
         return [ev for ev in ch.buffer if ev.get("seq", 0) > from_seq]
 
     def push_command(self, ch: RemoteChannel, command: dict[str, Any]) -> bool:
+        ch.cmd_seq += 1
+        command = {**command, "cmd_seq": ch.cmd_seq}
         try:
             ch.host_queue.put_nowait(command)
-            return True
         except asyncio.QueueFull:
+            ch.cmd_seq -= 1
             return False
+        ch.recent_cmds.append((time.time(), command))
+        return True
 
-    def attach_controller(self, ch: RemoteChannel) -> tuple[int, asyncio.Queue] | None:
-        if len(ch.controllers) >= MAX_CONTROLLERS:
-            return None
+    def attach_host(self, ch: RemoteChannel, last_cmd: int | None) -> tuple[int, asyncio.Queue]:
+        """Engancha un stream de comandos del host y jubila al anterior.
+
+        Si el host pierde la red sin cerrar el socket, el gateway no se entera
+        hasta que un ping falla: ese stream zombi seguía consumiendo la cola y
+        los comandos del móvil se perdían en un socket muerto. Cada conexión
+        tiene ahora su propia cola, y el host dice en `last_cmd` el último
+        comando que recibió para que se le reentregue lo que el zombi se tragó.
+        """
+        ch.host_gen += 1
+        old = ch.host_queue
+        pending: dict[int, dict[str, Any]] = {}
+        while not old.empty():
+            cmd = old.get_nowait()
+            if cmd is not None:
+                pending[cmd.get("cmd_seq", 0)] = cmd
+        if last_cmd is not None:
+            cutoff = time.time() - COMMAND_REPLAY_SECONDS
+            for at, cmd in ch.recent_cmds:
+                if cmd["cmd_seq"] > last_cmd and at >= cutoff:
+                    pending.setdefault(cmd["cmd_seq"], cmd)
+        new: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX)
+        for seq in sorted(pending):
+            new.put_nowait(pending[seq])
+        ch.host_queue = new
+        old.put_nowait(None)  # despierta al stream jubilado para que termine
+        was_online = self.host_online(ch)
+        ch.host_connected = True
+        if not was_online:
+            self._fanout(ch, self.host_status(ch))
+        return ch.host_gen, new
+
+    def detach_host(self, ch: RemoteChannel, gen: int) -> bool:
+        """True si este stream era el vigente. No avisa a nadie: el host tiene
+        HOST_GRACE_SECONDS para volver antes de darse por desconectado."""
+        if ch.host_gen != gen:
+            return False
+        ch.host_connected = False
+        ch.host_left_at = time.time()
+        return True
+
+    def host_online(self, ch: RemoteChannel) -> bool:
+        if ch.host_connected:
+            return True
+        return ch.host_gen > 0 and time.time() - ch.host_left_at < HOST_GRACE_SECONDS
+
+    def announce_host(self, ch: RemoteChannel) -> None:
+        self._fanout(ch, self.host_status(ch))
+
+    def host_status(self, ch: RemoteChannel) -> dict[str, Any]:
+        return {"type": "channel_status", "seq": ch.last_seq, "host_connected": self.host_online(ch), "ts": time.time()}
+
+    def seen_request(self, ch: RemoteChannel, rid: Any) -> bool:
+        """Marca `rid` y dice si ya se había encolado (el móvil reenvía lo que
+        no vio confirmado tras un corte)."""
+        if not isinstance(rid, str) or not rid:
+            return False
+        if rid in ch.recent_rids:
+            return True
+        ch.recent_rids.append(rid)
+        return False
+
+    def attach_controller(self, ch: RemoteChannel) -> tuple[int, asyncio.Queue]:
+        # Un móvil congelado en segundo plano deja su conexión abierta minutos:
+        # al llegar al tope se jubila la más antigua en vez de rechazar la nueva.
+        while len(ch.controllers) >= MAX_CONTROLLERS:
+            oldest = min(ch.controllers)
+            q_old = ch.controllers.pop(oldest)
+            try:
+                q_old.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
         ch._next_controller_id += 1
         cid = ch._next_controller_id
         q: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX)

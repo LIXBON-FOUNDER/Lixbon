@@ -29,4 +29,8 @@ EXPOSE 8000
 # --timeout-graceful-shutdown: sin él uvicorn espera sin límite a los streams
 # en curso y Railway mata el proceso con SIGKILL; los `finally` que guardan la
 # respuesta del asistente nunca corren y en cada deploy se perdían respuestas.
-CMD ["sh", "-c", "uvicorn core.gateway.app:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips=* --timeout-graceful-shutdown 5"]
+# --ws-ping-timeout 600: Android congela la app en segundo plano y no contesta
+# los pings; con los 20 s por defecto la sesión remota se cortaba al bloquear
+# la pantalla. Cada socket detecta a su propio cliente muerto (ver remote.py
+# y nodes_link.py).
+CMD ["sh", "-c", "uvicorn core.gateway.app:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips=* --timeout-graceful-shutdown 5 --ws-ping-interval 20 --ws-ping-timeout 600"]
