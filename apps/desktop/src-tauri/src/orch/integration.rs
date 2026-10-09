@@ -222,6 +222,8 @@ mod tests {
         git(&dir, &["init", "-q", "-b", "master"]);
         git(&dir, &["config", "user.name", "t"]);
         git(&dir, &["config", "user.email", "t@t"]);
+        // Sin conversión de fin de línea: Git para Windows trae core.autocrlf=true en el sistema.
+        git(&dir, &["config", "core.autocrlf", "false"]);
         std::fs::write(dir.join("a.txt"), "base\n").unwrap();
         git(&dir, &["add", "."]);
         git(&dir, &["commit", "-qm", "base"]);
