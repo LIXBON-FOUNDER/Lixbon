@@ -1438,6 +1438,22 @@
   .wave > span { animation: none; color: var(--accent); }
 }
 
+.shimmer {
+  background: linear-gradient(90deg, var(--ink-muted) 0%, var(--ink-muted) 40%, var(--ink) 50%, var(--ink-muted) 60%, var(--ink-muted) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-sweep 2.4s linear infinite, wave-in 0.48s cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes shimmer-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -20% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer { animation: none; background: none; color: var(--ink-muted); }
+}
+
 .chat-header__visual { height: 34px; padding: 0 12px; font-size: 13px; gap: 6px; margin-left: auto; }
 .chat-header__visual + .chat-header__share { margin-left: 8px; }
 

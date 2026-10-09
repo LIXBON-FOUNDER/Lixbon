@@ -39,8 +39,7 @@ export function LanguageSwitch({ className = 'icon-btn', conCodigo = false }) {
         aria-expanded={open}
         aria-label={t('language')}
       >
-        <IconGlobe size={16} />
-        {conCodigo && <>{locale.toUpperCase()}<IconChevron size={12} open={open} /></>}
+        {conCodigo ? <>{locale}<IconChevron size={12} open={open} /></> : <IconGlobe size={16} />}
       </button>
       <Desplegable abierto={open} className="lang-switch__menu" role="listbox" aria-label={t('language')}>
         {OPTIONS.map((o) => (

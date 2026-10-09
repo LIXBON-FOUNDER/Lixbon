@@ -762,6 +762,23 @@ body::-webkit-scrollbar,
   animation: fade-in 0.2s ease;
 }
 
+.sk-history .skeleton,
+.sk-thread .skeleton {
+  background: rgba(var(--ink-rgb), 0.1);
+  animation: skeleton-breathe 1.8s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 0.2s);
+}
+
+.sk-history .skeleton::after,
+.sk-thread .skeleton::after {
+  content: none;
+}
+
+@keyframes skeleton-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
 }

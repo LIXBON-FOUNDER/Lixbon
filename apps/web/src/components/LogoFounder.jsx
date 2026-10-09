@@ -5,14 +5,14 @@ const FUENTE = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght
 
 // k = orden en que se recogen las letras de tono.
 const LETRAS = [
-  { ch: 'l', clave: true },
+  { ch: 'l', clave: true, l: true },
   { ch: 'i', k: 4 }, { ch: 'x', k: 3 }, { ch: 'b', k: 2 }, { ch: 'o', k: 1 }, { ch: 'n', k: 0 },
   { ch: ' ', k: 5 },
   { ch: 'f', clave: true, f: true },
   { ch: 'o', k: 5 }, { ch: 'u', k: 4 }, { ch: 'n', k: 3 }, { ch: 'd', k: 2 }, { ch: 'e', k: 1 }, { ch: 'r', k: 0 },
 ];
 
-const claseLetra = (le) => `logo-founder__l ${le.clave ? 'logo-founder__l--clave' : 'logo-founder__l--tono'}${le.f ? ' logo-founder__l--f' : ''}`;
+const claseLetra = (le) => `logo-founder__l ${le.clave ? 'logo-founder__l--clave' : 'logo-founder__l--tono'}${le.l ? ' logo-founder__l--l' : ''}${le.f ? ' logo-founder__l--f' : ''}`;
 
 let fuente;
 function cargarFuente() {
@@ -57,7 +57,6 @@ export function LogoFounder({ cerrado = false, className = '' }) {
           style={{ '--i': i, '--k': le.k, '--a': anchos?.[i] }}
         >{le.ch}</span>
       ))}
-      <span className="logo-founder__trazo" aria-hidden="true" />
       <span className="logo-founder__medida" ref={medida} aria-hidden="true">
         {LETRAS.map((le, i) => <span key={i}>{le.ch}</span>)}
       </span>
@@ -91,13 +90,12 @@ function dibujarMonograma() {
   c.font = 'italic 680 46px Fraunces';
   c.textBaseline = 'alphabetic';
   const anchoL = c.measureText('l').width;
-  const solape = 46 * 0.07;
+  const solape = 46 * 0.13;
   const ancho = anchoL - solape + c.measureText('f').width;
   const x = (lado - ancho) / 2;
   const base = 44;
   c.fillText('l', x, base);
   c.fillText('f', x + anchoL - solape, base);
-  c.fillRect(x + 1, base + 3, ancho - 2, 2.2);
   return lienzo.toDataURL('image/png');
 }
 
