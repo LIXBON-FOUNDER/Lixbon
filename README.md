@@ -73,7 +73,7 @@ Detalle del flujo, convención de commits y pasos de release: [`docs/RAMAS_Y_REL
 │   ├── billing/         planes, cuotas, créditos, Stripe
 │   ├── persistence/     modelos SQLAlchemy y queries
 │   └── security/        auth, API keys, rate limit
-├── BD/                  schema.sql, migraciones Alembic, seeds, scripts de BD
+├── BD/                  schema.sql, migraciones Alembic, scripts de BD
 ├── infra/
 │   ├── node/            Docker e instaladores del nodo GPU
 │   ├── scripts/         lanzadores locales (lixbon.bat / lixbon.sh)

@@ -1,8 +1,8 @@
 export default {
   es: {
     seoTitle: 'Skills',
-    seoDescription: 'Skills oficiales de Lixbon para tus agentes: revisión adversarial, campañas de marketing y más. Instálalas desde Lixbon IDE.',
-    subtitle: 'Comandos que enseñan a tu agente a hacer un trabajo completo. Instálalas desde Lixbon IDE o descárgalas.',
+    seoDescription: 'Habilidades oficiales de Lixbon para tu asistente: revisar tu trabajo a fondo, preparar campañas de marketing y más. Instálalas desde Lixbon IDE.',
+    subtitle: 'Habilidades listas para instalar que enseñan a tu asistente a hacer un trabajo de principio a fin. Instálalas desde Lixbon IDE o descárgalas.',
     loading: 'Cargando skills…',
     empty: 'Aún no hay skills publicadas.',
     loadError: 'No se pudo cargar el catálogo.',
@@ -31,8 +31,8 @@ export default {
   },
   en: {
     seoTitle: 'Skills',
-    seoDescription: 'Official Lixbon skills for your agents: adversarial review, marketing campaigns and more. Install them from Lixbon IDE.',
-    subtitle: 'Commands that teach your agent to do a complete job. Install them from Lixbon IDE or download them.',
+    seoDescription: 'Official Lixbon skills for your assistant: review your work in depth, plan marketing campaigns and more. Install them from Lixbon IDE.',
+    subtitle: 'Ready-to-install skills that teach your assistant to do a job from start to finish. Install them from Lixbon IDE or download them.',
     loading: 'Loading skills…',
     empty: 'No skills published yet.',
     loadError: 'The catalog could not be loaded.',
