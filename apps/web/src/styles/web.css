@@ -99,9 +99,30 @@
 
 .pubnav__logo { margin-right: auto; text-decoration: none; }
 .pubnav__logo:has(.logo-founder) { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); }
-.logo-founder { display: block; }
+.logo-founder {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-optical-sizing: auto;
+  font-size: 30px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  white-space: pre;
+}
+.logo-founder__l { display: inline-block; }
+.logo-founder__trazo {
+  position: absolute;
+  left: 0.02em;
+  right: 0.02em;
+  bottom: 0.12em;
+  height: 0.045em;
+  background: currentColor;
+  transform-origin: 0 50%;
+}
 @media (max-width: 640px) {
-  .pubnav .logo-founder { width: auto; height: 18px; }
+  .pubnav .logo-founder { font-size: 24px; }
 }
 
 .pubnav__links { display: flex; align-items: center; gap: 2px; }
