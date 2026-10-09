@@ -157,6 +157,30 @@ pub struct State {
     pub tasks: BTreeMap<String, Task>,
     pub messages: Vec<Message>,
     pub seq: u64,
+    /// Decisiones de personas (integraciones), con los campos de la tabla
+    /// `decisions` del diseño SQLite para que S1 las importe tal cual.
+    #[serde(default)]
+    pub decisions: Vec<Decision>,
+}
+
+/// Fila de `decisions`: id, task, kind (merge|pr|release|discard|reopen|stop),
+/// actor ('human' o id de tarea), detail_json (texto JSON) y at (ms).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Decision {
+    pub id: u64,
+    pub task: String,
+    pub kind: String,
+    pub actor: String,
+    pub detail_json: Option<String>,
+    pub at: u64,
+}
+
+impl State {
+    pub fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> u64 {
+        let id = self.decisions.iter().map(|d| d.id).max().unwrap_or(0) + 1;
+        self.decisions.push(Decision { id, task: task.into(), kind: kind.into(), actor: actor.into(), detail_json: Some(detail.to_string()), at: now_ms() });
+        id
+    }
 }
 
 pub struct NewTask {

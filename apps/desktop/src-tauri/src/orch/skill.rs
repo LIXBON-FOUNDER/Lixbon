@@ -17,7 +17,7 @@ struct Skill {
 }
 
 const SKILLS: &[Skill] = &[
-    Skill { name: "orquestar", version: 5, md: orquestar_md },
+    Skill { name: "orquestar", version: 6, md: orquestar_md },
     Skill { name: "adversary", version: 1, md: adversary_md },
 ];
 
@@ -134,8 +134,8 @@ name: {name}
 description: >-
   Orquestador de agentes de Lixbon. Con "/orquestar <objetivo>" te conviertes en el COORDINADOR:
   repartes el objetivo entre agentes hijos de Claude Code según los roles que configuró el usuario
-  (explorador, implementador, revisor, escalado), esperas sus informes, integras sus ramas y le
-  cuentas al usuario el resultado; si el objetivo cita una issue de Lixbon Team (LXB-12), la
+  (explorador, implementador, revisor, escalado), esperas sus informes, le propones al usuario qué integrar (la integración la
+  aprueba una persona en Lixbon, no tú) y le cuentas el resultado; si el objetivo cita una issue de Lixbon Team (LXB-12), la
   lees, la mueves y dejas el resultado en ella con lxo issue. Úsala cuando el usuario escriba /orquestar, diga "orquesta",
   "coordina agentes", "reparte esta tarea", "lanza el equipo" o "lxo". Úsala también SIEMPRE que
   exista la variable LXO_TASK_ID o tu prompt diga que eres una tarea del orquestador de Lixbon:
@@ -168,7 +168,8 @@ lxo guide
 ```
 
 - Sin `LXO_TASK_ID`: eres el **coordinador**. El texto que acompaña a /orquestar es el objetivo.
-  Tú no implementas: repartes, esperas los informes, integras y respondes al usuario.
+  Tú no implementas ni integras: repartes, esperas los informes, propones la integración
+  (la aprueba una persona en Lixbon) y respondes al usuario.
 - Con `LXO_TASK_ID`: eres una **tarea hija**. Haz solo tu encargo y entrega tu informe.
 
 Sigue la guía al pie de la letra y añade `--json` cuando necesites leer la salida.

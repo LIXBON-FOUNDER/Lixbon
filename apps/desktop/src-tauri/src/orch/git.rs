@@ -28,6 +28,11 @@ fn ok(dir: &str, args: &[&str]) -> Result<String, String> {
     if o.ok { Ok(o.stdout) } else { Err(format!("git {}: {}", args.join(" "), if o.stderr.is_empty() { o.stdout } else { o.stderr })) }
 }
 
+/// Commit actual (`HEAD`) de un checkout.
+pub fn head(dir: &str) -> Option<String> {
+    ok(dir, &["rev-parse", "HEAD"]).ok().filter(|s| !s.is_empty())
+}
+
 pub fn toplevel(dir: &str) -> Option<String> {
     let top = ok(dir, &["rev-parse", "--show-toplevel"]).ok().filter(|s| !s.is_empty())?;
     // git responde con `/` también en Windows; el resto de rutas usan `\`.
