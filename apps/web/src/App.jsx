@@ -49,7 +49,8 @@ const AdminTransacciones = perezosa(admin, 'AdminTransacciones');
 const AdminLiquidaciones = perezosa(admin, 'AdminLiquidaciones');
 const AdminPasarela = perezosa(admin, 'AdminPasarela');
 const AdminSkills = perezosa(admin, 'AdminSkills');
-const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles, AdminAlias, AdminTarifas, AdminProveedores, AdminNodos, AdminIngresos, AdminReleases, AdminAuditoria, AdminTransacciones, AdminLiquidaciones, AdminPasarela, AdminSkills];
+const AdminCorreos = perezosa(admin, 'AdminCorreos');
+const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles, AdminAlias, AdminTarifas, AdminProveedores, AdminNodos, AdminIngresos, AdminReleases, AdminAuditoria, AdminTransacciones, AdminLiquidaciones, AdminPasarela, AdminSkills, AdminCorreos];
 
 const POR_SECCION = {
   chat: [ChatPage], c: [ChatPage], guides: [GuiasPage], visuals: [VisualsPage], auth: [AuthPage],
@@ -105,6 +106,7 @@ function LocalizedRoutes() {
         <Route path="usuarios" element={<AdminUsuarios />} />
         <Route path="releases" element={<AdminReleases />} />
         <Route path="skills" element={<AdminSkills />} />
+        <Route path="correos" element={<AdminCorreos />} />
         <Route path="auditoria" element={<AdminAuditoria />} />
       </Route>
       <Route path="/skills" element={<SkillsPage />} />

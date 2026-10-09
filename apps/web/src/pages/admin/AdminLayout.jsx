@@ -10,7 +10,7 @@ import { useDismiss } from '../../hooks/useDismiss';
 import { Logo, LogoMark } from '../../components/Logo';
 import {
   IconApps, IconBag, IconBolt, IconBook, IconCard, IconCaret, IconChat, IconDownload,
-  IconGear, IconHome, IconLogout, IconNodes, IconShield, IconTerminal, IconTrend, IconUsers,
+  IconGear, IconHome, IconLogout, IconNodes, IconSend, IconShield, IconTerminal, IconTrend, IconUsers,
 } from '../../components/Icons';
 import { inicialDe } from './comunes';
 
@@ -41,6 +41,7 @@ const AREAS = [
     ],
   },
   { to: '/admin/usuarios', icon: IconUsers, label: 'Usuarios' },
+  { to: '/admin/correos', icon: IconSend, label: 'Correos' },
   { to: '/admin/releases', icon: IconDownload, label: 'Releases' },
   { to: '/admin/skills', icon: IconTerminal, label: 'Skills' },
   { to: '/admin/auditoria', icon: IconShield, label: 'Auditoría' },

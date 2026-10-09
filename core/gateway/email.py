@@ -291,6 +291,19 @@ async def send_autoreload_failed_email(to: str, pack_nombre: str) -> bool:
     return await send_email(to, asunto, html, texto)
 
 
+async def send_terms_updated_email(to: str, *, vigencia_iso: str,
+                                   cambios: list[tuple[str, str]],
+                                   url_anterior: str | None = None) -> bool:
+    asunto, html, texto = plantillas.terminos_actualizados(
+        vigencia=fecha_larga(vigencia_iso) or vigencia_iso,
+        cambios=cambios,
+        url_terminos=f"{PUBLIC_BASE_URL}/legal/terms",
+        url_anterior=url_anterior,
+        url_cuenta=f"{PUBLIC_BASE_URL}/account",
+    )
+    return await send_email(to, asunto, html, texto)
+
+
 def importe_de_factura(centavos: int | None, moneda: str | None) -> str | None:
     if not centavos:
         return None

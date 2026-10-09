@@ -759,6 +759,18 @@ class LoginLocation(Base):
     last_seen: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class TermsNotice(Base):
+    __tablename__ = "terms_notices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "version", name="uq_terms_notices_user_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 # Viven dentro de un proyecto (el «equipo» en pantalla). Lo que la interfaz
 # llama «Proyectos» se guarda como iniciativas para no chocar con team_proyectos.
 

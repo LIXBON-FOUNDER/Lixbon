@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.billing.credits import invalidate_pricing_cache, microusd_to_usd
 from core.billing.quota import credit_buckets_snapshot, invalidate_weights_cache, usage_snapshot
 from core.gateway import deps
+from core.gateway.email import en_produccion, problema_de_configuracion, send_terms_updated_email
 from core.gateway.utils import fetch_models
 from core.inference.roles import (
     REQUIRED_CAPABILITY,
@@ -44,7 +47,10 @@ from core.persistence.queries import (
     list_plans,
     list_users_admin,
     log_audit_event,
+    mark_terms_notified,
     set_user_active,
+    terms_notice_count,
+    terms_notice_pending,
     set_user_plan,
     update_model_pricing,
     update_model_weight,
@@ -557,6 +563,94 @@ async def api_admin_audit(
     return {"events": list_audit_events(
         user_id=user_id, limit=limit, offset=offset, event_type=event_type,
     )}
+
+
+class CambioTerminos(BaseModel):
+    seccion: str = Field(min_length=1, max_length=120)
+    resumen: str = Field(min_length=1, max_length=400)
+
+
+class AvisoTerminosPayload(BaseModel):
+    vigencia: date
+    cambios: list[CambioTerminos] = Field(min_length=1, max_length=8)
+    url_anterior: str | None = Field(default=None, max_length=500)
+    prueba: str | None = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+_ENVIO_TERMINOS: dict[str, Any] = {"version": None, "total": 0, "enviados": 0,
+                                   "fallidos": 0, "activo": False}
+_TAREAS: set[asyncio.Task] = set()
+
+
+async def _enviar_terminos(version: str, destinatarios: list[dict[str, Any]],
+                           cambios: list[tuple[str, str]], url_anterior: str | None) -> None:
+    _ENVIO_TERMINOS.update(version=version, total=len(destinatarios), enviados=0,
+                           fallidos=0, activo=True)
+    try:
+        for d in destinatarios:
+            ok = await send_terms_updated_email(d["email"], vigencia_iso=version, cambios=cambios,
+                                                url_anterior=url_anterior)
+            if ok:
+                mark_terms_notified(d["id"], version)
+                _ENVIO_TERMINOS["enviados"] += 1
+            else:
+                _ENVIO_TERMINOS["fallidos"] += 1
+            # Brevo limita el ritmo por cuenta; un envío masivo de golpe acaba en 429.
+            await asyncio.sleep(0.15)
+    finally:
+        _ENVIO_TERMINOS["activo"] = False
+        logger.info(f"Aviso de términos {version}: {_ENVIO_TERMINOS['enviados']} enviados, "
+                    f"{_ENVIO_TERMINOS['fallidos']} fallidos")
+
+
+@router.get("/terms-notice")
+async def api_admin_terms_notice_estado(
+    vigencia: date | None = Query(default=None),
+    _admin: dict[str, Any] = Depends(admin_required),
+):
+    version = vigencia.isoformat() if vigencia else None
+    return {
+        "envio": _ENVIO_TERMINOS,
+        "pendientes": len(terms_notice_pending(version)) if version else None,
+        "avisados": terms_notice_count(version) if version else None,
+    }
+
+
+@router.post("/terms-notice")
+async def api_admin_terms_notice(
+    payload: AvisoTerminosPayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    """Avisa por correo de una versión nueva de los términos. Con `prueba` solo se
+    envía a esa dirección; sin ella, a cada cuenta verificada que no lo haya recibido
+    ya para esta vigencia, así que repetir la llamada no duplica correos."""
+    version = payload.vigencia.isoformat()
+    cambios = [(c.seccion.strip(), c.resumen.strip()) for c in payload.cambios]
+
+    if payload.prueba:
+        ok = await send_terms_updated_email(payload.prueba, vigencia_iso=version, cambios=cambios,
+                                            url_anterior=payload.url_anterior)
+        if not ok:
+            raise HTTPException(status_code=502, detail={
+                "code": "email_failed", "message": "El proveedor de correo rechazó el envío de prueba."})
+        return {"prueba": payload.prueba, "enviado": True}
+
+    if _ENVIO_TERMINOS["activo"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "terms_notice_running", "message": "Ya hay un envío de términos en curso."})
+    problema = problema_de_configuracion()
+    if problema and en_produccion():
+        raise HTTPException(status_code=503, detail={"code": "email_misconfigured", "message": problema})
+
+    destinatarios = terms_notice_pending(version)
+    log_audit_event("terms_notice_sent", user_id=admin["id"], version=version,
+                    destinatarios=len(destinatarios))
+    if destinatarios:
+        tarea = asyncio.get_running_loop().create_task(
+            _enviar_terminos(version, destinatarios, cambios, payload.url_anterior))
+        _TAREAS.add(tarea)
+        tarea.add_done_callback(_TAREAS.discard)
+    return {"version": version, "destinatarios": len(destinatarios)}
 
 
 def _pasarela_lista():
