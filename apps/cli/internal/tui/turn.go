@@ -119,6 +119,7 @@ func (m *Model) flushLive() {
 	live.content.Reset()
 	live.reasoning.Reset()
 	live.reasoningSecs = 0
+	live.viewLines, live.viewLen = nil, 0
 }
 
 func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
