@@ -837,8 +837,10 @@ impl Core {
     }
 
     /// Integración aprobada por la persona (comando Tauri `orch_integrate`).
-    pub fn integrate_from_ui(&self, task: &str, confirm: bool, squash: bool) -> Result<Value, String> {
-        let res = integration::integrate(&self.state, true, &json!({ "task": task, "confirm": confirm, "squash": squash }));
+    /// `accept_moved_target`: el `found_commit` que la persona vio y acepta.
+    pub fn integrate_from_ui(&self, task: &str, confirm: bool, squash: bool, accept_moved_target: Option<&str>) -> Result<Value, String> {
+        let res = integration::integrate(&self.state, true,
+            &json!({ "task": task, "confirm": confirm, "squash": squash, "accept_moved_target": accept_moved_target }));
         let st = self.lock();
         self.commit(&st, &[]);
         res.map(|mut v| {
@@ -1119,8 +1121,8 @@ pub fn orch_resolve_policy(provider: String, profile: String, role: String, work
 /// aquí: no está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe
 /// ser `true` (diálogo de confirmación de la UI).
 #[tauri::command(async)]
-pub fn orch_integrate(orch: TauriState<'_, Orch>, task: String, confirm: bool, squash: Option<bool>) -> Result<Value, String> {
-    orch.0.integrate_from_ui(&task, confirm, squash.unwrap_or(false))
+pub fn orch_integrate(orch: TauriState<'_, Orch>, task: String, confirm: bool, squash: Option<bool>, accept_moved_target: Option<String>) -> Result<Value, String> {
+    orch.0.integrate_from_ui(&task, confirm, squash.unwrap_or(false), accept_moved_target.as_deref())
 }
 
 /// Publica la rama de una tarea (push + `gh pr create`). Solo la interfaz: no
