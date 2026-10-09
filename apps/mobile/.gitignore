@@ -7,3 +7,4 @@ ios/
 build/
 dist/
 *.log
+google-services.json

@@ -53,6 +53,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Firebase config (push)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          # Sin el secret la app compila sin push de FCM (solo avisos locales).
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+            node -e "JSON.parse(require('fs').readFileSync('google-services.json','utf8'))"
+            echo "google-services.json listo"
+          else
+            echo "::warning::Sin GOOGLE_SERVICES_JSON: el APK no recibirá push con la app cerrada."
+          fi
+
       - name: Generate Android platform
         run: npx expo prebuild --platform android --no-install
 

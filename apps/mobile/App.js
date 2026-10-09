@@ -21,6 +21,7 @@ import ChatScreen from './src/screens/ChatScreen';
 import RemoteScreen from './src/screens/RemoteScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import UsageScreen from './src/screens/UsageScreen';
+import { onRemoteNotificationTap } from './src/push';
 import { shareConversation } from './src/share';
 import { useRemoteSessions } from './src/remoteSessions';
 import { AppState, useApi, useAuth, useChat, usePrefs } from './src/state';
@@ -136,7 +137,7 @@ function useCommands({ setSection, pushScreen, pickModel, openRemote }) {
 function HomeShell() {
   const c = useColors();
   const chat = useChat();
-  const { sheet } = useDialogs();
+  const { sheet, toast } = useDialogs();
   const reduced = useReducedMotion();
   const { width } = useWindowDimensions();
   const drawerWidth = Math.min(width * 0.84, 322);
@@ -245,10 +246,25 @@ function HomeShell() {
     }
   }, [deepLink]);
 
+  // En frío el toque llega antes de cargar la lista: la sesión se busca al llegar.
+  const [tappedSession, setTappedSession] = useState(null);
+  useEffect(
+    () =>
+      onRemoteNotificationTap((data) => {
+        setRemoteToken(null);
+        setRemoteSession(null);
+        setTappedSession(data?.session_id || null);
+        setSection('remote');
+      }),
+    [],
+  );
   useEffect(() => {
-    const { onRemoteNotificationTap } = require('./src/push');
-    return onRemoteNotificationTap(() => setSection('remote'));
-  }, []);
+    if (!tappedSession || remote.loading) return;
+    const found = remote.sessions.find((sx) => sx.id === tappedSession);
+    if (found) setRemoteSession(found);
+    else toast('Esa sesión ya no existe');
+    setTappedSession(null);
+  }, [tappedSession, remote.loading, remote.sessions, toast]);
 
   // Atrás de Android: búsqueda, menú, pantalla apilada y Remoto, en ese orden.
   useEffect(() => {
