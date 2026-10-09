@@ -1116,7 +1116,7 @@ pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, row
 /// Política efectiva de un perfil para un proveedor, con el rol de la tarea
 /// (vacío para consultar solo los flags), en un worktree: argv exacto,
 /// versión detectada, advertencias y estado (`ok`, `blocked` o `unverified`).
-#[tauri::command(async)]
+#[tauri::command(async, rename_all = "snake_case")]
 pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String) -> agents::Policy {
     agents::resolve_policy(&provider, &profile, &role, &worktree)
 }
