@@ -125,7 +125,8 @@ Por cada hija terminada con éxito:
 3. Cuando esté lista, díselo al usuario: qué tarea, qué rama, qué cambia, cómo se verificó y en qué
    orden conviene integrar. La persona integra desde Lixbon; si hay conflictos, el merge se aborta
    sin cambiar nada y queda registrado: propón cómo resolverlos (otra hija, por ejemplo).
-4. Si el usuario prefiere revisión en GitHub, `lxo pr <tarea>` abre un PR en lugar de integrar.
+4. Si el usuario prefiere revisión en GitHub, propónselo: publicar el PR (push + `gh pr create`)
+   también lo aprueba la persona desde Lixbon. `lxo pr` se rechaza.
 5. No liberes con `lxo release` las ramas que aún no se integraron: se perdería el worktree.
 
 ## 5. Cierra la issue, si la hay

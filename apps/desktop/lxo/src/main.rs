@@ -26,8 +26,9 @@ Coordinador (el agente con el que habla el usuario):
   lxo send <tarea> \"mensaje\"             instrucciones a una hija en marcha
   lxo continue <tarea> --task \"...\"      nuevo encargo a una hija que ya entregó
   lxo list | lxo show [<tarea>] | lxo diff <tarea>
-  lxo pr <tarea> | lxo stop <tarea> | lxo release <tarea> [--force]
-  (integrar una rama no es cosa de agentes: lo aprueba una persona desde Lixbon; lxo merge se rechaza)
+  lxo stop <tarea> | lxo release <tarea> [--force]
+  (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
+   lxo merge y lxo pr se rechazan)
 
 Tarea hija:
   lxo phase \"nombre\" --start | --done [--note \"...\"]

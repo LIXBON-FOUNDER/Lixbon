@@ -1452,6 +1452,7 @@ pub fn run() {
             orch::orch_agents,
             orch::orch_resolve_policy,
             orch::orch_integrate,
+            orch::orch_publish_pr,
             orch::orch_skill_install,
             orch::orch_skill_uninstall,
             skills_catalog::skills_agents,
