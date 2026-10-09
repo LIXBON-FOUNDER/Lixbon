@@ -151,7 +151,9 @@ function Inicio() {
         <div className="vis-top__right">
           <Link to="/chat" className="vis-top__volver"><IconArrowLeft size={14} />{t('backToChat')}</Link>
           <TemaBoton />
-          {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>{(user.name || user.email || '?')[0].toUpperCase()}</Link>
+          {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>
+            {user.avatar_url ? <img src={user.avatar_url} alt="" /> : (user.name || user.email || '?')[0].toUpperCase()}
+          </Link>
             : <Link to="/auth" className="pill-btn pill-btn--primary">{tc('logIn')}</Link>}
         </div>
       </header>
