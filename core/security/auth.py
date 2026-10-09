@@ -92,6 +92,10 @@ def cookie_auth_required(
     alternativa para apps (desktop/CLI), un Bearer API key.
     F3: la sesión web es un token propio en la tabla sessions — ya no es la API key.
     """
+    return authenticate(lixbon_session, authorization)
+
+
+def authenticate(lixbon_session: str | None, authorization: str | None, rate_limit: bool = True) -> dict[str, Any]:
     from core.persistence.queries import validate_web_session
 
     if lixbon_session:
@@ -105,7 +109,8 @@ def cookie_auth_required(
         if user_data:
             # Mismo rate limit que el resto de rutas con API key: sin esto,
             # este camino era una vía libre para martillear la API.
-            enforce_rate_limit(bearer)
+            if rate_limit:
+                enforce_rate_limit(bearer)
             return user_data
 
     raise HTTPException(status_code=401, detail="Sesión inválida o expirada")

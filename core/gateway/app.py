@@ -170,7 +170,9 @@ def _start_archiver_cron() -> None:
             try:
                 for _sid in _hub.live_host_sessions():
                     touch_remote_session(_sid)
-                sweep_remote_sessions()
+                # La app solo lista sesiones vivas: un host que murió sin
+                # despedirse (IDE cerrado a la fuerza) se da por terminado a las 2 h.
+                sweep_remote_sessions(end_after_h=2)
                 purged = purge_remote_sessions()
                 if purged:
                     _log.getLogger("lixbon").info(f"[cron] {purged} sesiones remotas inactivas borradas.")

@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import json
 import logging
 import re
@@ -163,8 +165,12 @@ async def ws_node(ws: WebSocket) -> None:
 
     try:
         while True:
+            # Las métricas llegan cada METRICS_INTERVAL: sin nada en 4 ciclos el
+            # nodo se da por muerto (el ping de uvicorn tarda 10 min, ver Dockerfile).
             try:
-                msg = json.loads(await ws.receive_text())
+                msg = json.loads(await asyncio.wait_for(ws.receive_text(), timeout=METRICS_INTERVAL * 4))
+            except asyncio.TimeoutError:
+                break
             except ValueError:
                 continue
             tipo = msg.get("type")

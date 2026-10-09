@@ -18,15 +18,16 @@ import io
 import json
 import logging
 import socket
+import time
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Header, HTTPException, Request
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 
 from core.config import PUBLIC_BASE_URL
 from core.gateway import deps
 from core.gateway.push import push_task
-from core.gateway.remote_hub import hub
+from core.gateway.remote_hub import HOST_GRACE_SECONDS, hub
 from core.persistence.queries import (
     claim_remote_session,
     count_remote_events,
@@ -41,13 +42,21 @@ from core.persistence.queries import (
     touch_remote_session,
     update_remote_session_meta,
 )
-from core.security.auth import cookie_auth_required
+from core.security.auth import authenticate, cookie_auth_required
 from core.security.ratelimit import check_auth_rate_limit, record_failed_auth
 
 router = APIRouter()
 log = logging.getLogger("lixbon")
 
 SSE_PING_SECONDS = 15
+SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+WS_PING_SECONDS = 15
+WS_AUTH_SECONDS = 10
+# El móvil en segundo plano queda congelado por Android y no puede contestar:
+# su conexión se mantiene varios minutos para retomarla tal cual al volver.
+CONTROLLER_IDLE_SECONDS = 600
+HOST_IDLE_SECONDS = 60
+TOUCH_EVERY_SECONDS = 30
 MAX_EVENTS_PER_BATCH = 200
 AGENTS = ("lixbon", "claude")
 CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch", "config")
@@ -124,11 +133,18 @@ def _session_or_404(session_id: str) -> dict[str, Any]:
 
 
 def _owner_required(session_id: str, lixbon_session: str | None, authorization: str | None) -> dict[str, Any]:
-    user = cookie_auth_required(lixbon_session, authorization)
+    # Sin rate limit: el host publica eventos varias veces por segundo mientras
+    # el agente escribe y el tope general (120/min por API key) los frenaba
+    # con 429, retrasando el texto en el móvil hasta el minuto siguiente.
+    user = authenticate(lixbon_session, authorization, rate_limit=False)
     sess = _session_or_404(session_id)
     if sess["user_id"] != user["id"]:
         raise HTTPException(status_code=404, detail="Sesión remota no encontrada")
     return sess
+
+
+async def _owner(session_id: str, lixbon_session: str | None, authorization: str | None) -> dict[str, Any]:
+    return await asyncio.to_thread(_owner_required, session_id, lixbon_session, authorization)
 
 
 
@@ -144,6 +160,8 @@ async def _sse(queue: asyncio.Queue, first: list[dict[str, Any]] | None = None):
         except asyncio.TimeoutError:
             yield ": ping\n\n"
             continue
+        if ev is None:
+            return
         yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
         if ev.get("type") in ("session_ended", "bye"):
             return
@@ -196,7 +214,7 @@ async def list_sessions_endpoint(
     # cuando el host publica eventos o pasa el barrido).
     for sess in sessions:
         ch = hub.get(sess["id"])
-        connected = bool(ch and ch.host_connected)
+        connected = bool(ch and hub.host_online(ch))
         sess["host_connected"] = connected
         sess["controllers"] = len(ch.controllers) if ch else 0
         sess["transcript_events"] = counts.get(sess["id"], 0)
@@ -254,49 +272,55 @@ async def claim_endpoint(
     return {"session": sess}
 
 
-@router.get("/api/remote/sessions/{session_id}/commands")
-async def host_commands_stream(
-    session_id: str,
-    lixbon_session: str | None = Cookie(default=None),
-    authorization: str | None = Header(default=None),
-):
-    """SSE de larga duración con los comandos que el host debe ejecutar."""
-    sess = _owner_required(session_id, lixbon_session, authorization)
-    if sess["status"] == "ended":
-        raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
-    ch = hub.channel(session_id, sess["user_id"])
-    ch.host_connected = True
-    touch_remote_session(session_id, status="online")
-    hub.notify_user(sess["user_id"], {"type": "session_online", "session_id": session_id})
+# ── Lógica común del relay (SSE+POST y WebSocket) ───────────────────────────
 
-    async def gen():
-        try:
-            async for chunk in _sse(ch.host_queue):
-                yield chunk
-        finally:
-            ch.host_connected = False
-            touch_remote_session(session_id, status="offline")
-            hub.notify_user(sess["user_id"], {"type": "session_offline", "session_id": session_id})
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+_background: set[asyncio.Task] = set()
 
 
-@router.post("/api/remote/sessions/{session_id}/events")
-async def host_publish_events(
-    session_id: str,
-    payload: dict[str, Any],
-    lixbon_session: str | None = Cookie(default=None),
-    authorization: str | None = Header(default=None),
-):
-    """El host publica un lote de eventos del transcript."""
-    sess = _owner_required(session_id, lixbon_session, authorization)
-    events = payload.get("events") or []
+def _spawn(coro) -> None:
+    task = asyncio.get_running_loop().create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def _host_attached(ch, sess: dict[str, Any], last_cmd: int | None) -> tuple[int, asyncio.Queue]:
+    was_online = hub.host_online(ch)
+    gen_id, queue = hub.attach_host(ch, last_cmd)
+    if not was_online:
+        await asyncio.to_thread(touch_remote_session, sess["id"], "online")
+        hub.notify_user(sess["user_id"], {"type": "session_online", "session_id": sess["id"]})
+    return gen_id, queue
+
+
+def _host_detached(ch, sess: dict[str, Any], gen_id: int) -> None:
+    # Un stream jubilado por una reconexión no cuenta. Y el vigente tampoco
+    # marca offline al instante: si el host vuelve dentro del margen, para el
+    # móvil nunca se desconectó.
+    if not hub.detach_host(ch, gen_id):
+        return
+
+    async def later():
+        await asyncio.sleep(HOST_GRACE_SECONDS + 1)
+        if hub.get(sess["id"]) is not ch or ch.host_gen != gen_id or ch.host_connected:
+            return
+        hub.announce_host(ch)
+        hub.notify_user(sess["user_id"], {"type": "session_offline", "session_id": sess["id"]})
+        await asyncio.to_thread(touch_remote_session, sess["id"], "offline")
+
+    _spawn(later())
+
+
+async def _publish(ch, sess: dict[str, Any], events: Any) -> int:
+    """Reparte un lote de eventos del host, lo guarda y reacciona a hello/bye."""
     if not isinstance(events, list) or len(events) > MAX_EVENTS_PER_BATCH:
         raise HTTPException(status_code=422, detail="Lote de eventos inválido")
-    ch = hub.channel(session_id, sess["user_id"])
+    session_id = sess["id"]
     clean = [ev for ev in events if isinstance(ev, dict)]
     last_seq = hub.publish_events(ch, clean)
-    touch_remote_session(session_id)
+    now = time.time()
+    if now - ch.last_touch > TOUCH_EVERY_SECONDS:
+        ch.last_touch = now
+        await asyncio.to_thread(touch_remote_session, session_id)
     # El transcript se guarda DESPUÉS de repartirlo: el relay manda, la BD es
     # lo que hace que la conversación siga ahí cuando la sesión termine.
     try:
@@ -304,7 +328,7 @@ async def host_publish_events(
     except Exception as exc:
         log.warning(f"[remote] no se pudo guardar el transcript de {session_id}: {exc}")
 
-    for ev in events:
+    for ev in clean:
         if ev.get("type") == "hello":
             updated = await asyncio.to_thread(
                 update_remote_session_meta, session_id,
@@ -320,33 +344,15 @@ async def host_publish_events(
                 {"kind": "remote_approval", "session_id": session_id},
             )
         elif ev.get("type") == "bye":
-            end_remote_session(session_id)
+            await asyncio.to_thread(end_remote_session, session_id)
             hub.drop(session_id)
             hub.notify_user(sess["user_id"], {"type": "session_ended", "session_id": session_id})
-    return {"seq": last_seq}
+    return last_seq
 
 
-@router.get("/api/remote/sessions/{session_id}/stream")
-async def controller_events_stream(
-    session_id: str,
-    from_seq: int = 0,
-    lixbon_session: str | None = Cookie(default=None),
-    authorization: str | None = Header(default=None),
-):
-    """SSE con el transcript en vivo (+replay desde from_seq). Solo el dueño."""
-    sess = _owner_required(session_id, lixbon_session, authorization)
-    if sess["status"] == "ended":
-        raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
-    ch = hub.channel(session_id, sess["user_id"])
-    attached = hub.attach_controller(ch)
-    if attached is None:
-        raise HTTPException(status_code=409, detail="Demasiados dispositivos conectados a esta sesión")
-    cid, queue = attached
-
+async def _controller_first(ch, sess: dict[str, Any], from_seq: int) -> list[dict[str, Any]]:
     status_ev = {
-        "type": "channel_status",
-        "seq": ch.last_seq,
-        "host_connected": ch.host_connected,
+        **hub.host_status(ch),
         "session": {k: v for k, v in sess.items() if k != "user_id"},
         "meta": ch.meta,
         "orch": ch.orch,
@@ -355,68 +361,28 @@ async def controller_events_stream(
     # sesiones de días), luego lo que el buffer en memoria tenga por encima.
     buffered = hub.replay(ch, from_seq)
     oldest_buffered = buffered[0].get("seq", 0) if buffered else None
-    stored = await asyncio.to_thread(list_remote_events, session_id, from_seq)
+    stored = await asyncio.to_thread(list_remote_events, sess["id"], from_seq)
     if oldest_buffered is not None:
         stored = [ev for ev in stored if ev.get("seq", 0) < oldest_buffered]
-    first = [status_ev] + stored + buffered
     # Si el controller llega sin nada que mostrar, el host reemite un snapshot
     # completo (solo tiene sentido si sigue conectado).
     if from_seq == 0 and ch.host_connected and not stored:
         hub.push_command(ch, {"type": "request_snapshot", "from_seq": 0})
-
-    async def gen():
-        try:
-            async for chunk in _sse(queue, first=first):
-                yield chunk
-        finally:
-            hub.detach_controller(ch, cid)
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return [status_ev] + stored + buffered
 
 
-@router.get("/api/remote/sessions/{session_id}/transcript")
-async def controller_transcript(
-    session_id: str,
-    from_seq: int = 0,
-    lixbon_session: str | None = Cookie(default=None),
-    authorization: str | None = Header(default=None),
-):
-    """Transcript guardado de la sesión, sin SSE.
-
-    Es la vista de lectura de una sesión ya terminada: el host se fue, no hay
-    canal en vivo, pero la conversación sigue estando.
-    """
-    sess = _owner_required(session_id, lixbon_session, authorization)
-    events = await asyncio.to_thread(list_remote_events, session_id, from_seq)
-    return {
-        "session": {k: v for k, v in sess.items() if k != "user_id"},
-        "events": events,
-        "last_seq": events[-1].get("seq", from_seq) if events else from_seq,
-    }
-
-
-@router.post("/api/remote/sessions/{session_id}/commands")
-async def controller_send_command(
-    session_id: str,
-    payload: dict[str, Any],
-    lixbon_session: str | None = Cookie(default=None),
-    authorization: str | None = Header(default=None),
-):
-    """El controller manda un comando al host: prompt | interrupt | approve |
-    request_snapshot | files (buscar archivos del workspace para mencionarlos)."""
-    sess = _owner_required(session_id, lixbon_session, authorization)
-    if sess["status"] == "ended":
-        raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
+def _queue_command(ch, payload: dict[str, Any], rid: Any = None) -> None:
+    """Valida un comando del controller y lo encola para el host."""
     kind = payload.get("type")
     if kind not in CONTROLLER_COMMANDS:
         raise HTTPException(status_code=422, detail=f"Comando no soportado: {kind}")
     attachments = _clean_attachments(payload.get("attachments")) if kind == "prompt" else []
     if kind == "prompt" and not (payload.get("text") or "").strip() and not attachments:
         raise HTTPException(status_code=422, detail="El prompt está vacío")
-
-    ch = hub.channel(session_id, sess["user_id"])
-    if not ch.host_connected:
+    if not hub.host_online(ch):
         raise HTTPException(status_code=409, detail="El host no está conectado ahora mismo")
+    if hub.seen_request(ch, rid):
+        return
     command = {k: payload.get(k) for k in ("type", "text", "id", "decision", "from_seq") if k in payload}
     if kind == "prompt":
         if attachments:
@@ -445,7 +411,264 @@ async def controller_send_command(
         command["args"] = args
     if not hub.push_command(ch, command):
         raise HTTPException(status_code=429, detail="El host tiene demasiados comandos pendientes")
+
+
+# ── SSE + POST (CLI y clientes anteriores al WebSocket) ─────────────────────
+
+@router.get("/api/remote/sessions/{session_id}/commands")
+async def host_commands_stream(
+    session_id: str,
+    last_cmd: int | None = None,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """SSE de larga duración con los comandos que el host debe ejecutar."""
+    sess = await _owner(session_id, lixbon_session, authorization)
+    if sess["status"] == "ended":
+        raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
+    ch = hub.channel(session_id, sess["user_id"])
+    gen_id, queue = await _host_attached(ch, sess, last_cmd)
+
+    async def gen():
+        try:
+            # cmd_seq actual: si el gateway se reinició el contador vuelve a
+            # empezar y el host debe olvidar su último comando visto.
+            async for chunk in _sse(queue, first=[{"type": "channel", "cmd_seq": ch.cmd_seq}]):
+                yield chunk
+        finally:
+            _host_detached(ch, sess, gen_id)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.post("/api/remote/sessions/{session_id}/events")
+async def host_publish_events(
+    session_id: str,
+    payload: dict[str, Any],
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """El host publica un lote de eventos del transcript."""
+    sess = await _owner(session_id, lixbon_session, authorization)
+    ch = hub.channel(session_id, sess["user_id"])
+    return {"seq": await _publish(ch, sess, payload.get("events") or [])}
+
+
+@router.get("/api/remote/sessions/{session_id}/stream")
+async def controller_events_stream(
+    session_id: str,
+    from_seq: int = 0,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """SSE con el transcript en vivo (+replay desde from_seq). Solo el dueño."""
+    sess = await _owner(session_id, lixbon_session, authorization)
+    if sess["status"] == "ended":
+        raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
+    ch = hub.channel(session_id, sess["user_id"])
+    cid, queue = hub.attach_controller(ch)
+    first = await _controller_first(ch, sess, from_seq)
+
+    async def gen():
+        try:
+            async for chunk in _sse(queue, first=first):
+                yield chunk
+        finally:
+            hub.detach_controller(ch, cid)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.get("/api/remote/sessions/{session_id}/transcript")
+async def controller_transcript(
+    session_id: str,
+    from_seq: int = 0,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """Transcript guardado de la sesión, sin SSE.
+
+    Es la vista de lectura de una sesión ya terminada: el host se fue, no hay
+    canal en vivo, pero la conversación sigue estando.
+    """
+    sess = await _owner(session_id, lixbon_session, authorization)
+    events = await asyncio.to_thread(list_remote_events, session_id, from_seq)
+    return {
+        "session": {k: v for k, v in sess.items() if k != "user_id"},
+        "events": events,
+        "last_seq": events[-1].get("seq", from_seq) if events else from_seq,
+    }
+
+
+@router.post("/api/remote/sessions/{session_id}/commands")
+async def controller_send_command(
+    session_id: str,
+    payload: dict[str, Any],
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """El controller manda un comando al host: prompt | interrupt | approve |
+    request_snapshot | files (buscar archivos del workspace para mencionarlos)."""
+    sess = await _owner(session_id, lixbon_session, authorization)
+    if sess["status"] == "ended":
+        raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
+    _queue_command(hub.channel(session_id, sess["user_id"]), payload, payload.get("rid"))
     return {"queued": True}
+
+
+# ── WebSocket ───────────────────────────────────────────────────────────────
+# Una sola conexión por lado: el móvil recibe eventos y manda comandos (con
+# acuse por `rid`); el host recibe comandos y publica eventos. Sin una
+# petición HTTP por mensaje, el texto llega a medida que el agente lo escribe.
+
+WS_CLOSE = {401: 4401, 404: 4404, 410: 4410}
+
+
+async def _ws_session(ws: WebSocket, session_id: str) -> dict[str, Any] | None:
+    cookie = ws.cookies.get("lixbon_session")
+    authorization = ws.headers.get("authorization")
+    # Un WebSocket de navegador (web, IDE) no puede mandar cabeceras y la API
+    # key no va en la URL (queda en los logs): llega en el primer mensaje.
+    if not cookie and not authorization:
+        try:
+            hello = json.loads(await asyncio.wait_for(ws.receive_text(), timeout=WS_AUTH_SECONDS))
+        except (asyncio.TimeoutError, ValueError, WebSocketDisconnect):
+            hello = None
+        token = hello.get("token") if isinstance(hello, dict) and hello.get("op") == "auth" else None
+        if isinstance(token, str) and token:
+            authorization = f"Bearer {token}"
+    try:
+        sess = await _owner(session_id, cookie, authorization)
+    except HTTPException as exc:
+        await ws.close(code=WS_CLOSE.get(exc.status_code, 4400), reason=str(exc.detail)[:120])
+        return None
+    if sess["status"] == "ended":
+        await ws.close(code=4410, reason="La sesión remota ya terminó")
+        return None
+    return sess
+
+
+async def _ws_run(ws: WebSocket, pump, listen, idle: float) -> str:
+    """Corre emisor y receptor hasta que uno acaba. Devuelve por qué."""
+    lock = asyncio.Lock()
+
+    async def send(ev: dict[str, Any]) -> None:
+        async with lock:
+            await ws.send_text(json.dumps(ev, ensure_ascii=False))
+
+    async def receive():
+        while True:
+            try:
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=idle)
+            except asyncio.TimeoutError:
+                return "idle"
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("op") == "ping":
+                await send({"type": "pong"})
+            else:
+                await listen(msg, send)
+
+    tasks = [asyncio.ensure_future(pump(send)), asyncio.ensure_future(receive())]
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        task = done.pop()
+        return "error" if task.exception() else (task.result() or "closed")
+    finally:
+        for t in tasks:
+            t.cancel()
+
+
+async def _ws_pump(queue: asyncio.Queue, send, first: list[dict[str, Any]]) -> str:
+    for ev in first:
+        await send(ev)
+    while True:
+        try:
+            ev = await asyncio.wait_for(queue.get(), timeout=WS_PING_SECONDS)
+        except asyncio.TimeoutError:
+            await send({"type": "ping"})
+            continue
+        if ev is None:
+            return "replaced"
+        await send(ev)
+        if ev.get("type") in ("session_ended", "bye"):
+            return "ended"
+
+
+async def _ws_close(ws: WebSocket, why: str) -> None:
+    code = {"ended": 4410, "replaced": 4409, "idle": 4408}.get(why, 1000)
+    try:
+        await ws.close(code=code)
+    except Exception:
+        pass
+
+
+@router.websocket("/api/remote/sessions/{session_id}/ws")
+async def controller_ws(ws: WebSocket, session_id: str, from_seq: int = 0) -> None:
+    await ws.accept()
+    sess = await _ws_session(ws, session_id)
+    if sess is None:
+        return
+    ch = hub.channel(session_id, sess["user_id"])
+    cid, queue = hub.attach_controller(ch)
+    first = await _controller_first(ch, sess, from_seq)
+
+    async def listen(msg: dict[str, Any], send) -> None:
+        if msg.get("op") != "cmd":
+            return
+        rid = msg.get("rid")
+        try:
+            if hub.get(session_id) is not ch:
+                raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
+            _queue_command(ch, msg.get("command") or {}, rid)
+            await send({"type": "ack", "rid": rid, "ok": True})
+        except HTTPException as exc:
+            detail = exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail
+            await send({"type": "ack", "rid": rid, "ok": False, "status": exc.status_code, "detail": detail})
+
+    why = "error"
+    try:
+        why = await _ws_run(ws, lambda send: _ws_pump(queue, send, first), listen, CONTROLLER_IDLE_SECONDS)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        hub.detach_controller(ch, cid)
+        await _ws_close(ws, why)
+
+
+@router.websocket("/api/remote/sessions/{session_id}/host")
+async def host_ws(ws: WebSocket, session_id: str, last_cmd: int | None = None) -> None:
+    await ws.accept()
+    sess = await _ws_session(ws, session_id)
+    if sess is None:
+        return
+    ch = hub.channel(session_id, sess["user_id"])
+    gen_id, queue = await _host_attached(ch, sess, last_cmd)
+
+    async def listen(msg: dict[str, Any], send) -> None:
+        if msg.get("op") != "events":
+            return
+        rid = msg.get("rid")
+        try:
+            # Un lote reenviado tras un corte (el acuse no llegó) no se repite.
+            seq = ch.last_seq if hub.seen_request(ch, rid) else await _publish(ch, sess, msg.get("events") or [])
+            await send({"type": "ack", "rid": rid, "ok": True, "seq": seq})
+        except HTTPException as exc:
+            await send({"type": "ack", "rid": rid, "ok": False, "status": exc.status_code, "detail": exc.detail})
+
+    why = "error"
+    try:
+        first = [{"type": "channel", "cmd_seq": ch.cmd_seq}]
+        why = await _ws_run(ws, lambda send: _ws_pump(queue, send, first), listen, HOST_IDLE_SECONDS)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _host_detached(ch, sess, gen_id)
+        await _ws_close(ws, why)
 
 
 @router.get("/api/remote/subscribe")
@@ -464,7 +687,7 @@ async def subscribe_sessions_stream(
         finally:
             hub.unsubscribe_user(user["id"], queue)
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.post("/api/remote/devices")
