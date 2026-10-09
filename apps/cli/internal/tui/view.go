@@ -105,20 +105,7 @@ func (m *Model) liveView() string {
 		}
 	}
 	if m.live.content.Len() > 0 {
-		text := m.live.content.String()
-		if m.chat.Mode == chat.ModeAgent {
-			text = toolparse.CleanProse(text)
-			if text == "" {
-				lines = append(lines, sDim.Render("  "+glyphThink+" preparando acciones…"))
-			}
-		}
-		if text = strings.TrimSpace(text); text != "" {
-			width := max(20, m.width-2)
-			wrapped := strings.Split(ansi.Wrap(liveTail(text, liveTailRows, width), width, ""), "\n")
-			for _, l := range wrapped[max(0, len(wrapped)-liveTailRows):] {
-				lines = append(lines, "  "+sPrimary.Render(l))
-			}
-		}
+		lines = append(lines, m.liveContentLines()...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -250,6 +237,43 @@ func (m *Model) sessionLabel() string {
 		return email
 	}
 	return "API key"
+}
+
+// liveRefresh es cada cuánto se recalcula como mucho el texto en vivo. Bubble
+// Tea llama a View tras cada mensaje (un fragmento SSE), y en modo agente
+// limpiar la prosa recorre toda la respuesta; recalcular con cada fragmento
+// volvía cuadrático el costo del stream (TERM-02).
+const liveRefresh = 50 * time.Millisecond
+
+// liveContentLines devuelve las filas del texto en vivo, reutilizando las de
+// la última vez si no pasó liveRefresh desde entonces.
+func (m *Model) liveContentLines() []string {
+	live := &m.live
+	n := live.content.Len()
+	if live.viewLines != nil && live.viewWidth == m.width &&
+		(live.viewLen == n || time.Since(live.viewAt) < liveRefresh) {
+		return live.viewLines
+	}
+	var lines []string
+	text := live.content.String()
+	if m.chat.Mode == chat.ModeAgent {
+		text = toolparse.CleanProse(text)
+		if text == "" {
+			lines = append(lines, sDim.Render("  "+glyphThink+" preparando acciones…"))
+		}
+	}
+	if text = strings.TrimSpace(text); text != "" {
+		width := max(20, m.width-2)
+		wrapped := strings.Split(ansi.Wrap(liveTail(text, liveTailRows, width), width, ""), "\n")
+		for _, l := range wrapped[max(0, len(wrapped)-liveTailRows):] {
+			lines = append(lines, "  "+sPrimary.Render(l))
+		}
+	}
+	if lines == nil {
+		lines = []string{}
+	}
+	live.viewLines, live.viewLen, live.viewWidth, live.viewAt = lines, n, m.width, time.Now()
+	return lines
 }
 
 // liveTail recorta el texto en vivo a lo último que puede verse: las últimas
