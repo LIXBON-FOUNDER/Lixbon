@@ -15,7 +15,7 @@ const LETRAS = [
 const claseLetra = (le) => `logo-founder__l ${le.clave ? 'logo-founder__l--clave' : 'logo-founder__l--tono'}${le.l ? ' logo-founder__l--l' : ''}${le.f ? ' logo-founder__l--f' : ''}`;
 
 let fuente;
-function cargarFuente() {
+export function cargarFuente() {
   fuente ??= new Promise((listo, fallo) => {
     const enlace = document.createElement('link');
     enlace.rel = 'stylesheet';

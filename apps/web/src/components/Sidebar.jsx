@@ -6,8 +6,7 @@ import { useNavigate, Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
 import { guardarIdioma, otherLocalePath } from '../i18n/paths';
 import { useT } from '../i18n/useT';
-import { Logo } from './Logo';
-import { planBadge } from '../lib/planColors';
+import { LogoLixbon } from './Logo';
 import { useDismiss } from '../hooks/useDismiss';
 import { HistorySkeleton } from './Skeleton';
 import { Desplegable } from './Desplegable';
@@ -133,9 +132,16 @@ export function Sidebar({
   const closeProfile = useCallback(() => setProfileMenu(false), []);
   useDismiss(profileMenu, profileRef, closeProfile);
 
+  // preventScroll: el campo vive en una casilla con overflow oculto que aún se
+  // está ensanchando, y el navegador la desplazaría para mostrar el cursor.
   useEffect(() => {
-    if (searchOpen) searchRef.current?.focus();
+    if (searchOpen) searchRef.current?.focus({ preventScroll: true });
   }, [searchOpen]);
+
+  const cerrarBusqueda = () => {
+    setSearchOpen(false);
+    setQuery('');
+  };
 
   // El foco entra en el cajón al abrirlo. Depende solo de `open` a propósito:
   // con `onClose` en las dependencias, cada re-render del chat durante el
@@ -161,6 +167,7 @@ export function Sidebar({
     : conversations;
 
   const drawerHidden = compact && !open;
+  const nuevoLabel = seccion === 'visuals' ? t('newDesign') : t('newConversation');
 
   return (
     <aside
@@ -182,12 +189,9 @@ export function Sidebar({
       <div className="sidebar__body" aria-hidden={collapsed && !compact}>
         <div className="sidebar__header">
           <Link to="/chat" className="sidebar__logo" onClick={compact ? onClose : undefined}>
-            <Logo />
+            <LogoLixbon />
           </Link>
           <div className="sidebar__header-actions">
-            <button className="icon-btn" onClick={() => setSearchOpen((v) => !v)} aria-label={t('searchConversations')}>
-              {searchOpen ? <IconX /> : <IconSearch />}
-            </button>
             {compact ? (
               <button ref={closeBtnRef} className="icon-btn" onClick={onClose} aria-label={t('closePanel')}>
                 <IconX />
@@ -200,28 +204,55 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className={`reveal ${searchOpen ? 'is-open' : ''}`}>
-          <div className="reveal__inner">
+        {/* Buscar y crear comparten la bandeja: la casilla ancha es la acción
+            en curso; tocar la estrecha intercambia los papeles. */}
+        <div className="sb-bandeja">
+          <div className={`sb-bandeja__casilla sb-bandeja__casilla--nuevo ${searchOpen ? 'is-estrecha' : ''}`}>
+            <button
+              className="sb-bandeja__btn"
+              onClick={() => (searchOpen ? cerrarBusqueda() : go(newPath))}
+              aria-label={nuevoLabel}
+            >
+              <IconPlus size={16} />
+              <span className="sb-bandeja__txt" aria-hidden="true">{nuevoLabel}</span>
+            </button>
+          </div>
+          <div className={`sb-bandeja__casilla ${searchOpen ? '' : 'is-estrecha'}`}>
+            <button
+              className="sb-bandeja__btn"
+              onClick={() => (searchOpen ? searchRef.current?.focus() : setSearchOpen(true))}
+              aria-label={t('searchConversations')}
+              aria-expanded={searchOpen}
+            >
+              <IconSearch size={16} />
+            </button>
             <input
               ref={searchRef}
-              className="sidebar__search"
-              placeholder={tc('search')}
+              type="search"
+              className="sb-bandeja__campo"
+              placeholder={t('searchHistory')}
+              aria-label={t('searchHistory')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Escape') return;
+                e.stopPropagation(); // en móvil, Escape también cerraría el cajón
+                cerrarBusqueda();
+              }}
               tabIndex={searchOpen ? 0 : -1}
             />
           </div>
         </div>
 
-        <nav className="sidebar__nav">
-          <button className="sb-nav" onClick={() => go(newPath)}>
-            <IconPlus /> <span>{seccion === 'visuals' ? t('newDesign') : t('newConversation')}</span>
-          </button>
+        <nav className="sidebar__nav" aria-label={t('spaces')}>
+          <span className="sidebar__label">{t('spaces')}</span>
           <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/chat'))}>
             <IconChat /> <span>{t('conversations')}</span>
+            {seccion === 'chat' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}</span>}
           </button>
           <button className={`sb-nav ${seccion === 'visuals' ? 'is-active' : ''}`} onClick={() => (seccion === 'visuals' ? setHistoryOpen(true) : go('/visuals'))}>
             <IconLayers /> <span>{t('visuals')}</span>
+            {seccion === 'visuals' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}</span>}
             {!tieneVisuals(user) && <span className="sb-menu__tag">Pro</span>}
           </button>
           <button className="sb-nav" onClick={() => go('/apps')}>
@@ -272,7 +303,6 @@ export function Sidebar({
         )}
 
         <div className="sidebar__foot">
-        <span className="tab" aria-hidden="true" />
         <div className="sidebar__profile" ref={profileRef}>
           {user ? (
             <>
@@ -291,10 +321,6 @@ export function Sidebar({
                   to="/plans"
                   className="sidebar__plan"
                   onClick={compact ? onClose : undefined}
-                  style={{
-                    background: planBadge(user.plan_id).bg,
-                    color: planBadge(user.plan_id).ink,
-                  }}
                 >
                   {user.plan_name || t('freePlan')}
                 </Link>

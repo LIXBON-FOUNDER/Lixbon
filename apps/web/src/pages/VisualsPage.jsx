@@ -28,7 +28,7 @@ import {
   actualizarVisual, aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, etiquetaDePedido,
   guardarRespuesta, listarVersiones, listarVisuals, nombreVersion,
 } from '../lib/visualStudio';
-import { Logo } from '../components/Logo';
+import { Logo, LogoLixbon } from '../components/Logo';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
@@ -143,11 +143,13 @@ function Inicio() {
 
   if (loading) return <Cargando />;
   return (
-    <div className="vis-page">
+    <div className="vis-page vis-inicio">
       <header className="vis-top">
-        <Link to="/chat" className="vis-top__logo" title={t('backToChat')}><Logo /></Link>
+        <Link to="/chat" className="vis-top__logo" aria-label={t('backToChat')}><LogoLixbon /></Link>
+        <span className="vis-top__div" aria-hidden="true" />
         <span className="vis-top__seccion">Visuals</span>
         <div className="vis-top__right">
+          <Link to="/chat" className="vis-top__volver"><IconArrowLeft size={14} />{t('backToChat')}</Link>
           <TemaBoton />
           {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>{(user.name || user.email || '?')[0].toUpperCase()}</Link>
             : <Link to="/auth" className="pill-btn pill-btn--primary">{tc('logIn')}</Link>}
@@ -157,6 +159,7 @@ function Inicio() {
       <div className="vis-galeria">
         <section className="vis-hero vis-hero--galeria">
           <div className="vis-hero__inner">
+            <span className="vis-hero__eyebrow">{t('lockedTitle')}</span>
             <h2 className="vis-hero__title">{t('heroTitle')}</h2>
             <p className="vis-hero__lead">{t('heroLead')}</p>
             {user && !tieneVisuals(user) ? (
@@ -178,9 +181,9 @@ function Inicio() {
               </div>
             ) : (
               <>
-                <div className="vis-tipos">
+                <div className="vis-tipos vis-bandeja" role="group" aria-label={t('kindFilter')}>
                   {[...TIPOS, TIPO_IMAGEN].map((tp) => (
-                    <button key={tp.id} className={`vis-tipo ${tipo?.id === tp.id ? 'is-active' : ''}`}
+                    <button key={tp.id} className={`vis-bandeja__op ${tipo?.id === tp.id ? 'is-active' : ''}`} aria-pressed={tipo?.id === tp.id}
                       disabled={tp.id === 'imagen' && !imagenes.available}
                       title={tp.id === 'imagen' && !imagenes.available ? t('noImageNodes') : undefined}
                       onClick={() => setTipo(tipo?.id === tp.id ? null : tp)}>
@@ -205,10 +208,9 @@ function Inicio() {
                 <div className="vis-ideas">
                   <span className="vis-ideas__label">{t('ideas')}</span>
                   {(IDEAS[tipo?.id] || IDEAS.general)[locale === 'en' ? 'en' : 'es'].map((idea) => (
-                    <button key={idea} className="vis-idea" onClick={() => rellenar(idea)}>{idea}</button>
+                    <button key={idea} className="vis-idea" onClick={() => rellenar(idea)}><span className="vis-idea__flecha" aria-hidden="true">→</span>{idea}</button>
                   ))}
                 </div>
-                {!user && <p className="vis-hero__nota">{t('proAdvanceNote')}</p>}
               </>
             )}
           </div>
@@ -279,26 +281,27 @@ function Galeria({ t, tc }) {
     <section className="vis-galeria__lista">
       <div className="vis-galeria__barra">
         <h3 className="vis-galeria__titulo">{t('yourDesigns')} <small>{items.length}</small></h3>
-        <div className="vis-seg vis-seg--chico" role="group" aria-label={t('kindFilter')}>
-          {['todos', 'design', 'marketing'].map((k) => (
-            <button key={k} className={`vis-tool ${tipo === k ? 'is-active' : ''}`} onClick={() => setTipo(k)} aria-pressed={tipo === k}>
-              {t(`kind_${k}`)} <small className="vis-tool__n">{cuenta(k)}</small>
-            </button>
-          ))}
-        </div>
         <label className="vis-buscar">
           <IconSearch size={14} />
           <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder={t('searchDesigns')} aria-label={t('searchDesigns')}
             onKeyDown={(e) => { if (e.key === 'Escape') setBusqueda(''); }} />
           {busqueda && <button className="vis-buscar__x" onClick={() => setBusqueda('')} aria-label={t('clearSearch')}><IconX size={12} /></button>}
         </label>
-        <div className="vis-seg vis-seg--chico" role="group" aria-label={t('sortBy')}>
-          <button className={`vis-tool ${orden === 'reciente' ? 'is-active' : ''}`} onClick={() => cambiarOrden('reciente')}>{t('sortRecent')}</button>
-          <button className={`vis-tool ${orden === 'nombre' ? 'is-active' : ''}`} onClick={() => cambiarOrden('nombre')}>{t('sortName')}</button>
+        <div className="vis-orden" role="group" aria-label={t('sortBy')}>
+          <button className={orden === 'reciente' ? 'is-active' : ''} onClick={() => cambiarOrden('reciente')} aria-pressed={orden === 'reciente'}>{t('sortRecent')}</button>
+          <span aria-hidden="true">/</span>
+          <button className={orden === 'nombre' ? 'is-active' : ''} onClick={() => cambiarOrden('nombre')} aria-pressed={orden === 'nombre'}>{t('sortName')}</button>
         </div>
-        <div className="vis-seg vis-seg--chico" role="group" aria-label={t('layout')}>
-          <button className={`vis-tool ${disposicion === 'lista' ? 'is-active' : ''}`} onClick={() => cambiarDisposicion('lista')} title={t('layoutList')} aria-label={t('layoutList')} aria-pressed={disposicion === 'lista'}><IconRows size={15} /></button>
-          <button className={`vis-tool ${disposicion === 'cuadricula' ? 'is-active' : ''}`} onClick={() => cambiarDisposicion('cuadricula')} title={t('layoutGrid')} aria-label={t('layoutGrid')} aria-pressed={disposicion === 'cuadricula'}><IconGrid size={15} /></button>
+        <div className="vis-bandeja vis-bandeja--chica" role="group" aria-label={t('kindFilter')}>
+          {['todos', 'design', 'marketing'].map((k) => (
+            <button key={k} className={`vis-bandeja__op ${tipo === k ? 'is-active' : ''}`} onClick={() => setTipo(k)} aria-pressed={tipo === k}>
+              {t(`kind_${k}`)} <small className="vis-bandeja__n">{cuenta(k)}</small>
+            </button>
+          ))}
+        </div>
+        <div className="vis-bandeja vis-bandeja--chica" role="group" aria-label={t('layout')}>
+          <button className={`vis-bandeja__op vis-bandeja__op--icono ${disposicion === 'cuadricula' ? 'is-active' : ''}`} onClick={() => cambiarDisposicion('cuadricula')} title={t('layoutGrid')} aria-label={t('layoutGrid')} aria-pressed={disposicion === 'cuadricula'}><IconGrid size={14} /></button>
+          <button className={`vis-bandeja__op vis-bandeja__op--icono ${disposicion === 'lista' ? 'is-active' : ''}`} onClick={() => cambiarDisposicion('lista')} title={t('layoutList')} aria-label={t('layoutList')} aria-pressed={disposicion === 'lista'}><IconRows size={14} /></button>
         </div>
       </div>
       {!visibles.length && <div className="vis-galeria__vacio">{busqueda.trim() ? t('noDesignsMatch', { q: busqueda.trim() }) : t('noDesignsOfKind')}</div>}

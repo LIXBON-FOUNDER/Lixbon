@@ -35,6 +35,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  font-family: var(--font-text);
   width: var(--sidebar-w); /* ancho fijo: el texto no se reacomoda al animar */
   opacity: 1;
   transition: opacity 0.18s ease 0.1s;
@@ -73,7 +74,19 @@
 }
 
 .sidebar__logo {
+  color: var(--ink);
   text-decoration: none;
+}
+
+.logo-lixbon {
+  font-family: 'Fraunces', var(--font-text);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  position: relative;
+  top: -1px;
 }
 
 .sidebar__header-actions {
@@ -81,41 +94,132 @@
   gap: 2px;
 }
 
-.sidebar__search {
-  width: calc(100% - 16px);
-  margin: 2px 8px 8px;
-  padding: 9px 12px;
+.sb-bandeja {
+  display: flex;
+  gap: 2px;
+  margin: 0 10px;
+  padding: 3px;
   border-radius: var(--radius);
-  background: var(--field);
-  outline: none;
-  font-size: 13.5px;
+  background: var(--primary);
+  box-shadow: 0 6px 18px rgba(var(--shadow-rgb), 0.14);
 }
 
-.sidebar__search:focus {
-  background: var(--field-focus);
+.sb-bandeja__casilla {
+  display: flex;
+  align-items: center;
+  flex: 1 0 38px;
+  min-width: 38px;
+  height: 34px;
+  overflow: hidden;
+  border-radius: calc(var(--radius) - 3px);
+  background: var(--on-primary);
+  color: var(--primary);
+  transition: flex-grow 0.42s cubic-bezier(0.65, 0, 0.35, 1), background-color 0.3s ease, color 0.3s ease;
+}
+
+.sb-bandeja__casilla.is-estrecha {
+  flex-grow: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--on-primary) 68%, var(--primary));
+}
+
+.sb-bandeja__casilla.is-estrecha:hover {
+  background: color-mix(in srgb, var(--on-primary) 8%, transparent);
+  color: var(--on-primary);
+}
+
+.sb-bandeja__casilla--nuevo:not(.is-estrecha):hover {
+  background: color-mix(in srgb, var(--on-primary) 88%, var(--primary));
+}
+
+.sb-bandeja__btn {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 9px;
+  height: 100%;
+  padding: 0 11px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.sb-bandeja__btn svg {
+  flex-shrink: 0;
+}
+
+.sb-bandeja__txt {
+  transition: opacity 0.2s ease 0.18s;
+}
+
+.sb-bandeja__campo {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px 0 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 14px;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: opacity 0.2s ease 0.2s;
+}
+
+.sb-bandeja__campo::placeholder {
+  color: color-mix(in srgb, var(--primary) 58%, var(--on-primary));
+}
+
+.is-estrecha .sb-bandeja__txt,
+.is-estrecha .sb-bandeja__campo {
+  opacity: 0;
+  transition-delay: 0s;
+}
+
+/* Sin anillo de foco: el cursor del campo ya marca dónde se está escribiendo
+   y la casilla ancha es en sí misma la acción activa. */
+.sb-bandeja__btn:focus-visible,
+.sb-bandeja__campo:focus-visible {
+  outline: none;
+}
+
+.sidebar__label {
+  padding: 0 10px 6px;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-label);
 }
 
 .sidebar__nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 8px;
+  padding: 22px 8px 0;
 }
 
 .sb-nav {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 9px 10px;
+  min-height: 38px;
+  padding: 0 10px;
   border-radius: var(--radius);
   color: var(--ink-soft);
-  font-size: 14px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1;
   text-align: left;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.sb-nav:first-child {
-  color: var(--ink);
+.sb-nav svg {
+  flex-shrink: 0;
+}
+
+.sb-nav__num {
+  margin-left: auto;
+  font-family: var(--font-text);
+  font-size: 12.5px;
+  color: var(--ink-soft);
 }
 
 .sb-nav:hover {
@@ -129,7 +233,7 @@
 
 .sb-nav.is-active {
   color: var(--ink);
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .sidebar__history {
@@ -144,9 +248,9 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 20px 10px 8px;
-  font-size: 11px;
-  letter-spacing: 0.09em;
+  padding: 22px 10px 6px;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
 }
@@ -186,7 +290,7 @@
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
-  font-size: 13.5px;
+  font-size: 14px;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -315,7 +419,8 @@
   padding: 1px 7px;
   border-radius: var(--radius-chip);
   background: var(--surface-5);
-  font-size: 10.5px;
+  font-family: var(--font-text);
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--ink-muted);
 }
@@ -361,7 +466,6 @@
   display: flex;
   flex-direction: column;
   margin: 10px;
-  --tab-fill: var(--surface-3);
 }
 
 .sidebar__profile {
@@ -371,7 +475,7 @@
   gap: 10px;
   padding: 10px;
   border-radius: var(--radius);
-  background: var(--surface-3);
+  background: var(--surface-2);
 }
 
 .sidebar__avatar {
@@ -431,13 +535,8 @@
    de acento, que es una invitación y no una etiqueta de plan. */
 .sidebar__plan {
   align-self: flex-start;
-  background: var(--accent-soft);
   color: var(--accent);
-  padding: 1px 7px;
-  border-radius: var(--radius-chip);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  font-size: 12.5px;
   text-decoration: none;
   transition: opacity 0.15s ease;
 }
@@ -1353,7 +1452,7 @@
   }
 
   /* 16px es el mínimo que evita que iOS haga zoom al enfocar un control. */
-  .sidebar__search,
+  .sb-bandeja__campo,
   .sb-item__edit,
   .chat-input__text {
     font-size: 16px;
