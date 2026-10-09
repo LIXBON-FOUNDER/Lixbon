@@ -76,6 +76,10 @@ pub struct Task {
     pub merged: bool,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// Commit del checkout de destino (el del padre) cuando se creó la rama de la
+    /// tarea: referencia para detectar si el destino se movió por fuera.
+    #[serde(default)]
+    pub base_commit: Option<String>,
     /// Perfil de autonomía pedido al lanzar (id de `agents::Profile`).
     #[serde(default)]
     pub profile: Option<String>,
@@ -291,6 +295,7 @@ impl State {
             external: t.external,
             merged: false,
             pr_url: None,
+            base_commit: None,
             profile: None,
             ack_unverified: false,
             requested_argv: None,

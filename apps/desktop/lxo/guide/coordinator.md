@@ -128,6 +128,8 @@ Por cada hija terminada con éxito:
 4. Si el usuario prefiere revisión en GitHub, propónselo: publicar el PR (push + `gh pr create`)
    también lo aprueba la persona desde Lixbon. `lxo pr` se rechaza.
 5. No liberes con `lxo release` las ramas que aún no se integraron: se perdería el worktree.
+6. No hagas commits, merges ni resets en tu checkout mientras haya integraciones pendientes: Lixbon
+   comprueba que el destino sigue donde lo dejó y, si se movió por fuera, no integra y avisa a la persona.
 
 ## 5. Cierra la issue, si la hay
 

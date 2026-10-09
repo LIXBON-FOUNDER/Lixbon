@@ -58,26 +58,38 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
     }
     let squash = bool_arg(args, "squash");
     let _one = INTEGRATING.lock().unwrap_or_else(|e| e.into_inner());
-    let (branch, into, title) = {
+    let (branch, into, title, expected) = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
         let t = st.task(&id)?;
         let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que integrar"))?;
         if t.merged {
             // Idempotente: no integra otra vez ni crea otra decisión.
-            let prev = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge"
-                && d.detail_json.as_deref().is_some_and(|j| j.contains("\"outcome\":\"merged\""))).map(|d| d.id);
+            let prev = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge" && outcome_of(d) == "merged").map(|d| d.id);
             return Ok(json!({ "task": id, "outcome": "already_merged", "decision": prev, "branch": branch }));
         }
         let parent = t.parent.as_ref().and_then(|p| st.tasks.get(p)).ok_or("La tarea raíz no se integra en nadie")?;
         if !t.status.is_final() && !bool_arg(args, "force") {
             return Err(format!("{id} aún está en marcha: espera a que entregue o usa force"));
         }
-        (branch, parent.cwd.clone(), t.title.clone())
+        (branch, parent.cwd.clone(), t.title.clone(), expected_target(&st, t, &parent.cwd))
     };
-    let base = git::head(&into);
+    let found = git::head(&into);
+    let mut st_rec = |detail: Value| {
+        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+        st.record_decision(&id, "merge", "human", &detail)
+    };
+    // El destino solo puede haberse movido por orch_integrate: si no, se avisa y no se integra.
+    if let Some(exp) = expected.as_ref().filter(|e| found.as_ref() != Some(*e)) {
+        let detail = json!({ "outcome": "target_moved", "branch": branch, "into": into, "squash": squash,
+            "expected_commit": exp, "found_commit": found });
+        let decision = st_rec(detail);
+        return Ok(json!({ "task": id, "outcome": "target_moved", "decision": decision, "branch": branch, "into": into,
+            "expected_commit": exp, "found_commit": found,
+            "message": "La rama destino cambió fuera de Lixbon (commit, merge o reset manual): revisa el destino antes de integrar. No se integró." }));
+    }
     let res = git::merge(&into, &branch, &format!("lxo: integra {id} · {title}"), squash);
     let result = res.as_ref().ok().and_then(|_| git::head(&into));
-    let (outcome, conflict, output) = match &res {
+    let (outcome, conflicts, message) = match &res {
         Ok(out) => ("merged", Value::Null, out.clone()),
         Err(e) if e.starts_with("Conflictos") => {
             let files: Vec<&str> = e.lines().skip(1).filter(|l| !l.trim().is_empty()).collect();
@@ -87,18 +99,35 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
     };
     let detail = json!({
         "outcome": outcome, "branch": branch, "into": into, "squash": squash,
-        "base_commit": base, "result_commit": result, "conflict": conflict,
+        "base_commit": found, "result_commit": result, "conflicts": conflicts,
+        "base_check": if expected.is_some() { "ok" } else { "sin_referencia" },
     });
-    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-    let decision = st.record_decision(&id, "merge", "human", &detail);
-    match res {
-        Ok(_) => {
-            st.task_mut(&id)?.merged = true;
-            Ok(json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
-                "base_commit": base, "result_commit": result, "output": output }))
-        }
-        Err(e) => Err(format!("{e}\n(decisión #{decision} registrada: {outcome})")),
+    let decision = st_rec(detail);
+    if outcome == "merged" {
+        state.lock().unwrap_or_else(|e| e.into_inner()).task_mut(&id)?.merged = true;
     }
+    Ok(json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
+        "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message }))
+}
+
+fn outcome_of(d: &super::state::Decision) -> String {
+    d.detail_json.as_deref().and_then(|j| serde_json::from_str::<Value>(j).ok())
+        .and_then(|v| v["outcome"].as_str().map(String::from)).unwrap_or_default()
+}
+
+/// Commit en el que debería estar el destino. Criterio: el `result_commit` de la
+/// última integración hecha por `orch_integrate` en ese mismo destino desde que se
+/// creó la tarea; si no hubo ninguna, el commit del destino al crear la tarea
+/// (`base_commit`). `None` (tareas de antes de este cambio): no hay referencia.
+fn expected_target(st: &State, t: &Task, into: &str) -> Option<String> {
+    let last = st.decisions.iter().rev().find_map(|d| {
+        if d.kind != "merge" || d.at < t.created {
+            return None;
+        }
+        let v: Value = serde_json::from_str(d.detail_json.as_deref()?).ok()?;
+        (v["outcome"] == "merged" && v["into"] == into).then(|| v["result_commit"].as_str().map(String::from)).flatten()
+    });
+    last.or_else(|| t.base_commit.clone())
 }
 
 /// Crea el PR (en la app, `git::gh_pr`; en pruebas, un gh simulado).
@@ -199,6 +228,7 @@ mod tests {
         let (_, root) = st.create_run("obj", nt("raíz", None));
         let id = st.add_child(&root, 2, nt("hija", Some("lx/t"))).unwrap();
         st.done(&id, true, "ok", vec![], None).unwrap();
+        st.task_mut(&id).unwrap().base_commit = Some(git(&dir, &["rev-parse", "HEAD"]));
         (Mutex::new(st), id, dir)
     }
 
@@ -245,7 +275,7 @@ mod tests {
         let detail: Value = serde_json::from_str(d.detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(detail["base_commit"], base.as_str());
         assert_eq!(detail["result_commit"], result.as_str());
-        assert!(detail["conflict"].is_null());
+        assert!(detail["conflicts"].is_null());
         // Forma de la tabla decisions, en state.json.
         let v = serde_json::to_value(d).unwrap();
         let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
@@ -281,8 +311,10 @@ mod tests {
     fn conflicto_queda_registrado_sin_integrar() {
         let (st, id, dir) = setup("conflicto", true);
         let base = git(&dir, &["rev-parse", "HEAD"]);
-        let e = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap_err();
-        assert!(e.starts_with("Conflictos") && e.contains("decisión #1"));
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["decision"].as_u64()), (Some("conflict"), Some(1)));
+        assert_eq!(out["conflicts"], json!(["a.txt"]));
+        assert_eq!((out["branch"].as_str(), out["into"].as_str()), (Some("lx/t"), dir.to_str()));
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), base);
         assert_eq!(git(&dir, &["status", "--porcelain"]), "");
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "master\n");
@@ -290,9 +322,69 @@ mod tests {
         assert!(!s.task(&id).unwrap().merged);
         let detail: Value = serde_json::from_str(s.decisions[0].detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(detail["outcome"], "conflict");
-        assert_eq!(detail["conflict"], json!(["a.txt"]));
+        assert_eq!(detail["conflicts"], json!(["a.txt"]));
         assert_eq!(detail["base_commit"], base.as_str());
         assert!(detail["result_commit"].is_null());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn destino_movido_por_fuera_no_integra_y_lo_registra() {
+        let (st, id, dir) = setup("movido", false);
+        let expected = git(&dir, &["rev-parse", "HEAD"]);
+        std::fs::write(dir.join("b.txt"), "manual\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "commit manual en el destino"]);
+        let found = git(&dir, &["rev-parse", "HEAD"]);
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "target_moved");
+        assert_eq!((out["expected_commit"].as_str(), out["found_commit"].as_str()), (Some(expected.as_str()), Some(found.as_str())));
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), found);
+        let s = st.lock().unwrap();
+        assert!(!s.task(&id).unwrap().merged);
+        let d = &s.decisions[0];
+        assert_eq!((d.kind.as_str(), d.actor.as_str()), ("merge", "human"));
+        let detail: Value = serde_json::from_str(d.detail_json.as_deref().unwrap()).unwrap();
+        assert_eq!(detail["outcome"], "target_moved");
+        assert_eq!((detail["expected_commit"].as_str(), detail["found_commit"].as_str()), (Some(expected.as_str()), Some(found.as_str())));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn integrar_dos_hermanas_seguidas_no_es_destino_movido() {
+        // La segunda espera el result_commit de la primera, no su base_commit.
+        let (st, id, dir) = setup("hermanas", false);
+        git(&dir, &["checkout", "-qb", "lx/u", "HEAD"]);
+        std::fs::write(dir.join("c.txt"), "u\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "u"]);
+        git(&dir, &["checkout", "-q", "master"]);
+        let id2 = {
+            let mut s = st.lock().unwrap();
+            let parent = s.task(&id).unwrap().parent.clone().unwrap();
+            let mut nt2 = NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "otra".into(), spec: String::new(),
+                repo: dir.to_string_lossy().into_owned(), cwd: dir.to_string_lossy().into_owned(), branch: Some("lx/u".into()), base: None, worktree: None, external: false };
+            nt2.title = "otra".into();
+            let id2 = s.add_child(&parent, 2, nt2).unwrap();
+            s.done(&id2, true, "ok", vec![], None).unwrap();
+            s.task_mut(&id2).unwrap().base_commit = Some(git(&dir, &["rev-parse", "HEAD"]));
+            s.task_mut(&id2).unwrap().created = 0;
+            id2
+        };
+        assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap()["outcome"], "merged");
+        let out = integrate(&st, true, &json!({ "task": id2, "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "merged", "{out}");
+        assert_eq!(st.lock().unwrap().decisions.len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sin_base_commit_integra_y_lo_anota() {
+        let (st, id, dir) = setup("sinref", false);
+        st.lock().unwrap().task_mut(&id).unwrap().base_commit = None;
+        assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap()["outcome"], "merged");
+        let detail: Value = serde_json::from_str(st.lock().unwrap().decisions[0].detail_json.as_deref().unwrap()).unwrap();
+        assert_eq!(detail["base_check"], "sin_referencia");
         let _ = std::fs::remove_dir_all(dir);
     }
 
