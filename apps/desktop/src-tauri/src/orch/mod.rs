@@ -585,7 +585,7 @@ impl Core {
         let requested_argv: Option<Vec<String>> = args.get("argv").filter(|v| !v.is_null())
             .map(|v| serde_json::from_value(v.clone()).map_err(|_| "argv debe ser una lista de textos".to_string()))
             .transpose()?;
-        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile)?;
+        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile, role.as_deref())?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
         // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
@@ -737,7 +737,8 @@ impl Core {
         // Se lanza exactamente el argv de la política efectiva (la misma que muestra
         // orch_resolve_policy); un perfil bloqueado no arranca.
         let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
-        let policy = agents::resolve_policy(&task.agent, &profile, &task.cwd);
+        // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
+        let policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, true);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         let launch = agents::launch_with(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
         if let Ok(t) = self.lock().task_mut(id) {
@@ -1051,11 +1052,12 @@ pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, row
     terms.get(&task).ok_or("La terminal de esa tarea ya se cerró")?.resize(cols, rows)
 }
 
-/// Política efectiva de un perfil para un proveedor en un worktree: argv exacto,
+/// Política efectiva de un perfil para un proveedor, con el rol de la tarea
+/// (vacío para consultar solo los flags), en un worktree: argv exacto,
 /// versión detectada, advertencias y estado (`ok`, `blocked` o `unverified`).
 #[tauri::command(async)]
-pub fn orch_resolve_policy(provider: String, profile: String, worktree: String) -> agents::Policy {
-    agents::resolve_policy(&provider, &profile, &worktree)
+pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String) -> agents::Policy {
+    agents::resolve_policy(&provider, &profile, &role, &worktree)
 }
 
 #[tauri::command]

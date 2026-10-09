@@ -148,7 +148,6 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
         }
         ("claude", Profile::AutonomiaAmplia) => v(&["--permission-mode", "auto"]),
         ("codex", Profile::Explorar | Profile::Proponer) => {
-            warnings.push("El sandbox read-only de Codex bloquea la red, también 127.0.0.1: lxo no puede hablar con el host (probado en Linux con 0.159.0 y 0.162.1).".into());
             if profile == Profile::Proponer {
                 warnings.push("El parche lo entrega el agente como diff en su salida; el host no comprueba que aplique hasta intentarlo.".into());
             }
@@ -208,6 +207,9 @@ pub enum Status {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Policy {
     pub profile: String,
+    /// Rol de la tarea (explorador, implementador, revisor, escalado, adversario)
+    /// o `null` si se consulta sin rol.
+    pub role: Option<String>,
     pub provider: String,
     /// Binario y flags de permisos, exactamente como se lanzan. Al lanzar solo se
     /// añaden detrás el modelo, el esfuerzo y el prompt.
@@ -251,7 +253,7 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
 }
 
 fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String) -> Policy {
-    Policy { profile: profile.into(), provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason) }
+    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason) }
 }
 
 /// Resuelve la política sin efectos: todo lo de la CLI llega en `detected`.
@@ -273,7 +275,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     if let Some(r) = profile.disabled_reason() {
         return blocked(provider, pid, argv, None, warnings, r.into());
     }
-    let ok = |status, version, reason| Policy { profile: pid.into(), provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason };
+    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
         Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin)),
@@ -299,6 +301,40 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     }
 }
 
+/// Motivo de bloqueo cuando Codex tendría que entregar con `lxo done` desde un
+/// sandbox sin red local.
+pub const CODEX_NO_LXO: &str = "Codex en este sandbox no puede conectarse al host local para entregar con lxo done; ver PR de entrega por archivo";
+
+/// El sandbox de Codex que resulta del argv deja conectar a 127.0.0.1. Probado con
+/// `codex sandbox` (0.159.0 y 0.162.1, Linux): read-only y workspace-write sin
+/// `sandbox_workspace_write.network_access=true` lo bloquean.
+fn codex_allows_local_network(argv: &[String]) -> bool {
+    let sandbox = argv.windows(2).find(|w| w[0] == "--sandbox" || w[0] == "-s").map(|w| w[1].as_str());
+    let net = argv.iter().any(|a| a == "sandbox_workspace_write.network_access=true");
+    match sandbox {
+        Some("workspace-write") => net,
+        _ => false,
+    }
+}
+
+/// Política para una tarea del orquestador. `role` es el rol de la tarea (o
+/// `None`); `delivers` indica que la tarea entrega con `lxo done`, como hacen
+/// hoy todas las hijas, tengan rol o no.
+pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktree: &str, detected: Detected, exec: bool, delivers: bool) -> Policy {
+    let mut p = evaluate(provider, profile, worktree, detected, exec);
+    p.role = role.map(str::to_string);
+    if let Some(r) = role.filter(|r| super::roles::spec(r).is_none()) {
+        p.status = Status::Blocked;
+        p.reason = Some(format!("Rol desconocido: {r}"));
+        return p;
+    }
+    if p.status != Status::Blocked && provider == "codex" && delivers && !codex_allows_local_network(&p.argv) {
+        p.status = Status::Blocked;
+        p.reason = Some(CODEX_NO_LXO.into());
+    }
+    p
+}
+
 static PROBES: Mutex<Option<HashMap<String, (Instant, Option<Probe>)>>> = Mutex::new(None);
 
 /// `--version` y `--help` de la CLI, con caché (se repite tras CACHE_TTL).
@@ -322,17 +358,28 @@ fn probe(bin: &str) -> Option<Probe> {
 }
 
 /// Política efectiva consultando la CLI instalada (TUI, que es como se lanza).
-pub fn resolve_policy(provider: &str, profile: &str, worktree: &str) -> Policy {
+/// Con rol, la tarea entrega con `lxo done`; sin rol (`""`) es una consulta de
+/// los flags y no se exige la entrega.
+pub fn resolve_policy(provider: &str, profile: &str, role: &str, worktree: &str) -> Policy {
+    let role = Some(role.trim()).filter(|r| !r.is_empty());
+    resolve_task_policy(provider, profile, role, worktree, role.is_some())
+}
+
+/// Como `resolve_policy`, indicando si la tarea entrega con `lxo done` (las hijas
+/// del orquestador siempre, tengan rol o no).
+pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, worktree: &str, delivers: bool) -> Policy {
     let Some(prof) = Profile::parse(profile) else {
-        return blocked(provider, profile, vec![], None, vec![], format!(
+        let mut p = blocked(provider, profile, vec![], None, vec![], format!(
             "Perfil desconocido: {profile}. Usa uno de: {}", Profile::ALL.map(|p| p.id()).join(", ")));
+        p.role = role.map(str::to_string);
+        return p;
     };
     let Some(a) = spec(provider) else {
-        return evaluate(provider, prof, worktree, Detected::Skip, false);
+        return evaluate_for(provider, prof, role, worktree, Detected::Skip, false, delivers);
     };
     match probe(a.bin) {
-        Some(p) => evaluate(provider, prof, worktree, Detected::Found(&p), false),
-        None => evaluate(provider, prof, worktree, Detected::Missing, false),
+        Some(p) => evaluate_for(provider, prof, role, worktree, Detected::Found(&p), false, delivers),
+        None => evaluate_for(provider, prof, role, worktree, Detected::Missing, false, delivers),
     }
 }
 
@@ -390,9 +437,10 @@ fn quote(a: &str) -> String {
     if a.contains(' ') { format!("\"{a}\"") } else { a.to_string() }
 }
 
-/// Valida y arma el lanzamiento sin consultar la CLI (perfil sin verificar).
-pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &str, profile: Profile) -> Result<Launch, String> {
-    let policy = evaluate(agent, profile, ".", Detected::Skip, false);
+/// Valida y arma el lanzamiento de una hija del orquestador sin consultar la CLI
+/// (perfil sin verificar). Las hijas entregan con `lxo done`.
+pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &str, profile: Profile, role: Option<&str>) -> Result<Launch, String> {
+    let policy = evaluate_for(agent, profile, role, ".", Detected::Skip, false, true);
     launch_with(&policy, model, effort, prompt)
 }
 
@@ -628,18 +676,19 @@ mod tests {
 
     #[test]
     fn lanzadores_con_perfil_y_modelo() {
-        let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea", Profile::DelegarConRevision).unwrap();
+        let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea", Profile::DelegarConRevision, None).unwrap();
         assert_eq!(l.command, r#"claude --permission-mode acceptEdits --model opus --effort high "Lee la tarea""#);
-        assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x", Profile::Explorar).is_err());
-        let l = launch("codex", Some("gpt-5.5"), Some("high"), "x", Profile::Explorar).unwrap();
+        assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x", Profile::Explorar, None).is_err());
+        let l = launch_with(&evaluate("codex", Profile::Explorar, ".", Detected::Skip, false), Some("gpt-5.5"), Some("high"), "x").unwrap();
         assert_eq!(l.command, r#"codex --sandbox read-only --ask-for-approval never --model gpt-5.5 -c model_reasoning_effort=high "x""#);
-        assert!(launch("claude", Some("opus & del"), None, "x", Profile::Explorar).is_err());
-        assert!(launch("gemini", None, None, "x", Profile::Explorar).is_err());
+        assert!(launch("claude", Some("opus & del"), None, "x", Profile::Explorar, None).is_err());
+        assert!(launch("gemini", None, None, "x", Profile::Explorar, None).is_err());
+        assert!(launch("codex", None, None, "x", Profile::DelegarConRevision, None).is_err());
     }
 
     #[test]
     fn explorar_en_claude_sin_herramientas_de_edicion() {
-        let l = launch("claude", Some("haiku"), None, "Lee", Profile::Explorar).unwrap();
+        let l = launch("claude", Some("haiku"), None, "Lee", Profile::Explorar, Some("explorador")).unwrap();
         assert_eq!(l.command, r#"claude --disallowedTools Edit Write NotebookEdit --allowedTools "Bash(lxo *)" --permission-mode plan --model haiku "Lee""#);
     }
 
@@ -672,7 +721,7 @@ mod tests {
                     }
                 }
                 if prof != Profile::AutonomiaAmplia {
-                    let l = launch(prov, None, None, "x", prof).unwrap();
+                    let l = launch_with(&evaluate(prov, prof, "wt", Detected::Skip, false), None, None, "x").unwrap();
                     assert!(BYPASS.iter().all(|f| !l.command.contains(f)), "{}", l.command);
                 }
             }
@@ -715,21 +764,26 @@ mod tests {
             assert_eq!(p.status, Status::Blocked);
             assert_eq!(p.reason.as_deref(), Some(DEFERRED));
             assert!(!p.argv.is_empty());
-            assert!(launch(prov, None, None, "x", Profile::AutonomiaAmplia).is_err());
+            assert!(launch(prov, None, None, "x", Profile::AutonomiaAmplia, None).is_err());
         }
-        assert_eq!(resolve_policy("claude", "autonomia_amplia", "wt").reason.as_deref(), Some(DEFERRED));
+        assert_eq!(resolve_policy("claude", "autonomia_amplia", "", "wt").reason.as_deref(), Some(DEFERRED));
     }
 
     #[test]
     fn forma_de_la_politica() {
         assert_eq!(Profile::parse("Delegar con revisión"), Some(Profile::DelegarConRevision));
         assert_eq!(Profile::parse("explorar"), Some(Profile::Explorar));
-        assert_eq!(resolve_policy("codex", "turbo", "wt").status, Status::Blocked);
+        assert_eq!(resolve_policy("codex", "turbo", "revisor", "wt").status, Status::Blocked);
         let p = evaluate("codex", Profile::Explorar, "wt", Detected::Skip, false);
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["status"], "unverified");
         assert_eq!(v["profile"], "explorar");
-        for k in ["profile", "provider", "argv", "cli_version", "warnings", "status", "reason"] {
+        assert!(v["role"].is_null());
+        let p = evaluate_for("claude", Profile::Explorar, Some("revisor"), "wt", Detected::Skip, false, true);
+        assert_eq!(serde_json::to_value(&p).unwrap()["role"], "revisor");
+        assert_eq!(resolve_policy("codex", "turbo", "revisor", "wt").role.as_deref(), Some("revisor"));
+        assert_eq!(evaluate_for("claude", Profile::Explorar, Some("planner"), "wt", Detected::Skip, false, true).status, Status::Blocked);
+        for k in ["profile", "role", "provider", "argv", "cli_version", "warnings", "status", "reason"] {
             assert!(v.get(k).is_some(), "falta {k}");
         }
         assert_eq!(parse_version("codex-cli 0.159.0\n").as_deref(), Some("0.159.0"));
@@ -804,6 +858,37 @@ mod tests {
         let sin = CLAUDE_HELP.replace("--allowedTools", "--x");
         let p = evaluate("claude", Profile::Explorar, "wt", Detected::Found(&probe("2.1.296", &sin)), false);
         assert_eq!(p.reason.as_deref(), Some("Claude Code 2.1.296 no admite: --allowedTools"));
+    }
+
+    #[test]
+    fn codex_bloqueado_por_rol_que_entrega_con_lxo() {
+        let found = probe("0.162.1", CODEX_HELP);
+        for (prof, role) in [(Profile::Explorar, "explorador"), (Profile::Explorar, "revisor"), (Profile::Proponer, "adversario"),
+            (Profile::DelegarConRevision, "implementador"), (Profile::DelegarConRevision, "escalado")] {
+            let p = evaluate_for("codex", prof, Some(role), "wt", Detected::Found(&found), false, true);
+            assert_eq!(p.status, Status::Blocked, "{prof:?} {role}");
+            assert_eq!(p.reason.as_deref(), Some(CODEX_NO_LXO));
+            assert!(authorize(&p, None, true).is_err());
+        }
+        // Una hija sin rol también entrega con lxo done.
+        assert!(launch("codex", None, None, "x", Profile::Explorar, None).err().unwrap().contains("lxo done"));
+        // Consulta sin rol ni entrega: los flags siguen valiendo.
+        let p = evaluate_for("codex", Profile::Explorar, None, "wt", Detected::Found(&found), false, false);
+        assert_eq!(p.status, Status::Ok);
+        // Solo workspace-write con red local permitiría entregar.
+        let con_red: Vec<String> = ["codex", "--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"].map(String::from).to_vec();
+        assert!(codex_allows_local_network(&con_red));
+        assert!(!codex_allows_local_network(&con_red[..3]));
+        assert!(!codex_allows_local_network(&["codex".into(), "--sandbox".into(), "read-only".into()]));
+    }
+
+    #[test]
+    fn claude_no_se_bloquea_por_rol() {
+        let found = probe("2.1.296", CLAUDE_HELP);
+        for (prof, role) in [(Profile::Explorar, "revisor"), (Profile::Proponer, "adversario"), (Profile::DelegarConRevision, "implementador")] {
+            let p = evaluate_for("claude", prof, Some(role), "wt", Detected::Found(&found), false, true);
+            assert_eq!((p.status, p.reason), (Status::Ok, None), "{prof:?} {role}");
+        }
     }
 
     #[test]
