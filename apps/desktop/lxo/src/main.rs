@@ -34,6 +34,8 @@ Tarea hija:
   lxo check
   lxo done --report <informe.md> --summary \"...\" [--failed] [--files a,b]
   lxo done --report - --summary \"...\" <<'EOF' … EOF   (solo lectura: informe por stdin)
+  lxo report --summary \"...\" [--report <informe.md>|-] [--failed] [--files a,b] [--stdout]
+                                   entrega sin red (sandbox de Codex): report.json o bloque por stdout
 
 Issues de Lixbon Team (con la cuenta del IDE):
   lxo issue ver <CLAVE>                            título, estado, descripción, subtareas y comentarios
@@ -289,6 +291,7 @@ fn human(cmd: &str, data: &Value) -> String {
         "pr" => format!("PR abierto: {}", data["url"].as_str().unwrap_or("")),
         "ask" => format!("Respuesta: {}", data["answer"].as_str().unwrap_or("")),
         "phase" => format!("Fase «{}» registrada.", data["phase"].as_str().unwrap_or("")),
+        "report" => data.as_str().unwrap_or("").to_string(),
         "done" => format!("Tarea cerrada e informe entregado ({}). No empieces trabajo nuevo: tu coordinador ya está avisado.", data["report"].as_str().unwrap_or("")),
         "reply" => format!("Respuesta enviada (#{}).", data["reply"]),
         "send" => format!("Mensaje enviado (#{}). La hija lo leerá en su próximo lxo check.", data["message"]),
@@ -460,6 +463,39 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             let name = need(sub(1).or_else(|| a.s("name")), "el nombre de la fase")?;
             ("phase", call("phase", json!({ "name": name, "done": a.b("done"), "note": a.s("note") }), me)?)
         }
+        "report" => {
+            let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
+            let summary = need(a.s("summary"), "--summary con una frase")?;
+            let report = match a.s("report").as_deref() {
+                Some("-") => {
+                    let mut t = String::new();
+                    std::io::stdin().read_to_string(&mut t).map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
+                    Some(t)
+                }
+                Some(p) if !p.is_empty() => Some(std::fs::read_to_string(p).map_err(|e| format!("No se pudo leer {p}: {e}"))?),
+                _ => None,
+            };
+            let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+            let task = env("LXO_TASK_ID").ok_or("Falta LXO_TASK_ID: lxo report solo funciona dentro de una tarea del orquestador")?;
+            let nonce = env("LXO_REPORT_NONCE").ok_or("Falta LXO_REPORT_NONCE: esta tarea no tiene activa la entrega por archivo; usa lxo done")?;
+            let attempt: u64 = env("LXO_REPORT_ATTEMPT").and_then(|v| v.parse().ok()).unwrap_or(1);
+            let created = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            let body = report_json(&task, attempt, !a.b("failed"), &summary, &files, report.as_deref(), &nonce, created);
+            let mut why = String::new();
+            if !a.b("stdout") {
+                match env("LXO_REPORT_PATH") {
+                    Some(path) => match write_atomic(std::path::Path::new(&path), body.as_bytes()) {
+                        Ok(()) => return Ok(("report".into(), Value::String(format!(
+                            "Informe escrito en {path}. Tu coordinador lo recibe solo; no empieces trabajo nuevo.")))),
+                        Err(e) => why = format!("No se pudo escribir report.json ({e}): "),
+                    },
+                    None => why = "Sin LXO_REPORT_PATH: ".into(),
+                }
+            }
+            return Ok(("report".into(), Value::String(format!(
+                "{why}entrega por la salida. Copia el bloque siguiente TAL CUAL, completo y sin cambiar nada, como última parte de tu respuesta final:\n\n{}",
+                marker_block(&body, &nonce)))));
+        }
         "done" => {
             let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
             let mut report = a.s("report").unwrap_or_default();
@@ -536,6 +572,44 @@ fn run(a: &Args) -> Result<(String, Value), String> {
     Ok((out.0.to_string(), out.1))
 }
 
+/// JSON del contrato de entrega por archivo (schema 1).
+#[allow(clippy::too_many_arguments)]
+fn report_json(task: &str, attempt: u64, ok: bool, summary: &str, files: &[String], report: Option<&str>, nonce: &str, created: u64) -> String {
+    let mut v = json!({
+        "schema": 1, "task": task, "attempt": attempt, "status": if ok { "done" } else { "failed" },
+        "summary": summary, "files": files, "nonce": nonce, "created": created,
+    });
+    if let Some(r) = report.filter(|r| !r.trim().is_empty()) {
+        v["report"] = Value::String(r.to_string());
+    }
+    v.to_string()
+}
+
+/// Bloque con marcadores para la salida: JSON en base64 (líneas de 76) y su sha256.
+fn marker_block(json: &str, nonce: &str) -> String {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(json.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
+    let lines: Vec<&str> = b64.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap_or("")).collect();
+    format!("<<<LXO-REPORT v1 nonce={nonce} sha256={hash}>>>\n{}\n<<<LXO-REPORT-END nonce={nonce}>>>", lines.join("\n"))
+}
+
+/// Escribe `.tmp` y lo renombra; reintenta el rename ~2 s (Windows: archivo abierto).
+fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    let mut last = String::new();
+    for _ in 0..20 {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = e.to_string(),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err(last)
+}
+
 fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
     // `lxo ask --resume <id>` reanuda la espera de una pregunta ya enviada.
@@ -592,6 +666,28 @@ mod tests {
         assert_eq!(a.s("report").as_deref(), Some("-"));
         let a = p(&["spawn", "--role", "explorador", "--task", "x"]);
         assert_eq!(a.s("role").as_deref(), Some("explorador"));
+    }
+
+    #[test]
+    fn informe_por_archivo_y_marcadores() {
+        use base64::Engine;
+        let j = report_json("t3", 1, true, "ok", &["a.rs".into()], Some("# t3"), "n1", 5);
+        let v: Value = serde_json::from_str(&j).unwrap();
+        assert_eq!((v["schema"].as_u64(), v["task"].as_str(), v["status"].as_str(), v["nonce"].as_str()), (Some(1), Some("t3"), Some("done"), Some("n1")));
+        let b = marker_block(&j, "n1");
+        let lines: Vec<&str> = b.lines().collect();
+        assert!(lines[0].starts_with("<<<LXO-REPORT v1 nonce=n1 sha256=") && lines[0].ends_with(">>>"));
+        assert_eq!(*lines.last().unwrap(), "<<<LXO-REPORT-END nonce=n1>>>");
+        assert!(lines[1..lines.len() - 1].iter().all(|l| l.len() <= 76));
+        let payload: String = lines[1..lines.len() - 1].concat();
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), j.as_bytes());
+        let dir = std::env::temp_dir().join(format!("lxo-report-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("report.json");
+        write_atomic(&path, j.as_bytes()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), j);
+        assert!(!dir.join("report.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

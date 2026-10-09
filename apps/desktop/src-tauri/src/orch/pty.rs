@@ -90,7 +90,7 @@ fn write_script(dir: &Path, command: &str) -> Result<(String, Vec<String>), Stri
 }
 
 /// Texto visible sin secuencias de escape, para reconocer los diálogos.
-fn plain(text: &str) -> String {
+pub(crate) fn plain(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -347,7 +347,7 @@ mod real {
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::process::Command::new("git").arg("init").arg("-q").current_dir(&dir).status();
         let prompt = "Crea un archivo llamado hola.txt que contenga la palabra hola. No hagas nada mas.";
-        let l = crate::orch::agents::launch(agent, model, None, prompt, false).unwrap();
+        let l = crate::orch::agents::launch(agent, model, None, prompt, crate::orch::agents::Profile::DelegarConRevision, None).unwrap();
         let screen = Arc::new(Mutex::new(String::new()));
         let sc = screen.clone();
         let mut term = super::spawn(

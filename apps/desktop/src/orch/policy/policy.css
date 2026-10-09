@@ -1,0 +1,15 @@
+.policy { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.policy__title { margin: 0; font-size: 13px; }
+.policy__pickers { display: flex; gap: 16px; flex-wrap: wrap; }
+.policy__group { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border, #333); border-radius: 6px; padding: 6px 10px; }
+.policy__group label.is-disabled { opacity: .55; }
+.policy__muted { opacity: .7; font-size: 12px; }
+.policy__details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
+.policy__details dd { margin: 0; overflow-wrap: anywhere; }
+.policy__status--ok { color: var(--ok, #3fb950); }
+.policy__status--blocked { color: var(--danger, #f85149); }
+.policy__status--unverified { color: var(--warn, #d29922); }
+.policy__warnings { margin: 0; padding-left: 16px; }
+.policy__error { color: var(--danger, #f85149); }
+.policy__launch { align-self: flex-start; }
+.policy__ack { display: flex; gap: 6px; align-items: center; margin-top: 4px; color: inherit; }

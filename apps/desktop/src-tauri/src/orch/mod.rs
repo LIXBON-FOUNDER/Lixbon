@@ -5,6 +5,7 @@
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
 mod agents;
+mod delivery;
 mod git;
 mod issues;
 mod pty;
@@ -576,7 +577,16 @@ impl Core {
             }
         };
         // Se valida antes de crear nada: un agente o modelo mal escrito no deja restos.
-        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", read_only)?;
+        // Perfil pedido (por defecto el del rol); se re-resuelve en el host al lanzar.
+        let profile = match Some(s(args, "profile")).filter(|p| !p.is_empty()) {
+            Some(p) => agents::Profile::parse(&p).ok_or_else(|| format!("Perfil desconocido: {p}"))?,
+            None => agents::Profile::for_role(read_only),
+        };
+        let ack_unverified = b(args, "ack_unverified");
+        let requested_argv: Option<Vec<String>> = args.get("argv").filter(|v| !v.is_null())
+            .map(|v| serde_json::from_value(v.clone()).map_err(|_| "argv debe ser una lista de textos".to_string()))
+            .transpose()?;
+        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile, role.as_deref())?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
         // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
@@ -589,6 +599,10 @@ impl Core {
                 agent: agent.clone(), model: model.clone(), effort: effort.clone(), role: role.clone(), title: title.clone(), spec: spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
             })?;
+            let t = st.task_mut(&id)?;
+            t.profile = Some(profile.id().to_string());
+            t.ack_unverified = ack_unverified;
+            t.requested_argv = requested_argv;
             (id, parent)
         };
 
@@ -648,13 +662,16 @@ impl Core {
             let mut st = self.lock();
             st.reopen(&id, &spec)?;
             let t = st.task(&id)?.clone();
+            // n = 1 hasta que haya intentos: se borra lo del intento anterior para no
+            // recogerlo otra vez (lo que siga en la terminal lo descarta su idem_key).
+            let _ = delivery::prepare(&t.cwd, &id, delivery::ATTEMPT);
             self.commit(&st, &[]);
             t
         };
         let file = Path::new(&task.cwd).join(".lixbon").join("tasks").join(format!("{id}.md"));
         let _ = std::fs::OpenOptions::new().append(true).open(&file).and_then(|mut f| {
             use std::io::Write;
-            writeln!(f, "\n## Seguimiento del coordinador\n\n{spec}\n\nAl terminar, escribe un informe nuevo y vuelve a cerrar con lxo done --report.")
+            writeln!(f, "\n## Seguimiento del coordinador\n\n{spec}\n\nAl terminar, escribe un informe nuevo y vuelve a cerrar con lxo done --report (sin red: lxo report).")
         });
         if let Ok(terms) = self.terms.lock() {
             if let Some(t) = terms.get(&id) {
@@ -688,20 +705,7 @@ impl Core {
             let full = if p.is_absolute() { p.to_path_buf() } else { Path::new(&task.cwd).join(p) };
             std::fs::read_to_string(&full).map_err(|e| format!("No se pudo leer el informe {}: {e}", full.display()))?
         };
-        let dir = Path::new(&coordinator.cwd).join(".lixbon").join("informes").join(&task.run);
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        git::exclude_lixbon_dir(&coordinator.cwd);
-        let dest = dir.join(format!("{}-{}.md", task.id, state::slug(&task.title, 40)));
-        let header = format!(
-            "<!-- Tarea {} · {}{}{} · {} -->\n\n",
-            task.id,
-            task.role.as_deref().map(|r| format!("{r} · ")).unwrap_or_default(),
-            task.agent,
-            task.model.as_deref().map(|m| format!(" ({m})")).unwrap_or_default(),
-            task.branch.as_deref().map(|b| format!("rama {b}")).unwrap_or_else(|| "carpeta compartida".into())
-        );
-        std::fs::write(&dest, format!("{header}{text}")).map_err(|e| e.to_string())?;
-        Ok(dest.to_string_lossy().into_owned())
+        delivery::write_report(&coordinator, &task, &text)
     }
 
     fn launch(self: &Arc<Self>, id: &str) -> Result<(), String> {
@@ -715,13 +719,34 @@ impl Core {
         };
         let dir = Path::new(&task.cwd).join(".lixbon").join("tasks");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        // Entrega sin red (contrato de informe por archivo): carpeta del intento
+        // limpia y nonce nuevo, antes de lanzar.
+        let report_path = delivery::prepare(&task.cwd, id, delivery::ATTEMPT)?;
+        let nonce = random_token();
+        {
+            let mut st = self.lock();
+            let t = st.task_mut(id)?;
+            t.report_nonce = Some(nonce.clone());
+            t.delivered.clear();
+        }
+        let mut task = task;
+        task.report_nonce = Some(nonce.clone());
         std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
             .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
         git::exclude_lixbon_dir(&task.cwd);
 
         let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
         let read_only = task.role.as_deref().and_then(roles::spec).is_some_and(|r| r.read_only);
-        let launch = agents::launch(&task.agent, task.model.as_deref(), task.effort.as_deref(), &prompt, read_only)?;
+        // Se lanza exactamente el argv de la política efectiva (la misma que muestra
+        // orch_resolve_policy); un perfil bloqueado no arranca.
+        let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
+        // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
+        let policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
+        let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
+        let launch = agents::launch_with(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
+        if let Ok(t) = self.lock().task_mut(id) {
+            t.policy = Some(record);
+        }
 
         let lxo = lxo_path();
         let mut path = lxo.parent().map(|p| p.as_os_str().to_owned()).unwrap_or_default();
@@ -735,6 +760,9 @@ impl Core {
             ("LXO_RUN_ID".to_string(), task.run.clone()),
             ("LXO_BIN".to_string(), lxo.to_string_lossy().into_owned()),
             ("PATH".to_string(), path.to_string_lossy().into_owned()),
+            ("LXO_REPORT_PATH".to_string(), report_path.to_string_lossy().into_owned()),
+            ("LXO_REPORT_NONCE".to_string(), nonce),
+            ("LXO_REPORT_ATTEMPT".to_string(), delivery::ATTEMPT.to_string()),
         ]);
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
@@ -751,15 +779,60 @@ impl Core {
             },
         )?;
         self.terms.lock().map_err(|_| "Estado interno corrupto")?.insert(id.to_string(), term);
+        // Sondeo del report.json y de la salida mientras la terminal siga abierta.
+        let weak = Arc::downgrade(self);
+        let tid = id.to_string();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let Some(core) = weak.upgrade() else { break };
+            let Some(text) = core.term_text(&tid) else { break };
+            core.collect(&tid, Some(text), false);
+        });
         Ok(())
     }
 
-    fn on_exit(&self, id: &str) {
-        if let Ok(mut terms) = self.terms.lock() {
-            terms.remove(id);
+    fn term_text(&self, id: &str) -> Option<String> {
+        let terms = self.terms.lock().ok()?;
+        let b = terms.get(id)?.buffer.lock().ok()?;
+        Some(String::from_utf8_lossy(&b).into_owned())
+    }
+
+    /// Recoge el informe por archivo o por marcadores (orch/delivery.rs) y lo
+    /// entrega como un `lxo done`. Al salir el proceso cierra la tarea si falta.
+    fn collect(&self, id: &str, terminal: Option<String>, at_exit: bool) {
+        let (expect, cwd, delivered, is_final) = {
+            let st = self.lock();
+            let Ok(t) = st.task(id) else { return };
+            (delivery::Expect::of(t), t.cwd.clone(), t.delivered.clone(), t.status.is_final())
+        };
+        if is_final {
+            return;
         }
+        let found = match &expect {
+            Some(ex) => {
+                let file = delivery::read_report_file(&delivery::report_path(&cwd, id, ex.attempt));
+                delivery::find(file.as_deref(), terminal.as_deref(), ex, &delivered)
+            }
+            None => delivery::Found::Nothing,
+        };
         let mut st = self.lock();
-        if let Ok(Some(msg)) = st.close(id, Status::Exited, "el agente se cerró sin avisar con lxo done") {
+        match delivery::apply(&mut st, id, found, at_exit) {
+            Ok(msgs) => self.commit(&st, &msgs),
+            Err(e) if at_exit => {
+                let msg = st.close(id, Status::Failed, &format!("informe inválido: {e}")).ok().flatten();
+                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn on_exit(&self, id: &str) {
+        let terminal = self.terms.lock().ok()
+            .and_then(|mut t| t.remove(id))
+            .and_then(|t| t.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned()));
+        self.collect(id, terminal, true);
+        let mut st = self.lock();
+        if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
             self.commit(&st, &[msg]);
         } else {
             self.commit(&st, &[]);
@@ -969,11 +1042,24 @@ Objetivo general: {objective}\n\n\
 2. Informa de tus fases: `lxo phase \"<nombre>\" --start` y `lxo phase \"<nombre>\" --done --note \"<resultado>\"`.\n\
 3. Si solo tu coordinador puede decidir algo: `lxo ask \"<pregunta>\"` y espera. Nunca abras preguntas interactivas.\n\
 4. En cada punto de control ejecuta `lxo check` por si tu coordinador te mandó instrucciones.\n\
-5. Al acabar: {deliver} Si no se pudo completar, añade `--failed`. Después no hagas nada más.\n",
+5. Al acabar: {deliver} Si no se pudo completar, añade `--failed`. Después no hagas nada más.\n{offline}",
+        offline = offline_rule(t),
         id = t.id,
         title = t.title,
         run = t.run,
         spec = t.spec,
+    )
+}
+
+/// Regla de entrega sin red para la ficha de la tarea (contrato de informe por archivo).
+fn offline_rule(t: &Task) -> String {
+    let Some(nonce) = &t.report_nonce else { return String::new() };
+    format!(
+        "6. **Sin red** (sandbox de Codex: `lxo` no conecta con el host): no reintentes `lxo done`; entrega con \
+`lxo report --summary \"<una frase>\" --report <informe.md o ->` (mismas opciones `--failed` y `--files`). \
+Si puede escribir, deja `{path}` y basta. Si no puede, imprime un bloque `<<<LXO-REPORT v1 nonce={nonce} …>>>`: \
+cópialo **tal cual y completo** al final de tu respuesta. Fases, preguntas y `lxo check` no llegan sin red: sigue sin ellos.\n",
+        path = delivery::report_path(&t.cwd, &t.id, delivery::ATTEMPT).display(),
     )
 }
 
@@ -1028,6 +1114,14 @@ pub fn orch_term_write(orch: TauriState<'_, Orch>, task: String, data: String) -
 pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, rows: u16) -> Result<(), String> {
     let terms = orch.0.terms.lock().map_err(|_| "Estado interno corrupto")?;
     terms.get(&task).ok_or("La terminal de esa tarea ya se cerró")?.resize(cols, rows)
+}
+
+/// Política efectiva de un perfil para un proveedor, con el rol de la tarea
+/// (vacío para consultar solo los flags), en un worktree: argv exacto,
+/// versión detectada, advertencias y estado (`ok`, `blocked` o `unverified`).
+#[tauri::command(async)]
+pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String) -> agents::Policy {
+    agents::resolve_policy(&provider, &profile, &role, &worktree)
 }
 
 #[tauri::command]
