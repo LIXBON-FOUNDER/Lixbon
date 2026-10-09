@@ -75,7 +75,7 @@ func TestRemoteCommandsStreamsAndCancelClosesIt(t *testing.T) {
 		close(closed)
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := c.RemoteCommands(ctx, "r1")
+	stream, err := c.RemoteCommands(ctx, "r1", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestRemoteRefusesAGenericProvider(t *testing.T) {
 	if _, err := c.RemoteQR(ctx, "x"); err == nil {
 		t.Error("qr")
 	}
-	if _, err := c.RemoteCommands(ctx, "r1"); err == nil {
+	if _, err := c.RemoteCommands(ctx, "r1", 0); err == nil {
 		t.Error("commands")
 	}
 }
