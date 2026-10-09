@@ -182,6 +182,7 @@ export const initialRemoteState = {
   activity: null, // 'compacting' mientras Claude Code compacta
   hostConnected: false,
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
+  background: [], // tareas que el agente dejó corriendo: [{ id, type, description, since }]
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
   // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
   orch: null,
@@ -206,8 +207,19 @@ function mapSnapshotMessages(messages) {
     else if (m.role === 'tool') {
       items.push(withKey({ kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: !!m.pending }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
+    else if (m.role === 'command') items.push(commandItem(m));
   }
   return items;
+}
+
+function commandItem(ev) {
+  return withKey({
+    kind: 'command',
+    name: ev.name || '',
+    args: ev.args || '',
+    rows: Array.isArray(ev.rows) ? ev.rows : [],
+    text: ev.text || '',
+  });
 }
 
 function closeOpenAssistant(items, finalText, keepIfEmpty = false) {
@@ -346,11 +358,15 @@ export function remoteReducer(state, ev) {
       // Respuesta del host a un slash-command: no es del modelo, así que se
       // pinta como una nota del sistema y no como una burbuja del asistente.
       return { ...s, items: [...closeOpenAssistant(s.items), withKey({ kind: 'notice', text: ev.text || '' })] };
+    case 'background':
+      return { ...s, background: Array.isArray(ev.tasks) ? ev.tasks : [] };
+    case 'command_result':
+      return { ...s, items: [...closeOpenAssistant(s.items), commandItem(ev)] };
     case 'error':
       return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':
     case 'session_ended':
-      return { ...s, ended: true, hostConnected: false, approvals: [] };
+      return { ...s, ended: true, hostConnected: false, approvals: [], background: [] };
     default:
       return s;
   }

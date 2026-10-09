@@ -422,6 +422,8 @@ function RemoteSessionView({ session, onBack }) {
         </View>
       )}
 
+      {!state.ended && !thinking && state.background.length > 0 && <WaitingStrip tasks={state.background} agent={agent} />}
+
       {state.approvals.map((a) => (
         <ApprovalCard key={a.id} approval={a} onDecide={approve} />
       ))}
@@ -434,6 +436,7 @@ function RemoteSessionView({ session, onBack }) {
           onSend={() => sendPrompt()}
           onInterrupt={interrupt}
           onCommands={openCommands}
+          onRunCommand={(text) => sendPrompt(text)}
           commands={commands}
           thinking={thinking}
           disabled={!state.hostConnected}
@@ -456,6 +459,7 @@ function SessionHeader({ session, state, link, agent, onBack, onOptions }) {
   const a = agentStyle(agent, c);
   const meta = state.meta || {};
   const working = state.agentState === 'thinking';
+  const waiting = !working && state.background.length > 0;
   // Una reconexión de un par de segundos no se anuncia: solo si se alarga.
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -472,7 +476,7 @@ function SessionHeader({ session, state, link, agent, onBack, onOptions }) {
       ? 'Reconectando…'
       : !state.hostConnected
         ? `${a.label} · host sin conexión`
-        : `${a.label} · ${working ? 'trabajando' : 'en vivo'}`;
+        : `${a.label} · ${working ? 'trabajando' : waiting ? 'esperando' : 'en vivo'}`;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 8, height: insets.top + 64 }}>
       <IconButton onPress={onBack} label="Volver a las sesiones">
@@ -483,7 +487,7 @@ function SessionHeader({ session, state, link, agent, onBack, onOptions }) {
           {meta.title || session.title || 'Sesión remota'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {!state.ended && !slow && state.hostConnected && (working ? <LiveDot size={6} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent }} />)}
+          {!state.ended && !slow && state.hostConnected && (working || waiting ? <LiveDot size={6} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent }} />)}
           <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
             {status}
           </Text>
@@ -526,6 +530,7 @@ function TranscriptRow({ item, agent, waitingTool, busy }) {
   const mdRules = useMemo(() => markdownRules(c, t, () => toast('Código copiado', { icon: 'check' })), [c, t, toast]);
   if (item.kind === 'user') return <UserRow item={item} busy={busy} />;
   if (item.kind === 'tools') return <ToolCard items={item.items} waitingTool={waitingTool} />;
+  if (item.kind === 'command') return <CommandCard item={item} agent={agent} />;
   if (item.kind === 'notice') {
     // Respuesta del host a un comando: monoespaciada, para que se lea como
     // salida del equipo y no como algo que dijo el modelo.
@@ -555,6 +560,81 @@ function TranscriptRow({ item, agent, waitingTool, busy }) {
       ) : item.open ? (
         <ShimmerText text={`${agentStyle(agent, c).label} está pensando…`} style={{ fontFamily: FONTS.uiMedium, fontSize: 15 }} />
       ) : null}
+    </FadeUp>
+  );
+}
+
+const TASK_LABEL = { local_bash: 'comando', local_agent: 'subagente', remote_agent: 'agente remoto' };
+
+const elapsed = (ms) => {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  return sec < 60 ? `${sec} s` : `${Math.floor(sec / 60)} min`;
+};
+
+// El turno terminó pero el agente dejó algo corriendo y retomará solo cuando
+// acabe: sin esto la sesión parecía parada.
+function WaitingStrip({ tasks, agent }) {
+  const c = useColors();
+  const a = agentStyle(agent, c);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <FadeUp style={{ marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: RADIUS, backgroundColor: a.soft, gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <LiveDot size={6} color={a.dot} />
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 13.5, color: a.ink }}>
+          {tasks.length === 1 ? 'Esperando a una tarea en segundo plano' : `Esperando a ${tasks.length} tareas en segundo plano`}
+        </Text>
+      </View>
+      {tasks.map((t) => (
+        <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: a.ink }}>{TASK_LABEL[t.type] || 'tarea'}</Text>
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkBody }}>{t.description || t.id}</Text>
+          {!!t.since && <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkMuted }}>{elapsed(now - t.since)}</Text>}
+        </View>
+      ))}
+    </FadeUp>
+  );
+}
+
+const TONE_COLOR = { ok: 'good', wait: 'accent', warn: 'accentDeep', bad: 'danger' };
+const COMMAND_ROWS = 12;
+
+// Resultado de un «/» del IDE (/status, /cost, /doctor…): allí es una tarjeta
+// con controles, aquí llega resumido en filas o como texto de Claude Code.
+function CommandCard({ item, agent }) {
+  const c = useColors();
+  const { s } = useScale();
+  const a = agentStyle(agent, c);
+  const [expanded, setExpanded] = useState(false);
+  const rows = expanded ? item.rows : item.rows.slice(0, COMMAND_ROWS);
+  return (
+    <FadeUp style={{ marginVertical: s(9), borderRadius: RADIUS, backgroundColor: c.surface1, overflow: 'hidden' }}>
+      <Text numberOfLines={1} style={{ paddingHorizontal: 12, paddingTop: 10, fontFamily: FONTS.monoMedium, fontSize: 12.5, color: a.ink }}>
+        /{item.name}
+        {!!item.args && <Text style={{ fontFamily: FONTS.mono, color: c.inkMuted }}>{`  ${item.args}`}</Text>}
+      </Text>
+      {rows.map((r, i) => (
+        <View key={i} style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 12, paddingTop: 8 }}>
+          <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 7, backgroundColor: c[TONE_COLOR[r.tone]] || c.inkFaint }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.ink }}>{r.label}</Text>
+            {!!r.detail && <Text selectable style={{ fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkMuted }}>{r.detail}</Text>}
+          </View>
+        </View>
+      ))}
+      {item.rows.length > COMMAND_ROWS && (
+        <Pressable onPress={() => setExpanded((v) => !v)} style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : `Ver ${item.rows.length - COMMAND_ROWS} más`}</Text>
+        </Pressable>
+      )}
+      {!!item.text && (
+        <Text selectable style={{ paddingHorizontal: 12, paddingTop: 8, fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>{item.text}</Text>
+      )}
+      <View style={{ height: 12 }} />
     </FadeUp>
   );
 }
@@ -778,6 +858,7 @@ function RemoteComposer({
   onSend,
   onInterrupt,
   onCommands,
+  onRunCommand,
   commands,
   thinking,
   disabled,
@@ -821,7 +902,7 @@ function RemoteComposer({
       {slashMatches.length > 0 && (
         <SuggestionBox>
           {slashMatches.map((cmd) => (
-            <SuggestionRow key={`${cmd.group || ''}${cmd.name}`} onPress={() => onChangeInput(cmd.args ? `/${cmd.name} ` : `/${cmd.name}`)}>
+            <SuggestionRow key={`${cmd.group || ''}${cmd.name}`} onPress={() => (cmd.args ? onChangeInput(`/${cmd.name} `) : onRunCommand(`/${cmd.name}`))}>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 13.5, color: c.ink }}>/{cmd.name}</Text>
               <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
                 {cmd.description}

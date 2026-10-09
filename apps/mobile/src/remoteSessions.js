@@ -4,8 +4,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiException } from './api';
+import { notifyLocal } from './push';
 import { keepStreamAlive, openEventStream } from './remote';
 import { useApi, useAuth } from './state';
+
+const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };
 
 // Las sesiones de antes de que el host anunciara su agente son de Lixbon.
 export const agentOf = (session, meta) => meta?.agent || session?.agent || 'lixbon';
@@ -70,6 +73,13 @@ export function useRemoteSessions() {
           ok();
           if (ev.type === 'session_created' && ev.session) {
             setSessions((cur) => [ev.session, ...cur.filter((sx) => sx.id !== ev.session.id)]);
+            // Para builds sin FCM; con FCM avisa el gateway y notifyLocal no hace nada.
+            const sx = ev.session;
+            notifyLocal({
+              title: `${AGENT_LABEL[sx.agent] || 'Sesión'} en remoto`,
+              body: [sx.title, sx.workspace !== sx.title ? sx.workspace : null, sx.machine].filter(Boolean).join(' · '),
+              data: { kind: 'remote_session', session_id: sx.id },
+            });
           } else if (ev.type === 'session_updated' && ev.session) {
             patch(ev.session.id, ev.session);
           } else if (ev.type === 'session_online' || ev.type === 'session_offline') {

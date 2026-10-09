@@ -10,10 +10,12 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "e2e-out"
 PKG = "com.usuario.lixbon"
+MOCK = "http://127.0.0.1:8765"
 results: dict[str, object] = {}
 
 
@@ -58,16 +60,19 @@ def find(pattern: str, timeout: float = 25, last: bool = False, cls: str | None 
         ]
         if found:
             return found[-1] if last else found[0]
+        dismiss_system_dialogs()
         time.sleep(1)
     raise SystemExit(f"no aparece: {pattern}")
 
 
 def dismiss_system_dialogs() -> None:
     """El emulador de CI a veces saca un "X isn't responding" del sistema."""
-    for n in nodes():
-        if n.get("text") in ("Wait", "Esperar") and n.get("package") == "android":
-            tap(n)
-    adb("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
+    dialogs = [n for n in nodes() if n.get("text") in ("Wait", "Esperar") and n.get("package") == "android"]
+    for n in dialogs:
+        x1, y1, x2, y2 = n["box"]
+        adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
+        time.sleep(0.8)
+    return bool(dialogs)
 
 
 def edits():
@@ -80,7 +85,10 @@ def edits():
     return []
 
 
-def tap(n) -> None:
+def tap(n, dismiss: bool = True) -> None:
+    # Dentro de la cortina de notificaciones no se busca nada más.
+    if dismiss:
+        dismiss_system_dialogs()
     x1, y1, x2, y2 = n["box"]
     adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
     time.sleep(0.8)
@@ -110,6 +118,9 @@ def ime_top() -> int | None:
 
 def check_above_keyboard(name: str) -> None:
     time.sleep(1.5)
+    if dismiss_system_dialogs():
+        tap(edits()[-1])
+        time.sleep(1.5)
     shown = "mInputShown=true" in adb("shell", "dumpsys", "input_method")
     boxes = edits()
     top = ime_top()
@@ -129,6 +140,7 @@ def hide_keyboard() -> None:
 def main() -> None:
     # El diálogo de notificaciones taparía la app a mitad del recorrido.
     adb("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS")
+    adb("shell", "settings", "put", "global", "hide_error_dialogs", "1")
     time.sleep(15)
     dismiss_system_dialogs()
     adb("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
@@ -199,9 +211,58 @@ def main() -> None:
     time.sleep(1.5)
     shot("14-remoto-aprobado")
 
+    # Hojas inferiores con el diseño de la app
+    tap(find(r"^Adjuntar$"))
+    find(r"Imagen de la galer")
+    shot("14b-hoja-adjuntar")
+    adb("shell", "input", "keyevent", "4")
+    time.sleep(1)
+    tap(find(r"Opciones de la sesi"))
+    find(r"Terminar sesi")
+    shot("14c-hoja-opciones")
+    adb("shell", "input", "keyevent", "4")
+    time.sleep(1)
+
+    # Un «/» sin argumentos se envía al elegirlo y su resultado llega como tarjeta
+    tap(edits()[-1])
+    type_text("/sta")
+    time.sleep(1)
+    shot("14d-menu-comandos")
+    tap(find(r"^/status$"))
+    find(r"2\.1\.0 \(Claude Code\)", timeout=15)
+    hide_keyboard()
+    shot("14e-resultado-comando")
+    results["comando_status"] = {"ok": True}
+
+    # Sesión nueva en el IDE → aviso en el teléfono → al tocarlo se abre
+    req = urllib.request.Request(f"{MOCK}/__e2e/new_session", data=b"{}", method="POST")
+    print("new_session:", urllib.request.urlopen(req, timeout=10).read().decode(), flush=True)
+    title = "Revisar las notificaciones push"
+    shown = False
+    for _ in range(15):
+        if title in adb("shell", "dumpsys", "notification", "--noredact"):
+            shown = True
+            break
+        time.sleep(1)
+    results["notificacion_sesion_nueva"] = {"ok": shown}
+    adb("shell", "cmd", "statusbar", "expand-notifications")
+    time.sleep(1.5)
+    shot("14f-notificacion")
+    if shown:
+        shade = [n for n in nodes() if title in n.get("text", "")]
+        if shade:
+            tap(shade[0], dismiss=False)
+        time.sleep(3)
+        header = [n for n in nodes() if n.get("text") == title]
+        results["notificacion_abre_sesion"] = {"ok": bool(header)}
+        shot("14g-sesion-desde-notificacion")
+    else:
+        adb("shell", "cmd", "statusbar", "collapse")
+
     tap(find(r"Volver a las sesiones"))
     tap(find(r"Refactor del reducer remoto"))
     find(r"remote\.js", timeout=20)
+    results["esperando_tarea"] = {"ok": bool(find(r"Esperando a una tarea", timeout=10))}
     shot("15-remoto-lixbon")
     tap(find(r"Volver a las sesiones"))
     tap(find(r"api-server"))

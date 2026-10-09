@@ -4,6 +4,7 @@
 // accesos. Con texto, conversaciones y comandos por coincidencia difusa.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardController } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useApi, usePrefs } from '../state';
@@ -129,9 +130,17 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
       onRequestClose={onClose}
       statusBarTranslucent
       navigationBarTranslucent
-      // autoFocus no abre el teclado dentro de un Modal en Android: el foco se
-      // pide cuando la ventana ya está visible.
-      onShow={() => setTimeout(() => inputRef.current?.focus(), 300)}
+      // autoFocus no abre el teclado dentro de un Modal en Android, y un focus()
+      // antes de que la ventana gane el foco a veces tampoco: se pide otra vez
+      // si el teclado no ha salido.
+      onShow={() => {
+        setTimeout(() => inputRef.current?.focus(), 300);
+        setTimeout(() => {
+          if (KeyboardController.isVisible() || !inputRef.current) return;
+          inputRef.current.blur();
+          inputRef.current.focus();
+        }, 900);
+      }}
     >
       <Animated.View style={{ flex: 1, backgroundColor: c.bg, opacity: anim }}>
         <KeyboardAware>
