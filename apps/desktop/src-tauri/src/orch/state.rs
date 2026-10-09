@@ -88,6 +88,13 @@ pub struct Task {
     /// Registro del intento: profile, cli_version, policy_status y ack_unverified.
     #[serde(default)]
     pub policy: Option<super::agents::PolicyRecord>,
+    /// Nonce del intento para la entrega por archivo/marcadores (`LXO_REPORT_NONCE`).
+    /// `None`: la tarea no tiene activa esa vía.
+    #[serde(default)]
+    pub report_nonce: Option<String>,
+    /// idem_key de los informes ya entregados por archivo/marcadores.
+    #[serde(default)]
+    pub delivered: Vec<String>,
     pub created: u64,
     pub updated: u64,
 }
@@ -264,6 +271,8 @@ impl State {
             ack_unverified: false,
             requested_argv: None,
             policy: None,
+            report_nonce: None,
+            delivered: vec![],
             created: now,
             updated: now,
         });

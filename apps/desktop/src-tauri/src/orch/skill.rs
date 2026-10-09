@@ -17,7 +17,7 @@ struct Skill {
 }
 
 const SKILLS: &[Skill] = &[
-    Skill { name: "orquestar", version: 4, md: orquestar_md },
+    Skill { name: "orquestar", version: 5, md: orquestar_md },
     Skill { name: "adversary", version: 1, md: adversary_md },
 ];
 
@@ -172,6 +172,13 @@ lxo guide
 - Con `LXO_TASK_ID`: eres una **tarea hija**. Haz solo tu encargo y entrega tu informe.
 
 Sigue la guía al pie de la letra y añade `--json` cuando necesites leer la salida.
+
+## 3. Hija sin red (sandbox de Codex)
+
+Si `lxo` no conecta con el host (el sandbox no deja abrir 127.0.0.1) y existe `LXO_REPORT_NONCE`,
+`lxo guide` funciona igual (no usa la red). Entrega con `lxo report` en vez de `lxo done`: escribe
+`report.json` si el sandbox deja escribir; si no, imprime un bloque `<<<LXO-REPORT …>>>` que
+copias tal cual y completo al final de tu respuesta. La guía de hija lo explica.
 "#
     )
 }

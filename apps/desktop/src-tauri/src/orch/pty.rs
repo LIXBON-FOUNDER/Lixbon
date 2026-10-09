@@ -90,7 +90,7 @@ fn write_script(dir: &Path, command: &str) -> Result<(String, Vec<String>), Stri
 }
 
 /// Texto visible sin secuencias de escape, para reconocer los diálogos.
-fn plain(text: &str) -> String {
+pub(crate) fn plain(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {

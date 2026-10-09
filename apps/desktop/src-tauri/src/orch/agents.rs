@@ -317,10 +317,23 @@ fn codex_allows_local_network(argv: &[String]) -> bool {
     }
 }
 
+/// Cómo entrega la tarea su informe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Delivery {
+    /// Consulta de flags, sin tarea que entregue.
+    Query,
+    /// Solo `lxo done` por HTTP a 127.0.0.1 (tareas sin nonce de entrega).
+    #[allow(dead_code)]
+    LxoOnly,
+    /// `lxo done` o, sin red, `report.json` / bloque con marcadores por la salida
+    /// (orch/delivery.rs). Es lo que activa el host para toda hija que lanza.
+    FileOrMarkers,
+}
+
 /// Política para una tarea del orquestador. `role` es el rol de la tarea (o
-/// `None`); `delivers` indica que la tarea entrega con `lxo done`, como hacen
-/// hoy todas las hijas, tengan rol o no.
-pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktree: &str, detected: Detected, exec: bool, delivers: bool) -> Policy {
+/// `None`). Codex sin red local solo se bloquea si la tarea no tiene activa la
+/// entrega por archivo/marcadores.
+pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktree: &str, detected: Detected, exec: bool, delivery: Delivery) -> Policy {
     let mut p = evaluate(provider, profile, worktree, detected, exec);
     p.role = role.map(str::to_string);
     if let Some(r) = role.filter(|r| super::roles::spec(r).is_none()) {
@@ -328,9 +341,19 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
         p.reason = Some(format!("Rol desconocido: {r}"));
         return p;
     }
-    if p.status != Status::Blocked && provider == "codex" && delivers && !codex_allows_local_network(&p.argv) {
-        p.status = Status::Blocked;
-        p.reason = Some(CODEX_NO_LXO.into());
+    if p.status != Status::Blocked && provider == "codex" && !codex_allows_local_network(&p.argv) {
+        match delivery {
+            Delivery::LxoOnly => {
+                p.status = Status::Blocked;
+                p.reason = Some(CODEX_NO_LXO.into());
+            }
+            Delivery::FileOrMarkers => p.warnings.push(if p.argv.iter().any(|a| a == "read-only") {
+                "Sin red local: entrega con lxo report (bloque con marcadores en la salida); lxo phase, ask y check no llegan al host.".into()
+            } else {
+                "Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.".into()
+            }),
+            Delivery::Query => {}
+        }
     }
     p
 }
@@ -362,12 +385,13 @@ fn probe(bin: &str) -> Option<Probe> {
 /// los flags y no se exige la entrega.
 pub fn resolve_policy(provider: &str, profile: &str, role: &str, worktree: &str) -> Policy {
     let role = Some(role.trim()).filter(|r| !r.is_empty());
-    resolve_task_policy(provider, profile, role, worktree, role.is_some())
+    // Con rol es una hija: el host le activa la entrega por archivo/marcadores.
+    resolve_task_policy(provider, profile, role, worktree, if role.is_some() { Delivery::FileOrMarkers } else { Delivery::Query })
 }
 
 /// Como `resolve_policy`, indicando si la tarea entrega con `lxo done` (las hijas
 /// del orquestador siempre, tengan rol o no).
-pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, worktree: &str, delivers: bool) -> Policy {
+pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, worktree: &str, delivery: Delivery) -> Policy {
     let Some(prof) = Profile::parse(profile) else {
         let mut p = blocked(provider, profile, vec![], None, vec![], format!(
             "Perfil desconocido: {profile}. Usa uno de: {}", Profile::ALL.map(|p| p.id()).join(", ")));
@@ -375,11 +399,11 @@ pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, wo
         return p;
     };
     let Some(a) = spec(provider) else {
-        return evaluate_for(provider, prof, role, worktree, Detected::Skip, false, delivers);
+        return evaluate_for(provider, prof, role, worktree, Detected::Skip, false, delivery);
     };
     match probe(a.bin) {
-        Some(p) => evaluate_for(provider, prof, role, worktree, Detected::Found(&p), false, delivers),
-        None => evaluate_for(provider, prof, role, worktree, Detected::Missing, false, delivers),
+        Some(p) => evaluate_for(provider, prof, role, worktree, Detected::Found(&p), false, delivery),
+        None => evaluate_for(provider, prof, role, worktree, Detected::Missing, false, delivery),
     }
 }
 
@@ -440,7 +464,7 @@ fn quote(a: &str) -> String {
 /// Valida y arma el lanzamiento de una hija del orquestador sin consultar la CLI
 /// (perfil sin verificar). Las hijas entregan con `lxo done`.
 pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &str, profile: Profile, role: Option<&str>) -> Result<Launch, String> {
-    let policy = evaluate_for(agent, profile, role, ".", Detected::Skip, false, true);
+    let policy = evaluate_for(agent, profile, role, ".", Detected::Skip, false, Delivery::FileOrMarkers);
     launch_with(&policy, model, effort, prompt)
 }
 
@@ -683,7 +707,6 @@ mod tests {
         assert_eq!(l.command, r#"codex --sandbox read-only --ask-for-approval never --model gpt-5.5 -c model_reasoning_effort=high "x""#);
         assert!(launch("claude", Some("opus & del"), None, "x", Profile::Explorar, None).is_err());
         assert!(launch("gemini", None, None, "x", Profile::Explorar, None).is_err());
-        assert!(launch("codex", None, None, "x", Profile::DelegarConRevision, None).is_err());
     }
 
     #[test]
@@ -779,10 +802,10 @@ mod tests {
         assert_eq!(v["status"], "unverified");
         assert_eq!(v["profile"], "explorar");
         assert!(v["role"].is_null());
-        let p = evaluate_for("claude", Profile::Explorar, Some("revisor"), "wt", Detected::Skip, false, true);
+        let p = evaluate_for("claude", Profile::Explorar, Some("revisor"), "wt", Detected::Skip, false, Delivery::FileOrMarkers);
         assert_eq!(serde_json::to_value(&p).unwrap()["role"], "revisor");
         assert_eq!(resolve_policy("codex", "turbo", "revisor", "wt").role.as_deref(), Some("revisor"));
-        assert_eq!(evaluate_for("claude", Profile::Explorar, Some("planner"), "wt", Detected::Skip, false, true).status, Status::Blocked);
+        assert_eq!(evaluate_for("claude", Profile::Explorar, Some("planner"), "wt", Detected::Skip, false, Delivery::FileOrMarkers).status, Status::Blocked);
         for k in ["profile", "role", "provider", "argv", "cli_version", "warnings", "status", "reason"] {
             assert!(v.get(k).is_some(), "falta {k}");
         }
@@ -865,15 +888,22 @@ mod tests {
         let found = probe("0.162.1", CODEX_HELP);
         for (prof, role) in [(Profile::Explorar, "explorador"), (Profile::Explorar, "revisor"), (Profile::Proponer, "adversario"),
             (Profile::DelegarConRevision, "implementador"), (Profile::DelegarConRevision, "escalado")] {
-            let p = evaluate_for("codex", prof, Some(role), "wt", Detected::Found(&found), false, true);
+            let p = evaluate_for("codex", prof, Some(role), "wt", Detected::Found(&found), false, Delivery::LxoOnly);
             assert_eq!(p.status, Status::Blocked, "{prof:?} {role}");
             assert_eq!(p.reason.as_deref(), Some(CODEX_NO_LXO));
             assert!(authorize(&p, None, true).is_err());
         }
-        // Una hija sin rol también entrega con lxo done.
-        assert!(launch("codex", None, None, "x", Profile::Explorar, None).err().unwrap().contains("lxo done"));
+        // Con la entrega por archivo/marcadores activa se desbloquea, con advertencia.
+        for (prof, role, via) in [(Profile::Explorar, "revisor", "marcadores"), (Profile::Proponer, "adversario", "marcadores"),
+            (Profile::DelegarConRevision, "implementador", "report.json")] {
+            let p = evaluate_for("codex", prof, Some(role), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+            assert_eq!((p.status, p.reason.as_deref()), (Status::Ok, None), "{prof:?} {role}");
+            assert!(p.warnings.iter().any(|w| w.contains(via)), "{:?}", p.warnings);
+        }
+        assert!(launch("codex", None, None, "x", Profile::Explorar, None).is_ok());
+        assert_eq!(resolve_policy("codex", "explorar", "revisor", "wt").reason.as_deref().filter(|r| *r == CODEX_NO_LXO), None);
         // Consulta sin rol ni entrega: los flags siguen valiendo.
-        let p = evaluate_for("codex", Profile::Explorar, None, "wt", Detected::Found(&found), false, false);
+        let p = evaluate_for("codex", Profile::Explorar, None, "wt", Detected::Found(&found), false, Delivery::Query);
         assert_eq!(p.status, Status::Ok);
         // Solo workspace-write con red local permitiría entregar.
         let con_red: Vec<String> = ["codex", "--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"].map(String::from).to_vec();
@@ -886,7 +916,7 @@ mod tests {
     fn claude_no_se_bloquea_por_rol() {
         let found = probe("2.1.296", CLAUDE_HELP);
         for (prof, role) in [(Profile::Explorar, "revisor"), (Profile::Proponer, "adversario"), (Profile::DelegarConRevision, "implementador")] {
-            let p = evaluate_for("claude", prof, Some(role), "wt", Detected::Found(&found), false, true);
+            let p = evaluate_for("claude", prof, Some(role), "wt", Detected::Found(&found), false, Delivery::LxoOnly);
             assert_eq!((p.status, p.reason), (Status::Ok, None), "{prof:?} {role}");
         }
     }
