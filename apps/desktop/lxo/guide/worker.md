@@ -50,7 +50,25 @@ abras preguntas interactivas ni esperes confirmaciones. Tu coordinador es quien 
    Añade `--failed` si no se pudo completar, y `--files a,b,c` con los archivos principales.
    Después de `lxo done` no empieces trabajo nuevo: quédate esperando. Si tu coordinador te manda
    un encargo nuevo, llegará a esta misma terminal; hazlo y vuelve a cerrar con un informe nuevo.
-8. **Si tu encargo cita una issue de Lixbon Team** (`LXB-12`), léela con `lxo issue ver LXB-12` y
+8. **Sin red (sandbox de Codex).** Si `lxo done` (o `phase`, `ask`, `check`) falla porque no
+   conecta con el host y tienes la variable `LXO_REPORT_NONCE`, no reintentes: entrega con
+   `lxo report`, que no usa la red. Mismas opciones que `lxo done`:
+   ```
+   lxo report --summary "Una frase" --report .lixbon/informe-<tu-id>.md
+   lxo report --summary "Una frase" --report - <<'EOF'
+   # <tu-id> · <título>
+   ...
+   EOF
+   ```
+   - Si el sandbox deja escribir (workspace-write), `lxo report` escribe `report.json` en
+     `LXO_REPORT_PATH` (con `.tmp` y rename) y dice «Informe escrito». Ya está entregado.
+   - Si no puede escribir (read-only), imprime un bloque entre `<<<LXO-REPORT v1 nonce=…>>>` y
+     `<<<LXO-REPORT-END nonce=…>>>`. **Cópialo tal cual y completo como última parte de tu
+     respuesta final**, sin resumirlo, sin cambiar ni un carácter y sin meterlo en otro formato.
+     El host comprueba su sha256: si cambia algo, el informe no vale.
+   - Sin red no llegan fases, preguntas ni instrucciones nuevas: trabaja sin ellas y cuenta en el
+     informe lo que habrías preguntado. Entrega una sola vez.
+9. **Si tu encargo cita una issue de Lixbon Team** (`LXB-12`), léela con `lxo issue ver LXB-12` y
    pon la clave en tus mensajes de commit (`fix: … (LXB-12)`): así queda ligada al equipo. El
    cierre de la issue lo hace tu coordinador; tú solo comentas si tu encargo lo pide, con
    `lxo issue comentar LXB-12 --texto "…"` (sale firmado como informe de tu rol).

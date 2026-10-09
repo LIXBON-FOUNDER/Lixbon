@@ -76,6 +76,25 @@ pub struct Task {
     pub merged: bool,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// Perfil de autonomía pedido al lanzar (id de `agents::Profile`).
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Quien lanzó confirmó usar una versión de CLI no verificada.
+    #[serde(default)]
+    pub ack_unverified: bool,
+    /// argv que mostró la UI; si no coincide con el que resuelve el host, no se lanza.
+    #[serde(default)]
+    pub requested_argv: Option<Vec<String>>,
+    /// Registro del intento: profile, cli_version, policy_status y ack_unverified.
+    #[serde(default)]
+    pub policy: Option<super::agents::PolicyRecord>,
+    /// Nonce del intento para la entrega por archivo/marcadores (`LXO_REPORT_NONCE`).
+    /// `None`: la tarea no tiene activa esa vía.
+    #[serde(default)]
+    pub report_nonce: Option<String>,
+    /// idem_key de los informes ya entregados por archivo/marcadores.
+    #[serde(default)]
+    pub delivered: Vec<String>,
     pub created: u64,
     pub updated: u64,
 }
@@ -248,6 +267,12 @@ impl State {
             external: t.external,
             merged: false,
             pr_url: None,
+            profile: None,
+            ack_unverified: false,
+            requested_argv: None,
+            policy: None,
+            report_nonce: None,
+            delivered: vec![],
             created: now,
             updated: now,
         });

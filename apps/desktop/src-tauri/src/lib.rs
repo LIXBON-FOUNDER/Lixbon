@@ -1450,6 +1450,7 @@ pub fn run() {
             orch::orch_term_write,
             orch::orch_term_resize,
             orch::orch_agents,
+            orch::orch_resolve_policy,
             orch::orch_skill_install,
             orch::orch_skill_uninstall,
             skills_catalog::skills_agents,
