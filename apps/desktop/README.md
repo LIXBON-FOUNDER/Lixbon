@@ -107,3 +107,9 @@ La app instalada se actualiza sola vía `tauri-plugin-updater`.
 Secrets necesarios en el repo: `TAURI_SIGNING_PRIVATE_KEY`,
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `LIXBON_ADMIN_TOKEN`; variable opcional
 `LIXBON_SERVER_URL`.
+
+## Compilar el host (src-tauri)
+
+1. Rust 1.87 o superior (`rustup` estable). En Windows, toolchain MSVC y Build Tools de Visual Studio.
+2. Generar el sidecar `lxo` (ignorado por git): `node scripts/build-lxo.mjs`.
+3. `cd src-tauri && cargo test`
