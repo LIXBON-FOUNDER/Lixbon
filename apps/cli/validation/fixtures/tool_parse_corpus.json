@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "oracle": "apps/cli/lixbon_cli/agent.py",
+  "oracle": "cliente Python retirado",
   "text_cases": [
     {
       "name": "classic_format",

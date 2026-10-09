@@ -34,7 +34,8 @@ Run: `run_d06dd487975f`. Las terminales y worktrees del debate se conservan.
 ## Decisiones posteriores (2026-10-06)
 
 - El usuario eligió **adelantar Go sin esperar el cierre de Phase 1** (opción B). Acta, matriz de destinos y mediciones siguen pendientes.
-- La comprobación de Bubble Tea previa a Phase 3 dio un resultado negativo para el modo inline: la versión 2.0.10 duplicaba la caja de entrada al encogerse la vista (reproducido con el emulador `x/vt`). Se adoptó **pantalla completa con transcript y scroll propios**; se pierde el scrollback nativo y la selección con ratón exige Mayús (`/copy` como alternativa).
+- La comprobación de Bubble Tea previa a Phase 3 dio un resultado negativo para el modo inline: la versión 2.0.10 duplicaba la caja de entrada al encogerse la vista (reproducido con el emulador `x/vt`). Se adoptó **pantalla completa con transcript y scroll propios**; se pierde el scrollback nativo.
+- **2026-10-07, decisión definitiva de la UI:** se mantiene la pantalla completa (limpia la terminal y ancla la barra abajo, como Claude Code y Codex). Se reprobó el modo inline con la corrección de `ultraviolet` (`20261001125412`), que resuelve la caja duplicada pero no puede anclar la barra abajo. Con ello la selección ya no exige Mayús: la rueda siempre desplaza el chat, arrastrar copia al soltar (`/copy` sigue disponible), Ctrl+T abre un visor del transcript con lo que el modelo escribe en vivo y desaparece `/mouse`. Se revisará solo si Bubble Tea ofrece anclaje de la barra en modo inline.
 - El CLI Go habla con cualquier servidor compatible con OpenAI mediante **perfiles de proveedor** (`lixbon profile`, `/provider`). Una suscripción de ChatGPT o Claude no es una API key y se descarta como vía.
 - El objetivo declarado es **retirar la base Python** una vez aceptada la paridad. El plan de retirada está en `.planning/ROADMAP.md`, sección «Retirada de Python»; Python sigue como referencia y rollback hasta entonces.
 
@@ -43,7 +44,7 @@ Run: `run_d06dd487975f`. Las terminales y worktrees del debate se conservan.
 - Fuente principal: `apps/cli/audit/EVALUACION_PYTHON_GO.md`, conservada sin modificar.
 - El ADR existente refleja una recomendación anterior de comparar Rust antes de elegir; esta conversación aporta la decisión posterior de Go. Se conserva el ADR original como historial.
 - La evaluación registra 131 pruebas aprobadas y dos fallos de fixture; son resultados del documento, no ejecuciones de esta planificación. Reproducir y clasificar antes de usarlos como línea base.
-- El README declara Python estándar sin dependencias externas, mientras `apps/cli/lixbon_cli/cli.py` instala `prompt_toolkit`, `rich` y `pypdf`. Resolver la discrepancia en el inventario y documentación de dependencias.
+- El README declara Python estándar sin dependencias externas, mientras el cliente Python instala `prompt_toolkit`, `rich` y `pypdf`. Resolver la discrepancia en el inventario y documentación de dependencias.
 - No hay benchmark equivalente de Go aportado por el debate; cualquier comparación futura debe usar escenarios y mediciones reproducibles.
 
 ## Ejecución posterior

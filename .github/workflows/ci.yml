@@ -7,16 +7,17 @@ on:
     branches: [master, cli]
 
 jobs:
-  cli:
-    name: CLI · tests + artefacto al día
+  gateway:
+    name: Gateway · tests (un proceso por módulo)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install pytest rich pypdf
-      - run: python -m pytest apps/cli/tests -q
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python infra/ci/gateway_tests.py
 
   cli-go:
     name: CLI Go · ${{ matrix.os }}
@@ -27,13 +28,13 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
-        working-directory: apps/cli/go
+        working-directory: apps/cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: apps/cli/go/go.mod
-          cache-dependency-path: apps/cli/go/go.sum
+          go-version-file: apps/cli/go.mod
+          cache-dependency-path: apps/cli/go.sum
       - run: go vet ./...
       - run: go test -count=1 ./...
       - run: go build -o ${{ runner.temp }}/lixbon ./cmd/lixbon
@@ -49,8 +50,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: apps/cli/go/go.mod
-          cache-dependency-path: apps/cli/go/go.sum
+          go-version-file: apps/cli/go.mod
+          cache-dependency-path: apps/cli/go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

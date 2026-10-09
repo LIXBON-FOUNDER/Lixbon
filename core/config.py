@@ -106,7 +106,6 @@ APP_VERSION: str = "2.4.0" # Actualizado a la versión del diseño del CLI
 APP_DESCRIPTION: str = "Data & Task Center — Distributed LLM Gateway"
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent  # core/config.py → raíz del monorepo
-CLI_SOURCE_PATH: Path = PROJECT_ROOT / "apps" / "cli" / "client_cli.py"
 WEB_DIST_DIR: Path = PROJECT_ROOT / "apps" / "web" / "dist"
 LOGS_DIR: Path = PROJECT_ROOT / "logs"
 

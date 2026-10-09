@@ -1,6 +1,6 @@
 {
  "version": 1,
- "oracle": "apps/cli/lixbon_cli/agent.py::execute_tool_call",
+ "oracle": "cliente Python retirado",
  "cases": [
   {
    "name": "edit_exact",

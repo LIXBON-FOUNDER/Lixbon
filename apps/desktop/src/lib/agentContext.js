@@ -1,5 +1,5 @@
 // agentContext.js — presupuesto de la ventana de contexto del turno de agente.
-// Espejo de apps/cli/lixbon_cli/context.py: mismo problema, misma solución.
+// Espejo de apps/cli/internal/history: mismo problema, misma solución.
 //
 // En modo agente el prompt no son solo los mensajes del chat: son también los
 // resultados de cada herramienta. Un `read_file` aporta decenas de miles de

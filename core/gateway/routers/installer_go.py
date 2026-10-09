@@ -84,7 +84,6 @@ mkdir -p "$BIN_DIR"
 cp "$binary" "$BIN_DIR/.lixbon.new"
 chmod 755 "$BIN_DIR/.lixbon.new"
 mv -f "$BIN_DIR/.lixbon.new" "$BIN_DIR/lixbon"
-rm -f "${HOME}/.lixbon/client_cli.py"
 "$BIN_DIR/lixbon" init --base-url "${SERVER_URL}/v1" >/dev/null 2>&1 || true
 
 PATH_NOTE="ya configurado"
@@ -175,8 +174,6 @@ try {
   Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item (Join-Path $InstallDir "lixbon.cmd") -Force -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $InstallDir "client_cli.py") -Force -ErrorAction SilentlyContinue
 & $Exe init --base-url "$ServerUrl/v1" | Out-Null
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

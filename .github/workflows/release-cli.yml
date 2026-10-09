@@ -40,13 +40,13 @@ jobs:
           - { goos: windows, goarch: arm64 }
     defaults:
       run:
-        working-directory: apps/cli/go
+        working-directory: apps/cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: apps/cli/go/go.mod
-          cache-dependency-path: apps/cli/go/go.sum
+          go-version-file: apps/cli/go.mod
+          cache-dependency-path: apps/cli/go.sum
       - name: La versión sale de la etiqueta y el binario la informa
         run: |
           version="${GITHUB_REF_NAME#cli-v}"
@@ -74,8 +74,8 @@ jobs:
         with:
           name: lixbon-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            apps/cli/go/dist/*.zip
-            apps/cli/go/dist/*.tar.gz
+            apps/cli/dist/*.zip
+            apps/cli/dist/*.tar.gz
 
   release:
     name: Publicar la release

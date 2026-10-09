@@ -1,6 +1,6 @@
 {
  "version": 1,
- "oracle": "apps/cli/lixbon_cli/mcp.py",
+ "oracle": "cliente Python retirado",
  "workspace_placeholder": "<ws>",
  "format_result": [
   {
