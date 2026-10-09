@@ -1,115 +1,103 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-const GROSOR = 17;
-const H = GROSOR / 2;
-const ANCHO = { L: 56, I: GROSOR, X: 66, B: 64, O: 76, N: 68, F: 56, U: 72, D: 72, E: 56, R: 66 };
-const ESPACIO = 14;
-const ENTRE_PALABRAS = 36;
-const F_FINAL = 48;
-const RADIO_UNION = 16;
 const TONO = 0.42;
 const RECORRIDO = 420;
+const ENTRADA = 1.5;
+const FUENTE = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,300..680&text=lixbonfuder&display=swap';
 
-const r = (n) => Math.round(n * 100) / 100;
+// k = orden en que se recogen: de fuera hacia la l y la f.
+const LETRAS = [
+  { ch: 'l', clave: true },
+  { ch: 'i', k: 4 }, { ch: 'x', k: 3 }, { ch: 'b', k: 2 }, { ch: 'o', k: 1 }, { ch: 'n', k: 0 },
+  { ch: ' ', k: 5 },
+  { ch: 'f', clave: true, f: true },
+  { ch: 'o', k: 5 }, { ch: 'u', k: 4 }, { ch: 'n', k: 3 }, { ch: 'd', k: 2 }, { ch: 'e', k: 1 }, { ch: 'r', k: 0 },
+];
+
+const r = (n) => Math.round(n * 1000) / 1000;
 const acota = (n) => Math.min(1, Math.max(0, n));
-const suave = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-const seno = (t) => (1 - Math.cos(Math.PI * t)) / 2;
+const sale3 = (x) => 1 - Math.pow(1 - x, 3);
+const suave = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 
-const ru = (50 - H) / 2;
-const ojo = (w) => `H${r(w - 2 - H - ru)}A${r(ru)} ${r(ru)} 0 0 1 ${r(w - 2 - H - ru)} 50H${r(H)}`;
-const redondo = (w) => {
-  const a = (w - 2 * H) / 2;
-  const arco = `A${r(a)} ${r(a)} 0 0 1`;
-  return `M${w / 2} ${H}${arco} ${w - H} ${r(H + a)}V${r(100 - H - a)}${arco} ${w / 2} ${100 - H}${arco} ${H} ${r(100 - H - a)}V${r(H + a)}${arco} ${w / 2} ${H}Z`;
-};
-const ene = (w) => {
-  const d = (w - 2 * H) * 0.1;
-  return `M${H} 100V0M${r(H - d)} -10L${r(w - H + d)} 110M${w - H} 100V0`;
-};
-const uA = (ANCHO.U - 2 * H) / 2;
-const dA = (100 - 2 * H) / 2;
-const FORMA = {
-  I: `M${H} 0V100`,
-  X: `M${r(H * 0.7)} -10L${r(66 - H * 0.7)} 110M${r(66 - H * 0.7)} -10L${r(H * 0.7)} 110`,
-  B: `M${H} 0V100M${H} ${H}${ojo(64)}M${H} 50H${r(64 - H - ru)}A${r(ru)} ${r(ru)} 0 0 1 ${r(64 - H - ru)} ${100 - H}H${H}`,
-  O: redondo(ANCHO.O),
-  N: ene(ANCHO.N),
-  U: `M${H} 0V${r(100 - H - uA)}A${r(uA)} ${r(uA)} 0 0 0 ${ANCHO.U - H} ${r(100 - H - uA)}V0`,
-  D: `M${H} 0V100M${H} ${H}H${r(72 - H - dA)}A${r(dA)} ${r(dA)} 0 0 1 ${r(72 - H - dA)} ${100 - H}H${H}`,
-  E: `M56 ${H}H${H}V${100 - H}H56M${H} 50H50`,
-  R: `M${H} 100V${H}${ojo(66)}M28 50L${66 - H} 108`,
-};
-
-const IXBON = [['i', 'I'], ['x', 'X'], ['b', 'B'], ['o', 'O'], ['n', 'N']];
-const OUNDER = [['o2', 'O'], ['u', 'U'], ['n2', 'N'], ['d', 'D'], ['e', 'E'], ['r', 'R']];
-
-const POS = (() => {
-  const pos = {};
-  let x = ANCHO.L;
-  IXBON.forEach(([k, g]) => { x += ESPACIO; pos[k] = x; x += ANCHO[g]; });
-  pos.f = x + ENTRE_PALABRAS;
-  x = pos.f + ANCHO.F;
-  OUNDER.forEach(([k, g]) => { x += ESPACIO; pos[k] = x; x += ANCHO[g]; });
-  pos.cola = x - pos.f;
-  return pos;
-})();
-
-function geometria(p) {
-  const desliza = suave(acota(p / 0.85));
-  const guarda = seno(acota(p / 0.8));
-  const une = seno(acota((p - 0.72) / 0.28));
-  const fX = POS.f + (F_FINAL - POS.f) * desliza;
-  const radio = RADIO_UNION * une;
-  const finPie = ANCHO.L + (F_FINAL + H - radio + 0.5 - ANCHO.L) * une;
-  return {
-    fX,
-    ancho: fX + Math.max(ANCHO.F, POS.cola * (1 - guarda)),
-    ounderX: (k) => fX + POS[k] - POS.f - POS.cola * guarda,
-    l: `M${H} 0V${100 - H}H${r(finPie)}`,
-    f: `M${r(H - radio)} ${r(100 - H * une)}A${r(radio)} ${r(radio)} 0 0 0 ${H} ${r(100 - H - radio)}V${H}H56M${H} 50H${r(50 - 6 * une)}`,
-  };
+// El diseño anima en segundos: la entrada ocupa 0–1,5 s y el cierre 2,4–5,2 s,
+// que aquí se recorre con el progreso del scroll.
+function estado(progreso, entrada) {
+  const t = 2.4 + acota(progreso) * 2.8;
+  const engrosa = suave(acota((t - 3.3) / 1.0));
+  const une = suave(acota((t - 3.7) / 0.9));
+  const letras = LETRAS.map((le, i) => {
+    const sube = sale3(acota((entrada - (0.15 + i * 0.05)) / 0.7));
+    const cierra = le.clave ? 0 : suave(acota((t - (3.0 + le.k * 0.09)) / 0.75));
+    return {
+      ch: le.ch,
+      opacity: r((le.clave ? 1 : TONO) * sube * (1 - cierra)),
+      transform: `translateY(${r((1 - sube) * 0.38)}em)`,
+      fontSize: `${r(le.clave ? 1 : 1 - cierra)}em`,
+      fontWeight: Math.round(le.clave ? 300 + 380 * engrosa : 300),
+      marginLeft: le.f ? `${r(-0.07 * une)}em` : undefined,
+    };
+  });
+  return { letras, trazo: r(sale3(acota((t - 4.3) / 0.7))) };
 }
 
-export function LogoFounder({ progreso = 0, alto = 22, className = '' }) {
-  const id = useId().replace(/[^a-zA-Z0-9_-]/g, '');
-  const g = geometria(acota(progreso));
-  const w = g.ancho + 4;
+let fuente;
+function cargarFuente() {
+  fuente ??= new Promise((listo, fallo) => {
+    const enlace = document.createElement('link');
+    enlace.rel = 'stylesheet';
+    enlace.href = FUENTE;
+    enlace.onload = listo;
+    enlace.onerror = fallo;
+    document.head.appendChild(enlace);
+  }).then(() => document.fonts.load('italic 680 46px Fraunces', 'lf'));
+  return fuente;
+}
+
+export function LogoFounder({ progreso = 0, entrada = ENTRADA, className = '' }) {
+  const { letras, trazo } = estado(progreso, entrada);
   return (
-    <svg
-      className={`logo-founder ${className}`}
-      width={r((w * alto) / 100)}
-      height={alto}
-      viewBox={`-2 0 ${r(w)} 100`}
-      role="img"
-      aria-label="Lixbon Founder"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={GROSOR}
-    >
-      <defs>
-        <clipPath id={`${id}i`}><rect x="-4" y="-20" width={r(Math.max(0, g.fX + 4))} height="140" /></clipPath>
-        <clipPath id={`${id}d`}><rect x={r(g.fX + ANCHO.F)} y="-20" width="2000" height="140" /></clipPath>
-      </defs>
-      <g clipPath={`url(#${id}i)`} opacity={TONO}>
-        {IXBON.map(([k, l]) => <path key={k} d={FORMA[l]} transform={`translate(${POS[k]} 0)`} />)}
-      </g>
-      <g clipPath={`url(#${id}d)`} opacity={TONO}>
-        {OUNDER.map(([k, l]) => <path key={k} d={FORMA[l]} transform={`translate(${r(g.ounderX(k))} 0)`} />)}
-      </g>
-      <path d={g.f} transform={`translate(${r(g.fX)} 0)`} />
-      <path d={g.l} />
-    </svg>
+    <span className={`logo-founder ${className}`} role="img" aria-label="Lixbon Founder">
+      {letras.map(({ ch, ...style }, i) => (
+        <span key={i} className="logo-founder__l" aria-hidden="true" style={style}>{ch}</span>
+      ))}
+      <span
+        className="logo-founder__trazo"
+        aria-hidden="true"
+        style={{ transform: `scaleX(${trazo})`, opacity: trazo > 0 ? 1 : 0 }}
+      />
+    </span>
   );
 }
 
-function useProgresoScroll(recorrido = RECORRIDO) {
+function useMovimientoReducido() {
+  const [reducido] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+  return reducido;
+}
+
+function useEntrada(reducido) {
+  const [segundos, setSegundos] = useState(reducido ? ENTRADA : 0);
+  useEffect(() => {
+    if (reducido) return undefined;
+    const inicio = performance.now();
+    let cuadro = requestAnimationFrame(function paso(ahora) {
+      const s = (ahora - inicio) / 1000;
+      setSegundos(Math.min(s, ENTRADA));
+      if (s < ENTRADA) cuadro = requestAnimationFrame(paso);
+    });
+    return () => cancelAnimationFrame(cuadro);
+  }, [reducido]);
+  return segundos;
+}
+
+function useProgresoScroll(reducido) {
   const [progreso, setProgreso] = useState(0);
   useEffect(() => {
-    const reducido = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let cuadro = 0;
     const medir = () => {
       cuadro = 0;
-      const p = acota(window.scrollY / recorrido);
+      const p = acota(window.scrollY / RECORRIDO);
       setProgreso(reducido ? (p < 0.5 ? 0 : 1) : p);
     };
     const alMover = () => { if (!cuadro) cuadro = requestAnimationFrame(medir); };
@@ -119,24 +107,58 @@ function useProgresoScroll(recorrido = RECORRIDO) {
       window.removeEventListener('scroll', alMover);
       cancelAnimationFrame(cuadro);
     };
-  }, [recorrido]);
+  }, [reducido]);
   return progreso;
+}
+
+// Un SVG de favicon no puede usar fuentes web, así que el monograma se pinta
+// en un canvas cuando Fraunces ya cargó; mientras tanto queda founder.svg.
+function dibujarMonograma() {
+  const lado = 64;
+  const lienzo = document.createElement('canvas');
+  lienzo.width = lienzo.height = lado;
+  const c = lienzo.getContext('2d');
+  c.fillStyle = '#191917';
+  c.beginPath();
+  c.roundRect(0, 0, lado, lado, 14);
+  c.fill();
+  c.fillStyle = '#F5F4EE';
+  c.font = 'italic 680 46px Fraunces';
+  c.textBaseline = 'alphabetic';
+  const anchoL = c.measureText('l').width;
+  const solape = 46 * 0.07;
+  const ancho = anchoL - solape + c.measureText('f').width;
+  const x = (lado - ancho) / 2;
+  const base = 44;
+  c.fillText('l', x, base);
+  c.fillText('f', x + anchoL - solape, base);
+  c.fillRect(x + 1, base + 3, ancho - 2, 2.2);
+  return lienzo.toDataURL('image/png');
 }
 
 function useFaviconFounder() {
   useEffect(() => {
     const enlaces = [...document.querySelectorAll('link[rel="icon"]')];
     const antes = enlaces.map((e) => [e.getAttribute('href'), e.getAttribute('type')]);
-    enlaces.forEach((e) => { e.setAttribute('href', '/founder.svg'); e.setAttribute('type', 'image/svg+xml'); });
-    return () => enlaces.forEach((e, i) => {
-      e.setAttribute('href', antes[i][0]);
-      if (antes[i][1]) e.setAttribute('type', antes[i][1]);
-      else e.removeAttribute('type');
-    });
+    const poner = (href, type) => enlaces.forEach((e) => { e.setAttribute('href', href); e.setAttribute('type', type); });
+    let vivo = true;
+    poner('/founder.svg', 'image/svg+xml');
+    cargarFuente().then((caras) => {
+      if (vivo && caras.length) poner(dibujarMonograma(), 'image/png');
+    }).catch(() => {});
+    return () => {
+      vivo = false;
+      enlaces.forEach((e, i) => {
+        e.setAttribute('href', antes[i][0]);
+        if (antes[i][1]) e.setAttribute('type', antes[i][1]);
+        else e.removeAttribute('type');
+      });
+    };
   }, []);
 }
 
-export function LogoFounderScroll({ alto = 22 }) {
+export function LogoFounderScroll() {
+  const reducido = useMovimientoReducido();
   useFaviconFounder();
-  return <LogoFounder progreso={useProgresoScroll()} alto={alto} />;
+  return <LogoFounder progreso={useProgresoScroll(reducido)} entrada={useEntrada(reducido)} />;
 }
