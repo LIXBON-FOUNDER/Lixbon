@@ -578,6 +578,9 @@ Seguimiento:
 
     pub fn remove_run(&mut self, run: &str) {
         self.runs.remove(run);
+        // Como ON DELETE CASCADE de decisions.task: se van con sus tareas.
+        let gone: std::collections::HashSet<String> = self.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
+        self.decisions.retain(|d| !gone.contains(&d.task));
         self.tasks.retain(|_, t| t.run != run);
         self.messages.retain(|m| m.run != run);
     }
@@ -592,6 +595,24 @@ mod tests {
             agent: "claude".into(), model: None, effort: None, role: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
             branch: None, base: None, worktree: None, external: false,
         }
+    }
+
+    #[test]
+    fn remove_run_borra_sus_decisiones() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let hija = s.add_child(&root, 1, nt("hija")).unwrap();
+        let (otro, otra_raiz) = s.create_run("otro", nt("raíz 2"));
+        let ajena = s.add_child(&otra_raiz, 1, nt("ajena")).unwrap();
+        s.record_decision(&hija, "merge", "human", &serde_json::json!({ "outcome": "merged" }));
+        s.record_decision(&root, "merge", "human", &serde_json::json!({ "outcome": "conflict" }));
+        let keep = s.record_decision(&ajena, "merge", "human", &serde_json::json!({ "outcome": "merged" }));
+        s.remove_run(&run);
+        assert_eq!(s.decisions.iter().map(|d| d.id).collect::<Vec<_>>(), [keep]);
+        assert_eq!(s.decisions[0].task, ajena);
+        assert!(s.runs.contains_key(&otro));
+        let back: State = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.decisions, s.decisions);
     }
 
     const IDLE: u64 = 30 * 60 * 1000;
