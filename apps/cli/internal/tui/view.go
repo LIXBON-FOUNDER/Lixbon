@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -112,7 +113,8 @@ func (m *Model) liveView() string {
 			}
 		}
 		if text = strings.TrimSpace(text); text != "" {
-			wrapped := strings.Split(ansi.Wrap(text, max(20, m.width-2), ""), "\n")
+			width := max(20, m.width-2)
+			wrapped := strings.Split(ansi.Wrap(liveTail(text, liveTailRows, width), width, ""), "\n")
 			for _, l := range wrapped[max(0, len(wrapped)-liveTailRows):] {
 				lines = append(lines, "  "+sPrimary.Render(l))
 			}
@@ -248,4 +250,39 @@ func (m *Model) sessionLabel() string {
 		return email
 	}
 	return "API key"
+}
+
+// liveTail recorta el texto en vivo a lo último que puede verse: las últimas
+// rows líneas duras y, si una sola línea es enorme, solo su final. Así envolver
+// en cada fragmento cuesta según lo visible y no según todo lo recibido; antes
+// se envolvía la respuesta completa en cada View y el costo crecía con el
+// cuadrado del tamaño (TERM-02).
+func liveTail(text string, rows, width int) string {
+	// Cada fila envuelta ocupa como mucho width celdas; 4 bytes por celda
+	// cubren UTF-8 y un margen para secuencias de escape.
+	budget := (rows + 1) * width * 4
+	start, lines := len(text), 0
+	for start > 0 && lines < rows {
+		i := strings.LastIndexByte(text[:start], '\n')
+		if i < 0 {
+			start = 0
+			break
+		}
+		start = i
+		lines++
+	}
+	if start > 0 {
+		start++ // tras el salto de línea
+	}
+	if len(text)-start > budget {
+		start = len(text) - budget
+		for start < len(text) && !utf8.RuneStart(text[start]) {
+			start++
+		}
+		// Empezar en un límite de palabra evita una primera fila partida.
+		if i := strings.IndexAny(text[start:], " \n"); i >= 0 && i < width*4 {
+			start += i + 1
+		}
+	}
+	return text[start:]
 }
