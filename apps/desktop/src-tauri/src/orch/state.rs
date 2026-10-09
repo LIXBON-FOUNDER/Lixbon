@@ -85,9 +85,9 @@ pub struct Task {
     /// argv que mostró la UI; si no coincide con el que resuelve el host, no se lanza.
     #[serde(default)]
     pub requested_argv: Option<Vec<String>>,
-    /// Registro de la confirmación de una versión no verificada en el intento.
+    /// Registro del intento: profile, cli_version, policy_status y ack_unverified.
     #[serde(default)]
-    pub policy_ack: Option<super::agents::PolicyAck>,
+    pub policy: Option<super::agents::PolicyRecord>,
     pub created: u64,
     pub updated: u64,
 }
@@ -263,7 +263,7 @@ impl State {
             profile: None,
             ack_unverified: false,
             requested_argv: None,
-            policy_ack: None,
+            policy: None,
             created: now,
             updated: now,
         });

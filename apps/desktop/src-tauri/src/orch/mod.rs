@@ -738,12 +738,10 @@ impl Core {
         // orch_resolve_policy); un perfil bloqueado no arranca.
         let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
         let policy = agents::resolve_policy(&task.agent, &profile, &task.cwd);
-        let ack = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
+        let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         let launch = agents::launch_with(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
-        if ack.is_some() {
-            if let Ok(t) = self.lock().task_mut(id) {
-                t.policy_ack = ack;
-            }
+        if let Ok(t) = self.lock().task_mut(id) {
+            t.policy = Some(record);
         }
 
         let lxo = lxo_path();
