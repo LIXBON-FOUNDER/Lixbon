@@ -328,7 +328,7 @@ mod tests {
         let t = st.task(&id).unwrap();
         assert_eq!((t.status, t.summary.as_str(), t.files.clone()), (Status::Done, "Hecho", vec!["src/a.rs".to_string()]));
         let report = t.report.clone().unwrap();
-        assert!(report.contains(&format!(".lixbon/informes/{}", t.run)));
+        assert!(Path::new(&report).parent().unwrap().ends_with(Path::new(".lixbon").join("informes").join(&t.run)));
         assert!(std::fs::read_to_string(report).unwrap().contains("hecho"));
         assert_eq!(done_msgs(&st, &root), 1);
         let _ = std::fs::remove_dir_all(dir);
