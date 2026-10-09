@@ -76,6 +76,18 @@ pub struct Task {
     pub merged: bool,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// Perfil de autonomía pedido al lanzar (id de `agents::Profile`).
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Quien lanzó confirmó usar una versión de CLI no verificada.
+    #[serde(default)]
+    pub ack_unverified: bool,
+    /// argv que mostró la UI; si no coincide con el que resuelve el host, no se lanza.
+    #[serde(default)]
+    pub requested_argv: Option<Vec<String>>,
+    /// Registro de la confirmación de una versión no verificada en el intento.
+    #[serde(default)]
+    pub policy_ack: Option<super::agents::PolicyAck>,
     pub created: u64,
     pub updated: u64,
 }
@@ -248,6 +260,10 @@ impl State {
             external: t.external,
             merged: false,
             pr_url: None,
+            profile: None,
+            ack_unverified: false,
+            requested_argv: None,
+            policy_ack: None,
             created: now,
             updated: now,
         });
