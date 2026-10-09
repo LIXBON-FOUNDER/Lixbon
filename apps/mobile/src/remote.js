@@ -2,9 +2,16 @@
 // /remote (SSE del gateway) y los reduce a un transcript renderizable.
 // El fetch de React Native no expone el cuerpo incremental, así que el SSE se
 // lee con XMLHttpRequest en onprogress (mismo patrón que sse.js).
+import { AppState } from 'react-native';
+
 import { ApiException, extractDetail } from './api';
 
 // ── SSE genérico (GET) ──────────────────────────────────────────────────────
+
+// El gateway manda un ping cada 15 s. Al apagar la pantalla o cambiar de red
+// Android deja el socket medio abierto sin avisar: sin bytes en 40 s el stream
+// se da por muerto, o la app seguiría "en vivo" sin recibir nada.
+const STREAM_IDLE_MS = 40000;
 
 export function openEventStream({ base, token, path, onEvent, onEnd, onError }) {
   const xhr = new XMLHttpRequest();
@@ -12,12 +19,25 @@ export function openEventStream({ base, token, path, onEvent, onEnd, onError }) 
   let finished = false;
   let seen = 0;
   let buffer = '';
+  let idleTimer = null;
 
   const fail = (err) => {
+    clearTimeout(idleTimer);
     if (!cancelled && !finished) {
       finished = true;
       onError?.(err);
     }
+  };
+  const kick = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      try {
+        xhr.abort();
+      } catch {
+        // ya cerrado
+      }
+      fail(new ApiException('El stream dejó de responder'));
+    }, STREAM_IDLE_MS);
   };
 
   const pump = (isFinal) => {
@@ -40,6 +60,7 @@ export function openEventStream({ base, token, path, onEvent, onEnd, onError }) 
     }
     if (isFinal && !cancelled && !finished) {
       finished = true;
+      clearTimeout(idleTimer);
       onEnd?.();
     }
   };
@@ -50,7 +71,9 @@ export function openEventStream({ base, token, path, onEvent, onEnd, onError }) 
   xhr.timeout = 0;
 
   xhr.onprogress = () => {
-    if (!cancelled && xhr.status < 400) pump(false);
+    if (cancelled) return;
+    kick();
+    if (xhr.status < 400) pump(false);
   };
   xhr.onload = () => {
     if (cancelled || finished) return;
@@ -68,16 +91,83 @@ export function openEventStream({ base, token, path, onEvent, onEnd, onError }) 
   };
   xhr.onerror = () => fail(new ApiException('Se perdió la conexión con el servidor'));
   xhr.send();
+  kick();
 
   return {
     cancel() {
       cancelled = true;
+      clearTimeout(idleTimer);
       try {
         xhr.abort();
       } catch {
         // ya cerrado
       }
     },
+  };
+}
+
+// Mantiene un stream SSE vivo: reconecta con backoff al caerse. En segundo
+// plano no se corta (Android congela la app, pero el socket aguanta y al volver
+// llega lo pendiente); solo se cierra si la app pasa BACKGROUND_KEEP_MS fuera.
+// `connect({ ok, retry })` abre el stream; `ok()` marca que llegó algo y
+// `retry(grow)` programa la reconexión.
+const RETRY_MIN = 1500;
+const RETRY_MAX = 20000;
+const BACKGROUND_KEEP_MS = 5 * 60 * 1000;
+
+export function keepStreamAlive(connect, { onResume } = {}) {
+  let stream = null;
+  let timer = null;
+  let parked = null;
+  let backoff = RETRY_MIN;
+  let stopped = false;
+  let closed = false;
+
+  const close = () => {
+    clearTimeout(timer);
+    timer = null;
+    stream?.cancel();
+    stream = null;
+  };
+  const open = () => {
+    if (stopped) return;
+    close();
+    closed = false;
+    stream = connect({ ok, retry });
+  };
+  function ok() {
+    backoff = RETRY_MIN;
+  }
+  function retry(grow = true) {
+    if (stopped || closed) return;
+    clearTimeout(timer);
+    timer = setTimeout(open, backoff);
+    if (grow) backoff = Math.min(backoff * 2, RETRY_MAX);
+  }
+
+  const sub = AppState.addEventListener('change', (next) => {
+    if (next === 'background') {
+      clearTimeout(parked);
+      parked = setTimeout(() => {
+        closed = true;
+        close();
+      }, BACKGROUND_KEEP_MS);
+    } else if (next === 'active') {
+      clearTimeout(parked);
+      if (closed) {
+        backoff = RETRY_MIN;
+        onResume?.();
+        open();
+      }
+    }
+  });
+  open();
+
+  return () => {
+    stopped = true;
+    clearTimeout(parked);
+    sub.remove();
+    close();
   };
 }
 
@@ -131,11 +221,14 @@ function closeOpenAssistant(items, finalText, keepIfEmpty = false) {
 }
 
 export function remoteReducer(state, ev) {
-  const seq = typeof ev.seq === 'number' ? ev.seq : state.lastSeq;
-  if (typeof ev.seq === 'number' && ev.seq <= state.lastSeq && ev.type !== 'channel_status') {
+  // channel_status llega primero al (re)conectar con el seq más alto del canal:
+  // si avanzara lastSeq, el replay de lo perdido que viene detrás se
+  // descartaría entero como duplicado.
+  const status = ev.type === 'channel_status';
+  if (!status && typeof ev.seq === 'number' && ev.seq <= state.lastSeq) {
     return state; // replay duplicado
   }
-  const s = { ...state, lastSeq: Math.max(state.lastSeq, seq) };
+  const s = status || typeof ev.seq !== 'number' ? state : { ...state, lastSeq: ev.seq };
 
   switch (ev.type) {
     case 'channel_status':
@@ -176,14 +269,23 @@ export function remoteReducer(state, ev) {
       };
     case 'snapshot':
       return { ...s, items: mapSnapshotMessages(ev.messages) };
-    case 'user_msg':
-      return {
-        ...s,
-        items: [
-          ...closeOpenAssistant(s.items),
-          withKey({ kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [] }),
-        ],
-      };
+    case 'local_user':
+      // Lo escrito en el móvil se pinta al instante; el user_msg del host lo
+      // sustituye cuando el agente lo toma (si estaba ocupado, queda en cola).
+      return { ...s, items: [...s.items, withKey({ kind: 'user', text: ev.text, images: ev.images || 0, mentions: ev.mentions || [], local: ev.local, sent: false })] };
+    case 'local_user_sent':
+      return { ...s, items: s.items.map((it) => (it.local === ev.local ? { ...it, sent: true } : it)) };
+    case 'local_user_failed':
+      return { ...s, items: s.items.filter((it) => it.local !== ev.local) };
+    case 'user_msg': {
+      const real = withKey({ kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [] });
+      const idx = ev.origin === 'remote' ? s.items.findIndex((it) => it.local && it.text.trim() === (ev.text || '').trim()) : -1;
+      if (idx !== -1) {
+        const rest = s.items.filter((_, i) => i !== idx);
+        return { ...s, items: [...closeOpenAssistant(rest), real] };
+      }
+      return { ...s, items: [...closeOpenAssistant(s.items), real] };
+    }
     case 'files':
       return { ...s, files: { query: ev.query || '', items: Array.isArray(ev.items) ? ev.items : [] } };
     case 'assistant_delta': {

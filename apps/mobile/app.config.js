@@ -46,6 +46,14 @@ module.exports = {
     },
     plugins: [
       [
+        'expo-camera',
+        {
+          cameraPermission: 'Lixbon usa la cámara para fotografiar documentos y adjuntarlos al chat.',
+          microphonePermission: false,
+          recordAudioAndroid: false,
+        },
+      ],
+      [
         'expo-image-picker',
         {
           cameraPermission: 'Lixbon usa la cámara para adjuntar fotos al chat.',

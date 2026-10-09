@@ -105,3 +105,13 @@ export function splitMessage(content) {
   if (files.length === 0) return { files: [], text: content };
   return { files, text: content.slice(cut + SEPARATOR.length) };
 }
+
+/// Foto de perfil: recorte cuadrado del sistema y JPEG de 512px, que es lo que
+/// el gateway guarda en R2. null si se canceló.
+export async function pickAvatar() {
+  const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 });
+  if (res.canceled || !res.assets?.length) return null;
+  const ref = await ImageManipulator.manipulate(res.assets[0].uri).resize({ width: 512 }).renderAsync();
+  const out = await ref.saveAsync({ compress: QUALITY, format: SaveFormat.JPEG });
+  return { uri: out.uri, name: 'avatar.jpg', type: 'image/jpeg' };
+}

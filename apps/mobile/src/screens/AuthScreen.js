@@ -1,50 +1,32 @@
-// AuthScreen.js — login / registro / olvidé mi contraseña.
-// Con el sistema del IDE: fondo con luz ambiente, isotipo + wordmark,
-// selector deslizante, campos de relleno con etiqueta flotante, CTA invertido
-// y botones sociales de relleno.
+// AuthScreen.js — acceso: iniciar sesión y crear cuenta como dos vistas con
+// titular en serif, Google y Apple primero, y el correo debajo. Recuperar la
+// contraseña es una hoja sobre el login, no otra pantalla.
 import React, { useEffect, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useDialogs } from '../components/dialogs';
-import {
-  AmbientGlow,
-  AppleLogo,
-  FadeUp,
-  FloatingField,
-  GoogleLogo,
-  KeyboardAware,
-  LixLogo,
-  LogoMark,
-  Segmented,
-  useColors,
-  useIsDark,
-} from '../components/ui';
 import { ApiException } from '../api';
+import Icon from '../components/Icon';
+import { SheetTitle, useDialogs } from '../components/dialogs';
+import { AppleLogo, FadeUp, GoogleLogo, IconButton, KeyboardAware, LixLogo, LogoMark, Meter, ScreenTitle, useColors } from '../components/ui';
 import { DEFAULT_API_BASE, useApi, useAuth, usePrefs } from '../state';
 import { FONTS, RADIUS } from '../theme';
 
+const MIN_PASSWORD = 8;
+
 export default function AuthScreen() {
   const c = useColors();
-  const dark = useIsDark();
   const api = useApi();
   const auth = useAuth();
   const prefs = usePrefs();
-  const { prompt } = useDialogs();
+  const insets = useSafeAreaInsets();
+  const { prompt, sheet } = useDialogs();
 
-  const [mode, setMode] = useState('login'); // 'login' | 'register' | 'forgot'
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  const [mode, setMode] = useState('login'); // login | register
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPw, setConfirmPw] = useState('');
   const [error, setError] = useState('');
-  const [noticeLocal, setNoticeLocal] = useState('');
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState([]);
 
@@ -53,7 +35,7 @@ export default function AuthScreen() {
       const data = await api.get('/api/auth/oauth/providers', { auth: false });
       setProviders(Array.isArray(data?.providers) ? data.providers : []);
     } catch {
-      // sin proveedores: los botones no se muestran
+      // sin proveedores: se avisa al tocar el botón
     }
   };
 
@@ -65,32 +47,24 @@ export default function AuthScreen() {
   const switchMode = (next) => {
     setMode(next);
     setError('');
-    setNoticeLocal('');
     auth.clearNotice();
   };
 
   const submit = async () => {
     auth.clearNotice();
     setError('');
-    setNoticeLocal('');
+    if (mode === 'register') {
+      const parts = name.trim().split(/\s+/).filter(Boolean);
+      if (parts.length < 2) return setError('Escribe tu nombre y tu apellido');
+      if (password.length < MIN_PASSWORD) return setError(`La contraseña necesita al menos ${MIN_PASSWORD} caracteres`);
+    }
     setBusy(true);
     try {
       if (mode === 'login') {
         await auth.login(email.trim(), password);
-      } else if (mode === 'register') {
-        if (password !== confirmPw) {
-          setError('Las contraseñas no coinciden');
-          return;
-        }
-        await auth.register({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          email: email.trim(),
-          password,
-        });
       } else {
-        await api.post('/api/auth/request-password-reset', { email: email.trim() }, { auth: false });
-        setNoticeLocal('Si el correo existe, te enviamos un enlace para restablecer la contraseña.');
+        const parts = name.trim().split(/\s+/);
+        await auth.register({ firstName: parts[0], lastName: parts.slice(1).join(' '), email: email.trim(), password });
       }
     } catch (err) {
       setError(err instanceof ApiException ? err.message : 'Algo salió mal. Intenta de nuevo.');
@@ -105,10 +79,7 @@ export default function AuthScreen() {
     // Los botones se muestran siempre (como en la web); si el gateway aún no
     // tiene el proveedor configurado, se avisa en lugar de abrir el navegador.
     if (!providers.includes(provider)) {
-      setError(
-        `El inicio de sesión con ${provider === 'google' ? 'Google' : 'Apple'} ` +
-          'aún no está disponible. Usa tu correo y contraseña.',
-      );
+      setError(`El acceso con ${provider === 'google' ? 'Google' : 'Apple'} aún no está disponible. Usa tu correo.`);
       return;
     }
     setBusy(true);
@@ -122,7 +93,9 @@ export default function AuthScreen() {
     }
   };
 
-  // Mantener pulsado el pie: cambiar de servidor (desarrollo)
+  const recover = () => sheet({ keyboard: true, render: (close) => <RecoverSheet initialEmail={email} onDone={close} /> });
+
+  // Mantener pulsada la marca: cambiar de servidor (desarrollo).
   const changeServer = async () => {
     const value = await prompt({
       title: 'Servidor',
@@ -137,254 +110,228 @@ export default function AuthScreen() {
     }
   };
 
-  const insets = useSafeAreaInsets();
-  const notice = auth.notice;
-  const screenBg = c.bg;
-  const surface = c.surface3;
+  const register = mode === 'register';
+  const message = error || auth.notice;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: screenBg }}>
-      <AmbientGlow />
-      {/* Sin esto el teclado tapaba los campos de abajo: con edge-to-edge la
-          ventana no se encoge, así que el ScrollView tampoco tenía nada que
-          desplazar y el formulario quedaba a medias. */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+      {/* Con edge-to-edge la ventana no se encoge con el teclado: sin esto el
+          formulario quedaba tapado y el ScrollView no tenía nada que mover. */}
       <KeyboardAware bottomInset={insets.bottom}>
-      <ScrollView
-        contentContainerStyle={{
-          flexGrow: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: 26,
-          paddingVertical: 40,
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
-        <FadeUp style={{ alignItems: 'center', gap: 14 }}>
-          <LogoMark size={48} />
-          <LixLogo size={24} />
-          <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkLabel }}>
-            IA en nuestras propias GPUs
-          </Text>
-        </FadeUp>
+        <ScrollView
+          key={mode}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: register ? 12 : 40, paddingBottom: 28 }}
+        >
+          {register ? (
+            <View style={{ marginLeft: -12 }}>
+              <IconButton onPress={() => switchMode('login')} label="Volver">
+                <Icon name="arrow-left" size={20} color={c.inkBody} />
+              </IconButton>
+            </View>
+          ) : (
+            <FadeUp>
+              <Pressable onLongPress={changeServer} delayLongPress={800} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start' }}>
+                <LogoMark size={28} />
+                <LixLogo size={16} />
+              </Pressable>
+            </FadeUp>
+          )}
 
-        <View style={{ width: '100%', maxWidth: 420, marginTop: 30, gap: 18 }}>
           <FadeUp delay={60}>
-            {mode !== 'forgot' ? (
-              <ModeToggle mode={mode} onChange={switchMode} surface={surface} />
-            ) : (
-              <Text
-                style={{
-                  textAlign: 'center',
-                  fontFamily: FONTS.uiSemiBold,
-                  fontSize: 23,
-                  color: c.ink,
-                  marginBottom: 4,
-                }}
-              >
-                Restablecer contraseña
-              </Text>
-            )}
+            <ScreenTitle style={{ fontSize: 34, lineHeight: 38, marginTop: register ? 36 : 72, marginBottom: register ? 28 : 32 }}>
+              {register ? 'Crea tu cuenta' : 'Bienvenido\nde nuevo'}
+            </ScreenTitle>
           </FadeUp>
 
-          {/* Campos: la key fuerza el fields-in al cambiar de modo */}
-          <FadeUp key={mode} style={{ gap: 10 }}>
-            {mode === 'register' && (
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <FloatingField surface={surface} label="Nombre" value={firstName} onChangeText={setFirstName} autoCapitalize="words" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <FloatingField surface={surface} label="Apellido" value={lastName} onChangeText={setLastName} autoCapitalize="words" />
-                </View>
-              </View>
-            )}
+          <FadeUp delay={120} style={{ flexDirection: 'row', gap: 8 }}>
+            <SocialButton label="Google" icon={<GoogleLogo size={18} />} disabled={busy} onPress={() => withProvider('google')} />
+            <SocialButton label="Apple" icon={<AppleLogo size={18} color={c.ink} />} disabled={busy} onPress={() => withProvider('apple')} />
+          </FadeUp>
 
-            <FloatingField
-              surface={surface}
-              label="Correo Electrónico"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
+          <FadeUp delay={160}>
+            <Text style={{ textAlign: 'center', marginTop: 24, marginBottom: 16, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>o con tu correo</Text>
+          </FadeUp>
+
+          <FadeUp delay={200} style={{ gap: 12 }}>
+            {register && <Field label="Nombre y apellido" value={name} onChangeText={setName} autoCapitalize="words" textContentType="name" />}
+            <Field label="Correo" value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" textContentType="emailAddress" />
+            <Field
+              label="Contraseña"
+              value={password}
+              onChangeText={setPassword}
+              secure
+              onSubmitEditing={submit}
+              aside={
+                register ? null : (
+                  <Pressable onPress={recover} hitSlop={8}>
+                    <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.accent }}>¿La olvidaste?</Text>
+                  </Pressable>
+                )
+              }
             />
-            {mode !== 'forgot' && (
-              <FloatingField surface={surface} label="Contraseña" value={password} onChangeText={setPassword} secure />
-            )}
-            {mode === 'register' && (
-              <FloatingField
-                surface={surface}
-                label="Confirmar Contraseña"
-                value={confirmPw}
-                onChangeText={setConfirmPw}
-                secure
-              />
+            {register && password.length > 0 && <Strength password={password} />}
+
+            {!!message && (
+              <FadeUp key={message} distance={4}>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: c.danger }}>{message}</Text>
+              </FadeUp>
             )}
 
-            {(!!error || !!notice) && (
-              <Text
-                style={{
-                  textAlign: 'center',
-                  fontFamily: FONTS.ui,
-                  fontSize: 14,
-                  color: c.danger,
-                }}
-              >
-                {error || notice}
-              </Text>
-            )}
-            {!!noticeLocal && (
-              <Text
-                style={{
-                  textAlign: 'center',
-                  fontFamily: FONTS.ui,
-                  fontSize: 14,
-                  color: c.accentDeep,
-                }}
-              >
-                {noticeLocal}
-              </Text>
-            )}
-
-            {/* CTA grande (.auth__cta) */}
             <Pressable
-              onPress={busy ? undefined : submit}
+              onPress={submit}
               disabled={busy}
               style={({ pressed }) => ({
-                marginTop: 6,
-                height: 48,
-                justifyContent: 'center',
+                marginTop: 8,
+                height: 50,
                 borderRadius: RADIUS,
                 backgroundColor: c.primary,
                 alignItems: 'center',
-                opacity: busy ? 0.45 : 1,
+                justifyContent: 'center',
+                opacity: busy ? 0.5 : 1,
                 transform: [{ scale: pressed ? 0.98 : 1 }],
               })}
             >
               <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>
-                {mode === 'register'
-                  ? busy
-                    ? 'Creando cuenta…'
-                    : 'Crear Cuenta'
-                  : mode === 'forgot'
-                    ? busy
-                      ? 'Enviando…'
-                      : 'Enviar enlace'
-                    : busy
-                      ? 'Iniciando…'
-                      : 'Iniciar Sesión'}
+                {register ? (busy ? 'Creando cuenta…' : 'Crear cuenta') : busy ? 'Entrando…' : 'Iniciar sesión'}
               </Text>
             </Pressable>
-
-            {mode === 'login' && (
-              <LinkText onPress={() => switchMode('forgot')}>¿Olvidaste tu contraseña?</LinkText>
-            )}
-            {mode === 'forgot' && (
-              <LinkText onPress={() => switchMode('login')}>Volver a iniciar sesión</LinkText>
-            )}
-
-            {mode !== 'forgot' && (
-              <>
-                {/* Divisor (.auth__divider) */}
-                <Text style={{ textAlign: 'center', marginTop: 8, fontFamily: FONTS.uiMedium, fontSize: 10.5, letterSpacing: 1, color: c.inkLabel }}>
-                  {mode === 'login' ? 'O INICIA SESIÓN CON' : 'O REGÍSTRATE CON'}
-                </Text>
-
-                {/* Sociales: Google superficie clara, Apple tinta (auth.css) */}
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <SocialButton
-                    label="Google"
-                    icon={<GoogleLogo />}
-                    variant="surface"
-                    surface={surface}
-                    disabled={busy}
-                    onPress={() => withProvider('google')}
-                  />
-                  <SocialButton
-                    label="Apple"
-                    icon={<AppleLogo color={dark ? DARK_APPLE : '#FFFFFF'} />}
-                    variant="ink"
-                    disabled={busy}
-                    onPress={() => withProvider('apple')}
-                  />
-                </View>
-              </>
-            )}
           </FadeUp>
-        </View>
 
-        <Pressable onLongPress={changeServer} style={{ marginTop: 30, padding: 6 }}>
-          <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkLabel }}>lixbon.com</Text>
-        </Pressable>
-      </ScrollView>
+          <View style={{ flex: 1, minHeight: 32 }} />
+          <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>{register ? '¿Ya tienes cuenta? ' : '¿No tienes cuenta? '}</Text>
+            <Pressable onPress={() => switchMode(register ? 'login' : 'register')} hitSlop={10}>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{register ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       </KeyboardAware>
     </SafeAreaView>
   );
 }
 
-// En oscuro el botón Apple es crema (primary) → logo en tinta oscura.
-const DARK_APPLE = '#0B0B0B';
-
-function ModeToggle({ mode, onChange }) {
+/// Campo con la etiqueta encima (y un enlace opcional a la derecha); el de
+/// contraseña trae el ojo para mostrarla.
+function Field({ label, aside = null, secure = false, surface, ...input }) {
+  const c = useColors();
+  const [shown, setShown] = useState(false);
+  const [focused, setFocused] = useState(false);
   return (
-    <Segmented
-      stretch
-      value={mode}
-      onChange={onChange}
-      options={[
-        { value: 'login', label: 'Iniciar sesión' },
-        { value: 'register', label: 'Registrarse' },
-      ]}
-    />
+    <View style={{ gap: 6 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.ink70 }}>{label}</Text>
+        {aside}
+      </View>
+      <View style={{ height: 48, borderRadius: RADIUS, backgroundColor: surface || (focused ? c.surface4 : c.surface3), flexDirection: 'row', alignItems: 'center' }}>
+        <TextInput
+          {...input}
+          accessibilityLabel={label}
+          secureTextEntry={secure && !shown}
+          autoCapitalize={input.autoCapitalize || 'none'}
+          autoCorrect={false}
+          placeholderTextColor={c.inkFaint}
+          selectionColor={c.accent}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{ flex: 1, height: 48, paddingLeft: 14, paddingRight: secure ? 4 : 14, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}
+        />
+        {secure && (
+          <Pressable
+            onPress={() => setShown((v) => !v)}
+            accessibilityLabel={shown ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Icon name={shown ? 'eye-off' : 'eye'} size={18} color={c.inkMuted} />
+          </Pressable>
+        )}
+      </View>
+    </View>
   );
 }
 
-// Enlace en acento.
-function LinkText({ children, onPress }) {
+function Strength({ password }) {
   const c = useColors();
+  const n = password.length;
+  const missing = MIN_PASSWORD - n;
+  const varied = /[A-Z]/.test(password) + /[0-9]/.test(password) + /[^A-Za-z0-9]/.test(password);
+  const strong = n >= 12 || (n >= MIN_PASSWORD && varied >= 2);
+  const label = missing > 0 ? `Casi · ${missing} ${missing === 1 ? 'carácter' : 'caracteres'} más` : strong ? 'Segura' : 'Válida';
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ alignSelf: 'center', padding: 4, opacity: pressed ? 0.72 : 1 })}>
-      <Text
-        style={{
-          fontFamily: FONTS.uiMedium,
-          fontSize: 13.5,
-          color: c.accentDeep,
-        }}
-      >
-        {children}
-      </Text>
-    </Pressable>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: -4 }}>
+      <Meter value={missing > 0 ? n / MIN_PASSWORD / 1.5 : strong ? 1 : 0.75} color={missing > 0 ? c.inkMuted : c.accent} />
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>{label}</Text>
+    </View>
   );
 }
 
-function SocialButton({ label, icon, onPress, disabled, variant, surface }) {
+function SocialButton({ label, icon, onPress, disabled }) {
   const c = useColors();
-  const ink = variant === 'ink';
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => ({
         flex: 1,
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 10,
-        height: 46,
+        height: 48,
         borderRadius: RADIUS,
-        backgroundColor: ink ? c.primary : pressed ? c.surface4 : surface || c.surface3,
-        opacity: disabled ? 0.45 : 1,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        backgroundColor: pressed ? c.surface4 : c.surface2,
+        opacity: disabled ? 0.5 : 1,
       })}
     >
       {icon}
-      <Text
-        style={{
-          fontFamily: FONTS.uiSemiBold,
-          fontSize: 14,
-          color: ink ? c.onPrimary : c.ink,
-        }}
-      >
-        {label}
-      </Text>
+      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{label}</Text>
     </Pressable>
+  );
+}
+
+function RecoverSheet({ initialEmail, onDone }) {
+  const c = useColors();
+  const api = useApi();
+  const [email, setEmail] = useState(initialEmail);
+  const [state, setState] = useState('idle'); // idle | sending | sent
+  const [error, setError] = useState('');
+
+  const send = async () => {
+    if (!email.trim()) return;
+    setState('sending');
+    setError('');
+    try {
+      await api.post('/api/auth/request-password-reset', { email: email.trim() }, { auth: false });
+      setState('sent');
+    } catch (err) {
+      setState('idle');
+      setError(err instanceof ApiException ? err.message : 'Sin conexión con el servidor');
+    }
+  };
+
+  if (state === 'sent') {
+    return (
+      <FadeUp style={{ paddingHorizontal: 8, gap: 18 }}>
+        <SheetTitle detail={`Si ${email.trim()} tiene cuenta, en unos minutos te llega el enlace. Revisa también el correo no deseado.`}>Revisa tu correo</SheetTitle>
+        <Pressable onPress={() => onDone(null)} style={{ height: 50, borderRadius: RADIUS, backgroundColor: c.raised, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onRaised }}>Listo</Text>
+        </Pressable>
+      </FadeUp>
+    );
+  }
+
+  return (
+    <View style={{ paddingHorizontal: 8, gap: 18 }}>
+      <SheetTitle detail="Te enviaremos un enlace para crear una nueva.">Recupera tu contraseña</SheetTitle>
+      <Field label="Correo" value={email} onChangeText={setEmail} keyboardType="email-address" surface={c.surface4} onSubmitEditing={send} autoFocus={!initialEmail} />
+      {!!error && <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>{error}</Text>}
+      <Pressable
+        onPress={send}
+        disabled={state === 'sending'}
+        style={({ pressed }) => ({ height: 50, borderRadius: RADIUS, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: state === 'sending' ? 0.5 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] })}
+      >
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>{state === 'sending' ? 'Enviando…' : 'Enviar enlace'}</Text>
+      </Pressable>
+    </View>
   );
 }

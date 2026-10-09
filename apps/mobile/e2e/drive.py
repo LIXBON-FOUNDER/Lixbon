@@ -156,18 +156,19 @@ def main() -> None:
     shot("05-chat-escribiendo")
     hide_keyboard()
 
-    # Paleta (Modal): mismo requisito
-    tap(find(r"Buscar o ejecutar"))
-    check_above_keyboard("06-paleta-teclado")
-    # Un "atrás" de más cerraría la app: se pulsa solo mientras la paleta siga abierta.
+    # Búsqueda (Modal a pantalla completa): mismo requisito
+    tap(find(r"^\s*Buscar\s*$"))
+    check_above_keyboard("06-busqueda-teclado")
+    # Un "atrás" de más cerraría la app: se pulsa solo mientras la búsqueda siga abierta.
     for _ in range(3):
-        if any(re.fullmatch(r"\s*Remoto\s*", n.get("text", "")) for n in nodes()):
+        if any(re.search(r"Abrir men[uú]", label(n)) for n in nodes()):
             break
         adb("shell", "input", "keyevent", "4")
         time.sleep(1)
 
-    # Remoto: lista con las marcas de cada agente
-    tap(find(r"^Remoto$"))
+    # Remoto: desde el menú lateral, la pestaña con las sesiones de cada agente
+    tap(find(r"Abrir men[uú]"))
+    tap(find(r"^\s*Remoto\s*$"))
     find(r"Arreglar el login con Google")
     shot("07-remoto-lista")
 
