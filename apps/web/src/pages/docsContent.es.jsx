@@ -1,7 +1,3 @@
-// docsContent.es.jsx — contenido en español de lixbon Docs. Cada sección es un
-// componente que recibe `base` (origen del gateway) para los ejemplos. El
-// índice, los títulos y las descripciones viven en docsIndex.js (lo comparte
-// el sitemap); docsContent.js junta este archivo con docsContent.en.jsx.
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { CodeBlock } from '../components/CodeBlock';
@@ -22,7 +18,7 @@ function Introduccion() {
     <>
       <h1>¿Qué es lixbon?</h1>
       <p className="docs__lead">
-        lixbon es una plataforma de IA que corre sobre un clúster de GPUs propio.
+        lixbon es una plataforma de IA que corre en GPUs que operamos nosotros.
         Chateas con modelos de lenguaje desde la web, programas con un agente desde
         la terminal o el IDE, diseñas sitios en Visuals y, si desarrollas, integras
         los mismos modelos en tu código con una API compatible con OpenAI.
@@ -30,10 +26,9 @@ function Introduccion() {
 
       <h2>Cómo funciona</h2>
       <p>
-        Tus mensajes llegan a un <strong>gateway</strong> que los enruta al nodo GPU
-        más adecuado del clúster y te devuelve la respuesta en streaming, token a
-        token. No dependes de un proveedor externo: la inferencia ocurre en hardware
-        propio, y el orquestador reparte la carga y evita los nodos caídos. Cada
+        Cada mensaje lo atiende el modelo más adecuado en nuestros servidores, que te devuelve la respuesta al instante,
+        mientras se escribe. No dependes de un proveedor externo: todo ocurre en
+        servidores propios. Cada
         tarea (chat, visión, autocompletado de código, embeddings) la atiende el
         modelo que mejor la sirve.
       </p>
@@ -112,7 +107,7 @@ function ChatWeb() {
 
       <h2>Modelos y razonamiento</h2>
       <p>
-        El selector del compositor lista los modelos activos del clúster. Los que
+        El selector del compositor lista los modelos disponibles. Los que
         razonan (DeepSeek-R1, Qwen 3, gpt-oss…) muestran su pensamiento en un bloque
         plegable antes de la respuesta; el nivel de razonamiento se ajusta solo según
         el modelo y la tarea.
@@ -122,7 +117,7 @@ function ChatWeb() {
       <p>
         Con el clip, pegando o arrastrando puedes adjuntar imágenes y documentos
         (PDF, Word, texto, Markdown, CSV, JSON, código…). Las imágenes las lee el
-        modelo de visión del clúster; los documentos se convierten a texto y entran
+        modelo de visión; los documentos se convierten a texto y entran
         en el contexto de la conversación.
       </p>
 
@@ -167,7 +162,7 @@ function Visuals() {
         <li><strong>Landing page</strong>, <strong>Componente</strong> (tarjeta, tabla, formulario…), <strong>Dashboard</strong> y <strong>Email</strong> (tablas y estilos en línea).</li>
         <li><strong>Logo / SVG</strong>: logotipos e ilustraciones vectoriales.</li>
         <li><strong>Prototipo</strong>: varias pantallas enlazadas entre sí (<code>index.html</code>, <code>contacto.html</code>…), navegables desde la vista previa.</li>
-        <li><strong>Imagen</strong>: generación de imágenes, cuando hay un nodo del clúster que las genera.</li>
+        <li><strong>Imagen</strong>: generación de imágenes, cuando el modelo de imágenes está disponible.</li>
         <li><strong>Piezas de marketing</strong>: imágenes, carruseles y vídeos con tamaño propio (post 1080×1350, story 1080×1920…). Se ven tal cual saldrán, se editan en el lienzo y se renderizan a PNG o MP4 desde el servidor.</li>
       </ul>
 
@@ -291,7 +286,7 @@ function Cli({ base }) {
     <>
       <h1>CLI</h1>
       <p className="docs__lead">
-        El CLI de lixbon te deja chatear con el clúster desde la terminal y trabajar
+        El CLI de lixbon te deja chatear con lixbon desde la terminal y trabajar
         con un agente que lee y edita tu proyecto, ejecuta comandos y hace commits.
         Es un solo ejecutable: no necesitas Python ni instalar nada más.
       </p>
@@ -333,7 +328,7 @@ function Cli({ base }) {
           <tr><td><code>ask</code></td><td>Chat normal. Adjunta imágenes con <code>@ruta.png</code> o <code>/paste</code>.</td></tr>
           <tr><td><code>agent</code></td><td>El modelo usa herramientas sobre tu carpeta de trabajo: lee y edita archivos, ejecuta comandos, hace commits. Cada herramienta pide aprobación salvo que actives <code>/approve</code> o la incluyas en <code>/allow</code>.</td></tr>
           <tr><td><code>plan</code></td><td>Sobre el modo agente: solo explora y propone un plan, sin tocar nada (<code>/plan on</code>).</td></tr>
-          <tr><td><code>delegate</code></td><td>Un clasificador analiza la petición (intención, complejidad, dominio, riesgo) y la enruta al modelo del clúster que mejor la resuelve.</td></tr>
+          <tr><td><code>delegate</code></td><td>Un clasificador analiza la petición (intención, complejidad, dominio, riesgo) y la enruta al modelo que mejor la resuelve.</td></tr>
         </tbody>
       </table>
       <p>
@@ -367,7 +362,7 @@ function Cli({ base }) {
           <tr><td><code>/visual &lt;qué diseñar&gt;</code> · <code>&lt;id&gt; &lt;cambio&gt;</code> · <code>codigo &lt;id&gt; [stack]</code></td><td>Crear, editar o pasar a código un diseño de Visuals (por el servidor MCP de Lixbon, que el CLI registra solo)</td></tr>
           <tr><td><code>/remote</code></td><td>Controlar esta sesión desde el móvil o la web (enlace + QR)</td></tr>
           <tr><td><code>/status</code> · <code>/cost</code> · <code>/usage</code></td><td>Estado de la sesión · tokens consumidos · uso global de la cuenta</td></tr>
-          <tr><td><code>/nodes</code></td><td>Ver los nodos del clúster</td></tr>
+          <tr><td><code>/nodes</code></td><td>Ver los modelos disponibles</td></tr>
           <tr><td><code>/login</code> · <code>/logout</code> · <code>/key &lt;api_key&gt;</code></td><td>Sesión de esta máquina</td></tr>
           <tr><td><code>/config</code> · <code>/bar</code> · <code>/doctor</code></td><td>Ajustes · barra de estado · diagnóstico de terminal y conexión</td></tr>
           <tr><td><code>/update</code></td><td>Actualizar el CLI a la última versión</td></tr>
@@ -442,7 +437,7 @@ function Desktop() {
 
       <h2>Qué incluye</h2>
       <ul>
-        <li><strong>Editor</strong> con resaltado, búsqueda y reemplazo, y <strong>autocompletado fantasma</strong> (estilo Copilot) servido por el modelo de código del clúster.</li>
+        <li><strong>Editor</strong> con resaltado, búsqueda y reemplazo, y <strong>autocompletado fantasma</strong> (estilo Copilot) servido por el modelo de código de lixbon.</li>
         <li><strong>Chat</strong> con @-menciones a archivos del proyecto.</li>
         <li><strong>Agente</strong>: las mismas herramientas del CLI (editar, ejecutar, commits) con aprobación por paso.</li>
         <li><strong>Remote</strong>: sigue la sesión desde el móvil (<Link to="/docs/remote">ver Remote</Link>).</li>
@@ -798,7 +793,7 @@ function Planes() {
         </tbody>
       </table>
       <p>
-        Todos los planes acceden a todos los modelos activos del clúster. Los precios
+        Todos los planes acceden a todos los modelos disponibles. Los precios
         vigentes y el cambio de plan están en la página de <Link to="/plans">Planes</Link>.
       </p>
 
@@ -820,7 +815,7 @@ function Planes() {
       <p>
         Las peticiones con API key <strong>no</strong> consumen la cuota del plan: se pagan
         con <Link to="/docs/api-pricing">créditos prepago</Link> por tokens y pueden usar
-        cualquier modelo del clúster. Del plan solo se conservan las peticiones por
+        cualquier modelo disponible. Del plan solo se conservan las peticiones por
         minuto y el número de keys.
       </p>
     </>

@@ -1,6 +1,4 @@
 """
-team_issues.py — Las issues propias de Lixbon Team en el gateway.
-
 Rutas bajo `/api/team/*` con la misma sesión que el resto de Team (cookie en
 team.lixbon.com, Bearer en el IDE). Cada cambio sale en vivo por `/ws/team` a
 todo el equipo:
@@ -52,8 +50,6 @@ def _emitir_tablero(proyecto_id: str) -> None:
         hub.a_usuario(uid, {"tipo": "proyecto_actualizado",
                             "proyecto": tq.proyecto_salida(proyecto_id, uid, hub.estado_publico)})
 
-
-# ── Cuerpos ────────────────────────────────────────────────────────────────
 
 class IssueNueva(BaseModel):
     titulo: str = Field(..., min_length=1, max_length=200)
@@ -143,8 +139,6 @@ class Ajustes(BaseModel):
     automatismos: dict[str, bool] | None = None
 
 
-# ── Issues ─────────────────────────────────────────────────────────────────
-
 @router.get("/api/team/projects/{proyecto_id}/issues")
 async def listar(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_auth_required)):
     return _ejecutar(ti.listar_issues, proyecto_id, yo["id"])
@@ -208,8 +202,6 @@ async def vincular(issue_id: str, cuerpo: VinculoNuevo, yo: dict[str, Any] = Dep
     pid = _ejecutar(ti.vincular, issue_id, yo["id"], cuerpo.tipo, cuerpo.ref, cuerpo.estado, cuerpo.url)
     return _emitir_issue(pid, issue_id)
 
-
-# ── Tablero del equipo ─────────────────────────────────────────────────────
 
 @router.patch("/api/team/projects/{proyecto_id}/issue-settings")
 async def ajustes(proyecto_id: str, cuerpo: Ajustes, yo: dict[str, Any] = Depends(cookie_auth_required)):
@@ -292,8 +284,6 @@ async def borrar_iniciativa(iniciativa_id: str, yo: dict[str, Any] = Depends(coo
         _emitir_issue(pid, iid)
     return Response(status_code=204)
 
-
-# ── GitHub: webhook por equipo ─────────────────────────────────────────────
 
 @router.get("/api/team/projects/{proyecto_id}/github-webhook")
 async def ver_webhook(proyecto_id: str, peticion: Request, yo: dict[str, Any] = Depends(cookie_auth_required)):

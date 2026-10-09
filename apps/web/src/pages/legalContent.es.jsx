@@ -1,6 +1,3 @@
-// legalContent.es.jsx — textos legales de lixbon en español (/legal/:doc). Lo
-// que va entre corchetes son datos del responsable que hay que rellenar antes
-// de cobrar en modo real; el resto describe lo que la plataforma hace de verdad.
 import { Link } from '../i18n/link';
 import { RESPONSABLE, VIGENCIA as VIGENCIA_POR_IDIOMA } from './legalShared';
 

@@ -1,7 +1,3 @@
-"""
-deps.py — Singletons compartidos entre routers de lixbon DTC.
-Los clientes HTTP se inicializan en el evento on_startup de main.py.
-"""
 from __future__ import annotations
 import httpx
 from core.orchestration.orchestrator import NodeOrchestrator

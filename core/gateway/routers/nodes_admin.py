@@ -1,5 +1,4 @@
 """
-nodes_admin.py — CRUD de nodos GPU del cluster (rol admin, F6).
 Los nodos viven en la tabla `nodes`; el orquestador se recarga tras cada cambio.
 
 Además de los nodos por URL, gestiona los tokens de enrolamiento con los que

@@ -28,8 +28,6 @@ y responde ÚNICAMENTE con un JSON válido con este formato exacto (sin texto ad
 }"""
 
 
-# ─── Embedding ─────────────────────────────────────────────────────────────
-
 async def get_embedding(
     text: str,
     base_url: str,
@@ -43,8 +41,6 @@ async def get_embedding(
     from core.inference.ollama import embed
     return await embed(base_url, text, model, headers=headers, keep_alive=keep_alive)
 
-
-# ─── Clasificación ─────────────────────────────────────────────────────────
 
 async def classify_request(
     user_input: str,
@@ -99,7 +95,6 @@ async def classify_request(
         }
 
 
-# ─── Candidatos ────────────────────────────────────────────────────────────
 # El catálogo es lo que devuelve fetch_models(): dicts {"id", "capabilities"?,
 # "size"?}. Se aceptan strings sueltos (⇒ capabilities desconocidas).
 
@@ -164,8 +159,6 @@ def pick_route_model(catalog: Iterable[Any] | None, tier: str = "heavy") -> str 
         return min(mejor, key=lambda m: (tamanos.get(m) or float("inf"), mejor.index(m)))
     return max(mejor, key=lambda m: (tamanos.get(m) or 0, -mejor.index(m)))
 
-
-# ─── Router ────────────────────────────────────────────────────────────────
 
 def route_request(
     classification: dict[str, Any],

@@ -1,6 +1,4 @@
-// useDismiss.js — cierra un popover al pulsar fuera o con Escape.
-// En táctil no existe `mouseleave`: sin esto los menús contextuales del panel
-// lateral se quedaban abiertos para siempre.
+// En táctil no existe `mouseleave`: sin esto los menús quedaban abiertos.
 import { useEffect } from 'react';
 
 export function useDismiss(open, ref, onClose) {

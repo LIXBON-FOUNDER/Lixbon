@@ -1,6 +1,3 @@
-// rutasPublicas.js — las páginas que se indexan: alimentan el sitemap y el
-// prerender (HTML estático para los buscadores). Sin JSX. Cada ruta en
-// español se repite con el prefijo /en: mismo slug, dos idiomas.
 import { DOCS_INDEX } from './pages/docsIndex.js';
 import { LEGAL_INDEX } from './pages/legalIndex.js';
 import { GUIAS_INDEX } from './pages/guiasIndex.js';
@@ -17,6 +14,8 @@ const BASE = [
   { path: '/news', priority: '0.6', changefreq: 'weekly' },
   { path: '/status', priority: '0.5', changefreq: 'hourly' },
   { path: '/support', priority: '0.5', changefreq: 'monthly' },
+  { path: '/about', priority: '0.6', changefreq: 'monthly' },
+  { path: '/team', priority: '0.5', changefreq: 'monthly' },
   { path: '/docs', priority: '0.8', changefreq: 'weekly' },
   { path: '/guides', priority: '0.8', changefreq: 'weekly' },
   ...GUIAS_INDEX.map((s) => ({ path: `/guides/${s.id}`, priority: '0.7', changefreq: 'monthly' })),
@@ -25,6 +24,6 @@ const BASE = [
 ];
 
 export const RUTAS_PUBLICAS = BASE.flatMap((r) => [
-  { ...r, locale: 'es' },
-  { ...r, path: withLocale(r.path, 'en'), locale: 'en' },
+  { ...r, locale: 'en' },
+  { ...r, path: withLocale(r.path, 'es'), locale: 'es' },
 ]);

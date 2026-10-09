@@ -1,6 +1,4 @@
 """
-visual_prompts.py — Instrucciones de `/visual` para agentes que usan las
-herramientas MCP de Visuals (Claude Code, Codex, el agente de Lixbon…).
 Las reglas de HTML y diseño son las de VISUALS_PROMPT (apps/web/src/lib/visuals.js);
 aquí cambia el canal: herramientas en vez de bloques file:/edit:.
 """

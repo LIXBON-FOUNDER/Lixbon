@@ -1,6 +1,3 @@
-// legalContent.jsx — junta el contenido en español (legalContent.es.jsx) y en
-// inglés (legalContent.en.jsx) con el índice (legalIndex.js); cada documento
-// lleva Body.es y Body.en. RESPONSABLE y VIGENCIA viven en legalShared.js.
 import { LEGAL_INDEX } from './legalIndex';
 import { CUERPOS as CUERPOS_ES } from './legalContent.es';
 import { CUERPOS as CUERPOS_EN } from './legalContent.en';

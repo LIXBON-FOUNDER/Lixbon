@@ -1,6 +1,4 @@
 """
-team_queries.py — Acceso a datos de Lixbon Team.
-
 Implementa el modelo de `docs/team-protocolo.md` (repo del IDE). Vive aparte de
 `queries.py` porque aquel ya son 2.200 líneas de otro dominio, y porque todo lo
 de aquí comparte una sola idea: **la autorización vive en la consulta, no en la
@@ -44,8 +42,6 @@ ESTADOS = ("en_linea", "desconectado", "no_molestar", "invisible")
 def _id(prefijo: str) -> str:
     return f"{prefijo}_{uuid.uuid4().hex[:12]}"
 
-
-# ── Usuarios ───────────────────────────────────────────────────────────────
 
 def usuario_publico(u: User | None) -> dict[str, Any] | None:
     """Lo que se manda de un usuario a OTROS: sin correo, sin plan, sin rol.
@@ -98,8 +94,6 @@ def buscar_usuarios(q: str, excepto: int, limite: int = 10) -> list[dict[str, An
         )
         return [usuario_publico(u) for u in filas]
 
-
-# ── Pertenencia y visibilidad ──────────────────────────────────────────────
 
 def _miembro(s, proyecto_id: str, uid: int) -> TeamMiembro | None:
     return s.get(TeamMiembro, {"proyecto_id": proyecto_id, "usuario_id": uid})
@@ -178,8 +172,6 @@ def relacionados(uid: int) -> list[int]:
         fuera.discard(uid)
         return sorted(fuera)
 
-
-# ── Salida: la forma que viaja por el cable ────────────────────────────────
 
 def _adjunto_salida(a: TeamAdjunto, firmar) -> dict[str, Any]:
     url, caduca = firmar(a.id)
@@ -285,8 +277,6 @@ def mensaje_salida(mensaje_id: str, firmar) -> dict[str, Any] | None:
         return _mensaje_salida(s, m, firmar) if m else None
 
 
-# ── Bootstrap ──────────────────────────────────────────────────────────────
-
 def bootstrap(uid: int, presencia_real: str, presencia) -> dict[str, Any]:
     """Todo lo que la ventana necesita para pintarse, en UNA llamada: arranca de
     golpe, no a saltos."""
@@ -329,8 +319,6 @@ def bootstrap(uid: int, presencia_real: str, presencia) -> dict[str, Any]:
             ],
         }
 
-
-# ── Proyectos ──────────────────────────────────────────────────────────────
 
 def crear_proyecto(uid: int, nombre: str, issues: dict[str, Any] | None = None) -> str:
     """El que lo crea queda como líder y se crea el canal #general: un proyecto
@@ -384,8 +372,6 @@ def proyecto(proyecto_id: str) -> dict[str, Any] | None:
         return {"id": p.id, "nombre": p.nombre, "lider_id": p.lider_id}
 
 
-# ── Miembros ───────────────────────────────────────────────────────────────
-
 def anadir_miembro(proyecto_id: str, uid: int) -> bool:
     """False si ya estaba."""
     with get_session() as s:
@@ -410,8 +396,6 @@ def miembros_de_proyecto(proyecto_id: str) -> list[int]:
         return list(s.scalars(
             select(TeamMiembro.usuario_id).where(TeamMiembro.proyecto_id == proyecto_id)))
 
-
-# ── Canales ────────────────────────────────────────────────────────────────
 
 def crear_canal(proyecto_id: str, nombre: str, tipo: str, tema: str, creador: int) -> str:
     cid = _id("c")
@@ -495,8 +479,6 @@ def directos_de(uid: int) -> list[str]:
             .where(TeamCanalMiembro.usuario_id == uid, TeamCanal.tipo == "directo")
             .order_by(TeamCanal.creado_en)))
 
-
-# ── Mensajes ───────────────────────────────────────────────────────────────
 
 def listar_mensajes(canal_id: str, antes_de: int, limite: int, hilo_de: str,
                     firmar) -> dict[str, Any]:
@@ -616,8 +598,6 @@ def replay(uid: int, cursores: dict[str, int], firmar, tope: int = 500) -> list[
     return salida[:tope]
 
 
-# ── Amistades ──────────────────────────────────────────────────────────────
-
 def amistad_entre(a: int, b: int) -> dict[str, Any] | None:
     with get_session() as s:
         fila = s.scalar(select(TeamAmistad).where(or_(
@@ -662,8 +642,6 @@ def amigos_de(uid: int) -> list[dict[str, Any]]:
         return [{"usuario": usuario_publico(otros[a.a_id if a.de_id == uid else a.de_id])}
                 for a in filas if otros.get(a.a_id if a.de_id == uid else a.de_id)]
 
-
-# ── Adjuntos ───────────────────────────────────────────────────────────────
 
 def crear_adjunto(canal_id: str, subido_por: int, tipo: str, nombre: str, mime: str,
                   tamano: int, clave_r2: str, ancho: int | None, alto: int | None,
@@ -734,8 +712,6 @@ def purgar_adjuntos_huerfanos(horas: int = 24) -> list[str]:
             s.execute(delete(TeamAdjunto).where(TeamAdjunto.id.in_([a.id for a in filas])))
         return claves
 
-
-# ── Canje del IDE ──────────────────────────────────────────────────────────
 
 TOKEN_IDE_TTL_MIN = 2
 

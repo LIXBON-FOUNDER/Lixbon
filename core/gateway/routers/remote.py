@@ -1,6 +1,4 @@
 """
-remote.py — Control remoto de sesiones IDE/CLI (/remote).
-
 El host (IDE/CLI) mantiene un SSE de comandos y publica eventos por POST;
 los controllers (app móvil / web) mantienen un SSE de eventos y publican
 comandos por POST. Transporte uniforme SSE+POST porque el CLI es stdlib puro
@@ -151,8 +149,6 @@ async def _sse(queue: asyncio.Queue, first: list[dict[str, Any]] | None = None):
             return
 
 
-# ── Ciclo de vida de sesiones ──────────────────────────────────────────────
-
 @router.post("/api/remote/sessions")
 async def create_session_endpoint(
     payload: dict[str, Any],
@@ -258,8 +254,6 @@ async def claim_endpoint(
     return {"session": sess}
 
 
-# ── Canal del host ─────────────────────────────────────────────────────────
-
 @router.get("/api/remote/sessions/{session_id}/commands")
 async def host_commands_stream(
     session_id: str,
@@ -331,8 +325,6 @@ async def host_publish_events(
             hub.notify_user(sess["user_id"], {"type": "session_ended", "session_id": session_id})
     return {"seq": last_seq}
 
-
-# ── Canal de los controllers ───────────────────────────────────────────────
 
 @router.get("/api/remote/sessions/{session_id}/stream")
 async def controller_events_stream(
@@ -456,8 +448,6 @@ async def controller_send_command(
     return {"queued": True}
 
 
-# ── Suscripción a la lista de sesiones (pantalla Remote de la app) ─────────
-
 @router.get("/api/remote/subscribe")
 async def subscribe_sessions_stream(
     lixbon_session: str | None = Cookie(default=None),
@@ -477,8 +467,6 @@ async def subscribe_sessions_stream(
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-# ── Dispositivos (push) ────────────────────────────────────────────────────
-
 @router.post("/api/remote/devices")
 async def register_device_endpoint(
     payload: dict[str, Any],
@@ -492,8 +480,6 @@ async def register_device_endpoint(
     register_device_token(user["id"], token, (payload.get("platform") or "").strip() or None)
     return {"registered": True}
 
-
-# ── QR ─────────────────────────────────────────────────────────────────────
 
 @router.get("/api/remote/qr")
 async def qr_endpoint(

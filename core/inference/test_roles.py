@@ -36,8 +36,6 @@ def _resolve(role, **kwargs):
     return resolve_from(role, **kwargs)
 
 
-# ── Normalización ───────────────────────────────────────────────────────────
-
 def test_normalize_ignora_latest():
     assert normalize("nomic-embed-text:latest") == "nomic-embed-text"
     assert normalize("nomic-embed-text") == "nomic-embed-text"
@@ -60,8 +58,6 @@ def test_has_capability_desconocido_no_descarta():
     assert has_capability(CATALOGO_LEGACY, "deepseek-r1:8b", "insert") is True
     assert has_capability(CATALOGO, "modelo-que-no-esta", "insert") is True
 
-
-# ── Precedencia ─────────────────────────────────────────────────────────────
 
 def test_bd_gana_a_env_y_a_autodeteccion():
     res = _resolve(
@@ -115,8 +111,6 @@ def test_keep_alive_cae_a_env_y_num_ctx_viene_de_bd():
     )
     assert (res.keep_alive, res.num_ctx) == ("30m", 16384)
 
-
-# ── Autodetección por capability ─────────────────────────────────────────────
 
 def test_autodeteccion_con_el_catalogo_real():
     """Cada rol cae en el modelo correcto sin ninguna config."""
@@ -184,8 +178,6 @@ def test_modelo_configurado_ausente_del_catalogo_no_se_veta():
     assert res.supported is True        # desconocido ≠ no soportado
 
 
-# ── Camino legacy (node_agents sin capabilities) ─────────────────────────────
-
 def test_legacy_usa_el_nombre_solo_si_nadie_declara_capabilities():
     assert _resolve("chat", catalog=CATALOGO_LEGACY).source == "capability-legacy"
     assert _resolve("vision", catalog=CATALOGO_LEGACY).model == "moondream:latest"
@@ -208,8 +200,6 @@ def test_catalogo_vacio_o_con_errores():
             assert res.warning
 
 
-# ── pick_by_capability ──────────────────────────────────────────────────────
-
 def test_pick_prefiere_la_capacidad_preferida_sobre_el_tamano():
     catalogo = [
         {"id": "grande-sin-tools", "capabilities": ["completion"], "size": 9_000_000_000},
@@ -228,8 +218,6 @@ def test_pick_sin_tamanos_conserva_el_orden_del_catalogo():
     assert pick_by_capability(catalogo, "completion") == "a"
     assert pick_by_capability(catalogo, "completion", smallest=True) == "a"
 
-
-# ── Contrato de la tabla de roles ───────────────────────────────────────────
 
 def test_todos_los_roles_declaran_capacidad_requerida():
     assert set(REQUIRED_CAPABILITY) == set(ROLES)

@@ -1,9 +1,3 @@
-// DownloadsPage.jsx — descargas públicas (/apps): app de escritorio,
-// app de Android y CLI. Escritorio y Android van como dos cuadros iguales;
-// el CLI se instala con un comando (PowerShell en Windows, bash en
-// Linux/macOS) que descarga el binario de la release, verifica su SHA-256 y
-// lo deja en el PATH. La tarjeta del CLI muestra su etapa (beta o estable),
-// las notas de cada versión y la instalación manual con verificación.
 import { useSeo } from '../lib/seo';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
@@ -14,8 +8,6 @@ import { PublicFooter } from '../components/PublicFooter';
 import { CodeBlock } from '../components/CodeBlock';
 import { IconDownload, IconTerminal, IconCheck, IconPhone, IconChevron } from '../components/Icons';
 
-// Solo la última y la penúltima versión publicada de cada app: el selector
-// no tiene que cargar con todo el historial.
 const MAX_VERSIONES = 2;
 
 // «1.4.0-beta.2» → [1, 4, 0] y su prerelease; una versión final va por
@@ -34,7 +26,6 @@ function compararVersiones(a, b) {
   return pa.localeCompare(pb, undefined, { numeric: true });
 }
 
-// Las versiones de un producto, de la más nueva a la más vieja, sin repetir.
 function versionesDe(lista, producto) {
   const vistas = new Set();
   return lista
@@ -50,7 +41,6 @@ function versionesDe(lista, producto) {
     .slice(0, MAX_VERSIONES);
 }
 
-// El historial del CLI no necesita todas las versiones, solo las últimas.
 const MAX_HISTORIAL_CLI = 8;
 
 const ARCHIVOS_CLI = {
@@ -61,8 +51,6 @@ const ARCHIVOS_CLI = {
   ],
 };
 
-// Una fila por plataforma en la BD → una entrada por versión del CLI, de la
-// más nueva a la más vieja, con su etapa, sus notas y el archivo de cada sistema.
 function versionesCli(lista) {
   const porVersion = new Map();
   for (const fila of lista) {
@@ -85,7 +73,6 @@ function versionesCli(lista) {
 const nombreDeArchivo = (url) => url.slice(url.lastIndexOf('/') + 1);
 const sumasDe = (url) => `${url.slice(0, url.lastIndexOf('/'))}/SHA256SUMS`;
 
-// Las notas se escriben en Markdown mínimo: lo que va entre `comillas` es código.
 function Nota({ texto }) {
   return String(texto).split('`').map((trozo, i) => (i % 2 ? <code key={i}>{trozo}</code> : trozo));
 }
@@ -172,7 +159,6 @@ const claveDe = (v) => `${v.version}@${v.channel}`;
 // La recomendada es la primera estable; si aún no hay estable, la más nueva.
 const recomendadaDe = (lista) => lista.find((v) => v.channel === 'stable') || lista[0];
 
-/** Selector de versión + descarga, igual para escritorio y Android. */
 function SelectorVersion({ versiones, producto, requisitos, t }) {
   const [elegida, setElegida] = useState('');
   const recomendada = versiones?.length ? recomendadaDe(versiones) : null;
@@ -223,10 +209,8 @@ export default function DownloadsPage() {
   const [android, setAndroid] = useState(null);
   const [cli, setCli] = useState(null);
   const [os, setOs] = useState('windows');
-  // Plataforma de la app de escritorio (la pestaña del CLI tiene la suya).
   const [plataforma, setPlataforma] = useState('windows');
 
-  // Origen del gateway (para los comandos de instalación del CLI)
   const base = useMemo(() => (typeof window === 'undefined' ? 'https://lixbon.com' : window.location.origin), []);
 
   useEffect(() => {
@@ -251,14 +235,13 @@ export default function DownloadsPage() {
   const cliRecomendada = cli?.length ? recomendadaDe(cli) : null;
 
   return (
-    <div className="page">
+    <div className="page web">
       <PublicNav />
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">{t('title')}</h1>
         <p className="plans__sub">{t('subtitle')}</p>
 
         <div className="downloads">
-          {/* ── Apps: escritorio + Android, dos cuadros iguales ── */}
           <div className="downloads__apps">
             <section className="dl-card dl-card--app">
               <div className="dl-card__head">
@@ -320,7 +303,6 @@ export default function DownloadsPage() {
             </section>
           </div>
 
-          {/* ── CLI ── */}
           <section className="dl-card dl-card--cli">
             <div className="dl-card__head">
               <div className="dl-card__icon"><IconTerminal size={19} /></div>

@@ -1,8 +1,3 @@
-/* chat.css — el armazón: barra lateral flotante + chat.
-   El armazón es un fondo var(--surface-0) con 12px de aire; encima flotan paneles
-   var(--surface-1) de esquinas 8px. Ninguna pieza lleva borde: la jerarquía la hace
-   el relleno. */
-
 .chat-shell {
   display: flex;
   gap: var(--shell-gap);
@@ -13,7 +8,6 @@
   background: var(--bg);
 }
 
-/* Velo del cajón lateral (solo en compacto, lo monta ChatPage) */
 .sidebar-scrim {
   position: fixed;
   inset: 0;
@@ -22,8 +16,6 @@
   animation: fade-in 0.22s ease;
   -webkit-tap-highlight-color: transparent;
 }
-
-/* ── Barra lateral (ancho animado; __body = completa, __rail = colapsada) ─ */
 
 .sidebar {
   position: relative;
@@ -122,7 +114,6 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-/* La primera acción del panel es la que se quiere pulsar: va en tinta plena. */
 .sb-nav:first-child {
   color: var(--ink);
 }
@@ -140,8 +131,6 @@
   color: var(--ink);
   background: var(--surface-2);
 }
-
-/* Historial */
 
 .sidebar__history {
   flex: 1;
@@ -237,8 +226,6 @@
   outline: none;
 }
 
-/* Menús contextuales */
-
 /* Fijo, no absoluto: el historial hace scroll (overflow) y recortaba el menú.
    HistoryItem calcula left/top desde el rectángulo del botón. */
 .sb-menu {
@@ -288,7 +275,6 @@
   color: var(--danger-ink) !important;
 }
 
-/* El menú del perfil sí cabe dentro del panel: se ancla al pie y sube. */
 .sb-menu--profile {
   position: absolute;
   right: 0;
@@ -304,8 +290,6 @@
     transform: scale(0.94) translateY(4px);
   }
 }
-
-/* Botón "Mejorar plan" */
 
 .sidebar__upgrade {
   display: flex;
@@ -325,8 +309,6 @@
 .sidebar__upgrade:hover {
   background: rgba(140, 160, 56, 0.24);
 }
-
-/* Item "próximamente" en el menú del perfil */
 
 .sb-menu__tag {
   margin-left: auto;
@@ -375,8 +357,6 @@
   color: var(--ink);
 }
 
-/* Pie de perfil: tarjeta con la pestaña asomando */
-
 .sidebar__foot {
   display: flex;
   flex-direction: column;
@@ -413,8 +393,6 @@
   background: var(--surface-5);
 }
 
-/* Sin sesión no hay inicial que mostrar: el hueco lo ocupa la silueta, y baja
-   de tono para que no compita con "Iniciar sesión". */
 .sidebar__avatar--guest {
   background: var(--surface-4);
   color: var(--ink-muted);
@@ -468,10 +446,6 @@
   opacity: 0.8;
 }
 
-/* ── Área principal ──────────────────────────────────────────────────── */
-/* Sin fondo propio: el chat respira sobre el var(--surface-0) del armazón y solo los
-   bloques (código, compositor, mensaje del usuario) suben un peldaño. */
-
 .chat-main {
   position: relative;
   flex: 1;
@@ -490,7 +464,6 @@
   padding: 0 10px 0 14px;
 }
 
-/* Abre el cajón lateral. Solo existe cuando el panel se vuelve cajón. */
 .chat-header__menu {
   display: none;
   flex-shrink: 0;
@@ -512,8 +485,6 @@
   padding: 0 14px;
   font-size: 13px;
 }
-
-/* Estado vacío: "¿Qué investigaremos hoy?" */
 
 .chat-hero {
   flex: 1;
@@ -539,8 +510,6 @@
   animation: fade-up 0.4s ease 0.08s backwards;
 }
 
-/* Sin sesión el encabezado no pregunta, explica el límite: es más largo, así
-   que baja de cuerpo y se le pone una medida de lectura. */
 .chat-hero__title--invitado {
   max-width: 640px;
   font-size: 29px;
@@ -555,8 +524,6 @@
     transform: translateY(12px);
   }
 }
-
-/* Hilo de mensajes */
 
 .chat-scroll {
   flex: 1;
@@ -584,8 +551,6 @@
   }
 }
 
-/* El mensaje propio es un bloque, no una burbuja invertida: sube un peldaño
-   de superficie y ya se distingue de la respuesta. */
 .msg__images {
   display: flex;
   flex-wrap: wrap;
@@ -674,7 +639,6 @@
   font-size: 14px;
 }
 
-/* Fuentes de la búsqueda web */
 .msg-sources {
   margin-bottom: 12px;
   padding: 10px 14px;
@@ -730,8 +694,6 @@
 @keyframes pulse {
   50% { opacity: 0.4; }
 }
-
-/* Markdown de las respuestas */
 
 .md h1, .md h2, .md h3, .md h4 {
   font-weight: 500;
@@ -800,8 +762,6 @@
   color: var(--ink-soft);
 }
 
-/* Bloque de código con cabecera (lenguaje, copiar, descargar). */
-
 .md-code {
   margin: 12px 0;
   border-radius: var(--radius);
@@ -835,8 +795,6 @@
 .md-code__btn:hover { background: var(--bg-hover); color: var(--ink); }
 
 .md .md-code pre { margin: 0; border-radius: 0; }
-
-/* Archivo escrito por el modelo (```file:nombre.ext). */
 
 .filecard {
   margin: 12px 0;
@@ -924,9 +882,6 @@
   .filecard__btn { width: 100%; justify-content: center; }
 }
 
-/* Botón "más ↓" — vive dentro del compositor y se apoya en su borde superior,
-   así sigue a la caja cuando crece (varias líneas, adjuntos, teclado abierto). */
-
 .chat-jump {
   position: absolute;
   bottom: calc(100% + 4px);
@@ -935,8 +890,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Rectángulo con el radio de la interfaz, como el resto de botones: solo
-     la flecha, el texto va en aria-label. */
   width: 40px;
   height: 30px;
   border-radius: var(--radius);
@@ -957,10 +910,6 @@
     transform: translateX(-50%) translateY(8px);
   }
 }
-
-/* ── Compositor ──────────────────────────────────────────────────────── */
-/* La caja es el bloque; los iconos y el botón de enviar cuelgan por fuera de
-   sus esquinas, sobre el fondo del armazón. */
 
 .chat-composer {
   position: relative; /* ancla de .chat-jump */
@@ -986,7 +935,6 @@
   transition: background 0.2s ease;
 }
 
-/* Barra inferior: herramientas · modelo + contexto · … · enviar. */
 .chat-input__bar {
   display: flex;
   align-items: center;
@@ -1057,7 +1005,6 @@
   max-height: 180px;
 }
 
-/* El modelo, como el chip de atajo del diseño: mismo sitio, mismo trato. */
 .chat-input__model {
   align-self: flex-start;
   max-width: 240px;
@@ -1137,7 +1084,6 @@
   color: var(--accent);
 }
 
-/* Micrófono grabando: el punto rojo es el estado, la pulsación es que sigue vivo. */
 .chat-input__tools .icon-btn.is-recording {
   background: var(--danger-soft);
   color: var(--danger-ink);
@@ -1148,7 +1094,6 @@
   50% { opacity: 0.55; }
 }
 
-/* Enviar: el único círculo de la interfaz, junto al avatar. */
 .chat-input__send {
   margin-left: auto;
   flex-shrink: 0;
@@ -1184,7 +1129,6 @@
   transform: scale(1.05);
 }
 
-/* Soltar un archivo: la zona cubre la caja entera, no un rectángulo pequeño. */
 .chat-drop {
   position: absolute;
   inset: 0;
@@ -1212,8 +1156,6 @@
   color: var(--ink-muted);
 }
 
-/* La imagen encogida hace de icono: se reconoce lo que se adjuntó de un vistazo,
-   que con tres capturas seguidas es lo único que las distingue. */
 .attach-chip__thumb {
   width: 22px;
   height: 22px;
@@ -1223,7 +1165,6 @@
   display: block;
 }
 
-/* Mientras el modelo de visión mira la imagen (o el servidor lee el PDF). */
 .attach-chip {
   position: relative;
 }
@@ -1249,8 +1190,6 @@
   to { transform: translateX(40%) scaleX(0.4); }
 }
 
-/* Nota al pie del compositor */
-
 .chat-disclaimer {
   margin-top: 26px;
   text-align: center;
@@ -1258,7 +1197,6 @@
   color: var(--ink-faint);
 }
 
-/* ── Aviso flotante ──────────────────────────────────────────────────── */
 /* Los tres avisos del chat son fallos, así que el color es el del error.
    La pestaña sale de ::before para no tener que montarla en el JSX. */
 
@@ -1283,7 +1221,7 @@
   left: 20px;
   width: 78px;
   height: 11px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 6px 6px 0 0;
   background: #6B241C;
 }
 
@@ -1309,8 +1247,6 @@
   }
 }
 
-/* ── Responsive ──────────────────────────────────────────────────────── */
-
 /* Con el dedo, los controles de texto del panel son demasiado bajos. Va al
    final del archivo a propósito: varias de estas reglas usan la forma corta
    `padding` más abajo y pisarían un `padding-top` declarado antes. */
@@ -1333,10 +1269,6 @@
     padding: 6px 0;
   }
 }
-
-/* Compacto (≤860px): el panel deja de ser una columna y pasa a ser un cajón
-   sobre el chat. Nada desaparece — historial, perfil, planes y ajustes siguen
-   estando, a un toque del botón de la cabecera. */
 
 @media (max-width: 860px) {
   .chat-shell {
@@ -1362,7 +1294,6 @@
     box-shadow: 0 0 70px rgba(0, 0, 0, 0.55);
   }
 
-  /* El riel colapsado es una idea de escritorio: aquí el cajón está o no está. */
   .sidebar.is-collapsed {
     width: min(320px, 84vw);
   }
@@ -1429,13 +1360,10 @@
   }
 
   .md pre {
-    /* El bloque de código se sale del ancho del hilo si no se le deja respirar. */
     padding: 12px;
     font-size: 12.5px;
   }
 }
-
-/* Teléfono (≤640px): objetivos táctiles de 44px y enviar cuadrado. */
 
 @media (max-width: 640px) {
   .chat-input__box {
@@ -1461,8 +1389,6 @@
   }
 }
 
-/* Teléfono estrecho (≤400px) */
-
 @media (max-width: 400px) {
   .chat-hero__title {
     font-size: 22px;
@@ -1477,8 +1403,6 @@
     font-size: 12.5px;
   }
 }
-
-/* Móvil apaisado: la altura manda, se recorta el aire vertical. */
 
 @media (max-height: 480px) and (orientation: landscape) {
   .chat-hero {
@@ -1500,8 +1424,6 @@
 
 .msg__error svg { flex-shrink: 0; margin-top: 2px; }
 
-/* La ola: cada letra de una acción en curso se enciende en el color de acento
-   y sube un pelo, una tras otra (WaveText.jsx). */
 .wave { display: inline-flex; min-width: 0; white-space: pre; overflow: hidden; animation: wave-in 0.25s ease both; }
 .wave > span {
   display: inline-block; white-space: pre; color: var(--ink-soft);
@@ -1516,7 +1438,6 @@
   .wave > span { animation: none; color: var(--accent); }
 }
 
-/* ── Visuals en el chat: chip en el mensaje y panel junto a la conversación ── */
 .chat-header__visual { height: 34px; padding: 0 12px; font-size: 13px; gap: 6px; margin-left: auto; }
 .chat-header__visual + .chat-header__share { margin-left: 8px; }
 

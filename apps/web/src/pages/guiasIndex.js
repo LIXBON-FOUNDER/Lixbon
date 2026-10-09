@@ -1,5 +1,4 @@
-// guiasIndex.js — índice de las guías (sin JSX: lo lee el sitemap). id es el
-// mismo en los dos idiomas; title/description sí cambian.
+// Sin JSX: lo lee el sitemap.
 export const GUIAS_INDEX = [
   {
     id: 'openai-compatible-api',
@@ -40,12 +39,12 @@ export const GUIAS_INDEX = [
   {
     id: 'private-data-own-gpus',
     title: {
-      es: 'IA con tus datos en GPUs propias: qué cambia frente a ChatGPT',
-      en: 'AI with your data on owned GPUs: what changes compared to ChatGPT',
+      es: 'IA con tus datos en GPUs que operamos: qué cambia frente a ChatGPT',
+      en: 'AI with your data on GPUs we operate: what changes compared to ChatGPT',
     },
     description: {
-      es: 'Dónde van tus conversaciones cuando usas un chat de IA, qué significa que los modelos corran en GPUs propias y qué controles tienes en lixbon sobre tu historial.',
-      en: 'Where your conversations go when you use an AI chat, what it means for models to run on owned GPUs, and what controls lixbon gives you over your history.',
+      es: 'Dónde van tus conversaciones cuando usas un chat de IA, qué significa que los modelos corran en GPUs que operamos y qué controles tienes en lixbon sobre tu historial.',
+      en: 'Where your conversations go when you use an AI chat, what it means for models to run on GPUs we operate, and what controls lixbon gives you over your history.',
     },
     fecha: '2026-09-15', minutos: 6,
   },

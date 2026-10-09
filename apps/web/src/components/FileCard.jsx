@@ -1,5 +1,3 @@
-// FileCard.jsx — un archivo escrito por el modelo (```file:nombre.ext): tarjeta
-// con descarga y el contenido plegado.
 import { useState } from 'react';
 import { IconChevron, IconDownload, IconFile } from './Icons';
 import { construirArchivo, descargarBlob, fmtBytes } from '../lib/archivos';

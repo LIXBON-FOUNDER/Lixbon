@@ -6,7 +6,7 @@ export default {
     greet: {
       morning: ['¡Buenos días! ¿Por dónde empezamos?', 'Buenos días. Café en mano y a trabajar.', '¡Hola! Hoy pinta productivo.'],
       afternoon: ['¡Buenas tardes! ¿Qué hacemos?', 'Buenas tardes. Aquí sigo, listo para lo que pidas.', '¡Hola de nuevo! ¿Seguimos?'],
-      night: ['Buenas noches. ¿Trabajando hasta tarde?', 'Shh… el clúster también trasnocha.', '¡Hola, búho! ¿Qué preparamos?'],
+      night: ['Buenas noches. ¿Trabajando hasta tarde?', 'Shh… los modelos también trasnochan.', '¡Hola, búho! ¿Qué preparamos?'],
     },
     chat: {
       thinking: '{{name}} está pensando',
@@ -20,7 +20,7 @@ export default {
     },
     guide: {
       hero: ['¡Hola! Te acompaño mientras lees.', 'Bienvenido a lixbon. Yo te enseño esto.', '¡Hola! Baja, que hay cosas interesantes.'],
-      private: ['Esto es lo importante: tus datos no salen del clúster.', 'Nada de mandar tu código a terceros.', 'Privacidad de verdad, sin letra pequeña.'],
+      private: ['Esto es lo importante: tus datos no van a otros proveedores de IA.', 'Nada de mandar tu código a OpenAI, Google ni Anthropic.', 'Privacidad de verdad, sin letra pequeña.'],
       products: ['Chat, IDE y API. Elige por dónde empezar.', 'Una cuenta, cuatro formas de usarla.', 'El IDE es donde vivimos nosotros, por cierto.'],
       api: ['Si ya usas el SDK de OpenAI, solo cambias dos líneas.', 'Copia, pega y a funcionar.', 'Mira qué poco código hace falta.'],
       plans: ['El plan gratuito no pide tarjeta.', 'Empieza gratis y sube cuando lo necesites.', 'Sin sorpresas en la factura.'],
@@ -63,7 +63,7 @@ export default {
     greet: {
       morning: ['Good morning! Where do we start?', 'Morning. Coffee in hand, let’s get to work.', 'Hi! Today looks productive.'],
       afternoon: ['Good afternoon! What are we doing?', 'Good afternoon. Still here, ready when you are.', 'Hi again! Shall we continue?'],
-      night: ['Good evening. Working late?', 'Shh… the cluster stays up late too.', 'Hey, night owl! What are we building?'],
+      night: ['Good evening. Working late?', 'Shh… the models stay up late too.', 'Hey, night owl! What are we building?'],
     },
     chat: {
       thinking: '{{name}} is thinking',
@@ -77,7 +77,7 @@ export default {
     },
     guide: {
       hero: ['Hi! I’ll keep you company while you read.', 'Welcome to lixbon. Let me show you around.', 'Hi! Scroll down, there’s good stuff.'],
-      private: ['This is the key part: your data never leaves the cluster.', 'No sending your code to third parties.', 'Real privacy, no fine print.'],
+      private: ['This is the key part: your data never goes to other AI providers.', 'No sending your code to OpenAI, Google or Anthropic.', 'Real privacy, no fine print.'],
       products: ['Chat, IDE and API. Pick where to start.', 'One account, four ways to use it.', 'The IDE is where we live, by the way.'],
       api: ['Already on the OpenAI SDK? You only change two lines.', 'Copy, paste and go.', 'Look how little code it takes.'],
       plans: ['The free plan needs no card.', 'Start free and upgrade when you need to.', 'No surprises on the bill.'],

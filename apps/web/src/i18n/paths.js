@@ -1,19 +1,42 @@
-// paths.js — prefijo /en de las rutas y mapas de slugs viejos (español) a los
-// nuevos slugs en inglés, para redirigir enlaces e índices antiguos.
+const PREFIJO = '/es';
+
+function tienePrefijo(pathname, prefijo) {
+  return pathname === prefijo || pathname.startsWith(`${prefijo}/`);
+}
+
+export function localeDePath(pathname) {
+  return tienePrefijo(pathname, PREFIJO) ? 'es' : 'en';
+}
+
 export function withLocale(pathname, locale) {
-  if (locale !== 'en' || typeof pathname !== 'string') return pathname;
-  if (!pathname.startsWith('/') || pathname === '/en' || pathname.startsWith('/en/')) return pathname;
-  return pathname === '/' ? '/en' : `/en${pathname}`;
+  if (locale !== 'es' || typeof pathname !== 'string') return pathname;
+  if (!pathname.startsWith('/') || tienePrefijo(pathname, PREFIJO)) return pathname;
+  return pathname === '/' ? PREFIJO : `${PREFIJO}${pathname}`;
+}
+
+export function stripLocale(pathname) {
+  return tienePrefijo(pathname, PREFIJO) ? pathname.slice(PREFIJO.length) || '/' : pathname;
 }
 
 export function otherLocalePath(pathname) {
-  if (pathname === '/en' || pathname.startsWith('/en/')) {
-    return pathname.slice(3) || '/';
-  }
-  return pathname === '/' ? '/en' : `/en${pathname}`;
+  return localeDePath(pathname) === 'es' ? stripLocale(pathname) : withLocale(pathname, 'es');
 }
 
-// id viejo (antes del rename a slugs en inglés) -> id nuevo
+// Antes el español iba sin prefijo y el inglés bajo /en.
+export function sinPrefijoLegacyEn(pathname) {
+  return tienePrefijo(pathname, '/en') ? pathname.slice(3) || '/' : null;
+}
+
+const CLAVE_IDIOMA = 'lixbon-idioma';
+
+export function idiomaGuardado() {
+  try { return localStorage.getItem(CLAVE_IDIOMA); } catch { return null; }
+}
+
+export function guardarIdioma(locale) {
+  try { localStorage.setItem(CLAVE_IDIOMA, locale); } catch { /* sin almacenamiento */ }
+}
+
 export const LEGACY_DOC_IDS = {
   introduccion: 'introduction',
   'primeros-pasos': 'getting-started',

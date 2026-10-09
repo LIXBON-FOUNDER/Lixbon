@@ -1,5 +1,3 @@
-// AccountPage.jsx — "Ajustes": sección con sidebar interno (General, Perfil,
-// Privacidad, Facturación, Uso). Reemplaza la antigua vista plana de Mi cuenta.
 import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -100,8 +98,6 @@ function Toggle({ checked, onChange, disabled, label }) {
   );
 }
 
-// ── General ─────────────────────────────────────────────────────────────
-
 function AvatarField({ user, onSaved }) {
   const t = useT('account');
   const fileRef = useRef(null);
@@ -158,7 +154,6 @@ function AvatarField({ user, onSaved }) {
     <div className="set-avatar-field">
       <input ref={fileRef} type="file" accept={AVATAR_ACCEPT} hidden onChange={pick} />
 
-      {/* La foto ES el botón: al pasar el ratón aparece la cámara. */}
       <button
         className="avatar-edit"
         onClick={() => fileRef.current?.click()}
@@ -240,8 +235,6 @@ function GeneralSection({ user, onSaved }) {
   );
 }
 
-// ── Perfil (cuenta) ────────────────────────────────────────────────────
-
 function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout }) {
   const t = useT('account');
   const [newKey, setNewKey] = useState(null);
@@ -259,7 +252,7 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
     setDelError('');
     try {
       await api.delete('/api/account', { data: { password } });
-      await onLogout(); // la sesión ya no existe; limpia el estado y navega
+      await onLogout();
     } catch (err) {
       const d = err.response?.data?.detail;
       setDelError(typeof d === 'string' ? d : t('profile.deleteAccountError'));
@@ -416,8 +409,6 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
   );
 }
 
-// ── Privacidad ──────────────────────────────────────────────────────────
-
 function PrivacySection({ user, onUserChange }) {
   const t = useT('account');
   const [settings, setSettings] = useState(user.settings || null);
@@ -475,7 +466,7 @@ function PrivacySection({ user, onUserChange }) {
     setError('');
     setBusyKey(key);
     const prev = settings;
-    setSettings({ ...settings, [key]: value }); // optimista
+    setSettings({ ...settings, [key]: value });
     try {
       const res = await api.patch('/api/account/settings', { [key]: value });
       setSettings(res.data.settings);
@@ -546,8 +537,6 @@ function PrivacySection({ user, onUserChange }) {
     </>
   );
 }
-
-// ── Uso ─────────────────────────────────────────────────────────────────
 
 function UsageSection({ usage, buckets, daily, plan }) {
   const t = useT('account');
@@ -646,9 +635,7 @@ function UsageSection({ usage, buckets, daily, plan }) {
   );
 }
 
-// ── Mascota ─────────────────────────────────────────────────────────────
-// Solo la mascota de la web: el IDE tiene sus propios ajustes (en su página
-// de Ajustes). Se guarda al momento, local y en la cuenta (lib/mascota.js).
+// Solo la mascota de la web: el IDE tiene sus propios ajustes.
 
 const MINUTOS_SIESTA = [1, 2, 5, 10, 15, 30];
 
@@ -731,8 +718,6 @@ function MascotSection() {
     </>
   );
 }
-
-// ── Página ──────────────────────────────────────────────────────────────
 
 export default function AccountPage() {
   const t = useT('account');
@@ -836,10 +821,6 @@ export default function AccountPage() {
         <main className="settings__content">
           {error && <p className="page__error" role="alert">{error}</p>}
           {account && user && (
-            /* key por sección: cambiar de pestaña vuelve a montar este bloque y
-               dispara su animación de entrada. Las secciones ya se montaban y
-               desmontaban una a una, así que no se pierde ningún estado que
-               antes sobreviviera. */
             <div className="settings__pane" key={current.id}>
               {current.id === 'general' && <GeneralSection user={user} onSaved={setUser} />}
               {current.id === 'profile' && (

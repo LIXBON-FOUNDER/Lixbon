@@ -1,5 +1,4 @@
 """
-attachments.py — Adjuntar documentos al chat.
 Extrae el TEXTO de un documento (PDF, Word, texto plano, código) para inyectarlo
 como contexto del mensaje. No guarda el archivo: los modelos solo necesitan el texto.
 

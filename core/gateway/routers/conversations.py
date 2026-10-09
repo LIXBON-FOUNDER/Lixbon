@@ -1,8 +1,3 @@
-"""
-conversations.py — Historial de conversaciones de la web (F4).
-Listar, retomar, renombrar, borrar y auto-título con el modelo pequeño.
-Todos los endpoints exigen sesión (cookie) y verifican pertenencia.
-"""
 from __future__ import annotations
 
 import logging

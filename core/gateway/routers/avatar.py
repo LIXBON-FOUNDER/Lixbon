@@ -1,6 +1,4 @@
 """
-avatar.py — Foto de perfil del usuario.
-
 La imagen vive en R2 (el disco de Railway es efímero) y la fila `users` solo
 guarda su key. El bucket es PRIVADO: el gateway hace de proxy en el GET, así la
 credencial de R2 nunca sale del servidor.

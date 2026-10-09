@@ -1,5 +1,4 @@
 """
-orchestrator.py — Orquestador de nodos GPU de lixbon.
 Gestiona el estado de los nodos registrados en BD, elige el mejor según
 recursos disponibles y expone el destino Ollama (proxy del node_agent).
 
@@ -82,7 +81,6 @@ class NodeOrchestrator:
         self._cliente = httpx.Client(timeout=8.0)
         self._links_activos: set[str] = set()
 
-    # ──────────────────────────────────────────
     # Carga de nodos (desde BD)
     # ──────────────────────────────────────────
 
@@ -150,7 +148,6 @@ class NodeOrchestrator:
         self._activo = False
         self._cliente.close()
 
-    # ──────────────────────────────────────────
     # Polling de métricas
     # ──────────────────────────────────────────
 
@@ -249,7 +246,6 @@ class NodeOrchestrator:
                     else:
                         logger.warning(f"[{nid}] Offline ({exc})")
 
-    # ──────────────────────────────────────────
     # Nodos por conexión inversa (WebSocket)
     # ──────────────────────────────────────────
 
@@ -287,7 +283,6 @@ class NodeOrchestrator:
         if nid in self._links_activos:
             self._aplicar_metricas(nid, metricas)
 
-    # ──────────────────────────────────────────
     # Selección del mejor nodo
     # ──────────────────────────────────────────
 
@@ -418,7 +413,6 @@ class NodeOrchestrator:
             estado = self._estado.get(nid)
             return bool(estado and estado["online"])
 
-    # ──────────────────────────────────────────
     # Información para endpoints de API
     # ──────────────────────────────────────────
 

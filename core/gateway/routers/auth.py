@@ -1,8 +1,3 @@
-"""
-auth.py — Autenticación de lixbon (F3).
-Login por EMAIL, sesiones web separadas de API keys, verificación de correo
-y reset de contraseña. Registro con nombre y apellido (según diseño web).
-"""
 from __future__ import annotations
 
 import os
@@ -126,8 +121,6 @@ def issue_named_api_key(user_id: int, key_name: str, ip: str) -> str:
     return raw_key
 
 
-# ── Registro / Login / Logout ──────────────────────────────────────────────
-
 @router.post("/api/auth/register")
 async def api_register(payload: RegisterRequest, request: Request):
     ip = _client_ip(request)
@@ -225,8 +218,6 @@ async def api_me(user_data: dict[str, Any] = Depends(cookie_auth_required)):
                      "settings": settings}}
 
 
-# ── Verificación de email ──────────────────────────────────────────────────
-
 @router.get("/api/auth/verify-email")
 async def verify_email(token: str):
     user_id = consume_email_token(token, "verify_email")
@@ -253,8 +244,6 @@ async def resend_verification(user_data: dict[str, Any] = Depends(cookie_auth_re
                             detail="No se pudo enviar el correo. Inténtalo de nuevo en unos minutos.")
     return {"message": "Correo de verificación reenviado"}
 
-
-# ── Reset de contraseña ────────────────────────────────────────────────────
 
 @router.post("/api/auth/request-password-reset")
 async def request_password_reset(payload: ResetRequestPayload, request: Request):
@@ -290,8 +279,6 @@ async def reset_password(payload: ResetPasswordPayload, request: Request):
         ))
     return {"message": "Contraseña actualizada. Inicia sesión de nuevo."}
 
-
-# ── Regeneración de API key ────────────────────────────────────────────────
 
 @router.post("/api/auth/api-key/regenerate")
 async def regenerate_api_key(

@@ -1,8 +1,3 @@
-"""
-models.py — Modelos SQLAlchemy de lixbon (Postgres).
-Los timestamps se guardan como TEXT ISO-8601 UTC (comparables lexicográficamente),
-igual que el esquema legacy, para no cambiar la lógica de los routers en esta fase.
-"""
 from __future__ import annotations
 
 from sqlalchemy import BigInteger, ForeignKey, Index, LargeBinary, Text, UniqueConstraint
@@ -571,7 +566,6 @@ class TokenUsageDaily(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-# ── Lixbon Team ────────────────────────────────────────────────────────────
 # Contrato: docs/team-protocolo.md del repo del IDE. Los campos van en español
 # y snake_case, como dice la sección 0; la única excepción es el objeto
 # `usuario`, que sale de la tabla `users` con sus nombres de siempre
@@ -752,7 +746,6 @@ class LoginDevice(Base):
     last_seen: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-# ── Issues de Lixbon Team ──────────────────────────────────────────────────
 # Viven dentro de un proyecto (el «equipo» en pantalla). Lo que la interfaz
 # llama «Proyectos» se guarda como iniciativas para no chocar con team_proyectos.
 

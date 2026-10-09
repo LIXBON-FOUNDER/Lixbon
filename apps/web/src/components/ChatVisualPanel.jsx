@@ -1,6 +1,3 @@
-// ChatVisualPanel.jsx — Visuals dentro del chat: cuando el modelo entrega una
-// página (```file:index.html) se abre un panel junto a la conversación con la
-// vista en vivo, y al terminar se guarda como visual de esa conversación.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '../i18n/link';
 import { documentoPreview, resolverPagina, rotuloDe } from '../lib/visuals';
@@ -16,7 +13,6 @@ export const VISUAL_CHAT_PROMPT = '\n\nVISUALS: si el usuario pide VER algo visu
   + '>>>>>>> REPLACE copiando el SEARCH exacto de los archivos actuales. Fuera del bloque, una frase como mucho. '
   + 'Si solo preguntan cómo programar algo, responde con código normal (```html), no con file:.';
 
-/** El texto sin los bloques de páginas: se ven en el panel, no en el hilo. */
 export function sinBloquesVisuales(texto) {
   return (texto || '').replace(/```\s*(?:file|edit):\s*[\w./-]+\.(?:html?|svg)[^\n`]*\n[\s\S]*?(?:\n```|$)/g, '').trim();
 }

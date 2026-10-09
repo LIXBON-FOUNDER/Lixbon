@@ -1,7 +1,3 @@
-// visuals.js — la sección Visuals: el modelo escribe un archivo (index.html o
-// .svg) en un bloque ```file:… y el lienzo lo pinta. Aquí viven el prompt de
-// sistema, los tipos de encargo y el parser del archivo.
-
 export const TIPOS = [
   { id: 'landing', label: { es: 'Landing page', en: 'Landing page' },
     hint: { es: 'Una landing para… (producto, público, tono)', en: 'A landing page for… (product, audience, tone)' },
@@ -23,7 +19,6 @@ export const TIPOS = [
     prefijo: { es: 'Crea un prototipo navegable de varias pantallas para: ', en: 'Create a navigable multi-screen prototype for: ' } },
 ];
 
-// Ideas de encargo bajo el campo de la galería: unas generales y unas por tipo.
 export const IDEAS = {
   general: {
     es: ['Una landing para una cafetería de especialidad en Lisboa', 'Un dashboard de ventas con KPIs, gráfica mensual y tabla de pedidos', 'Un prototipo de app para reservar pistas de pádel'],
@@ -59,7 +54,6 @@ export const IDEAS = {
   },
 };
 
-/** Anchos de vista previa del editor; 0 = el que deje el lienzo. */
 export const ANCHOS = [
   { id: 'ajustar', ancho: 0 },
   { id: 'escritorio', ancho: 1280 },
@@ -130,7 +124,6 @@ export function sanearHtml(code) {
   return out.replace(/(^|[\s,}])\.focus-visible(\s*[{,:])/g, '$1:focus-visible$2');
 }
 
-/** Todos los archivos de un texto, en orden; el último puede estar abierto. */
 export function extraerArchivos(texto) {
   if (!texto) return [];
   const out = [];
@@ -146,7 +139,6 @@ export function extraerArchivos(texto) {
     const enInfo = NOMBRE.exec(info) || NOMBRE.exec(` ${info}`);
     if (enInfo) name = enInfo[1];
     if (!name) {
-      // Primera línea (o dos) de dentro: `file:x.html`, `<!-- file: x.html -->`, `// x.html`
       const lineas = code.split('\n');
       for (let i = 0; i < Math.min(2, lineas.length); i += 1) {
         const l = lineas[i];
@@ -160,7 +152,7 @@ export function extraerArchivos(texto) {
       if (antes) name = antes[1];
     }
     const esHtml = /^\s*(<!doctype|<html|<svg)/i.test(code) || /^(html|svg|xml)$/i.test(info);
-    if (!name && !esHtml) continue;  // un bloque de código normal, no un archivo
+    if (!name && !esHtml) continue;
     if (!name) {
       if (/^\s*<svg/i.test(code) || info.toLowerCase() === 'svg') name = 'logo.svg';
       else {
@@ -175,30 +167,25 @@ export function extraerArchivos(texto) {
   return nombrarPorEnlaces(out);
 }
 
-// ── Nombres de las páginas sin nombre ───────────────────────────────────────
-// Cuando el modelo no pone file:nombre, el nombre sale del <title>; pero los
-// enlaces de las otras páginas dicen cómo se llaman de verdad
-// (href="estudio.html"). Se empareja cada página sin nombre con el destino de
-// enlace que mejor encaja con su título y su <h1>.
+// Sin file:nombre, el nombre sale del <title>, pero los enlaces de las otras
+// páginas dicen cómo se llaman de verdad: se empareja cada página sin nombre con
+// el destino que mejor encaja con su título y su <h1>.
 
 const slug = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 /** «Proyectos | Nimbus Arquitectura» → «Proyectos». */
 const primerSegmento = (t) => String(t || '').split(/\s+[|·—–:-]\s+|\s*[|·—–]\s*/)[0].trim() || String(t || '');
 const VACIAS = new Set(['para', 'por', 'con', 'los', 'las', 'del', 'una', 'uno', 'que', 'mas', 'the', 'and', 'for', 'our', 'your', 'html', 'htm', 'page', 'pagina']);
-/** Palabras con peso de un texto, sin acentos ni plural. */
 export function fichasDe(texto) {
   return new Set(slug(texto).split('-').filter((w) => w.length >= 3 && !VACIAS.has(w)).map((w) => w.replace(/(es|s)$/, '')));
 }
 const textoPlano = (html) => String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-/** Título y primer <h1> de una página, para emparejarla con enlaces. */
 export function rotuloDe(code) {
   const t = /<title>([^<]{1,120})<\/title>/i.exec(code || '');
   const h = /<h1\b[^>]*>([\s\S]{1,300}?)<\/h1>/i.exec(code || '');
   return `${t ? t[1] : ''} ${h ? textoPlano(h[1]) : ''}`.trim();
 }
 const ENLACE = /<a\b[^>]*\bhref\s*=\s*["']([^"'#?][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-/** Destinos internos (x.html) de los enlaces de unas páginas, con sus textos. */
 export function destinosDeEnlaces(codigos) {
   const out = new Map();
   for (const code of codigos) {
@@ -220,7 +207,6 @@ function nombrarPorEnlaces(files) {
   if (!sueltos.length) return files;
   const destinos = destinosDeEnlaces(files.map((f) => f.code));
   const ocupados = new Set(files.filter((f) => !f.anonimo).map((f) => f.name.toLowerCase()));
-  // Todas las parejas posibles con su puntuación; se asignan de mejor a peor.
   const parejas = [];
   for (const f of sueltos) {
     const rotulo = rotuloDe(f.code);
@@ -243,7 +229,6 @@ function nombrarPorEnlaces(files) {
     asignado.set(f, destino);
     ocupados.add(destino.toLowerCase());
   }
-  // Por descarte: una sola página sin pareja y un solo destino sin página.
   const sinPareja = sueltos.filter((f) => !asignado.has(f));
   const libres = [...destinos.keys()].filter((d) => !ocupados.has(d.toLowerCase()));
   if (sinPareja.length === 1 && libres.length === 1) asignado.set(sinPareja[0], libres[0]);
@@ -257,13 +242,9 @@ function nombrarPorEnlaces(files) {
   });
 }
 
-/** Último archivo de un texto (aunque el bloque aún esté abierto) y si cerró. */
-// ── Ediciones SEARCH/REPLACE sobre un archivo ya existente ───────────────────
-
 const EDIT_INFO = /^(?:edit|patch|diff):\s*([\w./-]+\.(?:html?|svg))$/i;
 const PAR = /<{5,9} *(?:SEARCH|BUSCAR)\n([\s\S]*?)\n={5,9}\n([\s\S]*?)\n>{5,9} *(?:REPLACE|REEMPLAZAR)/g;
 
-/** Bloques edit:nombre de un texto, con sus pares; el último puede estar abierto. */
 export function extraerEdiciones(texto) {
   if (!texto) return [];
   const out = [];
@@ -287,7 +268,6 @@ function indiceDeVentana(lineas, buscadas) {
   return -1;
 }
 
-/** Aplica pares SEARCH/REPLACE; lanza Error con el fragmento que no encaja. */
 export function aplicarEdiciones(code, pares) {
   let out = code;
   for (const { buscar, reemplazar } of pares) {
@@ -302,8 +282,6 @@ export function aplicarEdiciones(code, pares) {
   }
   return out;
 }
-
-// ── Design systems: reglas fijas que entran en el prompt ─────────────────────
 
 export const DESIGN_SYSTEMS = [
   { id: 'libre', label: { es: 'Libre', en: 'Freeform' }, desc: { es: 'El modelo decide según el encargo', en: 'The model decides based on the request' }, prompt: '' },
@@ -321,7 +299,6 @@ export const DESIGN_SYSTEMS = [
     prompt: 'Fondo #0B0F19, superficies #111827, bordes #1F2937, texto #E5E7EB, secundario #9CA3AF, acento #22D3EE con brillo sutil. Tipografía Inter para el cuerpo y JetBrains Mono para etiquetas, números y código. Rejilla fina de fondo, badges y gráficos. Tono producto para desarrolladores.' },
 ];
 
-/** Design system propio a partir de un formulario sencillo. */
 export function designSystemPersonalizado(form) {
   const { nombre, primario, fondo, texto, fuenteTitulos, fuenteCuerpo, tono } = form;
   const partes = [];
@@ -476,7 +453,6 @@ function conInspector(html, ops) {
   return /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, () => `${inyeccion}</body>`) : `${doc}${inyeccion}`;
 }
 
-/** Aplica las ediciones manuales al HTML fuente (sin ejecutar scripts). */
 export function aplicarOps(html, ops) {
   if (!ops || !ops.length) return html;
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -500,7 +476,6 @@ export function esSvg(name) {
   return /\.svg$/i.test(name || '');
 }
 
-/** Documento que pinta el lienzo: el HTML con el inspector, o el SVG centrado. */
 export function documentoPreview(archivo, ops = []) {
   if (!archivo) return '';
   if (esSvg(archivo.name)) {
@@ -512,13 +487,7 @@ export function documentoPreview(archivo, ops = []) {
   return conInspector(archivo.code, ops);
 }
 
-/** Qué página del diseño pide un enlace. Por orden: el nombre exacto; el
- *  mismo sin extensión, mayúsculas ni acentos («/Proyectos», «proyectos.htm»);
- *  la portada para «/», «index», «inicio» o «home»; uno que empieza por el
- *  otro («proyectos» ↔ «proyectos-nimbus.html»); y si no, la página cuyo
- *  título, <h1> o nombre comparte más palabras con el destino y el texto del
- *  enlace (`rotulos`: nombre → título y h1). null si ninguna encaja.
- *  Se serializa tal cual en «Presentar»: no puede usar nada de fuera. */
+// Se serializa tal cual en «Presentar»: no puede usar nada de fuera.
 export function resolverPagina(nombres, pedida, texto = '', rotulos = {}) {
   const base = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\.(html?|svg|php|aspx?)$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -547,9 +516,6 @@ export function resolverPagina(nombres, pedida, texto = '', rotulos = {}) {
   return puntos && !empate ? mejor : null;
 }
 
-/** Documento autocontenido para «Presentar»: todas las páginas dentro, la
- *  actual en un iframe y navegación por hash (atrás/adelante funcionan; un
- *  <a href="otra.html"> llega como lixbon:navigate desde el bridge). */
 export function documentoPresentacion(paginas, inicial, titulo = 'Presentación') {
   const docs = {};
   const rotulos = {};
@@ -589,14 +555,12 @@ export const TAMANOS_IMAGEN = [
 
 const IMG_MD = /!\[([^\]]*)\]\((data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+)\)/;
 
-/** Imagen generada guardada como Markdown en un mensaje. */
 export function extraerImagen(texto) {
   const m = IMG_MD.exec(texto || '');
   return m ? { alt: m[1], src: m[2] } : null;
 }
 
-/** Versiones de una conversación: cada respuesta con archivos (o imagen).
- *  Las páginas que una respuesta no reescribe se heredan de la anterior. */
+// Las páginas que una respuesta no reescribe se heredan de la anterior.
 export function construirVersiones(messages, enCursoIdx = -1) {
   const out = [];
   messages.forEach((m, i) => {

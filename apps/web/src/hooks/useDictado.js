@@ -1,9 +1,5 @@
-// useDictado.js — dictar el mensaje en vez de escribirlo.
-//
-// Usa el reconocimiento de voz del propio navegador (Chrome, Edge, Safari): no
-// sube el audio a ningún sitio nuestro y no necesita nada en el gateway, que
-// hoy no sabe transcribir. Donde el navegador no lo trae, `soportado` es false
-// y el botón del micrófono ni se pinta — mejor que un botón que no hace nada.
+// Reconocimiento de voz del navegador (el gateway no transcribe). Sin soporte,
+// `soportado` es false y el micrófono no se pinta.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const Reconocimiento =

@@ -1,6 +1,4 @@
 """
-oauth.py — Inicio de sesión con Google y GitHub (web, móvil y escritorio).
-
 Flujo (Authorization Code del lado del servidor + PKCE propio del cliente):
   1. El cliente genera un `code_verifier` aleatorio y abre en el navegador
      GET /api/auth/oauth/{provider}/start?redirect_uri=...&code_challenge=sha256(verifier).

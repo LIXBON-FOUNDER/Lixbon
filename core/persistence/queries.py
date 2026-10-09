@@ -1,8 +1,3 @@
-"""
-queries.py — Operaciones de persistencia de lixbon sobre Postgres (SQLAlchemy).
-Expone la misma API de funciones que la capa legacy (db_sqlite/db_mysql) para
-que los routers no cambien; la implementación es única y sin ramas por backend.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -55,8 +50,6 @@ KEY_EXPIRY_DAYS = 90
 INACTIVE_ARCHIVE_DAYS = 30
 
 
-# ─── Helpers ───────────────────────────────────────────────────────────────
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -86,8 +79,6 @@ def _verify_password_internal(password: str, stored_hash: str) -> bool:
     return secrets.compare_digest(legacy, stored_hash)
 
 
-# ─── Helpers vectoriales ───────────────────────────────────────────────────
-
 def serialize_vector(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
 
@@ -105,8 +96,6 @@ def cosine_similarity(v1: Any, v2: Any) -> float:
         return 0.0
     return dot / (norm1 * norm2)
 
-
-# ─── Usuarios ──────────────────────────────────────────────────────────────
 
 def avatar_url_for(avatar_key: str | None) -> str | None:
     """URL pública de la foto de perfil. Relativa: la web la usa tal cual y el
@@ -235,8 +224,6 @@ def check_user_password(user_id: int, password: str) -> bool:
         return bool(user and _verify_password_internal(password, user.password_hash))
 
 
-# ─── Preferencias del usuario (Ajustes) ────────────────────────────────────
-
 # Defaults en código: settings_json solo guarda lo que el usuario cambió.
 SETTINGS_DEFAULTS: dict[str, bool] = {
     "anonymous_usage": True,   # métricas agregadas para mejorar el servicio
@@ -332,8 +319,6 @@ def update_user_settings(user_id: int, patch: dict[str, Any]) -> dict[str, Any]:
         return current
 
 
-# ─── Sesiones web (cookie) ─────────────────────────────────────────────────
-
 SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "168"))  # 7 días por defecto
 
 
@@ -387,8 +372,6 @@ def purge_expired_sessions() -> int:
         return result.rowcount
 
 
-# ─── Tokens de email (verificación / reset de contraseña) ──────────────────
-
 def create_email_token(user_id: int, purpose: str, hours: int = 24) -> str:
     """Crea un token de un solo uso. purpose: 'verify_email' | 'reset_password'."""
     raw = secrets.token_urlsafe(32)
@@ -419,8 +402,6 @@ def consume_email_token(raw_token: str, purpose: str) -> int | None:
         tok.used = 1
         return tok.user_id
 
-
-# ─── API Keys ──────────────────────────────────────────────────────────────
 
 def _key_expires_at() -> str:
     return (datetime.now(timezone.utc) + timedelta(days=KEY_EXPIRY_DAYS)).isoformat()
@@ -607,8 +588,6 @@ def validate_api_key(raw_key: str, ip_address: str | None = None) -> dict[str, A
         return result
 
 
-# ─── Audit Log ─────────────────────────────────────────────────────────────
-
 def log_audit_event(
     event_type: str,
     user_id: int | None = None,
@@ -666,8 +645,6 @@ def list_audit_events(
             result.append(r)
         return result
 
-
-# ─── Task Embeddings (vector store) ────────────────────────────────────────
 
 def save_task_embedding(
     user_id: int,
@@ -729,8 +706,6 @@ def find_similar_tasks(
     results.sort(key=lambda x: x["similarity"], reverse=True)
     return results[:top_k]
 
-
-# ─── Planes, suscripciones y cuotas (F5) ───────────────────────────────────
 
 DEFAULT_PLAN_ID = "free"
 
@@ -952,8 +927,6 @@ def get_usage_quota(user_id: int, period_type: str, period_start: str) -> dict[s
         ).first()
         return {"messages": row.messages if row else 0, "tokens": row.tokens if row else 0}
 
-
-# ─── Pool de créditos: sesión (4h) + semana ─────────────────────────────────
 
 def get_week_anchor_slot(user_id: int) -> int:
     """Hora de la semana (0-167 UTC) donde arranca el ciclo semanal de esta
@@ -1265,8 +1238,6 @@ def get_global_stats(days: int = 30) -> dict[str, Any]:
         return {"totals": totals, "daily": daily}
 
 
-# ─── Conversaciones y mensajes ─────────────────────────────────────────────
-
 def ensure_conversation(
     conversation_id: str, user_id: int, title: str | None, client_id: str | None,
     source: str | None = None,
@@ -1412,8 +1383,6 @@ def update_message(
     if record_usage and conv_user_id is not None:
         record_model_usage(conv_user_id, model, prompt_tokens or 0, completion_tokens or 0, latency_ms or 0)
 
-
-# ─── Créditos prepago: tarifas, saldo y ledger (cobro por tokens de API) ───
 
 def _pricing_to_dict(p: ModelPricing) -> dict[str, Any]:
     return {
@@ -1917,8 +1886,6 @@ def admin_credits_summary() -> dict[str, Any]:
     }
 
 
-# ─── Tus datos: exportar / borrar historial / eliminar cuenta ──────────────
-
 def export_user_data(user_id: int) -> dict[str, Any] | None:
     """Copia completa de los datos del usuario (sección Privacidad → Exportar).
     Sin secretos: ni password_hash ni keys en claro ni ids de Stripe."""
@@ -2298,8 +2265,6 @@ def list_clients_usage(limit: int = 50, user_id: int | None = None) -> list[dict
         ]
 
 
-# ─── Versiones de la app ───────────────────────────────────────────────────
-
 def _version_to_dict(v: AppVersion) -> dict[str, Any]:
     try:
         changelog = _json.loads(v.changelog_json)
@@ -2397,8 +2362,6 @@ def add_app_version(
         s.execute(stmt)
 
 
-# ─── Nodos del cluster ─────────────────────────────────────────────────────
-
 def _node_to_dict(n: Node, mask_token: bool = True) -> dict[str, Any]:
     return {
         "id": n.id,
@@ -2469,8 +2432,6 @@ def delete_node(node_id: str) -> bool:
         return result.rowcount > 0
 
 
-# ─── Enrolamiento de nodos ─────────────────────────────────────────────────
-
 def _enrollment_to_dict(e: NodeEnrollment, with_token: bool = False) -> dict[str, Any]:
     return {
         "id": e.id,
@@ -2526,8 +2487,6 @@ def consume_enrollment(token: str) -> dict[str, Any] | None:
         return _enrollment_to_dict(e)
 
 
-# ─── Métricas diarias ──────────────────────────────────────────────────────
-
 def get_daily_metrics(user_id: int, days_limit: int = 30) -> list[dict[str, Any]]:
     with get_session() as s:
         rows = s.scalars(
@@ -2549,8 +2508,6 @@ def get_daily_metrics(user_id: int, days_limit: int = 30) -> list[dict[str, Any]
             for r in rows
         ]
 
-
-# ─── Control remoto (/remote) ──────────────────────────────────────────────
 
 REMOTE_TOKEN_TTL_HOURS = 24
 # Tope de eventos guardados por sesión: el transcript de una sesión larga no
@@ -2751,8 +2708,6 @@ def purge_remote_sessions(max_idle_days: int = 7) -> int:
         return len(ids)
 
 
-# ─── Transcript persistido de las sesiones remotas ─────────────────────────
-
 def save_remote_events(session_id: str, events: list[dict[str, Any]]) -> int:
     """Guarda los eventos con valor de transcript. Devuelve cuántos escribió.
 
@@ -2838,8 +2793,6 @@ def count_remote_events(user_id: int) -> dict[str, int]:
         return {sid: int(n) for sid, n in rows}
 
 
-# ─── Push tokens de dispositivos (Expo) ────────────────────────────────────
-
 def register_device_token(user_id: int, expo_push_token: str, platform: str | None = None) -> None:
     """Alta/refresco idempotente. Si el token cambia de usuario (logout/login
     en el mismo dispositivo), se reasigna al usuario nuevo."""
@@ -2873,8 +2826,6 @@ def delete_device_token(expo_push_token: str) -> None:
         s.execute(delete(DeviceToken).where(DeviceToken.expo_push_token == expo_push_token))
 
 
-# ─── Dispositivos conocidos (aviso de inicio de sesión) ────────────────────
-
 def registrar_dispositivo(user_id: int, user_agent: str | None) -> bool:
     # El ON CONFLICT decide en una sola sentencia si es la primera vez: dos
     # logins simultáneos desde el mismo navegador no pueden mandar dos avisos.
@@ -2898,8 +2849,6 @@ def registrar_dispositivo(user_id: int, user_agent: str | None) -> bool:
         )
         return False
 
-
-# ─── Estado público (/status) ──────────────────────────────────────────────
 
 STATUS_HISTORY_DAYS = 90
 

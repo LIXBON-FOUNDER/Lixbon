@@ -48,8 +48,6 @@ COMPONENTES = [
 ]
 
 
-# ── Comprobaciones ────────────────────────────────────────────────────────
-
 def _check_database() -> dict[str, Any]:
     inicio = time.perf_counter()
     try:
@@ -164,8 +162,6 @@ async def snapshot() -> dict[str, dict[str, Any]]:
     }
 
 
-# ── Historial ─────────────────────────────────────────────────────────────
-
 def _peor(estados) -> str:
     return max(estados, key=lambda e: _PESO.get(e, 0), default=OPERATIONAL)
 
@@ -256,8 +252,6 @@ def historial(muestras: list[tuple[str, dict[str, str]]], ahora: datetime | None
     return {"components": componentes, "incidents": incidentes}
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────
-
 _cache: tuple[float, dict[str, Any]] | None = None
 _cache_lock = asyncio.Lock()
 
@@ -303,8 +297,6 @@ def _safe_samples() -> list[tuple[str, dict[str, str]]]:
 async def api_status():
     return await estado_actual()
 
-
-# ── Muestreo periódico ────────────────────────────────────────────────────
 
 def _tomar_muestra() -> None:
     estados = asyncio.run(snapshot())

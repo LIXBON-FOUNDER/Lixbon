@@ -1,6 +1,4 @@
 """
-node_link.py — Nodos que se conectan AL gateway (conexión inversa).
-
 El node_agent abre un WebSocket saliente hacia /api/nodes/ws y por ese único
 canal empuja métricas y atiende peticiones de inferencia. Así una GPU alquilada
 (RunPod, Vast…) no necesita túnel, DNS ni puerto entrante: solo salida a internet.

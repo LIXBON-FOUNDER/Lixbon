@@ -1,24 +1,10 @@
-// VerifyBanner.jsx — aviso de "verifica tu correo" con botón de reenvío.
-//
-// Hasta ahora la única señal de que un correo estaba sin verificar era la
-// palabra "Sin verificar" en Ajustes → Cuenta: nadie entra ahí a mirar, así que
-// una cuenta podía quedarse sin verificar para siempre sin enterarse. Este
-// aviso aparece donde el usuario ya está (el chat) y trae la única acción que
-// resuelve el problema.
-//
-// Distingue tres situaciones, porque exigen cosas distintas del usuario:
-// acabas de registrarte y el correo salió (espéralo), acabas de registrarte y
-// NO salió (el fallo es nuestro, vuelve a intentarlo), o llevas tiempo sin
-// verificar (hazlo ya).
-//
-// No bloquea nada por sí solo: quien decide si el servicio se puede usar sin
-// verificar es el gateway (REQUIRE_EMAIL_VERIFICATION).
+// No bloquea nada: quien decide si se puede usar sin verificar es el gateway
+// (REQUIRE_EMAIL_VERIFICATION).
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../lib/api';
 import { useT } from '../i18n/useT';
 
-/** Reenvío del correo de verificación: 'reposo' | 'enviando' | 'enviado' | 'error'. */
 export function useReenvioVerificacion() {
   const [estado, setEstado] = useState('reposo');
 

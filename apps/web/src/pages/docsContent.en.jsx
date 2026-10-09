@@ -1,7 +1,3 @@
-// docsContent.en.jsx — English content for lixbon Docs. Each section is a
-// component that receives `base` (the gateway origin) for the examples. The
-// index, titles and descriptions live in docsIndex.js (shared with the
-// sitemap); docsContent.js merges this file with docsContent.es.jsx.
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { CodeBlock } from '../components/CodeBlock';
@@ -22,7 +18,7 @@ function Introduction() {
     <>
       <h1>What is lixbon?</h1>
       <p className="docs__lead">
-        lixbon is an AI platform that runs on its own GPU cluster. You chat with
+        lixbon is an AI platform that runs on GPUs we operate. You chat with
         language models from the web, code with an agent from the terminal or the
         IDE, design sites in Visuals, and, if you build software, integrate the
         same models into your code with an OpenAI-compatible API.
@@ -30,11 +26,9 @@ function Introduction() {
 
       <h2>How it works</h2>
       <p>
-        Your messages hit a <strong>gateway</strong> that routes them to the best
-        available GPU node in the cluster and streams the response back token by
-        token. You don&apos;t depend on an external provider: inference runs on our
-        own hardware, and the orchestrator balances load and routes around any
-        node that goes down. Each job (chat, vision, code completion, embeddings)
+        Each message is handled by the best-suited model on our servers, which sends the response back as it&apos;s
+        written. You don&apos;t depend on an external provider: everything runs on
+        our own servers. Each job (chat, vision, code completion, embeddings)
         is handled by whichever model does it best.
       </p>
 
@@ -114,7 +108,7 @@ function WebChat() {
 
       <h2>Models and reasoning</h2>
       <p>
-        The composer&apos;s model picker lists the cluster&apos;s active models. The
+        The composer&apos;s model picker lists the available models. The
         ones that reason (DeepSeek-R1, Qwen 3, gpt-oss…) show their thinking in a
         collapsible block before the answer; the reasoning level adjusts
         automatically based on the model and the task.
@@ -124,7 +118,7 @@ function WebChat() {
       <p>
         Using the paperclip, pasting, or dragging and dropping, you can attach
         images and documents (PDF, Word, text, Markdown, CSV, JSON, code…).
-        Images are read by the cluster&apos;s vision model; documents are converted
+        Images are read by the vision model; documents are converted
         to text and added to the conversation&apos;s context.
       </p>
 
@@ -171,7 +165,7 @@ function Visuals() {
         <li><strong>Landing page</strong>, <strong>Component</strong> (card, table, form…), <strong>Dashboard</strong> and <strong>Email</strong> (tables and inline styles).</li>
         <li><strong>Logo / SVG</strong>: logos and vector illustrations.</li>
         <li><strong>Prototype</strong>: several screens linked together (<code>index.html</code>, <code>contact.html</code>…), navigable from the preview.</li>
-        <li><strong>Image</strong>: image generation, when a cluster node that generates images is available.</li>
+        <li><strong>Image</strong>: image generation, when the image model is available.</li>
         <li><strong>Marketing pieces</strong>: images, carousels and videos with their own size (post 1080×1350, story 1080×1920…). They show as they will come out, are edited on the canvas and rendered to PNG or MP4 on the server.</li>
       </ul>
 
@@ -297,7 +291,7 @@ function Cli({ base }) {
     <>
       <h1>CLI</h1>
       <p className="docs__lead">
-        The lixbon CLI lets you chat with the cluster from the terminal and work
+        The lixbon CLI lets you chat with lixbon from the terminal and work
         with an agent that reads and edits your project, runs commands, and makes
         commits. It is a single executable: no Python or anything else to install.
       </p>
@@ -339,7 +333,7 @@ function Cli({ base }) {
           <tr><td><code>ask</code></td><td>Regular chat. Attach images with <code>@path.png</code> or <code>/paste</code>.</td></tr>
           <tr><td><code>agent</code></td><td>The model uses tools on your working folder: reads and edits files, runs commands, makes commits. Every tool asks for approval unless you turn on <code>/approve</code> or add it to <code>/allow</code>.</td></tr>
           <tr><td><code>plan</code></td><td>On top of agent mode: only explores and proposes a plan, without touching anything (<code>/plan on</code>).</td></tr>
-          <tr><td><code>delegate</code></td><td>A classifier analyzes the request (intent, complexity, domain, risk) and routes it to whichever cluster model handles it best.</td></tr>
+          <tr><td><code>delegate</code></td><td>A classifier analyzes the request (intent, complexity, domain, risk) and routes it to whichever model handles it best.</td></tr>
         </tbody>
       </table>
       <p>
@@ -373,7 +367,7 @@ function Cli({ base }) {
           <tr><td><code>/visual &lt;what to design&gt;</code> · <code>&lt;id&gt; &lt;change&gt;</code> · <code>codigo &lt;id&gt; [stack]</code></td><td>Create, edit or turn a Visuals design into code (through the Lixbon MCP server, which the CLI registers on its own)</td></tr>
           <tr><td><code>/remote</code></td><td>Control this session from your phone or the web (link + QR)</td></tr>
           <tr><td><code>/status</code> · <code>/cost</code> · <code>/usage</code></td><td>Session status · tokens used · account-wide usage</td></tr>
-          <tr><td><code>/nodes</code></td><td>View the cluster&apos;s nodes</td></tr>
+          <tr><td><code>/nodes</code></td><td>View the available models</td></tr>
           <tr><td><code>/login</code> · <code>/logout</code> · <code>/key &lt;api_key&gt;</code></td><td>This machine&apos;s session</td></tr>
           <tr><td><code>/config</code> · <code>/bar</code> · <code>/doctor</code></td><td>Settings · status bar · terminal and connection diagnostics</td></tr>
           <tr><td><code>/update</code></td><td>Update the CLI to the latest version</td></tr>
@@ -446,7 +440,7 @@ function Desktop() {
 
       <h2>What&apos;s included</h2>
       <ul>
-        <li><strong>Editor</strong> with syntax highlighting, find and replace, and <strong>ghost-text autocomplete</strong> (Copilot-style) served by the cluster&apos;s code model.</li>
+        <li><strong>Editor</strong> with syntax highlighting, find and replace, and <strong>ghost-text autocomplete</strong> (Copilot-style) served by lixbon&apos;s code model.</li>
         <li><strong>Chat</strong> with @-mentions for files in your project.</li>
         <li><strong>Agent</strong>: the same tools as the CLI (edit, run, commit) with step-by-step approval.</li>
         <li><strong>Remote</strong>: follow the session from your phone (<Link to="/docs/remote">see Remote</Link>).</li>
@@ -813,7 +807,7 @@ function Plans() {
         </tbody>
       </table>
       <p>
-        Every plan has access to every active model on the cluster. Current
+        Every plan has access to every available model. Current
         prices and plan changes live on the <Link to="/plans">Plans</Link> page.
       </p>
 
@@ -837,7 +831,7 @@ function Plans() {
         Requests made with an API key <strong>don&apos;t</strong> draw from your
         plan&apos;s quota: they&apos;re paid with{' '}
         <Link to="/docs/api-pricing">prepaid credits</Link> per token and can use
-        any model on the cluster. Only the requests-per-minute limit and the
+        any available model. Only the requests-per-minute limit and the
         number of keys carry over from your plan.
       </p>
     </>

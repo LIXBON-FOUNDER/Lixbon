@@ -53,6 +53,9 @@ Write-Host "> Descargando el agente..."
 Invoke-WebRequest -UseBasicParsing "$Gateway/node-agent.py" -OutFile (Join-Path $Dir "agent.py")
 
 if (-not $Actualizar) {
+  # Con token se enrola de nuevo: una identidad vieja (p. ej. nodo borrado en el
+  # panel) haria que el agente la reutilice y el gateway lo rechace para siempre.
+  Remove-Item (Join-Path $Dir "node.json") -Force -ErrorAction SilentlyContinue
   $envLines = @(
     "LIXBON_GATEWAY=$Gateway",
     "LIXBON_ENROLL=$($env:LIXBON_ENROLL)",

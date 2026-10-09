@@ -1,8 +1,3 @@
-"""
-admin_panel.py — API del panel de administración (F6). Todo por ROL admin.
-Usuarios (plan, bloqueo, detalle de uso), planes editables, modelos del
-cluster, audit log global y dashboard de métricas.
-"""
 from __future__ import annotations
 
 import json
@@ -90,8 +85,6 @@ class PlanUpdatePayload(BaseModel):
     stripe_price_id: str | None = None         # F7: price_ de Stripe (null = desconectar)
 
 
-# ── Dashboard global ────────────────────────────────────────────────────────
-
 @router.get("/metrics")
 async def api_admin_metrics(
     days: int = Query(default=30, ge=1, le=90),
@@ -106,8 +99,6 @@ async def api_admin_metrics(
     }
     return stats
 
-
-# ── Usuarios ────────────────────────────────────────────────────────────────
 
 @router.get("/users")
 async def api_admin_users(
@@ -171,8 +162,6 @@ async def api_admin_set_active(
     return {"user_id": user_id, "is_active": payload.active}
 
 
-# ── Planes (límites editables sin tocar la BD) ─────────────────────────────
-
 @router.get("/plans")
 async def api_admin_plans(_admin: dict[str, Any] = Depends(admin_required)):
     """Todos los planes, incluidos los inactivos."""
@@ -198,8 +187,6 @@ async def api_admin_update_plan(
                     plan_id=plan_id, fields=sorted(fields))
     return {"plan": plan}
 
-
-# ── Pool de créditos: sesión (4h) + semana (F8) ─────────────────────────────
 
 class UsagePolicyUpdatePayload(BaseModel):
     session_window_hours: float | None = None
@@ -291,8 +278,6 @@ async def api_admin_model_weights_delete(
     return {"deleted": True}
 
 
-# ── Modelos del cluster ─────────────────────────────────────────────────────
-
 @router.get("/models")
 async def api_admin_models(_admin: dict[str, Any] = Depends(admin_required)):
     """Qué modelos existen, en qué nodos están y a qué planes pertenecen."""
@@ -312,8 +297,6 @@ async def api_admin_models(_admin: dict[str, Any] = Depends(admin_required)):
         models.append({"id": model_id, "nodes": node_ids, "plans": in_plans})
     return {"models": models, "plans": plans}
 
-
-# ── Tarifas por modelo (créditos de API) ────────────────────────────────────
 
 _USD_PER_MICRO = 1_000_000
 
@@ -563,8 +546,6 @@ async def api_admin_credits_summary(_admin: dict[str, Any] = Depends(admin_requi
     }
 
 
-# ── Audit log global ────────────────────────────────────────────────────────
-
 @router.get("/audit")
 async def api_admin_audit(
     limit: int = Query(default=50, ge=1, le=200),
@@ -577,8 +558,6 @@ async def api_admin_audit(
         user_id=user_id, limit=limit, offset=offset, event_type=event_type,
     )}
 
-
-# ── Pagos ───────────────────────────────────────────────────────────────────
 
 def _pasarela_lista():
     from core.billing import stripe_gateway as sg
