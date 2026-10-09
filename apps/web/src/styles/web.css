@@ -105,13 +105,30 @@
   align-items: baseline;
   font-family: 'Fraunces', serif;
   font-style: italic;
+  font-weight: 300;
   font-optical-sizing: auto;
   font-size: 30px;
   line-height: 1.15;
   letter-spacing: -0.01em;
   white-space: pre;
 }
-.logo-founder__l { display: inline-block; }
+/* Tiempos del diseño (versión A) a 0,6×. Las transiciones del estado abierto
+   deshacen el cierre en orden inverso: trazo, unión, peso y letras. */
+.logo-founder__l {
+  display: inline-block;
+  animation: logo-founder-sube 0.7s cubic-bezier(0.33, 1, 0.68, 1) calc(0.15s + var(--i) * 0.05s) backwards;
+}
+.logo-founder__l--tono {
+  width: calc(var(--a) * 1em);
+  opacity: 0.42;
+  transform-origin: 50% 80%;
+  transition: width 0.45s, opacity 0.45s, transform 0.45s;
+  transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  transition-delay: calc(0.2s + (5 - var(--k)) * 0.045s);
+}
+.logo-founder__l--clave {
+  transition: font-weight 0.45s cubic-bezier(0.65, 0, 0.35, 1) 0.15s, margin-left 0.4s cubic-bezier(0.65, 0, 0.35, 1) 0.1s;
+}
 .logo-founder__trazo {
   position: absolute;
   left: 0.02em;
@@ -119,7 +136,37 @@
   bottom: 0.12em;
   height: 0.045em;
   background: currentColor;
+  transform: scaleX(0);
   transform-origin: 0 50%;
+  transition: transform 0.25s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.logo-founder.is-cerrado .logo-founder__l--tono {
+  width: 0;
+  opacity: 0;
+  transform: scale(0.4);
+  transition-delay: calc(var(--k) * 0.055s);
+}
+.logo-founder.is-cerrado .logo-founder__l--clave {
+  font-weight: 680;
+  transition: font-weight 0.6s cubic-bezier(0.65, 0, 0.35, 1) 0.18s, margin-left 0.54s cubic-bezier(0.65, 0, 0.35, 1) 0.42s;
+}
+.logo-founder.is-cerrado .logo-founder__l--f { margin-left: -0.07em; }
+.logo-founder.is-cerrado .logo-founder__trazo {
+  transform: scaleX(1);
+  transition: transform 0.42s cubic-bezier(0.33, 1, 0.68, 1) 0.78s;
+}
+.logo-founder__medida {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+.logo-founder__medida > span { display: inline-block; }
+@keyframes logo-founder-sube {
+  from { opacity: 0; transform: translateY(0.38em); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-founder__l,
+  .logo-founder__trazo { animation: none; transition: none; }
 }
 @media (max-width: 640px) {
   .pubnav .logo-founder { font-size: 24px; }

@@ -20,8 +20,8 @@ export default {
     },
     guide: {
       hero: ['¡Hola! Te acompaño mientras lees.', 'Bienvenido a lixbon. Yo te enseño esto.', '¡Hola! Baja, que hay cosas interesantes.'],
-      private: ['Esto es lo importante: tus datos no van a otros proveedores de IA.', 'Nada de mandar tu código a OpenAI, Google ni Anthropic.', 'Privacidad de verdad, sin letra pequeña.'],
-      products: ['Chat, IDE y API. Elige por dónde empezar.', 'Una cuenta, cuatro formas de usarla.', 'El IDE es donde vivimos nosotros, por cierto.'],
+      private: ['Esto es lo importante: lo que escribes se queda contigo.', 'Tus conversaciones no viajan a otras empresas de IA.', 'Privacidad de verdad, sin letra pequeña.'],
+      products: ['Chat, páginas web y código. Elige por dónde empezar.', 'Una cuenta para todo.', 'Prueba Visuals: describes tu web y la creamos juntos.'],
       api: ['Si ya usas el SDK de OpenAI, solo cambias dos líneas.', 'Copia, pega y a funcionar.', 'Mira qué poco código hace falta.'],
       plans: ['El plan gratuito no pide tarjeta.', 'Empieza gratis y sube cuando lo necesites.', 'Sin sorpresas en la factura.'],
       faq: ['¿Dudas? Seguro que alguna está aquí.', 'Las preguntas que todo el mundo hace.'],
@@ -77,8 +77,8 @@ export default {
     },
     guide: {
       hero: ['Hi! I’ll keep you company while you read.', 'Welcome to lixbon. Let me show you around.', 'Hi! Scroll down, there’s good stuff.'],
-      private: ['This is the key part: your data never goes to other AI providers.', 'No sending your code to OpenAI, Google or Anthropic.', 'Real privacy, no fine print.'],
-      products: ['Chat, IDE and API. Pick where to start.', 'One account, four ways to use it.', 'The IDE is where we live, by the way.'],
+      private: ['This is the key part: what you write stays with you.', 'Your conversations never travel to other AI companies.', 'Real privacy, no fine print.'],
+      products: ['Chat, websites and code. Pick where to start.', 'One account for everything.', 'Try Visuals: describe your website and we build it together.'],
       api: ['Already on the OpenAI SDK? You only change two lines.', 'Copy, paste and go.', 'Look how little code it takes.'],
       plans: ['The free plan needs no card.', 'Start free and upgrade when you need to.', 'No surprises on the bill.'],
       faq: ['Questions? One of these probably answers it.', 'The questions everyone asks.'],

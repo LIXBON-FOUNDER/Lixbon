@@ -73,9 +73,7 @@ Instalación del agente: `infra/node/` (Docker + `install-node.sh/.ps1`).
 
 - `schema.sql` — volcado de referencia (`BD/scripts/dump_schema.py`)
 - `migrations/` — Alembic (`alembic.ini` en la raíz; URL de `DATABASE_URL`)
-- `seeds/plans.sql` — planes Gratuito/Pro/Advance
-- `scripts/` — `reset_staging.py`, `migrate_legacy.py`
-- `legacy/` — esquema MySQL original, solo histórico
+- `scripts/` — `reset_staging.py`
 
 Operación en producción (`infra/ops/`): `reset_db.py` (vaciado por alcance),
 `probar_correo.py` (diagnóstico de Brevo).

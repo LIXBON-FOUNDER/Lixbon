@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-const TONO = 0.42;
-const RECORRIDO = 420;
-const ENTRADA = 1.5;
+const UMBRAL = 48;
 const FUENTE = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,300..680&text=lixbonfuder&display=swap';
 
-// k = orden en que se recogen: de fuera hacia la l y la f.
+// k = orden en que se recogen las letras de tono.
 const LETRAS = [
   { ch: 'l', clave: true },
   { ch: 'i', k: 4 }, { ch: 'x', k: 3 }, { ch: 'b', k: 2 }, { ch: 'o', k: 1 }, { ch: 'n', k: 0 },
@@ -14,31 +12,7 @@ const LETRAS = [
   { ch: 'o', k: 5 }, { ch: 'u', k: 4 }, { ch: 'n', k: 3 }, { ch: 'd', k: 2 }, { ch: 'e', k: 1 }, { ch: 'r', k: 0 },
 ];
 
-const r = (n) => Math.round(n * 1000) / 1000;
-const acota = (n) => Math.min(1, Math.max(0, n));
-const sale3 = (x) => 1 - Math.pow(1 - x, 3);
-const suave = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
-
-// El diseño anima en segundos: la entrada ocupa 0–1,5 s y el cierre 2,4–5,2 s,
-// que aquí se recorre con el progreso del scroll.
-function estado(progreso, entrada) {
-  const t = 2.4 + acota(progreso) * 2.8;
-  const engrosa = suave(acota((t - 3.3) / 1.0));
-  const une = suave(acota((t - 3.7) / 0.9));
-  const letras = LETRAS.map((le, i) => {
-    const sube = sale3(acota((entrada - (0.15 + i * 0.05)) / 0.7));
-    const cierra = le.clave ? 0 : suave(acota((t - (3.0 + le.k * 0.09)) / 0.75));
-    return {
-      ch: le.ch,
-      opacity: r((le.clave ? 1 : TONO) * sube * (1 - cierra)),
-      transform: `translateY(${r((1 - sube) * 0.38)}em)`,
-      fontSize: `${r(le.clave ? 1 : 1 - cierra)}em`,
-      fontWeight: Math.round(le.clave ? 300 + 380 * engrosa : 300),
-      marginLeft: le.f ? `${r(-0.07 * une)}em` : undefined,
-    };
-  });
-  return { letras, trazo: r(sale3(acota((t - 4.3) / 0.7))) };
-}
+const claseLetra = (le) => `logo-founder__l ${le.clave ? 'logo-founder__l--clave' : 'logo-founder__l--tono'}${le.f ? ' logo-founder__l--f' : ''}`;
 
 let fuente;
 function cargarFuente() {
@@ -53,62 +27,53 @@ function cargarFuente() {
   return fuente;
 }
 
-export function LogoFounder({ progreso = 0, entrada = ENTRADA, className = '' }) {
-  const { letras, trazo } = estado(progreso, entrada);
+// La animación es CSS (transiciones al cambiar is-cerrado): animar por scroll
+// desde React recalculaba tamaño y peso de cada letra en cada cuadro.
+// `width` necesita un valor fijo para poder transicionar; se mide en una copia
+// oculta porque las letras visibles pueden estar ya recogidas.
+export function LogoFounder({ cerrado = false, className = '' }) {
+  const medida = useRef(null);
+  const [anchos, setAnchos] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    const medir = () => {
+      const nodo = medida.current;
+      if (!vivo || !nodo) return;
+      const base = parseFloat(getComputedStyle(nodo).fontSize);
+      setAnchos([...nodo.children].map((c) => Math.round((c.getBoundingClientRect().width / base) * 1000) / 1000));
+    };
+    cargarFuente().then(medir, medir);
+    return () => { vivo = false; };
+  }, []);
+
   return (
-    <span className={`logo-founder ${className}`} role="img" aria-label="Lixbon Founder">
-      {letras.map(({ ch, ...style }, i) => (
-        <span key={i} className="logo-founder__l" aria-hidden="true" style={style}>{ch}</span>
+    <span className={`logo-founder ${cerrado ? 'is-cerrado' : ''} ${className}`} role="img" aria-label="Lixbon Founder">
+      {LETRAS.map((le, i) => (
+        <span
+          key={i}
+          className={claseLetra(le)}
+          aria-hidden="true"
+          style={{ '--i': i, '--k': le.k, '--a': anchos?.[i] }}
+        >{le.ch}</span>
       ))}
-      <span
-        className="logo-founder__trazo"
-        aria-hidden="true"
-        style={{ transform: `scaleX(${trazo})`, opacity: trazo > 0 ? 1 : 0 }}
-      />
+      <span className="logo-founder__trazo" aria-hidden="true" />
+      <span className="logo-founder__medida" ref={medida} aria-hidden="true">
+        {LETRAS.map((le, i) => <span key={i}>{le.ch}</span>)}
+      </span>
     </span>
   );
 }
 
-function useMovimientoReducido() {
-  const [reducido] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-  );
-  return reducido;
-}
-
-function useEntrada(reducido) {
-  const [segundos, setSegundos] = useState(reducido ? ENTRADA : 0);
+function useCerradoScroll() {
+  const [cerrado, setCerrado] = useState(false);
   useEffect(() => {
-    if (reducido) return undefined;
-    const inicio = performance.now();
-    let cuadro = requestAnimationFrame(function paso(ahora) {
-      const s = (ahora - inicio) / 1000;
-      setSegundos(Math.min(s, ENTRADA));
-      if (s < ENTRADA) cuadro = requestAnimationFrame(paso);
-    });
-    return () => cancelAnimationFrame(cuadro);
-  }, [reducido]);
-  return segundos;
-}
-
-function useProgresoScroll(reducido) {
-  const [progreso, setProgreso] = useState(0);
-  useEffect(() => {
-    let cuadro = 0;
-    const medir = () => {
-      cuadro = 0;
-      const p = acota(window.scrollY / RECORRIDO);
-      setProgreso(reducido ? (p < 0.5 ? 0 : 1) : p);
-    };
-    const alMover = () => { if (!cuadro) cuadro = requestAnimationFrame(medir); };
-    medir();
+    const alMover = () => setCerrado(window.scrollY > UMBRAL);
+    alMover();
     window.addEventListener('scroll', alMover, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', alMover);
-      cancelAnimationFrame(cuadro);
-    };
-  }, [reducido]);
-  return progreso;
+    return () => window.removeEventListener('scroll', alMover);
+  }, []);
+  return cerrado;
 }
 
 // Un SVG de favicon no puede usar fuentes web, así que el monograma se pinta
@@ -158,7 +123,6 @@ function useFaviconFounder() {
 }
 
 export function LogoFounderScroll() {
-  const reducido = useMovimientoReducido();
   useFaviconFounder();
-  return <LogoFounder progreso={useProgresoScroll(reducido)} entrada={useEntrada(reducido)} />;
+  return <LogoFounder cerrado={useCerradoScroll()} />;
 }
