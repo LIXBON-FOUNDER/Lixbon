@@ -1,0 +1,12 @@
+.integration { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.integration__title { margin: 0; font-size: 13px; }
+.integration__details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
+.integration__details dd { margin: 0; overflow-wrap: anywhere; }
+.integration__check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.integration__action { align-self: flex-start; }
+.integration__muted { opacity: .7; font-size: 12px; margin: 4px 0; }
+.integration__output { margin: 0; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border, #333); border-radius: 6px; padding: 6px; }
+.integration__result--ok { color: var(--ok, #3fb950); }
+.integration__error { color: var(--danger, #f85149); }
+.integration__error p { margin: 0; }
+.integration__files { margin: 0; padding-left: 16px; font-size: 12px; }
