@@ -26,7 +26,8 @@ Coordinador (el agente con el que habla el usuario):
   lxo send <tarea> \"mensaje\"             instrucciones a una hija en marcha
   lxo continue <tarea> --task \"...\"      nuevo encargo a una hija que ya entregó
   lxo list | lxo show [<tarea>] | lxo diff <tarea>
-  lxo merge <tarea> [--squash] | lxo pr <tarea> | lxo stop <tarea> | lxo release <tarea> [--force]
+  lxo pr <tarea> | lxo stop <tarea> | lxo release <tarea> [--force]
+  (integrar una rama no es cosa de agentes: lo aprueba una persona desde Lixbon; lxo merge se rechaza)
 
 Tarea hija:
   lxo phase \"nombre\" --start | --done [--note \"...\"]
@@ -324,7 +325,7 @@ fn run_close_human(data: &Value) -> String {
     let tail = if keeps_nothing(data) {
         "tu tarea queda terminada y la sesión de esta carpeta se borró."
     } else {
-        "tu tarea queda terminada. La sesión de esta carpeta se conserva para que `lxo merge` y `lxo release` sigan funcionando con lo conservado."
+        "tu tarea queda terminada. La sesión de esta carpeta se conserva para que la persona integre desde Lixbon y `lxo release` siga funcionando con lo conservado."
     };
     let mut out = vec![format!("Run {} cerrado: {tail}", data["run"].as_str().unwrap_or(""))];
     let stopped = ids("stopped");
