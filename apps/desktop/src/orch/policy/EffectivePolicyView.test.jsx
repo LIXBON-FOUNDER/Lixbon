@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { EffectivePolicyView } from './EffectivePolicyView';
 import { DEFERRED_REASON } from './resolvePolicy';
-import { mockResolvePolicy, ALLOWED_TOOLS_WARNING, LXO_ONLY_WARNING, CODEX_LXO_DONE_REASON, KNOWN_ROLES } from './mockResolvePolicy';
+import { mockResolvePolicy, ALLOWED_TOOLS_WARNING, LXO_ONLY_WARNING, KNOWN_ROLES, CODEX_REPORT_MARKERS_WARNING, CODEX_REPORT_FILE_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING } from './mockResolvePolicy';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 afterEach(cleanup);
@@ -110,18 +110,48 @@ describe('EffectivePolicyView', () => {
     expect(onLaunch).not.toHaveBeenCalled();
   });
 
-  it('Codex en tarea hija (cualquier rol válido): blocked y Lanzar deshabilitado', async () => {
-    for (const role of KNOWN_ROLES) {
-      const onLaunch = vi.fn();
-      render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProvider="codex" role={role} onLaunch={onLaunch} />);
-      const status = await screen.findByTestId('policy-status');
-      expect(status.textContent).toContain('Bloqueada');
-      expect(status.textContent).toContain(CODEX_LXO_DONE_REASON);
-      expect(launchBtn().disabled).toBe(true);
-      fireEvent.click(launchBtn());
-      expect(onLaunch).not.toHaveBeenCalled();
+  it('Codex en tarea hija (cualquier rol válido): ok con las advertencias del host por perfil', async () => {
+    const cases = {
+      explorar: [CODEX_REPORT_MARKERS_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING],
+      proponer: [CODEX_REPORT_MARKERS_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING],
+      delegar_con_revision: [CODEX_REPORT_FILE_WARNING, CODEX_NO_ASK_WARNING],
+    };
+    for (const [profile, expected] of Object.entries(cases)) {
+      for (const role of KNOWN_ROLES) {
+        const onLaunch = vi.fn();
+        render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProvider="codex" initialProfile={profile} role={role} onLaunch={onLaunch} />);
+        expect((await screen.findByTestId('policy-status')).textContent).toContain('Lista para lanzar');
+        for (const w of expected) expect(screen.getByText(w)).toBeTruthy();
+        const absent = [CODEX_REPORT_MARKERS_WARNING, CODEX_REPORT_FILE_WARNING, CODEX_COPY_BLOCK_WARNING].filter((w) => !expected.includes(w));
+        for (const w of absent) expect(screen.queryByText(w)).toBeNull();
+        expect(launchBtn().disabled).toBe(false);
+        fireEvent.click(launchBtn());
+        expect(onLaunch).toHaveBeenCalledTimes(1);
+        cleanup();
+      }
+    }
+  });
+
+  it('las advertencias de Codex sin red no aparecen en Claude ni sin rol', async () => {
+    const all = [CODEX_REPORT_MARKERS_WARNING, CODEX_REPORT_FILE_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING];
+    const views = [];
+    for (const profile of ['explorar', 'proponer', 'delegar_con_revision']) {
+      views.push({ initialProvider: 'claude', initialProfile: profile, role: 'implementador' });
+      views.push({ initialProvider: 'codex', initialProfile: profile });
+      views.push({ initialProvider: 'claude', initialProfile: profile });
+    }
+    for (const props of views) {
+      render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" {...props} />);
+      await screen.findByTestId('policy-status');
+      for (const w of all) expect(screen.queryByText(w)).toBeNull();
       cleanup();
     }
+  });
+
+  it('Codex con rol desconocido sigue blocked y sin advertencias de entrega', async () => {
+    const p = await mockResolvePolicy({ provider: 'codex', profile: 'explorar', role: 'arquitecto', worktree: 'C:/wt/t1' });
+    expect([p.status, p.reason]).toEqual(['blocked', 'Rol desconocido: arquitecto']);
+    expect(p.warnings).not.toContain(CODEX_NO_ASK_WARNING);
   });
 
   it('Claude con rol: ok, pasa el rol al resolver y onLaunch lo incluye', async () => {

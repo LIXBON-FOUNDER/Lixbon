@@ -15,6 +15,11 @@ const WORKTREE_WARNING = 'El aislamiento entre tareas lo da el worktree de git, 
 export const KNOWN_ROLES = ['explorador', 'implementador', 'revisor', 'escalado', 'adversario'];
 /** Motivo exacto del host (agents.rs, CODEX_NO_LXO). */
 export const CODEX_LXO_DONE_REASON = 'Codex en este sandbox no puede conectarse al host local para entregar con lxo done; ver PR de entrega por archivo';
+/** Advertencias exactas del host (agents.rs, 5d4ce56) para Codex sin red local con entrega por archivo. */
+export const CODEX_REPORT_MARKERS_WARNING = 'Sin red local: entrega con lxo report (bloque con marcadores en la salida); lxo phase, ask y check no llegan al host.';
+export const CODEX_REPORT_FILE_WARNING = 'Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.';
+export const CODEX_NO_ASK_WARNING = 'Sin red local, Codex no puede usar lxo ask: no podrá preguntarle a la persona y decidirá solo.';
+export const CODEX_COPY_BLOCK_WARNING = 'La entrega en solo lectura depende de que el agente copie el bloque del informe sin cambios; si el hash no coincide, la tarea termina Failed.';
 export const LXO_ONLY_WARNING = 'No verificado: que el modo plan respete --allowedTools "Bash(lxo *)" y deje ejecutar lxo.';
 export const ALLOWED_TOOLS_WARNING = 'Lista de --allowedTools pendiente de definir por el host';
 const CLAUDE_WARNINGS = [
@@ -48,10 +53,16 @@ function mockFlags(provider, profile, worktree) {
 export async function mockResolvePolicy(args, opts = {}) {
   const role = args.role ? String(args.role).trim() || null : null;
   const p = { ...(await resolveFlags(args, opts)), role };
-  // Igual que evaluate_for del host: rol desconocido bloquea; con rol (tarea hija que
-  // entrega con lxo done) Codex queda bloqueado porque su sandbox no llega al host local.
+  // Igual que evaluate_for del host (5d4ce56): rol desconocido bloquea; con rol la tarea
+  // hija entrega por archivo/marcadores, así que Codex sin red local queda en su estado
+  // con advertencias (ningún perfil del mock da red local a Codex).
   if (role && !KNOWN_ROLES.includes(role)) return { ...p, status: 'blocked', reason: `Rol desconocido: ${role}` };
-  if (role && p.provider === 'codex' && p.status !== 'blocked') return { ...p, status: 'blocked', reason: CODEX_LXO_DONE_REASON };
+  if (role && p.provider === 'codex' && p.status !== 'blocked') {
+    const readOnly = p.argv.includes('read-only');
+    const warnings = [...p.warnings, readOnly ? CODEX_REPORT_MARKERS_WARNING : CODEX_REPORT_FILE_WARNING, CODEX_NO_ASK_WARNING];
+    if (readOnly) warnings.push(CODEX_COPY_BLOCK_WARNING);
+    return { ...p, warnings };
+  }
   return p;
 }
 
