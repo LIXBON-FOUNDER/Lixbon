@@ -41,6 +41,11 @@ type liveState struct {
 	spoke            bool
 	lastProse        string
 	usedTools        bool
+	// Caché de las filas del texto en vivo (ver liveContentLines).
+	viewLines []string
+	viewLen   int
+	viewWidth int
+	viewAt    time.Time
 }
 
 // promptState captura el siguiente Enter como respuesta a una pregunta de
