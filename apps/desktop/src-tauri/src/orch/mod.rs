@@ -93,6 +93,10 @@ fn lixbon_dir() -> PathBuf {
 }
 
 fn data_dir() -> PathBuf {
+    // Las pruebas nunca tocan el state.json real del usuario.
+    if cfg!(test) {
+        return std::env::temp_dir().join(format!("lixbon-orch-test-{}", std::process::id()));
+    }
     lixbon_dir().join("orch")
 }
 
@@ -1120,14 +1124,16 @@ pub fn orch_resolve_policy(provider: String, profile: String, role: String, work
 /// Integra la rama de una tarea en su padre. Solo la interfaz (la persona) llega
 /// aquí: no está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe
 /// ser `true` (diálogo de confirmación de la UI).
-#[tauri::command(async)]
+// snake_case: la webview envía los nombres tal cual (accept_moved_target), sin camelCase.
+#[tauri::command(async, rename_all = "snake_case")]
 pub fn orch_integrate(orch: TauriState<'_, Orch>, task: String, confirm: bool, squash: Option<bool>, accept_moved_target: Option<String>) -> Result<Value, String> {
     orch.0.integrate_from_ui(&task, confirm, squash.unwrap_or(false), accept_moved_target.as_deref())
 }
 
 /// Publica la rama de una tarea (push + `gh pr create`). Solo la interfaz: no
 /// está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe ser `true`.
-#[tauri::command(async)]
+// snake_case: la webview envía los nombres tal cual (accept_moved_target), sin camelCase.
+#[tauri::command(async, rename_all = "snake_case")]
 pub fn orch_publish_pr(orch: TauriState<'_, Orch>, task: String, confirm: bool) -> Result<Value, String> {
     orch.0.publish_pr_from_ui(&task, confirm)
 }
@@ -1150,6 +1156,7 @@ pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use state::NewTask;
 
     #[test]
     fn el_servidor_de_lxo_no_conoce_la_integracion() {
@@ -1170,6 +1177,72 @@ mod tests {
             assert_eq!(core.rpc(Caller::Agent(None), "", c, &json!({})).unwrap_err(), format!("Comando desconocido: {c}"));
         }
         assert!(!include_str!("server.rs").contains("integrate") && !include_str!("server.rs").contains("publish"));
+    }
+
+    /// Invoca orch_integrate por el IPC de Tauri (MockRuntime), con el JSON que
+    /// mandaría la webview, para comprobar cómo llegan los argumentos.
+    #[test]
+    fn la_webview_envia_accept_moved_target_en_snake_case() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+        use tauri::webview::InvokeRequest;
+
+        let git = |dir: &Path, args: &[&str]| {
+            let o = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
+            assert!(o.status.success(), "{args:?}");
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        };
+        let dir = std::env::temp_dir().join(format!("lxo-ipc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for a in [&["init", "-q", "-b", "master"][..], &["config", "user.name", "t"], &["config", "user.email", "t@t"]] { git(&dir, a); }
+        std::fs::write(dir.join("a.txt"), "base\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "base"]);
+        let base = git(&dir, &["rev-parse", "HEAD"]);
+        git(&dir, &["checkout", "-qb", "lx/t"]);
+        std::fs::write(dir.join("b.txt"), "rama\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "rama"]);
+        git(&dir, &["checkout", "-q", "master"]);
+        std::fs::write(dir.join("c.txt"), "manual\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "manual"]);
+        let moved = git(&dir, &["rev-parse", "HEAD"]);
+
+        let orch = Orch::default();
+        let id = {
+            let cwd = dir.to_string_lossy().into_owned();
+            let nt = |branch: Option<&str>| NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "x".into(),
+                spec: String::new(), repo: cwd.clone(), cwd: cwd.clone(), branch: branch.map(String::from), base: None, worktree: None, external: false };
+            let mut st = orch.0.lock();
+            let (_, root) = st.create_run("obj", nt(None));
+            let id = st.add_child(&root, 2, nt(Some("lx/t"))).unwrap();
+            st.done(&id, true, "ok", vec![], None).unwrap();
+            st.task_mut(&id).unwrap().base_commit = Some(base.clone());
+            id
+        };
+        let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_integrate, orch_publish_pr])
+            .build(mock_context(noop_assets())).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let invoke = |body: Value| {
+            get_ipc_response(&webview, InvokeRequest {
+                cmd: "orch_integrate".into(), callback: CallbackFn(0), error: CallbackFn(1),
+                url: if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" }.parse().unwrap(), body: InvokeBody::Json(body),
+                headers: Default::default(), invoke_key: INVOKE_KEY.to_string(),
+            }).map(|r| r.deserialize::<Value>().unwrap())
+        };
+        // En camelCase (lo que Tauri esperaría por defecto) el campo ya no se reconoce:
+        // llega como None y el destino movido no se acepta.
+        let out = invoke(json!({ "task": id, "confirm": true, "acceptMovedTarget": moved })).unwrap();
+        assert_eq!(out["outcome"], "target_moved");
+        // En snake_case llega y se integra contra el commit aceptado.
+        let out = invoke(json!({ "task": id, "confirm": true, "accept_moved_target": moved })).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["accepted_moved_target"].as_bool()), (Some("merged"), Some(true)), "{out}");
+        assert_eq!(git(&dir, &["rev-parse", "HEAD^1"]), moved);
+        // Sin confirm (campo obligatorio) Tauri rechaza la llamada antes de llegar al host.
+        assert!(invoke(json!({ "task": id })).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

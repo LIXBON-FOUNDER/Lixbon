@@ -50,3 +50,7 @@ base64 = "0.22"
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 
+
+[dev-dependencies]
+# MockRuntime para probar cómo llegan los argumentos de los comandos por IPC.
+tauri = { version = "2", features = ["test"] }
