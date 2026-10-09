@@ -576,7 +576,16 @@ impl Core {
             }
         };
         // Se valida antes de crear nada: un agente o modelo mal escrito no deja restos.
-        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", read_only)?;
+        // Perfil pedido (por defecto el del rol); se re-resuelve en el host al lanzar.
+        let profile = match Some(s(args, "profile")).filter(|p| !p.is_empty()) {
+            Some(p) => agents::Profile::parse(&p).ok_or_else(|| format!("Perfil desconocido: {p}"))?,
+            None => agents::Profile::for_role(read_only),
+        };
+        let ack_unverified = b(args, "ack_unverified");
+        let requested_argv: Option<Vec<String>> = args.get("argv").filter(|v| !v.is_null())
+            .map(|v| serde_json::from_value(v.clone()).map_err(|_| "argv debe ser una lista de textos".to_string()))
+            .transpose()?;
+        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile)?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
         // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
@@ -589,6 +598,10 @@ impl Core {
                 agent: agent.clone(), model: model.clone(), effort: effort.clone(), role: role.clone(), title: title.clone(), spec: spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
             })?;
+            let t = st.task_mut(&id)?;
+            t.profile = Some(profile.id().to_string());
+            t.ack_unverified = ack_unverified;
+            t.requested_argv = requested_argv;
             (id, parent)
         };
 
@@ -721,7 +734,17 @@ impl Core {
 
         let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
         let read_only = task.role.as_deref().and_then(roles::spec).is_some_and(|r| r.read_only);
-        let launch = agents::launch(&task.agent, task.model.as_deref(), task.effort.as_deref(), &prompt, read_only)?;
+        // Se lanza exactamente el argv de la política efectiva (la misma que muestra
+        // orch_resolve_policy); un perfil bloqueado no arranca.
+        let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
+        let policy = agents::resolve_policy(&task.agent, &profile, &task.cwd);
+        let ack = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
+        let launch = agents::launch_with(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
+        if ack.is_some() {
+            if let Ok(t) = self.lock().task_mut(id) {
+                t.policy_ack = ack;
+            }
+        }
 
         let lxo = lxo_path();
         let mut path = lxo.parent().map(|p| p.as_os_str().to_owned()).unwrap_or_default();
@@ -1028,6 +1051,13 @@ pub fn orch_term_write(orch: TauriState<'_, Orch>, task: String, data: String) -
 pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, rows: u16) -> Result<(), String> {
     let terms = orch.0.terms.lock().map_err(|_| "Estado interno corrupto")?;
     terms.get(&task).ok_or("La terminal de esa tarea ya se cerró")?.resize(cols, rows)
+}
+
+/// Política efectiva de un perfil para un proveedor en un worktree: argv exacto,
+/// versión detectada, advertencias y estado (`ok`, `blocked` o `unverified`).
+#[tauri::command(async)]
+pub fn orch_resolve_policy(provider: String, profile: String, worktree: String) -> agents::Policy {
+    agents::resolve_policy(&provider, &profile, &worktree)
 }
 
 #[tauri::command]
