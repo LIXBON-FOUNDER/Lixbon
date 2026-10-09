@@ -312,7 +312,11 @@ async def oauth_exchange(payload: ExchangePayload, request: Request):
     if not user or not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Cuenta no disponible")
 
-    session_token = create_web_session(user_id, ip, request.headers.get("user-agent"))
+    agente = request.headers.get("user-agent")
+    session_token = create_web_session(user_id, ip, agente)
+    from core.gateway.routers.auth import avisar_si_acceso_inusual
+    avisar_si_acceso_inusual(user, agente, ip,
+                             (payload.key_name or "Lixbon Mobile") if payload.issue_api_key else None)
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
 
     if payload.issue_api_key:

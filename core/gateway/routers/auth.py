@@ -34,7 +34,7 @@ from core.persistence.queries import (
     list_api_keys,
     log_audit_event,
     mark_email_verified,
-    registrar_dispositivo,
+    registrar_acceso,
     set_user_password,
     set_user_plan,
     verify_user,
@@ -121,6 +121,13 @@ def issue_named_api_key(user_id: int, key_name: str, ip: str) -> str:
     return raw_key
 
 
+def avisar_si_acceso_inusual(user: dict[str, Any], user_agent: str | None, ip: str,
+                             key_name: str | None = None) -> None:
+    if registrar_acceso(user["id"], user_agent, ip, key_name) and user.get("email"):
+        en_segundo_plano(send_login_alert_email(user["email"], user_agent=user_agent, ip=ip,
+                                                key_name=key_name))
+
+
 @router.post("/api/auth/register")
 async def api_register(payload: RegisterRequest, request: Request):
     ip = _client_ip(request)
@@ -138,7 +145,7 @@ async def api_register(payload: RegisterRequest, request: Request):
     set_user_plan(user["id"], "free")  # F5: plan Gratuito por defecto
     agente = request.headers.get("user-agent")
     session_token = create_web_session(user["id"], ip, agente)
-    registrar_dispositivo(user["id"], agente)
+    registrar_acceso(user["id"], agente, ip)
     log_audit_event("user_registered", user_id=user["id"], ip_address=ip)
 
     verify_token = create_email_token(user["id"], "verify_email", hours=48)
@@ -174,8 +181,8 @@ async def api_login(payload: LoginRequest, request: Request):
     session_token = create_web_session(user["id"], ip, agente)
     log_audit_event("user_login", user_id=user["id"], ip_address=ip)
 
-    if registrar_dispositivo(user["id"], agente) and user.get("email"):
-        en_segundo_plano(send_login_alert_email(user["email"], user_agent=agente, ip=ip))
+    app_key = (payload.key_name or DESKTOP_KEY_NAME) if payload.issue_api_key else None
+    avisar_si_acceso_inusual(user, agente, ip, app_key)
 
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
 

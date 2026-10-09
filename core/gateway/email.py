@@ -10,6 +10,7 @@ from typing import Any, Awaitable
 import httpx
 
 from core.gateway import email_templates as plantillas
+from core.security.acceso import app_de, navegador_y_sistema
 
 logger = logging.getLogger("lixbon.email")
 
@@ -143,30 +144,14 @@ def momento_largo(cuando: datetime | None = None) -> str:
             f"{momento:%H:%M} (UTC)")
 
 
-def describir_dispositivo(user_agent: str | None) -> str:
-    ua = user_agent or ""
-    if not ua.strip():
+def describir_dispositivo(user_agent: str | None, key_name: str | None = None) -> str:
+    app = app_de(user_agent, key_name)
+    if app:
+        return f"La {app} de lixbon" if app == "app móvil" else f"El {app} de lixbon"
+    if not (user_agent or "").strip():
         return "Un dispositivo sin identificar"
-    if "lixbon" in ua.lower():
-        return "Una aplicación de lixbon"
 
-    navegador = ""
-    # El orden importa: Edge y Opera se anuncian también como Chrome, y Chrome
-    # como Safari.
-    for marca, nombre in (("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"),
-                          ("Chrome/", "Chrome"), ("Safari/", "Safari")):
-        if marca in ua:
-            navegador = nombre
-            break
-
-    sistema = ""
-    for marca, nombre in (("Windows", "Windows"), ("Android", "Android"),
-                          ("iPhone", "iOS"), ("iPad", "iPadOS"),
-                          ("Mac OS X", "macOS"), ("Linux", "Linux")):
-        if marca in ua:
-            sistema = nombre
-            break
-
+    navegador, sistema = navegador_y_sistema(user_agent)
     if navegador and sistema:
         return f"{navegador} en {sistema}"
     return navegador or sistema or "Un dispositivo sin identificar"
@@ -236,11 +221,12 @@ async def send_welcome_email(to: str, plan: dict[str, Any] | None = None) -> boo
     return await send_email(to, asunto, html, texto)
 
 
-async def send_login_alert_email(to: str, *, user_agent: str | None,
-                                 ip: str | None, cuando: datetime | None = None) -> bool:
+async def send_login_alert_email(to: str, *, user_agent: str | None, ip: str | None,
+                                 key_name: str | None = None,
+                                 cuando: datetime | None = None) -> bool:
     asunto, html, texto = plantillas.acceso(
         cuando=momento_largo(cuando),
-        dispositivo=describir_dispositivo(user_agent),
+        dispositivo=describir_dispositivo(user_agent, key_name),
         ip=recortar_ip(ip),
         url_proteger=f"{PUBLIC_BASE_URL}/reset-password",
     )

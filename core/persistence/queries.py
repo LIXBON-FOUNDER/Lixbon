@@ -25,6 +25,7 @@ from core.persistence.models import (
     DeviceToken,
     EmailToken,
     LoginDevice,
+    LoginLocation,
     Message,
     ModelPricing,
     ModelAlias,
@@ -2826,28 +2827,57 @@ def delete_device_token(expo_push_token: str) -> None:
         s.execute(delete(DeviceToken).where(DeviceToken.expo_push_token == expo_push_token))
 
 
-def registrar_dispositivo(user_id: int, user_agent: str | None) -> bool:
-    # El ON CONFLICT decide en una sola sentencia si es la primera vez: dos
-    # logins simultáneos desde el mismo navegador no pueden mandar dos avisos.
-    huella = hashlib.sha256((user_agent or "").encode("utf-8")).hexdigest()
+UBICACION_HABITUAL_DIAS = 180
+
+
+def registrar_acceso(user_id: int, user_agent: str | None, ip: str | None,
+                     key_name: str | None = None) -> bool:
+    """Anota dispositivo y red del acceso; True si merece aviso: un dispositivo
+    nunca visto desde una red que no es habitual en la cuenta."""
+    from core.security.acceso import clase_de_dispositivo, red_de
+
+    clase = clase_de_dispositivo(user_agent, key_name)
+    huella = f"v2:{clase}"
+    red = red_de(ip)
     ahora = now_iso()
+    desde = (datetime.now(timezone.utc) - timedelta(days=UBICACION_HABITUAL_DIAS)).isoformat()
     with get_session() as s:
+        # Las filas de antes guardaban el hash del user-agent completo: se
+        # reconocen recalculando su clase a partir del agente guardado.
+        previos = s.scalars(select(LoginDevice.user_agent).where(
+            LoginDevice.user_id == user_id, ~LoginDevice.fingerprint.startswith("v2:"))).all()
+        conocido_antes = any(clase_de_dispositivo(ua) == clase for ua in previos)
+
+        # El ON CONFLICT decide en una sola sentencia si es la primera vez: dos
+        # logins simultáneos desde el mismo dispositivo no pueden mandar dos avisos.
         insertado = s.execute(
             pg_insert(LoginDevice)
             .values(user_id=user_id, fingerprint=huella,
                     user_agent=(user_agent or "")[:300] or None,
                     first_seen=ahora, last_seen=ahora)
-            .on_conflict_do_nothing(index_elements=["user_id", "fingerprint"])
-            .returning(LoginDevice.id)
-        ).first()
-        if insertado:
-            return True
-        s.execute(
-            update(LoginDevice)
-            .where(LoginDevice.user_id == user_id, LoginDevice.fingerprint == huella)
-            .values(last_seen=ahora)
-        )
-        return False
+            .on_conflict_do_update(index_elements=["user_id", "fingerprint"],
+                                   set_={"last_seen": ahora,
+                                         "user_agent": (user_agent or "")[:300] or None})
+            .returning(LoginDevice.first_seen)
+        ).scalar_one() == ahora
+        dispositivo_nuevo = insertado and not conocido_antes
+
+        # Sin historial de redes (cuenta nueva o anterior a este registro) no
+        # hay "habitual" con qué comparar: el acceso se toma como referencia.
+        con_historial = s.scalar(select(func.count()).select_from(LoginLocation)
+                                 .where(LoginLocation.user_id == user_id)) > 0
+        red_habitual = red is None
+        if red is not None:
+            visto = s.scalar(select(LoginLocation.last_seen).where(
+                LoginLocation.user_id == user_id, LoginLocation.network == red))
+            red_habitual = visto is not None and visto >= desde
+            s.execute(
+                pg_insert(LoginLocation)
+                .values(user_id=user_id, network=red, first_seen=ahora, last_seen=ahora)
+                .on_conflict_do_update(index_elements=["user_id", "network"],
+                                       set_={"last_seen": ahora})
+            )
+        return dispositivo_nuevo and con_historial and not red_habitual
 
 
 STATUS_HISTORY_DAYS = 90
