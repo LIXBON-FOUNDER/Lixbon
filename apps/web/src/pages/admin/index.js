@@ -14,3 +14,4 @@ export { default as AdminTransacciones } from './Transacciones';
 export { default as AdminLiquidaciones } from './Liquidaciones';
 export { default as AdminPasarela } from './Pasarela';
 export { default as AdminSkills } from './Skills';
+export { default as AdminCorreos } from './Correos';

@@ -26,6 +26,7 @@ from core.persistence.models import (
     EmailToken,
     LoginDevice,
     LoginLocation,
+    TermsNotice,
     Message,
     ModelPricing,
     ModelAlias,
@@ -2904,3 +2905,30 @@ def get_status_samples(days: int = STATUS_HISTORY_DAYS) -> list[tuple[str, dict[
             .order_by(StatusSample.ts)
         ).all()
     return [(ts, _json.loads(cj)) for ts, cj in filas]
+
+
+def terms_notice_pending(version: str) -> list[dict[str, Any]]:
+    """Cuentas activas y verificadas que aún no recibieron el aviso de esta versión."""
+    with get_session() as s:
+        avisadas = select(TermsNotice.user_id).where(TermsNotice.version == version)
+        filas = s.execute(
+            select(User.id, User.email)
+            .where(User.is_active == 1, User.email_verified == 1, User.email.is_not(None),
+                   User.id.not_in(avisadas))
+            .order_by(User.id)
+        ).all()
+        return [{"id": uid, "email": email} for uid, email in filas]
+
+
+def terms_notice_count(version: str) -> int:
+    with get_session() as s:
+        return int(s.scalar(select(func.count()).select_from(TermsNotice)
+                            .where(TermsNotice.version == version)) or 0)
+
+
+def mark_terms_notified(user_id: int, version: str) -> None:
+    try:
+        with get_session() as s:
+            s.add(TermsNotice(user_id=user_id, version=version, sent_at=now_iso()))
+    except IntegrityError:
+        pass
