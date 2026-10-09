@@ -605,9 +605,11 @@ impl Core {
             let slug = state::slug(&title, 32);
             let branch = format!("lx/{}/{id}-{slug}", parent.run);
             let dir = git::worktree_dir(&parent.repo, None, &format!("{}-{id}-{slug}", parent.run));
+            let start = git::head(&parent.cwd);
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
             let mut st = self.lock();
             let t = st.task_mut(&id)?;
+            t.base_commit = start;
             t.cwd = dir.to_string_lossy().into_owned();
             t.worktree = Some(t.cwd.clone());
             t.branch = Some(branch);
@@ -840,7 +842,9 @@ impl Core {
         let st = self.lock();
         self.commit(&st, &[]);
         res.map(|mut v| {
-            v["hint"] = json!(self.close_hint(&st, task));
+            if v["outcome"] == "merged" {
+                v["hint"] = json!(self.close_hint(&st, task));
+            }
             v
         })
     }
