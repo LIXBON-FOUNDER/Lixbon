@@ -4,6 +4,9 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.3.0-go.7
+- Sin cambios de comportamiento: el CLI en Go pasa a ser el único cliente. Se retira el cliente Python y el código vive ahora en `apps/cli`.
+
 ## 2.3.0-go.6
 - La rueda del ratón desplaza el chat sin activar nada y desaparece `/mouse`. Arrastrar con el ratón selecciona texto y lo copia al soltar.
 - Nuevo Ctrl+T: abre un visor con la conversación, las herramientas ejecutadas y lo que el modelo está escribiendo ahora. Se mueve con las flechas, RePág/AvPág, Inicio/Fin o la rueda; q, Esc o Ctrl+T lo cierran.
