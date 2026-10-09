@@ -222,8 +222,11 @@ async def ide_connect_login(peticion: Request, email: str = Form(...), password:
         return _pagina_entrar(consulta, "Correo o contraseña incorrectos.")
 
     clear_auth_attempts(ip)
-    token = create_web_session(usuario["id"], ip, peticion.headers.get("user-agent"))
+    agente = peticion.headers.get("user-agent")
+    token = create_web_session(usuario["id"], ip, agente)
     log_audit_event("user_login", user_id=usuario["id"], ip_address=ip)
+    from core.gateway.routers.auth import avisar_si_acceso_inusual
+    avisar_si_acceso_inusual(usuario, agente, ip)
 
     # Se vuelve a /ide/connect con los MISMOS parámetros: el paso siguiente es
     # autorizar, igual que cuando ya había sesión.

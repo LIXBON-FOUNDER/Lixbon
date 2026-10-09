@@ -95,10 +95,12 @@ def verificada(cliente, registrada):
     return list(BUZON)
 
 
-def _entrar(cliente, agente: str):
+def _entrar(cliente, agente: str, ip: str | None = None, **extra):
     BUZON.clear()
+    if ip:
+        cliente = TestClient(app_mod.app, client=(ip, 50000))
     return cliente.post("/api/auth/login",
-                        json={"email": "ana@lixbon.test", "password": CLAVE},
+                        json={"email": "ana@lixbon.test", "password": CLAVE, **extra},
                         headers={"user-agent": agente})
 
 
@@ -122,16 +124,54 @@ def test_el_equipo_del_registro_no_dispara_aviso(cliente, verificada):
     assert BUZON == []
 
 
-def test_un_equipo_nuevo_avisa_una_sola_vez(cliente, verificada):
-    assert _entrar(cliente, FIREFOX).status_code == 200
+def test_actualizar_el_navegador_no_es_un_equipo_nuevo(cliente, verificada):
+    assert _entrar(cliente, CHROME.replace("141.0.0.0", "142.0.7444.60"), ip="201.140.10.20").status_code == 200
+    assert BUZON == []
+
+
+def test_un_equipo_nuevo_en_la_red_habitual_no_avisa(cliente, verificada):
+    # Otra IP del mismo proveedor: la casa de siempre con un portátil nuevo.
+    assert _entrar(cliente, FIREFOX, ip="187.190.99.5").status_code == 200
+    assert BUZON == []
+
+
+def test_equipo_y_red_desconocidos_avisan_una_sola_vez(cliente, verificada):
+    safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Mobile Safari/604.1"
+    assert _entrar(cliente, safari, ip="45.33.12.7").status_code == 200
     assert len(BUZON) == 1
     aviso = BUZON[0]
     assert "Nuevo inicio de sesión" in aviso["asunto"]
-    assert "Firefox en Linux" in aviso["html"]
-    assert "187.190.24.•••" in aviso["html"]
+    assert "Safari en iOS" in aviso["html"]
+    assert "45.33.12.•••" in aviso["html"]
 
-    assert _entrar(cliente, FIREFOX).status_code == 200
+    assert _entrar(cliente, safari, ip="45.33.12.7").status_code == 200
     assert BUZON == []
+
+
+def test_la_app_movil_se_reconoce_aunque_cambie_de_version(cliente, verificada):
+    assert _entrar(cliente, "okhttp/4.12.0", ip="77.88.5.5",
+                   issue_api_key=True, key_name="Lixbon Mobile").status_code == 200
+    assert len(BUZON) == 1
+    assert "La app móvil de lixbon" in BUZON[0]["html"]
+
+    assert _entrar(cliente, "okhttp/5.0.1", ip="91.12.3.4",
+                   issue_api_key=True, key_name="Lixbon Mobile").status_code == 200
+    assert BUZON == []
+
+
+def test_una_cuenta_sin_historial_de_redes_no_avisa(verificada):
+    # Cuentas anteriores al registro de redes: su primer acceso es la referencia.
+    usuario = q.create_user("previa@lixbon.test", CLAVE, "Pre", "Via")
+    assert q.registrar_acceso(usuario["id"], FIREFOX, "8.8.8.8") is False
+    assert q.registrar_acceso(usuario["id"], CHROME, "9.9.9.9") is True
+
+
+def test_la_red_se_agrupa_por_proveedor():
+    from core.security.acceso import red_de
+    assert red_de("187.190.24.91") == red_de("187.190.3.1") == "187.190.0.0/16"
+    assert red_de("2806:2f0:9000::1") == "2806:2f0::/32"
+    assert red_de("192.168.1.10") == "local"
+    assert red_de("testclient") is None
 
 
 def test_un_intento_fallido_no_avisa(cliente, verificada):

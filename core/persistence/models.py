@@ -746,6 +746,19 @@ class LoginDevice(Base):
     last_seen: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class LoginLocation(Base):
+    __tablename__ = "login_locations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "network", name="uq_login_locations_user_net"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    network: Mapped[str] = mapped_column(Text, nullable=False)
+    first_seen: Mapped[str] = mapped_column(Text, nullable=False)
+    last_seen: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 # Viven dentro de un proyecto (el «equipo» en pantalla). Lo que la interfaz
 # llama «Proyectos» se guarda como iniciativas para no chocar con team_proyectos.
 
