@@ -305,6 +305,9 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
 /// sandbox sin red local.
 pub const CODEX_NO_LXO: &str = "Codex en este sandbox no puede conectarse al host local para entregar con lxo done; ver PR de entrega por archivo";
 
+pub const WARN_NO_ASK: &str = "Sin red local, Codex no puede usar lxo ask: no podrá preguntarle a la persona y decidirá solo.";
+pub const WARN_COPY_BLOCK: &str = "La entrega en solo lectura depende de que el agente copie el bloque del informe sin cambios; si el hash no coincide, la tarea termina Failed.";
+
 /// El sandbox de Codex que resulta del argv deja conectar a 127.0.0.1. Probado con
 /// `codex sandbox` (0.159.0 y 0.162.1, Linux): read-only y workspace-write sin
 /// `sandbox_workspace_write.network_access=true` lo bloquean.
@@ -347,11 +350,18 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
                 p.status = Status::Blocked;
                 p.reason = Some(CODEX_NO_LXO.into());
             }
-            Delivery::FileOrMarkers => p.warnings.push(if p.argv.iter().any(|a| a == "read-only") {
-                "Sin red local: entrega con lxo report (bloque con marcadores en la salida); lxo phase, ask y check no llegan al host.".into()
-            } else {
-                "Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.".into()
-            }),
+            Delivery::FileOrMarkers => {
+                let read_only = p.argv.iter().any(|a| a == "read-only");
+                p.warnings.push(if read_only {
+                    "Sin red local: entrega con lxo report (bloque con marcadores en la salida); lxo phase, ask y check no llegan al host.".into()
+                } else {
+                    "Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.".into()
+                });
+                p.warnings.push(WARN_NO_ASK.into());
+                if read_only {
+                    p.warnings.push(WARN_COPY_BLOCK.into());
+                }
+            }
             Delivery::Query => {}
         }
     }
@@ -910,6 +920,22 @@ mod tests {
         assert!(codex_allows_local_network(&con_red));
         assert!(!codex_allows_local_network(&con_red[..3]));
         assert!(!codex_allows_local_network(&["codex".into(), "--sandbox".into(), "read-only".into()]));
+    }
+
+    #[test]
+    fn advertencias_de_codex_sin_red() {
+        let found = probe("0.162.1", CODEX_HELP);
+        for (prof, role, read_only) in [(Profile::Explorar, "revisor", true), (Profile::Proponer, "adversario", true),
+            (Profile::DelegarConRevision, "implementador", false)] {
+            let p = evaluate_for("codex", prof, Some(role), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+            assert!(p.warnings.iter().any(|w| w == WARN_NO_ASK), "{prof:?}");
+            assert_eq!(p.warnings.iter().any(|w| w == WARN_COPY_BLOCK), read_only, "{prof:?}");
+        }
+        // Ni en Claude ni en una consulta sin entrega.
+        let c = evaluate_for("claude", Profile::Explorar, Some("revisor"), "wt", Detected::Found(&probe("2.1.296", CLAUDE_HELP)), false, Delivery::FileOrMarkers);
+        assert!(!c.warnings.iter().any(|w| w == WARN_NO_ASK || w == WARN_COPY_BLOCK));
+        let q = evaluate_for("codex", Profile::Explorar, None, "wt", Detected::Found(&found), false, Delivery::Query);
+        assert!(!q.warnings.iter().any(|w| w == WARN_NO_ASK || w == WARN_COPY_BLOCK));
     }
 
     #[test]
