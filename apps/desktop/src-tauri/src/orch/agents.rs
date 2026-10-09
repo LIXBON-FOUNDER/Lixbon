@@ -119,6 +119,9 @@ const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.
 /// conserva: la necesita para `lxo`.
 const READ_ONLY_BLOCKED: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
+/// Única orden de Bash permitida en Explorar/Proponer con Claude.
+const LXO_ONLY: &str = "Bash(lxo *)";
+
 /// Flags de permisos de un perfil para un proveedor (sin el binario). `exec`
 /// indica `codex exec`, que no acepta `-a/--ask-for-approval`.
 fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -> Result<(Vec<String>, Vec<String>), String> {
@@ -126,11 +129,13 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
     let mut warnings = vec![];
     let flags = match (provider, profile) {
         ("claude", Profile::Explorar | Profile::Proponer) => {
+            // Bash solo para `lxo` (sintaxis del --help de 2.1.296: "Bash(git *)").
             let mut f = vec!["--disallowedTools".to_string()];
             f.extend(v(READ_ONLY_BLOCKED));
-            f.extend(v(&["--permission-mode", "plan"]));
+            f.extend(v(&["--allowedTools", LXO_ONLY, "--permission-mode", "plan"]));
             warnings.push("Claude no tiene sandbox del sistema: el modo plan lo aplica la CLI y Bash depende de su política.".into());
             warnings.push("La red y las lecturas fuera del repo no están bloqueadas.".into());
+            warnings.push("No verificado: que el modo plan respete --allowedTools \"Bash(lxo *)\" y deje ejecutar lxo.".into());
             if profile == Profile::Proponer {
                 warnings.push("El parche lo entrega el agente como texto; el host no comprueba que aplique hasta intentarlo.".into());
             }
@@ -143,6 +148,7 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
         }
         ("claude", Profile::AutonomiaAmplia) => v(&["--permission-mode", "auto"]),
         ("codex", Profile::Explorar | Profile::Proponer) => {
+            warnings.push("El sandbox read-only de Codex bloquea la red, también 127.0.0.1: lxo no puede hablar con el host (probado en Linux con 0.159.0 y 0.162.1).".into());
             if profile == Profile::Proponer {
                 warnings.push("El parche lo entrega el agente como diff en su salida; el host no comprueba que aplique hasta intentarlo.".into());
             }
@@ -190,7 +196,7 @@ pub enum Detected<'a> {
     Found(&'a Probe),
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Ok,
@@ -330,12 +336,14 @@ pub fn resolve_policy(provider: &str, profile: &str, worktree: &str) -> Policy {
     }
 }
 
-/// Lo que queda en el registro de la tarea cuando se lanza con una versión no
-/// verificada tras confirmarlo.
+/// Registro del intento de lanzamiento (mismos nombres que la tabla `attempts`
+/// del diseño SQLite): perfil, versión de la CLI, estado de la política y si se
+/// confirmó una versión no verificada.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct PolicyAck {
+pub struct PolicyRecord {
     pub profile: String,
     pub cli_version: Option<String>,
+    pub policy_status: Status,
     pub ack_unverified: bool,
 }
 
@@ -343,8 +351,9 @@ pub struct PolicyAck {
 /// se confía en el argv de la UI: si viene, tiene que ser idéntico al resuelto.
 /// - `blocked`: se rechaza siempre, aunque haya confirmación.
 /// - `unverified` sin `ack_unverified`: se rechaza.
-/// - `unverified` con `ack_unverified`: se lanza y se devuelve el registro.
-pub fn authorize(policy: &Policy, requested_argv: Option<&[String]>, ack_unverified: bool) -> Result<Option<PolicyAck>, String> {
+/// - `unverified` con `ack_unverified`: se lanza.
+/// Si se puede lanzar, devuelve el registro del intento.
+pub fn authorize(policy: &Policy, requested_argv: Option<&[String]>, ack_unverified: bool) -> Result<PolicyRecord, String> {
     if policy.status == Status::Blocked {
         return Err(format!("Perfil {} bloqueado: {}", policy.profile, policy.reason.as_deref().unwrap_or("sin motivo")));
     }
@@ -358,8 +367,12 @@ pub fn authorize(policy: &Policy, requested_argv: Option<&[String]>, ack_unverif
         Status::Unverified if !ack_unverified => Err(format!(
             "Perfil {} sin verificar: {}. Confírmalo (ack_unverified) para lanzar",
             policy.profile, policy.reason.as_deref().unwrap_or("versión no verificada"))),
-        Status::Unverified => Ok(Some(PolicyAck { profile: policy.profile.clone(), cli_version: policy.cli_version.clone(), ack_unverified: true })),
-        _ => Ok(None),
+        _ => Ok(PolicyRecord {
+            profile: policy.profile.clone(),
+            cli_version: policy.cli_version.clone(),
+            policy_status: policy.status,
+            ack_unverified: policy.status == Status::Unverified && ack_unverified,
+        }),
     }
 }
 
@@ -627,15 +640,15 @@ mod tests {
     #[test]
     fn explorar_en_claude_sin_herramientas_de_edicion() {
         let l = launch("claude", Some("haiku"), None, "Lee", Profile::Explorar).unwrap();
-        assert_eq!(l.command, r#"claude --disallowedTools Edit Write NotebookEdit --permission-mode plan --model haiku "Lee""#);
+        assert_eq!(l.command, r#"claude --disallowedTools Edit Write NotebookEdit --allowedTools "Bash(lxo *)" --permission-mode plan --model haiku "Lee""#);
     }
 
     #[test]
     fn argv_por_perfil_y_proveedor() {
         let wt = "C:\\Users\\USUARIO\\wt";
         let argv = |prov, prof| evaluate(prov, prof, wt, Detected::Skip, false).argv.join(" ");
-        assert_eq!(argv("claude", Profile::Explorar), "claude --disallowedTools Edit Write NotebookEdit --permission-mode plan");
-        assert_eq!(argv("claude", Profile::Proponer), "claude --disallowedTools Edit Write NotebookEdit --permission-mode plan");
+        assert_eq!(argv("claude", Profile::Explorar), "claude --disallowedTools Edit Write NotebookEdit --allowedTools Bash(lxo *) --permission-mode plan");
+        assert_eq!(argv("claude", Profile::Proponer), "claude --disallowedTools Edit Write NotebookEdit --allowedTools Bash(lxo *) --permission-mode plan");
         assert_eq!(argv("claude", Profile::DelegarConRevision), "claude --permission-mode acceptEdits");
         assert_eq!(argv("codex", Profile::Explorar), "codex --sandbox read-only --ask-for-approval never");
         assert_eq!(argv("codex", Profile::Proponer), "codex --sandbox read-only --ask-for-approval never");
@@ -752,10 +765,20 @@ mod tests {
     #[test]
     fn sin_verificar_con_confirmacion_lanza_y_lo_registra() {
         let p = con(Status::Unverified);
-        let ack = authorize(&p, Some(&p.argv), true).unwrap().unwrap();
-        assert_eq!(ack, PolicyAck { profile: "explorar".into(), cli_version: Some("0.170.0".into()), ack_unverified: true });
-        // Una versión verificada no necesita confirmación ni deja registro.
-        assert_eq!(authorize(&con(Status::Ok), None, false).unwrap(), None);
+        let rec = authorize(&p, Some(&p.argv), true).unwrap();
+        assert_eq!(rec, PolicyRecord { profile: "explorar".into(), cli_version: Some("0.170.0".into()), policy_status: Status::Unverified, ack_unverified: true });
+        // Una versión verificada no necesita confirmación; el registro dice ok y sin ack.
+        let rec = authorize(&con(Status::Ok), None, true).unwrap();
+        assert_eq!(rec, PolicyRecord { profile: "explorar".into(), cli_version: Some("0.162.1".into()), policy_status: Status::Ok, ack_unverified: false });
+    }
+
+    #[test]
+    fn registro_del_intento_con_nombres_de_attempts() {
+        let rec = authorize(&con(Status::Unverified), None, true).unwrap();
+        let v = serde_json::to_value(&rec).unwrap();
+        assert_eq!(v, json!({ "profile": "explorar", "cli_version": "0.170.0", "policy_status": "unverified", "ack_unverified": true }));
+        let back: PolicyRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, rec);
     }
 
     #[test]
@@ -766,6 +789,21 @@ mod tests {
         assert!(authorize(&p, Some(&otro), true).unwrap_err().contains("no coincide"));
         assert!(authorize(&p, Some(&p.argv[..2]), false).is_err());
         assert!(authorize(&p, Some(&p.argv), false).is_ok());
+    }
+
+    #[test]
+    fn explorar_en_claude_solo_permite_lxo() {
+        for prof in [Profile::Explorar, Profile::Proponer] {
+            let p = evaluate("claude", prof, "wt", Detected::Found(&probe("2.1.296", CLAUDE_HELP)), false);
+            assert_eq!(p.status, Status::Ok);
+            let i = p.argv.iter().position(|a| a == "--allowedTools").unwrap();
+            assert_eq!(p.argv[i + 1], "Bash(lxo *)");
+            assert!(p.argv.windows(2).any(|w| w == ["--permission-mode", "plan"]));
+        }
+        // Sin --allowedTools en el --help, Explorar queda bloqueado.
+        let sin = CLAUDE_HELP.replace("--allowedTools", "--x");
+        let p = evaluate("claude", Profile::Explorar, "wt", Detected::Found(&probe("2.1.296", &sin)), false);
+        assert_eq!(p.reason.as_deref(), Some("Claude Code 2.1.296 no admite: --allowedTools"));
     }
 
     #[test]
