@@ -12,6 +12,7 @@ import { DocsToc } from '../components/DocsToc';
 import { IconChevron } from '../components/Icons';
 import { useSeo } from '../lib/seo';
 import { LEGACY_DOC_IDS } from '../i18n/paths';
+import { LEGAL_INDEX } from './legalIndex';
 
 
 const SELECTOR_MASCOTA = '.docs__content [data-mascota], .docs__content .docs__callout, .docs__content .codeblock, .docs__content h2';
@@ -92,6 +93,12 @@ export default function DocsPage() {
               ))}
             </div>
           ))}
+          <div className="docs__nav-group">
+            <span className="docs__nav-title">{t('legalGroup')}</span>
+            {LEGAL_INDEX.map((d) => (
+              <Link key={d.id} to={`/legal/${d.id}`} className="docs__nav-link">{d.title[locale]}</Link>
+            ))}
+          </div>
         </aside>
 
         <article className="docs__content" ref={cuerpoRef}>

@@ -39,13 +39,14 @@ function useMenu(t) {
         { to: '/team', label: t('itemLeadership'), desc: t('itemLeadershipDesc') },
         { to: '/news', label: t('itemNews'), desc: t('itemNewsDesc') },
         { to: '/support', label: t('itemSupport'), desc: t('itemSupportDesc') },
+        { to: '/legal/terms', label: t('itemLegal'), desc: t('itemLegalDesc') },
       ],
     },
     { id: 'plans', label: t('plans'), to: '/plans' },
   ];
 }
 
-const coincide = (ruta, to) => ruta === to || (to !== '/docs' && ruta.startsWith(`${to}/`)) || (to === '/docs' && ruta.startsWith('/docs') && !ruta.startsWith('/docs/using-your-api-key'));
+const coincide = (ruta, to) => ruta === to || (to.startsWith('/legal/') && ruta.startsWith('/legal/')) ||(to !== '/docs' && ruta.startsWith(`${to}/`)) || (to === '/docs' && ruta.startsWith('/docs') && !ruta.startsWith('/docs/using-your-api-key'));
 
 export function PublicNav() {
   const { pathname } = useLocation();
