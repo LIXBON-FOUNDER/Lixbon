@@ -17,6 +17,7 @@ import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 import { usePendingSpawns, PendingSpawnList, PendingSpawnDetail, SpawnNotice } from './spawn/PendingSpawns';
 import { IntegrationDialog } from './integration/IntegrationDialog';
+import { TaskDiffView } from './review/TaskDiffView';
 import { canIntegrate as canIntegrateTask, isMerged, mergedCommitShort, integrationTarget } from './canIntegrate';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
@@ -276,6 +277,10 @@ function TaskView({ task, snap }) {
   // Regla única en ./canIntegrate.js.
   const canIntegrate = canIntegrateTask(task);
   const [integrating, setIntegrating] = useState(false);
+  // Revisión de diff por tarea (vista propia, aparte del chat): hija terminada con rama.
+  const canReview = Boolean(task.parent && task.status === 'done' && task.branch);
+  const [reviewing, setReviewing] = useState(false);
+  useEffect(() => { setReviewing(false); }, [task.id]);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
 
@@ -297,6 +302,9 @@ function TaskView({ task, snap }) {
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}
         {isMerged(task) && <span className="orch__pill is-ok" title={task.last_integration?.result_commit || undefined}>Fusionada{mergedCommitShort(task) ? <> · <span className="mono">{mergedCommitShort(task)}</span></> : null}</span>}
+        {canReview && (
+          <button className="lk" title="Revisar el diff de la rama de esta tarea contra su base" onClick={() => setReviewing((v) => !v)}>{reviewing ? 'Cerrar revisión' : 'Revisar diff'}</button>
+        )}
         {canIntegrate && (
           <button className="lk" title="Integrar la rama de esta tarea con tu confirmación" onClick={() => setIntegrating((v) => !v)}>{integrating ? 'Cerrar integración' : 'Integrar'}</button>
         )}
@@ -317,6 +325,11 @@ function TaskView({ task, snap }) {
         />
         {task.worktree && <span className="mono orch__hint orch__path" title={task.worktree}>{task.worktree}</span>}
       </div>
+      {canReview && reviewing && (
+        <div className="orch__review">
+          <TaskDiffView key={task.id} taskId={task.id} />
+        </div>
+      )}
       {canIntegrate && integrating && (
         <div className="orch__integrate">
           {/* Destino: integrate_into del host; si falta, la rama del padre. */}
