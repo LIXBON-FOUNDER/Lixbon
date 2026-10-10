@@ -79,7 +79,8 @@
 .orch__tabs { display: flex; align-items: center; gap: 12px; padding: 0 16px 10px; }
 .orch__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .orch__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.orch__term { flex: 1; min-height: 0; margin: 0 12px 12px; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-1); }
+.orch__term { flex: 1; min-height: 0; margin: 0 12px 12px; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-1); overflow-x: auto; overflow-y: hidden; }
+.orch__term-host { width: 100%; height: 100%; }
 [data-theme='light'] .orch__term { background: #f6f7ed; }
 
 .orch__activity { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; display: flex; flex-direction: column; gap: 18px; }
