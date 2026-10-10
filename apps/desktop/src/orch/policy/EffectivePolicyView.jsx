@@ -6,13 +6,37 @@ import './policy.css';
 const STATUS_TEXT = { ok: 'Lista para lanzar', blocked: 'Bloqueada', unverified: 'No verificado' };
 // Solo para mostrar: entrecomilla lo que un shell interpretaría (espacios, comillas, paréntesis, *).
 const quote = (a) => (/[\s"'()*]/.test(a) || a === '' ? JSON.stringify(a) : a);
+const LIST_FLAG = /^(--allowedTools|--disallowedTools)=(.*)$/;
+
+/** Separa un token `--allowedTools=a,b` en flag y reglas; null si no es de lista. */
+export function splitToolList(token) {
+  const m = LIST_FLAG.exec(token);
+  return m ? { flag: m[1], rules: m[2].split(',').filter(Boolean) } : null;
+}
+
+/** Solo presentación: las reglas de --allowedTools/--disallowedTools van una por línea.
+    El argv que se envía al lanzar no cambia. */
+function ArgvDisplay({ argv }) {
+  if (!argv.length) return '—';
+  return argv.map((a, i) => {
+    const list = splitToolList(a);
+    const sep = i ? ' ' : '';
+    if (!list) return <span key={i}>{sep}{quote(a)}</span>;
+    return (
+      <span key={i} className="policy__toollist" data-testid="policy-toollist">
+        {sep}{list.flag}=
+        {list.rules.map((r) => <span key={r} className="policy__toolrule" data-testid="policy-toolrule">{r}</span>)}
+      </span>
+    );
+  });
+}
 
 /**
- * @param {{ worktree: string, role?: string|null, initialProvider?: string, initialProfile?: string,
+ * @param {{ worktree: string, role?: string|null, model?: string|null, initialProvider?: string, initialProfile?: string,
  *   resolver?: import('./policyTypes').PolicyResolver,
  *   onLaunch?: (launch: import('./policyTypes').PolicyLaunch) => void }} props
  */
-export function EffectivePolicyView({ worktree, role = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch }) {
+export function EffectivePolicyView({ worktree, role = null, model = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch }) {
   const [provider, setProvider] = useState(initialProvider);
   const [profile, setProfile] = useState(initialProfile);
   const [policy, setPolicy] = useState(null);
@@ -25,11 +49,11 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
     setPolicy(null);
     setError(null);
     setAckUnverified(false);
-    resolver({ provider, profile, role, worktree })
+    resolver(model ? { provider, profile, role, worktree, model } : { provider, profile, role, worktree })
       .then((p) => alive && setPolicy(p))
       .catch((e) => alive && setError(String(e?.message || e)));
     return () => { alive = false; };
-  }, [provider, profile, role, worktree, resolver]);
+  }, [provider, profile, role, worktree, model, resolver]);
 
   const isUnverified = policy?.status === 'unverified';
   // blocked nunca se lanza; unverified solo tras marcar la casilla.
@@ -89,7 +113,7 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
           <dt>Proveedor</dt><dd>{providerLabel(policy.provider)}</dd>
           <dt>Versión CLI detectada</dt><dd className="mono">{policy.cli_version || 'no detectada'}</dd>
           <dt>Comando (argv exacto)</dt>
-          <dd><code data-testid="policy-argv" className="mono">{policy.argv.length ? policy.argv.map(quote).join(' ') : '—'}</code></dd>
+          <dd><code data-testid="policy-argv" className="mono"><ArgvDisplay argv={policy.argv} /></code></dd>
           <dt>Advertencias</dt>
           <dd>
             {policy.warnings.length ? (

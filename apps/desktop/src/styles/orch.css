@@ -167,3 +167,6 @@
 .mcpf__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .mcpf__pick { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; }
 .mcpf__pick input { accent-color: var(--accent); }
+.orch__badge--warn { color: #1A1710; background: var(--warn); }
+.orch__model { font-size: 12px; opacity: .9; }
+.orch__model-warn { color: var(--warn); font-weight: 600; margin-top: 2px; }

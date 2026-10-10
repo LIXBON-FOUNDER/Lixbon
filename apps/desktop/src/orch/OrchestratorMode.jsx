@@ -10,6 +10,7 @@ import { Collapse } from '../layout/Collapse';
 import { Segmented } from '../components/Segmented';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { AgentTerminal } from './AgentTerminal';
+import { ModelInfo, ModelMismatchBadge } from './ModelInfo';
 import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 
@@ -114,6 +115,7 @@ function TaskRow({ task, selected, onSelect, asking, now }) {
           {phase && !final ? <> · <span className="orch__task-phase">{phase.name}</span></> : ''}
         </span>
       </span>
+      <ModelMismatchBadge task={task} />
       {asking && <span className="orch__badge orch__badge--ask" title="Tiene una pregunta sin responder">?</span>}
       {task.merged && <span className="orch__badge" title="Fusionada en su padre">fusionada</span>}
       <span className="orch__task-time mono">{elapsed(task, now)}</span>
@@ -280,6 +282,7 @@ function TaskView({ task, snap }) {
             {parent ? ` · hija de ${parent.title || parent.id}` : ' · coordinador'}
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>
+          <ModelInfo task={task} />
         </div>
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}

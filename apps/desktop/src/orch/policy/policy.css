@@ -13,3 +13,7 @@
 .policy__error { color: var(--danger, #f85149); }
 .policy__launch { align-self: flex-start; }
 .policy__ack { display: flex; gap: 6px; align-items: center; margin-top: 4px; color: inherit; }
+
+/* Reglas de --allowedTools/--disallowedTools, una por línea (solo presentación). */
+.policy__toollist { display: inline; }
+.policy__toolrule { display: block; padding-left: 2ch; }
