@@ -342,7 +342,23 @@ pub struct Policy {
     pub reason: Option<String>,
     /// `false`: la CLI corre sin TUI (codex exec, claude -p); se ve pero no se le escribe.
     pub interactive: bool,
+    /// Modelo que se pedirá; con Codex sin modelo, MODEL_FROM_CONFIG (nunca un
+    /// nombre inventado). `null` en Claude sin modelo.
+    pub model: Option<String>,
 }
+
+pub const MODEL_FROM_CONFIG: &str = "el que defina config.toml";
+
+/// Muestra en la política el modelo pedido (o de dónde saldrá).
+pub fn set_model(policy: &mut Policy, model: Option<&str>) {
+    policy.model = match model.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => Some(m.to_string()),
+        None if policy.provider == "codex" => Some(MODEL_FROM_CONFIG.into()),
+        None => None,
+    };
+}
+
+pub const WARN_EFFORT_UNVERIFIED: &str = "esfuerzo no verificado: la CLI no lo lista entre sus niveles";
 
 /// Primer `x.y.z` de la salida de `--version` (`codex-cli 0.159.0`, `2.1.296 (Claude Code)`).
 pub fn parse_version(text: &str) -> Option<String> {
@@ -379,7 +395,7 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
 
 fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String) -> Policy {
     let interactive = !(argv.get(1).is_some_and(|a| a == "exec") || argv.iter().any(|a| a == "stream-json"));
-    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive }
+    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None }
 }
 
 /// Resuelve la política sin efectos: todo lo de la CLI llega en `detected`.
@@ -404,7 +420,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
         return blocked(provider, pid, argv, None, warnings, r.into());
     }
     let interactive = !(exec || argv.iter().any(|a| a == "stream-json"));
-    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive };
+    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
         Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin)),

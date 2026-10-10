@@ -126,6 +126,13 @@ pub struct Task {
     /// Motivo máquina del fallo: `terminal_approval_timeout` o `agent_idle_timeout`.
     #[serde(default)]
     pub failure_reason: Option<String>,
+    /// Codex: ruta del rollout de sesión atado a este intento, o `null` si no se
+    /// encontró uno solo.
+    #[serde(default)]
+    pub session_ref: Option<String>,
+    /// Inicio del intento actual (ms epoch).
+    #[serde(default)]
+    pub attempt_started: Option<u64>,
     /// Archivo de `codex exec -o` del intento (perfil read-only de Codex).
     #[serde(default)]
     pub last_message_path: Option<String>,
@@ -343,6 +350,8 @@ impl State {
             plan_mode: false,
             approval_deadline: None,
             failure_reason: None,
+            session_ref: None,
+            attempt_started: None,
             last_message_path: None,
             stream_json: false,
             created: now,
@@ -459,6 +468,7 @@ Seguimiento:
         t.report = None;
         t.delivery_channel = None;
         t.failure_reason = None;
+        t.session_ref = None;
         t.approval_deadline = None;
         t.merged = false;
         t.status = Status::Running;
