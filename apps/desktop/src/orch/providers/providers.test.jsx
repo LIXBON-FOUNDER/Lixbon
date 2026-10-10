@@ -61,7 +61,7 @@ describe('roleConfig', () => {
     expect(o[0]).toEqual({ value: 'haiku', label: 'haiku (sin verificar)', verified: false });
     expect(o.map((x) => x.value)).toEqual(['haiku', 'fable', 'opus', 'sonnet']);
     const cfgCodex = normalizeProvider({ id: 'codex', models: [{ id: 'gpt-6.1-sol', label: 'gpt-6.1-sol', verified: false }] });
-    expect(modelOptions(cfgCodex, 'gpt-6.1-sol')).toEqual([{ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol (sin verificar)', verified: false }]);
+    expect(modelOptions(cfgCodex, 'gpt-6.1-sol')).toEqual([{ value: '', label: 'Modelo de config.toml de Codex', verified: true }, { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol (sin verificar)', verified: false }]);
   });
   it('esfuerzos del proveedor y el guardado ajeno se conserva', async () => {
     const [claude, codex] = await providers();
@@ -159,5 +159,27 @@ describe('"+ Nuevo" del modo Agente', () => {
   });
   it('sin lista todavía: Claude y Codex visibles', () => {
     expect(newAgentEntries(null).map((e) => e.id)).toEqual(['claude', 'codex']);
+  });
+});
+
+describe('proveedor guardado por el host (660a0be: RoleCfg.provider y describe.agent)', () => {
+  it('el host devuelve provider y agent codex: sin aviso de "todavía lanza con Claude Code"', async () => {
+    const roles = ROLES.map((r) => (r.id === 'explorador' ? { ...r, agent: 'codex', model: 'gpt-6-sol', effort: null } : r));
+    render(<RolesSettings roles={roles} settings={{ roles: { explorador: { provider: 'codex', model: 'gpt-6-sol', effort: '' } } }} providers={await providers()} onSave={vi.fn()} resolver={mockResolvePolicy} />);
+    expect(screen.getByTitle('Proveedor del explorador').textContent).toContain('Codex');
+    expect(screen.getByTitle('Modelo del explorador').textContent).toContain('GPT-6-Sol');
+    expect(screen.queryByTestId('role-host-agent-explorador')).toBeNull();
+    expect(document.body.textContent).not.toContain('todavía lanza este rol');
+  });
+  it('el host no devuelve provider (agent sigue en claude): el aviso se mantiene', async () => {
+    render(<RolesSettings roles={ROLES} settings={{ roles: { explorador: { provider: 'codex', model: 'gpt-6-sol', effort: '' } } }} providers={await providers()} onSave={vi.fn()} resolver={mockResolvePolicy} />);
+    expect(screen.getByTestId('role-host-agent-explorador').textContent).toContain('El host todavía lanza este rol con Claude Code');
+  });
+  it('Codex sin modelo (model null en describe): opción del config.toml, sin marcar sin verificar', async () => {
+    const roles = ROLES.map((r) => (r.id === 'implementador' ? { ...r, agent: 'codex', model: null, effort: null } : r));
+    render(<RolesSettings roles={roles} settings={{ roles: { implementador: { provider: 'codex', model: '', effort: '' } } }} providers={await providers()} onSave={vi.fn()} resolver={mockResolvePolicy} />);
+    expect(screen.getByTitle('Modelo del implementador').textContent).toContain('Modelo de config.toml de Codex');
+    expect(screen.queryByTestId('role-unverified-implementador')).toBeNull();
+    expect(screen.queryByTestId('role-host-agent-implementador')).toBeNull();
   });
 });

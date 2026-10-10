@@ -17,6 +17,8 @@ export function migrateRoles(roles = {}) {
   return Object.fromEntries(Object.entries(roles || {}).map(([id, c]) => [id, migrateRoleCfg(c)]));
 }
 
+export const CODEX_CONFIG_MODEL_LABEL = 'Modelo de config.toml de Codex';
+
 /** Opciones del selector de proveedor: los no disponibles salen deshabilitados con su motivo. */
 export function providerOptions(providers) {
   return providers.map((p) => ({
@@ -35,6 +37,8 @@ export function modelOptions(provider, saved) {
   const list = provider?.models || [];
   const opts = list.map((m) => ({ value: m.id, label: m.verified ? m.label : `${m.label} (${UNVERIFIED_LABEL})`, verified: m.verified }));
   if (saved && !list.some((m) => m.id === saved)) opts.unshift({ value: saved, label: `${saved} (${UNVERIFIED_LABEL})`, verified: false });
+  // Codex sin modelo: el host lanza sin --model y Codex usa el de su config.toml (roles.rs, Resolved.model None).
+  if (provider?.id === 'codex') opts.unshift({ value: '', label: CODEX_CONFIG_MODEL_LABEL, verified: true });
   return opts;
 }
 
