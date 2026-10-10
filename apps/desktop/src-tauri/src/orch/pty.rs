@@ -98,13 +98,48 @@ fn write_script(dir: &Path, command: &str) -> Result<(String, Vec<String>), Stri
     }
 }
 
-/// Bytes del principio que se pueden pasar a texto ya: todo salvo un carácter
-/// multibyte incompleto al final (los bytes inválidos se dejan pasar).
-fn utf8_prefix(b: &[u8]) -> usize {
-    match std::str::from_utf8(b) {
-        Ok(_) => b.len(),
-        Err(e) if e.error_len().is_none() => e.valid_up_to(),
-        Err(_) => b.len(),
+/// Largo de un carácter incompleto al final de `b` (0 si no hay): un byte inicial
+/// multibyte seguido de menos continuaciones de las que pide.
+fn incomplete_tail(b: &[u8]) -> usize {
+    for back in 1..=b.len().min(3) {
+        let byte = b[b.len() - back];
+        if byte & 0xC0 == 0x80 {
+            continue; // continuación: sigue buscando el inicial
+        }
+        let need = match byte {
+            0xC2..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF4 => 4,
+            _ => return 0,
+        };
+        let tail = &b[b.len() - back..];
+        // Solo se guarda si de verdad puede completarse (prefijo válido).
+        let prefix_ok = matches!(std::str::from_utf8(tail), Err(e) if e.error_len().is_none());
+        return if back < need && prefix_ok { back } else { 0 };
+    }
+    0
+}
+
+/// Pasa bytes de la PTY a texto sin partir caracteres multibyte entre lecturas:
+/// guarda los bytes incompletos del final y los pega al siguiente trozo. Los
+/// bytes realmente inválidos salen como U+FFFD; `finish` vacía el resto con lossy.
+#[derive(Default)]
+pub(crate) struct Utf8Carry(Vec<u8>);
+
+impl Utf8Carry {
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> String {
+        self.0.extend_from_slice(bytes);
+        let keep = incomplete_tail(&self.0);
+        let cut = self.0.len() - keep;
+        let text = String::from_utf8_lossy(&self.0[..cut]).into_owned();
+        self.0.drain(..cut);
+        text
+    }
+
+    pub(crate) fn finish(&mut self) -> String {
+        let text = String::from_utf8_lossy(&self.0).into_owned();
+        self.0.clear();
+        text
     }
 }
 
@@ -187,26 +222,27 @@ fn spawn_piped(
     let pump = |mut pipe: Box<dyn Read + Send>, buf: Arc<Mutex<Vec<u8>>>, out: Arc<dyn Fn(String) + Send + Sync>| {
         thread::spawn(move || {
             let mut chunk = [0u8; 8192];
-            let mut carry: Vec<u8> = Vec::new();
+            let mut carry = Utf8Carry::default();
+            let emit = |part: String| {
+                if part.is_empty() {
+                    return;
+                }
+                // La salida canalizada usa \n a secas: la terminal necesita \r\n.
+                let text = part.replace("\r\n", "\n").replace('\n', "\r\n");
+                if let Ok(mut b) = buf.lock() {
+                    b.extend_from_slice(text.as_bytes());
+                }
+                out(text);
+            };
             while let Ok(n) = pipe.read(&mut chunk) {
                 if n == 0 {
                     break;
                 }
                 // Un carácter multibyte puede quedar partido entre dos lecturas: sin
                 // esto, el informe de stream-json llegaba con U+FFFD en vez de la letra.
-                carry.extend_from_slice(&chunk[..n]);
-                let valid = utf8_prefix(&carry);
-                if valid == 0 {
-                    continue;
-                }
-                let part: Vec<u8> = carry.drain(..valid).collect();
-                // La salida canalizada usa \n a secas: la terminal necesita \r\n.
-                let text = String::from_utf8_lossy(&part).replace("\r\n", "\n").replace('\n', "\r\n");
-                if let Ok(mut b) = buf.lock() {
-                    b.extend_from_slice(text.as_bytes());
-                }
-                out(text);
+                emit(carry.push(&chunk[..n]));
             }
+            emit(carry.finish());
         })
     };
     let a = pump(Box::new(child.stdout.take().ok_or("sin stdout")?), buffer.clone(), on_output.clone());
@@ -290,7 +326,7 @@ fn spawn_pty(
     let (buf_r, writer_r, last_r) = (buffer.clone(), writer.clone(), last_output.clone());
     thread::spawn(move || {
         let mut chunk = [0u8; 8192];
-        let mut carry: Vec<u8> = Vec::new();
+        let mut carry = Utf8Carry::default();
         let mut screen = String::new();
         // Cuándo se contestó por última vez: si el diálogo sigue ahí, se reintenta.
         let mut last_answer: Option<Instant> = None;
@@ -308,15 +344,8 @@ fn spawn_pty(
                             b.drain(0..cut);
                         }
                     }
-                    carry.extend_from_slice(&chunk[..n]);
                     // Un carácter multibyte puede quedar partido entre dos lecturas.
-                    let valid = match std::str::from_utf8(&carry) {
-                        Ok(_) => carry.len(),
-                        Err(e) if e.error_len().is_none() => e.valid_up_to(),
-                        Err(_) => carry.len(),
-                    };
-                    let text = String::from_utf8_lossy(&carry[..valid]).into_owned();
-                    carry.drain(0..valid);
+                    let text = carry.push(&chunk[..n]);
                     if text.is_empty() {
                         continue;
                     }
@@ -347,6 +376,11 @@ fn spawn_pty(
                     on_output(text);
                 }
             }
+        }
+        // Al cerrar, lo que quede incompleto sale con lossy.
+        let rest = carry.finish();
+        if !rest.is_empty() {
+            on_output(rest);
         }
     });
 
@@ -380,8 +414,77 @@ fn spawn_pty(
 }
 
 #[cfg(test)]
+mod utf8_tests {
+    use super::Utf8Carry;
+
+    const MUESTRAS: [&str; 4] = [
+        "Revisión: año, acción, pingüino ÁÉÍÓÚñ",
+        "┌─┬─┐│ ╔═╗ ║x║ └─┴─┘ ▶ ● ✓",
+        "listo 🚀 ok 👍🏽 familia 👨‍👩‍👧 bandera 🇨🇴",
+        "\x1b[1;32mverde ✓\x1b[0m tilde é en ANSI \x1b[38;5;208m🔥\x1b[0m",
+    ];
+
+    fn por_trozos(bytes: &[u8], cortes: &[usize]) -> String {
+        let mut c = Utf8Carry::default();
+        let mut out = String::new();
+        let mut prev = 0;
+        for &k in cortes.iter().chain(std::iter::once(&bytes.len())) {
+            let part = c.push(&bytes[prev..k]);
+            assert!(!part.contains('\u{FFFD}'), "U+FFFD en el corte {k}");
+            out.push_str(&part);
+            prev = k;
+        }
+        out + &c.finish()
+    }
+
+    #[test]
+    fn cortes_en_cada_posicion() {
+        for m in MUESTRAS {
+            let b = m.as_bytes();
+            for i in 0..=b.len() {
+                assert_eq!(por_trozos(b, &[i]), m, "corte en {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn dos_cortes_y_byte_a_byte() {
+        for m in MUESTRAS {
+            let b = m.as_bytes();
+            for i in 0..=b.len() {
+                for j in i..=b.len() {
+                    assert_eq!(por_trozos(b, &[i, j]), m, "cortes {i},{j}");
+                }
+            }
+            let todos: Vec<usize> = (1..b.len()).collect();
+            assert_eq!(por_trozos(b, &todos), m);
+        }
+    }
+
+    #[test]
+    fn invalido_antes_de_un_corte_no_estropea_el_siguiente() {
+        let mut c = Utf8Carry::default();
+        let emoji = "🚀".as_bytes();
+        let mut a = vec![b'x', 0xFF];
+        a.extend_from_slice(&emoji[..2]);
+        assert_eq!(c.push(&a), "x\u{FFFD}");
+        assert_eq!(c.push(&emoji[2..]), "🚀");
+        assert_eq!(c.finish(), "");
+    }
+
+    #[test]
+    fn al_cerrar_lo_incompleto_sale_con_lossy() {
+        let mut c = Utf8Carry::default();
+        assert_eq!(c.push(&"añ".as_bytes()[..2]), "a");
+        assert_eq!(c.push(&"─".as_bytes()[..0]), "");
+        assert_eq!(c.finish(), "\u{FFFD}");
+        assert_eq!(c.finish(), "");
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::{clamp_cols, plain, utf8_prefix, MIN_COLS};
+    use super::{clamp_cols, incomplete_tail, plain, MIN_COLS};
 
     #[test]
     fn la_pty_nunca_baja_del_minimo() {
@@ -395,9 +498,11 @@ mod tests {
     #[test]
     fn utf8_partido_entre_lecturas() {
         let s = "ñ🚀".as_bytes();
-        assert_eq!(utf8_prefix(&s[..1]), 0);
-        assert_eq!(utf8_prefix(&s[..3]), 2);
-        assert_eq!(utf8_prefix(s), s.len());
+        assert_eq!(incomplete_tail(&s[..1]), 1);
+        assert_eq!(incomplete_tail(&s[..3]), 1);
+        assert_eq!(incomplete_tail(&s[..5]), 3);
+        assert_eq!(incomplete_tail(s), 0);
+        assert_eq!(incomplete_tail(&[b'a', 0xFF]), 0);
     }
 
     #[test]
