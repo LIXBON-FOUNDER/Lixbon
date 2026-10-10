@@ -437,8 +437,9 @@ pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Ve
             let t = st.task_mut(id)?;
             t.delivered.push(idem_key(id, ATTEMPT, &r.sha256));
             t.delivery_channel = Some(r.channel.id().into());
-            if r.model.is_some() {
-                t.model_effective = r.model.clone();
+            if let Some(m) = &r.model {
+                t.model_effective = Some(m.clone());
+                t.model_mismatch = t.model_requested.as_deref().is_some_and(|req| !super::agents::same_model_family(req, m));
             }
             Ok(msg.into_iter().collect())
         }
@@ -828,6 +829,7 @@ mod tests {
         let t = st.task(&id).unwrap();
         assert_eq!(t.delivery_channel.as_deref(), Some("stream_json"));
         assert_eq!(t.model_effective.as_deref(), Some("claude-haiku-5-5-20260901"));
+        assert!(!t.model_mismatch);
         // Una línea a medias no rompe nada; sin result, al salir queda no entregado.
         let parcial = format!("{}{{\"type\":\"result\",\"res", stream(None));
         assert_eq!(parse_stream_json(&parcial).result, None);
@@ -864,6 +866,37 @@ mod tests {
                 assert_eq!(r.model.as_deref(), Some("claude-sonnet-5-5"));
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn model_mismatch_solo_si_se_pidio_y_es_otra_familia() {
+        let out = stream(Some("# Hecho"));
+        let otro = out.replace("claude-haiku-5-5-20260901", "claude-sonnet-5-5");
+        for (requested, raw, mismatch) in [(Some("haiku"), &out, false), (Some("haiku"), &otro, true), (None, &otro, false)] {
+            let (mut st, _, id, dir) = setup("mismatch");
+            st.task_mut(&id).unwrap().model_requested = requested.map(String::from);
+            let src = Sources { expect_stream: true, terminal: Some(raw), ..Sources::default() };
+            apply(&mut st, &id, find_all(&src, &ex(&id), &[]), true).unwrap();
+            let t = st.task(&id).unwrap();
+            assert_eq!(t.model_mismatch, mismatch, "{requested:?} {:?}", t.model_effective);
+            let v = serde_json::to_value(t).unwrap();
+            for k in ["model_requested", "model_effective", "model_mismatch", "delivery_channel"] {
+                assert!(v.get(k).is_some(), "falta {k}");
+            }
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn datos_de_prueba_nuevos_sin_crlf() {
+        // .gitattributes los fija en LF: un \r\n cambiaría el sha256 y el parseo.
+        for (name, bytes) in [
+            ("claude-2.1.296-plan-stream-json.jsonl", &include_bytes!("testdata/claude-2.1.296-plan-stream-json.jsonl")[..]),
+            ("codex-0.162.1-exec-help.txt", &include_bytes!("testdata/codex-0.162.1-exec-help.txt")[..]),
+            ("codex-0.162.1-exec-o-last-message.md", &include_bytes!("testdata/codex-0.162.1-exec-o-last-message.md")[..]),
+        ] {
+            assert!(!bytes.windows(2).any(|w| w == b"\r\n"), "{name} trae \\r\\n");
         }
     }
 

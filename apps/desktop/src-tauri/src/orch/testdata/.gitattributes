@@ -1,0 +1,4 @@
+# Grabaciones reales de las CLI: siempre LF (los tests las parsean y calculan hashes).
+claude-2.1.296-plan-stream-json.jsonl text eol=lf
+codex-0.162.1-exec-help.txt text eol=lf
+codex-0.162.1-exec-o-last-message.md text eol=lf
