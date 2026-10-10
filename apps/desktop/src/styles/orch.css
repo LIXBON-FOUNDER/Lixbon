@@ -183,3 +183,4 @@
 .codextabs__open { flex: 1; text-align: left; background: none; border: 0; color: inherit; padding: 4px 6px; cursor: pointer; font: inherit; }
 .codexlaunch { margin: 12px; }
 .codexlaunch__actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 8px; }
+.codexterm__bar { display: flex; justify-content: flex-end; padding-bottom: 4px; }
