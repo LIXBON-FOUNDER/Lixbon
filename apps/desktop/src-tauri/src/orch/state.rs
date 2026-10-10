@@ -127,13 +127,18 @@ pub struct Task {
     #[serde(default)]
     pub failure_reason: Option<String>,
     /// Codex: ruta del rollout de sesión atado a este intento, o `null` si no se
-    /// encontró uno solo.
+    /// encontró uno solo. Claude: el `session_id` del stream-json.
     #[serde(default)]
     pub session_ref: Option<String>,
-    /// De dónde salió `model_effective`: `stream_json` (Claude), `session_id` o
-    /// `cwd_time` (Codex) o `unknown`. `null` hasta que termina el intento.
+    /// De dónde salió `model_effective`: `stream_json` (Claude),
+    /// `session_declared` (Codex, `turn_context.model`) o `unknown`. `null`
+    /// hasta que termina el intento.
     #[serde(default)]
     pub model_source: Option<String>,
+    /// Codex: cómo se ató la sesión al intento, `session_id` o `cwd_time`; `null`
+    /// si no se encontró una sola y siempre en Claude.
+    #[serde(default)]
+    pub session_match: Option<String>,
     /// Inicio del intento actual (ms epoch).
     #[serde(default)]
     pub attempt_started: Option<u64>,
@@ -356,6 +361,7 @@ impl State {
             failure_reason: None,
             session_ref: None,
             model_source: None,
+            session_match: None,
             attempt_started: None,
             last_message_path: None,
             stream_json: false,
@@ -475,6 +481,7 @@ Seguimiento:
         t.failure_reason = None;
         t.session_ref = None;
         t.model_source = None;
+        t.session_match = None;
         t.approval_deadline = None;
         t.merged = false;
         t.status = Status::Running;

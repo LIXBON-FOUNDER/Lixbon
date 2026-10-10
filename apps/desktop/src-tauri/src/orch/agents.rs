@@ -164,6 +164,12 @@ pub fn flag_list<'a>(argv: &'a [String], flag: &str) -> Option<Vec<&'a str>> {
 }
 /// Aviso y motivo de bloqueo del perfil read-only de Codex con `[windows] sandbox = "elevated"`.
 pub const ELEVATED: &str = "el sandbox elevado falla y Codex sale del read-only";
+/// Delegar con Codex y `[windows] sandbox = "elevated"`: no se bloquea, pero avisa y pide confirmación.
+pub const WARN_ELEVATED_RW: &str = "el sandbox elevado de Codex falla en esta máquina: puede editar archivos pero no ejecutar comandos";
+/// ¿Este perfil de Codex lleva el aviso del sandbox elevado? Solo Delegar (Autonomía sigue aplazada).
+pub fn codex_elevated_warns(provider: &str, profile: Profile) -> bool {
+    provider == "codex" && profile == Profile::DelegarConRevision
+}
 pub const WARN_EXEC: &str = "No interactivo: se lanza con codex exec; la terminal muestra la salida pero no acepta teclado.";
 pub const WARN_EXEC_O: &str = "El host añade -o .lixbon/out/<tarea>/1/last-message.md al lanzar: el informe es el mensaje final del agente, de cualquier tamaño, escrito por la CLI.";
 pub const WARN_DELEGAR: &str = "Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.";
@@ -446,12 +452,21 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                 return blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into());
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
-            match version.as_deref() {
+            let mut pol = match version.as_deref() {
                 Some(v) if verified.contains(&v) => ok(Status::Ok, version.clone(), None),
                 v => ok(Status::Unverified, version.clone(), Some(format!(
                     "Versión {} no verificada (verificadas: {}); sus flags sí aparecen en --help",
                     v.unwrap_or("desconocida"), verified.join(", ")))),
+            };
+            if codex_elevated_warns(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
+                pol.warnings.push(WARN_ELEVATED_RW.into());
+                pol.status = Status::Unverified;
+                pol.reason = Some(match pol.reason.take() {
+                    Some(r) => format!("{r}; {WARN_ELEVATED_RW}"),
+                    None => WARN_ELEVATED_RW.into(),
+                });
             }
+            pol
         }
     }
 }
@@ -1219,8 +1234,19 @@ mod tests {
             assert!(p.warnings.iter().any(|w| w == ELEVATED));
             assert!(authorize(&p, Some(&p.argv), true).is_err());
         }
-        // Workspace-write y Claude no cambian; sin elevated, el read-only sigue ok.
-        assert_eq!(evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Found(&elev), false).status, Status::Ok);
+        // Delegar no se bloquea: avisa y queda unverified (pide ack).
+        let d = evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Found(&elev), false);
+        assert_eq!((d.status, d.reason.as_deref()), (Status::Unverified, Some(WARN_ELEVATED_RW)));
+        assert!(d.warnings.iter().any(|w| w == WARN_ELEVATED_RW) && !d.warnings.iter().any(|w| w == ELEVATED));
+        // Autonomía sigue deshabilitada con su motivo, sin el aviso.
+        let a = evaluate("codex", Profile::AutonomiaAmplia, "wt", Detected::Found(&elev), false);
+        assert_eq!((a.status, a.reason.as_deref()), (Status::Blocked, Some(DEFERRED)));
+        assert!(!a.warnings.iter().any(|w| w == WARN_ELEVATED_RW));
+        // Sin elevated, Delegar sigue ok y sin aviso.
+        let normal_d = Probe { windows_sandbox: Some("unelevated".into()), ..probe("0.162.1", CODEX_HELP) };
+        let d = evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Found(&normal_d), false);
+        assert_eq!(d.status, Status::Ok);
+        assert!(!d.warnings.iter().any(|w| w == WARN_ELEVATED_RW));
         let normal = Probe { windows_sandbox: Some("unelevated".into()), ..probe("0.162.1", CODEX_HELP) };
         assert_eq!(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&normal), false).status, Status::Ok);
         let _ = std::fs::remove_dir_all(dir);

@@ -94,6 +94,8 @@ pub struct Report {
     pub channel: Channel,
     /// Modelo efectivo, si la vía lo trae (stream-json).
     pub model: Option<String>,
+    /// `session_id` de Claude, si la vía lo trae (stream-json).
+    pub session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -170,7 +172,7 @@ pub fn parse_final_message(text: &str, ex: &Expect, ok_default: bool, channel: C
         return Err("el mensaje final no trae informe".into());
     }
     let summary: String = first_line.chars().take(MAX_SUMMARY).collect();
-    Ok(Report { ok, summary, files: vec![], report: Some(report), sha256: sha256_hex(text.as_bytes()), channel, model: None })
+    Ok(Report { ok, summary, files: vec![], report: Some(report), sha256: sha256_hex(text.as_bytes()), channel, model: None, session_id: None })
 }
 
 /// Lo que se saca de la salida de `claude -p --output-format stream-json`.
@@ -181,6 +183,8 @@ pub struct Stream {
     /// `message.model` de los eventos assistant o, si no hay, el de `modelUsage` del
     /// result. Nunca el del init: en plan, el init dice el pedido y responde otro.
     pub model: Option<String>,
+    /// `session_id` de los eventos (el del result si lo trae, si no el primero).
+    pub session_id: Option<String>,
 }
 
 /// Lee los eventos JSONL. Una línea a medias (aún escribiéndose) no es JSON y se salta.
@@ -192,6 +196,11 @@ pub fn parse_stream_json(raw: &str) -> Stream {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(l) else { continue };
+        if let Some(id) = v["session_id"].as_str().filter(|x| !x.is_empty()) {
+            if s.session_id.is_none() || v["type"] == "result" {
+                s.session_id = Some(id.to_string());
+            }
+        }
         match v["type"].as_str() {
             Some("assistant") => {
                 if let Some(m) = v["message"]["model"].as_str().filter(|m| !m.is_empty() && *m != "<synthetic>") {
@@ -267,7 +276,7 @@ pub fn parse_report(bytes: &[u8], ex: &Expect) -> Result<Report, String> {
         return Err(format!("report pasa de {} KiB", MAX_REPORT / 1024));
     }
     let files = v["files"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect()).unwrap_or_default();
-    Ok(Report { ok, summary, files, report, sha256: sha256_hex(bytes), channel: Channel::ReportJson, model: None })
+    Ok(Report { ok, summary, files, report, sha256: sha256_hex(bytes), channel: Channel::ReportJson, model: None, session_id: None })
 }
 
 /// Salida de terminal sin ANSI y sin ningún espacio ni salto: así los cortes que
@@ -371,12 +380,14 @@ pub fn find_all(src: &Sources, ex: &Expect, delivered: &[String]) -> Found {
         }
     }
     let mut stream_model = None;
+    let mut stream_session = None;
     if src.expect_stream {
         let s = parse_stream_json(src.terminal.unwrap_or(""));
         stream_model = s.model.clone();
+        stream_session = s.session_id.clone();
         if let Some((text, err)) = s.result {
             match parse_final_message(&text, ex, !err, Channel::StreamJson) {
-                Ok(r) if fresh(&r) => return Found::Valid(Report { model: s.model, ..r }),
+                Ok(r) if fresh(&r) => return Found::Valid(Report { model: s.model, session_id: s.session_id, ..r }),
                 Ok(_) => {}
                 Err(e) => invalid.push(format!("stream-json: {e}")),
             }
@@ -384,13 +395,13 @@ pub fn find_all(src: &Sources, ex: &Expect, delivered: &[String]) -> Found {
     }
     if let Some(bytes) = src.file {
         match parse_report(bytes, ex) {
-            Ok(r) if fresh(&r) => return Found::Valid(Report { model: stream_model, ..r }),
+            Ok(r) if fresh(&r) => return Found::Valid(Report { model: stream_model, session_id: stream_session, ..r }),
             Ok(_) => {}
             Err(e) => invalid.push(format!("report.json: {e}")),
         }
     }
     match src.terminal.map(|t| scan_markers(t, ex, delivered)) {
-        Some(Found::Valid(r)) => return Found::Valid(Report { model: stream_model, ..r }),
+        Some(Found::Valid(r)) => return Found::Valid(Report { model: stream_model, session_id: stream_session, ..r }),
         Some(Found::Invalid(e)) => invalid.push(e),
         Some(Found::Undelivered(e)) => undelivered.push(e),
         _ => {}
@@ -458,6 +469,11 @@ pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Ve
             // Claude con stream-json: el modelo sale de message.model/modelUsage.
             if r.channel == Channel::StreamJson {
                 t.model_source = Some(if r.model.is_some() { "stream_json" } else { "unknown" }.into());
+            }
+            // Claude: la sesión es su session_id; no hay búsqueda de sesión.
+            if let Some(sid) = &r.session_id {
+                t.session_ref = Some(sid.clone());
+                t.session_match = None;
             }
             Ok(msg.into_iter().collect())
         }
@@ -824,7 +840,7 @@ mod tests {
 
     fn stream(result: Option<&str>) -> String {
         let mut lines = vec![
-            r#"{"type":"system","subtype":"init","model":"claude-haiku-5-5","permissionMode":"plan"}"#.to_string(),
+            r#"{"type":"system","subtype":"init","model":"claude-haiku-5-5","permissionMode":"plan","session_id":"sess-claude-1"}"#.to_string(),
             r#"{"type":"assistant","message":{"model":"claude-haiku-5-5-20260901","content":[{"type":"text","text":"Leyendo"}]}}"#.to_string(),
         ];
         if let Some(r) = result {
@@ -850,6 +866,11 @@ mod tests {
         assert!(!t.model_mismatch);
         assert_eq!(t.model_source.as_deref(), Some("stream_json"));
         assert_eq!(serde_json::to_value(t).unwrap()["model_source"], "stream_json");
+        assert!(serde_json::to_value(t).unwrap()["session_match"].is_null());
+        assert_eq!(t.session_ref.as_deref(), Some("sess-claude-1"));
+        // La grabación real trae el session_id de Claude en sus eventos.
+        let real = include_str!("testdata/claude-2.1.296-plan-stream-json.jsonl");
+        assert_eq!(parse_stream_json(real).session_id.as_deref(), Some("446949a5-239e-4907-a4ae-c5d1727f937a"));
         // Una línea a medias no rompe nada; sin result, al salir queda no entregado.
         let parcial = format!("{}{{\"type\":\"result\",\"res", stream(None));
         assert_eq!(parse_stream_json(&parcial).result, None);

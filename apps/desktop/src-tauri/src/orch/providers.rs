@@ -35,6 +35,18 @@ pub struct Provider {
     pub efforts: Vec<String>,
     /// De dónde salió la lista: `initialize`, `help`, `debug_models`, `config` o `none`.
     pub models_source: String,
+    /// Codex con `[windows] sandbox = "elevated"` en su config.toml (solo se lee).
+    pub sandbox_elevated: bool,
+    /// Avisos del proveedor: con elevated, el de Delegar (que pide confirmación).
+    pub warnings: Vec<String>,
+    /// Perfiles que no se pueden lanzar en esta máquina y por qué.
+    pub blocked_profiles: Vec<BlockedProfile>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct BlockedProfile {
+    pub profile: String,
+    pub reason: String,
 }
 
 fn m(id: &str, label: &str, verified: bool) -> ProviderModel {
@@ -88,7 +100,10 @@ pub fn claude(installed: bool, version: Option<&str>, help: Option<&str>, init: 
             }
         }
     };
-    Provider { id: "claude".into(), version: version.map(str::to_string), available, disabled_reason, models, efforts: claude_efforts(help), models_source: source.into() }
+    Provider {
+        id: "claude".into(), version: version.map(str::to_string), available, disabled_reason, models, efforts: claude_efforts(help), models_source: source.into(),
+        sandbox_elevated: false, warnings: vec![], blocked_profiles: vec![],
+    }
 }
 
 /// Modelos visibles (`visibility: "list"`) de `codex debug models` y la unión de
@@ -138,8 +153,17 @@ const CODEX_MIN_EFFORTS: [&str; 3] = ["low", "medium", "high"];
 
 pub fn codex(installed: bool, version: Option<&str>, debug_models: Option<&str>, config: Option<&str>) -> Provider {
     let (available, disabled_reason) = availability("codex", installed, version);
+    // Solo se lee config.toml: nunca se escribe.
+    let elevated = config.and_then(agents::codex_windows_sandbox).as_deref() == Some("elevated");
+    let (warnings, blocked_profiles) = if elevated {
+        (vec![agents::WARN_ELEVATED_RW.to_string()],
+         ["explorar", "proponer"].iter().map(|p| BlockedProfile { profile: p.to_string(), reason: agents::ELEVATED.into() }).collect())
+    } else {
+        (vec![], vec![])
+    };
     let base = |models, efforts, source: &str| Provider {
         id: "codex".into(), version: version.map(str::to_string), available, disabled_reason: disabled_reason.clone(), models, efforts, models_source: source.into(),
+        sandbox_elevated: elevated, warnings: warnings.clone(), blocked_profiles: blocked_profiles.clone(),
     };
     if let Some((models, efforts)) = debug_models.and_then(codex_debug_models) {
         return base(models, efforts, "debug_models");
@@ -269,6 +293,21 @@ mod tests {
             assert!(v.get(k).is_some(), "{k}");
         }
         assert!(v["models"][0].get("verified").is_some());
+    }
+
+    #[test]
+    fn sandbox_elevado_en_la_lista() {
+        let toml = "model = \"gpt-6.1-sol\"\n[windows]\nsandbox = \"elevated\"\n";
+        let p = codex(true, Some("0.162.1"), Some(CODEX_MODELS), Some(toml));
+        // Sigue disponible: Delegar avisa, el read-only queda bloqueado.
+        assert!(p.available && p.sandbox_elevated);
+        assert_eq!(p.warnings, [agents::WARN_ELEVATED_RW]);
+        let b: Vec<&str> = p.blocked_profiles.iter().map(|b| b.profile.as_str()).collect();
+        assert_eq!(b, ["explorar", "proponer"]);
+        assert!(p.blocked_profiles.iter().all(|b| b.reason == agents::ELEVATED));
+        let p = codex(true, Some("0.162.1"), Some(CODEX_MODELS), Some("[windows]\nsandbox = \"unelevated\"\n"));
+        assert!(!p.sandbox_elevated && p.warnings.is_empty() && p.blocked_profiles.is_empty());
+        assert!(claude(true, Some("2.1.296"), Some(CLAUDE_HELP), None).warnings.is_empty());
     }
 
     #[test]
