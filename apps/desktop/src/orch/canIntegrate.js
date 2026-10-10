@@ -1,28 +1,30 @@
 // canIntegrate.js — regla única para mostrar "Integrar" en el orquestador y destino a mostrar.
 
-const outcomeOf = (d) => {
-  if (d?.outcome) return d.outcome;
-  try { return JSON.parse(d?.detail_json || '{}').outcome; } catch { return undefined; }
-};
+/** ¿La tarea ya está integrada? orch_snapshot manda por tarea
+    `last_integration: { outcome, result_commit, at } | null`, sacado de la última decisión `merge`.
+    - Objeto: manda su `outcome` (solo 'merged' bloquea; conflict/error no).
+    - null: el host dice que no hay ninguna decisión `merge` todavía.
+    - undefined (host anterior sin el campo): respaldo en `task.merged`. */
+export function isMerged(task) {
+  const li = task?.last_integration;
+  if (li === undefined) return Boolean(task?.merged);
+  return li?.outcome === 'merged';
+}
 
-/** ¿Ya hay una decisión registrada que integró esta tarea? Usa snap.decisions (forma de la
-    tabla `decisions`: kind, task, detail_json con outcome) si el snapshot la expone; hoy
-    orch_snapshot NO la expone, así que el respaldo es el campo `task.merged` del snapshot. */
-export function isMerged(task, snap) {
-  if (Array.isArray(snap?.decisions)) {
-    if (snap.decisions.some((d) => d.task === task.id && d.kind === 'merge' && outcomeOf(d) === 'merged')) return true;
-  }
-  return Boolean(task.merged);
+/** Hash corto del commit resultante de la integración, si la hay. */
+export function mergedCommitShort(task) {
+  const c = task?.last_integration?.outcome === 'merged' ? task.last_integration.result_commit : null;
+  return typeof c === 'string' && c ? c.slice(0, 7) : null;
 }
 
 /** Visible solo para una tarea hija (no el coordinador), terminada con status 'done',
     con rama y sin integración registrada.
     Aquí irá también la futura condición de "diff aceptado" por la persona. */
-export function canIntegrate(task, snap) {
+export function canIntegrate(task) {
   if (!task || !task.parent) return false;
   if (task.status !== 'done') return false;
   if (!task.branch) return false;
-  if (isMerged(task, snap)) return false;
+  if (isMerged(task)) return false;
   return true;
 }
 
