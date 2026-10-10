@@ -148,7 +148,7 @@ impl Core {
             integrate_into: (!f.shared).then(|| super::integrate_target(&parent.cwd)),
             pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
             role: f.role, model: f.model, effort: f.effort, spec_summary: summary(&f.spec), title: f.title, cwd, shared: f.shared,
-            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None },
+            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None },
             created_at: 0, expires_at: 0, spec: f.spec, base: f.base
         }
     }
