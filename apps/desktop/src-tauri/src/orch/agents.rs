@@ -141,6 +141,7 @@ pub fn flag_list<'a>(argv: &'a [String], flag: &str) -> Option<Vec<&'a str>> {
 pub const ELEVATED: &str = "el sandbox elevado falla y Codex sale del read-only";
 pub const WARN_EXEC: &str = "No interactivo: se lanza con codex exec; la terminal muestra la salida pero no acepta teclado.";
 pub const WARN_EXEC_O: &str = "El host añade -o .lixbon/out/<tarea>/1/last-message.md al lanzar: el informe es el mensaje final del agente, de cualquier tamaño, escrito por la CLI.";
+pub const WARN_DELEGAR: &str = "Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.";
 pub const WARN_CODEX_BIG: &str = "Codex puede rechazar informes de más de unos 50 KB: mantén el mensaje final por debajo de ese tamaño.";
 pub const WARN_STREAM: &str = "No interactivo: se lanza con claude -p --output-format stream-json; el informe se toma del resultado final, sin depender de que el agente ejecute lxo.";
 
@@ -170,7 +171,7 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
             f
         }
         ("claude", Profile::DelegarConRevision) => {
-            warnings.push(format!("Solo se ejecutan sin pedir permiso: {}; cualquier otro comando de Bash queda esperando aprobación.", LXO_TOOLS.join(", ")));
+            warnings.push(WARN_DELEGAR.into());
             warnings.push("El aislamiento lo da el worktree de git, no la CLI; un comando permitido puede escribir fuera de él.".into());
             let mut f = vec![allowed_tools()];
             f.extend(v(&["--permission-mode", "acceptEdits"]));
@@ -832,6 +833,15 @@ pub fn available(refresh: bool) -> Vec<Available> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn aviso_de_delegar_en_claude() {
+        let p = evaluate("claude", Profile::DelegarConRevision, "wt", Detected::Skip, false);
+        assert!(p.warnings.iter().any(|w| w == "Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla."), "{:?}", p.warnings);
+        assert!(!p.warnings.iter().any(|w| w.starts_with("Solo se ejecutan sin pedir permiso")));
+        let e = evaluate("claude", Profile::Explorar, "wt", Detected::Skip, false);
+        assert!(!e.warnings.iter().any(|w| w == WARN_DELEGAR));
+    }
     use super::*;
 
     const CODEX_HELP: &str = include_str!("testdata/codex-0.159.0-help.txt");
