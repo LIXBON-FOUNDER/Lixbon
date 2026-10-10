@@ -46,6 +46,8 @@ estable y los prerequisitos de Tauri 2 para Windows.
 
 ## Desarrollo local
 
+Requiere Node 22 o posterior (`.nvmrc`); compruébalo con `node -v`. Con Node 20 las pruebas (`npm test`) fallan por jsdom/undici (`webidl.util.markAsUncloneable is not a function`).
+
 ```bash
 cd apps/desktop
 npm install

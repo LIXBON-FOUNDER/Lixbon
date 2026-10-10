@@ -13,6 +13,8 @@ export interface ResolvePolicyArgs {
       null o vacío = solo consulta de flags (al host se envía ''). Rol desconocido = blocked. */
   role: string | null;
   worktree: string;
+  /** Modelo pedido (alias o id). Hoy solo lo usa el mock para la advertencia del modo plan. */
+  model?: string | null;
 }
 
 export interface EffectivePolicy {
