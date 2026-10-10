@@ -19,6 +19,9 @@ Coordinador (el agente con el que habla el usuario):
   lxo run close [--force]                         cierra el run: terminales, worktrees fusionados y sesión (paso final)
   lxo roles                                       roles del equipo y el modelo que les asignó el usuario
   lxo spawn --role <rol> --task \"...\" [--name \"...\"] [--base <rama>]
+                                                  cada lanzamiento espera a que la persona lo apruebe en Lixbon
+                                                  (lxo sondea cada 2 s; vence a los 10 min si nadie decide)
+  lxo spawn-status <pending_id>                   estado de un lanzamiento pendiente (si se cortó la espera)
   lxo agents [--refresh]                          agentes instalados y sus modelos (solo sin --role)
   lxo spawn --agent <id> --task \"...\" [--model <id>] [--effort <nivel>] [--name \"...\"] [--shared] [--base <rama>]
   lxo wait [--types done,question,exited,phase] [--timeout-ms 540000]
@@ -412,6 +415,47 @@ fn issue_human(data: &Value) -> String {
     }
 }
 
+/// Intervalo del sondeo de `spawn_status`: peticiones cortas, ninguna colgada.
+const APPROVAL_POLL: Duration = Duration::from_secs(2);
+
+/// `lxo spawn` deja el lanzamiento pendiente de la persona: sondea hasta que se
+/// resuelva y devuelve la hija lanzada, o un error claro si se rechazó o venció.
+fn await_approval(data: Value, me: Option<&str>) -> Result<Value, String> {
+    if data["status"] != "pending" {
+        return Ok(data);
+    }
+    let id = data["pending_id"].as_str().unwrap_or("").to_string();
+    eprintln!("Lanzamiento {id} pendiente: espera a que la persona lo apruebe en Lixbon (ventana del orquestador)…");
+    let mut fails = 0;
+    loop {
+        std::thread::sleep(APPROVAL_POLL);
+        let st = match call("spawn_status", json!({ "pending_id": id }), me) {
+            Ok(v) => { fails = 0; v }
+            Err(e) => {
+                fails += 1;
+                if fails >= 5 {
+                    return Err(format!("{e}\nSigue la espera con: lxo spawn-status {id}"));
+                }
+                continue;
+            }
+        };
+        if let Some(done) = approval_result(&id, &st) {
+            return done;
+        }
+    }
+}
+
+fn approval_result(id: &str, st: &Value) -> Option<Result<Value, String>> {
+    match st["status"].as_str().unwrap_or("") {
+        "pending" => None,
+        "approved" => Some(Ok(st["task"].clone())),
+        "rejected" => Some(Err(format!("La persona no aprobó el lanzamiento {id}: {}. No lo repitas igual: pregúntale o replantea el encargo.",
+            st["reason"].as_str().unwrap_or("sin motivo")))),
+        "expired" => Some(Err(format!("El lanzamiento {id} venció sin decisión de la persona (o Lixbon se reinició). Si sigue haciendo falta, vuelve a pedirlo con lxo spawn."))),
+        other => Some(Err(format!("Estado desconocido del lanzamiento {id}: {other}"))),
+    }
+}
+
 fn run(a: &Args) -> Result<(String, Value), String> {
     let me = caller();
     let me = me.as_deref();
@@ -451,12 +495,19 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         }
         "agents" => ("agents", call("agents", json!({ "refresh": a.b("refresh") }), me)?),
         "roles" => ("roles", call("roles", json!({}), me)?),
-        "spawn" => ("spawn", call("spawn", json!({
-            "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
-            "role": a.s("role"),
-            "agent": if a.s("role").is_some() { a.s("agent") } else { Some(need(a.s("agent"), "--role (mira `lxo roles`) o --agent (mira `lxo agents`)")?) },
-            "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
-        }), me)?),
+        "spawn" => {
+            let data = call("spawn", json!({
+                "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
+                "role": a.s("role"),
+                "agent": if a.s("role").is_some() { a.s("agent") } else { Some(need(a.s("agent"), "--role (mira `lxo roles`) o --agent (mira `lxo agents`)")?) },
+                "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
+            }), me)?;
+            ("spawn", await_approval(data, me)?)
+        }
+        "spawn-status" | "spawn_status" => {
+            let id = need(sub(1).or_else(|| a.s("pending-id")), "el pending_id")?;
+            ("spawn", await_approval(json!({ "status": "pending", "pending_id": id }), me)?)
+        }
         "continue" => ("continue", call("continue", json!({
             "task": need(sub(1), "la tarea")?,
             "spec": need(a.s("task").or_else(|| sub(2)), "--task con el nuevo encargo")?,
@@ -779,6 +830,18 @@ mod tests {
         let limpio = run_close_human(&json!({ "run": "r3", "released": [{ "task": "t4", "branch": "b", "branch_deleted": false }] }));
         assert!(limpio.contains("se borró") && limpio.contains("rama b conservada"));
         assert!(run_close_human(&json!({ "run": "r3" })).contains("Worktrees liberados: ninguno."));
+    }
+
+    #[test]
+    fn resultado_de_la_aprobacion() {
+        assert!(approval_result("sp1", &json!({ "status": "pending" })).is_none());
+        let ok = approval_result("sp1", &json!({ "status": "approved", "task": { "task": "t3", "agent": "claude", "status": "running" } })).unwrap().unwrap();
+        assert!(human("spawn", &ok).starts_with("Hija t3 lanzada con claude"));
+        let r = approval_result("sp1", &json!({ "status": "rejected", "reason": "no hace falta" })).unwrap().unwrap_err();
+        assert!(r.contains("no aprobó") && r.contains("no hace falta"));
+        assert!(approval_result("sp1", &json!({ "status": "expired" })).unwrap().unwrap_err().contains("venció"));
+        // Un host viejo que lanza directamente sigue funcionando.
+        assert_eq!(await_approval(json!({ "task": "t1" }), None).unwrap()["task"], "t1");
     }
 
     #[test]

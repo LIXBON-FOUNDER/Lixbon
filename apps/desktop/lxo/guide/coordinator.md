@@ -72,6 +72,14 @@ lxo spawn --role adversario --name "Ataque reseñas" --task "Ataca git diff <bas
 - Los roles de solo lectura trabajan en tu carpeta, sin rama, y no pueden editar archivos.
 - El implementador y el escalado tienen su propio worktree y su rama `lx/...`, que sale de tu rama actual.
 - Dentro de cada paso, lanza toda la tanda **antes** de esperar.
+- **Cada lanzamiento lo aprueba la persona.** `lxo spawn` no arranca nada: deja el lanzamiento
+  pendiente con su política efectiva en la ventana del orquestador de Lixbon y espera (sondea
+  cada 2 s) hasta que la persona lo apruebe o lo rechace. Vence a los 10 min sin decisión.
+  - Aprobado: imprime la hija lanzada, como siempre.
+  - Rechazado: sale con error y el motivo. No lo repitas igual; pregunta o replantea el encargo.
+  - Vencido (o Lixbon se reinició): sale con error; vuelve a pedirlo solo si sigue haciendo falta.
+  - Si se corta la espera (timeout de tu terminal), sigue con `lxo spawn-status <pending_id>`.
+  - Tú no puedes aprobar ni rechazar: no hay comando de `lxo` para eso.
 - `--agent/--model/--effort` sin `--role` solo si el usuario te pide expresamente otro agente o
   modelo (`lxo agents` los lista).
 

@@ -17,8 +17,8 @@ struct Skill {
 }
 
 const SKILLS: &[Skill] = &[
-    Skill { name: "orquestar", version: 7, md: orquestar_md },
-    Skill { name: "adversary", version: 1, md: adversary_md },
+    Skill { name: "orquestar", version: 8, md: orquestar_md },
+    Skill { name: "adversary", version: 2, md: adversary_md },
 ];
 
 struct Target {
@@ -172,6 +172,10 @@ lxo guide
   o el PR (los aprueba una persona en Lixbon; lxo merge y lxo pr se rechazan) y respondes al usuario.
 - Con `LXO_TASK_ID`: eres una **tarea hija**. Haz solo tu encargo y entrega tu informe.
 
+Cada `lxo spawn` lo aprueba una persona en la ventana del orquestador de Lixbon: el comando espera
+hasta que la persona lo apruebe, lo rechace o venza (10 min). Si se corta la espera, sigue con
+`lxo spawn-status <pending_id>`. Tú no puedes aprobarlo.
+
 Sigue la guía al pie de la letra y añade `--json` cuando necesites leer la salida.
 
 ## 3. Hija sin red (sandbox de Codex)
@@ -228,6 +232,7 @@ abrir Lixbon y activar Ajustes → Orquestador. No lo simules con otros subagent
    ```
    lxo spawn --role adversario --name "Adversario <tema>" --task "<qué atacar: diff (git diff <base>...<rama>), rama o archivos; contexto; decisiones tomadas y por qué>"
    ```
+   `lxo spawn` espera a que la persona apruebe el lanzamiento en Lixbon; si lo rechaza o vence, díselo al usuario.
 4. `lxo wait --timeout-ms 540000` hasta que llegue su informe; léelo entero.
 
 ## 3. Responde a cada hallazgo
