@@ -170,3 +170,6 @@
 .orch__badge--warn { color: #1A1710; background: var(--warn); }
 .orch__model { font-size: 12px; opacity: .9; }
 .orch__model-warn { color: var(--warn); font-weight: 600; margin-top: 2px; }
+.orch__approval { margin-top: 4px; padding: 4px 8px; border-left: 3px solid var(--warn); font-size: 12px; }
+.orch__approval.is-failed { border-left-color: var(--danger, #d9534f); font-weight: 600; }
+.orch__approval-hint { opacity: .85; }

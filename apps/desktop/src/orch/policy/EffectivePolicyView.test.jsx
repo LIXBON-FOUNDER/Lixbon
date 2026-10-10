@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { EffectivePolicyView, splitToolList } from './EffectivePolicyView';
 import { DEFERRED_REASON } from './resolvePolicy';
-import { mockResolvePolicy, mockLaunchArgv, PLAN_MODE_MODEL_WARNING, LXO_TOOLS, ALLOWED_TOOLS_WARNING, KNOWN_ROLES, CODEX_REPORT_MARKERS_WARNING, CODEX_REPORT_FILE_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING } from './mockResolvePolicy';
+import { mockResolvePolicy, CODEX_LARGE_REPORT_WARNING, ALLOWED_TOOLS_WARNING as DELEGAR_WARNING, mockLaunchArgv, PLAN_MODE_MODEL_WARNING, LXO_TOOLS, ALLOWED_TOOLS_WARNING, KNOWN_ROLES, CODEX_REPORT_MARKERS_WARNING, CODEX_REPORT_FILE_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING } from './mockResolvePolicy';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 afterEach(cleanup);
@@ -13,7 +13,7 @@ describe('EffectivePolicyView', () => {
   it('estado ok: muestra argv, versión y advertencias de Claude, y permite lanzar', async () => {
     const onLaunch = vi.fn();
     render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" role="explorador" onLaunch={onLaunch} />);
-    expect(await screen.findByTestId('policy-argv')).toHaveProperty('textContent', 'claude -p --output-format stream-json --verbose --disallowedTools=EditWriteNotebookEdit --allowedTools=Bash(lxo report:*)Bash(lxo guide)Bash(lxo phase:*)Bash(lxo ask:*) --permission-mode plan');
+    expect(await screen.findByTestId('policy-argv')).toHaveProperty('textContent', 'claude -p --output-format stream-json --verbose --disallowedTools=EditWriteNotebookEdit --allowedTools=Bash(lxo report:*)Bash(lxo guide)Bash(lxo phase:*)Bash(lxo ask:*)Bash(lxo check) --permission-mode plan');
     expect(screen.getByTestId('policy-status').textContent).toContain('Lista para lanzar');
     expect(screen.getByText('2.1.296')).toBeTruthy();
     expect(screen.getByText(/sin sandbox|no tiene sandbox del sistema operativo/)).toBeTruthy();
@@ -25,7 +25,7 @@ describe('EffectivePolicyView', () => {
     const sent = onLaunch.mock.calls[0][0];
     expect(sent.profile).toBe('explorar');
     expect(sent.provider).toBe('claude');
-    expect(sent.argv).toEqual(['claude', '-p', '--output-format', 'stream-json', '--verbose', '--disallowedTools=Edit,Write,NotebookEdit', '--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)', '--permission-mode', 'plan']);
+    expect(sent.argv).toEqual(['claude', '-p', '--output-format', 'stream-json', '--verbose', '--disallowedTools=Edit,Write,NotebookEdit', '--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)', '--permission-mode', 'plan']);
     expect(sent.ack_unverified).toBe(false);
     expect(sent.role).toBe('explorador');
     expect(screen.getByTestId('policy-role').textContent).toBe('explorador');
@@ -34,7 +34,7 @@ describe('EffectivePolicyView', () => {
   it('Claude + Proponer: argv igual al del host de DESKTOP', async () => {
     render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProfile="proponer" />);
     expect((await screen.findByTestId('policy-argv')).textContent)
-      .toBe('claude -p --output-format stream-json --verbose --disallowedTools=EditWriteNotebookEdit --allowedTools=Bash(lxo report:*)Bash(lxo guide)Bash(lxo phase:*)Bash(lxo ask:*) --permission-mode plan');
+      .toBe('claude -p --output-format stream-json --verbose --disallowedTools=EditWriteNotebookEdit --allowedTools=Bash(lxo report:*)Bash(lxo guide)Bash(lxo phase:*)Bash(lxo ask:*)Bash(lxo check) --permission-mode plan');
     expect(document.body.textContent).not.toContain('Bash(lxo *)');
   });
 
@@ -46,7 +46,7 @@ describe('EffectivePolicyView', () => {
 
   it('Claude + Delegar con revisión: token de --allowedTools y acceptEdits, sin --permission-prompts', async () => {
     render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProfile="delegar_con_revision" />);
-    expect((await screen.findByTestId('policy-argv')).textContent).toBe('claude --allowedTools=Bash(lxo report:*)Bash(lxo guide)Bash(lxo phase:*)Bash(lxo ask:*) --permission-mode acceptEdits');
+    expect((await screen.findByTestId('policy-argv')).textContent).toBe('claude --allowedTools=Bash(lxo report:*)Bash(lxo guide)Bash(lxo phase:*)Bash(lxo ask:*)Bash(lxo check) --permission-mode acceptEdits');
     expect(document.body.textContent).not.toContain('--permission-prompts');
     expect(screen.getByText(ALLOWED_TOOLS_WARNING)).toBeTruthy();
   });
@@ -87,7 +87,7 @@ describe('EffectivePolicyView', () => {
     expect(sent.ack_unverified).toBe(true);
     expect(sent.status).toBe('unverified');
     expect(sent.role).toBe('explorador');
-    expect(sent.argv).toEqual(['claude', '-p', '--output-format', 'stream-json', '--verbose', '--disallowedTools=Edit,Write,NotebookEdit', '--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)', '--permission-mode', 'plan']);
+    expect(sent.argv).toEqual(['claude', '-p', '--output-format', 'stream-json', '--verbose', '--disallowedTools=Edit,Write,NotebookEdit', '--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)', '--permission-mode', 'plan']);
   });
 
   it('estado ok: no hay casilla y onLaunch recibe ack_unverified false', async () => {
@@ -213,13 +213,13 @@ describe('EffectivePolicyView', () => {
     expect(rules(lists[1])).toEqual(LXO_TOOLS);
     fireEvent.click(launchBtn());
     const argv = onLaunch.mock.calls[0][0].argv;
-    expect(argv).toContain('--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)');
+    expect(argv).toContain('--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)');
     expect(argv).toContain('--disallowedTools=Edit,Write,NotebookEdit');
     expect(argv.filter((a) => a.startsWith('--allowedTools'))).toHaveLength(1);
   });
 
   it('splitToolList: solo tokens de lista con =', () => {
-    expect(splitToolList('--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)')).toEqual({ flag: '--allowedTools', rules: LXO_TOOLS });
+    expect(splitToolList('--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)')).toEqual({ flag: '--allowedTools', rules: LXO_TOOLS });
     expect(splitToolList('--allowedTools')).toBeNull();
     expect(splitToolList('--permission-mode')).toBeNull();
   });
@@ -242,7 +242,7 @@ describe('mockResolvePolicy (espejo del host bb0b013)', () => {
   it('Claude: un solo token --allowedTools con las cuatro reglas en los tres perfiles, nunca Bash(lxo *)', async () => {
     for (const profile of ['explorar', 'proponer', 'delegar_con_revision']) {
       const p = await mockResolvePolicy({ ...base, profile });
-      expect(p.argv.filter((a) => a.startsWith('--allowedTools'))).toEqual(['--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)']);
+      expect(p.argv.filter((a) => a.startsWith('--allowedTools'))).toEqual(['--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)']);
       expect(p.argv).not.toContain('--allowedTools');
       expect(p.argv).not.toContain('--disallowedTools');
       expect(p.argv.join(' ')).not.toContain('Bash(lxo *)');
@@ -262,8 +262,21 @@ describe('mockResolvePolicy (espejo del host bb0b013)', () => {
   it('lanzamiento: modelo, esfuerzo y -- antes del prompt, como el host', async () => {
     const p = await mockResolvePolicy({ ...base, profile: 'delegar_con_revision' });
     expect(mockLaunchArgv(p, { model: 'opus', effort: 'high', prompt: 'Lee la tarea' }))
-      .toEqual(['claude', '--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)', '--permission-mode', 'acceptEdits', '--model', 'opus', '--effort', 'high', '--', 'Lee la tarea']);
+      .toEqual(['claude', '--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)', '--permission-mode', 'acceptEdits', '--model', 'opus', '--effort', 'high', '--', 'Lee la tarea']);
     const e = await mockResolvePolicy({ ...base, profile: 'explorar' });
     expect(mockLaunchArgv(e, { model: 'haiku', prompt: '--no-es-flag' }).slice(-4)).toEqual(['--model', 'haiku', '--', '--no-es-flag']);
+  });
+  it('Claude: cinco reglas, con Bash(lxo check), y la advertencia de Delegar las lista todas', async () => {
+    expect(LXO_TOOLS).toEqual(['Bash(lxo report:*)', 'Bash(lxo guide)', 'Bash(lxo phase:*)', 'Bash(lxo ask:*)', 'Bash(lxo check)']);
+    const p = await mockResolvePolicy({ ...base, profile: 'delegar_con_revision' });
+    expect(p.warnings).toContain(DELEGAR_WARNING);
+    for (const r of LXO_TOOLS) expect(DELEGAR_WARNING).toContain(r);
+  });
+  it('Codex read-only: advertencia de informes grandes; no en workspace-write ni en Claude', async () => {
+    for (const profile of ['explorar', 'proponer']) {
+      expect((await mockResolvePolicy({ ...base, provider: 'codex', profile })).warnings).toContain(CODEX_LARGE_REPORT_WARNING);
+    }
+    expect((await mockResolvePolicy({ ...base, provider: 'codex', profile: 'delegar_con_revision' })).warnings).not.toContain(CODEX_LARGE_REPORT_WARNING);
+    expect((await mockResolvePolicy({ ...base, profile: 'explorar' })).warnings).not.toContain(CODEX_LARGE_REPORT_WARNING);
   });
 });
