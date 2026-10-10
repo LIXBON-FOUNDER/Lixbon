@@ -8,6 +8,9 @@ import { useClaudeUsage } from '../store/claudeSession';
 import { liveWindow } from '../lib/claudeUsage';
 import { Popover } from '../components/Popover';
 import { LogoMark, ClaudeMark } from '../components/Logo';
+import { useProviders } from '../orch/providers/RolesSettings';
+import { listProviders } from '../orch/providers/providersContract';
+import { NewAgentItems } from '../orch/providers/NewAgentItems';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
@@ -69,6 +72,7 @@ function NewMenu() {
   const ref = useRef(null);
   const close = useCallback(() => setOpen(false), []);
   const pick = (engine) => { close(); newSession(engine); };
+  const { providers } = useProviders(listProviders);
   return (
     <>
       <button ref={ref} className="btn btn--primary btn--sm" onClick={() => setOpen((v) => !v)}>
@@ -76,7 +80,7 @@ function NewMenu() {
       </button>
       <Popover anchorRef={ref} open={open} onClose={close} align="right" className="menu newagent">
         <button className="menu__item" onClick={() => pick('lixbon')}><LogoMark size={14} /><span className="menu__main">Agente de Lixbon</span><span className="menu__kbd">Ctrl N</span></button>
-        <button className="menu__item" onClick={() => pick('claude')}><ClaudeMark size={14} /><span className="menu__main">Claude Code</span></button>
+        <NewAgentItems providers={providers} onPick={pick} />
       </Popover>
     </>
   );

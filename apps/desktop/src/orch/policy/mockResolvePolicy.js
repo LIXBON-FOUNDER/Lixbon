@@ -28,10 +28,11 @@ export const READ_ONLY_BLOCKED = ['Edit', 'Write', 'NotebookEdit'];
 export const ALLOWED_TOOLS_TOKEN = `--allowedTools=${LXO_TOOLS.join(',')}`;
 export const DISALLOWED_TOOLS_TOKEN = `--disallowedTools=${READ_ONLY_BLOCKED.join(',')}`;
 /** Advertencia exacta del host para Claude + Delegar con revisión (agents.rs). */
-export const ALLOWED_TOOLS_WARNING = `Solo se ejecutan sin pedir permiso: ${LXO_TOOLS.join(', ')}; cualquier otro comando de Bash queda esperando aprobación.`;
+/** Advertencia exacta del host para Claude + Delegar con revisión (agents.rs, WARN_DELEGAR). */
+export const ALLOWED_TOOLS_WARNING = 'Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.';
 /** El host (bb0b013) no tiene esta cadena: texto acordado para el modo plan con un modelo que no es Sonnet. */
-/** Codex read-only: límite de tamaño del informe (texto acordado; el host aún no lo emite). */
-export const CODEX_LARGE_REPORT_WARNING = 'Informes muy grandes (cerca de 150 KB o más) pueden ser rechazados por Codex y la tarea queda Failed.';
+/** Codex read-only: límite de tamaño del informe (agents.rs, WARN_CODEX_BIG). */
+export const CODEX_LARGE_REPORT_WARNING = 'Codex puede rechazar informes de más de unos 50 KB: mantén el mensaje final por debajo de ese tamaño.';
 export const PLAN_MODE_MODEL_WARNING = 'en modo plan, Claude responde con Sonnet aunque pidas otro modelo';
 const CLAUDE_WARNINGS = [
   'Claude no tiene sandbox del sistema operativo: los límites los aplica la propia CLI.',

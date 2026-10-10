@@ -29,9 +29,9 @@ export const PROFILES = [
 ];
 
 /** Comando real del host. @param {ResolvePolicyArgs} args @returns {Promise<EffectivePolicy>} */
-export function invokeResolvePolicy({ provider, profile, role, worktree }) {
-  // El host recibe role como String: vacío = consulta de flags sin rol.
-  return invoke('orch_resolve_policy', { provider, profile, role: role ?? '', worktree });
+export function invokeResolvePolicy({ provider, profile, role, worktree, model }) {
+  // El host recibe role como String: vacío = consulta de flags sin rol. `model` es Option<String>.
+  return invoke('orch_resolve_policy', { provider, profile, role: role ?? '', worktree, model: model ?? null });
 }
 
 /** Resolver por defecto de la vista. @param {ResolvePolicyArgs} args @returns {Promise<EffectivePolicy>} */

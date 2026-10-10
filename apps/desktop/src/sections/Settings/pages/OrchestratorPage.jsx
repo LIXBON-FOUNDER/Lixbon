@@ -1,58 +1,14 @@
 // OrchestratorPage.jsx — Ajustes → Orquestador (experimental). Aquí se activa,
-// se asigna modelo y esfuerzo a cada rol del equipo (el coordinador lanza hijas
+// se asigna proveedor, modelo y esfuerzo a cada rol del equipo (el coordinador lanza hijas
 // por rol y no puede cambiarlos) y se elige qué se notifica.
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useOrchStore } from '../../../store/orchStore';
 import { Switch } from '../../../components/Switch';
-import { Select } from '../../../components/Select';
 import { IconNodes } from '../../../components/Icons';
 import { PageHead, SectionHead } from '../SettingsParts';
-
-const EFFORT_LABELS = { low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo' };
-
-/** Modelo y esfuerzo de cada rol. Todos corren en Claude Code por ahora. */
-function Roles({ roles, settings, claude, onSave }) {
-  const models = claude?.models?.length ? claude.models.map((m) => m.id) : ['haiku', 'sonnet', 'opus'];
-  const efforts = claude?.efforts?.length ? claude.efforts : Object.keys(EFFORT_LABELS);
-  const save = (id, patch) => {
-    const current = settings.roles?.[id] || { model: roles.find((r) => r.id === id)?.model || '', effort: roles.find((r) => r.id === id)?.effort || '' };
-    onSave({ roles: { ...settings.roles, [id]: { ...current, ...patch } } });
-  };
-  return (
-    <section className="ssec rise rise--2">
-      <SectionHead
-        label="Roles del equipo"
-        hint="El coordinador planifica con el modelo de su chat y lanza a cada hija por rol, con el modelo que elijas aquí (no puede cambiarlo). Pon lo barato en lo que solo lee y reserva el caro para cuando haga falta."
-      />
-      <div className="ssec ssec--card ssec--rows">
-        {roles.map((r) => {
-          const opts = [...new Set([...models, r.model])].map((id) => ({ value: id, label: id }));
-          return (
-            <div key={r.id} className="srow">
-              <div className="srow__text">
-                <span className="srow__label">
-                  {r.label} {r.read_only && <span className="orch__pill is-ok">Solo lectura</span>}
-                </span>
-                <span className="srow__hint">{r.purpose}</span>
-              </div>
-              <div className="orch__rolectl">
-                <Select className="select--fill" value={r.model} onChange={(model) => save(r.id, { model })} options={opts} title={`Modelo del ${r.label.toLowerCase()}`} />
-                <Select
-                  className="select--fill"
-                  value={r.effort || ''}
-                  onChange={(effort) => save(r.id, { effort })}
-                  options={[{ value: '', label: 'Esfuerzo por defecto' }, ...efforts.map((e) => ({ value: e, label: `Esfuerzo ${(EFFORT_LABELS[e] || e).toLowerCase()}` }))]}
-                  title={`Esfuerzo del ${r.label.toLowerCase()}`}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
+import { RolesSettings, useProviders } from '../../../orch/providers/RolesSettings';
+import { listProviders } from '../../../orch/providers/providersContract';
 
 function SkillRow({ a, onInstall, onRemove }) {
   const state = a.installed ? (a.outdated ? 'Desactualizada' : 'Instalada') : 'Sin instalar';
@@ -122,6 +78,7 @@ export function OrchestratorPage() {
   const { snap, agents, init, loadAgents, saveSettings, installSkill, uninstallSkill } = useOrchStore();
   const settings = snap?.settings;
   const team = useTeam(!!settings?.enabled);
+  const { providers } = useProviders(listProviders);
 
   useEffect(() => { init(); loadAgents(); }, [init, loadAgents]);
   useEffect(() => { if (settings?.enabled) loadAgents(); }, [settings?.enabled, loadAgents]);
@@ -163,7 +120,7 @@ export function OrchestratorPage() {
         </div>
       </section>
 
-      <Roles roles={snap.roles || []} settings={settings} claude={team.agents?.find((a) => a.id === 'claude')} onSave={saveSettings} />
+      <RolesSettings roles={snap.roles || []} settings={settings} providers={providers} onSave={saveSettings} />
 
       <Team enabled={!!settings.enabled} team={team} />
 
