@@ -62,7 +62,10 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
         let t = st.task(&id)?;
         let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que integrar"))?;
-        if t.merged {
+        // Ya integrada: por la marca de la tarea o por su última decisión `merge`
+        // (lo mismo que la snapshot manda como last_integration.outcome = merged).
+        let last_merge = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge");
+        if t.merged || last_merge.is_some_and(|d| outcome_of(d) == "merged") {
             // Idempotente: no integra otra vez ni crea otra decisión.
             let prev = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge" && outcome_of(d) == "merged").map(|d| d.id);
             return Ok(json!({ "task": id, "outcome": "already_merged", "decision": prev, "branch": branch }));
@@ -548,6 +551,29 @@ mod tests {
         assert_eq!(detail(&st2, 0), json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null }));
         assert!(st2.lock().unwrap().task(&id2).unwrap().pr_url.is_none());
         for d in [dir, bare, dir2] { let _ = std::fs::remove_dir_all(d); }
+    }
+
+    #[test]
+    fn el_host_rechaza_sin_rama_y_ya_integrada() {
+        // Sin rama: error claro, sin tocar git ni registrar nada.
+        let (st, id, dir) = setup("sin-rama", false);
+        st.lock().unwrap().task_mut(&id).unwrap().branch = None;
+        let n = st.lock().unwrap().decisions.len();
+        let e = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap_err();
+        assert!(e.contains("no tiene rama propia"), "{e}");
+        assert_eq!(st.lock().unwrap().decisions.len(), n);
+        let _ = std::fs::remove_dir_all(dir);
+        // Ya integrada según last_integration (decisión merge = merged) aunque falte la marca.
+        let (st, id, dir) = setup("ya-integrada", false);
+        assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap()["outcome"], "merged");
+        st.lock().unwrap().task_mut(&id).unwrap().merged = false;
+        let before = git(&dir, &["rev-parse", "HEAD"]);
+        let n = st.lock().unwrap().decisions.len();
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "already_merged");
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
+        assert_eq!(st.lock().unwrap().decisions.len(), n);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
