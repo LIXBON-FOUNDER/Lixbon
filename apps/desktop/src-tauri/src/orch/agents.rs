@@ -224,6 +224,22 @@ pub struct Probe {
     pub windows_sandbox: Option<String>,
 }
 
+pub const WARN_PLAN_SONNET: &str = "en modo plan, Claude responde con Sonnet aunque pidas otro modelo";
+
+/// La política lanza Claude con `--permission-mode plan`.
+pub fn is_plan(policy: &Policy) -> bool {
+    policy.provider == "claude" && policy.argv.windows(2).any(|w| w[0] == "--permission-mode" && w[1] == "plan")
+}
+
+/// Probado con Claude 2.1.296: en plan, `--model haiku` deja el init en haiku pero
+/// responde `claude-sonnet-5-5`. Si se pide un modelo que no es Sonnet, se avisa.
+pub fn warn_plan_model(policy: &mut Policy, model: Option<&str>) {
+    let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) else { return };
+    if is_plan(policy) && !m.to_ascii_lowercase().contains("sonnet") && !policy.warnings.iter().any(|w| w == WARN_PLAN_SONNET) {
+        policy.warnings.push(WARN_PLAN_SONNET.into());
+    }
+}
+
 /// El modelo efectivo es de la familia pedida: `haiku` casa con `claude-haiku-*`,
 /// un id completo casa consigo mismo o con su versión fechada.
 pub fn same_model_family(requested: &str, effective: &str) -> bool {
@@ -1144,7 +1160,7 @@ mod tests {
         for prof in [Profile::Explorar, Profile::Proponer, Profile::DelegarConRevision] {
             let p = evaluate("claude", prof, "wt", Detected::Found(&found), false);
             assert_eq!(p.status, Status::Ok, "{prof:?} {:?}", p.reason);
-            assert!(!p.argv.iter().any(|a| a == "Bash(lxo *)" || a == "Bash(lxo:*)"), "{prof:?}");
+            assert!(!p.argv.iter().any(|a| a.contains("Bash(lxo *)") || a.contains("Bash(lxo:*)")), "{prof:?}");
             assert_eq!(flag_list(&p.argv, "--allowedTools").unwrap(), LXO_TOOLS, "{prof:?}");
             // Un solo token: no hay valores sueltos de --allowedTools que se coman lo siguiente.
             assert!(!p.argv.iter().any(|a| a == "--allowedTools" || a == "--disallowedTools"), "{prof:?}");
@@ -1210,6 +1226,34 @@ mod tests {
         assert!(same_model_family("gpt-5.5", "gpt-5.5"));
         assert!(!same_model_family("haiku", "claude-sonnet-5-5"));
         assert!(!same_model_family("opus", "claude-opusplan-5"));
+    }
+
+    #[test]
+    fn aviso_de_sonnet_en_modo_plan() {
+        let found = probe("2.1.296", CLAUDE_HELP);
+        let con = |prof, model: Option<&str>| {
+            let mut p = evaluate_for("claude", prof, Some("explorador"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+            warn_plan_model(&mut p, model);
+            p.warnings.iter().filter(|w| *w == WARN_PLAN_SONNET).count()
+        };
+        for prof in [Profile::Explorar, Profile::Proponer] {
+            assert_eq!(con(prof, Some("haiku")), 1, "{prof:?}");
+            assert_eq!(con(prof, Some("opus")), 1, "{prof:?}");
+            assert_eq!(con(prof, Some("claude-opus-5")), 1, "{prof:?}");
+            assert_eq!(con(prof, Some("sonnet")), 0, "{prof:?}");
+            assert_eq!(con(prof, Some("claude-sonnet-5-5")), 0, "{prof:?}");
+            assert_eq!(con(prof, None), 0, "{prof:?}");
+        }
+        // Sin plan (Delegar) o en Codex no se avisa.
+        assert_eq!(con(Profile::DelegarConRevision, Some("haiku")), 0);
+        let mut c = evaluate("codex", Profile::Explorar, "wt", Detected::Skip, false);
+        warn_plan_model(&mut c, Some("haiku"));
+        assert!(!c.warnings.iter().any(|w| w == WARN_PLAN_SONNET));
+        // Llamarlo dos veces no duplica el aviso.
+        let mut p = evaluate("claude", Profile::Explorar, "wt", Detected::Skip, false);
+        warn_plan_model(&mut p, Some("haiku"));
+        warn_plan_model(&mut p, Some("haiku"));
+        assert_eq!(p.warnings.iter().filter(|w| *w == WARN_PLAN_SONNET).count(), 1);
     }
 
     #[test]

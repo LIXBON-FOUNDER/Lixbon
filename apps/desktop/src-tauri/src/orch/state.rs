@@ -112,6 +112,12 @@ pub struct Task {
     /// El efectivo no es de la familia del pedido (`haiku` casa con `claude-haiku-*`).
     #[serde(default)]
     pub model_mismatch: bool,
+    /// `plan_mode` si hay mismatch y el intento se lanzó con `--permission-mode plan`; si no, `None`.
+    #[serde(default)]
+    pub model_mismatch_reason: Option<String>,
+    /// El intento se lanzó con `--permission-mode plan`.
+    #[serde(default)]
+    pub plan_mode: bool,
     /// Archivo de `codex exec -o` del intento (perfil read-only de Codex).
     #[serde(default)]
     pub last_message_path: Option<String>,
@@ -325,6 +331,8 @@ impl State {
             model_effective: None,
             model_requested: None,
             model_mismatch: false,
+            model_mismatch_reason: None,
+            plan_mode: false,
             last_message_path: None,
             stream_json: false,
             created: now,
