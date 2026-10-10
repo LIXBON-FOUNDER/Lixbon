@@ -176,4 +176,15 @@ describe('IntegrationDialog', () => {
     await invokeIntegrateTask({ task: 't1', confirm: true, [ACCEPT_MOVED_TARGET_PARAM]: 'abc123' });
     expect(invoke).toHaveBeenLastCalledWith('orch_integrate', { task: 't1', confirm: true, accept_moved_target: 'abc123' });
   });
+
+  it('review_required: avisa, no integra y ofrece abrir la revisión', async () => {
+    const onOpenReview = vi.fn();
+    setup('t-unreviewed', vi.fn(mockIntegrateTask), { onOpenReview });
+    go();
+    const r = await screen.findByTestId('integration-result');
+    expect(r.textContent).toContain('Falta aceptar el diff');
+    expect(screen.queryByTestId('integration-commit')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar diff' }));
+    expect(onOpenReview).toHaveBeenCalledWith('t-unreviewed');
+  });
 });

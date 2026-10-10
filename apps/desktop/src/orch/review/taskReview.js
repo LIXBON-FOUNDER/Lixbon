@@ -5,20 +5,28 @@
 // En el build de producción DEV es la constante false y el bloque del mock se elimina.
 
 import { invoke } from '@tauri-apps/api/core';
-import { REVIEW_COMMANDS, diffArgs, reviewArgs, structuredError } from './reviewContract.js';
+import { listen } from '@tauri-apps/api/event';
+import { REVIEW_COMMANDS, REVIEW_EVENTS, diffArgs, reviewArgs } from './reviewContract.js';
 
 export function invokeTaskDiff(taskId) {
   return invoke(REVIEW_COMMANDS.diff, diffArgs(taskId));
 }
 
-/** Si el host rechaza con un error estructurado ({error}), se devuelve como resultado. */
-export async function invokeReviewTask(args) {
-  try {
-    return await invoke(REVIEW_COMMANDS.review, reviewArgs(args));
-  } catch (e) {
-    if (structuredError(e)) return e;
-    throw e;
+/** head_moved llega como respuesta normal; not_found y errores de uso, como rechazo de texto. */
+export function invokeReviewTask(args) {
+  return invoke(REVIEW_COMMANDS.review, reviewArgs(args));
+}
+
+/** Escucha orch-task-reviewed; devuelve la función para dejar de escuchar. */
+export function subscribeTaskReviewed(cb) {
+  if (import.meta.env.DEV && import.meta.env.VITE_ORCH_MOCK === '1') {
+    let off = null; let dead = false;
+    import('./mockTaskReview.js').then((m) => { if (!dead) off = m.onMockTaskReviewed(cb); });
+    return () => { dead = true; off?.(); };
   }
+  let un = null; let dead = false;
+  listen(REVIEW_EVENTS.reviewed, (e) => cb(e.payload)).then((u) => { if (dead) u(); else un = u; }).catch(() => {});
+  return () => { dead = true; un?.(); };
 }
 
 export async function fetchTaskDiff(taskId) {
@@ -38,4 +46,4 @@ export async function reviewTask(args) {
   return invokeReviewTask(args);
 }
 
-export const defaultReviewApi = Object.freeze({ fetchDiff: fetchTaskDiff, review: reviewTask });
+export const defaultReviewApi = Object.freeze({ fetchDiff: fetchTaskDiff, review: reviewTask, subscribe: subscribeTaskReviewed });

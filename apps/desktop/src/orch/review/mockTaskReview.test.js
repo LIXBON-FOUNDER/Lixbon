@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mockTaskDiff, mockReviewTask, resetMockTaskReview } from './mockTaskReview';
+import { mockTaskDiff, mockReviewTask, resetMockTaskReview, onMockTaskReviewed } from './mockTaskReview';
 import { FILE_STATUSES } from './reviewContract';
 
 beforeEach(() => resetMockTaskReview());
@@ -21,14 +21,26 @@ describe('mockTaskReview', () => {
     expect((await mockTaskDiff({ task_id: 't-truncated' })).truncated).toBe(true);
     expect((await mockTaskDiff({ task_id: 't-mergebase' })).base_source).toBe('merge_base');
     await expect(mockTaskDiff({ task_id: 't-diff-error' })).rejects.toMatch(/mock-orch/);
-    await expect(mockTaskDiff({ task_id: 't-missing' })).rejects.toEqual({ error: 'not_found' });
-    expect(await mockReviewTask({ task_id: 't-missing', decision: 'accepted', head_commit: 'x' })).toEqual({ error: 'not_found' });
+    await expect(mockTaskDiff({ task_id: 't-missing' })).rejects.toMatch(/^not_found/);
+    await expect(mockReviewTask({ task_id: 't-missing', decision: 'accepted', head_commit: 'x' })).rejects.toMatch(/^not_found/);
   });
   it('decisión con el head del diff: ok', async () => {
     const d = await mockTaskDiff({ task_id: 't1' });
     const r = await mockReviewTask({ task_id: 't1', decision: 'accepted', head_commit: d.head_commit });
     expect(r).toMatchObject({ ok: true, decision: 'accepted', head_commit: d.head_commit });
     expect(typeof r.at).toBe('string');
+  });
+  it('emite orch-task-reviewed tras aceptar y tras rechazar, no tras head_moved', async () => {
+    const seen = [];
+    onMockTaskReviewed((p) => seen.push(p));
+    const d = await mockTaskDiff({ task_id: 't1' });
+    await mockReviewTask({ task_id: 't1', decision: 'accepted', head_commit: d.head_commit });
+    await mockReviewTask({ task_id: 't1', decision: 'rejected', head_commit: d.head_commit });
+    await mockReviewTask({ task_id: 't-moved', decision: 'accepted', head_commit: 'viejo' });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen.map((p) => p.decision)).toEqual(['accepted', 'rejected']);
+    expect(Object.keys(seen[0]).sort()).toEqual(['at', 'decision', 'head_commit', 'task_id']);
+    expect(seen[0].task_id).toBe('t1');
   });
   it('moved: head_moved con el head viejo y ok tras recargar', async () => {
     const d1 = await mockTaskDiff({ task_id: 't-moved' });

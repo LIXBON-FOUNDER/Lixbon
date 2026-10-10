@@ -55,7 +55,15 @@ export interface IntegrateAlreadyMerged extends Base {
   outcome: 'already_merged';
 }
 
+/** No hay una revisión de diff aceptada para el head actual de la rama; no se integró nada. */
+export interface IntegrateReviewRequired extends Partial<Base> {
+  outcome: 'review_required';
+  message?: string;
+  head_commit?: string;
+}
+
 export type IntegrateResult =
-  | IntegrateMerged | IntegrateConflict | IntegrateTargetMoved | IntegrateError | IntegrateAlreadyMerged;
+  | IntegrateMerged | IntegrateConflict | IntegrateTargetMoved | IntegrateError | IntegrateAlreadyMerged
+  | IntegrateReviewRequired;
 
 export type IntegrateFn = (args: IntegrateArgs) => Promise<IntegrateResult>;

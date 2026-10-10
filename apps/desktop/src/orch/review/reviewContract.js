@@ -3,6 +3,9 @@
 // Los comandos son Tauri propios (no pasan por orch_call ni por HTTP), así que un agente no
 // puede aceptar su propio diff. Todos los nombres viven aquí: si el host los cambia, se renombran aquí.
 
+/** Evento del host tras registrar una decisión. payload: { task_id, decision, head_commit, at } */
+export const REVIEW_EVENTS = Object.freeze({ reviewed: 'orch-task-reviewed' });
+
 export const REVIEW_COMMANDS = Object.freeze({
   diff: 'orch_task_diff',     // { task_id } -> TaskDiff
   review: 'orch_review_task', // { task_id, decision, head_commit, comment? } -> ReviewResult | ReviewError
@@ -11,7 +14,9 @@ export const REVIEW_COMMANDS = Object.freeze({
 /** Decisiones posibles de la persona. */
 export const REVIEW_DECISIONS = Object.freeze({ accepted: 'accepted', rejected: 'rejected' });
 
-/** Errores estructurados de orch_review_task. head_moved: el head_commit enviado no coincide con la rama. */
+/** Errores de la revisión.
+    - head_moved: respuesta normal { error: 'head_moved', found_commit } (el head enviado no es el de la rama).
+    - not_found: llega como rechazo con texto que empieza por 'not_found'. */
 export const REVIEW_ERRORS = Object.freeze({ headMoved: 'head_moved', notFound: 'not_found' });
 
 /** Origen de base_commit: registrado al lanzar, o aproximado con git merge-base (tareas viejas). */
@@ -63,6 +68,11 @@ export function reviewArgs({ task_id, decision, head_commit, comment }) {
 /** Devuelve el error estructurado si el resultado (o el rechazo) lo es; si no, null. */
 export function structuredError(x) {
   return x && typeof x === 'object' && typeof x[F.error] === 'string' ? x : null;
+}
+
+/** ¿El rechazo es not_found? (texto que empieza por 'not_found'). */
+export function isNotFound(err) {
+  return errorText(err).startsWith(REVIEW_ERRORS.notFound);
 }
 
 export function errorText(err) {

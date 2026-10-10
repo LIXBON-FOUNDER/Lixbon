@@ -1,18 +1,23 @@
 // mockTaskReview.js - SOLO desarrollo (import.meta.env.DEV && VITE_ORCH_MOCK==='1').
 // Simula orch_task_diff y orch_review_task según el id de la tarea:
 //   *empty*      -> diff sin archivos            *truncated* -> truncated: true
-//   *mergebase*  -> base_source 'merge_base'     *missing*   -> not_found
+//   *mergebase*  -> base_source 'merge_base'     *missing*   -> rechazo 'not_found: ...'
 //   *diff-error* -> el diff falla (rechazo de texto)
 //   *moved*      -> la rama ya avanzó: la decisión con el head del primer diff da head_moved;
 //                   al recargar, el diff trae el head nuevo y la decisión pasa
 //   cualquier otra -> diff con 3 archivos; la decisión se registra
+// Tras aceptar o rechazar emite orch-task-reviewed ({ task_id, decision, head_commit, at })
+// a quien se suscriba con onMockTaskReviewed.
 
 const BASE = 'aaaa111bbbb222cccc333dddd444eeee555ffff6';
 const HEAD = '1234567890abcdef1234567890abcdef12345678';
 const MOVED = 'fedcba0987654321fedcba0987654321fedcba09';
 
 const diffCalls = new Map();
-export function resetMockTaskReview() { diffCalls.clear(); }
+const listeners = new Set();
+export function resetMockTaskReview() { diffCalls.clear(); listeners.clear(); }
+export function onMockTaskReviewed(cb) { listeners.add(cb); return () => listeners.delete(cb); }
+const NOT_FOUND = 'not_found: mock-orch: la tarea no existe';
 
 const delay = () => new Promise((r) => setTimeout(r, 10));
 const currentHead = (id) => (id.includes('moved') ? MOVED : HEAD);
@@ -30,7 +35,7 @@ export async function mockTaskDiff(args = {}) {
   await delay();
   const id = String(args.task_id ?? '');
   if (id.includes('diff-error')) throw 'mock-orch: no se pudo calcular el diff';
-  if (id.includes('missing')) throw { error: 'not_found' };
+  if (id.includes('missing')) throw NOT_FOUND;
   const n = (diffCalls.get(id) || 0) + 1;
   diffCalls.set(id, n);
   return {
@@ -45,9 +50,13 @@ export async function mockTaskDiff(args = {}) {
 export async function mockReviewTask(args = {}) {
   await delay();
   const id = String(args.task_id ?? '');
-  if (id.includes('missing')) return { error: 'not_found' };
+  if (id.includes('missing')) throw NOT_FOUND;
   if (args.decision !== 'accepted' && args.decision !== 'rejected') throw 'mock-orch: decisión inválida';
   const head = currentHead(id);
   if (args.head_commit !== head) return { error: 'head_moved', found_commit: head };
-  return { ok: true, decision: args.decision, head_commit: head, at: new Date(0).toISOString() };
+  const at = new Date(0).toISOString();
+  const ev = { task_id: id, decision: args.decision, head_commit: head, at };
+  const targets = [...listeners]; // los suscritos al momento de decidir
+  setTimeout(() => targets.forEach((cb) => cb(ev)), 0);
+  return { ok: true, decision: args.decision, head_commit: head, at };
 }

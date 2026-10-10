@@ -18,6 +18,7 @@ import { useFileViewStore } from '../store/fileViewStore';
 import { usePendingSpawns, PendingSpawnList, PendingSpawnDetail, SpawnNotice } from './spawn/PendingSpawns';
 import { IntegrationDialog } from './integration/IntegrationDialog';
 import { TaskDiffView } from './review/TaskDiffView';
+import { subscribeTaskReviewed } from './review/taskReview';
 import { canIntegrate as canIntegrateTask, isMerged, mergedCommitShort, integrationTarget } from './canIntegrate';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
@@ -281,6 +282,8 @@ function TaskView({ task, snap }) {
   const canReview = Boolean(task.parent && task.status === 'done' && task.branch);
   const [reviewing, setReviewing] = useState(false);
   useEffect(() => { setReviewing(false); }, [task.id]);
+  // orch-task-reviewed: refresca la snapshot para que last_review (y con él Integrar) se actualice.
+  useEffect(() => subscribeTaskReviewed(() => useOrchStore.getState().refresh()), []);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
 
@@ -333,7 +336,7 @@ function TaskView({ task, snap }) {
       {canIntegrate && integrating && (
         <div className="orch__integrate">
           {/* Destino: integrate_into del host; si falta, la rama del padre. */}
-          <IntegrationDialog task={task.id} branch={task.branch} target={integrationTarget(task, snap)} />
+          <IntegrationDialog task={task.id} branch={task.branch} target={integrationTarget(task, snap)} onOpenReview={() => setReviewing(true)} />
         </div>
       )}
       <div className="orch__body">
