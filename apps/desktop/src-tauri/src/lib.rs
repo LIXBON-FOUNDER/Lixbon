@@ -1451,6 +1451,7 @@ pub fn run() {
             orch::orch_term_resize,
             orch::orch_agents,
             orch::orch_resolve_policy,
+            orch::orch_list_providers,
             orch::orch_integrate,
             orch::orch_publish_pr,
             orch::orch_skill_install,

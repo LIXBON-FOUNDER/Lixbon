@@ -6,6 +6,7 @@
 
 mod agents;
 mod approval;
+mod providers;
 mod delivery;
 mod git;
 mod integration;
@@ -737,6 +738,9 @@ impl Core {
         // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
         let mut policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
         agents::warn_plan_model(&mut policy, task.model.as_deref());
+        if let Some(m) = task.model.as_deref() {
+            agents::mark_model(&mut policy, Some(m), providers::model_verified(&task.agent, m));
+        }
         let plan_mode = agents::is_plan(&policy);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.
@@ -1203,7 +1207,18 @@ pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, row
 pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String, model: Option<String>) -> agents::Policy {
     let mut p = agents::resolve_policy(&provider, &profile, &role, &worktree);
     agents::warn_plan_model(&mut p, model.as_deref());
+    if let Some(m) = model.as_deref() {
+        agents::mark_model(&mut p, Some(m), providers::model_verified(&provider, m));
+    }
     p
+}
+
+/// Proveedores para los roles del equipo: versión, disponibilidad, modelos (con
+/// `verified`) y esfuerzos que admite cada CLI. Solo la interfaz: no está en
+/// `orch_call` ni en el servidor HTTP de `lxo`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_list_providers(refresh: Option<bool>) -> Vec<providers::Provider> {
+    providers::list(refresh.unwrap_or(false))
 }
 
 /// Integra la rama de una tarea en su padre. Solo la interfaz (la persona) llega
