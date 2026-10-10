@@ -115,6 +115,30 @@ impl Profile {
 /// Versiones cuyo `--help` se revisó contra la tabla de perfiles.
 const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.159.0", "0.162.1"])];
 
+pub fn verified_versions(provider: &str) -> &'static [&'static str] {
+    VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[])
+}
+
+pub fn version_verified(provider: &str, version: &str) -> bool {
+    verified_versions(provider).contains(&version)
+}
+
+pub const WARN_MODEL_UNVERIFIED: &str = "modelo no verificado: la CLI no lo lista entre sus modelos";
+
+/// Con un modelo que la CLI no lista como verificado, la política queda
+/// `unverified` (pide `ack_unverified`). Un bloqueo se mantiene.
+pub fn mark_model(policy: &mut Policy, model: Option<&str>, verified: Option<bool>) {
+    let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) else { return };
+    if verified != Some(false) || policy.status == Status::Blocked {
+        return;
+    }
+    policy.warnings.push(format!("{WARN_MODEL_UNVERIFIED} ({m})"));
+    if policy.status == Status::Ok {
+        policy.status = Status::Unverified;
+        policy.reason = Some(format!("Modelo {m} no verificado para {}", policy.provider));
+    }
+}
+
 /// Herramientas que se le quitan a Claude en los perfiles sin escritura. Bash se
 /// conserva: la necesita para `lxo`.
 const READ_ONLY_BLOCKED: &[&str] = &["Edit", "Write", "NotebookEdit"];
@@ -714,9 +738,32 @@ fn output(bin: &str, args: &[&str], timeout: Duration) -> Option<String> {
     None
 }
 
+/// `--version` y `--help` (con caché) para la lista de proveedores.
+pub fn probe_cli(bin: &str) -> Option<Probe> {
+    probe(bin)
+}
+
+pub fn cli_output(bin: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    output(bin, args, timeout)
+}
+
+pub fn codex_config_text() -> Option<String> {
+    codex_config_path().and_then(|f| std::fs::read_to_string(f).ok())
+}
+
+/// Modelos del `initialize` de Claude como (id, label); `None` si no respondió.
+pub fn claude_init_models() -> Option<Vec<(String, String)>> {
+    let l = claude_models_init()?;
+    Some(l.into_iter().map(|m| (m.id, m.label)).collect())
+}
+
 /// Los modelos de Claude salen de su `initialize`, igual que en el chat de Claude Code.
 fn claude_models() -> Vec<Model> {
-    let fallback = || ["opus", "sonnet", "haiku", "fable"].iter().map(|m| Model { id: m.to_string(), label: m.to_string(), note: String::new() }).collect();
+    claude_models_init().unwrap_or_else(|| ["opus", "sonnet", "haiku", "fable"].iter().map(|m| Model { id: m.to_string(), label: m.to_string(), note: String::new() }).collect())
+}
+
+fn claude_models_init() -> Option<Vec<Model>> {
+    let fallback = || None;
     let Some(path) = which("claude") else { return fallback() };
     let mut cmd = if cfg!(windows) && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd")) {
         let mut c = Command::new("cmd");
@@ -756,7 +803,7 @@ fn claude_models() -> Vec<Model> {
                 })
             }).collect();
             if !out.is_empty() {
-                return out;
+                return Some(out);
             }
         }
     }
@@ -783,7 +830,9 @@ fn discover(a: &Spec) -> Vec<Model> {
     match a.id {
         "claude" => claude_models(),
         "opencode" => output("opencode", &["models"], long).map(|t| parse_lines(&t)).unwrap_or_default(),
-        "codex" => output("codex", &["debug", "models"], long).map(|t| parse_lines(&t)).unwrap_or_default(),
+        // `codex debug models` imprime JSON (0.162.1): una lista de texto no sirve.
+        "codex" => output("codex", &["debug", "models"], long).as_deref().and_then(super::providers::codex_debug_models)
+            .map(|(l, _)| l.into_iter().map(|m| Model { id: m.id, label: m.label, note: String::new() }).collect()).unwrap_or_default(),
         "cursor" => output("cursor-agent", &["models"], long).map(|t| parse_lines(&t)).unwrap_or_default(),
         _ => vec![],
     }
@@ -833,6 +882,30 @@ pub fn available(refresh: bool) -> Vec<Available> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn modelo_no_verificado_pide_ack() {
+        let mut p = evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Skip, false);
+        p.status = Status::Ok;
+        p.reason = None;
+        mark_model(&mut p, Some("gpt-6.1-sol"), Some(false));
+        assert_eq!(p.status, Status::Unverified);
+        assert!(p.warnings.iter().any(|w| w.starts_with(WARN_MODEL_UNVERIFIED)));
+        assert!(authorize(&p, None, false).unwrap_err().contains("ack_unverified"));
+        let rec = authorize(&p, None, true).unwrap();
+        assert!(rec.ack_unverified);
+        // Verificado o desconocido: no cambia.
+        let mut q = p.clone();
+        q.status = Status::Ok;
+        mark_model(&mut q, Some("gpt-6.1-sol"), Some(true));
+        mark_model(&mut q, Some("x"), None);
+        assert_eq!(q.status, Status::Ok);
+        // Bloqueado sigue bloqueado.
+        let mut b = p.clone();
+        b.status = Status::Blocked;
+        mark_model(&mut b, Some("x"), Some(false));
+        assert_eq!(b.status, Status::Blocked);
+    }
 
     #[test]
     fn aviso_de_delegar_en_claude() {
