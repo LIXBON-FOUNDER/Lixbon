@@ -99,6 +99,19 @@ pub struct Task {
     /// idem_key de los informes ya entregados por archivo/marcadores.
     #[serde(default)]
     pub delivered: Vec<String>,
+    /// Por dónde llegó el informe del intento: `exec_o`, `stream_json`,
+    /// `report_json`, `stdout` o `lxo_done`. `None`: no llegó nada.
+    #[serde(default)]
+    pub delivery_channel: Option<String>,
+    /// Modelo efectivo que informó la propia CLI (`message.model` de stream-json).
+    #[serde(default)]
+    pub model_effective: Option<String>,
+    /// Archivo de `codex exec -o` del intento (perfil read-only de Codex).
+    #[serde(default)]
+    pub last_message_path: Option<String>,
+    /// Lanzada con `claude -p --output-format stream-json`: el informe es el resultado final.
+    #[serde(default)]
+    pub stream_json: bool,
     pub created: u64,
     pub updated: u64,
 }
@@ -302,6 +315,10 @@ impl State {
             policy: None,
             report_nonce: None,
             delivered: vec![],
+            delivery_channel: None,
+            model_effective: None,
+            last_message_path: None,
+            stream_json: false,
             created: now,
             updated: now,
         });
@@ -414,6 +431,7 @@ Seguimiento:
 {spec}", t.spec);
         t.summary.clear();
         t.report = None;
+        t.delivery_channel = None;
         t.merged = false;
         t.status = Status::Running;
         t.updated = now_ms();
