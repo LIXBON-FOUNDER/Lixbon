@@ -19,8 +19,8 @@ export function CodexTabList() {
   );
 }
 
-/** Todas montadas (la salida sigue llegando), solo la activa visible. */
-export function CodexTermArea({ api, createTerminal }) {
+/** Vistas de las pestañas (solo la activa visible). El PTY y la salida viven en el store. */
+export function CodexTermArea({ createTerminal }) {
   const { tabs, activeKey } = useCodexTermStore();
-  return tabs.map((t) => <CodexTerminal key={t.key} tab={t} active={t.key === activeKey} api={api} createTerminal={createTerminal} />);
+  return tabs.map((t) => <CodexTerminal key={t.key} tab={t} active={t.key === activeKey} createTerminal={createTerminal} />);
 }

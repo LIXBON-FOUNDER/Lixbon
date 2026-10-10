@@ -18,10 +18,24 @@ export function createMockCodexTerm() {
   const handlers = new Map();
   const terms = new Map();
   let n = 0;
-  const emit = (event, payload) => (handlers.get(event) || []).forEach((h) => h({ payload }));
+  const out = new Map(); // term_id → { data, seq }
+  const emitRaw = (event, payload) => (handlers.get(event) || []).forEach((h) => h({ payload }));
+  // La salida lleva seq monótono y queda en el búfer del host simulado.
+  const emit = (event, payload) => {
+    if (event === E.exit) { const t = terms.get(payload.term_id); if (t) { t.open = false; t.code = payload.code; } }
+    if (event === E.output) {
+      const b = out.get(payload.term_id) || { data: '', seq: 0 };
+      const seq = payload.seq ?? b.seq + 1;
+      out.set(payload.term_id, { data: b.data + payload.data, seq });
+      return emitRaw(event, { ...payload, seq });
+    }
+    return emitRaw(event, payload);
+  };
   return {
     emit,
+    emitRaw,
     terms,
+    out,
     listen: async (event, h) => {
       handlers.set(event, [...(handlers.get(event) || []), h]);
       return () => handlers.set(event, (handlers.get(event) || []).filter((x) => x !== h));
@@ -33,7 +47,7 @@ export function createMockCodexTerm() {
           const p = policyOf(a);
           if (p.warnings.length && a.acknowledged !== true) throw new Error(`${NEEDS_ACK}: confirma los avisos antes de abrir Codex`);
           const term_id = `codex-mock-${++n}`;
-          terms.set(term_id, { open: true, cols: a.cols, rows: a.rows });
+          terms.set(term_id, { open: true, cols: a.cols, rows: a.rows, cwd: a.cwd, policy: p.policy, code: null });
           setTimeout(() => emit(E.output, { term_id, data: `\x1b[90m[mock] ${p.argv.join(' ')}\x1b[0m\r\n> ` }), 0);
           return { term_id, ...p };
         }
@@ -46,7 +60,23 @@ export function createMockCodexTerm() {
         case C.resize: { const t = terms.get(a.term_id); if (t) Object.assign(t, { cols: Math.max(200, a.cols), rows: a.rows }); return null; }
         case C.close: {
           const t = terms.get(a.term_id);
-          if (t?.open) { t.open = false; emit(E.exit, { term_id: a.term_id, code: 0 }); }
+          if (t?.open) { t.open = false; t.code = 0; emit(E.exit, { term_id: a.term_id, code: 0 }); }
+          terms.delete(a.term_id); // cerrada por la persona: ya no sale en la lista
+          return null;
+        }
+        case C.list:
+          return [...terms.entries()].map(([term_id, t]) => ({ term_id, cwd: t.cwd, policy: t.policy, exited: !t.open, code: t.code }));
+        case C.buffer: {
+          const b = out.get(a.term_id);
+          if (!b) throw new Error('terminal desconocida');
+          const t = terms.get(a.term_id) || {};
+          // vt100 del host simulado: la "pantalla" es todo lo emitido, precedido de \x1b[0m.
+          return { data: `\x1b[0m${b.data}`, seq: b.seq, cols: t.cols || 200, rows: t.rows || 40, alt_screen: false };
+        }
+        case C.redraw: {
+          const b = out.get(a.term_id);
+          if (!b) throw new Error('terminal desconocida');
+          emit(E.output, { term_id: a.term_id, data: '\x1b[2J\x1b[H[mock] redibujado\r\n' });
           return null;
         }
         default: throw new Error(`mock: comando desconocido ${cmd}`);
