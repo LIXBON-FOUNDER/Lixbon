@@ -389,6 +389,7 @@ impl Core {
                 let report = self.store_report(&me, &s(args, "report"), &s(args, "report_text"), &summary)?;
                 let mut st = self.lock();
                 let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
+                st.task_mut(&me)?.delivery_channel = Some("lxo_done".into());
                 self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
                 Ok(json!({ "task": me, "status": st.task(&me)?.status, "report": report }))
             }
@@ -726,9 +727,6 @@ impl Core {
         }
         let mut task = task;
         task.report_nonce = Some(nonce.clone());
-        std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
-            .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
-        git::exclude_lixbon_dir(&task.cwd);
 
         let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
         let read_only = task.role.as_deref().and_then(roles::spec).is_some_and(|r| r.read_only);
@@ -738,10 +736,23 @@ impl Core {
         // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
         let policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
-        let launch = agents::launch_with(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
+        // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.
+        let last_message = (policy.argv.get(1).map(String::as_str) == Some("exec"))
+            .then(|| delivery::last_message_path(&task.cwd, id, delivery::ATTEMPT).to_string_lossy().into_owned());
+        let stream_json = policy.argv.iter().any(|a| a == "stream-json");
+        let launch = agents::launch_task(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt, last_message.as_deref())?;
+        task.last_message_path = last_message.clone();
+        task.stream_json = stream_json;
         if let Ok(t) = self.lock().task_mut(id) {
             t.policy = Some(record);
+            t.last_message_path = last_message;
+            t.stream_json = stream_json;
+            t.delivery_channel = None;
+            t.model_effective = None;
         }
+        std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
+            .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
+        git::exclude_lixbon_dir(&task.cwd);
 
         let lxo = lxo_path();
         let mut path = lxo.parent().map(|p| p.as_os_str().to_owned()).unwrap_or_default();
@@ -795,10 +806,10 @@ impl Core {
     /// Recoge el informe por archivo o por marcadores (orch/delivery.rs) y lo
     /// entrega como un `lxo done`. Al salir el proceso cierra la tarea si falta.
     fn collect(&self, id: &str, terminal: Option<String>, at_exit: bool) {
-        let (expect, cwd, delivered, is_final) = {
+        let (expect, cwd, delivered, is_final, last_message, stream_json) = {
             let st = self.lock();
             let Ok(t) = st.task(id) else { return };
-            (delivery::Expect::of(t), t.cwd.clone(), t.delivered.clone(), t.status.is_final())
+            (delivery::Expect::of(t), t.cwd.clone(), t.delivered.clone(), t.status.is_final(), t.last_message_path.clone(), t.stream_json)
         };
         if is_final {
             return;
@@ -806,7 +817,16 @@ impl Core {
         let found = match &expect {
             Some(ex) => {
                 let file = delivery::read_report_file(&delivery::report_path(&cwd, id, ex.attempt));
-                delivery::find(file.as_deref(), terminal.as_deref(), ex, &delivered)
+                // El -o lo escribe codex al terminar: solo se lee al salir el proceso.
+                let final_file = last_message.as_ref().filter(|_| at_exit).and_then(|p| delivery::read_final_file(Path::new(p)));
+                let src = delivery::Sources {
+                    expect_final: last_message.is_some() && at_exit,
+                    final_file: final_file.as_deref(),
+                    expect_stream: stream_json,
+                    file: file.as_deref(),
+                    terminal: terminal.as_deref(),
+                };
+                delivery::find_all(&src, ex, &delivered)
             }
             None => delivery::Found::Nothing,
         };
@@ -1012,7 +1032,21 @@ fn task_file(t: &Task, parent: Option<&Task>, objective: &str) -> String {
     } else {
         ""
     };
-    let deliver = if read_only {
+    let final_message = t.last_message_path.is_some() || t.stream_json;
+    let deliver = if final_message {
+        let nonce = t.report_nonce.as_deref().unwrap_or("<nonce>");
+        format!(
+            "Tu informe es tu **mensaje final**: el host lo toma tal cual de la CLI, sin lxo done ni lxo report. \
+Empieza tu último mensaje con la línea `LXO-RESULT nonce={nonce} status=done` (o `status=failed`), \
+sigue con una línea de resumen y después el informe en markdown: qué encontraste, rutas con número de línea y qué queda. \
+No modifiques archivos."
+        )
+    } else if t.agent == "claude" && !read_only {
+        format!(
+            "Escribe tu informe en `{report}` (qué hiciste, archivos, cómo lo verificaste, qué queda y decisiones pendientes) \
+y cierra con `lxo report --report {report} --summary \"<una frase>\"`: es la única orden de lxo que tienes permitida sin pedir permiso."
+        )
+    } else if read_only {
         format!(
             "Eres de **solo lectura**: no tienes Edit ni Write y no debes modificar archivos (tampoco con Bash). \
 Tu informe va por la entrada estándar, sin archivo:\n\n\
@@ -1040,7 +1074,7 @@ Objetivo general: {objective}\n\n\
 3. Si solo tu coordinador puede decidir algo: `lxo ask \"<pregunta>\"` y espera. Nunca abras preguntas interactivas.\n\
 4. En cada punto de control ejecuta `lxo check` por si tu coordinador te mandó instrucciones.\n\
 5. Al acabar: {deliver} Si no se pudo completar, añade `--failed`. Después no hagas nada más.\n{offline}",
-        offline = offline_rule(t),
+        offline = if final_message { String::new() } else { offline_rule(t) },
         id = t.id,
         title = t.title,
         run = t.run,

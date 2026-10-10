@@ -121,30 +121,41 @@ const READ_ONLY_BLOCKED: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
 /// Única orden de Bash permitida en Explorar/Proponer con Claude.
 const LXO_ONLY: &str = "Bash(lxo *)";
+/// En Delegar, Claude solo puede ejecutar sin pedir permiso `lxo report` (no todo lxo).
+pub const LXO_REPORT_ONLY: &str = "Bash(lxo report:*)";
+/// Aviso y motivo de bloqueo del perfil read-only de Codex con `[windows] sandbox = "elevated"`.
+pub const ELEVATED: &str = "el sandbox elevado falla y Codex sale del read-only";
+pub const WARN_EXEC: &str = "No interactivo: se lanza con codex exec; la terminal muestra la salida pero no acepta teclado.";
+pub const WARN_EXEC_O: &str = "El host añade -o .lixbon/out/<tarea>/1/last-message.md al lanzar: el informe es el mensaje final del agente, de cualquier tamaño, escrito por la CLI.";
+pub const WARN_STREAM: &str = "No interactivo: se lanza con claude -p --output-format stream-json; el informe se toma del resultado final, sin depender de que el agente ejecute lxo.";
 
 /// Flags de permisos de un perfil para un proveedor (sin el binario). `exec`
 /// indica `codex exec`, que no acepta `-a/--ask-for-approval`.
 fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -> Result<(Vec<String>, Vec<String>), String> {
     let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
     let mut warnings = vec![];
+    if codex_exec(provider, profile) {
+        warnings.push(WARN_EXEC.into());
+        warnings.push(WARN_EXEC_O.into());
+    }
     let flags = match (provider, profile) {
         ("claude", Profile::Explorar | Profile::Proponer) => {
             // Bash solo para `lxo` (sintaxis del --help de 2.1.296: "Bash(git *)").
-            let mut f = vec!["--disallowedTools".to_string()];
+            let mut f = v(&["-p", "--output-format", "stream-json", "--verbose", "--disallowedTools"]);
             f.extend(v(READ_ONLY_BLOCKED));
             f.extend(v(&["--allowedTools", LXO_ONLY, "--permission-mode", "plan"]));
+            warnings.push(WARN_STREAM.into());
             warnings.push("Claude no tiene sandbox del sistema: el modo plan lo aplica la CLI y Bash depende de su política.".into());
             warnings.push("La red y las lecturas fuera del repo no están bloqueadas.".into());
-            warnings.push("No verificado: que el modo plan respete --allowedTools \"Bash(lxo *)\" y deje ejecutar lxo.".into());
             if profile == Profile::Proponer {
                 warnings.push("El parche lo entrega el agente como texto; el host no comprueba que aplique hasta intentarlo.".into());
             }
             f
         }
         ("claude", Profile::DelegarConRevision) => {
-            warnings.push("La lista de --allowedTools la tiene que definir el host; sin ella, los comandos que pidan permiso quedan esperando.".into());
+            warnings.push("Solo lxo report se ejecuta sin pedir permiso (Bash(lxo report:*)); cualquier otro comando de Bash queda esperando aprobación.".into());
             warnings.push("El aislamiento lo da el worktree de git, no la CLI; un comando permitido puede escribir fuera de él.".into());
-            v(&["--permission-mode", "acceptEdits"])
+            v(&["--allowedTools", LXO_REPORT_ONLY, "--permission-mode", "acceptEdits"])
         }
         ("claude", Profile::AutonomiaAmplia) => v(&["--permission-mode", "auto"]),
         ("codex", Profile::Explorar | Profile::Proponer) => {
@@ -179,12 +190,50 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
     Ok((flags, warnings))
 }
 
+/// El perfil read-only de Codex se lanza siempre con `codex exec` (entrega con -o).
+pub fn codex_exec(provider: &str, profile: Profile) -> bool {
+    provider == "codex" && matches!(profile, Profile::Explorar | Profile::Proponer)
+}
+
 /// Lo que se sabe de la CLI instalada: su `--version` y el `--help` del modo con
 /// que se lanza.
 #[derive(Clone, Debug, Default)]
 pub struct Probe {
     pub version: Option<String>,
     pub help: Option<String>,
+    /// `codex exec --help` (si es `None` se usa `help`).
+    pub exec_help: Option<String>,
+    /// Valor de `[windows] sandbox` en la config de Codex (solo se lee en Windows).
+    pub windows_sandbox: Option<String>,
+}
+
+/// `[windows] sandbox = "..."` (o `windows.sandbox = "..."`) de un config.toml de Codex.
+pub fn codex_windows_sandbox(toml: &str) -> Option<String> {
+    let mut section = String::new();
+    let mut found = None;
+    for raw in toml.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.starts_with('[') {
+            section = line.trim_matches(|c| c == '[' || c == ']').trim().to_string();
+            continue;
+        }
+        let Some((k, val)) = line.split_once('=') else { continue };
+        let key = k.trim().trim_matches('"');
+        let full = if section.is_empty() { key.to_string() } else { format!("{section}.{key}") };
+        if full == "windows.sandbox" {
+            found = Some(val.trim().trim_matches(|c| c == '"' || c == '\'').to_string());
+        }
+    }
+    found
+}
+
+/// Ruta de la config de Codex: `$CODEX_HOME/config.toml` o `~/.codex/config.toml`.
+fn codex_config_path() -> Option<std::path::PathBuf> {
+    if let Some(h) = std::env::var_os("CODEX_HOME").filter(|h| !h.is_empty()) {
+        return Some(std::path::PathBuf::from(h).join("config.toml"));
+    }
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(std::path::PathBuf::from(home).join(".codex").join("config.toml"))
 }
 
 pub enum Detected<'a> {
@@ -218,6 +267,8 @@ pub struct Policy {
     pub warnings: Vec<String>,
     pub status: Status,
     pub reason: Option<String>,
+    /// `false`: la CLI corre sin TUI (codex exec, claude -p); se ve pero no se le escribe.
+    pub interactive: bool,
 }
 
 /// Primer `x.y.z` de la salida de `--version` (`codex-cli 0.159.0`, `2.1.296 (Claude Code)`).
@@ -243,7 +294,7 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
             missing.push(a.clone());
             continue;
         }
-        if ["--sandbox", "--permission-mode", "--ask-for-approval"].contains(&a.as_str()) {
+        if ["--sandbox", "--permission-mode", "--ask-for-approval", "--output-format"].contains(&a.as_str()) {
             if let Some(val) = argv.get(i + 1).filter(|v| !help_has(help, v)) {
                 missing.push(format!("{a} {val}"));
             }
@@ -253,11 +304,14 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
 }
 
 fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String) -> Policy {
-    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason) }
+    let interactive = !(argv.get(1).is_some_and(|a| a == "exec") || argv.iter().any(|a| a == "stream-json"));
+    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive }
 }
 
 /// Resuelve la política sin efectos: todo lo de la CLI llega en `detected`.
+/// `exec` pide `codex exec`; el perfil read-only de Codex lo usa siempre.
 pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Detected, exec: bool) -> Policy {
+    let exec = exec || codex_exec(provider, profile);
     let pid = profile.id();
     let Some(a) = spec(provider) else {
         return blocked(provider, pid, vec![], None, vec![], format!("Proveedor desconocido: {provider}"));
@@ -275,20 +329,31 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     if let Some(r) = profile.disabled_reason() {
         return blocked(provider, pid, argv, None, warnings, r.into());
     }
-    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason };
+    let interactive = !(exec || argv.iter().any(|a| a == "stream-json"));
+    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
         Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin)),
         Detected::Found(p) => {
             let version = p.version.clone();
-            let Some(help) = &p.help else {
+            let help = if exec { p.exec_help.as_ref().or(p.help.as_ref()) } else { p.help.as_ref() };
+            let Some(help) = help else {
                 return ok(Status::Unverified, version, Some("No verificado: no se pudo leer --help".into()));
             };
-            let missing = missing_flags(&argv[1..], help);
+            let mut missing = missing_flags(&argv[1..], help);
+            // -o lo añade el host al lanzar: también tiene que existir.
+            if exec && !help_has(help, "--output-last-message") {
+                missing.push("-o/--output-last-message".into());
+            }
             if !missing.is_empty() {
                 let v = version.as_deref().unwrap_or("versión desconocida");
                 return blocked(provider, pid, argv.clone(), version.clone(), warnings.clone(),
                     format!("{} {v} no admite: {}", a.label, missing.join(", ")));
+            }
+            if codex_exec(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
+                let mut w = warnings.clone();
+                w.push(ELEVATED.into());
+                return blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into());
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
             match version.as_deref() {
@@ -306,7 +371,8 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
 pub const CODEX_NO_LXO: &str = "Codex en este sandbox no puede conectarse al host local para entregar con lxo done; ver PR de entrega por archivo";
 
 pub const WARN_NO_ASK: &str = "Sin red local, Codex no puede usar lxo ask: no podrá preguntarle a la persona y decidirá solo.";
-pub const WARN_COPY_BLOCK: &str = "La entrega en solo lectura depende de que el agente copie el bloque del informe sin cambios; si el hash no coincide, la tarea termina Failed.";
+pub const WARN_COPY_BLOCK: &str = "Respaldo si no llega el -o: el bloque por la salida solo vale hasta 50 KB y con el hash exacto; si no, el informe queda como no entregado.";
+pub const WARN_STDOUT_LIMIT: &str = "Si no llega report.json, el bloque por la salida solo vale hasta 50 KB; por encima el informe queda como no entregado.";
 
 /// El sandbox de Codex que resulta del argv deja conectar a 127.0.0.1. Probado con
 /// `codex sandbox` (0.159.0 y 0.162.1, Linux): read-only y workspace-write sin
@@ -353,14 +419,12 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
             Delivery::FileOrMarkers => {
                 let read_only = p.argv.iter().any(|a| a == "read-only");
                 p.warnings.push(if read_only {
-                    "Sin red local: entrega con lxo report (bloque con marcadores en la salida); lxo phase, ask y check no llegan al host.".into()
+                    "Sin red local: entrega con el mensaje final (codex exec -o); lxo phase, ask y check no llegan al host.".into()
                 } else {
                     "Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.".into()
                 });
                 p.warnings.push(WARN_NO_ASK.into());
-                if read_only {
-                    p.warnings.push(WARN_COPY_BLOCK.into());
-                }
+                p.warnings.push(if read_only { WARN_COPY_BLOCK } else { WARN_STDOUT_LIMIT }.into());
             }
             Delivery::Query => {}
         }
@@ -383,6 +447,8 @@ fn probe(bin: &str) -> Option<Probe> {
     let p = which(bin).map(|_| Probe {
         version: output(bin, &["--version"], short).as_deref().and_then(parse_version),
         help: output(bin, &["--help"], short).filter(|h| !h.trim().is_empty()),
+        exec_help: (bin == "codex").then(|| output(bin, &["exec", "--help"], short)).flatten().filter(|h| !h.trim().is_empty()),
+        windows_sandbox: None,
     });
     if let Ok(mut c) = PROBES.lock() {
         c.get_or_insert_with(HashMap::new).insert(bin.to_string(), (Instant::now(), p.clone()));
@@ -412,7 +478,12 @@ pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, wo
         return evaluate_for(provider, prof, role, worktree, Detected::Skip, false, delivery);
     };
     match probe(a.bin) {
-        Some(p) => evaluate_for(provider, prof, role, worktree, Detected::Found(&p), false, delivery),
+        Some(mut p) => {
+            if cfg!(windows) && provider == "codex" {
+                p.windows_sandbox = codex_config_path().and_then(|f| std::fs::read_to_string(f).ok()).as_deref().and_then(codex_windows_sandbox);
+            }
+            evaluate_for(provider, prof, role, worktree, Detected::Found(&p), false, delivery)
+        }
         None => evaluate_for(provider, prof, role, worktree, Detected::Missing, false, delivery),
     }
 }
@@ -481,6 +552,13 @@ pub fn launch(agent: &str, model: Option<&str>, effort: Option<&str>, prompt: &s
 /// Arma el lanzamiento con el argv exacto de la política; solo añade modelo,
 /// esfuerzo y prompt. Una política bloqueada no se lanza.
 pub fn launch_with(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str) -> Result<Launch, String> {
+    launch_task(policy, model, effort, prompt, None)
+}
+
+/// Como `launch_with`; con `codex exec` añade `-o <last_message>` (lo fija el host
+/// por intento, por eso no va en el argv de la política). Claude con stream-json
+/// corre con la salida canalizada: el JSONL llega sin cortes de ConPTY.
+pub fn launch_task(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str, last_message: Option<&str>) -> Result<Launch, String> {
     let agent = policy.provider.as_str();
     let a = spec(agent).ok_or_else(|| format!("Agente desconocido: {agent}. Usa uno de `lxo agents`."))?;
     if PAUSED.contains(&agent) {
@@ -497,6 +575,15 @@ pub fn launch_with(policy: &Policy, model: Option<&str>, effort: Option<&str>, p
         }
     }
     let mut args: Vec<String> = policy.argv.iter().map(|s| quote(s)).collect();
+    if policy.argv.get(1).is_some_and(|a| a == "exec") {
+        if let Some(lm) = last_message {
+            if lm.chars().any(|c| "\"%^&|<>\r\n".contains(c)) {
+                return Err("La ruta del mensaje final tiene caracteres que no se pueden pasar a la CLI".into());
+            }
+            args.extend(["-o".into(), format!("\"{lm}\"")]);
+        }
+    }
+    let piped = policy.argv.iter().any(|a| a == "stream-json");
     match agent {
         "claude" => {
             if let Some(m) = &model { args.extend(["--model".into(), m.clone()]); }
@@ -509,7 +596,7 @@ pub fn launch_with(policy: &Policy, model: Option<&str>, effort: Option<&str>, p
         _ => {}
     }
     args.push(format!("\"{prompt}\""));
-    Ok(Launch { command: args.join(" "), env: vec![], inject: None, piped: false })
+    Ok(Launch { command: args.join(" "), env: vec![], inject: None, piped })
 }
 
 /// Teclas para el diálogo de arranque que bloquearía a un hijo sin nadie
@@ -701,20 +788,26 @@ mod tests {
     const CODEX_HELP: &str = include_str!("testdata/codex-0.159.0-help.txt");
     const CODEX_EXEC_HELP: &str = include_str!("testdata/codex-0.159.0-exec-help.txt");
     const CLAUDE_HELP: &str = include_str!("testdata/claude-2.1.296-help.txt");
+    const CODEX_EXEC_HELP_162: &str = include_str!("testdata/codex-0.162.1-exec-help.txt");
     const BYPASS: &[&str] = &["--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--allow-dangerously-skip-permissions",
         "bypassPermissions", "danger-full-access", "--yolo"];
 
     fn probe(version: &str, help: &str) -> Probe {
-        Probe { version: Some(version.into()), help: Some(help.into()) }
+        Probe { version: Some(version.into()), help: Some(help.into()), exec_help: Some(CODEX_EXEC_HELP_162.into()), windows_sandbox: None }
     }
 
     #[test]
     fn lanzadores_con_perfil_y_modelo() {
         let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea", Profile::DelegarConRevision, None).unwrap();
-        assert_eq!(l.command, r#"claude --permission-mode acceptEdits --model opus --effort high "Lee la tarea""#);
+        assert_eq!(l.command, r#"claude --allowedTools "Bash(lxo report:*)" --permission-mode acceptEdits --model opus --effort high "Lee la tarea""#);
+        assert!(!l.piped);
         assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x", Profile::Explorar, None).is_err());
         let l = launch_with(&evaluate("codex", Profile::Explorar, ".", Detected::Skip, false), Some("gpt-5.5"), Some("high"), "x").unwrap();
-        assert_eq!(l.command, r#"codex --sandbox read-only --ask-for-approval never --model gpt-5.5 -c model_reasoning_effort=high "x""#);
+        assert_eq!(l.command, r#"codex exec --sandbox read-only --model gpt-5.5 -c model_reasoning_effort=high "x""#);
+        let p = evaluate("codex", Profile::Explorar, ".", Detected::Skip, false);
+        let l = launch_task(&p, None, None, "x", Some(r"C:\Mis Documentos\wt\.lixbon\out\t2\1\last-message.md")).unwrap();
+        assert_eq!(l.command, r#"codex exec --sandbox read-only -o "C:\Mis Documentos\wt\.lixbon\out\t2\1\last-message.md" "x""#);
+        assert!(launch_task(&p, None, None, "x", Some("a&b")).is_err());
         assert!(launch("claude", Some("opus & del"), None, "x", Profile::Explorar, None).is_err());
         assert!(launch("gemini", None, None, "x", Profile::Explorar, None).is_err());
     }
@@ -722,18 +815,21 @@ mod tests {
     #[test]
     fn explorar_en_claude_sin_herramientas_de_edicion() {
         let l = launch("claude", Some("haiku"), None, "Lee", Profile::Explorar, Some("explorador")).unwrap();
-        assert_eq!(l.command, r#"claude --disallowedTools Edit Write NotebookEdit --allowedTools "Bash(lxo *)" --permission-mode plan --model haiku "Lee""#);
+        assert_eq!(l.command, r#"claude -p --output-format stream-json --verbose --disallowedTools Edit Write NotebookEdit --allowedTools "Bash(lxo *)" --permission-mode plan --model haiku "Lee""#);
+        // stream-json va canalizado: el JSONL llega sin pasar por ConPTY.
+        assert!(l.piped);
     }
 
     #[test]
     fn argv_por_perfil_y_proveedor() {
         let wt = "C:\\Users\\USUARIO\\wt";
         let argv = |prov, prof| evaluate(prov, prof, wt, Detected::Skip, false).argv.join(" ");
-        assert_eq!(argv("claude", Profile::Explorar), "claude --disallowedTools Edit Write NotebookEdit --allowedTools Bash(lxo *) --permission-mode plan");
-        assert_eq!(argv("claude", Profile::Proponer), "claude --disallowedTools Edit Write NotebookEdit --allowedTools Bash(lxo *) --permission-mode plan");
-        assert_eq!(argv("claude", Profile::DelegarConRevision), "claude --permission-mode acceptEdits");
-        assert_eq!(argv("codex", Profile::Explorar), "codex --sandbox read-only --ask-for-approval never");
-        assert_eq!(argv("codex", Profile::Proponer), "codex --sandbox read-only --ask-for-approval never");
+        let plan = "claude -p --output-format stream-json --verbose --disallowedTools Edit Write NotebookEdit --allowedTools Bash(lxo *) --permission-mode plan";
+        assert_eq!(argv("claude", Profile::Explorar), plan);
+        assert_eq!(argv("claude", Profile::Proponer), plan);
+        assert_eq!(argv("claude", Profile::DelegarConRevision), "claude --allowedTools Bash(lxo report:*) --permission-mode acceptEdits");
+        assert_eq!(argv("codex", Profile::Explorar), "codex exec --sandbox read-only");
+        assert_eq!(argv("codex", Profile::Proponer), "codex exec --sandbox read-only");
         assert_eq!(argv("codex", Profile::DelegarConRevision), format!("codex --sandbox workspace-write --ask-for-approval never --cd {wt}"));
         // El argv de la política es exactamente el que se lanza; la ruta con espacios va entre comillas.
         let p = evaluate("codex", Profile::DelegarConRevision, "C:\\Mis Documentos\\wt", Detected::Found(&probe("0.159.0", CODEX_HELP)), false);
@@ -765,13 +861,14 @@ mod tests {
     #[test]
     fn bloquea_si_falta_un_flag() {
         // Codex 0.159.0: la TUI tiene -a, `codex exec` no.
-        let tui = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.159.0", CODEX_HELP)), false);
+        let tui = evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Found(&probe("0.159.0", CODEX_HELP)), false);
         assert_eq!((tui.status, tui.cli_version.as_deref()), (Status::Ok, Some("0.159.0")));
         let mismo_argv_en_exec = missing_flags(&tui.argv[1..], CODEX_EXEC_HELP);
         assert_eq!(mismo_argv_en_exec, ["--ask-for-approval"]);
-        let exec = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.159.0", CODEX_EXEC_HELP)), true);
+        let exec = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.162.1", CODEX_HELP)), false);
         assert_eq!(exec.argv, ["codex", "exec", "--sandbox", "read-only"]);
         assert_eq!(exec.status, Status::Ok);
+        assert!(!exec.interactive);
         // Un --help sin --sandbox (CLI antigua) bloquea con el motivo.
         let vieja = CODEX_HELP.replace("--sandbox", "--sbx");
         let p = evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Found(&probe("0.159.0", &vieja)), false);
@@ -816,7 +913,7 @@ mod tests {
         assert_eq!(serde_json::to_value(&p).unwrap()["role"], "revisor");
         assert_eq!(resolve_policy("codex", "turbo", "revisor", "wt").role.as_deref(), Some("revisor"));
         assert_eq!(evaluate_for("claude", Profile::Explorar, Some("planner"), "wt", Detected::Skip, false, Delivery::FileOrMarkers).status, Status::Blocked);
-        for k in ["profile", "role", "provider", "argv", "cli_version", "warnings", "status", "reason"] {
+        for k in ["profile", "role", "provider", "argv", "cli_version", "warnings", "status", "reason", "interactive"] {
             assert!(v.get(k).is_some(), "falta {k}");
         }
         assert_eq!(parse_version("codex-cli 0.159.0\n").as_deref(), Some("0.159.0"));
@@ -838,8 +935,11 @@ mod tests {
         let p = evaluate("codex", Profile::AutonomiaAmplia, "wt", Detected::Skip, false);
         assert!(authorize(&p, None, true).is_err());
         assert!(authorize(&p, Some(&p.argv), true).is_err());
-        let falta = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.159.0", CODEX_EXEC_HELP)), false);
+        // Un `codex exec --help` sin -o: el read-only no se puede entregar, bloqueado.
+        let sin_o = Probe { exec_help: Some(CODEX_EXEC_HELP_162.replace("--output-last-message", "--x")), ..probe("0.162.1", CODEX_HELP) };
+        let falta = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&sin_o), false);
         assert_eq!(falta.status, Status::Blocked);
+        assert_eq!(falta.reason.as_deref(), Some("Codex 0.162.1 no admite: -o/--output-last-message"));
         assert!(authorize(&falta, None, true).is_err());
     }
 
@@ -904,7 +1004,7 @@ mod tests {
             assert!(authorize(&p, None, true).is_err());
         }
         // Con la entrega por archivo/marcadores activa se desbloquea, con advertencia.
-        for (prof, role, via) in [(Profile::Explorar, "revisor", "marcadores"), (Profile::Proponer, "adversario", "marcadores"),
+        for (prof, role, via) in [(Profile::Explorar, "revisor", "codex exec -o"), (Profile::Proponer, "adversario", "codex exec -o"),
             (Profile::DelegarConRevision, "implementador", "report.json")] {
             let p = evaluate_for("codex", prof, Some(role), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
             assert_eq!((p.status, p.reason.as_deref()), (Status::Ok, None), "{prof:?} {role}");
@@ -945,6 +1045,68 @@ mod tests {
             let p = evaluate_for("claude", prof, Some(role), "wt", Detected::Found(&found), false, Delivery::LxoOnly);
             assert_eq!((p.status, p.reason), (Status::Ok, None), "{prof:?} {role}");
         }
+    }
+
+    #[test]
+    fn sandbox_elevado_bloquea_el_read_only_de_codex() {
+        // Config de prueba, no la de la persona.
+        let dir = std::env::temp_dir().join(format!("lxo-codex-home-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("config.toml");
+        std::fs::write(&cfg, "model = \"gpt-5.5\"\n\n[windows]\nsandbox = \"elevated\" # prueba\n\n[otra]\nsandbox = \"x\"\n").unwrap();
+        let leida = codex_windows_sandbox(&std::fs::read_to_string(&cfg).unwrap());
+        assert_eq!(leida.as_deref(), Some("elevated"));
+        assert_eq!(codex_windows_sandbox("windows.sandbox = 'unelevated'").as_deref(), Some("unelevated"));
+        assert_eq!(codex_windows_sandbox("[sandbox_workspace_write]\nnetwork_access = true"), None);
+        let elev = Probe { windows_sandbox: leida, ..probe("0.162.1", CODEX_HELP) };
+        for prof in [Profile::Explorar, Profile::Proponer] {
+            let p = evaluate_for("codex", prof, Some("revisor"), "wt", Detected::Found(&elev), false, Delivery::FileOrMarkers);
+            assert_eq!((p.status, p.reason.as_deref()), (Status::Blocked, Some(ELEVATED)), "{prof:?}");
+            assert!(p.warnings.iter().any(|w| w == ELEVATED));
+            assert!(authorize(&p, Some(&p.argv), true).is_err());
+        }
+        // Workspace-write y Claude no cambian; sin elevated, el read-only sigue ok.
+        assert_eq!(evaluate("codex", Profile::DelegarConRevision, "wt", Detected::Found(&elev), false).status, Status::Ok);
+        let normal = Probe { windows_sandbox: Some("unelevated".into()), ..probe("0.162.1", CODEX_HELP) };
+        assert_eq!(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&normal), false).status, Status::Ok);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn claude_stream_json_y_lxo_report_en_la_politica() {
+        let found = probe("2.1.296", CLAUDE_HELP);
+        for prof in [Profile::Explorar, Profile::Proponer] {
+            let p = evaluate_for("claude", prof, Some("explorador"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+            assert_eq!(p.status, Status::Ok, "{:?}", p.reason);
+            assert!(p.argv.windows(2).any(|w| w == ["--output-format", "stream-json"]));
+            assert!(p.argv.iter().any(|a| a == "-p") && p.argv.iter().any(|a| a == "--verbose"));
+            assert!(!p.interactive);
+            assert!(p.warnings.iter().any(|w| w == WARN_STREAM));
+            // La comprobación de argv sigue valiendo.
+            assert!(authorize(&p, Some(&p.argv), false).is_ok());
+            let mut sin_stream = p.argv.clone();
+            sin_stream.retain(|a| a != "--verbose");
+            assert!(authorize(&p, Some(&sin_stream), false).is_err());
+        }
+        let d = evaluate_for("claude", Profile::DelegarConRevision, Some("implementador"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+        assert_eq!(d.status, Status::Ok);
+        assert!(d.interactive);
+        let i = d.argv.iter().position(|a| a == "--allowedTools").unwrap();
+        assert_eq!(d.argv[i + 1], LXO_REPORT_ONLY);
+        assert!(!d.argv.iter().any(|a| a == LXO_ONLY));
+        // Un --help sin stream-json bloquea Explorar.
+        let sin = CLAUDE_HELP.replace("stream-json", "jsonl");
+        let p = evaluate("claude", Profile::Explorar, "wt", Detected::Found(&probe("2.1.296", &sin)), false);
+        assert_eq!(p.reason.as_deref(), Some("Claude Code 2.1.296 no admite: --output-format stream-json"));
+    }
+
+    #[test]
+    fn codex_interactivo_avisa_del_limite_de_50_kb() {
+        let found = probe("0.162.1", CODEX_HELP);
+        let d = evaluate_for("codex", Profile::DelegarConRevision, Some("implementador"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+        assert!(d.interactive && d.warnings.iter().any(|w| w == WARN_STDOUT_LIMIT));
+        let r = evaluate_for("codex", Profile::Explorar, Some("revisor"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
+        assert!(!r.interactive && r.warnings.iter().any(|w| w == WARN_EXEC) && r.warnings.iter().any(|w| w == WARN_EXEC_O));
     }
 
     #[test]

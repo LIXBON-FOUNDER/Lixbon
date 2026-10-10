@@ -13,6 +13,14 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use crate::hide_console;
 
 const BUFFER_CAP: usize = 512 * 1024;
+/// Ancho mínimo de la PTY de cada agente. La entrega no puede depender del ancho
+/// del panel: si la vista es más estrecha se reduce la vista, no la PTY.
+pub const MIN_COLS: u16 = 200;
+
+/// Columnas reales de la PTY para un ancho pedido por la UI: nunca menos de MIN_COLS.
+pub fn clamp_cols(cols: u16) -> u16 {
+    cols.max(MIN_COLS)
+}
 /// Ventana en la que se contestan los diálogos de arranque del agente.
 const STARTUP: Duration = Duration::from_secs(180);
 
@@ -49,9 +57,10 @@ impl AgentTerm {
         });
     }
 
+    /// La UI pide `cols`; el host aplica como mínimo MIN_COLS (orch_term_resize).
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
         match &self.master {
-            Some(m) => m.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string()),
+            Some(m) => m.resize(PtySize { rows: rows.max(1), cols: clamp_cols(cols), pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string()),
             None => Ok(()),
         }
     }
@@ -86,6 +95,16 @@ fn write_script(dir: &Path, command: &str) -> Result<(String, Vec<String>), Stri
         std::fs::write(&path, format!("{command}\n")).map_err(|e| e.to_string())?;
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
         Ok((shell, vec!["-l".into(), path.to_string_lossy().into_owned()]))
+    }
+}
+
+/// Bytes del principio que se pueden pasar a texto ya: todo salvo un carácter
+/// multibyte incompleto al final (los bytes inválidos se dejan pasar).
+fn utf8_prefix(b: &[u8]) -> usize {
+    match std::str::from_utf8(b) {
+        Ok(_) => b.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => b.len(),
     }
 }
 
@@ -168,12 +187,21 @@ fn spawn_piped(
     let pump = |mut pipe: Box<dyn Read + Send>, buf: Arc<Mutex<Vec<u8>>>, out: Arc<dyn Fn(String) + Send + Sync>| {
         thread::spawn(move || {
             let mut chunk = [0u8; 8192];
+            let mut carry: Vec<u8> = Vec::new();
             while let Ok(n) = pipe.read(&mut chunk) {
                 if n == 0 {
                     break;
                 }
+                // Un carácter multibyte puede quedar partido entre dos lecturas: sin
+                // esto, el informe de stream-json llegaba con U+FFFD en vez de la letra.
+                carry.extend_from_slice(&chunk[..n]);
+                let valid = utf8_prefix(&carry);
+                if valid == 0 {
+                    continue;
+                }
+                let part: Vec<u8> = carry.drain(..valid).collect();
                 // La salida canalizada usa \n a secas: la terminal necesita \r\n.
-                let text = String::from_utf8_lossy(&chunk[..n]).replace("\r\n", "\n").replace('\n', "\r\n");
+                let text = String::from_utf8_lossy(&part).replace("\r\n", "\n").replace('\n', "\r\n");
                 if let Ok(mut b) = buf.lock() {
                     b.extend_from_slice(text.as_bytes());
                 }
@@ -204,7 +232,7 @@ pub fn spawn(
         return spawn_piped(l, on_output, on_exit);
     }
     let pair = native_pty_system()
-        .openpty(PtySize { rows: 32, cols: 120, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize { rows: 32, cols: MIN_COLS, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
     let (program, args) = write_script(l.script_dir, &l.command)?;
     let mut cmd = CommandBuilder::new(program);
@@ -324,7 +352,24 @@ pub fn spawn(
 
 #[cfg(test)]
 mod tests {
-    use super::plain;
+    use super::{clamp_cols, plain, utf8_prefix, MIN_COLS};
+
+    #[test]
+    fn la_pty_nunca_baja_del_minimo() {
+        for pedido in [1u16, 40, 60, 76, 120, 199] {
+            assert_eq!(clamp_cols(pedido), MIN_COLS, "{pedido}");
+        }
+        assert_eq!(clamp_cols(200), 200);
+        assert_eq!(clamp_cols(260), 260);
+    }
+
+    #[test]
+    fn utf8_partido_entre_lecturas() {
+        let s = "ñ🚀".as_bytes();
+        assert_eq!(utf8_prefix(&s[..1]), 0);
+        assert_eq!(utf8_prefix(&s[..3]), 2);
+        assert_eq!(utf8_prefix(s), s.len());
+    }
 
     #[test]
     fn quita_escapes() {
@@ -375,3 +420,71 @@ mod real {
     fn claude_autonomo() { autonomo("claude", Some("haiku")); }
 }
 
+
+/// ConPTY de verdad (portable-pty en Windows): la UI pide 40, 60 y 76 columnas,
+/// el host deja la PTY en MIN_COLS y el bloque llega con el hash correcto. No
+/// gasta tokens: imprime un bloque ya hecho con `type`.
+#[cfg(all(test, windows))]
+mod ancho_real {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use base64::Engine;
+
+    use super::super::delivery::{scan_markers, sha256_hex, Expect, Found};
+
+    #[test]
+    fn entrega_por_conpty_real_sin_resize_y_a_40_60_76_columnas() {
+        let nonce = "5f1c2a9be04d7713a0c4e8f2b6d9c1e3";
+        // 0: sin ningún resize, el bloque sale con la PTY tal como se abrió.
+        for pedido in [0u16, 40, 60, 76] {
+            let dir = std::env::temp_dir().join(format!("lxo-conpty-{pedido}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let task = format!("t{pedido}");
+            let json = serde_json::json!({ "schema": 1, "task": task, "attempt": 1, "status": "done",
+                "summary": format!("ancho {pedido}"), "files": [], "report": "ñ ".repeat(1500), "nonce": nonce }).to_string();
+            let b64 = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
+            // Líneas de 150 con sangría: más anchas que lo que pide la UI.
+            let lines: Vec<String> = b64.as_bytes().chunks(150).map(|c| format!("    {}", std::str::from_utf8(c).unwrap())).collect();
+            let block = format!("<<<LXO-REPORT v1 nonce={nonce} sha256={}>>>\r\n{}\r\n<<<LXO-REPORT-END nonce={nonce}>>>\r\n",
+                sha256_hex(json.as_bytes()), lines.join("\r\n"));
+            std::fs::write(dir.join("bloque.txt"), block).unwrap();
+            let screen = Arc::new(Mutex::new(String::new()));
+            let done = Arc::new(AtomicBool::new(false));
+            let (sc, d) = (screen.clone(), done.clone());
+            let term = super::spawn(
+                super::Launch {
+                    cwd: &dir.to_string_lossy(),
+                    script_dir: &dir.join("s"),
+                    command: if pedido == 0 { "type bloque.txt & ping -n 2 127.0.0.1 >nul".into() } else { "ping -n 3 127.0.0.1 >nul & type bloque.txt & ping -n 2 127.0.0.1 >nul".into() },
+                    env: vec![],
+                    inject: None,
+                    piped: false,
+                },
+                move |t| sc.lock().unwrap().push_str(&t),
+                move || d.store(true, Ordering::SeqCst),
+            )
+            .unwrap();
+            // La UI pide menos que el mínimo antes de que salga el bloque.
+            if pedido > 0 {
+                term.resize(pedido, 30).unwrap();
+            }
+            let start = Instant::now();
+            while !done.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(40) {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            let raw = screen.lock().unwrap().clone();
+            let e = Expect { task: task.clone(), attempt: 1, nonce: nonce.into() };
+            match scan_markers(&raw, &e, &[]) {
+                Found::Valid(r) => {
+                    assert_eq!(r.sha256, sha256_hex(json.as_bytes()), "{pedido}");
+                    assert_eq!(r.summary, format!("ancho {pedido}"));
+                }
+                other => panic!("{pedido} columnas: {other:?}\n{}", super::plain(&raw)),
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
