@@ -8,7 +8,7 @@
 //!    id se busca el rollout cuyo `session_meta.id` (o el final del nombre) coincide.
 //! 2. Si no hay id (TUI interactiva) o no aparece su archivo: rollouts cuyo
 //!    `session_meta.cwd` normalizado es el del intento y cuyo `session_meta.timestamp`
-//!    es >= inicio del intento menos `MARGIN_MS`.
+//!    es >= inicio del intento menos `MARGIN_MS` (`cwd_time`).
 //! 3. Cero o más de un candidato: `unknown` y `session_ref: null`.
 
 use std::path::{Path, PathBuf};
@@ -137,21 +137,28 @@ pub fn pick(sessions: &Path, session_id: Option<&str>, cwd: &str, start_ms: u64)
     let by_filter: Vec<PathBuf> = metas.into_iter()
         .filter(|(_, m)| norm(&m.cwd) == want && m.started_ms.is_some_and(|t| t >= since))
         .map(|(p, _)| p).collect();
-    (one(by_filter), "filter")
+    (one(by_filter), "cwd_time")
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved {
     pub model: String,
     pub session_ref: Option<String>,
-    /// `session_id` o `filter`.
+    /// Cómo se eligió la sesión: `session_id` o `cwd_time`.
     pub mechanism: &'static str,
+}
+
+impl Resolved {
+    /// `model_source` del intento: el mecanismo si se leyó el modelo, si no `unknown`.
+    pub fn source(&self) -> &'static str {
+        if self.model == UNKNOWN { UNKNOWN } else { self.mechanism }
+    }
 }
 
 pub fn resolve(sessions: Option<&Path>, session_id: Option<&str>, cwd: &str, start_ms: u64) -> Resolved {
     let (path, mechanism) = match sessions {
         Some(s) => pick(s, session_id, cwd, start_ms),
-        None => (None, "filter"),
+        None => (None, "cwd_time"),
     };
     let model = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| turn_context_model(&t)).unwrap_or_else(|| UNKNOWN.to_string());
     Resolved { model, session_ref: path.map(|p| p.to_string_lossy().into_owned()), mechanism }
@@ -224,7 +231,7 @@ mod tests {
         put(&root, "otro-mismo-cwd", &session("otro-mismo-cwd", CWD, T0 + 2000, "gpt-5.6-luna"));
         // Dos con el mismo cwd y casi la misma hora: el id decide.
         let r = resolve(Some(&root), Some(ID), CWD, T0);
-        assert_eq!((r.model.as_str(), r.mechanism), ("gpt-6.1-sol", "session_id"));
+        assert_eq!((r.model.as_str(), r.mechanism, r.source()), ("gpt-6.1-sol", "session_id", "session_id"));
         assert_eq!(r.session_ref, Some(p.to_string_lossy().into_owned()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -236,7 +243,7 @@ mod tests {
         put(&root, "viejo", &session("viejo", CWD, T0 - 600_000, "gpt-5.6-luna"));
         let p = put(&root, ID, SESSION);
         let r = resolve(Some(&root), None, CWD, T0 - 1000);
-        assert_eq!((r.model.as_str(), r.mechanism), ("gpt-6.1-sol", "filter"));
+        assert_eq!((r.model.as_str(), r.mechanism, r.source()), ("gpt-6.1-sol", "cwd_time", "cwd_time"));
         assert_eq!(r.session_ref, Some(p.to_string_lossy().into_owned()));
         // Pedir desde antes de las dos: ambiguo.
         let r = resolve(Some(&root), None, CWD, T0 - 700_000);
@@ -272,12 +279,23 @@ mod tests {
     }
 
     #[test]
+    fn sesion_sin_turn_context_da_source_unknown() {
+        let root = dir("sintc");
+        let sin: String = SESSION.lines().filter(|l| !l.contains("turn_context")).collect::<Vec<_>>().join("\n");
+        put(&root, ID, &sin);
+        let r = resolve(Some(&root), Some(ID), CWD, T0);
+        assert_eq!((r.model.as_str(), r.mechanism, r.source()), (UNKNOWN, "session_id", "unknown"));
+        assert!(r.session_ref.is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn ambiguo_da_unknown() {
         let root = dir("ambiguo");
         put(&root, ID, SESSION);
         put(&root, "gemela", &session("gemela", CWD, T0 + 3000, "gpt-5.6-luna"));
         let r = resolve(Some(&root), None, CWD, T0);
-        assert_eq!((r.model.as_str(), r.session_ref, r.mechanism), (UNKNOWN, None, "filter"));
+        assert_eq!((r.model.as_str(), r.session_ref.clone(), r.mechanism, r.source()), (UNKNOWN, None, "cwd_time", "unknown"));
         assert_eq!(resolve(None, None, CWD, T0).model, UNKNOWN);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -302,8 +320,10 @@ mod tests {
         assert_eq!((t.model_requested.as_deref(), t.model_effective.as_deref(), t.model_mismatch), (None, Some("gpt-6.1-sol"), false));
         assert!(t.model_mismatch_reason.is_none());
         t.session_ref = Some("C:/x/rollout.jsonl".into());
+        t.model_source = Some("session_id".into());
         let v = serde_json::to_value(&*t).unwrap();
         assert_eq!(v["session_ref"], "C:/x/rollout.jsonl");
+        assert_eq!(v["model_source"], "session_id");
         t.session_ref = None;
         assert!(serde_json::to_value(&*t).unwrap()["session_ref"].is_null());
     }

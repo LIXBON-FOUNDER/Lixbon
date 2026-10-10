@@ -763,6 +763,7 @@ impl Core {
             t.plan_mode = plan_mode;
             t.failure_reason = None;
             t.session_ref = None;
+            t.model_source = None;
             t.attempt_started = Some(state::now_ms());
             t.approval_deadline = None;
             // launch_task ya rechazó un modelo pedido que no entra en el argv.
@@ -911,6 +912,7 @@ impl Core {
         let mut st = self.lock();
         if let Ok(t) = st.task_mut(id) {
             delivery::set_model_effective(t, &r.model);
+            t.model_source = Some(r.source().into());
             t.session_ref = r.session_ref;
         }
         self.commit(&st, &[]);

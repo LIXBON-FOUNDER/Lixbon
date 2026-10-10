@@ -455,6 +455,10 @@ pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Ve
             if let Some(m) = &r.model {
                 set_model_effective(t, m);
             }
+            // Claude con stream-json: el modelo sale de message.model/modelUsage.
+            if r.channel == Channel::StreamJson {
+                t.model_source = Some(if r.model.is_some() { "stream_json" } else { "unknown" }.into());
+            }
             Ok(msg.into_iter().collect())
         }
         Found::Invalid(e) if at_exit => Ok(st.close(id, Status::Failed, &format!("informe inválido: {e}"))?.into_iter().collect()),
@@ -844,6 +848,8 @@ mod tests {
         assert_eq!(t.delivery_channel.as_deref(), Some("stream_json"));
         assert_eq!(t.model_effective.as_deref(), Some("claude-haiku-5-5-20260901"));
         assert!(!t.model_mismatch);
+        assert_eq!(t.model_source.as_deref(), Some("stream_json"));
+        assert_eq!(serde_json::to_value(t).unwrap()["model_source"], "stream_json");
         // Una línea a medias no rompe nada; sin result, al salir queda no entregado.
         let parcial = format!("{}{{\"type\":\"result\",\"res", stream(None));
         assert_eq!(parse_stream_json(&parcial).result, None);
