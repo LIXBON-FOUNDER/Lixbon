@@ -10,7 +10,8 @@ export function CodexTabList() {
       {tabs.map((t, i) => (
         <div key={t.key} className={`codextabs__item ${t.key === activeKey ? 'is-active' : ''}`}>
           <button type="button" className="codextabs__open" onClick={() => activate(t.key)} data-testid={`codex-tab-${t.key}`}>
-            Codex {i + 1}{t.exited ? ' · terminó' : ''}
+            Codex {i + 1}{t.exited ? ` · terminó${t.code === null || t.code === undefined ? '' : ` (${t.code})`}` : ''}
+            {(t.model || t.effort) && <span className="codextabs__meta mono" data-testid={`codex-tab-meta-${t.key}`}>{[t.model, t.effort].filter(Boolean).join(' · ')}</span>}
           </button>
           <button type="button" className="lk" title="Cerrar la terminal de Codex" onClick={() => closeTab(t.key)} data-testid={`codex-tab-close-${t.key}`}>×</button>
         </div>

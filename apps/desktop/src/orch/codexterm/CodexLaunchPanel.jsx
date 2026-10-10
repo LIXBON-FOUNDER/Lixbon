@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Select } from '../../components/Select';
 import { ArgvDisplay } from '../policy/EffectivePolicyView';
 import { modelOptions, effortOptions } from '../providers/roleConfig';
-import { codexTerm as defaultApi, isNeedsAck } from './codexTermContract';
+import { codexTerm as defaultApi, isNeedsAck, policyText } from './codexTermContract';
 import '../policy/policy.css';
 
 export const ACK_LABEL = 'Entiendo los avisos y quiero abrir Codex';
@@ -59,7 +59,7 @@ export function CodexLaunchPanel({ cwd, codex, api = defaultApi, onOpened, onCan
         <dt>Esfuerzo</dt>
         <dd><Select className="select--fill" value={effort} onChange={setEffort} options={effortOptions(codex, effort)} title="Esfuerzo de Codex" /></dd>
         {pol && <>
-          {pol.policy && <><dt>Política</dt><dd data-testid="codex-policy">{pol.policy}</dd></>}
+          {policyText(pol.policy) && <><dt>Política</dt><dd data-testid="codex-policy">{policyText(pol.policy)}</dd></>}
           <dt>Comando (argv exacto)</dt>
           <dd><code data-testid="codex-argv" className="mono"><ArgvDisplay argv={pol.argv} /></code></dd>
           <dt>Advertencias</dt>

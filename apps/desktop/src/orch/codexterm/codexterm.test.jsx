@@ -2,12 +2,12 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { codexTerm, normalizeBuffer, normalizeListItem, seqOf, appendCapped, acceptSeq, TRUNCATE_RESET, decodeTermData, encodeTermData, isNeedsAck, policyArgs, CODEX_TERM_COMMANDS, CODEX_TERM_EVENTS, TERM_DATA_ENCODING } from './codexTermContract';
+import { codexTerm, policyText, normalizeBuffer, normalizeListItem, seqOf, appendCapped, acceptSeq, TRUNCATE_RESET, decodeTermData, encodeTermData, isNeedsAck, policyArgs, CODEX_TERM_COMMANDS, CODEX_TERM_EVENTS, TERM_DATA_ENCODING } from './codexTermContract';
 import { createMockCodexTerm, MOCK_CODEX_TERM_WARNINGS } from './mockCodexTerm';
 import { CodexLaunchPanel, ACK_LABEL } from './CodexLaunchPanel';
 import { CodexTerminal, exitText } from './CodexTerminal';
 import { useCodexTermStore, configureCodexTerm } from './codexTermStore';
-import { CodexTermArea } from './CodexTabs';
+import { CodexTermArea, CodexTabList } from './CodexTabs';
 import { MOCK_CODEX } from '../providers/mockListProviders';
 import { normalizeProvider } from '../providers/providersContract';
 
@@ -55,7 +55,8 @@ describe('contrato codex_term_*', () => {
     expect(CODEX_TERM_COMMANDS).toEqual({ policy: 'codex_term_policy', open: 'codex_term_open', write: 'codex_term_write', resize: 'codex_term_resize', close: 'codex_term_close', buffer: 'codex_term_buffer', redraw: 'codex_term_redraw', list: 'codex_term_list' });
     expect(normalizeBuffer({ data: '\x1b[0mhola', seq: 7, cols: 200, rows: 40, alt_screen: true })).toEqual({ data: '\x1b[0mhola', seq: 7, cols: 200, rows: 40, alt_screen: true });
     expect(normalizeBuffer({ seq: 1 })).toBeNull();
-    expect(normalizeListItem({ term_id: 't', cwd: 'C:/r', policy: 'p', exited: true, code: 2 })).toEqual({ term_id: 't', cwd: 'C:/r', policy: 'p', exited: true, code: 2 });
+    expect(normalizeListItem({ term_id: 't', cwd: 'C:/r', model: 'gpt-6-sol', effort: null, policy: { status: 'ok' }, argv: ['codex'], exited: true, code: 2 })).toEqual({ term_id: 't', cwd: 'C:/r', model: 'gpt-6-sol', effort: null, policy: { status: 'ok' }, argv: ['codex'], exited: true, code: 2 });
+    expect(normalizeListItem({ term_id: 't' })).toMatchObject({ model: null, effort: null, argv: [] });
     expect(normalizeListItem({ cwd: 'x' })).toBeNull();
     expect(CODEX_TERM_EVENTS).toEqual({ output: 'codex-term-output', exit: 'codex-term-exit' });
     expect(TERM_DATA_ENCODING).toBe('text');
@@ -65,6 +66,18 @@ describe('contrato codex_term_*', () => {
     expect(isNeedsAck(new Error('needs_ack: confirma'))).toBe(true);
     expect(isNeedsAck('otro error')).toBe(false);
     expect(policyArgs({ cwd: 'C:/r', model: '', effort: ' ' })).toEqual({ cwd: 'C:/r' });
+  });
+  it('policy del host es un objeto: se muestra como texto, nunca crudo', () => {
+    expect(policyText({ provider: 'codex', profile: 'terminal', cli_version: '0.162.1', model: 'gpt-6-sol', effort: 'high', interactive: true, status: 'ok' }))
+      .toBe('Terminal interactiva · Codex 0.162.1 · modelo: gpt-6-sol · esfuerzo: high · lista');
+    expect(policyText('texto')).toBe('texto');
+    expect(policyText(null)).toBe('');
+  });
+  it('mock como build() del host: -m para el modelo y -c model_reasoning_effort', async () => {
+    const m = createMockCodexTerm();
+    const p = await m.invoke(CODEX_TERM_COMMANDS.policy, { cwd: 'C:/r', model: 'gpt-6-sol', effort: 'high' });
+    expect(p.argv).toEqual(['codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--cd', 'C:/r', '-m', 'gpt-6-sol', '-c', 'model_reasoning_effort=high']);
+    expect(p.policy).toMatchObject({ provider: 'codex', profile: 'terminal', model: 'gpt-6-sol', effort: 'high', interactive: true });
   });
   it('sin VITE_ORCH_MOCK llama al host con snake_case y acknowledged booleano', async () => {
     vi.stubEnv('VITE_ORCH_MOCK', '');
@@ -98,7 +111,7 @@ describe('panel previo a abrir Codex', () => {
     render(<CodexLaunchPanel cwd="C:/repo" codex={codex} api={api} onOpened={onOpened} />);
     expect(await screen.findByTestId('codex-argv')).toBeTruthy();
     expect(screen.getByTestId('codex-argv').textContent).toBe('codex --sandbox workspace-write --ask-for-approval on-request --cd C:/repo');
-    expect(screen.getByTestId('codex-policy').textContent).toContain('workspace-write');
+    expect(screen.getByTestId('codex-policy').textContent).toBe('Terminal interactiva · Codex 0.162.1 · modelo: el que defina config.toml · sin verificar');
     for (const w of MOCK_CODEX_TERM_WARNINGS) expect(screen.getByText(w)).toBeTruthy();
     expect(openSpy).not.toHaveBeenCalled();
     const btn = screen.getByRole('button', { name: 'Abrir' });
@@ -287,7 +300,7 @@ describe('pestaña de terminal de Codex (PTY a nivel de app)', () => {
 
   it('recargar la webview: codex_term_list rehace las pestañas (terminadas con su código) y cada una se repinta', async () => {
     const m = createMockCodexTerm();
-    const a = await m.invoke(CODEX_TERM_COMMANDS.open, { cwd: 'C:/a', acknowledged: true, cols: 210, rows: 33 });
+    const a = await m.invoke(CODEX_TERM_COMMANDS.open, { cwd: 'C:/a', model: 'gpt-6-sol', effort: 'high', acknowledged: true, cols: 210, rows: 33 });
     const b = await m.invoke(CODEX_TERM_COMMANDS.open, { cwd: 'C:/b', acknowledged: true });
     await new Promise((r) => setTimeout(r, 0));
     m.emit(CODEX_TERM_EVENTS.output, { term_id: a.term_id, data: 'antes de recargar' });
@@ -297,7 +310,14 @@ describe('pestaña de terminal de Codex (PTY a nivel de app)', () => {
     useCodexTermStore.setState({ tabs: [], activeKey: null, launcher: false, buffers: {} });
     expect(await useCodexTermStore.getState().rehydrate()).toBe(2);
     const tabs = useCodexTermStore.getState().tabs;
-    expect(tabs.map((t) => [t.term_id, t.cwd, t.exited, t.code])).toEqual([[a.term_id, 'C:/a', false, null], [b.term_id, 'C:/b', true, 1]]);
+    expect(tabs.map((t) => [t.term_id, t.cwd, t.model, t.effort, t.exited, t.code])).toEqual([[a.term_id, 'C:/a', 'gpt-6-sol', 'high', false, null], [b.term_id, 'C:/b', null, null, true, 1]]);
+    expect(tabs[0].argv).toContain('-m');
+    // Modelo y esfuerzo en la pestaña restaurada; nada cuando son null.
+    const list = render(<CodexTabList />);
+    expect(screen.getByTestId(`codex-tab-meta-${tabs[0].key}`).textContent).toBe('gpt-6-sol · high');
+    expect(screen.queryByTestId(`codex-tab-meta-${tabs[1].key}`)).toBeNull();
+    expect(screen.getByTestId(`codex-tab-${tabs[1].key}`).textContent).toContain('terminó (1)');
+    list.unmount();
     expect(await useCodexTermStore.getState().rehydrate()).toBe(0); // no duplica
     useCodexTermStore.setState({ activeKey: tabs[0].key });
     const { made, create } = fakeTerms();
