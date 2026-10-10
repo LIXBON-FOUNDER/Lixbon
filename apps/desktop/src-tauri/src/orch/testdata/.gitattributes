@@ -5,3 +5,4 @@ codex-0.162.1-exec-o-last-message.md text eol=lf
 claude-2.1.296-delegar-espera-aprobacion.txt -text
 codex-0.162.1-version.txt -text
 codex-0.162.1-debug-models.json text eol=lf
+codex-0.162.1-session-recortada.jsonl text eol=lf

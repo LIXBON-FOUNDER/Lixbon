@@ -1,7 +1,8 @@
 //! Roles del equipo: el usuario decide en Ajustes qué modelo y qué esfuerzo usa
 //! cada uno, y el coordinador lanza hijas por rol (`lxo spawn --role …`) sin
 //! elegir modelo. Así lo barato (leer, buscar) va a un modelo barato y lo caro
-//! solo se usa cuando hace falta. Por ahora todos los roles corren en Claude Code.
+//! solo se usa cuando hace falta. Cada rol elige su proveedor (claude o codex);
+//! los roles guardados antes de existir el campo siguen en Claude.
 
 use std::collections::BTreeMap;
 
@@ -9,9 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::agents;
+use super::providers::{self, Provider};
 
-/// Agente con el que se lanzan todos los roles.
-pub const AGENT: &str = "claude";
+/// Proveedor de los roles que no dicen otro (y de los guardados sin el campo).
+pub const DEFAULT_PROVIDER: &str = "claude";
+
+fn default_provider() -> String {
+    DEFAULT_PROVIDER.into()
+}
 
 pub struct RoleSpec {
     pub id: &'static str,
@@ -40,21 +46,32 @@ pub fn spec(id: &str) -> Option<&'static RoleSpec> {
     ROLES.iter().find(|r| r.id == id)
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct RoleCfg {
+    /// `claude` | `codex`. Falta en los settings viejos: `claude`.
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub model: String,
     pub effort: String,
 }
 
+impl Default for RoleCfg {
+    fn default() -> Self {
+        RoleCfg { provider: default_provider(), model: String::new(), effort: String::new() }
+    }
+}
+
 pub fn defaults() -> BTreeMap<String, RoleCfg> {
-    ROLES.iter().map(|r| (r.id.to_string(), RoleCfg { model: r.model.into(), effort: r.effort.into() })).collect()
+    ROLES.iter().map(|r| (r.id.to_string(), RoleCfg { provider: default_provider(), model: r.model.into(), effort: r.effort.into() })).collect()
 }
 
 /// Rol ya resuelto: lo que se lanza de verdad.
 pub struct Resolved {
     pub spec: &'static RoleSpec,
-    pub model: String,
+    pub provider: String,
+    /// `None`: sin `--model` (Codex con su modelo de config.toml).
+    pub model: Option<String>,
     pub effort: Option<String>,
 }
 
@@ -64,22 +81,71 @@ pub fn resolve(cfg: &BTreeMap<String, RoleCfg>, id: &str) -> Result<Resolved, St
         format!("Rol desconocido: {id}. Usa uno de: {}", ROLES.iter().map(|r| r.id).collect::<Vec<_>>().join(", "))
     })?;
     let user = cfg.get(id);
-    let model = user.map(|c| c.model.trim()).filter(|m| !m.is_empty()).unwrap_or(spec.model).to_string();
+    let provider = user.map(|c| c.provider.trim()).filter(|p| !p.is_empty()).unwrap_or(DEFAULT_PROVIDER).to_string();
+    if !providers::IDS.contains(&provider.as_str()) {
+        return Err(format!("{}: proveedor desconocido {provider}. Usa uno de: {}", spec.label, providers::IDS.join(", ")));
+    }
+    let claude = provider == DEFAULT_PROVIDER;
+    let user_model = user.map(|c| c.model.trim()).filter(|m| !m.is_empty());
+    // Los modelos por defecto son alias de Claude: con otro proveedor no se heredan.
+    let model = user_model.map(str::to_string).or_else(|| claude.then(|| spec.model.to_string()));
     let effort = match user {
         Some(c) => c.effort.trim().to_string(),
-        None => spec.effort.to_string(),
+        None if claude => spec.effort.to_string(),
+        None => String::new(),
     };
-    Ok(Resolved { spec, model, effort: Some(effort).filter(|e| !e.is_empty()) })
+    Ok(Resolved { spec, provider, model, effort: Some(effort).filter(|e| !e.is_empty()) })
 }
 
-/// Rechaza al guardar un modelo o esfuerzo que luego no se podría lanzar.
-pub fn validate(cfg: &BTreeMap<String, RoleCfg>) -> Result<(), String> {
+/// Proveedor al que pertenece un id de modelo, por su forma (alias o prefijo).
+fn model_owner(model: &str) -> Option<&'static str> {
+    let m = model.to_ascii_lowercase();
+    if ["opus", "sonnet", "haiku", "fable"].contains(&m.as_str()) || m.starts_with("claude") {
+        return Some("claude");
+    }
+    if m.starts_with("gpt-") || m.starts_with("codex") || (m.len() > 1 && m.starts_with('o') && m[1..2].chars().all(|c| c.is_ascii_digit())) {
+        return Some("codex");
+    }
+    None
+}
+
+/// Revisa modelo y esfuerzo contra la lista de proveedores. Rechaza un modelo de
+/// otro proveedor; uno que la lista no trae (o trae con `verified: false`) solo
+/// queda como aviso de `unverified`. Devuelve los avisos.
+pub fn validate_with(cfg: &BTreeMap<String, RoleCfg>, list: &[Provider]) -> Result<Vec<String>, String> {
+    let mut notes = vec![];
     for r in ROLES {
         let res = resolve(cfg, r.id)?;
-        agents::launch(AGENT, Some(&res.model), res.effort.as_deref(), "x", agents::Profile::for_role(r.read_only), Some(r.id))
+        agents::launch(&res.provider, res.model.as_deref(), res.effort.as_deref(), "x", agents::Profile::for_role(r.read_only), Some(r.id))
             .map_err(|e| format!("{}: {e}", r.label))?;
+        let mine = list.iter().find(|p| p.id == res.provider);
+        if let Some(m) = res.model.as_deref() {
+            let in_mine = mine.is_some_and(|p| p.models.iter().any(|x| x.id == m));
+            let other = list.iter().filter(|p| p.id != res.provider).any(|p| p.models.iter().any(|x| x.id == m))
+                || model_owner(m).is_some_and(|o| o != res.provider);
+            if !in_mine && other {
+                return Err(format!("{}: el modelo {m} no es de {}", r.label, res.provider));
+            }
+            if let Some(p) = mine {
+                if !p.models.iter().any(|x| x.id == m && x.verified) {
+                    notes.push(format!("{}: modelo {m} no verificado en {} (quedará unverified)", r.label, p.id));
+                }
+            }
+        }
+        if let (Some(e), Some(p)) = (res.effort.as_deref(), mine) {
+            if !p.efforts.is_empty() && !p.efforts.iter().any(|x| x == e) {
+                notes.push(format!("{}: esfuerzo {e} no verificado en {} (quedará unverified)", r.label, p.id));
+            }
+        }
     }
-    Ok(())
+    Ok(notes)
+}
+
+/// Rechaza al guardar un modelo o esfuerzo que luego no se podría lanzar, con
+/// la lista de `orch_list_providers` (en las pruebas, sin consultar ninguna CLI).
+pub fn validate(cfg: &BTreeMap<String, RoleCfg>) -> Result<Vec<String>, String> {
+    let list = if cfg!(test) { vec![] } else { providers::list(false) };
+    validate_with(cfg, &list)
 }
 
 /// Lo que ve el coordinador con `lxo roles`.
@@ -88,7 +154,7 @@ pub fn describe(cfg: &BTreeMap<String, RoleCfg>) -> Value {
         let res = resolve(cfg, r.id).ok()?;
         Some(json!({
             "id": r.id, "label": r.label, "purpose": r.purpose, "read_only": r.read_only,
-            "agent": AGENT, "model": res.model, "effort": res.effort,
+            "agent": res.provider, "model": res.model, "effort": res.effort,
         }))
     }).collect();
     json!({ "roles": list })
@@ -102,22 +168,22 @@ mod tests {
     fn resuelve_con_defaults_y_config() {
         let mut cfg = BTreeMap::new();
         let r = resolve(&cfg, "explorador").unwrap();
-        assert_eq!((r.model.as_str(), r.effort), ("haiku", None));
+        assert_eq!((r.model.as_deref(), r.effort), (Some("haiku"), None));
         assert!(r.spec.read_only);
-        cfg.insert("implementador".into(), RoleCfg { model: "opus".into(), effort: "high".into() });
+        cfg.insert("implementador".into(), RoleCfg { model: "opus".into(), effort: "high".into(), ..Default::default() });
         let r = resolve(&cfg, "implementador").unwrap();
-        assert_eq!((r.model.as_str(), r.effort.as_deref()), ("opus", Some("high")));
+        assert_eq!((r.model.as_deref(), r.effort.as_deref()), (Some("opus"), Some("high")));
         // Un esfuerzo vacío guardado a propósito significa «sin --effort».
-        cfg.insert("revisor".into(), RoleCfg { model: String::new(), effort: String::new() });
+        cfg.insert("revisor".into(), RoleCfg { model: String::new(), effort: String::new(), ..Default::default() });
         let r = resolve(&cfg, "revisor").unwrap();
-        assert_eq!((r.model.as_str(), r.effort), ("opus", None));
+        assert_eq!((r.model.as_deref(), r.effort), (Some("opus"), None));
         assert!(resolve(&cfg, "planner").is_err());
     }
 
     #[test]
     fn el_adversario_es_opus_high_y_solo_lectura() {
         let r = resolve(&BTreeMap::new(), "adversario").unwrap();
-        assert_eq!((r.model.as_str(), r.effort.as_deref()), ("opus", Some("high")));
+        assert_eq!((r.model.as_deref(), r.effort.as_deref()), (Some("opus"), Some("high")));
         assert!(r.spec.read_only);
         assert!(defaults().contains_key("adversario"));
     }
@@ -126,10 +192,89 @@ mod tests {
     fn valida_lo_que_se_guarda() {
         assert!(validate(&defaults()).is_ok());
         let mut cfg = defaults();
-        cfg.insert("explorador".into(), RoleCfg { model: "haiku & del".into(), effort: String::new() });
+        cfg.insert("explorador".into(), RoleCfg { model: "haiku & del".into(), effort: String::new(), ..Default::default() });
         assert!(validate(&cfg).is_err());
         let mut cfg = defaults();
-        cfg.insert("explorador".into(), RoleCfg { model: "haiku".into(), effort: "turbo".into() });
+        cfg.insert("explorador".into(), RoleCfg { model: "haiku".into(), effort: "turbo".into(), ..Default::default() });
         assert!(validate(&cfg).is_err());
+    }
+
+    fn codex_list() -> Vec<Provider> {
+        vec![
+            providers::claude(true, Some("2.1.296"), Some(include_str!("testdata/claude-2.1.296-help.txt")), None),
+            providers::codex(true, Some("0.162.1"), Some(include_str!("testdata/codex-0.162.1-debug-models.json")), None),
+        ]
+    }
+
+    fn codex_cfg(role: &str, model: &str, effort: &str) -> BTreeMap<String, RoleCfg> {
+        let mut cfg = defaults();
+        cfg.insert(role.into(), RoleCfg { provider: "codex".into(), model: model.into(), effort: effort.into() });
+        cfg
+    }
+
+    #[test]
+    fn guarda_y_lee_el_proveedor() {
+        // Settings viejos, sin el campo: Claude.
+        let old: BTreeMap<String, RoleCfg> = serde_json::from_str(r#"{"explorador":{"model":"haiku","effort":""}}"#).unwrap();
+        assert_eq!(old["explorador"].provider, "claude");
+        assert_eq!(resolve(&old, "explorador").unwrap().provider, "claude");
+        let cfg = codex_cfg("implementador", "gpt-6.1-sol", "ultra");
+        let text = serde_json::to_string(&cfg).unwrap();
+        let back: BTreeMap<String, RoleCfg> = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, cfg);
+        assert_eq!(back["implementador"].provider, "codex");
+        let d = describe(&back);
+        let imp = d["roles"].as_array().unwrap().iter().find(|r| r["id"] == "implementador").unwrap();
+        assert_eq!((imp["agent"].as_str(), imp["model"].as_str()), (Some("codex"), Some("gpt-6.1-sol")));
+        // Codex sin modelo elegido: no hereda el alias de Claude.
+        let r = resolve(&codex_cfg("revisor", "", ""), "revisor").unwrap();
+        assert_eq!((r.model, r.effort), (None, None));
+        let mut bad = defaults();
+        bad.insert("revisor".into(), RoleCfg { provider: "gemini".into(), ..Default::default() });
+        assert!(resolve(&bad, "revisor").is_err());
+    }
+
+    #[test]
+    fn valida_contra_los_proveedores() {
+        let l = codex_list();
+        // gpt-* con ultra en Codex: pasa sin avisos.
+        let n = validate_with(&codex_cfg("implementador", "gpt-6.1-sol", "ultra"), &l).unwrap();
+        assert!(!n.iter().any(|x| x.starts_with("Implementador")), "{n:?}");
+        // haiku no sale en el --help de Claude 2.1.296: queda unverified, no rechazado.
+        assert!(n.iter().any(|x| x.starts_with("Explorador: modelo haiku")));
+        // Modelo que la lista no trae: unverified, no rechazado.
+        let n = validate_with(&codex_cfg("implementador", "gpt-9-nuevo", "high"), &l).unwrap();
+        assert!(n.iter().any(|x| x.contains("gpt-9-nuevo") && x.contains("unverified")), "{n:?}");
+        // Modelo de otro proveedor: rechazado.
+        let e = validate_with(&codex_cfg("implementador", "opus", "high"), &l).unwrap_err();
+        assert!(e.contains("opus no es de codex"), "{e}");
+        let mut c = defaults();
+        c.insert("implementador".into(), RoleCfg { provider: "claude".into(), model: "gpt-6.1-sol".into(), effort: "high".into() });
+        assert!(validate_with(&c, &l).unwrap_err().contains("no es de claude"));
+        // Sin lista (no se pudo consultar): solo la forma.
+        assert!(validate_with(&codex_cfg("implementador", "opus", ""), &[]).is_err());
+        assert!(validate_with(&defaults(), &l).is_ok());
+    }
+
+    #[test]
+    fn argv_de_codex_para_un_rol() {
+        let cfg = codex_cfg("explorador", "gpt-6.1-sol", "high");
+        let r = resolve(&cfg, "explorador").unwrap();
+        assert!(r.spec.read_only);
+        let profile = agents::Profile::for_role(r.spec.read_only);
+        let p = agents::evaluate_for(&r.provider, profile, Some("explorador"), "wt", agents::Detected::Skip, false, agents::Delivery::FileOrMarkers);
+        // Solo lectura con Codex: el perfil read-only (codex exec, sandbox read-only) y sus avisos.
+        assert_eq!(&p.argv[..2], ["codex", "exec"]);
+        assert!(p.argv.windows(2).any(|w| w == ["--sandbox", "read-only"]), "{:?}", p.argv);
+        assert!(!p.interactive);
+        assert!(p.warnings.iter().any(|w| w == agents::WARN_CODEX_BIG));
+        let l = agents::launch_with(&p, r.model.as_deref(), r.effort.as_deref(), "x").unwrap();
+        assert!(l.command.contains("--model gpt-6.1-sol") && l.command.contains("-c model_reasoning_effort=high"), "{}", l.command);
+        // Un rol que edita con Codex no usa read-only.
+        let cfg = codex_cfg("implementador", "gpt-6.1-sol", "ultra");
+        let r = resolve(&cfg, "implementador").unwrap();
+        let p = agents::evaluate_for(&r.provider, agents::Profile::for_role(false), Some("implementador"), "wt", agents::Detected::Skip, false, agents::Delivery::FileOrMarkers);
+        assert!(!p.argv.iter().any(|a| a == "read-only"));
+        assert!(agents::launch_with(&p, r.model.as_deref(), r.effort.as_deref(), "x").unwrap().command.contains("model_reasoning_effort=ultra"));
     }
 }

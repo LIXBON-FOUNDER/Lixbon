@@ -7,6 +7,7 @@
 mod agents;
 mod approval;
 mod providers;
+mod codex_session;
 mod delivery;
 mod git;
 mod integration;
@@ -562,7 +563,7 @@ impl Core {
                     ));
                 }
                 let r = roles::resolve(&self.settings().roles, id)?;
-                (roles::AGENT.to_string(), Some(r.model), r.effort, r.spec.read_only)
+                (r.provider, r.model, r.effort, r.spec.read_only)
             }
             None => {
                 let agent = s(args, "agent");
@@ -892,11 +893,31 @@ impl Core {
         }
     }
 
+    /// Codex: el modelo efectivo sale de `turn_context.model` de su archivo de
+    /// sesión; si no se puede leer, `unknown`. Nunca se copia del pedido.
+    fn record_codex_model(&self, id: &str) {
+        let (agent, cwd, since) = {
+            let st = self.lock();
+            let Ok(t) = st.task(id) else { return };
+            (t.agent.clone(), t.cwd.clone(), t.created)
+        };
+        if agent != "codex" {
+            return;
+        }
+        let model = codex_session::effective_model(agents::codex_home().map(|h| h.join("sessions")).as_deref(), &cwd, since);
+        let mut st = self.lock();
+        if let Ok(t) = st.task_mut(id) {
+            delivery::set_model_effective(t, &model);
+        }
+        self.commit(&st, &[]);
+    }
+
     fn on_exit(&self, id: &str) {
         let terminal = self.terms.lock().ok()
             .and_then(|mut t| t.remove(id))
             .and_then(|t| t.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned()));
         self.collect(id, terminal, true);
+        self.record_codex_model(id);
         let mut st = self.lock();
         if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
             self.commit(&st, &[msg]);
