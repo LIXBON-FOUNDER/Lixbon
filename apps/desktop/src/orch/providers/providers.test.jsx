@@ -5,6 +5,8 @@ import { listProviders, normalizeProvider, PROVIDERS_COMMAND } from './providers
 import { mockListProviders, MOCK_CLAUDE, MOCK_CODEX } from './mockListProviders';
 import { migrateRoleCfg, migrateRoles, modelOptions, effortOptions, providerOptions, profileForRole } from './roleConfig';
 import { RolesSettings } from './RolesSettings';
+import { normalizeSaveWarnings, isSnapshotResponse } from './roleSaveContract';
+import { mockRoleSaveWarnings } from './mockRoleSaveWarnings';
 import { newAgentEntries, CODEX_NO_CHAT_REASON } from './newAgentEntries';
 import { NewAgentItems } from './NewAgentItems';
 import { mockResolvePolicy, CODEX_LARGE_REPORT_WARNING, CODEX_COPY_BLOCK_WARNING } from '../policy/mockResolvePolicy';
@@ -181,5 +183,41 @@ describe('proveedor guardado por el host (660a0be: RoleCfg.provider y describe.a
     expect(screen.getByTitle('Modelo del implementador').textContent).toContain('Modelo de config.toml de Codex');
     expect(screen.queryByTestId('role-unverified-implementador')).toBeNull();
     expect(screen.queryByTestId('role-host-agent-implementador')).toBeNull();
+  });
+});
+
+describe('avisos al guardar los roles (respuesta { ok, warnings: { <rol>: [..] } })', () => {
+  const RESP = { ok: true, warnings: { explorador: ['Explorador: modelo haiku no verificado en claude (quedará unverified)'], revisor: ['Revisor: esfuerzo ultra no verificado en claude (quedará unverified)'] } };
+  it('forma confirmada por rol: solo los roles con avisos', () => {
+    expect(normalizeSaveWarnings(RESP)).toEqual({ flat: [], byRole: RESP.warnings });
+    expect(normalizeSaveWarnings({ ok: true, warnings: {} })).toEqual({ flat: [], byRole: {} });
+    expect(normalizeSaveWarnings({ ok: true, warnings: { explorador: ['a', 3, ''], revisor: [] } })).toEqual({ flat: [], byRole: { explorador: ['a'] } });
+    expect(isSnapshotResponse(RESP)).toBe(false);
+  });
+  it('por rol en la UI: cada aviso bajo su rol y nada arriba', async () => {
+    render(<RolesSettings roles={ROLES} settings={{ roles: {} }} providers={await providers()} onSave={vi.fn()} resolver={mockResolvePolicy} saveWarnings={normalizeSaveWarnings(RESP)} />);
+    expect(within(screen.getByTestId('role-explorador')).getByTestId('role-save-warnings-explorador').textContent).toContain('modelo haiku no verificado');
+    expect(screen.queryByTestId('role-save-warnings-implementador')).toBeNull();
+    expect(screen.queryByTestId('roles-save-warnings')).toBeNull();
+  });
+  it('mock con la forma confirmada', () => {
+    const r = mockRoleSaveWarnings({ roles: { explorador: { provider: 'claude', model: 'haiku', effort: '' }, implementador: { provider: 'codex', model: 'gpt-6-sol', effort: 'turbo' }, revisor: { model: 'opus', effort: 'high' } } }, { explorador: 'Explorador' });
+    expect(r).toEqual({ ok: true, warnings: {
+      explorador: ['Explorador: modelo haiku no verificado en claude (quedará unverified)'],
+      implementador: ['implementador: esfuerzo turbo no verificado en codex (quedará unverified)'],
+    } });
+  });
+  it('respaldo: lista plana arriba del bloque de roles', async () => {
+    expect(normalizeSaveWarnings({ ok: true, warnings: ['x', null] })).toEqual({ flat: ['x'], byRole: {} });
+    render(<RolesSettings roles={ROLES} settings={{ roles: {} }} providers={await providers()} onSave={vi.fn()} resolver={mockResolvePolicy}
+      saveWarnings={normalizeSaveWarnings({ ok: true, warnings: ['Implementador: esfuerzo ultra no verificado en claude (quedará unverified)'] })} />);
+    const top = screen.getByTestId('roles-save-warnings');
+    expect(top.textContent).toContain('esfuerzo ultra');
+    expect(top.compareDocumentPosition(screen.getByTestId('role-explorador')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it('formas ausentes o raras y snapshot viejo: sin avisos', () => {
+    for (const v of [undefined, null, {}, { ok: true }, { warnings: null }, { warnings: 'texto' }, 5]) expect(normalizeSaveWarnings(v)).toEqual({ flat: [], byRole: {} });
+    expect(normalizeSaveWarnings({ settings: {}, runs: {} })).toEqual({ flat: [], byRole: {} });
+    expect(isSnapshotResponse({ settings: {}, runs: {} })).toBe(true);
   });
 });

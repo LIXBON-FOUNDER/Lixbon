@@ -5,6 +5,7 @@ import { Select } from '../../components/Select';
 import { SectionHead } from '../../sections/Settings/SettingsParts';
 import { resolvePolicy as defaultResolver } from '../policy/resolvePolicy';
 import { DEFAULT_PROVIDER, UNVERIFIED_LABEL, providerLabel } from './providersContract';
+import { EMPTY_SAVE_WARNINGS } from './roleSaveContract';
 import { migrateRoleCfg, providerOptions, modelOptions, effortOptions, isModelVerified, profileForRole } from './roleConfig';
 
 /** Advertencias de la política de solo lectura (las da orch_resolve_policy; aquí solo se pintan). */
@@ -33,7 +34,8 @@ function ReadOnlyWarnings({ role, provider, model, resolver }) {
  * @param {{ roles: Array<{id,label,purpose,read_only,model,effort,agent?}>, settings: object,
  *   providers: Array|null, onSave: (patch: object) => any, resolver?: Function }} props
  */
-export function RolesSettings({ roles, settings, providers, onSave, resolver = defaultResolver }) {
+export function RolesSettings({ roles, settings, providers, onSave, resolver = defaultResolver, saveWarnings = EMPTY_SAVE_WARNINGS }) {
+  const sw = saveWarnings || EMPTY_SAVE_WARNINGS;
   // Proveedor elegido aquí que el host aún no devolvió en su configuración.
   const [chosen, setChosen] = useState({});
   const list = providers || [];
@@ -61,6 +63,11 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
       />
       <div className="ssec ssec--card ssec--rows">
         {providers === null && <span className="srow__hint">Consultando proveedores…</span>}
+        {sw.flat?.length > 0 && (
+          <ul className="orch__rolewarn" data-testid="roles-save-warnings" aria-label="Avisos al guardar los roles">
+            {sw.flat.map((w) => <li key={w}>{w}</li>)}
+          </ul>
+        )}
         {roles.map((r) => {
           const cfg = cfgOf(r);
           const stored = settings.roles?.[r.id]?.provider;
@@ -85,6 +92,11 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
                   <span className="srow__hint is-warn" role="alert" data-testid={`role-host-agent-${r.id}`}>
                     El host todavía lanza este rol con {providerLabel(hostAgent || stored || DEFAULT_PROVIDER)}: no guardó el proveedor elegido.
                   </span>
+                )}
+                {sw.byRole?.[r.id]?.length > 0 && (
+                  <ul className="orch__rolewarn" data-testid={`role-save-warnings-${r.id}`} aria-label={`Avisos al guardar ${r.label}`}>
+                    {sw.byRole[r.id].map((w) => <li key={w}>{w}</li>)}
+                  </ul>
                 )}
                 {r.read_only && providerId === 'codex' && <ReadOnlyWarnings role={r.id} provider="codex" model={model} resolver={resolver} />}
               </div>

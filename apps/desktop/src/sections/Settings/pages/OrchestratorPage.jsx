@@ -75,7 +75,7 @@ function Team({ enabled, team }) {
 }
 
 export function OrchestratorPage() {
-  const { snap, agents, init, loadAgents, saveSettings, installSkill, uninstallSkill } = useOrchStore();
+  const { snap, saveWarnings, agents, init, loadAgents, saveSettings, installSkill, uninstallSkill } = useOrchStore();
   const settings = snap?.settings;
   const team = useTeam(!!settings?.enabled);
   const { providers } = useProviders(listProviders);
@@ -120,7 +120,7 @@ export function OrchestratorPage() {
         </div>
       </section>
 
-      <RolesSettings roles={snap.roles || []} settings={settings} providers={providers} onSave={saveSettings} />
+      <RolesSettings roles={snap.roles || []} settings={settings} providers={providers} onSave={saveSettings} saveWarnings={saveWarnings} />
 
       <Team enabled={!!settings.enabled} team={team} />
 

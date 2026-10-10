@@ -1,6 +1,7 @@
 // EffectivePolicyView.jsx — "Política efectiva": lo que se va a lanzar, antes de lanzarlo.
 import { useEffect, useState } from 'react';
 import { PROFILES, PROVIDERS, resolvePolicy as defaultResolver } from './resolvePolicy';
+import { CODEX_CONFIG_MODEL_TEXT } from '../ModelInfo';
 import './policy.css';
 
 const STATUS_TEXT = { ok: 'Lista para lanzar', blocked: 'Bloqueada', unverified: 'No verificado' };
@@ -111,6 +112,10 @@ export function EffectivePolicyView({ worktree, role = null, model = null, initi
           <dt>Perfil</dt><dd>{profileLabel(policy.profile)}</dd>
           <dt>Rol</dt><dd data-testid="policy-role">{policy.role || 'Sin rol (solo consulta)'}</dd>
           <dt>Proveedor</dt><dd>{providerLabel(policy.provider)}</dd>
+          {(model || policy.provider === 'codex') && <>
+            <dt>Modelo pedido</dt>
+            <dd data-testid="policy-model" className={model ? 'mono' : ''}>{model || CODEX_CONFIG_MODEL_TEXT}</dd>
+          </>}
           <dt>Versión CLI detectada</dt><dd className="mono">{policy.cli_version || 'no detectada'}</dd>
           <dt>Comando (argv exacto)</dt>
           <dd><code data-testid="policy-argv" className="mono"><ArgvDisplay argv={policy.argv} /></code></dd>

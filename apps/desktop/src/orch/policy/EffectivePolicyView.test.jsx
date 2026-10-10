@@ -281,3 +281,19 @@ describe('mockResolvePolicy (espejo del host bb0b013)', () => {
     expect((await mockResolvePolicy({ ...base, profile: 'explorar' })).warnings).not.toContain(CODEX_LARGE_REPORT_WARNING);
   });
 });
+
+describe('modelo pedido en la política efectiva', () => {
+  it('Codex sin modelo: "el que defina config.toml"', async () => {
+    render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProvider="codex" />);
+    expect((await screen.findByTestId('policy-model')).textContent).toBe('el que defina config.toml');
+  });
+  it('con modelo: su id tal cual', async () => {
+    render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProvider="codex" model="gpt-6-sol" />);
+    expect((await screen.findByTestId('policy-model')).textContent).toBe('gpt-6-sol');
+  });
+  it('Claude sin modelo: no se muestra la fila (no hay config.toml)', async () => {
+    render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" />);
+    await screen.findByTestId('policy-argv');
+    expect(screen.queryByTestId('policy-model')).toBeNull();
+  });
+});
