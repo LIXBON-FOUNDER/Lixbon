@@ -108,12 +108,14 @@ export function PendingSpawnDetail({ item, busy, onApprove, onReject }) {
   const [reason, setReason] = useState('');
   const policy = useMemo(() => pendingPolicy(item), [item]);
   const summary = spawnField(item, 'specSummary');
+  const into = spawnField(item, 'integrateInto');
   return (
     <div className="spawns__detail" aria-label="Detalle del lanzamiento pendiente">
       <p className="spawns__lead">
         El coordinador <b>{spawnField(item, 'parentTask')}</b> quiere lanzar esta tarea. No arranca hasta que la apruebes.
       </p>
       {summary && <p className="spawns__summary">{summary}</p>}
+      {into && <p className="spawns__summary" data-testid="spawn-integrate-into">Se integrará en <span className="mono">{into}</span></p>}
       <EffectivePolicyView policy={policy} launchLabel={busy ? 'Enviando…' : 'Aprobar lanzamiento'} busy={busy} onLaunch={(l) => onApprove(item, l)} />
       <div className="spawns__reject">
         <label className="spawns__reason">

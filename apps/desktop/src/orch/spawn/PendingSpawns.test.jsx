@@ -127,6 +127,15 @@ describe('PendingSpawnsPanel', () => {
     expect(screen.getByTestId('spawn-p1')).toBeTruthy();
   });
 
+  it('muestra integrate_into del pendiente si el host lo manda', async () => {
+    const { api } = makeApi([pending('p1', {}, { integrate_into: 'master' }), pending('p2')]);
+    render(<PendingSpawnsPanel api={api} />);
+    await open('p1');
+    expect(screen.getByTestId('spawn-integrate-into').textContent).toContain('master');
+    await open('p2');
+    expect(screen.queryByTestId('spawn-integrate-into')).toBeNull();
+  });
+
   it('el evento orch-spawn-resolved quita el pendiente', async () => {
     const { api, h } = makeApi([pending('p1')]);
     render(<PendingSpawnsPanel api={api} />);

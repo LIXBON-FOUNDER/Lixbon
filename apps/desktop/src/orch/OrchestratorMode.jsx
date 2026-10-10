@@ -17,6 +17,7 @@ import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 import { usePendingSpawns, PendingSpawnList, PendingSpawnDetail, SpawnNotice } from './spawn/PendingSpawns';
 import { IntegrationDialog } from './integration/IntegrationDialog';
+import { canIntegrate as canIntegrateTask, integrationTarget } from './canIntegrate';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
 const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
@@ -272,8 +273,8 @@ function TaskView({ task, snap }) {
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
   const now = useNow(!final, 1000);
-  // Integración humana: solo tareas hijas terminadas, con rama y sin fusionar.
-  const canIntegrate = final && task.status === 'done' && parent && task.branch && !task.merged;
+  // Regla única en ./canIntegrate.js.
+  const canIntegrate = canIntegrateTask(task, snap);
   const [integrating, setIntegrating] = useState(false);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
@@ -318,8 +319,8 @@ function TaskView({ task, snap }) {
       </div>
       {canIntegrate && integrating && (
         <div className="orch__integrate">
-          {/* Destino: la rama del padre si la tiene; si no, el host decide (ver pregunta abierta). */}
-          <IntegrationDialog task={task.id} branch={task.branch} target={parent.branch || 'la rama del coordinador'} />
+          {/* Destino: integrate_into del host; si falta, la rama del padre. */}
+          <IntegrationDialog task={task.id} branch={task.branch} target={integrationTarget(task, snap)} />
         </div>
       )}
       <div className="orch__body">
