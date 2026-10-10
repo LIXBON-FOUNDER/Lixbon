@@ -9,9 +9,11 @@ export const MOCK_CODEX_TERM_WARNINGS = [
 
 function policyOf({ cwd, model, effort }) {
   const argv = ['codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--cd', cwd];
-  if (model) argv.push('--model', model);
+  if (model) argv.push('-m', model);
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
-  return { policy: 'workspace-write · on-request', argv, warnings: [...MOCK_CODEX_TERM_WARNINGS] };
+  // Misma forma que build() en codex_term.rs (cd76e40).
+  const policy = { provider: 'codex', profile: 'terminal', cli_version: '0.162.1', model: model || 'el que defina config.toml', effort: effort || null, interactive: true, status: 'unverified' };
+  return { policy, argv, warnings: [...MOCK_CODEX_TERM_WARNINGS] };
 }
 
 export function createMockCodexTerm() {
@@ -47,7 +49,7 @@ export function createMockCodexTerm() {
           const p = policyOf(a);
           if (p.warnings.length && a.acknowledged !== true) throw new Error(`${NEEDS_ACK}: confirma los avisos antes de abrir Codex`);
           const term_id = `codex-mock-${++n}`;
-          terms.set(term_id, { open: true, cols: a.cols, rows: a.rows, cwd: a.cwd, policy: p.policy, code: null });
+          terms.set(term_id, { open: true, cols: a.cols, rows: a.rows, cwd: a.cwd, model: a.model ?? null, effort: a.effort ?? null, argv: p.argv, policy: p.policy, code: null });
           setTimeout(() => emit(E.output, { term_id, data: `\x1b[90m[mock] ${p.argv.join(' ')}\x1b[0m\r\n> ` }), 0);
           return { term_id, ...p };
         }
@@ -65,7 +67,7 @@ export function createMockCodexTerm() {
           return null;
         }
         case C.list:
-          return [...terms.entries()].map(([term_id, t]) => ({ term_id, cwd: t.cwd, policy: t.policy, exited: !t.open, code: t.code }));
+          return [...terms.entries()].map(([term_id, t]) => ({ term_id, cwd: t.cwd, model: t.model, effort: t.effort, policy: t.policy, argv: t.argv, exited: !t.open, code: t.code }));
         case C.buffer: {
           const b = out.get(a.term_id);
           if (!b) throw new Error('terminal desconocida');

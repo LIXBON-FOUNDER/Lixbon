@@ -7,13 +7,14 @@ import { listen } from '@tauri-apps/api/event';
 
 export const CODEX_TERM_COMMANDS = Object.freeze({
   policy: 'codex_term_policy',   // { cwd, model?, effort? } → { policy, argv, warnings }; no lanza nada
+                                 //   policy (host cd76e40) es un objeto: { provider, profile, cli_version, model, effort, interactive, status }
   open: 'codex_term_open',       // { cwd, model?, effort?, cols?, rows?, acknowledged } → { term_id, policy, argv, warnings }
   write: 'codex_term_write',     // { term_id, data }
   resize: 'codex_term_resize',   // { term_id, cols, rows } (mínimo 200 columnas)
   close: 'codex_term_close',     // { term_id }
   buffer: 'codex_term_buffer',   // { term_id } → { data, seq, cols, rows, alt_screen }  (pantalla renderizada por vt100; data empieza con \x1b[0m; seq = el último incluido)
   redraw: 'codex_term_redraw',   // { term_id }  respaldo: el host vuelve a pintar la pantalla
-  list: 'codex_term_list',       // () → [{ term_id, cwd, policy, exited, code }]  (rehacer pestañas al arrancar/recargar)
+  list: 'codex_term_list',       // () → [{ term_id, cwd, model, effort, policy, argv, exited, code }]  (rehacer pestañas al arrancar/recargar)
 });
 
 export const CODEX_TERM_EVENTS = Object.freeze({
@@ -25,10 +26,9 @@ export const CODEX_TERM_EVENTS = Object.freeze({
 export const NEEDS_ACK = 'needs_ack';
 export const isNeedsAck = (e) => String(e?.message ?? e ?? '').includes(NEEDS_ACK);
 
-// Formato de `data`: el mismo que el PTY de los agentes del orquestador. Hoy ese PTY
-// emite texto (AgentTerminal hace term.write(e.payload) y orch_term_write recibe la
-// cadena de onData), así que aquí es texto tal cual. Si el host pasa a base64, se
-// cambia SOLO en estas dos funciones.
+// Formato de `data`: texto UTF-8 con sus secuencias ANSI, sin base64 (confirmado en
+// codex_term.rs, cd76e40: el mismo que la PTY de los agentes). Pasa tal cual; si cambiara,
+// se toca SOLO en estas dos funciones.
 export const TERM_DATA_ENCODING = 'text';
 export function decodeTermData(data) {
   return typeof data === 'string' ? data : '';
@@ -84,10 +84,30 @@ export function appendCapped(buf, text, cap = FALLBACK_BUFFER_CAP) {
   return TRUNCATE_RESET + out.slice(i);
 }
 
+const optStr = (v) => (typeof v === 'string' && v ? v : null);
+
 /** Entrada de codex_term_list normalizada; null si no trae term_id. */
 export function normalizeListItem(x) {
   if (!x || typeof x.term_id !== 'string' || !x.term_id) return null;
-  return { term_id: x.term_id, cwd: typeof x.cwd === 'string' ? x.cwd : '', policy: x.policy ?? null, exited: x.exited === true, code: x.code ?? null };
+  return {
+    term_id: x.term_id, cwd: typeof x.cwd === 'string' ? x.cwd : '', model: optStr(x.model), effort: optStr(x.effort),
+    policy: x.policy ?? null, argv: Array.isArray(x.argv) ? x.argv.filter((a) => typeof a === 'string') : [],
+    exited: x.exited === true, code: x.code ?? null,
+  };
+}
+
+const STATUS_TEXT = { ok: 'lista', unverified: 'sin verificar', blocked: 'bloqueada' };
+/** Texto legible de `policy` (objeto en el host; se acepta también una cadena). Nunca un objeto crudo. */
+export function policyText(policy) {
+  if (typeof policy === 'string') return policy;
+  if (!policy || typeof policy !== 'object') return '';
+  const parts = [];
+  if (policy.profile) parts.push(policy.profile === 'terminal' ? 'Terminal interactiva' : String(policy.profile));
+  if (policy.cli_version) parts.push(`Codex ${policy.cli_version}`);
+  if (policy.model) parts.push(`modelo: ${policy.model}`);
+  if (policy.effort) parts.push(`esfuerzo: ${policy.effort}`);
+  if (policy.status) parts.push(STATUS_TEXT[policy.status] || String(policy.status));
+  return parts.join(' · ');
 }
 
 /** seq válido (entero ≥ 0) o null si no viene. */

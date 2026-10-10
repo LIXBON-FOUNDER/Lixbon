@@ -91,7 +91,7 @@ export const useCodexTermStore = create((set, get) => ({
     const list = await api.list();
     const known = new Set(get().tabs.map((t) => t.term_id));
     const add = list.filter((x) => !known.has(x.term_id)).map((x) => ({
-      key: `codex-tab-${++seq}`, term_id: x.term_id, cwd: x.cwd, model: null, effort: null, argv: [], warnings: [], policy: x.policy, exited: x.exited, code: x.code,
+      key: `codex-tab-${++seq}`, term_id: x.term_id, cwd: x.cwd, model: x.model, effort: x.effort, argv: x.argv, warnings: [], policy: x.policy, exited: x.exited, code: x.code,
     }));
     if (!add.length) return 0;
     const buffers = { ...get().buffers };
