@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './toastStore';
-import { normalizeSaveWarnings, snapshotFromSaveResponse, EMPTY_SAVE_WARNINGS } from '../orch/providers/roleSaveContract';
+import { normalizeSaveWarnings, snapshotFromSaveResponse, providersOfSettings, EMPTY_SAVE_WARNINGS } from '../orch/providers/roleSaveContract';
 import { TERMINAL_APPROVAL, TERMINAL_APPROVAL_TEXT } from '../orch/terminalApprovalContract';
 
 export const AGENT_LABELS = {
@@ -56,12 +56,15 @@ export const useOrchStore = create((set, get) => ({
         const { mockRoleSaveWarnings } = await import('../orch/providers/mockRoleSaveWarnings.js');
         res = mockRoleSaveWarnings(settings, snapshotFromSaveResponse(res));
       }
-      set({ saveWarnings: normalizeSaveWarnings(res) });
+      // Se recuerda con qué proveedor por rol se calcularon (para no enseñarlos en otra fila).
+      set({ saveWarnings: normalizeSaveWarnings(res, providersOfSettings(settings)) });
       // { ok, warnings, snapshot }: se usa su snapshot; solo si falta se pide orch_snapshot.
       const snap = snapshotFromSaveResponse(res);
       if (snap) set({ snap });
       else await get().refresh();
     } catch (e) {
+      // Los avisos del guardado anterior ya no corresponden a lo que se intentó guardar.
+      set({ saveWarnings: EMPTY_SAVE_WARNINGS });
       toast(`No se pudo guardar: ${e}`, { tone: 'error' });
     }
   },

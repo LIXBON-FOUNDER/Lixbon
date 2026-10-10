@@ -36,12 +36,20 @@ describe('saveSettings', () => {
     await useOrchStore.getState().saveSettings({});
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(useOrchStore.getState().snap).toEqual(SNAP);
-    expect(useOrchStore.getState().saveWarnings).toEqual({ flat: [], byRole: {} });
+    expect(useOrchStore.getState().saveWarnings).toMatchObject({ flat: [], byRole: {} });
   });
   it('tareas con session_ref y attempt_started en el snapshot no rompen nada', async () => {
     const snap = { ...SNAP, tasks: { t1: { id: 't1', agent: 'codex', status: 'running', session_ref: 'rollout-2026-10-09.jsonl', attempt_started: 1_800_000_000_000 } } };
     vi.mocked(invoke).mockResolvedValue({ ok: true, warnings: {}, snapshot: snap });
     await useOrchStore.getState().saveSettings({});
     expect(useOrchStore.getState().snap.tasks.t1.session_ref).toBe('rollout-2026-10-09.jsonl');
+  });
+  it('guarda con qué proveedor por rol se calcularon los avisos; si falla el guardado, los limpia', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, warnings: W, snapshot: SNAP });
+    await useOrchStore.getState().saveSettings({ roles: SNAP.settings.roles });
+    expect(useOrchStore.getState().saveWarnings.providers).toEqual({ explorador: 'codex' });
+    vi.mocked(invoke).mockRejectedValue('Explorador: el modelo haiku no es de codex');
+    await useOrchStore.getState().saveSettings({ roles: { explorador: { provider: 'codex', model: 'haiku', effort: '' } } });
+    expect(useOrchStore.getState().saveWarnings).toEqual({ flat: [], byRole: {} });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
-import { ModelInfo, ModelMismatchBadge, modelInfo, MODEL_MISMATCH_TEXT, PLAN_MODE_TEXT, CODEX_CONFIG_MODEL_TEXT } from './ModelInfo';
+import { ModelInfo, ModelMismatchBadge, modelInfo, REPORTED_BY_CODEX_LABEL, MODEL_MISMATCH_TEXT, PLAN_MODE_TEXT, CODEX_CONFIG_MODEL_TEXT } from './ModelInfo';
 
 afterEach(cleanup);
 
@@ -42,7 +42,7 @@ describe('ModelInfo', () => {
   it('snapshot viejo sin campos de modelo: no pinta nada ni falla', () => {
     const { container } = render(<><ModelInfo task={{ id: 't1', model: 'opus' }} /><ModelMismatchBadge task={{ id: 't1' }} /></>);
     expect(container.textContent).toBe('');
-    expect(modelInfo(undefined)).toEqual({ requested: null, effective: null, mismatch: false, fromConfig: false, planMode: false });
+    expect(modelInfo(undefined)).toEqual({ requested: null, effective: null, mismatch: false, fromConfig: false, modelSource: null, sessionMatch: undefined, planMode: false });
   });
 
   it('model_mismatch distinto de true (p. ej. "true") no cuenta', () => {
@@ -69,5 +69,25 @@ describe('ModelInfo', () => {
   it('Codex sin modelo y efectivo desconocido: solo el texto de config.toml, sin nombre inventado', () => {
     const { container } = render(<ModelInfo task={{ agent: 'codex', model_requested: null, model_effective: null }} />);
     expect(container.textContent).toBe(`Pedido: ${CODEX_CONFIG_MODEL_TEXT}`);
+  });
+
+  it('model_source session_declared: "Reportado por Codex" en vez de "Respondió"', () => {
+    render(<ModelInfo task={{ agent: 'codex', model_requested: 'gpt-6-sol', model_effective: 'gpt-6-sol', model_source: 'session_declared', session_match: 'exact' }} />);
+    expect(screen.getByTestId('model-effective-label').textContent).toBe(REPORTED_BY_CODEX_LABEL);
+    expect(screen.getByTestId('task-model').textContent).toContain('Reportado por Codex: gpt-6-sol');
+    expect(screen.getByTestId('task-model').textContent).not.toContain('Respondió');
+  });
+  it('otros model_source o ausente: se mantiene "Respondió"', () => {
+    for (const model_source of ['stream_json', 'session_id', 'cwd_time', 'unknown', undefined]) {
+      render(<ModelInfo task={{ model_requested: 'haiku', model_effective: 'claude-haiku-5-5', model_source }} />);
+      expect(screen.getByTestId('model-effective-label').textContent).toBe('Respondió');
+      cleanup();
+    }
+  });
+  it('session_match se pasa sin tocar', () => {
+    const v = { score: 0.4, why: ['cwd'] };
+    expect(modelInfo({ session_match: v }).sessionMatch).toBe(v);
+    expect(modelInfo({ session_match: 'cwd_time' }).sessionMatch).toBe('cwd_time');
+    expect(modelInfo({ model_source: 'session_declared' }).modelSource).toBe('session_declared');
   });
 });
