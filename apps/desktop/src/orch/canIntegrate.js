@@ -20,9 +20,11 @@ export function mergedCommitShort(task) {
 /** Visible solo para una tarea hija (no el coordinador), terminada con status 'done',
     con rama y sin integración registrada.
     Revisión de diff: orch_snapshot manda por tarea `last_review: { decision, head_commit, at } | null`.
-    - Objeto o null (host con revisión): Integrar exige decision 'accepted' y, si se conoce
-      task.head_commit, que last_review.head_commit sea ese mismo commit (un diff aceptado
-      sobre un head anterior no vale). null = todavía no hay revisión, así que no se integra.
+    Solo cuenta la última revisión (aceptar y luego rechazar el mismo head no integra).
+    - Objeto (host con revisión): Integrar exige decision 'accepted' y que last_review.head_commit
+      sea task.head_commit. Si falta task.head_commit no se habilita (un diff aceptado sobre
+      un head anterior, o sobre un head que no se conoce, no vale).
+    - null: todavía no hay revisión, así que no se integra.
     - undefined (host anterior sin el campo): no se exige revisión, como antes. */
 export function canIntegrate(task) {
   if (!task || !task.parent) return false;
@@ -38,7 +40,7 @@ export function isReviewAccepted(task) {
   const lr = task?.last_review;
   if (lr === undefined) return true;
   if (!lr || lr.decision !== 'accepted') return false;
-  if (task.head_commit && lr.head_commit !== task.head_commit) return false;
+  if (!task.head_commit || lr.head_commit !== task.head_commit) return false;
   return true;
 }
 

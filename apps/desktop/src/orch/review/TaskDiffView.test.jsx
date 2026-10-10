@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { TaskDiffView } from './TaskDiffView';
-import { invokeReviewTask, invokeTaskDiff } from './taskReview';
-import { REVIEW_COMMANDS, reviewArgs } from './reviewContract';
+import { invokeReviewTask, invokeTaskDiff, subscribeTaskReviewed } from './taskReview';
+import { REVIEW_COMMANDS, REVIEW_EVENTS, reviewArgs, isNotFound } from './reviewContract';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const HEAD = '1234567890abcdef1234567890abcdef12345678';
@@ -113,8 +115,25 @@ describe('TaskDiffView', () => {
     expect(screen.queryByTestId('tdv-head-moved')).toBeNull();
   });
 
-  it('not_found y errores de uso se muestran', async () => {
-    const api = makeApi({ review: vi.fn(async () => ({ error: 'not_found' })) });
+  it('not_found al cargar (rechazo de texto) se muestra como tarea inexistente', async () => {
+    render(<TaskDiffView taskId="t1" api={makeApi({ fetchDiff: vi.fn(async () => { throw 'not_found: t1'; }) })} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('no encuentra');
+  });
+
+  it('orch-task-reviewed de esta tarea muestra la última decisión y avisa; ignora otras tareas', async () => {
+    let cb; const onReviewed = vi.fn();
+    const api = makeApi({ subscribe: vi.fn((f) => { cb = f; return () => {}; }) });
+    render(<TaskDiffView taskId="t1" api={api} onReviewed={onReviewed} />);
+    await screen.findByTestId('tdv-head');
+    act(() => cb({ task_id: 'otra', decision: 'accepted', head_commit: HEAD, at: 'x' }));
+    expect(screen.queryByTestId('tdv-last-review')).toBeNull();
+    act(() => cb({ task_id: 't1', decision: 'rejected', head_commit: HEAD, at: 'x' }));
+    expect(screen.getByTestId('tdv-last-review').textContent).toContain('rechazado en 1234567');
+    expect(onReviewed).toHaveBeenCalledWith({ task_id: 't1', decision: 'rejected', head_commit: HEAD, at: 'x' });
+  });
+
+  it('not_found al decidir (rechazo de texto) se muestra', async () => {
+    const api = makeApi({ review: vi.fn(async () => { throw 'not_found: t1'; }) });
     render(<TaskDiffView taskId="t1" api={api} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Aceptar' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar aceptar' }));
@@ -131,10 +150,22 @@ describe('taskReview adaptador', () => {
     expect(invoke).toHaveBeenLastCalledWith(REVIEW_COMMANDS.review, { task_id: 't1', decision: 'rejected', head_commit: 'h' });
     expect(reviewArgs({ task_id: 't', decision: 'rejected', head_commit: 'h', comment: ' no ' }).comment).toBe('no');
   });
-  it('un rechazo estructurado del host se devuelve como resultado', async () => {
-    invoke.mockRejectedValueOnce({ error: 'head_moved', found_commit: 'abc' });
+  it('head_moved llega como respuesta normal y not_found como rechazo de texto', async () => {
+    invoke.mockResolvedValueOnce({ error: 'head_moved', found_commit: 'abc' });
     expect(await invokeReviewTask({ task_id: 't1', decision: 'accepted', head_commit: 'h' })).toEqual({ error: 'head_moved', found_commit: 'abc' });
-    invoke.mockRejectedValueOnce('texto');
-    await expect(invokeReviewTask({ task_id: 't1', decision: 'accepted', head_commit: 'h' })).rejects.toBe('texto');
+    invoke.mockRejectedValueOnce('not_found: t1');
+    await expect(invokeReviewTask({ task_id: 't1', decision: 'accepted', head_commit: 'h' })).rejects.toBe('not_found: t1');
+    expect(isNotFound('not_found: t1')).toBe(true);
+    expect(isNotFound('otra cosa')).toBe(false);
+  });
+  it('subscribeTaskReviewed escucha orch-task-reviewed y entrega el payload', async () => {
+    let handler; const un = vi.fn();
+    listen.mockImplementationOnce((name, h) => { handler = h; expect(name).toBe(REVIEW_EVENTS.reviewed); return Promise.resolve(un); });
+    const cb = vi.fn();
+    const off = subscribeTaskReviewed(cb);
+    handler({ payload: { task_id: 't1', decision: 'accepted', head_commit: 'h', at: 'x' } });
+    expect(cb).toHaveBeenCalledWith({ task_id: 't1', decision: 'accepted', head_commit: 'h', at: 'x' });
+    await Promise.resolve(); off();
+    expect(un).toHaveBeenCalled();
   });
 });

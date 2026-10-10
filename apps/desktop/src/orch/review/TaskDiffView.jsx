@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultReviewApi } from './taskReview';
-import { REVIEW_DECISIONS, REVIEW_ERRORS, BASE_SOURCES, shortSha, structuredError, errorText } from './reviewContract';
+import { REVIEW_DECISIONS, REVIEW_ERRORS, BASE_SOURCES, shortSha, structuredError, errorText, isNotFound } from './reviewContract';
 import './review.css';
 
 const STATUS_LABELS = { added: 'Nuevo', modified: 'Modificado', deleted: 'Eliminado', renamed: 'Renombrado' };
@@ -26,13 +26,14 @@ function Patch({ patch }) {
   );
 }
 
-export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided }) {
+export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onReviewed }) {
   const [state, setState] = useState({ status: 'loading' });
   const [confirm, setConfirm] = useState(null); // 'accepted' | 'rejected' | null
   const [comment, setComment] = useState('');
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);   // { ok... } | { error: ... }
   const [sendError, setSendError] = useState(null);
+  const [lastEvent, setLastEvent] = useState(null); // último orch-task-reviewed de esta tarea
   const busy = useRef(false);
   const reqId = useRef(0);
 
@@ -43,15 +44,24 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided }) {
     try {
       const d = await api.fetchDiff(taskId);
       if (id !== reqId.current) return;
-      if (structuredError(d)) setState({ status: 'error', error: d.error });
-      else setState({ status: 'ready', diff: d });
+      setState({ status: 'ready', diff: d });
     } catch (e) {
       if (id !== reqId.current) return;
-      setState({ status: 'error', error: errorText(e) });
+      setState({ status: 'error', error: errorText(e), notFound: isNotFound(e) });
     }
   }, [api, taskId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // orch-task-reviewed: refleja la última decisión de esta tarea (también si llegó de otra ventana).
+  useEffect(() => {
+    if (!api.subscribe) return undefined;
+    return api.subscribe((p) => {
+      if (!p || p.task_id !== taskId) return;
+      setLastEvent(p);
+      onReviewed?.(p);
+    });
+  }, [api, taskId, onReviewed]);
 
   async function send() {
     if (busy.current || state.status !== 'ready' || !confirm) return;
@@ -62,7 +72,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided }) {
       setResult(r);
       if (!structuredError(r)) { setConfirm(null); onDecided?.(r); }
     } catch (e) {
-      setSendError(errorText(e));
+      setSendError(isNotFound(e) ? 'El host no encuentra esta tarea.' : errorText(e));
     } finally {
       busy.current = false; setSending(false);
     }
@@ -70,7 +80,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided }) {
 
   if (state.status === 'loading') return <div className="tdv" role="status">Cargando diff…</div>;
   if (state.status === 'error') {
-    const msg = state.error === REVIEW_ERRORS.notFound ? 'El host no encuentra esta tarea.' : state.error;
+    const msg = state.notFound ? 'El host no encuentra esta tarea.' : state.error;
     return (
       <div className="tdv">
         <div className="tdv__notice tdv__notice--error" role="alert">No se pudo cargar el diff: {msg}</div>
@@ -128,6 +138,11 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided }) {
           {done.decision === REVIEW_DECISIONS.accepted ? 'Diff aceptado' : 'Diff rechazado'} en <span className="mono">{shortSha(done.head_commit)}</span>.
         </div>
       )}
+      {lastEvent && !done && (
+        <div className="tdv__notice" data-testid="tdv-last-review">
+          Última revisión: {lastEvent.decision === REVIEW_DECISIONS.accepted ? 'aceptado' : 'rechazado'} en <span className="mono">{shortSha(lastEvent.head_commit)}</span>.
+        </div>
+      )}
       {moved && (
         <div className="tdv__notice tdv__notice--warn" role="alert" data-testid="tdv-head-moved">
           La rama se movió: ahora está en <span className="mono">{shortSha(err.found_commit)}</span>, no en el head que revisaste ({shortSha(diff.head_commit)}). No se registró la decisión. Recarga el diff y revísalo de nuevo.
@@ -136,7 +151,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided }) {
       )}
       {err && !moved && (
         <div className="tdv__notice tdv__notice--error" role="alert">
-          {err.error === REVIEW_ERRORS.notFound ? 'El host no encuentra esta tarea.' : `Error: ${err.error}`}
+          {`Error: ${err.error}`}
         </div>
       )}
       {sendError && <div className="tdv__notice tdv__notice--error" role="alert">{sendError}</div>}

@@ -63,7 +63,14 @@ describe('canIntegrate con last_review', () => {
   it('rejected: no', () => expect(canIntegrate(t({ last_review: lr('rejected'), head_commit: 'h1' }), snap())).toBe(false));
   it('accepted sobre el head actual: sí', () => expect(canIntegrate(t({ last_review: lr('accepted'), head_commit: 'h1' }), snap())).toBe(true));
   it('accepted sobre otro head: no', () => expect(canIntegrate(t({ last_review: lr('accepted', 'h0'), head_commit: 'h1' }), snap())).toBe(false));
-  it('accepted sin head_commit conocido en la tarea: sí', () => expect(canIntegrate(t({ last_review: lr('accepted') }), snap())).toBe(true));
+  it('accepted sin head_commit conocido en la tarea: no', () => expect(canIntegrate(t({ last_review: lr('accepted') }), snap())).toBe(false));
+  it('aceptar y luego llega un head nuevo: ya no integra', () => {
+    const task = t({ last_review: lr('accepted', 'h1'), head_commit: 'h1' });
+    expect(canIntegrate(task, snap())).toBe(true);
+    expect(canIntegrate({ ...task, head_commit: 'h2' }, snap())).toBe(false);
+  });
+  it('solo cuenta la última: aceptado y luego rechazado en el mismo head no integra', () =>
+    expect(canIntegrate(t({ last_review: lr('rejected', 'h1'), head_commit: 'h1' }), snap())).toBe(false));
   it('accepted pero ya integrada: no', () =>
     expect(canIntegrate(t({ last_review: lr('accepted'), head_commit: 'h1', last_integration: { outcome: 'merged', result_commit: 'r', at: 'x' } }), snap())).toBe(false));
   it('accepted con integración en conflicto: sí', () =>

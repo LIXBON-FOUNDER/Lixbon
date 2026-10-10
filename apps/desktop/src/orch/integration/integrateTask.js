@@ -25,6 +25,7 @@ export const OUTCOMES = Object.freeze({
   targetMoved: 'target_moved',
   error: 'error',
   alreadyMerged: 'already_merged',
+  reviewRequired: 'review_required', // no hay revisión aceptada para el head actual
 });
 
 /** Nombres de campos de la respuesta, en un solo lugar (si el host los cambia, se renombran aquí). */

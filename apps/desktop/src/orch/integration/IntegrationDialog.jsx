@@ -34,9 +34,11 @@ const DEFAULT_LABELS = {
   acceptMoved: (into, found) => `Acepto que la rama destino cambió y quiero integrar contra ${found}`,
   retry: 'Integrar contra la rama actual',
   errorNote: 'No se integró nada.',
+  reviewRequired: 'Falta aceptar el diff del head actual de esta rama. No se integró nada.',
+  openReview: 'Revisar diff',
 };
 
-export function IntegrationDialog({ task, branch, target, integrate = defaultIntegrate, allowSquash = true, labels, onDone }) {
+export function IntegrationDialog({ task, branch, target, integrate = defaultIntegrate, allowSquash = true, labels, onDone, onOpenReview }) {
   const L = { ...DEFAULT_LABELS, ...(labels || {}) };
   const [confirmed, setConfirmed] = useState(false);
   const [acceptMoved, setAcceptMoved] = useState(false);
@@ -143,6 +145,15 @@ export function IntegrationDialog({ task, branch, target, integrate = defaultInt
           <button type="button" className="integration__action" disabled={!confirmed || !acceptMoved || busy} onClick={() => run(true)}>
             {busy ? L.busy : L.retry}
           </button>
+        </div>
+      )}
+      {outcome === OUTCOMES.reviewRequired && (
+        <div className="integration__error" role="alert" data-testid="integration-result">
+          <p><strong>{L.reviewRequired}</strong></p>
+          {message && <p className="integration__muted">{message}</p>}
+          {onOpenReview && (
+            <button type="button" className="integration__action" onClick={() => onOpenReview(task)}>{L.openReview}</button>
+          )}
         </div>
       )}
       {outcome === OUTCOMES.error && (
