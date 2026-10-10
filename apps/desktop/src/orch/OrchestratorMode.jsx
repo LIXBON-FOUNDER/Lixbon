@@ -15,6 +15,8 @@ import { TerminalApprovalNotice, TerminalApprovalBadge } from './TerminalApprova
 import { isAwaitingTerminalApproval } from './terminalApprovalContract';
 import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
+import { usePendingSpawns, PendingSpawnList, PendingSpawnDetail, SpawnNotice } from './spawn/PendingSpawns';
+import { IntegrationDialog } from './integration/IntegrationDialog';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
 const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
@@ -270,6 +272,9 @@ function TaskView({ task, snap }) {
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
   const now = useNow(!final, 1000);
+  // Integración humana: solo tareas hijas terminadas, con rama y sin fusionar.
+  const canIntegrate = final && task.status === 'done' && parent && task.branch && !task.merged;
+  const [integrating, setIntegrating] = useState(false);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
 
@@ -291,6 +296,9 @@ function TaskView({ task, snap }) {
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}
         {task.merged && <span className="orch__pill is-ok">Fusionada</span>}
+        {canIntegrate && (
+          <button className="lk" title="Integrar la rama de esta tarea con tu confirmación" onClick={() => setIntegrating((v) => !v)}>{integrating ? 'Cerrar integración' : 'Integrar'}</button>
+        )}
         {!final && parent && (
           <button className="lk is-danger" title="Solo para emergencias: el coordinador recibe el aviso" onClick={() => call('stop', { task: task.id }, 'Tarea detenida')}>Detener</button>
         )}
@@ -308,6 +316,12 @@ function TaskView({ task, snap }) {
         />
         {task.worktree && <span className="mono orch__hint orch__path" title={task.worktree}>{task.worktree}</span>}
       </div>
+      {canIntegrate && integrating && (
+        <div className="orch__integrate">
+          {/* Destino: la rama del padre si la tiene; si no, el host decide (ver pregunta abierta). */}
+          <IntegrationDialog task={task.id} branch={task.branch} target={parent.branch || 'la rama del coordinador'} />
+        </div>
+      )}
       <div className="orch__body">
         {tab === 'term' && task.parent && <AgentTerminal key={task.id} task={task.id} live={live} />}
         {tab === 'activity' && <Activity task={task} messages={snap.messages} tasks={snap.tasks} />}
@@ -339,6 +353,9 @@ export function OrchestratorMode() {
   const [allRepos, setAllRepos] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const root = useAppStore((s) => s.workspaceRoot);
+  const spawns = usePendingSpawns();
+  const [pendingSel, setPendingSel] = useState(null);
+  const pendingItem = spawns.items.find((x) => x.pending_id === pendingSel) || null;
 
   useEffect(() => { init(); }, [init]);
 
@@ -369,6 +386,8 @@ export function OrchestratorMode() {
           <div className="panelhead">
             <span className="panelhead__title">{allRepos ? 'Runs · todos los repos' : `Runs · ${root ? root.split(/[\\/]/).pop() : 'sin carpeta'}`}</span>
           </div>
+          <SpawnNotice notice={spawns.notice} onClose={spawns.clearNotice} />
+          <PendingSpawnList items={spawns.items} selected={pendingItem ? pendingSel : null} onSelect={setPendingSel} tasks={snap.tasks} />
           <div className="orch__runs scroll">
             {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
             {runs.map((r) => {
@@ -385,7 +404,7 @@ export function OrchestratorMode() {
                   <button className="ic" title="Quitar este run de la lista (libera los worktrees fusionados y borra sus ramas)" onClick={() => call('remove_run', { run: r.id }, removedText)}><IconTrash size={12} /></button>
                 </div>
                 {!folded && taskTree(snap.tasks, r.id).map((t) => (
-                  <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={select} />
+                  <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={(id) => { setPendingSel(null); select(id); }} />
                 ))}
               </section>
               );
@@ -401,7 +420,9 @@ export function OrchestratorMode() {
         <Gutter sizeKey="side" />
       </Collapse>
       <Panel id="orchmain" className="wb__grow orch__main">
-        {task ? <TaskView key={task.id} task={task} snap={snap} /> : <HowTo />}
+        {pendingItem
+          ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} onApprove={spawns.approve} onReject={spawns.reject} />
+          : task ? <TaskView key={task.id} task={task} snap={snap} /> : <HowTo />}
       </Panel>
     </div>
   );
