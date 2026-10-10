@@ -113,5 +113,5 @@ Secrets necesarios en el repo: `TAURI_SIGNING_PRIVATE_KEY`,
 ## Compilar el host (src-tauri)
 
 1. Rust 1.87 o superior (`rustup` estable). En Windows, toolchain MSVC y Build Tools de Visual Studio.
-2. Generar el sidecar `lxo` (ignorado por git): `node scripts/build-lxo.mjs`.
+2. Generar el sidecar `lxo` (ignorado por git) antes de `cargo test`: `npm run build:lxo` (ejecuta `node scripts/build-lxo.mjs`). Sin él, el build de Tauri falla porque no encuentra `binaries/lxo-<target>`.
 3. `cd src-tauri && cargo test`
