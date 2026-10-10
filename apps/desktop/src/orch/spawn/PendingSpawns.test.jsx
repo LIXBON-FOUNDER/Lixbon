@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { PendingSpawnsPanel, countdown } from './PendingSpawns';
+import { integrateIntoLabel, toMs, resolvedReason } from './spawnContract';
 import { approveSpawn, rejectSpawn, SPAWN_COMMANDS } from './spawnContract';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -8,7 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-const inMin = (m) => new Date(Date.now() + m * 60000).toISOString();
+const inMin = (m) => Date.now() + m * 60000; // ms epoch, como el host
 const pending = (id, policy = {}, extra = {}) => ({
   pending_id: id, parent_task: 'coord', agent: 'claude', provider: 'claude', profile: 'explorar', role: 'explorador',
   expires_at: inMin(5), policy: { argv: ['claude', '--permission-mode', 'plan', 'con espacio'], status: 'ok', warnings: [], cli_version: '2.0.0', ...policy }, ...extra,
@@ -123,12 +124,14 @@ describe('PendingSpawnsPanel', () => {
     render(<PendingSpawnsPanel api={api} />);
     await open('p1');
     fireEvent.click(approveBtn());
-    expect((await screen.findByRole('alert')).textContent).toContain('argv distinto del confirmado');
+    expect((await screen.findByTestId('spawn-error')).textContent).toContain('argv distinto del confirmado');
+    expect(screen.getByTestId('spawn-error').textContent).toContain('sigue pendiente');
     expect(screen.getByTestId('spawn-p1')).toBeTruthy();
+    expect(approveBtn().disabled).toBe(false); // se puede volver a intentar a mano
   });
 
   it('muestra integrate_into del pendiente si el host lo manda', async () => {
-    const { api } = makeApi([pending('p1', {}, { integrate_into: 'master' }), pending('p2')]);
+    const { api } = makeApi([pending('p1', {}, { integrate_into: { dir: 'C:/repo/coord', branch: 'master' } }), pending('p2')]);
     render(<PendingSpawnsPanel api={api} />);
     await open('p1');
     expect(screen.getByTestId('spawn-integrate-into').textContent).toContain('master');
@@ -142,6 +145,81 @@ describe('PendingSpawnsPanel', () => {
     await screen.findByTestId('spawn-p1');
     act(() => h.onResolved({ pending_id: 'p1', outcome: 'expired' }));
     expect(screen.queryByTestId('spawn-p1')).toBeNull();
+  });
+});
+
+describe('casos del host b2aa870', () => {
+  it('launch_failed: muestra el error, distinto de un rechazo, quita el pendiente y no reintenta', async () => {
+    const { api } = makeApi([pending('p1')], {
+      approve: vi.fn(async (a) => ({ pending_id: a.pending_id, outcome: 'launch_failed', reason: 'Aprobado, pero no se pudo lanzar: worktree ocupado', decision: null })),
+    });
+    render(<PendingSpawnsPanel api={api} />);
+    await open('p1');
+    fireEvent.click(approveBtn());
+    const n = await screen.findByTestId('spawn-notice');
+    expect(n.className).toContain('spawns__notice--failed');
+    expect(n.textContent).toContain('no pudo lanzar');
+    expect(n.textContent).toContain('worktree ocupado');
+    expect(n.textContent).not.toContain('rechazado');
+    expect(screen.queryByTestId('spawn-p1')).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(api.approve).toHaveBeenCalledTimes(1);
+  });
+
+  it('launch_failed por evento (otra ventana) también avisa; lee launch_error de la decisión', async () => {
+    const { api, h } = makeApi([pending('p1')]);
+    render(<PendingSpawnsPanel api={api} />);
+    await screen.findByTestId('spawn-p1');
+    act(() => h.onResolved({ pending_id: 'p1', outcome: 'launch_failed', decision: { kind: 'spawn', detail: { outcome: 'approved', launch_error: 'sin codex' } } }));
+    expect(screen.queryByTestId('spawn-p1')).toBeNull();
+    expect(screen.getByTestId('spawn-notice').textContent).toContain('sin codex');
+  });
+
+  it('expired por evento (run borrado, sin decisión) quita el pendiente y lo explica', async () => {
+    const { api, h } = makeApi([pending('p1')]);
+    render(<PendingSpawnsPanel api={api} />);
+    await open('p1');
+    act(() => h.onResolved({ pending_id: 'p1', outcome: 'expired', decision: null }));
+    expect(screen.queryByTestId('spawn-p1')).toBeNull();
+    expect(screen.queryByLabelText('Detalle del lanzamiento pendiente')).toBeNull();
+    expect(screen.getByTestId('spawn-notice').textContent).toContain('run borrado');
+  });
+
+  it('expired de un id que no está en la lista no muestra aviso', async () => {
+    const { api, h } = makeApi([]);
+    render(<PendingSpawnsPanel api={api} />);
+    await waitFor(() => expect(h.onResolved).toBeTypeOf('function'));
+    act(() => h.onResolved({ pending_id: 'otro', outcome: 'expired', decision: null }));
+    expect(screen.queryByTestId('spawn-notice')).toBeNull();
+  });
+
+  it('rechazo con motivo del host lo muestra', async () => {
+    const { api } = makeApi([pending('p1')], { reject: vi.fn(async (a) => ({ pending_id: a.pending_id, outcome: 'rejected', reason: 'Rechazado por la persona' })) });
+    render(<PendingSpawnsPanel api={api} />);
+    await open('p1');
+    fireEvent.click(screen.getByRole('button', { name: 'Rechazar' }));
+    expect((await screen.findByTestId('spawn-notice')).textContent).toContain('Motivo: Rechazado por la persona');
+  });
+
+  it('muestra cwd (worktree nuevo o carpeta compartida)', async () => {
+    const { api } = makeApi([pending('p1', {}, { cwd: 'C:/wt/run-sp1-x', shared: false }), pending('p2', {}, { cwd: 'C:/coord', shared: true })]);
+    render(<PendingSpawnsPanel api={api} />);
+    await open('p1');
+    expect(screen.getByTestId('spawn-cwd').textContent).toContain('worktree nuevo');
+    expect(screen.getByTestId('spawn-cwd').textContent).toContain('C:/wt/run-sp1-x');
+    await open('p2');
+    expect(screen.getByTestId('spawn-cwd').textContent).toContain('carpeta del coordinador');
+  });
+
+  it('helpers del contrato', () => {
+    expect(toMs(65000)).toBe(65000);
+    expect(toMs('65000')).toBe(65000);
+    expect(toMs(new Date(65000).toISOString())).toBe(65000);
+    expect(integrateIntoLabel({ dir: 'C:/x', branch: 'main' })).toBe('main');
+    expect(integrateIntoLabel({ dir: 'C:/x', branch: null })).toBe('C:/x');
+    expect(integrateIntoLabel(null)).toBe(null);
+    expect(resolvedReason({ reason: 'r' })).toBe('r');
+    expect(resolvedReason({ decision: { detail: { launch_error: 'e' } } })).toBe('e');
   });
 });
 
@@ -159,5 +237,6 @@ describe('spawnContract', () => {
   it('countdown', () => {
     expect(countdown(new Date(65000).toISOString(), 0)).toBe('vence en 1:05');
     expect(countdown(new Date(0).toISOString(), 1000)).toBe('vencido');
+    expect(countdown(65000, 0)).toBe('vence en 1:05'); // ms epoch del host
   });
 });
