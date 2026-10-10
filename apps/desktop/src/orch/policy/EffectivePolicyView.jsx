@@ -16,7 +16,7 @@ export function splitToolList(token) {
 
 /** Solo presentación: las reglas de --allowedTools/--disallowedTools van una por línea.
     El argv que se envía al lanzar no cambia. */
-function ArgvDisplay({ argv }) {
+export function ArgvDisplay({ argv }) {
   if (!argv.length) return '—';
   return argv.map((a, i) => {
     const list = splitToolList(a);
