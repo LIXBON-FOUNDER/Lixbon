@@ -5,6 +5,7 @@
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
 mod agents;
+mod approval;
 mod delivery;
 mod git;
 mod integration;
@@ -754,6 +755,8 @@ impl Core {
             t.model_mismatch = false;
             t.model_mismatch_reason = None;
             t.plan_mode = plan_mode;
+            t.failure_reason = None;
+            t.approval_deadline = None;
             // launch_task ya rechazó un modelo pedido que no entra en el argv.
             t.model_requested = t.model.clone();
         }
@@ -781,9 +784,18 @@ impl Core {
         let tid = id.to_string();
         let (out_event, exit_event) = (format!("orch:term:{id}"), format!("orch:term-exit:{id}"));
         let app_exit = app.clone();
+        // Espera de aprobación en la terminal y agente inactivo (orch/approval.rs).
+        let guard = Arc::new(Mutex::new(approval::Guard::from_env(state::now_ms())));
+        let (guard_out, weak_out, tid_out) = (guard.clone(), Arc::downgrade(self), id.to_string());
         let term = pty::spawn(
             pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped },
-            move |text| { let _ = app.emit(&out_event, text); },
+            move |text| {
+                let change = guard_out.lock().ok().and_then(|mut g| g.on_output(&text, state::now_ms()));
+                if let (Some(change), Some(core)) = (change, weak_out.upgrade()) {
+                    core.on_approval_change(&tid_out, change);
+                }
+                let _ = app.emit(&out_event, text);
+            },
             move || {
                 let _ = app_exit.emit(&exit_event, ());
                 if let Some(core) = weak.upgrade() {
@@ -796,12 +808,40 @@ impl Core {
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
         std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            std::thread::sleep(std::time::Duration::from_secs(1));
             let Some(core) = weak.upgrade() else { break };
             let Some(text) = core.term_text(&tid) else { break };
             core.collect(&tid, Some(text), false);
+            let timeout = guard.lock().ok().and_then(|g| g.check(state::now_ms()));
+            if let Some(t) = timeout {
+                core.on_guard_timeout(&tid, t);
+                break;
+            }
         });
         Ok(())
+    }
+
+    fn on_approval_change(&self, id: &str, change: approval::Change) {
+        let mut st = self.lock();
+        let changed = match change {
+            approval::Change::Entered(deadline) => st.await_terminal_approval(id, deadline),
+            approval::Change::Left => st.resume_from_approval(id),
+        };
+        if changed.unwrap_or(false) {
+            self.commit(&st, &[]);
+        }
+    }
+
+    /// Venció la espera de aprobación o el agente lleva demasiado sin escribir: la
+    /// tarea queda Failed con su motivo y se mata la PTY con todo su árbol.
+    fn on_guard_timeout(&self, id: &str, t: approval::Timeout) {
+        {
+            let mut st = self.lock();
+            if let Ok(msg) = st.fail_with(id, t.reason(), t.message()) {
+                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
+            }
+        }
+        self.kill_term(id);
     }
 
     fn term_text(&self, id: &str) -> Option<String> {

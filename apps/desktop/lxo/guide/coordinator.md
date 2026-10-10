@@ -6,10 +6,13 @@ informes, propones qué integrar (lo aprueba una persona en Lixbon) y le cuentas
 propia terminal dentro de Lixbon (el usuario puede mirarlas en el modo Orquestar), en su rama y
 su worktree, y trabaja en autónomo.
 
+**Un comando `lxo` por llamada**: nunca los encadenes con `;`, `&&`, `||` ni `|`. Cada orden va
+sola; si no, la regla de permisos no la reconoce y la terminal se queda esperando aprobación.
+
 ## 1. Arranque
 
 1. `lxo status` comprueba que el orquestador está activo.
-2. `lxo run create --objective "<objetivo del usuario en una frase>" --agent <tu agente: claude|codex|lixbon…>`
+2. `lxo run create --objective "<objetivo del usuario en una frase>" --agent <tu agente: claude, codex o lixbon>`
    Cada objetivo nuevo del usuario (cada /orquestar) es un run nuevo, aunque `lxo status` diga que
    ya coordinas otro. A partir de ahí eres el coordinador de ese run. Si el run anterior terminó, está
    cerrado o se borró desde la interfaz, `run create` lo sustituye solo. Si dice que el run anterior
