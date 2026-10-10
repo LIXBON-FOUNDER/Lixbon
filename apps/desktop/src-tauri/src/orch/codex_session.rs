@@ -9,7 +9,8 @@
 //! 2. Si no hay id (TUI interactiva) o no aparece su archivo: rollouts cuyo
 //!    `session_meta.cwd` normalizado es el del intento y cuyo `session_meta.timestamp`
 //!    es >= inicio del intento menos `MARGIN_MS` (`cwd_time`).
-//! 3. Cero o más de un candidato: `unknown` y `session_ref: null`.
+//! 3. Solo cuentan las sesiones con `source` `cli` o `exec` (no los subagentes).
+//! 4. Cero o más de un candidato: `unknown` y `session_ref: null`.
 
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -33,6 +34,9 @@ pub struct Meta {
     pub id: String,
     pub cwd: String,
     pub started_ms: Option<u64>,
+    /// `source` es `cli` (TUI) o `exec`. Los subagentes (`{"subagent": ...}`, con
+    /// `guardian` o `thread_spawn`) comparten carpeta pero no son la hija.
+    pub own: bool,
 }
 
 /// `session_meta` (en las primeras líneas).
@@ -43,6 +47,7 @@ pub fn session_meta(jsonl: &str) -> Option<Meta> {
         id: p["id"].as_str().unwrap_or("").to_string(),
         cwd: p["cwd"].as_str()?.to_string(),
         started_ms: p["timestamp"].as_str().or(v["timestamp"].as_str()).and_then(parse_rfc3339_ms),
+        own: matches!(p["source"].as_str(), Some("cli" | "exec")),
     })
 }
 
@@ -124,6 +129,7 @@ pub fn pick(sessions: &Path, session_id: Option<&str>, cwd: &str, start_ms: u64)
     rollouts(sessions, since, &mut files, 0);
     let metas: Vec<(PathBuf, Meta)> = files.into_iter()
         .filter_map(|p| { let m = std::fs::read_to_string(&p).ok().and_then(|t| session_meta(&t))?; Some((p, m)) })
+        .filter(|(_, m)| m.own)
         .collect();
     if let Some(id) = session_id.map(str::trim).filter(|i| !i.is_empty()) {
         let by_id: Vec<PathBuf> = metas.iter()
@@ -213,7 +219,7 @@ mod tests {
     #[test]
     fn piezas_de_la_sesion_real() {
         assert_eq!(turn_context_model(SESSION).as_deref(), Some("gpt-6.1-sol"));
-        assert_eq!(session_meta(SESSION), Some(Meta { id: ID.into(), cwd: CWD.into(), started_ms: Some(T0) }));
+        assert_eq!(session_meta(SESSION), Some(Meta { id: ID.into(), cwd: CWD.into(), started_ms: Some(T0), own: true }));
         assert_eq!(parse_rfc3339_ms("2026-10-09T22:15:55.607-05:00"), Some(T0));
         assert_eq!(parse_rfc3339_ms("1970-01-01T00:00:01Z"), Some(1000));
         // Cabecera real de `codex exec` 0.162.1 (con ANSI).
@@ -286,6 +292,44 @@ mod tests {
         let r = resolve(Some(&root), Some(ID), CWD, T0);
         assert_eq!((r.model.as_str(), r.mechanism, r.source()), (UNKNOWN, "session_id", "unknown"));
         assert!(r.session_ref.is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn subagent(id: &str, start: u64, source: &str) -> String {
+        session(id, CWD, start, "gpt-5.6-luna").replace(r#""source":"exec""#, &format!(r#""source":{source}"#))
+    }
+
+    const GUARDIAN: &str = r#"{"subagent":{"other":"guardian"}}"#;
+    const SPAWN: &str = r#"{"subagent":{"thread_spawn":{"parent_thread_id":"01a123cf-5f63-7591-b38c-67509d3a1ce1","depth":1,"agent_path":null,"agent_nickname":"Hooke","agent_role":null}}}"#;
+
+    #[test]
+    fn hija_mas_subagente_guardian_gana_la_hija() {
+        let root = dir("guardian");
+        let p = put(&root, ID, SESSION);
+        put(&root, "guardian", &subagent("guardian", T0 + 2000, GUARDIAN));
+        put(&root, "spawn", &subagent("spawn", T0 + 3000, SPAWN));
+        assert!(!session_meta(&subagent("g", T0, GUARDIAN)).unwrap().own);
+        let r = resolve(Some(&root), None, CWD, T0);
+        assert_eq!((r.model.as_str(), r.source()), ("gpt-6.1-sol", "cwd_time"));
+        assert_eq!(r.session_ref, Some(p.to_string_lossy().into_owned()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn solo_un_subagente_da_unknown() {
+        let root = dir("solosub");
+        put(&root, "guardian", &subagent("guardian", T0 + 2000, GUARDIAN));
+        let r = resolve(Some(&root), None, CWD, T0);
+        assert_eq!((r.model.as_str(), r.session_ref.clone(), r.source()), (UNKNOWN, None, "unknown"));
+        // Ni pidiéndolo por su id.
+        let r = resolve(Some(&root), Some("guardian"), CWD, T0);
+        assert_eq!((r.model.as_str(), r.session_ref), (UNKNOWN, None));
+        // Un source desconocido tampoco cuenta; `cli` (TUI) sí.
+        put(&root, "rara", &subagent("rara", T0 + 1000, r#""vscode""#));
+        assert_eq!(resolve(Some(&root), None, CWD, T0).model, UNKNOWN);
+        put(&root, "tui", &subagent("tui", T0 + 1500, r#""cli""#));
+        let r = resolve(Some(&root), None, CWD, T0);
+        assert_eq!((r.model.as_str(), r.source()), ("gpt-5.6-luna", "cwd_time"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
