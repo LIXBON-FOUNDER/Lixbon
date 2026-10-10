@@ -125,6 +125,24 @@ describe('panel previo a abrir Codex', () => {
     expect(openSpy).toHaveBeenCalledWith({ cwd: 'C:/repo', model: '', effort: '', cols: 200, rows: 40, acknowledged: true });
     expect(onOpened.mock.calls[0][0].term_id).toMatch(/^codex-mock-/);
   });
+  it('sandbox elevado (e3572e5): el aviso de Delegar sale en el panel y exige confirmación', async () => {
+    const { WARN_ELEVATED_RW } = await import('../providers/mockListProviders');
+    const m = createMockCodexTerm({ windowsSandbox: 'elevated' });
+    await expect(m.invoke(CODEX_TERM_COMMANDS.open, { cwd: 'C:/r', cols: 200, rows: 40, acknowledged: false })).rejects.toThrow(/^needs_ack/);
+    const api = apiOver(m);
+    const onOpened = vi.fn();
+    render(<CodexLaunchPanel cwd="C:/repo" codex={codex} api={api} onOpened={onOpened} />);
+    expect(await screen.findByText(WARN_ELEVATED_RW)).toBeTruthy();
+    const btn = screen.getByRole('button', { name: 'Abrir' });
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: ACK_LABEL }));
+    fireEvent.click(btn);
+    await waitFor(() => expect(onOpened).toHaveBeenCalledTimes(1));
+    expect(onOpened.mock.calls[0][0].warnings).toContain(WARN_ELEVATED_RW);
+    // Sin elevated no aparece.
+    expect((await createMockCodexTerm().invoke(CODEX_TERM_COMMANDS.policy, { cwd: 'C:/r' })).warnings).not.toContain(WARN_ELEVATED_RW);
+  });
+
   it('si el host responde needs_ack, no abre, lo dice y desmarca la casilla', async () => {
     const api = { policy: async () => ({ policy: 'x', argv: ['codex'], warnings: ['aviso'] }), open: vi.fn(async () => { throw new Error('needs_ack'); }) };
     const onOpened = vi.fn();

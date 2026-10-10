@@ -11,6 +11,7 @@ export const MOCK_CLAUDE = {
   ],
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
   models_source: 'help',
+  sandbox_elevated: false, warnings: [], blocked_profiles: [],
 };
 
 export const MOCK_CODEX = {
@@ -21,9 +22,20 @@ export const MOCK_CODEX = {
   ].map(([id, label]) => ({ id, label, verified: true })),
   efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   models_source: 'debug_models',
+  sandbox_elevated: false, warnings: [], blocked_profiles: [],
 };
 
-/** `opts.codex`: sobrescribe campos de Codex (p. ej. no instalado) para probar estados. */
+/** Textos exactos de agents.rs (300abea). */
+export const ELEVATED = 'el sandbox elevado falla y Codex sale del read-only';
+export const WARN_ELEVATED_RW = 'el sandbox elevado de Codex falla en esta máquina: puede editar archivos pero no ejecutar comandos';
+/** Lo que añade providers::codex con [windows] sandbox = "elevated". */
+export const MOCK_CODEX_ELEVATED = Object.freeze({
+  sandbox_elevated: true,
+  warnings: [WARN_ELEVATED_RW],
+  blocked_profiles: ['explorar', 'proponer'].map((profile) => ({ profile, reason: ELEVATED })),
+});
+
+/** `opts.elevated`: Codex con sandbox elevado. `opts.codex`: sobrescribe campos de Codex (p. ej. no instalado) para probar estados. */
 export async function mockListProviders(opts = {}) {
-  return [{ ...MOCK_CLAUDE }, { ...MOCK_CODEX, ...(opts.codex || {}) }];
+  return [{ ...MOCK_CLAUDE }, { ...MOCK_CODEX, ...(opts.elevated ? MOCK_CODEX_ELEVATED : {}), ...(opts.codex || {}) }];
 }

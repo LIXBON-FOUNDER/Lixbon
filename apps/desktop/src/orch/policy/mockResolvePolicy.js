@@ -74,9 +74,21 @@ function mockPolicyModel({ provider, model }) {
   return provider === 'codex' ? MODEL_FROM_CONFIG : null;
 }
 
+import { ELEVATED, WARN_ELEVATED_RW } from '../providers/mockListProviders.js';
+
+/** Igual que agents::evaluate (300abea) con `opts.windowsSandbox === 'elevated'`. */
+function applyElevated(p, opts) {
+  if (opts.windowsSandbox !== 'elevated' || p.provider !== 'codex' || p.status === 'blocked') return p;
+  if (p.argv.includes('read-only')) return { ...p, status: 'blocked', reason: ELEVATED, warnings: [...p.warnings, ELEVATED] };
+  if (p.profile === 'delegar_con_revision') {
+    return { ...p, status: 'unverified', reason: p.reason ? `${p.reason}; ${WARN_ELEVATED_RW}` : WARN_ELEVATED_RW, warnings: [...p.warnings, WARN_ELEVATED_RW] };
+  }
+  return p;
+}
+
 async function mockResolvePolicyBase(args, opts) {
   const role = args.role ? String(args.role).trim() || null : null;
-  const p = { ...(await resolveFlags(args, opts)), role };
+  const p = applyElevated({ ...(await resolveFlags(args, opts)), role }, opts);
   // Igual que evaluate_for del host (5d4ce56): rol desconocido bloquea; con rol la tarea
   // hija entrega por archivo/marcadores, así que Codex sin red local queda en su estado
   // con advertencias (ningún perfil del mock da red local a Codex).

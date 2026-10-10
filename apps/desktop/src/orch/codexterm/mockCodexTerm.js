@@ -1,5 +1,6 @@
 // mockCodexTerm.js — SOLO desarrollo (DEV && VITE_ORCH_MOCK==='1') y pruebas.
 // Imita el contrato propuesto: política sin lanzar, needs_ack, eco de lo escrito y salida.
+import { WARN_ELEVATED_RW } from '../providers/mockListProviders.js';
 import { CODEX_TERM_COMMANDS as C, CODEX_TERM_EVENTS as E, NEEDS_ACK } from './codexTermContract';
 
 export const MOCK_CODEX_TERM_WARNINGS = [
@@ -7,16 +8,19 @@ export const MOCK_CODEX_TERM_WARNINGS = [
   'Con on-request, Codex pide aprobación en esta terminal antes de salir del sandbox.',
 ];
 
-function policyOf({ cwd, model, effort }) {
+function policyOf({ cwd, model, effort }, elevated = false) {
   const argv = ['codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--cd', cwd];
   if (model) argv.push('-m', model);
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
   // Misma forma que build() en codex_term.rs (cd76e40).
   const policy = { provider: 'codex', profile: 'terminal', cli_version: '0.162.1', model: model || 'el que defina config.toml', effort: effort || null, interactive: true, status: 'unverified' };
-  return { policy, argv, warnings: [...MOCK_CODEX_TERM_WARNINGS] };
+  // e3572e5: con [windows] sandbox = "elevated", el mismo aviso que Delegar (pide ack).
+  const warnings = [...MOCK_CODEX_TERM_WARNINGS, ...(elevated ? [WARN_ELEVATED_RW] : [])];
+  return { policy, argv, warnings };
 }
 
-export function createMockCodexTerm() {
+export function createMockCodexTerm(opts = {}) {
+  const elevated = opts.windowsSandbox === 'elevated';
   const handlers = new Map();
   const terms = new Map();
   let n = 0;
@@ -44,9 +48,9 @@ export function createMockCodexTerm() {
     },
     invoke: async (cmd, a = {}) => {
       switch (cmd) {
-        case C.policy: return policyOf(a);
+        case C.policy: return policyOf(a, elevated);
         case C.open: {
-          const p = policyOf(a);
+          const p = policyOf(a, elevated);
           if (p.warnings.length && a.acknowledged !== true) throw new Error(`${NEEDS_ACK}: confirma los avisos antes de abrir Codex`);
           const term_id = `codex-mock-${++n}`;
           terms.set(term_id, { open: true, cols: a.cols, rows: a.rows, cwd: a.cwd, model: a.model ?? null, effort: a.effort ?? null, argv: p.argv, policy: p.policy, code: null });

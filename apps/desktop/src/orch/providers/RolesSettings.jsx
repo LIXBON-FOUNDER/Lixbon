@@ -5,6 +5,7 @@ import { Select } from '../../components/Select';
 import { SectionHead } from '../../sections/Settings/SettingsParts';
 import { resolvePolicy as defaultResolver } from '../policy/resolvePolicy';
 import { DEFAULT_PROVIDER, UNVERIFIED_LABEL, providerLabel } from './providersContract';
+import { profileName } from './NewAgentItems';
 import { EMPTY_SAVE_WARNINGS, warningsForRole, dropClaudeOnly } from './roleSaveContract';
 import { migrateRoleCfg, providerOptions, modelOptions, effortOptions, isModelVerified, profileForRole } from './roleConfig';
 
@@ -64,6 +65,17 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
       />
       <div className="ssec ssec--card ssec--rows">
         {providers === null && <span className="srow__hint">Consultando proveedores…</span>}
+        {list.filter((p) => p.warnings?.length || p.blocked_profiles?.length).map((p) => (
+          <div key={p.id} className="orch__rolewarn" role="note" data-testid={`provider-warnings-${p.id}`}>
+            <strong>{providerLabel(p.id)}</strong>
+            <ul>
+              {(p.warnings || []).map((w) => <li key={w}>{w}</li>)}
+              {(p.blocked_profiles || []).map((b) => (
+                <li key={b.profile} className="is-disabled" aria-disabled="true" data-testid={`provider-blocked-${p.id}-${b.profile}`}>{profileName(b.profile)} (bloqueado): {b.reason}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
         {sw.flat?.length > 0 && (
           <ul className="orch__rolewarn" data-testid="roles-save-warnings" aria-label="Avisos al guardar los roles">
             {sw.flat.map((w) => <li key={w}>{w}</li>)}
