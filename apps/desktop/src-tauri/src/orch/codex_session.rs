@@ -155,9 +155,16 @@ pub struct Resolved {
 }
 
 impl Resolved {
-    /// `model_source` del intento: el mecanismo si se leyó el modelo, si no `unknown`.
+    /// `model_source` del intento: `session_declared` si el modelo salió del
+    /// archivo de sesión, si no `unknown`.
     pub fn source(&self) -> &'static str {
-        if self.model == UNKNOWN { UNKNOWN } else { self.mechanism }
+        if self.model == UNKNOWN { UNKNOWN } else { "session_declared" }
+    }
+
+    /// `session_match` del intento: cómo se ató la sesión (`session_id` o
+    /// `cwd_time`), o `None` si no se encontró una sola.
+    pub fn session_match(&self) -> Option<&'static str> {
+        self.session_ref.as_ref().map(|_| self.mechanism)
     }
 }
 
@@ -237,7 +244,7 @@ mod tests {
         put(&root, "otro-mismo-cwd", &session("otro-mismo-cwd", CWD, T0 + 2000, "gpt-5.6-luna"));
         // Dos con el mismo cwd y casi la misma hora: el id decide.
         let r = resolve(Some(&root), Some(ID), CWD, T0);
-        assert_eq!((r.model.as_str(), r.mechanism, r.source()), ("gpt-6.1-sol", "session_id", "session_id"));
+        assert_eq!((r.model.as_str(), r.mechanism, r.source()), ("gpt-6.1-sol", "session_id", "session_declared"));
         assert_eq!(r.session_ref, Some(p.to_string_lossy().into_owned()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -249,7 +256,7 @@ mod tests {
         put(&root, "viejo", &session("viejo", CWD, T0 - 600_000, "gpt-5.6-luna"));
         let p = put(&root, ID, SESSION);
         let r = resolve(Some(&root), None, CWD, T0 - 1000);
-        assert_eq!((r.model.as_str(), r.mechanism, r.source()), ("gpt-6.1-sol", "cwd_time", "cwd_time"));
+        assert_eq!((r.model.as_str(), r.mechanism, r.source()), ("gpt-6.1-sol", "cwd_time", "session_declared"));
         assert_eq!(r.session_ref, Some(p.to_string_lossy().into_owned()));
         // Pedir desde antes de las dos: ambiguo.
         let r = resolve(Some(&root), None, CWD, T0 - 700_000);
@@ -310,7 +317,7 @@ mod tests {
         put(&root, "spawn", &subagent("spawn", T0 + 3000, SPAWN));
         assert!(!session_meta(&subagent("g", T0, GUARDIAN)).unwrap().own);
         let r = resolve(Some(&root), None, CWD, T0);
-        assert_eq!((r.model.as_str(), r.source()), ("gpt-6.1-sol", "cwd_time"));
+        assert_eq!((r.model.as_str(), r.source(), r.session_match()), ("gpt-6.1-sol", "session_declared", Some("cwd_time")));
         assert_eq!(r.session_ref, Some(p.to_string_lossy().into_owned()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -321,6 +328,7 @@ mod tests {
         put(&root, "guardian", &subagent("guardian", T0 + 2000, GUARDIAN));
         let r = resolve(Some(&root), None, CWD, T0);
         assert_eq!((r.model.as_str(), r.session_ref.clone(), r.source()), (UNKNOWN, None, "unknown"));
+        assert_eq!(r.session_match(), None);
         // Ni pidiéndolo por su id.
         let r = resolve(Some(&root), Some("guardian"), CWD, T0);
         assert_eq!((r.model.as_str(), r.session_ref), (UNKNOWN, None));
@@ -329,7 +337,7 @@ mod tests {
         assert_eq!(resolve(Some(&root), None, CWD, T0).model, UNKNOWN);
         put(&root, "tui", &subagent("tui", T0 + 1500, r#""cli""#));
         let r = resolve(Some(&root), None, CWD, T0);
-        assert_eq!((r.model.as_str(), r.source()), ("gpt-5.6-luna", "cwd_time"));
+        assert_eq!((r.model.as_str(), r.source(), r.session_match()), ("gpt-5.6-luna", "session_declared", Some("cwd_time")));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -364,10 +372,12 @@ mod tests {
         assert_eq!((t.model_requested.as_deref(), t.model_effective.as_deref(), t.model_mismatch), (None, Some("gpt-6.1-sol"), false));
         assert!(t.model_mismatch_reason.is_none());
         t.session_ref = Some("C:/x/rollout.jsonl".into());
-        t.model_source = Some("session_id".into());
+        t.model_source = Some("session_declared".into());
+        t.session_match = Some("session_id".into());
         let v = serde_json::to_value(&*t).unwrap();
         assert_eq!(v["session_ref"], "C:/x/rollout.jsonl");
-        assert_eq!(v["model_source"], "session_id");
+        assert_eq!(v["model_source"], "session_declared");
+        assert_eq!(v["session_match"], "session_id");
         t.session_ref = None;
         assert!(serde_json::to_value(&*t).unwrap()["session_ref"].is_null());
     }

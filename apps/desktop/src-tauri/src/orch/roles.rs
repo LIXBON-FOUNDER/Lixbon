@@ -147,6 +147,15 @@ pub fn validate_with(cfg: &BTreeMap<String, RoleCfg>, list: &[Provider]) -> Resu
                 }
             }
         }
+        // Sandbox elevado de Codex: el read-only queda bloqueado; Delegar avisa y pide confirmación.
+        if let Some(p) = mine.filter(|p| p.sandbox_elevated) {
+            let profile = agents::Profile::for_role(r.read_only);
+            if agents::codex_exec(&res.provider, profile) {
+                notes.push(agents::ELEVATED.into());
+            } else if agents::codex_elevated_warns(&p.id, profile) {
+                notes.push(agents::WARN_ELEVATED_RW.into());
+            }
+        }
         if let (Some(e), Some(p)) = (res.effort.as_deref(), mine) {
             if !p.efforts.is_empty() && !p.efforts.iter().any(|x| x == e) {
                 notes.push(format!("{} ({e})", agents::WARN_EFFORT_UNVERIFIED));
@@ -222,6 +231,26 @@ mod tests {
             providers::claude(true, Some("2.1.296"), Some(include_str!("testdata/claude-2.1.296-help.txt")), None),
             providers::codex(true, Some("0.162.1"), Some(include_str!("testdata/codex-0.162.1-debug-models.json")), None),
         ]
+    }
+
+    #[test]
+    fn guardar_con_sandbox_elevado() {
+        let toml = "[windows]\nsandbox = \"elevated\"\n";
+        let list = vec![
+            providers::claude(true, Some("2.1.296"), Some(include_str!("testdata/claude-2.1.296-help.txt")), None),
+            providers::codex(true, Some("0.162.1"), Some(include_str!("testdata/codex-0.162.1-debug-models.json")), Some(toml)),
+        ];
+        let mut cfg = codex_cfg("implementador", "gpt-6.1-sol", "high");
+        cfg.insert("escalado".into(), RoleCfg { provider: "codex".into(), model: "gpt-6.1-sol".into(), effort: "high".into() });
+        cfg.insert("revisor".into(), RoleCfg { provider: "codex".into(), model: "gpt-6.1-sol".into(), effort: "high".into() });
+        let w = validate_with(&cfg, &list).unwrap();
+        for r in ["implementador", "escalado"] {
+            assert!(w[r].iter().any(|x| x == agents::WARN_ELEVATED_RW), "{r}: {:?}", w.get(r));
+        }
+        assert!(w["revisor"].iter().any(|x| x == agents::ELEVATED));
+        assert!(!w["revisor"].iter().any(|x| x == agents::WARN_ELEVATED_RW));
+        // Roles de Claude no reciben el aviso.
+        assert!(w.get("explorador").is_none_or(|v| !v.iter().any(|x| x == agents::WARN_ELEVATED_RW)));
     }
 
     fn codex_cfg(role: &str, model: &str, effort: &str) -> BTreeMap<String, RoleCfg> {
