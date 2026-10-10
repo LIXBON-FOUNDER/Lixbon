@@ -34,7 +34,8 @@ pub const AGENTS: &[Spec] = &[
     Spec { id: "claude", label: "Claude Code", bin: "claude", strengths: "Implementación y refactor complejos, depuración, tareas largas de código.",
         efforts: &["low", "medium", "high", "xhigh", "max"] },
     Spec { id: "codex", label: "Codex", bin: "codex", strengths: "Implementación y tests; buen segundo implementador o revisor.",
-        efforts: &["low", "medium", "high"] },
+        // Niveles de `codex debug models` en 0.162.1.
+        efforts: &["low", "medium", "high", "xhigh", "max", "ultra"] },
     Spec { id: "cursor", label: "Cursor", bin: "cursor-agent", strengths: "Revisión de diffs, lectura del código y cambios acotados.",
         efforts: &[] },
     Spec { id: "opencode", label: "OpenCode", bin: "opencode", strengths: "Modelos de muchos proveedores: documentación, lectura, QA y tareas baratas.",
@@ -296,11 +297,16 @@ pub fn codex_windows_sandbox(toml: &str) -> Option<String> {
 
 /// Ruta de la config de Codex: `$CODEX_HOME/config.toml` o `~/.codex/config.toml`.
 fn codex_config_path() -> Option<std::path::PathBuf> {
+    codex_home().map(|h| h.join("config.toml"))
+}
+
+/// `$CODEX_HOME` o `~/.codex`.
+pub fn codex_home() -> Option<std::path::PathBuf> {
     if let Some(h) = std::env::var_os("CODEX_HOME").filter(|h| !h.is_empty()) {
-        return Some(std::path::PathBuf::from(h).join("config.toml"));
+        return Some(std::path::PathBuf::from(h));
     }
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
-    Some(std::path::PathBuf::from(home).join(".codex").join("config.toml"))
+    Some(std::path::PathBuf::from(home).join(".codex"))
 }
 
 pub enum Detected<'a> {
@@ -841,7 +847,7 @@ fn discover(a: &Spec) -> Vec<Model> {
 fn hint(id: &str) -> &'static str {
     match id {
         "claude" => "--model con un alias (opus, sonnet, haiku, fable) o un id completo",
-        "codex" => "--model con un id de OpenAI (p. ej. gpt-5.5); --effort low|medium|high",
+        "codex" => "--model con un id de OpenAI (mira los de `codex debug models`); --effort low|medium|high|xhigh|max|ultra",
         "opencode" => "--model proveedor/modelo, tal como sale en la lista",
         "cursor" => "--model con un id de la lista de Cursor",
         "gemini" => "--model con un id de Gemini",

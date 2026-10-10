@@ -425,6 +425,15 @@ pub fn write_report(coordinator: &Task, task: &Task, text: &str) -> Result<Strin
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// Modelo con que respondió la CLI y si difiere del pedido. `unknown` (no se
+/// pudo leer) no cuenta como diferencia.
+pub fn set_model_effective(t: &mut super::state::Task, model: &str) {
+    t.model_effective = Some(model.to_string());
+    t.model_mismatch = model != super::codex_session::UNKNOWN
+        && t.model_requested.as_deref().is_some_and(|req| !super::agents::same_model_family(req, model));
+    t.model_mismatch_reason = (t.model_mismatch && t.plan_mode).then(|| "plan_mode".to_string());
+}
+
 /// Aplica lo encontrado. Entrega por el camino de `lxo done`; una tarea ya final
 /// (llegó antes un `lxo done` u otra lectura) se descarta en silencio. Al salir
 /// el proceso, un informe inválido deja la tarea `Failed` y la falta, `Exited`.
@@ -444,9 +453,7 @@ pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Ve
             t.delivered.push(idem_key(id, ATTEMPT, &r.sha256));
             t.delivery_channel = Some(r.channel.id().into());
             if let Some(m) = &r.model {
-                t.model_effective = Some(m.clone());
-                t.model_mismatch = t.model_requested.as_deref().is_some_and(|req| !super::agents::same_model_family(req, m));
-                t.model_mismatch_reason = (t.model_mismatch && t.plan_mode).then(|| "plan_mode".to_string());
+                set_model_effective(t, m);
             }
             Ok(msg.into_iter().collect())
         }
