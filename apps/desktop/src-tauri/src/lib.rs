@@ -130,6 +130,63 @@ fn ensure_inside_root(root: &State<WorkspaceRoot>, path: &str) -> Result<PathBuf
     Ok(canonical)
 }
 
+// ── Pestaña de terminal de Codex (solo la interfaz; no está en el servidor de lxo) ──
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn codex_term_policy(cwd: String, model: Option<String>, effort: Option<String>) -> Result<serde_json::Value, String> {
+    orch::codex_term_policy(&cwd, model.as_deref(), effort.as_deref())
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+#[allow(clippy::too_many_arguments)]
+fn codex_term_open(
+    app: AppHandle,
+    root: State<'_, WorkspaceRoot>,
+    terms: State<'_, orch::CodexTerms>,
+    cwd: String,
+    model: Option<String>,
+    effort: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    acknowledged: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let root_path = root.0.lock().map_err(|_| "Estado interno corrupto".to_string())?.clone();
+    orch::codex_term_open(&app, &terms, root_path.as_deref(), &cwd, model.as_deref(), effort.as_deref(), cols, rows, acknowledged == Some(true))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn codex_term_write(terms: State<'_, orch::CodexTerms>, term_id: String, data: String) -> Result<(), String> {
+    terms.write(&term_id, &data)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn codex_term_resize(terms: State<'_, orch::CodexTerms>, term_id: String, cols: u16, rows: u16) -> Result<(), String> {
+    terms.resize(&term_id, cols, rows)
+}
+
+/// `{ data, seq }`: buffer de 1 MB y el último seq que incluye.
+#[tauri::command(rename_all = "snake_case")]
+fn codex_term_buffer(terms: State<'_, orch::CodexTerms>, term_id: String) -> Result<serde_json::Value, String> {
+    terms.buffer(&term_id)
+}
+
+/// Fuerza a Codex a redibujar (resize a cols+1 y vuelta).
+#[tauri::command(async, rename_all = "snake_case")]
+fn codex_term_redraw(terms: State<'_, orch::CodexTerms>, term_id: String) -> Result<(), String> {
+    terms.redraw(&term_id)
+}
+
+/// Terminales abiertas, para recuperar las pestañas tras recargar la webview.
+#[tauri::command]
+fn codex_term_list(terms: State<'_, orch::CodexTerms>) -> Vec<orch::CodexTermListed> {
+    terms.list()
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn codex_term_close(terms: State<'_, orch::CodexTerms>, term_id: String) -> Result<(), String> {
+    terms.close(&term_id)
+}
+
 #[tauri::command]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -1351,6 +1408,7 @@ pub fn run() {
         .manage(preview_proxy::PreviewProxy::default())
         .manage(visual_server::VisualServer::default())
         .manage(orch::Orch::default())
+        .manage(orch::CodexTerms::default())
         .manage(mascota::MascotaDatos(Mutex::new(String::new())))
         .manage(FsWatchState {
             watcher: Mutex::new(None),
@@ -1375,6 +1433,8 @@ pub fn run() {
                     window.state::<mcp::McpServers>().stop_all();
                     window.state::<claude_code::ClaudeSessions>().stop_all();
                     window.state::<orch::Orch>().0.shutdown();
+                    // Las pestañas de Codex mueren con la ventana, con todo su árbol.
+                    window.state::<orch::CodexTerms>().close_all();
                     team::apagar(window.app_handle());
                     mascota::apagar(window.app_handle());
                 }
@@ -1452,6 +1512,14 @@ pub fn run() {
             orch::orch_agents,
             orch::orch_resolve_policy,
             orch::orch_list_providers,
+            codex_term_policy,
+            codex_term_open,
+            codex_term_write,
+            codex_term_resize,
+            codex_term_close,
+            codex_term_buffer,
+            codex_term_list,
+            codex_term_redraw,
             orch::orch_integrate,
             orch::orch_publish_pr,
             orch::orch_skill_install,

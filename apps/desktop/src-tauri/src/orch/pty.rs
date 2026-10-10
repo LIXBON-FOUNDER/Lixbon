@@ -231,8 +231,37 @@ pub fn spawn(
     if l.piped {
         return spawn_piped(l, on_output, on_exit);
     }
+    spawn_pty(l, PtyOpts { auto_answer: true, cols: MIN_COLS, rows: 32 }, on_output, move |_| on_exit())
+}
+
+/// Opciones de la PTY. Las hijas contestan solas el diálogo de confianza; una
+/// terminal que maneja la persona (pestaña de Codex), no.
+pub struct PtyOpts {
+    pub auto_answer: bool,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// PTY para una persona: sin respuestas automáticas, con el tamaño pedido (como
+/// mínimo MIN_COLS) y el código de salida del proceso al terminar.
+pub fn spawn_user(
+    l: Launch,
+    cols: u16,
+    rows: u16,
+    on_output: impl Fn(String) + Send + Sync + 'static,
+    on_exit: impl FnOnce(Option<u32>) + Send + 'static,
+) -> Result<AgentTerm, String> {
+    spawn_pty(l, PtyOpts { auto_answer: false, cols: clamp_cols(cols), rows: rows.max(1) }, on_output, on_exit)
+}
+
+fn spawn_pty(
+    l: Launch,
+    opts: PtyOpts,
+    on_output: impl Fn(String) + Send + Sync + 'static,
+    on_exit: impl FnOnce(Option<u32>) + Send + 'static,
+) -> Result<AgentTerm, String> {
     let pair = native_pty_system()
-        .openpty(PtySize { rows: 32, cols: MIN_COLS, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize { rows: opts.rows, cols: clamp_cols(opts.cols), pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
     let (program, args) = write_script(l.script_dir, &l.command)?;
     let mut cmd = CommandBuilder::new(program);
@@ -291,7 +320,7 @@ pub fn spawn(
                     if text.is_empty() {
                         continue;
                     }
-                    if started.elapsed() < STARTUP {
+                    if opts.auto_answer && started.elapsed() < STARTUP {
                         screen.push_str(&plain(&text));
                         if screen.len() > 4000 {
                             let mut cut = screen.len() - 3000;
@@ -324,9 +353,9 @@ pub fn spawn(
     // Con ConPTY el lector no recibe EOF al morir el proceso (el master sigue
     // abierto): el fin se detecta esperando al hijo.
     thread::spawn(move || {
-        let _ = child.wait();
+        let code = child.wait().ok().map(|s| s.exit_code());
         thread::sleep(Duration::from_millis(300));
-        on_exit();
+        on_exit(code);
     });
 
     let term = AgentTerm { master: Some(pair.master), writer, killer, buffer };
