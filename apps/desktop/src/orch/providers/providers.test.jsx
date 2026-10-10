@@ -5,7 +5,7 @@ import { listProviders, normalizeProvider, PROVIDERS_COMMAND } from './providers
 import { mockListProviders, MOCK_CLAUDE, MOCK_CODEX } from './mockListProviders';
 import { migrateRoleCfg, migrateRoles, modelOptions, effortOptions, providerOptions, profileForRole } from './roleConfig';
 import { RolesSettings } from './RolesSettings';
-import { normalizeSaveWarnings, isSnapshotResponse } from './roleSaveContract';
+import { normalizeSaveWarnings, isSnapshotResponse, snapshotFromSaveResponse } from './roleSaveContract';
 import { mockRoleSaveWarnings } from './mockRoleSaveWarnings';
 import { newAgentEntries, CODEX_NO_CHAT_REASON } from './newAgentEntries';
 import { NewAgentItems } from './NewAgentItems';
@@ -200,12 +200,21 @@ describe('avisos al guardar los roles (respuesta { ok, warnings: { <rol>: [..] }
     expect(screen.queryByTestId('role-save-warnings-implementador')).toBeNull();
     expect(screen.queryByTestId('roles-save-warnings')).toBeNull();
   });
-  it('mock con la forma confirmada', () => {
-    const r = mockRoleSaveWarnings({ roles: { explorador: { provider: 'claude', model: 'haiku', effort: '' }, implementador: { provider: 'codex', model: 'gpt-6-sol', effort: 'turbo' }, revisor: { model: 'opus', effort: 'high' } } }, { explorador: 'Explorador' });
-    expect(r).toEqual({ ok: true, warnings: {
-      explorador: ['Explorador: modelo haiku no verificado en claude (quedará unverified)'],
-      implementador: ['implementador: esfuerzo turbo no verificado en codex (quedará unverified)'],
+  it('mock con la forma de roles::save_response (textos de agents.rs)', () => {
+    const snap = { settings: {}, roles: [] };
+    const r = mockRoleSaveWarnings({ roles: { explorador: { provider: 'claude', model: 'haiku', effort: '' }, implementador: { provider: 'codex', model: 'gpt-6-sol', effort: 'turbo' }, revisor: { model: 'opus', effort: 'high' } } }, snap);
+    expect(r).toEqual({ ok: true, snapshot: snap, warnings: {
+      explorador: ['modelo no verificado: la CLI no lo lista entre sus modelos (haiku)'],
+      implementador: ['esfuerzo no verificado: la CLI no lo lista entre sus niveles (turbo)'],
     } });
+  });
+  it('snapshot de la respuesta: el de { ok, warnings, snapshot }, el viejo a secas, o null', () => {
+    const snap = { settings: { enabled: true }, tasks: {} };
+    expect(snapshotFromSaveResponse({ ok: true, warnings: {}, snapshot: snap })).toBe(snap);
+    expect(snapshotFromSaveResponse(snap)).toBe(snap);
+    expect(snapshotFromSaveResponse({ ok: true, warnings: {} })).toBeNull();
+    expect(snapshotFromSaveResponse(null)).toBeNull();
+    expect(normalizeSaveWarnings({ ok: true, warnings: { revisor: ['x'] }, snapshot: snap })).toEqual({ flat: [], byRole: { revisor: ['x'] } });
   });
   it('respaldo: lista plana arriba del bloque de roles', async () => {
     expect(normalizeSaveWarnings({ ok: true, warnings: ['x', null] })).toEqual({ flat: ['x'], byRole: {} });

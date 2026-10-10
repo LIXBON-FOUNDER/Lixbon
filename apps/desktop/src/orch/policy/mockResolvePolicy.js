@@ -63,6 +63,18 @@ function mockFlags(provider, profile, worktree) {
  * @returns {Promise<EffectivePolicy>}
  */
 export async function mockResolvePolicy(args, opts = {}) {
+  return { ...(await mockResolvePolicyBase(args, opts)), model: mockPolicyModel(args) };
+}
+
+/** Igual que agents::set_model del host (c969d21). */
+export const MODEL_FROM_CONFIG = 'el que defina config.toml';
+function mockPolicyModel({ provider, model }) {
+  const m = typeof model === 'string' ? model.trim() : '';
+  if (m) return m;
+  return provider === 'codex' ? MODEL_FROM_CONFIG : null;
+}
+
+async function mockResolvePolicyBase(args, opts) {
   const role = args.role ? String(args.role).trim() || null : null;
   const p = { ...(await resolveFlags(args, opts)), role };
   // Igual que evaluate_for del host (5d4ce56): rol desconocido bloquea; con rol la tarea
