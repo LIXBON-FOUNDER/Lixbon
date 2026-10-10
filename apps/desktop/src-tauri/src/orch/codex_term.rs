@@ -92,8 +92,9 @@ pub fn build(cwd: &str, model: Option<&str>, effort: Option<&str>, probe: Option
             warnings.push(format!("{} ({e})", agents::WARN_EFFORT_UNVERIFIED));
         }
     }
+    // workspace-write + on-request: con elevated, Codex edita pero no ejecuta comandos.
     if windows_sandbox == Some("elevated") {
-        warnings.push(agents::ELEVATED.into());
+        warnings.push(agents::WARN_ELEVATED_RW.into());
     }
     let policy = json!({
         "provider": "codex",
@@ -441,9 +442,12 @@ mod tests {
         let p = build("/r", Some("gpt-9"), Some("turbo"), Some(&probe("0.162.1")), &list(), None).unwrap();
         assert_eq!(p.warnings, vec![format!("{} (gpt-9)", agents::WARN_MODEL_UNVERIFIED), format!("{} (turbo)", agents::WARN_EFFORT_UNVERIFIED)]);
         assert_eq!(p.policy["status"], "unverified");
-        // Elevated: el mismo aviso que en la política de las hijas.
+        // Elevated: el mismo aviso que Delegar; no se bloquea, queda unverified y pide ack.
         let p = build("/r", None, None, Some(&probe("0.162.1")), &list(), Some("elevated")).unwrap();
-        assert_eq!(p.warnings, vec![agents::ELEVATED.to_string()]);
+        assert_eq!(p.warnings, vec![agents::WARN_ELEVATED_RW.to_string()]);
+        assert_eq!(p.policy["status"], "unverified");
+        let p = build("/r", None, None, Some(&probe("0.162.1")), &list(), Some("unelevated")).unwrap();
+        assert!(p.warnings.is_empty() && p.policy["status"] == "ok");
         // Inyección en el modelo: error.
         assert!(build("/r", Some("x & del"), None, Some(&probe("0.162.1")), &list(), None).is_err());
     }
