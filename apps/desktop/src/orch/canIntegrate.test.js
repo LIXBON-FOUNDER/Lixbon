@@ -48,6 +48,10 @@ describe('mergedCommitShort', () => {
 
 describe('integrationTarget', () => {
   it('usa integrate_into del host', () => expect(integrationTarget(t({ integrate_into: 'master' }), snap())).toBe('master'));
+  it('usa snap.integrate_into[id] { dir, branch } del host', () =>
+    expect(integrationTarget(t(), snap({ integrate_into: { [t().id]: { dir: 'C:/coord', branch: 'main' } } }))).toBe('main'));
+  it('snap.integrate_into sin rama: la carpeta', () =>
+    expect(integrationTarget(t(), snap({ integrate_into: { [t().id]: { dir: 'C:/coord', branch: null } } }))).toBe('C:/coord'));
   it('sin integrate_into: rama del padre', () => expect(integrationTarget(t(), snap())).toBe('lxo/coord'));
   it('sin nada: texto genérico', () => expect(integrationTarget(t(), { tasks: {} })).toBe(INTEGRATE_INTO_FALLBACK));
 });

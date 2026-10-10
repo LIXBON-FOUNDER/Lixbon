@@ -30,9 +30,15 @@ export function canIntegrate(task) {
 
 export const INTEGRATE_INTO_FALLBACK = 'la rama del coordinador';
 
-/** Destino que manda el host en `integrate_into`; si falta, la rama del padre o el texto genérico. */
+/** Destino de la integración. El host (b2aa870) lo manda en la snapshot como mapa de primer
+    nivel `snap.integrate_into[task_id] = { dir, branch }` (no dentro de la tarea). Se acepta
+    también `task.integrate_into` (texto u objeto). Si falta, la rama del padre o el texto genérico. */
 export function integrationTarget(task, snap) {
-  if (task?.integrate_into) return task.integrate_into;
+  const label = (v) => (typeof v === 'string' ? v : v && typeof v === 'object' ? v.branch || v.dir || null : null);
+  const fromSnap = label(task?.id ? snap?.integrate_into?.[task.id] : null);
+  if (fromSnap) return fromSnap;
+  const fromTask = label(task?.integrate_into);
+  if (fromTask) return fromTask;
   const parent = task?.parent ? snap?.tasks?.[task.parent] : null;
   return parent?.branch || INTEGRATE_INTO_FALLBACK;
 }

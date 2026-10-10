@@ -422,7 +422,7 @@ export function OrchestratorMode() {
       </Collapse>
       <Panel id="orchmain" className="wb__grow orch__main">
         {pendingItem
-          ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} onApprove={spawns.approve} onReject={spawns.reject} />
+          ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} error={spawns.errors[pendingItem.pending_id]} onApprove={spawns.approve} onReject={spawns.reject} />
           : task ? <TaskView key={task.id} task={task} snap={snap} /> : <HowTo />}
       </Panel>
     </div>

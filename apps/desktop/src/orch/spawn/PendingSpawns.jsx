@@ -4,26 +4,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EffectivePolicyView } from '../policy/EffectivePolicyView';
 import { AGENT_LABELS, ROLE_LABELS } from '../../store/orchStore';
-import { defaultSpawnApi, pendingPolicy, spawnField, SPAWN_OUTCOMES } from './spawnContract';
+import { defaultSpawnApi, integrateIntoLabel, pendingPolicy, resolvedReason, spawnField, SPAWN_OUTCOMES, toMs } from './spawnContract';
 import './spawn.css';
 
 const NOTICES = {
   [SPAWN_OUTCOMES.approved]: 'Lanzamiento aprobado.',
   [SPAWN_OUTCOMES.rejected]: 'Lanzamiento rechazado. El coordinador recibe el aviso.',
-  [SPAWN_OUTCOMES.expired]: 'Este lanzamiento ya venció: nadie lo aprobó a tiempo y no se lanzó.',
+  [SPAWN_OUTCOMES.expired]: 'Este lanzamiento ya venció o su coordinador ya no sigue (run borrado o terminado). No se lanzó.',
+  [SPAWN_OUTCOMES.launchFailed]: 'Aprobado, pero el host no pudo lanzar el agente. No se reintenta solo.',
   [SPAWN_OUTCOMES.alreadyResolved]: 'Este lanzamiento ya estaba decidido. No se hizo nada.',
 };
 const errText = (e) => (typeof e === 'string' ? e : e?.message || String(e));
 const idOf = (x) => spawnField(x, 'pendingId');
 
+/** Aviso para un resultado del host (respuesta del comando o evento). */
+export function noticeFor(r) {
+  const outcome = spawnField(r, 'outcome');
+  const reason = resolvedReason(r);
+  if (outcome === SPAWN_OUTCOMES.launchFailed) {
+    return { tone: 'failed', title: NOTICES[outcome], text: reason || 'El host no dio el motivo.', id: idOf(r) };
+  }
+  const tone = outcome === SPAWN_OUTCOMES.approved || outcome === SPAWN_OUTCOMES.rejected ? 'ok' : 'warn';
+  const base = NOTICES[outcome] || `Respuesta del host: ${outcome}`;
+  return { tone, text: outcome === SPAWN_OUTCOMES.rejected && reason ? `${base} Motivo: ${reason}` : base };
+}
+
 /** Estado de los pendientes: lista al montar, eventos del host y decisiones. */
 export function usePendingSpawns(api = defaultSpawnApi) {
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(() => new Set());
-  const [notice, setNotice] = useState(null); // { tone, text }
+  const [notice, setNotice] = useState(null); // { tone, text, title? }
+  const [errors, setErrors] = useState({}); // pending_id -> error del host (p. ej. argv distinto); el pendiente sigue
   const inFlight = useRef(new Set());
+  const itemsRef = useRef([]);
+  itemsRef.current = items;
 
-  const remove = useCallback((id) => setItems((xs) => xs.filter((x) => idOf(x) !== id)), []);
+  const remove = useCallback((id) => {
+    setItems((xs) => xs.filter((x) => idOf(x) !== id));
+    setErrors((e) => { if (!(id in e)) return e; const n = { ...e }; delete n[id]; return n; });
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -33,7 +52,15 @@ export function usePendingSpawns(api = defaultSpawnApi) {
     }).catch(() => { /* sin host (vite solo) */ });
     const off = api.subscribe({
       onPending: (p) => setItems((xs) => (xs.some((x) => idOf(x) === idOf(p)) ? xs : [...xs, p])),
-      onResolved: (r) => remove(idOf(r)),
+      onResolved: (r) => {
+        const id = idOf(r);
+        const outcome = spawnField(r, 'outcome');
+        // Un fallo de lanzamiento siempre se avisa, aunque lo haya aprobado otra ventana.
+        if (outcome === SPAWN_OUTCOMES.launchFailed) setNotice(noticeFor(r));
+        // Si estaba en pantalla y venció (o se borró su run) se dice por qué desaparece.
+        else if (outcome === SPAWN_OUTCOMES.expired && itemsRef.current.some((x) => idOf(x) === id) && !inFlight.current.has(id)) setNotice(noticeFor(r));
+        remove(id);
+      },
     });
     return () => { alive = false; off?.(); };
   }, [api, remove]);
@@ -43,13 +70,16 @@ export function usePendingSpawns(api = defaultSpawnApi) {
     inFlight.current.add(id);
     setBusy((s) => new Set(s).add(id));
     setNotice(null);
+    setErrors((e) => { if (!(id in e)) return e; const n = { ...e }; delete n[id]; return n; });
     try {
       const r = await fn();
-      const outcome = spawnField(r, 'outcome');
-      setNotice({ tone: outcome === SPAWN_OUTCOMES.approved || outcome === SPAWN_OUTCOMES.rejected ? 'ok' : 'warn', text: NOTICES[outcome] || `Respuesta del host: ${outcome}` });
+      setNotice(noticeFor(r));
       remove(id);
     } catch (e) {
-      setNotice({ tone: 'error', text: errText(e) });
+      // Error de uso (argv distinto, falta ack, bloqueado ahora): el host no lanzó y sigue pendiente.
+      const text = errText(e);
+      setErrors((x) => ({ ...x, [id]: text }));
+      setNotice({ tone: 'error', text });
     } finally {
       inFlight.current.delete(id);
       setBusy((s) => { const n = new Set(s); n.delete(id); return n; });
@@ -59,7 +89,7 @@ export function usePendingSpawns(api = defaultSpawnApi) {
   const approve = useCallback((item, launch) => decide(idOf(item), () => api.approve({ pending_id: idOf(item), argv: launch.argv, ack_unverified: launch.ack_unverified === true })), [api, decide]);
   const reject = useCallback((item, reason) => decide(idOf(item), () => api.reject({ pending_id: idOf(item), reason })), [api, decide]);
 
-  return { items, busy, notice, approve, reject, clearNotice: () => setNotice(null) };
+  return { items, busy, notice, errors, approve, reject, clearNotice: () => setNotice(null) };
 }
 
 function useClock(active) {
@@ -73,7 +103,7 @@ function useClock(active) {
 }
 
 export function countdown(expiresAt, now) {
-  const ms = Date.parse(expiresAt) - now;
+  const ms = toMs(expiresAt) - now;
   if (!Number.isFinite(ms)) return '';
   if (ms <= 0) return 'vencido';
   const s = Math.floor(ms / 1000);
@@ -104,18 +134,30 @@ export function PendingSpawnList({ items, selected, onSelect, tasks = {} }) {
   );
 }
 
-export function PendingSpawnDetail({ item, busy, onApprove, onReject }) {
+export function PendingSpawnDetail({ item, busy, error, onApprove, onReject }) {
   const [reason, setReason] = useState('');
   const policy = useMemo(() => pendingPolicy(item), [item]);
   const summary = spawnField(item, 'specSummary');
-  const into = spawnField(item, 'integrateInto');
+  const into = integrateIntoLabel(spawnField(item, 'integrateInto'));
+  const cwd = spawnField(item, 'cwd');
+  const shared = spawnField(item, 'shared');
   return (
     <div className="spawns__detail" aria-label="Detalle del lanzamiento pendiente">
       <p className="spawns__lead">
         El coordinador <b>{spawnField(item, 'parentTask')}</b> quiere lanzar esta tarea. No arranca hasta que la apruebes.
       </p>
       {summary && <p className="spawns__summary">{summary}</p>}
+      {cwd && (
+        <p className="spawns__summary" data-testid="spawn-cwd">
+          {shared ? 'Correrá en la carpeta del coordinador' : 'Correrá en un worktree nuevo'}: <span className="mono spawns__path" title={cwd}>{cwd}</span>
+        </p>
+      )}
       {into && <p className="spawns__summary" data-testid="spawn-integrate-into">Se integrará en <span className="mono">{into}</span></p>}
+      {error && (
+        <div className="spawns__error" role="alert" data-testid="spawn-error">
+          <b>El host no lanzó nada y el lanzamiento sigue pendiente.</b> <span>{error}</span>
+        </div>
+      )}
       <EffectivePolicyView policy={policy} launchLabel={busy ? 'Enviando…' : 'Aprobar lanzamiento'} busy={busy} onLaunch={(l) => onApprove(item, l)} />
       <div className="spawns__reject">
         <label className="spawns__reason">
@@ -131,8 +173,8 @@ export function PendingSpawnDetail({ item, busy, onApprove, onReject }) {
 export function SpawnNotice({ notice, onClose }) {
   if (!notice) return null;
   return (
-    <div className={`spawns__notice spawns__notice--${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'} data-testid="spawn-notice">
-      <span>{notice.text}</span>
+    <div className={`spawns__notice spawns__notice--${notice.tone}`} role={notice.tone === 'error' || notice.tone === 'failed' ? 'alert' : 'status'} data-testid="spawn-notice">
+      <span>{notice.title && <b className="spawns__notice-title">{notice.title} </b>}{notice.text}</span>
       {onClose && <button type="button" className="ic" aria-label="Cerrar aviso" onClick={onClose}>×</button>}
     </div>
   );
@@ -147,7 +189,7 @@ export function PendingSpawnsPanel({ api, tasks }) {
     <>
       <SpawnNotice notice={s.notice} onClose={s.clearNotice} />
       <PendingSpawnList items={s.items} selected={sel} onSelect={setSel} tasks={tasks} />
-      {item && <PendingSpawnDetail key={sel} item={item} busy={s.busy.has(sel)} onApprove={s.approve} onReject={s.reject} />}
+      {item && <PendingSpawnDetail key={sel} item={item} busy={s.busy.has(sel)} error={s.errors[sel]} onApprove={s.approve} onReject={s.reject} />}
     </>
   );
 }

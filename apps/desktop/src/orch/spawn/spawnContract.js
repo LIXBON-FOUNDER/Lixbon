@@ -10,7 +10,8 @@ import { listen } from '@tauri-apps/api/event';
 
 export const SPAWN_EVENTS = Object.freeze({
   pending: 'orch-spawn-pending',   // payload: PendingSpawn
-  resolved: 'orch-spawn-resolved', // payload: { pending_id, outcome }
+  // payload: { pending_id, outcome, decision, task?, reason? } (host b2aa870, approval.rs resolved_payload)
+  resolved: 'orch-spawn-resolved',
 });
 
 export const SPAWN_COMMANDS = Object.freeze({
@@ -22,7 +23,8 @@ export const SPAWN_COMMANDS = Object.freeze({
 export const SPAWN_OUTCOMES = Object.freeze({
   approved: 'approved',
   rejected: 'rejected',
-  expired: 'expired',
+  expired: 'expired',             // venció, el coordinador terminó o el run se borró (sin decisión)
+  launchFailed: 'launch_failed',  // la persona aprobó pero el host no pudo lanzar: NO es un rechazo
   alreadyResolved: 'already_resolved',
 });
 
@@ -30,14 +32,23 @@ export const SPAWN_OUTCOMES = Object.freeze({
 export const SPAWN_FIELDS = Object.freeze({
   pendingId: 'pending_id',
   parentTask: 'parent_task',
+  run: 'run',
+  title: 'title',
+  model: 'model',
+  effort: 'effort',
+  cwd: 'cwd',          // carpeta donde correrá la hija (worktree aún sin crear o la del coordinador)
+  shared: 'shared',
+  createdAt: 'created_at',
   agent: 'agent',
   provider: 'provider',
   profile: 'profile',
   role: 'role',
   specSummary: 'spec_summary',
-  expiresAt: 'expires_at',
+  expiresAt: 'expires_at', // ms desde epoch (u64) en el host; se acepta también ISO
+  task: 'task',
+  decision: 'decision',
   policy: 'policy',
-  integrateInto: 'integrate_into', // destino de integración que manda el host (también en tareas)
+  integrateInto: 'integrate_into', // { dir, branch } | null (null = compartida, sin rama)
   outcome: 'outcome',
   confirm: 'confirm',
   argv: 'argv',
@@ -47,6 +58,26 @@ export const SPAWN_FIELDS = Object.freeze({
 
 const F = SPAWN_FIELDS;
 export const spawnField = (obj, key) => (obj ? obj[F[key]] : undefined);
+
+/** expires_at/created_at a milisegundos: el host manda un número (ms epoch). */
+export function toMs(v) {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string' && /^\d+$/.test(v)) return Number(v);
+  return Date.parse(v);
+}
+
+/** Texto del destino de integración: el host manda { dir, branch }; se acepta un texto. */
+export function integrateIntoLabel(v) {
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object') return v.branch || v.dir || null;
+  return null;
+}
+
+/** Motivo de un resultado: `reason` del payload o `launch_error` de la decisión registrada. */
+export function resolvedReason(r) {
+  return r?.reason ?? r?.decision?.detail?.launch_error ?? r?.decision?.detail?.reason ?? null;
+}
 
 /** Política completa para EffectivePolicyView: el host manda argv/status/warnings/cli_version
     y el pendiente aporta proveedor, perfil y rol. */
