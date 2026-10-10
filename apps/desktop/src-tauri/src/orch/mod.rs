@@ -76,6 +76,8 @@ pub struct Core {
     ttl_ms: u64,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
+    #[cfg(test)]
+    events: Mutex<Vec<(String, Value)>>,
 }
 
 pub type Resolver = fn(&str, &str, Option<&str>, &str) -> agents::Policy;
@@ -100,6 +102,8 @@ impl Default for Orch {
             ttl_ms: spawn_approval::ttl_ms(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            events: Mutex::new(Vec::new()),
         }))
     }
 }
@@ -576,6 +580,7 @@ impl Core {
                     return Err("Solo desde la interfaz".into());
                 }
                 let run = s(args, "run");
+                self.expire_run_pending(&run);
                 let ids: Vec<String> = self.lock().tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
                 for id in &ids {
                     self.kill_term(id);

@@ -77,6 +77,8 @@ pub enum PendState {
     Launching,
     Approved(Value),
     Rejected(String),
+    /// La persona aprobó pero no se pudo lanzar (sin reintento automático).
+    LaunchFailed(String),
     Expired,
 }
 
@@ -102,6 +104,8 @@ impl Core {
     }
 
     fn emit(&self, ev: &str, payload: &Value) {
+        #[cfg(test)]
+        self.events.lock().unwrap().push((ev.to_string(), payload.clone()));
         if let Some(app) = self.app.get() {
             let _ = app.emit(ev, payload);
         }
@@ -168,6 +172,7 @@ impl Core {
             PendState::Pending | PendState::Launching => json!({ "pending_id": id, "status": "pending", "expires_at": e.p.expires_at }),
             PendState::Approved(task) => json!({ "pending_id": id, "status": "approved", "task": task }),
             PendState::Rejected(r) => json!({ "pending_id": id, "status": "rejected", "reason": r }),
+            PendState::LaunchFailed(r) => json!({ "pending_id": id, "status": "launch_failed", "reason": r }),
             PendState::Expired => json!({ "pending_id": id, "status": "expired" }),
         })
     }
@@ -190,7 +195,7 @@ impl Core {
 
     /// Registra la decisión (una por pending_id) y avisa. Si la tarea padre ya no
     /// existe (run eliminado) no hay fila a la que colgarla: no se registra.
-    fn finish(&self, p: &PendingSpawn, actor: &str, outcome: &str, task: Option<&Value>, reason: Option<&str>) -> Option<u64> {
+    fn finish(&self, p: &PendingSpawn, actor: &str, outcome: &str, task: Option<&Value>, reason: Option<&str>, launch_error: Option<&str>) -> Option<u64> {
         let decided_at = state::now_ms();
         let id = {
             let mut st = self.lock();
@@ -200,7 +205,7 @@ impl Core {
             let id = (exists && !dup).then(|| st.record_decision(&p.parent_task, "spawn", actor, &json!({
                 "pending_id": p.pending_id, "parent_task": p.parent_task, "profile": p.profile, "argv": p.policy.argv,
                 "policy_status": p.policy.status, "outcome": outcome, "created_at": p.created_at, "decided_at": decided_at,
-                "task": task.and_then(|t| t["task"].as_str()), "reason": reason,
+                "task": task.and_then(|t| t["task"].as_str()), "reason": reason, "launch_error": launch_error,
             })));
             self.commit(&st, &[]);
             id
@@ -271,14 +276,17 @@ impl Core {
         p.policy = policy;
         // Se lanza con el argv del host (policy.argv); launch() lo vuelve a comprobar.
         let res = self.create_child(&p, p.policy.argv.clone(), ack_unverified);
-        let (state_, outcome, task, reason) = match res {
-            Ok(task) => (PendState::Approved(task.clone()), "approved", Some(task), None),
+        // La decisión de la persona fue aprobar: se registra `approved` aunque el
+        // lanzamiento falle (detail_json.launch_error); a la UI y al agente les llega
+        // `launch_failed` con el mensaje. No se reintenta solo.
+        let (state_, outcome, task, reason, launch_error) = match res {
+            Ok(task) => (PendState::Approved(task.clone()), "approved", Some(task), None, None),
             Err(e) => {
                 let r = format!("Aprobado, pero no se pudo lanzar: {e}");
-                (PendState::Rejected(r.clone()), "launch_failed", None, Some(r))
+                (PendState::LaunchFailed(r.clone()), "launch_failed", None, Some(r), Some(e))
             }
         };
-        let decision = self.finish(&p, "human", outcome, task.as_ref(), reason.as_deref());
+        let decision = self.finish(&p, "human", "approved", task.as_ref(), reason.as_deref(), launch_error.as_deref());
         if let Some(e) = self.pend().get_mut(pending_id) {
             e.state = state_;
             e.decision = decision;
@@ -309,13 +317,31 @@ impl Core {
                 }
             }
         };
-        let decision = self.finish(&p, "human", "rejected", None, Some(&reason));
+        let decision = self.finish(&p, "human", "rejected", None, Some(&reason), None);
         if let Some(e) = self.pend().get_mut(pending_id) {
             e.decision = decision;
         }
         let v = self.resolved_payload(pending_id, "rejected", None, decision, Some(&reason));
         self.emit(EV_RESOLVED, &v);
         Ok(v)
+    }
+
+    /// El run se elimina: sus pendientes salen de la lista y vencen sin fila de
+    /// decisión (la tarea padre desaparece con el run).
+    pub(super) fn expire_run_pending(&self, run: &str) {
+        let now = state::now_ms();
+        let gone: Vec<String> = {
+            let mut pend = self.pend();
+            pend.values_mut().filter(|e| e.p.run == run && e.state == PendState::Pending).map(|e| {
+                e.state = PendState::Expired;
+                e.resolved_at = Some(now);
+                e.p.pending_id.clone()
+            }).collect()
+        };
+        for id in gone {
+            let v = self.resolved_payload(&id, "expired", None, None, None);
+            self.emit(EV_RESOLVED, &v);
+        }
     }
 
     /// Vence los pendientes caducados y los de coordinadores que ya no siguen.
@@ -344,7 +370,7 @@ impl Core {
                 }).collect()
         };
         for p in expired {
-            let decision = self.finish(&p, "system", "expired", None, None);
+            let decision = self.finish(&p, "system", "expired", None, None, None);
             if let Some(e) = self.pend().get_mut(&p.pending_id) {
                 e.decision = decision;
             }
@@ -632,6 +658,49 @@ mod tests {
         assert!(err.contains("desactivado"), "{err}");
         assert!(e.core.pend().is_empty());
         assert!(e.core.list_pending_spawns().is_empty());
+    }
+
+    #[test]
+    fn lanzamiento_fallido_registra_approved_con_launch_error() {
+        let e = setup("fallo");
+        let p = pid(&e.core.rpc(e.agent(), "", "spawn", &json!({ "agent": "claude", "task": "x", "base": "rama-que-no-existe" })).unwrap());
+        let out = e.core.approve_spawn(&p, true, &e.argv(&p), true).unwrap();
+        assert_eq!(out["outcome"], "launch_failed", "{out}");
+        assert!(out["reason"].as_str().unwrap().contains("no se pudo lanzar"));
+        assert!(e.launched().is_empty());
+        assert_eq!(e.children(), 0);
+        let d = e.decisions(&p);
+        assert_eq!(d.len(), 1);
+        assert_eq!((d[0].0.as_str(), d[0].1["outcome"].as_str()), ("human", Some("approved")));
+        assert!(d[0].1["launch_error"].as_str().is_some_and(|m| !m.is_empty()));
+        let st = e.status(&p);
+        assert_eq!(st["status"], "launch_failed");
+        assert!(st["reason"].as_str().is_some());
+        let ev = e.core.events.lock().unwrap().iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).cloned().collect::<Vec<_>>();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].1["outcome"], "launch_failed");
+        // Sin reintento automático: otra confirmación no lanza.
+        assert_eq!(e.core.approve_spawn(&p, true, &[], true).unwrap()["outcome"], "already_resolved");
+        assert!(e.launched().is_empty());
+    }
+
+    #[test]
+    fn run_eliminado_quita_pendientes_y_emite_expired_sin_decision() {
+        let e = setup("borrado");
+        let a = pid(&e.spawn("claude"));
+        let b = pid(&e.spawn("codex"));
+        e.core.events.lock().unwrap().clear();
+        e.core.rpc(Caller::User, "", "remove_run", &json!({ "run": e.run })).unwrap();
+        assert!(e.core.list_pending_spawns().is_empty());
+        let ev = e.core.events.lock().unwrap().clone();
+        for id in [&a, &b] {
+            let mine: Vec<_> = ev.iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == id.as_str()).collect();
+            assert_eq!(mine.len(), 1, "{ev:?}");
+            assert_eq!(mine[0].1["outcome"], "expired");
+            assert_eq!(mine[0].1["decision"], Value::Null);
+            assert!(e.decisions(id).is_empty());
+        }
+        assert!(e.core.lock().decisions.iter().all(|d| d.kind != "spawn"));
     }
 
     #[test]

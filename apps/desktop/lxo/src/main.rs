@@ -451,6 +451,8 @@ fn approval_result(id: &str, st: &Value) -> Option<Result<Value, String>> {
         "approved" => Some(Ok(st["task"].clone())),
         "rejected" => Some(Err(format!("La persona no aprobó el lanzamiento {id}: {}. No lo repitas igual: pregúntale o replantea el encargo.",
             st["reason"].as_str().unwrap_or("sin motivo")))),
+        "launch_failed" => Some(Err(format!("La persona aprobó el lanzamiento {id}, pero no se pudo lanzar: {}. No se reintenta solo.",
+            st["reason"].as_str().unwrap_or("sin detalle")))),
         "expired" => Some(Err(format!("El lanzamiento {id} venció sin decisión de la persona (o Lixbon se reinició). Si sigue haciendo falta, vuelve a pedirlo con lxo spawn."))),
         other => Some(Err(format!("Estado desconocido del lanzamiento {id}: {other}"))),
     }
@@ -839,6 +841,7 @@ mod tests {
         assert!(human("spawn", &ok).starts_with("Hija t3 lanzada con claude"));
         let r = approval_result("sp1", &json!({ "status": "rejected", "reason": "no hace falta" })).unwrap().unwrap_err();
         assert!(r.contains("no aprobó") && r.contains("no hace falta"));
+        assert!(approval_result("sp1", &json!({ "status": "launch_failed", "reason": "sin worktree" })).unwrap().unwrap_err().contains("no se pudo lanzar"));
         assert!(approval_result("sp1", &json!({ "status": "expired" })).unwrap().unwrap_err().contains("venció"));
         // Un host viejo que lanza directamente sigue funcionando.
         assert_eq!(await_approval(json!({ "task": "t1" }), None).unwrap()["task"], "t1");
