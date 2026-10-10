@@ -109,16 +109,31 @@ fn model_owner(model: &str) -> Option<&'static str> {
     None
 }
 
+/// Avisos por rol (solo los que tienen), con el mismo texto que `warnings` de
+/// `orch_resolve_policy`.
+pub type Warnings = BTreeMap<String, Vec<String>>;
+
+/// Respuesta de guardar los roles: `{ ok, warnings: { rol: [...] }, snapshot }`.
+pub fn save_response(warnings: &Warnings, snapshot: Value) -> Value {
+    json!({ "ok": true, "warnings": warnings, "snapshot": snapshot })
+}
+
 /// Revisa modelo y esfuerzo contra la lista de proveedores. Rechaza un modelo de
 /// otro proveedor; uno que la lista no trae (o trae con `verified: false`) solo
-/// queda como aviso de `unverified`. Devuelve los avisos.
-pub fn validate_with(cfg: &BTreeMap<String, RoleCfg>, list: &[Provider]) -> Result<Vec<String>, String> {
-    let mut notes = vec![];
+/// queda como aviso de `unverified`. Devuelve los avisos por rol.
+pub fn validate_with(cfg: &BTreeMap<String, RoleCfg>, list: &[Provider]) -> Result<Warnings, String> {
+    let mut all = Warnings::new();
     for r in ROLES {
         let res = resolve(cfg, r.id)?;
         agents::launch(&res.provider, res.model.as_deref(), res.effort.as_deref(), "x", agents::Profile::for_role(r.read_only), Some(r.id))
             .map_err(|e| format!("{}: {e}", r.label))?;
         let mine = list.iter().find(|p| p.id == res.provider);
+        let mut notes: Vec<String> = vec![];
+        // Mismo aviso que orch_resolve_policy para Claude en plan con un modelo que no es Sonnet.
+        let mut pol = agents::evaluate_for(&res.provider, agents::Profile::for_role(r.read_only), Some(r.id), ".", agents::Detected::Skip, false, agents::Delivery::FileOrMarkers);
+        pol.warnings.clear();
+        agents::warn_plan_model(&mut pol, res.model.as_deref());
+        notes.extend(pol.warnings);
         if let Some(m) = res.model.as_deref() {
             let in_mine = mine.is_some_and(|p| p.models.iter().any(|x| x.id == m));
             let other = list.iter().filter(|p| p.id != res.provider).any(|p| p.models.iter().any(|x| x.id == m))
@@ -128,22 +143,25 @@ pub fn validate_with(cfg: &BTreeMap<String, RoleCfg>, list: &[Provider]) -> Resu
             }
             if let Some(p) = mine {
                 if !p.models.iter().any(|x| x.id == m && x.verified) {
-                    notes.push(format!("{}: modelo {m} no verificado en {} (quedará unverified)", r.label, p.id));
+                    notes.push(format!("{} ({m})", agents::WARN_MODEL_UNVERIFIED));
                 }
             }
         }
         if let (Some(e), Some(p)) = (res.effort.as_deref(), mine) {
             if !p.efforts.is_empty() && !p.efforts.iter().any(|x| x == e) {
-                notes.push(format!("{}: esfuerzo {e} no verificado en {} (quedará unverified)", r.label, p.id));
+                notes.push(format!("{} ({e})", agents::WARN_EFFORT_UNVERIFIED));
             }
         }
+        if !notes.is_empty() {
+            all.insert(r.id.to_string(), notes);
+        }
     }
-    Ok(notes)
+    Ok(all)
 }
 
 /// Rechaza al guardar un modelo o esfuerzo que luego no se podría lanzar, con
 /// la lista de `orch_list_providers` (en las pruebas, sin consultar ninguna CLI).
-pub fn validate(cfg: &BTreeMap<String, RoleCfg>) -> Result<Vec<String>, String> {
+pub fn validate(cfg: &BTreeMap<String, RoleCfg>) -> Result<Warnings, String> {
     let list = if cfg!(test) { vec![] } else { providers::list(false) };
     validate_with(cfg, &list)
 }
@@ -226,9 +244,19 @@ mod tests {
         let d = describe(&back);
         let imp = d["roles"].as_array().unwrap().iter().find(|r| r["id"] == "implementador").unwrap();
         assert_eq!((imp["agent"].as_str(), imp["model"].as_str()), (Some("codex"), Some("gpt-6.1-sol")));
-        // Codex sin modelo elegido: no hereda el alias de Claude.
+        // Codex sin modelo elegido: no hereda el alias de Claude ni se inventa uno.
         let r = resolve(&codex_cfg("revisor", "", ""), "revisor").unwrap();
-        assert_eq!((r.model, r.effort), (None, None));
+        assert_eq!((r.model.clone(), r.effort.clone()), (None, None));
+        let mut p = agents::evaluate_for("codex", agents::Profile::for_role(true), Some("revisor"), "wt", agents::Detected::Skip, false, agents::Delivery::FileOrMarkers);
+        agents::set_model(&mut p, r.model.as_deref());
+        assert_eq!(p.model.as_deref(), Some(agents::MODEL_FROM_CONFIG));
+        let l = agents::launch_with(&p, r.model.as_deref(), None, "x").unwrap();
+        assert!(!l.command.contains("--model"), "{}", l.command);
+        agents::set_model(&mut p, Some("gpt-6.1-sol"));
+        assert_eq!(p.model.as_deref(), Some("gpt-6.1-sol"));
+        let mut c = agents::evaluate("claude", agents::Profile::Explorar, "wt", agents::Detected::Skip, false);
+        agents::set_model(&mut c, None);
+        assert_eq!(c.model, None);
         let mut bad = defaults();
         bad.insert("revisor".into(), RoleCfg { provider: "gemini".into(), ..Default::default() });
         assert!(resolve(&bad, "revisor").is_err());
@@ -237,14 +265,12 @@ mod tests {
     #[test]
     fn valida_contra_los_proveedores() {
         let l = codex_list();
-        // gpt-* con ultra en Codex: pasa sin avisos.
-        let n = validate_with(&codex_cfg("implementador", "gpt-6.1-sol", "ultra"), &l).unwrap();
-        assert!(!n.iter().any(|x| x.starts_with("Implementador")), "{n:?}");
-        // haiku no sale en el --help de Claude 2.1.296: queda unverified, no rechazado.
-        assert!(n.iter().any(|x| x.starts_with("Explorador: modelo haiku")));
+        // gpt-* con ultra en Codex: pasa sin avisos para ese rol.
+        let w = validate_with(&codex_cfg("implementador", "gpt-6.1-sol", "ultra"), &l).unwrap();
+        assert!(!w.contains_key("implementador"), "{w:?}");
         // Modelo que la lista no trae: unverified, no rechazado.
-        let n = validate_with(&codex_cfg("implementador", "gpt-9-nuevo", "high"), &l).unwrap();
-        assert!(n.iter().any(|x| x.contains("gpt-9-nuevo") && x.contains("unverified")), "{n:?}");
+        let w = validate_with(&codex_cfg("implementador", "gpt-9-nuevo", "high"), &l).unwrap();
+        assert_eq!(w["implementador"], vec![format!("{} (gpt-9-nuevo)", agents::WARN_MODEL_UNVERIFIED)]);
         // Modelo de otro proveedor: rechazado.
         let e = validate_with(&codex_cfg("implementador", "opus", "high"), &l).unwrap_err();
         assert!(e.contains("opus no es de codex"), "{e}");
@@ -254,6 +280,26 @@ mod tests {
         // Sin lista (no se pudo consultar): solo la forma.
         assert!(validate_with(&codex_cfg("implementador", "opus", ""), &[]).is_err());
         assert!(validate_with(&defaults(), &l).is_ok());
+    }
+
+    #[test]
+    fn guardar_devuelve_avisos_solo_de_los_roles_que_los_tienen() {
+        let l = codex_list();
+        let mut cfg = defaults();
+        cfg.insert("implementador".into(), RoleCfg { provider: "codex".into(), model: "gpt-9-nuevo".into(), effort: "high".into() });
+        let w = validate_with(&cfg, &l).unwrap();
+        // Explorador (plan) con haiku: aviso de Sonnet en plan y haiku no listado en el --help de Claude 2.1.296.
+        assert_eq!(w["explorador"], vec![agents::WARN_PLAN_SONNET.to_string(), format!("{} (haiku)", agents::WARN_MODEL_UNVERIFIED)]);
+        assert_eq!(w["implementador"], vec![format!("{} (gpt-9-nuevo)", agents::WARN_MODEL_UNVERIFIED)]);
+        // Escalado (opus, edita): sin avisos, no aparece.
+        assert!(!w.contains_key("escalado"));
+        let v = save_response(&w, json!({"runs": []}));
+        assert_eq!(v["ok"], true);
+        assert!(v["warnings"]["implementador"].is_array());
+        assert!(v["warnings"].get("escalado").is_none());
+        assert!(v["snapshot"].is_object());
+        let v = save_response(&Warnings::new(), json!({}));
+        assert_eq!(v["warnings"], json!({}));
     }
 
     #[test]

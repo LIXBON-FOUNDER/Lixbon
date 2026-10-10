@@ -742,6 +742,7 @@ impl Core {
         if let Some(m) = task.model.as_deref() {
             agents::mark_model(&mut policy, Some(m), providers::model_verified(&task.agent, m));
         }
+        agents::set_model(&mut policy, task.model.as_deref());
         let plan_mode = agents::is_plan(&policy);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.
@@ -761,6 +762,8 @@ impl Core {
             t.model_mismatch_reason = None;
             t.plan_mode = plan_mode;
             t.failure_reason = None;
+            t.session_ref = None;
+            t.attempt_started = Some(state::now_ms());
             t.approval_deadline = None;
             // launch_task ya rechazó un modelo pedido que no entra en el argv.
             t.model_requested = t.model.clone();
@@ -895,19 +898,20 @@ impl Core {
 
     /// Codex: el modelo efectivo sale de `turn_context.model` de su archivo de
     /// sesión; si no se puede leer, `unknown`. Nunca se copia del pedido.
-    fn record_codex_model(&self, id: &str) {
+    fn record_codex_model(&self, id: &str, session_id: Option<&str>) {
         let (agent, cwd, since) = {
             let st = self.lock();
             let Ok(t) = st.task(id) else { return };
-            (t.agent.clone(), t.cwd.clone(), t.created)
+            (t.agent.clone(), t.cwd.clone(), t.attempt_started.unwrap_or(t.created))
         };
         if agent != "codex" {
             return;
         }
-        let model = codex_session::effective_model(agents::codex_home().map(|h| h.join("sessions")).as_deref(), &cwd, since);
+        let r = codex_session::resolve(agents::codex_home().map(|h| h.join("sessions")).as_deref(), session_id, &cwd, since);
         let mut st = self.lock();
         if let Ok(t) = st.task_mut(id) {
-            delivery::set_model_effective(t, &model);
+            delivery::set_model_effective(t, &r.model);
+            t.session_ref = r.session_ref;
         }
         self.commit(&st, &[]);
     }
@@ -916,8 +920,9 @@ impl Core {
         let terminal = self.terms.lock().ok()
             .and_then(|mut t| t.remove(id))
             .and_then(|t| t.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned()));
+        let session_id = terminal.as_deref().and_then(codex_session::session_id_from_terminal);
         self.collect(id, terminal, true);
-        self.record_codex_model(id);
+        self.record_codex_model(id, session_id.as_deref());
         let mut st = self.lock();
         if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
             self.commit(&st, &[msg]);
@@ -1178,7 +1183,7 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
     let core = &orch.0;
     let enabled = settings.enabled;
     let was = core.settings().enabled;
-    roles::validate(&settings.roles)?;
+    let warnings = roles::validate(&settings.roles)?;
     write_json(&data_dir().join("settings.json"), &settings)?;
     // Activarlo deja la skill en todos los agentes del equipo: nada que configurar a mano.
     if enabled && !was {
@@ -1192,7 +1197,7 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
     if let Some(app) = core.app.get() {
         let _ = app.emit("orch:changed", ());
     }
-    Ok(core.snapshot())
+    Ok(roles::save_response(&warnings, core.snapshot()))
 }
 
 #[tauri::command(async)]
@@ -1231,6 +1236,7 @@ pub fn orch_resolve_policy(provider: String, profile: String, role: String, work
     if let Some(m) = model.as_deref() {
         agents::mark_model(&mut p, Some(m), providers::model_verified(&provider, m));
     }
+    agents::set_model(&mut p, model.as_deref());
     p
 }
 
