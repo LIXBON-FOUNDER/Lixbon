@@ -4,10 +4,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultReviewApi } from './taskReview';
-import { REVIEW_DECISIONS, REVIEW_ERRORS, BASE_SOURCES, shortSha, structuredError, errorText, isNotFound } from './reviewContract';
+import {
+  REVIEW_DECISIONS, BASE_SOURCES, shortSha, isRecorded, isHeadMoved, reviewErrorMessage, isNotFound, isNoBranch,
+  fileStatus, formatBytes,
+} from './reviewContract';
 import './review.css';
 
-const STATUS_LABELS = { added: 'Nuevo', modified: 'Modificado', deleted: 'Eliminado', renamed: 'Renombrado' };
+const STATUS_LABELS = {
+  added: 'Nuevo', modified: 'Modificado', deleted: 'Eliminado', renamed: 'Renombrado',
+  copied: 'Copiado', typechange: 'Cambio de tipo', unmerged: 'Sin fusionar',
+};
+const statusLabel = (s) => STATUS_LABELS[fileStatus(s)] || String(s ?? '');
+const isBinary = (f) => f.additions == null && f.deletions == null;
 
 function patchLineClass(line) {
   if (line.startsWith('@@')) return 'tdv__ln tdv__ln--hunk';
@@ -16,9 +24,12 @@ function patchLineClass(line) {
   return 'tdv__ln';
 }
 
-function Patch({ patch }) {
-  if (!patch) return <div className="tdv__nopatch">Sin patch para mostrar (binario o vacío).</div>;
-  const lines = patch.replace(/\n$/, '').split('\n');
+function Patch({ file, truncated }) {
+  if (file.patch == null) {
+    return <div className="tdv__nopatch">{truncated ? 'Patch omitido: se alcanzó el límite del diff.' : 'Sin patch para mostrar.'}</div>;
+  }
+  if (isBinary(file)) return <div className="tdv__nopatch">Archivo binario: no se muestra el contenido.</div>;
+  const lines = file.patch.replace(/\n$/, '').split('\n');
   return (
     <pre className="tdv__patch mono">
       {lines.map((l, i) => <div key={i} className={patchLineClass(l)}>{l || ' '}</div>)}
@@ -26,12 +37,17 @@ function Patch({ patch }) {
   );
 }
 
+function Counts({ f }) {
+  if (isBinary(f)) return <span className="tdv__st">binario</span>;
+  return <><span className="tdv__add">+{f.additions || 0}</span> <span className="tdv__del">−{f.deletions || 0}</span></>;
+}
+
 export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onReviewed }) {
   const [state, setState] = useState({ status: 'loading' });
   const [confirm, setConfirm] = useState(null); // 'accepted' | 'rejected' | null
   const [comment, setComment] = useState('');
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState(null);   // { ok... } | { error: ... }
+  const [result, setResult] = useState(null);   // respuesta de orch_review_task
   const [sendError, setSendError] = useState(null);
   const [lastEvent, setLastEvent] = useState(null); // último orch-task-reviewed de esta tarea
   const busy = useRef(false);
@@ -47,7 +63,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
       setState({ status: 'ready', diff: d });
     } catch (e) {
       if (id !== reqId.current) return;
-      setState({ status: 'error', error: errorText(e), notFound: isNotFound(e) });
+      setState({ status: 'error', message: reviewErrorMessage(e), retry: !isNotFound(e) && !isNoBranch(e), noBranch: isNoBranch(e) });
     }
   }, [api, taskId]);
 
@@ -70,9 +86,9 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
       const r = await api.review({ task_id: taskId, decision: confirm, head_commit: state.diff.head_commit,
         comment: confirm === REVIEW_DECISIONS.rejected ? comment : undefined });
       setResult(r);
-      if (!structuredError(r)) { setConfirm(null); onDecided?.(r); }
+      if (isRecorded(r)) { setConfirm(null); onDecided?.(r); }
     } catch (e) {
-      setSendError(isNotFound(e) ? 'El host no encuentra esta tarea.' : errorText(e));
+      setSendError(reviewErrorMessage(e));
     } finally {
       busy.current = false; setSending(false);
     }
@@ -80,26 +96,29 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
 
   if (state.status === 'loading') return <div className="tdv" role="status">Cargando diff…</div>;
   if (state.status === 'error') {
-    const msg = state.notFound ? 'El host no encuentra esta tarea.' : state.error;
     return (
       <div className="tdv">
-        <div className="tdv__notice tdv__notice--error" role="alert">No se pudo cargar el diff: {msg}</div>
-        <button className="lk" onClick={load}>Reintentar</button>
+        <div className={`tdv__notice ${state.noBranch ? 'tdv__notice--warn' : 'tdv__notice--error'}`} role="alert" data-testid="tdv-load-error">
+          {state.noBranch ? state.message : `No se pudo cargar el diff: ${state.message}`}
+        </div>
+        {state.retry && <button className="lk" onClick={load}>Reintentar</button>}
       </div>
     );
   }
 
   const { diff } = state;
   const files = Array.isArray(diff.files) ? diff.files : [];
-  const err = structuredError(result);
-  const done = result && !err ? result : null;
-  const moved = err?.error === REVIEW_ERRORS.headMoved;
+  const done = isRecorded(result) ? result : null;
+  const moved = isHeadMoved(result) ? result : null;
+  const unknown = result && !done && !moved;
   const totalAdd = files.reduce((s, f) => s + (f.additions || 0), 0);
   const totalDel = files.reduce((s, f) => s + (f.deletions || 0), 0);
+  const limit = formatBytes(diff.limit_bytes);
 
   return (
     <div className="tdv">
       <div className="tdv__head">
+        {diff.branch && <span className="mono" data-testid="tdv-branch">{diff.branch}</span>}
         <span>Base <span className="mono" data-testid="tdv-base" title={diff.base_commit}>{shortSha(diff.base_commit)}</span></span>
         <span>→ Head <span className="mono" data-testid="tdv-head" title={diff.head_commit}>{shortSha(diff.head_commit)}</span></span>
         <span className="tdv__totals">{files.length} archivo{files.length === 1 ? '' : 's'} · <span className="tdv__add">+{totalAdd}</span> <span className="tdv__del">−{totalDel}</span></span>
@@ -112,7 +131,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
       )}
       {diff.truncated && (
         <div className="tdv__notice tdv__notice--warn" data-testid="tdv-truncated">
-          El diff está truncado: el host no envió todos los cambios. Revisa la rama completa antes de aceptar.
+          El diff está truncado{limit ? ` al límite de ${limit}` : ''}: la lista de archivos está completa, pero faltan parches. Revisa la rama completa antes de aceptar.
         </div>
       )}
       {files.length === 0 ? (
@@ -121,13 +140,13 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
         <>
           <ul className="tdv__files">
             {files.map((f) => (
-              <li key={f.path}><a href={`#tdv-${f.path}`} className="mono">{f.path}</a> <span className="tdv__st">{STATUS_LABELS[f.status] || f.status}</span> <span className="tdv__add">+{f.additions || 0}</span> <span className="tdv__del">−{f.deletions || 0}</span></li>
+              <li key={f.path}><a href={`#tdv-${f.path}`} className="mono">{f.path}</a> <span className="tdv__st">{statusLabel(f.status)}</span> <Counts f={f} /></li>
             ))}
           </ul>
           {files.map((f) => (
             <section key={f.path} id={`tdv-${f.path}`} className="tdv__file" data-testid={`tdv-file-${f.path}`}>
-              <header className="tdv__fhead mono">{f.path} <span className="tdv__st">{STATUS_LABELS[f.status] || f.status}</span></header>
-              <Patch patch={f.patch} />
+              <header className="tdv__fhead mono">{f.path} <span className="tdv__st">{statusLabel(f.status)}</span></header>
+              <Patch file={f} truncated={diff.truncated} />
             </section>
           ))}
         </>
@@ -145,15 +164,14 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
       )}
       {moved && (
         <div className="tdv__notice tdv__notice--warn" role="alert" data-testid="tdv-head-moved">
-          La rama se movió: ahora está en <span className="mono">{shortSha(err.found_commit)}</span>, no en el head que revisaste ({shortSha(diff.head_commit)}). No se registró la decisión. Recarga el diff y revísalo de nuevo.
+          {moved.found_commit
+            ? <>La rama se movió: revisaste <span className="mono">{shortSha(moved.expected_commit ?? diff.head_commit)}</span> y ahora está en <span className="mono">{shortSha(moved.found_commit)}</span>.</>
+            : <>La rama de la tarea ya no existe (revisaste <span className="mono">{shortSha(moved.expected_commit ?? diff.head_commit)}</span>).</>}
+          {' '}No se registró la decisión. Recarga el diff y revísalo de nuevo.
           <button className="lk" onClick={load}>Recargar diff</button>
         </div>
       )}
-      {err && !moved && (
-        <div className="tdv__notice tdv__notice--error" role="alert">
-          {`Error: ${err.error}`}
-        </div>
-      )}
+      {unknown && <div className="tdv__notice tdv__notice--error" role="alert">Respuesta inesperada del host: {String(result.outcome ?? JSON.stringify(result))}</div>}
       {sendError && <div className="tdv__notice tdv__notice--error" role="alert">{sendError}</div>}
 
       {!done && !moved && (

@@ -39,6 +39,8 @@ export const FIELDS = Object.freeze({
   conflicts: 'conflicts',
   expectedCommit: 'expected_commit',
   foundCommit: 'found_commit',
+  headCommit: 'head_commit', // review_required: HEAD actual de la rama (null si no existe)
+  lastReview: 'last_review', // review_required: { decision, head_commit, at } | null
 });
 
 /** Lee un campo del resultado por su nombre lógico. */
