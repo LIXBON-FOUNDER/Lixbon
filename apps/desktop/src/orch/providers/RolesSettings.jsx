@@ -5,7 +5,7 @@ import { Select } from '../../components/Select';
 import { SectionHead } from '../../sections/Settings/SettingsParts';
 import { resolvePolicy as defaultResolver } from '../policy/resolvePolicy';
 import { DEFAULT_PROVIDER, UNVERIFIED_LABEL, providerLabel } from './providersContract';
-import { EMPTY_SAVE_WARNINGS } from './roleSaveContract';
+import { EMPTY_SAVE_WARNINGS, warningsForRole, dropClaudeOnly } from './roleSaveContract';
 import { migrateRoleCfg, providerOptions, modelOptions, effortOptions, isModelVerified, profileForRole } from './roleConfig';
 
 /** Advertencias de la política de solo lectura (las da orch_resolve_policy; aquí solo se pintan). */
@@ -16,7 +16,8 @@ function ReadOnlyWarnings({ role, provider, model, resolver }) {
     let alive = true;
     setWarnings(null); setError(null);
     resolver({ provider, profile: profileForRole(true), role, worktree: '', model: model || null })
-      .then((p) => alive && setWarnings(Array.isArray(p?.warnings) ? p.warnings : []))
+      // Política de Codex: nunca se cuelan avisos solo de Claude.
+      .then((p) => alive && setWarnings(dropClaudeOnly(Array.isArray(p?.warnings) ? p.warnings : [], provider)))
       .catch((e) => alive && setError(String(e?.message || e)));
     return () => { alive = false; };
   }, [role, provider, model, resolver]);
@@ -71,7 +72,9 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
         {roles.map((r) => {
           const cfg = cfgOf(r);
           const stored = settings.roles?.[r.id]?.provider;
-          const providerId = chosen[r.id] || cfg.provider || DEFAULT_PROVIDER;
+          // La fila muestra lo que tiene el host (settings.roles por clave), no lo elegido sin guardar.
+          const providerId = cfg.provider || DEFAULT_PROVIDER;
+          const roleWarnings = warningsForRole(sw, r.id, providerId);
           const provider = list.find((p) => p.id === providerId);
           const model = cfg.model || r.model || '';
           const effort = cfg.effort ?? r.effort ?? '';
@@ -93,9 +96,9 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
                     El host todavía lanza este rol con {providerLabel(hostAgent || stored || DEFAULT_PROVIDER)}: no guardó el proveedor elegido.
                   </span>
                 )}
-                {sw.byRole?.[r.id]?.length > 0 && (
+                {roleWarnings.length > 0 && (
                   <ul className="orch__rolewarn" data-testid={`role-save-warnings-${r.id}`} aria-label={`Avisos al guardar ${r.label}`}>
-                    {sw.byRole[r.id].map((w) => <li key={w}>{w}</li>)}
+                    {roleWarnings.map((w) => <li key={w}>{w}</li>)}
                   </ul>
                 )}
                 {r.read_only && providerId === 'codex' && <ReadOnlyWarnings role={r.id} provider="codex" model={model} resolver={resolver} />}

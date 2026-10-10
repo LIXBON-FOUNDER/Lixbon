@@ -5,7 +5,7 @@ import { listProviders, normalizeProvider, PROVIDERS_COMMAND } from './providers
 import { mockListProviders, MOCK_CLAUDE, MOCK_CODEX } from './mockListProviders';
 import { migrateRoleCfg, migrateRoles, modelOptions, effortOptions, providerOptions, profileForRole } from './roleConfig';
 import { RolesSettings } from './RolesSettings';
-import { normalizeSaveWarnings, isSnapshotResponse, snapshotFromSaveResponse } from './roleSaveContract';
+import { normalizeSaveWarnings, isSnapshotResponse, snapshotFromSaveResponse, warningsForRole, providersOfSettings, dropClaudeOnly } from './roleSaveContract';
 import { mockRoleSaveWarnings } from './mockRoleSaveWarnings';
 import { newAgentEntries } from './newAgentEntries';
 import { NewAgentItems } from './NewAgentItems';
@@ -238,5 +238,72 @@ describe('avisos al guardar los roles (respuesta { ok, warnings: { <rol>: [..] }
     for (const v of [undefined, null, {}, { ok: true }, { warnings: null }, { warnings: 'texto' }, 5]) expect(normalizeSaveWarnings(v)).toEqual({ flat: [], byRole: {} });
     expect(normalizeSaveWarnings({ settings: {}, runs: {} })).toEqual({ flat: [], byRole: {} });
     expect(isSnapshotResponse({ settings: {}, runs: {} })).toBe(true);
+  });
+});
+
+describe('avisos de guardado por clave de rol del host (fallo: aviso del modo plan en la fila de Codex)', () => {
+  const PLAN = 'en modo plan, Claude responde con Sonnet aunque pidas otro modelo';
+  const ALL = [
+    { id: 'explorador', label: 'Explorador', purpose: '', read_only: true, model: 'haiku', effort: '', agent: 'claude' },
+    { id: 'implementador', label: 'Implementador', purpose: '', read_only: false, model: 'sonnet', effort: 'medium', agent: 'claude' },
+    { id: 'revisor', label: 'Revisor', purpose: '', read_only: true, model: 'gpt-6-sol', effort: '', agent: 'codex' },
+    { id: 'escalado', label: 'Escalado', purpose: '', read_only: false, model: 'opus', effort: 'high', agent: 'claude' },
+    { id: 'adversario', label: 'Adversario', purpose: '', read_only: true, model: 'opus', effort: 'high', agent: 'claude' },
+  ];
+  const settings = { roles: {
+    explorador: { provider: 'claude', model: 'haiku', effort: '' },
+    implementador: { provider: 'claude', model: 'sonnet', effort: 'medium' },
+    revisor: { provider: 'codex', model: 'gpt-6-sol', effort: '' },
+    escalado: { provider: 'claude', model: 'opus', effort: 'high' },
+    adversario: { provider: 'claude', model: 'opus', effort: 'high' },
+  } };
+  // Claves en otro orden que la lista de roles (y que las filas): se asignan por clave.
+  const RESP = { ok: true, warnings: { adversario: ['aviso-adversario'], explorador: [PLAN], revisor: ['modelo no verificado: la CLI no lo lista entre sus modelos (gpt-6-sol)'] } };
+
+  it('ids de roles iguales a los del host (roles.rs)', () => {
+    expect(ALL.map((r) => r.id)).toEqual(['explorador', 'implementador', 'revisor', 'escalado', 'adversario']);
+  });
+
+  it('orden de claves barajado: cada aviso en su rol; el del modo plan (solo explorador/Claude) no sale en la fila de Codex', async () => {
+    const sw = normalizeSaveWarnings(RESP, providersOfSettings(settings));
+    render(<RolesSettings roles={[...ALL].reverse()} settings={settings} providers={await providers()} onSave={vi.fn()} resolver={mockResolvePolicy} saveWarnings={sw} />);
+    expect(screen.getByTestId('role-save-warnings-explorador').textContent).toContain(PLAN);
+    expect(screen.getByTestId('role-save-warnings-adversario').textContent).toBe('aviso-adversario');
+    const codexRow = screen.getByTestId('role-revisor');
+    expect(within(codexRow).getByTestId('role-save-warnings-revisor').textContent).toContain('gpt-6-sol');
+    await waitFor(() => expect(within(codexRow).getByTestId('role-warnings-revisor')).toBeTruthy());
+    expect(codexRow.textContent).not.toContain(PLAN);
+    expect(screen.queryByTestId('role-save-warnings-implementador')).toBeNull();
+    expect(screen.queryByTestId('role-save-warnings-escalado')).toBeNull();
+  });
+
+  it('la política de solo lectura de Codex se pide con provider codex y nunca muestra avisos solo de Claude', async () => {
+    const resolver = vi.fn(async (a) => ({ ...(await mockResolvePolicy(a)), warnings: [...(await mockResolvePolicy(a)).warnings, PLAN] }));
+    render(<RolesSettings roles={ALL} settings={settings} providers={await providers()} onSave={vi.fn()} resolver={resolver} />);
+    await waitFor(() => expect(screen.getByTestId('role-warnings-revisor')).toBeTruthy());
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ provider: 'codex', role: 'revisor', profile: 'explorar' }));
+    expect(screen.getByTestId('role-revisor').textContent).not.toContain(PLAN);
+  });
+
+  it('avisos calculados con otro proveedor (guardado fallido o pendiente) no se enseñan en la fila', () => {
+    const sw = normalizeSaveWarnings({ warnings: { revisor: [PLAN, 'x'] } }, { revisor: 'claude' });
+    expect(warningsForRole(sw, 'revisor', 'codex')).toEqual([]);
+    expect(warningsForRole(sw, 'revisor', 'claude')).toEqual([PLAN, 'x']);
+    // Sin saber con qué se calcularon: se muestran, pero sin los exclusivos de Claude en Codex.
+    expect(warningsForRole(normalizeSaveWarnings({ warnings: { revisor: [PLAN, 'x'] } }), 'revisor', 'codex')).toEqual(['x']);
+    expect(dropClaudeOnly([PLAN], 'claude')).toEqual([PLAN]);
+    expect(providersOfSettings({ roles: { a: { model: 'x' }, b: { provider: 'codex' } } })).toEqual({ a: 'claude', b: 'codex' });
+  });
+
+  it('la fila muestra el proveedor que guardó el host, no el elegido sin guardar', async () => {
+    const onSave = vi.fn();
+    render(<RolesSettings roles={ALL} settings={settings} providers={await providers()} onSave={onSave} resolver={mockResolvePolicy}
+      saveWarnings={normalizeSaveWarnings({ warnings: { explorador: [PLAN] } }, providersOfSettings(settings))} />);
+    fireEvent.click(screen.getByTitle('Proveedor del explorador'));
+    fireEvent.click(within(screen.getByRole('listbox')).getByText('Codex'));
+    // El host no devolvió el cambio: sigue en Claude, con el aviso de no guardado.
+    expect(screen.getByTitle('Proveedor del explorador').textContent).toContain('Claude Code');
+    expect(screen.getByTestId('role-host-agent-explorador')).toBeTruthy();
   });
 });
