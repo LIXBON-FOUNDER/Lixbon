@@ -36,6 +36,10 @@ const DEFAULT_LABELS = {
   errorNote: 'No se integró nada.',
   reviewRequired: 'Falta aceptar el diff del head actual de esta rama. No se integró nada.',
   openReview: 'Revisar diff',
+  currentHead: 'HEAD actual de la rama',
+  noHead: 'la rama ya no existe',
+  lastReview: (d, h) => `Última revisión: ${d === 'accepted' ? 'aceptada' : 'rechazada'} sobre ${h}`,
+  noReview: 'Todavía no hay ninguna revisión de esta tarea.',
 };
 
 export function IntegrationDialog({ task, branch, target, integrate = defaultIntegrate, allowSquash = true, labels, onDone, onOpenReview }) {
@@ -150,6 +154,12 @@ export function IntegrationDialog({ task, branch, target, integrate = defaultInt
       {outcome === OUTCOMES.reviewRequired && (
         <div className="integration__error" role="alert" data-testid="integration-result">
           <p><strong>{L.reviewRequired}</strong></p>
+          <p>{L.currentHead}: {field(result, 'headCommit')
+            ? <code data-testid="integration-head">{shortSha(field(result, 'headCommit'))}</code>
+            : <span data-testid="integration-head">{L.noHead}</span>}</p>
+          <p data-testid="integration-last-review">{field(result, 'lastReview')
+            ? fmt(L.lastReview, field(result, 'lastReview').decision, shortSha(field(result, 'lastReview').head_commit))
+            : L.noReview}</p>
           {message && <p className="integration__muted">{message}</p>}
           {onOpenReview && (
             <button type="button" className="integration__action" onClick={() => onOpenReview(task)}>{L.openReview}</button>

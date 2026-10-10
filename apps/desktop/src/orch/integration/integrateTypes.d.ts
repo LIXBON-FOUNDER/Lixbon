@@ -55,11 +55,19 @@ export interface IntegrateAlreadyMerged extends Base {
   outcome: 'already_merged';
 }
 
-/** No hay una revisión de diff aceptada para el head actual de la rama; no se integró nada. */
-export interface IntegrateReviewRequired extends Partial<Base> {
+/** Última revisión de la tarea (la más reciente decide). `at`: número de decisions.at del host. */
+export interface LastReview { decision: 'accepted' | 'rejected'; head_commit: string; at: number }
+
+/** No hay una revisión de diff aceptada para el HEAD actual de la rama; no se integró nada ni se registró decisión.
+    Forma real (integration.rs): { task, outcome, branch, head_commit, last_review, message } (sin `decision`). */
+export interface IntegrateReviewRequired {
+  task: string;
   outcome: 'review_required';
-  message?: string;
-  head_commit?: string;
+  branch: string;
+  /** null si la rama ya no existe. */
+  head_commit: string | null;
+  last_review: LastReview | null;
+  message: string;
 }
 
 export type IntegrateResult =

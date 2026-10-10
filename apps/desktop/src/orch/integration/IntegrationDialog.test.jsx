@@ -187,4 +187,19 @@ describe('IntegrationDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Revisar diff' }));
     expect(onOpenReview).toHaveBeenCalledWith('t-unreviewed');
   });
+
+  it('review_required muestra el HEAD actual y la última revisión (o que no hay)', async () => {
+    setup('t-unreviewed');
+    go();
+    expect((await screen.findByTestId('integration-head')).textContent).toBe('9f8e7d6');
+    expect(screen.getByTestId('integration-last-review').textContent).toContain('aceptada sobre 1111111');
+    cleanup();
+    setup('t-never-reviewed');
+    go();
+    expect((await screen.findByTestId('integration-last-review')).textContent).toContain('no hay ninguna revisión');
+    cleanup();
+    setup('t2', vi.fn(async () => ({ task: 't2', outcome: 'review_required', branch: 'lx/t2', head_commit: null, last_review: null, message: 'x' })));
+    go();
+    expect((await screen.findByTestId('integration-head')).textContent).toContain('ya no existe');
+  });
 });

@@ -6,7 +6,8 @@
 //                                                             (accept_moved_target = found_commit -> merged)
 //   *moved-twice* -> se mueve otra vez tras el primer reintento
 //   *dirty*     -> outcome error                *already*  -> outcome already_merged
-//   *unreviewed* -> outcome review_required (sin revisión aceptada del head actual)
+//   *unreviewed* -> outcome review_required con last_review aceptada sobre un head anterior
+//   *never-reviewed* -> outcome review_required con last_review null
 //   cualquier otra -> merged
 
 import { ACCEPT_MOVED_TARGET_PARAM } from './integrateTask.js';
@@ -33,9 +34,10 @@ export async function mockIntegrateTask(args = {}) {
   if (id.includes('nobranch')) throw MOCK_ERRORS.nobranch;
   const common = { task: id, decision: `mock-dec-${id}`, branch: `lxo/${id}` };
   if (id.includes('already')) return { ...common, outcome: 'already_merged' };
-  if (id.includes('unreviewed')) {
-    return { ...common, outcome: 'review_required', head_commit: RESULT,
-      message: 'mock-orch: no hay revisión aceptada para el head actual' };
+  if (id.includes('unreviewed') || id.includes('never-reviewed')) {
+    const last_review = id.includes('never') ? null : { decision: 'accepted', head_commit: BASE, at: 1760054400 };
+    return { task: id, outcome: 'review_required', branch: common.branch, head_commit: RESULT, last_review,
+      message: 'mock-orch: Antes de integrar, revisa el diff de la tarea y acéptalo sobre su commit actual.' };
   }
   if (id.includes('dirty')) {
     return { ...common, outcome: 'error', into: 'master', message: 'mock-orch: la rama destino tiene cambios sin commit' };
