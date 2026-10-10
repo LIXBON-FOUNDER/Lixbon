@@ -6,6 +6,7 @@
 
 mod agents;
 mod approval;
+mod spawn_approval;
 mod providers;
 mod codex_session;
 mod codex_term;
@@ -68,6 +69,19 @@ pub struct Core {
     terms: Mutex<HashMap<String, pty::AgentTerm>>,
     settings: Mutex<Settings>,
     server: Mutex<Option<server::Handle>>,
+    /// Lanzamientos esperando la aprobación de la persona (solo en memoria).
+    pending: Mutex<HashMap<String, spawn_approval::Entry>>,
+    /// Cómo se resuelve la política efectiva (las pruebas no consultan CLIs reales).
+    resolver: Resolver,
+    ttl_ms: u64,
+    #[cfg(test)]
+    launched: Mutex<Vec<String>>,
+}
+
+pub type Resolver = fn(&str, &str, Option<&str>, &str) -> agents::Policy;
+
+fn resolve_real(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
+    agents::resolve_task_policy(provider, profile, role, worktree, agents::Delivery::FileOrMarkers)
 }
 
 pub struct Orch(pub Arc<Core>);
@@ -81,6 +95,11 @@ impl Default for Orch {
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
             server: Mutex::new(None),
+            pending: Mutex::new(HashMap::new()),
+            resolver: resolve_real,
+            ttl_ms: spawn_approval::ttl_ms(),
+            #[cfg(test)]
+            launched: Mutex::new(Vec::new()),
         }))
     }
 }
@@ -114,6 +133,12 @@ fn discovery_file() -> PathBuf {
 pub fn lxo_path() -> PathBuf {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
     dir.join(if cfg!(windows) { "lxo.exe" } else { "lxo" })
+}
+
+/// Destino de `orch_integrate` para las hijas de una tarea: su carpeta y la rama
+/// que tiene ahora (integration.rs integra en la carpeta del padre).
+pub(crate) fn integrate_target(dir: &str) -> Value {
+    json!({ "dir": dir, "branch": git::current_branch(dir) })
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
@@ -151,6 +176,19 @@ const SWEEP_EVERY: Duration = Duration::from_secs(60);
 const CLOSE_REMINDER: &str = "No quedan hijas en marcha. Si el objetivo está cumplido e integrado, termina con `lxo run close`.";
 
 impl Core {
+    /// Política efectiva de una hija: la del perfil (vía `resolver`) más el modelo
+    /// pedido (aviso del modo plan, modelo no verificado). La misma al pedir
+    /// aprobación, al aprobar y al lanzar.
+    pub(crate) fn task_policy(&self, provider: &str, profile: &str, role: Option<&str>, cwd: &str, model: Option<&str>) -> agents::Policy {
+        let mut policy = (self.resolver)(provider, profile, role, cwd);
+        agents::warn_plan_model(&mut policy, model);
+        if let Some(m) = model {
+            agents::mark_model(&mut policy, Some(m), providers::model_verified(provider, m));
+        }
+        agents::set_model(&mut policy, model);
+        policy
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -183,6 +221,15 @@ impl Core {
                 core.close_idle_runs();
                 drop(core);
                 std::thread::sleep(SWEEP_EVERY);
+            }
+        });
+        // Vencimiento de lanzamientos pendientes (y de los de coordinadores que ya no siguen).
+        let weak = Arc::downgrade(self);
+        std::thread::spawn(move || {
+            while let Some(core) = weak.upgrade() {
+                core.sweep_pending();
+                drop(core);
+                std::thread::sleep(Duration::from_secs(5));
             }
         });
     }
@@ -362,7 +409,9 @@ impl Core {
                 self.commit(&st, &[]);
                 Ok(json!({ "run": run, "task": task }))
             }
-            "spawn" => self.spawn(&caller, args),
+            // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
+            "spawn" => self.spawn_request(&caller, args),
+            "spawn_status" => self.spawn_status(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
             "issue" => {
@@ -549,7 +598,8 @@ impl Core {
         Ok((branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone()))
     }
 
-    fn spawn(self: &Arc<Self>, caller: &Caller, args: &Value) -> Result<Value, String> {
+    /// Valida lo que pide el agente (sin crear nada) y arma el pendiente.
+    fn plan_spawn(&self, caller: &Caller, args: &Value) -> Result<spawn_approval::PendingSpawn, String> {
         let parent_id = Self::me(caller)?;
         let spec = s(args, "task");
         if spec.is_empty() {
@@ -577,45 +627,62 @@ impl Core {
             }
         };
         // Se valida antes de crear nada: un agente o modelo mal escrito no deja restos.
-        // Perfil pedido (por defecto el del rol); se re-resuelve en el host al lanzar.
+        // Perfil pedido (por defecto el del rol); se re-resuelve en el host al aprobar y al lanzar.
         let profile = match Some(s(args, "profile")).filter(|p| !p.is_empty()) {
             Some(p) => agents::Profile::parse(&p).ok_or_else(|| format!("Perfil desconocido: {p}"))?,
             None => agents::Profile::for_role(read_only),
         };
-        let ack_unverified = b(args, "ack_unverified");
-        let requested_argv: Option<Vec<String>> = args.get("argv").filter(|v| !v.is_null())
-            .map(|v| serde_json::from_value(v.clone()).map_err(|_| "argv debe ser una lista de textos".to_string()))
-            .transpose()?;
         agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile, role.as_deref())?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
         // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
         let shared = b(args, "shared") || read_only;
+        let parent = {
+            let st = self.lock();
+            let parent = st.task(&parent_id)?.clone();
+            if parent.depth >= MAX_DEPTH {
+                return Err("Una tarea hija no puede lanzar otras: pídeselo a tu coordinador con lxo ask".into());
+            }
+            if st.runs.get(&parent.run).is_none_or(|r| r.closed) {
+                return Err("Tu run está cerrado: no se pueden lanzar hijas".into());
+            }
+            parent
+        };
+        let base = Some(s(args, "base")).filter(|b| !b.is_empty());
+        Ok(self.new_pending(&parent, spawn_approval::NewPending {
+            provider: agent, profile: profile.id().to_string(), role, model, effort, title, spec, shared, base,
+        }))
+    }
 
+    /// Crea y lanza la hija de un pendiente que la persona aprobó. `argv` es el que
+    /// resolvió el host (nunca el que llega de la UI).
+    fn create_child(self: &Arc<Self>, p: &spawn_approval::PendingSpawn, argv: Vec<String>, ack_unverified: bool) -> Result<Value, String> {
+        let parent_id = p.parent_task.clone();
         let (id, parent) = {
             let mut st = self.lock();
             let parent = st.task(&parent_id)?.clone();
             let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
-                agent: agent.clone(), model: model.clone(), effort: effort.clone(), role: role.clone(), title: title.clone(), spec: spec.clone(),
+                agent: p.provider.clone(), model: p.model.clone(), effort: p.effort.clone(), role: p.role.clone(), title: p.title.clone(), spec: p.spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
             })?;
             let t = st.task_mut(&id)?;
-            t.profile = Some(profile.id().to_string());
+            t.profile = Some(p.profile.clone());
             t.ack_unverified = ack_unverified;
-            t.requested_argv = requested_argv;
+            t.requested_argv = Some(argv);
             (id, parent)
         };
 
         let prepared = (|| -> Result<(), String> {
-            if shared {
+            if p.shared {
                 return Ok(());
             }
-            let base = Some(s(args, "base")).filter(|b| !b.is_empty())
+            let base = p.base.clone()
                 .or_else(|| git::current_branch(&parent.cwd))
                 .unwrap_or_else(|| "HEAD".into());
-            let slug = state::slug(&title, 32);
+            let slug = state::slug(&p.title, 32);
             let branch = format!("lx/{}/{id}-{slug}", parent.run);
-            let dir = git::worktree_dir(&parent.repo, None, &format!("{}-{id}-{slug}", parent.run));
+            // La carpeta es la que se mostró en el pendiente: el argv aprobado la incluye (codex --cd).
+            let dir = PathBuf::from(&p.cwd);
             let start = git::head(&parent.cwd);
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
             let mut st = self.lock();
@@ -711,6 +778,9 @@ impl Core {
     }
 
     fn launch(self: &Arc<Self>, id: &str) -> Result<(), String> {
+        #[cfg(test)]
+        return self.fake_launch(id);
+        #[allow(unreachable_code)]
         let app = self.app.get().ok_or("Lixbon aún no terminó de arrancar")?.clone();
         let (task, parent, objective) = {
             let st = self.lock();
@@ -740,12 +810,7 @@ impl Core {
         // orch_resolve_policy); un perfil bloqueado no arranca.
         let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
         // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
-        let mut policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
-        agents::warn_plan_model(&mut policy, task.model.as_deref());
-        if let Some(m) = task.model.as_deref() {
-            agents::mark_model(&mut policy, Some(m), providers::model_verified(&task.agent, m));
-        }
-        agents::set_model(&mut policy, task.model.as_deref());
+        let policy = self.task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, task.model.as_deref());
         let plan_mode = agents::is_plan(&policy);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.
@@ -1079,11 +1144,43 @@ impl Core {
             "lxo": lxo_path(),
             "lxo_exists": lxo_path().is_file(),
             "runs": st.runs,
-            "tasks": st.tasks,
+            "tasks": tasks_with_integration(&st),
             "messages": &st.messages[start..],
             "live": live,
+            // Por tarea con rama: dónde la integraría orch_integrate (una consulta git por padre).
+            "integrate_into": integrate_targets(&st),
         })
     }
+}
+
+/// Última integración de la tarea (decisión `merge` más reciente) o `null`.
+fn last_integration(st: &State, id: &str) -> Value {
+    st.decisions.iter().filter(|d| d.task == id && d.kind == "merge").max_by_key(|d| (d.at, d.id)).map(|d| {
+        let v: Value = d.detail_json.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+        json!({ "outcome": v["outcome"], "result_commit": v.get("result_commit").cloned().unwrap_or(Value::Null), "at": d.at })
+    }).unwrap_or(Value::Null)
+}
+
+/// Las tareas de la snapshot con `last_integration` (sin la lista de decisiones).
+fn tasks_with_integration(st: &State) -> Value {
+    let mut tasks = serde_json::to_value(&st.tasks).unwrap_or(Value::Null);
+    if let Some(map) = tasks.as_object_mut() {
+        for (id, t) in map.iter_mut() {
+            t["last_integration"] = last_integration(st, id);
+        }
+    }
+    tasks
+}
+
+fn integrate_targets(st: &State) -> BTreeMap<String, Value> {
+    let mut by_dir: HashMap<String, Value> = HashMap::new();
+    let mut out = BTreeMap::new();
+    for t in st.tasks.values().filter(|t| t.branch.is_some() && !t.merged) {
+        let Some(p) = t.parent.as_ref().and_then(|p| st.tasks.get(p)) else { continue };
+        let v = by_dir.entry(p.cwd.clone()).or_insert_with(|| integrate_target(&p.cwd)).clone();
+        out.insert(t.id.clone(), v);
+    }
+    out
 }
 
 impl State {
@@ -1287,6 +1384,26 @@ pub fn orch_publish_pr(orch: TauriState<'_, Orch>, task: String, confirm: bool) 
     orch.0.publish_pr_from_ui(&task, confirm)
 }
 
+/// Lanzamientos que esperan a la persona (para recuperar la vista si se recarga).
+/// Solo la interfaz: no está en `orch_call` ni en el servidor HTTP de `lxo`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_list_pending_spawns(orch: TauriState<'_, Orch>) -> Vec<spawn_approval::PendingSpawn> {
+    orch.0.list_pending_spawns()
+}
+
+/// La persona aprueba un lanzamiento. `argv` es el que vio: solo se compara con el
+/// que vuelve a resolver el host, que es el que se lanza. Solo la interfaz.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_approve_spawn(orch: TauriState<'_, Orch>, pending_id: String, confirm: bool, argv: Vec<String>, ack_unverified: Option<bool>) -> Result<Value, String> {
+    orch.0.approve_spawn(&pending_id, confirm, &argv, ack_unverified.unwrap_or(false))
+}
+
+/// La persona rechaza un lanzamiento. Solo la interfaz.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_reject_spawn(orch: TauriState<'_, Orch>, pending_id: String, confirm: bool, reason: Option<String>) -> Result<Value, String> {
+    orch.0.reject_spawn(&pending_id, confirm, reason.as_deref())
+}
+
 #[tauri::command]
 pub fn orch_agents() -> Vec<skill::Detected> {
     skill::detect(&lxo_path().to_string_lossy())
@@ -1392,6 +1509,29 @@ mod tests {
         // Sin confirm (campo obligatorio) Tauri rechaza la llamada antes de llegar al host.
         assert!(invoke(json!({ "task": id })).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn la_snapshot_trae_la_ultima_integracion_de_cada_tarea() {
+        let orch = Orch::default();
+        let id = {
+            let nt = || NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "x".into(), spec: String::new(),
+                repo: ".".into(), cwd: ".".into(), branch: None, base: None, worktree: None, external: false };
+            let mut st = orch.0.lock();
+            let (_, root) = st.create_run("obj", nt());
+            st.add_child(&root, 2, nt()).unwrap()
+        };
+        let li = |o: &Orch| o.0.snapshot()["tasks"][&id]["last_integration"].clone();
+        assert_eq!(li(&orch), Value::Null);
+        orch.0.lock().record_decision(&id, "merge", "human", &json!({ "outcome": "conflict", "conflict": ["a.txt"] }));
+        assert_eq!((li(&orch)["outcome"].as_str(), li(&orch)["result_commit"].clone()), (Some("conflict"), Value::Null));
+        std::thread::sleep(Duration::from_millis(5));
+        orch.0.lock().record_decision(&id, "merge", "human", &json!({ "outcome": "merged", "result_commit": "abc123" }));
+        orch.0.lock().record_decision(&id, "spawn", "human", &json!({ "outcome": "approved" }));
+        let v = li(&orch);
+        assert_eq!((v["outcome"].as_str(), v["result_commit"].as_str()), (Some("merged"), Some("abc123")));
+        assert!(v["at"].as_u64().is_some());
+        assert!(orch.0.snapshot().get("decisions").is_none());
     }
 
     #[test]
