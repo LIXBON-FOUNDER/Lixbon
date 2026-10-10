@@ -8,6 +8,9 @@ mod agents;
 mod approval;
 mod providers;
 mod codex_session;
+mod codex_term;
+
+pub use codex_term::{CodexTerms, Listed as CodexTermListed};
 mod delivery;
 mod git;
 mod integration;
@@ -1242,6 +1245,21 @@ pub fn orch_resolve_policy(provider: String, profile: String, role: String, work
     }
     agents::set_model(&mut p, model.as_deref());
     p
+}
+
+/// Pestaña de terminal de Codex (orch/codex_term.rs): política sin lanzar nada.
+pub fn codex_term_policy(cwd: &str, model: Option<&str>, effort: Option<&str>) -> Result<Value, String> {
+    serde_json::to_value(codex_term::resolve(cwd, model, effort)?).map_err(|e| e.to_string())
+}
+
+/// Abre la pestaña de Codex. `root`: carpeta de trabajo abierta en Lixbon.
+#[allow(clippy::too_many_arguments)]
+pub fn codex_term_open(app: &AppHandle, terms: &CodexTerms, root: Option<&Path>, cwd: &str, model: Option<&str>, effort: Option<&str>,
+    cols: Option<u16>, rows: Option<u16>, acknowledged: bool) -> Result<Value, String> {
+    let app = app.clone();
+    let emit = move |name: &str, payload: Value| { let _ = app.emit(name, payload); };
+    let o = codex_term::open(terms, root, cwd, model, effort, cols, rows, acknowledged, |c| codex_term::resolve(c, model, effort), emit)?;
+    serde_json::to_value(o).map_err(|e| e.to_string())
 }
 
 /// Proveedores para los roles del equipo: versión, disponibilidad, modelos (con
