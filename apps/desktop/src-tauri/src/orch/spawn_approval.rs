@@ -103,7 +103,7 @@ impl Core {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn emit(&self, ev: &str, payload: &Value) {
+    pub(super) fn emit(&self, ev: &str, payload: &Value) {
         #[cfg(test)]
         self.events.lock().unwrap().push((ev.to_string(), payload.clone()));
         if let Some(app) = self.app.get() {
@@ -595,10 +595,23 @@ mod tests {
     fn coordinador_terminado_o_run_eliminado_limpia_sus_pendientes() {
         let e = setup("muerto");
         let p = pid(&e.spawn("claude"));
+        let argv = e.argv(&p);
+        e.core.events.lock().unwrap().clear();
         e.core.lock().close(&e.root, Status::Exited, "se cerró").unwrap();
         assert!(e.core.list_pending_spawns().is_empty());
+        let ev: Vec<_> = e.core.events.lock().unwrap().iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).cloned().collect();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].1["outcome"], "expired");
+        assert_eq!(ev[0].1["decision"]["actor"], "system");
         assert_eq!(e.status(&p)["status"], "expired");
-        assert_eq!(e.decisions(&p)[0].0, "system");
+        let d = e.decisions(&p);
+        assert_eq!(d.len(), 1);
+        assert_eq!((d[0].0.as_str(), d[0].1["outcome"].as_str()), ("system", Some("expired")));
+        let late = e.core.approve_spawn(&p, true, &argv, true).unwrap();
+        assert!(late["outcome"] == "expired" || late["outcome"] == "already_resolved", "{late}");
+        assert!(e.launched().is_empty());
+        assert_eq!(e.children(), 0);
+        assert_eq!(e.decisions(&p).len(), 1);
 
         let e2 = setup("eliminado");
         let p2 = pid(&e2.spawn("codex"));

@@ -16,6 +16,7 @@ mod delivery;
 mod git;
 mod integration;
 mod issues;
+mod review;
 mod pty;
 mod roles;
 mod server;
@@ -363,6 +364,11 @@ impl Core {
         }
         if let Caller::Agent(Some(id)) = &caller {
             self.lock().touch_run(id);
+        }
+        // Decisiones humanas (integrar, PR, revisar) y lecturas cerradas (diff de
+        // revisión): ni orch_call ni el servidor de lxo llegan a ellas.
+        if let Some(why) = review::closed_to_agents(cmd) {
+            return Err(why.into());
         }
         match cmd {
             "status" => {
@@ -1029,6 +1035,21 @@ impl Core {
         })
     }
 
+    /// Diff de revisión de una tarea (comando Tauri `orch_task_diff`).
+    pub fn task_diff_from_ui(&self, task_id: &str) -> Result<Value, String> {
+        review::task_diff(&self.state, task_id, review::DIFF_LIMIT)
+    }
+
+    /// Revisión de la persona (comando Tauri `orch_review_task`).
+    pub fn review_from_ui(&self, task_id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
+        let out = review::review_task(&self.state, task_id, decision, head_commit, comment, confirm)?;
+        if out["outcome"] == "recorded" {
+            self.commit(&self.lock(), &[]);
+            self.emit(review::EV_REVIEWED, &json!({ "task_id": task_id, "decision": decision, "head_commit": head_commit, "at": out["at"] }));
+        }
+        Ok(out)
+    }
+
     /// Publicación de PR aprobada por la persona (comando Tauri `orch_publish_pr`).
     pub fn publish_pr_from_ui(&self, task: &str, confirm: bool) -> Result<Value, String> {
         let res = integration::publish_pr(&self.state, true, &json!({ "task": task, "confirm": confirm }), &git::gh_pr);
@@ -1169,9 +1190,17 @@ fn last_integration(st: &State, id: &str) -> Value {
 /// Las tareas de la snapshot con `last_integration` (sin la lista de decisiones).
 fn tasks_with_integration(st: &State) -> Value {
     let mut tasks = serde_json::to_value(&st.tasks).unwrap_or(Value::Null);
+    // Un `git for-each-ref` por repo para el head_commit de todas sus ramas.
+    let mut heads: HashMap<String, HashMap<String, String>> = HashMap::new();
     if let Some(map) = tasks.as_object_mut() {
         for (id, t) in map.iter_mut() {
             t["last_integration"] = last_integration(st, id);
+            t["last_review"] = review::last_review(st, id);
+            let task = st.tasks.get(id);
+            t["head_commit"] = match task.and_then(|x| x.branch.as_ref().map(|b| (x.repo.clone(), b.clone()))) {
+                Some((repo, branch)) => json!(heads.entry(repo.clone()).or_insert_with(|| review::branch_heads(&repo)).get(&branch)),
+                None => Value::Null,
+            };
         }
     }
     tasks
@@ -1409,6 +1438,19 @@ pub fn orch_reject_spawn(orch: TauriState<'_, Orch>, pending_id: String, confirm
     orch.0.reject_spawn(&pending_id, confirm, reason.as_deref())
 }
 
+/// Diff de la rama de una tarea contra su base, por archivo. Solo la interfaz:
+/// no está en `orch_call` ni en el servidor HTTP de `lxo`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_task_diff(orch: TauriState<'_, Orch>, task_id: String) -> Result<Value, String> {
+    orch.0.task_diff_from_ui(&task_id)
+}
+
+/// La persona acepta o rechaza el diff de una tarea sobre `head_commit`. Solo la interfaz.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_review_task(orch: TauriState<'_, Orch>, task_id: String, decision: String, head_commit: String, comment: Option<String>, confirm: bool) -> Result<Value, String> {
+    orch.0.review_from_ui(&task_id, &decision, &head_commit, comment.as_deref(), confirm)
+}
+
 #[tauri::command]
 pub fn orch_agents() -> Vec<skill::Detected> {
     skill::detect(&lxo_path().to_string_lossy())
@@ -1437,14 +1479,14 @@ mod tests {
         core.settings.lock().unwrap().enabled = true;
         for caller in [Caller::Agent(None), Caller::Agent(Some("t1".into())), Caller::User] {
             let e = core.rpc(caller, "", "integrate", &json!({ "task": "t1", "confirm": true })).unwrap_err();
-            assert_eq!(e, "Comando desconocido: integrate");
+            assert_eq!(e, integration::AGENT_REJECT);
         }
         let e = core.rpc(Caller::Agent(None), "", "merge", &json!({ "task": "t1" })).unwrap_err();
         assert_eq!(e, integration::AGENT_REJECT);
         for caller in [Caller::Agent(Some("t1".into())), Caller::User] {
             assert_eq!(core.rpc(caller, "", "pr", &json!({ "task": "t1" })).unwrap_err(), integration::PR_REJECT);
         }
-        for c in ["publish_pr", "orch_publish_pr", "integrate"] {
+        for c in ["publish_pr", "orch_publish_pr"] {
             assert_eq!(core.rpc(Caller::Agent(None), "", c, &json!({})).unwrap_err(), format!("Comando desconocido: {c}"));
         }
         assert!(!include_str!("server.rs").contains("integrate") && !include_str!("server.rs").contains("publish"));
@@ -1493,6 +1535,8 @@ mod tests {
             st.task_mut(&id).unwrap().base_commit = Some(base.clone());
             id
         };
+        // Integrar exige la revisión aceptada sobre el HEAD de la rama (review.rs).
+        orch.0.lock().record_decision(&id, "review", "human", &json!({ "decision": "accepted", "head_commit": git(&dir, &["rev-parse", "lx/t"]) }));
         let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_integrate, orch_publish_pr])
             .build(mock_context(noop_assets())).unwrap();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -1514,6 +1558,78 @@ mod tests {
         // Sin confirm (campo obligatorio) Tauri rechaza la llamada antes de llegar al host.
         assert!(invoke(json!({ "task": id })).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Las dos listas de rechazo, cada una por separado, por orch_call (User) y
+    /// por el camino del servidor HTTP (Caller::Agent, mismo Core::rpc).
+    #[test]
+    fn revisar_y_diff_de_revision_no_llegan_por_orch_call_ni_http() {
+        let core = Orch::default().0;
+        core.settings.lock().unwrap().enabled = true;
+        let callers = || [Caller::Agent(None), Caller::Agent(Some("t1".into())), Caller::User];
+        for c in review::HUMAN_DECISION_CMDS {
+            for caller in callers() {
+                let e = core.rpc(caller, "", c, &json!({ "task": "t1", "task_id": "t1", "confirm": true })).unwrap_err();
+                assert!([integration::AGENT_REJECT, integration::PR_REJECT, review::REVIEW_REJECT].contains(&e.as_str()), "{c}: {e}");
+            }
+        }
+        assert_eq!(core.rpc(Caller::User, "", "review", &json!({})).unwrap_err(), review::REVIEW_REJECT);
+        for c in review::CLOSED_READ_CMDS {
+            for caller in callers() {
+                assert_eq!(core.rpc(caller, "", c, &json!({ "task_id": "t1" })).unwrap_err(), review::TASK_DIFF_CLOSED);
+            }
+        }
+        for c in ["orch_review_task", "orch_task_diff", "review_task"] {
+            assert_eq!(core.rpc(Caller::User, "", c, &json!({})).unwrap_err(), format!("Comando desconocido: {c}"));
+        }
+        let server = include_str!("server.rs");
+        assert!(server.contains("closed_to_agents"));
+        assert!(!server.contains("review_task") && !server.contains("task_diff_from_ui"));
+    }
+
+    /// orch_task_diff y orch_review_task por el IPC de Tauri, en snake_case.
+    #[test]
+    fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+        use tauri::webview::InvokeRequest;
+        let (st, id, dir, _) = review::tests::setup("ipc");
+        let orch = Orch::default();
+        *orch.0.lock() = st.into_inner().unwrap();
+        let core = orch.0.clone();
+        let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_task_diff, orch_review_task])
+            .build(mock_context(noop_assets())).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let invoke = |cmd: &str, body: Value| {
+            get_ipc_response(&webview, InvokeRequest {
+                cmd: cmd.into(), callback: CallbackFn(0), error: CallbackFn(1),
+                url: if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" }.parse().unwrap(), body: InvokeBody::Json(body),
+                headers: Default::default(), invoke_key: INVOKE_KEY.to_string(),
+            }).map(|r| r.deserialize::<Value>().unwrap())
+        };
+        assert!(invoke("orch_task_diff", json!({ "taskId": id })).is_err());
+        let d = invoke("orch_task_diff", json!({ "task_id": id })).unwrap();
+        let h = d["head_commit"].as_str().unwrap().to_string();
+        assert_eq!(d["base_source"], "recorded");
+        let nf = invoke("orch_task_diff", json!({ "task_id": "nadie" })).unwrap_err();
+        assert!(format!("{nf:?}").contains("not_found"), "{nf:?}");
+        assert!(invoke("orch_review_task", json!({ "taskId": id, "decision": "accepted", "headCommit": h, "confirm": true })).is_err());
+        assert!(invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h })).is_err(), "confirm obligatorio");
+        let out = invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h, "comment": "ok", "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "recorded");
+        let ev: Vec<_> = core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).cloned().collect();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].1, json!({ "task_id": id, "decision": "accepted", "head_commit": h, "at": out["at"] }));
+        let snap = core.snapshot();
+        assert_eq!(snap["tasks"][&id]["last_review"]["decision"], "accepted");
+        assert_eq!(snap["tasks"][&id]["head_commit"].as_str(), Some(h.as_str()));
+        let root = core.lock().task(&id).unwrap().parent.clone().unwrap();
+        assert_eq!(snap["tasks"][&root]["head_commit"], Value::Null);
+        assert_eq!(snap["tasks"][&root]["last_review"], Value::Null);
+        let moved = invoke("orch_review_task", json!({ "task_id": id, "decision": "rejected", "head_commit": "0000", "confirm": true })).unwrap();
+        assert_eq!((moved["outcome"].as_str(), moved["found_commit"].as_str()), (Some("head_moved"), Some(h.as_str())));
+        assert_eq!(core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

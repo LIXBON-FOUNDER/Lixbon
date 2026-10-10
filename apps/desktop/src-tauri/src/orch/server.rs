@@ -90,6 +90,10 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
     let args = req.get("args").cloned().unwrap_or(Value::Null);
     // Las esperas largas (wait, ask) superan el timeout de lectura por diseño.
     stream.set_read_timeout(None)?;
+    // Rechazo explícito antes de despachar: decisiones humanas y lecturas cerradas (review.rs).
+    if let Some(why) = super::review::closed_to_agents(cmd) {
+        return reply(&mut stream, 200, &json!({ "ok": false, "error": why }));
+    }
     let res = match core.rpc(super::Caller::Agent(caller), &cwd, cmd, &args) {
         Ok(v) => json!({ "ok": true, "data": v }),
         Err(e) => json!({ "ok": false, "error": e }),
