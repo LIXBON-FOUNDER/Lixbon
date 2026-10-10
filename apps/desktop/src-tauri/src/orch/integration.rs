@@ -58,7 +58,7 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
     }
     let squash = bool_arg(args, "squash");
     let _one = INTEGRATING.lock().unwrap_or_else(|e| e.into_inner());
-    let (branch, into, title, expected) = {
+    let (branch, into, title, expected, repo) = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
         let t = st.task(&id)?;
         let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que integrar"))?;
@@ -71,10 +71,21 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
         if !t.status.is_final() && !bool_arg(args, "force") {
             return Err(format!("{id} aún está en marcha: espera a que entregue o usa force"));
         }
-        (branch, parent.cwd.clone(), t.title.clone(), expected_target(&st, t, &parent.cwd))
+        (branch, parent.cwd.clone(), t.title.clone(), expected_target(&st, t, &parent.cwd), t.repo.clone())
     };
+    // Solo se integra lo que la persona revisó: la última revisión tiene que ser
+    // `accepted` sobre el HEAD actual de la rama. Si no, ni git ni decisión.
+    let head = super::review::branch_head(&repo, &branch);
+    let reviewed = {
+        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+        head.as_deref().is_some_and(|h| super::review::accepted_for(&st, &id, h)).then_some(()).ok_or_else(|| super::review::last_review(&st, &id))
+    };
+    if let Err(last_review) = reviewed {
+        return Ok(json!({ "task": id, "outcome": "review_required", "branch": branch, "head_commit": head, "last_review": last_review,
+            "message": "Antes de integrar, revisa el diff de la tarea y acéptalo sobre su commit actual." }));
+    }
     let found = git::head(&into);
-    let mut st_rec = |detail: Value| {
+    let st_rec = |detail: Value| {
         let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
         st.record_decision(&id, "merge", "human", &detail)
     };
@@ -245,7 +256,22 @@ mod tests {
         let id = st.add_child(&root, 2, nt("hija", Some("lx/t"))).unwrap();
         st.done(&id, true, "ok", vec![], None).unwrap();
         st.task_mut(&id).unwrap().base_commit = Some(git(&dir, &["rev-parse", "HEAD"]));
-        (Mutex::new(st), id, dir)
+        // Integrar exige una revisión aceptada sobre el HEAD de la rama (review.rs).
+        let st = Mutex::new(st);
+        accept(&st, &id, &dir, "lx/t");
+        (st, id, dir)
+    }
+
+    /// Revisión aceptada de la persona sobre el HEAD actual de la rama.
+    fn accept(st: &Mutex<State>, id: &str, dir: &Path, branch: &str) {
+        let h = git(dir, &["rev-parse", branch]);
+        let out = super::super::review::review_task(st, id, "accepted", &h, None, true).unwrap();
+        assert_eq!(out["outcome"], "recorded");
+    }
+
+    /// Decisiones sin las revisiones (las pruebas de integración cuentan merges y PRs).
+    fn ds(s: &State) -> Vec<super::super::state::Decision> {
+        s.decisions.iter().filter(|d| d.kind != "review").cloned().collect()
     }
 
     #[test]
@@ -256,7 +282,7 @@ mod tests {
         assert_eq!(e, AGENT_REJECT);
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
         let s = st.lock().unwrap();
-        assert!(!s.task(&id).unwrap().merged && s.decisions.is_empty());
+        assert!(!s.task(&id).unwrap().merged && ds(&s).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -268,7 +294,7 @@ mod tests {
             assert_eq!(integrate(&st, true, &args).unwrap_err(), NEED_CONFIRM);
         }
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
-        assert!(st.lock().unwrap().decisions.is_empty());
+        assert!(ds(&st.lock().unwrap()).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -285,8 +311,8 @@ mod tests {
         assert_eq!((out["outcome"].as_str(), out["result_commit"].as_str()), (Some("merged"), Some(result.as_str())));
         let s = st.lock().unwrap();
         assert!(s.task(&id).unwrap().merged);
-        let d = &s.decisions[0];
-        assert_eq!((d.id, d.task.as_str(), d.kind.as_str(), d.actor.as_str()), (1, id.as_str(), "merge", "human"));
+        let dv = ds(&s); let d = &dv[0];
+        assert_eq!((d.id, d.task.as_str(), d.kind.as_str(), d.actor.as_str()), (2, id.as_str(), "merge", "human"));
         assert!(d.at > 0);
         let detail: Value = serde_json::from_str(d.detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(detail["base_commit"], base.as_str());
@@ -300,9 +326,9 @@ mod tests {
         drop(s);
         // Llamada repetida (doble clic): no integra otra vez ni registra otra decisión.
         let again = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
-        assert_eq!((again["outcome"].as_str(), again["decision"].as_u64()), (Some("already_merged"), Some(1)));
+        assert_eq!((again["outcome"].as_str(), again["decision"].as_u64()), (Some("already_merged"), Some(2)));
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), result);
-        assert_eq!(st.lock().unwrap().decisions.len(), 1);
+        assert_eq!(ds(&st.lock().unwrap()).len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -318,7 +344,7 @@ mod tests {
         let mut sorted = outs.clone();
         sorted.sort();
         assert_eq!(sorted, ["already_merged", "merged"]);
-        assert_eq!(st.lock().unwrap().decisions.len(), 1);
+        assert_eq!(ds(&st.lock().unwrap()).len(), 1);
         assert_eq!(git(&dir, &["rev-list", "--merges", "--count", "HEAD"]), "1");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -328,7 +354,7 @@ mod tests {
         let (st, id, dir) = setup("conflicto", true);
         let base = git(&dir, &["rev-parse", "HEAD"]);
         let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
-        assert_eq!((out["outcome"].as_str(), out["decision"].as_u64()), (Some("conflict"), Some(1)));
+        assert_eq!((out["outcome"].as_str(), out["decision"].as_u64()), (Some("conflict"), Some(2)));
         assert_eq!(out["conflicts"], json!(["a.txt"]));
         assert_eq!((out["branch"].as_str(), out["into"].as_str()), (Some("lx/t"), dir.to_str()));
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), base);
@@ -336,7 +362,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "master\n");
         let s = st.lock().unwrap();
         assert!(!s.task(&id).unwrap().merged);
-        let detail: Value = serde_json::from_str(s.decisions[0].detail_json.as_deref().unwrap()).unwrap();
+        let detail: Value = serde_json::from_str(ds(&s)[0].detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(detail["outcome"], "conflict");
         assert_eq!(detail["conflicts"], json!(["a.txt"]));
         assert_eq!(detail["base_commit"], base.as_str());
@@ -358,7 +384,7 @@ mod tests {
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), found);
         let s = st.lock().unwrap();
         assert!(!s.task(&id).unwrap().merged);
-        let d = &s.decisions[0];
+        let dv = ds(&s); let d = &dv[0];
         assert_eq!((d.kind.as_str(), d.actor.as_str()), ("merge", "human"));
         let detail: Value = serde_json::from_str(d.detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(detail["outcome"], "target_moved");
@@ -393,11 +419,11 @@ mod tests {
         assert_eq!(git(&dir, &["rev-parse", "HEAD^1"]), now);
         let s = st.lock().unwrap();
         assert!(s.task(&id).unwrap().merged);
-        let d: Value = serde_json::from_str(s.decisions.last().unwrap().detail_json.as_deref().unwrap()).unwrap();
+        let d: Value = serde_json::from_str(ds(&s).last().unwrap().detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(d["accepted_moved_target"], true);
         assert_eq!((d["expected_commit"].as_str(), d["found_commit"].as_str(), d["base_commit"].as_str()),
             (Some(expected.as_str()), Some(now.as_str()), Some(now.as_str())));
-        assert_eq!(s.decisions.len(), 3);
+        assert_eq!(ds(&s).len(), 3);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -422,10 +448,11 @@ mod tests {
             s.task_mut(&id2).unwrap().created = 0;
             id2
         };
+        accept(&st, &id2, &dir, "lx/u");
         assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap()["outcome"], "merged");
         let out = integrate(&st, true, &json!({ "task": id2, "confirm": true })).unwrap();
         assert_eq!(out["outcome"], "merged", "{out}");
-        assert_eq!(st.lock().unwrap().decisions.len(), 2);
+        assert_eq!(ds(&st.lock().unwrap()).len(), 2);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -434,7 +461,7 @@ mod tests {
         let (st, id, dir) = setup("sinref", false);
         st.lock().unwrap().task_mut(&id).unwrap().base_commit = None;
         assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap()["outcome"], "merged");
-        let detail: Value = serde_json::from_str(st.lock().unwrap().decisions[0].detail_json.as_deref().unwrap()).unwrap();
+        let detail: Value = serde_json::from_str(ds(&st.lock().unwrap())[0].detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(detail["base_check"], "sin_referencia");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -460,7 +487,7 @@ mod tests {
     }
 
     fn detail(st: &Mutex<State>, i: usize) -> Value {
-        serde_json::from_str(st.lock().unwrap().decisions[i].detail_json.as_deref().unwrap()).unwrap()
+        serde_json::from_str(ds(&st.lock().unwrap())[i].detail_json.as_deref().unwrap()).unwrap()
     }
 
     #[test]
@@ -471,7 +498,7 @@ mod tests {
         assert_eq!(publish_pr(&st, false, &json!({ "task": id, "confirm": true }), &gh).unwrap_err(), PR_REJECT);
         assert_eq!(publish_pr(&st, true, &json!({ "task": id }), &gh).unwrap_err(), NEED_CONFIRM_PR);
         assert_eq!(calls.get(), 0);
-        assert!(st.lock().unwrap().decisions.is_empty());
+        assert!(ds(&st.lock().unwrap()).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -491,7 +518,7 @@ mod tests {
         assert_eq!(git(&bare, &["rev-parse", "lx/t"]), git(&dir, &["rev-parse", "lx/t"]));
         let d = detail(&st, 0);
         assert_eq!(d, json!({ "outcome": "created", "branch": "lx/t", "remote": bare.to_str().unwrap(), "pr_url": "https://github.com/o/r/pull/7" }));
-        { let s = st.lock().unwrap(); assert_eq!((s.decisions[0].kind.as_str(), s.decisions[0].actor.as_str()), ("pr", "human")); }
+        { let s = st.lock().unwrap(); assert_eq!((ds(&s)[0].kind.as_str(), ds(&s)[0].actor.as_str()), ("pr", "human")); }
         // Repetida: no vuelve a crear, deja constancia already_exists.
         let again = publish_pr(&st, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
         assert_eq!(again["outcome"], "already_exists");
@@ -515,7 +542,7 @@ mod tests {
         let (st2, id2, dir2) = setup("pr-error", false);
         let ok_gh = |_: &str, _: &str, _: &str, _: &str, _: &str| Ok("https://x".to_string());
         let out = publish_pr(&st2, true, &json!({ "task": id2, "confirm": true }), &ok_gh).unwrap();
-        assert_eq!((out["outcome"].as_str(), out["decision"].as_u64(), out["branch"].as_str()), (Some("error"), Some(1), Some("lx/t")));
+        assert_eq!((out["outcome"].as_str(), out["decision"].as_u64(), out["branch"].as_str()), (Some("error"), Some(2), Some("lx/t")));
         assert!(out["pr_url"].is_null() && out["remote"].is_null());
         assert!(out["message"].as_str().unwrap().contains("push"));
         assert_eq!(detail(&st2, 0), json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null }));
@@ -524,8 +551,62 @@ mod tests {
     }
 
     #[test]
+    fn sin_revision_aceptada_no_integra() {
+        let (st, id, dir) = setup("sin-revision", false);
+        st.lock().unwrap().decisions.clear();
+        let before = git(&dir, &["rev-parse", "HEAD"]);
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "review_required");
+        assert_eq!(out["last_review"], Value::Null);
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
+        assert!(st.lock().unwrap().decisions.is_empty(), "no registra decisión");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn commit_nuevo_tras_aceptar_exige_revisar_otra_vez() {
+        let (st, id, dir) = setup("commit-nuevo", false);
+        let accepted = git(&dir, &["rev-parse", "lx/t"]);
+        git(&dir, &["checkout", "-q", "lx/t"]);
+        std::fs::write(dir.join("d.txt"), "después\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "commit tras la revisión"]);
+        git(&dir, &["checkout", "-q", "master"]);
+        let before = git(&dir, &["rev-parse", "HEAD"]);
+        let n = st.lock().unwrap().decisions.len();
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "review_required");
+        assert_eq!(out["last_review"]["head_commit"].as_str(), Some(accepted.as_str()));
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
+        assert_eq!(st.lock().unwrap().decisions.len(), n);
+        // Revisar el commit viejo ya no vale: head_moved, sin registrar nada.
+        let old = super::super::review::review_task(&st, &id, "accepted", &accepted, None, true).unwrap();
+        assert_eq!(old["outcome"], "head_moved");
+        assert_eq!(st.lock().unwrap().decisions.len(), n);
+        // Aceptado sobre el nuevo HEAD sí integra.
+        accept(&st, &id, &dir, "lx/t");
+        assert_eq!(integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap()["outcome"], "merged");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn aceptar_y_luego_rechazar_el_mismo_commit_no_integra() {
+        let (st, id, dir) = setup("acepta-rechaza", false);
+        let h = git(&dir, &["rev-parse", "lx/t"]);
+        let r = super::super::review::review_task(&st, &id, "rejected", &h, Some("mejor no"), true).unwrap();
+        assert_eq!(r["outcome"], "recorded");
+        let before = git(&dir, &["rev-parse", "HEAD"]);
+        let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "review_required");
+        assert_eq!(out["last_review"]["decision"], "rejected");
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
+        assert!(ds(&st.lock().unwrap()).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn state_json_viejo_sin_decisions_se_lee() {
         let s: State = serde_json::from_str(r#"{"runs":{},"tasks":{},"messages":[],"seq":3}"#).unwrap();
-        assert!(s.decisions.is_empty());
+        assert!(ds(&s).is_empty());
     }
 }
