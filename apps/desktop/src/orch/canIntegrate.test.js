@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canIntegrate, isMerged, mergedCommitShort, integrationTarget, INTEGRATE_INTO_FALLBACK } from './canIntegrate';
+import { canIntegrate, isReviewAccepted, isMerged, mergedCommitShort, integrationTarget, INTEGRATE_INTO_FALLBACK } from './canIntegrate';
 
 const t = (o = {}) => ({ id: 't1', parent: 'coord', status: 'done', branch: 'lxo/t1', ...o });
 const snap = (o = {}) => ({ tasks: { coord: { id: 'coord', branch: 'lxo/coord' } }, ...o });
@@ -54,4 +54,22 @@ describe('integrationTarget', () => {
     expect(integrationTarget(t(), snap({ integrate_into: { [t().id]: { dir: 'C:/coord', branch: null } } }))).toBe('C:/coord'));
   it('sin integrate_into: rama del padre', () => expect(integrationTarget(t(), snap())).toBe('lxo/coord'));
   it('sin nada: texto genérico', () => expect(integrationTarget(t(), { tasks: {} })).toBe(INTEGRATE_INTO_FALLBACK));
+});
+
+describe('canIntegrate con last_review', () => {
+  const lr = (decision, head_commit = 'h1') => ({ decision, head_commit, at: '2026-10-09T12:00:00Z' });
+  it('undefined (host anterior): se integra como antes', () => expect(canIntegrate(t(), snap())).toBe(true));
+  it('null: sin revisión no se integra', () => expect(canIntegrate(t({ last_review: null }), snap())).toBe(false));
+  it('rejected: no', () => expect(canIntegrate(t({ last_review: lr('rejected'), head_commit: 'h1' }), snap())).toBe(false));
+  it('accepted sobre el head actual: sí', () => expect(canIntegrate(t({ last_review: lr('accepted'), head_commit: 'h1' }), snap())).toBe(true));
+  it('accepted sobre otro head: no', () => expect(canIntegrate(t({ last_review: lr('accepted', 'h0'), head_commit: 'h1' }), snap())).toBe(false));
+  it('accepted sin head_commit conocido en la tarea: sí', () => expect(canIntegrate(t({ last_review: lr('accepted') }), snap())).toBe(true));
+  it('accepted pero ya integrada: no', () =>
+    expect(canIntegrate(t({ last_review: lr('accepted'), head_commit: 'h1', last_integration: { outcome: 'merged', result_commit: 'r', at: 'x' } }), snap())).toBe(false));
+  it('accepted con integración en conflicto: sí', () =>
+    expect(canIntegrate(t({ last_review: lr('accepted'), head_commit: 'h1', last_integration: { outcome: 'conflict', result_commit: null, at: 'x' } }), snap())).toBe(true));
+  it('isReviewAccepted sigue la misma regla', () => {
+    expect(isReviewAccepted({})).toBe(true);
+    expect(isReviewAccepted({ last_review: null })).toBe(false);
+  });
 });
