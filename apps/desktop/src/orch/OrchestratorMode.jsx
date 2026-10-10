@@ -17,7 +17,7 @@ import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 import { usePendingSpawns, PendingSpawnList, PendingSpawnDetail, SpawnNotice } from './spawn/PendingSpawns';
 import { IntegrationDialog } from './integration/IntegrationDialog';
-import { canIntegrate as canIntegrateTask, integrationTarget } from './canIntegrate';
+import { canIntegrate as canIntegrateTask, isMerged, mergedCommitShort, integrationTarget } from './canIntegrate';
 
 const agentLabel = (id) => AGENT_LABELS[id] || id;
 const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
@@ -274,7 +274,7 @@ function TaskView({ task, snap }) {
   const final = isFinal(task.status);
   const now = useNow(!final, 1000);
   // Regla única en ./canIntegrate.js.
-  const canIntegrate = canIntegrateTask(task, snap);
+  const canIntegrate = canIntegrateTask(task);
   const [integrating, setIntegrating] = useState(false);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
@@ -296,7 +296,7 @@ function TaskView({ task, snap }) {
         </div>
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}
-        {task.merged && <span className="orch__pill is-ok">Fusionada</span>}
+        {isMerged(task) && <span className="orch__pill is-ok" title={task.last_integration?.result_commit || undefined}>Fusionada{mergedCommitShort(task) ? <> · <span className="mono">{mergedCommitShort(task)}</span></> : null}</span>}
         {canIntegrate && (
           <button className="lk" title="Integrar la rama de esta tarea con tu confirmación" onClick={() => setIntegrating((v) => !v)}>{integrating ? 'Cerrar integración' : 'Integrar'}</button>
         )}
