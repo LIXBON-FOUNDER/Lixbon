@@ -34,9 +34,12 @@ export function ArgvDisplay({ argv }) {
 /**
  * @param {{ worktree: string, role?: string|null, model?: string|null, initialProvider?: string, initialProfile?: string,
  *   resolver?: import('./policyTypes').PolicyResolver,
- *   onLaunch?: (launch: import('./policyTypes').PolicyLaunch) => void }} props
+ *   onLaunch?: (launch: import('./policyTypes').PolicyLaunch) => void,
+ *   policy?: import('./policyTypes').EffectivePolicy, launchLabel?: string, busy?: boolean }} props
+ * Con `policy` la vista muestra esa política tal cual (p. ej. la de un lanzamiento pendiente que
+ * ya resolvió el host): no llama al resolver ni deja cambiar proveedor o perfil.
  */
-export function EffectivePolicyView({ worktree, role = null, model = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch, providers = null }) {
+export function EffectivePolicyView({ worktree, role = null, model = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch, providers = null, policy: fixedPolicy = null, launchLabel = 'Lanzar', busy = false }) {
   const blockedReason = (provId, profId) => providers?.find((x) => x.id === provId)?.blocked_profiles?.find((b) => b.profile === profId)?.reason ?? null;
   const [provider, setProvider] = useState(initialProvider);
   const [profile, setProfile] = useState(initialProfile);
@@ -50,17 +53,18 @@ export function EffectivePolicyView({ worktree, role = null, model = null, initi
     setPolicy(null);
     setError(null);
     setAckUnverified(false);
+    if (fixedPolicy) { setPolicy(fixedPolicy); return () => { alive = false; }; }
     resolver(model ? { provider, profile, role, worktree, model } : { provider, profile, role, worktree })
       .then((p) => alive && setPolicy(p))
       .catch((e) => alive && setError(String(e?.message || e)));
     return () => { alive = false; };
-  }, [provider, profile, role, worktree, model, resolver]);
+  }, [provider, profile, role, worktree, model, resolver, fixedPolicy]);
 
   const isUnverified = policy?.status === 'unverified';
   // blocked nunca se lanza; unverified solo tras marcar la casilla.
   // Sin rol es solo una consulta de flags: no se lanza.
   const consultOnly = policy ? !policy.role : false;
-  const canLaunch = Boolean(policy && !consultOnly && policy.status !== 'blocked' && policy.argv.length > 0 && (!isUnverified || ackUnverified));
+  const canLaunch = Boolean(!busy && policy && !consultOnly && policy.status !== 'blocked' && policy.argv.length > 0 && (!isUnverified || ackUnverified));
   const launch = () => {
     if (!canLaunch) return;
     // Mismos nombres snake_case que espera spawn en el host: profile (id), argv, ack_unverified.
@@ -72,7 +76,7 @@ export function EffectivePolicyView({ worktree, role = null, model = null, initi
   return (
     <section className="policy" aria-label="Política efectiva">
       <h3 className="policy__title">Política efectiva</h3>
-      <div className="policy__pickers">
+      {!fixedPolicy && <div className="policy__pickers">
         <fieldset className="policy__group">
           <legend>Proveedor</legend>
           {PROVIDERS.map((p) => (
@@ -96,7 +100,7 @@ export function EffectivePolicyView({ worktree, role = null, model = null, initi
             );
           })}
         </fieldset>
-      </div>
+      </div>}
 
       {error && <p role="alert" className="policy__error">No se pudo resolver la política: {error}</p>}
       {!policy && !error && <p className="policy__muted">Resolviendo…</p>}
@@ -134,7 +138,7 @@ export function EffectivePolicyView({ worktree, role = null, model = null, initi
       )}
       {consultOnly && <p className="policy__muted">Solo consulta: sin rol no se lanza ninguna tarea.</p>}
       <button type="button" className="policy__launch" disabled={!canLaunch} onClick={launch}>
-        Lanzar
+        {launchLabel}
       </button>
     </section>
   );
