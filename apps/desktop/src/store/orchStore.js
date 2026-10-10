@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './toastStore';
-import { normalizeSaveWarnings, isSnapshotResponse, EMPTY_SAVE_WARNINGS } from '../orch/providers/roleSaveContract';
+import { normalizeSaveWarnings, snapshotFromSaveResponse, EMPTY_SAVE_WARNINGS } from '../orch/providers/roleSaveContract';
 import { TERMINAL_APPROVAL, TERMINAL_APPROVAL_TEXT } from '../orch/terminalApprovalContract';
 
 export const AGENT_LABELS = {
@@ -54,11 +54,12 @@ export const useOrchStore = create((set, get) => ({
       if (import.meta.env.DEV && import.meta.env.VITE_ORCH_MOCK === '1') {
         // Rama eliminada en el build de producción.
         const { mockRoleSaveWarnings } = await import('../orch/providers/mockRoleSaveWarnings.js');
-        res = { ...(isSnapshotResponse(res) ? res : {}), ...mockRoleSaveWarnings(settings) };
+        res = mockRoleSaveWarnings(settings, snapshotFromSaveResponse(res));
       }
       set({ saveWarnings: normalizeSaveWarnings(res) });
-      // Host anterior: devolvía el snapshot. Nuevo: { ok, warnings } → se pide el snapshot.
-      if (isSnapshotResponse(res)) set({ snap: res });
+      // { ok, warnings, snapshot }: se usa su snapshot; solo si falta se pide orch_snapshot.
+      const snap = snapshotFromSaveResponse(res);
+      if (snap) set({ snap });
       else await get().refresh();
     } catch (e) {
       toast(`No se pudo guardar: ${e}`, { tone: 'error' });

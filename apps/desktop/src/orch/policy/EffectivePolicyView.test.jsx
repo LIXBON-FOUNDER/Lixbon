@@ -291,7 +291,25 @@ describe('modelo pedido en la política efectiva', () => {
     render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" initialProvider="codex" model="gpt-6-sol" />);
     expect((await screen.findByTestId('policy-model')).textContent).toBe('gpt-6-sol');
   });
-  it('Claude sin modelo: no se muestra la fila (no hay config.toml)', async () => {
+  it('muestra el texto del host tal cual (policy.model), sin inventar', async () => {
+    const resolver = async (a) => ({ ...(await mockResolvePolicy(a)), model: 'texto del host' });
+    render(<EffectivePolicyView resolver={resolver} worktree="C:/wt/t1" initialProvider="codex" />);
+    expect((await screen.findByTestId('policy-model')).textContent).toBe('texto del host');
+  });
+  it('host anterior sin campo model: no hay fila', async () => {
+    const resolver = async (a) => { const p = await mockResolvePolicy(a); delete p.model; return p; };
+    render(<EffectivePolicyView resolver={resolver} worktree="C:/wt/t1" initialProvider="codex" />);
+    await screen.findByTestId('policy-argv');
+    expect(screen.queryByTestId('policy-model')).toBeNull();
+  });
+  it('mock: model como agents::set_model', async () => {
+    const base = { role: null, worktree: 'C:/wt/t1', profile: 'explorar' };
+    expect((await mockResolvePolicy({ ...base, provider: 'codex' })).model).toBe('el que defina config.toml');
+    expect((await mockResolvePolicy({ ...base, provider: 'codex', model: ' ' })).model).toBe('el que defina config.toml');
+    expect((await mockResolvePolicy({ ...base, provider: 'claude' })).model).toBeNull();
+    expect((await mockResolvePolicy({ ...base, provider: 'claude', model: 'opus' })).model).toBe('opus');
+  });
+  it('Claude sin modelo: model null y no se muestra la fila', async () => {
     render(<EffectivePolicyView resolver={mockResolvePolicy} worktree="C:/wt/t1" />);
     await screen.findByTestId('policy-argv');
     expect(screen.queryByTestId('policy-model')).toBeNull();
