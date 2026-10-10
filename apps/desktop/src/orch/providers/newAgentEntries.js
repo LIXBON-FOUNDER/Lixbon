@@ -5,8 +5,8 @@ import { providerLabel } from './providersContract';
 /** Motores de chat que Lixbon sabe abrir (chatStore.spawnSession). Codex no tiene chat propio todavía. */
 export const CHAT_ENGINES = Object.freeze(['claude']);
 export const NO_CHAT_REASON = 'chat aún no disponible';
-/** Motivo fijo de Codex: no hay chat de Codex en chatStore (c72ff47), esté o no disponible el proveedor. */
-export const CODEX_NO_CHAT_REASON = 'chat con Codex aún no disponible';
+/** Codex no abre chat: abre una pestaña con su TUI en un PTY (orch/codexterm). */
+export const TERMINAL_ENGINES = Object.freeze(['codex']);
 
 /**
  * Claude se muestra aunque la lista no llegue (su chat no depende del orquestador).
@@ -19,8 +19,8 @@ export function newAgentEntries(providers) {
     const off = p.available ? null : p.disabled_reason || 'no disponible';
     // El chat de Claude Code no pasa por el orquestador: su motivo se muestra pero no se
     // bloquea (antes siempre se podía abrir; una versión sin verificar no lo impide).
-    if (hasChat) return { id: p.id, label: providerLabel(p.id), disabled: false, reason: off };
-    if (p.id === 'codex') return { id: p.id, label: providerLabel(p.id), disabled: true, reason: CODEX_NO_CHAT_REASON };
+    if (hasChat) return { id: p.id, label: providerLabel(p.id), disabled: false, reason: off, kind: 'chat' };
+    if (TERMINAL_ENGINES.includes(p.id)) return { id: p.id, label: providerLabel(p.id), disabled: !p.available, reason: off, kind: 'terminal' };
     return { id: p.id, label: providerLabel(p.id), disabled: true, reason: off || NO_CHAT_REASON };
   });
 }

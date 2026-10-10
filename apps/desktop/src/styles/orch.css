@@ -173,3 +173,13 @@
 .orch__approval { margin-top: 4px; padding: 4px 8px; border-left: 3px solid var(--warn); font-size: 12px; }
 .orch__approval.is-failed { border-left-color: var(--danger, #d9534f); font-weight: 600; }
 .orch__approval-hint { opacity: .85; }
+/* Pestañas de terminal de Codex (modo Agente). */
+.codexterm { display: flex; flex-direction: column; height: 100%; }
+.codexterm__exit { font-size: 12px; color: var(--ink-dim); padding: 4px 0 6px; }
+.codexterm.is-exited .orch__term-host { opacity: .75; }
+.codextabs { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; }
+.codextabs__item { display: flex; align-items: center; gap: 4px; border-radius: var(--radius); }
+.codextabs__item.is-active { background: var(--surface-2, rgba(127,127,127,.12)); }
+.codextabs__open { flex: 1; text-align: left; background: none; border: 0; color: inherit; padding: 4px 6px; cursor: pointer; font: inherit; }
+.codexlaunch { margin: 12px; }
+.codexlaunch__actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 8px; }

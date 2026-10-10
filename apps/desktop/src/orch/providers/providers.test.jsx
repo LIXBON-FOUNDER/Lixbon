@@ -7,7 +7,7 @@ import { migrateRoleCfg, migrateRoles, modelOptions, effortOptions, providerOpti
 import { RolesSettings } from './RolesSettings';
 import { normalizeSaveWarnings, isSnapshotResponse, snapshotFromSaveResponse } from './roleSaveContract';
 import { mockRoleSaveWarnings } from './mockRoleSaveWarnings';
-import { newAgentEntries, CODEX_NO_CHAT_REASON } from './newAgentEntries';
+import { newAgentEntries } from './newAgentEntries';
 import { NewAgentItems } from './NewAgentItems';
 import { mockResolvePolicy, CODEX_LARGE_REPORT_WARNING, CODEX_COPY_BLOCK_WARNING } from '../policy/mockResolvePolicy';
 
@@ -136,27 +136,37 @@ describe('RolesSettings', () => {
 });
 
 describe('"+ Nuevo" del modo Agente', () => {
-  it('Codex sale deshabilitado con "chat con Codex aún no disponible" aunque esté disponible, y nunca abre chat', async () => {
+  it('Codex disponible: habilitado como terminal; abre el panel de terminal y nunca llama a onPick (newSession)', async () => {
     const onPick = vi.fn();
-    render(<NewAgentItems providers={await providers()} onPick={onPick} />);
+    const onOpenTerminal = vi.fn();
+    render(<NewAgentItems providers={await providers()} onPick={onPick} onOpenTerminal={onOpenTerminal} />);
     const codex = screen.getByTestId('newagent-codex');
-    expect(codex.disabled).toBe(true);
-    expect(codex.textContent).toContain('chat con Codex aún no disponible');
-    expect(CODEX_NO_CHAT_REASON).toBe('chat con Codex aún no disponible');
+    expect(codex.disabled).toBe(false);
+    expect(codex.textContent).not.toContain('chat con Codex aún no disponible');
     fireEvent.click(codex);
-    codex.onclick?.();
+    expect(onOpenTerminal).toHaveBeenCalledWith('codex');
     expect(onPick).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('newagent-claude'));
     expect(onPick).toHaveBeenCalledWith('claude');
     expect(onPick).toHaveBeenCalledTimes(1);
   });
-  it('Codex no disponible: mismo motivo fijo; Claude no disponible muestra su disabled_reason sin ocultarse', async () => {
+  it('Codex no disponible: deshabilitado con su disabled_reason y sin efecto al pulsar', async () => {
+    const onPick = vi.fn();
+    const onOpenTerminal = vi.fn();
+    render(<NewAgentItems providers={await providers({ available: false, disabled_reason: 'codex no está instalado o no está en el PATH de Lixbon' })} onPick={onPick} onOpenTerminal={onOpenTerminal} />);
+    const codex = screen.getByTestId('newagent-codex');
+    expect(codex.disabled).toBe(true);
+    expect(codex.textContent).toContain('codex no está instalado');
+    fireEvent.click(codex);
+    expect(onOpenTerminal).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+  });
+  it('Claude no disponible muestra su disabled_reason sin ocultarse; otro proveedor, el suyo', async () => {
     const l = (await providers({ available: false, disabled_reason: 'codex no está instalado' }));
     l[0] = { ...l[0], available: false, disabled_reason: 'no se pudo leer `claude --version`' };
     const e = newAgentEntries(l);
-    expect(e.find((x) => x.id === 'codex')).toMatchObject({ disabled: true, reason: 'chat con Codex aún no disponible' });
+    expect(e.find((x) => x.id === 'codex')).toMatchObject({ disabled: true, reason: 'codex no está instalado', kind: 'terminal' });
     expect(e.find((x) => x.id === 'claude').reason).toBe('no se pudo leer `claude --version`');
-    // Otro proveedor no disponible (futuro): su disabled_reason.
     expect(newAgentEntries([{ id: 'gemini', available: false, disabled_reason: 'gemini no está instalado' }])[0]).toMatchObject({ disabled: true, reason: 'gemini no está instalado' });
   });
   it('sin lista todavía: Claude y Codex visibles', () => {
