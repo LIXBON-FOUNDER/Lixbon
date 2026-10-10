@@ -645,6 +645,48 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+
+    /// Ejemplos de la guía (bloques de código y `código` en línea) con `lxo` encadenado.
+    fn chained_examples(guide: &str) -> Vec<String> {
+        let mut bad = vec![];
+        let mut fence = false;
+        for line in guide.lines() {
+            if line.trim_start().starts_with("```") {
+                fence = !fence;
+                continue;
+            }
+            let snippets: Vec<&str> = if fence { vec![line] } else { line.split('`').skip(1).step_by(2).collect() };
+            for sn in snippets {
+                if !sn.contains("lxo ") {
+                    continue;
+                }
+                // Lo que va entre comillas es texto, no shell.
+                let mut out = String::new();
+                let mut q = false;
+                for c in sn.chars() {
+                    if c == '"' { q = !q; } else if !q { out.push(c); }
+                }
+                if out.contains(';') || out.contains("&&") || out.contains('|') {
+                    bad.push(sn.to_string());
+                }
+            }
+        }
+        bad
+    }
+
+    #[test]
+    fn la_guia_no_encadena_comandos_lxo() {
+        for (name, g) in [("coordinator", COORDINATOR), ("worker", WORKER)] {
+            assert_eq!(chained_examples(g), Vec::<String>::new(), "{name}");
+            assert!(g.contains("Un comando `lxo` por llamada"), "{name}");
+        }
+        // La comprobación detecta los casos que colgaron la prueba de punta a punta.
+        assert_eq!(chained_examples("```\nlxo phase \"X\" --start; lxo check\n```").len(), 1);
+        assert_eq!(chained_examples("usa `lxo guide && lxo check`").len(), 1);
+        assert_eq!(chained_examples("`lxo list | lxo show`").len(), 1);
+        assert!(chained_examples("`lxo ask \"¿A; B | C?\"`").is_empty());
+    }
+
     use super::*;
 
     fn p(s: &[&str]) -> Args {

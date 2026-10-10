@@ -16,6 +16,8 @@ pub enum Status {
     Starting,
     Running,
     Waiting,
+    /// La CLI espera una aprobación en su terminal (`approval_deadline`).
+    AwaitingTerminalApproval,
     Done,
     Failed,
     Stopped,
@@ -118,6 +120,12 @@ pub struct Task {
     /// El intento se lanzó con `--permission-mode plan`.
     #[serde(default)]
     pub plan_mode: bool,
+    /// Límite de la espera de aprobación en la terminal (ms epoch) mientras dure.
+    #[serde(default)]
+    pub approval_deadline: Option<u64>,
+    /// Motivo máquina del fallo: `terminal_approval_timeout` o `agent_idle_timeout`.
+    #[serde(default)]
+    pub failure_reason: Option<String>,
     /// Archivo de `codex exec -o` del intento (perfil read-only de Codex).
     #[serde(default)]
     pub last_message_path: Option<String>,
@@ -333,6 +341,8 @@ impl State {
             model_mismatch: false,
             model_mismatch_reason: None,
             plan_mode: false,
+            approval_deadline: None,
+            failure_reason: None,
             last_message_path: None,
             stream_json: false,
             created: now,
@@ -448,6 +458,8 @@ Seguimiento:
         t.summary.clear();
         t.report = None;
         t.delivery_channel = None;
+        t.failure_reason = None;
+        t.approval_deadline = None;
         t.merged = false;
         t.status = Status::Running;
         t.updated = now_ms();
@@ -467,6 +479,39 @@ Seguimiento:
             }
             None => Ok(None),
         }
+    }
+
+    /// La CLI quedó esperando aprobación en su terminal hasta `deadline` (ms epoch).
+    pub fn await_terminal_approval(&mut self, id: &str, deadline: u64) -> Result<bool, String> {
+        let t = self.task(id)?;
+        if t.status.is_final() {
+            return Ok(false);
+        }
+        let t = self.task_mut(id)?;
+        t.approval_deadline = Some(deadline);
+        self.touch(id, Some(Status::AwaitingTerminalApproval))?;
+        Ok(true)
+    }
+
+    /// El agente siguió y volvió a escribir: deja de esperar.
+    pub fn resume_from_approval(&mut self, id: &str) -> Result<bool, String> {
+        if self.task(id)?.status != Status::AwaitingTerminalApproval {
+            return Ok(false);
+        }
+        self.task_mut(id)?.approval_deadline = None;
+        self.touch(id, Some(Status::Running))?;
+        Ok(true)
+    }
+
+    /// Cierra la tarea Failed con un motivo máquina (`failure_reason`) y otro legible.
+    pub fn fail_with(&mut self, id: &str, reason: &str, why: &str) -> Result<Option<u64>, String> {
+        if self.task(id)?.status.is_final() {
+            return Ok(None);
+        }
+        let t = self.task_mut(id)?;
+        t.failure_reason = Some(reason.into());
+        t.approval_deadline = None;
+        self.close(id, Status::Failed, why)
     }
 
     pub fn is_ancestor(&self, ancestor: &str, id: &str) -> bool {
@@ -853,5 +898,27 @@ mod tests {
     fn slug_legible() {
         assert_eq!(slug("Añadir API de autenticación!", 40), "anadir-api-de-autenticacion");
         assert_eq!(slug("¿?", 10), "tarea");
+    }
+
+    #[test]
+    fn espera_de_aprobacion_y_fallo_con_motivo() {
+        let mut s = State::default();
+        let (_, root) = s.create_run("obj", nt("raíz"));
+        let h = s.add_child(&root, 2, nt("hija")).unwrap();
+        assert!(s.await_terminal_approval(&h, 123).unwrap());
+        let v = serde_json::to_value(s.task(&h).unwrap()).unwrap();
+        assert_eq!((v["status"].as_str(), v["approval_deadline"].as_u64()), (Some("awaiting_terminal_approval"), Some(123)));
+        assert!(!s.task(&h).unwrap().status.is_final());
+        assert!(s.resume_from_approval(&h).unwrap());
+        assert_eq!((s.task(&h).unwrap().status, s.task(&h).unwrap().approval_deadline), (Status::Running, None));
+        s.await_terminal_approval(&h, 456).unwrap();
+        s.fail_with(&h, "terminal_approval_timeout", "nadie aprobó").unwrap();
+        let v = serde_json::to_value(s.task(&h).unwrap()).unwrap();
+        assert_eq!((v["status"].as_str(), v["failure_reason"].as_str()), (Some("failed"), Some("terminal_approval_timeout")));
+        assert!(v["approval_deadline"].is_null());
+        // Ya final: ni espera ni otro fallo la cambian.
+        assert!(!s.await_terminal_approval(&h, 1).unwrap());
+        assert!(s.fail_with(&h, "agent_idle_timeout", "x").unwrap().is_none());
+        assert_eq!(s.task(&h).unwrap().failure_reason.as_deref(), Some("terminal_approval_timeout"));
     }
 }
