@@ -37,6 +37,7 @@ export const SPAWN_FIELDS = Object.freeze({
   specSummary: 'spec_summary',
   expiresAt: 'expires_at',
   policy: 'policy',
+  integrateInto: 'integrate_into', // destino de integración que manda el host (también en tareas)
   outcome: 'outcome',
   confirm: 'confirm',
   argv: 'argv',
