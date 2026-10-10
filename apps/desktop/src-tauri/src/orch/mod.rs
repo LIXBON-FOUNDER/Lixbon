@@ -749,6 +749,9 @@ impl Core {
             t.stream_json = stream_json;
             t.delivery_channel = None;
             t.model_effective = None;
+            t.model_mismatch = false;
+            // launch_task ya rechazó un modelo pedido que no entra en el argv.
+            t.model_requested = t.model.clone();
         }
         std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
             .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;

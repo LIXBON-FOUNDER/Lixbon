@@ -106,6 +106,12 @@ pub struct Task {
     /// Modelo efectivo que informó la propia CLI (`message.model` de stream-json).
     #[serde(default)]
     pub model_effective: Option<String>,
+    /// Modelo pedido tal cual (alias o id) si `--model` va en el argv lanzado; `None` si no se pidió.
+    #[serde(default)]
+    pub model_requested: Option<String>,
+    /// El efectivo no es de la familia del pedido (`haiku` casa con `claude-haiku-*`).
+    #[serde(default)]
+    pub model_mismatch: bool,
     /// Archivo de `codex exec -o` del intento (perfil read-only de Codex).
     #[serde(default)]
     pub last_message_path: Option<String>,
@@ -317,6 +323,8 @@ impl State {
             delivered: vec![],
             delivery_channel: None,
             model_effective: None,
+            model_requested: None,
+            model_mismatch: false,
             last_message_path: None,
             stream_json: false,
             created: now,

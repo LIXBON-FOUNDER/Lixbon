@@ -119,10 +119,24 @@ const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.
 /// conserva: la necesita para `lxo`.
 const READ_ONLY_BLOCKED: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
-/// Única orden de Bash permitida en Explorar/Proponer con Claude.
-const LXO_ONLY: &str = "Bash(lxo *)";
-/// En Delegar, Claude solo puede ejecutar sin pedir permiso `lxo report` (no todo lxo).
-pub const LXO_REPORT_ONLY: &str = "Bash(lxo report:*)";
+/// Órdenes de Bash que Claude puede ejecutar sin pedir permiso, en todos sus
+/// perfiles: lista explícita, nunca `Bash(lxo *)`.
+pub const LXO_TOOLS: [&str; 4] = ["Bash(lxo report:*)", "Bash(lxo guide)", "Bash(lxo phase:*)", "Bash(lxo ask:*)"];
+
+/// `--allowedTools`/`--disallowedTools` aceptan varios valores y se tragarían lo
+/// que venga detrás: van en un solo token `--flag=a,b,c` (probado con Claude 2.1.296).
+fn allowed_tools() -> String {
+    format!("--allowedTools={}", LXO_TOOLS.join(","))
+}
+
+fn disallowed_tools() -> String {
+    format!("--disallowedTools={}", READ_ONLY_BLOCKED.join(","))
+}
+
+/// Reglas de un token `--flag=a,b` del argv (para la política y las pruebas).
+pub fn flag_list<'a>(argv: &'a [String], flag: &str) -> Option<Vec<&'a str>> {
+    argv.iter().find_map(|a| a.strip_prefix(flag)?.strip_prefix('=')).map(|v| v.split(',').collect())
+}
 /// Aviso y motivo de bloqueo del perfil read-only de Codex con `[windows] sandbox = "elevated"`.
 pub const ELEVATED: &str = "el sandbox elevado falla y Codex sale del read-only";
 pub const WARN_EXEC: &str = "No interactivo: se lanza con codex exec; la terminal muestra la salida pero no acepta teclado.";
@@ -141,9 +155,10 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
     let flags = match (provider, profile) {
         ("claude", Profile::Explorar | Profile::Proponer) => {
             // Bash solo para `lxo` (sintaxis del --help de 2.1.296: "Bash(git *)").
-            let mut f = v(&["-p", "--output-format", "stream-json", "--verbose", "--disallowedTools"]);
-            f.extend(v(READ_ONLY_BLOCKED));
-            f.extend(v(&["--allowedTools", LXO_ONLY, "--permission-mode", "plan"]));
+            let mut f = v(&["-p", "--output-format", "stream-json", "--verbose"]);
+            f.push(disallowed_tools());
+            f.push(allowed_tools());
+            f.extend(v(&["--permission-mode", "plan"]));
             warnings.push(WARN_STREAM.into());
             warnings.push("Claude no tiene sandbox del sistema: el modo plan lo aplica la CLI y Bash depende de su política.".into());
             warnings.push("La red y las lecturas fuera del repo no están bloqueadas.".into());
@@ -153,9 +168,11 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
             f
         }
         ("claude", Profile::DelegarConRevision) => {
-            warnings.push("Solo lxo report se ejecuta sin pedir permiso (Bash(lxo report:*)); cualquier otro comando de Bash queda esperando aprobación.".into());
+            warnings.push(format!("Solo se ejecutan sin pedir permiso: {}; cualquier otro comando de Bash queda esperando aprobación.", LXO_TOOLS.join(", ")));
             warnings.push("El aislamiento lo da el worktree de git, no la CLI; un comando permitido puede escribir fuera de él.".into());
-            v(&["--allowedTools", LXO_REPORT_ONLY, "--permission-mode", "acceptEdits"])
+            let mut f = vec![allowed_tools()];
+            f.extend(v(&["--permission-mode", "acceptEdits"]));
+            f
         }
         ("claude", Profile::AutonomiaAmplia) => v(&["--permission-mode", "auto"]),
         ("codex", Profile::Explorar | Profile::Proponer) => {
@@ -205,6 +222,13 @@ pub struct Probe {
     pub exec_help: Option<String>,
     /// Valor de `[windows] sandbox` en la config de Codex (solo se lee en Windows).
     pub windows_sandbox: Option<String>,
+}
+
+/// El modelo efectivo es de la familia pedida: `haiku` casa con `claude-haiku-*`,
+/// un id completo casa consigo mismo o con su versión fechada.
+pub fn same_model_family(requested: &str, effective: &str) -> bool {
+    let (r, e) = (requested.trim().to_ascii_lowercase(), effective.trim().to_ascii_lowercase());
+    e == r || e.starts_with(&format!("{r}-")) || e.starts_with(&format!("claude-{r}-")) || e == format!("claude-{r}")
 }
 
 /// `[windows] sandbox = "..."` (o `windows.sandbox = "..."`) de un config.toml de Codex.
@@ -290,8 +314,9 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
     let mut missing = vec![];
     for (i, a) in argv.iter().enumerate() {
         if !a.starts_with('-') { continue; }
-        if !help_has(help, a) {
-            missing.push(a.clone());
+        let name = a.split('=').next().unwrap_or(a);
+        if !help_has(help, name) {
+            missing.push(name.to_string());
             continue;
         }
         if ["--sandbox", "--permission-mode", "--ask-for-approval", "--output-format"].contains(&a.as_str()) {
@@ -588,12 +613,18 @@ pub fn launch_task(policy: &Policy, model: Option<&str>, effort: Option<&str>, p
         "claude" => {
             if let Some(m) = &model { args.extend(["--model".into(), m.clone()]); }
             if let Some(e) = &effort { args.extend(["--effort".into(), e.clone()]); }
+            // Fin de opciones: el prompt nunca se lee como valor de un flag (Claude 2.1.296 acepta `--`).
+            args.push("--".into());
         }
         "codex" => {
             if let Some(m) = &model { args.extend(["--model".into(), m.clone()]); }
             if let Some(e) = &effort { args.extend(["-c".into(), format!("model_reasoning_effort={e}")]); }
         }
-        _ => {}
+        _ => {
+            if let Some(m) = &model {
+                return Err(format!("Se pidió el modelo {m} pero el lanzamiento de {} no lo lleva en el argv: no se lanza", a.label));
+            }
+        }
     }
     args.push(format!("\"{prompt}\""));
     Ok(Launch { command: args.join(" "), env: vec![], inject: None, piped })
@@ -799,7 +830,7 @@ mod tests {
     #[test]
     fn lanzadores_con_perfil_y_modelo() {
         let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea", Profile::DelegarConRevision, None).unwrap();
-        assert_eq!(l.command, r#"claude --allowedTools "Bash(lxo report:*)" --permission-mode acceptEdits --model opus --effort high "Lee la tarea""#);
+        assert_eq!(l.command, r#"claude "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)" --permission-mode acceptEdits --model opus --effort high -- "Lee la tarea""#);
         assert!(!l.piped);
         assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x", Profile::Explorar, None).is_err());
         let l = launch_with(&evaluate("codex", Profile::Explorar, ".", Detected::Skip, false), Some("gpt-5.5"), Some("high"), "x").unwrap();
@@ -815,7 +846,7 @@ mod tests {
     #[test]
     fn explorar_en_claude_sin_herramientas_de_edicion() {
         let l = launch("claude", Some("haiku"), None, "Lee", Profile::Explorar, Some("explorador")).unwrap();
-        assert_eq!(l.command, r#"claude -p --output-format stream-json --verbose --disallowedTools Edit Write NotebookEdit --allowedTools "Bash(lxo *)" --permission-mode plan --model haiku "Lee""#);
+        assert_eq!(l.command, r#"claude -p --output-format stream-json --verbose --disallowedTools=Edit,Write,NotebookEdit "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)" --permission-mode plan --model haiku -- "Lee""#);
         // stream-json va canalizado: el JSONL llega sin pasar por ConPTY.
         assert!(l.piped);
     }
@@ -824,10 +855,11 @@ mod tests {
     fn argv_por_perfil_y_proveedor() {
         let wt = "C:\\Users\\USUARIO\\wt";
         let argv = |prov, prof| evaluate(prov, prof, wt, Detected::Skip, false).argv.join(" ");
-        let plan = "claude -p --output-format stream-json --verbose --disallowedTools Edit Write NotebookEdit --allowedTools Bash(lxo *) --permission-mode plan";
+        let tools = "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*)";
+        let plan = format!("claude -p --output-format stream-json --verbose --disallowedTools=Edit,Write,NotebookEdit {tools} --permission-mode plan");
         assert_eq!(argv("claude", Profile::Explorar), plan);
         assert_eq!(argv("claude", Profile::Proponer), plan);
-        assert_eq!(argv("claude", Profile::DelegarConRevision), "claude --allowedTools Bash(lxo report:*) --permission-mode acceptEdits");
+        assert_eq!(argv("claude", Profile::DelegarConRevision), format!("claude {tools} --permission-mode acceptEdits"));
         assert_eq!(argv("codex", Profile::Explorar), "codex exec --sandbox read-only");
         assert_eq!(argv("codex", Profile::Proponer), "codex exec --sandbox read-only");
         assert_eq!(argv("codex", Profile::DelegarConRevision), format!("codex --sandbox workspace-write --ask-for-approval never --cd {wt}"));
@@ -983,8 +1015,7 @@ mod tests {
         for prof in [Profile::Explorar, Profile::Proponer] {
             let p = evaluate("claude", prof, "wt", Detected::Found(&probe("2.1.296", CLAUDE_HELP)), false);
             assert_eq!(p.status, Status::Ok);
-            let i = p.argv.iter().position(|a| a == "--allowedTools").unwrap();
-            assert_eq!(p.argv[i + 1], "Bash(lxo *)");
+            assert_eq!(flag_list(&p.argv, "--allowedTools").unwrap(), LXO_TOOLS);
             assert!(p.argv.windows(2).any(|w| w == ["--permission-mode", "plan"]));
         }
         // Sin --allowedTools en el --help, Explorar queda bloqueado.
@@ -1091,9 +1122,7 @@ mod tests {
         let d = evaluate_for("claude", Profile::DelegarConRevision, Some("implementador"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
         assert_eq!(d.status, Status::Ok);
         assert!(d.interactive);
-        let i = d.argv.iter().position(|a| a == "--allowedTools").unwrap();
-        assert_eq!(d.argv[i + 1], LXO_REPORT_ONLY);
-        assert!(!d.argv.iter().any(|a| a == LXO_ONLY));
+        assert_eq!(flag_list(&d.argv, "--allowedTools").unwrap(), LXO_TOOLS);
         // Un --help sin stream-json bloquea Explorar.
         let sin = CLAUDE_HELP.replace("stream-json", "jsonl");
         let p = evaluate("claude", Profile::Explorar, "wt", Detected::Found(&probe("2.1.296", &sin)), false);
@@ -1107,6 +1136,80 @@ mod tests {
         assert!(d.interactive && d.warnings.iter().any(|w| w == WARN_STDOUT_LIMIT));
         let r = evaluate_for("codex", Profile::Explorar, Some("revisor"), "wt", Detected::Found(&found), false, Delivery::FileOrMarkers);
         assert!(!r.interactive && r.warnings.iter().any(|w| w == WARN_EXEC) && r.warnings.iter().any(|w| w == WARN_EXEC_O));
+    }
+
+    #[test]
+    fn claude_lista_explicita_de_lxo_en_todos_los_perfiles() {
+        let found = probe("2.1.296", CLAUDE_HELP);
+        for prof in [Profile::Explorar, Profile::Proponer, Profile::DelegarConRevision] {
+            let p = evaluate("claude", prof, "wt", Detected::Found(&found), false);
+            assert_eq!(p.status, Status::Ok, "{prof:?} {:?}", p.reason);
+            assert!(!p.argv.iter().any(|a| a == "Bash(lxo *)" || a == "Bash(lxo:*)"), "{prof:?}");
+            assert_eq!(flag_list(&p.argv, "--allowedTools").unwrap(), LXO_TOOLS, "{prof:?}");
+            // Un solo token: no hay valores sueltos de --allowedTools que se coman lo siguiente.
+            assert!(!p.argv.iter().any(|a| a == "--allowedTools" || a == "--disallowedTools"), "{prof:?}");
+        }
+    }
+
+    /// Parte la línea de launch.cmd como lo haría la CLI: comillas dobles agrupan.
+    fn split_cmd(line: &str) -> Vec<String> {
+        let (mut out, mut cur, mut q) = (vec![], String::new(), false);
+        for c in line.chars() {
+            match c {
+                '"' => q = !q,
+                ' ' if !q => { if !cur.is_empty() { out.push(std::mem::take(&mut cur)); } }
+                c => cur.push(c),
+            }
+        }
+        if !cur.is_empty() { out.push(cur); }
+        out
+    }
+
+    #[test]
+    fn argv_real_modelo_prompt_y_reglas() {
+        // --disallowedTools y --allowedTools aceptan varios valores: van en un solo
+        // token y el prompt va tras `--`. Se comprueba sobre el argv que se lanza.
+        let prompt = "Eres la tarea t3 del orquestador de Lixbon. Lee .lixbon/tasks/t3.md, ejecuta lxo guide y haz la tarea.";
+        for prof in [Profile::Explorar, Profile::Proponer, Profile::DelegarConRevision] {
+            for model in [Some("haiku"), None] {
+                let l = launch_with(&evaluate("claude", prof, "wt", Detected::Skip, false), model, None, prompt).unwrap();
+                let argv = split_cmd(&l.command);
+                // 1. --model llega con su valor.
+                let m = argv.iter().position(|a| a == "--model");
+                assert_eq!(m.map(|i| argv[i + 1].as_str()), model, "{}", l.command);
+                // 2. El prompt llega intacto, último y tras `--`.
+                assert_eq!(argv.last().unwrap(), prompt);
+                assert_eq!(argv[argv.len() - 2], "--");
+                assert_eq!(argv.iter().filter(|a| *a == "--").count(), 1);
+                // 3. Exactamente las cuatro reglas, en un solo token.
+                assert_eq!(flag_list(&argv, "--allowedTools").unwrap(), LXO_TOOLS);
+                assert_eq!(argv.iter().filter(|a| a.starts_with("--allowedTools")).count(), 1);
+                if prof != Profile::DelegarConRevision {
+                    assert_eq!(flag_list(&argv, "--disallowedTools").unwrap(), READ_ONLY_BLOCKED);
+                }
+            }
+        }
+        // Codex no lleva `--`.
+        let c = launch_with(&evaluate("codex", Profile::Explorar, "wt", Detected::Skip, false), None, None, "x").unwrap();
+        assert!(!split_cmd(&c.command).iter().any(|a| a == "--"));
+    }
+
+    #[test]
+    fn modelo_pedido_que_no_entra_en_el_argv_no_se_lanza() {
+        let mut p = evaluate("claude", Profile::DelegarConRevision, "wt", Detected::Skip, false);
+        p.provider = "gemini".into();
+        assert!(launch_with(&p, Some("gemini-x"), None, "x").is_err());
+        assert!(launch_with(&evaluate("codex", Profile::Explorar, "wt", Detected::Skip, false), Some("gpt-5.5"), None, "x").unwrap().command.contains("--model gpt-5.5"));
+    }
+
+    #[test]
+    fn familia_del_modelo() {
+        assert!(same_model_family("haiku", "claude-haiku-5-5"));
+        assert!(same_model_family("haiku", "claude-haiku-5-5-20260901"));
+        assert!(same_model_family("claude-haiku-5-5", "claude-haiku-5-5-20260901"));
+        assert!(same_model_family("gpt-5.5", "gpt-5.5"));
+        assert!(!same_model_family("haiku", "claude-sonnet-5-5"));
+        assert!(!same_model_family("opus", "claude-opusplan-5"));
     }
 
     #[test]
