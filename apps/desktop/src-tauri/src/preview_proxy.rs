@@ -85,13 +85,38 @@ fn inject(html: Vec<u8>) -> Vec<u8> {
     out.into_bytes()
 }
 
-fn handle(client: TcpStream, target: String) -> Option<()> {
-    client.set_read_timeout(Some(Duration::from_secs(30))).ok();
-    let mut reader = BufReader::new(client.try_clone().ok()?);
-    let head = read_head(&mut reader)?;
+/// Atiende una conexión y la cierra siempre limpia. Si algo falla se registra
+/// (antes se tragaba con `.ok()?` y el socket se soltaba a medias: en Windows,
+/// soltar un socket con datos sin leer manda RST y el cliente ve el error 10054).
+fn handle(client: TcpStream, target: String) {
+    if let Err(e) = serve(&client, &target) {
+        eprintln!("[preview_proxy] {target}: {e}");
+    }
+    close_clean(&client);
+}
+
+/// Cierre ordenado: FIN de nuestro lado y drenar lo que quede por leer del otro
+/// (con un límite de tiempo) antes de soltar el socket, para no provocar un RST.
+fn close_clean(s: &TcpStream) {
+    let _ = s.shutdown(std::net::Shutdown::Write);
+    let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
+    let mut buf = [0u8; 4096];
+    let mut r = s;
+    let mut total = 0usize;
+    while let Ok(n) = r.read(&mut buf) {
+        total += n;
+        if n == 0 || total > 1 << 20 { break; }
+    }
+}
+
+fn serve(client: &TcpStream, target: &str) -> Result<(), String> {
+    let io = |what: &str| { let what = what.to_string(); move |e: std::io::Error| format!("{what}: {e}") };
+    client.set_read_timeout(Some(Duration::from_secs(30))).map_err(io("timeout del cliente"))?;
+    let mut reader = BufReader::new(client.try_clone().map_err(io("clonar el socket del cliente"))?);
+    let head = read_head(&mut reader).ok_or("pedido incompleto o inválido")?;
     let upgrade = header(&head, "upgrade").is_some();
 
-    let mut upstream = TcpStream::connect(&target).ok()?;
+    let mut upstream = TcpStream::connect(target).map_err(io("conectar con el servidor de desarrollo"))?;
     let mut req = String::new();
     req.push_str(&head[0]);
     req.push_str("\r\n");
@@ -106,34 +131,36 @@ fn handle(client: TcpStream, target: String) -> Option<()> {
     }
     if !upgrade { req.push_str("Accept-Encoding: identity\r\nConnection: close\r\n"); }
     req.push_str("\r\n");
-    upstream.write_all(req.as_bytes()).ok()?;
+    upstream.write_all(req.as_bytes()).map_err(io("enviar el pedido"))?;
 
     if upgrade {
-        let up2 = upstream.try_clone().ok()?;
-        let mut cl2 = client.try_clone().ok()?;
+        let up2 = upstream.try_clone().map_err(io("clonar el socket del servidor"))?;
+        let mut cl2 = client.try_clone().map_err(io("clonar el socket del cliente"))?;
         client.set_read_timeout(None).ok();
         let t = thread::spawn(move || pipe(up2, &mut cl2));
         pipe(reader, &mut upstream);
         let _ = t.join();
-        return Some(());
+        return Ok(());
     }
 
+    // El pedido entero (cuerpo incluido) se lee antes de responder.
     if let Some(len) = header(&head, "content-length").and_then(|v| v.parse::<u64>().ok()) {
         let mut body = (&mut reader).take(len);
-        std::io::copy(&mut body, &mut upstream).ok()?;
+        std::io::copy(&mut body, &mut upstream).map_err(io("reenviar el cuerpo del pedido"))?;
     }
 
     let mut up_reader = BufReader::new(upstream);
-    let resp = read_head(&mut up_reader)?;
+    let resp = read_head(&mut up_reader).ok_or("respuesta incompleta del servidor de desarrollo")?;
     let mut client = client;
     let is_html = header(&resp, "content-type").map(|v| v.contains("text/html")).unwrap_or(false);
     if !is_html {
         let mut out = String::new();
         for line in &resp { out.push_str(line); out.push_str("\r\n"); }
         out.push_str("\r\n");
-        client.write_all(out.as_bytes()).ok()?;
-        pipe(up_reader, &mut client);
-        return Some(());
+        client.write_all(out.as_bytes()).map_err(io("responder al cliente"))?;
+        pipe(&mut up_reader, &mut client);
+        close_clean(up_reader.get_ref());
+        return Ok(());
     }
 
     let chunked = header(&resp, "transfer-encoding").map(|v| v.contains("chunked")).unwrap_or(false);
@@ -144,6 +171,8 @@ fn handle(client: TcpStream, target: String) -> Option<()> {
         let _ = up_reader.read_to_end(&mut b);
         b
     };
+    // Lo que quede del servidor (CRLF final del chunked, trailers) se drena al cerrar.
+    close_clean(up_reader.get_ref());
     let body = inject(body);
     let mut out = String::new();
     out.push_str(&resp[0]);
@@ -156,9 +185,9 @@ fn handle(client: TcpStream, target: String) -> Option<()> {
         out.push_str("\r\n");
     }
     out.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
-    client.write_all(out.as_bytes()).ok()?;
-    client.write_all(&body).ok()?;
-    Some(())
+    client.write_all(out.as_bytes()).map_err(io("responder al cliente"))?;
+    client.write_all(&body).map_err(io("enviar el cuerpo al cliente"))?;
+    Ok(())
 }
 
 /// Arranca el proxy (una sola vez) o cambia su destino. Devuelve el puerto.
@@ -179,7 +208,7 @@ fn listen(target: Arc<Mutex<String>>) -> Result<u16, String> {
     thread::spawn(move || {
         for conn in listener.incoming().flatten() {
             let target = target.lock().unwrap().clone();
-            thread::spawn(move || { let _ = handle(conn, target); });
+            thread::spawn(move || handle(conn, target));
         }
     });
     Ok(p)
@@ -189,14 +218,23 @@ fn listen(target: Arc<Mutex<String>>) -> Result<u16, String> {
 mod tests {
     use super::*;
 
+    /// Servidor de prueba: lee el pedido entero (hasta la línea vacía), responde,
+    /// cierra su escritura con shutdown y drena antes de soltar el socket.
     fn upstream(response: &'static str) -> u16 {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         thread::spawn(move || {
             for mut c in l.incoming().flatten() {
+                let mut req = Vec::new();
                 let mut buf = [0u8; 4096];
-                let _ = c.read(&mut buf);
+                while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match c.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => req.extend_from_slice(&buf[..n]),
+                    }
+                }
                 let _ = c.write_all(response.as_bytes());
+                close_clean(&c);
             }
         });
         port
