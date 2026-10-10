@@ -42,11 +42,11 @@ describe('contrato orch_list_providers', () => {
     expect(MOCK_CODEX.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
     expect(MOCK_CODEX.models.map((m) => m.id)).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
     for (const p of [MOCK_CLAUDE, MOCK_CODEX]) {
-      expect(Object.keys(p).sort()).toEqual(['available', 'disabled_reason', 'efforts', 'id', 'models', 'models_source', 'version']);
+      expect(Object.keys(p).sort()).toEqual(['available', 'blocked_profiles', 'disabled_reason', 'efforts', 'id', 'models', 'models_source', 'sandbox_elevated', 'version', 'warnings']);
     }
   });
   it('campos ausentes no rompen', () => {
-    expect(normalizeProvider({ id: 'codex' })).toEqual({ id: 'codex', version: null, available: false, disabled_reason: null, models: [], efforts: [], models_source: 'none' });
+    expect(normalizeProvider({ id: 'codex' })).toEqual({ id: 'codex', version: null, available: false, disabled_reason: null, models: [], efforts: [], models_source: 'none', sandbox_elevated: false, warnings: [], blocked_profiles: [] });
   });
 });
 
@@ -305,5 +305,70 @@ describe('avisos de guardado por clave de rol del host (fallo: aviso del modo pl
     // El host no devolvió el cambio: sigue en Claude, con el aviso de no guardado.
     expect(screen.getByTitle('Proveedor del explorador').textContent).toContain('Claude Code');
     expect(screen.getByTestId('role-host-agent-explorador')).toBeTruthy();
+  });
+});
+
+describe('Codex con sandbox elevado (300abea)', async () => {
+  const { MOCK_CODEX_ELEVATED, WARN_ELEVATED_RW, ELEVATED } = await import('./mockListProviders');
+  const { normalizeProvider, blockedProfileReason } = await import('./providersContract');
+  const { EffectivePolicyView } = await import('../policy/EffectivePolicyView');
+  const elevatedList = async () => (await mockListProviders({ elevated: true })).map(normalizeProvider);
+
+  it('normaliza sandbox_elevated, warnings y blocked_profiles (y valores por defecto en hosts viejos)', async () => {
+    const codex = (await elevatedList()).find((p) => p.id === 'codex');
+    expect(codex.sandbox_elevated).toBe(true);
+    expect(codex.warnings).toEqual([WARN_ELEVATED_RW]);
+    expect(codex.blocked_profiles).toEqual(MOCK_CODEX_ELEVATED.blocked_profiles);
+    expect(blockedProfileReason(codex, 'explorar')).toBe(ELEVATED);
+    expect(blockedProfileReason(codex, 'delegar_con_revision')).toBeNull();
+    expect(normalizeProvider({ id: 'codex' })).toMatchObject({ sandbox_elevated: false, warnings: [], blocked_profiles: [] });
+  });
+
+  it('ajustes de roles: avisos del proveedor y perfiles bloqueados con motivo', async () => {
+    render(<RolesSettings roles={[{ id: 'implementador', label: 'Implementador', purpose: '', read_only: false, model: 'sonnet', effort: '' }]}
+      settings={{ roles: {} }} providers={await elevatedList()} onSave={vi.fn()} resolver={mockResolvePolicy} />);
+    expect(screen.getByTestId('provider-warnings-codex').textContent).toContain(WARN_ELEVATED_RW);
+    const b = screen.getByTestId('provider-blocked-codex-explorar');
+    expect(b.getAttribute('aria-disabled')).toBe('true');
+    expect(b.textContent).toContain(ELEVATED);
+    expect(screen.getByTestId('provider-blocked-codex-proponer')).toBeTruthy();
+    expect(screen.queryByTestId('provider-warnings-claude')).toBeNull();
+  });
+
+  it('+ Nuevo: aviso y perfiles bloqueados de Codex', async () => {
+    render(<NewAgentItems providers={await elevatedList()} onPick={vi.fn()} />);
+    expect(screen.getByTestId('newagent-warning-codex').textContent).toBe(WARN_ELEVATED_RW);
+    expect(screen.getByTestId('newagent-blocked-codex-explorar').textContent).toContain(ELEVATED);
+    expect(screen.queryByTestId('newagent-warning-claude')).toBeNull();
+  });
+
+  it('política: Explorar/Proponer de Codex deshabilitados con motivo; Delegar unverified exige confirmación', async () => {
+    const onLaunch = vi.fn();
+    const resolver = (a) => mockResolvePolicy(a, { windowsSandbox: 'elevated' });
+    render(<EffectivePolicyView worktree="/wt" role="implementador" initialProvider="codex" initialProfile="delegar_con_revision"
+      providers={await elevatedList()} resolver={resolver} onLaunch={onLaunch} />);
+    const ex = screen.getByTestId('policy-profile-explorar');
+    expect(ex.querySelector('input').disabled).toBe(true);
+    expect(ex.textContent).toContain(ELEVATED);
+    expect(screen.getByTestId('policy-profile-delegar_con_revision').querySelector('input').disabled).toBe(false);
+    await waitFor(() => expect(screen.getAllByText(new RegExp(WARN_ELEVATED_RW)).length).toBeGreaterThan(0));
+    const btn = screen.getByRole('button', { name: /lanzar/i });
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(btn);
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ status: 'unverified', ack_unverified: true }));
+  });
+
+  it('mock de la política igual que agents::evaluate con elevated', async () => {
+    const d = await mockResolvePolicy({ provider: 'codex', profile: 'delegar_con_revision', role: 'implementador', worktree: '/wt' }, { windowsSandbox: 'elevated' });
+    expect(d.status).toBe('unverified');
+    expect(d.reason).toBe(WARN_ELEVATED_RW);
+    expect(d.warnings).toContain(WARN_ELEVATED_RW);
+    const r = await mockResolvePolicy({ provider: 'codex', profile: 'explorar', role: 'explorador', worktree: '/wt' }, { windowsSandbox: 'elevated' });
+    expect([r.status, r.reason]).toEqual(['blocked', ELEVATED]);
+    const c = await mockResolvePolicy({ provider: 'claude', profile: 'delegar_con_revision', role: 'implementador', worktree: '/wt' }, { windowsSandbox: 'elevated' });
+    expect(c.warnings).not.toContain(WARN_ELEVATED_RW);
+    const n = await mockResolvePolicy({ provider: 'codex', profile: 'delegar_con_revision', role: 'implementador', worktree: '/wt' });
+    expect(n.status).toBe('ok');
   });
 });

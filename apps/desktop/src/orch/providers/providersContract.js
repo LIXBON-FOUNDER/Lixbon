@@ -19,6 +19,9 @@ export const UNVERIFIED_LABEL = 'sin verificar';
 export const providerLabel = (id) => PROVIDER_LABELS[id] || id;
 
 /** Normaliza lo que llegue del host: campos ausentes → valores vacíos, nunca se lanza. */
+/** Motivo de bloqueo de un perfil en este proveedor (blocked_profiles), o null. */
+export const blockedProfileReason = (p, profile) => p?.blocked_profiles?.find((b) => b.profile === profile)?.reason ?? null;
+
 export function normalizeProvider(p) {
   const models = Array.isArray(p?.models) ? p.models.filter((m) => m && typeof m.id === 'string') : [];
   return {
@@ -29,6 +32,12 @@ export function normalizeProvider(p) {
     models: models.map((m) => ({ id: m.id, label: m.label || m.id, verified: m.verified === true })),
     efforts: Array.isArray(p?.efforts) ? p.efforts.filter((e) => typeof e === 'string') : [],
     models_source: p?.models_source ?? 'none',
+    // 300abea: Codex con [windows] sandbox = "elevated" (solo se lee config.toml).
+    sandbox_elevated: p?.sandbox_elevated === true,
+    warnings: Array.isArray(p?.warnings) ? p.warnings.filter((w) => typeof w === 'string') : [],
+    blocked_profiles: Array.isArray(p?.blocked_profiles)
+      ? p.blocked_profiles.filter((b) => b && typeof b.profile === 'string').map((b) => ({ profile: b.profile, reason: String(b.reason || '') }))
+      : [],
   };
 }
 

@@ -36,7 +36,8 @@ export function ArgvDisplay({ argv }) {
  *   resolver?: import('./policyTypes').PolicyResolver,
  *   onLaunch?: (launch: import('./policyTypes').PolicyLaunch) => void }} props
  */
-export function EffectivePolicyView({ worktree, role = null, model = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch }) {
+export function EffectivePolicyView({ worktree, role = null, model = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch, providers = null }) {
+  const blockedReason = (provId, profId) => providers?.find((x) => x.id === provId)?.blocked_profiles?.find((b) => b.profile === profId)?.reason ?? null;
   const [provider, setProvider] = useState(initialProvider);
   const [profile, setProfile] = useState(initialProfile);
   const [policy, setPolicy] = useState(null);
@@ -83,13 +84,17 @@ export function EffectivePolicyView({ worktree, role = null, model = null, initi
         </fieldset>
         <fieldset className="policy__group">
           <legend>Perfil</legend>
-          {PROFILES.map((p) => (
-            <label key={p.id} className={p.enabled ? '' : 'is-disabled'} title={p.disabledReason || undefined}>
-              <input type="radio" name="policy-profile" value={p.id} checked={profile === p.id} disabled={!p.enabled} onChange={() => setProfile(p.id)} />
-              {p.label}
-              {!p.enabled && <span className="policy__muted"> — {p.disabledReason}</span>}
-            </label>
-          ))}
+          {PROFILES.map((p) => {
+            // blocked_profiles de orch_list_providers (p. ej. sandbox elevado de Codex).
+            const why = !p.enabled ? p.disabledReason : blockedReason(provider, p.id);
+            return (
+              <label key={p.id} className={why ? 'is-disabled' : ''} title={why || undefined} data-testid={`policy-profile-${p.id}`}>
+                <input type="radio" name="policy-profile" value={p.id} checked={profile === p.id} disabled={Boolean(why)} onChange={() => setProfile(p.id)} />
+                {p.label}
+                {why && <span className="policy__muted"> — {why}</span>}
+              </label>
+            );
+          })}
         </fieldset>
       </div>
 
