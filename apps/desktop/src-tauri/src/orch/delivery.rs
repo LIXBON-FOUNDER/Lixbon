@@ -178,7 +178,8 @@ pub fn parse_final_message(text: &str, ex: &Expect, ok_default: bool, channel: C
 pub struct Stream {
     /// `result` del evento final y si fue error (`is_error` o subtype distinto de success).
     pub result: Option<(String, bool)>,
-    /// `message.model` de los eventos assistant (o `model` del init si no hay).
+    /// `message.model` de los eventos assistant o, si no hay, el de `modelUsage` del
+    /// result. Nunca el del init: en plan, el init dice el pedido y responde otro.
     pub model: Option<String>,
 }
 
@@ -192,7 +193,6 @@ pub fn parse_stream_json(raw: &str) -> Stream {
         }
         let Ok(v) = serde_json::from_str::<Value>(l) else { continue };
         match v["type"].as_str() {
-            Some("system") if v["subtype"] == "init" && s.model.is_none() => s.model = v["model"].as_str().map(String::from),
             Some("assistant") => {
                 if let Some(m) = v["message"]["model"].as_str().filter(|m| !m.is_empty() && *m != "<synthetic>") {
                     s.model = Some(m.to_string());
@@ -201,6 +201,12 @@ pub fn parse_stream_json(raw: &str) -> Stream {
             Some("result") => {
                 let err = v["is_error"].as_bool().unwrap_or(false) || v["subtype"].as_str() != Some("success");
                 s.result = Some((v["result"].as_str().unwrap_or("").to_string(), err));
+                if s.model.is_none() {
+                    // Con varios modelos, el que más tokens de salida generó.
+                    s.model = v["modelUsage"].as_object().and_then(|u| {
+                        u.iter().max_by_key(|(_, x)| x["outputTokens"].as_u64().unwrap_or(0)).map(|(k, _)| k.clone())
+                    });
+                }
             }
             _ => {}
         }
@@ -440,6 +446,7 @@ pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Ve
             if let Some(m) = &r.model {
                 t.model_effective = Some(m.clone());
                 t.model_mismatch = t.model_requested.as_deref().is_some_and(|req| !super::agents::same_model_family(req, m));
+                t.model_mismatch_reason = (t.model_mismatch && t.plan_mode).then(|| "plan_mode".to_string());
             }
             Ok(msg.into_iter().collect())
         }
@@ -884,6 +891,43 @@ mod tests {
             for k in ["model_requested", "model_effective", "model_mismatch", "delivery_channel"] {
                 assert!(v.get(k).is_some(), "falta {k}");
             }
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn modelo_efectivo_nunca_del_init() {
+        // Grabación real en plan: el init dice claude-haiku-5-5, responde sonnet.
+        let raw = include_str!("testdata/claude-2.1.296-plan-stream-json.jsonl");
+        assert!(raw.contains(r#""subtype":"init""#) && raw.contains(r#""model":"claude-haiku-5-5""#));
+        assert_eq!(parse_stream_json(raw).model.as_deref(), Some("claude-sonnet-5-5"));
+        // Solo init: sin modelo efectivo.
+        let init = r#"{"type":"system","subtype":"init","model":"claude-haiku-5-5"}"#;
+        assert_eq!(parse_stream_json(init).model, None);
+        // Sin message.model, sale de modelUsage del result.
+        let usage = format!("{init}\n{}", r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","modelUsage":{"claude-sonnet-5-5":{"outputTokens":212},"claude-haiku-5-5":{"outputTokens":3}}}"#);
+        assert_eq!(parse_stream_json(&usage).model.as_deref(), Some("claude-sonnet-5-5"));
+    }
+
+    #[test]
+    fn motivo_del_mismatch_en_plan() {
+        let raw = include_str!("testdata/claude-2.1.296-plan-stream-json.jsonl");
+        let e = Expect { task: String::new(), attempt: 1, nonce: "abc123".into() };
+        for (requested, plan, mismatch, reason) in [
+            (Some("haiku"), true, true, Some("plan_mode")),
+            (Some("haiku"), false, true, None),
+            (Some("sonnet"), true, false, None),
+            (None, true, false, None),
+        ] {
+            let (mut st, _, id, dir) = setup("motivo");
+            let t = st.task_mut(&id).unwrap();
+            t.model_requested = requested.map(String::from);
+            t.plan_mode = plan;
+            let src = Sources { expect_stream: true, terminal: Some(raw), ..Sources::default() };
+            apply(&mut st, &id, find_all(&src, &Expect { task: id.clone(), ..e.clone() }, &[]), true).unwrap();
+            let t = st.task(&id).unwrap();
+            assert_eq!((t.model_mismatch, t.model_mismatch_reason.as_deref()), (mismatch, reason), "{requested:?} plan={plan}");
+            assert!(serde_json::to_value(t).unwrap().get("model_mismatch_reason").is_some());
             let _ = std::fs::remove_dir_all(dir);
         }
     }

@@ -734,7 +734,9 @@ impl Core {
         // orch_resolve_policy); un perfil bloqueado no arranca.
         let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
         // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
-        let policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
+        let mut policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
+        agents::warn_plan_model(&mut policy, task.model.as_deref());
+        let plan_mode = agents::is_plan(&policy);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.
         let last_message = (policy.argv.get(1).map(String::as_str) == Some("exec"))
@@ -750,6 +752,8 @@ impl Core {
             t.delivery_channel = None;
             t.model_effective = None;
             t.model_mismatch = false;
+            t.model_mismatch_reason = None;
+            t.plan_mode = plan_mode;
             // launch_task ya rechazó un modelo pedido que no entra en el argv.
             t.model_requested = t.model.clone();
         }
@@ -1154,8 +1158,12 @@ pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, row
 /// (vacío para consultar solo los flags), en un worktree: argv exacto,
 /// versión detectada, advertencias y estado (`ok`, `blocked` o `unverified`).
 #[tauri::command(async, rename_all = "snake_case")]
-pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String) -> agents::Policy {
-    agents::resolve_policy(&provider, &profile, &role, &worktree)
+/// `model` (opcional): el modelo que se va a pedir; con Claude en plan y un modelo
+/// que no es Sonnet, añade el aviso WARN_PLAN_SONNET.
+pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String, model: Option<String>) -> agents::Policy {
+    let mut p = agents::resolve_policy(&provider, &profile, &role, &worktree);
+    agents::warn_plan_model(&mut p, model.as_deref());
+    p
 }
 
 /// Integra la rama de una tarea en su padre. Solo la interfaz (la persona) llega
