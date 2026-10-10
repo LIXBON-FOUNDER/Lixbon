@@ -168,8 +168,10 @@ pub fn review_task(state: &Mutex<State>, id: &str, decision: &str, head_commit: 
         return Err(format!("decision debe ser accepted o rejected (llegó {decision:?})"));
     }
     let t = target(state, id)?;
-    let found = branch_head(&t.repo, &t.branch);
-    if found.as_deref() != Some(head_commit.trim()) {
+    // Rama borrada: error de uso, no un head_moved con found_commit null. No se registra nada.
+    let found = branch_head(&t.repo, &t.branch)
+        .ok_or_else(|| format!("no_branch: la rama {} de {id} ya no existe", t.branch))?;
+    if found != head_commit.trim() {
         return Ok(json!({ "task_id": id, "outcome": "head_moved", "expected_commit": head_commit, "found_commit": found }));
     }
     let (base, source) = match resolve_base(&t) {
@@ -306,6 +308,24 @@ pub(crate) mod tests {
         assert!(st.lock().unwrap().decisions.is_empty());
         assert!(review_task(&st, &id, "accepted", &now, None, false).is_err());
         assert!(review_task(&st, &id, "quizas", &now, None, true).is_err());
+        assert!(st.lock().unwrap().decisions.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rama_borrada_es_no_branch_y_no_registra() {
+        let (st, id, dir, _) = setup("borrada");
+        let h = head(&dir);
+        let reviews = |st: &Mutex<State>| st.lock().unwrap().decisions.iter().filter(|d| d.kind == "review").count();
+        // head_moved no escribe fila.
+        assert_eq!(review_task(&st, &id, "accepted", "0000000", None, true).unwrap()["outcome"], "head_moved");
+        assert_eq!(reviews(&st), 0);
+        git(&dir, &["branch", "-D", "lx/t"]);
+        for d in ["accepted", "rejected"] {
+            let e = review_task(&st, &id, d, &h, Some("x"), true).unwrap_err();
+            assert!(e.starts_with("no_branch:"), "{e}");
+        }
+        assert_eq!(reviews(&st), 0);
         assert!(st.lock().unwrap().decisions.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
