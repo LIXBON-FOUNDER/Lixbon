@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './toastStore';
+import { TERMINAL_APPROVAL, TERMINAL_APPROVAL_TEXT } from '../orch/terminalApprovalContract';
 
 export const AGENT_LABELS = {
   claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador',
@@ -12,7 +13,7 @@ export const AGENT_LABELS = {
 export const ROLE_LABELS = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
 
 export const STATUS_LABELS = {
-  starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
+  starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', [TERMINAL_APPROVAL.status]: TERMINAL_APPROVAL_TEXT.waiting, done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
 };
 
 export const isFinal = (status) => ['done', 'failed', 'stopped', 'exited'].includes(status);

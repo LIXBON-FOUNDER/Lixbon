@@ -20,8 +20,8 @@ export const CODEX_REPORT_MARKERS_WARNING = 'Sin red local: entrega con lxo repo
 export const CODEX_REPORT_FILE_WARNING = 'Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.';
 export const CODEX_NO_ASK_WARNING = 'Sin red local, Codex no puede usar lxo ask: no podrá preguntarle a la persona y decidirá solo.';
 export const CODEX_COPY_BLOCK_WARNING = 'La entrega en solo lectura depende de que el agente copie el bloque del informe sin cambios; si el hash no coincide, la tarea termina Failed.';
-/** Órdenes de Bash permitidas a Claude en todos sus perfiles (agents.rs, LXO_TOOLS). Nunca `Bash(lxo *)`. */
-export const LXO_TOOLS = ['Bash(lxo report:*)', 'Bash(lxo guide)', 'Bash(lxo phase:*)', 'Bash(lxo ask:*)'];
+/** Órdenes de Bash permitidas a Claude en todos sus perfiles (agents.rs, LXO_TOOLS; cinco reglas desde que se añadió lxo check). Nunca `Bash(lxo *)`. */
+export const LXO_TOOLS = ['Bash(lxo report:*)', 'Bash(lxo guide)', 'Bash(lxo phase:*)', 'Bash(lxo ask:*)', 'Bash(lxo check)'];
 /** Herramientas quitadas en los perfiles sin escritura (agents.rs, READ_ONLY_BLOCKED). */
 export const READ_ONLY_BLOCKED = ['Edit', 'Write', 'NotebookEdit'];
 /** Un solo token `--flag=a,b,c`, como allowed_tools()/disallowed_tools() del host. */
@@ -30,6 +30,8 @@ export const DISALLOWED_TOOLS_TOKEN = `--disallowedTools=${READ_ONLY_BLOCKED.joi
 /** Advertencia exacta del host para Claude + Delegar con revisión (agents.rs). */
 export const ALLOWED_TOOLS_WARNING = `Solo se ejecutan sin pedir permiso: ${LXO_TOOLS.join(', ')}; cualquier otro comando de Bash queda esperando aprobación.`;
 /** El host (bb0b013) no tiene esta cadena: texto acordado para el modo plan con un modelo que no es Sonnet. */
+/** Codex read-only: límite de tamaño del informe (texto acordado; el host aún no lo emite). */
+export const CODEX_LARGE_REPORT_WARNING = 'Informes muy grandes (cerca de 150 KB o más) pueden ser rechazados por Codex y la tarea queda Failed.';
 export const PLAN_MODE_MODEL_WARNING = 'en modo plan, Claude responde con Sonnet aunque pidas otro modelo';
 const CLAUDE_WARNINGS = [
   'Claude no tiene sandbox del sistema operativo: los límites los aplica la propia CLI.',
@@ -88,6 +90,7 @@ async function resolveFlags({ provider, profile, worktree, model }, opts) {
   const flags = mockFlags(provider, profile, worktree);
   if (!flags) return { ...base, argv: [], status: 'blocked', reason: 'Proveedor no soportado' };
   const argv = [provider, ...flags];
+  if (provider === 'codex' && argv.includes('read-only')) warnings.push(CODEX_LARGE_REPORT_WARNING);
   if (provider === 'claude' && planModeIgnoresModel(argv, model)) warnings.push(PLAN_MODE_MODEL_WARNING);
   if (!cli_version) return { ...base, argv, status: 'blocked', reason: `No se detectó la CLI de ${provider}` };
   const verified = VERIFIED_VERSIONS[provider] || [];

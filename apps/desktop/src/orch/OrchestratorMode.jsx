@@ -11,6 +11,8 @@ import { Segmented } from '../components/Segmented';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { AgentTerminal } from './AgentTerminal';
 import { ModelInfo, ModelMismatchBadge } from './ModelInfo';
+import { TerminalApprovalNotice, TerminalApprovalBadge } from './TerminalApproval';
+import { isAwaitingTerminalApproval } from './terminalApprovalContract';
 import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 
@@ -115,6 +117,7 @@ function TaskRow({ task, selected, onSelect, asking, now }) {
           {phase && !final ? <> · <span className="orch__task-phase">{phase.name}</span></> : ''}
         </span>
       </span>
+      <TerminalApprovalBadge task={task} now={now} />
       <ModelMismatchBadge task={task} />
       {asking && <span className="orch__badge orch__badge--ask" title="Tiene una pregunta sin responder">?</span>}
       {task.merged && <span className="orch__badge" title="Fusionada en su padre">fusionada</span>}
@@ -283,6 +286,7 @@ function TaskView({ task, snap }) {
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>
           <ModelInfo task={task} />
+          <TerminalApprovalNotice task={task} now={now} onGoToTerminal={task.parent ? () => setTab('term') : undefined} />
         </div>
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}
@@ -351,7 +355,9 @@ export function OrchestratorMode() {
   const asking = useMemo(() => new Set(pendingQuestions(snap?.messages).map((q) => q.from)), [snap]);
   const task = selected && snap?.tasks?.[selected];
   const anyLive = useMemo(() => Object.values(snap?.tasks || {}).some((t) => !isFinal(t.status)), [snap]);
-  const now = useNow(anyLive);
+  // Cuenta atrás de la aprobación en terminal: refresco por segundo solo mientras alguna espera.
+  const anyAwaiting = useMemo(() => Object.values(snap?.tasks || {}).some(isAwaitingTerminalApproval), [snap]);
+  const now = useNow(anyLive, anyAwaiting ? 1000 : 5000);
 
   if (!snap) return <div className="wb"><div className="changes__empty">Cargando el orquestador…</div></div>;
   if (!snap.settings?.enabled) return <div className="wb wb--orch"><Disabled /></div>;
