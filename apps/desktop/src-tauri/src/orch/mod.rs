@@ -79,9 +79,10 @@ pub struct Core {
     launched: Mutex<Vec<String>>,
     #[cfg(test)]
     events: Mutex<Vec<(String, Value)>>,
-    /// En pruebas: ¿estaba libre el lock del estado justo antes de correr git en la snapshot?
+    /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
+    /// espera en la barrera, para que la prueba mire el lock en ese punto exacto.
     #[cfg(test)]
-    git_probe: Mutex<Vec<bool>>,
+    snapshot_git_hook: Mutex<Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>)>>,
 }
 
 pub type Resolver = fn(&str, &str, Option<&str>, &str) -> agents::Policy;
@@ -109,7 +110,7 @@ impl Default for Orch {
             #[cfg(test)]
             events: Mutex::new(Vec::new()),
             #[cfg(test)]
-            git_probe: Mutex::new(Vec::new()),
+            snapshot_git_hook: Mutex::new(None),
         }))
     }
 }
@@ -1186,7 +1187,13 @@ impl Core {
             (out, SnapshotGit::copy(&st))
         };
         #[cfg(test)]
-        self.git_probe.lock().unwrap().push(self.state.try_lock().is_ok());
+        {
+            let hook = self.snapshot_git_hook.lock().unwrap().clone();
+            if let Some((tx, barrier)) = hook {
+                let _ = tx.send(());
+                barrier.wait();
+            }
+        }
         let (heads, into) = git_in.run();
         if let Some(tasks) = out["tasks"].as_object_mut() {
             for (id, t) in tasks.iter_mut() {
@@ -1670,37 +1677,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// git corre sin el lock del estado: la sonda lo ve libre y otro hilo puede
-    /// tomarlo mientras dura la snapshot (con un repo y varias ramas reales).
+    /// git corre sin el lock del estado. Determinista: la snapshot avisa al
+    /// arrancar su fase git y espera; la prueba hace try_lock() justo ahí (tiene
+    /// que funcionar) y recién entonces la deja seguir.
     #[test]
     fn la_snapshot_no_corre_git_con_el_lock_tomado() {
         let (st, id, dir, _) = review::tests::setup("lock-snapshot");
         let core = Orch::default().0;
         *core.lock() = st.into_inner().unwrap();
-        let snap = core.snapshot();
-        assert_eq!(core.git_probe.lock().unwrap().as_slice(), [true]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        *core.snapshot_git_hook.lock().unwrap() = Some((tx, barrier.clone()));
+        let worker = {
+            let core = core.clone();
+            std::thread::spawn(move || core.snapshot())
+        };
+        rx.recv().expect("la snapshot no llegó a la fase git");
+        assert!(core.state.try_lock().is_ok(), "el lock del estado sigue tomado en la fase git");
+        barrier.wait();
+        let snap = worker.join().unwrap();
+        *core.snapshot_git_hook.lock().unwrap() = None;
         assert!(snap["tasks"][&id]["head_commit"].as_str().is_some_and(|h| h.len() == 40));
         assert!(snap["integrate_into"][&id]["branch"].as_str() == Some("master"));
-        // Muchas snapshots en paralelo con un hilo que toma y suelta el lock: ninguna se queda esperando a git.
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let locker = {
-            let (core, stop) = (core.clone(), stop.clone());
-            std::thread::spawn(move || {
-                let mut n = 0u32;
-                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    drop(core.lock());
-                    n += 1;
-                    std::thread::yield_now();
-                }
-                n
-            })
-        };
-        for _ in 0..5 {
-            core.snapshot();
-        }
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        assert!(locker.join().unwrap() > 0);
-        assert!(core.git_probe.lock().unwrap().iter().all(|free| *free));
         let _ = std::fs::remove_dir_all(dir);
     }
 
