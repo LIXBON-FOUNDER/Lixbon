@@ -266,16 +266,17 @@ describe('mockResolvePolicy (espejo del host bb0b013)', () => {
     const e = await mockResolvePolicy({ ...base, profile: 'explorar' });
     expect(mockLaunchArgv(e, { model: 'haiku', prompt: '--no-es-flag' }).slice(-4)).toEqual(['--model', 'haiku', '--', '--no-es-flag']);
   });
-  it('Claude: cinco reglas, con Bash(lxo check), y la advertencia de Delegar las lista todas', async () => {
+  it('Claude: cinco reglas, con Bash(lxo check), y la advertencia de Delegar del host', async () => {
     expect(LXO_TOOLS).toEqual(['Bash(lxo report:*)', 'Bash(lxo guide)', 'Bash(lxo phase:*)', 'Bash(lxo ask:*)', 'Bash(lxo check)']);
     const p = await mockResolvePolicy({ ...base, profile: 'delegar_con_revision' });
     expect(p.warnings).toContain(DELEGAR_WARNING);
-    for (const r of LXO_TOOLS) expect(DELEGAR_WARNING).toContain(r);
+    expect(DELEGAR_WARNING).toBe('Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.');
   });
   it('Codex read-only: advertencia de informes grandes; no en workspace-write ni en Claude', async () => {
     for (const profile of ['explorar', 'proponer']) {
       expect((await mockResolvePolicy({ ...base, provider: 'codex', profile })).warnings).toContain(CODEX_LARGE_REPORT_WARNING);
     }
+    expect(CODEX_LARGE_REPORT_WARNING).toContain('unos 50 KB');
     expect((await mockResolvePolicy({ ...base, provider: 'codex', profile: 'delegar_con_revision' })).warnings).not.toContain(CODEX_LARGE_REPORT_WARNING);
     expect((await mockResolvePolicy({ ...base, profile: 'explorar' })).warnings).not.toContain(CODEX_LARGE_REPORT_WARNING);
   });
