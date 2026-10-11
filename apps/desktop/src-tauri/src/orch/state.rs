@@ -78,6 +78,9 @@ pub struct Task {
     pub merged: bool,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// Qué se enlazó o copió al crear el worktree (orch/worktree_env.rs); `None` si el repo no tiene reglas.
+    #[serde(default)]
+    pub env: Option<super::worktree_env::Plan>,
     /// Commit del checkout de destino (el del padre) cuando se creó la rama de la
     /// tarea: referencia para detectar si el destino se movió por fuera.
     #[serde(default)]
@@ -344,6 +347,7 @@ impl State {
             external: t.external,
             merged: false,
             pr_url: None,
+            env: None,
             base_commit: None,
             profile: None,
             ack_unverified: false,

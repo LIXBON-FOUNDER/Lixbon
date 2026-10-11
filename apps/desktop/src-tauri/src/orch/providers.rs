@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::agents;
 
-pub const IDS: [&str; 2] = ["claude", "codex"];
+pub const IDS: [&str; 3] = ["claude", "codex", agents::LIXBON_CLI];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct ProviderModel {
@@ -179,6 +179,37 @@ pub fn codex(installed: bool, version: Option<&str>, debug_models: Option<&str>,
     }
 }
 
+/// Los proveedores de `lixbon profile list --json` como `modelo@proveedor`: es lo
+/// que el usuario ya configuró en el CLI, así que cuenta como verificado. Un
+/// proveedor sin modelo fijado no aparece (el rol puede escribirlo a mano).
+pub fn lixbon_profile_models(json: &str) -> Vec<ProviderModel> {
+    let Ok(Value::Array(list)) = serde_json::from_str::<Value>(json.trim()) else { return vec![] };
+    list.iter()
+        .filter_map(|p| {
+            let (name, model) = (p["name"].as_str()?, p["model"].as_str().filter(|m| !m.is_empty())?);
+            let id = format!("{model}@{name}");
+            agents::safe_token(&id).ok()?;
+            Some(m(&id, &format!("{name} · {model}"), true))
+        })
+        .collect()
+}
+
+/// El CLI de Lixbon como agente hijo. `worker_help` es `lixbon worker --help`: sin
+/// `--profile` es una versión que todavía no sabe correr como hija.
+pub fn lixbon_cli(installed: bool, version: Option<&str>, worker_help: Option<&str>, profiles_json: Option<&str>) -> Provider {
+    let (mut available, mut disabled_reason) = availability(agents::LIXBON_CLI, installed, version);
+    if available && !worker_help.is_some_and(|h| h.contains("--profile")) {
+        available = false;
+        disabled_reason = Some("esta versión del CLI no incluye `lixbon worker`: actualízala con `lixbon update`".into());
+    }
+    let models = profiles_json.map(lixbon_profile_models).unwrap_or_default();
+    let source = if models.is_empty() { "none" } else { "profiles" };
+    Provider {
+        id: agents::LIXBON_CLI.into(), version: version.map(str::to_string), available, disabled_reason, models, efforts: vec![],
+        models_source: source.into(), sandbox_elevated: false, warnings: vec![], blocked_profiles: vec![],
+    }
+}
+
 static CACHE: Mutex<Option<(Instant, Vec<Provider>)>> = Mutex::new(None);
 const CACHE_TTL: Duration = Duration::from_secs(15 * 60);
 
@@ -196,9 +227,12 @@ pub fn list(refresh: bool) -> Vec<Provider> {
     let init = claude_p.as_ref().and_then(|_| agents::claude_init_models());
     let debug = codex_p.as_ref().and_then(|_| agents::cli_output("codex", &["debug", "models"], Duration::from_secs(25)));
     let config = agents::codex_config_text();
+    let lixbon_p = agents::probe_cli("lixbon");
+    let profiles = lixbon_p.as_ref().and_then(|_| agents::cli_output("lixbon", &["profile", "list", "--json"], Duration::from_secs(15)));
     let l = vec![
         claude(claude_p.is_some(), claude_p.as_ref().and_then(|p| p.version.as_deref()), claude_p.as_ref().and_then(|p| p.help.as_deref()), init),
         codex(codex_p.is_some(), codex_p.as_ref().and_then(|p| p.version.as_deref()), debug.as_deref(), config.as_deref()),
+        lixbon_cli(lixbon_p.is_some(), lixbon_p.as_ref().and_then(|p| p.version.as_deref()), lixbon_p.as_ref().and_then(|p| p.help.as_deref()), profiles.as_deref()),
     ];
     if let Ok(mut c) = CACHE.lock() {
         *c = Some((Instant::now(), l.clone()));

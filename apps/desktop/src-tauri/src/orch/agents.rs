@@ -42,7 +42,22 @@ pub const AGENTS: &[Spec] = &[
         efforts: &[] },
     Spec { id: "gemini", label: "Gemini CLI", bin: "gemini", strengths: "Contexto muy largo: leer mucho código o documentación.",
         efforts: &[] },
+    Spec { id: LIXBON_CLI, label: "Lixbon CLI", bin: "lixbon", strengths: "Modelos locales o de otros proveedores (Ollama, LM Studio, OpenAI, Kilo…) con los perfiles del CLI: lectura, borradores y tareas baratas.",
+        efforts: &[] },
 ];
+
+/// El CLI de Lixbon como agente hijo (`lixbon worker`). No se llama `lixbon` porque
+/// ese id ya es el chat del gateway.
+pub const LIXBON_CLI: &str = "lixbon-cli";
+
+/// El modelo de un rol de este proveedor es `modelo@proveedor` (un perfil de
+/// `lixbon profile`); sin `@` manda el proveedor activo del CLI.
+pub fn split_cli_model(model: &str) -> (&str, Option<&str>) {
+    match model.rsplit_once('@') {
+        Some((name, provider)) if !provider.is_empty() => (name, Some(provider)),
+        _ => (model, None),
+    }
+}
 
 pub fn spec(id: &str) -> Option<&'static Spec> {
     AGENTS.iter().find(|a| a.id == id)
@@ -114,7 +129,7 @@ impl Profile {
 }
 
 /// Versiones cuyo `--help` se revisó contra la tabla de perfiles.
-const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.159.0", "0.162.1"])];
+const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.159.0", "0.162.1"]), (LIXBON_CLI, &["2.3.0"])];
 
 pub fn verified_versions(provider: &str) -> &'static [&'static str] {
     VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[])
@@ -174,7 +189,10 @@ pub const WARN_EXEC: &str = "No interactivo: se lanza con codex exec; la termina
 pub const WARN_EXEC_O: &str = "El host añade -o .lixbon/out/<tarea>/1/last-message.md al lanzar: el informe es el mensaje final del agente, de cualquier tamaño, escrito por la CLI.";
 pub const WARN_DELEGAR: &str = "Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.";
 pub const WARN_CODEX_BIG: &str = "Codex puede rechazar informes de más de unos 50 KB: mantén el mensaje final por debajo de ese tamaño.";
-pub const WARN_STREAM: &str = "No interactivo: se lanza con claude -p --output-format stream-json; el informe se toma del resultado final, sin depender de que el agente ejecute lxo.";
+pub const WARN_LIXBON_CLI: &str = "No interactivo: se lanza con lixbon worker; la terminal muestra la salida pero no acepta teclado. El informe es la respuesta final del modelo y lo entrega el propio CLI.";
+pub const WARN_LIXBON_CLI_PLAN: &str = "La solo lectura la aplica el CLI (modo plan): no hay sandbox del sistema.";
+pub const WARN_LIXBON_CLI_DELEGAR: &str = "Edita sin preguntar dentro del worktree; solo ejecuta los comandos de allowed_commands del CLI y las llamadas a lxo (los demás se rechazan: nadie responde en la terminal). No usa servidores MCP.";
+pub const WARN_STREAM: &str ="No interactivo: se lanza con claude -p --output-format stream-json; el informe se toma del resultado final, sin depender de que el agente ejecute lxo.";
 
 /// Flags de permisos de un perfil para un proveedor (sin el binario). `exec`
 /// indica `codex exec`, que no acepta `-a/--ask-for-approval`.
@@ -233,7 +251,16 @@ fn profile_flags(provider: &str, profile: Profile, worktree: &str, exec: bool) -
             if !exec { f.extend(v(&["--ask-for-approval", "on-request"])); }
             f
         }
-        _ => return Err(format!("{provider} no tiene perfiles de permisos definidos; solo se lanza sin saltar permisos con claude o codex")),
+        (LIXBON_CLI, _) => {
+            warnings.push(WARN_LIXBON_CLI.into());
+            match profile {
+                Profile::Explorar | Profile::Proponer => warnings.push(WARN_LIXBON_CLI_PLAN.into()),
+                Profile::DelegarConRevision => warnings.push(WARN_LIXBON_CLI_DELEGAR.into()),
+                Profile::AutonomiaAmplia => {}
+            }
+            v(&["worker", "--profile", profile.id()])
+        }
+        _ => return Err(format!("{provider} no tiene perfiles de permisos definidos; solo se lanza sin saltar permisos con claude, codex o lixbon-cli")),
     };
     if exec && provider == "codex" {
         warnings.push("codex exec no acepta -a/--ask-for-approval: se omite.".into());
@@ -400,7 +427,7 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
 }
 
 fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String) -> Policy {
-    let interactive = !(argv.get(1).is_some_and(|a| a == "exec") || argv.iter().any(|a| a == "stream-json"));
+    let interactive = !(argv.get(1).is_some_and(|a| a == "exec" || a == "worker") || argv.iter().any(|a| a == "stream-json"));
     Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None }
 }
 
@@ -425,7 +452,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     if let Some(r) = profile.disabled_reason() {
         return blocked(provider, pid, argv, None, warnings, r.into());
     }
-    let interactive = !(exec || argv.iter().any(|a| a == "stream-json"));
+    let interactive = !(exec || provider == LIXBON_CLI || argv.iter().any(|a| a == "stream-json"));
     let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
@@ -551,7 +578,8 @@ fn probe(bin: &str) -> Option<Probe> {
     let short = Duration::from_secs(10);
     let p = which(bin).map(|_| Probe {
         version: output(bin, &["--version"], short).as_deref().and_then(parse_version),
-        help: output(bin, &["--help"], short).filter(|h| !h.trim().is_empty()),
+        // El CLI de Lixbon declara sus flags de agente hijo en `worker --help`, no en la ayuda general.
+        help: output(bin, if bin == "lixbon" { &["worker", "--help"] } else { &["--help"] }, short).filter(|h| !h.trim().is_empty()),
         exec_help: (bin == "codex").then(|| output(bin, &["exec", "--help"], short)).flatten().filter(|h| !h.trim().is_empty()),
         windows_sandbox: None,
     });
@@ -699,6 +727,13 @@ pub fn launch_task(policy: &Policy, model: Option<&str>, effort: Option<&str>, p
         "codex" => {
             if let Some(m) = &model { args.extend(["--model".into(), m.clone()]); }
             if let Some(e) = &effort { args.extend(["-c".into(), format!("model_reasoning_effort={e}")]); }
+        }
+        LIXBON_CLI => {
+            if let Some(m) = &model {
+                let (name, provider) = split_cli_model(m);
+                if let Some(p) = provider { args.extend(["--provider".into(), p.to_string()]); }
+                if !name.is_empty() { args.extend(["--model".into(), name.to_string()]); }
+            }
         }
         _ => {
             if let Some(m) = &model {
@@ -871,6 +906,8 @@ fn discover(a: &Spec) -> Vec<Model> {
         "codex" => output("codex", &["debug", "models"], long).as_deref().and_then(super::providers::codex_debug_models)
             .map(|(l, _)| l.into_iter().map(|m| Model { id: m.id, label: m.label, note: String::new() }).collect()).unwrap_or_default(),
         "cursor" => output("cursor-agent", &["models"], long).map(|t| parse_lines(&t)).unwrap_or_default(),
+        LIXBON_CLI => output("lixbon", &["profile", "list", "--json"], long).as_deref().map(super::providers::lixbon_profile_models)
+            .map(|l| l.into_iter().map(|m| Model { id: m.id, label: m.label, note: String::new() }).collect()).unwrap_or_default(),
         _ => vec![],
     }
 }
@@ -882,6 +919,7 @@ fn hint(id: &str) -> &'static str {
         "opencode" => "--model proveedor/modelo, tal como sale en la lista",
         "cursor" => "--model con un id de la lista de Cursor",
         "gemini" => "--model con un id de Gemini",
+        LIXBON_CLI => "--model modelo@proveedor, con un proveedor de `lixbon profile`; sin @ usa el proveedor activo del CLI",
         _ => "",
     }
 }

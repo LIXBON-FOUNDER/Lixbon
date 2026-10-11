@@ -12,7 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 export const PROVIDERS_COMMAND = 'orch_list_providers';
 export const PROVIDER_IDS = Object.freeze(['claude', 'codex']);
 export const DEFAULT_PROVIDER = 'claude';
-export const PROVIDER_LABELS = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
+export const PROVIDER_LABELS = Object.freeze({ claude: 'Claude Code', codex: 'Codex', 'lixbon-cli': 'Lixbon CLI' });
 export const EFFORT_LABELS = Object.freeze({ low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo', ultra: 'Ultra' });
 export const UNVERIFIED_LABEL = 'sin verificar';
 

@@ -1,12 +1,15 @@
 // newAgentEntries.js — entradas de proveedores en "+ Nuevo" del modo Agente (el
 // "Agente de Lixbon" va fijo aparte). Salen de orch_list_providers.
 import { providerLabel } from './providersContract';
+import { EXTRA_CHAT_ENGINES, TERMINAL_ENGINE_IDS } from '../../lib/engines';
 
 /** Motores de chat que Lixbon sabe abrir (chatStore.spawnSession). Codex no tiene chat propio todavía. */
-export const CHAT_ENGINES = Object.freeze(['claude']);
+export const CHAT_ENGINES = EXTRA_CHAT_ENGINES;
 export const NO_CHAT_REASON = 'chat aún no disponible';
 /** Codex no abre chat: abre una pestaña con su TUI en un PTY (orch/codexterm). */
-export const TERMINAL_ENGINES = Object.freeze(['codex']);
+export const TERMINAL_ENGINES = TERMINAL_ENGINE_IDS;
+/** Solo sirven como agente hijo del orquestador (roles): no tienen chat ni terminal propios en "+ Nuevo". */
+export const WORKER_ONLY = Object.freeze(['lixbon-cli']);
 
 /**
  * Claude se muestra aunque la lista no llegue (su chat no depende del orquestador).
@@ -14,7 +17,7 @@ export const TERMINAL_ENGINES = Object.freeze(['codex']);
  */
 export function newAgentEntries(providers) {
   const list = providers?.length ? providers : [{ id: 'claude', available: true }, { id: 'codex', available: false }];
-  return list.map((p) => withWarnings(p, entryOf(p)));
+  return list.filter((p) => !WORKER_ONLY.includes(p.id)).map((p) => withWarnings(p, entryOf(p)));
 }
 
 /** Avisos del proveedor (orch_list_providers.warnings) y perfiles bloqueados, para mostrarlos en el menú. */

@@ -240,3 +240,20 @@ describe('spawnContract', () => {
     expect(countdown(65000, 0)).toBe('vence en 1:05'); // ms epoch del host
   });
 });
+
+describe('entorno del worktree en la aprobación', () => {
+  it('antes de aprobar se ve qué se enlazará y qué se copiará', async () => {
+    const { api } = makeApi([pending('pe', {}, { env: { shared: ['node_modules'], copy: ['.env'], skipped: [] } })]);
+    render(<PendingSpawnsPanel api={api} tasks={{}} />);
+    await open('pe');
+    expect(screen.getByTestId('worktree-env-shared').textContent).toMatch(/Se enlazará.*node_modules/);
+    expect(screen.getByTestId('worktree-env-copy').textContent).toMatch(/Se copiará.*\.env/);
+  });
+
+  it('sin reglas en el repo no aparece la sección', async () => {
+    const { api } = makeApi([pending('pn', {}, { env: { shared: [], copy: [], skipped: [] } })]);
+    render(<PendingSpawnsPanel api={api} tasks={{}} />);
+    await open('pn');
+    expect(screen.queryByTestId('worktree-env')).toBeNull();
+  });
+});

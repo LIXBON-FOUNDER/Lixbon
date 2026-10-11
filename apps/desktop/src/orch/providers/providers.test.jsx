@@ -335,6 +335,32 @@ describe('Codex con sandbox elevado (300abea)', async () => {
     expect(screen.queryByTestId('provider-warnings-claude')).toBeNull();
   });
 
+  it('rol de solo lectura: Codex sale deshabilitado con el motivo y no se puede guardar', async () => {
+    const onSave = vi.fn();
+    render(<RolesSettings roles={[{ id: 'explorador', label: 'Explorador', purpose: '', read_only: true, model: 'sonnet', effort: '' }]}
+      settings={{ roles: {} }} providers={await elevatedList()} onSave={onSave} resolver={mockResolvePolicy} />);
+    fireEvent.click(screen.getByTitle('Proveedor del explorador'));
+    const opt = within(screen.getByRole('listbox')).getByText(/Codex \(bloqueado para este rol\)/).closest('li');
+    expect(opt.className).toContain('is-disabled');
+    expect(opt.textContent).toContain(ELEVATED);
+    fireEvent.click(opt);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('rol que edita: Codex con sandbox elevado sigue elegible', async () => {
+    const list = await elevatedList();
+    expect(providerOptions(list, profileForRole(false)).find((o) => o.value === 'codex').disabled).toBe(false);
+    expect(providerOptions(list, profileForRole(true)).find((o) => o.value === 'codex').disabled).toBe(true);
+  });
+
+  it('el aviso del proveedor no se repite en la fila de un rol de solo lectura', async () => {
+    render(<RolesSettings roles={[{ id: 'revisor', label: 'Revisor', purpose: '', read_only: true, model: 'gpt', effort: '' }]}
+      settings={{ roles: { revisor: { provider: 'codex', model: '', effort: '' } } }} providers={await elevatedList()} onSave={vi.fn()}
+      resolver={async () => ({ warnings: [WARN_ELEVATED_RW, 'otro aviso del rol'] })} />);
+    await waitFor(() => expect(screen.getByTestId('role-warnings-revisor').textContent).toContain('otro aviso del rol'));
+    expect(screen.getByTestId('role-warnings-revisor').textContent).not.toContain(WARN_ELEVATED_RW);
+  });
+
   it('+ Nuevo: aviso y perfiles bloqueados de Codex', async () => {
     render(<NewAgentItems providers={await elevatedList()} onPick={vi.fn()} />);
     expect(screen.getByTestId('newagent-warning-codex').textContent).toBe(WARN_ELEVATED_RW);

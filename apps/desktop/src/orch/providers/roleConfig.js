@@ -1,6 +1,6 @@
 // roleConfig.js — proveedor, modelo y esfuerzo de cada rol, calculados a partir de
 // la lista de proveedores. No decide políticas: solo arma opciones para la UI.
-import { DEFAULT_PROVIDER, EFFORT_LABELS, UNVERIFIED_LABEL, providerLabel } from './providersContract';
+import { DEFAULT_PROVIDER, EFFORT_LABELS, UNVERIFIED_LABEL, blockedProfileReason, providerLabel } from './providersContract';
 
 /** Config guardada de un rol con `provider`; las viejas (sin provider) pasan a claude. */
 export function migrateRoleCfg(cfg, fallback = {}) {
@@ -19,14 +19,14 @@ export function migrateRoles(roles = {}) {
 
 export const CODEX_CONFIG_MODEL_LABEL = 'Modelo de config.toml de Codex';
 
-/** Opciones del selector de proveedor: los no disponibles salen deshabilitados con su motivo. */
-export function providerOptions(providers) {
-  return providers.map((p) => ({
-    value: p.id,
-    label: p.available ? providerLabel(p.id) : `${providerLabel(p.id)} (no disponible)`,
-    disabled: !p.available,
-    hint: p.available ? undefined : p.disabled_reason || 'No disponible',
-  }));
+/** Opciones del selector de proveedor. Los no disponibles, y los que el host bloquea para el perfil del rol, salen deshabilitados con su motivo. */
+export function providerOptions(providers, profile = null) {
+  return providers.map((p) => {
+    const blocked = profile ? blockedProfileReason(p, profile) : null;
+    if (!p.available) return { value: p.id, label: `${providerLabel(p.id)} (no disponible)`, disabled: true, hint: p.disabled_reason || 'No disponible' };
+    if (blocked !== null) return { value: p.id, label: `${providerLabel(p.id)} (bloqueado para este rol)`, disabled: true, hint: blocked || 'Bloqueado para este perfil' };
+    return { value: p.id, label: providerLabel(p.id), disabled: false, hint: undefined };
+  });
 }
 
 /**

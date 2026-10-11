@@ -11,6 +11,7 @@ mod providers;
 mod codex_session;
 mod codex_term;
 
+pub use codex_session::SessionInfo as CodexSessionInfo;
 pub use codex_term::{CodexTerms, Listed as CodexTermListed};
 mod delivery;
 mod git;
@@ -19,6 +20,11 @@ mod issues;
 mod review;
 mod pty;
 mod roles;
+mod worktree_env;
+#[cfg(test)]
+mod lixbon_cli_tests;
+#[cfg(test)]
+mod codex_history_tests;
 mod server;
 pub(crate) mod skill;
 pub mod state;
@@ -45,6 +51,7 @@ pub enum Caller {
 
 /// Un nivel: el coordinador y sus hijos. Un hijo no reparte trabajo.
 const MAX_DEPTH: u32 = 1;
+const MODEL_TRIES: u32 = 10;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -278,6 +285,7 @@ impl Core {
         let h = server::start(self.clone())?;
         write_json(&discovery_file(), &json!({
             "port": h.port, "token": h.token, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
+            "lxo": lxo_path(),
         }))?;
         *slot = Some(h);
         Ok(())
@@ -702,8 +710,10 @@ impl Core {
             let dir = PathBuf::from(&p.cwd);
             let start = git::head(&parent.cwd);
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
+            let env = worktree_env::apply(&parent.repo, &dir, &worktree_env::plan(&parent.repo).restricted_to(&p.env));
             let mut st = self.lock();
             let t = st.task_mut(&id)?;
+            t.env = Some(env).filter(|e| !e.is_empty());
             t.base_commit = start;
             t.cwd = dir.to_string_lossy().into_owned();
             t.worktree = Some(t.cwd.clone());
@@ -821,7 +831,12 @@ impl Core {
         let mut task = task;
         task.report_nonce = Some(nonce.clone());
 
-        let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
+        // El CLI de Lixbon ya lleva sus reglas de entrega: no se le manda a leer la guía de lxo.
+        let prompt = if task.agent == agents::LIXBON_CLI {
+            format!("Lee .lixbon/tasks/{id}.md y haz la tarea.")
+        } else {
+            format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.")
+        };
         let read_only = task.role.as_deref().and_then(roles::spec).is_some_and(|r| r.read_only);
         // Se lanza exactamente el argv de la política efectiva (la misma que muestra
         // orch_resolve_policy); un perfil bloqueado no arranca.
@@ -902,11 +917,18 @@ impl Core {
         // Sondeo del report.json y de la salida mientras la terminal siga abierta.
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
+        let mut model_tries = 0;
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
             let Some(core) = weak.upgrade() else { break };
             let Some(text) = core.term_text(&tid) else { break };
+            let session_id = codex_session::session_id_from_terminal(&text);
             core.collect(&tid, Some(text), false);
+            // Codex deja la TUI abierta tras el informe: el modelo no puede esperar a que se cierre.
+            if model_tries < MODEL_TRIES && core.codex_model_pending(&tid) {
+                model_tries += 1;
+                core.record_codex_model(&tid, session_id.as_deref());
+            }
             let timeout = guard.lock().ok().and_then(|g| g.check(state::now_ms()));
             if let Some(t) = timeout {
                 core.on_guard_timeout(&tid, t);
@@ -1003,6 +1025,11 @@ impl Core {
             t.session_ref = r.session_ref;
         }
         self.commit(&st, &[]);
+    }
+
+    fn codex_model_pending(&self, id: &str) -> bool {
+        let st = self.lock();
+        st.task(id).is_ok_and(|t| t.agent == "codex" && t.status.is_final() && matches!(t.model_source.as_deref(), None | Some("unknown")))
     }
 
     fn on_exit(&self, id: &str) {
@@ -1424,17 +1451,30 @@ pub fn orch_resolve_policy(provider: String, profile: String, role: String, work
 }
 
 /// Pestaña de terminal de Codex (orch/codex_term.rs): política sin lanzar nada.
-pub fn codex_term_policy(cwd: &str, model: Option<&str>, effort: Option<&str>) -> Result<Value, String> {
-    serde_json::to_value(codex_term::resolve(cwd, model, effort)?).map_err(|e| e.to_string())
+pub fn codex_term_policy(cwd: &str, model: Option<&str>, effort: Option<&str>, resume: Option<&str>) -> Result<Value, String> {
+    serde_json::to_value(resolve_codex_term(cwd, model, effort, resume)?).map_err(|e| e.to_string())
+}
+
+fn resolve_codex_term(cwd: &str, model: Option<&str>, effort: Option<&str>, resume: Option<&str>) -> Result<codex_term::TermPolicy, String> {
+    let policy = codex_term::resolve(cwd, model, effort)?;
+    match resume.map(str::trim).filter(|id| !id.is_empty()) {
+        Some(id) => codex_term::with_resume(policy, id),
+        None => Ok(policy),
+    }
+}
+
+/// Sesiones guardadas de Codex para el historial de la interfaz (solo lectura de `~/.codex/sessions`).
+pub fn codex_sessions(cwd: Option<&str>, limit: usize) -> Vec<codex_session::SessionInfo> {
+    agents::codex_home().map(|h| codex_session::list(&h.join("sessions"), cwd, limit.clamp(1, 200))).unwrap_or_default()
 }
 
 /// Abre la pestaña de Codex. `root`: carpeta de trabajo abierta en Lixbon.
 #[allow(clippy::too_many_arguments)]
 pub fn codex_term_open(app: &AppHandle, terms: &CodexTerms, root: Option<&Path>, cwd: &str, model: Option<&str>, effort: Option<&str>,
-    cols: Option<u16>, rows: Option<u16>, acknowledged: bool) -> Result<Value, String> {
+    cols: Option<u16>, rows: Option<u16>, acknowledged: bool, resume: Option<&str>) -> Result<Value, String> {
     let app = app.clone();
     let emit = move |name: &str, payload: Value| { let _ = app.emit(name, payload); };
-    let o = codex_term::open(terms, root, cwd, model, effort, cols, rows, acknowledged, |c| codex_term::resolve(c, model, effort), emit)?;
+    let o = codex_term::open(terms, root, cwd, model, effort, cols, rows, acknowledged, |c| resolve_codex_term(c, model, effort, resume), emit)?;
     serde_json::to_value(o).map_err(|e| e.to_string())
 }
 

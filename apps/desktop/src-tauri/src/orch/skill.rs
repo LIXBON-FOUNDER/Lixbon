@@ -73,21 +73,40 @@ pub fn home() -> Option<PathBuf> {
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
+    let me = std::env::current_exe().ok().and_then(|p| p.canonicalize().ok());
+    which_in(name, &std::env::var_os("PATH")?, me.as_deref())
+}
+
+/// Busca `name` en `path`. Nunca devuelve `me` (el ejecutable de Lixbon): el desktop
+/// y el CLI se llaman igual (`lixbon`), y ejecutar el desktop como si fuera el CLI abre
+/// otra copia de la app en lugar de responder.
+pub fn which_in(name: &str, path: &std::ffi::OsStr, me: Option<&Path>) -> Option<PathBuf> {
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT").unwrap_or(".EXE;.CMD;.BAT".into()).split(';').map(|e| e.to_ascii_lowercase()).collect()
     } else {
         vec![String::new()]
     };
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(path) {
         for ext in &exts {
             let p = dir.join(format!("{name}{ext}"));
-            if p.is_file() {
+            if p.is_file() && !me.is_some_and(|m| same_file(&p, m)) {
                 return Some(p);
             }
         }
     }
     None
+}
+
+/// Mismo fichero por ruta o por identidad: cargo deja enlaces duros del ejecutable (`target/debug/deps`)
+/// y esas rutas distintas siguen siendo la misma app.
+fn same_file(a: &Path, b: &Path) -> bool {
+    if a.canonicalize().ok().as_deref() == Some(b) {
+        return true;
+    }
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.len() == y.len() && x.len() > 0 && x.modified().ok().is_some_and(|t| Some(t) == y.modified().ok()),
+        _ => false,
+    }
 }
 
 fn skill_file(home: &Path, t: &Target, skill: &Skill) -> PathBuf {

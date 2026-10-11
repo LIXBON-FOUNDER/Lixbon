@@ -11,10 +11,12 @@ import '../policy/policy.css';
 export const ACK_LABEL = 'Entiendo los avisos y quiero abrir Codex';
 
 /**
- * @param {{ cwd: string, codex: object|null, api?: typeof defaultApi,
+ * `resume` ({ id, title }): reanuda esa sesión guardada en lugar de abrir una nueva.
+ * @param {{ cwd: string, codex: object|null, resume?: { id: string, title?: string }|null, api?: typeof defaultApi,
  *   onOpened: (res: object, args: object) => void, onCancel?: () => void }} props
  */
-export function CodexLaunchPanel({ cwd, codex, api = defaultApi, onOpened, onCancel }) {
+export function CodexLaunchPanel({ cwd, codex, resume = null, api = defaultApi, onOpened, onCancel }) {
+  const resumeId = resume?.id || '';
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
   const [pol, setPol] = useState(null);
@@ -26,18 +28,18 @@ export function CodexLaunchPanel({ cwd, codex, api = defaultApi, onOpened, onCan
     let alive = true;
     setPol(null); setError(null); setAck(false);
     if (!cwd) return undefined;
-    api.policy({ cwd, model, effort })
+    api.policy({ cwd, model, effort, ...(resumeId ? { resume: resumeId } : {}) })
       .then((p) => alive && setPol({ policy: p?.policy ?? null, argv: Array.isArray(p?.argv) ? p.argv : [], warnings: Array.isArray(p?.warnings) ? p.warnings : [] }))
       .catch((e) => alive && setError(`No se pudo leer la política: ${e?.message || e}`));
     return () => { alive = false; };
-  }, [cwd, model, effort, api]);
+  }, [cwd, model, effort, resumeId, api]);
 
   const hasWarnings = Boolean(pol?.warnings.length);
   const canOpen = Boolean(cwd && pol && !opening && (!hasWarnings || ack));
   const open = async () => {
     if (!canOpen) return;
     setOpening(true); setError(null);
-    const args = { cwd, model, effort };
+    const args = { cwd, model, effort, ...(resumeId ? { resume: resumeId, title: resume.title } : {}) };
     try {
       const res = await api.open({ ...args, cols: 200, rows: 40, acknowledged: hasWarnings ? ack : false });
       onOpened(res, args);
@@ -49,9 +51,10 @@ export function CodexLaunchPanel({ cwd, codex, api = defaultApi, onOpened, onCan
   };
 
   return (
-    <section className="policy codexlaunch" aria-label="Abrir Codex en una terminal">
-      <h3 className="policy__title">Codex en una terminal</h3>
+    <section className="policy codexlaunch" aria-label={resume ? 'Reanudar una sesión de Codex' : 'Abrir Codex en una terminal'}>
+      <h3 className="policy__title">{resume ? 'Reanudar sesión de Codex' : 'Codex en una terminal'}</h3>
       <dl className="policy__details">
+        {resume && <><dt>Sesión</dt><dd data-testid="codex-resume-title">{resume.title || resumeId}</dd></>}
         <dt>Carpeta</dt>
         <dd className="mono" data-testid="codex-cwd">{cwd || 'Abre una carpeta primero'}</dd>
         <dt>Modelo</dt>
@@ -76,7 +79,7 @@ export function CodexLaunchPanel({ cwd, codex, api = defaultApi, onOpened, onCan
       )}
       <div className="codexlaunch__actions">
         {onCancel && <button type="button" className="lk" onClick={onCancel}>Cancelar</button>}
-        <button type="button" className="policy__launch" disabled={!canOpen} onClick={open}>{opening ? 'Abriendo…' : 'Abrir'}</button>
+        <button type="button" className="policy__launch" disabled={!canOpen} onClick={open}>{opening ? 'Abriendo…' : resume ? 'Reanudar' : 'Abrir'}</button>
       </div>
     </section>
   );

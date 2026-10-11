@@ -177,6 +177,97 @@ pub fn resolve(sessions: Option<&Path>, session_id: Option<&str>, cwd: &str, sta
     Resolved { model, session_ref: path.map(|p| p.to_string_lossy().into_owned()), mechanism }
 }
 
+/// Una sesión de Codex para el historial de la interfaz.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct SessionInfo {
+    pub id: String,
+    pub cwd: String,
+    pub title: String,
+    pub updated_ms: u64,
+    pub model: Option<String>,
+}
+
+/// Lo que se lee de cada rollout: la cabecera trae `session_meta` y los primeros mensajes.
+const HEAD_BYTES: u64 = 192 * 1024;
+/// Rollouts que se miran como máximo, de los más recientes a los más viejos.
+const MAX_SCANNED: usize = 400;
+const TITLE_CHARS: usize = 80;
+
+fn head(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(path).ok()?.take(HEAD_BYTES).read_to_end(&mut buf).ok()?;
+    // El corte puede partir un carácter o una línea: la línea rota no parsea y se ignora.
+    Some(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Primera petición real de la persona. Codex abre cada sesión con mensajes de
+/// sistema (`<environment_context>`, instrucciones de AGENTS.md) que no cuentan.
+pub fn first_prompt(jsonl: &str) -> Option<String> {
+    let real = |t: &str| {
+        let t = t.trim();
+        (!t.is_empty() && !t.starts_with('<') && !t.contains("AGENTS.md instructions")).then(|| t.to_string())
+    };
+    jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find_map(|v| {
+        let p = &v["payload"];
+        match (v["type"].as_str()?, p["type"].as_str()) {
+            ("response_item", Some("message")) if p["role"] == "user" => {
+                p["content"].as_array()?.iter().filter(|c| matches!(c["type"].as_str(), Some("input_text" | "text"))).find_map(|c| real(c["text"].as_str()?))
+            }
+            ("event_msg", Some("user_message")) => real(p["message"].as_str()?),
+            _ => None,
+        }
+    })
+}
+
+fn title_of(prompt: &str) -> String {
+    let line = prompt.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let mut title: String = line.chars().take(TITLE_CHARS).collect();
+    if line.chars().count() > TITLE_CHARS {
+        title.push('…');
+    }
+    title
+}
+
+/// Sesiones propias de Codex (TUI o exec; sin subagentes), las más recientes primero.
+/// Con `cwd`, solo las de esa carpeta o las de una subcarpeta suya.
+pub fn list(sessions: &Path, cwd: Option<&str>, limit: usize) -> Vec<SessionInfo> {
+    let mut files = vec![];
+    rollouts(sessions, 0, &mut files, 0);
+    files.sort_by_key(|p| std::cmp::Reverse(mtime_ms(p)));
+    let want = cwd.map(norm).filter(|w| !w.is_empty());
+    let mut out = vec![];
+    for path in files.into_iter().take(MAX_SCANNED) {
+        if out.len() >= limit {
+            break;
+        }
+        let Some(text) = head(&path) else { continue };
+        let Some(meta) = session_meta(&text).filter(|m| m.own && !m.id.is_empty()) else { continue };
+        let here = norm(&meta.cwd);
+        if want.as_ref().is_some_and(|w| &here != w && !here.starts_with(&format!("{w}/"))) {
+            continue;
+        }
+        out.push(SessionInfo {
+            id: meta.id,
+            cwd: meta.cwd,
+            title: first_prompt(&text).map(|p| title_of(&p)).unwrap_or_else(|| "Sesión de Codex".into()),
+            updated_ms: mtime_ms(&path),
+            model: turn_context_model(&text),
+        });
+    }
+    out
+}
+
+/// Un id de sesión de Codex (UUID): solo hexadecimal y guiones, para ir en el comando.
+pub fn valid_session_id(id: &str) -> Result<String, String> {
+    let id = id.trim();
+    if (32..=40).contains(&id.len()) && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        Ok(id.to_ascii_lowercase())
+    } else {
+        Err(format!("Id de sesión de Codex no válido: {id}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

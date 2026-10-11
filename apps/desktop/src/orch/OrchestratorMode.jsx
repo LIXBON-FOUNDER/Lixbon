@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
-import { useOrchStore, taskTree, isFinal, AGENT_LABELS, STATUS_LABELS, ROLE_LABELS } from '../store/orchStore';
+import { useOrchStore, taskTree, isFinal, STATUS_LABELS } from '../store/orchStore';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
@@ -20,8 +20,12 @@ import { IntegrationDialog } from './integration/IntegrationDialog';
 import { TaskDiffView } from './review/TaskDiffView';
 import { subscribeTaskReviewed } from './review/taskReview';
 import { canIntegrate as canIntegrateTask, isMerged, mergedCommitShort, integrationTarget } from './canIntegrate';
+import { ATTENTION, attentionItems, unansweredQuestions } from './attention';
+import { AgentChip } from './agent/AgentChip';
+import { WorktreeEnv } from './spawn/WorktreeEnv';
+import { roleName } from './agent/agentIdentity';
+import { AttentionList } from './AttentionList';
 
-const agentLabel = (id) => AGENT_LABELS[id] || id;
 const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
 const ago = (ms) => {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -30,6 +34,8 @@ const ago = (ms) => {
   if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
   return new Date(ms).toLocaleDateString('es');
 };
+
+const firstLine = (text) => String(text || '').split('\n').map((l) => l.trim()).find(Boolean) || '';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
@@ -41,12 +47,6 @@ const inRepo = (task, root) => {
   const b = norm(root);
   return a === b || b.startsWith(`${a}/`) || a.startsWith(`${b}/`);
 };
-
-/** Preguntas sin respuesta todavía. */
-function pendingQuestions(messages = []) {
-  const answered = new Set(messages.filter((m) => m.kind === 'reply').map((m) => m.reply_to));
-  return messages.filter((m) => m.kind === 'question' && !answered.has(m.id));
-}
 
 const duration = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -70,8 +70,9 @@ const elapsed = (task, now) => duration((isFinal(task.status) ? task.updated : n
 
 export function StatusIcon({ status, size = 14 }) {
   const busy = status === 'running' || status === 'starting';
+  const shape = isAwaitingTerminalApproval({ status }) ? 'waiting' : status;
   return (
-    <span className={`orchst orchst--${status}`} style={{ width: size, height: size }} title={STATUS_LABELS[status] || status}>
+    <span className={`orchst orchst--${shape}`} style={{ width: size, height: size }} title={STATUS_LABELS[status] || status}>
       <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden>
         {busy && (
           <>
@@ -80,7 +81,7 @@ export function StatusIcon({ status, size = 14 }) {
             {status === 'running' && <circle className="orchst__core" cx="8" cy="8" r="2.3" />}
           </>
         )}
-        {status === 'waiting' && (
+        {shape === 'waiting' && (
           <>
             <circle className="orchst__ping" cx="8" cy="8" r="3" />
             <circle className="orchst__core" cx="8" cy="8" r="3" />
@@ -112,15 +113,17 @@ export function StatusIcon({ status, size = 14 }) {
 function TaskRow({ task, selected, onSelect, asking, now }) {
   const phase = task.phases?.[task.phases.length - 1];
   const final = isFinal(task.status);
+  const statusLine = (final ? firstLine(task.summary) : phase?.note?.trim()) || '';
   return (
     <button className={`orch__task orch__task--${task.status} ${selected ? 'is-active' : ''}`} style={{ paddingLeft: 12 + task.depth * 16 }} onClick={() => onSelect(task.id)}>
       <StatusIcon status={task.status} />
       <span className="orch__task-main">
         <span className="orch__task-title">{task.title || task.id}</span>
         <span className="orch__task-meta">
-          {task.role ? `${ROLE_LABELS[task.role] || task.role} · ` : ''}{agentLabel(task.agent)}{task.model ? ` · ${task.model}` : ''}
+          {task.role ? `${roleName(task.role)} · ` : ''}<AgentChip provider={task.agent} model={task.model} effort={task.effort} />
           {phase && !final ? <> · <span className="orch__task-phase">{phase.name}</span></> : ''}
         </span>
+        {statusLine && <span className="orch__task-note" title={statusLine} data-testid={`task-note-${task.id}`}>{statusLine}</span>}
       </span>
       <TerminalApprovalBadge task={task} now={now} />
       <ModelMismatchBadge task={task} />
@@ -173,7 +176,7 @@ function Activity({ task, messages, tasks }) {
     useFileViewStore.getState().open(task.report);
   };
   const mine = messages.filter((m) => m.from === task.id || m.to === task.id);
-  const open = pendingQuestions(messages).filter((q) => q.to === task.id || q.from === task.id);
+  const open = unansweredQuestions(messages).filter((q) => q.to === task.id || q.from === task.id);
   const name = (id) => (tasks[id] ? `${tasks[id].title || id}` : id);
 
   return (
@@ -192,6 +195,8 @@ function Activity({ task, messages, tasks }) {
           <p className="orch__spec">{task.spec}</p>
         </section>
       )}
+
+      <WorktreeEnv env={task.env} done />
 
       {task.report && (
         <section className="orch__block">
@@ -268,20 +273,19 @@ function DiffTab({ task }) {
   );
 }
 
-function TaskView({ task, snap }) {
+function TaskView({ task, snap, intent }) {
   const call = useOrchStore((s) => s.call);
-  const [tab, setTab] = useState(task.parent ? 'term' : 'activity');
+  const [tab, setTab] = useState(task.parent && intent !== ATTENTION.review && intent !== ATTENTION.integrate ? 'term' : 'activity');
   const live = snap.live.includes(task.id);
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
   const now = useNow(!final, 1000);
   // Regla única en ./canIntegrate.js.
   const canIntegrate = canIntegrateTask(task);
-  const [integrating, setIntegrating] = useState(false);
+  const [integrating, setIntegrating] = useState(intent === ATTENTION.integrate);
   // Revisión de diff por tarea (vista propia, aparte del chat): hija terminada con rama.
   const canReview = Boolean(task.parent && task.status === 'done' && task.branch);
-  const [reviewing, setReviewing] = useState(false);
-  useEffect(() => { setReviewing(false); }, [task.id]);
+  const [reviewing, setReviewing] = useState(intent === ATTENTION.review);
   // orch-task-reviewed: refresca la snapshot para que last_review (y con él Integrar) se actualice.
   useEffect(() => subscribeTaskReviewed(() => useOrchStore.getState().refresh()), []);
 
@@ -295,7 +299,7 @@ function TaskView({ task, snap }) {
           <span className="panelhead__title">{task.title || task.id}</span>
           <span className="panelhead__meta">
             <span className={`orch__state orch__state--${task.status}`}>{STATUS_LABELS[task.status] || task.status} · {elapsed(task, now)}</span>
-            <span className="mono">{task.id}</span> · {task.role ? `${ROLE_LABELS[task.role] || task.role} · ` : ''}{agentLabel(task.agent)}{task.model ? ` (${task.model}${task.effort ? `, ${task.effort}` : ''})` : ''}
+            <span className="mono">{task.id}</span> · {task.role ? `${roleName(task.role)} · ` : ''}<AgentChip provider={task.agent} model={task.model} effort={task.effort} size={13} />
             {parent ? ` · hija de ${parent.title || parent.id}` : ' · coordinador'}
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>
@@ -372,7 +376,8 @@ export function OrchestratorMode() {
   const root = useAppStore((s) => s.workspaceRoot);
   const spawns = usePendingSpawns();
   const [pendingSel, setPendingSel] = useState(null);
-  const pendingItem = spawns.items.find((x) => x.pending_id === pendingSel) || null;
+  const [intent, setIntent] = useState(null);
+  const pickTask = (id, why = null) => { setPendingSel(null); setIntent(why); select(id); };
 
   useEffect(() => { init(); }, [init]);
 
@@ -386,8 +391,14 @@ export function OrchestratorMode() {
     [allRuns, allRepos, root, snap],
   );
   const hidden = allRuns.length - runs.length;
-  const asking = useMemo(() => new Set(pendingQuestions(snap?.messages).map((q) => q.from)), [snap]);
+  const asking = useMemo(() => new Set(unansweredQuestions(snap?.messages).map((q) => q.from)), [snap]);
   const task = selected && snap?.tasks?.[selected];
+  const attention = useMemo(
+    () => attentionItems(runs.filter((r) => !r.closed).flatMap((r) => taskTree(snap?.tasks, r.id))),
+    [runs, snap],
+  );
+  // Un lanzamiento pendiente vence a los 10 minutos: si no hay nada elegido, se enseña él antes que la ayuda.
+  const pendingItem = spawns.items.find((x) => x.pending_id === pendingSel) || (!task ? spawns.items[0] : null) || null;
   const anyLive = useMemo(() => Object.values(snap?.tasks || {}).some((t) => !isFinal(t.status)), [snap]);
   // Cuenta atrás de la aprobación en terminal: refresco por segundo solo mientras alguna espera.
   const anyAwaiting = useMemo(() => Object.values(snap?.tasks || {}).some(isAwaitingTerminalApproval), [snap]);
@@ -404,7 +415,8 @@ export function OrchestratorMode() {
             <span className="panelhead__title">{allRepos ? 'Runs · todos los repos' : `Runs · ${root ? root.split(/[\\/]/).pop() : 'sin carpeta'}`}</span>
           </div>
           <SpawnNotice notice={spawns.notice} onClose={spawns.clearNotice} />
-          <PendingSpawnList items={spawns.items} selected={pendingItem ? pendingSel : null} onSelect={setPendingSel} tasks={snap.tasks} />
+          <PendingSpawnList items={spawns.items} selected={pendingItem?.pending_id ?? null} onSelect={setPendingSel} tasks={snap.tasks} />
+          <AttentionList items={attention} selected={pendingItem ? null : selected} onSelect={pickTask} />
           <div className="orch__runs scroll">
             {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
             {runs.map((r) => {
@@ -421,7 +433,7 @@ export function OrchestratorMode() {
                   <button className="ic" title="Quitar este run de la lista (libera los worktrees fusionados y borra sus ramas)" onClick={() => call('remove_run', { run: r.id }, removedText)}><IconTrash size={12} /></button>
                 </div>
                 {!folded && taskTree(snap.tasks, r.id).map((t) => (
-                  <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={(id) => { setPendingSel(null); select(id); }} />
+                  <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={(id) => pickTask(id)} />
                 ))}
               </section>
               );
@@ -439,7 +451,7 @@ export function OrchestratorMode() {
       <Panel id="orchmain" className="wb__grow orch__main">
         {pendingItem
           ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} error={spawns.errors[pendingItem.pending_id]} onApprove={spawns.approve} onReject={spawns.reject} />
-          : task ? <TaskView key={task.id} task={task} snap={snap} /> : <HowTo />}
+          : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} /> : <HowTo />}
       </Panel>
     </div>
   );

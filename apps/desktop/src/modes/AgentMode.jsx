@@ -11,7 +11,7 @@ import { LogoMark, ClaudeMark } from '../components/Logo';
 import { useProviders } from '../orch/providers/RolesSettings';
 import { listProviders } from '../orch/providers/providersContract';
 import { NewAgentItems } from '../orch/providers/NewAgentItems';
-import { useCodexTermStore } from '../orch/codexterm/codexTermStore';
+import { useCodexTermStore, useLeaveCodexOnChatChange } from '../orch/codexterm/codexTermStore';
 import { CodexTabList, CodexTermArea } from '../orch/codexterm/CodexTabs';
 import { CodexLaunchPanel } from '../orch/codexterm/CodexLaunchPanel';
 import { useWorkbenchStore } from '../store/workbenchStore';
@@ -123,9 +123,10 @@ export function AgentMode() {
   const { providers } = useProviders(listProviders);
   const codexView = useCodexTermStore((s) => (s.launcher ? 'launcher' : s.activeKey ? 'term' : null));
   const codexTab = useCodexTermStore((s) => s.tabs.find((t) => t.key === s.activeKey));
+  const codexResume = useCodexTermStore((s) => s.launcherResume);
   // Elegir una sesión de chat vuelve del terminal de Codex al chat.
   const chatKey = useSessionsStore((s) => s.activeKey);
-  useEffect(() => { useCodexTermStore.getState().deactivate(); }, [chatKey]);
+  useLeaveCodexOnChatChange(chatKey);
 
   return (
     <div className="wb wb--agent">
@@ -146,7 +147,7 @@ export function AgentMode() {
       <Panel id="chat" className="wb__grow agentmain">
         <div className="panelhead panelhead--tall">
           <div className="agentmain__title">
-            <span>{codexView === 'launcher' ? 'Codex en una terminal' : codexView === 'term' ? 'Codex' : (conversationTitle || 'Nueva conversación')}</span>
+            <span>{codexView === 'launcher' ? (codexResume ? 'Reanudar sesión de Codex' : 'Codex en una terminal') : codexView === 'term' ? 'Codex' : (conversationTitle || 'Nueva conversación')}</span>
             {codexView === 'term' && codexTab ? <span className="mono agentmain__meta">{codexTab.cwd}</span> : meta && <span className="mono agentmain__meta">{meta}</span>}
           </div>
           <div className="panelhead__fill" />
@@ -155,7 +156,7 @@ export function AgentMode() {
         </div>
         <div className="agentmain__body">
           {codexView === 'launcher' && (
-            <CodexLaunchPanel cwd={workspaceRoot} codex={providers?.find((p) => p.id === 'codex') || null}
+            <CodexLaunchPanel cwd={codexResume?.cwd || workspaceRoot} resume={codexResume} codex={providers?.find((p) => p.id === 'codex') || null}
               onOpened={(res, args) => useCodexTermStore.getState().addTab(res, args)} onCancel={() => useCodexTermStore.getState().cancelLauncher()} />
           )}
           <div style={codexView ? { display: 'none' } : { display: 'contents' }}><ChatPanel wide /></div>

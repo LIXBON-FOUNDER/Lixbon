@@ -8,7 +8,7 @@ import { normalizeSaveWarnings, snapshotFromSaveResponse, providersOfSettings, E
 import { TERMINAL_APPROVAL, TERMINAL_APPROVAL_TEXT } from '../orch/terminalApprovalContract';
 
 export const AGENT_LABELS = {
-  claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador',
+  claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', 'lixbon-cli': 'Lixbon CLI', coordinador: 'Coordinador',
 };
 
 export const ROLE_LABELS = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
