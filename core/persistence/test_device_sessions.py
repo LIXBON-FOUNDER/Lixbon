@@ -115,20 +115,6 @@ def test_cada_dispositivo_tiene_su_sesion(uid):
     assert q.validate_access_token(b["access_token"]) is not None
 
 
-def test_legacy_sin_refresh_y_uno_por_app(uid):
-    normal = q.create_device_session(uid, "desktop")
-    a = q.create_device_session(uid, "desktop", legacy=True)
-    movil = q.create_device_session(uid, "mobile", legacy=True)
-    assert a["refresh_token"] is None
-    assert q.validate_access_token(a["access_token"])["legacy"] is True
-
-    b = q.create_device_session(uid, "desktop", legacy=True)
-    assert q.validate_access_token(a["access_token"]) is None
-    assert q.validate_access_token(b["access_token"]) is not None
-    assert q.validate_access_token(movil["access_token"]) is not None
-    assert q.validate_access_token(normal["access_token"]) is not None
-
-
 def test_cookie_web_y_access_no_se_cruzan(uid):
     web = q.create_web_session(uid)
     t = q.create_device_session(uid, "desktop")
@@ -142,13 +128,10 @@ def test_purga_conserva_sesiones_con_refresh_vigente(uid):
     _fijar(viva["session_id"], expires_at=_hace(minutes=1))
     muerta = q.create_device_session(uid, "cli")
     _fijar(muerta["session_id"], refresh_expires_at=_hace(seconds=1))
-    legacy = q.create_device_session(uid, "mobile", legacy=True)
-    _fijar(legacy["session_id"], expires_at=_hace(seconds=1))
 
     q.purge_expired_sessions()
     with get_session() as s:
         assert s.get(models.Session, muerta["session_id"]) is None
-        assert s.get(models.Session, legacy["session_id"]) is None
     assert q.rotate_refresh(viva["refresh_token"]) is not None
 
 

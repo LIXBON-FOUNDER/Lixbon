@@ -19,20 +19,17 @@ from core.gateway.email import (
 from core.persistence.queries import (
     ACCESS_TOKEN_MINUTES,
     RefreshRace,
-    count_daily_regenerations,
     create_device_session,
     create_email_token,
     consume_email_token,
     create_user,
     create_web_session,
     deactivate_all_user_keys,
-    deactivate_key,
     delete_user_sessions,
     delete_web_session,
     get_plan_for_user,
     get_user_by_email,
     get_user_by_id,
-    list_api_keys,
     list_user_sessions,
     log_audit_event,
     mark_email_verified,
@@ -57,24 +54,8 @@ from core.security.auth import (
 router = APIRouter()
 
 SESSION_COOKIE = "lixbon_session"
-DESKTOP_KEY_NAME = "lixbon Desktop"
-CLI_KEY_NAME = "lixbon CLI"        # apps/cli/internal/api lo manda explícito
-MOBILE_KEY_NAME = "Lixbon Mobile"  # debe coincidir exactamente con apps/mobile/src/state.js
-# El login OAuth del desktop emitía su key con este nombre; se sigue reconociendo
-# para que esas keys ya emitidas cuenten como desktop sin obligar a re-login.
-LEGACY_DESKTOP_KEY_NAME = "Lixbon IDE"
-# Nombres de las API keys que las propias apps se emiten a sí mismas al hacer
-# login (issue_api_key=True). Cualquier otra API key (creada a mano en
-# Ajustes → API keys para uso externo/programable) sigue con el sistema de
-# créditos prepago sin cambios — ver core.gateway.routers.chat._is_external_api,
-# que además distingue Free (desktop/CLI se quedan en créditos; móvil no) de
-# Pro/Advance (las 4 apps comparten el pool de sesión/semana).
-FIRST_PARTY_KEY_NAMES = frozenset(
-    {DESKTOP_KEY_NAME, LEGACY_DESKTOP_KEY_NAME, CLI_KEY_NAME, MOBILE_KEY_NAME})
-DESKTOP_CLI_KEY_NAMES = frozenset({DESKTOP_KEY_NAME, LEGACY_DESKTOP_KEY_NAME, CLI_KEY_NAME})
-_CLIENT_POR_KEY = {DESKTOP_KEY_NAME: "desktop", LEGACY_DESKTOP_KEY_NAME: "desktop",
-                   CLI_KEY_NAME: "cli", MOBILE_KEY_NAME: "mobile"}
-_KEY_POR_CLIENT = {"desktop": DESKTOP_KEY_NAME, "cli": CLI_KEY_NAME, "mobile": MOBILE_KEY_NAME}
+# Cómo nombra cada app el aviso de acceso inusual (core/security/acceso.py).
+_NOMBRE_DE_APP = {"desktop": "lixbon Desktop", "cli": "lixbon CLI", "mobile": "Lixbon Mobile"}
 AppClient = Literal["desktop", "cli", "mobile"]
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"   # "1" en Railway (HTTPS)
 SESSION_MAX_AGE = int(os.getenv("SESSION_EXPIRY_HOURS", "168")) * 3600
@@ -92,12 +73,11 @@ class LoginRequest(BaseModel):
     email: str | None = None
     username: str | None = None   # compat con clientes pre-F3
     password: str
-    # Clientes nuevos: piden una sesión de dispositivo (access + refresh).
+    # Las apps piden una sesión de este dispositivo (access + refresh).
     client: AppClient | None = None
     device_name: str | None = Field(default=None, max_length=80)
-    # Clientes anteriores: esperan `api_key`; key_name dice qué app es.
+    # Solo lo mandan las apps anteriores a las sesiones de dispositivo.
     issue_api_key: bool = False
-    key_name: str | None = Field(default=None, min_length=1, max_length=60)
 
 
 class RefreshRequest(BaseModel):
@@ -132,8 +112,19 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def nombre_de_app(client: str | None, key_name: str | None) -> str:
-    return _KEY_POR_CLIENT[client] if client else (key_name or DESKTOP_KEY_NAME)
+def nombre_de_app(client: str) -> str:
+    return _NOMBRE_DE_APP[client]
+
+
+def exigir_cliente_actual(client: str | None) -> str:
+    """Los clientes anteriores a las sesiones de dispositivo (desktop < 2.0.29,
+    CLI < 2.6.0, móvil < 0.5.0) piden una API key al entrar: ya no se emite."""
+    if not client:
+        raise HTTPException(status_code=426, detail={
+            "error": "update_required",
+            "message": "Actualiza la app de Lixbon para iniciar sesión.",
+        })
+    return client
 
 
 def cuerpo_de_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
@@ -148,27 +139,12 @@ def cuerpo_de_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
 
 
 def emitir_credencial_de_app(user_id: int, ip: str, user_agent: str | None, *,
-                             client: str | None, device_name: str | None,
-                             key_name: str | None) -> dict[str, Any]:
-    """Login de una app. Nunca crea una API key: con `client` entrega access +
-    refresh; sin él es un cliente anterior que espera `api_key` y recibe en ese
-    campo un access legacy de 90 días sin refresh."""
-    if client:
-        tokens = create_device_session(user_id, client, device_name=device_name,
-                                       ip_address=ip, user_agent=user_agent)
-        log_audit_event("device_session_created", user_id=user_id, ip_address=ip, client=client)
-        return cuerpo_de_tokens(tokens)
-
-    nombre = nombre_de_app(None, key_name)
-    legacy_client = _CLIENT_POR_KEY.get(nombre, "desktop")
-    # Lo que hacía la rotación por nombre: la key que esta app tenía deja de valer.
-    for k in list_api_keys(user_id):
-        if k["name"] == nombre and k["is_active"] and k["origin"] == "login":
-            deactivate_key(k["id"], user_id)
-    tokens = create_device_session(user_id, legacy_client, ip_address=ip, user_agent=user_agent,
-                                   legacy=True)
-    log_audit_event("legacy_session_created", user_id=user_id, ip_address=ip, client=legacy_client)
-    return {"api_key": tokens["access_token"], "api_key_notice": "Guárdala: no se volverá a mostrar"}
+                             client: str, device_name: str | None) -> dict[str, Any]:
+    """Login de una app: una sesión de este dispositivo, nunca una API key."""
+    tokens = create_device_session(user_id, client, device_name=device_name,
+                                   ip_address=ip, user_agent=user_agent)
+    log_audit_event("device_session_created", user_id=user_id, ip_address=ip, client=client)
+    return cuerpo_de_tokens(tokens)
 
 
 def avisar_si_acceso_inusual(user: dict[str, Any], user_agent: str | None, ip: str,
@@ -234,10 +210,10 @@ async def api_login(payload: LoginRequest, request: Request):
     # Las apps no pueden reusar la cookie en peticiones cross-origin (SameSite=Lax
     # desde tauri://localhost o la app Android): reciben su credencial en el cuerpo.
     if payload.client or payload.issue_api_key:
-        avisar_si_acceso_inusual(user, agente, ip, nombre_de_app(payload.client, payload.key_name))
-        body.update(emitir_credencial_de_app(user["id"], ip, agente, client=payload.client,
-                                             device_name=payload.device_name,
-                                             key_name=payload.key_name))
+        client = exigir_cliente_actual(payload.client)
+        avisar_si_acceso_inusual(user, agente, ip, nombre_de_app(client))
+        body.update(emitir_credencial_de_app(user["id"], ip, agente, client=client,
+                                             device_name=payload.device_name))
         return JSONResponse(body)
 
     avisar_si_acceso_inusual(user, agente, ip)
@@ -384,40 +360,3 @@ async def reset_password(payload: ResetPasswordPayload, request: Request):
             ip=_client_ip(request),
         ))
     return {"message": "Contraseña actualizada. Inicia sesión de nuevo."}
-
-
-@router.post("/api/auth/api-key/regenerate")
-async def regenerate_api_key(
-    request: Request,
-    user_data: dict[str, Any] = Depends(session_required),
-):
-    """Obsoleto: lo usa la app móvil anterior para «regenerar su clave». Rota solo
-    la credencial de quien llama; las API keys manuales y las demás sesiones no
-    se tocan. Límite: 5 veces por día."""
-    user_id = user_data["id"]
-    ip = _client_ip(request)
-    if user_data.get("client") == "web":
-        raise HTTPException(status_code=400,
-                            detail="Desde la web, cierra sesiones en Cuenta → Sesiones y dispositivos.")
-    if count_daily_regenerations(user_id) >= 5:
-        raise HTTPException(
-            status_code=429,
-            detail="Límite diario de regeneraciones alcanzado (máx. 5 por día)",
-        )
-
-    if user_data["auth_via"] == "api_key":
-        deactivate_key(user_data["key_id"], user_id)
-        client = _CLIENT_POR_KEY.get(user_data.get("key_name"), "mobile")
-    else:
-        revoke_session(user_data["session_id"], user_id)
-        client = user_data["client"]
-    tokens = create_device_session(user_id, client, ip_address=ip,
-                                   user_agent=request.headers.get("user-agent"), legacy=True)
-    log_audit_event("api_key_regenerated", user_id=user_id, ip_address=ip, client=client)
-
-    return {
-        "newApiKey": tokens["access_token"],
-        "notice": "Guárdala: no se volverá a mostrar",
-        "oldKeyDeactivated": True,
-        "expiresAt": tokens["expires_at"],
-    }

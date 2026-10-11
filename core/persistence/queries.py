@@ -396,9 +396,6 @@ class RefreshRace(Exception):
 def _grant_tokens(ses: Session) -> dict[str, Any]:
     access = f"lixbon_at_{secrets.token_urlsafe(32)}"
     ses.token_hash = hash_api_key(access)
-    if ses.legacy:
-        ses.expires_at = _iso_in(days=KEY_EXPIRY_DAYS)
-        return {"access_token": access, "refresh_token": None, "expires_at": ses.expires_at}
     refresh = f"lixbon_rt_{secrets.token_urlsafe(32)}"
     ses.expires_at = _iso_in(minutes=ACCESS_TOKEN_MINUTES)
     ses.refresh_hash = hash_api_key(refresh)
@@ -407,20 +404,15 @@ def _grant_tokens(ses: Session) -> dict[str, Any]:
 
 
 def create_device_session(user_id: int, client: str, *, device_name: str | None = None,
-                          ip_address: str | None = None, user_agent: str | None = None,
-                          legacy: bool = False) -> dict[str, Any]:
+                          ip_address: str | None = None, user_agent: str | None = None) -> dict[str, Any]:
     if client not in DEVICE_CLIENTS:
         raise ValueError(f"Cliente desconocido: {client}")
     now = now_iso()
     ses = Session(user_id=user_id, client=client, device_name=(device_name or "")[:80] or None,
                   ip_address=ip_address, user_agent=(user_agent or "")[:300] or None,
-                  created_at=now, last_used_at=now, legacy=int(legacy))
+                  created_at=now, last_used_at=now)
     tokens = _grant_tokens(ses)
     with get_session() as s:
-        if legacy:
-            # Igual que las keys con nombre a las que sustituye: una por app.
-            s.execute(delete(Session).where(Session.user_id == user_id, Session.client == client,
-                                            Session.legacy == 1))
         s.add(ses)
         s.flush()
         tokens["session_id"] = ses.id
@@ -671,24 +663,6 @@ def archive_old_inactive_keys() -> int:
             .values(status="archived")
         )
         return result.rowcount
-
-
-def count_daily_regenerations(user_id: int) -> int:
-    today_start = (
-        datetime.now(timezone.utc)
-        .replace(hour=0, minute=0, second=0, microsecond=0)
-        .isoformat()
-    )
-    with get_session() as s:
-        return s.scalar(
-            select(func.count())
-            .select_from(AuditEvent)
-            .where(
-                AuditEvent.user_id == user_id,
-                AuditEvent.event_type == "api_key_regenerated",
-                AuditEvent.created_at >= today_start,
-            )
-        ) or 0
 
 
 def list_api_keys(user_id: int | None = None) -> list[dict[str, Any]]:
