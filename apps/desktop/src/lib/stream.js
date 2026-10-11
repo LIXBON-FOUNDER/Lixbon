@@ -2,6 +2,7 @@
 // Adaptación de apps/web/src/lib/stream.js: URL absoluta del gateway y
 // Authorization: Bearer <apiKey> en lugar de la cookie de sesión.
 // Usa el fetch del WebView (necesario para res.body.getReader(); plugin-http no sirve).
+import { useAppStore } from '../store/appStore';
 
 /** Convierte el detail estructurado de cuota (F5) en un mensaje en español. */
 export function quotaMessage(detail) {
@@ -38,11 +39,11 @@ export async function streamChatCompletion({
   webSearch = false,
   noPersist = false,
 }) {
-  const res = await fetch(`${serverUrl}/v1/chat/completions`, {
+  const abrir = (token) => fetch(`${serverUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       model,
@@ -57,6 +58,12 @@ export async function streamChatCompletion({
     }),
     signal,
   });
+
+  let res = await abrir(apiKey);
+  if (res.status === 401) {
+    const renovado = await useAppStore.getState().renovarToken(apiKey);
+    if (renovado) res = await abrir(renovado);
+  }
 
   if (!res.ok) {
     let detail = `Error del servidor (${res.status})`;

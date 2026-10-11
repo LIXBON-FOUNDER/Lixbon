@@ -5,7 +5,10 @@ import { useGitStore } from './gitStore';
 import { modelId } from '../lib/vision';
 import { fetchModelRoles, normalizeModel } from '../lib/modelRoles';
 import { fetchMe } from '../lib/account';
+import { cerrarSesion, iniciarSesion, SesionCaducada, tokenVigente } from '../lib/session';
 import { useWorkbenchStore } from './workbenchStore';
+
+let vigilante = null;
 
 // Si el catálogo aún no llegó: la que usaba el IDE antes (solo para medir).
 const DEFAULT_CONTEXT_WINDOW = 8192;
@@ -19,7 +22,10 @@ export const useAppStore = create((set, get) => ({
   // Config persistida en plugin-store; se llena en hydrate()
   hydrated: false,
   serverUrl: DEFAULT_SERVER_URL,
+  // Credencial vigente: el access de la sesión de este equipo (lo renueva el
+  // vigilante) o una API key pegada a mano (sesionDispositivo: false).
   apiKey: '',
+  sesionDispositivo: false,
   user: null,
 
   connectionStatus: 'disconnected', // 'connected' | 'disconnected' | 'connecting'
@@ -58,11 +64,18 @@ export const useAppStore = create((set, get) => ({
     if (get().hydrated) return;
     try {
       const { serverUrl, apiKey, user } = await loadSettings();
-      set({ serverUrl, apiKey, user, hydrated: true });
+      let token = apiKey;
+      let sesionDispositivo = false;
+      try {
+        const vigente = await tokenVigente();
+        if (vigente) [token, sesionDispositivo] = [vigente, true];
+      } catch { /* sesión caducada: queda la API key guardada, si la hay */ }
+      set({ serverUrl, apiKey: token, sesionDispositivo, user, hydrated: true });
+      if (sesionDispositivo) get().vigilarSesion();
       // El perfil persistido lleva el plan de cuando se inició sesión: se
       // relee siempre (también repara la sesión sin perfil guardado) sin
       // bloquear el arranque.
-      if (apiKey) get().refreshUser();
+      if (token) get().refreshUser();
     } catch (e) {
       console.error('[store] Error hidratando configuración:', e);
       set({ hydrated: true }); // no bloquear la app: quedará en pantalla de auth
@@ -170,6 +183,8 @@ export const useAppStore = create((set, get) => ({
   },
 
   refreshUser: async () => {
+    // Al volver de la suspensión el access puede llevar horas caducado.
+    await get().renovarToken();
     const { serverUrl, apiKey } = get();
     if (!apiKey) return;
     try {
@@ -179,7 +194,34 @@ export const useAppStore = create((set, get) => ({
 
   setApiKey: (apiKey) => {
     saveSetting('apiKey', apiKey);
-    set({ apiKey });
+    set({ apiKey, sesionDispositivo: false });
+  },
+
+  /** Entra con la sesión de este equipo que entregó el login (access + refresh). */
+  entrarConSesion: async (cuerpo) => {
+    const token = await iniciarSesion(get().serverUrl, cuerpo);
+    saveSetting('apiKey', null); // una API key anterior ya no manda
+    set({ apiKey: token, sesionDispositivo: true });
+    get().vigilarSesion();
+  },
+
+  /** Access vigente de la sesión de este equipo; con `rechazado` (el que
+      recibió un 401) fuerza la renovación. null si no hay sesión o caducó,
+      y en ese caso se cierra la sesión local. */
+  renovarToken: async (rechazado = null) => {
+    if (!get().sesionDispositivo) return null;
+    try {
+      const token = await tokenVigente(rechazado);
+      if (token && token !== get().apiKey) set({ apiKey: token });
+      return token;
+    } catch (e) {
+      if (e instanceof SesionCaducada) get().logout();
+      return null;
+    }
+  },
+
+  vigilarSesion: () => {
+    if (!vigilante) vigilante = setInterval(() => get().renovarToken(), 60_000);
   },
 
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
@@ -227,8 +269,11 @@ export const useAppStore = create((set, get) => ({
   setLatency: (latency) => set({ latency }),
 
   logout: () => {
+    if (get().sesionDispositivo) cerrarSesion();
+    clearInterval(vigilante);
+    vigilante = null;
     saveSetting('apiKey', null);
     saveSetting('user', null);
-    set({ user: null, apiKey: '' });
+    set({ user: null, apiKey: '', sesionDispositivo: false });
   },
 }));

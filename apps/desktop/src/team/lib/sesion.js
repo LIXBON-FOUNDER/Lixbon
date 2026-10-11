@@ -1,6 +1,7 @@
 // sesion.js — Team usa la misma cuenta que el IDE: la llave y el servidor
 // salen de los ajustes del IDE (lib/settings.js), no hay inicio de sesión propio.
 import { loadSettings, DEFAULT_SERVER_URL } from '../../lib/settings';
+import { tokenVigente } from '../../lib/session';
 
 let servidor = DEFAULT_SERVER_URL;
 
@@ -13,7 +14,8 @@ export function fijarServidor(url) {
 export async function leerSesion() {
   const { serverUrl, apiKey, user } = await loadSettings();
   fijarServidor(serverUrl);
-  return { llave: apiKey || '', usuario: user || null };
+  const vigente = await tokenVigente().catch(() => null);
+  return { llave: vigente || apiKey || '', usuario: user || null };
 }
 
 export async function revalidar(llave) {

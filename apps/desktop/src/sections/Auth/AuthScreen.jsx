@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { DEFAULT_SERVER_URL } from '../../lib/settings';
 import { openExternal } from '../../lib/tauri';
-import { browserLogin, oauthLogin, oauthProviders, PROVIDER_NAMES } from '../../lib/browserLogin';
+import { browserLogin, credencialDeLogin, oauthLogin, oauthProviders, pedidoDeApp, PROVIDER_NAMES } from '../../lib/browserLogin';
 import { LogoMark } from '../../components/Logo';
 import { SpinRing } from '../../components/Ring';
 import { IconEye, IconEyeOff, IconGlobe } from '../../components/Icons';
@@ -45,10 +45,10 @@ async function loginWithEmail(serverUrl, email, password) {
     res = await fetch(`${serverUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // issue_api_key: el servidor entrega una API key propia de la app en la
-      // respuesta. La cookie de sesión no sirve aquí: es SameSite=Lax y no se
-      // envía en peticiones cross-origin desde tauri://localhost.
-      body: JSON.stringify({ email, password, issue_api_key: true }),
+      // La credencial llega en la respuesta: la cookie de sesión no sirve aquí,
+      // es SameSite=Lax y no se envía en peticiones cross-origin desde
+      // tauri://localhost.
+      body: JSON.stringify({ email, password, ...(await pedidoDeApp()) }),
       signal: AbortSignal.timeout(15000),
     });
   } catch {
@@ -59,11 +59,11 @@ async function loginWithEmail(serverUrl, email, password) {
   if (!res.ok) throw new Error(`El servidor respondió con un error (${res.status}).`);
 
   const body = await res.json();
-  const apiKey = body.api_key || '';
-  if (!apiKey) throw new Error('El servidor no entregó una API key para esta app. Inténtalo de nuevo.');
+  const credencial = credencialDeLogin(body);
+  if (!credencial) throw new Error('El servidor no entregó una sesión para esta app. Inténtalo de nuevo.');
 
-  const user = await fetchProfile(serverUrl, apiKey);
-  return { apiKey, user: user || body.user };
+  const user = await fetchProfile(serverUrl, credencial.apiKey);
+  return { ...credencial, user: user || body.user };
 }
 
 async function fetchProfile(serverUrl, apiKey) {
@@ -82,7 +82,7 @@ async function fetchProfile(serverUrl, apiKey) {
 }
 
 export function AuthScreen() {
-  const { serverUrl, setServerUrl, setApiKey, setUser } = useAppStore();
+  const { serverUrl, setServerUrl, setApiKey, setUser, entrarConSesion } = useAppStore();
 
   const [mode, setMode] = useState('login'); // 'login' | 'key'
   const [email, setEmail] = useState('');
@@ -108,10 +108,12 @@ export function AuthScreen() {
     return () => { alive = false; clearTimeout(t); };
   }, [serverForProviders]);
 
-  const enter = (url, session) => {
+  // Lo último que se fija es la credencial: es lo que dispara la entrada a la app.
+  const enter = async (url, session) => {
     setServerUrl(url);
     setUser(session.user);
-    setApiKey(session.apiKey); // último: dispara la entrada a la app
+    if (session.tokens) await entrarConSesion(session.tokens);
+    else setApiKey(session.apiKey);
   };
 
   const handleSubmit = async (e) => {
@@ -131,7 +133,7 @@ export function AuthScreen() {
         }
         session = { apiKey: key, user: await fetchProfile(url, key) };
       }
-      enter(url, session);
+      await enter(url, session);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -151,7 +153,7 @@ export function AuthScreen() {
     const url = effectiveUrl();
     try {
       const session = kind === 'browser' ? await browserLogin(url, ctrl.signal) : await oauthLogin(url, kind, ctrl.signal);
-      enter(url, session);
+      await enter(url, session);
     } catch (err) {
       if (err.name !== 'AbortError') setError(err.message);
     } finally {
