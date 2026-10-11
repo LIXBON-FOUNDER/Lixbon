@@ -134,6 +134,29 @@ def init_db() -> None:
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max_mb INTEGER",
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visual_renders_per_day INTEGER",
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visual_video_renders_per_day INTEGER",
+        # Sesiones por dispositivo (access + refresh rotatorio), separadas de las API keys
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS client TEXT NOT NULL DEFAULT 'web'",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_name TEXT",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS refresh_hash TEXT",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS refresh_expires_at TEXT",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS prev_refresh_hash TEXT",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_at TEXT",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at TEXT",
+        "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS legacy INTEGER NOT NULL DEFAULT 0",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_refresh ON sessions (refresh_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_prev_refresh ON sessions (prev_refresh_hash)",
+        # Origen de cada API key. Las que tienen evento api_key_created son manuales
+        # aunque se llamen como una app; tras el primer arranque el UPDATE no toca nada.
+        "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS origin TEXT",
+        """UPDATE api_keys SET origin = CASE
+             WHEN id IN (SELECT key_id FROM audit_events
+                         WHERE event_type = 'api_key_created' AND key_id IS NOT NULL) THEN 'manual'
+             WHEN name IN ('lixbon Desktop', 'Lixbon IDE', 'lixbon CLI', 'Lixbon Mobile') THEN 'login'
+             WHEN name LIKE 'Default Key - %' OR name LIKE 'Session - %' THEN 'login_compat'
+             ELSE 'manual' END
+           WHERE origin IS NULL""",
+        "ALTER TABLE api_keys ALTER COLUMN origin SET DEFAULT 'manual'",
+        "ALTER TABLE api_keys ALTER COLUMN origin SET NOT NULL",
     ]
     with engine.begin() as conn:
         for stmt in _column_migrations:

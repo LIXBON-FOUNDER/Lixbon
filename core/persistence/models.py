@@ -31,10 +31,12 @@ class User(Base):
 
 
 class Session(Base):
-    """Sesión web (cookie). Separada de las API keys: revocable e independiente."""
+    """Una fila por sesión: la cookie de la web (client='web') o un dispositivo
+    (desktop/cli/mobile) con access token corto y refresh rotatorio."""
     __tablename__ = "sessions"
     __table_args__ = (
         Index("idx_sessions_user", "user_id"),
+        Index("idx_sessions_prev_refresh", "prev_refresh_hash"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -44,6 +46,16 @@ class Session(Base):
     ip_address: Mapped[str | None] = mapped_column(Text)
     user_agent: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    client: Mapped[str] = mapped_column(Text, nullable=False, default="web")
+    device_name: Mapped[str | None] = mapped_column(Text)
+    refresh_hash: Mapped[str | None] = mapped_column(Text, unique=True)
+    refresh_expires_at: Mapped[str | None] = mapped_column(Text)
+    # Si el refresh anterior reaparece fuera de la gracia, otro lo tiene: se revoca la sesión.
+    prev_refresh_hash: Mapped[str | None] = mapped_column(Text)
+    rotated_at: Mapped[str | None] = mapped_column(Text)
+    last_used_at: Mapped[str | None] = mapped_column(Text)
+    # Transición: clientes que aún esperan `api_key` en el login reciben un access de 90 días sin refresh.
+    legacy: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
 class EmailToken(Base):
@@ -85,6 +97,9 @@ class ApiKey(Base):
     last_used_ip: Mapped[str | None] = mapped_column(Text)
     deactivated_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    # manual (panel/MCP) | login (la emitía una app al entrar) | login_compat
+    # (Default Key / Session de flujos antiguos). Solo `manual` cuenta para el cupo del plan.
+    origin: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
 
 
 class Conversation(Base):

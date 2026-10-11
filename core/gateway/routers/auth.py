@@ -116,7 +116,7 @@ def issue_named_api_key(user_id: int, key_name: str, ip: str) -> str:
     for k in list_api_keys(user_id):
         if k["name"] == key_name and k["is_active"]:
             deactivate_key(k["id"], user_id)
-    raw_key, key_data = create_api_key(key_name, user_id)
+    raw_key, key_data = create_api_key(key_name, user_id, origin="login")
     log_audit_event("app_key_issued", user_id=user_id, key_id=key_data["id"], ip_address=ip)
     return raw_key
 
@@ -197,7 +197,8 @@ async def api_login(payload: LoginRequest, request: Request):
     # Compat CLI/desktop pre-F3: si el usuario no tiene ninguna API key activa,
     # se crea una y se muestra UNA única vez.
     elif not get_active_key_for_user(user["id"]):
-        raw_key, _key = create_api_key(f"Default Key - {user['email'] or user['username']}", user["id"])
+        raw_key, _key = create_api_key(f"Default Key - {user['email'] or user['username']}", user["id"],
+                                       origin="login_compat")
         body["api_key"] = raw_key
         body["api_key_notice"] = "Guárdala: no se volverá a mostrar"
 
@@ -304,7 +305,7 @@ async def regenerate_api_key(
 
     deactivate_all_user_keys(user_id)
     raw_key, key_data = create_api_key(
-        f"Session - {user_data.get('email') or user_data['username']}", user_id
+        f"Session - {user_data.get('email') or user_data['username']}", user_id, origin="login_compat"
     )
     log_audit_event("api_key_regenerated", user_id=user_id, key_id=key_data["id"], ip_address=ip)
 
