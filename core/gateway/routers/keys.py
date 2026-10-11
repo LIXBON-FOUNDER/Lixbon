@@ -11,13 +11,13 @@ from core.persistence.queries import (
     list_api_keys,
     log_audit_event,
 )
-from core.security.auth import api_key_required, cookie_auth_required
+from core.security.auth import api_key_required, session_required
 
 router = APIRouter()
 
 
 @router.get("/api/keys")
-async def list_keys_endpoint(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def list_keys_endpoint(user_data: dict[str, Any] = Depends(session_required)):
     """API keys del usuario (sin exponer la key: solo prefijo y metadatos)."""
     return {"keys": list_api_keys(user_id=user_data["id"])}
 
@@ -26,7 +26,7 @@ async def list_keys_endpoint(user_data: dict[str, Any] = Depends(cookie_auth_req
 async def create_api_key_endpoint(
     payload: dict[str, Any],
     request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Crea una nueva API key (opcionalmente restringida a un modelo)."""
     # F5: tope de keys activas según el plan
@@ -59,7 +59,7 @@ async def create_api_key_endpoint(
 async def delete_api_key(
     key_id: int,
     request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Soft-delete de una API key. Solo keys del propio usuario (anti-IDOR)."""
     ip = request.client.host if request.client else None

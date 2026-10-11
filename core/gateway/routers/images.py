@@ -106,7 +106,7 @@ async def api_images_generate(
     record_tokens(user_data["id"], IMAGE_TOKEN_EQUIV)
 
     conv_id = payload.conversation_id
-    if conv_id and user_data.get("auth_via") == "session":
+    if conv_id and user_data.get("client") == "web":
         # La imagen queda en la conversación como Markdown: al reabrirla se ve.
         if ensure_conversation(conv_id, user_data["id"], None, "web", source=payload.source or "visuals"):
             save_message(conv_id, "user", payload.prompt, model=resultado.get("model"))

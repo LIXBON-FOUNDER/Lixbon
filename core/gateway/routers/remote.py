@@ -5,7 +5,7 @@ comandos por POST. Transporte uniforme SSE+POST porque el CLI es stdlib puro
 (sin cliente WebSocket) y todos los clientes ya hablan SSE.
 
 Seguridad:
-- Host y listados: sesión web o API key del dueño (cookie_auth_required).
+- Host y listados: sesión web o API key del dueño (session_or_api_key).
 - Controllers: SIEMPRE el dueño autenticado. El token del link/QR NO da acceso
   por sí solo: solo identifica la sesión; el claim exige iniciar sesión con la
   cuenta dueña (la web redirige a /auth y vuelve). Cada claim queda en
@@ -42,7 +42,7 @@ from core.persistence.queries import (
     touch_remote_session,
     update_remote_session_meta,
 )
-from core.security.auth import authenticate, cookie_auth_required
+from core.security.auth import authenticate, session_or_api_key
 from core.security.ratelimit import check_auth_rate_limit, record_failed_auth
 
 router = APIRouter()
@@ -175,7 +175,7 @@ async def create_session_endpoint(
     authorization: str | None = Header(default=None),
 ):
     """Crea una sesión remota (host). Devuelve el share token EN CLARO solo aquí."""
-    user = cookie_auth_required(lixbon_session, authorization)
+    user = session_or_api_key(lixbon_session, authorization)
     source = payload.get("source") if payload.get("source") in ("cli", "ide") else "cli"
     title = (payload.get("title") or "").strip() or "Sesión remota"
     machine = (payload.get("machine") or "").strip() or socket.gethostname()
@@ -205,7 +205,7 @@ async def list_sessions_endpoint(
     lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ):
-    user = cookie_auth_required(lixbon_session, authorization)
+    user = session_or_api_key(lixbon_session, authorization)
     sessions = list_remote_sessions(user["id"])
     # Cuántos eventos guardados tiene cada una: la app marca así las sesiones
     # terminadas que todavía se pueden abrir para releer la conversación.
@@ -255,7 +255,7 @@ async def claim_endpoint(
     """Resuelve el token del link/QR a su sesión. El token NO es una llave:
     exige estar autenticado como el DUEÑO de la sesión (la web manda a /auth
     primero). Un token válido de otra cuenta responde 404, no revela nada."""
-    user = cookie_auth_required(lixbon_session, authorization)
+    user = session_or_api_key(lixbon_session, authorization)
     ip = request.client.host if request.client else None
     if ip:
         check_auth_rate_limit(ip)
@@ -677,7 +677,7 @@ async def subscribe_sessions_stream(
     authorization: str | None = Header(default=None),
 ):
     """SSE de avisos: sesión creada / online / offline / terminada."""
-    user = cookie_auth_required(lixbon_session, authorization)
+    user = session_or_api_key(lixbon_session, authorization)
     queue = hub.subscribe_user(user["id"])
 
     async def gen():
@@ -696,7 +696,7 @@ async def register_device_endpoint(
     lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ):
-    user = cookie_auth_required(lixbon_session, authorization)
+    user = session_or_api_key(lixbon_session, authorization)
     token = (payload.get("token") or payload.get("expo_push_token") or "").strip()
     if not token or len(token) > 300:
         raise HTTPException(status_code=422, detail="Push token inválido")
@@ -715,7 +715,7 @@ async def qr_endpoint(
     """Genera el QR del share_url. `fmt=txt` devuelve unicode para terminal
     (half-blocks), `png`/`svg` para IDE y web. Requiere sesión: no es un
     generador de QR público."""
-    cookie_auth_required(lixbon_session, authorization)
+    session_or_api_key(lixbon_session, authorization)
     if len(data) > 500:
         raise HTTPException(status_code=422, detail="Dato demasiado largo para el QR")
     try:

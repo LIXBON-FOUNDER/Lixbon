@@ -25,7 +25,7 @@ from core.persistence.queries import (
     list_credit_packs,
     set_autoreload,
 )
-from core.security.auth import cookie_auth_required
+from core.security.auth import session_required
 
 logger = logging.getLogger("lixbon.payments")
 router = APIRouter(prefix="/api/billing", tags=["billing"])
@@ -114,7 +114,7 @@ async def billing_config():
 
 
 @router.post("/setup-intent")
-async def create_setup_intent(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def create_setup_intent(user_data: dict[str, Any] = Depends(session_required)):
     """Secreto para que el navegador guarde una tarjeta nueva sin cobrar."""
     _require_enabled()
     try:
@@ -124,14 +124,14 @@ async def create_setup_intent(user_data: dict[str, Any] = Depends(cookie_auth_re
 
 
 @router.get("/payment-methods")
-async def list_payment_methods(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def list_payment_methods(user_data: dict[str, Any] = Depends(session_required)):
     return {"payment_methods": sg.list_payment_methods(user_data)}
 
 
 @router.post("/payment-methods/default")
 async def set_default_payment_method(
     payload: PaymentMethodPayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     _require_enabled()
     try:
@@ -144,7 +144,7 @@ async def set_default_payment_method(
 @router.delete("/payment-methods/{pm_id}")
 async def delete_payment_method(
     pm_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     _require_enabled()
     try:
@@ -157,7 +157,7 @@ async def delete_payment_method(
 @router.post("/subscribe")
 async def subscribe(
     payload: SubscribePayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Alta o cambio de plan con una tarjeta guardada. Si el banco pide
     confirmación, devuelve el secreto para que el navegador la resuelva."""
@@ -169,7 +169,7 @@ async def subscribe(
 
 
 @router.post("/cancel")
-async def cancel(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def cancel(user_data: dict[str, Any] = Depends(session_required)):
     _require_enabled()
     try:
         return sg.cancel_subscription(user_data)
@@ -178,7 +178,7 @@ async def cancel(user_data: dict[str, Any] = Depends(cookie_auth_required)):
 
 
 @router.post("/resume")
-async def resume(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def resume(user_data: dict[str, Any] = Depends(session_required)):
     _require_enabled()
     try:
         return sg.resume_subscription(user_data)
@@ -189,7 +189,7 @@ async def resume(user_data: dict[str, Any] = Depends(cookie_auth_required)):
 @router.post("/resolve")
 def resolve(
     payload: ResolvePayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Cierra un cobro que pasó por el banco sin esperar al webhook. Síncrono a
     propósito: puede esperar unos segundos a que Stripe aplique un cambio de
@@ -202,7 +202,7 @@ def resolve(
 
 
 @router.get("/status")
-async def billing_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def billing_status(user_data: dict[str, Any] = Depends(session_required)):
     """Todo lo que pinta Ajustes → Facturación en una sola llamada."""
     user_id = user_data["id"]
     plan = get_plan_for_user(user_id)
@@ -256,7 +256,7 @@ async def credit_packs():
 @credits_router.post("/topup")
 async def topup(
     payload: TopupPayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Recarga el saldo cobrando una tarjeta guardada."""
     _require_enabled()
@@ -275,7 +275,7 @@ async def topup(
 @credits_router.put("/autoreload")
 async def update_autoreload(
     payload: AutoreloadPayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Recarga automática: cobra el pack elegido cuando el saldo baja del umbral."""
     if payload.enabled:
@@ -320,7 +320,7 @@ def _autoreload_public(ajustes: dict[str, Any]) -> dict[str, Any]:
 
 
 @credits_router.get("")
-async def credit_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def credit_status(user_data: dict[str, Any] = Depends(session_required)):
     """Saldo, recarga automática y últimos movimientos."""
     user_id = user_data["id"]
     cuenta = get_credit_account(user_id)
@@ -335,7 +335,7 @@ async def credit_status(user_data: dict[str, Any] = Depends(cookie_auth_required
 @credits_router.get("/usage")
 async def credit_usage(
     days: int = 30,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Consumo facturable de la API por día y modelo (del ledger)."""
     days = max(1, min(days, 90))

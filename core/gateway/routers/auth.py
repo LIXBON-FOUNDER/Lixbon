@@ -42,7 +42,8 @@ from core.persistence.queries import (
 from core.security.auth import (
     check_auth_rate_limit,
     clear_auth_attempts,
-    cookie_auth_required,
+    session_or_api_key,
+    session_required,
     record_failed_auth,
 )
 
@@ -217,7 +218,7 @@ async def api_logout(lixbon_session: str | None = Cookie(default=None)):
 
 
 @router.get("/api/auth/me")
-async def api_me(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_me(user_data: dict[str, Any] = Depends(session_or_api_key)):
     """Usuario actual + plan vigente + preferencias (para hidratar la web al cargar)."""
     from core.persistence.queries import get_plan_for_user, get_user_settings
     plan = get_plan_for_user(user_data["id"])
@@ -241,7 +242,7 @@ async def verify_email(token: str):
 
 
 @router.post("/api/auth/resend-verification")
-async def resend_verification(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def resend_verification(user_data: dict[str, Any] = Depends(session_required)):
     if user_data.get("email_verified"):
         return {"message": "El correo ya está verificado"}
     if not user_data.get("email"):
@@ -291,7 +292,7 @@ async def reset_password(payload: ResetPasswordPayload, request: Request):
 @router.post("/api/auth/api-key/regenerate")
 async def regenerate_api_key(
     request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Regenera la API key del usuario. Límite: 5 veces por día."""
     user_id = user_data["id"]

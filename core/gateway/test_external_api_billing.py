@@ -28,3 +28,22 @@ def test_movil_siempre_usa_el_pool_del_plan():
 
 def test_sesion_web_no_es_api_externa():
     assert not _is_external_api(_usuario(None, auth_via="cookie"), {"id": "free"})
+
+
+def _sesion(client):
+    return {"id": 1, "auth_via": "session", "client": client}
+
+
+@pytest.mark.parametrize("client", ["desktop", "cli"])
+def test_sesion_desktop_y_cli_free_usan_creditos(client):
+    assert _is_external_api(_sesion(client), {"id": "free"})
+
+
+@pytest.mark.parametrize("client", ["desktop", "cli"])
+def test_sesion_desktop_y_cli_pro_usan_el_pool(client):
+    assert not _is_external_api(_sesion(client), {"id": "pro"})
+
+
+@pytest.mark.parametrize("client", ["web", "mobile"])
+def test_sesion_web_y_movil_usan_el_pool(client):
+    assert not _is_external_api(_sesion(client), {"id": "free"})

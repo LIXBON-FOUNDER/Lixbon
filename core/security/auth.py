@@ -67,53 +67,86 @@ def exigir_correo_verificado(user_data: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def api_key_required(
-    request: Request,
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    """Dependencia: valida Bearer token y aplica rate limit."""
-    token = get_bearer_token(authorization)
-    if not token:
-        raise HTTPException(status_code=401, detail="API key ausente")
-    ip = request.client.host if request.client else None
-    user_data = validate_api_key(token, ip_address=ip)
-    if not user_data:
-        raise HTTPException(status_code=401, detail="API key inválida o expirada")
-    enforce_rate_limit(token)
-    return exigir_correo_verificado(user_data)
+ACCESS_TOKEN_PREFIX = "lixbon_at_"
 
 
-def cookie_auth_required(
-    lixbon_session: str | None = Cookie(default=None),
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    """
-    Dependencia: valida la cookie de sesión web (lixbon_session) o, como
-    alternativa para apps (desktop/CLI), un Bearer API key.
-    F3: la sesión web es un token propio en la tabla sessions — ya no es la API key.
-    """
-    return authenticate(lixbon_session, authorization)
-
-
-def authenticate(lixbon_session: str | None, authorization: str | None, rate_limit: bool = True) -> dict[str, Any]:
-    from core.persistence.queries import validate_web_session
+def resolve_credential(lixbon_session: str | None, authorization: str | None,
+                       ip: str | None = None) -> dict[str, Any] | None:
+    """Cookie web, access token de dispositivo o API key, según el prefijo."""
+    from core.persistence.queries import validate_access_token, validate_web_session
 
     if lixbon_session:
         user_data = validate_web_session(lixbon_session)
         if user_data:
             return user_data
+    token = get_bearer_token(authorization)
+    if not token:
+        return None
+    if token.startswith(ACCESS_TOKEN_PREFIX):
+        return validate_access_token(token)
+    return validate_api_key(token, ip_address=ip)
 
-    bearer = get_bearer_token(authorization)
-    if bearer:
-        user_data = validate_api_key(bearer)
-        if user_data:
-            # Mismo rate limit que el resto de rutas con API key: sin esto,
-            # este camino era una vía libre para martillear la API.
-            if rate_limit:
-                enforce_rate_limit(bearer)
-            return user_data
 
-    raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+def es_sesion(user_data: dict[str, Any]) -> bool:
+    # Las keys que emitía el login cuentan como sesión hasta que caduquen (≤ 90 días
+    # desde que el login dejó de emitirlas); las manuales nunca.
+    return (user_data.get("auth_via") == "session"
+            or user_data.get("key_origin") in ("login", "login_compat"))
+
+
+def _limitar(user_data: dict[str, Any], token: str | None) -> None:
+    if user_data.get("auth_via") == "api_key" and token:
+        enforce_rate_limit(token)
+    elif user_data.get("client") not in (None, "web"):
+        enforce_rate_limit(f"session:{user_data['session_id']}")
+
+
+def authenticate(lixbon_session: str | None, authorization: str | None, rate_limit: bool = True,
+                 ip: str | None = None) -> dict[str, Any]:
+    user_data = resolve_credential(lixbon_session, authorization, ip)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+    if rate_limit:
+        _limitar(user_data, get_bearer_token(authorization))
+    return user_data
+
+
+def session_required(
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Cuenta, keys, sesiones, team y pagos: solo una sesión (web o dispositivo)."""
+    user_data = authenticate(lixbon_session, authorization)
+    if not es_sesion(user_data):
+        raise HTTPException(status_code=403, detail={
+            "error": "session_required",
+            "message": "Inicia sesión para usar esta función. Las API keys solo sirven "
+                       "para inferencia y lectura.",
+        })
+    return user_data
+
+
+def session_or_api_key(
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Lectura y uso del producto: sesión o API key."""
+    return authenticate(lixbon_session, authorization)
+
+
+def api_key_required(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Solo Bearer (sin cookie): API key o access token de dispositivo."""
+    if not get_bearer_token(authorization):
+        raise HTTPException(status_code=401, detail="API key ausente")
+    ip = request.client.host if request.client else None
+    user_data = resolve_credential(None, authorization, ip)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="API key inválida o expirada")
+    _limitar(user_data, get_bearer_token(authorization))
+    return exigir_correo_verificado(user_data)
 
 
 def web_or_api_key_auth(
@@ -121,28 +154,13 @@ def web_or_api_key_auth(
     lixbon_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """
-    Dependencia para endpoints de inferencia (/v1/*): acepta la cookie de sesión
-    web (F4: el chat de la web hace streaming directo a /v1/chat/completions)
-    o un Bearer API key. A diferencia de cookie_auth_required, mantiene el
-    rate limit por token cuando la auth viene por API key.
-    """
-    from core.persistence.queries import validate_web_session
-
-    if lixbon_session:
-        user_data = validate_web_session(lixbon_session)
-        if user_data:
-            return exigir_correo_verificado(user_data)
-
-    token = get_bearer_token(authorization)
-    if token:
-        ip = request.client.host if request.client else None
-        user_data = validate_api_key(token, ip_address=ip)
-        if user_data:
-            enforce_rate_limit(token)
-            return exigir_correo_verificado(user_data)
-
-    raise HTTPException(status_code=401, detail="Autenticación requerida (sesión o API key)")
+    """Inferencia (/v1/*, /mcp, visuals): sesión o API key, con correo verificado."""
+    ip = request.client.host if request.client else None
+    user_data = resolve_credential(lixbon_session, authorization, ip)
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Autenticación requerida (sesión o API key)")
+    _limitar(user_data, get_bearer_token(authorization))
+    return exigir_correo_verificado(user_data)
 
 
 def admin_required(
@@ -150,7 +168,7 @@ def admin_required(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Dependencia: usuario autenticado con role=admin."""
-    user_data = cookie_auth_required(lixbon_session, authorization)
+    user_data = session_required(lixbon_session, authorization)
     if user_data.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Requiere rol de administrador")
     return user_data
@@ -169,7 +187,7 @@ def admin_or_token(
     if ADMIN_TOKEN and x_admin_token and _secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
         return
     try:
-        user_data = cookie_auth_required(lixbon_session, authorization)
+        user_data = session_required(lixbon_session, authorization)
         if user_data.get("role") == "admin":
             return
     except HTTPException:

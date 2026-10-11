@@ -1,12 +1,12 @@
 from typing import Any
 from fastapi import APIRouter, Depends
 from core.persistence import queries as db
-from core.security.auth import cookie_auth_required
+from core.security.auth import session_or_api_key
 
 router = APIRouter()
 
 @router.get("/api/monitor/usage")
-async def get_monitor_usage(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def get_monitor_usage(user_data: dict[str, Any] = Depends(session_or_api_key)):
     """Obtiene el resumen de uso general del usuario actual."""
     user_id = user_data["id"]
     return db.get_usage_summary(user_id)
@@ -14,7 +14,7 @@ async def get_monitor_usage(user_data: dict[str, Any] = Depends(cookie_auth_requ
 @router.get("/api/monitor/usage/daily")
 async def get_daily_usage(
     limit: int = 30,
-    user_data: dict[str, Any] = Depends(cookie_auth_required)
+    user_data: dict[str, Any] = Depends(session_or_api_key)
 ):
     """Obtiene el registro diario detallado de tokens para graficar."""
     user_id = user_data["id"]

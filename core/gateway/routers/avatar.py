@@ -22,7 +22,7 @@ from core.persistence.queries import (
     get_user_avatar_key,
     set_user_avatar,
 )
-from core.security.auth import web_or_api_key_auth
+from core.security.auth import session_required
 from core.storage import r2
 
 logger = logging.getLogger("lixbon.avatar")
@@ -56,7 +56,7 @@ def _sniff_ok(ext: str, data: bytes) -> bool:
 @router.post("/api/account/avatar")
 async def upload_avatar(
     file: UploadFile = File(...),
-    user: dict[str, Any] = Depends(web_or_api_key_auth),
+    user: dict[str, Any] = Depends(session_required),
 ):
     """Sube la foto de perfil. Vale para web e IDE (cookie o API key)."""
     if not r2_configured():
@@ -110,7 +110,7 @@ async def upload_avatar(
 
 
 @router.delete("/api/account/avatar")
-async def delete_avatar(user: dict[str, Any] = Depends(web_or_api_key_auth)):
+async def delete_avatar(user: dict[str, Any] = Depends(session_required)):
     """Quita la foto de perfil (vuelve a la inicial del nombre)."""
     key = get_user_avatar_key(user["id"])
     set_user_avatar(user["id"], None)

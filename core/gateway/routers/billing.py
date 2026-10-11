@@ -25,7 +25,7 @@ from core.persistence.queries import (
     update_user_profile,
     update_user_settings,
 )
-from core.security.auth import cookie_auth_required, record_failed_auth
+from core.security.auth import record_failed_auth, session_or_api_key, session_required
 
 router = APIRouter()
 
@@ -74,7 +74,7 @@ async def api_pricing():
 
 
 @router.get("/api/account/usage")
-async def api_account_usage(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_account_usage(user_data: dict[str, Any] = Depends(session_or_api_key)):
     """Mi cuenta: plan vigente, uso del período y serie diaria para la gráfica.
 
     `buckets` (sesión 4h + semana, F8) es el shape nuevo y el gate real del
@@ -94,7 +94,7 @@ async def api_account_usage(user_data: dict[str, Any] = Depends(cookie_auth_requ
 @router.patch("/api/account/profile")
 async def api_update_profile(
     payload: ProfilePayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Actualiza el nombre del usuario (sección General de Ajustes)."""
     user_id = user_data["id"]
@@ -108,7 +108,7 @@ class DeleteAccountPayload(BaseModel):
 
 
 @router.get("/api/account/export")
-async def api_export_data(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_export_data(user_data: dict[str, Any] = Depends(session_required)):
     """Descarga una copia de los datos del usuario (JSON). Privacidad → Tus datos."""
     from datetime import datetime, timezone
 
@@ -125,7 +125,7 @@ async def api_export_data(user_data: dict[str, Any] = Depends(cookie_auth_requir
 
 
 @router.delete("/api/account/conversations")
-async def api_clear_history(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_clear_history(user_data: dict[str, Any] = Depends(session_required)):
     """Borra TODAS las conversaciones del usuario (el uso agregado se conserva)."""
     deleted = delete_all_conversations(user_data["id"])
     log_audit_event("history_cleared", user_id=user_data["id"], deleted=deleted)
@@ -136,7 +136,7 @@ async def api_clear_history(user_data: dict[str, Any] = Depends(cookie_auth_requ
 async def api_delete_account(
     payload: DeleteAccountPayload,
     request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Elimina la cuenta y todos sus datos. Requiere reautenticación con contraseña."""
     from core.gateway.routers.auth import SESSION_COOKIE
@@ -167,7 +167,7 @@ async def api_delete_account(
 
 
 @router.get("/api/account/settings")
-async def api_get_settings(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_get_settings(user_data: dict[str, Any] = Depends(session_required)):
     """Preferencias del usuario (privacidad e historial), con defaults aplicados."""
     return {"settings": get_user_settings(user_data["id"])}
 
@@ -175,7 +175,7 @@ async def api_get_settings(user_data: dict[str, Any] = Depends(cookie_auth_requi
 @router.patch("/api/account/settings")
 async def api_update_settings(
     payload: SettingsPayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Actualiza las preferencias (PATCH parcial: Privacidad y Mascota de Ajustes)."""
     user_id = user_data["id"]
