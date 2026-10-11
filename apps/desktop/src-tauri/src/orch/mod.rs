@@ -168,6 +168,41 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// Como `write_json`, pero el archivo queda legible solo por su propietario antes de
+/// publicarse: lleva el token del host y `~/.lixbon` hereda permisos más anchos (en
+/// Windows, el sandbox de Codex lo podía leer).
+fn write_private_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    restrict_to_owner(&tmp);
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+fn restrict_to_owner(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(windows)]
+    {
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        if user.is_empty() {
+            return;
+        }
+        let who = match std::env::var("USERDOMAIN") {
+            Ok(d) if !d.is_empty() => format!("{d}\\{user}"),
+            _ => user,
+        };
+        let mut c = std::process::Command::new("icacls");
+        c.arg(path).args(["/inheritance:r", "/grant:r"]).arg(format!("{who}:F"));
+        let _ = crate::hide_console(&mut c).output();
+    }
+}
+
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
@@ -283,7 +318,7 @@ impl Core {
             return Ok(());
         }
         let h = server::start(self.clone())?;
-        write_json(&discovery_file(), &json!({
+        write_private_json(&discovery_file(), &json!({
             "port": h.port, "token": h.token, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
             "lxo": lxo_path(),
         }))?;
@@ -1555,6 +1590,28 @@ pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
 mod tests {
     use super::*;
     use state::NewTask;
+
+    #[test]
+    fn el_archivo_de_descubrimiento_solo_lo_lee_su_propietario() {
+        let dir = std::env::temp_dir().join(format!("lixbon-priv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p = dir.join("orch.json");
+        write_private_json(&p, &json!({ "token": "secreto" })).unwrap();
+        assert!(std::fs::read_to_string(&p).unwrap().contains("secreto"));
+        assert!(!p.with_extension("tmp").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        #[cfg(windows)]
+        {
+            let out = std::process::Command::new("icacls").arg(&p).output().unwrap();
+            let acl = String::from_utf8_lossy(&out.stdout).to_string();
+            assert_eq!(acl.matches(":(").count(), 1, "solo el propietario debe figurar en la ACL:\n{acl}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn el_servidor_de_lxo_no_conoce_la_integracion() {
