@@ -73,12 +73,15 @@ func (p *loginProgram) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loginFinished:
 		res := p.view.result
 		applyLogin(&p.cfg, res)
-		if err := config.Save(p.path, p.cfg); err != nil {
+		err := config.Save(p.path, p.cfg)
+		if err == nil {
+			err = adoptLogin(p.client, p.cfg, res)
+		}
+		if err != nil {
 			p.view.fail(stepMethod, err)
 			return p, cmd
 		}
 		p.done = true
-		p.client.APIKey = res.key
 		if p.cfg.Model != "" || p.cfg.KeyModel != "" {
 			return p, tea.Quit
 		}

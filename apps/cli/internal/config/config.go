@@ -40,6 +40,9 @@ type Config struct {
 	// Extra conserva los campos que el CLI Go no interpreta (plan_name,
 	// web_search, allowed_commands…) para no perderlos al guardar.
 	Extra map[string]json.RawMessage
+
+	// path es el archivo del que se leyó: sessions.json vive a su lado.
+	path string
 }
 
 func Default() Config {
@@ -77,6 +80,7 @@ func DefaultPath() (string, error) {
 // conserva su valor por defecto.
 func Load(path string) Config {
 	cfg := Default()
+	cfg.path = path
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return cfg
@@ -204,11 +208,15 @@ func Save(path string, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	backupIfCorrupt(path)
+	return writePrivate(path, body)
+}
+
+func writePrivate(path string, body []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	backupIfCorrupt(path)
 	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
 	if err != nil {
 		return err

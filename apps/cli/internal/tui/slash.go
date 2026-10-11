@@ -1396,10 +1396,17 @@ func (m *Model) cmdLogout() tea.Cmd {
 		if cancelled || value != "yes" {
 			return nil
 		}
+		// La copia conserva la sesión para cerrarla también en el servidor.
+		client := *m.chat.Client
 		m.chat.ClearSession()
 		m.chat.Model = ""
 		m.add(okLine("Sesión cerrada. Usa /login para volver a entrar."))
-		return nil
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = client.Logout(ctx)
+			return nil
+		}
 	})
 	return nil
 }

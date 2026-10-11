@@ -4,6 +4,12 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.6.0
+- Iniciar sesión con el navegador ya no crea una API key en tu cuenta: abre una sesión de este equipo que se renueva sola. La ves (y la puedes cerrar) en lixbon.com → Cuenta → Sesiones y dispositivos, con el nombre del equipo.
+- `/logout` y `lixbon auth logout` cierran la sesión también en el servidor, no solo en este equipo.
+- Varias terminales con la misma cuenta comparten la sesión sin cerrarse entre sí, y el servidor MCP de Lixbon sigue conectado aunque el chat dure horas.
+- Con una API key (`lixbon setup --api-key`, `/key`) todo sigue igual. Las sesiones iniciadas con versiones anteriores siguen valiendo hasta que caduquen; después, el CLI te pide entrar otra vez.
+
 ## 2.5.0
 - `/workspace` abre un navegador de carpetas: ↑↓ para moverte, → para entrar, ← para subir, Enter para usarla y escribir para filtrar. La barra superior y la tarjeta de bienvenida se actualizan con la carpeta y su rama.
 - Las conversaciones son de cada carpeta o repositorio: `/history` lista solo las de aquí (`/history todas` enseña el resto) y cambiar de carpeta empieza una conversación con el contexto vacío. La cuota de la cuenta (sesión y semana) va en la barra superior.

@@ -57,7 +57,7 @@ func (a *App) saveConfig(cfg config.Config) bool {
 // que no lo tenga, con la lista de modelos.
 func (a *App) loginWithKey(ctx context.Context, cfg config.Config, key string) int {
 	client := api.FromConfig(cfg)
-	client.APIKey = key
+	client.SetKey(key)
 	info, err := client.KeyInfo(ctx)
 	if err != nil && !api.IsAuth(err) {
 		_, err = client.Models(ctx)
@@ -80,6 +80,7 @@ func (a *App) loginWithKey(ctx context.Context, cfg config.Config, key string) i
 	if !a.saveConfig(cfg) {
 		return 1
 	}
+	_ = config.RemoveSession(cfg.SessionFile(), cfg.ActiveProfile())
 	a.defaultModel(ctx, client, &cfg)
 	return 0
 }
@@ -110,12 +111,15 @@ func (a *App) loginWithBrowser(ctx context.Context, cfg config.Config) int {
 		a.printError(err.Error())
 		return 1
 	}
-	key, user, err := client.ExchangeIDEToken(ctx, token, session.Verifier, api.LoginKeyName)
+	tokens, user, err := client.ExchangeIDEToken(ctx, token, session.Verifier)
+	if err == nil {
+		err = client.StartSession(cfg, tokens)
+	}
 	if err != nil {
 		a.printError(err.Error())
 		return 1
 	}
-	cfg.APIKey, cfg.KeyModel = key, ""
+	cfg.APIKey, cfg.KeyModel = tokens.Access, ""
 	cfg.SetExtraString("account_email", user.Email)
 	if user.PlanName != "" {
 		cfg.SetExtraString("plan_name", user.PlanName)
@@ -131,7 +135,6 @@ func (a *App) loginWithBrowser(ctx context.Context, cfg config.Config) int {
 		line += " · plan " + user.PlanName
 	}
 	fmt.Fprintln(a.Stdout, line)
-	client.APIKey = key
 	a.defaultModel(ctx, client, &cfg)
 	return 0
 }

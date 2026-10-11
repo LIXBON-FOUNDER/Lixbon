@@ -323,7 +323,8 @@ func (c *Chat) ClearSession() {
 	c.Cfg.SetExtraString("account_email", "")
 	c.Cfg.SetExtraString("plan_name", "")
 	_ = c.SaveConfig()
-	c.Client.APIKey = ""
+	_ = config.RemoveSession(c.Cfg.SessionFile(), c.Cfg.ActiveProfile())
+	c.Client.SetKey("")
 }
 
 // ThinkValue traduce el esfuerzo al campo think del gateway, que lo pasa a

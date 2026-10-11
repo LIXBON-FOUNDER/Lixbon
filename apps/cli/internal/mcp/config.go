@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -23,6 +24,9 @@ type Spec struct {
 	Cwd     string
 	URL     string
 	Headers map[string]string
+	// Bearer da la credencial de cada petición; el access de una sesión de
+	// navegador caduca a los 30 min y no puede fijarse al arrancar.
+	Bearer func(context.Context) string
 }
 
 func (s Spec) Remote() bool { return s.URL != "" }

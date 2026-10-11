@@ -33,6 +33,8 @@ type Client struct {
 	BaseURL string
 	Server  string
 	APIKey  string
+	// Session existe tras un login por navegador y manda sobre APIKey.
+	Session *Session
 	HTTP    *http.Client
 	// Generic es un servidor compatible con OpenAI que no es un gateway
 	// Lixbon: solo recibe model, messages, stream y tools, y sus endpoints
@@ -47,6 +49,9 @@ var errNotGateway = &Error{Message: "Este proveedor no es un gateway Lixbon: esa
 func FromConfig(cfg config.Config) *Client {
 	c := New(cfg.BaseURL, cfg.APIKey)
 	c.Generic = cfg.IsGeneric()
+	if stored, ok := cfg.ActiveSession(); ok {
+		c.Session = newSession(cfg, stored)
+	}
 	return c
 }
 
@@ -55,6 +60,48 @@ func FromConfig(cfg config.Config) *Client {
 func (c *Client) Configure(cfg config.Config) {
 	fresh := FromConfig(cfg)
 	c.BaseURL, c.Server, c.APIKey, c.Generic = fresh.BaseURL, fresh.Server, fresh.APIKey, fresh.Generic
+	c.Session = fresh.Session
+}
+
+// SetKey usa una API key (o ninguna) y abandona la sesión de navegador.
+func (c *Client) SetKey(key string) {
+	c.APIKey, c.Session = key, nil
+}
+
+// StartSession guarda los tokens de un login por navegador y los usa desde ya.
+// Un gateway anterior a las sesiones solo entrega un access, que se usa como key.
+func (c *Client) StartSession(cfg config.Config, t Tokens) error {
+	if t.Refresh == "" {
+		c.SetKey(t.Access)
+		return config.RemoveSession(cfg.SessionFile(), cfg.ActiveProfile())
+	}
+	stored := config.StoredSession{
+		Server: config.ServerBase(cfg.BaseURL), Access: t.Access, Refresh: t.Refresh, ExpiresAt: t.ExpiresAt,
+	}
+	if err := config.WriteSession(cfg.SessionFile(), cfg.ActiveProfile(), stored); err != nil {
+		return err
+	}
+	c.APIKey, c.Session = t.Access, newSession(cfg, stored)
+	return nil
+}
+
+func (c *Client) bearer() string {
+	if c.Session != nil {
+		return c.Session.access()
+	}
+	return c.APIKey
+}
+
+// Bearer devuelve la credencial vigente, renovada si estaba a punto de caducar.
+func (c *Client) Bearer(ctx context.Context) string {
+	c.renewIfDue(ctx)
+	return c.bearer()
+}
+
+func (c *Client) renewIfDue(ctx context.Context) {
+	if c.Session != nil && c.Session.due() {
+		_ = c.Session.renew(ctx, c, c.bearer())
+	}
 }
 
 // New desactiva la compresión transparente: con gzip el transporte podría
@@ -89,13 +136,32 @@ func sameOriginOnly(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// open renueva el access antes de que caduque y, si aun así llega un 401 con
+// sesión de navegador, renueva y repite la petición una vez.
 func (c *Client) open(ctx context.Context, method, url string, payload any, auth bool) (*http.Response, error) {
-	var body io.Reader
+	var encoded []byte
 	if payload != nil {
-		encoded, err := json.Marshal(payload)
-		if err != nil {
+		var err error
+		if encoded, err = json.Marshal(payload); err != nil {
 			return nil, err
 		}
+	}
+	if !auth {
+		return c.send(ctx, method, url, encoded, "")
+	}
+	c.renewIfDue(ctx)
+	token := c.bearer()
+	resp, err := c.send(ctx, method, url, encoded, token)
+	var apiErr *Error
+	if c.Session != nil && errors.As(err, &apiErr) && apiErr.Status == 401 && c.Session.renew(ctx, c, token) == nil {
+		return c.send(ctx, method, url, encoded, c.bearer())
+	}
+	return resp, err
+}
+
+func (c *Client) send(ctx context.Context, method, url string, encoded []byte, token string) (*http.Response, error) {
+	var body io.Reader
+	if encoded != nil {
 		body = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
@@ -104,8 +170,8 @@ func (c *Client) open(ctx context.Context, method, url string, payload any, auth
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", config.UserAgent)
-	if auth && c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

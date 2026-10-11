@@ -53,6 +53,17 @@ const (
 type loginResult struct {
 	key, keyModel, email, plan string
 	web                        bool
+	tokens                     api.Tokens
+}
+
+// adoptLogin pone en el cliente la credencial recién obtenida: la sesión del
+// navegador o la API key, que deja sin efecto una sesión anterior.
+func adoptLogin(client *api.Client, cfg config.Config, res loginResult) error {
+	if res.web {
+		return client.StartSession(cfg, res.tokens)
+	}
+	client.SetKey(res.key)
+	return config.RemoveSession(cfg.SessionFile(), cfg.ActiveProfile())
 }
 
 type (
@@ -170,8 +181,9 @@ func (l *loginView) exchangeCmd(token string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		key, user, err := client.ExchangeIDEToken(ctx, token, verifier, api.LoginKeyName)
-		return loginKeyMsg{res: loginResult{key: key, email: user.Email, plan: user.PlanName, web: true}, err: err}
+		tokens, user, err := client.ExchangeIDEToken(ctx, token, verifier)
+		res := loginResult{key: tokens.Access, tokens: tokens, email: user.Email, plan: user.PlanName, web: true}
+		return loginKeyMsg{res: res, err: err}
 	}
 }
 
@@ -180,7 +192,7 @@ func (l *loginView) exchangeCmd(token string) tea.Cmd {
 func (l *loginView) keyCmd(key string) tea.Cmd {
 	l.step = stepValidating
 	client := l.client
-	client.APIKey = key
+	client.SetKey(key)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -475,7 +487,7 @@ func (l *loginView) card(inner int) (title, boxTitle string, rows []panelRow, bo
 		title = "Todo listo"
 		detail := "guardada en ~/.lixbon/config.json"
 		if l.result.web {
-			detail = "clave «" + api.LoginKeyName + "» guardada en este equipo"
+			detail = "sesión de este equipo guardada en ~/.lixbon/sessions.json"
 		}
 		if l.result.plan != "" {
 			detail = "plan " + l.result.plan + " " + glyphSep + " " + detail
@@ -561,7 +573,9 @@ func (m *Model) updateLogin(msg tea.Msg) tea.Cmd {
 		res := m.login.result
 		m.login = nil
 		applyLogin(&m.chat.Cfg, res)
-		m.chat.Client.APIKey = res.key
+		if err := adoptLogin(m.chat.Client, m.chat.Cfg, res); err != nil {
+			m.add(errLine("No se pudo guardar la sesión: " + err.Error()))
+		}
 		if res.keyModel != "" {
 			m.chat.SetModel(res.keyModel)
 		}
