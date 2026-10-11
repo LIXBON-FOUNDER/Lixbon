@@ -1,15 +1,17 @@
 package cli
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 
 	"lixbon.com/cli/internal/config"
 )
 
 const profileUsage = `Proveedores de modelos (lixbon.com, LM Studio, Ollama, OpenAI, OpenRouter…):
-  lixbon profile                       Listar los proveedores
+  lixbon profile [list [--json]]         Listar los proveedores
   lixbon profile add NOMBRE --base-url URL|preset [--api-key K] [--model M]
                                        [--context-window N] [--gateway] [--use]
   lixbon profile set NOMBRE [--base-url URL|preset] [--api-key K] [--model M]
@@ -27,11 +29,11 @@ no se le envían campos propios de Lixbon y la clave es opcional.
 
 func (a *App) profile(args []string) int {
 	if len(args) == 0 {
-		return a.profileList()
+		return a.profileList(false)
 	}
 	switch name, rest := args[0], args[1:]; name {
 	case "list", "ls":
-		return a.profileList()
+		return a.profileList(slices.Contains(rest, "--json"))
 	case "add":
 		return a.profileAdd(rest)
 	case "set":
@@ -49,9 +51,32 @@ func (a *App) profile(args []string) int {
 	}
 }
 
-func (a *App) profileList() int {
+// profileInfo es lo que `profile list --json` cuenta de cada proveedor: nunca la clave.
+type profileInfo struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
+	Active  bool   `json:"active"`
+}
+
+func (a *App) profileList(asJSON bool) int {
 	cfg := config.Load(a.ConfigPath)
 	profiles := cfg.Profiles()
+	if asJSON {
+		list := []profileInfo{}
+		for _, name := range cfg.ProfileNames() {
+			p := profiles[name]
+			kind := "gateway"
+			if p.Generic {
+				kind = "generic"
+			}
+			list = append(list, profileInfo{Name: name, Kind: kind, BaseURL: p.BaseURL, Model: p.Model, Active: name == cfg.ActiveProfile()})
+		}
+		raw, _ := json.Marshal(list)
+		fmt.Fprintln(a.Stdout, string(raw))
+		return 0
+	}
 	fmt.Fprintln(a.Stdout, "Proveedores:")
 	for _, name := range cfg.ProfileNames() {
 		p := profiles[name]

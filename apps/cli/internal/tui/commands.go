@@ -67,6 +67,8 @@ var Specs = []Spec{
 // porque este es el contrato con el catálogo de Python.
 var GoSpecs = []Spec{
 	{"provider", "[nombre | key nombre]", "Cambiar de proveedor de modelos o de clave de uno (lixbon.com, LM Studio, Ollama…)", "cuenta"},
+	{"orquestar", "<objetivo>", "El agente coordina un equipo de agentes en Lixbon Desktop", "agente"},
+	{"orquestador", "", "Estado del orquestador de Lixbon Desktop: runs y tareas", "agente"},
 	{"effort", "[auto|off|low|medium|high]", "Cuánto razona el modelo antes de responder", "conversación"},
 	{"branch", "[rama]", "Ver las ramas del repositorio y cambiar de una a otra", "agente"},
 }

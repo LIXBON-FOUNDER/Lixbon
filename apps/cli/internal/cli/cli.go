@@ -59,6 +59,7 @@ Comandos:
   update   Actualizar el CLI a la última versión (--check solo comprueba; también --update)
   version  Mostrar la versión (también --version)
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
+  worker   Correr como agente hijo del orquestador de Lixbon Desktop (lixbon worker --help)
 `
 
 func (a *App) Run(ctx context.Context, args []string) int {
@@ -78,6 +79,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.profile(rest)
 	case "chat", "run", "start":
 		return a.chat(ctx, rest)
+	case "worker":
+		return a.worker(ctx, rest)
 	case "setup":
 		return a.setup(ctx, rest)
 	case "usage":

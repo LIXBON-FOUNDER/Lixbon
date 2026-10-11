@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lixbon.com/cli/internal/history"
+	"lixbon.com/cli/internal/orch"
 	"lixbon.com/cli/internal/textutil"
 	"lixbon.com/cli/internal/toolparse"
 	"lixbon.com/cli/internal/tools"
@@ -82,6 +83,8 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	content += TodoPrompt + "\n\n" + StylePrompt
 	if s.PlanMode {
 		content += PlanModePrompt
+	} else if info := s.OrchInfo(); info.Available() {
+		content += orch.PromptSection(info)
 	}
 	var extra []json.RawMessage
 	if s.MCP != nil {
@@ -505,7 +508,7 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 	// «siempre» tras una edición no habilita ejecutar comandos.
 	if tool == "run_command" {
 		command := stringArg(args, "command")
-		if !s.AutoRunCommands && !CommandAllowed(command, s.AllowedCommands) {
+		if !s.AutoRunCommands && !CommandAllowed(command, s.AllowedCommands) && !s.OrchInfo().IsLxoCommand(command) {
 			prefix := CommandPrefix(command)
 			decision, err := t.approve(ctx, Approval{Kind: ApproveCommand, Tool: tool, Summary: ArgsSummary(tool, args), Prefix: prefix, Change: change})
 			if err != nil {
