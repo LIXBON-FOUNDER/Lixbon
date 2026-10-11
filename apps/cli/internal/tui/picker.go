@@ -8,35 +8,42 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// option es una fila de un selector.
+// option es una fila de un selector. Meta va pegado a la derecha (ya pintado)
+// y Extra detrás de la descripción (p. ej. las capacidades de un modelo).
 type option struct {
 	Label    string
 	Value    string
 	Desc     string
 	Badge    string
+	Meta     string
+	Extra    string
 	Disabled bool
 }
 
-// picker es un menú modal con flechas (o filtro al teclear): se usa para las
-// aprobaciones y para los comandos que piden elegir (/model, /mode, /history…).
+// picker es un panel modal con flechas, números o filtro al teclear: se usa
+// para las aprobaciones, las preguntas y los comandos que piden elegir.
 type picker struct {
 	title    string
-	detail   string
-	hint     string
+	body     []string
+	keys     [][2]string
 	options  []option
 	cursor   int
 	filter   string
 	search   bool
 	maxShown int
+	// tone es el color del borde: ámbar en aprobaciones y preguntas.
+	tone string
 	// cancel es el valor que devuelve Esc («no» en las aprobaciones).
 	cancel string
 	// done recibe el valor elegido; cancelled indica que se cerró con Esc.
 	done func(value string, cancelled bool) tea.Cmd
+
+	// Lo que pintó el último view, para traducir clics a filas.
+	start, optionTop, shown int
 }
 
 func newPicker(title string, options []option, done func(string, bool) tea.Cmd) *picker {
-	p := &picker{title: title, options: options, maxShown: 12, done: done,
-		hint: fmt.Sprintf("↑↓ mover %s ↵ elegir %s esc cancelar", glyphSep, glyphSep)}
+	p := &picker{title: title, options: options, maxShown: 12, done: done}
 	p.moveToEnabled(1)
 	return p
 }
@@ -76,9 +83,45 @@ func (p *picker) move(step int) {
 	p.moveToEnabled(step)
 }
 
+// numbered: sin filtro y con pocas opciones, las teclas 1–9 eligen.
+func (p *picker) numbered() bool {
+	if p.search {
+		return false
+	}
+	n := 0
+	for _, o := range p.options {
+		if !o.Disabled {
+			n++
+		}
+	}
+	return n > 1 && n <= 9
+}
+
+// enabledIndex es la posición en visible() de la opción habilitada número n (1…).
+func (p *picker) enabledIndex(n int) int {
+	for i, o := range p.visible() {
+		if o.Disabled {
+			continue
+		}
+		if n--; n == 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+func (p *picker) choose(i int) (tea.Cmd, bool) {
+	opts := p.visible()
+	if i < 0 || i >= len(opts) || opts[i].Disabled {
+		return nil, false
+	}
+	p.cursor = i
+	return p.done(opts[i].Value, false), true
+}
+
 // key procesa una tecla; devuelve el comando resultante y si el selector se cerró.
 func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
-	switch msg.String() {
+	switch k := msg.String(); k {
 	case "up", "ctrl+p", "shift+tab":
 		p.move(-1)
 	case "down", "ctrl+n", "tab":
@@ -90,11 +133,7 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 		p.cursor = max(0, len(p.visible())-1)
 		p.moveToEnabled(-1)
 	case "enter":
-		opts := p.visible()
-		if len(opts) == 0 || opts[p.cursor].Disabled {
-			return nil, false
-		}
-		return p.done(opts[p.cursor].Value, false), true
+		return p.choose(p.cursor)
 	case "esc", "ctrl+c":
 		return p.done(p.cancel, true), true
 	case "backspace":
@@ -105,7 +144,10 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 			p.moveToEnabled(1)
 		}
 	default:
-		if p.search && msg.Key().Text != "" && len(msg.Key().Text) > 0 {
+		if p.numbered() && len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
+			return p.choose(p.enabledIndex(int(k[0] - '0')))
+		}
+		if p.search && msg.Key().Text != "" {
 			p.filter += msg.Key().Text
 			p.cursor = 0
 			p.moveToEnabled(1)
@@ -114,68 +156,130 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 	return nil, false
 }
 
-// view pinta el selector dentro del canal, con el detalle a la derecha del título.
-func (p *picker) view(width int) string {
-	var lines []string
-	title := rail(true) + sBold.Render(p.title)
-	if p.detail != "" {
-		title = twoCol(title, sDim2.Render(p.detail), width)
+// click elige la fila row del panel (contando desde su borde superior).
+func (p *picker) click(row int) (tea.Cmd, bool) {
+	i := row - p.optionTop
+	if i < 0 || i >= p.shown {
+		return nil, false
 	}
-	lines = append(lines, title)
+	return p.choose(p.start + i)
+}
+
+func (p *picker) hints() string {
+	if len(p.keys) > 0 {
+		return keyHints(p.keys...)
+	}
+	pairs := [][2]string{{"↑↓", "mover"}}
+	if p.numbered() {
+		pairs = append(pairs, [2]string{fmt.Sprintf("1–%d", p.enabledIndexCount()), "elegir"})
+	}
 	if p.search {
-		query := p.filter
-		if query == "" {
-			query = sDim2.Render("escribe para filtrar")
+		pairs = append(pairs, [2]string{"escribe", "filtra"})
+	}
+	pairs = append(pairs, [2]string{"↵", "elegir"}, [2]string{"esc", "cancelar"})
+	return keyHints(pairs...)
+}
+
+func (p *picker) enabledIndexCount() int {
+	n := 0
+	for _, o := range p.options {
+		if !o.Disabled {
+			n++
 		}
-		lines = append(lines, rail(true)+sDim2.Render("/ ")+query)
+	}
+	return n
+}
+
+// view pinta el panel a lo ancho, con como mucho maxRows filas de opciones.
+func (p *picker) view(width, maxRows int) []string {
+	inner := max(1, width-4)
+	var rows []panelRow
+	for _, b := range p.body {
+		rows = append(rows, panelRow{text: b})
 	}
 	opts := p.visible()
-	start := 0
-	if len(opts) > p.maxShown {
-		start = max(0, min(p.cursor-p.maxShown/2, len(opts)-p.maxShown))
+	if len(p.body) > 0 && len(opts) > 0 {
+		rows = append(rows, panelRow{})
 	}
-	end := min(len(opts), start+p.maxShown)
+	if p.search {
+		query := sInk.Render(p.filter) + sAccent.Render(glyphEdge)
+		if p.filter == "" {
+			query = sAccent.Render(glyphEdge) + sDim2.Render("escribe para filtrar")
+		}
+		count := sDim.Render(fmt.Sprintf("%d de %d", len(opts), len(p.options)))
+		rows = append(rows, panelRow{text: fitRight(sDim2.Render("/ ")+query, count, inner+1)})
+	}
+	limit := max(1, min(p.maxShown, maxRows))
+	start := 0
+	if len(opts) > limit {
+		start = max(0, min(p.cursor-limit/2, len(opts)-limit))
+	}
+	end := min(len(opts), start+limit)
 	labelWidth := 0
 	for _, o := range opts[start:end] {
-		labelWidth = max(labelWidth, ansi.StringWidth(o.Label))
+		if !o.Disabled {
+			labelWidth = max(labelWidth, ansi.StringWidth(o.Label))
+		}
+	}
+	labelWidth = min(labelWidth, max(8, inner/2))
+	numbers := p.numbered()
+	p.start, p.optionTop, p.shown = start, 1+len(rows), end-start
+	number := 0
+	for i := 0; i < start; i++ {
+		if !opts[i].Disabled {
+			number++
+		}
 	}
 	for i := start; i < end; i++ {
 		o := opts[i]
-		label := o.Label + strings.Repeat(" ", labelWidth-ansi.StringWidth(o.Label))
-		switch {
-		case o.Disabled:
-			lines = append(lines, rail(true)+sDim2.Render("  "+o.Label))
-		case i == p.cursor:
-			row := sAccent.Render(glyphEdge+" ") + sBold.Render(label)
-			if o.Badge != "" {
-				row += " " + sAccent.Render(o.Badge)
-			}
-			if o.Desc != "" {
-				row += "  " + sDim.Render(o.Desc)
-			}
-			lines = append(lines, rail(true)+row)
-		default:
-			row := "  " + sPrimary.Render(label)
-			if o.Badge != "" {
-				row += " " + sDim2.Render(o.Badge)
-			}
-			if o.Desc != "" {
-				row += "  " + sDim2.Render(o.Desc)
-			}
-			lines = append(lines, rail(true)+row)
+		if o.Disabled {
+			rows = append(rows, panelRow{text: sDim2.Bold(true).Render(strings.ToUpper(o.Label))})
+			continue
 		}
+		number++
+		on := i == p.cursor
+		bar, labelStyle, descStyle := " ", sPrimary, sDim
+		if on {
+			bar, labelStyle, descStyle = sAccent.Render(glyphEdge), sBold, sSoft
+		}
+		left := bar + " "
+		if numbers {
+			numStyle := sDim2
+			if on {
+				numStyle = sAccent
+			}
+			left += numStyle.Render(fmt.Sprintf("%d", number)) + "  "
+		}
+		label := ansi.Truncate(o.Label, labelWidth, glyphEllipsis)
+		left += labelStyle.Render(label + strings.Repeat(" ", labelWidth-ansi.StringWidth(label)))
+		if o.Desc != "" {
+			left += "  " + descStyle.Render(o.Desc)
+		}
+		if o.Extra != "" {
+			left += "  " + o.Extra
+		}
+		right := o.Meta
+		if o.Badge != "" {
+			if right != "" {
+				right += "  "
+			}
+			right += sAccent.Render(o.Badge)
+		}
+		row := panelRow{text: fitRight(left, right, inner+1)}
+		if on {
+			row.bg = pal.surf2
+		}
+		rows = append(rows, row)
 	}
 	if len(opts) == 0 {
-		lines = append(lines, rail(true)+sDim2.Render("  sin coincidencias"))
+		rows = append(rows, panelRow{text: sDim.Render("  sin coincidencias")})
 	}
-	if len(opts) > p.maxShown {
-		lines = append(lines, rail(true)+sDim2.Render(fmt.Sprintf("  %d de %d", p.cursor+1, len(opts))))
+	if len(opts) > limit {
+		rows = append(rows, panelRow{text: sDim2.Render(fmt.Sprintf("  %d de %d", p.cursor+1, len(opts)))})
 	}
-	lines = append(lines, "  "+sDim2.Render(p.hint))
-	for i, l := range lines {
-		if ansi.StringWidth(l) > width {
-			lines[i] = ansi.Truncate(l, width, glyphEllipsis)
-		}
+	tone := p.tone
+	if tone == "" {
+		tone = pal.faint
 	}
-	return strings.Join(lines, "\n")
+	return panel(rows, width, tone, p.title)
 }

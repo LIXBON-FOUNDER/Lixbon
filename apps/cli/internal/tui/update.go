@@ -3,31 +3,70 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
-	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/sse"
 )
 
 const (
-	quitWindow  = 2 * time.Second
-	tickEvery   = 120 * time.Millisecond
-	menuVisible = 8
+	quitWindow    = 2 * time.Second
+	tickEvery     = 120 * time.Millisecond
+	relayoutDelay = 80 * time.Millisecond
+	menuVisible   = 8
 )
+
+// relayoutMsg repinta el markdown tras un redimensionado; gen descarta los
+// que llegan cuando la ventana ya cambió otra vez.
+type relayoutMsg struct{ gen int }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(tickEvery, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
+// ticking: el ticker anima el turno y los comandos asíncronos; se para solo.
+func (m *Model) ticking() bool { return m.running || m.busy != "" || m.login != nil }
+
+func (m *Model) startTick() tea.Cmd {
+	if m.tickOn {
+		return nil
+	}
+	m.tickOn = true
+	return tickCmd()
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.login != nil {
+		switch msg.(type) {
+		case tea.KeyPressMsg, tea.PasteMsg, loginStartedMsg, loginTokenMsg, loginKeyMsg:
+			return m, m.updateLogin(msg)
+		case tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg:
+			return m, nil
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.SetWidth(max(10, msg.Width-4))
 		m.log.resize(msg.Width)
+		m.relayoutGen++
+		gen := m.relayoutGen
+		return m, tea.Tick(relayoutDelay, func(time.Time) tea.Msg { return relayoutMsg{gen} })
+
+	case tea.BackgroundColorMsg:
+		if m.chat.Cfg.ExtraString("theme") == "auto" {
+			m.setTheme(msg.IsDark())
+		}
+		return m, nil
+
+	case relayoutMsg:
+		if msg.gen == m.relayoutGen && m.log.repaintDirty() {
+			m.sel = nil
+		}
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -44,9 +83,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseClickMsg:
-		if !m.pagerActive() {
-			m.onMouseDown(msg)
+		if m.pagerActive() {
+			return m, nil
 		}
+		if cmd, ok := m.clickChrome(msg); ok {
+			return m, cmd
+		}
+		m.onMouseDown(msg)
 		return m, nil
 
 	case tea.MouseMotionMsg:
@@ -79,7 +122,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.PasteMsg:
+		if m.secret != nil {
+			var cmd tea.Cmd
+			*m.secret, cmd = m.secret.Update(msg)
+			return m, cmd
+		}
 		if m.picker != nil || m.remote != nil {
+			return m, nil
+		}
+		if path, ok := droppedImage(msg.Content, m.chat.Workspace); ok {
+			m.stageImage(path)
 			return m, nil
 		}
 		m.input.InsertString(strings.ReplaceAll(strings.ReplaceAll(msg.Content, "\r\n", "\n"), "\r", "\n"))
@@ -87,10 +139,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if !m.running {
+		if !m.ticking() {
+			m.tickOn = false
 			return m, nil
 		}
 		m.spin++
+		if m.openTool != nil {
+			m.log.refresh(m.openTool)
+		}
 		return m, tickCmd()
 
 	case deltaMsg:
@@ -99,13 +155,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.kind {
 		case sse.Content:
+			m.liveChars += utf8.RuneCountInString(msg.text)
 			m.live.content.WriteString(msg.text)
 		case sse.Reasoning:
 			if m.live.reasoning.Len() == 0 {
 				m.live.reasoningStarted = time.Now()
 			}
+			m.liveChars += utf8.RuneCountInString(msg.text)
 			m.live.reasoning.WriteString(msg.text)
 			m.live.reasoningSecs = time.Since(m.live.reasoningStarted).Seconds()
+		case sse.Usage:
+			if n, err := strconv.Atoi(msg.text); err == nil {
+				m.liveReal += n
+				m.liveChars = 0
+			}
 		}
 		return m, nil
 
@@ -118,7 +181,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case noteMsg:
 		if msg.turn == m.turn {
 			m.flushLive()
-			m.print(note(msg.text))
+			m.add(note(msg.text))
 		}
 		return m, nil
 
@@ -140,13 +203,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.finishAsync(msg)
 
 	case updateNoticeMsg:
-		m.print(note(fmt.Sprintf("Hay una versión nueva (v%s). Ejecuta /update.", msg.version)))
+		m.add(note(fmt.Sprintf("Hay una versión nueva (v%s). Ejecuta /update.", msg.version)))
 		return m, nil
 
 	case runCommandMsg:
 		return m, m.runCommand(msg.name, msg.arg)
 
 	case promptMsg:
+		if msg.secret {
+			return m, m.promptSecret(msg.label, msg.onSubmit)
+		}
 		m.promptFor(msg.label, msg.onSubmit)
 		return m, nil
 
@@ -167,6 +233,26 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
+	if m.secret != nil {
+		return m, m.handleSecretKey(msg)
+	}
+	if m.shortcutsOpen {
+		m.shortcutsOpen = false
+		if k := msg.String(); k == "esc" || k == "?" {
+			return m, nil
+		}
+	} else if msg.String() == "?" && m.input.Value() == "" && m.prompt == nil {
+		m.shortcutsOpen = true
+		return m, nil
+	}
+	// Con el menú @ abierto, Enter completa la ruta; si ya está escrita
+	// entera, envía el mensaje.
+	if msg.String() == "enter" && m.menuFiles && len(m.menu) > 0 {
+		if q, _, _ := m.atQuery(); q != m.menu[m.menuCursor].insert {
+			m.completeMenu()
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "pgup":
 		m.scrollBy(max(1, m.height-6))
@@ -176,6 +262,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+t":
 		m.pager = &pager{}
+		return m, nil
+	case "ctrl+o":
+		m.toggleDetail()
 		return m, nil
 	case "alt+v":
 		m.pasteImage()
@@ -195,7 +284,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if p.onCancel != nil {
 				p.onCancel()
 			}
-			m.print(note("cancelado"))
+			m.add(note("cancelado"))
 		case m.running:
 			m.cancelTurn()
 		case len(m.menu) > 0:
@@ -215,7 +304,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "shift+tab":
-		if !m.running {
+		if !m.busyNow() {
 			m.cycleMode()
 		}
 		return m, nil
@@ -307,7 +396,7 @@ func (m *Model) onEnter() tea.Cmd {
 		m.prompt = nil
 		return p.onSubmit(text)
 	}
-	m.hist.add(text)
+	m.hist.add(keyArg.ReplaceAllStringFunc(text, maskKeyCommand))
 	m.histPos = len(m.hist.entries)
 	m.draft = ""
 	if m.busyNow() {
@@ -362,148 +451,4 @@ func (m *Model) allSpecs() []Spec {
 		specs = append(specs, Spec{Name: name, Desc: c.Description, Group: "propios"})
 	}
 	return specs
-}
-
-func (m *Model) refreshMenu() {
-	value := m.input.Value()
-	if !strings.HasPrefix(value, "/") || strings.ContainsAny(value, " \n") {
-		m.menu, m.menuHidden = nil, false
-		return
-	}
-	if m.menuHidden {
-		return
-	}
-	prefix := strings.ToLower(value[1:])
-	var out []Spec
-	for _, s := range m.allSpecs() {
-		if strings.HasPrefix(s.Name, prefix) {
-			out = append(out, s)
-		}
-	}
-	m.menu = out
-	m.menuCursor = max(0, min(m.menuCursor, len(out)-1))
-}
-
-// completeMenu escribe el comando elegido en la caja.
-func (m *Model) completeMenu() {
-	if len(m.menu) == 0 {
-		return
-	}
-	chosen := m.menu[m.menuCursor]
-	m.input.SetValue("/" + chosen.Name)
-	if chosen.Args != "" {
-		m.input.InsertString(" ")
-	}
-	m.input.MoveToEnd()
-	m.refreshMenu()
-}
-
-// ── turnos ───────────────────────────────────────────────────────────────
-
-func (m *Model) handleEvent(e agent.Event) {
-	m.flushLive()
-	if e.Kind == agent.EventStep {
-		return
-	}
-	m.live.usedTools = true
-	switch e.Kind {
-	case agent.EventNote:
-		m.print(note(e.Text))
-	case agent.EventRescued:
-		m.print(renderResult(e.Text, false, "", m.width))
-	case agent.EventReadGroup:
-		m.print("\n" + renderAction(agent.Event{Tool: e.Tool, Text: e.Text, ReadOnly: true, Meta: e.Meta}, m.width) +
-			"\n" + renderLogLine(strings.Join(e.Names, " "+glyphSep+" "), sDim2, "", m.width))
-	case agent.EventAction:
-		out := "\n" + renderAction(e, m.width)
-		if e.Change != nil && !e.ReadOnly {
-			rows := agent.DiffRows(*e.Change, agent.DiffContext)
-			if len(rows) > 0 {
-				out += "\n" + strings.Join(renderDiff(rows, m.width, diffMaxRows), "\n")
-			}
-		}
-		m.print(out)
-	case agent.EventActionResult:
-		m.print(m.renderActionResult(e))
-	}
-}
-
-func (m *Model) renderActionResult(e agent.Event) string {
-	meta := ""
-	if e.Elapsed >= 100*time.Millisecond {
-		meta = fmt.Sprintf("%.1f s", e.Elapsed.Seconds())
-	}
-	if e.Tool != "run_command" || e.Result == "" {
-		summary := e.Summary
-		if e.Check != "" {
-			summary += "  " + glyphSep + "  " + e.Check
-		}
-		return renderResult(summary, e.Failed, meta, m.width)
-	}
-	body, code := e.Result, "?"
-	if rest, ok := strings.CutPrefix(body, "[EXIT "); ok {
-		if n, after, found := strings.Cut(rest, "] "); found {
-			code, body = n, after
-		} else if n, after, found := strings.Cut(rest, "]"); found {
-			code, body = n, after
-		}
-	}
-	lines, last := renderOutput(body, m.width)
-	summary := "exit " + code
-	if last != "" && last != "(sin salida)" {
-		summary = last + "  " + glyphSep + "  exit " + code
-	}
-	if e.Check != "" {
-		summary += "  " + glyphSep + "  " + e.Check
-	}
-	out := strings.Join(lines, "\n")
-	if out != "" {
-		out += "\n"
-	}
-	return out + renderResult(summary, e.Failed, meta, m.width)
-}
-
-func (m *Model) printTodo(items, previous []todoItem) {
-	m.todo = items
-	done := 0
-	for _, it := range items {
-		if it.Status == "done" {
-			done++
-		}
-	}
-	same := previous != nil && len(previous) == len(items)
-	if same {
-		for i := range items {
-			if items[i].Text != previous[i].Text {
-				same = false
-			}
-		}
-	}
-	if same {
-		doing := ""
-		for _, it := range items {
-			if it.Status == "doing" {
-				doing = it.Text
-				break
-			}
-		}
-		detail := fmt.Sprintf("%d/%d", done, len(items))
-		if doing != "" {
-			detail += "  " + glyphArrow + "  " + doing
-		}
-		m.print("\n" + renderAction(agent.Event{Tool: "todo", Text: detail, ReadOnly: true}, m.width))
-		return
-	}
-	lines := []string{"\n" + renderAction(agent.Event{Tool: "todo", Text: fmt.Sprintf("%d pasos", len(items)), ReadOnly: true}, m.width)}
-	for _, it := range items {
-		mark, style := "○", sDim
-		switch it.Status {
-		case "done":
-			mark, style = glyphDot, sDim2
-		case "doing":
-			mark, style = glyphArrow, sPrimary
-		}
-		lines = append(lines, renderLogLine("  "+mark+" "+it.Text, style, "", m.width))
-	}
-	m.print(strings.Join(lines, "\n"))
 }

@@ -101,6 +101,7 @@ func newChat(t *testing.T, client *api.Client, mutate func(*config.Config), opts
 type recorder struct {
 	mu     sync.Mutex
 	deltas []string
+	usage  []string
 	notes  []string
 	titles []string
 	events []agent.Event
@@ -109,8 +110,11 @@ type recorder struct {
 func (r *recorder) Delta(kind sse.Kind, text string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if kind == sse.Content {
+	switch kind {
+	case sse.Content:
 		r.deltas = append(r.deltas, text)
+	case sse.Usage:
+		r.usage = append(r.usage, text)
 	}
 }
 func (r *recorder) Event(e agent.Event) { r.mu.Lock(); r.events = append(r.events, e); r.mu.Unlock() }
@@ -293,7 +297,7 @@ func TestInterruptedStreamKeepsThePartialAnswer(t *testing.T) {
 	}
 }
 
-func TestContextUsageUsesTheServerCountAsAnchor(t *testing.T) {
+func TestContextUsageCountsOnlyTheConversation(t *testing.T) {
 	g, client := newGateway(t)
 	g.chat = func(_ int, w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -302,7 +306,16 @@ func TestContextUsageUsesTheServerCountAsAnchor(t *testing.T) {
 		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: "+string(usage)+"\n\ndata: [DONE]\n\n")
 	}
 	c := newChat(t, client, func(cfg *config.Config) { cfg.ContextWindow = 1000 }, Options{})
+	c.ProjectContext = strings.Repeat("contexto ", 500)
 	before, _ := c.ContextUsage()
+	if before != 0 {
+		t.Fatalf("sin mensajes el contexto debe estar vacío: %d", before)
+	}
+	c.Mode = ModeAgent
+	if empty, _ := c.ContextUsage(); empty != 0 {
+		t.Fatalf("el prompt de sistema y las herramientas no cuentan: %d", empty)
+	}
+	c.Mode, c.ProjectContext = ModeAsk, ""
 	c.Send(context.Background(), strings.Repeat("palabra ", 100), nil)
 	tokens, pct := c.ContextUsage()
 	if c.SessionTokens != 520 || c.TurnTokens != 520 {
@@ -365,5 +378,69 @@ func TestSwitchingFromAgentToAskDropsToolRoundTrips(t *testing.T) {
 		if msg["role"] == "tool" || msg["tool_calls"] != nil {
 			t.Fatalf("el round-trip de herramientas no debe viajar en modo ask: %v", msg)
 		}
+	}
+}
+
+func TestEmptyAnswerLeavesNoTraceInAskMode(t *testing.T) {
+	g, client := newGateway(t)
+	g.chat = func(_ int, w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}
+	c := newChat(t, client, nil, Options{})
+	if _, err := c.Send(context.Background(), "hola", nil); err != nil {
+		t.Fatal(err)
+	}
+	if tokens, _ := c.ContextUsage(); len(c.History) != 0 || tokens != 0 {
+		t.Fatalf("historial %+v, %d tokens", c.History, tokens)
+	}
+}
+
+// El gateway pone su propio prompt de sistema, que el CLI no ve: el contexto
+// tiene que mostrar solo la conversación, medida con los tokens reales.
+func TestContextUsageSubtractsTheHiddenSystemPrompt(t *testing.T) {
+	const hidden = 1000
+	g, client := newGateway(t)
+	g.chat = func(n int, w http.ResponseWriter) {
+		g.mu.Lock()
+		conv := 0
+		for _, m := range g.bodies[n]["messages"].([]any) {
+			conv += len([]rune(m.(map[string]any)["content"].(string)))
+		}
+		g.mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}}}})
+		usage, _ := json.Marshal(map[string]any{"usage": map[string]any{"prompt_tokens": hidden + conv/4, "completion_tokens": 7, "total_tokens": hidden + conv/4 + 7}})
+		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: "+string(usage)+"\n\ndata: [DONE]\n\n")
+	}
+	c := newChat(t, client, func(cfg *config.Config) { cfg.ContextWindow = 100000 }, Options{})
+	rec := &recorder{}
+	c.Send(context.Background(), "hola", rec)
+	long := strings.Repeat("palabra ", 400)
+	c.Send(context.Background(), long, rec)
+	tokens, _ := c.ContextUsage()
+	want := (4 + 2 + len(long) + 2) / 4
+	if tokens < want*8/10 || tokens > want*12/10 {
+		t.Fatalf("contexto %d tokens, la conversación real son ~%d", tokens, want)
+	}
+	if len(rec.usage) != 2 || rec.usage[0] != "7" {
+		t.Fatalf("tokens reales de la respuesta: %v", rec.usage)
+	}
+}
+
+// Ollama no cuenta el prefijo que reutiliza de su caché: un prompt_tokens
+// muy por debajo de lo enviado no se toma como conteo.
+func TestContextUsageIgnoresCachedPromptCounts(t *testing.T) {
+	g, client := newGateway(t)
+	g.chat = func(_ int, w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		usage, _ := json.Marshal(map[string]any{"usage": map[string]any{"prompt_tokens": 60, "completion_tokens": 2, "total_tokens": 62}})
+		chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}}}})
+		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: "+string(usage)+"\n\ndata: [DONE]\n\n")
+	}
+	c := newChat(t, client, func(cfg *config.Config) { cfg.ContextWindow = 100000 }, Options{})
+	c.Send(context.Background(), strings.Repeat("palabra ", 400), nil)
+	if tokens, _ := c.ContextUsage(); tokens < 500 {
+		t.Fatalf("un prompt cacheado no puede bajar el contexto a %d tokens", tokens)
 	}
 }

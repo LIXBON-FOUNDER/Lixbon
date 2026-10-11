@@ -50,12 +50,12 @@ func (m *Model) cmdUpdate() tea.Cmd {
 	return m.async("actualizando lixbon", func(ctx context.Context) cmdDoneMsg {
 		updater, err := newUpdater(manifestURL)
 		if err != nil {
-			return cmdDoneMsg{lines: []string{errLine(err.Error())}}
+			return cmdDoneMsg{lines: []block{errLine(err.Error())}}
 		}
 		message, err := update.Run(ctx, updater, false)
 		if err != nil {
-			return cmdDoneMsg{lines: []string{errLine(err.Error())}}
+			return cmdDoneMsg{lines: []block{errLine(err.Error())}}
 		}
-		return cmdDoneMsg{lines: []string{okLine(message)}}
+		return cmdDoneMsg{lines: []block{okLine(message)}}
 	})
 }

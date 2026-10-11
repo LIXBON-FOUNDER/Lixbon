@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 
@@ -73,6 +74,24 @@ type Model struct {
 	// winTop y winRows describen la ventana del transcript del último fotograma:
 	// con ellas el ratón se traduce a filas del transcript.
 	winTop, winRows int
+	// winY es la fila de pantalla donde empieza el transcript (tras la barra
+	// superior); panelY, donde empieza el panel abierto (-1 si no hay).
+	winY, panelY int
+	// Zonas clicables del último fotograma.
+	barShown          bool
+	barModel, barPlan span
+	footMode          span
+
+	// secret sustituye a la caja mientras se pide una clave: lo escrito sale
+	// como •. alwaysAllowed avisa en el pie de que no se pregunta más.
+	secret        *textinput.Model
+	alwaysAllowed bool
+
+	// liveReal son los tokens reales de los pasos terminados; liveChars y
+	// charsPerToken estiman el paso en curso.
+	liveChars     int
+	liveReal      int
+	charsPerToken float64
 
 	running     bool
 	interrupted bool
@@ -82,15 +101,33 @@ type Model struct {
 	live        liveState
 	queue       []string
 	spin        int
+	tickOn      bool
+	relayoutGen int
 
-	remote     *remoteHost
-	picker     *picker
-	prompt     *promptState
-	busy       string
-	todo       []tools.TodoItem
-	menu       []Spec
-	menuCursor int
-	menuHidden bool
+	// Bloques del turno que todavía cambian: la herramienta en marcha, el
+	// grupo de lecturas en curso y el plan.
+	openTool  *entry
+	readGroup *entry
+	todoEntry *entry
+	todoTurn  int
+
+	// chips son las imágenes en cola, en el orden de las de chat: el marcador
+	// [IMG#n] apunta a la n-ésima.
+	chips []imageChip
+
+	remote        *remoteHost
+	login         *loginView
+	picker        *picker
+	prompt        *promptState
+	busy          string
+	todo          []tools.TodoItem
+	menu          []menuItem
+	menuFiles     bool
+	menuQuery     string
+	menuCursor    int
+	menuHidden    bool
+	files         *fileIndex
+	shortcutsOpen bool
 
 	hist     *inputHistory
 	histPos  int
@@ -99,13 +136,18 @@ type Model struct {
 	quitting bool
 
 	lastAnswer string
-	ctxTokens  int
-	ctxPct     float64
-	online     bool
-	notice     string
+	// sessionTokens y ctxTokens son copias que hace refreshContext: View no
+	// lee m.chat, que el turno modifica desde otra goroutine.
+	sessionTokens int
+	ctxTokens     int
+	ctxPct        float64
+	online        bool
+	branch        string
+	notice        string
 
 	md      *glamour.TermRenderer
 	mdWidth int
+	mdTheme int
 }
 
 func New(c *chat.Chat, opts Options) *Model {
@@ -119,27 +161,25 @@ func New(c *chat.Chat, opts Options) *Model {
 	ta.SetVirtualCursor(true)
 	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
 		if info.LineNumber == 0 {
-			return glyphDot + " "
+			return glyphPrompt + " "
 		}
 		return "  "
 	})
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "shift+enter"))
-	styles := textarea.DefaultDarkStyles()
-	styles.Focused.CursorLine = styles.Focused.Text
-	ta.SetStyles(styles)
+	ta.SetStyles(inputStyles())
 	ta.SetWidth(76)
 	ta.Focus()
 
 	m := &Model{
-		chat:   c,
-		opts:   opts,
-		input:  ta,
-		width:  80,
-		height: 24,
-		hist:   loadInputHistory(opts.HistoryFile),
+		chat:     c,
+		opts:     opts,
+		input:    ta,
+		width:    80,
+		height:   24,
+		hist:     loadInputHistory(opts.HistoryFile),
 		copyText: copyToClipboard,
-		online: !opts.Offline,
-		send:   func(tea.Msg) {},
+		online:   !opts.Offline,
+		send:     func(tea.Msg) {},
 	}
 	m.log.resize(m.width)
 	m.histPos = len(m.hist.entries)
@@ -156,27 +196,49 @@ func (m *Model) Wire(send func(tea.Msg), observe func(string)) {
 	m.chat.Toolbox.OnTodo = func(items, previous []tools.TodoItem) { send(todoMsg{items, previous}) }
 }
 
-// print añade texto al transcript. Si el usuario había subido con el scroll,
-// la vista se queda donde estaba en vez de saltar al final.
-func (m *Model) print(text string) {
-	added := len(m.log.add(text))
+// print añade texto ya pintado al transcript.
+func (m *Model) print(text string) *entry { return m.add(textBlock(text)) }
+
+// printDynamic imprime una entrada que se redibuja cuando cambia el ancho.
+func (m *Model) printDynamic(render func(width int) string) *entry { return m.add(funcBlock(render)) }
+
+// add añade un bloque. Si el usuario había subido con el scroll, la vista se
+// queda donde estaba en vez de saltar al final.
+func (m *Model) add(b block) *entry {
+	e := m.log.add(b)
 	if m.scroll > 0 {
-		m.scroll += added
+		m.scroll += len(e.rows)
 	}
 	if m.observe != nil {
-		m.observe(text)
+		m.observe(e.text)
+	}
+	return e
+}
+
+// refresh vuelve a pintar un bloque que cambió (una herramienta que terminó,
+// el plan que avanza…). Si queda por debajo de la ventana, el scroll se
+// compensa para que lo que se está leyendo no se mueva.
+func (m *Model) refresh(e *entry) {
+	total := m.log.total()
+	start, delta := m.log.refresh(e)
+	if delta != 0 {
+		if m.scroll > 0 && start >= total-m.scroll {
+			m.scroll = max(0, m.scroll+delta)
+		}
+		if m.sel != nil {
+			if _, to := m.sel.bounds(); start <= to.row {
+				m.sel = nil
+			}
+		}
+	}
+	if m.observe != nil {
+		m.observe(e.text)
 	}
 }
 
-// printDynamic imprime una entrada que se redibuja cuando cambia el ancho.
-func (m *Model) printDynamic(render func(width int) string) {
-	rows := m.log.addDynamic(render)
-	if m.scroll > 0 {
-		m.scroll += len(rows)
-	}
-	if m.observe != nil {
-		m.observe(strings.Join(rows, "\n"))
-	}
+func (m *Model) toggleDetail() {
+	m.log.setDetail(!m.log.detail)
+	m.sel = nil
 }
 
 func placeholderFor(c *chat.Chat) string {
@@ -193,6 +255,7 @@ func placeholderFor(c *chat.Chat) string {
 
 func (m *Model) refreshContext() {
 	m.ctxTokens, m.ctxPct = m.chat.ContextUsage()
+	m.sessionTokens = m.chat.SessionTokens
 	m.input.Placeholder = placeholderFor(m.chat)
 }
 
@@ -204,26 +267,42 @@ func (m *Model) modeName() string {
 	return m.chat.Mode
 }
 
-func (m *Model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.updateNoticeCmd()) }
+func (m *Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd()}
+	if m.login != nil {
+		cmds = append(cmds, m.startTick())
+	}
+	return tea.Batch(cmds...)
+}
 
-func (m *Model) markdown(text string) string {
-	width := max(40, m.width-4)
-	if m.md == nil || m.mdWidth != width {
-		style := os.Getenv("GLAMOUR_STYLE")
-		if style == "" {
-			style = "dark"
-		}
-		renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(style), glamour.WithWordWrap(width))
+// renderMarkdown pinta markdown al ancho dado; el renderer se reutiliza
+// mientras no cambien el ancho ni el tema.
+func (m *Model) renderMarkdown(text string, width int) string {
+	width = max(20, width)
+	if m.md == nil || m.mdWidth != width || m.mdTheme != themeVersion {
+		renderer, err := newMarkdownRenderer(width, os.Getenv("GLAMOUR_STYLE"))
 		if err != nil {
 			return text
 		}
-		m.md, m.mdWidth = renderer, width
+		m.md, m.mdWidth, m.mdTheme = renderer, width, themeVersion
 	}
 	out, err := m.md.Render(text)
 	if err != nil {
 		return text
 	}
 	return strings.Trim(out, "\n")
+}
+
+func inputStyles() textarea.Styles {
+	styles := textarea.DefaultStyles(pal.dark)
+	text := sPrimary
+	for _, st := range []*textarea.StyleState{&styles.Focused, &styles.Blurred} {
+		st.Text = text
+		st.CursorLine = text
+		st.Placeholder = sDim2
+		st.Prompt = sAccent
+	}
+	return styles
 }
 
 func (m *Model) saveConfig() { _ = config.Save(m.chat.ConfigPath, m.chat.Cfg) }

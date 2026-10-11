@@ -62,8 +62,31 @@ func TestModelsDetailFiltersAndNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 2 || models[0] != (Model{"a", "Alfa"}) || models[1] != (Model{"b", "b"}) {
+	if len(models) != 2 || models[0].ID != "a" || models[0].Name != "Alfa" || models[1].ID != "b" || models[1].Name != "b" {
 		t.Fatalf("modelos: %+v", models)
+	}
+}
+
+func TestModelsDetailReadsCapabilitiesOnlyFromTheGateway(t *testing.T) {
+	body := `{"data":[{"id":"q","capabilities":["completion","tools","vision"],"num_ctx":131072,"description":"rápido"},{"id":"r"}]}`
+	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) })
+	models, err := c.ModelsDetail(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models[0].HasCapability("vision") || models[0].NumCtx != 131072 || models[0].Description != "rápido" {
+		t.Fatalf("capacidades: %+v", models[0])
+	}
+	if models[1].Capabilities != nil {
+		t.Fatalf("sin capabilities se queda en nil (desconocido): %+v", models[1])
+	}
+	c.Generic = true
+	models, err = c.ModelsDetail(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if models[0].Capabilities != nil || models[0].NumCtx != 0 {
+		t.Fatalf("un proveedor genérico no aporta capacidades: %+v", models[0])
 	}
 }
 
@@ -294,21 +317,26 @@ func TestModelsDetailSurfacesGatewayErrorEntries(t *testing.T) {
 	}
 }
 
-func TestLoginAsksForAnIssuedKeyUnderTheCLIName(t *testing.T) {
+func TestExchangeIDETokenAsksForTheCLIKey(t *testing.T) {
 	var body map[string]any
 	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/auth/login" || r.Header.Get("Authorization") != "" {
+		if r.URL.Path != "/api/auth/ide/exchange" || r.Header.Get("Authorization") != "" {
 			t.Errorf("ruta %s, auth %q", r.URL.Path, r.Header.Get("Authorization"))
 		}
 		json.NewDecoder(r.Body).Decode(&body)
-		io.WriteString(w, `{"api_key":"lixbon_sk_x"}`)
+		io.WriteString(w, `{"api_key":"lixbon_sk_x","user":{"email":"ana@estudio.dev","plan_name":"Pro"}}`)
 	})
-	key, err := c.Login(context.Background(), "a@b.c", "pw")
-	if err != nil || key != "lixbon_sk_x" {
-		t.Fatalf("key %q err %v", key, err)
+	c.APIKey = "vieja"
+	key, user, err := c.ExchangeIDEToken(context.Background(), "tok", "ver", LoginKeyName)
+	if err != nil || key != "lixbon_sk_x" || user.Email != "ana@estudio.dev" || user.PlanName != "Pro" {
+		t.Fatalf("key %q user %+v err %v", key, user, err)
 	}
-	if body["issue_api_key"] != true || body["key_name"] != "lixbon CLI" || body["email"] != "a@b.c" || body["password"] != "pw" {
+	if body["token"] != "tok" || body["verifier"] != "ver" || body["key_name"] != "lixbon CLI" {
 		t.Fatalf("cuerpo: %v", body)
+	}
+	empty := newGateway(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"user":{}}`) })
+	if _, _, err := empty.ExchangeIDEToken(context.Background(), "tok", "ver", LoginKeyName); err == nil {
+		t.Fatal("sin api_key el canje falla")
 	}
 }
 

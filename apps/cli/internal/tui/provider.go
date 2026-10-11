@@ -101,30 +101,33 @@ func (m *Model) pickPresetToAdd() {
 func (m *Model) addPreset(name string) tea.Cmd {
 	baseURL, ok := config.Presets[name]
 	if !ok {
-		m.print(errLine(fmt.Sprintf("No existe el preset «%s».", name)))
+		m.add(errLine(fmt.Sprintf("No existe el preset «%s».", name)))
 		return nil
 	}
 	if slices.Contains(config.LocalPresets, name) {
 		return m.addProvider(name, baseURL, "")
 	}
-	m.promptFor("API key de «"+name+"» (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
+	return m.promptSecret("API key de «"+name+"» (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
 		return m.addProvider(name, baseURL, strings.TrimSpace(key))
 	})
-	return nil
 }
 
 func promptCmd(label string, onSubmit func(string) tea.Cmd) tea.Cmd {
-	return func() tea.Msg { return promptMsg{label, onSubmit} }
+	return func() tea.Msg { return promptMsg{label: label, onSubmit: onSubmit} }
+}
+
+func promptSecretCmd(label string, onSubmit func(string) tea.Cmd) tea.Cmd {
+	return func() tea.Msg { return promptMsg{label: label, onSubmit: onSubmit, secret: true} }
 }
 
 func (m *Model) askProviderURL(text string) tea.Cmd {
 	name, err := config.NormalizeProfileName(text)
 	if err != nil {
-		m.print(errLine(err.Error()))
+		m.add(errLine(err.Error()))
 		return nil
 	}
 	if _, exists := m.chat.Cfg.Profiles()[name]; exists {
-		m.print(errLine(fmt.Sprintf("Ya existe el proveedor «%s».", name)))
+		m.add(errLine(fmt.Sprintf("Ya existe el proveedor «%s».", name)))
 		return nil
 	}
 	label := "URL base o preset (" + strings.Join(config.PresetNames(), ", ") + ")"
@@ -137,10 +140,10 @@ func (m *Model) askProviderURL(text string) tea.Cmd {
 func (m *Model) askProviderKey(name, text string) tea.Cmd {
 	baseURL, err := config.NormalizeBaseURL(text)
 	if err != nil {
-		m.print(errLine(err.Error()))
+		m.add(errLine(err.Error()))
 		return nil
 	}
-	return promptCmd("API key (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
+	return promptSecretCmd("API key (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
 		return m.addProvider(name, baseURL, strings.TrimSpace(key))
 	})
 }
@@ -151,30 +154,30 @@ func (m *Model) addProvider(name, baseURL, key string) tea.Cmd {
 	}
 	profile := config.Profile{BaseURL: baseURL, APIKey: key, ContextWindow: config.DefaultGenericContext, Generic: true}
 	if err := m.chat.Cfg.AddProfile(name, profile); err != nil {
-		m.print(errLine(err.Error()))
+		m.add(errLine(err.Error()))
 		return nil
 	}
 	m.saveConfig()
-	m.print(okLine(fmt.Sprintf("Proveedor «%s» añadido (%s)", name, baseURL)))
+	m.add(okLine(fmt.Sprintf("Proveedor «%s» añadido (%s)", name, baseURL)))
 	return m.switchProvider(name)
 }
 
 func (m *Model) switchProvider(name string) tea.Cmd {
 	switch {
 	case m.busyNow():
-		m.print(errLine("Espera a que termine lo que está en marcha antes de cambiar de proveedor."))
+		m.add(errLine("Espera a que termine lo que está en marcha antes de cambiar de proveedor."))
 		return nil
 	case name == m.chat.Cfg.ActiveProfile():
-		m.print(note(fmt.Sprintf("Ya usas «%s».", name)))
+		m.add(note(fmt.Sprintf("Ya usas «%s».", name)))
 		return nil
 	}
 	previousMode := m.chat.Mode
 	if err := m.chat.UseProfile(name); err != nil {
-		m.print(errLine(err.Error()))
+		m.add(errLine(err.Error()))
 		return nil
 	}
 	if previousMode != m.chat.Mode {
-		m.print(note("El modo delegate solo existe en un gateway Lixbon: pasas al modo ask."))
+		m.add(note("El modo delegate solo existe en un gateway Lixbon: pasas al modo ask."))
 	}
 	return m.connect(name)
 }
@@ -186,8 +189,8 @@ func (m *Model) connect(name string) tea.Cmd {
 	m.online = false
 	host := providerHost(m.chat.Client.BaseURL)
 	return m.async("conectando con "+name, func(ctx context.Context) cmdDoneMsg {
-		acc := m.chat.Probe(ctx)
-		lines := []string{okLine(fmt.Sprintf("Proveedor: %s %s %s", name, glyphSep, host))}
+		acc := m.chat.QueryAccount(ctx)
+		lines := []block{okLine(fmt.Sprintf("Proveedor: %s %s %s", name, glyphSep, host))}
 		switch acc.State {
 		case chat.AccountOffline:
 			lines = append(lines, warnLine(serverProblem(acc, host)))
@@ -195,13 +198,21 @@ func (m *Model) connect(name string) tea.Cmd {
 			lines = append(lines, warnLine(host+" rechazó la clave."))
 		}
 		return cmdDoneMsg{lines: lines, apply: func(m *Model) {
+			m.chat.ApplyAccount(acc)
 			m.opts.Account = acc
 			m.online = acc.State != chat.AccountOffline
-			if acc.State == chat.AccountAuth {
-				m.offerNewKey(name, acc.Generic)
-				return
+			switch {
+			case acc.State == chat.AccountAuth && acc.Generic:
+				m.offerNewKey(name, true)
+			case acc.State != chat.AccountAuth:
+				m.afterProviderProbe(acc)
 			}
-			m.afterProviderProbe(acc)
+		}, then: func(m *Model) tea.Cmd {
+			// Un gateway Lixbon sin sesión o con la clave rechazada abre el login.
+			if acc.State == chat.AccountAuth && !acc.Generic {
+				return m.openLogin(loginCommand, stepMethod, "Inicia sesión en «"+name+"» para usarlo.")
+			}
+			return nil
 		}}
 	})
 }
@@ -212,10 +223,10 @@ func serverProblem(acc chat.Account, host string) string {
 
 func (m *Model) offerNewKey(name string, generic bool) {
 	if !generic {
-		m.print(note("/login inicia sesión de nuevo y /key pega otra API key."))
+		m.add(note("/login inicia sesión de nuevo y /key pega otra API key."))
 		return
 	}
-	m.promptFor("Nueva API key para «"+name+"» (Esc cancela)", func(key string) tea.Cmd {
+	m.promptSecret("Nueva API key para «"+name+"» (Esc cancela)", func(key string) tea.Cmd {
 		return m.setProviderKey(name, strings.TrimSpace(key))
 	})
 }
@@ -225,11 +236,11 @@ func (m *Model) setProviderKey(name, key string) tea.Cmd {
 		return nil
 	}
 	if err := m.chat.Cfg.UpdateProfile(name, func(p *config.Profile) { p.APIKey = key }); err != nil {
-		m.print(errLine(err.Error()))
+		m.add(errLine(err.Error()))
 		return nil
 	}
 	m.saveConfig()
-	m.print(okLine(fmt.Sprintf("Clave de «%s» actualizada (%s)", name, config.MaskKey(key))))
+	m.add(okLine(fmt.Sprintf("Clave de «%s» actualizada (%s)", name, config.MaskKey(key))))
 	if name != m.chat.Cfg.ActiveProfile() {
 		return nil
 	}
@@ -242,9 +253,9 @@ func (m *Model) cmdProviderKey(name string) tea.Cmd {
 	profile, ok := m.chat.Cfg.Profiles()[name]
 	switch {
 	case !ok:
-		m.print(errLine(fmt.Sprintf("No existe el proveedor «%s».", name)))
+		m.add(errLine(fmt.Sprintf("No existe el proveedor «%s».", name)))
 	case !profile.Generic:
-		m.print(note("«" + name + "» es un gateway Lixbon: usa /login o /key."))
+		m.add(note("«" + name + "» es un gateway Lixbon: usa /login o /key."))
 	default:
 		m.offerNewKey(name, true)
 	}
@@ -255,17 +266,17 @@ func (m *Model) afterProviderProbe(acc chat.Account) {
 	needsPick, err := m.chat.ResolveModel(acc)
 	switch {
 	case err != nil:
-		m.print(warnLine(err.Error()))
+		m.add(warnLine(err.Error()))
 	case needsPick:
 		m.queueModelPicker()
 	case len(acc.Models) > 0 && !slices.ContainsFunc(acc.Models, func(mod api.Model) bool { return mod.ID == m.chat.Model }):
-		m.print(warnLine(fmt.Sprintf("El modelo «%s» no está en la lista de este proveedor (%d disponibles). /model elige otro.", m.chat.Model, len(acc.Models))))
+		m.add(warnLine(fmt.Sprintf("El modelo «%s» no está en la lista de este proveedor (%d disponibles). /model elige otro.", m.chat.Model, len(acc.Models))))
 		m.queueModelPicker()
 	default:
 		line := "Modelo: " + m.modelLabel(m.chat.Model)
 		if n := len(acc.Models); n > 1 && m.chat.Cfg.KeyModel == "" {
 			line += fmt.Sprintf(" %s %d modelos disponibles, /model para cambiar", glyphSep, n)
 		}
-		m.print(note(line))
+		m.add(note(line))
 	}
 }
