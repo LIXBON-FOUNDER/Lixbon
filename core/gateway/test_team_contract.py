@@ -472,7 +472,8 @@ def test_regla3_el_token_es_de_un_solo_uso(cliente, gente):
     uno = cliente.post("/api/auth/ide/exchange",
                        json={"token": token, "verifier": "verificador-secreto"})
     assert uno.status_code == 200
-    assert uno.json()["api_key"].startswith("lixbon_sk_")
+    # Un cliente anterior sigue recibiendo `api_key`, pero ya es una sesión, no una key.
+    assert uno.json()["api_key"].startswith("lixbon_at_")
     assert uno.json()["user"]["id"] == gente["ana"]["id"]
     # El segundo canje no vale aunque el verificador sea correcto.
     dos = cliente.post("/api/auth/ide/exchange",

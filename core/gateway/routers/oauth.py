@@ -27,7 +27,7 @@ import json
 import os
 import secrets
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -288,13 +288,15 @@ async def oauth_callback(provider: str, request: Request,
 class ExchangePayload(BaseModel):
     code: str = Field(..., min_length=16, max_length=128)
     code_verifier: str = Field(..., min_length=16, max_length=128)
+    client: Literal["desktop", "cli", "mobile"] | None = None
+    device_name: str | None = Field(default=None, max_length=80)
     issue_api_key: bool = False
     key_name: str | None = Field(default=None, max_length=60)
 
 
 @router.post("/api/auth/oauth/exchange")
 async def oauth_exchange(payload: ExchangePayload, request: Request):
-    """Canjea el código de un solo uso por sesión (+ API key para apps)."""
+    """Canjea el código de un solo uso por la cookie web o, en las apps, por su credencial."""
     ip = request.client.host if request.client else "unknown"
     check_auth_rate_limit(ip)
 
@@ -312,22 +314,25 @@ async def oauth_exchange(payload: ExchangePayload, request: Request):
     if not user or not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Cuenta no disponible")
 
+    from core.gateway.routers.auth import (
+        MOBILE_KEY_NAME,
+        _set_session_cookie,
+        avisar_si_acceso_inusual,
+        emitir_credencial_de_app,
+        nombre_de_app,
+    )
     agente = request.headers.get("user-agent")
-    session_token = create_web_session(user_id, ip, agente)
-    from core.gateway.routers.auth import avisar_si_acceso_inusual
-    avisar_si_acceso_inusual(user, agente, ip,
-                             (payload.key_name or "Lixbon Mobile") if payload.issue_api_key else None)
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
+    if payload.client or payload.issue_api_key:
+        key_name = payload.key_name or MOBILE_KEY_NAME
+        avisar_si_acceso_inusual(user, agente, ip, nombre_de_app(payload.client, key_name))
+        body.update(emitir_credencial_de_app(user_id, ip, agente, client=payload.client,
+                                             device_name=payload.device_name, key_name=key_name))
+        return JSONResponse(body)
 
-    if payload.issue_api_key:
-        from core.gateway.routers.auth import issue_named_api_key
-        raw_key = issue_named_api_key(user_id, payload.key_name or "Lixbon Mobile", ip)
-        body["api_key"] = raw_key
-        body["api_key_notice"] = "Guárdala: no se volverá a mostrar"
-
-    from core.gateway.routers.auth import SESSION_COOKIE, _set_session_cookie
+    avisar_si_acceso_inusual(user, agente, ip)
     response = JSONResponse(body)
-    _set_session_cookie(response, session_token)
+    _set_session_cookie(response, create_web_session(user_id, ip, agente))
     return response
 
 
