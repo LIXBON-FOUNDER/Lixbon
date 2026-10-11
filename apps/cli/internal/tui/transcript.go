@@ -6,15 +6,51 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// transcript guarda lo ya impreso como líneas lógicas y las envuelve al ancho
-// vigente: al cambiar el tamaño de la ventana se reenvuelve todo.
+// block es una entrada del transcript: sabe pintarse a cualquier ancho y, si
+// se pliega, distinta abierta que cerrada.
+type block interface {
+	render(width int, open bool) string
+}
+
+// folder lo cumplen los bloques plegables (pensamiento, salida larga, diff):
+// un clic en su cabecera o ctrl+o los abren.
+type folder interface{ folds() bool }
+
+type textBlock string
+
+func (b textBlock) render(int, bool) string { return string(b) }
+
+type funcBlock func(width int) string
+
+func (b funcBlock) render(width int, _ bool) string { return b(width) }
+
+// lazier lo cumplen los bloques caros de pintar (markdown): al redimensionar
+// se reenvuelve lo ya pintado y se repintan después, con calma.
+type lazier interface{ lazy() bool }
+
+type entry struct {
+	b     block
+	open  bool
+	text  string
+	rows  []string
+	dirty bool
+}
+
+func (e *entry) folds() bool {
+	f, ok := e.b.(folder)
+	return ok && f.folds()
+}
+
+// transcript guarda las entradas con sus filas ya envueltas al ancho vigente.
+// flat y owner son la vista plana (fila → entrada); se rehacen a demanda
+// cuando una entrada de en medio cambia de alto.
 type transcript struct {
-	lines   []string
-	wrapped []string
+	entries []*entry
 	width   int
-	// dynamic guarda cómo volver a dibujar las entradas que dependen del ancho
-	// (la cabecera con el logo), indexadas por su posición en lines.
-	dynamic map[int]func(width int) string
+	detail  bool
+	flat    []string
+	owner   []int
+	stale   bool
 }
 
 func (t *transcript) wrapLine(line string) []string {
@@ -24,28 +60,119 @@ func (t *transcript) wrapLine(line string) []string {
 	return strings.Split(ansi.Hardwrap(line, t.width, true), "\n")
 }
 
-// add añade texto (puede llevar saltos de línea) y devuelve las filas
-// visibles que ocupa.
-func (t *transcript) add(text string) []string {
-	before := len(t.wrapped)
-	for _, line := range strings.Split(text, "\n") {
-		t.lines = append(t.lines, line)
-		t.wrapped = append(t.wrapped, t.wrapLine(line)...)
-	}
-	return t.wrapped[before:]
+func (t *transcript) paint(e *entry) {
+	e.text = e.b.render(t.width, e.open || t.detail)
+	e.dirty = false
+	t.rewrap(e)
 }
 
-// addDynamic añade una entrada que se redibuja al cambiar el ancho.
-func (t *transcript) addDynamic(render func(width int) string) []string {
-	if t.dynamic == nil {
-		t.dynamic = map[int]func(int) string{}
+func (t *transcript) rewrap(e *entry) {
+	var rows []string
+	for _, line := range strings.Split(e.text, "\n") {
+		rows = append(rows, t.wrapLine(line)...)
 	}
-	text := render(t.width)
-	t.dynamic[len(t.lines)] = render
-	t.lines = append(t.lines, text)
-	before := len(t.wrapped)
-	t.wrapped = append(t.wrapped, t.wrapLine(text)...)
-	return t.wrapped[before:]
+	e.rows = rows
+}
+
+func (t *transcript) add(b block) *entry {
+	e := &entry{b: b}
+	t.paint(e)
+	t.entries = append(t.entries, e)
+	if !t.stale {
+		t.flat = append(t.flat, e.rows...)
+		for range e.rows {
+			t.owner = append(t.owner, len(t.entries)-1)
+		}
+	}
+	return e
+}
+
+func (t *transcript) flatten() {
+	if !t.stale {
+		return
+	}
+	t.flat, t.owner = nil, nil
+	for i, e := range t.entries {
+		t.flat = append(t.flat, e.rows...)
+		for range e.rows {
+			t.owner = append(t.owner, i)
+		}
+	}
+	t.stale = false
+}
+
+func (t *transcript) lines() []string {
+	t.flatten()
+	return t.flat
+}
+
+func (t *transcript) total() int { return len(t.lines()) }
+
+func (t *transcript) start(e *entry) int {
+	start := 0
+	for _, x := range t.entries {
+		if x == e {
+			break
+		}
+		start += len(x.rows)
+	}
+	return start
+}
+
+// refresh vuelve a pintar e y devuelve la fila donde empieza y cuántas filas
+// ganó o perdió.
+func (t *transcript) refresh(e *entry) (start, delta int) {
+	start = t.start(e)
+	before := len(e.rows)
+	t.paint(e)
+	delta = len(e.rows) - before
+	if n := len(t.entries); !t.stale && n > 0 && t.entries[n-1] == e {
+		t.flat = append(t.flat[:start], e.rows...)
+		t.owner = t.owner[:start]
+		for range e.rows {
+			t.owner = append(t.owner, n-1)
+		}
+	} else {
+		t.stale = true
+	}
+	return start, delta
+}
+
+// foldAt devuelve la entrada plegable cuya cabecera (su primera fila con
+// texto) está en row.
+func (t *transcript) foldAt(row int) *entry {
+	t.flatten()
+	if row < 0 || row >= len(t.owner) {
+		return nil
+	}
+	e := t.entries[t.owner[row]]
+	if !e.folds() {
+		return nil
+	}
+	head := t.start(e)
+	for i, r := range e.rows {
+		if strings.TrimSpace(ansi.Strip(r)) != "" {
+			head += i
+			break
+		}
+	}
+	if row != head {
+		return nil
+	}
+	return e
+}
+
+func (t *transcript) setDetail(on bool) {
+	if t.detail == on {
+		return
+	}
+	t.detail = on
+	for _, e := range t.entries {
+		if e.folds() {
+			t.paint(e)
+		}
+	}
+	t.stale = true
 }
 
 func (t *transcript) resize(width int) {
@@ -53,14 +180,39 @@ func (t *transcript) resize(width int) {
 		return
 	}
 	t.width = width
-	t.wrapped = t.wrapped[:0]
-	for i, line := range t.lines {
-		if render, ok := t.dynamic[i]; ok {
-			line = render(width)
-			t.lines[i] = line
+	for _, e := range t.entries {
+		if l, ok := e.b.(lazier); ok && l.lazy() && e.rows != nil {
+			t.rewrap(e)
+			e.dirty = true
+			continue
 		}
-		t.wrapped = append(t.wrapped, t.wrapLine(line)...)
+		t.paint(e)
 	}
+	t.stale = true
+}
+
+// repaintDirty repinta las entradas caras que el último resize solo
+// reenvolvió. Devuelve si hubo alguna.
+func (t *transcript) repaintDirty() bool {
+	any := false
+	for _, e := range t.entries {
+		if e.dirty {
+			t.paint(e)
+			any = true
+		}
+	}
+	if any {
+		t.stale = true
+	}
+	return any
+}
+
+// relayout vuelve a pintar todo, p. ej. tras un cambio de tema.
+func (t *transcript) relayout() {
+	for _, e := range t.entries {
+		t.paint(e)
+	}
+	t.stale = true
 }
 
 // window devuelve exactamente rows filas: el final del transcript desplazado
@@ -69,19 +221,43 @@ func (t *transcript) window(rows, scroll int) []string {
 	if rows <= 0 {
 		return nil
 	}
-	total := len(t.wrapped)
+	all := t.lines()
+	total := len(all)
 	scroll = max(0, min(scroll, total-rows))
 	end := total - scroll
 	start := max(0, end-rows)
-	out := append([]string(nil), t.wrapped[start:end]...)
+	out := append([]string(nil), all[start:end]...)
 	for len(out) < rows {
 		out = append(out, "")
 	}
 	return out
 }
 
-func (t *transcript) reset() { t.lines, t.wrapped, t.dynamic = nil, nil, nil }
+// expanded es el transcript con todo desplegado, para el visor de ctrl+t.
+func (t *transcript) expanded() []string {
+	var out []string
+	for _, e := range t.entries {
+		text := e.text
+		if e.folds() {
+			text = e.b.render(t.width, true)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			out = append(out, t.wrapLine(line)...)
+		}
+	}
+	return out
+}
 
-func (t *transcript) maxScroll(rows int) int { return max(0, len(t.wrapped)-rows) }
+func (t *transcript) reset() {
+	t.entries, t.flat, t.owner, t.stale = nil, nil, nil, false
+}
 
-func (t *transcript) text() string { return strings.Join(t.lines, "\n") }
+func (t *transcript) maxScroll(rows int) int { return max(0, t.total()-rows) }
+
+func (t *transcript) text() string {
+	texts := make([]string, len(t.entries))
+	for i, e := range t.entries {
+		texts[i] = e.text
+	}
+	return strings.Join(texts, "\n")
+}

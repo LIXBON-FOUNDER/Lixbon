@@ -24,10 +24,10 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestRealProgramEndToEnd(t *testing.T) {
 	h := newHarness(t, nil, textReply("Hola desde el modelo."))
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("Lixbon CLI")
+	rig.waitFor("LIXBON CLI")
 	rig.type_("buenas tardes\r")
 	rig.waitFor("Hola desde el modelo.")
-	rig.waitGone("trabajando…")
+	rig.waitGone("Trabajando…")
 	screen := rig.screen()
 	if i, j := strings.Index(screen, "buenas tardes"), strings.Index(screen, "Hola desde el modelo."); i < 0 || j < 0 || i > j {
 		t.Fatalf("el mensaje debe verse antes que la respuesta (%d, %d):\n%s", i, j, screen)

@@ -1,17 +1,17 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-// pager es el visor del transcript (Ctrl+T): muestra la conversación, las
-// herramientas ejecutadas y, mientras el modelo trabaja, lo que lleva escrito
-// completo, sin el recorte de la vista normal.
+// pager es el visor del transcript (Ctrl+T): la conversación con todo
+// desplegado y, mientras el modelo trabaja, lo que lleva escrito completo,
+// sin el recorte de la vista normal.
 type pager struct {
 	// fromEnd son las filas que el visor está desplazado hacia arriba desde el final.
 	fromEnd int
@@ -19,28 +19,26 @@ type pager struct {
 
 func (m *Model) pagerActive() bool { return m.pager != nil && m.picker == nil }
 
-func (m *Model) pageRows() int { return max(1, m.height-1) }
+func (m *Model) pageRows() int { return max(1, m.height-2) }
 
 func (m *Model) pagerScroll(rows int) {
 	m.pager.fromEnd = max(0, min(m.pager.fromEnd+rows, max(0, len(m.pagerLines())-m.pageRows())))
 }
 
 func (m *Model) pagerLines() []string {
-	lines := slices.Clone(m.log.wrapped)
+	lines := m.log.expanded()
 	if !m.running {
 		return lines
 	}
-	lines = append(lines, "", sAccent.Render(glyphDot)+sDim.Render(" en curso"))
-	for _, part := range []struct {
-		text  string
-		style lipgloss.Style
-	}{{m.live.reasoning.String(), sDim2}, {m.live.content.String(), sPrimary}} {
-		text := strings.TrimSpace(part.text)
-		if text == "" {
-			continue
+	lines = append(lines, "", mark(m.spinFrame(), sAccent)+sDim.Render("en curso"))
+	if think := strings.TrimSpace(m.live.reasoning.String()); think != "" {
+		for _, l := range wrapText(think, max(20, m.width-6)) {
+			lines = append(lines, pad+sDim2.Render(glyphThinkRail)+" "+sDim.Italic(true).Render(l))
 		}
-		for _, l := range strings.Split(ansi.Wrap(text, max(20, m.width-2), ""), "\n") {
-			lines = append(lines, "  "+part.style.Render(l))
+	}
+	if text := strings.TrimSpace(m.live.content.String()); text != "" {
+		for _, l := range wrapText(text, max(20, m.width-4)) {
+			lines = append(lines, pad+sPrimary.Render(l))
 		}
 	}
 	return lines
@@ -67,6 +65,7 @@ func (m *Model) handlePagerKey(msg tea.KeyPressMsg) {
 }
 
 func (m *Model) pagerView() tea.View {
+	width := max(m.width, 1)
 	rows := m.pageRows()
 	m.pagerScroll(0)
 	all := m.pagerLines()
@@ -75,16 +74,17 @@ func (m *Model) pagerView() tea.View {
 	for len(lines) < rows {
 		lines = append(lines, "")
 	}
-	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, max(m.width, 1), "")
-	}
-	hint := "↑↓ RePág/AvPág Inicio/Fin desplazan  " + glyphSep + "  q, Esc o Ctrl+T cierran"
+	head := mark(glyphBrand, sAccent) + sBold.Render("Transcript completo") + sDim2.Render(" "+glyphSep+" ") + sDim.Render(fmt.Sprintf("%d filas", len(all)))
+	hint := keyHints([2]string{"↑↓ RePág AvPág", "desplazan"}, [2]string{"Inicio Fin", "saltan"}, [2]string{"q, Esc o Ctrl+T", "cierran"})
 	if m.pager.fromEnd > 0 {
-		hint = "▲ " + hint
+		hint = sAccent.Render("▲") + " " + hint
 	}
-	footer := ansi.Truncate(" "+sDim.Render(hint), max(m.width, 1), "")
-
-	v := tea.NewView(strings.Join(append(lines, footer), "\n"))
+	screen := append([]string{head}, lines...)
+	screen = append(screen, " "+hint)
+	for i, line := range screen {
+		screen[i] = ansi.Truncate(line, width, "")
+	}
+	v := tea.NewView(strings.Join(screen, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = m.windowTitle()

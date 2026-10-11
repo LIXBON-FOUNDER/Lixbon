@@ -96,10 +96,10 @@ func (r *screenRig) dump() string { return fmt.Sprintf("\n%s", r.screen()) }
 func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 	h := newHarness(t, func(c *configT) { c.Model = "" })
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("Lixbon CLI")
+	rig.waitFor("LIXBON CLI")
 	rig.waitFor("sin modelo")
 
-	status := rig.rowOf("sin modelo  ·  API key")
+	status := rig.rowOf("shift+tab")
 	box := rig.rowOf("╭")
 	if status != rig.rows-1 || box != rig.rows-4 {
 		t.Fatalf("la barra debe ir en las últimas filas: caja=%d estado=%d%s", box, status, rig.dump())
@@ -110,7 +110,7 @@ func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 		if got := rig.count("╭"); got != 1 {
 			t.Fatalf("tras %q hay %d cajas de entrada%s", step, got, rig.dump())
 		}
-		if rig.rowOf("╭") != box || rig.rowOf("sin modelo  ·  API key") != status {
+		if rig.rowOf("╭") != box || rig.rowOf("shift+tab") != status {
 			t.Fatalf("tras %q la barra se movió%s", step, rig.dump())
 		}
 	}
@@ -123,8 +123,8 @@ func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 func TestLogoAndHeaderAreAtTheTop(t *testing.T) {
 	h := newHarness(t, nil)
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("Lixbon CLI")
-	if row := rig.rowOf("Lixbon CLI"); row < 1 || row > 4 {
+	rig.waitFor("LIXBON CLI")
+	if row := rig.rowOf("LIXBON CLI"); row < 1 || row > 4 {
 		t.Fatalf("la cabecera va arriba: fila %d%s", row, rig.dump())
 	}
 	if !strings.ContainsAny(rig.screen(), "▀▄") {
@@ -159,7 +159,7 @@ func TestTranscriptScrollsWithPageKeys(t *testing.T) {
 func TestLogoAndHeaderShowTheWorkspaceFolder(t *testing.T) {
 	h := newHarness(t, nil)
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("Lixbon CLI")
+	rig.waitFor("LIXBON CLI")
 	if !strings.Contains(rig.screen(), shortPath(h.chat.Workspace)) {
 		t.Fatalf("la cabecera muestra la carpeta de trabajo%s", rig.dump())
 	}
@@ -168,10 +168,10 @@ func TestLogoAndHeaderShowTheWorkspaceFolder(t *testing.T) {
 func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	h := newHarness(t, nil, textReply("respuesta vieja"))
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("Lixbon CLI")
+	rig.waitFor("LIXBON CLI")
 	rig.type_("mensaje viejo\r")
 	rig.waitFor("respuesta vieja")
-	rig.waitGone("trabajando…")
+	rig.waitGone("Trabajando…")
 
 	rig.type_("/clear\r")
 	rig.waitFor("contexto limpio")
@@ -179,7 +179,7 @@ func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	if strings.Contains(screen, "respuesta vieja") || strings.Contains(screen, "mensaje viejo") {
 		t.Fatalf("/clear debe borrar la conversación de la pantalla%s", rig.dump())
 	}
-	for _, want := range []string{"Lixbon CLI", shortPath(h.chat.Workspace)} {
+	for _, want := range []string{"LIXBON CLI", shortPath(h.chat.Workspace)} {
 		if !strings.Contains(screen, want) {
 			t.Fatalf("tras /clear debe seguir viéndose %q%s", want, rig.dump())
 		}

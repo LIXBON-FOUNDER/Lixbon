@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,8 +67,6 @@ type Options struct {
 	Autotitle bool
 }
 
-type anchor struct{ tokens, chars int }
-
 type Chat struct {
 	Cfg        config.Config
 	ConfigPath string
@@ -99,7 +98,21 @@ type Chat struct {
 	autotitle     bool
 	titling       bool
 	anchor        *anchor
+	overhead      map[string]overhead
 }
+
+// anchor son los tokens reales de la conversación en la última petición:
+// prompt_tokens del servidor menos lo que ocupan sistema y herramientas.
+type anchor struct {
+	agent         bool
+	tokens, chars int
+}
+
+// overhead es lo que ocupan el prompt de sistema (también el que añade el
+// gateway, que el CLI no ve) y las herramientas. Se mide restando la
+// conversación estimada al prompt real, y se queda la medición hecha con la
+// conversación más corta, que es la de menos error.
+type overhead struct{ tokens, convChars int }
 
 // New prepara la conversación a partir de la configuración. No hace red.
 func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
@@ -213,11 +226,21 @@ type Account struct {
 	ModelsErr     error
 	// Generic: el proveedor no es un gateway Lixbon.
 	Generic bool
+	// PlanName es el plan de la cuenta según el gateway ("" si no se supo).
+	PlanName string
 }
 
 // Probe distingue sesión válida, clave rechazada y servidor inalcanzable, y
 // deja el plan cacheado en la configuración.
 func (c *Chat) Probe(ctx context.Context) Account {
+	acc := c.QueryAccount(ctx)
+	c.ApplyAccount(acc)
+	return acc
+}
+
+// QueryAccount es Probe sin tocar el estado: se puede llamar fuera de la
+// goroutine de la interfaz y aplicar el resultado después con ApplyAccount.
+func (c *Chat) QueryAccount(ctx context.Context) Account {
 	var acc Account
 	authFailed := false
 	models, err := c.Client.ModelsDetail(ctx)
@@ -254,14 +277,19 @@ func (c *Chat) Probe(ctx context.Context) Account {
 		}
 		return acc
 	}
-	if plan != "" && plan != c.Cfg.ExtraString("plan_name") {
-		c.Cfg.SetExtraString("plan_name", plan)
-		_ = c.SaveConfig()
-	}
+	acc.PlanName = plan
 	if authFailed {
 		acc.State = AccountAuth
 	}
 	return acc
+}
+
+// ApplyAccount guarda en la configuración el plan que trajo QueryAccount.
+func (c *Chat) ApplyAccount(acc Account) {
+	if acc.PlanName != "" && acc.PlanName != c.Cfg.ExtraString("plan_name") {
+		c.Cfg.SetExtraString("plan_name", acc.PlanName)
+		_ = c.SaveConfig()
+	}
 }
 
 // UseProfile cambia de proveedor: guarda el que se deja, apunta el cliente al
@@ -275,7 +303,6 @@ func (c *Chat) UseProfile(name string) error {
 	c.Model = firstNonEmpty(c.Cfg.KeyModel, c.Cfg.Model)
 	c.Session.Model = c.Model
 	c.Session.ContextWindow = c.Cfg.ContextWindow
-	c.anchor = nil
 	if c.Client.Generic && c.Mode == ModeDelegate {
 		c.Mode, c.Cfg.Mode = ModeAsk, ModeAsk
 	}
@@ -347,11 +374,11 @@ func (c *Chat) Persist() {
 func (c *Chat) NewConversation() {
 	c.Persist()
 	c.History = nil
-	c.anchor = nil
 	c.SessionTokens = 0
 	c.ConversationID = newUUID()
 	c.SetTitle("")
 	c.Session.Working = nil
+	c.anchor = nil
 }
 
 // Open reabre una conversación guardada; false si ya no está.
@@ -362,10 +389,10 @@ func (c *Chat) Open(id string) bool {
 	}
 	c.Persist()
 	c.History = record.Messages
-	c.anchor = nil
 	c.ConversationID = firstNonEmpty(record.ID, id)
 	c.SetTitle(record.Title)
 	c.SessionTokens = record.Tokens
+	c.anchor = nil
 	return true
 }
 
@@ -434,6 +461,11 @@ func (c *Chat) Send(ctx context.Context, text string, sink Sink) (string, error)
 		// Un error del gateway no deja el mensaje a medias en el historial.
 		c.History = c.History[:prior]
 		return "", err
+	}
+	if err == nil && c.Mode == ModeAsk && strings.TrimSpace(answer) == "" {
+		// Sin respuesta no hubo intercambio: no se reenvía ni cuenta en el contexto.
+		c.History = c.History[:prior]
+		return "", nil
 	}
 	c.maybeAutotitle(sink)
 	c.Persist()
@@ -580,8 +612,6 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 			req.Think = "high"
 		}
 		sink.Event(agent.Event{Kind: agent.EventStep})
-		sentChars := history.PayloadChars(messages, toolList)
-		sentImages := history.ImageCount(messages)
 
 		stream, err := c.Client.ChatStream(ctx, req)
 		if err != nil {
@@ -625,48 +655,94 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 			}
 		}
 		calls := assembler.calls()
-		c.registerUsage(usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, sentChars, sentImages, text.Len()+len(fmt.Sprint(calls)))
+		c.registerUsage(agentMode, messages, toolList, usage.PromptTokens, usage.TotalTokens)
+		if usage.CompletionTokens > 0 {
+			sink.Delta(sse.Usage, strconv.Itoa(usage.CompletionTokens))
+		}
 		return agent.StreamResult{Text: text.String(), ToolCalls: calls, Reasoning: textutil.Strip(reasoning.String())}, nil
 	}
 }
 
-func (c *Chat) registerUsage(prompt, completion, total, sentChars, sentImages, replyChars int) {
+// registerUsage suma los tokens reales de la petición y fija el ancla del
+// contexto con su prompt_tokens.
+func (c *Chat) registerUsage(agentMode bool, messages []history.Message, toolList []map[string]any, prompt, total int) {
 	if total > 0 {
 		c.SessionTokens += total
 		c.TurnTokens += total
 	}
-	if prompt > 0 && sentChars > 0 {
-		c.Session.Estimator.Calibrate(sentChars, prompt-history.TokensPerImage*sentImages)
-		c.anchor = &anchor{tokens: prompt + completion, chars: sentChars + replyChars}
+	if prompt <= 0 {
+		return
 	}
+	est := c.Session.Estimator
+	system, conv := splitSystem(messages)
+	images := history.TokensPerImage * history.ImageCount(conv)
+	// Ollama no cuenta el prefijo que reutiliza de su caché: un prompt muy por
+	// debajo de lo enviado no es un conteo completo.
+	sentEst := est.EstimateTokens(messages) + int(float64(history.PayloadChars(nil, toolList))/est.CharsPerToken())
+	if float64(prompt) < 0.6*float64(sentEst) {
+		return
+	}
+	convChars := history.PayloadChars(conv, nil)
+	key := fmt.Sprintf("%t/%d", agentMode, history.PayloadChars(system, toolList))
+	if c.overhead == nil {
+		c.overhead = map[string]overhead{}
+	}
+	o, ok := c.overhead[key]
+	switch {
+	case !ok:
+		est.Calibrate(history.PayloadChars(messages, toolList), prompt-images)
+	case convChars > o.convChars && prompt > o.tokens:
+		// Con el sistema ya medido, la proporción sale solo de la conversación,
+		// sin el prompt del gateway que el CLI no ve.
+		est.Calibrate(convChars, prompt-o.tokens-images)
+	}
+	if !ok || convChars < o.convChars {
+		o = overhead{tokens: max(0, prompt-est.EstimateTokens(conv)), convChars: convChars}
+		c.overhead[key] = o
+	}
+	c.anchor = &anchor{agent: agentMode, tokens: max(0, prompt-o.tokens), chars: convChars}
 }
 
-// ContextUsage estima cuánto del contexto ocupa lo que se enviaría ahora:
-// parte del conteo real del último prompt y solo estima lo añadido después.
-func (c *Chat) ContextUsage() (tokens int, percent float64) {
-	est := c.Session.Estimator
-	var sent []history.Message
-	var toolList []map[string]any
-	if c.Mode == ModeAgent {
-		sent = append(sent, history.Message{Role: "system", Content: agent.NativeSystemPrompt(c.Workspace)})
-		if c.Session.Working != nil {
-			sent = append(sent, c.Session.Working...)
+func splitSystem(messages []history.Message) (system, conv []history.Message) {
+	for _, m := range messages {
+		if m.Role == "system" {
+			system = append(system, m)
 		} else {
-			sent = append(sent, c.History...)
+			conv = append(conv, m)
 		}
-		if c.Session.NativeTools {
-			toolList = toolSchemas()
-		}
-	} else {
-		sent = c.contextMessages()
 	}
-	chars := history.PayloadChars(sent, toolList)
-	if a := c.anchor; a != nil && float64(chars) >= float64(a.chars)*0.8 {
+	return system, conv
+}
+
+// ContextUsage es lo que ocupa la conversación: los mensajes del usuario, las
+// respuestas del modelo y lo que hizo con las herramientas, sin el prompt de
+// sistema ni los esquemas de herramientas. Parte del conteo real de la última
+// petición y solo estima lo añadido después.
+func (c *Chat) ContextUsage() (tokens int, percent float64) {
+	agentMode := c.Mode == ModeAgent
+	var sent []history.Message
+	switch {
+	case agentMode && c.Session.Working != nil:
+		sent = c.Session.Working
+	case agentMode:
+		sent = c.History
+	default:
+		sent = agent.SanitizeForPlainChat(c.History)
+		if limit := c.Cfg.MaxContextMessages; limit > 0 && len(sent) > limit {
+			sent = sent[len(sent)-limit:]
+		}
+	}
+	_, conv := splitSystem(sent)
+	if len(conv) == 0 {
+		return 0, 0
+	}
+	est := c.Session.Estimator
+	chars := history.PayloadChars(conv, nil)
+	if a := c.anchor; a != nil && a.agent == agentMode && float64(chars) >= float64(a.chars)*0.8 {
 		tokens = a.tokens + int(float64(max(0, chars-a.chars))/est.CharsPerToken())
 	} else {
-		tokens = int(float64(chars) / est.CharsPerToken())
+		tokens = est.EstimateTokens(conv)
 	}
-	tokens += history.TokensPerImage * history.ImageCount(sent)
 	window := max(c.Cfg.ContextWindow, 1)
 	return tokens, min(100.0, float64(tokens)*100.0/float64(window))
 }

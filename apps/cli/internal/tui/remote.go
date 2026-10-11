@@ -91,18 +91,18 @@ func (m *Model) cmdRemote(arg string) tea.Cmd {
 	switch strings.ToLower(arg) {
 	case "", "start":
 	case "stop", "status":
-		m.print(note("El control remoto se activa con /remote y se termina con Ctrl+C dentro del modo remoto."))
+		m.add(note("El control remoto se activa con /remote y se termina con Ctrl+C dentro del modo remoto."))
 		return nil
 	default:
-		m.print(errLine("Uso: /remote — inicia el control remoto desde tu app móvil"))
+		m.add(errLine("Uso: /remote — inicia el control remoto desde tu app móvil"))
 		return nil
 	}
 	switch {
 	case m.remote != nil:
-		m.print(note("El control remoto ya está activo."))
+		m.add(note("El control remoto ya está activo."))
 		return nil
 	case m.chat.Cfg.APIKey == "":
-		m.print(errLine("Necesitas una sesión activa (/login) para usar /remote."))
+		m.add(errLine("Necesitas una sesión activa (/login) para usar /remote."))
 		return nil
 	}
 	title := firstNonEmpty(filepath.Base(m.chat.Workspace), "workspace")
@@ -112,7 +112,7 @@ func (m *Model) cmdRemote(arg string) tea.Cmd {
 	mode, model := m.chat.Mode, m.chat.Model
 	return m.async("creando sesión remota", func(ctx context.Context) cmdDoneMsg {
 		if err := link.Start(ctx, mode, model); err != nil {
-			return cmdDoneMsg{lines: []string{errLine("No se pudo iniciar el control remoto: " + err.Error())}}
+			return cmdDoneMsg{lines: []block{errLine("No se pudo iniciar el control remoto: " + err.Error())}}
 		}
 		qr := link.QR(ctx)
 		return cmdDoneMsg{apply: func(m *Model) { m.enterRemote(link, title, machine, qr) }}
@@ -135,20 +135,20 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 		link.Emit("tool_use", map[string]any{"tool": "todo", "summary": todoSummary(items), "readonly": true})
 	}
 
-	lines := []string{"", "  " + sBold.Render(glyphThink+" Control remoto activo"),
-		"  " + sDim.Render("Sesión: ") + sPrimary.Render(title) + sDim.Render(" en "+machine),
-		"  " + sDim.Render("Link:   ") + sAccent.Render(link.ShareURL())}
+	m.gap()
+	m.add(reportBlock{title: "Control remoto activo", rows: [][2]string{
+		{"Sesión", sPrimary.Render(title) + sDim.Render(" en "+machine)},
+		{"Link", sPlan.Render(link.ShareURL())},
+	}})
 	if qr != "" {
-		lines = append(lines, "")
-		for _, row := range strings.Split(strings.TrimRight(qr, "\n"), "\n") {
-			lines = append(lines, "  "+row)
-		}
+		m.print("")
+		m.add(qrBlock(qr))
 	}
-	lines = append(lines, "",
-		note("La sesión ya aparece en la sección Remote de tu app Lixbon."),
-		note("Sin la app, escanea el QR: abre la sesión en la web (te pedirá iniciar sesión con tu cuenta)."),
-		note("Control local en pausa — Ctrl+C para terminar el modo remoto y volver aquí."), "")
-	m.print(strings.Join(lines, "\n"))
+	m.print("")
+	m.add(note("La sesión ya aparece en la sección Remote de tu app Lixbon."))
+	m.add(note("Sin la app, escanea el QR: abre la sesión en la web (te pedirá iniciar sesión con tu cuenta)."))
+	m.add(note("Control local en pausa — Ctrl+C para terminar el modo remoto y volver aquí."))
+	m.print("")
 
 	link.EmitSnapshot()
 	link.Emit("status", map[string]any{"state": "idle"})
@@ -185,7 +185,8 @@ func (m *Model) leaveRemote(endSession bool) {
 	m.chat.Toolbox.AskUser = host.askUser
 	m.chat.Toolbox.OnTodo = host.onTodo
 	go host.link.Stop(endSession)
-	m.print("\n" + note("Control remoto terminado; la sesión vuelve a esta terminal."))
+	m.gap()
+	m.add(note("Control remoto terminado; la sesión vuelve a esta terminal."))
 }
 
 func (m *Model) onRemote(msg remoteMsg) tea.Cmd {
@@ -198,9 +199,10 @@ func (m *Model) onRemote(msg remoteMsg) tea.Cmd {
 		switch {
 		case text == "":
 		case strings.HasPrefix(text, "!"):
-			m.print(note("Se ignoró un «!» recibido por control remoto: los comandos manuales solo se escriben en esta terminal."))
+			m.add(note("Se ignoró un «!» recibido por control remoto: los comandos manuales solo se escriben en esta terminal."))
 		case strings.HasPrefix(text, "/"):
-			m.print(renderCommandEcho(text + "  [remoto]"))
+			m.gap()
+			m.add(echoBlock(text + "  [remoto]"))
 			m.remoteCommand(text)
 		case m.busyNow():
 			m.queue = append(m.queue, text)
@@ -384,10 +386,4 @@ func (m *Model) handleRemoteKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.pager = &pager{}
 	}
 	return nil
-}
-
-func (m *Model) remoteBanner() string {
-	line := sAccent.Render(glyphDot) + " " + sBold.Render("Control remoto activo") +
-		sDim2.Render("  "+glyphSep+"  Ctrl+C termina y devuelve el control a esta terminal")
-	return m.borderColor().Width(max(10, m.width-2)).Render(line)
 }

@@ -5,13 +5,10 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 const wheelStep = 3
-
-var sSelected = lipgloss.NewStyle().Reverse(true)
 
 type point struct{ row, col int }
 
@@ -66,12 +63,14 @@ func (m *Model) scrollBy(rows int) {
 	m.scroll = max(0, m.scroll+rows)
 }
 
+// pointAt traduce una celda de la pantalla a fila y columna del transcript.
 func (m *Model) pointAt(x, y int) (point, bool) {
+	y -= m.winY
 	if y < 0 || y >= m.winRows {
 		return point{}, false
 	}
 	row := m.winTop + y
-	if row >= len(m.log.wrapped) {
+	if row >= m.log.total() {
 		return point{}, false
 	}
 	return point{row: row, col: max(0, x)}, true
@@ -92,12 +91,12 @@ func (m *Model) onMouseDrag(msg tea.MouseMotionMsg) {
 		return
 	}
 	switch {
-	case msg.Y <= 0:
+	case msg.Y <= m.winY:
 		m.scrollBy(1)
-	case msg.Y >= m.winRows-1:
+	case msg.Y >= m.winY+m.winRows-1:
 		m.scrollBy(-1)
 	}
-	y := min(max(msg.Y, 0), m.winRows-1)
+	y := min(max(msg.Y, m.winY), m.winY+m.winRows-1)
 	if p, ok := m.pointAt(msg.X, y); ok {
 		m.sel.head = p
 	}
@@ -109,7 +108,12 @@ func (m *Model) onMouseUp() tea.Cmd {
 	}
 	m.sel.dragging = false
 	if m.sel.empty() {
+		row := m.sel.anchor.row
 		m.sel = nil
+		if e := m.log.foldAt(row); e != nil {
+			e.open = !e.open
+			m.refresh(e)
+		}
 		return nil
 	}
 	text := m.selectedText()
@@ -126,8 +130,9 @@ func (m *Model) selectedText() string {
 	}
 	from, to := m.sel.bounds()
 	var out []string
-	for row := from.row; row <= to.row && row < len(m.log.wrapped); row++ {
-		plain := ansi.Strip(m.log.wrapped[row])
+	lines := m.log.lines()
+	for row := from.row; row <= to.row && row < len(lines); row++ {
+		plain := ansi.Strip(lines[row])
 		a, b, _ := m.sel.span(row, ansi.StringWidth(plain))
 		out = append(out, strings.TrimRight(ansi.Cut(plain, a, b), " "))
 	}
