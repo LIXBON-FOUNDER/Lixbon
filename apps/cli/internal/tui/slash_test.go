@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lixbon.com/cli/internal/history"
 )
@@ -140,7 +141,7 @@ func TestHistoryMessagesResendsOne(t *testing.T) {
 }
 
 func TestCompactCommand(t *testing.T) {
-	h := newHarness(t, nil, jsonReply(`{"choices":[{"message":{"content":"resumen corto"}}]}`))
+	h := newHarness(t, nil, textReply("resumen corto"))
 	h.send("/compact")
 	contains(t, h.out(), "nada que compactar")
 	for i := 0; i < 4; i++ {
@@ -148,10 +149,26 @@ func TestCompactCommand(t *testing.T) {
 	}
 	h.send("/compact")
 	h.settle()
-	contains(t, h.out(), "Conversación compactada:")
+	contains(t, h.out(), "Conversación compactada")
 	if !strings.Contains(h.chat.History[0].Content, "resumen corto") || len(h.chat.History) != 4 {
 		t.Fatalf("historial: %d, primero %q", len(h.chat.History), h.chat.History[0].Content)
 	}
+	body := h.gw.bodyAt(0)
+	if body["think"] != false || body["stream"] != true || body["conversation_id"] != nil {
+		t.Fatalf("el resumen va en streaming, sin razonar y fuera de la conversación: %v", body)
+	}
+	notContains(t, h.out(), "resumen corto")
+	if h.m.compacting != nil {
+		t.Fatal("el avance debe desaparecer al terminar")
+	}
+}
+
+func TestCompactProgressShowsBothPhases(t *testing.T) {
+	h := newHarness(t, nil)
+	h.m.compacting = &compactState{started: time.Now(), messages: 12, tokens: 9000}
+	contains(t, h.view(), "1/2 el modelo lee 12 mensajes")
+	h.update(compactProgressMsg{written: 1400})
+	contains(t, h.view(), "2/2 escribe el resumen 50%")
 }
 
 func TestSettingsCommands(t *testing.T) {
@@ -242,17 +259,18 @@ func TestWorkspaceCommandReloadsProjectContext(t *testing.T) {
 	other := t.TempDir()
 	os.WriteFile(filepath.Join(other, "LIXBON.md"), []byte("Reglas"), 0o644)
 	h.send("/workspace")
-	contains(t, h.out(), "Workspace actual:")
+	contains(t, h.view(), "usar esta carpeta")
+	h.key("esc")
 	h.send("/workspace " + other)
 	if h.chat.ProjectContext != "Reglas" || h.chat.Session.ProjectContext != "Reglas" {
 		t.Fatalf("contexto: %q", h.chat.ProjectContext)
 	}
-	contains(t, h.out(), "LIXBON.md encontrado")
+	contains(t, h.out(), "LIXBON.md")
 	if want, _ := filepath.EvalSymlinks(other); h.chat.Toolbox.Root != want {
 		t.Fatalf("la raíz de las herramientas es %s, se esperaba %s", h.chat.Toolbox.Root, want)
 	}
 	h.send("/workspace /no/existe/seguro")
-	contains(t, h.out(), "Ruta inválida o no es una carpeta.")
+	contains(t, h.out(), "no es una carpeta")
 }
 
 func TestSaveWritesMarkdown(t *testing.T) {
@@ -327,8 +345,11 @@ func TestPsListsAndStopsBackgroundCommands(t *testing.T) {
 	}
 	h.chat.Toolbox.Execute(t.Context(), "run_command", map[string]any{"command": sleep, "background": true})
 	h.send("/ps")
-	contains(t, h.view(), "Detener alguno")
-	h.key("up")
+	contains(t, h.view(), "Comandos en segundo plano (1)")
+	contains(t, h.view(), "en marcha")
+	h.key("esc")
+	contains(t, h.view(), "[1] comando")
+	h.send("/ps")
 	h.key("enter")
 	if len(h.chat.Toolbox.Procs.IDs()) != 0 {
 		t.Fatal("el proceso debía detenerse")

@@ -34,6 +34,8 @@ type entry struct {
 	text  string
 	rows  []string
 	dirty bool
+	// detached: la entrada se mostró fuera del transcript (pie o panel).
+	detached bool
 }
 
 func (e *entry) folds() bool {

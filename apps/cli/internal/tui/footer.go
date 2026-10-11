@@ -6,13 +6,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// footer es la fila de abajo: el modo y los avisos a la izquierda; el
-// contexto a la derecha. Con un selector abierto, la izquierda son sus teclas.
-// En una terminal estrecha se van soltando detalles en vez de partir la fila.
+// footer es la fila de abajo: el modo, el razonamiento, los comandos en
+// segundo plano y los avisos a la izquierda; el contexto de esta conversación
+// a la derecha. Con un selector abierto, la izquierda son sus teclas. En una
+// terminal estrecha se van soltando detalles en vez de partir la fila.
 func (m *Model) footer() string {
 	width := max(1, m.width)
 	sep := sDim2.Render(" " + glyphSep + " ")
-	mode := " " + sAccent.Render(glyphPrompt) + " " + modeStyle(m.modeName()).Bold(true).Render(m.modeName())
+	mode := " " + m.lit(sAccent.Render(glyphPrompt)+" "+modeStyle(m.modeName()).Bold(true).Render(m.modeName()), m.height-1, m.footMode)
 
 	var hint string
 	switch {
@@ -25,10 +26,22 @@ func (m *Model) footer() string {
 	default:
 		hint = sDim2.Render("shift+tab")
 	}
+	var effort, procs string
+	if m.picker == nil {
+		if l := m.effortLabel(); l != "" {
+			effort = sDim.Render("razonamiento ") + sSoft.Render(l)
+		}
+		if n := m.liveProcs(); n > 0 {
+			procs = sAccent.Render(fmt.Sprintf("[%d]", n)) + " " + sSoft.Render(plural(n, "comando", "comandos"))
+		}
+	}
 	var notices []string
-	if m.busy != "" {
+	switch {
+	case m.busy != "":
 		notices = append(notices, sAccent.Render(m.spinFrame())+" "+sSoft.Render(m.busy+"…"))
-	} else if m.notice != "" {
+	case m.toastText != "":
+		notices = append(notices, m.toastText)
+	case m.notice != "":
 		notices = append(notices, sAccent.Render(m.notice))
 	}
 	if n := len(m.queue); n > 0 {
@@ -41,20 +54,45 @@ func (m *Model) footer() string {
 		notices = append(notices, sWarn.Render("sin preguntar"))
 	}
 
-	full := mode
-	if m.picker != nil {
-		full = " " + hint
-	} else {
-		full += "  " + hint
+	type layout struct {
+		hint          bool
+		effort, procs bool
+		notices       int
 	}
-	for _, n := range notices {
-		full += sep + n
+	layouts := []layout{
+		{true, true, true, len(notices)},
+		{false, true, true, len(notices)},
+		{false, true, true, min(1, len(notices))},
+		{false, false, true, min(1, len(notices))},
+		{false, false, true, 0},
+		{false, false, false, 0},
 	}
-	lefts := []string{full}
-	if len(notices) > 0 {
-		lefts = append(lefts, mode+sep+notices[0])
+	build := func(l layout) (string, span, span) {
+		left := mode
+		if m.picker != nil {
+			left = " " + hint
+		} else if l.hint {
+			left += "  " + hint
+		}
+		var effortAt, procsAt span
+		if l.effort && effort != "" {
+			left += sep
+			effortAt = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(effort)}
+			left += m.lit(effort, m.height-1, m.footEffort)
+		}
+		if l.procs && procs != "" {
+			left += sep
+			procsAt = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(procs)}
+			left += m.lit(procs, m.height-1, m.footProcs)
+		}
+		for _, n := range notices[:l.notices] {
+			left += sep + n
+		}
+		if l.notices == 1 && len(notices) > 0 {
+			left = ansi.Truncate(left, max(1, width-6), glyphEllipsis)
+		}
+		return left, effortAt, procsAt
 	}
-	lefts = append(lefts, mode)
 
 	pct := fmt.Sprintf(" %.0f%%", m.ctxPct)
 	pctStyle := sSoft
@@ -65,7 +103,7 @@ func (m *Model) footer() string {
 		pctStyle = sWarn
 	}
 	bar := meter(m.ctxPct, contextCells) + pctStyle.Render(pct)
-	tokens := sDim.Render(fmtTokens(max(m.sessionTokens, m.ctxTokens)) + " tok")
+	tokens := sDim.Render(fmtTokens(m.ctxTokens) + " tok")
 	compact := ""
 	if m.ctxPct >= ctxFull {
 		compact = sep + sWarn.Render("/compact")
@@ -77,16 +115,18 @@ func (m *Model) footer() string {
 		pctStyle.Render(fmt.Sprintf("%.0f%%", m.ctxPct)) + " ",
 		"",
 	}
-	for _, l := range lefts {
+	for _, l := range layouts {
+		left, effortAt, procsAt := build(l)
 		for _, r := range rights {
-			if ansi.StringWidth(l)+ansi.StringWidth(r)+2 <= width || r == "" && ansi.StringWidth(l) <= width {
+			if ansi.StringWidth(left)+ansi.StringWidth(r)+2 <= width || r == "" && ansi.StringWidth(left) <= width {
 				m.footMode = span{1, ansi.StringWidth(mode)}
-				return twoCol(l, r, width)
+				m.footEffort, m.footProcs = effortAt, procsAt
+				return twoCol(left, r, width)
 			}
 		}
 	}
-	m.footMode = span{}
-	return ansi.Truncate(lefts[len(lefts)-1], width, "")
+	m.footMode, m.footEffort, m.footProcs = span{}, span{}, span{}
+	return ansi.Truncate(mode, width, "")
 }
 
 // visionWarning avisa si hay imágenes en cola y el modelo dice que no las ve.

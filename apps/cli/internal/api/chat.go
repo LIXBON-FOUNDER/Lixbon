@@ -27,6 +27,9 @@ type ChatRequest struct {
 	NumCtx         int              `json:"num_ctx,omitempty"`
 	Tools          []map[string]any `json:"tools,omitempty"`
 	Think          any              `json:"think,omitempty"`
+	// Effort es el nivel que pidió el usuario con /effort; solo lo usa un
+	// proveedor genérico (el gateway ya lo recibe en Think).
+	Effort string `json:"-"`
 }
 
 // generic es el cuerpo para un servidor compatible con OpenAI: OpenAI y otros
@@ -38,6 +41,12 @@ func (r ChatRequest) generic() map[string]any {
 	}
 	if len(r.Tools) > 0 {
 		body["tools"] = r.Tools
+	}
+	// Ollama y LM Studio aceptan reasoning_effort en su API compatible con
+	// OpenAI; a otros modelos les sobra, así que solo va si se pidió.
+	switch r.Effort {
+	case "low", "medium", "high":
+		body["reasoning_effort"] = r.Effort
 	}
 	return body
 }
@@ -137,6 +146,9 @@ func (c *Client) Chat(ctx context.Context, model string, messages []map[string]a
 	payload := map[string]any{
 		"model": model, "messages": messages, "conversation_id": nil,
 		"client_id": clientID, "title": "interno", "source": "cli",
+		// Un resumen o un mensaje de commit no necesitan razonar: con un modelo
+		// thinking, pensar antes multiplicaba lo que tardaba /compact.
+		"think": false,
 	}
 	if c.Generic {
 		payload = map[string]any{"model": model, "messages": openAIVision(messages)}

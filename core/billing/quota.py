@@ -186,14 +186,23 @@ def compute_credit_cost(weight: dict[str, Any], tokens_in: int, tokens_out: int)
     ) // 1_000_000
 
 
-def _session_window(user_id: int, policy: dict[str, Any]) -> dict[str, Any]:
-    """Ventana de sesión vigente: fixed window con inicio dinámico. Si la
-    última fila del usuario sigue vigente se reusa tal cual; si no (expiró o
-    nunca hubo una), se abre una nueva con period_key = ahora."""
+def _session_window(user_id: int, policy: dict[str, Any], *, start: bool = False) -> dict[str, Any] | None:
+    """Ventana de sesión vigente: fixed window que arranca con el PRIMER MENSAJE
+    enviado con la sesión a 0 %, no al consultar la cuota (abrir la cuenta o
+    arrancar el CLI no debe poner el reloj en marcha).
+
+    - Sin `start` (consultas y registro de uso): la última fila si sigue vigente;
+      si no hay, None.
+    - Con `start` (al enviar un mensaje): si no hay ventana vigente, o la vigente
+      sigue vacía porque la petición que la abrió no llegó a consumir, se abre
+      una nueva que empieza ahora."""
     now = _now()
     latest = get_latest_credit_window(user_id, "session")
-    if latest and latest["expires_at"] > now.isoformat():
+    vigente = latest and latest["expires_at"] > now.isoformat()
+    if vigente and (not start or latest["credits_used"] > 0 or latest["messages"] > 0):
         return latest
+    if not start:
+        return None
     started_at = now.isoformat()
     hours = float(policy["session_window_hours"])
     expires_at = (now + timedelta(hours=hours)).isoformat()
@@ -236,7 +245,7 @@ def ensure_session_week_credits(user_id: int, plan: dict[str, Any]) -> None:
     para que credit_buckets_snapshot tenga datos reales) — vía de escape para
     verificar en producción sin cortar tráfico real."""
     policy = get_usage_policy()
-    session = _session_window(user_id, policy)
+    session = _session_window(user_id, policy, start=True)
     week = _week_window(user_id, policy)
 
     if not SESSION_QUOTA_ENFORCE:
@@ -275,7 +284,9 @@ def record_session_week_tokens(user_id: int, model: str | None,
         if cost <= 0:
             return
         policy = get_usage_policy()
-        session = _session_window(user_id, policy)
+        # Normalmente ya la abrió ensure_session_week_credits al enviar; start
+        # solo actúa si caducó durante una respuesta muy larga.
+        session = _session_window(user_id, policy) or _session_window(user_id, policy, start=True)
         week = _week_window(user_id, policy)
         bump_credit_window(user_id, "session", session["period_key"],
                            session["started_at"], session["expires_at"],
@@ -295,7 +306,10 @@ def credit_buckets_snapshot(user_id: int, plan: dict[str, Any]) -> dict[str, Any
     session_limit = _credit_limit(policy, plan, "session")
     week_limit = _credit_limit(policy, plan, "week")
 
-    def _bucket(row: dict[str, Any], limit: int) -> dict[str, Any]:
+    def _bucket(row: dict[str, Any] | None, limit: int) -> dict[str, Any]:
+        # Sin ventana abierta la sesión no ha empezado: 0 % y sin reset_at
+        # hasta el próximo mensaje (los clientes lo dicen así).
+        row = row or {"credits_used": 0, "messages": 0, "expires_at": None}
         used = int(row["credits_used"])
         unlimited = limit == UNLIMITED
         pct = 0.0 if unlimited or limit <= 0 else round(min(100.0, used / limit * 100), 1)

@@ -15,6 +15,7 @@ import (
 const (
 	topBarMinHeight = 12
 	ruleMinHeight   = 24
+	breathMinHeight = 16
 )
 
 // span es un tramo clicable de una fila: [x0, x1).
@@ -72,6 +73,7 @@ func (m *Model) topBar(width int) string {
 	if m.chat.Model == "" {
 		model = sDim2.Render("sin modelo")
 	}
+	model = m.lit(model, 0, m.barModel)
 	var plan string
 	switch {
 	case m.chat.Client.Generic:
@@ -83,7 +85,7 @@ func (m *Model) topBar(width int) string {
 	}
 	var flags []string
 	if m.remote != nil {
-		flags = append(flags, sPlan.Render("remoto"))
+		flags = append(flags, sDim.Render("Remote: ")+sAccent.Render("conectado"))
 	}
 	if m.chat.WebMode == "on" {
 		flags = append(flags, sSoft.Render("web"))
@@ -95,39 +97,54 @@ func (m *Model) topBar(width int) string {
 		if m.branch == "" {
 			return ""
 		}
-		return sDim2.Render("  "+glyphBranch+" ") + sSoft.Render(ansi.Truncate(m.branch, limit, glyphEllipsis))
+		return "  " + m.lit(sDim2.Render(glyphBranch+" ")+sSoft.Render(ansi.Truncate(m.branch, limit, glyphEllipsis)), 0, m.barBranch)
 	}
 	dot := sDim2.Render("  " + glyphSep + "  ")
-	type variant struct{ left, planText, model string }
-	var variants []variant
-	full := " " + brandStyle.Render(glyphBrand) + " " + ivory.Render("LIXBON") + "   " + sBeige.Render(shortPath(m.chat.Workspace)) + branch(40)
+	brand := " " + brandStyle.Render(glyphBrand) + " "
+	type variant struct{ head, branch, tail, planText, model string }
+	var tail, remoteTail string
 	if len(flags) > 0 {
-		full += "    " + strings.Join(flags, sDim2.Render(" "+glyphSep+" "))
+		tail = "    " + strings.Join(flags, sDim2.Render(" "+glyphSep+" "))
 	}
-	planFull := plan
+	if m.remote != nil {
+		remoteTail = "  " + flags[0]
+	}
+	planFull, planShort := plan, plan
 	if plan != "" && !m.chat.Client.Generic && m.hasSession() {
 		planFull = sDim.Render("plan ") + plan
 	}
-	variants = append(variants,
-		variant{full, planFull, model},
-		variant{" " + brandStyle.Render(glyphBrand) + " " + ivory.Render("LIXBON") + "  " + sBeige.Render(shortPath(m.chat.Workspace)) + branch(16), plan, model},
-		variant{" " + brandStyle.Render(glyphBrand) + " " + sBeige.Render(filepath.Base(m.chat.Workspace)) + branch(10), "", model},
-		variant{" " + brandStyle.Render(glyphBrand) + " " + sBeige.Render(filepath.Base(m.chat.Workspace)), "", model},
-	)
+	if q := m.quotaLabel(false); q != "" {
+		planFull = strings.TrimSpace(planFull + dot + q)
+		planShort = strings.TrimSpace(planShort + dot + m.quotaLabel(true))
+	}
+	variants := []variant{
+		{brand + ivory.Render("LIXBON") + "   " + sBeige.Render(shortPath(m.chat.Workspace)), branch(40), tail, planFull, model},
+		{brand + ivory.Render("LIXBON") + "   " + sBeige.Render(shortPath(m.chat.Workspace)), branch(24), tail, planShort, model},
+		{brand + ivory.Render("LIXBON") + "  " + sBeige.Render(shortPath(m.chat.Workspace)), branch(16), remoteTail, plan, model},
+		{brand + sBeige.Render(filepath.Base(m.chat.Workspace)), branch(10), remoteTail, "", model},
+		{brand + sBeige.Render(filepath.Base(m.chat.Workspace)), "", remoteTail, "", model},
+		{brand + sBeige.Render(filepath.Base(m.chat.Workspace)), "", "", "", model},
+	}
 	for _, v := range variants {
 		right := v.model
 		if v.planText != "" {
-			right = v.planText + dot + v.model
+			right = m.lit(v.planText, 0, m.barPlan) + dot + v.model
 		}
 		right += " "
-		if ansi.StringWidth(v.left)+ansi.StringWidth(right)+2 <= width {
+		left := v.head + v.branch + v.tail
+		if ansi.StringWidth(left)+ansi.StringWidth(right)+2 <= width {
 			m.recordBarZones(width, right, v.model, v.planText)
-			return twoCol(v.left, right, width)
+			m.barBranch = span{}
+			if v.branch != "" {
+				x := ansi.StringWidth(v.head) + 2
+				m.barBranch = span{x, ansi.StringWidth(v.head) + ansi.StringWidth(v.branch)}
+			}
+			return twoCol(left, right, width)
 		}
 	}
 	last := variants[len(variants)-1]
-	m.barModel, m.barPlan = span{}, span{}
-	return ansi.Truncate(last.left, max(1, width), "")
+	m.barModel, m.barPlan, m.barBranch = span{}, span{}, span{}
+	return ansi.Truncate(last.head, max(1, width), "")
 }
 
 // recordBarZones apunta dónde quedaron el plan y el modelo para los clics.
@@ -184,7 +201,7 @@ func headerLayout(logo, text []string, logoWidth, width int) string {
 func (m *Model) printHeader() {
 	m.refreshGit()
 	m.print("")
-	m.printDynamic(func(width int) string {
+	m.header = m.printDynamic(func(width int) string {
 		c := m.chat
 		dot := sDim2.Render(" " + glyphSep + " ")
 		info := sSoft.Render(firstNonEmpty(m.modelLabel(c.Model), "sin modelo")) + dot + modeStyle(m.modeName()).Render(m.modeName())
@@ -204,11 +221,28 @@ func (m *Model) printHeader() {
 		text := []string{"", sBold.Render("LIXBON CLI") + sDim.Render("  "+m.opts.Version), info, place, "", tips}
 		return headerLayout(renderLogo(cardLogoSize), text, cardLogoSize, width)
 	})
+	m.headerKey = m.headerSignature()
 	m.print("")
 	if m.chat.Mode == chat.ModeAsk {
 		m.add(infoLine("Modo ask: el modelo solo conversa", "/mode agent para que cree y edite archivos"))
 	}
 	if m.chat.ProjectContext != "" {
 		m.add(infoLine("LIXBON.md encontrado", "se usa como contexto del proyecto"))
+	}
+}
+
+func (m *Model) headerSignature() string {
+	return strings.Join([]string{m.chat.Workspace, m.branch, m.chat.Model, m.modeName(), m.planLabel(), m.chat.Cfg.ActiveProfile()}, "|")
+}
+
+// syncHeader repinta la tarjeta de bienvenida si cambió algo de lo que enseña
+// (carpeta, rama, modelo, modo o plan).
+func (m *Model) syncHeader() {
+	if m.header == nil {
+		return
+	}
+	if key := m.headerSignature(); key != m.headerKey {
+		m.headerKey = key
+		m.refresh(m.header)
 	}
 }

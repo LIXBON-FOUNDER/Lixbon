@@ -44,6 +44,16 @@ func Schemas() []map[string]any {
 	return out
 }
 
+// Schema es la definición de una sola herramienta (nil si no existe).
+func Schema(name string) map[string]any {
+	for _, s := range Schemas() {
+		if fn, _ := s["function"].(map[string]any); fn["name"] == name {
+			return s
+		}
+	}
+	return nil
+}
+
 func Specs() []Spec { return slices.Clone(cat.Specs) }
 
 func Names() []string {

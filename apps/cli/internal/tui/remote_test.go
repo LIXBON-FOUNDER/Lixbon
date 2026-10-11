@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"io"
 	"net/http"
 	"os"
@@ -126,25 +127,33 @@ func startRemote(t *testing.T, h *harness, relay *fakeRelay) {
 	h.waitFor("hello", func() bool { return relay.find("hello") != nil && relay.find("snapshot") != nil })
 }
 
-func TestRemoteShowsLinkAndQRAndPausesTheKeyboard(t *testing.T) {
-	h, relay := remoteHarness(t, nil)
+func TestRemoteShowsLinkAndQRAndKeepsTheKeyboard(t *testing.T) {
+	h, relay := remoteHarness(t, nil, textReply("hola desde el modelo"))
 	startRemote(t, h, relay)
 
 	contains(t, h.out(), "Control remoto activo")
 	contains(t, h.out(), "https://lixbon.test/remote/tok")
-	contains(t, h.out(), "QR-FILA-1")
-	contains(t, h.view(), "Control remoto activo")
+	contains(t, h.out(), "Código QR")
+	notContains(t, h.out(), "QR-FILA-1")
+	h.m.toggleDetail()
+	contains(t, ansi.Strip(h.m.log.text()), "QR-FILA-1")
+	h.m.toggleDetail()
+	contains(t, h.view(), "Remote activo")
 
-	h.typeText("hola")
-	h.key("enter")
-	if h.m.input.Value() != "" || h.gw.count() != 0 {
-		t.Fatalf("el teclado local debe quedar en pausa: caja=%q peticiones=%d", h.m.input.Value(), h.gw.count())
+	h.send("hola")
+	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
+	if msg := relay.find("user_msg"); msg["text"] != "hola" || msg["origin"] != "local" {
+		t.Fatalf("lo escrito en la terminal también llega al móvil: %v", msg)
 	}
 	hello := relay.find("hello")
 	if hello["source"] != "cli" || hello["mode"] != "ask" || hello["model"] != "qwen" {
 		t.Fatalf("hello: %v", hello)
 	}
-	h.m.remote.link.Stop(true)
+	h.settle()
+	h.key("ctrl+c")
+	if h.m.remote != nil {
+		t.Fatal("ctrl+c con la caja vacía termina el modo remoto")
+	}
 }
 
 func TestRemotePromptRunsATurnAndStreamsItBack(t *testing.T) {

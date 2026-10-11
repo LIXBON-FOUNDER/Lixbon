@@ -6,6 +6,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,9 @@ import (
 	"lixbon.com/cli/internal/session"
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
+	"lixbon.com/cli/internal/toolparse"
 	"lixbon.com/cli/internal/tools"
+	"lixbon.com/cli/internal/toolspec"
 	"lixbon.com/cli/internal/workspace"
 )
 
@@ -77,11 +80,14 @@ type Chat struct {
 	// MCP es nil mientras no haya servidores MCP configurados.
 	MCP *mcp.Registry
 
-	Model          string
-	Mode           string
-	ClientID       string
-	Workspace      string
-	WebMode        string
+	Model     string
+	Mode      string
+	ClientID  string
+	Workspace string
+	WebMode   string
+	// Effort es el razonamiento pedido con /effort: "" (lo decide el CLI),
+	// off, on, low, medium o high.
+	Effort         string
 	ConversationID string
 	History        []history.Message
 	SessionTokens  int
@@ -140,6 +146,7 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 		ClientID:       firstNonEmpty(opts.ClientID, "cli-client"),
 		Workspace:      root,
 		WebMode:        cfg.WebMode(),
+		Effort:         cfg.ExtraString("effort"),
 		ConversationID: newUUID(),
 		ProjectContext: workspace.ProjectContext(root),
 		title:          opts.Title,
@@ -319,6 +326,31 @@ func (c *Chat) ClearSession() {
 	c.Client.APIKey = ""
 }
 
+// ThinkValue traduce el esfuerzo al campo think del gateway, que lo pasa a
+// Ollama: los niveles solo los distingue gpt-oss; el resto de modelos con
+// razonamiento lo entienden como encendido. nil deja decidir al servidor.
+func ThinkValue(effort string) any {
+	switch effort {
+	case "off":
+		return false
+	case "on":
+		return true
+	case "low", "medium", "high":
+		return effort
+	}
+	return nil
+}
+
+// SetEffort cambia el razonamiento y lo recuerda.
+func (c *Chat) SetEffort(effort string) {
+	if effort == "auto" {
+		effort = ""
+	}
+	c.Effort = effort
+	c.Cfg.SetExtraString("effort", effort)
+	_ = c.SaveConfig()
+}
+
 // SetModel cambia de modelo y lo recuerda como predeterminado.
 func (c *Chat) SetModel(model string) {
 	c.Model = model
@@ -381,13 +413,19 @@ func (c *Chat) NewConversation() {
 	c.anchor = nil
 }
 
-// Open reabre una conversación guardada; false si ya no está.
+// Open reabre una conversación guardada; false si ya no está. Si es de otra
+// carpeta que sigue existiendo, el workspace vuelve a ella.
 func (c *Chat) Open(id string) bool {
 	record, ok := c.Store.Load(id)
 	if !ok {
 		return false
 	}
 	c.Persist()
+	if ws := record.Workspace; ws != "" && ws != c.Workspace {
+		if info, err := os.Stat(ws); err == nil && info.IsDir() {
+			c.SetWorkspace(ws)
+		}
+	}
 	c.History = record.Messages
 	c.ConversationID = firstNonEmpty(record.ID, id)
 	c.SetTitle(record.Title)
@@ -518,14 +556,63 @@ func (c *Chat) agentTurn(ctx context.Context, sink Sink) (string, error) {
 	return answer, nil
 }
 
+// askTurn conversa sin tocar el workspace, pero puede leer páginas web con
+// fetch_url. Lo descargado queda en el historial como TOOL_RESULT para que las
+// preguntas siguientes sobre la página tengan el texto delante.
 func (c *Chat) askTurn(ctx context.Context, sink Sink) (string, error) {
 	c.autoCompact(ctx, sink)
-	res, err := c.streamer(sink, false)(ctx, c.contextMessages(), nil)
-	if err != nil {
-		return "", err
+	messages := c.contextMessages()
+	var toolList []map[string]any
+	if c.Session.NativeTools {
+		toolList = []map[string]any{toolspec.Schema("fetch_url")}
 	}
-	c.History = append(c.History, history.Assistant(res.Text))
-	return res.Text, nil
+	stream := c.streamer(sink, false)
+	turn := &agent.Turn{S: c.Session, Emit: sink.Event}
+	var fetched []history.Message
+	for step := 0; ; step++ {
+		if step == maxAskFetches {
+			toolList = nil
+		}
+		res, err := stream(ctx, messages, toolList)
+		if err != nil && toolList != nil && ctx.Err() == nil && rejectsTools(err) {
+			c.Session.NativeTools, toolList = false, nil
+			res, err = stream(ctx, messages, nil)
+		}
+		if err != nil {
+			return "", err
+		}
+		if len(res.ToolCalls) == 0 {
+			c.History = append(c.History, fetched...)
+			c.History = append(c.History, history.Assistant(res.Text))
+			return res.Text, nil
+		}
+		messages = append(messages, history.Message{Role: "assistant", Content: res.Text, ToolCalls: res.ToolCalls})
+		for _, raw := range res.ToolCalls {
+			var call map[string]any
+			_ = json.Unmarshal(raw, &call)
+			parsed := toolparse.Native(call)
+			id, _ := call["id"].(string)
+			result := "[ERROR] En el modo ask solo está fetch_url; para el resto, /mode agent."
+			if parsed.Tool == "fetch_url" {
+				if result, err = turn.Fetch(ctx, parsed.Args); err != nil {
+					return "", err
+				}
+				url, _ := parsed.Args["url"].(string)
+				fetched = append(fetched, history.User(fmt.Sprintf("TOOL_RESULT fetch_url %s:\n%s", url,
+					history.ClipToolOutput(result, history.MaxToolOutputChars))))
+			}
+			messages = append(messages, history.Message{Role: "tool", Name: parsed.Tool, ToolCallID: id,
+				Content: history.ClipToolOutput(result, history.MaxToolOutputChars)})
+		}
+	}
+}
+
+const maxAskFetches = 3
+
+// rejectsTools: el servidor (o el modelo) no admite herramientas nativas.
+func rejectsTools(err error) bool {
+	var apiErr *api.Error
+	return errors.As(err, &apiErr) && strings.Contains(strings.ToLower(apiErr.Message), "tool")
 }
 
 // contextMessages son los últimos max_context_messages del historial, sin el
@@ -536,9 +623,9 @@ func (c *Chat) contextMessages() []history.Message {
 	if limit := c.Cfg.MaxContextMessages; limit > 0 && len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}
-	var system []history.Message
+	system := []history.Message{{Role: "system", Content: agent.StylePrompt}}
 	if c.Client.Generic {
-		system = append(system, history.Message{Role: "system", Content: askSystemPrompt})
+		system[0].Content = askSystemPrompt + " " + agent.StylePrompt
 	}
 	if c.ProjectContext != "" {
 		system = append(system, history.Message{Role: "system", Content: "Contexto del proyecto (LIXBON.md):\n" + c.ProjectContext})
@@ -550,8 +637,8 @@ func (c *Chat) contextMessages() []history.Message {
 // equipo» sin más. Solo va a proveedores genéricos: el gateway Lixbon pone su
 // propio prompt y el contrato con él no lleva mensaje de sistema.
 const askSystemPrompt = "Eres el asistente de Lixbon CLI, una terminal de programación. Ahora está en modo ask: " +
-	"solo conversas y no tienes herramientas, así que no puedes leer, crear ni editar archivos ni ejecutar " +
-	"comandos. Si el usuario te pide algo que requiere el equipo o el proyecto, dile que escriba /mode agent " +
+	"conversas y solo puedes leer páginas web con fetch_url (úsala cuando el usuario nombre una URL o un " +
+	"dominio); no puedes leer, crear ni editar archivos ni ejecutar comandos. Si el usuario te pide algo que requiere el equipo o el proyecto, dile que escriba /mode agent " +
 	"(o pulse Mayús+Tab) para que trabajes sobre su workspace; no digas que es imposible. " +
 	"El usuario puede ejecutar un comando él mismo con !comando (p. ej. !git status); su salida te llega " +
 	"como mensaje en la conversación. Responde en el idioma del usuario."
@@ -575,8 +662,17 @@ func (c *Chat) autoCompact(ctx context.Context, sink Sink) {
 // Compact sustituye lo antiguo del historial por un resumen del modelo y
 // conserva los últimos keepRecent mensajes.
 func (c *Chat) Compact(ctx context.Context, keepRecent int) error {
+	return c.CompactWithProgress(ctx, keepRecent, nil)
+}
+
+// CompactWithProgress es Compact contando lo que lleva escrito el resumen:
+// progress recibe los caracteres según llegan (desde otra goroutine).
+func (c *Chat) CompactWithProgress(ctx context.Context, keepRecent int, progress func(written int)) error {
 	compacted, err := history.CompactMessages(c.History, func(m []history.Message) (string, error) {
-		return c.AskQuiet(ctx, m)
+		if progress == nil {
+			return c.AskQuiet(ctx, m)
+		}
+		return c.summarize(ctx, m, progress)
 	}, keepRecent)
 	if err != nil {
 		return err
@@ -584,6 +680,31 @@ func (c *Chat) Compact(ctx context.Context, keepRecent int) error {
 	c.History = compacted
 	c.anchor = nil
 	return nil
+}
+
+// summarize pide el resumen en streaming, sin razonamiento ni búsqueda web y
+// fuera de la conversación (sin conversation_id), para poder contar el avance.
+func (c *Chat) summarize(ctx context.Context, messages []history.Message, progress func(int)) (string, error) {
+	title := "interno"
+	stream, err := c.Client.ChatStream(ctx, api.ChatRequest{
+		Model: c.Model, Messages: toMaps(messages), ClientID: c.ClientID, Title: &title,
+		WebSearch: false, NumCtx: c.Cfg.ContextWindow, Think: false,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+	var text strings.Builder
+	for ev, err := range stream.Events() {
+		if err != nil {
+			return "", err
+		}
+		if ev.Kind == sse.Content {
+			text.WriteString(ev.Text)
+			progress(text.Len())
+		}
+	}
+	return text.String(), nil
 }
 
 // AskQuiet es un chat sin streaming ni historial, para trabajo interno.
@@ -607,8 +728,12 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 			WebSearch:      webSearchValue(c.WebMode),
 			NumCtx:         c.Cfg.ContextWindow,
 			Tools:          toolList,
+			Effort:         c.Effort,
 		}
-		if agentMode || c.Session.PlanMode {
+		switch think := ThinkValue(c.Effort); {
+		case think != nil:
+			req.Think = think
+		case agentMode || c.Session.PlanMode:
 			req.Think = "high"
 		}
 		sink.Event(agent.Event{Kind: agent.EventStep})

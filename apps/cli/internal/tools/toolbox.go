@@ -42,7 +42,8 @@ type Toolbox struct {
 	// OnTodo avisa a la interfaz de que la lista de pasos cambió.
 	OnTodo func(items, previous []TodoItem)
 
-	todo []TodoItem
+	todo      []TodoItem
+	lastFetch *FetchInfo
 }
 
 func NewToolbox(root string) *Toolbox {
