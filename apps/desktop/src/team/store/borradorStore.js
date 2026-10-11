@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as adj from '../lib/adjuntos';
-import { useTeamStore } from './teamStore';
+import { credencial } from '../lib/api';
 
 const vacio = () => ({ texto: '', adjuntos: [] });
 
@@ -73,7 +73,7 @@ export const useBorradorStore = create((set, get) => ({
 
     try {
       const medidas = medidasFijas || (await adj.medir(file));
-      const llave = useTeamStore.getState().llave;
+      const llave = await credencial();
       const { promesa, cancelar } = adj.subir({
         canalId,
         file,

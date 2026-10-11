@@ -5,6 +5,7 @@
 // servidor efímero de auth_loopback.rs.
 import { listen } from '@tauri-apps/api/event';
 import { authLoopbackStart, openExternal } from './tauri';
+import { nombreDelEquipo } from './session';
 
 const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomToken = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -27,6 +28,19 @@ async function roundTrip(signal, urlFor) {
   }
 }
 
+/** Lo que piden las apps al entrar: una sesión de este equipo. issue_api_key y
+    key_name solo los entiende un gateway anterior, que responde con api_key. */
+export async function pedidoDeApp() {
+  return { client: 'desktop', device_name: await nombreDelEquipo(), issue_api_key: true, key_name: 'lixbon Desktop' };
+}
+
+/** { tokens } con sesión de dispositivo, o { apiKey } si el gateway es anterior. */
+export function credencialDeLogin(body) {
+  if (body.refresh_token) return { tokens: body, apiKey: body.access_token };
+  if (body.api_key) return { apiKey: body.api_key };
+  return null;
+}
+
 async function postJson(url, payload) {
   const res = await fetch(url, {
     method: 'POST',
@@ -35,8 +49,9 @@ async function postJson(url, payload) {
     signal: AbortSignal.timeout(15000),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.api_key) throw new Error(body.detail || `El servidor respondió con un error (${res.status}).`);
-  return { apiKey: body.api_key, user: body.user };
+  const credencial = res.ok && credencialDeLogin(body);
+  if (!credencial) throw new Error(body.detail || `El servidor respondió con un error (${res.status}).`);
+  return { ...credencial, user: body.user };
 }
 
 export async function browserLogin(serverUrl, signal) {
@@ -46,7 +61,8 @@ export async function browserLogin(serverUrl, signal) {
   const { token, state: back } = await roundTrip(signal, (redirect) =>
     `${serverUrl}/ide/connect?${new URLSearchParams({ redirect_uri: redirect, state, challenge, method: 'S256' })}`);
   if (back !== state || !token) throw new Error('La respuesta del navegador no corresponde a esta solicitud.');
-  return postJson(`${serverUrl}/api/auth/ide/exchange`, { token, verifier });
+  const { client, device_name: deviceName } = await pedidoDeApp();
+  return postJson(`${serverUrl}/api/auth/ide/exchange`, { token, verifier, client, device_name: deviceName });
 }
 
 export const PROVIDER_NAMES = { github: 'GitHub', google: 'Google' };
@@ -67,7 +83,5 @@ export async function oauthLogin(serverUrl, provider, signal) {
   const { code, error } = await roundTrip(signal, (redirect) =>
     `${serverUrl}/api/auth/oauth/${provider}/start?${new URLSearchParams({ redirect_uri: redirect, code_challenge: challenge })}`);
   if (error || !code) throw new Error(`Cancelaste el inicio de sesión con ${PROVIDER_NAMES[provider]}.`);
-  return postJson(`${serverUrl}/api/auth/oauth/exchange`, {
-    code, code_verifier: verifier, issue_api_key: true, key_name: 'lixbon Desktop',
-  });
+  return postJson(`${serverUrl}/api/auth/oauth/exchange`, { code, code_verifier: verifier, ...(await pedidoDeApp()) });
 }

@@ -35,7 +35,7 @@ function maskKey(key) {
   return `${key.slice(0, 10)}••••${key.slice(-4)}`;
 }
 
-function ProfilePage({ user, serverUrl, apiKey, busy, error, onPickAvatar, onRemoveAvatar, onGoUsage, onClose }) {
+function ProfilePage({ user, serverUrl, apiKey, sesionDispositivo, busy, error, onPickAvatar, onRemoveAvatar, onGoUsage, onClose }) {
   const displayName =
     [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.email;
   const copyKey = () => navigator.clipboard.writeText(apiKey).catch(() => {});
@@ -80,7 +80,7 @@ function ProfilePage({ user, serverUrl, apiKey, busy, error, onPickAvatar, onRem
         <button className="pillbtn" onClick={() => openExternal(`${serverUrl}/account`)}>Gestionar</button>
       </div>
 
-      {apiKey && (
+      {apiKey && !sesionDispositivo && (
         <div className="acctpop__key">
           <span className="acctpop__key-value">{maskKey(apiKey)}</span>
           <button className="iconbtn" onClick={copyKey} title="Copiar la clave completa">
@@ -158,7 +158,7 @@ function UsagePage({ user, serverUrl, usage, onBack, onClose }) {
 }
 
 export function AccountMenu({ compact = false }) {
-  const { user, serverUrl, apiKey } = useAppStore();
+  const { user, serverUrl, apiKey, sesionDispositivo } = useAppStore();
 
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState('profile'); // 'profile' | 'usage'
@@ -287,7 +287,7 @@ export function AccountMenu({ compact = false }) {
         <div className="acctpop" ref={popRef} style={pos}>
           {page === 'profile' ? (
             <ProfilePage
-              user={user} serverUrl={serverUrl} apiKey={apiKey}
+              user={user} serverUrl={serverUrl} apiKey={apiKey} sesionDispositivo={sesionDispositivo}
               busy={busy} error={error}
               onPickAvatar={() => fileRef.current?.click()}
               onRemoveAvatar={onRemove}

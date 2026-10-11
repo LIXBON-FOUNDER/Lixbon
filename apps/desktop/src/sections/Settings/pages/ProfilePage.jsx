@@ -32,7 +32,7 @@ function useCopy() {
 }
 
 export function ProfilePage() {
-  const { user, serverUrl, apiKey, setUser, logout } = useAppStore();
+  const { user, serverUrl, apiKey, sesionDispositivo, setUser, logout } = useAppStore();
   const [first, setFirst] = useState(user?.first_name || '');
   const [last, setLast] = useState(user?.last_name || '');
   const [savingName, setSavingName] = useState(false);
@@ -45,7 +45,7 @@ export function ProfilePage() {
   const [copied, copy] = useCopy();
   const fileRef = useRef(null);
 
-  const loadKeys = () => api.get('/api/keys').then((r) => setKeys((r.keys || []).filter((k) => k.is_active))).catch(() => setKeys([]));
+  const loadKeys = () => api.get('/api/keys').then((r) => setKeys((r.keys || []).filter((k) => k.is_active && (k.origin ?? 'manual') === 'manual'))).catch(() => setKeys([]));
   useEffect(() => { loadKeys(); }, []);
 
   if (!user) return <span className="skeleton" style={{ height: 120, display: 'block' }} />;
@@ -210,8 +210,10 @@ export function ProfilePage() {
       <section className="ssec rise rise--3">
         <span className="ssec__label">Sesión</span>
         <div className="ssec__actions">
-          <button className="btn btn--ghost" onClick={() => openExternal(`${serverUrl}/account`)}>Gestionar cuenta en la web</button>
-          <button className="btn btn--ghost" onClick={() => copy('cur', apiKey)}>{copied === 'cur' ? 'Clave copiada' : 'Copiar la clave de esta sesión'}</button>
+          <button className="btn btn--ghost" onClick={() => openExternal(`${serverUrl}/account/profile`)}>Sesiones y dispositivos</button>
+          {!sesionDispositivo && (
+            <button className="btn btn--ghost" onClick={() => copy('cur', apiKey)}>{copied === 'cur' ? 'Clave copiada' : 'Copiar la clave de esta sesión'}</button>
+          )}
           <div className="panelhead__fill" />
           <button className="lk is-danger" onClick={logout}>Cerrar sesión</button>
         </div>

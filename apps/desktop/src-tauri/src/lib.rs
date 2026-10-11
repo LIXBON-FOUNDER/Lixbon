@@ -23,6 +23,7 @@ pub(crate) fn hide_console(cmd: &mut Command) -> &mut Command {
 
 mod mcp;
 mod auth_loopback;
+mod auth_session;
 mod preview_proxy;
 mod visual_server;
 mod team;
@@ -1416,6 +1417,10 @@ pub fn run() {
             secret_get,
             secret_delete,
             auth_loopback::auth_loopback_start,
+            auth_session::auth_session_start,
+            auth_session::auth_token,
+            auth_session::auth_logout,
+            auth_session::device_name,
             preview_proxy::preview_proxy_start,
             mcp::vscode_user_file,
             save_text_as,

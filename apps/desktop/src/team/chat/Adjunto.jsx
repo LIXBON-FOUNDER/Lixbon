@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { openExternal } from '../../lib/tauri';
 import { renovarUrl, formatDuracion } from '../lib/adjuntos';
-import { useTeamStore } from '../store/teamStore';
+import { credencial } from '../lib/api';
 import { IconDownload, IconFile, IconWarn, IconPlay, IconX } from '../../components/Icons';
 import { IconPause, IconMic } from '../ui/icons';
 
@@ -36,7 +36,7 @@ function useUrl(adjunto) {
     if (renovado.current) return false;
     renovado.current = true;
     try {
-      setUrl((await renovarUrl(adjunto.id, useTeamStore.getState().llave)).url);
+      setUrl((await renovarUrl(adjunto.id, await credencial())).url);
       return true;
     } catch {
       return false;

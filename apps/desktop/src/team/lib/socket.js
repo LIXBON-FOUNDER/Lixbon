@@ -9,12 +9,15 @@ function urlSocket(llave) {
   return `${base}/ws/team?token=${encodeURIComponent(llave)}`;
 }
 
+// `llave` es una función: el access de la sesión caduca a los 30 min y cada
+// reconexión necesita el vigente.
 export function abrirSocket({ llave, cursores, alEvento, alEstado }) {
   let ws = null;
   let intentos = 0;
   let cerradoAposta = false;
   let reintento = null;
   let latido = null;
+  let conectando = false;
 
   const limpiar = () => {
     clearTimeout(reintento);
@@ -28,14 +31,21 @@ export function abrirSocket({ llave, cursores, alEvento, alEstado }) {
     return Math.round(base * (0.75 + Math.random() * 0.5));
   }
 
-  function conectar() {
-    if (cerradoAposta) return;
+  async function conectar() {
+    if (cerradoAposta || conectando) return;
+    conectando = true;
     alEstado('conectando');
 
     try {
-      ws = new WebSocket(urlSocket(llave));
+      ws = new WebSocket(urlSocket(await llave()));
     } catch {
       programarReintento();
+      return;
+    } finally {
+      conectando = false;
+    }
+    if (cerradoAposta) {
+      ws.close();
       return;
     }
 

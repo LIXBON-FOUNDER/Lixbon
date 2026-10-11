@@ -1,6 +1,6 @@
 import { useAppStore } from '../store/appStore';
 
-async function request(endpoint, options = {}) {
+async function request(endpoint, options = {}, reintentar = true) {
   const { serverUrl, apiKey } = useAppStore.getState();
   
   if (!serverUrl) {
@@ -32,6 +32,10 @@ async function request(endpoint, options = {}) {
   try {
     const response = await fetch(url, fetchOptions);
     
+    if (response.status === 401 && reintentar && (await useAppStore.getState().renovarToken(apiKey))) {
+      return request(endpoint, options, false);
+    }
+
     // Si la respuesta no es exitosa, arrojar error con el detalle del backend
     if (!response.ok) {
       let errorDetail = 'API Request Failed';

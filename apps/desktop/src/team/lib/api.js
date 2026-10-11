@@ -1,4 +1,5 @@
 import { servidorActual } from './sesion';
+import { tokenVigente } from '../../lib/session';
 
 let llave = '';
 
@@ -6,18 +7,30 @@ export function usarLlave(nueva) {
   llave = nueva || '';
 }
 
+/** El access vigente de la sesión del IDE (dura 30 min) o, si se entró con
+    una API key, esa llave. Con `rechazada` fuerza la renovación. */
+export async function credencial(rechazada = null) {
+  return (await tokenVigente(rechazada).catch(() => null)) || llave;
+}
+
 async function pedir(ruta, { metodo = 'GET', cuerpo, timeout = 15000 } = {}) {
+  const enviar = (token) => fetch(`${servidorActual()}${ruta}`, {
+    method: metodo,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+    signal: AbortSignal.timeout(timeout),
+  });
   let res;
   try {
-    res = await fetch(`${servidorActual()}${ruta}`, {
-      method: metodo,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(llave ? { Authorization: `Bearer ${llave}` } : {}),
-      },
-      body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
-      signal: AbortSignal.timeout(timeout),
-    });
+    const token = await credencial();
+    res = await enviar(token);
+    if (res.status === 401 && token) {
+      const renovado = await credencial(token);
+      if (renovado && renovado !== token) res = await enviar(renovado);
+    }
   } catch {
     throw new Error('No se pudo contactar con Lixbon Team.');
   }

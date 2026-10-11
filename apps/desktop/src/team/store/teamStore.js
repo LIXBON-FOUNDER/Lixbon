@@ -473,7 +473,7 @@ export const useTeamStore = create((set, get) => ({
   conectar: () => {
     if (socket || !get().llave) return;
     socket = abrirSocket({
-      llave: get().llave,
+      llave: () => api.credencial(),
       cursores: () => useMensajesStore.getState().cursores(),
       alEstado: (conexion) => set({ conexion }),
       alEvento: (evento) => get()._evento(evento),

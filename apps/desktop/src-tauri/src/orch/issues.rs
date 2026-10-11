@@ -1,7 +1,7 @@
 //! Issues de Lixbon Team para los agentes: `lxo issue ver|comentar|mover|vincular`.
-//! Habla con el gateway con la misma cuenta que el IDE (la llave del almacén
-//! cifrado o, fuera de Windows, la de los ajustes), así que un agente solo ve
-//! las issues de los equipos de quien lo lanzó.
+//! Habla con el gateway con la misma cuenta que el IDE (su sesión de
+//! dispositivo o, si se entró con una API key, esa llave), así que un agente
+//! solo ve las issues de los equipos de quien lo lanzó.
 
 use std::time::Duration;
 
@@ -15,6 +15,9 @@ struct Sesion {
 }
 
 fn sesion(app: &AppHandle) -> Result<Sesion, String> {
+    if let Some(s) = tauri::async_runtime::block_on(crate::auth_session::vigente(app, None))? {
+        return Ok(Sesion { servidor: s.servidor, llave: s.access });
+    }
     let ruta = app.path().app_data_dir().map_err(|e| e.to_string())?.join("lixbon.settings.json");
     let ajustes: Value = std::fs::read_to_string(&ruta)
         .ok()
