@@ -132,9 +132,9 @@ func TestAskKeepsAndTrimsHistory(t *testing.T) {
 	if len(c.History) != 6 {
 		t.Fatalf("historial: %d mensajes", len(c.History))
 	}
-	third := g.bodyAt(2)["messages"].([]any)
+	third := g.bodyAt(2)["messages"].([]any)[1:]
 	if len(third) != 3 {
-		t.Fatalf("la ventana debe ser de 3 mensajes, fueron %d", len(third))
+		t.Fatalf("la ventana debe ser de 3 mensajes más el de estilo, fueron %d", len(third))
 	}
 	if first := third[0].(map[string]any); first["content"] != "dos" {
 		t.Fatalf("la ventana debe conservar los más recientes: %v", third)
@@ -316,12 +316,15 @@ func TestContextUsageCountsOnlyTheConversation(t *testing.T) {
 		t.Fatalf("el prompt de sistema y las herramientas no cuentan: %d", empty)
 	}
 	c.Mode, c.ProjectContext = ModeAsk, ""
+	// Sin fetch_url: el esquema de la herramienta contaría como sistema.
+	c.Session.NativeTools = false
 	c.Send(context.Background(), strings.Repeat("palabra ", 100), nil)
 	tokens, pct := c.ContextUsage()
 	if c.SessionTokens != 520 || c.TurnTokens != 520 {
 		t.Fatalf("tokens de sesión: %d/%d", c.SessionTokens, c.TurnTokens)
 	}
-	if tokens < 500 || tokens > 700 || pct < 50 || before >= tokens {
+	// Los 500 tokens del prompt incluyen el mensaje de estilo, que no cuenta.
+	if tokens < 300 || tokens >= 500 || pct < 30 || before >= tokens {
 		t.Fatalf("uso de contexto: %d tokens (%.0f%%), antes %d", tokens, pct, before)
 	}
 	c.History = append(c.History, history.User(strings.Repeat("x", 20000)))
@@ -443,4 +446,43 @@ func TestContextUsageIgnoresCachedPromptCounts(t *testing.T) {
 	if tokens, _ := c.ContextUsage(); tokens < 500 {
 		t.Fatalf("un prompt cacheado no puede bajar el contexto a %d tokens", tokens)
 	}
+}
+
+func TestAskModeCanFetchAPageAndKeepsItInTheHistory(t *testing.T) {
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		io.WriteString(w, "Lixbon es una plataforma de IA")
+	}))
+	defer page.Close()
+	g, client := newGateway(t)
+	g.chat = func(n int, w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		delta := map[string]any{"content": "Es una plataforma de IA."}
+		if n == 0 {
+			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "f1",
+				"function": map[string]any{"name": "fetch_url", "arguments": `{"url":"` + page.URL + `"}`}}}}
+		}
+		chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": delta}}})
+		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: [DONE]\n\n")
+	}
+	c := newChat(t, client, nil, Options{})
+	answer, err := c.Send(context.Background(), "busca "+page.URL, nil)
+	if err != nil || answer != "Es una plataforma de IA." {
+		t.Fatalf("answer=%q err=%v", answer, err)
+	}
+	tools, _ := g.bodyAt(0)["tools"].([]any)
+	if len(tools) != 1 || !strings.Contains(mustJSON(tools[0]), "fetch_url") {
+		t.Fatalf("en ask solo va fetch_url: %v", tools)
+	}
+	if !strings.Contains(mustJSON(g.bodyAt(1)["messages"]), "plataforma de IA") {
+		t.Fatalf("el modelo no recibió la página: %v", g.bodyAt(1)["messages"])
+	}
+	if !strings.Contains(mustJSON(c.History), "TOOL_RESULT fetch_url") {
+		t.Fatalf("la página debe quedar en el historial: %+v", c.History)
+	}
+}
+
+func mustJSON(v any) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
 }

@@ -294,6 +294,7 @@ type toolBlock struct {
 
 	result  string
 	check   string
+	fetch   bool
 	command bool
 	code    string
 	output  []string
@@ -323,6 +324,7 @@ func newToolBlock(e agent.Event, spin *int) *toolBlock {
 		b.verb, b.gerund, b.target = label, "Usando "+label, summary
 	}
 	b.command = e.Tool == "run_command"
+	b.fetch = e.Tool == "fetch_url"
 	b.counts = e.Adds != 0 || e.Dels != 0
 	b.adds, b.dels = e.Adds, e.Dels
 	return b
@@ -410,7 +412,10 @@ func (b *toolBlock) dot() string {
 
 func (b *toolBlock) header(width int) string {
 	left := " " + b.dot() + " " + sBold.Render(b.verb)
-	if b.target != "" {
+	switch {
+	case b.fetch:
+		left = " " + b.dot() + " " + sBold.Render("Fetch") + sDim.Render("(") + sBeige.Render(b.target) + sDim.Render(")")
+	case b.target != "":
 		left += "  " + sBeige.Render(b.target)
 	}
 	right := ""
@@ -455,10 +460,13 @@ func (b *toolBlock) render(width int, open bool) string {
 }
 
 func (b *toolBlock) footer(width int) string {
+	corner := pad + sDim2.Render(glyphCorner) + " "
+	if b.fetch && b.state == toolRunning {
+		return corner + sDim.Render("Descargando"+glyphEllipsis)
+	}
 	if b.state == toolRunning || b.state == toolWaiting {
 		return ""
 	}
-	corner := pad + sDim2.Render(glyphCorner) + " "
 	extra := ""
 	if b.check != "" {
 		extra = " " + glyphSep + " " + b.check
@@ -635,7 +643,7 @@ func (answerBlock) lazy() bool { return true }
 func (b answerBlock) render(width int, _ bool) string {
 	body := strings.Join(wrapText(b.text, width-3), "\n")
 	if b.md != nil {
-		body = b.md(b.text, max(20, width-3))
+		body = renderRich(b.text, max(20, width-3), b.md)
 	}
 	lines := strings.Split(body, "\n")
 	blank := func(s string) bool { return strings.TrimSpace(ansi.Strip(s)) == "" }
@@ -646,7 +654,6 @@ func (b answerBlock) render(width int, _ bool) string {
 		lines = lines[:len(lines)-1]
 	}
 	for i, l := range lines {
-		l = trimRightANSI(l)
 		if i == 0 {
 			lines[i] = mark(glyphBrand, sAccent) + l
 		} else {
@@ -712,17 +719,27 @@ func (interruptedBlock) render(width int, _ bool) string {
 	return strings.Join(lines, "\n")
 }
 
-// qrBlock pinta el QR con colores fijos (módulos claros sobre negro): sobre el
-// fondo del tema claro saldría invertido y no se podría escanear.
+// qrBlock es el QR del control remoto, plegado: la app móvil ya avisa de la
+// sesión, así que solo lo despliega quien lo necesite (clic o ctrl+o). Se pinta
+// con colores fijos (módulos claros sobre negro) para que se lea con cualquier tema.
 type qrBlock string
 
-func (b qrBlock) render(int, bool) string {
-	st := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#000000"))
-	rows := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	for i, r := range rows {
-		rows[i] = pad + st.Render(r)
+func (qrBlock) folds() bool { return true }
+
+func (b qrBlock) render(width int, open bool) string {
+	hint := "clic para mostrar"
+	if open {
+		hint = "clic para ocultar"
 	}
-	return strings.Join(rows, "\n")
+	out := []string{fitRight(mark(glyphChip, sDim)+sSoft.Render("Código QR")+sDim.Render(" "+glyphSep+" para abrir la sesión desde otro dispositivo"),
+		sDim2.Render(hint), width)}
+	if open {
+		st := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#000000"))
+		for _, r := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+			out = append(out, pad+st.Render(r))
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // ── informes ─────────────────────────────────────────────────────────────

@@ -74,8 +74,45 @@ func decodeCharset(raw []byte, charset string) string {
 	return textutil.DecodeLossy(raw)
 }
 
+// FetchInfo es lo que la interfaz enseña de la última descarga: el estado
+// HTTP (0 si no hubo respuesta) y los bytes recibidos.
+type FetchInfo struct {
+	Status int
+	Bytes  int
+}
+
+// TakeFetch devuelve y olvida la última descarga de fetch_url.
+func (tb *Toolbox) TakeFetch() (FetchInfo, bool) {
+	info := tb.lastFetch
+	tb.lastFetch = nil
+	if info == nil {
+		return FetchInfo{}, false
+	}
+	return *info, true
+}
+
+// Summary es «Recibido 196.6 KB (200 OK)» o el estado del fallo.
+func (f FetchInfo) Summary() string {
+	status := fmt.Sprintf("%d %s", f.Status, http.StatusText(f.Status))
+	if f.Status >= 400 {
+		return status
+	}
+	return fmt.Sprintf("Recibido %s (%s)", byteSize(f.Bytes), status)
+}
+
+func byteSize(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
 func (tb *Toolbox) fetchURL(ctx context.Context, url string) (string, error) {
-	url = textutil.Strip(url)
+	tb.lastFetch = nil
+	url = withScheme(textutil.Strip(url))
 	if lower := strings.ToLower(url); !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return "[ERROR] La URL debe empezar por http:// o https://", nil
 	}
@@ -99,10 +136,12 @@ func (tb *Toolbox) fetchURL(ctx context.Context, url string) (string, error) {
 		return fmt.Sprintf("[ERROR] No se pudo descargar %s: %v", url, err), nil
 	}
 	defer resp.Body.Close()
+	tb.lastFetch = &FetchInfo{Status: resp.StatusCode}
 	if resp.StatusCode >= 400 {
 		return fmt.Sprintf("[ERROR] HTTP %d al descargar %s", resp.StatusCode, url), nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))
+	tb.lastFetch.Bytes = len(raw)
 	if err != nil {
 		return fmt.Sprintf("[ERROR] No se pudo descargar %s: %v", url, err), nil
 	}
@@ -130,6 +169,16 @@ func (tb *Toolbox) fetchURL(ctx context.Context, url string) (string, error) {
 		return "(la página no tiene texto)", nil
 	}
 	return text, nil
+}
+
+// withScheme completa «lixbon.com/docs» con https://, que es como lo escribe
+// la gente y a menudo el modelo; lo que ya trae esquema no se toca.
+func withScheme(url string) string {
+	host, _, _ := strings.Cut(url, "/")
+	if url == "" || strings.Contains(url, "://") || strings.ContainsAny(host, ": ") || !strings.Contains(host, ".") {
+		return url
+	}
+	return "https://" + url
 }
 
 func containsAny(s string, parts ...string) bool {

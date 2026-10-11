@@ -301,3 +301,22 @@ func TestMessageJSONKeepsToolFields(t *testing.T) {
 		t.Fatalf("got %s", raw)
 	}
 }
+
+func TestCompactClipsLongMessagesAndImagesForTheSummary(t *testing.T) {
+	long := User(strings.Repeat("a", 20000))
+	long.Images = []string{"img"}
+	var sent []Message
+	out, err := CompactMessages([]Message{long, Assistant("ok"), User("b"), Assistant("c")}, func(m []Message) (string, error) {
+		sent = m
+		return "resumen", nil
+	}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(sent[0].Content)) > compactMessageChars+200 || sent[0].Images != nil {
+		t.Fatalf("se enviaron %d caracteres e imágenes %v", len([]rune(sent[0].Content)), sent[0].Images)
+	}
+	if !IsSummary(out[0]) || !IsSummary(out[1]) || SummaryText(out[0]) != "resumen" {
+		t.Fatalf("resumen: %+v", out[:2])
+	}
+}

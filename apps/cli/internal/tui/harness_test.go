@@ -254,6 +254,12 @@ func (h *harness) key(s string) {
 		msg = tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
 		msg = tea.KeyPressMsg{Code: tea.KeyDown}
+	case "pgdown":
+		msg = tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "left":
+		msg = tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		msg = tea.KeyPressMsg{Code: tea.KeyRight}
 	case "shift+tab":
 		msg = tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	case "ctrl+c":
