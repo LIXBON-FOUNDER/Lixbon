@@ -4,6 +4,20 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.5.0
+- `/workspace` abre un navegador de carpetas: ↑↓ para moverte, → para entrar, ← para subir, Enter para usarla y escribir para filtrar. La barra superior y la tarjeta de bienvenida se actualizan con la carpeta y su rama.
+- Las conversaciones son de cada carpeta o repositorio: `/history` lista solo las de aquí (`/history todas` enseña el resto) y cambiar de carpeta empieza una conversación con el contexto vacío. La cuota de la cuenta (sesión y semana) va en la barra superior.
+- Nuevo `/branch` (o clic en la rama de la barra) para ver las ramas locales y remotas, cambiar de una a otra o crear una nueva.
+- Nuevo `/effort` para elegir cuánto razona el modelo (auto, encendido o apagado; bajo, medio o alto en gpt-oss). Se ve en el pie.
+- Los comandos de ajuste y consulta (`/model`, `/status`, `/usage`, `/tools`…) ya no llenan el chat: su resultado sale en el pie o en un panel que se cierra con Esc o al seguir escribiendo.
+- El modelo puede leer páginas web también en el modo ask (`busca lixbon.com/docs`). Cada descarga se ve como `Fetch(url)` con el tamaño y el estado HTTP.
+- `/compact` es mucho más rápido (el resumen se escribe sin razonar y sin reenviar páginas ni imágenes enteras) y enseña su avance. El resumen ya no aparece como un mensaje tuyo, ni en la terminal ni en la app móvil.
+- Respuestas más legibles: títulos con jerarquía, bloques de código con fondo y su lenguaje, comandos destacados y tablas con bordes que se ajustan al ancho. Mientras el modelo escribe solo se ve el progreso, y una respuesta larga se muestra desde su principio, con un botón para bajar al final.
+- Con el control remoto activo puedes seguir escribiendo en la terminal, y las aprobaciones se piden a la vez aquí y en el móvil. El QR queda plegado.
+- Ctrl+V pega texto (o la imagen del portapapeles) en cualquier terminal. Las zonas clicables se iluminan al pasar el ratón, y los comandos en segundo plano se ven en el pie (`[2] comandos`) con su tiempo.
+- `/key` solo aparece si iniciaste sesión con una API key.
+- Corregido: en Windows no arrancaban los servidores MCP lanzados con `npx` cuando un argumento llevaba espacios (p. ej. `Authorization:Bearer …`).
+
 ## 2.4.0
 - Nuevo diseño de la terminal con la identidad de lixbon.com: barra superior fija con proyecto, rama, plan y modelo; tarjeta de bienvenida con el prisma; zona viva con lo que está haciendo el agente, el tiempo y el paso del plan; caja de entrada con el color del modo y un pie con el modo y el contexto. Tema claro u oscuro según tu terminal (`LIXBON_THEME`, `/config` → Tema).
 - El turno del agente se lee por bloques: el pensamiento queda plegado («Pensó 4.2 s»), las lecturas seguidas se agrupan («Exploró 4 archivos · 2 búsquedas»), las ediciones muestran el diff con resaltado de sintaxis y los comandos su salida con las primeras y las últimas líneas. Ctrl+O despliega todo y un clic en un bloque, solo ese.
