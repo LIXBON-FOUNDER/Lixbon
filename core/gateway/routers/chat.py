@@ -56,7 +56,8 @@ from core.gateway.model_router import model_for_request, target_or_503
 from core.inference.aliases import public_catalog, to_public
 from core.orchestration.orchestrator import ModelUnavailable
 from core.inference.context import fit_messages
-from core.inference.roles import REQUIRED_CAPABILITY, resolve_all, resolve_num_ctx
+from core.inference.esfuerzo import nivel_de_razonamiento
+from core.inference.roles import REQUIRED_CAPABILITY, capabilities_of, resolve_all, resolve_num_ctx
 
 logger = logging.getLogger("lixbon.chat")
 router = APIRouter()
@@ -374,8 +375,18 @@ async def chat_completions(
         messages = _normalize_for_ollama(messages)
 
     base, headers, origen = target_or_503(model)
-    num_ctx = resolve_num_ctx(payload.num_ctx, role.num_ctx, await fetch_models(), model)
+    catalog = await fetch_models()
+    num_ctx = resolve_num_ctx(payload.num_ctx, role.num_ctx, catalog, model)
+    nivel = nivel_de_razonamiento(messages)
     think = payload.think if payload.think is not None else CHAT_THINK
+    if think is None and not payload.tools:
+        caps = capabilities_of(catalog, model)
+        if caps is not None and "thinking" in caps:
+            # Solo gpt-oss gradúa; para los demás el término medio es no razonar.
+            think = nivel if nivel != "low" or "gpt-oss" in model.lower() else False
+        elif nivel is False:
+            # Ollama rechaza think=True en un modelo sin razonamiento, no False.
+            think = False
     # Visuals apaga el razonamiento porque qwen3.5 escribía el HTML dentro del
     # thinking; gpt-oss separa bien ambos canales y diseña mejor razonando.
     if payload.source == "visuals" and think is False and "gpt-oss" in model.lower():
@@ -390,10 +401,23 @@ async def chat_completions(
         # Con herramientas (agente) el modelo ya tiene `web_search` como tool
         # y decide él; el planificador solo duplicaría la búsqueda.
         web_mode = False
+    if web_mode == "auto" and nivel is False:
+        web_mode = False
     if web_mode and messages and messages[-1]["role"] == "user":
+        p_model, p_base, p_headers, p_alive = model, base, headers, role.keep_alive
+        # Solo si el admin fija el rol `route`: un modelo autodetectado distinto
+        # del del chat podría desalojarlo de la VRAM y salir más caro.
+        ruta = resolve_all(catalog)["route"]
+        if ruta.model and ruta.model != model and ruta.source in ("db", "env"):
+            try:
+                p_base, p_headers, _ = target_or_503(ruta.model)
+                p_model, p_alive = ruta.model, ruta.keep_alive
+            except HTTPException:
+                pass
+
         async def _preguntar(planner_messages: list[dict]) -> str:
-            resp = await ollama_chat(base, model, planner_messages, headers=headers,
-                                     client=deps.http_client_chat, keep_alive=role.keep_alive,
+            resp = await ollama_chat(p_base, p_model, planner_messages, headers=p_headers,
+                                     client=deps.http_client_chat, keep_alive=p_alive,
                                      format="json", think=False)
             return (resp.get("message") or {}).get("content", "")
 
@@ -406,7 +430,7 @@ async def chat_completions(
     messages = fit_messages(messages, num_ctx)
     started_at = time.perf_counter()
     logger.info(f"[chat] model='{model}' ({role.source}) stream={payload.stream} "
-                f"target={origen} web={payload.web_search}")
+                f"target={origen} web={web_mode} think={think}")
 
     if payload.stream:
         async def _stream_and_persist():
@@ -484,7 +508,7 @@ async def chat_completions(
 
     # Modo sin streaming
     ollama_resp, origen = await _routed_chat(model, messages, num_ctx=num_ctx,
-                                            keep_alive=role.keep_alive)
+                                            keep_alive=role.keep_alive, think=think)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     assistant_text = ollama_resp.get("message", {}).get("content", "")
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
