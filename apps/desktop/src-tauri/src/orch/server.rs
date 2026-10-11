@@ -95,16 +95,19 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
         return reply(&mut stream, 200, &json!({ "ok": false, "error": why }));
     }
     // Un pánico dentro de un comando no debe cortar la conexión sin decir nada: el agente recibe el motivo.
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| core.rpc(super::Caller::Agent(caller), &cwd, cmd, &args)));
-    let res = match outcome {
+    let res = guarded(cmd, || core.rpc(super::Caller::Agent(caller), &cwd, cmd, &args));
+    reply(&mut stream, 200, &res)
+}
+
+fn guarded(cmd: &str, run: impl FnOnce() -> Result<Value, String>) -> Value {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(Ok(v)) => json!({ "ok": true, "data": v }),
         Ok(Err(e)) => json!({ "ok": false, "error": e }),
         Err(panic) => {
             let why = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
             json!({ "ok": false, "error": format!("Error interno de Lixbon en «{cmd}»: {why}") })
         }
-    };
-    reply(&mut stream, 200, &res)
+    }
 }
 
 fn reply(stream: &mut TcpStream, code: u16, body: &Value) -> std::io::Result<()> {
@@ -128,4 +131,75 @@ fn reply(stream: &mut TcpStream, code: u16, body: &Value) -> std::io::Result<()>
     let mut sink = [0u8; 512];
     while matches!(stream.read(&mut sink), Ok(n) if n > 0) {}
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orch::state::NewTask;
+    use crate::orch::Orch;
+
+    #[test]
+    fn un_panico_en_un_comando_llega_como_error_con_el_motivo() {
+        let r = guarded("show", || panic!("se rompió"));
+        assert_eq!(r["ok"], false);
+        let e = r["error"].as_str().unwrap();
+        assert!(e.contains("«show»") && e.contains("se rompió"), "{e}");
+        let propio = String::from("motivo propio");
+        let r = guarded("list", move || -> Result<Value, String> { std::panic::panic_any(propio) });
+        assert!(r["error"].as_str().unwrap().contains("motivo propio"));
+        assert_eq!(guarded("x", || Ok(json!(1)))["data"], 1);
+        assert_eq!(guarded("x", || Err("no".into()))["error"], "no");
+    }
+
+    #[test]
+    fn una_respuesta_grande_llega_completa_aunque_el_cliente_lea_despacio() {
+        let core = Orch::default().0;
+        core.settings.lock().unwrap().enabled = true;
+        let spec = "x".repeat(3 * 1024 * 1024);
+        core.lock().create_run("obj", NewTask {
+            agent: "coordinador".into(), model: None, effort: None, role: None, title: "t".into(), spec: spec.clone(),
+            repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: true,
+        });
+        let h = start(core).unwrap();
+        let body = r#"{"cmd":"list","args":{}}"#;
+        let mut s = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
+        // Bytes de más tras el cuerpo: sin leer en el servidor al cerrar, Windows manda un RST.
+        write!(s, "POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}EXTRA-SIN-LEER", h.token, body.len(), body).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let mut raw = Vec::new();
+        let mut chunk = [0u8; 32 * 1024];
+        loop {
+            match s.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    raw.extend_from_slice(&chunk[..n]);
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(e) => panic!("la conexión se cortó a mitad de la respuesta: {e}"),
+            }
+        }
+        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        let head = String::from_utf8_lossy(&raw[..split]).to_string();
+        let len: usize = head.lines().find_map(|l| l.strip_prefix("Content-Length: ")).unwrap().trim().parse().unwrap();
+        assert_eq!(raw.len() - split, len, "respuesta truncada");
+        let v: Value = serde_json::from_slice(&raw[split..]).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["data"]["tasks"][0]["spec"].as_str().unwrap().len(), spec.len());
+        h.stop();
+    }
+
+    #[test]
+    fn sin_el_token_correcto_no_se_despacha_nada() {
+        let core = Orch::default().0;
+        core.settings.lock().unwrap().enabled = true;
+        let h = start(core).unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
+        let body = r#"{"cmd":"status"}"#;
+        write!(s, "POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer incorrecto\r\nContent-Length: {}\r\n\r\n{}", body.len(), body).unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        assert!(out.starts_with("HTTP/1.1 401"), "{out}");
+        h.stop();
+    }
 }
