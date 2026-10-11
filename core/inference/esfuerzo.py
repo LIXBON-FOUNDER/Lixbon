@@ -27,20 +27,51 @@ _ANALISIS = re.compile(
 )
 
 
+_CHARLA = frozenset(
+    "hola buenas buenos dias tardes noches hey hi hello gracias muchas mil thanks thank you ok okay vale "
+    "si no claro perfecto genial bien muy todo como estas esta que tal adios chao bye nos vemos de nada "
+    "entendido listo excelente super good great nice cool yes sure np".split()
+)
+
+
 def _plano(texto: str) -> str:
     sin_tildes = unicodedata.normalize("NFKD", texto.lower())
     return "".join(c for c in sin_tildes if not unicodedata.combining(c))
 
 
-def nivel_de_razonamiento(messages: list[dict]) -> Nivel:
+def _ultima_pregunta(messages: list[dict]) -> tuple[str, bool] | None:
     ultimo = next((m for m in reversed(messages) if m.get("role") == "user"), None)
     if ultimo is None:
-        return "low"
+        return None
     texto = str(ultimo.get("content") or "")
     adjuntos = bool(ultimo.get("images"))
     if texto.startswith("--- ") and _SEPARADOR_ADJUNTOS in texto:
         texto = texto.rsplit(_SEPARADOR_ADJUNTOS, 1)[1]
         adjuntos = True
+    return texto, adjuntos
+
+
+def podria_necesitar_internet(messages: list[dict]) -> bool:
+    """Si merece la pena preguntar al planificador de búsquedas (web_search
+    auto): una cuenta, código o un saludo nunca dependen de internet."""
+    pregunta = _ultima_pregunta(messages)
+    if pregunta is None:
+        return False
+    texto, _ = pregunta
+    if _CODIGO.search(texto):
+        return False
+    plano = _plano(texto)
+    palabras = re.findall(r"[a-zñ]+", plano)
+    if len(palabras) <= PALABRAS_CORTO and all(p in _CHARLA for p in palabras):
+        return False
+    return not (_CALCULO.search(plano) and len(plano.split()) <= 12)
+
+
+def nivel_de_razonamiento(messages: list[dict]) -> Nivel:
+    pregunta = _ultima_pregunta(messages)
+    if pregunta is None:
+        return "low"
+    texto, adjuntos = pregunta
     if _CODIGO.search(texto):
         return True
     plano = _plano(texto)

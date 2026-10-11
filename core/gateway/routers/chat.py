@@ -61,7 +61,7 @@ from core.gateway.model_router import model_for_request, target_or_503
 from core.inference.aliases import public_catalog, to_public
 from core.orchestration.orchestrator import ModelUnavailable
 from core.inference.context import fit_messages
-from core.inference.esfuerzo import nivel_de_razonamiento
+from core.inference.esfuerzo import nivel_de_razonamiento, podria_necesitar_internet
 from core.inference.roles import REQUIRED_CAPABILITY, capabilities_of, resolve_all, resolve_num_ctx
 
 logger = logging.getLogger("lixbon.chat")
@@ -419,7 +419,7 @@ async def chat_completions(
         # Con herramientas (agente) el modelo ya tiene `web_search` como tool
         # y decide él; el planificador solo duplicaría la búsqueda.
         web_mode = False
-    if web_mode == "auto" and nivel is False:
+    if web_mode == "auto" and not podria_necesitar_internet(messages):
         web_mode = False
     if web_mode and messages and messages[-1]["role"] == "user":
         p_model, p_base, p_headers, p_alive = model, base, headers, role.keep_alive
