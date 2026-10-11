@@ -21,6 +21,7 @@ import { AppState as AppLifecycle } from 'react-native';
 import { ApiClient, ApiException } from './api';
 import { oauthAuthorize } from './oauth';
 import { registerPushToken } from './push';
+import { nivelesDe, thinkDe } from './razonamiento';
 import { streamChatCompletion } from './sse';
 
 // EXPO_PUBLIC_API_BASE: builds contra staging o el gateway simulado de las pruebas.
@@ -44,6 +45,7 @@ const appLogin = () => ({
 });
 const UI_KEY = 'uiPrefs';
 const DEFAULT_MODEL_KEY = 'defaultModel';
+const RAZONAR_KEY = 'razonar';
 
 export const UI_DEFAULTS = {
   accent: 'lima',
@@ -405,6 +407,9 @@ function ChatState({ api, apiKey, ready, children }) {
   const [error, setError] = useState('');
   const [webSearch, setWebSearch] = useState(false);
   const [usage, setUsage] = useState(null); // {used, total} del último turno
+  const [modelInfo, setModelInfo] = useState({});
+  const [razonar, setRazonarState] = useState('auto');
+  const [quota, setQuota] = useState(null); // aviso de cupo de sesión/semana del gateway
   const draftRef = useRef(''); // texto del compositor (sobrevive al cambio de pestaña)
 
   const handleRef = useRef(null);
@@ -420,6 +425,13 @@ function ChatState({ api, apiKey, ready, children }) {
       const ids = (Array.isArray(res?.data) ? res.data : [])
         .map((m) => m?.id)
         .filter((id) => typeof id === 'string' && !id.startsWith('error:'));
+      setModelInfo(
+        Object.fromEntries(
+          (Array.isArray(res?.data) ? res.data : [])
+            .filter((m) => typeof m?.id === 'string')
+            .map((m) => [m.id, { reasoning: m.reasoning, real: m.model || m.id }]),
+        ),
+      );
       if (!defaultModelRef.current) {
         defaultModelRef.current = (await AsyncStorage.getItem(DEFAULT_MODEL_KEY).catch(() => null)) || '';
         setDefaultModelState(defaultModelRef.current);
@@ -431,6 +443,17 @@ function ChatState({ api, apiKey, ready, children }) {
       setModels([]);
     }
   }, [api]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(RAZONAR_KEY)
+      .then((v) => v && setRazonarState(v))
+      .catch(() => {});
+  }, []);
+
+  const setRazonar = useCallback((valor) => {
+    setRazonarState(valor);
+    AsyncStorage.setItem(RAZONAR_KEY, valor).catch(() => {});
+  }, []);
 
   const setDefaultModel = useCallback((id) => {
     defaultModelRef.current = id;
@@ -506,6 +529,7 @@ function ChatState({ api, apiKey, ready, children }) {
       setMessages([...thread, { role: 'assistant', content: '' }]);
       setStreaming(true);
       setError('');
+      setQuota(null);
 
       handleRef.current = streamChatCompletion({
         base: api.base,
@@ -514,6 +538,8 @@ function ChatState({ api, apiKey, ready, children }) {
         messages: thread.map((m) => ({ role: m.role, content: m.content })),
         conversationId: convId,
         webSearch,
+        think: thinkDe(razonar, nivelesDe(modelInfo[model])),
+        onQuota: setQuota,
         onDelta: (delta) => {
           setMessages((msgs) => {
             const last = msgs[msgs.length - 1];
@@ -540,13 +566,17 @@ function ChatState({ api, apiKey, ready, children }) {
             return last && last.role === 'assistant' && !last.content ? msgs.slice(0, -1) : msgs;
           });
           setStreaming(false);
+          if (err?.quota) {
+            setQuota(err.quota);
+            return;
+          }
           setError(
             err instanceof ApiException ? err.message : 'Se perdió la conexión con el servidor',
           );
         },
       });
     },
-    [api, apiKey, model, webSearch, generateTitle],
+    [api, apiKey, model, webSearch, razonar, modelInfo, generateTitle],
   );
 
   const send = useCallback(
@@ -607,6 +637,11 @@ function ChatState({ api, apiKey, ready, children }) {
       error,
       webSearch,
       usage,
+      razonar,
+      setRazonar,
+      nivelesRazonar: nivelesDe(modelInfo[model]),
+      quota,
+      clearQuota: () => setQuota(null),
       draftRef,
       loadModels,
       setModel,
@@ -619,7 +654,7 @@ function ChatState({ api, apiKey, ready, children }) {
       regenerate,
       stop,
     }),
-    [models, model, defaultModel, setDefaultModel, conversationId, title, messages, streaming, loadingMessages, error, webSearch, usage, loadModels, newChat, openConversation, send, regenerate, stop],
+    [models, model, defaultModel, setDefaultModel, conversationId, title, messages, streaming, loadingMessages, error, webSearch, usage, razonar, setRazonar, modelInfo, quota, loadModels, newChat, openConversation, send, regenerate, stop],
   );
 
   return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;

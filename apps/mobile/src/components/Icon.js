@@ -6,6 +6,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 const ICONS = {
   plus: { paths: ['M12 5v14M5 12h14'] },
+  bolt: { paths: ['M13.5 3 5 13.5h6.5L10.5 21 19 10.5h-6.5L13.5 3Z'] },
   search: { paths: ['m20 20-3.5-3.5'], circles: [{ cx: 11, cy: 11, r: 7 }] },
   chat: { paths: ['M21 12a8 8 0 0 1-8 8H4l1.7-3.4A8 8 0 1 1 21 12Z'] },
   panel: { paths: ['M9.5 4v16'], rects: [{ x: 3, y: 4, width: 18, height: 16, rx: 3 }] },

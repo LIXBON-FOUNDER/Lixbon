@@ -17,9 +17,11 @@ export function streamChatCompletion({
   messages,
   conversationId,
   webSearch,
+  think,
   onDelta,
   onSources,
   onUsage,
+  onQuota,
   onDone,
   onError,
 }) {
@@ -60,6 +62,7 @@ export function streamChatCompletion({
       }
       try {
         const obj = JSON.parse(data);
+        if (obj?.lixbon_quota && onQuota) onQuota(obj.lixbon_quota);
         if (obj && Array.isArray(obj.lixbon_sources)) {
           onSources(obj.lixbon_sources);
           continue;
@@ -95,7 +98,11 @@ export function streamChatCompletion({
       } catch {
         // cuerpo no JSON
       }
-      fail(new ApiException(extractDetail(data, xhr.status), xhr.status));
+      const err = new ApiException(extractDetail(data, xhr.status), xhr.status);
+      if (/_quota_exhausted$/.test(data?.detail?.code || '')) {
+        err.quota = { state: 'exhausted', scope: data.detail.scope, reset_at: data.detail.reset_at, message: err.message };
+      }
+      fail(err);
       return;
     }
     pump(true);
@@ -110,6 +117,7 @@ export function streamChatCompletion({
       stream: true,
       web_search: webSearch,
       source: CHAT_SOURCE,
+      ...(think !== undefined ? { think } : {}),
     }),
   );
 
