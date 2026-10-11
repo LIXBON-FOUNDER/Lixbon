@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"lixbon.com/cli/internal/history"
+	"lixbon.com/cli/internal/orch"
 	"lixbon.com/cli/internal/tools"
 	"lixbon.com/cli/internal/toolspec"
 )
@@ -124,7 +125,9 @@ type Session struct {
 	AllowedCommands []string
 	// OnAllowedCommands persiste la lista cuando el usuario añade un prefijo.
 	OnAllowedCommands func([]string)
-	ContextWindow     int
+	// Orch consulta el orquestador de Lixbon Desktop; nil lo desactiva.
+	Orch          func() orch.Info
+	ContextWindow int
 	// Ask es un chat sin streaming (compactación del contexto); nil la desactiva.
 	Ask func(ctx context.Context, messages []history.Message) (string, error)
 
@@ -138,6 +141,13 @@ type Session struct {
 	UndoStack      [][]Checkpoint
 
 	pendingImages []string
+}
+
+func (s *Session) OrchInfo() orch.Info {
+	if s.Orch == nil {
+		return orch.Info{}
+	}
+	return s.Orch()
 }
 
 func NewSession(workspace string, tb *tools.Toolbox) *Session {

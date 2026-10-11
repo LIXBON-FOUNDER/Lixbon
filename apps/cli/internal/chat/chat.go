@@ -20,6 +20,7 @@ import (
 	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/history"
 	"lixbon.com/cli/internal/mcp"
+	"lixbon.com/cli/internal/orch"
 	"lixbon.com/cli/internal/session"
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
@@ -68,6 +69,9 @@ type Options struct {
 	AutoRun   bool
 	// Autotitle pide al servidor el título tras el primer intercambio.
 	Autotitle bool
+	// Ephemeral no escribe nada en disco: ni config.json ni conversaciones. Es lo
+	// que usa un worker del orquestador para no alterar el proveedor ni el modelo del usuario.
+	Ephemeral bool
 }
 
 type Chat struct {
@@ -96,6 +100,7 @@ type Chat struct {
 	ProjectContext string
 	Custom         map[string]workspace.Command
 
+	ephemeral     bool
 	reserved      []string
 	pendingImages []string
 	// nextImages viajan con el próximo mensaje sin marcador [IMG#n]: las
@@ -154,6 +159,7 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 		ProjectContext: workspace.ProjectContext(root),
 		title:          opts.Title,
 		autotitle:      opts.Autotitle,
+		ephemeral:      opts.Ephemeral,
 	}
 	s := agent.NewSession(root, toolbox)
 	s.AutoApprove = cfg.AutoApproveTools
@@ -166,6 +172,8 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 	s.OnAllowedCommands = c.saveAllowedCommands
 	s.Ask = c.AskQuiet
 	s.Model = c.Model
+	orchDir := filepath.Dir(opts.ConfigPath)
+	s.Orch = func() orch.Info { return orch.Discover(orchDir) }
 	c.Session = s
 	return c, nil
 }
@@ -213,11 +221,16 @@ func (c *Chat) LoadCustomCommands(reserved []string) {
 
 func (c *Chat) saveAllowedCommands(list []string) {
 	c.Cfg.SetExtraStringList("allowed_commands", list)
-	_ = config.Save(c.ConfigPath, c.Cfg)
+	_ = c.SaveConfig()
 }
 
 // SaveConfig persiste la configuración (modelo, modo, búsqueda web…).
-func (c *Chat) SaveConfig() error { return config.Save(c.ConfigPath, c.Cfg) }
+func (c *Chat) SaveConfig() error {
+	if c.ephemeral {
+		return nil
+	}
+	return config.Save(c.ConfigPath, c.Cfg)
+}
 
 // ── cuenta ──────────────────────────────────────────────────────────────
 
@@ -396,6 +409,9 @@ func (a Account) NoModelsError() error {
 
 // Persist guarda la conversación en el historial local; nunca falla el turno.
 func (c *Chat) Persist() {
+	if c.ephemeral {
+		return
+	}
 	// Serializado: el guardado del turno y el del autotítulo pueden solaparse
 	// y el más antiguo no debe pisar al nuevo.
 	c.persistMu.Lock()

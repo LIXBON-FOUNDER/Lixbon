@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -381,6 +382,33 @@ func TestSwitchingFromAgentToAskDropsToolRoundTrips(t *testing.T) {
 		if msg["role"] == "tool" || msg["tool_calls"] != nil {
 			t.Fatalf("el round-trip de herramientas no debe viajar en modo ask: %v", msg)
 		}
+	}
+}
+
+func TestEphemeralChatNeverWritesConfigOrConversations(t *testing.T) {
+	_, client := newGateway(t)
+	touch := func(c *Chat) {
+		c.SetModel("otro")
+		c.Session.OnAllowedCommands([]string{"npm test"})
+		if _, err := c.Send(context.Background(), "hola", nil); err != nil {
+			t.Fatal(err)
+		}
+		c.Persist()
+	}
+
+	normal := newChat(t, client, nil, Options{})
+	touch(normal)
+	if entries, _ := os.ReadDir(filepath.Dir(normal.ConfigPath)); len(entries) == 0 {
+		t.Fatal("un chat normal sí escribe config.json y sus conversaciones: la comprobación no mide nada")
+	}
+
+	ephemeral := newChat(t, client, nil, Options{Ephemeral: true})
+	touch(ephemeral)
+	if entries, _ := os.ReadDir(filepath.Dir(ephemeral.ConfigPath)); len(entries) != 0 {
+		t.Fatalf("un chat efímero no debe escribir nada: %v", entries)
+	}
+	if ephemeral.Model != "otro" {
+		t.Fatal("el cambio de modelo sí vale para la sesión en curso")
 	}
 }
 

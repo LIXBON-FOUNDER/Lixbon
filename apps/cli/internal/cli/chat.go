@@ -39,36 +39,41 @@ func (a *App) chat(ctx context.Context, args []string) int {
 	return a.Interactive(ctx, opts)
 }
 
-// runOnce envía un único mensaje y escribe la respuesta en stdout; el
-// registro de acciones y los avisos van a stderr.
-func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) int {
-	cfg := config.Load(a.ConfigPath)
+// openChat prepara una conversación sin interfaz: comprueba la sesión, sondea el
+// proveedor, resuelve el modelo y, si withMCP, arranca MCP. Si stop es true ya se explicó el
+// motivo y code es el código de salida (0 si fue una interrupción).
+func (a *App) openChat(ctx context.Context, cfg config.Config, opts chat.Options, withMCP bool) (*chat.Chat, int, bool) {
 	if cfg.APIKey == "" && !cfg.IsGeneric() {
 		a.printError("No hay sesión. Inicia sesión con: lixbon setup, o usa otro proveedor: lixbon auth login")
-		return 1
+		return nil, 1, true
 	}
 	client := api.FromConfig(cfg)
 	c, err := chat.New(cfg, client, opts)
 	if err != nil {
 		a.printError(err.Error())
-		return 1
+		return nil, 1, true
 	}
-	defer c.Toolbox.Close()
-	defer c.StopMCP()
+	ready := false
+	defer func() {
+		if !ready {
+			c.Toolbox.Close()
+			c.StopMCP()
+		}
+	}()
 
 	acc := c.Probe(ctx)
 	if ctx.Err() != nil {
-		return a.interrupted()
+		return nil, a.interrupted(), true
 	}
 	switch acc.State {
 	case chat.AccountAuth:
 		if acc.Generic {
 			a.printError(fmt.Sprintf("El proveedor rechazó la clave. Cámbiala con: lixbon auth login %s", cfg.ActiveProfile()))
-			return 1
+			return nil, 1, true
 		}
 		c.ClearSession()
 		a.printError("Tu sesión ya no es válida (se cerró desde otro sitio o la clave fue revocada).")
-		return 1
+		return nil, 1, true
 	case chat.AccountOffline:
 		a.printError("No se pudo contactar con el servidor; se trabajará con la configuración local.")
 	}
@@ -76,18 +81,32 @@ func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) in
 	switch {
 	case err != nil:
 		a.printError(err.Error())
-		return 1
+		return nil, 1, true
 	case needsPick:
 		a.printError("No hay modelo configurado. Indica uno con --model o lixbon init --model <id>.")
-		return 1
+		return nil, 1, true
 	}
 
-	if c.Mode != chat.ModeAsk {
+	if withMCP && c.Mode != chat.ModeAsk {
 		c.StartMCP()
 		waitCtx, cancel := context.WithTimeout(ctx, mcpStartWait)
 		c.WaitMCP(waitCtx)
 		cancel()
 	}
+	ready = true
+	return c, 0, false
+}
+
+// runOnce envía un único mensaje y escribe la respuesta en stdout; el
+// registro de acciones y los avisos van a stderr.
+func (a *App) runOnce(ctx context.Context, message string, opts chat.Options) int {
+	cfg := config.Load(a.ConfigPath)
+	c, code, stop := a.openChat(ctx, cfg, opts, true)
+	if stop {
+		return code
+	}
+	defer c.Toolbox.Close()
+	defer c.StopMCP()
 	c.Session.Approver = &headlessApprover{app: a}
 	sink := &onceSink{app: a, live: c.Mode != chat.ModeAgent}
 	answer, err := c.Send(ctx, message, sink)
