@@ -235,6 +235,97 @@ function GeneralSection({ user, onSaved }) {
   );
 }
 
+const NAVEGADORES = [['Edg/', 'Edge'], ['OPR/', 'Opera'], ['Firefox/', 'Firefox'], ['Chrome/', 'Chrome'], ['Safari/', 'Safari']];
+const SISTEMAS = [['Windows', 'Windows'], ['Android', 'Android'], ['iPhone', 'iOS'], ['iPad', 'iPadOS'], ['Mac OS X', 'macOS'], ['Linux', 'Linux']];
+const buscarMarca = (ua, tabla) => tabla.find(([marca]) => ua.includes(marca))?.[1];
+
+function describirSesion(s) {
+  if (s.device_name) return s.device_name;
+  const ua = s.user_agent || '';
+  return [buscarMarca(ua, NAVEGADORES), buscarMarca(ua, SISTEMAS)].filter(Boolean).join(' · ') || s.ip_address || '';
+}
+
+function SessionsCard() {
+  const t = useT('account');
+  const confirmar = useConfirmar();
+  const [sessions, setSessions] = useState([]);
+  const [errorKey, setErrorKey] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get('/api/auth/sessions');
+      setSessions(res.data.sessions);
+    } catch {
+      setErrorKey('profile.sessionsError');
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const revocar = async (pregunta, peticion) => {
+    const ok = await confirmar({
+      titulo: t(`profile.${pregunta}.title`),
+      texto: t(`profile.${pregunta}.text`),
+      etiqueta: t(`profile.${pregunta}.label`),
+    });
+    if (!ok) return;
+    setErrorKey('');
+    try {
+      await peticion();
+      await load();
+    } catch {
+      setErrorKey('profile.revokeError');
+    }
+  };
+
+  const hayOtras = sessions.some((s) => !s.current);
+
+  return (
+    <div className="set-card">
+      <h2 className="set-title">{t('profile.sessionsTitle')}</h2>
+      {errorKey && <p className="page__error" role="alert">{t(errorKey)}</p>}
+      <div className="set-row set-row--head">
+        <span className="card__muted">{t('profile.sessionsHint')}</span>
+        {hayOtras && (
+          <button
+            className="pill-btn pill-btn--outline set-btn"
+            onClick={() => revocar('revokeOthersConfirm', () => api.delete('/api/auth/sessions'))}
+          >
+            {t('profile.revokeOthers')}
+          </button>
+        )}
+      </div>
+      <ul className="keys">
+        {sessions.map((s) => {
+          const cliente = t(`profile.clients.${s.client}`);
+          return (
+            <li key={s.id} className="keys__item">
+              <div className="keys__info">
+                <span className="keys__name">
+                  {cliente}{s.legacy && ` · ${t('profile.legacyTag')}`}
+                </span>
+                <span className="keys__masked">{describirSesion(s)}</span>
+              </div>
+              {s.current
+                ? <span className="verify-chip is-ok">{t('profile.thisSession')}</span>
+                : <span className="keys__meta">{t('profile.lastUsed', { date: new Date(s.last_used_at).toLocaleDateString() })}</span>}
+              {!s.current && (
+                <button
+                  className="icon-btn"
+                  onClick={() => revocar('revokeConfirm', () => api.delete(`/api/auth/sessions/${s.id}`))}
+                  aria-label={t('profile.revokeAria', { name: cliente })}
+                >
+                  <IconTrash size={15} />
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout }) {
   const t = useT('account');
   const [newKey, setNewKey] = useState(null);
@@ -260,7 +351,8 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
     }
   };
 
-  const activeKeys = keys.filter((k) => k.is_active);
+  const manualKeys = keys.filter((k) => (k.origin ?? 'manual') === 'manual');
+  const activeKeys = manualKeys.filter((k) => k.is_active);
 
   const createKey = async () => {
     setError('');
@@ -336,6 +428,7 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
 
       <div className="set-card">
         <h2 className="set-title">{t('profile.apiKeysTitle')}</h2>
+        <p className="card__muted">{t('profile.apiKeysHint')}</p>
         {error && <p className="page__error" role="alert">{error}</p>}
         <div className="set-row set-row--head">
           <span className="card__muted">
@@ -357,7 +450,7 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
         )}
 
         <ul className="keys">
-          {keys.map((k) => (
+          {manualKeys.map((k) => (
             <li key={k.id} className={`keys__item ${k.is_active ? '' : 'is-inactive'}`}>
               <div className="keys__info">
                 <span className="keys__name">{k.name}</span>
@@ -373,9 +466,11 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
               )}
             </li>
           ))}
-          {keys.length === 0 && <p className="card__muted">{t('profile.noKeys')}</p>}
+          {manualKeys.length === 0 && <p className="card__muted">{t('profile.noKeys')}</p>}
         </ul>
       </div>
+
+      <SessionsCard />
 
       <div className="set-card">
         <h2 className="set-title">{t('profile.sessionTitle')}</h2>
