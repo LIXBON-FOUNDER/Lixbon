@@ -2,6 +2,7 @@
 // las sesiones de chat y del modo Agente: cambiar de modo desmonta la vista, no el PTY.
 // La suscripción a los eventos del host es una sola, del store (no de la vista), y guarda un
 // búfer de respaldo por pestaña. El PTY solo se cierra al cerrar la pestaña o la app.
+import { useEffect, useRef } from 'react';
 import { create } from 'zustand';
 import { codexTerm as defaultApi, appendCapped, FALLBACK_BUFFER_CAP } from './codexTermContract';
 
@@ -48,21 +49,22 @@ export const useCodexTermStore = create((set, get) => ({
   tabs: [],          // [{ key, term_id, cwd, model, effort, argv, warnings, policy, exited, code }]
   activeKey: null,   // pestaña de Codex a la vista; null = se ve el chat
   launcher: false,   // panel previo al lanzamiento abierto
+  launcherResume: null, // { id, title, cwd, model } si el panel es para reanudar una sesión guardada
   /** Búfer de respaldo por term_id: { data (≤ ~1 MB, recortado por delante), seq }. */
   buffers: {},
 
-  openLauncher: () => set({ launcher: true, activeKey: null }),
-  cancelLauncher: () => set({ launcher: false }),
+  openLauncher: (resume = null) => set({ launcher: true, launcherResume: resume, activeKey: null }),
+  cancelLauncher: () => set({ launcher: false, launcherResume: null }),
   /** Tras codex_term_open: añade la pestaña, la activa y asegura la suscripción. */
-  addTab: (res, { cwd, model, effort }) => {
+  addTab: (res, { cwd, model, effort, title }) => {
     ensureCodexTermEvents();
     const key = `codex-tab-${++seq}`;
-    const tab = { key, term_id: res.term_id, cwd, model: model || null, effort: effort || null, argv: res.argv || [], warnings: res.warnings || [], policy: res.policy ?? null, exited: false, code: null };
-    set({ tabs: [...get().tabs, tab], activeKey: key, launcher: false, buffers: { ...get().buffers, [res.term_id]: { data: '', seq: null } } });
+    const tab = { key, term_id: res.term_id, title: title || null, cwd, model: model || null, effort: effort || null, argv: res.argv || [], warnings: res.warnings || [], policy: res.policy ?? null, exited: false, code: null };
+    set({ tabs: [...get().tabs, tab], activeKey: key, launcher: false, launcherResume: null, buffers: { ...get().buffers, [res.term_id]: { data: '', seq: null } } });
     return key;
   },
-  activate: (key) => { if (get().tabs.some((t) => t.key === key)) set({ activeKey: key, launcher: false }); },
-  deactivate: () => set({ activeKey: null, launcher: false }),
+  activate: (key) => { if (get().tabs.some((t) => t.key === key)) set({ activeKey: key, launcher: false, launcherResume: null }); },
+  deactivate: () => set({ activeKey: null, launcher: false, launcherResume: null }),
   appendOutput: (term_id, data, s) => {
     const b = get().buffers[term_id];
     if (!b) return; // pestaña ya cerrada o desconocida
@@ -103,3 +105,13 @@ export const useCodexTermStore = create((set, get) => ({
 
 // Sin cierre en beforeunload: recargar la webview también lo dispara y mataría los PTY que
 // rehydrate() debe recuperar. Al cerrar la app los cierra el host.
+
+/** Elegir otro chat saca a Codex de la vista. Montar de nuevo (al volver de otro modo) no cuenta como elegir. */
+export function useLeaveCodexOnChatChange(chatKey) {
+  const last = useRef(chatKey);
+  useEffect(() => {
+    if (last.current === chatKey) return;
+    last.current = chatKey;
+    useCodexTermStore.getState().deactivate();
+  }, [chatKey]);
+}

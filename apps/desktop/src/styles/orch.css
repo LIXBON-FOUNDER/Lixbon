@@ -5,7 +5,8 @@
 .orch__warn { margin: 8px; padding: 8px 10px; border-radius: var(--radius); font-size: 11.5px; line-height: 1.5; color: var(--warn); background: rgba(var(--warn-rgb), 0.08); }
 
 .modeswitch__tab.has-alert { position: relative; }
-.modeswitch__tab.has-alert::after { content: ''; position: absolute; top: 6px; right: 10px; width: 6px; height: 6px; border-radius: 3px; background: var(--warn); }
+.modeswitch__tab.has-alert:not(:has(.modeswitch__count))::after { content: ''; position: absolute; top: 6px; right: 10px; width: 6px; height: 6px; border-radius: 3px; background: var(--warn); }
+.modeswitch__count { position: absolute; top: 3px; right: 4px; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; line-height: 1; color: #1A1710; background: var(--warn); }
 
 .orch__side { display: flex; flex-direction: column; }
 .orch__runs { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
@@ -23,6 +24,7 @@
 .orch__task.is-active { background: var(--surface-4, var(--surface-5)); color: var(--ink); }
 .orch__task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .orch__task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.orch__task-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink-50, var(--ink-35)); }
 .orch__task-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink-35); }
 .orch__badge { flex-shrink: 0; min-width: 16px; height: 16px; padding: 0 6px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
 .orch__badge--ask { color: #1A1710; background: var(--warn); }
@@ -184,4 +186,5 @@
 .codexlaunch { margin: 12px; }
 .codexlaunch__actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 8px; }
 .codexterm__bar { display: flex; justify-content: flex-end; padding-bottom: 4px; }
+.codextabs__folder { opacity: .6; }
 .codextabs__meta { display: block; font-size: 11px; color: var(--ink-dim); }

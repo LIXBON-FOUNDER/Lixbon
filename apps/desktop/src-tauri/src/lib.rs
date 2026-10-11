@@ -133,8 +133,14 @@ fn ensure_inside_root(root: &State<WorkspaceRoot>, path: &str) -> Result<PathBuf
 // ── Pestaña de terminal de Codex (solo la interfaz; no está en el servidor de lxo) ──
 
 #[tauri::command(async, rename_all = "snake_case")]
-fn codex_term_policy(cwd: String, model: Option<String>, effort: Option<String>) -> Result<serde_json::Value, String> {
-    orch::codex_term_policy(&cwd, model.as_deref(), effort.as_deref())
+fn codex_term_policy(cwd: String, model: Option<String>, effort: Option<String>, resume: Option<String>) -> Result<serde_json::Value, String> {
+    orch::codex_term_policy(&cwd, model.as_deref(), effort.as_deref(), resume.as_deref())
+}
+
+/// Sesiones guardadas de Codex (de la carpeta indicada o de todas) para el historial.
+#[tauri::command(async, rename_all = "snake_case")]
+fn codex_sessions(cwd: Option<String>, limit: Option<usize>) -> Vec<orch::CodexSessionInfo> {
+    orch::codex_sessions(cwd.as_deref(), limit.unwrap_or(60))
 }
 
 #[tauri::command(async, rename_all = "snake_case")]
@@ -149,9 +155,10 @@ fn codex_term_open(
     cols: Option<u16>,
     rows: Option<u16>,
     acknowledged: Option<bool>,
+    resume: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let root_path = root.0.lock().map_err(|_| "Estado interno corrupto".to_string())?.clone();
-    orch::codex_term_open(&app, &terms, root_path.as_deref(), &cwd, model.as_deref(), effort.as_deref(), cols, rows, acknowledged == Some(true))
+    orch::codex_term_open(&app, &terms, root_path.as_deref(), &cwd, model.as_deref(), effort.as_deref(), cols, rows, acknowledged == Some(true), resume.as_deref())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1513,6 +1520,7 @@ pub fn run() {
             orch::orch_resolve_policy,
             orch::orch_list_providers,
             codex_term_policy,
+            codex_sessions,
             codex_term_open,
             codex_term_write,
             codex_term_resize,

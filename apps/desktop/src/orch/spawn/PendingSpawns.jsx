@@ -3,6 +3,7 @@
 // Aprobar envía el argv exactamente como se ve; ack_unverified solo si se marcó la casilla.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EffectivePolicyView } from '../policy/EffectivePolicyView';
+import { WorktreeEnv } from './WorktreeEnv';
 import { AGENT_LABELS, ROLE_LABELS } from '../../store/orchStore';
 import { defaultSpawnApi, integrateIntoLabel, pendingPolicy, resolvedReason, spawnField, SPAWN_OUTCOMES, toMs } from './spawnContract';
 import './spawn.css';
@@ -153,6 +154,7 @@ export function PendingSpawnDetail({ item, busy, error, onApprove, onReject }) {
         </p>
       )}
       {into && <p className="spawns__summary" data-testid="spawn-integrate-into">Se integrará en <span className="mono">{into}</span></p>}
+      <WorktreeEnv env={spawnField(item, 'env')} />
       {error && (
         <div className="spawns__error" role="alert" data-testid="spawn-error">
           <b>El host no lanzó nada y el lanzamiento sigue pendiente.</b> <span>{error}</span>

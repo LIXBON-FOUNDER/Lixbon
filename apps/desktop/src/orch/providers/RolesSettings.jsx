@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import { Select } from '../../components/Select';
 import { SectionHead } from '../../sections/Settings/SettingsParts';
 import { resolvePolicy as defaultResolver } from '../policy/resolvePolicy';
-import { DEFAULT_PROVIDER, UNVERIFIED_LABEL, providerLabel } from './providersContract';
+import { DEFAULT_PROVIDER, UNVERIFIED_LABEL, blockedProfileReason, providerLabel } from './providersContract';
 import { profileName } from './NewAgentItems';
 import { EMPTY_SAVE_WARNINGS, warningsForRole, dropClaudeOnly } from './roleSaveContract';
 import { migrateRoleCfg, providerOptions, modelOptions, effortOptions, isModelVerified, profileForRole } from './roleConfig';
 
 /** Advertencias de la política de solo lectura (las da orch_resolve_policy; aquí solo se pintan). */
-function ReadOnlyWarnings({ role, provider, model, resolver }) {
+function ReadOnlyWarnings({ role, provider, model, resolver, shown = [] }) {
   const [warnings, setWarnings] = useState(null);
   const [error, setError] = useState(null);
   useEffect(() => {
@@ -18,10 +18,10 @@ function ReadOnlyWarnings({ role, provider, model, resolver }) {
     setWarnings(null); setError(null);
     resolver({ provider, profile: profileForRole(true), role, worktree: '', model: model || null })
       // Política de Codex: nunca se cuelan avisos solo de Claude.
-      .then((p) => alive && setWarnings(dropClaudeOnly(Array.isArray(p?.warnings) ? p.warnings : [], provider)))
+      .then((p) => alive && setWarnings(dropClaudeOnly(Array.isArray(p?.warnings) ? p.warnings : [], provider).filter((w) => !shown.includes(w))))
       .catch((e) => alive && setError(String(e?.message || e)));
     return () => { alive = false; };
-  }, [role, provider, model, resolver]);
+  }, [role, provider, model, resolver, shown.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <span className="srow__hint is-warn" role="alert">No se pudo leer la política de solo lectura: {error}</span>;
   if (!warnings) return <span className="srow__hint">Leyendo la política de solo lectura…</span>;
   if (!warnings.length) return null;
@@ -48,7 +48,7 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
   };
   const pickProvider = (r, id) => {
     const p = list.find((x) => x.id === id);
-    if (!p || !p.available) return;
+    if (!p || !p.available || blockedProfileReason(p, profileForRole(r.read_only)) !== null) return;
     setChosen((c) => ({ ...c, [r.id]: id }));
     const cur = cfgOf(r);
     // Cambio explícito de proveedor: el modelo y el esfuerzo pasan a los del nuevo.
@@ -113,11 +113,11 @@ export function RolesSettings({ roles, settings, providers, onSave, resolver = d
                     {roleWarnings.map((w) => <li key={w}>{w}</li>)}
                   </ul>
                 )}
-                {r.read_only && providerId === 'codex' && <ReadOnlyWarnings role={r.id} provider="codex" model={model} resolver={resolver} />}
+                {r.read_only && providerId === 'codex' && <ReadOnlyWarnings role={r.id} provider="codex" model={model} resolver={resolver} shown={provider?.warnings} />}
               </div>
               <div className="orch__rolectl">
                 <Select className="select--fill" value={providerId} onChange={(id) => pickProvider(r, id)}
-                  options={list.length ? providerOptions(list) : [{ value: providerId, label: providerLabel(providerId) }]}
+                  options={list.length ? providerOptions(list, profileForRole(r.read_only)) : [{ value: providerId, label: providerLabel(providerId) }]}
                   title={`Proveedor del ${r.label.toLowerCase()}`} />
                 <Select className="select--fill" value={model} onChange={(m) => save(r, { provider: providerId, model: m })}
                   options={modelOptions(provider, model)} title={`Modelo del ${r.label.toLowerCase()}`} />

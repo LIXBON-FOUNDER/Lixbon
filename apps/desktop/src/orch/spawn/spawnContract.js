@@ -48,6 +48,7 @@ export const SPAWN_FIELDS = Object.freeze({
   task: 'task',
   decision: 'decision',
   policy: 'policy',
+  env: 'env', // { shared, copy, skipped }: lo que el worktree nuevo se llevaría del repo
   integrateInto: 'integrate_into', // { dir, branch } | null (null = compartida, sin rama)
   outcome: 'outcome',
   confirm: 'confirm',

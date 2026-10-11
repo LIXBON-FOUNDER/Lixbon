@@ -24,8 +24,9 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::Emitter;
+use tauri_plugin_notification::NotificationExt;
 
-use super::{agents, random_token, s, state, Caller, Core};
+use super::{agents, random_token, s, state, worktree_env, Caller, Core};
 
 pub const DEFAULT_TTL_SECS: u64 = 10 * 60;
 pub const TTL_ENV: &str = "LIXBON_SPAWN_APPROVAL_TTL_SECS";
@@ -61,6 +62,9 @@ pub struct PendingSpawn {
     /// Carpeta donde correrá la hija: su worktree (aún sin crear) o la del coordinador.
     pub cwd: String,
     pub shared: bool,
+    /// Lo que el worktree nuevo se llevaría del repo (enlaces y copias de `.worktreeinclude`);
+    /// al aprobar solo se aplica esto. Vacío si es compartida o el repo no tiene reglas.
+    pub env: worktree_env::Plan,
     pub policy: agents::Policy,
     pub created_at: u64,
     pub expires_at: u64,
@@ -127,11 +131,23 @@ impl Core {
         let ev = json!(p);
         self.pend().insert(p.pending_id.clone(), Entry { p: p.clone(), state: PendState::Pending, decision: None, resolved_at: None });
         self.emit(EV_PENDING, &ev);
+        self.notify_pending(&p);
         Ok(json!({
             "status": "pending", "pending_id": p.pending_id, "expires_at": p.expires_at,
             "provider": p.provider, "profile": p.profile, "role": p.role, "title": p.title,
             "policy_status": p.policy.status,
         }))
+    }
+
+    /// El pendiente vence solo: avisa aunque la persona esté en otro modo o ventana.
+    fn notify_pending(&self, p: &PendingSpawn) {
+        let Some(app) = self.app.get() else { return };
+        if !self.settings().notify_questions {
+            return;
+        }
+        let who = p.role.as_deref().unwrap_or(&p.provider);
+        let body = format!("{} · {}. Vence en {} min.", who, p.title, (self.ttl_ms / 60_000).max(1));
+        let _ = app.notification().builder().title("Orquestador · lanzamiento pendiente").body(body).show();
     }
 
     /// Esqueleto del pendiente: lo que el agente pidió, ya validado.
@@ -148,6 +164,7 @@ impl Core {
             integrate_into: (!f.shared).then(|| super::integrate_target(&parent.cwd)),
             pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
             role: f.role, model: f.model, effort: f.effort, spec_summary: summary(&f.spec), title: f.title, cwd, shared: f.shared,
+            env: if f.shared { worktree_env::Plan::default() } else { worktree_env::plan(&parent.repo) },
             policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None },
             created_at: 0, expires_at: 0, spec: f.spec, base: f.base
         }

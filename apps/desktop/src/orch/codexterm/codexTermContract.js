@@ -39,11 +39,23 @@ export function encodeTermData(text) {
 
 /** Quita opcionales vacíos: el host recibe Option<String>. */
 const opt = (v) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-export function policyArgs({ cwd, model, effort }) {
+export function policyArgs({ cwd, model, effort, resume }) {
   const a = { cwd };
   if (opt(model)) a.model = opt(model);
   if (opt(effort)) a.effort = opt(effort);
+  if (opt(resume)) a.resume = opt(resume);
   return a;
+}
+
+export const CODEX_SESSIONS_COMMAND = 'codex_sessions';
+
+/** Una sesión guardada de Codex del host: { id, cwd, title, updated_ms, model } o null si no sirve. */
+export function normalizeSession(x) {
+  if (!x || typeof x.id !== 'string' || !x.id) return null;
+  return {
+    id: x.id, cwd: typeof x.cwd === 'string' ? x.cwd : '', title: typeof x.title === 'string' && x.title ? x.title : 'Sesión de Codex',
+    updated_ms: Number.isFinite(x.updated_ms) ? x.updated_ms : 0, model: typeof x.model === 'string' && x.model ? x.model : null,
+  };
 }
 
 const useMock = () => import.meta.env.DEV && import.meta.env.VITE_ORCH_MOCK === '1';
@@ -130,6 +142,13 @@ export function normalizeBuffer(res) {
 /** Adaptador: lo único que usa la UI. */
 export const codexTerm = {
   policy: (a) => call(CODEX_TERM_COMMANDS.policy, policyArgs(a)),
+  /** Sesiones guardadas de Codex (de `cwd` o de todas); [] si el host no las da. */
+  sessions: async ({ cwd, limit = 60 } = {}) => {
+    try {
+      const l = await call(CODEX_SESSIONS_COMMAND, { ...(opt(cwd) ? { cwd: opt(cwd) } : {}), limit });
+      return (Array.isArray(l) ? l : []).map(normalizeSession).filter(Boolean);
+    } catch { return []; }
+  },
   open: ({ cols, rows, acknowledged, ...a }) => call(CODEX_TERM_COMMANDS.open, { ...policyArgs(a), cols, rows, acknowledged: acknowledged === true }),
   write: (term_id, text) => call(CODEX_TERM_COMMANDS.write, { term_id, data: encodeTermData(text) }),
   resize: (term_id, cols, rows) => call(CODEX_TERM_COMMANDS.resize, { term_id, cols, rows }),

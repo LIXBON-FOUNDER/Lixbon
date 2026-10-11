@@ -94,9 +94,15 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
     if let Some(why) = super::review::closed_to_agents(cmd) {
         return reply(&mut stream, 200, &json!({ "ok": false, "error": why }));
     }
-    let res = match core.rpc(super::Caller::Agent(caller), &cwd, cmd, &args) {
-        Ok(v) => json!({ "ok": true, "data": v }),
-        Err(e) => json!({ "ok": false, "error": e }),
+    // Un pánico dentro de un comando no debe cortar la conexión sin decir nada: el agente recibe el motivo.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| core.rpc(super::Caller::Agent(caller), &cwd, cmd, &args)));
+    let res = match outcome {
+        Ok(Ok(v)) => json!({ "ok": true, "data": v }),
+        Ok(Err(e)) => json!({ "ok": false, "error": e }),
+        Err(panic) => {
+            let why = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+            json!({ "ok": false, "error": format!("Error interno de Lixbon en «{cmd}»: {why}") })
+        }
     };
     reply(&mut stream, 200, &res)
 }
@@ -114,5 +120,12 @@ fn reply(stream: &mut TcpStream, code: u16, body: &Value) -> std::io::Result<()>
         "HTTP/1.1 {code} {status}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
         text.len()
     )?;
-    stream.flush()
+    stream.flush()?;
+    // Cierre ordenado: cerrar de golpe con algo sin leer del otro lado manda un RST en Windows y el
+    // cliente pierde el final de la respuesta («conexión forzada»). Se avisa del fin y se espera su cierre.
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let mut sink = [0u8; 512];
+    while matches!(stream.read(&mut sink), Ok(n) if n > 0) {}
+    Ok(())
 }

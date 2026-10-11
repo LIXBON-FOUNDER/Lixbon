@@ -8,12 +8,12 @@ export const MOCK_CODEX_TERM_WARNINGS = [
   'Con on-request, Codex pide aprobación en esta terminal antes de salir del sandbox.',
 ];
 
-function policyOf({ cwd, model, effort }, elevated = false) {
-  const argv = ['codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--cd', cwd];
+function policyOf({ cwd, model, effort, resume }, elevated = false) {
+  const argv = ['codex', ...(resume ? ['resume', resume] : []), '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--cd', cwd];
   if (model) argv.push('-m', model);
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
   // Misma forma que build() en codex_term.rs (cd76e40).
-  const policy = { provider: 'codex', profile: 'terminal', cli_version: '0.162.1', model: model || 'el que defina config.toml', effort: effort || null, interactive: true, status: 'unverified' };
+  const policy = { provider: 'codex', profile: 'terminal', cli_version: '0.162.1', model: model || 'el que defina config.toml', effort: effort || null, interactive: true, status: 'unverified', ...(resume ? { resume } : {}) };
   // e3572e5: con [windows] sandbox = "elevated", el mismo aviso que Delegar (pide ack).
   const warnings = [...MOCK_CODEX_TERM_WARNINGS, ...(elevated ? [WARN_ELEVATED_RW] : [])];
   return { policy, argv, warnings };
@@ -48,6 +48,7 @@ export function createMockCodexTerm(opts = {}) {
     },
     invoke: async (cmd, a = {}) => {
       switch (cmd) {
+        case 'codex_sessions': return opts.sessions || [];
         case C.policy: return policyOf(a, elevated);
         case C.open: {
           const p = policyOf(a, elevated);

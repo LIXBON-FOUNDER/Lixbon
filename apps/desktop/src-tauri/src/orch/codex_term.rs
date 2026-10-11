@@ -108,6 +108,15 @@ pub fn build(cwd: &str, model: Option<&str>, effort: Option<&str>, probe: Option
     Ok(TermPolicy { policy, argv, warnings })
 }
 
+/// Reanuda una sesión guardada: `codex resume <id> …` con los mismos permisos de la
+/// terminal (probado en 0.162.1: `resume` admite -s, -a, -C, -m y -c).
+pub fn with_resume(mut p: TermPolicy, id: &str) -> Result<TermPolicy, String> {
+    let id = super::codex_session::valid_session_id(id)?;
+    p.argv.splice(1..1, ["resume".to_string(), id.clone()]);
+    p.policy["resume"] = json!(id);
+    Ok(p)
+}
+
 /// La línea de comando para el script de la PTY.
 pub fn command_line(argv: &[String]) -> String {
     argv.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() }).collect::<Vec<_>>().join(" ")
@@ -265,8 +274,10 @@ pub struct Listed {
 #[derive(Default)]
 pub struct CodexTerms {
     terms: Mutex<HashMap<String, Entry>>,
-    next: AtomicU64,
 }
+
+// Global al proceso: el id da nombre a la carpeta del script, que no puede repetirse entre instancias.
+static NEXT_TERM: AtomicU64 = AtomicU64::new(0);
 
 impl CodexTerms {
     /// Abre una terminal con `command` (la de Codex o, en las pruebas, un falso).
@@ -281,7 +292,7 @@ impl CodexTerms {
         rows: u16,
         emit: impl Fn(&str, Value) + Send + Sync + Clone + 'static,
     ) -> Result<String, String> {
-        let n = self.next.fetch_add(1, Ordering::SeqCst) + 1;
+        let n = NEXT_TERM.fetch_add(1, Ordering::SeqCst) + 1;
         let term_id = format!("codex-{}-{n}", std::process::id());
         let script_dir = std::env::temp_dir().join("lixbon-codex-term").join(&term_id);
         let (cols, rows) = (pty::clamp_cols(cols), rows.max(1));
@@ -616,6 +627,30 @@ mod falso {
     fn alive(pid: &str) -> bool {
         let out = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output().unwrap();
         String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
+    }
+
+    #[test]
+    fn entrada_unicode_llega_entera() {
+        let root = std::env::temp_dir().join(format!("lxo-codex-term-uni-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let terms = CodexTerms::default();
+        let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(vec![]));
+        let ev = events.clone();
+        let emit = move |name: &str, v: Value| ev.lock().unwrap().push((name.to_string(), v));
+        let cmd = "powershell -NoProfile -Command \"Write-Host LISTO; for ($i=0; $i -lt 10; $i++) { $k = [Console]::ReadKey($true); Write-Host ('K' + [int]$k.KeyChar) }; Write-Host FIN; Start-Sleep 30\"".to_string();
+        let id = terms.open_command(&root, cmd, TermMeta { policy: json!({}), argv: vec![], ..Default::default() }, 200, 20, emit).unwrap();
+        let out = || events.lock().unwrap().iter().filter(|(n, v)| n == EVENT_OUTPUT && v["term_id"] == id.as_str()).map(|(_, v)| v["data"].as_str().unwrap().to_string()).collect::<String>();
+        assert!(wait(|| pty::plain(&out()).contains("LISTO"), 40));
+        for chunk in ["a", "\u{f1}", "\u{2764}", "\u{2500}", "\u{2502}", "\u{1F680}", "\u{2764}\u{fe0f}", "z"] {
+            terms.write(&id, chunk).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        assert!(wait(|| pty::plain(&out()).contains("FIN"), 10), "{:?}", pty::plain(&out()));
+        let got: Vec<u32> = pty::plain(&out()).split_whitespace().filter_map(|t| t.strip_prefix('K')?.parse().ok()).collect();
+        // ñ, ❤, símbolos de caja, 🚀 (par sustituto) y ❤ + selector de emoji: ConPTY los entrega todos.
+        assert_eq!(got, [97, 241, 10084, 9472, 9474, 55357, 56960, 10084, 65039, 122]);
+        terms.close_all();
     }
 
     #[test]
