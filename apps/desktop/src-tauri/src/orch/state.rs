@@ -16,6 +16,8 @@ pub enum Status {
     Starting,
     Running,
     Waiting,
+    /// La CLI espera una aprobación en su terminal (`approval_deadline`).
+    AwaitingTerminalApproval,
     Done,
     Failed,
     Stopped,
@@ -76,6 +78,13 @@ pub struct Task {
     pub merged: bool,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// Qué se enlazó o copió al crear el worktree (orch/worktree_env.rs); `None` si el repo no tiene reglas.
+    #[serde(default)]
+    pub env: Option<super::worktree_env::Plan>,
+    /// Commit del checkout de destino (el del padre) cuando se creó la rama de la
+    /// tarea: referencia para detectar si el destino se movió por fuera.
+    #[serde(default)]
+    pub base_commit: Option<String>,
     /// Perfil de autonomía pedido al lanzar (id de `agents::Profile`).
     #[serde(default)]
     pub profile: Option<String>,
@@ -95,6 +104,53 @@ pub struct Task {
     /// idem_key de los informes ya entregados por archivo/marcadores.
     #[serde(default)]
     pub delivered: Vec<String>,
+    /// Por dónde llegó el informe del intento: `exec_o`, `stream_json`,
+    /// `report_json`, `stdout` o `lxo_done`. `None`: no llegó nada.
+    #[serde(default)]
+    pub delivery_channel: Option<String>,
+    /// Modelo efectivo que informó la propia CLI (`message.model` de stream-json).
+    #[serde(default)]
+    pub model_effective: Option<String>,
+    /// Modelo pedido tal cual (alias o id) si `--model` va en el argv lanzado; `None` si no se pidió.
+    #[serde(default)]
+    pub model_requested: Option<String>,
+    /// El efectivo no es de la familia del pedido (`haiku` casa con `claude-haiku-*`).
+    #[serde(default)]
+    pub model_mismatch: bool,
+    /// `plan_mode` si hay mismatch y el intento se lanzó con `--permission-mode plan`; si no, `None`.
+    #[serde(default)]
+    pub model_mismatch_reason: Option<String>,
+    /// El intento se lanzó con `--permission-mode plan`.
+    #[serde(default)]
+    pub plan_mode: bool,
+    /// Límite de la espera de aprobación en la terminal (ms epoch) mientras dure.
+    #[serde(default)]
+    pub approval_deadline: Option<u64>,
+    /// Motivo máquina del fallo: `terminal_approval_timeout` o `agent_idle_timeout`.
+    #[serde(default)]
+    pub failure_reason: Option<String>,
+    /// Codex: ruta del rollout de sesión atado a este intento, o `null` si no se
+    /// encontró uno solo. Claude: el `session_id` del stream-json.
+    #[serde(default)]
+    pub session_ref: Option<String>,
+    /// De dónde salió `model_effective`: `stream_json` (Claude),
+    /// `session_declared` (Codex, `turn_context.model`) o `unknown`. `null`
+    /// hasta que termina el intento.
+    #[serde(default)]
+    pub model_source: Option<String>,
+    /// Codex: cómo se ató la sesión al intento, `session_id` o `cwd_time`; `null`
+    /// si no se encontró una sola y siempre en Claude.
+    #[serde(default)]
+    pub session_match: Option<String>,
+    /// Inicio del intento actual (ms epoch).
+    #[serde(default)]
+    pub attempt_started: Option<u64>,
+    /// Archivo de `codex exec -o` del intento (perfil read-only de Codex).
+    #[serde(default)]
+    pub last_message_path: Option<String>,
+    /// Lanzada con `claude -p --output-format stream-json`: el informe es el resultado final.
+    #[serde(default)]
+    pub stream_json: bool,
     pub created: u64,
     pub updated: u64,
 }
@@ -157,6 +213,30 @@ pub struct State {
     pub tasks: BTreeMap<String, Task>,
     pub messages: Vec<Message>,
     pub seq: u64,
+    /// Decisiones de personas (integraciones), con los campos de la tabla
+    /// `decisions` del diseño SQLite para que S1 las importe tal cual.
+    #[serde(default)]
+    pub decisions: Vec<Decision>,
+}
+
+/// Fila de `decisions`: id, task, kind (merge|pr|release|discard|reopen|stop),
+/// actor ('human' o id de tarea), detail_json (texto JSON) y at (ms).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Decision {
+    pub id: u64,
+    pub task: String,
+    pub kind: String,
+    pub actor: String,
+    pub detail_json: Option<String>,
+    pub at: u64,
+}
+
+impl State {
+    pub fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> u64 {
+        let id = self.decisions.iter().map(|d| d.id).max().unwrap_or(0) + 1;
+        self.decisions.push(Decision { id, task: task.into(), kind: kind.into(), actor: actor.into(), detail_json: Some(detail.to_string()), at: now_ms() });
+        id
+    }
 }
 
 pub struct NewTask {
@@ -267,12 +347,28 @@ impl State {
             external: t.external,
             merged: false,
             pr_url: None,
+            env: None,
+            base_commit: None,
             profile: None,
             ack_unverified: false,
             requested_argv: None,
             policy: None,
             report_nonce: None,
             delivered: vec![],
+            delivery_channel: None,
+            model_effective: None,
+            model_requested: None,
+            model_mismatch: false,
+            model_mismatch_reason: None,
+            plan_mode: false,
+            approval_deadline: None,
+            failure_reason: None,
+            session_ref: None,
+            model_source: None,
+            session_match: None,
+            attempt_started: None,
+            last_message_path: None,
+            stream_json: false,
             created: now,
             updated: now,
         });
@@ -385,6 +481,12 @@ Seguimiento:
 {spec}", t.spec);
         t.summary.clear();
         t.report = None;
+        t.delivery_channel = None;
+        t.failure_reason = None;
+        t.session_ref = None;
+        t.model_source = None;
+        t.session_match = None;
+        t.approval_deadline = None;
         t.merged = false;
         t.status = Status::Running;
         t.updated = now_ms();
@@ -404,6 +506,39 @@ Seguimiento:
             }
             None => Ok(None),
         }
+    }
+
+    /// La CLI quedó esperando aprobación en su terminal hasta `deadline` (ms epoch).
+    pub fn await_terminal_approval(&mut self, id: &str, deadline: u64) -> Result<bool, String> {
+        let t = self.task(id)?;
+        if t.status.is_final() {
+            return Ok(false);
+        }
+        let t = self.task_mut(id)?;
+        t.approval_deadline = Some(deadline);
+        self.touch(id, Some(Status::AwaitingTerminalApproval))?;
+        Ok(true)
+    }
+
+    /// El agente siguió y volvió a escribir: deja de esperar.
+    pub fn resume_from_approval(&mut self, id: &str) -> Result<bool, String> {
+        if self.task(id)?.status != Status::AwaitingTerminalApproval {
+            return Ok(false);
+        }
+        self.task_mut(id)?.approval_deadline = None;
+        self.touch(id, Some(Status::Running))?;
+        Ok(true)
+    }
+
+    /// Cierra la tarea Failed con un motivo máquina (`failure_reason`) y otro legible.
+    pub fn fail_with(&mut self, id: &str, reason: &str, why: &str) -> Result<Option<u64>, String> {
+        if self.task(id)?.status.is_final() {
+            return Ok(None);
+        }
+        let t = self.task_mut(id)?;
+        t.failure_reason = Some(reason.into());
+        t.approval_deadline = None;
+        self.close(id, Status::Failed, why)
     }
 
     pub fn is_ancestor(&self, ancestor: &str, id: &str) -> bool {
@@ -554,6 +689,9 @@ Seguimiento:
 
     pub fn remove_run(&mut self, run: &str) {
         self.runs.remove(run);
+        // Como ON DELETE CASCADE de decisions.task: se van con sus tareas.
+        let gone: std::collections::HashSet<String> = self.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
+        self.decisions.retain(|d| !gone.contains(&d.task));
         self.tasks.retain(|_, t| t.run != run);
         self.messages.retain(|m| m.run != run);
     }
@@ -568,6 +706,24 @@ mod tests {
             agent: "claude".into(), model: None, effort: None, role: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
             branch: None, base: None, worktree: None, external: false,
         }
+    }
+
+    #[test]
+    fn remove_run_borra_sus_decisiones() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let hija = s.add_child(&root, 1, nt("hija")).unwrap();
+        let (otro, otra_raiz) = s.create_run("otro", nt("raíz 2"));
+        let ajena = s.add_child(&otra_raiz, 1, nt("ajena")).unwrap();
+        s.record_decision(&hija, "merge", "human", &serde_json::json!({ "outcome": "merged" }));
+        s.record_decision(&root, "merge", "human", &serde_json::json!({ "outcome": "conflict" }));
+        let keep = s.record_decision(&ajena, "merge", "human", &serde_json::json!({ "outcome": "merged" }));
+        s.remove_run(&run);
+        assert_eq!(s.decisions.iter().map(|d| d.id).collect::<Vec<_>>(), [keep]);
+        assert_eq!(s.decisions[0].task, ajena);
+        assert!(s.runs.contains_key(&otro));
+        let back: State = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.decisions, s.decisions);
     }
 
     const IDLE: u64 = 30 * 60 * 1000;
@@ -769,5 +925,27 @@ mod tests {
     fn slug_legible() {
         assert_eq!(slug("Añadir API de autenticación!", 40), "anadir-api-de-autenticacion");
         assert_eq!(slug("¿?", 10), "tarea");
+    }
+
+    #[test]
+    fn espera_de_aprobacion_y_fallo_con_motivo() {
+        let mut s = State::default();
+        let (_, root) = s.create_run("obj", nt("raíz"));
+        let h = s.add_child(&root, 2, nt("hija")).unwrap();
+        assert!(s.await_terminal_approval(&h, 123).unwrap());
+        let v = serde_json::to_value(s.task(&h).unwrap()).unwrap();
+        assert_eq!((v["status"].as_str(), v["approval_deadline"].as_u64()), (Some("awaiting_terminal_approval"), Some(123)));
+        assert!(!s.task(&h).unwrap().status.is_final());
+        assert!(s.resume_from_approval(&h).unwrap());
+        assert_eq!((s.task(&h).unwrap().status, s.task(&h).unwrap().approval_deadline), (Status::Running, None));
+        s.await_terminal_approval(&h, 456).unwrap();
+        s.fail_with(&h, "terminal_approval_timeout", "nadie aprobó").unwrap();
+        let v = serde_json::to_value(s.task(&h).unwrap()).unwrap();
+        assert_eq!((v["status"].as_str(), v["failure_reason"].as_str()), (Some("failed"), Some("terminal_approval_timeout")));
+        assert!(v["approval_deadline"].is_null());
+        // Ya final: ni espera ni otro fallo la cambian.
+        assert!(!s.await_terminal_approval(&h, 1).unwrap());
+        assert!(s.fail_with(&h, "agent_idle_timeout", "x").unwrap().is_none());
+        assert_eq!(s.task(&h).unwrap().failure_reason.as_deref(), Some("terminal_approval_timeout"));
     }
 }

@@ -17,14 +17,14 @@ describe('resolvePolicy', () => {
     const real = { profile: 'explorar', provider: 'codex', argv: ['codex'], cli_version: '9.9.9', warnings: [], status: 'ok', reason: null };
     vi.mocked(invoke).mockResolvedValue(real);
     await expect(resolvePolicy(args)).resolves.toBe(real);
-    expect(invoke).toHaveBeenCalledWith('orch_resolve_policy', args);
+    expect(invoke).toHaveBeenCalledWith('orch_resolve_policy', { ...args, model: null });
   });
 
   it('sin rol envía role vacío al comando real (consulta de flags)', async () => {
     vi.stubEnv('VITE_ORCH_MOCK', '');
     vi.mocked(invoke).mockResolvedValue({ status: 'ok', role: null });
     await resolvePolicy({ ...args, role: null });
-    expect(invoke).toHaveBeenCalledWith('orch_resolve_policy', { ...args, role: '' });
+    expect(invoke).toHaveBeenCalledWith('orch_resolve_policy', { ...args, role: '', model: null });
   });
 
   it('con VITE_ORCH_MOCK distinto de "1" también usa el comando real', async () => {

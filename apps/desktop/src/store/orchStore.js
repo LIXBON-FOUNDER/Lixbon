@@ -4,15 +4,17 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from './toastStore';
+import { normalizeSaveWarnings, snapshotFromSaveResponse, providersOfSettings, EMPTY_SAVE_WARNINGS } from '../orch/providers/roleSaveContract';
+import { TERMINAL_APPROVAL, TERMINAL_APPROVAL_TEXT } from '../orch/terminalApprovalContract';
 
 export const AGENT_LABELS = {
-  claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador',
+  claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', 'lixbon-cli': 'Lixbon CLI', coordinador: 'Coordinador',
 };
 
 export const ROLE_LABELS = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
 
 export const STATUS_LABELS = {
-  starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
+  starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', [TERMINAL_APPROVAL.status]: TERMINAL_APPROVAL_TEXT.waiting, done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
 };
 
 export const isFinal = (status) => ['done', 'failed', 'stopped', 'exited'].includes(status);
@@ -22,6 +24,8 @@ let refreshTimer = null;
 
 export const useOrchStore = create((set, get) => ({
   snap: null,
+  /** Avisos del último guardado de roles ({ flat, byRole }), ver roleSaveContract.js. */
+  saveWarnings: EMPTY_SAVE_WARNINGS,
   agents: [],
   selected: null,
   busy: null,
@@ -46,8 +50,21 @@ export const useOrchStore = create((set, get) => ({
   saveSettings: async (patch) => {
     const settings = { ...get().snap?.settings, ...patch };
     try {
-      set({ snap: await invoke('orch_settings_set', { settings }) });
+      let res = await invoke('orch_settings_set', { settings });
+      if (import.meta.env.DEV && import.meta.env.VITE_ORCH_MOCK === '1') {
+        // Rama eliminada en el build de producción.
+        const { mockRoleSaveWarnings } = await import('../orch/providers/mockRoleSaveWarnings.js');
+        res = mockRoleSaveWarnings(settings, snapshotFromSaveResponse(res));
+      }
+      // Se recuerda con qué proveedor por rol se calcularon (para no enseñarlos en otra fila).
+      set({ saveWarnings: normalizeSaveWarnings(res, providersOfSettings(settings)) });
+      // { ok, warnings, snapshot }: se usa su snapshot; solo si falta se pide orch_snapshot.
+      const snap = snapshotFromSaveResponse(res);
+      if (snap) set({ snap });
+      else await get().refresh();
     } catch (e) {
+      // Los avisos del guardado anterior ya no corresponden a lo que se intentó guardar.
+      set({ saveWarnings: EMPTY_SAVE_WARNINGS });
       toast(`No se pudo guardar: ${e}`, { tone: 'error' });
     }
   },

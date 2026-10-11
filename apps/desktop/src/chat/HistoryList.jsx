@@ -9,8 +9,22 @@ import { useChatStore, useOpenSessions, useSessionsStore, spawnSessionOf } from 
 import { useAppStore } from '../store/appStore';
 import { claudeSessions, claudeDeleteSession, claudeArchiveSession } from '../lib/claudeCode';
 import { ClaudeMark } from '../components/Logo';
+import { codexTerm } from '../orch/codexterm/codexTermContract';
+import { useCodexTermStore } from '../orch/codexterm/codexTermStore';
+import { engineOf, ENGINE_IDS } from '../lib/engines';
 import { SpinRing } from '../components/Ring';
 import { IconPencil, IconTrash, IconSearch, IconArchive, IconChevronRight, IconChevronDown } from '../components/Icons';
+
+const FILTER_KEY = 'lixbon_hist_filter';
+const FILTERS = [{ id: 'all', label: 'Todos' }, ...ENGINE_IDS.map((id) => ({ id, label: engineOf(id).short }))];
+const engineKey = (c) => c.engine || 'lixbon';
+
+function readFilter() {
+  try {
+    const saved = localStorage.getItem(FILTER_KEY);
+    return FILTERS.some((f) => f.id === saved) ? saved : 'all';
+  } catch { return 'all'; }
+}
 
 function relTime(iso) {
   if (!iso) return '';
@@ -34,9 +48,11 @@ function groupOf(iso) {
 
 export function HistoryList() {
   const { loadConversation, conversationId, conversationTitle, streaming } = useChatStore();
-  const engine = useChatStore((s) => s.engine) || 'lixbon';
   const [items, setItems] = useState(null);
   const [ccItems, setCcItems] = useState([]);
+  const [codexItems, setCodexItems] = useState([]);
+  const [filter, setFilter] = useState(readFilter);
+  const codexTabs = useCodexTermStore((s) => s.tabs.length);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -71,6 +87,20 @@ export function HistoryList() {
       .catch(() => setCcItems([]));
   }, [workspaceRoot, conversationId, streaming, runningKey]);
 
+  useEffect(() => {
+    if (!workspaceRoot) { setCodexItems([]); return undefined; }
+    let alive = true;
+    codexTerm.sessions({ cwd: workspaceRoot }).then((list) => {
+      if (alive) setCodexItems(list.map((s) => ({ id: s.id, title: s.title, updated_at: new Date(s.updated_ms).toISOString(), engine: 'codex', cwd: s.cwd, model: s.model })));
+    });
+    return () => { alive = false; };
+  }, [workspaceRoot, codexTabs]);
+
+  const chooseFilter = (id) => {
+    setFilter(id);
+    try { localStorage.setItem(FILTER_KEY, id); } catch { /* sin almacenamiento: vale por esta sesión */ }
+  };
+
   const groups = useMemo(() => {
     const out = [];
     const liveIds = new Set(running.map((o) => o.conversationId).filter(Boolean));
@@ -81,8 +111,10 @@ export function HistoryList() {
       });
     }
     const q = query.trim().toLowerCase();
-    // Cada agente ve solo su historial: mezclarlos confundía de qué agente era cada conversación.
-    const pool = engine === 'claude' ? ccItems.filter((c) => !q || c.title.toLowerCase().includes(q)) : (items || []);
+    // Todo junto por defecto; el filtro deja solo un agente y cada fila lleva la marca del suyo.
+    const match = (c) => !q || (c.title || '').toLowerCase().includes(q);
+    const lists = { lixbon: items || [], claude: ccItems.filter(match), codex: codexItems.filter(match) };
+    const pool = (filter === 'all' ? ENGINE_IDS : [filter]).flatMap((id) => (lists[id] || []).map((c) => ({ ...c, engine: id })));
     const all = [...pool]
       .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
     const archived = [];
@@ -95,10 +127,16 @@ export function HistoryList() {
     }
     if (archived.length) out.push({ label: 'Archivadas', archived: true, items: archived });
     return out;
-  }, [items, ccItems, runningKey, engine]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, ccItems, codexItems, filter, query, runningKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const counts = { all: (items?.length || 0) + ccItems.length + codexItems.length, lixbon: items?.length || 0, claude: ccItems.length, codex: codexItems.length };
 
   const openItem = async (c) => {
     if (c.live) { useSessionsStore.getState().activate(c.key); return; }
+    if (engineKey(c) === 'codex') {
+      useCodexTermStore.getState().openLauncher({ id: c.id, title: c.title, cwd: c.cwd, model: c.model });
+      return;
+    }
     setError('');
     const id = c.id;
     try {
@@ -169,6 +207,13 @@ export function HistoryList() {
           <button className="lk hist__searchbtn" onClick={() => setSearchOpen(true)}><IconSearch size={12} /> Buscar</button>
         )}
       </div>
+      <div className="hist__filters" role="group" aria-label="Filtrar por agente">
+        {FILTERS.map((f) => (
+          <button key={f.id} type="button" className={`hist__chip ${filter === f.id ? 'is-active' : ''}`} aria-pressed={filter === f.id} data-testid={`hist-filter-${f.id}`} onClick={() => chooseFilter(f.id)}>
+            {f.label}{counts[f.id] > 0 && <span className="hist__chipcount">{counts[f.id]}</span>}
+          </button>
+        ))}
+      </div>
       {error && <span className="hist__error">{error}</span>}
 
       <div className="hist__list scroll">
@@ -195,14 +240,15 @@ export function HistoryList() {
                 ) : (
                   <button className="hist__btn" onClick={() => openItem(c)} title={c.title}>
                     {(() => {
-                      const claude = c.engine === 'claude' || open.find((o) => o.key === c.key)?.engine === 'claude';
+                      const eng = c.live ? (open.find((o) => o.key === c.key)?.engine || 'lixbon') : engineKey(c);
+                      const Mark = engineOf(eng).Mark;
                       const working = c.streaming && !c.waiting;
                       return (
                         <>
-                          {working && (claude ? <ClaudeMark size={12} className="claudemark--live" /> : <SpinRing size={11} />)}
+                          {working && (eng === 'claude' ? <ClaudeMark size={12} className="claudemark--live" /> : <SpinRing size={11} />)}
                           {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
                           {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
-                          {claude && !working && <ClaudeMark size={11} />}
+                          {!working && (eng !== 'lixbon' || filter === 'all') && <span className="hist__mark" title={engineOf(eng).label}><Mark size={11} /></span>}
                         </>
                       );
                     })()}
@@ -210,7 +256,7 @@ export function HistoryList() {
                     <span className="hist__time">{c.waiting ? 'permiso' : c.streaming ? 'ahora' : c.live ? 'listo' : relTime(c.updated_at)}</span>
                   </button>
                 )}
-                {!c.live && renamingId !== c.id && (
+                {!c.live && renamingId !== c.id && engineKey(c) !== 'codex' && (
                   <span className="hist__acts">
                     {c.engine !== 'claude' && (
                       <button className="ic" title="Renombrar" onClick={() => { setRenamingId(c.id); setRenameValue(c.title || ''); }}><IconPencil size={12} /></button>

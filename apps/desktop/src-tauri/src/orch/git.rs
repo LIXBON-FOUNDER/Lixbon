@@ -28,6 +28,11 @@ fn ok(dir: &str, args: &[&str]) -> Result<String, String> {
     if o.ok { Ok(o.stdout) } else { Err(format!("git {}: {}", args.join(" "), if o.stderr.is_empty() { o.stdout } else { o.stderr })) }
 }
 
+/// Commit actual (`HEAD`) de un checkout.
+pub fn head(dir: &str) -> Option<String> {
+    ok(dir, &["rev-parse", "HEAD"]).ok().filter(|s| !s.is_empty())
+}
+
 pub fn toplevel(dir: &str) -> Option<String> {
     let top = ok(dir, &["rev-parse", "--show-toplevel"]).ok().filter(|s| !s.is_empty())?;
     // git responde con `/` también en Windows; el resto de rutas usan `\`.
@@ -86,7 +91,7 @@ pub fn diff(dir: &str, base: &str, branch: &str) -> Result<(String, String), Str
         full.truncate(cut);
         full.push_str("\n… (diff recortado)");
     }
-    let dirty = ok(dir, &["status", "--porcelain"]).unwrap_or_default();
+    let dirty = super::worktree_env::without_links(Path::new(dir), &ok(dir, &["status", "--porcelain"]).unwrap_or_default()).join("\n");
     let stat = if dirty.is_empty() { stat } else { format!("{stat}\n\nSin commit en el worktree de la tarea:\n{dirty}") };
     Ok((stat, full))
 }
@@ -121,6 +126,11 @@ pub fn merge(parent_dir: &str, branch: &str, message: &str, squash: bool) -> Res
     Ok(o.stdout)
 }
 
+/// URL del remoto `origin`, si existe.
+pub fn remote_url(dir: &str) -> Option<String> {
+    ok(dir, &["remote", "get-url", "origin"]).ok().filter(|s| !s.is_empty())
+}
+
 pub fn push(dir: &str, branch: &str) -> Result<(), String> {
     ok(dir, &["push", "-u", "origin", branch]).map(|_| ())
 }
@@ -138,6 +148,8 @@ pub fn gh_pr(dir: &str, base: &str, branch: &str, title: &str, body: &str) -> Re
 }
 
 pub fn remove_worktree(repo: &str, dir: &str, force: bool) -> Result<(), String> {
+    // Antes de borrar nada: ningún borrado recursivo puede atravesar un enlace al checkout principal.
+    super::worktree_env::unlink(Path::new(dir));
     let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
@@ -168,7 +180,9 @@ pub fn is_merged(repo: &str, branch: &str, into: &str) -> bool {
 }
 
 pub fn is_dirty(dir: &str) -> bool {
-    run(dir, &["status", "--porcelain"]).map(|o| !o.ok || o.stdout.lines().any(|l| !l.contains(".lixbon"))).unwrap_or(true)
+    run(dir, &["status", "--porcelain"])
+        .map(|o| !o.ok || super::worktree_env::without_links(Path::new(dir), &o.stdout).iter().any(|l| !l.contains(".lixbon")))
+        .unwrap_or(true)
 }
 
 pub fn delete_branch(repo: &str, branch: &str) -> Result<(), String> {

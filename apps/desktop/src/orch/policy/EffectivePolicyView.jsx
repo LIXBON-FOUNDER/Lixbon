@@ -6,13 +6,41 @@ import './policy.css';
 const STATUS_TEXT = { ok: 'Lista para lanzar', blocked: 'Bloqueada', unverified: 'No verificado' };
 // Solo para mostrar: entrecomilla lo que un shell interpretaría (espacios, comillas, paréntesis, *).
 const quote = (a) => (/[\s"'()*]/.test(a) || a === '' ? JSON.stringify(a) : a);
+const LIST_FLAG = /^(--allowedTools|--disallowedTools)=(.*)$/;
+
+/** Separa un token `--allowedTools=a,b` en flag y reglas; null si no es de lista. */
+export function splitToolList(token) {
+  const m = LIST_FLAG.exec(token);
+  return m ? { flag: m[1], rules: m[2].split(',').filter(Boolean) } : null;
+}
+
+/** Solo presentación: las reglas de --allowedTools/--disallowedTools van una por línea.
+    El argv que se envía al lanzar no cambia. */
+export function ArgvDisplay({ argv }) {
+  if (!argv.length) return '—';
+  return argv.map((a, i) => {
+    const list = splitToolList(a);
+    const sep = i ? ' ' : '';
+    if (!list) return <span key={i}>{sep}{quote(a)}</span>;
+    return (
+      <span key={i} className="policy__toollist" data-testid="policy-toollist">
+        {sep}{list.flag}=
+        {list.rules.map((r) => <span key={r} className="policy__toolrule" data-testid="policy-toolrule">{r}</span>)}
+      </span>
+    );
+  });
+}
 
 /**
- * @param {{ worktree: string, role?: string|null, initialProvider?: string, initialProfile?: string,
+ * @param {{ worktree: string, role?: string|null, model?: string|null, initialProvider?: string, initialProfile?: string,
  *   resolver?: import('./policyTypes').PolicyResolver,
- *   onLaunch?: (launch: import('./policyTypes').PolicyLaunch) => void }} props
+ *   onLaunch?: (launch: import('./policyTypes').PolicyLaunch) => void,
+ *   policy?: import('./policyTypes').EffectivePolicy, launchLabel?: string, busy?: boolean }} props
+ * Con `policy` la vista muestra esa política tal cual (p. ej. la de un lanzamiento pendiente que
+ * ya resolvió el host): no llama al resolver ni deja cambiar proveedor o perfil.
  */
-export function EffectivePolicyView({ worktree, role = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch }) {
+export function EffectivePolicyView({ worktree, role = null, model = null, initialProvider = 'claude', initialProfile = 'explorar', resolver = defaultResolver, onLaunch, providers = null, policy: fixedPolicy = null, launchLabel = 'Lanzar', busy = false }) {
+  const blockedReason = (provId, profId) => providers?.find((x) => x.id === provId)?.blocked_profiles?.find((b) => b.profile === profId)?.reason ?? null;
   const [provider, setProvider] = useState(initialProvider);
   const [profile, setProfile] = useState(initialProfile);
   const [policy, setPolicy] = useState(null);
@@ -25,17 +53,18 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
     setPolicy(null);
     setError(null);
     setAckUnverified(false);
-    resolver({ provider, profile, role, worktree })
+    if (fixedPolicy) { setPolicy(fixedPolicy); return () => { alive = false; }; }
+    resolver(model ? { provider, profile, role, worktree, model } : { provider, profile, role, worktree })
       .then((p) => alive && setPolicy(p))
       .catch((e) => alive && setError(String(e?.message || e)));
     return () => { alive = false; };
-  }, [provider, profile, role, worktree, resolver]);
+  }, [provider, profile, role, worktree, model, resolver, fixedPolicy]);
 
   const isUnverified = policy?.status === 'unverified';
   // blocked nunca se lanza; unverified solo tras marcar la casilla.
   // Sin rol es solo una consulta de flags: no se lanza.
   const consultOnly = policy ? !policy.role : false;
-  const canLaunch = Boolean(policy && !consultOnly && policy.status !== 'blocked' && policy.argv.length > 0 && (!isUnverified || ackUnverified));
+  const canLaunch = Boolean(!busy && policy && !consultOnly && policy.status !== 'blocked' && policy.argv.length > 0 && (!isUnverified || ackUnverified));
   const launch = () => {
     if (!canLaunch) return;
     // Mismos nombres snake_case que espera spawn en el host: profile (id), argv, ack_unverified.
@@ -47,7 +76,7 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
   return (
     <section className="policy" aria-label="Política efectiva">
       <h3 className="policy__title">Política efectiva</h3>
-      <div className="policy__pickers">
+      {!fixedPolicy && <div className="policy__pickers">
         <fieldset className="policy__group">
           <legend>Proveedor</legend>
           {PROVIDERS.map((p) => (
@@ -59,15 +88,19 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
         </fieldset>
         <fieldset className="policy__group">
           <legend>Perfil</legend>
-          {PROFILES.map((p) => (
-            <label key={p.id} className={p.enabled ? '' : 'is-disabled'} title={p.disabledReason || undefined}>
-              <input type="radio" name="policy-profile" value={p.id} checked={profile === p.id} disabled={!p.enabled} onChange={() => setProfile(p.id)} />
-              {p.label}
-              {!p.enabled && <span className="policy__muted"> — {p.disabledReason}</span>}
-            </label>
-          ))}
+          {PROFILES.map((p) => {
+            // blocked_profiles de orch_list_providers (p. ej. sandbox elevado de Codex).
+            const why = !p.enabled ? p.disabledReason : blockedReason(provider, p.id);
+            return (
+              <label key={p.id} className={why ? 'is-disabled' : ''} title={why || undefined} data-testid={`policy-profile-${p.id}`}>
+                <input type="radio" name="policy-profile" value={p.id} checked={profile === p.id} disabled={Boolean(why)} onChange={() => setProfile(p.id)} />
+                {p.label}
+                {why && <span className="policy__muted"> — {why}</span>}
+              </label>
+            );
+          })}
         </fieldset>
-      </div>
+      </div>}
 
       {error && <p role="alert" className="policy__error">No se pudo resolver la política: {error}</p>}
       {!policy && !error && <p className="policy__muted">Resolviendo…</p>}
@@ -87,9 +120,14 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
           <dt>Perfil</dt><dd>{profileLabel(policy.profile)}</dd>
           <dt>Rol</dt><dd data-testid="policy-role">{policy.role || 'Sin rol (solo consulta)'}</dd>
           <dt>Proveedor</dt><dd>{providerLabel(policy.provider)}</dd>
+          {/* El texto lo da el host (policy.model; Codex sin modelo: «el que defina config.toml»). */}
+          {(typeof policy.model === 'string' && policy.model) ? <>
+            <dt>Modelo pedido</dt>
+            <dd data-testid="policy-model" className="mono">{policy.model}</dd>
+          </> : null}
           <dt>Versión CLI detectada</dt><dd className="mono">{policy.cli_version || 'no detectada'}</dd>
           <dt>Comando (argv exacto)</dt>
-          <dd><code data-testid="policy-argv" className="mono">{policy.argv.length ? policy.argv.map(quote).join(' ') : '—'}</code></dd>
+          <dd><code data-testid="policy-argv" className="mono"><ArgvDisplay argv={policy.argv} /></code></dd>
           <dt>Advertencias</dt>
           <dd>
             {policy.warnings.length ? (
@@ -100,7 +138,7 @@ export function EffectivePolicyView({ worktree, role = null, initialProvider = '
       )}
       {consultOnly && <p className="policy__muted">Solo consulta: sin rol no se lanza ninguna tarea.</p>}
       <button type="button" className="policy__launch" disabled={!canLaunch} onClick={launch}>
-        Lanzar
+        {launchLabel}
       </button>
     </section>
   );

@@ -17,6 +17,7 @@ import "./styles/settings.css";
 import "./styles/orch.css";
 import "./styles/mascota.css";
 import { initUiScale } from "./lib/uiScale";
+import { useCodexTermStore } from "./orch/codexterm/codexTermStore";
 
 async function start() {
   // Fuera de Tauri (navegador en `npm run dev`) se simula la API nativa.
@@ -29,6 +30,8 @@ async function start() {
       </ErrorBoundary>
     </React.StrictMode>,
   );
+  // Pestañas de terminal de Codex que sigan vivas en el host (arranque o recarga de la webview).
+  useCodexTermStore.getState().rehydrate().catch(() => {});
 }
 
 start();

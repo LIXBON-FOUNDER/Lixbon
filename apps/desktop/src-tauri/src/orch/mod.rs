@@ -5,11 +5,26 @@
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
 mod agents;
+mod approval;
+mod spawn_approval;
+mod providers;
+mod codex_session;
+mod codex_term;
+
+pub use codex_session::SessionInfo as CodexSessionInfo;
+pub use codex_term::{CodexTerms, Listed as CodexTermListed};
 mod delivery;
 mod git;
+mod integration;
 mod issues;
+mod review;
 mod pty;
 mod roles;
+mod worktree_env;
+#[cfg(test)]
+mod lixbon_cli_tests;
+#[cfg(test)]
+mod codex_history_tests;
 mod server;
 pub(crate) mod skill;
 pub mod state;
@@ -36,6 +51,7 @@ pub enum Caller {
 
 /// Un nivel: el coordinador y sus hijos. Un hijo no reparte trabajo.
 const MAX_DEPTH: u32 = 1;
+const MODEL_TRIES: u32 = 10;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -61,6 +77,25 @@ pub struct Core {
     terms: Mutex<HashMap<String, pty::AgentTerm>>,
     settings: Mutex<Settings>,
     server: Mutex<Option<server::Handle>>,
+    /// Lanzamientos esperando la aprobación de la persona (solo en memoria).
+    pending: Mutex<HashMap<String, spawn_approval::Entry>>,
+    /// Cómo se resuelve la política efectiva (las pruebas no consultan CLIs reales).
+    resolver: Resolver,
+    ttl_ms: u64,
+    #[cfg(test)]
+    launched: Mutex<Vec<String>>,
+    #[cfg(test)]
+    events: Mutex<Vec<(String, Value)>>,
+    /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
+    /// espera en la barrera, para que la prueba mire el lock en ese punto exacto.
+    #[cfg(test)]
+    snapshot_git_hook: Mutex<Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>)>>,
+}
+
+pub type Resolver = fn(&str, &str, Option<&str>, &str) -> agents::Policy;
+
+fn resolve_real(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
+    agents::resolve_task_policy(provider, profile, role, worktree, agents::Delivery::FileOrMarkers)
 }
 
 pub struct Orch(pub Arc<Core>);
@@ -74,6 +109,15 @@ impl Default for Orch {
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
             server: Mutex::new(None),
+            pending: Mutex::new(HashMap::new()),
+            resolver: resolve_real,
+            ttl_ms: spawn_approval::ttl_ms(),
+            #[cfg(test)]
+            launched: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            events: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            snapshot_git_hook: Mutex::new(None),
         }))
     }
 }
@@ -92,6 +136,10 @@ fn lixbon_dir() -> PathBuf {
 }
 
 fn data_dir() -> PathBuf {
+    // Las pruebas nunca tocan el state.json real del usuario.
+    if cfg!(test) {
+        return std::env::temp_dir().join(format!("lixbon-orch-test-{}", std::process::id()));
+    }
     lixbon_dir().join("orch")
 }
 
@@ -103,6 +151,12 @@ fn discovery_file() -> PathBuf {
 pub fn lxo_path() -> PathBuf {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
     dir.join(if cfg!(windows) { "lxo.exe" } else { "lxo" })
+}
+
+/// Destino de `orch_integrate` para las hijas de una tarea: su carpeta y la rama
+/// que tiene ahora (integration.rs integra en la carpeta del padre).
+pub(crate) fn integrate_target(dir: &str) -> Value {
+    json!({ "dir": dir, "branch": git::current_branch(dir) })
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
@@ -140,6 +194,19 @@ const SWEEP_EVERY: Duration = Duration::from_secs(60);
 const CLOSE_REMINDER: &str = "No quedan hijas en marcha. Si el objetivo está cumplido e integrado, termina con `lxo run close`.";
 
 impl Core {
+    /// Política efectiva de una hija: la del perfil (vía `resolver`) más el modelo
+    /// pedido (aviso del modo plan, modelo no verificado). La misma al pedir
+    /// aprobación, al aprobar y al lanzar.
+    pub(crate) fn task_policy(&self, provider: &str, profile: &str, role: Option<&str>, cwd: &str, model: Option<&str>) -> agents::Policy {
+        let mut policy = (self.resolver)(provider, profile, role, cwd);
+        agents::warn_plan_model(&mut policy, model);
+        if let Some(m) = model {
+            agents::mark_model(&mut policy, Some(m), providers::model_verified(provider, m));
+        }
+        agents::set_model(&mut policy, model);
+        policy
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -172,6 +239,15 @@ impl Core {
                 core.close_idle_runs();
                 drop(core);
                 std::thread::sleep(SWEEP_EVERY);
+            }
+        });
+        // Vencimiento de lanzamientos pendientes (y de los de coordinadores que ya no siguen).
+        let weak = Arc::downgrade(self);
+        std::thread::spawn(move || {
+            while let Some(core) = weak.upgrade() {
+                core.sweep_pending();
+                drop(core);
+                std::thread::sleep(Duration::from_secs(5));
             }
         });
     }
@@ -209,6 +285,7 @@ impl Core {
         let h = server::start(self.clone())?;
         write_json(&discovery_file(), &json!({
             "port": h.port, "token": h.token, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
+            "lxo": lxo_path(),
         }))?;
         *slot = Some(h);
         Ok(())
@@ -302,6 +379,11 @@ impl Core {
         if let Caller::Agent(Some(id)) = &caller {
             self.lock().touch_run(id);
         }
+        // Decisiones humanas (integrar, PR, revisar) y lecturas cerradas (diff de
+        // revisión): ni orch_call ni el servidor de lxo llegan a ellas.
+        if let Some(why) = review::closed_to_agents(cmd) {
+            return Err(why.into());
+        }
         match cmd {
             "status" => {
                 let st = self.lock();
@@ -351,7 +433,9 @@ impl Core {
                 self.commit(&st, &[]);
                 Ok(json!({ "run": run, "task": task }))
             }
-            "spawn" => self.spawn(&caller, args),
+            // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
+            "spawn" => self.spawn_request(&caller, args),
+            "spawn_status" => self.spawn_status(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
             "issue" => {
@@ -384,6 +468,7 @@ impl Core {
                 let report = self.store_report(&me, &s(args, "report"), &s(args, "report_text"), &summary)?;
                 let mut st = self.lock();
                 let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
+                st.task_mut(&me)?.delivery_channel = Some("lxo_done".into());
                 self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
                 Ok(json!({ "task": me, "status": st.task(&me)?.status, "report": report }))
             }
@@ -481,22 +566,10 @@ impl Core {
                 let (stat, diff) = git::diff(&dir, &base, &branch)?;
                 Ok(json!({ "branch": branch, "base": base, "stat": stat, "diff": diff }))
             }
-            "merge" => self.merge(&caller, args),
-            "pr" => {
-                let id = s(args, "task");
-                let (branch, base, dir) = self.branch_of(&caller, &id)?;
-                let (title, summary) = {
-                    let st = self.lock();
-                    let t = st.task(&id)?;
-                    (t.title.clone(), t.summary.clone())
-                };
-                git::push(&dir, &branch)?;
-                let url = git::gh_pr(&dir, &base, &branch, &title, &format!("{summary}\n\n_Tarea {id} del orquestador de Lixbon._"))?;
-                let mut st = self.lock();
-                st.task_mut(&id)?.pr_url = Some(url.clone());
-                self.commit(&st, &[]);
-                Ok(json!({ "url": url }))
-            }
+            // Integrar es decisión de una persona: `lxo merge` ya no integra.
+            "merge" => Err(integration::AGENT_REJECT.into()),
+            // Publicar (push + PR) es decisión de una persona: orch_publish_pr.
+            "pr" => Err(integration::PR_REJECT.into()),
             "stop" => {
                 let id = s(args, "task");
                 {
@@ -527,6 +600,7 @@ impl Core {
                     return Err("Solo desde la interfaz".into());
                 }
                 let run = s(args, "run");
+                self.expire_run_pending(&run);
                 let ids: Vec<String> = self.lock().tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
                 for id in &ids {
                     self.kill_term(id);
@@ -549,7 +623,8 @@ impl Core {
         Ok((branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone()))
     }
 
-    fn spawn(self: &Arc<Self>, caller: &Caller, args: &Value) -> Result<Value, String> {
+    /// Valida lo que pide el agente (sin crear nada) y arma el pendiente.
+    fn plan_spawn(&self, caller: &Caller, args: &Value) -> Result<spawn_approval::PendingSpawn, String> {
         let parent_id = Self::me(caller)?;
         let spec = s(args, "task");
         if spec.is_empty() {
@@ -566,7 +641,7 @@ impl Core {
                     ));
                 }
                 let r = roles::resolve(&self.settings().roles, id)?;
-                (roles::AGENT.to_string(), Some(r.model), r.effort, r.spec.read_only)
+                (r.provider, r.model, r.effort, r.spec.read_only)
             }
             None => {
                 let agent = s(args, "agent");
@@ -577,48 +652,69 @@ impl Core {
             }
         };
         // Se valida antes de crear nada: un agente o modelo mal escrito no deja restos.
-        // Perfil pedido (por defecto el del rol); se re-resuelve en el host al lanzar.
+        // Perfil pedido (por defecto el del rol); se re-resuelve en el host al aprobar y al lanzar.
         let profile = match Some(s(args, "profile")).filter(|p| !p.is_empty()) {
             Some(p) => agents::Profile::parse(&p).ok_or_else(|| format!("Perfil desconocido: {p}"))?,
             None => agents::Profile::for_role(read_only),
         };
-        let ack_unverified = b(args, "ack_unverified");
-        let requested_argv: Option<Vec<String>> = args.get("argv").filter(|v| !v.is_null())
-            .map(|v| serde_json::from_value(v.clone()).map_err(|_| "argv debe ser una lista de textos".to_string()))
-            .transpose()?;
         agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile, role.as_deref())?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
         // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
         let shared = b(args, "shared") || read_only;
+        let parent = {
+            let st = self.lock();
+            let parent = st.task(&parent_id)?.clone();
+            if parent.depth >= MAX_DEPTH {
+                return Err("Una tarea hija no puede lanzar otras: pídeselo a tu coordinador con lxo ask".into());
+            }
+            if st.runs.get(&parent.run).is_none_or(|r| r.closed) {
+                return Err("Tu run está cerrado: no se pueden lanzar hijas".into());
+            }
+            parent
+        };
+        let base = Some(s(args, "base")).filter(|b| !b.is_empty());
+        Ok(self.new_pending(&parent, spawn_approval::NewPending {
+            provider: agent, profile: profile.id().to_string(), role, model, effort, title, spec, shared, base,
+        }))
+    }
 
+    /// Crea y lanza la hija de un pendiente que la persona aprobó. `argv` es el que
+    /// resolvió el host (nunca el que llega de la UI).
+    fn create_child(self: &Arc<Self>, p: &spawn_approval::PendingSpawn, argv: Vec<String>, ack_unverified: bool) -> Result<Value, String> {
+        let parent_id = p.parent_task.clone();
         let (id, parent) = {
             let mut st = self.lock();
             let parent = st.task(&parent_id)?.clone();
             let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
-                agent: agent.clone(), model: model.clone(), effort: effort.clone(), role: role.clone(), title: title.clone(), spec: spec.clone(),
+                agent: p.provider.clone(), model: p.model.clone(), effort: p.effort.clone(), role: p.role.clone(), title: p.title.clone(), spec: p.spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
             })?;
             let t = st.task_mut(&id)?;
-            t.profile = Some(profile.id().to_string());
+            t.profile = Some(p.profile.clone());
             t.ack_unverified = ack_unverified;
-            t.requested_argv = requested_argv;
+            t.requested_argv = Some(argv);
             (id, parent)
         };
 
         let prepared = (|| -> Result<(), String> {
-            if shared {
+            if p.shared {
                 return Ok(());
             }
-            let base = Some(s(args, "base")).filter(|b| !b.is_empty())
+            let base = p.base.clone()
                 .or_else(|| git::current_branch(&parent.cwd))
                 .unwrap_or_else(|| "HEAD".into());
-            let slug = state::slug(&title, 32);
+            let slug = state::slug(&p.title, 32);
             let branch = format!("lx/{}/{id}-{slug}", parent.run);
-            let dir = git::worktree_dir(&parent.repo, None, &format!("{}-{id}-{slug}", parent.run));
+            // La carpeta es la que se mostró en el pendiente: el argv aprobado la incluye (codex --cd).
+            let dir = PathBuf::from(&p.cwd);
+            let start = git::head(&parent.cwd);
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
+            let env = worktree_env::apply(&parent.repo, &dir, &worktree_env::plan(&parent.repo).restricted_to(&p.env));
             let mut st = self.lock();
             let t = st.task_mut(&id)?;
+            t.env = Some(env).filter(|e| !e.is_empty());
+            t.base_commit = start;
             t.cwd = dir.to_string_lossy().into_owned();
             t.worktree = Some(t.cwd.clone());
             t.branch = Some(branch);
@@ -709,6 +805,9 @@ impl Core {
     }
 
     fn launch(self: &Arc<Self>, id: &str) -> Result<(), String> {
+        #[cfg(test)]
+        return self.fake_launch(id);
+        #[allow(unreachable_code)]
         let app = self.app.get().ok_or("Lixbon aún no terminó de arrancar")?.clone();
         let (task, parent, objective) = {
             let st = self.lock();
@@ -731,22 +830,49 @@ impl Core {
         }
         let mut task = task;
         task.report_nonce = Some(nonce.clone());
-        std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
-            .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
-        git::exclude_lixbon_dir(&task.cwd);
 
-        let prompt = format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.");
+        // El CLI de Lixbon ya lleva sus reglas de entrega: no se le manda a leer la guía de lxo.
+        let prompt = if task.agent == agents::LIXBON_CLI {
+            format!("Lee .lixbon/tasks/{id}.md y haz la tarea.")
+        } else {
+            format!("Eres la tarea {id} del orquestador de Lixbon. Lee .lixbon/tasks/{id}.md, ejecuta lxo guide y haz la tarea.")
+        };
         let read_only = task.role.as_deref().and_then(roles::spec).is_some_and(|r| r.read_only);
         // Se lanza exactamente el argv de la política efectiva (la misma que muestra
         // orch_resolve_policy); un perfil bloqueado no arranca.
         let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
         // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
-        let policy = agents::resolve_task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, agents::Delivery::FileOrMarkers);
+        let policy = self.task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, task.model.as_deref());
+        let plan_mode = agents::is_plan(&policy);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
-        let launch = agents::launch_with(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt)?;
+        // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.
+        let last_message = (policy.argv.get(1).map(String::as_str) == Some("exec"))
+            .then(|| delivery::last_message_path(&task.cwd, id, delivery::ATTEMPT).to_string_lossy().into_owned());
+        let stream_json = policy.argv.iter().any(|a| a == "stream-json");
+        let launch = agents::launch_task(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt, last_message.as_deref())?;
+        task.last_message_path = last_message.clone();
+        task.stream_json = stream_json;
         if let Ok(t) = self.lock().task_mut(id) {
             t.policy = Some(record);
+            t.last_message_path = last_message;
+            t.stream_json = stream_json;
+            t.delivery_channel = None;
+            t.model_effective = None;
+            t.model_mismatch = false;
+            t.model_mismatch_reason = None;
+            t.plan_mode = plan_mode;
+            t.failure_reason = None;
+            t.session_ref = None;
+            t.model_source = None;
+            t.session_match = None;
+            t.attempt_started = Some(state::now_ms());
+            t.approval_deadline = None;
+            // launch_task ya rechazó un modelo pedido que no entra en el argv.
+            t.model_requested = t.model.clone();
         }
+        std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
+            .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
+        git::exclude_lixbon_dir(&task.cwd);
 
         let lxo = lxo_path();
         let mut path = lxo.parent().map(|p| p.as_os_str().to_owned()).unwrap_or_default();
@@ -768,9 +894,18 @@ impl Core {
         let tid = id.to_string();
         let (out_event, exit_event) = (format!("orch:term:{id}"), format!("orch:term-exit:{id}"));
         let app_exit = app.clone();
+        // Espera de aprobación en la terminal y agente inactivo (orch/approval.rs).
+        let guard = Arc::new(Mutex::new(approval::Guard::from_env(state::now_ms())));
+        let (guard_out, weak_out, tid_out) = (guard.clone(), Arc::downgrade(self), id.to_string());
         let term = pty::spawn(
             pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped },
-            move |text| { let _ = app.emit(&out_event, text); },
+            move |text| {
+                let change = guard_out.lock().ok().and_then(|mut g| g.on_output(&text, state::now_ms()));
+                if let (Some(change), Some(core)) = (change, weak_out.upgrade()) {
+                    core.on_approval_change(&tid_out, change);
+                }
+                let _ = app.emit(&out_event, text);
+            },
             move || {
                 let _ = app_exit.emit(&exit_event, ());
                 if let Some(core) = weak.upgrade() {
@@ -782,13 +917,48 @@ impl Core {
         // Sondeo del report.json y de la salida mientras la terminal siga abierta.
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
+        let mut model_tries = 0;
         std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            std::thread::sleep(std::time::Duration::from_secs(1));
             let Some(core) = weak.upgrade() else { break };
             let Some(text) = core.term_text(&tid) else { break };
+            let session_id = codex_session::session_id_from_terminal(&text);
             core.collect(&tid, Some(text), false);
+            // Codex deja la TUI abierta tras el informe: el modelo no puede esperar a que se cierre.
+            if model_tries < MODEL_TRIES && core.codex_model_pending(&tid) {
+                model_tries += 1;
+                core.record_codex_model(&tid, session_id.as_deref());
+            }
+            let timeout = guard.lock().ok().and_then(|g| g.check(state::now_ms()));
+            if let Some(t) = timeout {
+                core.on_guard_timeout(&tid, t);
+                break;
+            }
         });
         Ok(())
+    }
+
+    fn on_approval_change(&self, id: &str, change: approval::Change) {
+        let mut st = self.lock();
+        let changed = match change {
+            approval::Change::Entered(deadline) => st.await_terminal_approval(id, deadline),
+            approval::Change::Left => st.resume_from_approval(id),
+        };
+        if changed.unwrap_or(false) {
+            self.commit(&st, &[]);
+        }
+    }
+
+    /// Venció la espera de aprobación o el agente lleva demasiado sin escribir: la
+    /// tarea queda Failed con su motivo y se mata la PTY con todo su árbol.
+    fn on_guard_timeout(&self, id: &str, t: approval::Timeout) {
+        {
+            let mut st = self.lock();
+            if let Ok(msg) = st.fail_with(id, t.reason(), t.message()) {
+                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
+            }
+        }
+        self.kill_term(id);
     }
 
     fn term_text(&self, id: &str) -> Option<String> {
@@ -800,10 +970,10 @@ impl Core {
     /// Recoge el informe por archivo o por marcadores (orch/delivery.rs) y lo
     /// entrega como un `lxo done`. Al salir el proceso cierra la tarea si falta.
     fn collect(&self, id: &str, terminal: Option<String>, at_exit: bool) {
-        let (expect, cwd, delivered, is_final) = {
+        let (expect, cwd, delivered, is_final, last_message, stream_json) = {
             let st = self.lock();
             let Ok(t) = st.task(id) else { return };
-            (delivery::Expect::of(t), t.cwd.clone(), t.delivered.clone(), t.status.is_final())
+            (delivery::Expect::of(t), t.cwd.clone(), t.delivered.clone(), t.status.is_final(), t.last_message_path.clone(), t.stream_json)
         };
         if is_final {
             return;
@@ -811,7 +981,16 @@ impl Core {
         let found = match &expect {
             Some(ex) => {
                 let file = delivery::read_report_file(&delivery::report_path(&cwd, id, ex.attempt));
-                delivery::find(file.as_deref(), terminal.as_deref(), ex, &delivered)
+                // El -o lo escribe codex al terminar: solo se lee al salir el proceso.
+                let final_file = last_message.as_ref().filter(|_| at_exit).and_then(|p| delivery::read_final_file(Path::new(p)));
+                let src = delivery::Sources {
+                    expect_final: last_message.is_some() && at_exit,
+                    final_file: final_file.as_deref(),
+                    expect_stream: stream_json,
+                    file: file.as_deref(),
+                    terminal: terminal.as_deref(),
+                };
+                delivery::find_all(&src, ex, &delivered)
             }
             None => delivery::Found::Nothing,
         };
@@ -826,11 +1005,40 @@ impl Core {
         }
     }
 
+    /// Codex: el modelo efectivo sale de `turn_context.model` de su archivo de
+    /// sesión; si no se puede leer, `unknown`. Nunca se copia del pedido.
+    fn record_codex_model(&self, id: &str, session_id: Option<&str>) {
+        let (agent, cwd, since) = {
+            let st = self.lock();
+            let Ok(t) = st.task(id) else { return };
+            (t.agent.clone(), t.cwd.clone(), t.attempt_started.unwrap_or(t.created))
+        };
+        if agent != "codex" {
+            return;
+        }
+        let r = codex_session::resolve(agents::codex_home().map(|h| h.join("sessions")).as_deref(), session_id, &cwd, since);
+        let mut st = self.lock();
+        if let Ok(t) = st.task_mut(id) {
+            delivery::set_model_effective(t, &r.model);
+            t.model_source = Some(r.source().into());
+            t.session_match = r.session_match().map(str::to_string);
+            t.session_ref = r.session_ref;
+        }
+        self.commit(&st, &[]);
+    }
+
+    fn codex_model_pending(&self, id: &str) -> bool {
+        let st = self.lock();
+        st.task(id).is_ok_and(|t| t.agent == "codex" && t.status.is_final() && matches!(t.model_source.as_deref(), None | Some("unknown")))
+    }
+
     fn on_exit(&self, id: &str) {
         let terminal = self.terms.lock().ok()
             .and_then(|mut t| t.remove(id))
             .and_then(|t| t.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned()));
+        let session_id = terminal.as_deref().and_then(codex_session::session_id_from_terminal);
         self.collect(id, terminal, true);
+        self.record_codex_model(id, session_id.as_deref());
         let mut st = self.lock();
         if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
             self.commit(&st, &[msg]);
@@ -845,25 +1053,42 @@ impl Core {
         true
     }
 
-    fn merge(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
-        let id = s(args, "task");
-        let (branch, parent_dir, title, open) = {
-            let st = self.lock();
-            Self::check_manages(&st, caller, &id)?;
-            let t = st.task(&id)?;
-            let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia"))?;
-            let parent = t.parent.as_ref().and_then(|p| st.tasks.get(p)).ok_or("La tarea raíz no se fusiona en nadie")?;
-            (branch, parent.cwd.clone(), t.title.clone(), !t.status.is_final())
-        };
-        if open && !b(args, "force") {
-            return Err(format!("{id} aún está en marcha: espera a su lxo done o usa --force"));
-        }
-        let out = git::merge(&parent_dir, &branch, &format!("lxo: fusiona {id} · {title}"), b(args, "squash"))?;
-        let mut st = self.lock();
-        st.task_mut(&id)?.merged = true;
+    /// Integración aprobada por la persona (comando Tauri `orch_integrate`).
+    /// `accept_moved_target`: el `found_commit` que la persona vio y acepta.
+    pub fn integrate_from_ui(&self, task: &str, confirm: bool, squash: bool, accept_moved_target: Option<&str>) -> Result<Value, String> {
+        let res = integration::integrate(&self.state, true,
+            &json!({ "task": task, "confirm": confirm, "squash": squash, "accept_moved_target": accept_moved_target }));
+        let st = self.lock();
         self.commit(&st, &[]);
-        let hint = self.close_hint(&st, &id);
-        Ok(json!({ "task": id, "merged": branch, "into": parent_dir, "output": out, "hint": hint }))
+        res.map(|mut v| {
+            if v["outcome"] == "merged" {
+                v["hint"] = json!(self.close_hint(&st, task));
+            }
+            v
+        })
+    }
+
+    /// Diff de revisión de una tarea (comando Tauri `orch_task_diff`).
+    pub fn task_diff_from_ui(&self, task_id: &str) -> Result<Value, String> {
+        review::task_diff(&self.state, task_id, review::DIFF_LIMIT)
+    }
+
+    /// Revisión de la persona (comando Tauri `orch_review_task`).
+    pub fn review_from_ui(&self, task_id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
+        let out = review::review_task(&self.state, task_id, decision, head_commit, comment, confirm)?;
+        if out["outcome"] == "recorded" {
+            self.commit(&self.lock(), &[]);
+            self.emit(review::EV_REVIEWED, &json!({ "task_id": task_id, "decision": decision, "head_commit": head_commit, "at": out["at"] }));
+        }
+        Ok(out)
+    }
+
+    /// Publicación de PR aprobada por la persona (comando Tauri `orch_publish_pr`).
+    pub fn publish_pr_from_ui(&self, task: &str, confirm: bool) -> Result<Value, String> {
+        let res = integration::publish_pr(&self.state, true, &json!({ "task": task, "confirm": confirm }), &git::gh_pr);
+        let st = self.lock();
+        self.commit(&st, &[]);
+        res
     }
 
     fn release(&self, caller: &Caller, id: &str, force: bool) -> Result<Value, String> {
@@ -966,23 +1191,102 @@ impl Core {
         (released, kept)
     }
 
+    /// Estado para la interfaz. Con el lock del estado solo se copian datos; git
+    /// (`for-each-ref` y la rama del padre para `integrate_into`) corre después,
+    /// sin lock, para que una consulta lenta no frene a lxo ni a los agentes.
     pub fn snapshot(&self) -> Value {
-        let st = self.lock();
-        let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
-        let server = self.server.lock().ok().and_then(|s| s.as_ref().map(|h| h.port));
-        let start = st.messages.len().saturating_sub(400);
-        json!({
-            "settings": self.settings(),
-            "roles": roles::describe(&self.settings().roles)["roles"],
-            "server": server,
-            "lxo": lxo_path(),
-            "lxo_exists": lxo_path().is_file(),
-            "runs": st.runs,
-            "tasks": st.tasks,
-            "messages": &st.messages[start..],
-            "live": live,
-        })
+        let (mut out, git_in) = {
+            let st = self.lock();
+            let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+            let server = self.server.lock().ok().and_then(|s| s.as_ref().map(|h| h.port));
+            let start = st.messages.len().saturating_sub(400);
+            let out = json!({
+                "settings": self.settings(),
+                "roles": roles::describe(&self.settings().roles)["roles"],
+                "server": server,
+                "lxo": lxo_path(),
+                "lxo_exists": lxo_path().is_file(),
+                "runs": st.runs,
+                "tasks": tasks_with_integration(&st),
+                "messages": &st.messages[start..],
+                "live": live,
+            });
+            (out, SnapshotGit::copy(&st))
+        };
+        #[cfg(test)]
+        {
+            let hook = self.snapshot_git_hook.lock().unwrap().clone();
+            if let Some((tx, barrier)) = hook {
+                let _ = tx.send(());
+                barrier.wait();
+            }
+        }
+        let (heads, into) = git_in.run();
+        if let Some(tasks) = out["tasks"].as_object_mut() {
+            for (id, t) in tasks.iter_mut() {
+                t["head_commit"] = heads.get(id).cloned().map(Value::String).unwrap_or(Value::Null);
+            }
+        }
+        // Por tarea con rama sin integrar: dónde la integraría orch_integrate.
+        out["integrate_into"] = json!(into);
+        out
     }
+}
+
+/// Lo que necesita git para la snapshot, copiado con el lock tomado.
+struct SnapshotGit {
+    /// (tarea, repo, rama) de cada tarea con rama.
+    branches: Vec<(String, String, String)>,
+    /// (tarea, carpeta del padre) de cada hija con rama sin integrar.
+    parents: Vec<(String, String)>,
+}
+
+impl SnapshotGit {
+    fn copy(st: &State) -> Self {
+        let branches = st.tasks.values().filter_map(|t| Some((t.id.clone(), t.repo.clone(), t.branch.clone()?))).collect();
+        let parents = st.tasks.values().filter(|t| t.branch.is_some() && !t.merged)
+            .filter_map(|t| Some((t.id.clone(), st.tasks.get(t.parent.as_ref()?)?.cwd.clone()))).collect();
+        SnapshotGit { branches, parents }
+    }
+
+    /// Sin lock: un `git for-each-ref` por repo y una consulta de rama por carpeta de padre.
+    fn run(self) -> (HashMap<String, String>, BTreeMap<String, Value>) {
+        let mut by_repo: HashMap<String, HashMap<String, String>> = HashMap::new();
+        let mut heads = HashMap::new();
+        for (id, repo, branch) in self.branches {
+            let refs = by_repo.entry(repo.clone()).or_insert_with(|| review::branch_heads(&repo));
+            if let Some(c) = refs.get(&branch) {
+                heads.insert(id, c.clone());
+            }
+        }
+        let mut by_dir: HashMap<String, Value> = HashMap::new();
+        let into = self.parents.into_iter()
+            .map(|(id, dir)| (id, by_dir.entry(dir.clone()).or_insert_with(|| integrate_target(&dir)).clone()))
+            .collect();
+        (heads, into)
+    }
+}
+
+/// Última integración de la tarea (decisión `merge` más reciente) o `null`.
+fn last_integration(st: &State, id: &str) -> Value {
+    st.decisions.iter().filter(|d| d.task == id && d.kind == "merge").max_by_key(|d| (d.at, d.id)).map(|d| {
+        let v: Value = d.detail_json.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+        json!({ "outcome": v["outcome"], "result_commit": v.get("result_commit").cloned().unwrap_or(Value::Null), "at": d.at })
+    }).unwrap_or(Value::Null)
+}
+
+/// Las tareas de la snapshot con `last_integration` (sin la lista de decisiones).
+fn tasks_with_integration(st: &State) -> Value {
+    let mut tasks = serde_json::to_value(&st.tasks).unwrap_or(Value::Null);
+    if let Some(map) = tasks.as_object_mut() {
+        for (id, t) in map.iter_mut() {
+            t["last_integration"] = last_integration(st, id);
+            t["last_review"] = review::last_review(st, id);
+            // head_commit se rellena después, fuera del lock (Core::snapshot).
+            t["head_commit"] = Value::Null;
+        }
+    }
+    tasks
 }
 
 impl State {
@@ -1015,7 +1319,21 @@ fn task_file(t: &Task, parent: Option<&Task>, objective: &str) -> String {
     } else {
         ""
     };
-    let deliver = if read_only {
+    let final_message = t.last_message_path.is_some() || t.stream_json;
+    let deliver = if final_message {
+        let nonce = t.report_nonce.as_deref().unwrap_or("<nonce>");
+        format!(
+            "Tu informe es tu **mensaje final**: el host lo toma tal cual de la CLI, sin lxo done ni lxo report. \
+Empieza tu último mensaje con la línea `LXO-RESULT nonce={nonce} status=done` (o `status=failed`), \
+sigue con una línea de resumen y después el informe en markdown: qué encontraste, rutas con número de línea y qué queda. \
+No modifiques archivos."
+        )
+    } else if t.agent == "claude" && !read_only {
+        format!(
+            "Escribe tu informe en `{report}` (qué hiciste, archivos, cómo lo verificaste, qué queda y decisiones pendientes) \
+y cierra con `lxo report --report {report} --summary \"<una frase>\"`: es la única orden de lxo que tienes permitida sin pedir permiso."
+        )
+    } else if read_only {
         format!(
             "Eres de **solo lectura**: no tienes Edit ni Write y no debes modificar archivos (tampoco con Bash). \
 Tu informe va por la entrada estándar, sin archivo:\n\n\
@@ -1043,7 +1361,7 @@ Objetivo general: {objective}\n\n\
 3. Si solo tu coordinador puede decidir algo: `lxo ask \"<pregunta>\"` y espera. Nunca abras preguntas interactivas.\n\
 4. En cada punto de control ejecuta `lxo check` por si tu coordinador te mandó instrucciones.\n\
 5. Al acabar: {deliver} Si no se pudo completar, añade `--failed`. Después no hagas nada más.\n{offline}",
-        offline = offline_rule(t),
+        offline = if final_message { String::new() } else { offline_rule(t) },
         id = t.id,
         title = t.title,
         run = t.run,
@@ -1075,7 +1393,7 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
     let core = &orch.0;
     let enabled = settings.enabled;
     let was = core.settings().enabled;
-    roles::validate(&settings.roles)?;
+    let warnings = roles::validate(&settings.roles)?;
     write_json(&data_dir().join("settings.json"), &settings)?;
     // Activarlo deja la skill en todos los agentes del equipo: nada que configurar a mano.
     if enabled && !was {
@@ -1089,7 +1407,7 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
     if let Some(app) = core.app.get() {
         let _ = app.emit("orch:changed", ());
     }
-    Ok(core.snapshot())
+    Ok(roles::save_response(&warnings, core.snapshot()))
 }
 
 #[tauri::command(async)]
@@ -1119,9 +1437,103 @@ pub fn orch_term_resize(orch: TauriState<'_, Orch>, task: String, cols: u16, row
 /// Política efectiva de un perfil para un proveedor, con el rol de la tarea
 /// (vacío para consultar solo los flags), en un worktree: argv exacto,
 /// versión detectada, advertencias y estado (`ok`, `blocked` o `unverified`).
-#[tauri::command(async)]
-pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String) -> agents::Policy {
-    agents::resolve_policy(&provider, &profile, &role, &worktree)
+#[tauri::command(async, rename_all = "snake_case")]
+/// `model` (opcional): el modelo que se va a pedir; con Claude en plan y un modelo
+/// que no es Sonnet, añade el aviso WARN_PLAN_SONNET.
+pub fn orch_resolve_policy(provider: String, profile: String, role: String, worktree: String, model: Option<String>) -> agents::Policy {
+    let mut p = agents::resolve_policy(&provider, &profile, &role, &worktree);
+    agents::warn_plan_model(&mut p, model.as_deref());
+    if let Some(m) = model.as_deref() {
+        agents::mark_model(&mut p, Some(m), providers::model_verified(&provider, m));
+    }
+    agents::set_model(&mut p, model.as_deref());
+    p
+}
+
+/// Pestaña de terminal de Codex (orch/codex_term.rs): política sin lanzar nada.
+pub fn codex_term_policy(cwd: &str, model: Option<&str>, effort: Option<&str>, resume: Option<&str>) -> Result<Value, String> {
+    serde_json::to_value(resolve_codex_term(cwd, model, effort, resume)?).map_err(|e| e.to_string())
+}
+
+fn resolve_codex_term(cwd: &str, model: Option<&str>, effort: Option<&str>, resume: Option<&str>) -> Result<codex_term::TermPolicy, String> {
+    let policy = codex_term::resolve(cwd, model, effort)?;
+    match resume.map(str::trim).filter(|id| !id.is_empty()) {
+        Some(id) => codex_term::with_resume(policy, id),
+        None => Ok(policy),
+    }
+}
+
+/// Sesiones guardadas de Codex para el historial de la interfaz (solo lectura de `~/.codex/sessions`).
+pub fn codex_sessions(cwd: Option<&str>, limit: usize) -> Vec<codex_session::SessionInfo> {
+    agents::codex_home().map(|h| codex_session::list(&h.join("sessions"), cwd, limit.clamp(1, 200))).unwrap_or_default()
+}
+
+/// Abre la pestaña de Codex. `root`: carpeta de trabajo abierta en Lixbon.
+#[allow(clippy::too_many_arguments)]
+pub fn codex_term_open(app: &AppHandle, terms: &CodexTerms, root: Option<&Path>, cwd: &str, model: Option<&str>, effort: Option<&str>,
+    cols: Option<u16>, rows: Option<u16>, acknowledged: bool, resume: Option<&str>) -> Result<Value, String> {
+    let app = app.clone();
+    let emit = move |name: &str, payload: Value| { let _ = app.emit(name, payload); };
+    let o = codex_term::open(terms, root, cwd, model, effort, cols, rows, acknowledged, |c| resolve_codex_term(c, model, effort, resume), emit)?;
+    serde_json::to_value(o).map_err(|e| e.to_string())
+}
+
+/// Proveedores para los roles del equipo: versión, disponibilidad, modelos (con
+/// `verified`) y esfuerzos que admite cada CLI. Solo la interfaz: no está en
+/// `orch_call` ni en el servidor HTTP de `lxo`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_list_providers(refresh: Option<bool>) -> Vec<providers::Provider> {
+    providers::list(refresh.unwrap_or(false))
+}
+
+/// Integra la rama de una tarea en su padre. Solo la interfaz (la persona) llega
+/// aquí: no está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe
+/// ser `true` (diálogo de confirmación de la UI).
+// snake_case: la webview envía los nombres tal cual (accept_moved_target), sin camelCase.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_integrate(orch: TauriState<'_, Orch>, task: String, confirm: bool, squash: Option<bool>, accept_moved_target: Option<String>) -> Result<Value, String> {
+    orch.0.integrate_from_ui(&task, confirm, squash.unwrap_or(false), accept_moved_target.as_deref())
+}
+
+/// Publica la rama de una tarea (push + `gh pr create`). Solo la interfaz: no
+/// está en `orch_call` ni en el servidor HTTP de `lxo`. `confirm` debe ser `true`.
+// snake_case: la webview envía los nombres tal cual (accept_moved_target), sin camelCase.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_publish_pr(orch: TauriState<'_, Orch>, task: String, confirm: bool) -> Result<Value, String> {
+    orch.0.publish_pr_from_ui(&task, confirm)
+}
+
+/// Lanzamientos que esperan a la persona (para recuperar la vista si se recarga).
+/// Solo la interfaz: no está en `orch_call` ni en el servidor HTTP de `lxo`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_list_pending_spawns(orch: TauriState<'_, Orch>) -> Vec<spawn_approval::PendingSpawn> {
+    orch.0.list_pending_spawns()
+}
+
+/// La persona aprueba un lanzamiento. `argv` es el que vio: solo se compara con el
+/// que vuelve a resolver el host, que es el que se lanza. Solo la interfaz.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_approve_spawn(orch: TauriState<'_, Orch>, pending_id: String, confirm: bool, argv: Vec<String>, ack_unverified: Option<bool>) -> Result<Value, String> {
+    orch.0.approve_spawn(&pending_id, confirm, &argv, ack_unverified.unwrap_or(false))
+}
+
+/// La persona rechaza un lanzamiento. Solo la interfaz.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_reject_spawn(orch: TauriState<'_, Orch>, pending_id: String, confirm: bool, reason: Option<String>) -> Result<Value, String> {
+    orch.0.reject_spawn(&pending_id, confirm, reason.as_deref())
+}
+
+/// Diff de la rama de una tarea contra su base, por archivo. Solo la interfaz:
+/// no está en `orch_call` ni en el servidor HTTP de `lxo`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_task_diff(orch: TauriState<'_, Orch>, task_id: String) -> Result<Value, String> {
+    orch.0.task_diff_from_ui(&task_id)
+}
+
+/// La persona acepta o rechaza el diff de una tarea sobre `head_commit`. Solo la interfaz.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_review_task(orch: TauriState<'_, Orch>, task_id: String, decision: String, head_commit: String, comment: Option<String>, confirm: bool) -> Result<Value, String> {
+    orch.0.review_from_ui(&task_id, &decision, &head_commit, comment.as_deref(), confirm)
 }
 
 #[tauri::command]
@@ -1137,4 +1549,235 @@ pub fn orch_skill_install(ids: Vec<String>) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
     skill::uninstall(&ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use state::NewTask;
+
+    #[test]
+    fn el_servidor_de_lxo_no_conoce_la_integracion() {
+        // server.rs despacha todo por Core::rpc con Caller::Agent; orch_call de la UI
+        // usa el mismo rpc. Ninguno de los dos puede integrar.
+        let core = Orch::default().0;
+        core.settings.lock().unwrap().enabled = true;
+        for caller in [Caller::Agent(None), Caller::Agent(Some("t1".into())), Caller::User] {
+            let e = core.rpc(caller, "", "integrate", &json!({ "task": "t1", "confirm": true })).unwrap_err();
+            assert_eq!(e, integration::AGENT_REJECT);
+        }
+        let e = core.rpc(Caller::Agent(None), "", "merge", &json!({ "task": "t1" })).unwrap_err();
+        assert_eq!(e, integration::AGENT_REJECT);
+        for caller in [Caller::Agent(Some("t1".into())), Caller::User] {
+            assert_eq!(core.rpc(caller, "", "pr", &json!({ "task": "t1" })).unwrap_err(), integration::PR_REJECT);
+        }
+        for c in ["publish_pr", "orch_publish_pr"] {
+            assert_eq!(core.rpc(Caller::Agent(None), "", c, &json!({})).unwrap_err(), format!("Comando desconocido: {c}"));
+        }
+        assert!(!include_str!("server.rs").contains("integrate") && !include_str!("server.rs").contains("publish"));
+    }
+
+    /// Invoca orch_integrate por el IPC de Tauri (MockRuntime), con el JSON que
+    /// mandaría la webview, para comprobar cómo llegan los argumentos.
+    #[test]
+    fn la_webview_envia_accept_moved_target_en_snake_case() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+        use tauri::webview::InvokeRequest;
+
+        let git = |dir: &Path, args: &[&str]| {
+            let o = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
+            assert!(o.status.success(), "{args:?}");
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        };
+        let dir = std::env::temp_dir().join(format!("lxo-ipc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for a in [&["init", "-q", "-b", "master"][..], &["config", "user.name", "t"], &["config", "user.email", "t@t"]] { git(&dir, a); }
+        std::fs::write(dir.join("a.txt"), "base\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "base"]);
+        let base = git(&dir, &["rev-parse", "HEAD"]);
+        git(&dir, &["checkout", "-qb", "lx/t"]);
+        std::fs::write(dir.join("b.txt"), "rama\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "rama"]);
+        git(&dir, &["checkout", "-q", "master"]);
+        std::fs::write(dir.join("c.txt"), "manual\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-qm", "manual"]);
+        let moved = git(&dir, &["rev-parse", "HEAD"]);
+
+        let orch = Orch::default();
+        let id = {
+            let cwd = dir.to_string_lossy().into_owned();
+            let nt = |branch: Option<&str>| NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "x".into(),
+                spec: String::new(), repo: cwd.clone(), cwd: cwd.clone(), branch: branch.map(String::from), base: None, worktree: None, external: false };
+            let mut st = orch.0.lock();
+            let (_, root) = st.create_run("obj", nt(None));
+            let id = st.add_child(&root, 2, nt(Some("lx/t"))).unwrap();
+            st.done(&id, true, "ok", vec![], None).unwrap();
+            st.task_mut(&id).unwrap().base_commit = Some(base.clone());
+            id
+        };
+        // Integrar exige la revisión aceptada sobre el HEAD de la rama (review.rs).
+        orch.0.lock().record_decision(&id, "review", "human", &json!({ "decision": "accepted", "head_commit": git(&dir, &["rev-parse", "lx/t"]) }));
+        let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_integrate, orch_publish_pr])
+            .build(mock_context(noop_assets())).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let invoke = |body: Value| {
+            get_ipc_response(&webview, InvokeRequest {
+                cmd: "orch_integrate".into(), callback: CallbackFn(0), error: CallbackFn(1),
+                url: if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" }.parse().unwrap(), body: InvokeBody::Json(body),
+                headers: Default::default(), invoke_key: INVOKE_KEY.to_string(),
+            }).map(|r| r.deserialize::<Value>().unwrap())
+        };
+        // En camelCase (lo que Tauri esperaría por defecto) el campo ya no se reconoce:
+        // llega como None y el destino movido no se acepta.
+        let out = invoke(json!({ "task": id, "confirm": true, "acceptMovedTarget": moved })).unwrap();
+        assert_eq!(out["outcome"], "target_moved");
+        // En snake_case llega y se integra contra el commit aceptado.
+        let out = invoke(json!({ "task": id, "confirm": true, "accept_moved_target": moved })).unwrap();
+        assert_eq!((out["outcome"].as_str(), out["accepted_moved_target"].as_bool()), (Some("merged"), Some(true)), "{out}");
+        assert_eq!(git(&dir, &["rev-parse", "HEAD^1"]), moved);
+        // Sin confirm (campo obligatorio) Tauri rechaza la llamada antes de llegar al host.
+        assert!(invoke(json!({ "task": id })).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Las dos listas de rechazo, cada una por separado, por orch_call (User) y
+    /// por el camino del servidor HTTP (Caller::Agent, mismo Core::rpc).
+    #[test]
+    fn revisar_y_diff_de_revision_no_llegan_por_orch_call_ni_http() {
+        let core = Orch::default().0;
+        core.settings.lock().unwrap().enabled = true;
+        let callers = || [Caller::Agent(None), Caller::Agent(Some("t1".into())), Caller::User];
+        for c in review::HUMAN_DECISION_CMDS {
+            for caller in callers() {
+                let e = core.rpc(caller, "", c, &json!({ "task": "t1", "task_id": "t1", "confirm": true })).unwrap_err();
+                assert!([integration::AGENT_REJECT, integration::PR_REJECT, review::REVIEW_REJECT].contains(&e.as_str()), "{c}: {e}");
+            }
+        }
+        assert_eq!(core.rpc(Caller::User, "", "review", &json!({})).unwrap_err(), review::REVIEW_REJECT);
+        for c in review::CLOSED_READ_CMDS {
+            for caller in callers() {
+                assert_eq!(core.rpc(caller, "", c, &json!({ "task_id": "t1" })).unwrap_err(), review::TASK_DIFF_CLOSED);
+            }
+        }
+        for c in ["orch_review_task", "orch_task_diff", "review_task"] {
+            assert_eq!(core.rpc(Caller::User, "", c, &json!({})).unwrap_err(), format!("Comando desconocido: {c}"));
+        }
+        let server = include_str!("server.rs");
+        assert!(server.contains("closed_to_agents"));
+        assert!(!server.contains("review_task") && !server.contains("task_diff_from_ui"));
+    }
+
+    /// orch_task_diff y orch_review_task por el IPC de Tauri, en snake_case.
+    #[test]
+    fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+        use tauri::webview::InvokeRequest;
+        let (st, id, dir, _) = review::tests::setup("ipc");
+        let orch = Orch::default();
+        *orch.0.lock() = st.into_inner().unwrap();
+        let core = orch.0.clone();
+        let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_task_diff, orch_review_task])
+            .build(mock_context(noop_assets())).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let invoke = |cmd: &str, body: Value| {
+            get_ipc_response(&webview, InvokeRequest {
+                cmd: cmd.into(), callback: CallbackFn(0), error: CallbackFn(1),
+                url: if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" }.parse().unwrap(), body: InvokeBody::Json(body),
+                headers: Default::default(), invoke_key: INVOKE_KEY.to_string(),
+            }).map(|r| r.deserialize::<Value>().unwrap())
+        };
+        assert!(invoke("orch_task_diff", json!({ "taskId": id })).is_err());
+        let d = invoke("orch_task_diff", json!({ "task_id": id })).unwrap();
+        let h = d["head_commit"].as_str().unwrap().to_string();
+        assert_eq!(d["base_source"], "recorded");
+        let nf = invoke("orch_task_diff", json!({ "task_id": "nadie" })).unwrap_err();
+        assert!(format!("{nf:?}").contains("not_found"), "{nf:?}");
+        assert!(invoke("orch_review_task", json!({ "taskId": id, "decision": "accepted", "headCommit": h, "confirm": true })).is_err());
+        assert!(invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h })).is_err(), "confirm obligatorio");
+        let out = invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h, "comment": "ok", "confirm": true })).unwrap();
+        assert_eq!(out["outcome"], "recorded");
+        let ev: Vec<_> = core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).cloned().collect();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].1, json!({ "task_id": id, "decision": "accepted", "head_commit": h, "at": out["at"] }));
+        let snap = core.snapshot();
+        assert_eq!(snap["tasks"][&id]["last_review"]["decision"], "accepted");
+        assert_eq!(snap["tasks"][&id]["head_commit"].as_str(), Some(h.as_str()));
+        let root = core.lock().task(&id).unwrap().parent.clone().unwrap();
+        assert_eq!(snap["tasks"][&root]["head_commit"], Value::Null);
+        assert_eq!(snap["tasks"][&root]["last_review"], Value::Null);
+        let moved = invoke("orch_review_task", json!({ "task_id": id, "decision": "rejected", "head_commit": "0000", "confirm": true })).unwrap();
+        assert_eq!((moved["outcome"].as_str(), moved["found_commit"].as_str()), (Some("head_moved"), Some(h.as_str())));
+        assert_eq!(core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// git corre sin el lock del estado. Determinista: la snapshot avisa al
+    /// arrancar su fase git y espera; la prueba hace try_lock() justo ahí (tiene
+    /// que funcionar) y recién entonces la deja seguir.
+    #[test]
+    fn la_snapshot_no_corre_git_con_el_lock_tomado() {
+        let (st, id, dir, _) = review::tests::setup("lock-snapshot");
+        let core = Orch::default().0;
+        *core.lock() = st.into_inner().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        *core.snapshot_git_hook.lock().unwrap() = Some((tx, barrier.clone()));
+        let worker = {
+            let core = core.clone();
+            std::thread::spawn(move || core.snapshot())
+        };
+        rx.recv().expect("la snapshot no llegó a la fase git");
+        assert!(core.state.try_lock().is_ok(), "el lock del estado sigue tomado en la fase git");
+        barrier.wait();
+        let snap = worker.join().unwrap();
+        *core.snapshot_git_hook.lock().unwrap() = None;
+        assert!(snap["tasks"][&id]["head_commit"].as_str().is_some_and(|h| h.len() == 40));
+        assert!(snap["integrate_into"][&id]["branch"].as_str() == Some("master"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn la_snapshot_trae_la_ultima_integracion_de_cada_tarea() {
+        let orch = Orch::default();
+        let id = {
+            let nt = || NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "x".into(), spec: String::new(),
+                repo: ".".into(), cwd: ".".into(), branch: None, base: None, worktree: None, external: false };
+            let mut st = orch.0.lock();
+            let (_, root) = st.create_run("obj", nt());
+            st.add_child(&root, 2, nt()).unwrap()
+        };
+        let li = |o: &Orch| o.0.snapshot()["tasks"][&id]["last_integration"].clone();
+        assert_eq!(li(&orch), Value::Null);
+        orch.0.lock().record_decision(&id, "merge", "human", &json!({ "outcome": "conflict", "conflict": ["a.txt"] }));
+        assert_eq!((li(&orch)["outcome"].as_str(), li(&orch)["result_commit"].clone()), (Some("conflict"), Value::Null));
+        std::thread::sleep(Duration::from_millis(5));
+        orch.0.lock().record_decision(&id, "merge", "human", &json!({ "outcome": "merged", "result_commit": "abc123" }));
+        orch.0.lock().record_decision(&id, "spawn", "human", &json!({ "outcome": "approved" }));
+        let v = li(&orch);
+        assert_eq!((v["outcome"].as_str(), v["result_commit"].as_str()), (Some("merged"), Some("abc123")));
+        assert!(v["at"].as_u64().is_some());
+        assert!(orch.0.snapshot().get("decisions").is_none());
+    }
+
+    #[test]
+    fn la_decision_persiste_en_state_json_y_sobrevive_recarga() {
+        let dir = std::env::temp_dir().join(format!("lxo-decisiones-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        let mut st = State::default();
+        let id = st.record_decision("t2", "merge", "human", &json!({ "outcome": "conflict", "conflict": ["a.txt"] }));
+        write_json(&path, &st).unwrap();
+        let back: State = read_json(&path).unwrap();
+        assert_eq!(back.decisions, st.decisions);
+        assert_eq!(back.decisions[0].id, id);
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["decisions"][0]["actor"], "human");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

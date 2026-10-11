@@ -13,6 +13,8 @@ export interface ResolvePolicyArgs {
       null o vacío = solo consulta de flags (al host se envía ''). Rol desconocido = blocked. */
   role: string | null;
   worktree: string;
+  /** Modelo pedido (alias o id). Hoy solo lo usa el mock para la advertencia del modo plan. */
+  model?: string | null;
 }
 
 export interface EffectivePolicy {
@@ -28,6 +30,8 @@ export interface EffectivePolicy {
   status: PolicyStatus;
   /** Motivo del estado (obligatorio cuando es blocked o unverified). */
   reason: string | null;
+  /** Modelo pedido (host c969d21): el id, «el que defina config.toml» en Codex sin modelo, null en Claude sin modelo. */
+  model?: string | null;
 }
 
 export type PolicyResolver = (args: ResolvePolicyArgs) => Promise<EffectivePolicy>;

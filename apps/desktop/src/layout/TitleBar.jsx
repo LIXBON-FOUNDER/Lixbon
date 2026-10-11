@@ -9,6 +9,8 @@ import { useWorkbenchStore, selectSidePanels } from '../store/workbenchStore';
 import { useFileViewStore } from '../store/fileViewStore';
 import { useChatStore } from '../store/chatStore';
 import { useOrchStore } from '../store/orchStore';
+import { usePendingSpawnsStore } from '../orch/spawn/pendingSpawnsStore';
+import { useAttentionTotals } from '../orch/useAttention';
 import { listFiles, pickDirectory } from '../lib/tauri';
 import { allCommands, runCommand } from '../lib/commands';
 import { chordForCommand, prettyChord } from '../lib/keymap';
@@ -41,12 +43,9 @@ function ModeSwitch() {
   const setMode = useWorkbenchStore((s) => s.setMode);
   const onPage = useWorkbenchStore((s) => !!s.page);
   const orchOn = useOrchStore((s) => !!s.snap?.settings?.enabled);
-  const orchAsking = useOrchStore((s) => {
-    const msgs = s.snap?.messages || [];
-    const answered = new Set(msgs.filter((m) => m.kind === 'reply').map((m) => m.reply_to));
-    return msgs.some((m) => m.kind === 'question' && !answered.has(m.id));
-  });
+  const attention = useAttentionTotals();
   useEffect(() => { useOrchStore.getState().init(); }, []);
+  useEffect(() => { if (orchOn) usePendingSpawnsStore.getState().start(); }, [orchOn]);
   // El orquestador es experimental: su pestaña solo aparece si está activado.
   const tabs = orchOn || mode === 'orch' ? MODE_TABS : MODE_TABS.filter((t) => t.id !== 'orch');
   const idx = Math.max(0, tabs.findIndex((t) => t.id === mode));
@@ -56,12 +55,13 @@ function ModeSwitch() {
       {tabs.map((t) => (
         <button
           key={t.id}
-          className={`modeswitch__tab ${mode === t.id ? 'is-active' : ''} ${t.id === 'orch' && orchAsking ? 'has-alert' : ''}`}
+          className={`modeswitch__tab ${mode === t.id ? 'is-active' : ''} ${t.id === 'orch' && attention.total > 0 ? 'has-alert' : ''}`}
           style={{ width: TAB_W }}
           onClick={() => setMode(t.id)}
           title={prettyChord(chordForCommand(`mode.${t.id}`))}
         >
           {t.label}
+          {t.id === 'orch' && attention.total > 0 && <span className="modeswitch__count" aria-label={`${attention.total} esperan tu decisión`}>{attention.total}</span>}
         </button>
       ))}
     </nav>

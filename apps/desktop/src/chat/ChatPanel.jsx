@@ -9,7 +9,7 @@ import { ChatInputBar } from './ChatInputBar';
 import { ApprovalCard } from './ApprovalCard';
 import { QuestionCard } from './QuestionCard';
 import { ClaudeDock } from './ClaudeDock';
-import { LogoMark, ClaudeMark } from '../components/Logo';
+import { engineOf } from '../lib/engines';
 import { MascotaAgente, PistaAgente } from './MascotaAgente';
 import { ObraAgente, useModoObra } from './ObraAgente';
 
@@ -50,6 +50,8 @@ const jumpTo = (el, top) => {
 
 export function ChatPanel({ wide = false }) {
   const { messages, streaming, engine } = useChatStore();
+  const info = engineOf(engine);
+  const EngineMark = info.Mark;
   const compacting = useChatStore((s) => s.ccCompacting);
   const background = useChatStore((s) => s.ccBackground);
   const activeKey = useSessionsStore((s) => s.activeKey);
@@ -85,13 +87,9 @@ export function ChatPanel({ wide = false }) {
       <div className="chatpanel__feed" ref={feedRef} onScroll={onScroll}>
         {messages.length === 0 ? (
           <div className="chatpanel__empty">
-            {engine === 'claude' ? <ClaudeMark size={28} /> : <LogoMark size={28} />}
-            <p>{engine === 'claude' ? 'Claude Code' : '¿En qué trabajamos hoy?'}</p>
-            <p className="chatpanel__empty-hint">
-              {engine === 'claude'
-                ? 'Usa tu instalación y tu cuenta de Claude Code sobre esta carpeta. Sus cambios, lecturas y comandos aparecen en los paneles de la derecha, y los permisos se piden aquí.'
-                : 'El agente puede leer, buscar y editar tu carpeta de trabajo, y ejecutar comandos con tu permiso. Menciona archivos con @ y usa / para comandos.'}
-            </p>
+            <EngineMark size={28} />
+            <p>{info.emptyTitle}</p>
+            <p className="chatpanel__empty-hint">{info.emptyHint}</p>
           </div>
         ) : (
           renderMessages(messages, streaming)
@@ -101,7 +99,7 @@ export function ChatPanel({ wide = false }) {
       </div>
       <ApprovalCard />
       <QuestionCard />
-      {engine === 'claude' && <ClaudeDock />}
+      {info.dock && <ClaudeDock />}
       {/* La mascota se apoya en el borde superior del compositor, a la
           derecha; en el panel lateral del Editor, en pequeño. */}
       <div className="mascota-anclaje">
