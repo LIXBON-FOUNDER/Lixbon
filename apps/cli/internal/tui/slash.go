@@ -169,6 +169,10 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		m.cmdMCP()
 	case "provider":
 		return m.cmdProvider(arg)
+	case "orquestar":
+		return m.cmdOrquestar(arg)
+	case "orquestador":
+		return m.cmdOrquestador()
 	case "doctor":
 		return m.cmdDoctor()
 	case "update":
