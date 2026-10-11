@@ -1,6 +1,6 @@
 import pytest
 
-from core.inference.esfuerzo import nivel_de_razonamiento
+from core.inference.esfuerzo import nivel_de_razonamiento, podria_necesitar_internet
 
 
 def _u(texto, **extra):
@@ -62,3 +62,15 @@ def test_el_texto_de_los_adjuntos_no_cuenta_como_mensaje_largo():
     adjunto = "--- Imagen adjunta: foto.jpg (descrita por un modelo de visión) ---\n" + "detalle " * 200
     assert nivel_de_razonamiento(_u(adjunto + "\n\n---\n\nDescribe esta imagen")) == "low"
     assert nivel_de_razonamiento(_u(adjunto + "\n\n---\n\n¿Por qué falla?")) is True
+
+
+@pytest.mark.parametrize("texto", ["hola", "Hola! ¿cómo estás?", "muchas gracias", "Cual es el resultado de 2×2+5", "cuánto es 37 * 41",
+                                   "arregla esto:\n```js\nconst a = 1\n```"])
+def test_no_hace_falta_planificar_la_busqueda(texto):
+    assert podria_necesitar_internet(_u(texto)) is False
+
+
+@pytest.mark.parametrize("texto", ["¿Quién ganó el mundial de 2022?", "precio del dólar en México hoy", "clima en Lima",
+                                   "explica la diferencia entre TCP y UDP"])
+def test_puede_hacer_falta_buscar(texto):
+    assert podria_necesitar_internet(_u(texto)) is True
