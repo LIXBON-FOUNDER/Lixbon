@@ -85,7 +85,49 @@ func (m *Model) resolveDir(arg string) (string, bool) {
 			return c, true
 		}
 	}
+	for _, c := range candidates {
+		if found, ok := foldPath(c); ok {
+			return found, true
+		}
+	}
 	return "", false
+}
+
+// foldPath busca path sin distinguir mayúsculas tramo a tramo: en Linux
+// «desktop/lixbon» también encuentra «Desktop/Lixbon».
+func foldPath(path string) (string, bool) {
+	path = filepath.Clean(path)
+	vol := filepath.VolumeName(path)
+	rest := strings.TrimPrefix(path[len(vol):], string(filepath.Separator))
+	current := vol + string(filepath.Separator)
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	for _, part := range strings.Split(rest, string(filepath.Separator)) {
+		if part == "" {
+			continue
+		}
+		next := filepath.Join(current, part)
+		if _, err := os.Stat(next); err != nil {
+			entries, err := os.ReadDir(current)
+			if err != nil {
+				return "", false
+			}
+			next = ""
+			for _, e := range entries {
+				if strings.EqualFold(e.Name(), part) {
+					next = filepath.Join(current, e.Name())
+					break
+				}
+			}
+			if next == "" {
+				return "", false
+			}
+		}
+		current = next
+	}
+	info, err := os.Stat(current)
+	return current, err == nil && info.IsDir()
 }
 
 func (m *Model) cmdWorkspace(arg string) tea.Cmd {
