@@ -12,18 +12,23 @@ const authTimeout = 30 * time.Second
 // escritorio de la misma cuenta: el servidor rota las claves por nombre.
 const LoginKeyName = "lixbon CLI"
 
-// Login entrega una API key propia y rotable (el mismo flujo que la app de
-// escritorio) a cambio de correo y contraseña.
-func (c *Client) Login(ctx context.Context, email, password string) (string, error) {
-	var data struct {
-		APIKey string `json:"api_key"`
-	}
-	payload := map[string]any{"email": email, "password": password, "issue_api_key": true, "key_name": LoginKeyName}
-	err := c.doJSON(ctx, http.MethodPost, c.Server+"/api/auth/login", payload, authTimeout, false, &data)
-	return data.APIKey, err
+// IDEUser es la cuenta que devuelve el canje del login por navegador.
+type IDEUser struct {
+	Email    string `json:"email"`
+	PlanName string `json:"plan_name"`
 }
 
-func (c *Client) Register(ctx context.Context, email, password, firstName, lastName string) error {
-	payload := map[string]any{"email": email, "password": password, "first_name": firstName, "last_name": lastName}
-	return c.doJSON(ctx, http.MethodPost, c.Server+"/api/auth/register", payload, authTimeout, false, nil)
+// ExchangeIDEToken canjea el token de un solo uso que trae el navegador (y el
+// verificador PKCE) por una API key propia del CLI.
+func (c *Client) ExchangeIDEToken(ctx context.Context, token, verifier, keyName string) (string, IDEUser, error) {
+	var data struct {
+		APIKey string  `json:"api_key"`
+		User   IDEUser `json:"user"`
+	}
+	payload := map[string]any{"token": token, "verifier": verifier, "key_name": keyName}
+	err := c.doJSON(ctx, http.MethodPost, c.Server+"/api/auth/ide/exchange", payload, authTimeout, false, &data)
+	if err == nil && data.APIKey == "" {
+		err = &Error{Message: "El servidor no entregó una API key. Vuelve a intentarlo."}
+	}
+	return data.APIKey, data.User, err
 }
