@@ -40,6 +40,8 @@ export default defineConfig({
       '/api': 'http://localhost:8000',
       '/v1': 'http://localhost:8000',
       '/mcp': 'http://localhost:8000',
+      // El login del CLI y del escritorio (/ide/connect) lo sirve el gateway.
+      '/ide': 'http://localhost:8000',
     },
   },
 })

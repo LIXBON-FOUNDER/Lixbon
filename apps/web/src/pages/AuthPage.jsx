@@ -31,6 +31,14 @@ function GitHubLogo() {
 }
 
 const OAUTH_KEY = 'lixbon_oauth';
+
+// /ide/connect es una página del gateway (el login del CLI y del escritorio),
+// no una ruta del SPA: react-router no sabe volver a ella, así que se navega
+// de verdad.
+function irA(navigate, path) {
+  if (path.startsWith('/ide/')) window.location.assign(path);
+  else navigate(path, { replace: true });
+}
 const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 async function empezarOAuth(provider, next) {
@@ -87,7 +95,7 @@ export default function AuthPage() {
         setUser(res.data.user);
         api.get('/api/auth/me').then((me) => setUser(me.data.user)).catch(() => {});
         const next = typeof guardado.next === 'string' && guardado.next.startsWith('/') && !guardado.next.startsWith('//') ? guardado.next : '/chat';
-        navigate(next, { replace: true });
+        irA(navigate, next);
       })
       .catch((err) => setError(err.response?.data?.detail || t('genericError')))
       .finally(() => setOauthBusy(''));
@@ -118,14 +126,14 @@ export default function AuthPage() {
     try {
       if (mode === 'login') {
         await login(email, password);
-        navigate(nextPath, { replace: true });
+        irA(navigate, nextPath);
       } else if (mode === 'register') {
         if (password !== confirm) {
           setError(t('passwordsDontMatch'));
           return;
         }
         await register({ firstName, lastName, email, password });
-        navigate(nextPath, { replace: true });
+        irA(navigate, nextPath);
       } else {
         await api.post('/api/auth/request-password-reset', { email });
         setNotice(t('resetLinkNotice'));
