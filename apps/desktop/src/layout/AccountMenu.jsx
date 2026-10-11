@@ -117,7 +117,9 @@ function BucketMeter({ label, bucket }) {
           <span className="acctpop__meter-fill" style={{ width: `${pct}%` }} />
         </span>
       )}
-      <span className="acctpop__hint" style={{ margin: 0 }}>Se reinicia {fmtReset(bucket.reset_at)}</span>
+      <span className="acctpop__hint" style={{ margin: 0 }}>
+        {bucket.reset_at ? `Se reinicia ${fmtReset(bucket.reset_at)}` : 'Empieza con tu próximo mensaje'}
+      </span>
     </div>
   );
 }
