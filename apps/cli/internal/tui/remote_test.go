@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -246,40 +247,171 @@ func TestRemoteInterruptCancelsTheTurnWithoutWaitingForTheModel(t *testing.T) {
 	h.m.remote.link.Stop(true)
 }
 
-func TestRemoteSlashCommandsAnswerWithNotices(t *testing.T) {
+func (f *fakeRelay) all(eventType string) []map[string]any {
+	var out []map[string]any
+	for _, e := range f.snapshotEvents() {
+		if e["type"] == eventType {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (f *fakeRelay) last(eventType string) map[string]any {
+	all := f.all(eventType)
+	if len(all) == 0 {
+		return nil
+	}
+	return all[len(all)-1]
+}
+
+func TestRemoteHelloAnnouncesImagesAndTheWholeCommandCatalog(t *testing.T) {
+	h, relay := remoteHarness(t, nil)
+	startRemote(t, h, relay)
+	hello := relay.find("hello")
+	caps, _ := hello["capabilities"].([]any)
+	if !slices.Contains(caps, any("images")) || !slices.Contains(caps, any("attachments")) || hello["agent"] != "lixbon" {
+		t.Fatalf("hello sin capacidades: %v", hello)
+	}
+	var names []string
+	for _, c := range hello["commands"].([]any) {
+		names = append(names, c.(map[string]any)["name"].(string))
+	}
+	for _, want := range []string{"model", "effort", "mode", "branch", "commit", "diff", "mcp", "plan", "ps", "todo", "tools", "visual", "compact"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("falta /%s en el catálogo remoto", want)
+		}
+	}
+	for _, blocked := range []string{"exit", "logout", "remote"} {
+		if slices.Contains(names, blocked) {
+			t.Errorf("/%s no se ofrece en remoto", blocked)
+		}
+	}
+	h.m.remote.link.Stop(true)
+}
+
+func TestRemoteSlashCommandsRunTheRealCommand(t *testing.T) {
 	h, relay := remoteHarness(t, nil)
 	startRemote(t, h, relay)
 
 	relay.push(prompt("/model llama"))
-	relay.push(prompt("/mode"))
 	relay.push(prompt("/approve off"))
 	relay.push(prompt("/web on"))
 	relay.push(prompt("/nope"))
-	relay.push(prompt("/s"))
-	h.waitFor("seis avisos", func() bool {
-		n := 0
-		for _, e := range relay.snapshotEvents() {
-			if e["type"] == "notice" {
-				n++
+	relay.push(prompt("/exit"))
+	h.waitFor("respuestas", func() bool { return len(relay.all("command_result")) >= 3 && len(relay.all("notice")) >= 2 })
+
+	results := relay.all("command_result")
+	for i, want := range []string{"Modelo: Llama", "Auto-aprobar: off", "Búsqueda web: on"} {
+		if text, _ := results[i]["text"].(string); !strings.Contains(text, want) {
+			t.Errorf("resultado %d = %q, esperaba %q", i, text, want)
+		}
+	}
+	notices := relay.all("notice")
+	if !strings.Contains(notices[0]["text"].(string), "Comando desconocido: /nope") || !strings.Contains(notices[1]["text"].(string), "no se puede usar desde la app") {
+		t.Fatalf("avisos: %v", notices)
+	}
+	contains(t, h.out(), "/model llama  [remoto]")
+	contains(t, h.out(), "Modelo: Llama")
+	h.waitFor("hello con el modelo nuevo", func() bool { return relay.last("hello")["model"] == "llama" })
+	if h.chat.Model != "llama" || h.gw.count() != 0 || h.m.quitting {
+		t.Fatalf("modelo %q, peticiones al modelo %d, saliendo %v", h.chat.Model, h.gw.count(), h.m.quitting)
+	}
+	h.m.remote.link.Stop(true)
+}
+
+func TestRemoteSelectorIsChosenFromThePhone(t *testing.T) {
+	h, relay := remoteHarness(t, nil)
+	startRemote(t, h, relay)
+
+	relay.push(prompt("/mode"))
+	h.waitFor("choice_request", func() bool { return relay.find("choice_request") != nil })
+	choice := relay.find("choice_request")
+	options := choice["options"].([]any)
+	if choice["title"] != "Modo de trabajo" || len(options) != 3 || options[1].(map[string]any)["value"] != "agent" {
+		t.Fatalf("choice: %v", choice)
+	}
+	if h.m.picker == nil {
+		t.Fatal("el selector sigue abierto también en la terminal")
+	}
+	relay.push(fmt.Sprintf(`{"type":"approve","id":%q,"decision":"agent"}`, choice["id"]))
+	h.waitFor("modo agent", func() bool { return h.chat.Mode == "agent" && relay.find("choice_resolved") != nil })
+	h.waitFor("hello en agent", func() bool { return relay.last("hello")["mode"] == "agent" })
+	if h.m.picker != nil {
+		t.Fatal("elegir en el móvil cierra el selector de la terminal")
+	}
+	if text, _ := relay.last("command_result")["text"].(string); !strings.Contains(text, "Workspace del agente") {
+		t.Fatalf("resultado: %v", relay.last("command_result"))
+	}
+
+	relay.push(prompt("/mode"))
+	h.waitFor("otro selector", func() bool { return len(relay.all("choice_request")) == 2 })
+	h.key("esc")
+	h.waitFor("retirado del móvil", func() bool {
+		return relay.last("choice_resolved")["id"] == relay.last("choice_request")["id"]
+	})
+	h.m.remote.link.Stop(true)
+}
+
+func TestRemoteAsyncCommandResultReachesThePhone(t *testing.T) {
+	h, relay := remoteHarness(t, nil)
+	startRemote(t, h, relay)
+	relay.push(prompt("/diff"))
+	h.waitFor("resultado de /diff", func() bool { return relay.find("command_result") != nil })
+	if text, _ := relay.find("command_result")["text"].(string); !strings.Contains(text, "no es un repositorio git") {
+		t.Fatalf("resultado: %v", relay.find("command_result"))
+	}
+	h.m.remote.link.Stop(true)
+}
+
+// png1x1 es una imagen PNG válida de un píxel.
+const png1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+func TestRemotePhotoAndDocumentReachTheModel(t *testing.T) {
+	h, relay := remoteHarness(t, nil, textReply("veo un píxel"))
+	startRemote(t, h, relay)
+	relay.push(`{"type":"prompt","text":"¿qué ves?","attachments":[{"kind":"image","name":"foto.png","base64":"` + png1x1 + `","mime":"image/png"},{"kind":"doc","name":"notas.txt","text":"contenido del documento"}]}`)
+	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
+
+	messages := h.gw.bodyAt(0)["messages"].([]any)
+	last := messages[len(messages)-1].(map[string]any)
+	if images, _ := last["images"].([]any); len(images) != 1 {
+		t.Fatalf("la foto no llegó al modelo: %v", last)
+	}
+	if content, _ := last["content"].(string); !strings.Contains(content, "contenido del documento") || !strings.Contains(content, "¿qué ves?") {
+		t.Fatalf("contenido: %q", content)
+	}
+	if msg := relay.find("user_msg"); msg["text"] != "¿qué ves?" || msg["images"] != float64(1) || msg["origin"] != "remote" {
+		t.Fatalf("user_msg: %v", msg)
+	}
+	h.m.remote.link.Stop(true)
+}
+
+func TestRemoteAgentToolsCarryTheirIDAndDiff(t *testing.T) {
+	h, relay := remoteHarness(t, func(c *config.Config) { c.AutoApproveTools = true; c.Mode = "agent" },
+		toolReply("t1", "write_file", map[string]any{"path": "nota.txt", "content": "hola\nmundo\n"}),
+		textReply("hecho"))
+	startRemote(t, h, relay)
+	relay.push(prompt("crea nota.txt"))
+	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
+
+	use, result := relay.find("tool_use"), relay.find("tool_result")
+	if use["id"] == "" || use["id"] != result["id"] || use["tool"] != "write_file" {
+		t.Fatalf("tool_use %v / tool_result %v", use, result)
+	}
+	if diff, _ := use["diff"].(string); use["adds"] != float64(2) || !strings.Contains(diff, "+hola") {
+		t.Fatalf("diff: %v", use)
+	}
+	relay.push(`{"type":"request_snapshot"}`)
+	h.waitFor("snapshot con herramientas", func() bool {
+		messages, _ := relay.last("snapshot")["messages"].([]any)
+		for _, msg := range messages {
+			if m := msg.(map[string]any); m["role"] == "tool" && m["tool"] == "write_file" && m["pending"] == false {
+				return true
 			}
 		}
-		return n >= 6
+		return false
 	})
-	var notices []string
-	for _, e := range relay.snapshotEvents() {
-		if e["type"] == "notice" {
-			notices = append(notices, e["text"].(string))
-		}
-	}
-	want := []string{"Modelo cambiado a llama.", "Modo actual: ask.", "Auto-aprobar herramientas: off.", "Búsqueda web: on.", "no se puede ejecutar desde la app", "Modelo: llama"}
-	for i, part := range want {
-		if !strings.Contains(notices[i], part) {
-			t.Errorf("aviso %d = %q, esperaba %q", i, notices[i], part)
-		}
-	}
-	if h.chat.Model != "llama" || h.gw.count() != 0 {
-		t.Fatalf("modelo %q, peticiones al modelo %d", h.chat.Model, h.gw.count())
-	}
 	h.m.remote.link.Stop(true)
 }
 

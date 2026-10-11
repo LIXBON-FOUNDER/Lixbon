@@ -98,6 +98,9 @@ type Chat struct {
 
 	reserved      []string
 	pendingImages []string
+	// nextImages viajan con el próximo mensaje sin marcador [IMG#n]: las
+	// fotos que manda el control remoto.
+	nextImages []string
 	mu            sync.Mutex
 	persistMu     sync.Mutex
 	title         string

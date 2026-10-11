@@ -63,7 +63,9 @@ func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if title := m.asyncQuiet; title != "" {
+	if cmd, ok := m.finishRemoteAsync(show); ok {
+		cmds = append(cmds, cmd)
+	} else if title := m.asyncQuiet; title != "" {
 		m.asyncQuiet = ""
 		cmds = append(cmds, m.captured(title, show))
 	} else {
@@ -391,7 +393,9 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 
 func (m *Model) newConversation(label string) {
 	m.chat.NewConversation()
-	m.refreshRemoteSnapshot()
+	if m.remote != nil {
+		m.remote.reset()
+	}
 	m.lastAnswer = ""
 	m.todo = nil
 	m.gap()

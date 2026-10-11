@@ -40,6 +40,12 @@ func (m *Model) startTick() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	m.syncRemote()
+	return model, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if k, ok := msg.(tea.KeyPressMsg); ok && (k.String() == "ctrl+v" || k.String() == "shift+insert") {
 		return m, pasteClipboard
 	}

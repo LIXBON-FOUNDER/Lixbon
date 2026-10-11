@@ -264,12 +264,9 @@ func TestCompactionSummaryIsHiddenFromTheRemoteSnapshotAndReplay(t *testing.T) {
 	h := newHarness(t, nil)
 	h.chat.History = []history.Message{
 		history.User(history.SummaryIntro + "\nlo secreto del resumen"), history.Assistant(history.SummaryAck),
-		history.User("sigue"), history.Assistant("vale"),
+		history.User("sigue"), history.User(agent.NoOutputPrompt), history.Assistant("vale"),
 	}
-	h.m.remote = &remoteHost{}
-	h.m.refreshRemoteSnapshot()
-	snap := h.m.remote.snapshotNow()
-	h.m.remote = nil
+	snap := (&remoteHost{base: remoteHistory(h.chat.History)}).snapshotNow()
 	if len(snap) != 2 || snap[0]["content"] != "sigue" {
 		t.Fatalf("snapshot: %v", snap)
 	}
