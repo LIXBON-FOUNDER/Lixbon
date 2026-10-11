@@ -4,6 +4,15 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.4.0
+- Nuevo diseño de la terminal con la identidad de lixbon.com: barra superior fija con proyecto, rama, plan y modelo; tarjeta de bienvenida con el prisma; zona viva con lo que está haciendo el agente, el tiempo y el paso del plan; caja de entrada con el color del modo y un pie con el modo y el contexto. Tema claro u oscuro según tu terminal (`LIXBON_THEME`, `/config` → Tema).
+- El turno del agente se lee por bloques: el pensamiento queda plegado («Pensó 4.2 s»), las lecturas seguidas se agrupan («Exploró 4 archivos · 2 búsquedas»), las ediciones muestran el diff con resaltado de sintaxis y los comandos su salida con las primeras y las últimas líneas. Ctrl+O despliega todo y un clic en un bloque, solo ese.
+- Nuevo inicio de sesión sin correo ni contraseña en la terminal: con tu cuenta de lixbon.com en el navegador (vuelve solo a la terminal; en SSH se pega la dirección) o con una API key enmascarada. La clave del CLI ya no cierra la sesión de la app de escritorio. Sin terminal: `lixbon setup --api-key`.
+- Aprobaciones, preguntas del agente y selectores en paneles: se elige con ↑↓, con el número o con un clic. `/model` muestra qué sabe hacer cada modelo (visión, herramientas, razona) y su contexto, y se abre también con un clic en el modelo de la barra.
+- Menú `@` para adjuntar archivos del proyecto (respeta `.gitignore`), menú `/` agrupado con filtro difuso y `?` con la caja vacía para ver los atajos.
+- Las imágenes pegadas o arrastradas a la terminal se muestran como fichas con su tamaño, y se avisa si el modelo no ve imágenes.
+- Las claves de los proveedores se piden sin mostrarlas, y `/key <clave>` ya no queda a la vista en el historial.
+
 ## 2.3.0-go.6
 - La rueda del ratón desplaza el chat sin activar nada y desaparece `/mouse`. Arrastrar con el ratón selecciona texto y lo copia al soltar.
 - Nuevo Ctrl+T: abre un visor con la conversación, las herramientas ejecutadas y lo que el modelo está escribiendo ahora. Se mueve con las flechas, RePág/AvPág, Inicio/Fin o la rueda; q, Esc o Ctrl+T lo cierran.
