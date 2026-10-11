@@ -8,7 +8,7 @@ import { IconChart } from '../../../components/Icons';
 import { PageHead } from '../SettingsParts';
 
 function fmtReset(iso) {
-  if (!iso) return '';
+  if (!iso) return 'empieza con tu próximo mensaje';
   const d = new Date(iso);
   const mins = Math.round((d.getTime() - Date.now()) / 60000);
   const when = d.toLocaleString('es', { weekday: 'long', hour: '2-digit', minute: '2-digit' });
