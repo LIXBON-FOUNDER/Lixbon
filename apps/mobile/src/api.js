@@ -1,6 +1,7 @@
 // api.js — cliente HTTP del gateway. Mismo criterio que la web (lib/api.js):
-// errores normalizados desde `detail` (string u objeto {code, message}) y
-// logout automático en 401. Auth por Bearer API key.
+// errores normalizados desde `detail` (string u objeto {code, message}).
+// Auth por Bearer: el access de la sesión de este móvil, que `renew` mantiene
+// vigente (y renueva tras un 401 antes de dar la sesión por perdida).
 
 export class ApiException extends Error {
   constructor(message, status = null) {
@@ -21,9 +22,10 @@ export function extractDetail(data, statusCode) {
 }
 
 export class ApiClient {
-  constructor({ getBase, getToken, onUnauthorized }) {
+  constructor({ getBase, getToken, renew, onUnauthorized }) {
     this.getBase = getBase;
     this.getToken = getToken;
+    this.renew = renew || null;
     this.onUnauthorized = onUnauthorized || null;
   }
 
@@ -31,7 +33,10 @@ export class ApiClient {
     return this.getBase().replace(/\/+$/, '');
   }
 
-  async request(path, { method = 'GET', body = null, form = null, auth = true } = {}) {
+  async request(path, { method = 'GET', body = null, form = null, auth = true } = {}, retried = false) {
+    if (auth && this.renew && !retried) {
+      await this.renew().catch(() => null); // sin red: se intenta con el token que hay
+    }
     // Con FormData el boundary del multipart lo pone fetch: fijar Content-Type lo rompe.
     const headers = form ? {} : { 'Content-Type': 'application/json' };
     const token = this.getToken();
@@ -55,6 +60,10 @@ export class ApiClient {
       // respuesta sin cuerpo JSON
     }
 
+    if (res.status === 401 && auth && token && !retried && this.renew) {
+      const renewed = await this.renew(token).catch(() => null);
+      if (renewed) return this.request(path, { method, body, form, auth }, true);
+    }
     if (res.status >= 400) {
       if (res.status === 401 && auth && token && this.onUnauthorized) {
         this.onUnauthorized();

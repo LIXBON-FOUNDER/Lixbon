@@ -1,7 +1,6 @@
 // SettingsScreen.js — Ajustes en secciones: perfil (abre su hoja), plan,
 // apariencia, chat, privacidad, desarrolladores y sesión y datos. Las acciones
-// delicadas viven en hojas: regenerar la API key confirma mostrando la key que
-// muere, y eliminar la cuenta se hace manteniendo pulsado.
+// delicadas piden confirmación, y eliminar la cuenta se hace manteniendo pulsado.
 import Constants from 'expo-constants';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
@@ -16,12 +15,6 @@ import { useApi, useAuth, useChat, usePrefs } from '../state';
 import { ACCENTS, FONTS, RADIUS, RADIUS_SM } from '../theme';
 
 const TEXT_LABEL = { sm: 'Pequeño', md: 'Normal', lg: 'Grande' };
-
-export function maskKey(key) {
-  if (typeof key !== 'string' || key.length < 8) return '••••';
-  const prefix = key.includes('_') ? `${key.split('_')[0]}_` : '';
-  return `${prefix}••••${key.slice(-4)}`;
-}
 
 export default function SettingsScreen({ onBack, onNavigate }) {
   const c = useColors();
@@ -81,26 +74,17 @@ export default function SettingsScreen({ onBack, onNavigate }) {
 
   const editProfile = () => sheet({ keyboard: true, render: (close) => <ProfileSheet onDone={close} /> });
 
-  const regenerateKey = async () => {
-    const ok = await sheet({
-      render: (close) => (
-        <View>
-          <SheetTitle detail="La actual deja de funcionar en el IDE, la CLI y cualquier integración. Esta app pasa a la nueva sola.">
-            ¿Regenerar la API key?
-          </SheetTitle>
-          <View style={{ height: 48, marginHorizontal: 8, marginTop: 10, paddingHorizontal: 14, borderRadius: RADIUS, backgroundColor: c.bg, flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 13.5, color: c.inkMuted, textDecorationLine: 'line-through' }}>{maskKey(auth.apiKey)}</Text>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>actual</Text>
-          </View>
-          <SheetActions confirmLabel="Regenerar" danger onCancel={() => close(false)} onConfirm={() => close(true)} />
-        </View>
-      ),
+  const closeOtherSessions = async () => {
+    const ok = await confirm({
+      title: '¿Cerrar las demás sesiones?',
+      message: 'Tus otros dispositivos (web, IDE, CLI y otros móviles) tendrán que volver a iniciar sesión. Esta app sigue dentro y tus API keys siguen funcionando.',
+      confirmLabel: 'Cerrar las demás',
+      danger: true,
     });
     if (!ok) return;
     try {
-      const res = await api.post('/api/auth/api-key/regenerate');
-      if (typeof res?.newApiKey === 'string' && res.newApiKey) await auth.adoptApiKey(res.newApiKey);
-      toast('API key regenerada', { icon: 'check' });
+      await auth.closeOtherSessions();
+      toast('Sesiones cerradas', { icon: 'check' });
     } catch (err) {
       fail(err);
     }
@@ -212,15 +196,12 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         </Section>
 
         <Section title="Desarrolladores" delay={150}>
-          <Row
-            title="API key"
-            onPress={regenerateKey}
-            right={<Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>{maskKey(auth.apiKey)}</Text>}
-          />
+          <Row title="API keys" external onPress={() => Linking.openURL(`${api.base}/account/profile`)} />
           <Row title="Documentación" external onPress={() => Linking.openURL(`${api.base}/docs`)} />
         </Section>
 
         <Section title="Sesión y datos" delay={180}>
+          <Row title="Cerrar las demás sesiones" onPress={closeOtherSessions} chevron={false} />
           <Row title="Cerrar sesión" onPress={logout} chevron={false} />
           <Row title="Borrar historial de conversaciones" danger onPress={clearHistory} chevron={false} />
           <Row title="Eliminar cuenta" danger onPress={deleteAccount} chevron={false} />
@@ -231,25 +212,6 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         </Text>
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function SheetActions({ confirmLabel, danger, onCancel, onConfirm, disabled = false }) {
-  const c = useColors();
-  const btn = { flex: 1, height: 50, borderRadius: RADIUS, alignItems: 'center', justifyContent: 'center' };
-  return (
-    <View style={{ flexDirection: 'row', gap: 8, marginTop: 18, marginHorizontal: 8 }}>
-      <Pressable onPress={onCancel} style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onRaised }}>Cancelar</Text>
-      </Pressable>
-      <Pressable
-        onPress={onConfirm}
-        disabled={disabled}
-        style={({ pressed }) => [btn, { backgroundColor: danger ? c.dangerSoft : c.primary, opacity: disabled ? 0.45 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]}
-      >
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: danger ? c.danger : c.onPrimary }}>{confirmLabel}</Text>
-      </Pressable>
-    </View>
   );
 }
 

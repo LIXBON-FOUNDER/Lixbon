@@ -1,9 +1,10 @@
 // state.js — estado global con React Context:
 //   PrefsContext → tema, personalización y servidor (AsyncStorage; nunca credenciales)
-//   AuthContext  → sesión (API key "Lixbon Mobile" en el Keystore vía
-//                  expo-secure-store) — se rota en cada login
+//   AuthContext  → sesión de este móvil (access de 30 min + refresh rotatorio
+//                  en el Keystore vía expo-secure-store)
 //   ChatContext  → modelos, conversación activa y streaming
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import React, {
@@ -15,6 +16,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { AppState as AppLifecycle } from 'react-native';
 
 import { ApiClient, ApiException } from './api';
 import { oauthAuthorize } from './oauth';
@@ -24,7 +26,22 @@ import { streamChatCompletion } from './sse';
 // EXPO_PUBLIC_API_BASE: builds contra staging o el gateway simulado de las pruebas.
 export const DEFAULT_API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://lixbon.com';
 const SECURE_KEY = 'lixbon_api_key';
+const REFRESH_KEY = 'lixbon_refresh_token';
+const EXPIRES_KEY = 'lixbon_token_expires';
+const SESSION_KEYS = [SECURE_KEY, REFRESH_KEY, EXPIRES_KEY];
 const MOBILE_KEY_NAME = 'Lixbon Mobile';
+// Se renueva un poco antes de caducar: un stream que se abre con un access a
+// punto de expirar no debe recibir 401 a medias.
+const RENEW_MARGIN_MS = 2 * 60 * 1000;
+
+/// Lo que pide la app al entrar: una sesión de este móvil. issue_api_key y
+/// key_name solo los entiende un gateway anterior, que responde con api_key.
+const appLogin = () => ({
+  client: 'mobile',
+  device_name: Constants.deviceName || null,
+  issue_api_key: true,
+  key_name: MOBILE_KEY_NAME,
+});
 const UI_KEY = 'uiPrefs';
 const DEFAULT_MODEL_KEY = 'defaultModel';
 
@@ -66,12 +83,21 @@ export const useChat = () => useContext(ChatContext);
 
 export function AppState({ children }) {
   // Valores vivos que el ApiClient lee en cada petición (evita closures viejas).
-  const live = useRef({ apiBase: DEFAULT_API_BASE, apiKey: null, onUnauthorized: () => {} }).current;
+  const live = useRef({
+    apiBase: DEFAULT_API_BASE,
+    apiKey: null,
+    refresh: null,
+    expiresAt: 0,
+    renewing: null,
+    renew: async () => null,
+    onUnauthorized: () => {},
+  }).current;
   const api = useMemo(
     () =>
       new ApiClient({
         getBase: () => live.apiBase,
         getToken: () => live.apiKey,
+        renew: (rejected) => live.renew(rejected),
         onUnauthorized: () => live.onUnauthorized(),
       }),
     [live],
@@ -152,6 +178,50 @@ export function AppState({ children }) {
     [live],
   );
 
+  /// Guarda la sesión de este móvil tal como la entrega el login o una renovación.
+  const saveSession = useCallback(
+    async (data) => {
+      const expiresAt = Date.now() + data.expires_in * 1000;
+      await Promise.all([
+        SecureStore.setItemAsync(SECURE_KEY, data.access_token),
+        SecureStore.setItemAsync(REFRESH_KEY, data.refresh_token),
+        SecureStore.setItemAsync(EXPIRES_KEY, String(expiresAt)),
+      ]);
+      live.refresh = data.refresh_token;
+      live.expiresAt = expiresAt;
+      adoptKey(data.access_token);
+    },
+    [live, adoptKey],
+  );
+
+  // Una sola renovación en vuelo: dos con el mismo refresh harían que el
+  // servidor cerrara la sesión. Con `rejected` (el access que recibió un 401)
+  // se fuerza, salvo que otra petición ya lo haya renovado.
+  live.renew = async (rejected = null) => {
+    if (!live.refresh) return null;
+    const vigente = rejected ? rejected !== live.apiKey : live.expiresAt - Date.now() > RENEW_MARGIN_MS;
+    if (vigente) return live.apiKey;
+    if (!live.renewing) {
+      live.renewing = api
+        .post('/api/auth/refresh', { refresh_token: live.refresh }, { auth: false })
+        .then(async (data) => {
+          await saveSession(data);
+          return data.access_token;
+        })
+        .catch((err) => {
+          if (err instanceof ApiException && err.status === 401) {
+            live.refresh = null;
+            return null;
+          }
+          throw err;
+        })
+        .finally(() => {
+          live.renewing = null;
+        });
+    }
+    return live.renewing;
+  };
+
   const refreshMe = useCallback(async () => {
     try {
       const data = await api.get('/api/auth/me');
@@ -163,17 +233,19 @@ export function AppState({ children }) {
 
   const logout = useCallback(
     async (withNotice = '') => {
-      try {
-        await SecureStore.deleteItemAsync(SECURE_KEY);
-      } catch {
-        // ya borrada
+      if (live.refresh) {
+        // También en el servidor; sin red, la sesión caduca sola.
+        api.post('/api/auth/logout', { refresh_token: live.refresh }, { auth: false }).catch(() => {});
       }
+      await Promise.all(SESSION_KEYS.map((k) => SecureStore.deleteItemAsync(k).catch(() => {})));
       live.apiKey = null;
+      live.refresh = null;
+      live.expiresAt = 0;
       setApiKey(null);
       setUser(null);
       setNotice(withNotice);
     },
-    [live],
+    [api, live],
   );
 
   live.onUnauthorized = () => logout('Tu sesión expiró. Inicia sesión de nuevo.');
@@ -181,10 +253,12 @@ export function AppState({ children }) {
   useEffect(() => {
     (async () => {
       try {
-        const key = await SecureStore.getItemAsync(SECURE_KEY);
+        const [key, refresh, expires] = await Promise.all(SESSION_KEYS.map((k) => SecureStore.getItemAsync(k)));
         if (key) {
+          live.refresh = refresh || null;
+          live.expiresAt = Number(expires) || 0;
           adoptKey(key);
-          await refreshMe(); // valida la key; un 401 dispara el logout
+          await refreshMe(); // renueva si hace falta; un 401 sin remedio dispara el logout
         }
       } catch {
         // Keystore no disponible: se queda deslogueado
@@ -196,24 +270,31 @@ export function AppState({ children }) {
 
   const adoptLogin = useCallback(
     async (data) => {
-      const key = data?.api_key;
-      if (typeof key !== 'string' || !key) {
-        throw new ApiException('El servidor no entregó credenciales para la app');
+      if (data?.refresh_token) {
+        await saveSession(data);
+      } else {
+        // Un gateway anterior a las sesiones de dispositivo solo entrega una key.
+        const key = data?.api_key;
+        if (typeof key !== 'string' || !key) {
+          throw new ApiException('El servidor no entregó credenciales para la app');
+        }
+        await SecureStore.setItemAsync(SECURE_KEY, key);
+        await SecureStore.deleteItemAsync(REFRESH_KEY).catch(() => {});
+        live.refresh = null;
+        adoptKey(key);
       }
-      await SecureStore.setItemAsync(SECURE_KEY, key);
-      adoptKey(key);
       if (data.user && typeof data.user === 'object') setUser(data.user);
       setNotice('');
       refreshMe(); // trae plan y settings completos
     },
-    [adoptKey, refreshMe],
+    [live, adoptKey, saveSession, refreshMe],
   );
 
   const login = useCallback(
     async (email, password) => {
       const data = await api.post(
         '/api/auth/login',
-        { email, password, issue_api_key: true, key_name: MOBILE_KEY_NAME },
+        { email, password, ...appLogin() },
         { auth: false },
       );
       await adoptLogin(data);
@@ -228,7 +309,7 @@ export function AppState({ children }) {
         { first_name: firstName, last_name: lastName, email, password },
         { auth: false },
       );
-      // El registro entrega cookie de sesión (web); la app necesita su API key,
+      // El registro entrega cookie de sesión (web); la app necesita la suya,
       // así que encadena un login normal con las mismas credenciales.
       await login(email, password);
     },
@@ -243,8 +324,7 @@ export function AppState({ children }) {
         {
           code: result.code,
           code_verifier: result.verifier,
-          issue_api_key: true,
-          key_name: MOBILE_KEY_NAME,
+          ...appLogin(),
         },
         { auth: false },
       );
@@ -253,14 +333,23 @@ export function AppState({ children }) {
     [api, adoptLogin],
   );
 
-  /// La regeneración desde Cuenta devuelve una key nueva: se adopta al instante.
-  const adoptApiKey = useCallback(
-    async (rawKey) => {
-      await SecureStore.setItemAsync(SECURE_KEY, rawKey);
-      adoptKey(rawKey);
-    },
-    [adoptKey],
-  );
+  const closeOtherSessions = useCallback(() => api.delete('/api/auth/sessions'), [api]);
+
+  /// Lo leen los streams al (re)conectar: deben usar el access vigente.
+  const currentToken = useCallback(() => live.apiKey, [live]);
+
+  // Con la app abierta, y al volver del segundo plano, el access se mantiene
+  // vigente aunque no haya peticiones: los streams lo leen al conectar.
+  useEffect(() => {
+    if (!apiKey) return undefined;
+    const tick = () => live.renew().catch(() => null);
+    const timer = setInterval(tick, 60000);
+    const sub = AppLifecycle.addEventListener('change', (state) => state === 'active' && tick());
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [apiKey, live]);
 
   const clearNotice = useCallback(() => setNotice(''), []);
 
@@ -279,12 +368,13 @@ export function AppState({ children }) {
       login,
       register,
       loginWithProvider,
-      adoptApiKey,
+      closeOtherSessions,
+      currentToken,
       refreshMe,
       logout,
       clearNotice,
     }),
-    [authReady, apiKey, user, notice, login, register, loginWithProvider, adoptApiKey, refreshMe, logout, clearNotice],
+    [authReady, apiKey, user, notice, login, register, loginWithProvider, closeOtherSessions, currentToken, refreshMe, logout, clearNotice],
   );
 
   return (
