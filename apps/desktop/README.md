@@ -46,6 +46,8 @@ estable y los prerequisitos de Tauri 2 para Windows.
 
 ## Desarrollo local
 
+Requiere Node 22 o posterior (`.nvmrc`); compruébalo con `node -v`. Con Node 20 las pruebas (`npm test`) fallan por jsdom/undici (`webidl.util.markAsUncloneable is not a function`).
+
 ```bash
 cd apps/desktop
 npm install
@@ -111,5 +113,17 @@ Secrets necesarios en el repo: `TAURI_SIGNING_PRIVATE_KEY`,
 ## Compilar el host (src-tauri)
 
 1. Rust 1.87 o superior (`rustup` estable). En Windows, toolchain MSVC y Build Tools de Visual Studio.
-2. Generar el sidecar `lxo` (ignorado por git): `node scripts/build-lxo.mjs`.
+2. Generar el sidecar `lxo` (ignorado por git) antes de `cargo test`: `npm run build:lxo` (ejecuta `node scripts/build-lxo.mjs`). Sin él, el build de Tauri falla porque no encuentra `binaries/lxo-<target>`.
 3. `cd src-tauri && cargo test`
+
+
+## Entorno del worktree de una tarea del orquestador
+
+Un worktree nuevo es un checkout limpio: no trae `node_modules` ni `.env`. El repo declara qué llevarse y el host lo hace al crear la hija, sin ejecutar nada suyo. Las reglas se leen del checkout principal y solo valen para rutas **relativas, existentes e ignoradas por git** (nada absoluto, con `..`, con `.git` ni con comodines).
+
+- `.lixbon/worktree.json`: `{"sharedDirectories": ["node_modules"]}`. Esos directorios se **enlazan** (junction en Windows, symlink en el resto): comparten los archivos con el repo.
+- `.worktreeinclude`: una ruta por línea (`#` comenta), p. ej. `.env`. Se **copian** y cada worktree tiene los suyos (tope de 2 GiB y 50 000 entradas).
+
+La aprobación del lanzamiento muestra qué se enlazará y qué se copiará, y solo se aplica lo que se vio; la actividad de la tarea cuenta lo que se hizo y lo que se omitió con su motivo. Los enlaces no cuentan como cambios de la tarea. Al borrar el worktree se quitan primero: sin eso, `git worktree remove --force` atraviesa el enlace y borra el original del repo (comprobado en las pruebas). No hay script de setup: ejecutar comandos del repo al crear un worktree necesita su propia aprobación y queda para más adelante.
+
+Inspirado en `.worktreeinclude` y `worktree.sharedDirectories` de [Orca](https://github.com/stablyai/orca) (MIT).

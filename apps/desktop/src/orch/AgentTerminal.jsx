@@ -10,7 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { FONT } from '../editor/TerminalPanel';
 import { currentXtermTheme } from '../editor/xtermThemes';
 import { watchTheme } from '../editor/themeMode';
-import { ptyCols } from '../lib/orchTermSize';
+import { computePtySize, ptyCols } from '../lib/orchTermSize';
 
 export function AgentTerminal({ task, live }) {
   const hostRef = useRef(null);
@@ -37,8 +37,13 @@ export function AgentTerminal({ task, live }) {
     const unlisten = [];
     const resize = () => {
       try {
-        fit.fit();
-        invoke('orch_term_resize', { task, cols: term.cols, rows: term.rows }).then(() => ptyCols.set(task, term.cols)).catch(() => {});
+        // No fit.fit(): eso bajaría las columnas al ancho del panel. Se mide lo
+        // que cabe y se aplica el mínimo; si sobra, el contenedor hace scroll.
+        const dims = fit.proposeDimensions();
+        if (!dims) return;
+        const { cols, rows } = computePtySize(dims.cols, dims.rows);
+        if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
+        invoke('orch_term_resize', { task, cols, rows }).then(() => ptyCols.set(task, cols)).catch(() => {});
       } catch { /* oculto */ }
     };
 
@@ -72,5 +77,5 @@ export function AgentTerminal({ task, live }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task]);
 
-  return <div className="orch__term" ref={hostRef} />;
+  return <div className="orch__term"><div className="orch__term-host" ref={hostRef} /></div>;
 }

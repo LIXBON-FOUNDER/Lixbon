@@ -1,0 +1,4 @@
+.agentchip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; vertical-align: middle; }
+.agentchip__name { white-space: nowrap; }
+.agentchip__detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .7; font-size: .92em; }
+.providermark { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 3px; font-weight: 700; line-height: 1; color: var(--ink-70, inherit); background: var(--surface-2, rgba(127,127,127,.18)); }

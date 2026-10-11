@@ -477,7 +477,7 @@
 .idx__fill { background: var(--accent); }
 
 /* Modelo y esfuerzo de cada rol del orquestador: columnas fijas, alineadas. */
-.orch__rolectl { flex-shrink: 0; display: grid; grid-template-columns: 132px 176px; gap: 8px; }
+.orch__rolectl { flex-shrink: 0; display: grid; grid-template-columns: 132px 176px 176px; gap: 8px; }
 .select--fill .select__btn { width: 100%; min-width: 0; max-width: none; }
 
 /* ── Ajustes › Skills ────────────────────────────────────────────────── */
@@ -530,3 +530,10 @@
 .skl-sha { margin-top: 4px; font-size: 10.5px; color: var(--ink-50); overflow-wrap: anywhere; }
 @media (max-width: 860px) { .skl-detail__grid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .skl-card, .skl-vote__stars button { transition: none; } }
+.orch__rolewarn { margin: 4px 0 0; padding-left: 16px; font-size: 12px; color: var(--warn); }
+.newagent .menu__item:disabled, .newagent .menu__item.is-disabled { opacity: 0.5; cursor: default; }
+.newagent__reason { font-size: 11px; color: var(--ink-dim); }
+
+.newagent__warn, .newagent__blocked { display: block; font-size: 11px; color: var(--warn, #b7791f); }
+.newagent__blocked { opacity: .7; }
+.orch__rolewarn li.is-disabled { opacity: .7; }

@@ -17,8 +17,8 @@ struct Skill {
 }
 
 const SKILLS: &[Skill] = &[
-    Skill { name: "orquestar", version: 5, md: orquestar_md },
-    Skill { name: "adversary", version: 1, md: adversary_md },
+    Skill { name: "orquestar", version: 8, md: orquestar_md },
+    Skill { name: "adversary", version: 2, md: adversary_md },
 ];
 
 struct Target {
@@ -73,21 +73,40 @@ pub fn home() -> Option<PathBuf> {
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
+    let me = std::env::current_exe().ok().and_then(|p| p.canonicalize().ok());
+    which_in(name, &std::env::var_os("PATH")?, me.as_deref())
+}
+
+/// Busca `name` en `path`. Nunca devuelve `me` (el ejecutable de Lixbon): el desktop
+/// y el CLI se llaman igual (`lixbon`), y ejecutar el desktop como si fuera el CLI abre
+/// otra copia de la app en lugar de responder.
+pub fn which_in(name: &str, path: &std::ffi::OsStr, me: Option<&Path>) -> Option<PathBuf> {
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT").unwrap_or(".EXE;.CMD;.BAT".into()).split(';').map(|e| e.to_ascii_lowercase()).collect()
     } else {
         vec![String::new()]
     };
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(path) {
         for ext in &exts {
             let p = dir.join(format!("{name}{ext}"));
-            if p.is_file() {
+            if p.is_file() && !me.is_some_and(|m| same_file(&p, m)) {
                 return Some(p);
             }
         }
     }
     None
+}
+
+/// Mismo fichero por ruta o por identidad: cargo deja enlaces duros del ejecutable (`target/debug/deps`)
+/// y esas rutas distintas siguen siendo la misma app.
+fn same_file(a: &Path, b: &Path) -> bool {
+    if a.canonicalize().ok().as_deref() == Some(b) {
+        return true;
+    }
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.len() == y.len() && x.len() > 0 && x.modified().ok().is_some_and(|t| Some(t) == y.modified().ok()),
+        _ => false,
+    }
 }
 
 fn skill_file(home: &Path, t: &Target, skill: &Skill) -> PathBuf {
@@ -134,8 +153,8 @@ name: {name}
 description: >-
   Orquestador de agentes de Lixbon. Con "/orquestar <objetivo>" te conviertes en el COORDINADOR:
   repartes el objetivo entre agentes hijos de Claude Code según los roles que configuró el usuario
-  (explorador, implementador, revisor, escalado), esperas sus informes, integras sus ramas y le
-  cuentas al usuario el resultado; si el objetivo cita una issue de Lixbon Team (LXB-12), la
+  (explorador, implementador, revisor, escalado), esperas sus informes, le propones al usuario qué integrar (la integración la
+  aprueba una persona en Lixbon, no tú) y le cuentas el resultado; si el objetivo cita una issue de Lixbon Team (LXB-12), la
   lees, la mueves y dejas el resultado en ella con lxo issue. Úsala cuando el usuario escriba /orquestar, diga "orquesta",
   "coordina agentes", "reparte esta tarea", "lanza el equipo" o "lxo". Úsala también SIEMPRE que
   exista la variable LXO_TASK_ID o tu prompt diga que eres una tarea del orquestador de Lixbon:
@@ -168,8 +187,13 @@ lxo guide
 ```
 
 - Sin `LXO_TASK_ID`: eres el **coordinador**. El texto que acompaña a /orquestar es el objetivo.
-  Tú no implementas: repartes, esperas los informes, integras y respondes al usuario.
+  Tú no implementas ni integras: repartes, esperas los informes, propones la integración
+  o el PR (los aprueba una persona en Lixbon; lxo merge y lxo pr se rechazan) y respondes al usuario.
 - Con `LXO_TASK_ID`: eres una **tarea hija**. Haz solo tu encargo y entrega tu informe.
+
+Cada `lxo spawn` lo aprueba una persona en la ventana del orquestador de Lixbon: el comando espera
+hasta que la persona lo apruebe, lo rechace o venza (10 min). Si se corta la espera, sigue con
+`lxo spawn-status <pending_id>`. Tú no puedes aprobarlo.
 
 Sigue la guía al pie de la letra y añade `--json` cuando necesites leer la salida.
 
@@ -227,6 +251,7 @@ abrir Lixbon y activar Ajustes → Orquestador. No lo simules con otros subagent
    ```
    lxo spawn --role adversario --name "Adversario <tema>" --task "<qué atacar: diff (git diff <base>...<rama>), rama o archivos; contexto; decisiones tomadas y por qué>"
    ```
+   `lxo spawn` espera a que la persona apruebe el lanzamiento en Lixbon; si lo rechaza o vence, díselo al usuario.
 4. `lxo wait --timeout-ms 540000` hasta que llegue su informe; léelo entero.
 
 ## 3. Responde a cada hallazgo

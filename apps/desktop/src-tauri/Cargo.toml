@@ -31,6 +31,7 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.8"
+vt100 = "0.16"
 notify = "6"
 regex = "1"
 # Walker de ripgrep: respeta el .gitignore del proyecto en búsqueda/listado.
@@ -50,3 +51,7 @@ base64 = "0.22"
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 
+
+[dev-dependencies]
+# MockRuntime para probar cómo llegan los argumentos de los comandos por IPC.
+tauri = { version = "2", features = ["test"] }
