@@ -289,9 +289,12 @@ func TestOutageKeepsTheQueueBoundedAndRecoversWithASnapshot(t *testing.T) {
 	link.Emit("assistant_done", map[string]any{"text": "fin", "interrupted": false})
 	time.Sleep(60 * time.Millisecond)
 
+	// Con flushMu el lote en vuelo ya ha vuelto a la cola tras el fallo.
+	link.flushMu.Lock()
 	link.mu.Lock()
 	bytes, pending := link.queuedBytes, len(link.queue)
 	link.mu.Unlock()
+	link.flushMu.Unlock()
 	if bytes > MaxQueuedBytes {
 		t.Fatalf("la cola acumula %d bytes (tope %d)", bytes, MaxQueuedBytes)
 	}
