@@ -31,6 +31,7 @@ type httpTransport struct {
 	name    string
 	url     string
 	headers map[string]string
+	bearer  func(context.Context) string
 	client  *http.Client
 
 	mu       sync.Mutex
@@ -44,6 +45,7 @@ func newHTTP(spec Spec) *httpTransport {
 		name:    spec.Name,
 		url:     spec.URL,
 		headers: spec.Headers,
+		bearer:  spec.Bearer,
 		client:  &http.Client{CheckRedirect: sameOriginOnly},
 	}
 }
@@ -85,6 +87,11 @@ func (t *httpTransport) newRequest(ctx context.Context, method string, body []by
 	req.Header.Set("User-Agent", config.UserAgent)
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
+	}
+	if t.bearer != nil {
+		if token := t.bearer(ctx); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

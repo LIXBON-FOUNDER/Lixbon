@@ -317,26 +317,39 @@ func TestModelsDetailSurfacesGatewayErrorEntries(t *testing.T) {
 	}
 }
 
-func TestExchangeIDETokenAsksForTheCLIKey(t *testing.T) {
+func TestExchangeIDETokenAsksForADeviceSession(t *testing.T) {
 	var body map[string]any
 	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/auth/ide/exchange" || r.Header.Get("Authorization") != "" {
 			t.Errorf("ruta %s, auth %q", r.URL.Path, r.Header.Get("Authorization"))
 		}
 		json.NewDecoder(r.Body).Decode(&body)
-		io.WriteString(w, `{"api_key":"lixbon_sk_x","user":{"email":"ana@estudio.dev","plan_name":"Pro"}}`)
+		io.WriteString(w, `{"access_token":"lixbon_at_x","refresh_token":"lixbon_rt_x",
+			"expires_at":"2026-10-11T15:00:00.123456+00:00","user":{"email":"ana@estudio.dev","plan_name":"Pro"}}`)
 	})
-	c.APIKey = "vieja"
-	key, user, err := c.ExchangeIDEToken(context.Background(), "tok", "ver", LoginKeyName)
-	if err != nil || key != "lixbon_sk_x" || user.Email != "ana@estudio.dev" || user.PlanName != "Pro" {
-		t.Fatalf("key %q user %+v err %v", key, user, err)
+	tokens, user, err := c.ExchangeIDEToken(context.Background(), "tok", "ver")
+	if err != nil || tokens.Access != "lixbon_at_x" || tokens.Refresh != "lixbon_rt_x" || tokens.ExpiresAt.IsZero() {
+		t.Fatalf("tokens %+v err %v", tokens, err)
 	}
-	if body["token"] != "tok" || body["verifier"] != "ver" || body["key_name"] != "lixbon CLI" {
+	if user.Email != "ana@estudio.dev" || user.PlanName != "Pro" {
+		t.Fatalf("user %+v", user)
+	}
+	if body["token"] != "tok" || body["verifier"] != "ver" || body["client"] != "cli" || body["key_name"] != "lixbon CLI" {
 		t.Fatalf("cuerpo: %v", body)
 	}
 	empty := newGateway(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"user":{}}`) })
-	if _, _, err := empty.ExchangeIDEToken(context.Background(), "tok", "ver", LoginKeyName); err == nil {
-		t.Fatal("sin api_key el canje falla")
+	if _, _, err := empty.ExchangeIDEToken(context.Background(), "tok", "ver"); err == nil {
+		t.Fatal("sin credencial el canje falla")
+	}
+}
+
+func TestExchangeIDETokenWithAnOlderGatewayKeepsItsKey(t *testing.T) {
+	c := newGateway(t, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"api_key":"lixbon_sk_x","user":{}}`)
+	})
+	tokens, _, err := c.ExchangeIDEToken(context.Background(), "tok", "ver")
+	if err != nil || tokens.Access != "lixbon_sk_x" || tokens.Refresh != "" {
+		t.Fatalf("tokens %+v err %v", tokens, err)
 	}
 }
 

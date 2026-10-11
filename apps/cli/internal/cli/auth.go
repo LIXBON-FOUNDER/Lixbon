@@ -237,7 +237,7 @@ func (a *App) loginGateway(ctx context.Context, cfg config.Config, name string, 
 		return a.setup(ctx, nil)
 	}
 	client := api.FromConfig(cfg)
-	client.APIKey = strings.TrimSpace(key)
+	client.SetKey(strings.TrimSpace(key))
 	info, err := client.KeyInfo(ctx)
 	if err != nil {
 		if _, fallback := client.Models(ctx); fallback != nil {
@@ -253,6 +253,7 @@ func (a *App) loginGateway(ctx context.Context, cfg config.Config, name string, 
 	if !a.saveConfig(cfg) {
 		return 1
 	}
+	_ = config.RemoveSession(cfg.SessionFile(), name)
 	fmt.Fprintf(a.Stdout, "Proveedor «%s» activo con la clave verificada.\n", name)
 	return 0
 }
@@ -301,6 +302,14 @@ func (a *App) authLogout(args []string) int {
 		fmt.Fprintf(a.Stdout, "«%s» no tiene clave guardada.\n", name)
 		return 0
 	}
+	what := "Clave"
+	if s, ok := config.ReadSession(cfg.SessionFile(), name); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = api.New(profile.BaseURL, "").RevokeRefresh(ctx, s.Refresh)
+		cancel()
+		_ = config.RemoveSession(cfg.SessionFile(), name)
+		what = "Sesión"
+	}
 	if err := cfg.UpdateProfile(name, func(p *config.Profile) { p.APIKey, p.KeyModel = "", "" }); err != nil {
 		fmt.Fprintf(a.Stderr, "auth logout: %v\n", err)
 		return 1
@@ -312,6 +321,6 @@ func (a *App) authLogout(args []string) int {
 	if !a.saveConfig(cfg) {
 		return 1
 	}
-	fmt.Fprintf(a.Stdout, "Clave de «%s» eliminada. El proveedor sigue guardado: lixbon auth login %s la vuelve a poner.\n", name, name)
+	fmt.Fprintf(a.Stdout, "%s de «%s» cerrada en este equipo. El proveedor sigue guardado: lixbon auth login %s vuelve a entrar.\n", what, name, name)
 	return 0
 }

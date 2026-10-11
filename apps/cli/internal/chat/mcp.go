@@ -26,9 +26,9 @@ func (c *Chat) MCPSpecs() []mcp.Spec {
 		}
 	}
 	return append(specs, mcp.Spec{
-		Name:    lixbonMCP,
-		URL:     config.ServerBase(c.Cfg.BaseURL) + "/mcp",
-		Headers: map[string]string{"Authorization": "Bearer " + c.Cfg.APIKey},
+		Name:   lixbonMCP,
+		URL:    config.ServerBase(c.Cfg.BaseURL) + "/mcp",
+		Bearer: c.Client.Bearer,
 	})
 }
 
