@@ -22,6 +22,9 @@ func main() {
 	app.Interactive = func(ctx context.Context, opts chat.Options) int {
 		return tui.Interactive(ctx, app.Stdout, app.Stderr, app.ConfigPath, opts)
 	}
+	app.Login = func(ctx context.Context) int {
+		return tui.Login(ctx, app.Stdout, app.Stderr, app.ConfigPath)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	code := app.Run(ctx, os.Args[1:])

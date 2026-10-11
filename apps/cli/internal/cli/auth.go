@@ -234,7 +234,7 @@ func (a *App) loginGateway(ctx context.Context, cfg config.Config, name string, 
 		return 1
 	}
 	if !keyGiven {
-		return a.setup(ctx)
+		return a.setup(ctx, nil)
 	}
 	client := api.FromConfig(cfg)
 	client.APIKey = strings.TrimSpace(key)

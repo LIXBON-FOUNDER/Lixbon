@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"lixbon.com/cli/internal/config"
 )
@@ -14,11 +17,9 @@ import (
 type accountGateway struct {
 	srv       *httptest.Server
 	usage     string
-	loginBody map[string]any
-	registers int
-	logins    int
-	loginFail int
 	keyInfo   string
+	role      string
+	exchanged map[string]any
 }
 
 func newAccountGateway(t *testing.T) *accountGateway {
@@ -33,19 +34,9 @@ func newAccountGateway(t *testing.T) *accountGateway {
 		}
 		io.WriteString(w, g.usage)
 	})
-	mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		g.logins++
-		json.NewDecoder(r.Body).Decode(&g.loginBody)
-		if g.logins <= g.loginFail {
-			w.WriteHeader(401)
-			io.WriteString(w, `{"detail":"Credenciales incorrectas"}`)
-			return
-		}
-		io.WriteString(w, `{"api_key":"lixbon_sk_nueva"}`)
-	})
-	mux.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
-		g.registers++
-		io.WriteString(w, `{}`)
+	mux.HandleFunc("/api/auth/ide/exchange", func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&g.exchanged)
+		io.WriteString(w, `{"api_key":"lixbon_sk_web","user":{"email":"ana@ejemplo.com","plan_name":"Pro"}}`)
 	})
 	mux.HandleFunc("/api/key/info", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer lixbon_sk_buena" {
@@ -55,7 +46,13 @@ func newAccountGateway(t *testing.T) *accountGateway {
 		}
 		io.WriteString(w, g.keyInfo)
 	})
-	mux.HandleFunc("/api/model-roles", http.NotFound)
+	mux.HandleFunc("/api/model-roles", func(w http.ResponseWriter, r *http.Request) {
+		if g.role == "" {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, `{"roles":{"chat":{"model":"`+g.role+`"}}}`)
+	})
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer lixbon_sk_mala" {
 			w.WriteHeader(401)
@@ -138,57 +135,15 @@ func TestUsageFailureAndGenericProvider(t *testing.T) {
 
 func (h *harness) feed(text string) { h.app.Stdin = strings.NewReader(text) }
 
-func TestSetupWithCredentialsSavesTheIssuedKey(t *testing.T) {
-	g := newAccountGateway(t)
-	h := newHarness(t, nil, g.config(map[string]any{"model": "qwen"}))
-	h.feed("1\nana@ejemplo.com\nsecreta\n")
-	if code := h.run("setup"); code != 0 {
-		t.Fatalf("code %d: %s %s", code, h.out, h.errOut)
-	}
-	if g.loginBody["issue_api_key"] != true || g.loginBody["key_name"] != "lixbon CLI" || g.loginBody["email"] != "ana@ejemplo.com" {
-		t.Fatalf("login: %v", g.loginBody)
-	}
-	cfg := config.Load(h.path)
-	if cfg.APIKey != "lixbon_sk_nueva" || cfg.ExtraString("account_email") != "ana@ejemplo.com" || cfg.KeyModel != "" {
-		t.Fatalf("config guardada: key=%q email=%q", cfg.APIKey, cfg.ExtraString("account_email"))
-	}
-	if !strings.Contains(h.out.String(), "Sesión iniciada como ana@ejemplo.com") {
-		t.Fatalf("salida: %q", h.out)
-	}
-}
-
-func TestSetupRetriesAfterBadCredentials(t *testing.T) {
-	g := newAccountGateway(t)
-	g.loginFail = 1
-	h := newHarness(t, nil, g.config(map[string]any{"model": "qwen"}))
-	h.feed("1\nana@ejemplo.com\nmala\nana@ejemplo.com\nbuena\n")
-	if code := h.run("setup"); code != 0 {
-		t.Fatalf("code %d: %s %s", code, h.out, h.errOut)
-	}
-	if g.logins != 2 || !strings.Contains(h.errOut.String(), "Credenciales incorrectas") {
-		t.Fatalf("logins=%d stderr=%q", g.logins, h.errOut)
-	}
-}
-
-func TestSetupRegisterThenLogin(t *testing.T) {
-	g := newAccountGateway(t)
-	h := newHarness(t, nil, g.config(map[string]any{"model": "qwen"}))
-	h.feed("2\nnueva@ejemplo.com\nsecreta\nAna\nPérez\n")
-	if code := h.run("setup"); code != 0 || g.registers != 1 || g.logins != 1 {
-		t.Fatalf("code %d registers=%d logins=%d: %s", code, g.registers, g.logins, h.errOut)
-	}
-}
-
 func TestSetupWithAnAPIKeyLinksTheFixedModel(t *testing.T) {
 	g := newAccountGateway(t)
 	g.keyInfo = `{"plan":{"name":"Pro"},"key_model":"modelo-fijo"}`
 	h := newHarness(t, nil, g.config(nil))
-	h.feed("3\nlixbon_sk_buena\n")
-	if code := h.run("setup"); code != 0 {
+	if code := h.run("setup", "--api-key", "lixbon_sk_buena"); code != 0 {
 		t.Fatalf("code %d: %s %s", code, h.out, h.errOut)
 	}
 	cfg := config.Load(h.path)
-	if cfg.APIKey != "lixbon_sk_buena" || cfg.KeyModel != "modelo-fijo" || cfg.Model != "modelo-fijo" {
+	if cfg.APIKey != "lixbon_sk_buena" || cfg.KeyModel != "modelo-fijo" || cfg.Model != "modelo-fijo" || cfg.ExtraString("plan_name") != "Pro" {
 		t.Fatalf("config: %+v", cfg)
 	}
 	if !strings.Contains(h.out.String(), "Clave vinculada al modelo modelo-fijo (modelo fijo)") {
@@ -196,38 +151,73 @@ func TestSetupWithAnAPIKeyLinksTheFixedModel(t *testing.T) {
 	}
 }
 
-func TestSetupRejectsABadKeyThenAcceptsAGoodOne(t *testing.T) {
+func TestSetupRejectsABadKey(t *testing.T) {
 	g := newAccountGateway(t)
 	h := newHarness(t, nil, g.config(map[string]any{"model": "qwen"}))
-	h.feed("3\nlixbon_sk_mala\nlixbon_sk_buena\n")
-	if code := h.run("setup"); code != 0 {
-		t.Fatalf("code %d: %s %s", code, h.out, h.errOut)
+	if code := h.run("setup", "--api-key", "lixbon_sk_mala"); code != 1 || !strings.Contains(h.errOut.String(), "Clave inválida") {
+		t.Fatalf("code %d stderr %q", code, h.errOut)
 	}
-	if !strings.Contains(h.errOut.String(), "Clave inválida") || config.Load(h.path).APIKey != "lixbon_sk_buena" {
-		t.Fatalf("stderr %q", h.errOut)
+	if config.Load(h.path).APIKey != "" {
+		t.Fatal("una clave mala no se guarda")
 	}
 }
 
-func TestSetupPicksAModelWhenNoneIsConfigured(t *testing.T) {
+func TestSetupUsesTheLoginScreenWithATerminal(t *testing.T) {
 	g := newAccountGateway(t)
 	h := newHarness(t, nil, g.config(nil))
-	h.feed("1\nana@ejemplo.com\nsecreta\n2\n")
-	if code := h.run("setup"); code != 0 {
-		t.Fatalf("code %d: %s %s", code, h.out, h.errOut)
-	}
-	if got := config.Load(h.path).Model; got != "llama" {
-		t.Fatalf("modelo elegido: %q", got)
+	called := false
+	h.app.IsTerminal = func() bool { return true }
+	h.app.Login = func(context.Context) int { called = true; return 0 }
+	if code := h.run("setup"); code != 0 || !called {
+		t.Fatalf("code %d, pantalla %v", code, called)
 	}
 }
 
-func TestSetupAbortsWhenInputEnds(t *testing.T) {
+func TestSetupWithoutATerminalWaitsForTheBrowser(t *testing.T) {
 	g := newAccountGateway(t)
-	for _, input := range []string{"", "1\n", "1\nana@ejemplo.com\n", "9\n"} {
-		h := newHarness(t, nil, g.config(nil))
-		h.feed(input)
-		if code := h.run("setup"); code != 1 || g.logins != 0 {
-			t.Fatalf("entrada %q: code %d logins %d", input, code, g.logins)
+	g.role = "qwen"
+	h := newHarness(t, nil, g.config(nil))
+	opened := make(chan string, 1)
+	h.app.IsTerminal = func() bool { return false }
+	h.app.OpenBrowser = func(u string) error { opened <- u; return nil }
+	done := make(chan int, 1)
+	go func() { done <- h.run("setup") }()
+	var link string
+	select {
+	case link = <-opened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no se abrió el navegador")
+	}
+	u, _ := url.Parse(link)
+	q := u.Query()
+	if u.Path != "/ide/connect" || q.Get("client") != "cli" || q.Get("method") != "S256" {
+		t.Fatalf("dirección: %s", link)
+	}
+	resp, err := http.Get(q.Get("redirect_uri") + "?token=tok&state=" + url.QueryEscape(q.Get("state")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("code %d: %s", code, h.errOut)
 		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("setup no terminó tras volver el navegador")
+	}
+	if g.exchanged["token"] != "tok" || g.exchanged["key_name"] != "lixbon CLI" || g.exchanged["verifier"] == "" {
+		t.Fatalf("canje: %v", g.exchanged)
+	}
+	cfg := config.Load(h.path)
+	if cfg.APIKey != "lixbon_sk_web" || cfg.ExtraString("account_email") != "ana@ejemplo.com" || cfg.Model != "qwen" {
+		t.Fatalf("config: key=%q email=%q model=%q", cfg.APIKey, cfg.ExtraString("account_email"), cfg.Model)
+	}
+	if !strings.Contains(h.out.String(), "Sesión iniciada como ana@ejemplo.com · plan Pro") || !strings.Contains(h.errOut.String(), link) {
+		t.Fatalf("salida %q / %q", h.out, h.errOut)
+	}
+	if strings.Contains(h.out.String()+h.errOut.String(), "ontraseña") {
+		t.Fatal("el CLI no pide contraseña")
 	}
 }
 
@@ -236,7 +226,6 @@ func TestSetupRefusesAGenericProvider(t *testing.T) {
 	h := newHarness(t, nil, g.config(map[string]any{
 		"profile": "local", "profiles": map[string]any{"local": map[string]any{"base_url": g.srv.URL + "/v1", "generic": true}},
 	}))
-	h.feed("1\n")
 	if code := h.run("setup"); code != 1 || !strings.Contains(h.out.String(), "no usa cuentas Lixbon") {
 		t.Fatalf("code %d: %q", code, h.out)
 	}
