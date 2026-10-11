@@ -303,21 +303,6 @@ pub fn without_links(worktree: &Path, lines: &str) -> Vec<String> {
         .collect()
 }
 
-/// Una línea para mostrar lo que se hizo («node_modules enlazado, .env copiado»).
-pub fn summary(done: &Plan) -> String {
-    let mut parts = vec![];
-    if !done.shared.is_empty() {
-        parts.push(format!("enlazado: {}", done.shared.join(", ")));
-    }
-    if !done.copy.is_empty() {
-        parts.push(format!("copiado: {}", done.copy.join(", ")));
-    }
-    if !done.skipped.is_empty() {
-        parts.push(format!("omitido: {}", done.skipped.iter().map(|s| format!("{} ({})", s.path, s.reason)).collect::<Vec<_>>().join(", ")));
-    }
-    parts.join(" · ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,8 +397,6 @@ mod tests {
         assert_eq!(fs::read_to_string(wt.path().join("build/out.txt")).unwrap(), "salida");
         assert!(!is_link(&wt.path().join("build")), "lo copiado es propio");
         assert_eq!(links(wt.path()), ["node_modules"]);
-        let s = summary(&done);
-        assert!(s.contains("enlazado: node_modules") && s.contains("copiado: build") && s.contains("omitido: .env"), "{s}");
     }
 
     #[test]

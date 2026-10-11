@@ -148,19 +148,6 @@ fn el_argv_de_un_rol_de_solo_lectura_es_el_perfil_explorar() {
     assert!(l.command.contains("--provider ollama --model qwen3:8b"), "{}", l.command);
 }
 
-/// Contra las CLI reales de la máquina: `cargo test -- --ignored available_real --nocapture`.
-#[test]
-#[ignore]
-fn available_real_con_refresco() {
-    let t = std::time::Instant::now();
-    let list = agents::available(true);
-    for a in &list {
-        eprintln!("{}: {} modelos, esfuerzos {:?}", a.id, a.models.len(), a.efforts);
-    }
-    eprintln!("en {:?}", t.elapsed());
-    assert!(list.iter().any(|a| a.id == "claude"));
-}
-
 #[test]
 fn which_nunca_devuelve_el_propio_ejecutable_de_lixbon() {
     use super::skill::which_in;
@@ -188,17 +175,4 @@ fn which_nunca_devuelve_el_propio_ejecutable_de_lixbon() {
     let con_enlace = std::env::join_paths([&deps, &cli]).unwrap();
     assert_eq!(which_in("lixbon", &con_enlace, Some(&me)).unwrap(), cli.join(exe));
     let _ = std::fs::remove_dir_all(&base);
-}
-
-/// Como la app instalada: el PATH sin las carpetas de cargo. `cargo test -- --ignored sin_cargo --nocapture`.
-#[test]
-#[ignore]
-fn available_real_sin_cargo_en_el_path() {
-    let limpio: Vec<std::path::PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap()).filter(|p| !p.to_string_lossy().contains("target\\debug")).collect();
-    std::env::set_var("PATH", std::env::join_paths(limpio).unwrap());
-    eprintln!("WHICH: {:?}", super::skill::which("lixbon"));
-    let l = agents::available(true);
-    for a in &l {
-        eprintln!("{}: {} modelos", a.id, a.models.len());
-    }
 }
