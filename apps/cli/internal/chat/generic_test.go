@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/api"
 	"lixbon.com/cli/internal/config"
 )
@@ -177,14 +178,15 @@ func TestAskModeTellsAGenericModelHowToGetTools(t *testing.T) {
 	}
 }
 
-func TestAskModeSendsNoSystemPromptToTheLixbonGateway(t *testing.T) {
+func TestAskModeSendsOnlyTheStylePromptToTheLixbonGateway(t *testing.T) {
 	g, client := newGateway(t)
 	c := newChat(t, client, nil, Options{})
 	if _, err := c.Send(context.Background(), "hola", nil); err != nil {
 		t.Fatal(err)
 	}
 	messages := g.bodyAt(0)["messages"].([]any)
-	if len(messages) != 1 {
-		t.Fatalf("el contrato con el gateway no lleva mensaje de sistema: %v", messages)
+	system := messages[0].(map[string]any)
+	if len(messages) != 2 || system["content"] != agent.StylePrompt {
+		t.Fatalf("al gateway solo va el estilo, no el prompt de proveedores externos: %v", messages)
 	}
 }

@@ -195,7 +195,7 @@ func TestChatOncePrintsStreamAndSendsContract(t *testing.T) {
 	if id, _ := body["conversation_id"].(string); len(id) != 36 {
 		t.Fatalf("conversation_id: %v", body["conversation_id"])
 	}
-	msgs := body["messages"].([]any)
+	msgs := body["messages"].([]any)[1:]
 	if len(msgs) != 1 || msgs[0].(map[string]any)["content"] != "saluda" {
 		t.Fatalf("messages: %v", msgs)
 	}
@@ -340,7 +340,7 @@ func TestChatOnceAttachesAtPathFiles(t *testing.T) {
 	if code := h.run("chat", "--once", "resume @datos.txt"); code != 0 {
 		t.Fatalf("code %d: %s", code, h.errOut)
 	}
-	content := g.chatBody["messages"].([]any)[0].(map[string]any)["content"].(string)
+	content := g.chatBody["messages"].([]any)[1].(map[string]any)["content"].(string)
 	if !strings.Contains(content, "resume datos.txt") || !strings.Contains(content, "Archivo adjunto `datos.txt`") || !strings.Contains(content, "cinco") {
 		t.Fatalf("contenido: %q", content)
 	}

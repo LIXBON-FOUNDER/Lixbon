@@ -30,11 +30,22 @@ func (m *Model) dispatch(text string) tea.Cmd {
 	if name == "" {
 		return m.startTurn(text, text)
 	}
+	if _, ok := m.spec(name); ok {
+		switch {
+		case quietCommands[name]:
+			return m.captured("/"+name, func() tea.Cmd { return m.runCommand(name, arg) })
+		case echoless[name]:
+		default:
+			m.gap()
+			m.add(echoBlock(text))
+		}
+		return m.uncaptured(func() tea.Cmd { return m.runCommand(name, arg) })
+	}
+	if name == "key" && m.chat.Cfg.ExtraString("account_email") != "" {
+		return m.toast(sSoft.Render("/key es para sesiones con API key; entraste con tu cuenta de lixbon.com"))
+	}
 	m.gap()
 	m.add(echoBlock(text))
-	if _, ok := lookup(name); ok {
-		return m.runCommand(name, arg)
-	}
 	if custom, ok := m.chat.Custom[name]; ok {
 		return m.startTurn(workspace.Expand(custom.Body, arg), "")
 	}
@@ -73,6 +84,7 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	m.liveChars, m.liveReal, m.charsPerToken = 0, 0, m.chat.Session.Estimator.CharsPerToken()
 	m.notice = ""
 	m.openTool, m.readGroup, m.todoEntry = nil, nil, nil
+	m.answerEntry = nil
 	if shown != "" {
 		m.gap()
 		m.add(userBlock{text: shown, chips: m.sentChips(shown)})
@@ -123,7 +135,7 @@ func (m *Model) flushLive() {
 func (m *Model) printAnswer(prose string) {
 	m.closeReads()
 	m.gap()
-	m.add(answerBlock{text: prose, md: m.renderMarkdown})
+	m.answerEntry = m.add(answerBlock{text: prose, md: m.renderMarkdown})
 }
 
 func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
@@ -189,12 +201,16 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	m.refreshGit()
 	m.files = nil
 
-	if len(m.queue) > 0 && !m.quitting {
-		next := m.queue[0]
-		m.queue = m.queue[1:]
-		return m.dispatch(next)
+	// Una respuesta larga se enseña desde su principio, no desde el final:
+	// si no, el usuario tiene que subir a buscar dónde empieza.
+	if m.answerEntry != nil && m.scroll == 0 {
+		m.anchorTop = m.answerEntry
 	}
-	return nil
+	quota := m.fetchQuota()
+	if len(m.queue) > 0 && !m.quitting {
+		return tea.Batch(quota, m.dispatchQueued())
+	}
+	return quota
 }
 
 // reportError traduce un error del gateway a la acción que lo resuelve.
@@ -268,6 +284,7 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 		return nil
 	})
 	p.cancel = "no"
+	p.token = reply
 	p.tone = pal.warn
 	p.body = m.approvalBody(req)
 	p.keys = [][2]string{{"↑↓", "mover"}, {fmt.Sprintf("1–%d", len(options)), "elegir"}, {"↵", "confirmar"}, {"esc", "= No"}}

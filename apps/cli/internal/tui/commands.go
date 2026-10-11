@@ -67,6 +67,8 @@ var Specs = []Spec{
 // porque este es el contrato con el catálogo de Python.
 var GoSpecs = []Spec{
 	{"provider", "[nombre | key nombre]", "Cambiar de proveedor de modelos o de clave de uno (lixbon.com, LM Studio, Ollama…)", "cuenta"},
+	{"effort", "[auto|off|low|medium|high]", "Cuánto razona el modelo antes de responder", "conversación"},
+	{"branch", "[rama]", "Ver las ramas del repositorio y cambiar de una a otra", "agente"},
 }
 
 // Ordered devuelve el catálogo por grupo (en el orden de Groups) y, dentro,
@@ -111,4 +113,21 @@ func lookup(name string) (Spec, bool) {
 		}
 	}
 	return Spec{}, false
+}
+
+// spec busca un comando que exista ahora mismo para esta sesión.
+func (m *Model) spec(name string) (Spec, bool) {
+	if !m.available(name) {
+		return Spec{}, false
+	}
+	return lookup(name)
+}
+
+// available: /key cambia la API key de una sesión iniciada con clave; con la
+// cuenta de lixbon.com (login por navegador) no hay clave que cambiar.
+func (m *Model) available(name string) bool {
+	if name == "key" {
+		return m.chat.Client.Generic || m.chat.Cfg.APIKey != "" && m.chat.Cfg.ExtraString("account_email") == ""
+	}
+	return true
 }

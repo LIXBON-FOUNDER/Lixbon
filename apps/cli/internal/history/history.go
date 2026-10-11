@@ -3,6 +3,7 @@ package history
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"lixbon.com/cli/internal/textutil"
@@ -217,7 +218,16 @@ func CompactMessages(messages []Message, ask func([]Message) (string, error), ke
 	}
 	cut := safeStart(plain, max(0, len(plain)-keepRecent))
 	old, recent := plain[:cut], plain[cut:]
-	request := append(append([]Message{}, old...), User(CompactPrompt))
+	// Lo que más tarda es que el modelo lea la conversación: las salidas largas
+	// (páginas descargadas, comandos) y las imágenes se recortan, porque para
+	// resumir basta con su principio y su final.
+	request := make([]Message, 0, len(old)+1)
+	for _, m := range old {
+		m.Images = nil
+		m.Content = ClipToolOutput(m.Content, compactMessageChars)
+		request = append(request, m)
+	}
+	request = append(request, User(CompactPrompt))
 	summary, err := ask(request)
 	if err != nil {
 		return nil, err
@@ -226,9 +236,24 @@ func CompactMessages(messages []Message, ask func([]Message) (string, error), ke
 	if summary == "" {
 		return nil, ErrEmptySummary
 	}
-	out := []Message{
-		User("Resumen de lo hablado hasta ahora (la conversación se compactó para liberar contexto):\n" + summary),
-		Assistant("Entendido, sigo desde ahí."),
-	}
+	out := []Message{User(SummaryIntro + "\n" + summary), Assistant(SummaryAck)}
 	return append(out, recent...), nil
+}
+
+const (
+	// SummaryIntro abre el mensaje con el resumen de una compactación. Es para
+	// el modelo: las interfaces lo enseñan como «conversación compactada».
+	SummaryIntro        = "Resumen de lo hablado hasta ahora (la conversación se compactó para liberar contexto):"
+	SummaryAck          = "Entendido, sigo desde ahí."
+	compactMessageChars = 3000
+)
+
+// IsSummary dice si m es el resumen de una compactación o su acuse.
+func IsSummary(m Message) bool {
+	return m.Role == "user" && strings.HasPrefix(m.Content, SummaryIntro) || m.Role == "assistant" && m.Content == SummaryAck
+}
+
+// SummaryText es el resumen sin la frase que lo introduce.
+func SummaryText(m Message) string {
+	return strings.TrimSpace(strings.TrimPrefix(m.Content, SummaryIntro))
 }

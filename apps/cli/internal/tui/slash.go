@@ -53,22 +53,30 @@ func (m *Model) busyNow() bool { return m.running || m.busy != "" }
 
 func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 	m.busy, m.notice = "", ""
-	for _, b := range msg.lines {
-		m.add(b)
+	show := func() tea.Cmd {
+		for _, b := range msg.lines {
+			m.add(b)
+		}
+		if msg.apply != nil {
+			msg.apply(m)
+		}
+		return nil
 	}
-	if msg.apply != nil {
-		msg.apply(m)
+	var cmds []tea.Cmd
+	if title := m.asyncQuiet; title != "" {
+		m.asyncQuiet = ""
+		cmds = append(cmds, m.captured(title, show))
+	} else {
+		show()
 	}
 	m.refreshContext()
-	if msg.then != nil {
-		return msg.then(m)
+	switch {
+	case msg.then != nil:
+		cmds = append(cmds, msg.then(m))
+	case len(m.queue) > 0 && !m.running:
+		cmds = append(cmds, m.dispatchQueued())
 	}
-	if len(m.queue) > 0 && !m.running {
-		next := m.queue[0]
-		m.queue = m.queue[1:]
-		return m.dispatch(next)
-	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) runCommand(name, arg string) tea.Cmd {
@@ -128,7 +136,11 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 	case "allow":
 		return m.cmdAllow(arg)
 	case "workspace":
-		m.cmdWorkspace(arg)
+		return m.cmdWorkspace(arg)
+	case "branch":
+		return m.cmdBranch(arg)
+	case "effort":
+		return m.cmdEffort(arg)
 	case "status":
 		return m.cmdStatus()
 	case "cost":
@@ -386,29 +398,27 @@ func (m *Model) newConversation(label string) {
 	m.add(separator(label))
 }
 
-func (m *Model) cmdCompact() tea.Cmd {
-	if len(m.chat.History) < 4 {
-		m.add(note("La conversación aún es corta; nada que compactar."))
-		return nil
-	}
-	before, _ := m.chat.ContextUsage()
-	return m.async("compactando conversación", func(ctx context.Context) cmdDoneMsg {
-		if err := m.chat.Compact(ctx, 2); err != nil {
-			return cmdDoneMsg{lines: []block{errLine("No se pudo generar el resumen: " + err.Error())}}
-		}
-		after, _ := m.chat.ContextUsage()
-		return cmdDoneMsg{lines: []block{okLine(fmt.Sprintf("Conversación compactada: %s %s %s tokens", fmtTokens(before), glyphArrow, fmtTokens(after)))}}
-	})
-}
-
 func (m *Model) cmdHistory(arg string) tea.Cmd {
 	if slices.Contains([]string{"mensajes", "messages", "msg"}, strings.ToLower(arg)) {
 		return m.historyMessages()
 	}
 	m.chat.Persist()
-	items := m.chat.Store.List(50)
+	all := slices.Contains([]string{"todas", "all", "todo"}, strings.ToLower(arg))
+	var items []session.Header
+	for _, item := range m.chat.Store.List(0) {
+		if all || m.ownsConversation(item.Workspace) {
+			items = append(items, item)
+		}
+		if len(items) == 50 {
+			break
+		}
+	}
 	if len(items) == 0 {
-		m.add(note("Todavía no hay conversaciones guardadas. Al primer mensaje empieza a guardarse sola."))
+		if all {
+			m.add(note("Todavía no hay conversaciones guardadas. Al primer mensaje empieza a guardarse sola."))
+		} else {
+			m.add(note("No hay conversaciones en " + shortPath(m.historyScope()) + ". /history todas enseña las de todas las carpetas."))
+		}
 		return nil
 	}
 	now := float64(time.Now().UnixNano()) / 1e9
@@ -429,8 +439,15 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 			detail += " " + glyphSep + " actual"
 		}
 		options[i] = option{Label: title, Value: item.ID, Desc: detail}
+		if all {
+			options[i].Meta = sDim.Render(shortPath(item.Workspace))
+		}
 	}
-	p := newPicker("Conversaciones", options, func(value string, cancelled bool) tea.Cmd {
+	heading := "Conversaciones " + glyphSep + " " + shortPath(m.historyScope())
+	if all {
+		heading = "Conversaciones de todas las carpetas"
+	}
+	p := newPicker(heading, options, func(value string, cancelled bool) tea.Cmd {
 		switch {
 		case cancelled:
 		case value == m.chat.ConversationID:
@@ -438,6 +455,8 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 		case !m.chat.Open(value):
 			m.add(errLine("Esa conversación ya no está disponible."))
 		default:
+			m.refreshGit()
+			m.files = nil
 			m.replayTranscript()
 			m.add(okLine("Conversación reabierta: " + firstNonEmpty(m.chat.Title(), "sin título")))
 			m.refreshContext()
@@ -450,10 +469,24 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 	return nil
 }
 
+// historyScope es de dónde son las conversaciones que lista /history: el
+// repositorio entero si el workspace está en uno, si no la carpeta.
+func (m *Model) historyScope() string { return firstNonEmpty(m.repoRoot, m.chat.Workspace) }
+
+func (m *Model) ownsConversation(workspace string) bool {
+	if workspace == "" {
+		return false
+	}
+	if m.repoRoot != "" {
+		return within(workspace, m.repoRoot)
+	}
+	return samePath(workspace, m.chat.Workspace)
+}
+
 func (m *Model) historyMessages() tea.Cmd {
 	var mine []string
 	for _, msg := range m.chat.History {
-		if msg.Role == "user" && !strings.HasPrefix(msg.Content, "TOOL_RESULT") {
+		if msg.Role == "user" && !strings.HasPrefix(msg.Content, "TOOL_RESULT") && !history.IsSummary(msg) {
 			mine = append(mine, strings.Join(strings.Fields(msg.Content), " "))
 		}
 	}
@@ -489,6 +522,13 @@ func (m *Model) replayTranscript() {
 	m.add(separator(firstNonEmpty(m.chat.Title(), "conversación")))
 	for _, msg := range m.chat.History {
 		content := strings.TrimSpace(msg.Content)
+		if history.IsSummary(msg) {
+			if msg.Role == "user" {
+				m.gap()
+				m.add(compactBlock{summary: history.SummaryText(msg)})
+			}
+			continue
+		}
 		switch msg.Role {
 		case "user":
 			if strings.HasPrefix(content, "TOOL_RESULT") {
@@ -839,33 +879,7 @@ func (m *Model) cmdUndo() tea.Cmd {
 	return nil
 }
 
-func (m *Model) cmdPs() tea.Cmd {
-	procs := m.chat.Toolbox.Procs.List()
-	if len(procs) == 0 {
-		m.add(note("No hay comandos en segundo plano."))
-		return nil
-	}
-	options := make([]option, 0, len(procs)+1)
-	for _, p := range procs {
-		state := "terminado"
-		if p.Alive {
-			state = "en marcha"
-		}
-		m.add(note(fmt.Sprintf("%s  %s  %s", p.ID, state, truncateRunes(p.Command, 90))))
-		options = append(options, option{Label: p.ID + "  " + truncateRunes(p.Command, 60), Value: p.ID, Desc: state})
-	}
-	options = append(options, option{Label: "Ninguno", Value: "none", Desc: "volver"})
-	p := newPicker("Detener alguno", options, func(value string, cancelled bool) tea.Cmd {
-		if cancelled || value == "none" {
-			return nil
-		}
-		m.add(okLine(m.chat.Toolbox.Execute(context.Background(), "stop_command", map[string]any{"id": value})))
-		return nil
-	})
-	p.cursor = len(options) - 1
-	m.picker = p
-	return nil
-}
+func (m *Model) cmdPs() tea.Cmd { return m.openProcs() }
 
 func (m *Model) cmdCheck(arg string) tea.Cmd {
 	apply := func(on bool) {
@@ -934,32 +948,6 @@ func (m *Model) cmdAllow(arg string) tea.Cmd {
 	p.cursor = len(options) - 1
 	m.picker = p
 	return nil
-}
-
-func (m *Model) cmdWorkspace(arg string) {
-	if arg == "" {
-		m.add(note("Workspace actual: " + m.chat.Workspace))
-		return
-	}
-	path := expandHome(arg)
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(m.chat.Workspace, path)
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		m.add(errLine("Ruta inválida o no es una carpeta."))
-		return
-	}
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
-	}
-	m.chat.SetWorkspace(path)
-	m.refreshGit()
-	m.files = nil
-	m.add(okLine("Workspace: " + shortPath(path)))
-	if m.chat.ProjectContext != "" {
-		m.add(note("LIXBON.md encontrado: se usará como contexto del proyecto."))
-	}
 }
 
 // execShell ejecuta un comando del usuario en el workspace y deja su salida en
@@ -1305,6 +1293,8 @@ func (m *Model) cmdUsage() tea.Cmd {
 			report.rows = append(report.rows, [2]string{b.label, meter(float64(pct), 24) + sPrimary.Render(fmt.Sprintf("  %d%% usado", pct))})
 			if reset := api.ResetIn(b.bucket.ResetAt, time.Now()); reset != "" {
 				report.rows = append(report.rows, [2]string{"", sDim2.Render("Se reinicia " + reset)})
+			} else if b.bucket.ResetAt == "" && b.bucket.Percent == 0 {
+				report.rows = append(report.rows, [2]string{"", sDim2.Render("Empieza con tu próximo mensaje")})
 			}
 		}
 		return cmdDoneMsg{lines: []block{report}}

@@ -115,7 +115,16 @@ type Model struct {
 	// [IMG#n] apunta a la n-ésima.
 	chips []imageChip
 
-	remote        *remoteHost
+	remote     *remoteHost
+	compacting *compactState
+	// answerEntry es la última respuesta del turno; anchorTop, la que el
+	// siguiente fotograma debe dejar arriba de la ventana.
+	answerEntry, anchorTop *entry
+	// moreY es la fila del botón «↓ n líneas más» (-1 si no está).
+	moreY   int
+	moreBtn span
+	// remoteOrigin: el turno que arranca lo pidió el móvil o la web.
+	remoteOrigin  bool
 	login         *loginView
 	picker        *picker
 	prompt        *promptState
@@ -144,6 +153,23 @@ type Model struct {
 	online        bool
 	branch        string
 	notice        string
+
+	// capturing recoge lo que imprimen los comandos de ajuste o consulta para
+	// mostrarlo en el pie o en un panel; asyncQuiet es el título del panel de
+	// un comando así que sigue en segundo plano.
+	capturing  *[]block
+	asyncQuiet string
+	toastText  string
+	toastGen   int
+	header     *entry
+	headerKey  string
+	repoRoot   string
+	quota      *quotaState
+	footProcs  span
+	footEffort span
+	barBranch  span
+	// hoverX y hoverY son dónde está el ratón: las zonas clicables se iluminan.
+	hoverX, hoverY int
 
 	md      *glamour.TermRenderer
 	mdWidth int
@@ -180,6 +206,9 @@ func New(c *chat.Chat, opts Options) *Model {
 		copyText: copyToClipboard,
 		online:   !opts.Offline,
 		send:     func(tea.Msg) {},
+		hoverX:   -1,
+		hoverY:   -1,
+		moreY:    -1,
 	}
 	m.log.resize(m.width)
 	m.histPos = len(m.hist.entries)
@@ -205,6 +234,14 @@ func (m *Model) printDynamic(render func(width int) string) *entry { return m.ad
 // add añade un bloque. Si el usuario había subido con el scroll, la vista se
 // queda donde estaba en vez de saltar al final.
 func (m *Model) add(b block) *entry {
+	if m.capturing != nil {
+		*m.capturing = append(*m.capturing, b)
+		e := &entry{b: b, detached: true, text: b.render(max(20, m.width-4), true)}
+		if m.observe != nil {
+			m.observe(e.text)
+		}
+		return e
+	}
 	e := m.log.add(b)
 	if m.scroll > 0 {
 		m.scroll += len(e.rows)
@@ -219,6 +256,9 @@ func (m *Model) add(b block) *entry {
 // el plan que avanza…). Si queda por debajo de la ventana, el scroll se
 // compensa para que lo que se está leyendo no se mueva.
 func (m *Model) refresh(e *entry) {
+	if e.detached {
+		return
+	}
 	total := m.log.total()
 	start, delta := m.log.refresh(e)
 	if delta != 0 {
@@ -257,6 +297,7 @@ func (m *Model) refreshContext() {
 	m.ctxTokens, m.ctxPct = m.chat.ContextUsage()
 	m.sessionTokens = m.chat.SessionTokens
 	m.input.Placeholder = placeholderFor(m.chat)
+	m.syncHeader()
 }
 
 // modeName es el modo que se muestra: plan es un modo del agente.
@@ -268,7 +309,7 @@ func (m *Model) modeName() string {
 }
 
 func (m *Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd()}
+	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd(), m.fetchQuota()}
 	if m.login != nil {
 		cmds = append(cmds, m.startTick())
 	}

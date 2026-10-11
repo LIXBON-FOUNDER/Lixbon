@@ -40,6 +40,9 @@ func (m *Model) startTick() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyPressMsg); ok && (k.String() == "ctrl+v" || k.String() == "shift+insert") {
+		return m, pasteClipboard
+	}
 	if m.login != nil {
 		switch msg.(type) {
 		case tea.KeyPressMsg, tea.PasteMsg, loginStartedMsg, loginTokenMsg, loginKeyMsg:
@@ -93,6 +96,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
+		m.hoverX, m.hoverY = msg.X, msg.Y
 		if !m.pagerActive() {
 			m.onMouseDrag(msg)
 		}
@@ -107,8 +111,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handlePagerKey(msg)
 			return m, nil
 		}
-		if m.remote != nil {
-			return m, m.handleRemoteKey(msg)
+		if m.remoteEndKey(msg) {
+			return m, nil
 		}
 		return m.handleKey(msg)
 
@@ -127,7 +131,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			*m.secret, cmd = m.secret.Update(msg)
 			return m, cmd
 		}
-		if m.picker != nil || m.remote != nil {
+		if m.picker != nil {
 			return m, nil
 		}
 		if path, ok := droppedImage(msg.Content, m.chat.Workspace); ok {
@@ -136,6 +140,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.input.InsertString(strings.ReplaceAll(strings.ReplaceAll(msg.Content, "\r\n", "\n"), "\r", "\n"))
 		m.refreshMenu()
+		return m, nil
+
+	case tea.ClipboardMsg:
+		return m.Update(tea.PasteMsg{Content: msg.Content})
+
+	case clipboardImageMsg:
+		if m.picker == nil && m.secret == nil {
+			m.pasteImage()
+		}
 		return m, nil
 
 	case tickMsg:
@@ -185,6 +198,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case compactProgressMsg:
+		if m.compacting != nil {
+			m.compacting.written = msg.written
+		}
+		return m, nil
+
+	case toastExpiredMsg:
+		if msg.gen == m.toastGen {
+			m.toastText = ""
+		}
+		return m, nil
+
+	case quotaMsg:
+		m.applyQuota(msg)
+		return m, nil
+
 	case titleMsg:
 		m.notice = ""
 		return m, nil
@@ -195,6 +224,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case approvalMsg:
 		return m, m.openApproval(msg)
+
+	case approvalClosedMsg:
+		if m.picker != nil && m.picker.token == any(msg.reply) {
+			m.picker = nil
+			m.setToolState(toolRunning)
+		}
+		return m, nil
 
 	case askMsg:
 		return m, m.openAsk(msg)
@@ -226,12 +262,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.picker != nil && m.picker.content != nil && !infoKeys[msg.String()] {
+		m.picker = nil
+	}
 	if m.picker != nil {
-		cmd, closed := m.picker.key(msg)
-		if closed {
-			m.picker = nil
-		}
-		return m, cmd
+		return m, m.pickerDo(func(p *picker) (tea.Cmd, bool) { return p.key(msg) })
 	}
 	if m.secret != nil {
 		return m, m.handleSecretKey(msg)
@@ -387,7 +422,7 @@ func (m *Model) onEnter() tea.Cmd {
 	text := strings.TrimRight(m.input.Value(), " \t\r\n")
 	m.input.Reset()
 	m.refreshMenu()
-	m.notice = ""
+	m.notice, m.toastText = "", ""
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -446,7 +481,7 @@ func (m *Model) hideMenuWhileBrowsing() {
 // ── menú de comandos ─────────────────────────────────────────────────────
 
 func (m *Model) allSpecs() []Spec {
-	specs := order(slices.Concat(Specs, GoSpecs))
+	specs := slices.DeleteFunc(order(slices.Concat(Specs, GoSpecs)), func(s Spec) bool { return !m.available(s.Name) })
 	for name, c := range m.chat.Custom {
 		specs = append(specs, Spec{Name: name, Desc: c.Description, Group: "propios"})
 	}

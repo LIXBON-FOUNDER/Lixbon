@@ -44,4 +44,23 @@ func gitBranch(dir string) string {
 	return ""
 }
 
-func (m *Model) refreshGit() { m.branch = gitBranch(m.chat.Workspace) }
+func (m *Model) refreshGit() {
+	m.branch = gitBranch(m.chat.Workspace)
+	m.repoRoot = gitRoot(m.chat.Workspace)
+	m.syncHeader()
+}
+
+// gitRoot es la carpeta del repositorio que contiene dir ("" si no hay).
+func gitRoot(dir string) string {
+	for d := dir; d != ""; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
+		}
+		d = parent
+	}
+	return ""
+}

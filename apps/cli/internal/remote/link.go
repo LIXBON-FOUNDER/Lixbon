@@ -478,6 +478,8 @@ func (l *Link) RequestApproval(ctx context.Context, tool, summary, risk string) 
 		l.Emit("approval_resolved", map[string]any{"id": id, "decision": decision})
 		return decision == "allow"
 	case <-ctx.Done():
+		// La respondió la terminal: el móvil retira la pregunta.
+		l.Emit("approval_resolved", map[string]any{"id": id})
 		return false
 	case <-l.done:
 		return false

@@ -14,13 +14,21 @@ const markdownMargin = 0
 // El registro de chroma es un mapa sin lock: los estilos se registran una
 // sola vez, antes de que nada resalte código.
 func init() {
-	chromastyles.Register(chromaStyle("lixbon-dark", darkPalette))
-	chromastyles.Register(chromaStyle("lixbon-light", lightPalette))
+	chromastyles.Register(chromaStyle("lixbon-dark", darkPalette, false))
+	chromastyles.Register(chromaStyle("lixbon-light", lightPalette, false))
+	chromastyles.Register(chromaStyle("lixbon-dark-cmd", darkPalette, true))
+	chromastyles.Register(chromaStyle("lixbon-light-cmd", lightPalette, true))
 }
 
-func chromaStyle(name string, p palette) *chroma.Style {
+// chromaStyle: con cmd, el texto de un comando de shell va en negrita y en el
+// color más claro, para que destaque sobre los comentarios.
+func chromaStyle(name string, p palette, cmd bool) *chroma.Style {
+	text := p.body
+	if cmd {
+		text = "bold " + p.ink
+	}
 	return chroma.MustNewStyle(name, chroma.StyleEntries{
-		chroma.Text:                p.body,
+		chroma.Text:                text,
 		chroma.Error:               p.err,
 		chroma.Comment:             "italic " + p.com,
 		chroma.CommentPreproc:      p.com,
@@ -29,7 +37,7 @@ func chromaStyle(name string, p palette) *chroma.Style {
 		chroma.KeywordConstant:     p.num,
 		chroma.Operator:            p.soft,
 		chroma.Punctuation:         p.soft,
-		chroma.Name:                p.body,
+		chroma.Name:                text,
 		chroma.NameBuiltin:         p.fn,
 		chroma.NameFunction:        p.fn,
 		chroma.NameClass:           p.ty,
@@ -100,7 +108,7 @@ func markdownStyle(p palette, margin uint) ansi.StyleConfig {
 		Image:     ansi.StylePrimitive{Color: str(p.info), Underline: yes()},
 		ImageText: ansi.StylePrimitive{Color: str(p.muted), Format: "imagen: {{.text}} " + glyphs.arrow},
 
-		Code: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: str(p.code)}},
+		Code: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: str(p.code), BackgroundColor: str(p.surf2), Prefix: " ", Suffix: " "}},
 		CodeBlock: ansi.StyleCodeBlock{
 			StyleBlock: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: str(p.body)}, Margin: num(2)},
 			Theme:      chromaTheme(p),

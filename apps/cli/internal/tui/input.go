@@ -37,7 +37,9 @@ func panel(rows []panelRow, width int, border, title string) []string {
 	}
 	out := []string{top}
 	for _, r := range rows {
-		text := ansi.Truncate(r.text, inner, "")
+		// Un \r (salida de un programa de Windows) devolvería el cursor al
+		// borde y pisaría la fila.
+		text := ansi.Truncate(strings.ReplaceAll(r.text, "\r", ""), inner, "")
 		fill := strings.Repeat(" ", max(0, inner-ansi.StringWidth(text)))
 		if r.bg != "" {
 			bg := lipgloss.NewStyle().Background(lipgloss.Color(r.bg))
@@ -57,6 +59,7 @@ func withBackground(text, bg string) string {
 	if open == "" {
 		return text
 	}
+	text = strings.ReplaceAll(text, "\x1b[0m", "\x1b[m")
 	return open + strings.ReplaceAll(text, "\x1b[m", "\x1b[m"+open) + "\x1b[m"
 }
 
@@ -75,13 +78,11 @@ func keyHints(pairs ...[2]string) string {
 // responde a una pregunta), chips de imagen arriba y una pista a la derecha.
 func (m *Model) inputBox() []string {
 	width := max(4, m.width)
-	if m.remote != nil {
-		row := sAccent.Render(glyphDot) + " " + sBold.Render("Control remoto activo") +
-			sDim.Render(" "+glyphSep+" ctrl+c termina y devuelve el control a esta terminal")
-		return panel([]panelRow{{text: row}}, width, pal.acc, "")
-	}
 	inner := max(1, width-4)
 	border, title := modeBorder(m.modeName()), ""
+	if m.remote != nil {
+		border, title = pal.acc, "Remote activo "+glyphSep+" ctrl+c con la caja vacía lo termina"
+	}
 	if m.prompt != nil {
 		border, title = pal.warn, m.prompt.label
 	}

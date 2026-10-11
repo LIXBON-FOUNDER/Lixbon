@@ -279,7 +279,7 @@ func TestAskOnceSavesTheSessionWithTokensAndProjectContext(t *testing.T) {
 	if code := h.run("chat", "--once", "hola"); code != 0 {
 		t.Fatalf("code %d: %s", code, h.errOut)
 	}
-	msgs := bodyMessages(g.chatBody)
+	msgs := bodyMessages(g.chatBody)[1:]
 	if msgs[0]["role"] != "system" || msgs[0]["content"] != "Contexto del proyecto (LIXBON.md):\nReglas del proyecto" {
 		t.Fatalf("mensajes: %v", msgs)
 	}
