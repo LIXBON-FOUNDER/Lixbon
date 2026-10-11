@@ -4,6 +4,12 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.6.1
+- Control remoto: desde el móvil puedes mandar fotos y documentos con el mensaje y citar archivos del proyecto; el modelo los recibe como si los adjuntaras en la terminal.
+- Las ediciones del agente se ven en el móvil con su diff (archivo y líneas añadidas y borradas), también cuando te pide aprobarlas.
+- Los selectores que abre el CLI se responden también desde el móvil, y desaparecen de allí en cuanto los cierras en la terminal. Desde el móvil también se puede cambiar el modelo de la sesión.
+- Los avisos y los resúmenes largos de las herramientas llegan completos al móvil.
+
 ## 2.6.0
 - Iniciar sesión con el navegador ya no crea una API key en tu cuenta: abre una sesión de este equipo que se renueva sola. La ves (y la puedes cerrar) en lixbon.com → Cuenta → Sesiones y dispositivos, con el nombre del equipo.
 - `/logout` y `lixbon auth logout` cierran la sesión también en el servidor, no solo en este equipo.
