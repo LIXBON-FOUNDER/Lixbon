@@ -64,3 +64,15 @@ def test_comando_invalido_devuelve_ack_con_error(client):
         phone.send_json({"op": "cmd", "rid": "r2", "command": {"type": "prompt", "text": "x"}})
         ack = until(phone, "ack")
         assert ack["ok"] is False and ack["status"] == 409
+
+
+def test_con_eventos_en_el_buffer_no_se_pide_un_snapshot_que_los_borre(client):
+    with client.websocket_connect("/api/remote/sessions/s1/host?last_cmd=0") as host:
+        host.send_json({"op": "auth", "token": "lxb_test"})
+        until(host, "channel")
+        host.send_json({"op": "events", "rid": "e1", "events": [{"type": "tool_use", "id": "t1", "tool": "run_command"}]})
+        until(host, "ack")
+        with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer lxb_test"}) as phone:
+            until(phone, "channel_status")
+            assert until(phone, "tool_use")["id"] == "t1"
+        assert remote.hub.get("s1").cmd_seq == 0

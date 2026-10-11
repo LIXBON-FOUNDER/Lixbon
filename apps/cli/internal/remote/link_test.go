@@ -125,7 +125,7 @@ func started(t *testing.T) (*Link, *fakeRelay) {
 	relay := newRelay()
 	link := NewLink(relay, "cli", "proyecto", "mi-pc")
 	link.Snapshot = func() []map[string]any { return []map[string]any{{"role": "user", "content": "hola"}} }
-	if err := link.Start(context.Background(), "agent", "qwen"); err != nil {
+	if err := link.Start(context.Background(), map[string]any{"mode": "agent", "model": "qwen", "commands": []map[string]string{{"name": "help"}}}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { link.Stop(false) })
@@ -140,7 +140,7 @@ func TestStartPublishesHelloWithTheCommandCatalog(t *testing.T) {
 	if hello["source"] != "cli" || hello["title"] != "proyecto" || hello["machine"] != "mi-pc" || hello["mode"] != "agent" || hello["model"] != "qwen" {
 		t.Fatalf("hello: %v", hello)
 	}
-	if cmds, _ := hello["commands"].([]map[string]string); len(cmds) != len(Commands) || cmds[0]["name"] != "help" {
+	if cmds, _ := hello["commands"].([]map[string]string); len(cmds) != 1 || cmds[0]["name"] != "help" {
 		t.Fatalf("comandos: %v", hello["commands"])
 	}
 	if link.ShareURL() != "https://lixbon.test/remote/tok" || link.QR(context.Background()) != "▀▄ QR" {
@@ -217,7 +217,7 @@ func TestApprovalRoundTrip(t *testing.T) {
 	link, relay := started(t)
 	result := make(chan bool, 1)
 	go func() {
-		result <- link.RequestApproval(context.Background(), "edit_file", "app.py (reemplaza 3 chars)", "edit")
+		result <- link.RequestApproval(context.Background(), map[string]any{"tool": "edit_file", "summary": "app.py (reemplaza 3 chars)", "risk": "edit"})
 	}()
 
 	eventually(t, "approval_request", func() bool { return relay.find("approval_request") != nil })
@@ -240,7 +240,7 @@ func TestApprovalDeniesOnWrongIDCancelAndEnd(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan bool, 1)
-	go func() { result <- link.RequestApproval(ctx, "run_command", "ls", "command") }()
+	go func() { result <- link.RequestApproval(ctx, map[string]any{"tool": "run_command", "summary": "ls", "risk": "command"}) }()
 	eventually(t, "approval_request", func() bool { return relay.find("approval_request") != nil })
 	relay.send(t, `data: {"type":"approve","id":"otro","decision":"allow"}`)
 	select {
@@ -248,16 +248,45 @@ func TestApprovalDeniesOnWrongIDCancelAndEnd(t *testing.T) {
 		t.Fatal("una aprobación con otro id no debe resolver la petición")
 	case <-time.After(50 * time.Millisecond):
 	}
+	if cmd := <-link.Inbox; cmd.Type != "choose" || cmd.ID != "otro" || cmd.Value != "allow" {
+		t.Fatalf("un approve sin aprobación pendiente es la respuesta a un selector: %+v", cmd)
+	}
 	cancel()
 	if <-result {
 		t.Fatal("un turno cancelado equivale a denegar")
 	}
 
-	go func() { result <- link.RequestApproval(context.Background(), "run_command", "rm", "command") }()
+	go func() { result <- link.RequestApproval(context.Background(), map[string]any{"tool": "run_command", "summary": "rm", "risk": "command"}) }()
 	time.Sleep(20 * time.Millisecond)
 	relay.send(t, `data: {"type":"bye"}`)
 	if <-result {
 		t.Fatal("al terminar la sesión se deniega")
+	}
+}
+
+func TestPromptsCarryAttachmentsMentionsAndFileSearches(t *testing.T) {
+	link, relay := started(t)
+	relay.send(t, `data: {"type":"prompt","text":"mira","attachments":[{"kind":"image","name":"foto.jpg","base64":"QUJD","mime":"image/jpeg"},{"kind":"doc","name":"a.txt","text":"hola"}],"mentions":[{"path":"/w/main.go","name":"main.go","rel":"main.go"}]}`)
+	relay.send(t, `data: {"type":"files","query":"mai"}`)
+	relay.send(t, `data: {"type":"config","model":"qwen3"}`)
+	cmd := <-link.Inbox
+	if len(cmd.Attachments) != 2 || cmd.Attachments[0].Base64 != "QUJD" || cmd.Attachments[1].Text != "hola" || cmd.Mentions[0].Rel != "main.go" {
+		t.Fatalf("prompt: %+v", cmd)
+	}
+	if cmd := <-link.Inbox; cmd.Type != "files" || cmd.Query != "mai" {
+		t.Fatalf("files: %+v", cmd)
+	}
+	if cmd := <-link.Inbox; cmd.Type != "config" || cmd.Model != "qwen3" {
+		t.Fatalf("config: %+v", cmd)
+	}
+}
+
+func TestALargePhotoFitsInOneCommandLine(t *testing.T) {
+	link, relay := started(t)
+	photo := strings.Repeat("A", 3<<20)
+	relay.send(t, `data: {"type":"prompt","text":"foto","attachments":[{"kind":"image","name":"f.jpg","base64":"`+photo+`"}]}`)
+	if cmd := <-link.Inbox; len(cmd.Attachments) != 1 || len(cmd.Attachments[0].Base64) != len(photo) {
+		t.Fatalf("la foto llegó cortada: %d adjuntos", len(cmd.Attachments))
 	}
 }
 
@@ -352,7 +381,7 @@ func TestStopEndsTheSessionAndLeavesNoGoroutines(t *testing.T) {
 	before := runtime.NumGoroutine()
 	relay := newRelay()
 	link := NewLink(relay, "cli", "p", "m")
-	if err := link.Start(context.Background(), "ask", "qwen"); err != nil {
+	if err := link.Start(context.Background(), map[string]any{"mode": "ask", "model": "qwen"}); err != nil {
 		t.Fatal(err)
 	}
 	<-relay.connect
@@ -376,7 +405,7 @@ func TestStopWithoutEndingTheSessionDoesNotTouchTheServer(t *testing.T) {
 	fast(t)
 	relay := newRelay()
 	link := NewLink(relay, "cli", "p", "m")
-	link.Start(context.Background(), "ask", "qwen")
+	link.Start(context.Background(), map[string]any{"mode": "ask", "model": "qwen"})
 	<-relay.connect
 	link.Stop(false)
 	relay.mu.Lock()

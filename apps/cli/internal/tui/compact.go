@@ -51,9 +51,8 @@ func (m *Model) cmdCompact() tea.Cmd {
 		done := compactBlock{summary: summary, before: before, after: after, secs: secs}
 		return cmdDoneMsg{lines: []block{done}, apply: func(m *Model) {
 			m.compacting = nil
-			if m.remote != nil {
-				m.refreshRemoteSnapshot()
-				m.remote.link.Emit("notice", map[string]any{"text": done.headline()})
+			if m.remote != nil && !m.remoteOrigin {
+				m.remote.notice(done.headline())
 			}
 		}}
 	})

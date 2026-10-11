@@ -85,15 +85,22 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	m.notice = ""
 	m.openTool, m.readGroup, m.todoEntry = nil, nil, nil
 	m.answerEntry = nil
+	var chips []imageChip
+	if m.remote != nil && m.remoteOrigin {
+		chips, m.remote.next.chips = m.remote.next.chips, nil
+	} else if shown != "" {
+		chips = m.sentChips(shown)
+	}
 	if shown != "" {
 		m.gap()
-		m.add(userBlock{text: shown, chips: m.sentChips(shown)})
+		m.add(userBlock{text: shown, chips: chips})
 		m.print("")
 	}
 	var sink chat.Sink = &uiSink{send: m.send, turn: id}
 	if m.remote != nil {
-		sink = remoteSink{Sink: sink, link: m.remote.link}
-		m.remoteTurnStarted(prompt)
+		rs := &remoteSink{Sink: sink, host: m.remote, agent: m.chat.Mode == chat.ModeAgent}
+		m.remote.sink, sink = rs, rs
+		m.remoteTurnStarted(prompt, chips)
 	}
 	c := m.chat
 	send := m.send

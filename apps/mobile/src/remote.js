@@ -177,7 +177,8 @@ export function keepStreamAlive(connect, { onResume } = {}) {
 
 export const initialRemoteState = {
   items: [],
-  approvals: [], // [{ id, tool, summary, risk }]
+  approvals: [], // [{ id, tool, summary, risk, path, adds, dels, diff }]
+  choices: [], // selectores del host: [{ id, title, body, options: [{ label, value, description, badge }] }]
   agentState: 'idle', // idle | thinking
   activity: null, // 'compacting' mientras Claude Code compacta
   hostConnected: false,
@@ -205,8 +206,9 @@ function mapSnapshotMessages(messages) {
     if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
-      items.push(withKey({ kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: !!m.pending }));
+      items.push(withKey({ kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: !!m.pending, ...changeOf(m) }));
     } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
+    else if (m.role === 'notice') items.push(withKey({ kind: 'notice', text: m.content || '' }));
     else if (m.role === 'command') items.push(commandItem(m));
   }
   return items;
@@ -219,7 +221,18 @@ function commandItem(ev) {
     args: ev.args || '',
     rows: Array.isArray(ev.rows) ? ev.rows : [],
     text: ev.text || '',
+    diff: !!ev.diff,
   });
+}
+
+// Una edición del agente: ruta, líneas añadidas/borradas y el diff con +/-.
+function changeOf(ev) {
+  const out = {};
+  if (typeof ev.diff === 'string' && ev.diff) out.diff = ev.diff;
+  if (typeof ev.adds === 'number') out.adds = ev.adds;
+  if (typeof ev.dels === 'number') out.dels = ev.dels;
+  if (typeof ev.path === 'string' && ev.path) out.path = ev.path;
+  return out;
 }
 
 function closeOpenAssistant(items, finalText, keepIfEmpty = false) {
@@ -331,7 +344,7 @@ export function remoteReducer(state, ev) {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
           kind: 'tool', id: ev.id || '', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
-          readonly: !!ev.readonly, running: true, result: '', error: false,
+          readonly: !!ev.readonly, running: true, result: '', error: false, ...changeOf(ev),
         })],
       };
     case 'tool_result': {
@@ -339,7 +352,7 @@ export function remoteReducer(state, ev) {
       const idx = ev.id
         ? items.findLastIndex((it) => it.kind === 'tool' && it.id === ev.id)
         : items.findLastIndex((it) => it.kind === 'tool' && it.running && it.tool === ev.tool);
-      const patch = { running: false, result: ev.result || '', error: !!ev.error };
+      const patch = { running: false, result: ev.result || '', error: !!ev.error, ...changeOf(ev) };
       if (idx === -1) {
         items.push(withKey({ kind: 'tool', tool: ev.tool || 'tool', summary: '', ...patch }));
       } else {
@@ -351,9 +364,17 @@ export function remoteReducer(state, ev) {
       return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle', activity: ev.state === 'thinking' ? ev.activity || null : null };
     case 'approval_request':
       if (s.approvals.some((a) => a.id === ev.id)) return s;
-      return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit' }] };
+      return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit', ...changeOf(ev) }] };
     case 'approval_resolved':
       return { ...s, approvals: s.approvals.filter((a) => a.id !== ev.id) };
+    case 'choice_request':
+      if (s.choices.some((x) => x.id === ev.id)) return s;
+      return {
+        ...s,
+        choices: [...s.choices, { id: ev.id, title: ev.title || 'Elige una opción', body: ev.body || '', options: Array.isArray(ev.options) ? ev.options : [] }],
+      };
+    case 'choice_resolved':
+      return { ...s, choices: s.choices.filter((x) => x.id !== ev.id) };
     case 'notice':
       // Respuesta del host a un slash-command: no es del modelo, así que se
       // pinta como una nota del sistema y no como una burbuja del asistente.
@@ -366,7 +387,7 @@ export function remoteReducer(state, ev) {
       return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':
     case 'session_ended':
-      return { ...s, ended: true, hostConnected: false, approvals: [], background: [] };
+      return { ...s, ended: true, hostConnected: false, approvals: [], choices: [], background: [] };
     default:
       return s;
   }

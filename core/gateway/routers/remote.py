@@ -365,8 +365,9 @@ async def _controller_first(ch, sess: dict[str, Any], from_seq: int) -> list[dic
     if oldest_buffered is not None:
         stored = [ev for ev in stored if ev.get("seq", 0) < oldest_buffered]
     # Si el controller llega sin nada que mostrar, el host reemite un snapshot
-    # completo (solo tiene sentido si sigue conectado).
-    if from_seq == 0 and ch.host_connected and not stored:
+    # completo (solo tiene sentido si sigue conectado). Con algo en el buffer
+    # no: el snapshot llegaría detrás y sustituiría lo ya pintado.
+    if from_seq == 0 and ch.host_connected and not stored and not buffered:
         hub.push_command(ch, {"type": "request_snapshot", "from_seq": 0})
     return [status_ev] + stored + buffered
 

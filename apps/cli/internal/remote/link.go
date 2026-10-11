@@ -33,15 +33,17 @@ var (
 )
 
 const (
-	maxBatchEvents   = 200
-	closeTimeout     = 5 * time.Second
-	maxCommandLine   = 1 << 20
+	maxBatchEvents = 200
+	closeTimeout   = 5 * time.Second
+	// Un prompt con fotos llega en una sola línea SSE: el gateway admite hasta
+	// 8 MB de imágenes en base64 más los documentos.
+	maxCommandLine   = 16 << 20
 	commandQueueSize = 64
 
 	// MaxQueuedBytes acota lo que se acumula si el servidor no responde.
 	MaxQueuedBytes = 1 << 20
 	// ResultChars es el tamaño máximo del resumen de un resultado de herramienta.
-	ResultChars = 600
+	ResultChars = 2000
 )
 
 // Relay es el servidor al que habla el host; *api.Client lo implementa.
@@ -53,30 +55,37 @@ type Relay interface {
 	RemoteCommands(ctx context.Context, sessionID string, lastCmd int64) (io.ReadCloser, error)
 }
 
-// CommandSpec es un comando que el host acepta desde la app, publicado en el
-// `hello` para que el móvil pueda ofrecerlo. Solo entran los que se resuelven
-// con un argumento: en remoto no hay teclado para un selector.
-type CommandSpec struct{ Name, Args, Description string }
-
-var Commands = []CommandSpec{
-	{"help", "", "Ver los comandos disponibles aquí"},
-	{"new", "", "Empezar una conversación nueva"},
-	{"model", "[nombre]", "Ver o cambiar el modelo"},
-	{"mode", "[ask|agent|delegate]", "Ver o cambiar el modo de trabajo"},
-	{"approve", "[on|off]", "Auto-aprobar herramientas del agente"},
-	{"web", "[on|off]", "Búsqueda web durante las respuestas"},
-	{"status", "", "Estado de la sesión y del host"},
-	{"cost", "", "Tokens y contexto consumidos"},
-	{"workspace", "", "Carpeta de trabajo del agente"},
+// Command es lo que el móvil o la web le pide al host. Las aprobaciones y los
+// snapshots los resuelve el propio enlace; una respuesta a un selector
+// (choose) llega como un approve cuyo id no es de ninguna aprobación.
+type Command struct {
+	Type        string       `json:"type"`
+	Text        string       `json:"text"`
+	Reason      string       `json:"reason"`
+	Attachments []Attachment `json:"attachments"`
+	Mentions    []Mention    `json:"mentions"`
+	Query       string       `json:"query"`
+	Model       string       `json:"model"`
+	Effort      string       `json:"effort"`
+	ID          string       `json:"id"`
+	Value       string       `json:"value"`
 }
 
-// Command es lo que el móvil o la web le pide al host: un mensaje, cancelar el
-// turno o terminar. Las aprobaciones y los snapshots los resuelve el propio
-// enlace.
-type Command struct {
-	Type   string `json:"type"`
+// Attachment es un adjunto de un prompt: una imagen en base64 o un documento
+// que la app ya convirtió a texto.
+type Attachment struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Base64 string `json:"base64"`
+	Mime   string `json:"mime"`
 	Text   string `json:"text"`
-	Reason string `json:"reason"`
+}
+
+// Mention es un archivo del workspace citado con @ desde la app.
+type Mention struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	Rel  string `json:"rel"`
 }
 
 type Link struct {
@@ -86,7 +95,8 @@ type Link struct {
 	Machine string
 	// Snapshot devuelve el historial renderizable para un controller que se une.
 	Snapshot func() []map[string]any
-	// Inbox entrega prompt, interrupt y bye. Se cierra al terminar el enlace.
+	// Inbox entrega prompt, interrupt, files, config, choose y bye. Se cierra
+	// al terminar el enlace.
 	Inbox <-chan Command
 
 	inbox chan Command
@@ -135,8 +145,9 @@ func (l *Link) SessionID() string { return l.sessionID }
 func (l *Link) Done() <-chan struct{} { return l.done }
 func (l *Link) Ended() bool           { return l.ended.Load() }
 
-// Start crea la sesión en el gateway y arranca el lector y el vaciado de eventos.
-func (l *Link) Start(ctx context.Context, mode, model string) error {
+// Start crea la sesión en el gateway, publica el hello (qué comandos acepta el
+// host y qué puede recibir) y arranca el lector y el vaciado de eventos.
+func (l *Link) Start(ctx context.Context, hello map[string]any) error {
 	session, err := l.Relay.RemoteCreate(ctx, l.Source, l.Title, l.Machine)
 	if err != nil {
 		return err
@@ -144,14 +155,11 @@ func (l *Link) Start(ctx context.Context, mode, model string) error {
 	l.sessionID, l.shareURL = session.ID, session.ShareURL
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 
-	commands := make([]map[string]string, len(Commands))
-	for i, c := range Commands {
-		commands[i] = map[string]string{"name": c.Name, "args": c.Args, "description": c.Description}
+	fields := map[string]any{"source": l.Source, "title": l.Title, "machine": l.Machine}
+	for k, v := range hello {
+		fields[k] = v
 	}
-	l.Emit("hello", map[string]any{
-		"source": l.Source, "title": l.Title, "machine": l.Machine,
-		"mode": mode, "model": model, "commands": commands,
-	})
+	l.Emit("hello", fields)
 	l.wg.Add(2)
 	go l.readCommands()
 	go l.flushLoop()
@@ -400,7 +408,6 @@ func (l *Link) consume(body io.ReadCloser) {
 		}
 		var raw struct {
 			Command
-			ID       string `json:"id"`
 			Decision string `json:"decision"`
 			CmdSeq   *int64 `json:"cmd_seq"`
 		}
@@ -427,20 +434,24 @@ func (l *Link) consume(body io.ReadCloser) {
 
 func (l *Link) dispatch(cmd Command, id, decision string) {
 	switch cmd.Type {
-	case "prompt", "interrupt":
+	case "prompt", "interrupt", "files", "config":
 		l.deliver(cmd)
 	case "approve":
 		l.mu.Lock()
 		waiter := l.approvals[id]
 		l.mu.Unlock()
-		if waiter != nil {
-			if decision == "" {
-				decision = "deny"
-			}
-			select {
-			case waiter <- decision:
-			default:
-			}
+		if waiter == nil {
+			// El gateway solo releva approve: los selectores viajan con él para
+			// no depender de un gateway que conozca otro tipo de comando.
+			l.deliver(Command{Type: "choose", ID: id, Value: decision})
+			return
+		}
+		if decision == "" {
+			decision = "deny"
+		}
+		select {
+		case waiter <- decision:
+		default:
 		}
 	case "request_snapshot":
 		l.EmitSnapshot()
@@ -452,7 +463,8 @@ func (l *Link) dispatch(cmd Command, id, decision string) {
 
 // ── aprobaciones remotas ─────────────────────────────────────────────────
 
-func newID() string {
+// NewID es un identificador corto para aprobaciones, selectores y herramientas.
+func NewID() string {
 	b := make([]byte, 5)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
@@ -460,8 +472,8 @@ func newID() string {
 
 // RequestApproval emite approval_request y espera la decisión del móvil o la
 // web. Un contexto cancelado o el fin de la sesión equivalen a denegar.
-func (l *Link) RequestApproval(ctx context.Context, tool, summary, risk string) bool {
-	id := newID()
+func (l *Link) RequestApproval(ctx context.Context, request map[string]any) bool {
+	id := NewID()
 	waiter := make(chan string, 1)
 	l.mu.Lock()
 	l.approvals[id] = waiter
@@ -472,7 +484,11 @@ func (l *Link) RequestApproval(ctx context.Context, tool, summary, risk string) 
 		l.mu.Unlock()
 	}()
 
-	l.Emit("approval_request", map[string]any{"id": id, "tool": tool, "summary": summary, "risk": risk})
+	fields := map[string]any{"id": id}
+	for k, v := range request {
+		fields[k] = v
+	}
+	l.Emit("approval_request", fields)
 	select {
 	case decision := <-waiter:
 		l.Emit("approval_resolved", map[string]any{"id": id, "decision": decision})

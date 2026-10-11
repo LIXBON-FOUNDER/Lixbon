@@ -158,7 +158,7 @@ function RemoteSessionView({ session, onBack }) {
     if (transport !== 'ws') return undefined;
     const socket = openRemoteSocket({
       base: api.base,
-      token: auth.apiKey,
+      getToken: auth.currentToken,
       sessionId: session.id,
       getSeq: () => seqRef.current,
       onEvent: onRemoteEvent,
@@ -185,7 +185,7 @@ function RemoteSessionView({ session, onBack }) {
     const stop = keepStreamAlive(({ ok, retry }) =>
       openEventStream({
         base: api.base,
-        token: auth.apiKey,
+        token: auth.currentToken(),
         path: `/api/remote/sessions/${session.id}/stream?from_seq=${seqRef.current}`,
         onEvent: (ev) => {
           ok();
@@ -314,6 +314,9 @@ function RemoteSessionView({ session, onBack }) {
 
   const interrupt = () => sendCommand({ type: 'interrupt' });
   const approve = (id, decision) => sendCommand({ type: 'approve', id, decision });
+  // El gateway solo releva approve: la opción elegida de un selector del host
+  // viaja como su decisión ('' = cancelar).
+  const choose = (id, value) => sendCommand({ type: 'approve', id, decision: value });
 
   const endSession = async () => {
     const ok = await confirm({
@@ -426,6 +429,8 @@ function RemoteSessionView({ session, onBack }) {
       {state.approvals.map((a) => (
         <ApprovalCard key={a.id} approval={a} onDecide={approve} />
       ))}
+
+      {!state.ended && state.choices.slice(-1).map((x) => <ChoiceCard key={x.id} choice={x} onChoose={choose} />)}
 
       {!state.ended && (
         <RemoteComposer
@@ -630,8 +635,16 @@ function CommandCard({ item, agent }) {
           <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : `Ver ${item.rows.length - COMMAND_ROWS} más`}</Text>
         </Pressable>
       )}
-      {!!item.text && (
-        <Text selectable style={{ paddingHorizontal: 12, paddingTop: 8, fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>{item.text}</Text>
+      {!!item.text &&
+        (item.diff ? (
+          <DiffLines text={item.text} max={expanded ? 400 : 60} style={{ paddingHorizontal: 12, paddingTop: 8 }} />
+        ) : (
+          <Text selectable style={{ paddingHorizontal: 12, paddingTop: 8, fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>{item.text}</Text>
+        ))}
+      {item.diff && item.rows.length <= COMMAND_ROWS && item.text.split('\n').length > 60 && (
+        <Pressable onPress={() => setExpanded((v) => !v)} style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : 'Ver el diff completo'}</Text>
+        </Pressable>
       )}
       <View style={{ height: 12 }} />
     </FadeUp>
@@ -691,6 +704,52 @@ function groupItems(items) {
   return out;
 }
 
+// Líneas de un diff con su color: añadidas en verde, borradas en rojo.
+function DiffLines({ text, max = 80, style }) {
+  const c = useColors();
+  const lines = String(text || '').replace(/\n$/, '').split('\n');
+  const shown = lines.slice(0, max);
+  return (
+    <View style={style}>
+      {shown.map((line, i) => {
+        const add = line.startsWith('+');
+        const del = line.startsWith('-');
+        const gap = line.startsWith('@@');
+        return (
+          <Text
+            key={i}
+            selectable
+            numberOfLines={1}
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 11.5,
+              lineHeight: 17,
+              color: add ? c.good : del ? c.danger : gap ? c.inkFaint : c.inkMuted,
+              backgroundColor: del ? c.dangerSoft : 'transparent',
+            }}
+          >
+            {gap ? '⋯' : line || ' '}
+          </Text>
+        );
+      })}
+      {lines.length > shown.length && (
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint, marginTop: 4 }}>{`… ${lines.length - shown.length} líneas más`}</Text>
+      )}
+    </View>
+  );
+}
+
+function LineCounts({ it }) {
+  const c = useColors();
+  if (typeof it.adds !== 'number' && typeof it.dels !== 'number') return null;
+  return (
+    <View style={{ flexDirection: 'row', gap: 5 }}>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.good }}>{`+${it.adds || 0}`}</Text>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.danger }}>{`−${it.dels || 0}`}</Text>
+    </View>
+  );
+}
+
 function ToolLine({ it, waitingTool, trailing, onPress }) {
   const c = useColors();
   const waiting = it.running && waitingTool && it.tool === waitingTool;
@@ -712,6 +771,7 @@ function ToolLine({ it, waitingTool, trailing, onPress }) {
       <Text numberOfLines={1} style={{ flex: 1, fontFamily: mono ? FONTS.mono : FONTS.ui, fontSize: mono ? 12.5 : 13.5, color: c.inkBody }}>
         {target}
       </Text>
+      <LineCounts it={it} />
       {trailing}
     </Pressable>
   );
@@ -756,10 +816,13 @@ function ToolCard({ items, waitingTool }) {
             <ToolLine
               it={it}
               waitingTool={waitingTool}
-              onPress={it.result ? () => setShown(open ? null : it.key) : undefined}
-              trailing={!!it.result && <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} />}
+              onPress={it.result || it.diff ? () => setShown(open ? null : it.key) : undefined}
+              trailing={!!(it.result || it.diff) && <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} />}
             />
-            {open && (
+            {open && !!it.diff && (
+              <DiffLines text={it.diff} max={200} style={{ marginBottom: 6, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1 }} />
+            )}
+            {open && !!it.result && (
               <Text selectable style={{ marginBottom: 6, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody }}>
                 {it.result}
               </Text>
@@ -787,6 +850,15 @@ function ApprovalCard({ approval, onDecide }) {
       <Text selectable style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS_SM, backgroundColor: c.bg, fontFamily: FONTS.mono, fontSize: 13, color: c.ink }}>
         {approval.summary || approval.tool}
       </Text>
+      {!!approval.diff && (
+        <ScrollView style={{ maxHeight: 220, borderRadius: RADIUS_SM, backgroundColor: c.bg }} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 12, color: c.inkBody }}>{approval.path || ''}</Text>
+            <LineCounts it={approval} />
+          </View>
+          <DiffLines text={approval.diff} max={120} />
+        </ScrollView>
+      )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Pressable onPress={() => onDecide(approval.id, 'deny')} style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
           <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.onRaised }}>Rechazar</Text>
@@ -801,6 +873,41 @@ function ApprovalCard({ approval, onDecide }) {
 
 /// Hoja de comandos: accesos grandes (adjuntar, archivo, estado, terminar…) y
 /// los comandos "/" del host con un filtro.
+// Selector abierto en el host por un comando (/model, /branch, confirmar un
+// commit…): sigue abierto también allí y vale la primera respuesta.
+function ChoiceCard({ choice, onChoose }) {
+  const c = useColors();
+  return (
+    <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name="layers" size={16} color={c.accent} />
+        <Text numberOfLines={2} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{choice.title}</Text>
+      </View>
+      {!!choice.body && (
+        <Text selectable numberOfLines={8} style={{ fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>{choice.body}</Text>
+      )}
+      <ScrollView style={{ maxHeight: 280 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+        {choice.options.map((o) => (
+          <Pressable
+            key={o.value}
+            onPress={() => onChoose(choice.id, o.value)}
+            style={({ pressed }) => ({ paddingHorizontal: 12, paddingVertical: 10, marginBottom: 6, borderRadius: RADIUS_SM, backgroundColor: pressed ? c.surface3 : c.bg })}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{o.label || o.value}</Text>
+              {!!o.badge && <Text style={{ fontFamily: FONTS.ui, fontSize: 11.5, color: c.accent }}>{o.badge}</Text>}
+            </View>
+            {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted, marginTop: 2 }}>{o.description}</Text>}
+          </Pressable>
+        ))}
+      </ScrollView>
+      <Pressable onPress={() => onChoose(choice.id, '')} style={{ height: 36, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>Cancelar</Text>
+      </Pressable>
+    </FadeUp>
+  );
+}
+
 function CommandsSheet({ commands, tiles, onPick }) {
   const c = useColors();
   const [q, setQ] = useState('');

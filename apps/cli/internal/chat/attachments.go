@@ -45,6 +45,25 @@ func (c *Chat) takeStagedImages() []string {
 	return staged
 }
 
+// AttachNext adjunta imágenes al próximo mensaje sin tocar la cola de
+// marcadores de la caja de texto.
+func (c *Chat) AttachNext(paths ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextImages = append(c.nextImages, paths...)
+}
+
+// DropNextImages descarta las de AttachNext si su mensaje no llegó a salir.
+func (c *Chat) DropNextImages() { c.takeNextImages() }
+
+func (c *Chat) takeNextImages() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	next := c.nextImages
+	c.nextImages = nil
+	return next
+}
+
 // prepared es el mensaje de usuario con sus adjuntos resueltos.
 type prepared struct {
 	message history.Message
@@ -62,6 +81,7 @@ func (c *Chat) prepare(text string) (prepared, error) {
 	}
 	skipped := found.Errors
 	images := append(documents.ParseImageMarkers(found.Clean, c.takeStagedImages()), found.Images...)
+	images = append(images, c.takeNextImages()...)
 
 	var encoded []string
 	for _, path := range images {
