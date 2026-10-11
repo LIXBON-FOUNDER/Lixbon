@@ -122,7 +122,7 @@ func DeriveTitle(messages []history.Message) string {
 			continue
 		}
 		text := strings.Join(strings.FieldsFunc(m.Content, textutil.IsSpace), " ")
-		if text == "" || strings.HasPrefix(text, "TOOL_RESULT") {
+		if text == "" || strings.HasPrefix(text, "TOOL_RESULT") || history.IsSummary(m) {
 			continue
 		}
 		if utf8.RuneCountInString(text) > 60 {

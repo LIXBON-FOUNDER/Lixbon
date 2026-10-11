@@ -127,7 +127,7 @@ func TestLiveLabelFollowsTheTurn(t *testing.T) {
 		t.Errorf("razonando: %q", label())
 	}
 	h.m.live.content.WriteString("respuesta")
-	if label() != "Escribiendo…" {
+	if label() != "Escribiendo la respuesta…" {
 		t.Errorf("escribiendo: %q", label())
 	}
 	h.m.live = liveState{}

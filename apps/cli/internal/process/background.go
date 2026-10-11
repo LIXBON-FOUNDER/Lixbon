@@ -19,6 +19,7 @@ const (
 type Background struct {
 	ID      string
 	Command string
+	Started time.Time
 
 	cmd      *exec.Cmd
 	mu       sync.Mutex
@@ -84,7 +85,7 @@ func NewManager() *Manager {
 // solo Stop, StopAll o su propio final lo terminan.
 func (m *Manager) Start(dir, command string) (*Background, error) {
 	cmd := shellCommand(context.Background(), dir, command)
-	bg := &Background{Command: command, cmd: cmd, done: make(chan struct{})}
+	bg := &Background{Command: command, Started: time.Now(), cmd: cmd, done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = bg, bg
 	cmd.WaitDelay = waitDelay
 	if err := cmd.Start(); err != nil {
@@ -123,6 +124,7 @@ type Info struct {
 	ID      string
 	Command string
 	Alive   bool
+	Started time.Time
 }
 
 func (m *Manager) List() []Info {
@@ -131,7 +133,7 @@ func (m *Manager) List() []Info {
 	out := make([]Info, 0, len(m.order))
 	for _, id := range m.order {
 		bg := m.procs[id]
-		out = append(out, Info{bg.ID, bg.Command, bg.Alive()})
+		out = append(out, Info{bg.ID, bg.Command, bg.Alive(), bg.Started})
 	}
 	return out
 }

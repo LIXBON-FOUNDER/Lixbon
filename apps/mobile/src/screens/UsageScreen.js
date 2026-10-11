@@ -18,7 +18,7 @@ const pad = (n) => String(n).padStart(2, '0');
 // La sesión dura 4 h: para resets cercanos importa "en cuánto", para los
 // lejanos el día y la hora.
 function fmtReset(iso) {
-  if (typeof iso !== 'string') return '';
+  if (typeof iso !== 'string') return 'Empieza con tu próximo mensaje';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const mins = Math.round((d.getTime() - Date.now()) / 60000);

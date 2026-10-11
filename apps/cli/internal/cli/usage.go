@@ -30,6 +30,8 @@ func (a *App) printBucket(label string, bucket api.Bucket) {
 	fmt.Fprintf(a.Stdout, "  [%s]  %d%% usado\n", usageBar(pct), pct)
 	if reset := api.ResetIn(bucket.ResetAt, time.Now()); reset != "" {
 		fmt.Fprintf(a.Stdout, "  Se reinicia %s\n", reset)
+	} else if bucket.ResetAt == "" && bucket.Percent == 0 {
+		fmt.Fprintln(a.Stdout, "  Empieza con tu próximo mensaje")
 	}
 }
 

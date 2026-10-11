@@ -42,7 +42,10 @@ type (
 		reply    chan askReply
 	}
 	todoMsg struct{ items, previous []tools.TodoItem }
-	tickMsg struct{}
+	// approvalClosedMsg retira el panel de una aprobación que ya no espera
+	// (se respondió en el móvil o se canceló el turno).
+	approvalClosedMsg struct{ reply chan agent.Decision }
+	tickMsg           struct{}
 )
 
 type askReply struct {
@@ -71,6 +74,7 @@ func (a *uiApprover) Approve(ctx context.Context, req agent.Approval) (agent.Dec
 	case d := <-reply:
 		return d, nil
 	case <-ctx.Done():
+		a.send(approvalClosedMsg{reply})
 		return agent.Deny, ctx.Err()
 	}
 }

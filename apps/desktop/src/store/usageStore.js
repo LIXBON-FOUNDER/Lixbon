@@ -21,7 +21,8 @@ export const useUsageStore = create((set, get) => ({
 }));
 
 export function resetLabel(iso) {
-  if (!iso) return '';
+  // Sin reset_at la sesión aún no ha empezado: el reloj arranca con el primer mensaje.
+  if (!iso) return 'empieza con tu próximo mensaje';
   const d = new Date(iso);
   const mins = Math.round((d.getTime() - Date.now()) / 60000);
   if (mins <= 0) return 'se reinicia en breve';

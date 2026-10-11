@@ -45,6 +45,12 @@ const (
 		"antes de tocar archivos."
 
 	ToolImagesPrompt = "Imágenes de los read_file anteriores, en el mismo orden. Continúa."
+
+	// StylePrompt va en todos los modos: los modelos pequeños llenan de emojis
+	// los títulos y las listas, y en la terminal se ven como ruido.
+	StylePrompt = "Estilo de las respuestas: no uses emojis, ni en títulos, ni como viñetas, ni para decorar. " +
+		"Úsalos solo si el usuario los pide o si un símbolo aporta información que el texto no da (por ejemplo " +
+		"✅/❌ en una tabla de estado). Markdown sobrio: títulos cortos, listas y bloques de código con su lenguaje."
 )
 
 // NativeSystemPrompt es el prompt para tool-calling nativo: las herramientas

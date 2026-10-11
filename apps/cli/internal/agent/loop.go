@@ -79,7 +79,7 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	if s.ProjectContext != "" {
 		content += "\n\n=== CONTEXTO DEL PROYECTO (LIXBON.md) ===\n" + s.ProjectContext
 	}
-	content += TodoPrompt
+	content += TodoPrompt + "\n\n" + StylePrompt
 	if s.PlanMode {
 		content += PlanModePrompt
 	}
@@ -465,6 +465,9 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		t.emit(Event{Kind: EventActionResult, Tool: tool, Summary: "bloqueado: modo plan", Failed: true})
 		return planBlockedMessage, nil
 	}
+	if tool == "fetch_url" {
+		return t.Fetch(ctx, args)
+	}
 	if toolspec.IsReadOnly(tool) {
 		label := "."
 		for _, key := range []string{"path", "pattern", "query", "url"} {
@@ -577,6 +580,23 @@ func (t *Turn) run(ctx context.Context, tool string, args map[string]any) (strin
 	}
 	t.emit(Event{Kind: EventActionResult, Tool: tool, Result: result, Summary: ResultSummary(result),
 		Check: check, Failed: failed || checkFailed, Elapsed: elapsed})
+	return result, nil
+}
+
+// Fetch abre la descarga antes de hacerla, para que se vea en marcha, y la
+// cierra con lo recibido y el estado HTTP. El modo ask la usa también.
+func (t *Turn) Fetch(ctx context.Context, args map[string]any) (string, error) {
+	t.emit(Event{Kind: EventAction, Tool: "fetch_url", Text: textutil.Head(stringArg(args, "url"), 200)})
+	result, failed, elapsed := t.execute(ctx, "fetch_url", args)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	t.S.Stats.Actions++
+	summary := textutil.Head(strings.TrimSpace(strings.TrimPrefix(firstLine(result), "[ERROR]")), 120)
+	if info, ok := t.S.Tools.TakeFetch(); ok && info.Status > 0 {
+		summary = info.Summary()
+	}
+	t.emit(Event{Kind: EventActionResult, Tool: "fetch_url", Result: result, Summary: summary, Failed: failed, Elapsed: elapsed})
 	return result, nil
 }
 

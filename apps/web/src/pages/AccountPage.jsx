@@ -567,7 +567,9 @@ function UsageSection({ usage, buckets, daily, plan }) {
           used={buckets.session.used}
           limit={buckets.session.unlimited ? -1 : buckets.session.limit}
           unlimitedLabel={t('unlimited')}
-          resetHint={`${t('usage.sessionHint')} ${t('usage.resetsAt', { date: new Date(buckets.session.reset_at).toLocaleString(locale) })}`}
+          resetHint={`${t('usage.sessionHint')} ${buckets.session.reset_at
+            ? t('usage.resetsAt', { date: new Date(buckets.session.reset_at).toLocaleString(locale) })
+            : t('usage.notStarted')}`}
         />
         <QuotaBar
           showPercent

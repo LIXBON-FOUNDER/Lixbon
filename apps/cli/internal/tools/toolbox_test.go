@@ -211,6 +211,35 @@ func TestFetchURL(t *testing.T) {
 	}
 }
 
+func TestFetchURLAddsTheSchemeToABareDomain(t *testing.T) {
+	for in, want := range map[string]string{"lixbon.com/docs": "https://lixbon.com/docs", "lixbon.com": "https://lixbon.com",
+		"http://x.dev": "http://x.dev", "javascript:1": "javascript:1", "localhost:80": "localhost:80", "hola": "hola"} {
+		if got := withScheme(in); got != want {
+			t.Errorf("%q → %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFetchURLRecordsStatusAndSize(t *testing.T) {
+	srv := fetchServer(t)
+	tb := newBox(t)
+	tb.run("fetch_url", map[string]any{"url": srv.URL + "/json"})
+	info, ok := tb.TakeFetch()
+	if !ok || info.Status != 200 || info.Bytes != len(`{"a":1}`) || info.Summary() != "Recibido 7 B (200 OK)" {
+		t.Fatalf("info %+v %q", info, info.Summary())
+	}
+	if _, again := tb.TakeFetch(); again {
+		t.Fatal("TakeFetch debe olvidarla")
+	}
+	tb.run("fetch_url", map[string]any{"url": srv.URL + "/missing"})
+	if info, _ := tb.TakeFetch(); info.Summary() != "404 Not Found" {
+		t.Fatalf("404: %q", info.Summary())
+	}
+	if (FetchInfo{Status: 200, Bytes: 200_806}).Summary() != "Recibido 196.1 KB (200 OK)" {
+		t.Fatal((FetchInfo{Status: 200, Bytes: 200_806}).Summary())
+	}
+}
+
 func TestFetchURLRespectsCancel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer srv.Close()

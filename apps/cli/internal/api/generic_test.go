@@ -172,3 +172,19 @@ func TestConfigureSwitchesTheSameClient(t *testing.T) {
 		t.Fatalf("cliente: %+v", c)
 	}
 }
+
+func TestGenericChatSendsReasoningEffortOnlyWhenAsked(t *testing.T) {
+	rec, base := newRecorder(t)
+	c := genericClient(base, "")
+	stream, err := c.ChatStream(context.Background(), ChatRequest{Model: "gpt-oss:20b",
+		Messages: []map[string]any{{"role": "user", "content": "x"}}, Think: "low", Effort: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	for range stream.Events() {
+	}
+	if rec.body["reasoning_effort"] != "low" {
+		t.Fatalf("reasoning_effort: %v", rec.body["reasoning_effort"])
+	}
+}

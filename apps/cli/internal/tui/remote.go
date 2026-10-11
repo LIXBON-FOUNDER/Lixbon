@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/chat"
+	"lixbon.com/cli/internal/history"
 	"lixbon.com/cli/internal/remote"
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
@@ -56,7 +58,39 @@ func (a *remoteApprover) Approve(ctx context.Context, req agent.Approval) (agent
 	if a.link.RequestApproval(ctx, req.Tool, firstNonEmpty(req.Summary, req.Tool), risk) {
 		return agent.Allow, nil
 	}
+	select {
+	case <-a.link.Done():
+		return agent.Deny, errRemoteGone
+	default:
+	}
 	return agent.Deny, ctx.Err()
+}
+
+var errRemoteGone = errors.New("el control remoto se cerró")
+
+// sharedApprover pregunta a la vez en la terminal y en el móvil: vale la
+// primera respuesta y la otra pregunta se retira.
+type sharedApprover struct{ local, remote agent.Approver }
+
+func (a sharedApprover) Approve(ctx context.Context, req agent.Approval) (agent.Decision, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type answer struct {
+		d   agent.Decision
+		err error
+	}
+	answers := make(chan answer, 2)
+	for _, ap := range []agent.Approver{a.local, a.remote} {
+		go func() {
+			d, err := ap.Approve(ctx, req)
+			answers <- answer{d, err}
+		}()
+	}
+	first := <-answers
+	if first.err != nil && ctx.Err() == nil {
+		first = <-answers
+	}
+	return first.d, first.err
 }
 
 // remoteSink reenvía al móvil lo que ocurre durante un turno, además de
@@ -128,7 +162,7 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 	link.Snapshot = host.snapshotNow
 	m.refreshRemoteSnapshot()
 
-	m.chat.Session.Approver = &remoteApprover{link: link}
+	m.chat.Session.Approver = sharedApprover{local: host.approver, remote: &remoteApprover{link: link}}
 	m.chat.Toolbox.AskUser = nil
 	m.chat.Toolbox.OnTodo = func(items, previous []tools.TodoItem) {
 		host.onTodo(items, previous)
@@ -146,8 +180,8 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 	}
 	m.print("")
 	m.add(note("La sesión ya aparece en la sección Remote de tu app Lixbon."))
-	m.add(note("Sin la app, escanea el QR: abre la sesión en la web (te pedirá iniciar sesión con tu cuenta)."))
-	m.add(note("Control local en pausa — Ctrl+C para terminar el modo remoto y volver aquí."))
+	m.add(note("Sin la app, abre el link o despliega el QR: la sesión se abre en la web con tu cuenta."))
+	m.add(note("Puedes seguir escribiendo aquí; las aprobaciones se piden en los dos sitios. Ctrl+C con la caja vacía termina el modo remoto."))
 	m.print("")
 
 	link.EmitSnapshot()
@@ -205,8 +239,10 @@ func (m *Model) onRemote(msg remoteMsg) tea.Cmd {
 			m.add(echoBlock(text + "  [remoto]"))
 			m.remoteCommand(text)
 		case m.busyNow():
-			m.queue = append(m.queue, text)
+			m.queue = append(m.queue, fromRemote+text)
 		default:
+			m.remoteOrigin = true
+			defer func() { m.remoteOrigin = false }()
 			return m.dispatch(text)
 		}
 	case "interrupt":
@@ -233,7 +269,7 @@ func (m *Model) refreshRemoteSnapshot() {
 		switch {
 		case msg.Role == "system" || msg.Role == "tool":
 			continue
-		case msg.Role == "user" && strings.HasPrefix(content, "TOOL_RESULT"):
+		case msg.Role == "user" && strings.HasPrefix(content, "TOOL_RESULT"), history.IsSummary(msg):
 			continue
 		case msg.Role == "assistant":
 			if content = toolparse.CleanProse(content); content == "" {
@@ -251,7 +287,11 @@ func (m *Model) refreshRemoteSnapshot() {
 
 // remoteTurnStarted y remoteTurnDone cuentan al móvil cómo va el turno.
 func (m *Model) remoteTurnStarted(prompt string) {
-	m.remote.link.Emit("user_msg", map[string]any{"text": prompt, "origin": "remote"})
+	origin := "local"
+	if m.remoteOrigin {
+		origin = "remote"
+	}
+	m.remote.link.Emit("user_msg", map[string]any{"text": prompt, "origin": origin})
 	m.remote.link.Emit("status", map[string]any{"state": "thinking"})
 }
 
@@ -369,21 +409,26 @@ func (m *Model) remoteModel(arg string) string {
 	return "Modelo cambiado a " + match + "."
 }
 
-// handleRemoteKey: con el control remoto activo solo Ctrl+C y el visor del
-// transcript responden; el resto del teclado queda en pausa.
-func (m *Model) handleRemoteKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "ctrl+c":
-		if m.running {
-			m.cancelTurn()
-		}
-		m.leaveRemote(true)
-	case "pgup":
-		m.scrollBy(max(1, m.height-6))
-	case "pgdown":
-		m.scrollBy(-max(1, m.height-6))
-	case "ctrl+t":
-		m.pager = &pager{}
+// fromRemote marca en la cola los mensajes que llegaron del móvil o la web.
+const fromRemote = "\x00remoto\x00"
+
+// dispatchQueued envía el siguiente mensaje de la cola con su origen.
+func (m *Model) dispatchQueued() tea.Cmd {
+	next := m.queue[0]
+	m.queue = m.queue[1:]
+	text, remote := strings.CutPrefix(next, fromRemote)
+	m.remoteOrigin = remote
+	defer func() { m.remoteOrigin = false }()
+	return m.dispatch(text)
+}
+
+// remoteEndKey: con el control remoto activo la terminal sigue escribiendo
+// mensajes; Ctrl+C con la caja vacía y sin turno en marcha lo termina.
+func (m *Model) remoteEndKey(msg tea.KeyPressMsg) bool {
+	if m.remote == nil || msg.String() != "ctrl+c" || m.running || m.picker != nil || m.prompt != nil ||
+		strings.TrimSpace(m.input.Value()) != "" {
+		return false
 	}
-	return nil
+	m.leaveRemote(true)
+	return true
 }

@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	liveTailRows  = 8
 	liveThinkRows = 3
 	ctxWarn       = 60.0
 	ctxFull       = 85.0
@@ -41,7 +40,7 @@ func (m *Model) liveLabel() (string, bool) {
 		if m.chat.Mode == chat.ModeAgent && toolparse.CleanProse(m.live.content.String()) == "" {
 			return "Preparando acciones…", false
 		}
-		return "Escribiendo…", false
+		return "Escribiendo la respuesta…", false
 	}
 	if m.live.reasoning.Len() > 0 {
 		return "Pensando…", false
@@ -93,28 +92,6 @@ func (m *Model) liveTokens() int {
 func (m *Model) liveView() []string {
 	width := m.width
 	var lines []string
-	if m.live.content.Len() > 0 {
-		text := m.live.content.String()
-		if m.chat.Mode == chat.ModeAgent {
-			text = toolparse.CleanProse(text)
-		}
-		if text = strings.TrimSpace(text); text != "" {
-			wrapped := wrapText(text, max(10, width-4))
-			tail := wrapped[max(0, len(wrapped)-liveTailRows):]
-			for i, l := range tail {
-				prefix := pad
-				if i == 0 && len(wrapped) <= liveTailRows {
-					prefix = mark(glyphBrand, sAccent)
-				}
-				row := prefix + sPrimary.Render(l)
-				if i == len(tail)-1 && m.spin%6 < 3 {
-					row += sAccent.Render(glyphEdge)
-				}
-				lines = append(lines, row)
-			}
-		}
-	}
-
 	label, warn := m.liveLabel()
 	head := " " + sAccent.Render(m.spinFrame()) + " "
 	if warn {
@@ -161,7 +138,7 @@ func (m *Model) currentStep() (text string, total, current int) {
 }
 
 func (m *Model) queueLine() string {
-	first := strings.Join(strings.Fields(m.queue[0]), " ")
+	first := strings.Join(strings.Fields(strings.TrimPrefix(m.queue[0], fromRemote)), " ")
 	text := pad + sDim2.Render(glyphInfo) + " " + sSoft.Render(fmt.Sprintf("%d en cola", len(m.queue))) +
 		sDim.Render(" "+glyphSep+" «"+first+"»")
 	return ansi.Truncate(text, max(1, m.width-1), glyphEllipsis+sDim.Render("»"))
