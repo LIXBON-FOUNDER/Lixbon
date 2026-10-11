@@ -1,8 +1,8 @@
 // Package update descarga, verifica e instala la última versión del binario.
 //
 // La confianza se reparte en dos orígenes: el gateway publica la versión y el
-// digest de cada archivo, y los bytes y el SHA256SUMS salen de la release de
-// GitHub. Solo se instala si los dos digests coinciden con el archivo.
+// digest de cada archivo, y los bytes y el SHA256SUMS salen de la carpeta de la
+// release. Solo se instala si los dos digests coinciden con el archivo.
 package update
 
 import (

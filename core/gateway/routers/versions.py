@@ -238,7 +238,7 @@ async def get_tauri_manifest(channel: str, request: Request):
 @router.get("/api/updates/cli/{channel}")
 async def get_cli_manifest(channel: str):
     """Manifest del CLI Go (`lixbon update` y los instaladores). Las URL apuntan
-    a GitHub Releases y el digest de cada archivo sale de aquí: el cliente solo
+    a /cli/releases y el digest de cada archivo sale de aquí: el cliente solo
     instala si coincide con el archivo y con el SHA256SUMS de la release."""
     if channel not in ("stable", "beta"):
         raise HTTPException(status_code=400, detail="Canal de actualización inválido")
@@ -342,6 +342,41 @@ async def api_upload_version(
             "channel": channel, "storage": storage}
 
 
+_CLI_TAG_RE = re.compile(r"cli-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
+_CLI_FILE_RE = re.compile(r"(?:lixbon-[0-9A-Za-z.-]+-(?:linux|darwin|windows)-(?:amd64|arm64)\.(?:tar\.gz|zip)|SHA256SUMS)")
+
+
+def _cli_release_key(tag: str, filename: str) -> str:
+    if not _CLI_TAG_RE.fullmatch(tag) or not _CLI_FILE_RE.fullmatch(filename):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return f"cli-releases/{tag}/{filename}"
+
+
+@router.post("/api/versions/cli-asset")
+async def api_upload_cli_asset(tag: str = Form(...), file: UploadFile = File(...),
+                               _: None = Depends(admin_or_token)):
+    """Sube a R2 un archivo de una release del CLI (binario o SHA256SUMS)."""
+    key = _cli_release_key(tag, file.filename or "")
+    try:
+        r2.upload_release(key, file.file, content_type="application/octet-stream")
+    except r2.R2NotConfigured:
+        raise HTTPException(status_code=503, detail="Almacenamiento de releases no configurado")
+    except Exception as exc:
+        logger.error(f"[versions] fallo al subir {key} a R2: {exc}")
+        raise HTTPException(status_code=502, detail="No se pudo subir el archivo a R2")
+    return {"success": True, "key": key}
+
+
+@router.get("/cli/releases/{tag}/{filename}")
+async def download_cli_asset(tag: str, filename: str):
+    key = _cli_release_key(tag, filename)
+    try:
+        signed = r2.presigned_get_url(key)
+    except r2.R2NotConfigured:
+        raise HTTPException(status_code=503, detail="Almacenamiento de releases no configurado")
+    return RedirectResponse(url=signed, status_code=302)
+
+
 class CliReleaseRegistration(BaseModel):
     product: str
     version: str
@@ -355,8 +390,8 @@ class CliReleaseRegistration(BaseModel):
 @router.post("/api/versions/register")
 async def api_register_cli_release(body: CliReleaseRegistration,
                                    _: None = Depends(admin_or_token)):
-    """Registra un binario del CLI ya publicado en GitHub Releases (no se sube
-    el archivo: solo su URL y su SHA-256)."""
+    """Registra un binario del CLI ya subido con /api/versions/cli-asset (solo
+    su URL y su SHA-256)."""
     if body.product not in CLI_PRODUCTS:
         raise HTTPException(status_code=400, detail="Producto inválido")
     if body.channel not in ("stable", "beta") or not _VERSION_RE.fullmatch(body.version):
