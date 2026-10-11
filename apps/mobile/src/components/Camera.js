@@ -111,7 +111,7 @@ function CameraStage({ docMode, onMode, onClose, onCapture }) {
     if (!ready || busy) return;
     setBusy(true);
     try {
-      const photo = await camRef.current.takePictureAsync({ quality: 0.9 });
+      const photo = await camRef.current.takePictureAsync({ quality: 0.9, shutterSound: false });
       let uri = photo.uri;
       if (docMode && guide) {
         // El visor recorta la foto como "cover": se deshace esa escala para

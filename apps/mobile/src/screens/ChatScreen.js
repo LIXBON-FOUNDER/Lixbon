@@ -13,6 +13,7 @@ import { AttachmentTray, useAttachments } from '../components/Attachments';
 import CameraModal from '../components/Camera';
 import Icon from '../components/Icon';
 import ShimmerText from '../components/ShimmerText';
+import StepSlider from '../components/StepSlider';
 import { useDialogs } from '../components/dialogs';
 import { markdownRules, markdownStyles } from '../components/markdown';
 import {
@@ -31,6 +32,7 @@ import {
 } from '../components/ui';
 import { togglePin, usePins } from '../pins';
 import { shareConversation } from '../share';
+import { ETIQUETA_RAZONAR } from '../razonamiento';
 import { useApi, useAuth, useChat } from '../state';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
 
@@ -391,6 +393,27 @@ function AttachSheet({ onPick }) {
         </View>
         <Toggle value={chat.webSearch} onChange={chat.setWebSearch} label="Búsqueda web" />
       </Pressable>
+      {chat.nivelesRazonar.length > 0 && (
+        <View style={{ gap: 10, paddingHorizontal: 4, paddingBottom: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <Icon name="bolt" size={22} color={chat.razonar !== 'auto' && chat.razonar !== 'off' ? c.accent : c.inkSoft} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>Razonamiento</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+                {chat.razonar === 'auto' || !chat.nivelesRazonar.includes(chat.razonar)
+                  ? 'Razona solo cuando el mensaje lo pide'
+                  : 'Más razonamiento, mejor en lo difícil pero tarda más'}
+              </Text>
+            </View>
+          </View>
+          <StepSlider
+            steps={chat.nivelesRazonar}
+            value={chat.nivelesRazonar.includes(chat.razonar) ? chat.razonar : 'auto'}
+            onChange={chat.setRazonar}
+            labelOf={(n) => ETIQUETA_RAZONAR[n]}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -548,6 +571,14 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
 
   return (
     <View style={{ paddingHorizontal: 12, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 14) }}>
+      {!!chat.quota && (
+        <FadeUp style={{ marginBottom: 8, minHeight: 40, paddingLeft: 14, paddingRight: 6, borderRadius: RADIUS, backgroundColor: chat.quota.state === 'exhausted' ? c.dangerSoft : c.warnSoft, flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ flex: 1, paddingVertical: 8, fontFamily: FONTS.ui, fontSize: 13.5, color: chat.quota.state === 'exhausted' ? c.danger : c.warn }}>{chat.quota.message}</Text>
+          <Pressable onPress={chat.clearQuota} accessibilityLabel="Cerrar aviso de cupo" style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={15} color={chat.quota.state === 'exhausted' ? c.danger : c.warn} />
+          </Pressable>
+        </FadeUp>
+      )}
       {!!chat.error && (
         <FadeUp style={{ marginBottom: 8, minHeight: 40, paddingLeft: 14, paddingRight: 6, borderRadius: RADIUS, backgroundColor: c.dangerSoft, flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ flex: 1, paddingVertical: 8, fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>{chat.error}</Text>
@@ -618,6 +649,17 @@ function Composer({ input, inputRef, placeholder, onChangeInput, onSend, onPickM
             >
               <Icon name="globe" size={13} color={c.accent} strokeWidth={1.8} />
               <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>Web</Text>
+            </Pressable>
+          )}
+
+          {chat.razonar !== 'auto' && chat.nivelesRazonar.includes(chat.razonar) && (
+            <Pressable
+              onPress={onAttach}
+              accessibilityLabel={`Razonamiento: ${ETIQUETA_RAZONAR[chat.razonar]}`}
+              style={{ height: 30, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, borderRadius: RADIUS_SM, backgroundColor: `rgba(${c.accentRgb},0.12)` }}
+            >
+              <Icon name="bolt" size={13} color={c.accent} strokeWidth={1.8} />
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{ETIQUETA_RAZONAR[chat.razonar]}</Text>
             </Pressable>
           )}
 
