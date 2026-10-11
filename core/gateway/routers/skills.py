@@ -18,7 +18,7 @@ from core.gateway.routers.visuals import FileIn, decode_files
 from core.persistence import skills as store
 from core.persistence.queries import log_audit_event
 from core.persistence.visuals import VisualError
-from core.security.auth import admin_required, cookie_auth_required
+from core.security.auth import admin_required, session_or_api_key
 
 router = APIRouter(tags=["skills"])
 
@@ -28,7 +28,7 @@ def optional_user(lixbon_session: str | None = Cookie(default=None),
     if not lixbon_session and not authorization:
         return None
     try:
-        return cookie_auth_required(lixbon_session, authorization)
+        return session_or_api_key(lixbon_session, authorization)
     except HTTPException:
         return None
 
@@ -75,7 +75,7 @@ async def get_skill(slug: str, user: dict[str, Any] | None = Depends(optional_us
 @router.get("/api/skills/{slug}/download")
 async def download(slug: str, version: str | None = Query(None, max_length=20),
                    client: str | None = Query(None, max_length=10),
-                   user: dict[str, Any] = Depends(cookie_auth_required)):
+                   user: dict[str, Any] = Depends(session_or_api_key)):
     try:
         pkg = store.download(slug, version, user["id"], client)
     except store.SkillError as exc:
@@ -90,7 +90,7 @@ async def download(slug: str, version: str | None = Query(None, max_length=20),
 
 
 @router.put("/api/skills/{slug}/rating")
-async def rate(slug: str, body: RatingIn, user: dict[str, Any] = Depends(cookie_auth_required)):
+async def rate(slug: str, body: RatingIn, user: dict[str, Any] = Depends(session_or_api_key)):
     try:
         return store.rate(slug, user["id"], body.stars)
     except store.SkillError as exc:
@@ -98,7 +98,7 @@ async def rate(slug: str, body: RatingIn, user: dict[str, Any] = Depends(cookie_
 
 
 @router.delete("/api/skills/{slug}/rating")
-async def unrate(slug: str, user: dict[str, Any] = Depends(cookie_auth_required)):
+async def unrate(slug: str, user: dict[str, Any] = Depends(session_or_api_key)):
     try:
         return store.rate(slug, user["id"], None)
     except store.SkillError as exc:

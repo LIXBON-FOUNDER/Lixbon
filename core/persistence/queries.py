@@ -740,7 +740,8 @@ def validate_api_key(raw_key: str, ip_address: str | None = None) -> dict[str, A
         user = s.get(User, row.user_id)
         if not user or not user.is_active:
             return None  # usuario bloqueado: sus keys dejan de funcionar
-        result = {**_user_to_dict(user), "key_model": row.model, "key_name": row.name, "auth_via": "api_key"}
+        result = {**_user_to_dict(user), "key_model": row.model, "key_name": row.name,
+                  "key_origin": row.origin, "auth_via": "api_key"}
         row.last_accessed = now
         row.last_used_ip = ip_address
         return result

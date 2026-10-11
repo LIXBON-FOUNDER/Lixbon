@@ -33,8 +33,7 @@ from core.config import PUBLIC_BASE_URL, r2_configured
 from core.gateway.team_hub import hub
 from core.persistence import team_issues as ti
 from core.persistence import team_queries as tq
-from core.persistence.queries import validate_api_key
-from core.security.auth import cookie_auth_required
+from core.security.auth import es_sesion, resolve_credential, session_required
 from core.storage import r2
 
 logger = logging.getLogger("lixbon.team")
@@ -190,7 +189,7 @@ class PresenciaNueva(BaseModel):
 
 
 @router.get("/api/team/bootstrap")
-async def team_bootstrap(yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def team_bootstrap(yo: dict[str, Any] = Depends(session_required)):
     """Todo lo que la ventana necesita para pintarse. UNA sola llamada: la
     ventana arranca de golpe, no a saltos."""
     uid = yo["id"]
@@ -198,7 +197,7 @@ async def team_bootstrap(yo: dict[str, Any] = Depends(cookie_auth_required)):
 
 
 @router.post("/api/team/projects", status_code=201)
-async def crear_proyecto(cuerpo: ProyectoNuevo, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def crear_proyecto(cuerpo: ProyectoNuevo, yo: dict[str, Any] = Depends(session_required)):
     issues = cuerpo.issues.model_dump(exclude_none=True) if cuerpo.issues else None
     # Se valida ANTES de crear: un identificador mal escrito no puede dejar un
     # equipo a medio nacer.
@@ -215,7 +214,7 @@ async def crear_proyecto(cuerpo: ProyectoNuevo, yo: dict[str, Any] = Depends(coo
 
 @router.patch("/api/team/projects/{proyecto_id}")
 async def editar_proyecto(proyecto_id: str, cuerpo: ProyectoCambios,
-                          yo: dict[str, Any] = Depends(cookie_auth_required)):
+                          yo: dict[str, Any] = Depends(session_required)):
     if not tq.proyecto(proyecto_id):
         raise _no(404, "No existe ese proyecto.")
     if not tq.es_lider(proyecto_id, yo["id"]):
@@ -230,7 +229,7 @@ async def editar_proyecto(proyecto_id: str, cuerpo: ProyectoCambios,
 
 
 @router.delete("/api/team/projects/{proyecto_id}", status_code=204)
-async def borrar_proyecto(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def borrar_proyecto(proyecto_id: str, yo: dict[str, Any] = Depends(session_required)):
     if not tq.proyecto(proyecto_id):
         raise _no(404, "No existe ese proyecto.")
     if not tq.es_lider(proyecto_id, yo["id"]):
@@ -246,7 +245,7 @@ async def borrar_proyecto(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_
 
 
 @router.get("/api/team/projects/{proyecto_id}/members")
-async def listar_miembros(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def listar_miembros(proyecto_id: str, yo: dict[str, Any] = Depends(session_required)):
     if not tq.proyecto(proyecto_id):
         raise _no(404, "No existe ese proyecto.")
     if not tq.es_miembro(proyecto_id, yo["id"]):
@@ -256,7 +255,7 @@ async def listar_miembros(proyecto_id: str, yo: dict[str, Any] = Depends(cookie_
 
 @router.post("/api/team/projects/{proyecto_id}/members", status_code=201)
 async def invitar_miembro(proyecto_id: str, cuerpo: MiembroNuevo,
-                          yo: dict[str, Any] = Depends(cookie_auth_required)):
+                          yo: dict[str, Any] = Depends(session_required)):
     if not tq.proyecto(proyecto_id):
         raise _no(404, "No existe ese proyecto.")
     if not tq.es_lider(proyecto_id, yo["id"]):
@@ -281,7 +280,7 @@ async def invitar_miembro(proyecto_id: str, cuerpo: MiembroNuevo,
 
 @router.delete("/api/team/projects/{proyecto_id}/members/{usuario_id}", status_code=204)
 async def quitar_miembro(proyecto_id: str, usuario_id: int,
-                         yo: dict[str, Any] = Depends(cookie_auth_required)):
+                         yo: dict[str, Any] = Depends(session_required)):
     p = tq.proyecto(proyecto_id)
     if not p:
         raise _no(404, "No existe ese proyecto.")
@@ -298,7 +297,7 @@ async def quitar_miembro(proyecto_id: str, usuario_id: int,
 
 @router.post("/api/team/projects/{proyecto_id}/channels", status_code=201)
 async def crear_canal(proyecto_id: str, cuerpo: CanalNuevo,
-                      yo: dict[str, Any] = Depends(cookie_auth_required)):
+                      yo: dict[str, Any] = Depends(session_required)):
     if not tq.proyecto(proyecto_id):
         raise _no(404, "No existe ese proyecto.")
     if not tq.es_miembro(proyecto_id, yo["id"]):
@@ -318,7 +317,7 @@ async def crear_canal(proyecto_id: str, cuerpo: CanalNuevo,
 
 @router.patch("/api/team/channels/{canal_id}")
 async def editar_canal(canal_id: str, cuerpo: CanalCambios,
-                       yo: dict[str, Any] = Depends(cookie_auth_required)):
+                       yo: dict[str, Any] = Depends(session_required)):
     c = _canal_o_404(canal_id, yo["id"])
     if c["tipo"] == "directo":
         raise _no(400, "Un directo no se edita.")
@@ -335,7 +334,7 @@ async def editar_canal(canal_id: str, cuerpo: CanalCambios,
 
 
 @router.delete("/api/team/channels/{canal_id}", status_code=204)
-async def borrar_canal(canal_id: str, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def borrar_canal(canal_id: str, yo: dict[str, Any] = Depends(session_required)):
     c = _canal_o_404(canal_id, yo["id"])
     if c["tipo"] == "directo":
         raise _no(400, "Un directo no se borra.")
@@ -352,7 +351,7 @@ async def borrar_canal(canal_id: str, yo: dict[str, Any] = Depends(cookie_auth_r
 
 @router.post("/api/team/channels/{canal_id}/members", status_code=201)
 async def sumar_a_canal(canal_id: str, cuerpo: UsuarioRef,
-                        yo: dict[str, Any] = Depends(cookie_auth_required)):
+                        yo: dict[str, Any] = Depends(session_required)):
     c = tq.canal(canal_id)
     if not c:
         raise _no(404, "No existe ese canal.")
@@ -371,7 +370,7 @@ async def sumar_a_canal(canal_id: str, cuerpo: UsuarioRef,
 
 @router.delete("/api/team/channels/{canal_id}/members/{usuario_id}", status_code=204)
 async def sacar_de_canal(canal_id: str, usuario_id: int,
-                         yo: dict[str, Any] = Depends(cookie_auth_required)):
+                         yo: dict[str, Any] = Depends(session_required)):
     c = tq.canal(canal_id)
     if not c:
         raise _no(404, "No existe ese canal.")
@@ -387,7 +386,7 @@ async def sacar_de_canal(canal_id: str, usuario_id: int,
 @router.get("/api/team/channels/{canal_id}/messages")
 async def listar_mensajes(canal_id: str, peticion: Request, antes_de: int = 0,
                           limite: int = 50, hilo_de: str = "",
-                          yo: dict[str, Any] = Depends(cookie_auth_required)):
+                          yo: dict[str, Any] = Depends(session_required)):
     _canal_o_404(canal_id, yo["id"])
     limite = max(1, min(limite, LIMITE_MENSAJES))
     return tq.listar_mensajes(canal_id, antes_de, limite, hilo_de,
@@ -396,7 +395,7 @@ async def listar_mensajes(canal_id: str, peticion: Request, antes_de: int = 0,
 
 @router.post("/api/team/channels/{canal_id}/messages")
 async def enviar_mensaje(canal_id: str, cuerpo: MensajeNuevo, peticion: Request,
-                         yo: dict[str, Any] = Depends(cookie_auth_required)):
+                         yo: dict[str, Any] = Depends(session_required)):
     _canal_o_404(canal_id, yo["id"])
     texto = (cuerpo.texto or "").strip()
     adjuntos = list(cuerpo.adjuntos or [])
@@ -443,7 +442,7 @@ async def enviar_mensaje(canal_id: str, cuerpo: MensajeNuevo, peticion: Request,
 
 @router.patch("/api/team/messages/{mensaje_id}")
 async def editar_mensaje(mensaje_id: str, cuerpo: MensajeCambios, peticion: Request,
-                         yo: dict[str, Any] = Depends(cookie_auth_required)):
+                         yo: dict[str, Any] = Depends(session_required)):
     m = tq.mensaje(mensaje_id)
     # Un mensaje que no se puede ver no puede confirmarse que exista.
     if not m or not tq.puede_ver_canal(m["canal_id"], yo["id"]):
@@ -469,7 +468,7 @@ async def editar_mensaje(mensaje_id: str, cuerpo: MensajeCambios, peticion: Requ
 
 @router.delete("/api/team/messages/{mensaje_id}")
 async def borrar_mensaje(mensaje_id: str, peticion: Request,
-                         yo: dict[str, Any] = Depends(cookie_auth_required)):
+                         yo: dict[str, Any] = Depends(session_required)):
     m = tq.mensaje(mensaje_id)
     if not m or not tq.puede_ver_canal(m["canal_id"], yo["id"]):
         raise _no(404, "No existe ese mensaje.")
@@ -508,13 +507,13 @@ async def borrar_mensaje(mensaje_id: str, peticion: Request,
 
 
 @router.get("/api/team/dms")
-async def listar_directos(yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def listar_directos(yo: dict[str, Any] = Depends(session_required)):
     return [tq.canal_salida(cid, yo["id"], hub.estado_publico)
             for cid in tq.directos_de(yo["id"])]
 
 
 @router.post("/api/team/dms", status_code=201)
-async def abrir_directo(cuerpo: UsuarioRef, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def abrir_directo(cuerpo: UsuarioRef, yo: dict[str, Any] = Depends(session_required)):
     otro = tq.usuario_publico_por_id(cuerpo.usuario_id)
     if not otro:
         raise _no(404, "No existe ese usuario.")
@@ -531,19 +530,19 @@ async def abrir_directo(cuerpo: UsuarioRef, yo: dict[str, Any] = Depends(cookie_
 
 
 @router.get("/api/team/users/search")
-async def buscar_usuarios(q: str = "", yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def buscar_usuarios(q: str = "", yo: dict[str, Any] = Depends(session_required)):
     if len(q.strip()) < 2:
         return []
     return tq.buscar_usuarios(q, yo["id"])
 
 
 @router.get("/api/team/friends")
-async def listar_amigos(yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def listar_amigos(yo: dict[str, Any] = Depends(session_required)):
     return tq.amigos_de(yo["id"])
 
 
 @router.post("/api/team/friends/requests", status_code=201)
-async def pedir_amistad(cuerpo: MiembroNuevo, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def pedir_amistad(cuerpo: MiembroNuevo, yo: dict[str, Any] = Depends(session_required)):
     otro = tq.buscar_usuario(cuerpo.identificador)
     if not otro:
         raise _no(404, "No hay ningún usuario con ese correo o nombre.")
@@ -558,7 +557,7 @@ async def pedir_amistad(cuerpo: MiembroNuevo, yo: dict[str, Any] = Depends(cooki
 
 
 @router.post("/api/team/friends/requests/{usuario_id}/accept")
-async def aceptar_amistad(usuario_id: int, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def aceptar_amistad(usuario_id: int, yo: dict[str, Any] = Depends(session_required)):
     if not tq.aceptar_amistad(usuario_id, yo["id"]):
         raise _no(404, "No hay ninguna solicitud de esa persona.")
     hub.a_usuario(usuario_id, {"tipo": "amistad", "accion": "aceptada",
@@ -567,14 +566,14 @@ async def aceptar_amistad(usuario_id: int, yo: dict[str, Any] = Depends(cookie_a
 
 
 @router.delete("/api/team/friends/{usuario_id}", status_code=204)
-async def quitar_amigo(usuario_id: int, yo: dict[str, Any] = Depends(cookie_auth_required)):
+async def quitar_amigo(usuario_id: int, yo: dict[str, Any] = Depends(session_required)):
     tq.quitar_amistad(yo["id"], usuario_id)
     return Response(status_code=204)
 
 
 @router.put("/api/team/presence")
 async def poner_presencia(cuerpo: PresenciaNueva,
-                          yo: dict[str, Any] = Depends(cookie_auth_required)):
+                          yo: dict[str, Any] = Depends(session_required)):
     if cuerpo.estado not in tq.ESTADOS:
         raise _no(400, "Estado desconocido.")
     hub.poner_estado(yo["id"], cuerpo.estado)
@@ -639,7 +638,7 @@ async def subir_adjunto(
     ancho: int | None = Form(default=None),
     alto: int | None = Form(default=None),
     duracion_ms: int | None = Form(default=None),
-    yo: dict[str, Any] = Depends(cookie_auth_required),
+    yo: dict[str, Any] = Depends(session_required),
 ):
     """Se sube ANTES de mandar el mensaje. REGLA 5 — el adjunto queda ligado a
     un canal, y solo sus miembros podrán obtener una URL: un id no es una
@@ -685,7 +684,7 @@ async def subir_adjunto(
 
 @router.get("/api/team/attachments/{adjunto_id}/url")
 async def renovar_url(adjunto_id: str, peticion: Request,
-                      yo: dict[str, Any] = Depends(cookie_auth_required)):
+                      yo: dict[str, Any] = Depends(session_required)):
     a = tq.adjunto(adjunto_id)
     if not a or not tq.puede_ver_canal(a["canal_id"], yo["id"]):
         raise _no(404, "No existe ese adjunto.")
@@ -722,8 +721,8 @@ async def ws_team(websocket: WebSocket):
     `new WebSocket`. Por eso NUNCA se registra la URL completa: en los logs solo
     entra el id del usuario."""
     llave = websocket.query_params.get("token", "")
-    usuario = validate_api_key(llave) if llave else None
-    if not usuario:
+    usuario = resolve_credential(None, f"Bearer {llave}") if llave else None
+    if not usuario or not es_sesion(usuario):
         await websocket.close(code=4401)
         return
 

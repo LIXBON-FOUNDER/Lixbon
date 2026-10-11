@@ -73,7 +73,7 @@ def _alta(correo: str) -> tuple[int, str]:
     """Un usuario y su llave. Devuelve (id, api_key)."""
     u = q.create_user(correo, "contraseña-larga", correo.split("@")[0].title(), "Prueba")
     q.set_user_plan(u["id"], "free")
-    llave, _ = q.create_api_key("lixbon Desktop", u["id"])
+    llave, _ = q.create_api_key("lixbon Desktop", u["id"], origin="login")
     return u["id"], llave
 
 

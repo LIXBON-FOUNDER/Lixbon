@@ -48,7 +48,7 @@ from core.inference.ollama import (
 from core.inference import websearch
 from core.security.auth import (
     api_key_required,
-    cookie_auth_required,
+    session_or_api_key,
     validate_model_access,
     web_or_api_key_auth,
 )
@@ -74,8 +74,13 @@ def _is_external_api(user_data: dict[str, Any], plan: dict[str, Any]) -> bool:
       comprar créditos es de web y móvil, no de desktop/CLI. Pro/Advance en
       esas mismas apps sí comparten el pool de sesión/semana.
     - La key de la app móvil: siempre el pool de sesión/semana, en cualquier
-      plan (igual que la sesión web, que ni siquiera pasa por aquí).
+      plan (igual que la sesión web).
+
+    Las sesiones de dispositivo siguen la misma regla por `client`; las keys
+    con nombre de app solo existen hasta que caduquen las que emitía el login.
     """
+    if user_data.get("auth_via") == "session":
+        return user_data.get("client") in ("desktop", "cli") and plan.get("id") == "free"
     if user_data.get("auth_via") != "api_key":
         return False
     key_name = user_data.get("key_name")
@@ -305,7 +310,7 @@ async def model_roles(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
 @router.post("/api/chat")
 async def api_chat(
     payload: UIChatRequest,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """Chat desde el dashboard web. Enrutado por el orquestador (F2)."""
     model, role = await model_for_request(payload.model, "chat", user_data)
@@ -371,7 +376,7 @@ async def chat_completions(
 
     conv_id = payload.conversation_id or str(uuid.uuid4())
     # Origen: lo declara el cliente; si no, se infiere (web = sesión, resto = api)
-    source = payload.source or ("web" if user_data.get("auth_via") == "session" else "api")
+    source = payload.source or ("web" if user_data.get("client") == "web" else "api")
     if save_history:
         if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id, source=source):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
@@ -798,7 +803,7 @@ async def embed_texts(
 @router.post("/api/delegate")
 async def delegate_request(
     payload: DelegateRequest,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """
     Delegación inteligente. Todo el pipeline (embedding, clasificación y ejecución)

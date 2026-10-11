@@ -23,7 +23,7 @@ from core.persistence.queries import (
     set_conversation_archived,
     set_conversation_share,
 )
-from core.security.auth import web_or_api_key_auth, cookie_auth_required
+from core.security.auth import web_or_api_key_auth, session_or_api_key
 
 logger = logging.getLogger("lixbon.conversations")
 router = APIRouter()
@@ -75,14 +75,14 @@ async def api_list_conversations(
     offset: int = Query(default=0, ge=0),
     source: str | None = Query(default=None, max_length=16),
     archived: bool | None = Query(default=None),
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     # Historial independiente por superficie: cada cliente pide su `source`
     # (web/mobile/ide/cli). Si no lo manda, se infiere por el tipo de auth para
     # que la web (sesión) NO vea las conversaciones del móvil/IDE/CLI; con API
     # key sin `source` se devuelve todo, que es el contrato de la API pública.
     if not source:
-        source = "web" if user_data.get("auth_via") == "session" else None
+        source = "web" if user_data.get("client") == "web" else None
     # Solo el historial del IDE caduca; se purga al listarlo para no depender de un cron.
     if source == "ide":
         purge_inactive_conversations(user_data["id"], "ide", IDE_PURGE_DAYS)
@@ -93,7 +93,7 @@ async def api_list_conversations(
 @router.get("/api/conversations/{conversation_id}/messages")
 async def api_conversation_messages(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     messages = list_messages(conversation_id, user_data["id"])
     if messages is None:
@@ -124,7 +124,7 @@ async def api_conversation_files(
 async def api_rename_conversation(
     conversation_id: str,
     payload: RenamePayload,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     if not rename_conversation(conversation_id, user_data["id"], payload.title.strip()):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
@@ -134,7 +134,7 @@ async def api_rename_conversation(
 @router.delete("/api/conversations/{conversation_id}")
 async def api_delete_conversation(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     if not delete_conversation(conversation_id, user_data["id"]):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
@@ -144,7 +144,7 @@ async def api_delete_conversation(
 @router.post("/api/conversations/{conversation_id}/archive")
 async def api_archive_conversation(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     if not set_conversation_archived(conversation_id, user_data["id"], True):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
@@ -154,7 +154,7 @@ async def api_archive_conversation(
 @router.delete("/api/conversations/{conversation_id}/archive")
 async def api_unarchive_conversation(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     if not set_conversation_archived(conversation_id, user_data["id"], False):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
@@ -164,7 +164,7 @@ async def api_unarchive_conversation(
 @router.post("/api/conversations/{conversation_id}/rewind")
 async def api_rewind_conversation(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """Quita el último turno (mensaje del usuario + respuesta) antes de regenerar."""
     removed = rewind_last_turn(conversation_id, user_data["id"])
@@ -176,7 +176,7 @@ async def api_rewind_conversation(
 @router.get("/api/conversations/{conversation_id}/share")
 async def api_get_share(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """Estado de compartir de la conversación (token actual, si lo hay)."""
     if not get_conversation(conversation_id, user_data["id"]):
@@ -188,7 +188,7 @@ async def api_get_share(
 @router.post("/api/conversations/{conversation_id}/share")
 async def api_enable_share(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """Genera (o reutiliza) el enlace público de solo lectura."""
     token = set_conversation_share(conversation_id, user_data["id"], enabled=True)
@@ -201,7 +201,7 @@ async def api_enable_share(
 @router.delete("/api/conversations/{conversation_id}/share")
 async def api_disable_share(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """Revoca el enlace público."""
     if not get_conversation(conversation_id, user_data["id"]):
@@ -222,7 +222,7 @@ async def api_shared_conversation(token: str):
 @router.post("/api/conversations/{conversation_id}/generate-title")
 async def api_generate_title(
     conversation_id: str,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     """
     Auto-título tras el primer intercambio: pide un título corto al modelo

@@ -14,7 +14,7 @@ from core.persistence.queries import (
     list_recent_conversations,
     validate_api_key,
 )
-from core.security.auth import admin_required, cookie_auth_required
+from core.security.auth import admin_required, session_required
 from core.gateway.utils import fetch_models
 
 router = APIRouter()
@@ -23,7 +23,7 @@ router = APIRouter()
 @router.get("/api/dashboard/init")
 async def dashboard_init(
     request: Request,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     user_id = user_data["id"]
     return {
@@ -45,7 +45,7 @@ async def health():
 
 
 @router.get("/api/status")
-async def api_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_status(user_data: dict[str, Any] = Depends(session_required)):
     models = await fetch_models()
     ollama_ok = not (models and str(models[0].get("id", "")).startswith("error:"))
     return {
@@ -57,7 +57,7 @@ async def api_status(user_data: dict[str, Any] = Depends(cookie_auth_required)):
 
 
 @router.get("/api/usage")
-async def api_usage(user_data: dict[str, Any] = Depends(cookie_auth_required)):
+async def api_usage(user_data: dict[str, Any] = Depends(session_required)):
     return get_usage_summary(user_data["id"])
 
 
@@ -86,7 +86,7 @@ async def api_reload_nodes(user_data: dict[str, Any] = Depends(admin_required)):
 @router.get("/api/audit")
 async def api_audit(
     limit: int = 50,
-    user_data: dict[str, Any] = Depends(cookie_auth_required),
+    user_data: dict[str, Any] = Depends(session_required),
 ):
     """Devuelve los últimos eventos del audit log del usuario."""
     return {"events": list_audit_events(user_id=user_data["id"], limit=limit)}

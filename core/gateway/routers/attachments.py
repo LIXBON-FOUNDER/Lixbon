@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from core.security.auth import cookie_auth_required
+from core.security.auth import session_or_api_key
 
 logger = logging.getLogger("lixbon.attachments")
 router = APIRouter()
@@ -65,7 +65,7 @@ def _extract_pdf(data: bytes) -> str:
 @router.post("/api/attachments")
 async def upload_attachment(
     file: UploadFile = File(...),
-    _user: dict[str, Any] = Depends(cookie_auth_required),
+    _user: dict[str, Any] = Depends(session_or_api_key),
 ):
     """Sube un documento y devuelve su texto extraído (para adjuntar al mensaje)."""
     data = await file.read()
