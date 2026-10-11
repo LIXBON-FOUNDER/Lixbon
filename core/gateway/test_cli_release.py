@@ -225,3 +225,29 @@ def test_instaladores_responden_503_sin_release_registrada(cliente, monkeypatch)
     monkeypatch.setattr(installer, "latest_cli_release_for_install", lambda: None)
     assert cliente.get("/install.sh").status_code == 503
     assert cliente.get("/install.ps1").status_code == 503
+
+
+def test_los_archivos_de_la_release_se_suben_y_se_sirven_desde_r2(cliente, monkeypatch):
+    from core.storage import r2
+    subidos = {}
+    monkeypatch.setattr(r2, "upload_release", lambda key, f, content_type=None: subidos.setdefault(key, f.read()))
+    monkeypatch.setattr(r2, "presigned_get_url", lambda key, ttl_min=None: f"https://r2.example/{key}?firma=x")
+    for nombre in ("lixbon-2.4.0-linux-amd64.tar.gz", "SHA256SUMS"):
+        r = cliente.post("/api/versions/cli-asset", headers=ADMIN, data={"tag": "cli-v2.4.0"},
+                         files={"file": (nombre, b"bytes")})
+        assert r.status_code == 200
+    assert set(subidos) == {"cli-releases/cli-v2.4.0/lixbon-2.4.0-linux-amd64.tar.gz",
+                            "cli-releases/cli-v2.4.0/SHA256SUMS"}
+    r = cliente.get("/cli/releases/cli-v2.4.0/SHA256SUMS", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"].startswith("https://r2.example/cli-releases/cli-v2.4.0/SHA256SUMS")
+
+
+def test_subir_archivos_de_release_exige_admin_y_nombres_validos(cliente, monkeypatch):
+    from core.storage import r2
+    monkeypatch.setattr(r2, "upload_release", lambda *a, **k: None)
+    archivo = {"file": ("lixbon-2.4.0-linux-amd64.tar.gz", b"x")}
+    assert cliente.post("/api/versions/cli-asset", data={"tag": "cli-v2.4.0"}, files=archivo).status_code in (401, 403)
+    assert cliente.post("/api/versions/cli-asset", headers=ADMIN, data={"tag": "../x"}, files=archivo).status_code == 404
+    otro = {"file": ("../../secreto", b"x")}
+    assert cliente.post("/api/versions/cli-asset", headers=ADMIN, data={"tag": "cli-v2.4.0"}, files=otro).status_code == 404
+    assert cliente.get("/cli/releases/cli-v2.4.0/otra-cosa.txt", follow_redirects=False).status_code == 404
