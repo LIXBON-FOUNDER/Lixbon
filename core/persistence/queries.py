@@ -9,7 +9,7 @@ import struct
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, desc, func, or_, select, update
+from sqlalchemy import and_, delete, desc, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -322,6 +322,14 @@ def update_user_settings(user_id: int, patch: dict[str, Any]) -> dict[str, Any]:
 
 
 SESSION_EXPIRY_HOURS = int(os.getenv("SESSION_EXPIRY_HOURS", "168"))  # 7 días por defecto
+ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))
+REFRESH_TOKEN_DAYS = int(os.getenv("REFRESH_TOKEN_DAYS", "60"))
+REFRESH_REUSE_GRACE_SECONDS = 60
+DEVICE_CLIENTS = frozenset({"desktop", "cli", "mobile"})
+
+
+def _iso_in(**delta: float) -> str:
+    return (datetime.now(timezone.utc) + timedelta(**delta)).isoformat()
 
 
 def create_web_session(user_id: int, ip_address: str | None = None,
@@ -346,13 +354,14 @@ def validate_web_session(raw_token: str) -> dict[str, Any] | None:
     if not raw_token:
         return None
     with get_session() as s:
-        ses = s.scalar(select(Session).where(Session.token_hash == hash_api_key(raw_token)))
+        ses = s.scalar(select(Session).where(Session.token_hash == hash_api_key(raw_token),
+                                             Session.client == "web"))
         if not ses or ses.expires_at < now_iso():
             return None
         user = s.get(User, ses.user_id)
         if not user or not user.is_active:
             return None  # usuario bloqueado: la sesión deja de valer al instante
-        return {**_user_to_dict(user), "auth_via": "session"}
+        return {**_user_to_dict(user), "auth_via": "session", "client": "web", "session_id": ses.id}
 
 
 def delete_web_session(raw_token: str) -> None:
@@ -369,9 +378,152 @@ def delete_user_sessions(user_id: int) -> int:
 
 
 def purge_expired_sessions() -> int:
+    now = now_iso()
     with get_session() as s:
-        result = s.execute(delete(Session).where(Session.expires_at < now_iso()))
+        # Con refresh, lo que caduca la sesión es el refresh, no el access de 30 min.
+        result = s.execute(delete(Session).where(or_(
+            Session.refresh_expires_at < now,
+            and_(Session.refresh_hash.is_(None), Session.expires_at < now),
+        )))
         return result.rowcount
+
+
+class RefreshRace(Exception):
+    """El refresh anterior llegó dentro de la gracia: otra ventana del mismo
+    cliente ya rotó. El llamante relee sus tokens; no hay que volver al login."""
+
+
+def _grant_tokens(ses: Session) -> dict[str, Any]:
+    access = f"lixbon_at_{secrets.token_urlsafe(32)}"
+    ses.token_hash = hash_api_key(access)
+    if ses.legacy:
+        ses.expires_at = _iso_in(days=KEY_EXPIRY_DAYS)
+        return {"access_token": access, "refresh_token": None, "expires_at": ses.expires_at}
+    refresh = f"lixbon_rt_{secrets.token_urlsafe(32)}"
+    ses.expires_at = _iso_in(minutes=ACCESS_TOKEN_MINUTES)
+    ses.refresh_hash = hash_api_key(refresh)
+    ses.refresh_expires_at = _iso_in(days=REFRESH_TOKEN_DAYS)
+    return {"access_token": access, "refresh_token": refresh, "expires_at": ses.expires_at}
+
+
+def create_device_session(user_id: int, client: str, *, device_name: str | None = None,
+                          ip_address: str | None = None, user_agent: str | None = None,
+                          legacy: bool = False) -> dict[str, Any]:
+    if client not in DEVICE_CLIENTS:
+        raise ValueError(f"Cliente desconocido: {client}")
+    now = now_iso()
+    ses = Session(user_id=user_id, client=client, device_name=(device_name or "")[:80] or None,
+                  ip_address=ip_address, user_agent=(user_agent or "")[:300] or None,
+                  created_at=now, last_used_at=now, legacy=int(legacy))
+    tokens = _grant_tokens(ses)
+    with get_session() as s:
+        if legacy:
+            # Igual que las keys con nombre a las que sustituye: una por app.
+            s.execute(delete(Session).where(Session.user_id == user_id, Session.client == client,
+                                            Session.legacy == 1))
+        s.add(ses)
+        s.flush()
+        tokens["session_id"] = ses.id
+    return tokens
+
+
+def rotate_refresh(raw_refresh: str, ip_address: str | None = None) -> dict[str, Any] | None:
+    """Canjea un refresh por un par nuevo. None si no vale. Un refresh anterior
+    dentro de la gracia lanza RefreshRace; fuera de ella revoca la sesión."""
+    if not raw_refresh:
+        return None
+    h = hash_api_key(raw_refresh)
+    now = now_iso()
+    reused_by: int | None = None
+    with get_session() as s:
+        ses = s.scalar(select(Session).where(Session.refresh_hash == h).with_for_update())
+        if ses is None:
+            old = s.scalar(select(Session).where(Session.prev_refresh_hash == h))
+            if old is None:
+                return None
+            if old.rotated_at and old.rotated_at > _iso_in(seconds=-REFRESH_REUSE_GRACE_SECONDS):
+                raise RefreshRace()
+            reused_by = old.user_id
+            s.delete(old)
+        elif ses.refresh_expires_at < now:
+            s.delete(ses)
+            return None
+        else:
+            user = s.get(User, ses.user_id)
+            if not user or not user.is_active:
+                return None
+            ses.prev_refresh_hash, ses.rotated_at, ses.last_used_at = ses.refresh_hash, now, now
+            if ip_address:
+                ses.ip_address = ip_address
+            tokens = _grant_tokens(ses)
+            return {**tokens, "session_id": ses.id, "client": ses.client, "user": _user_to_dict(user)}
+    log_audit_event("session_refresh_reuse", user_id=reused_by, ip_address=ip_address)
+    return None
+
+
+def validate_access_token(raw_token: str) -> dict[str, Any] | None:
+    if not raw_token:
+        return None
+    now = now_iso()
+    with get_session() as s:
+        ses = s.scalar(select(Session).where(Session.token_hash == hash_api_key(raw_token),
+                                             Session.client != "web"))
+        if not ses or ses.expires_at < now:
+            return None
+        user = s.get(User, ses.user_id)
+        if not user or not user.is_active:
+            return None
+        # Una escritura cada pocos minutos, no una por petición.
+        if not ses.last_used_at or ses.last_used_at < _iso_in(minutes=-5):
+            ses.last_used_at = now
+        return {**_user_to_dict(user), "auth_via": "session", "client": ses.client,
+                "session_id": ses.id, "legacy": bool(ses.legacy)}
+
+
+def revoke_session_token(raw_token: str) -> dict[str, Any] | None:
+    """Logout de un dispositivo con su access o con su refresh."""
+    if not raw_token:
+        return None
+    h = hash_api_key(raw_token)
+    with get_session() as s:
+        ses = s.scalar(select(Session).where(or_(Session.token_hash == h, Session.refresh_hash == h)))
+        if not ses:
+            return None
+        revoked = {"id": ses.id, "user_id": ses.user_id, "client": ses.client}
+        s.delete(ses)
+        return revoked
+
+
+def revoke_session(session_id: int, user_id: int) -> bool:
+    with get_session() as s:
+        return s.execute(delete(Session).where(Session.id == session_id,
+                                               Session.user_id == user_id)).rowcount > 0
+
+
+def revoke_other_sessions(user_id: int, keep_session_id: int | None) -> int:
+    stmt = delete(Session).where(Session.user_id == user_id)
+    if keep_session_id is not None:
+        stmt = stmt.where(Session.id != keep_session_id)
+    with get_session() as s:
+        return s.execute(stmt).rowcount
+
+
+def list_user_sessions(user_id: int) -> list[dict[str, Any]]:
+    now = now_iso()
+    with get_session() as s:
+        rows = s.scalars(select(Session).where(Session.user_id == user_id).order_by(
+            desc(func.coalesce(Session.last_used_at, Session.created_at)))).all()
+        return [{
+            "id": r.id,
+            "client": r.client,
+            "device_name": r.device_name,
+            "ip_address": r.ip_address,
+            "user_agent": r.user_agent,
+            "created_at": r.created_at,
+            "last_used_at": r.last_used_at or r.created_at,
+            "expires_at": r.refresh_expires_at or r.expires_at,
+            "legacy": bool(r.legacy),
+        } for r in rows if (r.refresh_expires_at or r.expires_at) >= now]
 
 
 def create_email_token(user_id: int, purpose: str, hours: int = 24) -> str:
@@ -439,6 +591,7 @@ def create_api_key(
     user_id: int,
     model: str | None = None,
     scopes: str = "read,write",
+    origin: str = "manual",
 ) -> tuple[str, dict[str, Any]]:
     raw_key = f"lixbon_sk_{secrets.token_urlsafe(28)}"
     created_at = now_iso()
@@ -457,6 +610,7 @@ def create_api_key(
             expires_at=expires_at,
             last_accessed=created_at,
             created_at=created_at,
+            origin=origin,
         )
         s.add(key)
         s.flush()
@@ -470,6 +624,7 @@ def create_api_key(
             "key_prefix": key.key_prefix,
             "created_at": created_at,
             "expires_at": expires_at,
+            "origin": origin,
         }
     return raw_key, key_data
 
@@ -559,6 +714,7 @@ def list_api_keys(user_id: int | None = None) -> list[dict[str, Any]]:
                 "last_accessed": row.last_accessed,
                 "last_used_ip": row.last_used_ip,
                 "created_at": row.created_at,
+                "origin": row.origin,
             })
         return result
 
@@ -1138,7 +1294,8 @@ def bump_credit_window(
 def count_active_keys(user_id: int) -> int:
     with get_session() as s:
         return int(s.execute(
-            select(func.count(ApiKey.id)).where(ApiKey.user_id == user_id, ApiKey.is_active == 1)
+            select(func.count(ApiKey.id)).where(ApiKey.user_id == user_id, ApiKey.is_active == 1,
+                                                ApiKey.origin == "manual")
         ).scalar_one())
 
 
