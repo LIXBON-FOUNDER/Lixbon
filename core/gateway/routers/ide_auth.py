@@ -37,7 +37,7 @@ from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Cookie, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Al nivel del módulo y no dentro de la función: con `from __future__ import
 # annotations`, Pydantic resuelve el Literal de Canje contra estos globales.
@@ -397,8 +397,11 @@ async def ide_connect_cancelar(peticion: Request):
 class Canje(BaseModel):
     token: str
     verifier: str
-    # Cada cliente rota su propia clave: con «lixbon CLI» el canje no desactiva
-    # la del escritorio. Solo se aceptan estos dos nombres.
+    # Clientes nuevos: sesión de dispositivo (access + refresh) en vez de `api_key`.
+    client: Literal["desktop", "cli"] | None = None
+    device_name: str | None = Field(default=None, max_length=80)
+    # Clientes anteriores: cada uno rota su propia credencial; con «lixbon CLI»
+    # el canje no cierra la del escritorio. Solo se aceptan estos dos nombres.
     key_name: Literal[DESKTOP_KEY_NAME, CLI_KEY_NAME] = DESKTOP_KEY_NAME
 
 
@@ -427,13 +430,13 @@ async def ide_exchange(cuerpo: Canje, peticion: Request):
     if not usuario:
         raise HTTPException(status_code=400, detail="La cuenta ya no existe.")
 
-    # La misma key con nombre que emite el login clásico: así los dos caminos
-    # ROTAN la misma credencial en vez de acumular una por intento.
-    from core.gateway.routers.auth import issue_named_api_key
-    api_key = issue_named_api_key(usuario["id"], cuerpo.key_name, _ip(peticion))
+    from core.gateway.routers.auth import emitir_credencial_de_app
+    credencial = emitir_credencial_de_app(usuario["id"], _ip(peticion), peticion.headers.get("user-agent"),
+                                          client=cuerpo.client, device_name=cuerpo.device_name,
+                                          key_name=cuerpo.key_name)
     plan = get_plan_for_user(usuario["id"])
     logger.info("[ide-auth] canje correcto para el usuario %s", usuario["id"])
     return JSONResponse({
-        "api_key": api_key,
+        **credencial,
         "user": {**usuario, "plan_id": plan["id"], "plan_name": plan["name"]},
     })
