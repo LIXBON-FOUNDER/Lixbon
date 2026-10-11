@@ -22,10 +22,14 @@ from core.gateway import deps
 from core.config import CHAT_THINK, OLLAMA_BASE_URL
 from core.billing import credits
 from core.billing.quota import (
+    compute_credit_cost,
+    credits_remaining,
     ensure_can_chat,
     ensure_can_use_visuals,
+    quota_notice,
     record_session_week_tokens,
     record_tokens,
+    resolve_model_weight,
 )
 from core.persistence.queries import (
     ensure_conversation,
@@ -42,6 +46,7 @@ from core.inference.ollama import (
     chat as ollama_chat,
     generate as ollama_generate,
     embed_many as ollama_embed_many,
+    gradua_razonamiento,
     stream_chat_openai,
 )
 from core.inference import websearch
@@ -231,6 +236,17 @@ def _persist_assistant(conv_id: str, model: str, text: str,
             record_session_week_tokens(user_id, model, prompt_tokens, completion_tokens)  # F8: gate real
 
 
+def _caracteres_emitidos(chunk: str) -> int:
+    if not chunk.startswith("data: {"):
+        return 0
+    try:
+        choices = json.loads(chunk[6:]).get("choices") or [{}]
+    except ValueError:
+        return 0
+    delta = choices[0].get("delta") or {}
+    return len(delta.get("content") or "") + len(delta.get("reasoning_content") or "")
+
+
 class WebSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=400)
     limit: int = Field(5, ge=1, le=10)
@@ -268,6 +284,8 @@ async def models(user_data: dict[str, Any] = Depends(web_or_api_key_auth)):
     for entry in _sin_errores(catalog):
         if isinstance(entry, dict):
             entry = {**entry, "num_ctx": resolve_num_ctx(None, chat_role.num_ctx, catalog, entry.get("id")) or 4096}
+            if "thinking" in (entry.get("capabilities") or []):
+                entry["reasoning"] = "levels" if gradua_razonamiento(entry.get("model") or entry.get("id")) else "toggle"
         data.append(entry)
     return {"object": "list", "data": public_catalog(data, include_raw=user_data.get("role") == "admin")}
 
@@ -382,8 +400,8 @@ async def chat_completions(
     if think is None and not payload.tools:
         caps = capabilities_of(catalog, model)
         if caps is not None and "thinking" in caps:
-            # Solo gpt-oss gradúa; para los demás el término medio es no razonar.
-            think = nivel if nivel != "low" or "gpt-oss" in model.lower() else False
+            # Si el modelo no gradúa, el término medio es no razonar.
+            think = nivel if nivel != "low" or gradua_razonamiento(model) else False
         elif nivel is False:
             # Ollama rechaza think=True en un modelo sin razonamiento, no False.
             think = False
@@ -433,12 +451,21 @@ async def chat_completions(
                 f"target={origen} web={web_mode} think={think}")
 
     if payload.stream:
+        uid = user_data["id"]
+        # Cupo de sesión/semana: solo el tráfico que va contra el pool del plan.
+        restante = None if is_api else await run_in_threadpool(credits_remaining, uid, plan)
+        peso = resolve_model_weight(model) if restante is not None else None
+        prompt_est = sum(len(str(m.get("content") or "")) for m in messages) // 4
+
         async def _stream_and_persist():
             collector: dict[str, Any] = {}
             streamed_something = False
             message_id: int | None = None
             guardado = ""
             ultimo_checkpoint = time.perf_counter()
+            salida = 0  # caracteres de texto y razonamiento ya emitidos
+            sin_cupo = False
+            persistido = False
 
             async def _checkpoint() -> None:
                 # Texto parcial a BD: si el gateway muere a mitad (deploy), la
@@ -463,46 +490,78 @@ async def chat_completions(
                 except Exception as exc:
                     logger.warning(f"[stream] checkpoint del mensaje falló: {exc}")
 
-            # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
-            if web_queries:
-                import json as _json
-                yield f"data: {_json.dumps({'lixbon_sources': web_sources, 'lixbon_queries': web_queries})}\n\n"
-            try:
+            async def _bombear(gen):
+                # El [DONE] de Ollama se retiene: antes va el aviso de cupo.
+                nonlocal streamed_something, salida, sin_cupo
                 try:
-                    async for chunk in stream_chat_openai(base, model, messages,
-                                                          headers=headers, collector=collector,
-                                                          tools=payload.tools, num_ctx=num_ctx,
-                                                          keep_alive=role.keep_alive, think=think):
+                    async for chunk in gen:
+                        if chunk.startswith("data: [DONE]"):
+                            continue
                         streamed_something = True
+                        salida += _caracteres_emitidos(chunk)
                         yield chunk
                         await _checkpoint()
+                        if restante is not None and compute_credit_cost(peso, prompt_est, salida // 4) >= restante:
+                            sin_cupo = True
+                            return
+                finally:
+                    # Cerrar el generador corta también la petición a Ollama.
+                    await gen.aclose()
+
+            def _persistir() -> None:
+                # Sin el chunk final de Ollama (corte por cupo, botón de detener)
+                # no hay recuento real: se cobra la estimación, no cero.
+                nonlocal persistido
+                if persistido:
+                    return
+                persistido = True
+                text = collector.get("content", "")
+                if not text and not salida:
+                    return
+                _persist_assistant(
+                    conv_id, model, text,
+                    collector.get("prompt_tokens") or prompt_est,
+                    collector.get("completion_tokens") or salida // 4,
+                    int((time.perf_counter() - started_at) * 1000),
+                    user_id=uid,
+                    save_history=save_history and bool(text),
+                    bill_credits=bill_credits,
+                    message_id=message_id,
+                )
+
+            # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
+            if web_queries:
+                yield f"data: {json.dumps({'lixbon_sources': web_sources, 'lixbon_queries': web_queries})}\n\n"
+            try:
+                try:
+                    async for chunk in _bombear(stream_chat_openai(
+                            base, model, messages, headers=headers, collector=collector,
+                            tools=payload.tools, num_ctx=num_ctx, keep_alive=role.keep_alive, think=think)):
+                        yield chunk
                 except Exception as exc:
                     # Fallback local solo si el nodo falló ANTES de emitir contenido
                     # (reintentar a mitad de stream duplicaría texto en el cliente)
                     if origen != "local" and not streamed_something:
                         logger.warning(f"[stream] Nodo '{origen}' falló ({exc}); fallback local")
-                        async for chunk in stream_chat_openai(OLLAMA_BASE_URL, model, messages,
-                                                              collector=collector, tools=payload.tools,
-                                                              num_ctx=num_ctx, keep_alive=role.keep_alive,
-                                                              think=think):
+                        async for chunk in _bombear(stream_chat_openai(
+                                OLLAMA_BASE_URL, model, messages, collector=collector, tools=payload.tools,
+                                num_ctx=num_ctx, keep_alive=role.keep_alive, think=think)):
                             yield chunk
                     else:
                         logger.error(f"[stream] Falló el streaming ({exc})")
                         raise
+                await run_in_threadpool(_persistir)
+                aviso = None if is_api else await run_in_threadpool(quota_notice, uid, plan)
+                if sin_cupo:
+                    logger.info(f"[chat] respuesta cortada por cupo (user={uid})")
+                    final = {"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}],
+                             "lixbon_quota": aviso or {"state": "exhausted", "message": "Agotaste tu cupo."}}
+                    yield f"data: {json.dumps(final, ensure_ascii=False)}\n\n"
+                elif aviso:
+                    yield f"data: {json.dumps({'choices': [], 'lixbon_quota': aviso}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
             finally:
-                text = collector.get("content", "")
-                if text:
-                    latency_ms = int((time.perf_counter() - started_at) * 1000)
-                    _persist_assistant(
-                        conv_id, model, text,
-                        collector.get("prompt_tokens", 0),
-                        collector.get("completion_tokens", 0),
-                        latency_ms,
-                        user_id=user_data["id"],
-                        save_history=save_history,
-                        bill_credits=bill_credits,
-                        message_id=message_id,
-                    )
+                _persistir()
 
         return StreamingResponse(_stream_and_persist(), media_type="text/event-stream")
 
@@ -537,6 +596,7 @@ async def chat_completions(
             "total_tokens": prompt_tokens + completion_tokens,
         },
         "latency_ms": latency_ms,
+        "lixbon_quota": None if is_api else quota_notice(user_data["id"], plan),
     })
 
 
@@ -658,8 +718,10 @@ async def vision_describe(
         "images": payload.images,
     }]
     started_at = time.perf_counter()
+    # Describir no necesita razonar: con thinking, qwen3.5 tardaba tanto que el
+    # proxy cortaba la petición y el móvil mostraba "Sin conexión".
     resp, origen = await _routed_chat(model, messages, num_ctx=resolve_num_ctx(None, role.num_ctx, await fetch_models(), model),
-                                      keep_alive=role.keep_alive)
+                                      keep_alive=role.keep_alive, think=False)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     description = resp.get("message", {}).get("content", "").strip()
     prompt_tokens = int(resp.get("prompt_eval_count") or 0)

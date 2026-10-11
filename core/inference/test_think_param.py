@@ -18,3 +18,9 @@ def test_otros_modelos_solo_entienden_booleanos():
     assert think_param("qwen3.5:27b", True) is True
     assert think_param("qwen3.5:27b", "high") is True
     assert think_param("", False) is False
+
+
+def test_qwen38_gradua():
+    assert think_param("qwen3.8:9b", "high") == "high"
+    assert think_param("qwen3.8:9b", False) is False
+    assert think_param("qwen3.5:2b", "low") is True

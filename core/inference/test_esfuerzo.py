@@ -17,8 +17,8 @@ def test_lo_conversacional_no_razona(texto):
     "¿Por qué el cielo es azul?",
     "explica la diferencia entre TCP y UDP",
     "compara React con Vue",
-    "cuánto es 37 * 41",
     "resuelve 2x + 3 = 11",
+    "calcula la integral de x^2 entre 0 y 3",
     "why does this fail",
     "falla esto:\n```py\nprint(1/0)\n```",
     "Traceback (most recent call last):\n  File x",
@@ -32,6 +32,8 @@ def test_lo_que_pide_pensar_razona(texto):
 @pytest.mark.parametrize("texto", [
     "dame ideas de nombres para una cafetería en la playa",
     "en 2024 qué pasó",
+    "Cual es el resultado de 2×2+5",
+    "cuánto es 37 * 41",
     "escribe un poema corto sobre el mar y la luna llena",
 ])
 def test_lo_intermedio_razona_poco(texto):
@@ -54,3 +56,9 @@ def test_mira_solo_el_ultimo_mensaje_del_usuario():
 
 def test_sin_mensaje_del_usuario():
     assert nivel_de_razonamiento([{"role": "system", "content": "x"}]) == "low"
+
+
+def test_el_texto_de_los_adjuntos_no_cuenta_como_mensaje_largo():
+    adjunto = "--- Imagen adjunta: foto.jpg (descrita por un modelo de visión) ---\n" + "detalle " * 200
+    assert nivel_de_razonamiento(_u(adjunto + "\n\n---\n\nDescribe esta imagen")) == "low"
+    assert nivel_de_razonamiento(_u(adjunto + "\n\n---\n\n¿Por qué falla?")) is True

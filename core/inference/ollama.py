@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Any, AsyncIterator
@@ -58,15 +59,24 @@ def coerce_keep_alive(value: str | int | None) -> str | int | None:
 
 THINK_LEVELS = ("low", "medium", "high")
 
+# Modelos que gradúan el razonamiento (low/medium/high). El resto solo entiende
+# booleanos y un nivel se traduce a "encendido".
+THINK_LEVEL_MODELS = tuple(
+    p.strip().lower() for p in os.getenv("THINK_LEVEL_MODELS", "gpt-oss,qwen3.8").split(",") if p.strip()
+)
+
+
+def gradua_razonamiento(model: str | None) -> bool:
+    nombre = (model or "").lower()
+    return any(p in nombre for p in THINK_LEVEL_MODELS)
+
 
 # gpt-oss no permite apagar el razonamiento: Ollama rechaza `think: false` y
-# solo acepta niveles ("low"/"medium"/"high"). El resto de modelos thinking
-# solo entiende booleanos, así que un nivel se traduce a "encendido".
+# solo acepta niveles.
 def think_param(model: str, think: bool | str | None) -> bool | str | None:
-    es_gpt_oss = "gpt-oss" in (model or "").lower()
     if isinstance(think, str):
-        return think if es_gpt_oss else True
-    if es_gpt_oss and think is not None:
+        return think if gradua_razonamiento(model) else True
+    if "gpt-oss" in (model or "").lower() and think is not None:
         return "medium" if think else "low"
     return think
 

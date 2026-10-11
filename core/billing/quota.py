@@ -325,6 +325,46 @@ def credit_buckets_snapshot(user_id: int, plan: dict[str, Any]) -> dict[str, Any
     return {"session": _bucket(session, session_limit), "week": _bucket(week, week_limit)}
 
 
+AVISO_CERCA_PCT = 80.0
+_NOMBRE_BUCKET = {"session": "de tu sesión actual", "week": "semanal"}
+
+
+def credits_remaining(user_id: int, plan: dict[str, Any]) -> int | None:
+    """Créditos que quedan en el bucket más justo; None si no hay límite que
+    hacer cumplir. Lo usa el stream para cortar al agotarse a mitad."""
+    if not SESSION_QUOTA_ENFORCE:
+        return None
+    snap = credit_buckets_snapshot(user_id, plan)
+    restos = [b["limit"] - b["used"] for b in snap.values() if not b["unlimited"]]
+    return min(restos) if restos else None
+
+
+def quota_notice(user_id: int, plan: dict[str, Any]) -> dict[str, Any] | None:
+    """Aviso para el cliente tras una respuesta: cupo agotado o por encima del
+    80 %. None si no hay nada que avisar."""
+    try:
+        snap = credit_buckets_snapshot(user_id, plan)
+    except Exception as exc:
+        logger.warning(f"No se pudo leer el cupo para avisar ({exc})")
+        return None
+    peor = max(
+        ((scope, b) for scope, b in snap.items() if not b["unlimited"]),
+        key=lambda x: x[1]["percent"], default=None,
+    )
+    if peor is None or peor[1]["percent"] < AVISO_CERCA_PCT:
+        return None
+    scope, b = peor
+    agotado = b["percent"] >= 100
+    reset = datetime.fromisoformat(b["reset_at"]) if b["reset_at"] else None
+    espera = f" Se reinicia en {_human_wait(reset)}." if reset else ""
+    message = (
+        f"Agotaste el cupo {_NOMBRE_BUCKET[scope]} del plan {plan['name']}.{espera}" if agotado
+        else f"Llevas el {round(b['percent'])} % del cupo {_NOMBRE_BUCKET[scope]} del plan {plan['name']}.{espera}"
+    )
+    return {"state": "exhausted" if agotado else "near", "scope": scope, "percent": b["percent"],
+            "reset_at": b["reset_at"], "message": message}
+
+
 def ensure_can_chat(user_id: int, plan: dict[str, Any], model: str | None = None) -> None:
     """
     Verificación previa a la inferencia. Lanza 403 (modelo fuera del plan),
