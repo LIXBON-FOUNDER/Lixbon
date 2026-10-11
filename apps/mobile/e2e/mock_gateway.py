@@ -260,8 +260,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         body = self._body()
-        if path == "/api/auth/login":
-            return self._json({"api_key": "lxb_e2e_key", "user": USER})
+        if path in ("/api/auth/login", "/api/auth/refresh"):
+            # Como el gateway real: las apps reciben una sesión de dispositivo.
+            return self._json({"access_token": "lixbon_at_e2e", "refresh_token": "lixbon_rt_e2e",
+                               "token_type": "Bearer", "expires_in": 1800, "session_id": 1, "user": USER})
         if path == "/__e2e/new_session":
             # Lo que hace el gateway cuando un IDE ejecuta /remote.
             sess = {**SESSIONS[0], "id": "claude02", "title": "Revisar las notificaciones push",

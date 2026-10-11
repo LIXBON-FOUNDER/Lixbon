@@ -14,7 +14,8 @@ const ATTEMPTS_BEFORE_UNSUPPORTED = 2;
 let ridSeq = 0;
 const newRid = () => `m${Date.now().toString(36)}${(++ridSeq).toString(36)}`;
 
-export function openRemoteSocket({ base, token, sessionId, getSeq, onEvent, onStatus, onEnded, onUnsupported, appState }) {
+// `getToken` se lee en cada conexión: el access de la sesión dura 30 min.
+export function openRemoteSocket({ base, getToken, sessionId, getSeq, onEvent, onStatus, onEnded, onUnsupported, appState }) {
   let socket = null;
   let link = null;
   let stopped = false;
@@ -100,7 +101,7 @@ export function openRemoteSocket({ base, token, sessionId, getSeq, onEvent, onSt
 
     ws.onopen = () => {
       if (me.dead) return;
-      ws.send(JSON.stringify({ op: 'auth', token }));
+      ws.send(JSON.stringify({ op: 'auth', token: getToken() }));
       me.open = true;
       everOpened = true;
       failed = 0;
