@@ -1599,3 +1599,107 @@
   .chat-vchip { transition: none; }
   .chat-vchip.is-busy strong::after { animation: none; }
 }
+
+.razonar {
+  position: relative;
+}
+
+.razonar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.razonar__btn:hover,
+.razonar__btn.is-open {
+  background: var(--surface-5);
+}
+
+.razonar__btn.is-on {
+  color: var(--accent);
+}
+
+.razonar__pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 90;
+  width: 260px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--sombra-menu);
+  animation: select-in 0.14s ease;
+}
+
+.razonar__cab {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.razonar__valor {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.razonar__rango {
+  width: 100%;
+  margin: 10px 0 4px;
+  accent-color: var(--accent);
+}
+
+.razonar__marcas {
+  display: flex;
+  justify-content: space-between;
+}
+
+.razonar__marcas button {
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.razonar__marcas button.is-sel {
+  color: var(--ink);
+}
+
+.razonar__ayuda {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-muted);
+}
+
+.aviso-cuota {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+.aviso-cuota.is-agotado {
+  background: var(--field-error);
+  color: var(--danger-ink);
+}
+
+.aviso-cuota span {
+  flex: 1;
+}
+
+.aviso-cuota__x {
+  display: inline-flex;
+  color: inherit;
+  opacity: 0.7;
+}
