@@ -4,6 +4,11 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.7.0
+- Orquestador: `/orquestar <objetivo>` convierte al agente en coordinador de un equipo de agentes que corre en Lixbon Desktop. Cada lanzamiento y cada integración las aprueba una persona allí. `/orquestador` muestra los runs y las tareas, y explica qué falta si el orquestador no está disponible.
+- Nuevo `lixbon worker`: el orquestador de Lixbon Desktop puede lanzar al CLI como un agente hijo, con cualquier proveedor de `lixbon profile`. Solo corre dentro de una tarea del orquestador y entrega su respuesta como informe.
+- Nuevo `lixbon profile list --json`: lista los proveedores configurados (nunca las claves) para que Lixbon Desktop los ofrezca como modelos de un rol.
+
 ## 2.6.1
 - Control remoto: desde el móvil puedes mandar fotos y documentos con el mensaje y citar archivos del proyecto; el modelo los recibe como si los adjuntaras en la terminal.
 - Las ediciones del agente se ven en el móvil con su diff (archivo y líneas añadidas y borradas), también cuando te pide aprobarlas.
