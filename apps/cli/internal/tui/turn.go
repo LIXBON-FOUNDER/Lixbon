@@ -30,16 +30,15 @@ func (m *Model) dispatch(text string) tea.Cmd {
 	if name == "" {
 		return m.startTurn(text, text)
 	}
+	m.gap()
+	m.add(echoBlock(text))
 	if _, ok := lookup(name); ok {
-		m.print(renderCommandEcho(text))
 		return m.runCommand(name, arg)
 	}
 	if custom, ok := m.chat.Custom[name]; ok {
-		m.print(renderCommandEcho(text))
 		return m.startTurn(workspace.Expand(custom.Body, arg), "")
 	}
-	m.print(renderCommandEcho(text))
-	m.print(errLine("Comando desconocido: /" + name + ". /help muestra los disponibles."))
+	m.add(errLine("Comando desconocido: /" + name + ". /help muestra los disponibles."))
 	return nil
 }
 
@@ -47,10 +46,9 @@ func (m *Model) dispatch(text string) tea.Cmd {
 // pedir confirmación: lo ha escrito él.
 func (m *Model) shell(command string) tea.Cmd {
 	if command == "" {
-		m.print(note("Escribe un comando tras «!», p. ej. !git status. Se ejecuta en el workspace y el modelo ve la salida."))
+		m.add(note("Escribe un comando tras «!», p. ej. !git status. Se ejecuta en el workspace y el modelo ve la salida."))
 		return nil
 	}
-	m.print(renderCommandEcho("!" + command))
 	return m.execShell(command)
 }
 
@@ -58,11 +56,11 @@ func (m *Model) shell(command string) tea.Cmd {
 // si ya se imprimió, p. ej. el prompt de un comando propio).
 func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	if !m.chat.Client.Generic && m.chat.Cfg.APIKey == "" {
-		m.print(errLine(noSessionHint))
+		m.add(errLine(noSessionHint))
 		return nil
 	}
 	if m.chat.Model == "" {
-		m.print(errLine("Todavía no hay un modelo elegido. /model abre el selector cuando el servidor publique modelos."))
+		m.add(errLine("Todavía no hay un modelo elegido. /model abre el selector cuando el servidor publique modelos."))
 		return nil
 	}
 	m.turn++
@@ -72,9 +70,13 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	m.running = true
 	m.started = time.Now()
 	m.live = liveState{}
+	m.liveChars, m.liveReal, m.charsPerToken = 0, 0, m.chat.Session.Estimator.CharsPerToken()
 	m.notice = ""
+	m.openTool, m.readGroup, m.todoEntry = nil, nil, nil
 	if shown != "" {
-		m.print("\n" + renderUserMessage(shown, m.width))
+		m.gap()
+		m.add(userBlock{text: shown, chips: m.sentChips(shown)})
+		m.print("")
 	}
 	var sink chat.Sink = &uiSink{send: m.send, turn: id}
 	if m.remote != nil {
@@ -87,15 +89,17 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 		answer, err := c.Send(ctx, prompt, sink)
 		send(doneMsg{turn: id, answer: answer, err: err})
 	}()
-	return tickCmd()
+	return m.startTick()
 }
 
-// flushLive imprime lo que el modelo lleva dicho en el paso actual: el
-// razonamiento resumido en una línea y la prosa (sin el JSON de las llamadas).
+// flushLive pasa al transcript lo que el modelo lleva dicho en el paso
+// actual: el razonamiento completo (plegado) y la prosa, sin el JSON de las
+// llamadas.
 func (m *Model) flushLive() {
 	live := &m.live
-	if live.reasoning.Len() > 0 && live.reasoningSecs > 0.5 {
-		m.print(renderLogLine(fmt.Sprintf("%s pensó %.1f s", glyphThink, live.reasoningSecs), sDim2, "", m.width))
+	if strings.TrimSpace(live.reasoning.String()) != "" {
+		m.closeReads()
+		m.add(thinkBlock{text: live.reasoning.String(), secs: live.reasoningSecs})
 	}
 	raw := live.content.String()
 	prose := strings.TrimSpace(raw)
@@ -107,18 +111,19 @@ func (m *Model) flushLive() {
 		}
 	}
 	if prose != "" {
-		if !live.spoke {
-			m.print("\n" + renderSpeaker("", m.width))
-			live.spoke = true
-		} else {
-			m.print("")
-		}
-		m.print(m.markdown(prose))
+		m.printAnswer(prose)
+		live.spoke = true
 		live.lastProse = prose
 	}
 	live.content.Reset()
 	live.reasoning.Reset()
 	live.reasoningSecs = 0
+}
+
+func (m *Model) printAnswer(prose string) {
+	m.closeReads()
+	m.gap()
+	m.add(answerBlock{text: prose, md: m.renderMarkdown})
 }
 
 func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
@@ -127,6 +132,8 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	m.notice = ""
 	cancelled := m.interrupted || errors.Is(msg.err, context.Canceled)
 	m.interrupted = false
+	m.closeTool(toolStopped)
+	m.closeReads()
 	if m.remote != nil {
 		m.remoteTurnDone(msg, cancelled)
 	}
@@ -137,26 +144,23 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 
 	switch {
 	case msg.err != nil && !errors.Is(msg.err, context.Canceled):
-		m.print(m.reportError(msg.err))
+		m.add(m.reportError(msg.err))
 	default:
 		if answer := strings.TrimSpace(msg.answer); answer != "" {
 			shown := answer
 			if m.chat.Mode == chat.ModeAgent {
 				shown = toolparse.CleanProse(answer)
 			}
-			if shown != "" && shown != m.live.lastProse && !m.live.spoke {
-				m.print("\n" + renderSpeaker("", m.width))
-				m.print(m.markdown(shown))
-			} else if shown != "" && shown != m.live.lastProse && m.live.usedTools {
-				m.print("")
-				m.print(m.markdown(shown))
+			if shown != "" && shown != m.live.lastProse && (!m.live.spoke || m.live.usedTools) {
+				m.printAnswer(shown)
 			}
 		} else if m.chat.Mode != chat.ModeAgent && !m.live.spoke {
-			m.print(renderLogLine("(sin respuesta)  "+glyphSep+"  el modelo no devolvió texto; /doctor revisa la conexión", sDim2, "", m.width))
+			m.add(note("(sin respuesta) " + glyphSep + " el modelo no devolvió texto; /doctor revisa la conexión"))
 		}
 	}
 	if cancelled {
-		m.print("\n" + sWarn.Render("— interrumpido —") + sDim2.Render("  el contexto se conserva: escribe «continúa» para seguir"))
+		m.gap()
+		m.add(interruptedBlock{})
 	}
 	if sources := m.chat.Sources; len(sources) > 0 {
 		var labels []string
@@ -170,12 +174,11 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 			}
 			labels = append(labels, label)
 		}
-		m.print(sDim2.Render("fuentes  " + strings.Join(labels, "  "+glyphSep+"  ")))
+		m.add(sourcesBlock(labels))
 	}
 	if m.chat.Mode == chat.ModeAgent {
-		st := m.chat.Session.Stats
-		if line := renderTurnSummary(st.Actions, len(st.Files), st.Adds, st.Dels, time.Since(m.started).Seconds(), m.width); line != "" {
-			m.print("\n" + line)
+		if st := m.chat.Session.Stats; st.Actions > 0 {
+			m.add(summaryBlock{actions: st.Actions, files: len(st.Files), adds: st.Adds, dels: st.Dels, secs: time.Since(m.started).Seconds()})
 		}
 	}
 	m.print("")
@@ -183,6 +186,8 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 		m.lastAnswer = h[len(h)-1].Content
 	}
 	m.refreshContext()
+	m.refreshGit()
+	m.files = nil
 
 	if len(m.queue) > 0 && !m.quitting {
 		next := m.queue[0]
@@ -193,7 +198,7 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 }
 
 // reportError traduce un error del gateway a la acción que lo resuelve.
-func (m *Model) reportError(err error) string {
+func (m *Model) reportError(err error) block {
 	var apiErr *api.Error
 	if !errors.As(err, &apiErr) {
 		return errLine(err.Error())
@@ -242,6 +247,7 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 		}
 	}
 	reply := msg.reply
+	m.setToolState(toolWaiting)
 	p := newPicker(title, options, func(value string, cancelled bool) tea.Cmd {
 		d := agent.Deny
 		if !cancelled {
@@ -250,29 +256,57 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 				d = agent.Allow
 			case "always":
 				d = agent.AllowAlways
+				m.alwaysAllowed = true
 			case "prefix":
 				d = agent.AllowPrefix
 			}
+		}
+		if d != agent.Deny {
+			m.setToolState(toolRunning)
 		}
 		reply <- d
 		return nil
 	})
 	p.cancel = "no"
-	p.detail = req.Detail
-	if p.detail == "" {
-		p.detail = req.Summary
-	}
-	p.hint = fmt.Sprintf("↑↓ mover %s ↵ elegir %s esc = No", glyphSep, glyphSep)
+	p.tone = pal.warn
+	p.body = m.approvalBody(req)
+	p.keys = [][2]string{{"↑↓", "mover"}, {fmt.Sprintf("1–%d", len(options)), "elegir"}, {"↵", "confirmar"}, {"esc", "= No"}}
 	m.picker = p
 	return nil
 }
 
+// approvalBody explica en el panel qué se aprueba: el comando con su carpeta,
+// el archivo con sus cambios (el diff ya está en el transcript) o la
+// herramienta externa.
+func (m *Model) approvalBody(req agent.Approval) []string {
+	switch req.Kind {
+	case agent.ApproveCommand:
+		return []string{
+			sAccent.Bold(true).Render("$") + " " + sBold.Render(req.Summary),
+			sDim.Render("  en " + shortPath(m.chat.Workspace)),
+		}
+	case agent.ApproveMCP:
+		return []string{sBeige.Render(req.Detail), sDim.Render("  " + req.Summary)}
+	}
+	line := sBeige.Render(firstNonEmpty(req.Detail, req.Summary))
+	if req.Change != nil {
+		line = sBeige.Render(req.Change.Path)
+		if m.openTool != nil {
+			if b := m.openTool.b.(*toolBlock); b.counts {
+				line += sDim2.Render(" "+glyphSep+" ") + counts(b.adds, b.dels)
+			}
+		}
+		line += sDim.Render(" " + glyphSep + " el diff está justo encima")
+	}
+	return []string{line}
+}
+
 func (m *Model) openAsk(msg askMsg) tea.Cmd {
-	m.print("")
+	m.gap()
 	reply := msg.reply
 	freeText := func() {
-		m.print(rail(true) + sBold.Render(msg.question))
-		m.print(note("escribe tu respuesta y pulsa Enter (Esc cancela)"))
+		m.add(askLine(msg.question))
+		m.add(note("escribe tu respuesta y pulsa Enter (Esc cancela)"))
 		m.prompt = &promptState{
 			label:    msg.question,
 			onSubmit: func(text string) tea.Cmd { reply <- askReply{answer: text, ok: true}; return nil },
@@ -299,5 +333,6 @@ func (m *Model) openAsk(msg askMsg) tea.Cmd {
 		}
 		return nil
 	})
+	m.picker.tone = pal.warn
 	return nil
 }

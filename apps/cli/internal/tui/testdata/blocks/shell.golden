@@ -1,0 +1,15 @@
+── 40 ──
+ $ Ejecutar  git status
+   │ On branch main
+   │ nothing to commit
+   └ exit 0 · 2 líneas
+── 80 ──
+ $ Ejecutar  git status
+   │ On branch main
+   │ nothing to commit
+   └ exit 0 · 2 líneas
+── 120 ──
+ $ Ejecutar  git status
+   │ On branch main
+   │ nothing to commit
+   └ exit 0 · 2 líneas

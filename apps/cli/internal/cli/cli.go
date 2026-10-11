@@ -27,6 +27,11 @@ type App struct {
 	Interactive func(ctx context.Context, opts chat.Options) int
 	// NewUpdater crea el actualizador; nil usa update.New.
 	NewUpdater func(manifestURL string) (*update.Updater, error)
+	// Login abre la pantalla de inicio de sesión; nil si no hay interfaz.
+	Login func(ctx context.Context) int
+	// IsTerminal y OpenBrowser se sustituyen en las pruebas.
+	IsTerminal  func() bool
+	OpenBrowser func(url string) error
 }
 
 func NewApp() (*App, error) {
@@ -45,7 +50,7 @@ const usage = `lixbon — asistente de código en tu terminal
 
 Comandos:
   init     Guardar base_url, api_key y modelo
-  setup    Iniciar sesión (interactivo)
+  setup    Iniciar sesión con tu cuenta de lixbon.com o una API key (--api-key)
   status   Ver configuración local
   models   Listar modelos disponibles
   usage    Ver uso global de la cuenta
@@ -74,7 +79,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "chat", "run", "start":
 		return a.chat(ctx, rest)
 	case "setup":
-		return a.setup(ctx)
+		return a.setup(ctx, rest)
 	case "usage":
 		return a.usageReport(ctx)
 	case "ui-demo":

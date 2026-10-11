@@ -1,69 +1,93 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"lixbon.com/cli/internal/chat"
-	"lixbon.com/cli/internal/toolparse"
 )
 
-var spinFrames = []string{"✻", "✦", "✧", "✦"}
-
-const (
-	liveTailRows = 8
-	ctxWarn      = 60.0
-	ctxFull      = 85.0
-)
-
-// View compone la pantalla completa: el transcript arriba y, pegado al borde
-// inferior, el texto en vivo, el menú, la caja de entrada y la barra de estado.
-// La altura total es siempre la de la terminal.
+// View compone la pantalla: barra superior fija, transcript y, pegado abajo,
+// la zona viva, el menú o panel, la caja de entrada y el pie. La altura total
+// es siempre la de la terminal.
 func (m *Model) View() tea.View {
 	if m.pagerActive() {
 		return m.pagerView()
 	}
+	width, height := max(m.width, 1), max(m.height, 1)
+	if m.login != nil {
+		v := tea.NewView(m.login.view(width, height))
+		v.AltScreen = true
+		v.WindowTitle = "lixbon · iniciar sesión"
+		return v
+	}
+	var top []string
+	if height >= topBarMinHeight {
+		top = append(top, m.topBar(width))
+		if height >= ruleMinHeight {
+			top = append(top, lipgloss.NewStyle().Foreground(lipgloss.Color(pal.rule)).Render(strings.Repeat(glyphs.rule, width)))
+		}
+	}
+
 	var bottom []string
 	if m.running {
-		bottom = append(bottom, m.liveView())
+		bottom = append(bottom, m.liveView()...)
 	}
+	panelAt := -1
 	if m.picker != nil {
-		bottom = append(bottom, m.picker.view(m.width))
+		chrome := 2 + len(m.picker.body) + 1
+		if len(m.picker.body) > 0 {
+			chrome++
+		}
+		if m.picker.search {
+			chrome++
+		}
+		maxRows := height - len(top) - len(bottom) - 1 - chrome
+		panelAt = len(bottom)
+		bottom = append(bottom, m.picker.view(width, max(1, maxRows))...)
 	} else {
-		if len(m.menu) > 0 {
-			bottom = append(bottom, m.menuView())
+		switch {
+		case m.shortcutsOpen:
+			bottom = append(bottom, m.shortcutsView()...)
+		case len(m.menu) > 0:
+			bottom = append(bottom, m.menuView()...)
 		}
 		if len(m.queue) > 0 {
 			bottom = append(bottom, m.queueLine())
 		}
-		bottom = append(bottom, m.inputBox())
+		bottom = append(bottom, m.inputBox()...)
 	}
-	bottom = append(bottom, m.statusBar())
-	lower := strings.Split(strings.Join(bottom, "\n"), "\n")
-	for i, line := range lower {
-		lower[i] = ansi.Truncate(line, max(m.width, 1), "")
+	bottom = append(bottom, m.footer())
+	for i, line := range bottom {
+		bottom[i] = ansi.Truncate(line, width, "")
 	}
 
-	height := max(m.height, 1)
-	if len(lower) > height {
-		lower = lower[len(lower)-height:]
+	if len(top)+len(bottom) > height {
+		top = nil
 	}
-	rows := height - len(lower)
+	if len(bottom) > height {
+		cut := len(bottom) - height
+		bottom = bottom[cut:]
+		panelAt -= cut
+	}
+	m.barShown = len(top) > 0
+	rows := height - len(top) - len(bottom)
 	m.scroll = min(m.scroll, m.log.maxScroll(rows))
 	window := m.log.window(rows, m.scroll)
-	m.winRows, m.winTop = rows, max(0, len(m.log.wrapped)-m.scroll-rows)
+	m.winY, m.winRows, m.winTop = len(top), rows, max(0, m.log.total()-m.scroll-rows)
+	m.panelY = -1
+	if panelAt >= 0 {
+		m.panelY = len(top) + rows + panelAt
+	}
 	if !m.sel.empty() {
 		for y, line := range window {
 			window[y] = m.highlight(m.winTop+y, line)
 		}
 	}
 
-	v := tea.NewView(strings.Join(append(window, lower...), "\n"))
+	screen := append(append(top, window...), bottom...)
+	v := tea.NewView(strings.Join(screen, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = m.windowTitle()
@@ -77,164 +101,31 @@ func (m *Model) windowTitle() string {
 	return "lixbon"
 }
 
-func (m *Model) queueLine() string {
-	n := len(m.queue)
-	label := fmt.Sprintf("%d en cola", n)
-	return sDim2.Render("  " + glyphDot + " " + label + " " + glyphSep + " se envía al terminar")
-}
-
-func (m *Model) liveView() string {
-	frame := spinFrames[m.spin%len(spinFrames)]
-	elapsed := time.Since(m.started).Seconds()
-	label := "trabajando"
-	if m.live.reasoning.Len() > 0 && m.live.content.Len() == 0 {
-		label = "pensando"
+// clickChrome atiende los clics fuera del transcript: el modelo y el plan de
+// la barra superior, el modo del pie y las filas de un panel.
+func (m *Model) clickChrome(msg tea.MouseClickMsg) (tea.Cmd, bool) {
+	if msg.Button != tea.MouseLeft {
+		return nil, false
 	}
-	hint := "Esc interrumpe"
-	if m.interrupted {
-		hint = "interrumpiendo…"
-	}
-	lines := []string{"", twoCol(sAccent.Render(frame)+" "+sDim.Render(label+"…"),
-		sDim2.Render(fmt.Sprintf("%.0f s %s %s", elapsed, glyphSep, hint)), m.width)}
-
-	if m.live.reasoning.Len() > 0 && m.live.content.Len() == 0 {
-		tail := strings.Split(strings.TrimSpace(m.live.reasoning.String()), "\n")
-		for _, l := range tail[max(0, len(tail)-3):] {
-			lines = append(lines, rail(false)+sDim2.Render(ansi.Truncate(l, max(10, m.width-4), glyphEllipsis)))
-		}
-	}
-	if m.live.content.Len() > 0 {
-		text := m.live.content.String()
-		if m.chat.Mode == chat.ModeAgent {
-			text = toolparse.CleanProse(text)
-			if text == "" {
-				lines = append(lines, sDim.Render("  "+glyphThink+" preparando acciones…"))
-			}
-		}
-		if text = strings.TrimSpace(text); text != "" {
-			wrapped := strings.Split(ansi.Wrap(text, max(20, m.width-2), ""), "\n")
-			for _, l := range wrapped[max(0, len(wrapped)-liveTailRows):] {
-				lines = append(lines, "  "+sPrimary.Render(l))
-			}
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m *Model) borderColor() lipgloss.Style {
-	color := cDim2
-	switch m.modeName() {
-	case "agent":
-		color = cAccent
-	case "plan":
-		color = cPlan
-	}
-	if m.prompt != nil {
-		color = cWarn
-	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(color).Width(max(20, m.width))
-}
-
-func (m *Model) inputBox() string {
-	if m.remote != nil {
-		return m.remoteBanner()
-	}
-	return m.borderColor().Render(m.input.View())
-}
-
-func (m *Model) menuView() string {
-	start := 0
-	if len(m.menu) > menuVisible {
-		start = max(0, min(m.menuCursor-menuVisible/2, len(m.menu)-menuVisible))
-	}
-	end := min(len(m.menu), start+menuVisible)
-	var lines []string
-	for i := start; i < end; i++ {
-		s := m.menu[i]
-		label := fmt.Sprintf("%-*s", NameWidth, "/"+s.Name)
-		args := ""
-		if s.Args != "" {
-			args = " " + s.Args
-		}
-		row := label + sDim2.Render(args) + "  " + sDim.Render(s.Desc)
-		if i == m.menuCursor {
-			row = sAccent.Render(glyphEdge+" ") + sBold.Render(label) + sDim.Render(args) + "  " + sPrimary.Render(s.Desc)
-		} else {
-			row = "  " + sBeige.Render(label) + sDim2.Render(args) + "  " + sDim.Render(s.Desc)
-		}
-		lines = append(lines, ansi.Truncate(row, m.width, glyphEllipsis))
-	}
-	return strings.Join(lines, "\n")
-}
-
-// statusBar: a la izquierda quién eres y con qué trabajas; a la derecha cuánto
-// llevas gastado. En una terminal estrecha se van descartando detalles, de los
-// menos a los más importantes, en vez de dejar que la fila se parta.
-func (m *Model) statusBar() string {
-	dot := sOK.Render(glyphDot)
 	switch {
-	case !m.online:
-		dot = sErr.Render(glyphDot)
-	case m.running:
-		dot = sAccent.Render(glyphDot)
-	}
-	sep := sDim2.Render("  " + glyphSep + "  ")
-	model := m.chat.Model
-	if model == "" {
-		model = "sin modelo"
-	}
-	modeStyle := sDim
-	switch m.modeName() {
-	case "agent":
-		modeStyle = sAccent
-	case "plan":
-		modeStyle = sPlan
-	}
-	mode := modeStyle.Render(m.modeName())
-	left := " " + dot + " " + sBeige.Render(model) + sep + sDim.Render(m.sessionLabel()) + sep + mode
-	if m.notice != "" {
-		left += sep + sAccent.Render(m.notice)
-	}
-	lefts := []string{left, " " + dot + " " + sBeige.Render(model) + sep + mode, " " + dot + " " + mode}
-
-	barStyle := sAccent
-	switch {
-	case m.ctxPct >= ctxFull:
-		barStyle = sErr
-	case m.ctxPct >= ctxWarn:
-		barStyle = sWarn
-	}
-	percent := sDim.Render(fmt.Sprintf(" %.0f%%", m.ctxPct))
-	context := sDim.Render("contexto ") + barStyle.Render(contextBar(m.ctxPct)) + percent
-	tokens := sDim.Render(fmtTokens(max(m.chat.SessionTokens, m.ctxTokens)) + " tokens")
-	var flags []string
-	if m.chat.WebMode == "on" {
-		flags = append(flags, "web")
-	}
-	if m.remote != nil {
-		flags = append(flags, "remoto")
-	}
-	if m.chat.ProjectContext != "" {
-		flags = append(flags, "LIXBON.md")
-	}
-	full := context + sep + tokens
-	if len(flags) > 0 {
-		full += sep + sBeige.Render(strings.Join(flags, " "))
-	}
-	if m.ctxPct >= ctxFull {
-		full += sep + sWarn.Render("/compact")
-	}
-	rights := []string{full + " ", context + sep + tokens + " ", context + " ",
-		barStyle.Render(contextBar(m.ctxPct)) + percent + " ", barStyle.Render(fmt.Sprintf("%.0f%%", m.ctxPct)) + " ", ""}
-
-	for _, l := range lefts {
-		for _, r := range rights {
-			if ansi.StringWidth(l)+ansi.StringWidth(r)+2 <= m.width || r == "" && ansi.StringWidth(l) <= m.width {
-				return twoCol(l, r, m.width)
-			}
+	case m.picker != nil && m.panelY >= 0 && msg.Y >= m.panelY:
+		cmd, closed := m.picker.click(msg.Y - m.panelY)
+		if closed {
+			m.picker = nil
 		}
+		return cmd, true
+	case m.barShown && msg.Y == 0 && m.picker == nil && !m.busyNow():
+		switch {
+		case m.barModel.has(msg.X):
+			return m.cmdModel(""), true
+		case m.barPlan.has(msg.X) && !m.chat.Client.Generic:
+			return m.runCommand("usage", ""), true
+		}
+	case msg.Y == m.height-1 && m.footMode.has(msg.X) && m.picker == nil && !m.busyNow():
+		m.cycleMode()
+		return nil, true
 	}
-	return ansi.Truncate(lefts[len(lefts)-1], max(m.width, 1), "")
+	return nil, false
 }
 
 func (m *Model) sessionLabel() string {

@@ -506,3 +506,67 @@ def test_la_llave_del_canje_revalida_en_api_auth_me(cliente):
     # propia, usa la del IDE.
     assert cliente.get("/api/team/bootstrap",
                        headers={"Authorization": f"Bearer {llave}"}).status_code == 200
+
+
+def _params_cli(verificador: str = "verificador-cli") -> dict[str, str]:
+    return {"redirect_uri": "http://127.0.0.1:53127/callback", "state": "xyz",
+            "challenge": _reto(verificador), "method": "S256", "client": "cli"}
+
+
+def test_el_cli_tiene_su_llave_y_no_rota_la_del_escritorio(cliente, gente):
+    """Cada cliente rota su propia credencial: iniciar sesión en el CLI no
+    puede cerrar la sesión de la app de escritorio."""
+    token = _token_emitido(cliente, "verificador-escritorio")
+    escritorio = cliente.post("/api/auth/ide/exchange",
+                              json={"token": token, "verifier": "verificador-escritorio"}).json()["api_key"]
+    token = _token_emitido(cliente, "verificador-cli")
+    r = cliente.post("/api/auth/ide/exchange",
+                     json={"token": token, "verifier": "verificador-cli", "key_name": "lixbon CLI"})
+    assert r.status_code == 200
+    cli = r.json()["api_key"]
+    assert cli != escritorio
+    for llave in (escritorio, cli):
+        assert cliente.get("/api/auth/me", headers={"Authorization": f"Bearer {llave}"}).status_code == 200
+
+
+def test_un_key_name_ajeno_se_rechaza(cliente):
+    token = _token_emitido(cliente, "verificador-ajeno")
+    r = cliente.post("/api/auth/ide/exchange",
+                     json={"token": token, "verifier": "verificador-ajeno", "key_name": "otra cosa"})
+    assert r.status_code == 422
+
+
+def test_client_cli_se_conserva_y_habla_de_la_terminal(cliente, gente):
+    params = _params_cli()
+    entrar = cliente.get("/ide/connect", params=params).text
+    assert "Lixbon CLI" in entrar and "desde la terminal" in entrar
+    assert "Entrar en lixbon.com" in entrar and 'action="/auth"' in entrar
+    r = cliente.post("/ide/connect/login", params=params,
+                     data={"email": "ana@lixbon.test", "password": "contraseña-larga"},
+                     follow_redirects=False)
+    assert r.status_code == 303 and "client=cli" in r.headers["location"]
+    autorizar = cliente.get("/ide/connect", params=params).text
+    assert "Conectar Lixbon CLI" in autorizar and "/ide/connect/cancelar" in autorizar
+    r = cliente.post("/ide/connect/authorize", params=params, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("http://127.0.0.1:53127/callback?")
+    r = cliente.get("/ide/connect/cancelar", params=params, follow_redirects=False)
+    assert r.status_code == 303
+    vuelta = r.headers["location"]
+    assert vuelta.startswith("http://127.0.0.1:53127/callback?")
+    assert "error=access_denied" in vuelta and "state=xyz" in vuelta
+    cliente.cookies.clear()
+    caducada = cliente.post("/ide/connect/authorize", params=params, follow_redirects=False)
+    assert caducada.status_code == 401 and "desde la terminal" in caducada.text
+
+
+def test_cancelar_tambien_exige_la_vuelta_local(cliente):
+    params = _params_cli()
+    params["redirect_uri"] = "https://malvado.example/callback"
+    assert cliente.get("/ide/connect/cancelar", params=params, follow_redirects=False).status_code == 400
+
+
+def test_sin_client_las_paginas_del_escritorio_no_cambian(cliente):
+    r = _conectar(cliente)
+    assert "client=" not in r.text
+    assert "Lixbon IDE" in r.text and "desde el IDE" in r.text
+    assert "Entrar en lixbon.com" not in r.text and "cancelar" not in r.text

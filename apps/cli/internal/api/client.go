@@ -205,16 +205,34 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
+// Model es un modelo de /v1/models. Capabilities usa los nombres de Ollama
+// (completion, tools, vision, thinking…); nil significa que el servidor no
+// las publica, no que no tenga ninguna.
 type Model struct {
-	ID   string
-	Name string
+	ID           string
+	Name         string
+	Capabilities []string
+	NumCtx       int
+	Description  string
+}
+
+func (m Model) HasCapability(name string) bool {
+	for _, c := range m.Capabilities {
+		if c == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 	var data struct {
 		Data []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID           string   `json:"id"`
+			Name         string   `json:"name"`
+			Capabilities []string `json:"capabilities"`
+			NumCtx       int      `json:"num_ctx"`
+			Description  string   `json:"description"`
 		} `json:"data"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, c.BaseURL+"/models", nil, 20*time.Second, true, &data); err != nil {
@@ -234,7 +252,13 @@ func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 		if name == "" {
 			name = m.ID
 		}
-		models = append(models, Model{ID: m.ID, Name: name})
+		model := Model{ID: m.ID, Name: name}
+		// Un proveedor compatible con OpenAI puede mandar campos con el mismo
+		// nombre y otro significado: solo se leen de un gateway Lixbon.
+		if !c.Generic {
+			model.Capabilities, model.NumCtx, model.Description = m.Capabilities, m.NumCtx, m.Description
+		}
+		models = append(models, model)
 	}
 	if len(models) == 0 && len(failures) > 0 {
 		return nil, &Error{Message: "El servidor no pudo listar los modelos: " + strings.Join(failures, "; ")}

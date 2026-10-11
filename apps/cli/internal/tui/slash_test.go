@@ -220,7 +220,7 @@ func TestToolsAndCostAndStatusReports(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/tools")
 	out := h.out()
-	contains(t, out, "herramientas del modo agent")
+	contains(t, out, "Herramientas del modo agent")
 	contains(t, out, "read_file")
 	contains(t, out, "solo lectura")
 	contains(t, out, "Protocolo: nativo")
@@ -282,7 +282,7 @@ func TestRunCommandExecutesAndFeedsTheModel(t *testing.T) {
 	h.key("enter")
 	h.settle()
 	contains(t, h.out(), "hola")
-	contains(t, h.out(), "salida 0")
+	contains(t, h.out(), "exit 0")
 	last := h.chat.History[len(h.chat.History)-1]
 	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
 		t.Fatalf("historial: %+v", last)
@@ -345,13 +345,13 @@ func TestKeyCommandValidatesTheKey(t *testing.T) {
 		t.Fatalf("clave: %q", h.chat.Cfg.APIKey)
 	}
 	h.send("/key")
-	contains(t, h.out(), "Pega tu API key")
-	if h.m.prompt == nil {
-		t.Fatal("debe pedir la clave")
+	if h.m.login == nil || h.m.login.step != stepAPIKey {
+		t.Fatal("/key sin argumento abre el login en la API key")
 	}
+	contains(t, h.view(), "Usar una API key")
 	h.key("esc")
-	if h.m.prompt != nil {
-		t.Fatal("Esc cancela la pregunta")
+	if h.m.login != nil {
+		t.Fatal("Esc vuelve al chat")
 	}
 }
 
@@ -448,9 +448,9 @@ func TestBangRunsTheCommandWithoutAskingAndFeedsTheModel(t *testing.T) {
 	h.send("!echo hola")
 	h.settle()
 	notContains(t, h.view(), "Ejecutar «")
-	contains(t, h.out(), "!echo hola")
+	contains(t, h.out(), "Ejecutar  echo hola")
 	contains(t, h.out(), "hola")
-	contains(t, h.out(), "salida 0")
+	contains(t, h.out(), "exit 0")
 	last := h.chat.History[len(h.chat.History)-1]
 	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
 		t.Fatalf("historial: %+v", last)

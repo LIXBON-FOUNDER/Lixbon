@@ -91,7 +91,24 @@ func newGateway(t *testing.T, steps ...func(http.ResponseWriter, *http.Request))
 		}
 		g.mcp(w, r)
 	})
-	mux.HandleFunc("/api/key/info", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"plan":{"name":"Pro"}}`) })
+	mux.HandleFunc("/api/key/info", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer lixbon_sk_mala" {
+			w.WriteHeader(401)
+			io.WriteString(w, `{"detail":"clave inválida"}`)
+			return
+		}
+		io.WriteString(w, `{"plan":{"name":"Pro"}}`)
+	})
+	mux.HandleFunc("/api/auth/ide/exchange", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["token"] != "tok-web" || body["key_name"] != "lixbon CLI" || body["verifier"] == "" {
+			w.WriteHeader(401)
+			io.WriteString(w, `{"detail":"token inválido"}`)
+			return
+		}
+		io.WriteString(w, `{"api_key":"lixbon_sk_web","user":{"email":"ana@estudio.dev","plan_name":"Pro"}}`)
+	})
 	mux.HandleFunc("/api/account/usage", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"plan":{"name":"Pro"},"buckets":{"session":{"percent":30},"week":{"unlimited":true}}}`)
 	})
