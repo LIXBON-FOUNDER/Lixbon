@@ -52,7 +52,7 @@ def cliente(_esquema):
 def _alta(correo: str) -> dict:
     u = q.create_user(correo, "contraseña-larga", correo.split("@")[0].title(), "Prueba")
     q.set_user_plan(u["id"], "free")
-    llave, _ = q.create_api_key("lixbon Desktop", u["id"], origin="login")
+    llave = q.create_device_session(u["id"], "desktop")["access_token"]
     return {"id": u["id"], "h": {"Authorization": f"Bearer {llave}"}, "llave": llave}
 
 

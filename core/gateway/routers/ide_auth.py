@@ -39,9 +39,6 @@ from fastapi import APIRouter, Cookie, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-# Al nivel del módulo y no dentro de la función: con `from __future__ import
-# annotations`, Pydantic resuelve el Literal de Canje contra estos globales.
-from core.gateway.routers.auth import CLI_KEY_NAME, DESKTOP_KEY_NAME
 from core.persistence.queries import (
     get_plan_for_user,
     get_user_by_id,
@@ -397,12 +394,9 @@ async def ide_connect_cancelar(peticion: Request):
 class Canje(BaseModel):
     token: str
     verifier: str
-    # Clientes nuevos: sesión de dispositivo (access + refresh) en vez de `api_key`.
+    # Sin `client` es una app anterior a las sesiones de dispositivo.
     client: Literal["desktop", "cli"] | None = None
     device_name: str | None = Field(default=None, max_length=80)
-    # Clientes anteriores: cada uno rota su propia credencial; con «lixbon CLI»
-    # el canje no cierra la del escritorio. Solo se aceptan estos dos nombres.
-    key_name: Literal[DESKTOP_KEY_NAME, CLI_KEY_NAME] = DESKTOP_KEY_NAME
 
 
 def _cuadra(challenge: str, verifier: str) -> bool:
@@ -430,10 +424,10 @@ async def ide_exchange(cuerpo: Canje, peticion: Request):
     if not usuario:
         raise HTTPException(status_code=400, detail="La cuenta ya no existe.")
 
-    from core.gateway.routers.auth import emitir_credencial_de_app
+    from core.gateway.routers.auth import emitir_credencial_de_app, exigir_cliente_actual
     credencial = emitir_credencial_de_app(usuario["id"], _ip(peticion), peticion.headers.get("user-agent"),
-                                          client=cuerpo.client, device_name=cuerpo.device_name,
-                                          key_name=cuerpo.key_name)
+                                          client=exigir_cliente_actual(cuerpo.client),
+                                          device_name=cuerpo.device_name)
     plan = get_plan_for_user(usuario["id"])
     logger.info("[ide-auth] canje correcto para el usuario %s", usuario["id"])
     return JSONResponse({

@@ -79,7 +79,6 @@ SOLO_SESION = [
     ("patch", "/api/account/profile"),
     ("get", "/api/account/settings"),
     ("get", "/api/team/bootstrap"),
-    ("post", "/api/auth/api-key/regenerate"),
 ]
 
 SESION_O_KEY = [
@@ -91,8 +90,9 @@ SESION_O_KEY = [
 
 
 @pytest.mark.parametrize("metodo,ruta", SOLO_SESION)
-def test_key_manual_no_gestiona_la_cuenta(cliente, cred, metodo, ruta):
-    r = getattr(cliente, metodo)(ruta, headers=cred["manual"])
+@pytest.mark.parametrize("quien", ["manual", "app_key"])
+def test_una_api_key_no_gestiona_la_cuenta(cliente, cred, quien, metodo, ruta):
+    r = getattr(cliente, metodo)(ruta, headers=cred[quien])
     assert r.status_code == 403
     assert r.json()["detail"]["error"] == "session_required"
 
@@ -104,10 +104,9 @@ def test_lectura_acepta_cualquier_credencial(cliente, cred, quien, metodo, ruta)
     assert r.status_code == 200, r.text
 
 
-@pytest.mark.parametrize("quien", ["app_key", "access"])
-def test_sesiones_y_keys_de_login_gestionan_la_cuenta(cliente, cred, quien):
-    assert cliente.get("/api/keys", headers=cred[quien]).status_code == 200
-    assert cliente.get("/api/account/settings", headers=cred[quien]).status_code == 200
+def test_la_sesion_del_dispositivo_gestiona_la_cuenta(cliente, cred):
+    assert cliente.get("/api/keys", headers=cred["access"]).status_code == 200
+    assert cliente.get("/api/account/settings", headers=cred["access"]).status_code == 200
 
 
 def test_cookie_web_gestiona_la_cuenta(cliente, cred):

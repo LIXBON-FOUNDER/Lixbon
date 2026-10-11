@@ -88,10 +88,7 @@ def resolve_credential(lixbon_session: str | None, authorization: str | None,
 
 
 def es_sesion(user_data: dict[str, Any]) -> bool:
-    # Las keys que emitía el login cuentan como sesión hasta que caduquen (≤ 90 días
-    # desde que el login dejó de emitirlas); las manuales nunca.
-    return (user_data.get("auth_via") == "session"
-            or user_data.get("key_origin") in ("login", "login_compat"))
+    return user_data.get("auth_via") == "session"
 
 
 def _limitar(user_data: dict[str, Any], token: str | None) -> None:

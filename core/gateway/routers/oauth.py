@@ -291,7 +291,6 @@ class ExchangePayload(BaseModel):
     client: Literal["desktop", "cli", "mobile"] | None = None
     device_name: str | None = Field(default=None, max_length=80)
     issue_api_key: bool = False
-    key_name: str | None = Field(default=None, max_length=60)
 
 
 @router.post("/api/auth/oauth/exchange")
@@ -315,19 +314,19 @@ async def oauth_exchange(payload: ExchangePayload, request: Request):
         raise HTTPException(status_code=403, detail="Cuenta no disponible")
 
     from core.gateway.routers.auth import (
-        MOBILE_KEY_NAME,
         _set_session_cookie,
         avisar_si_acceso_inusual,
         emitir_credencial_de_app,
+        exigir_cliente_actual,
         nombre_de_app,
     )
     agente = request.headers.get("user-agent")
     body: dict[str, Any] = {"message": "Login correcto", "user": user}
     if payload.client or payload.issue_api_key:
-        key_name = payload.key_name or MOBILE_KEY_NAME
-        avisar_si_acceso_inusual(user, agente, ip, nombre_de_app(payload.client, key_name))
-        body.update(emitir_credencial_de_app(user_id, ip, agente, client=payload.client,
-                                             device_name=payload.device_name, key_name=key_name))
+        client = exigir_cliente_actual(payload.client)
+        avisar_si_acceso_inusual(user, agente, ip, nombre_de_app(client))
+        body.update(emitir_credencial_de_app(user_id, ip, agente, client=client,
+                                             device_name=payload.device_name))
         return JSONResponse(body)
 
     avisar_si_acceso_inusual(user, agente, ip)

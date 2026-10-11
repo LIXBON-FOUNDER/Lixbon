@@ -19,7 +19,6 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from core.gateway import deps
-from core.gateway.routers.auth import DESKTOP_CLI_KEY_NAMES, FIRST_PARTY_KEY_NAMES
 from core.config import CHAT_THINK, OLLAMA_BASE_URL
 from core.billing import credits
 from core.billing.quota import (
@@ -64,31 +63,18 @@ router = APIRouter()
 
 
 def _is_external_api(user_data: dict[str, Any], plan: dict[str, Any]) -> bool:
-    """True cuando el tráfico debe seguir cobrándose con créditos prepago
+    """True cuando el tráfico se cobra con créditos prepago
     (credits.ensure_can_use_api) en vez de con el pool de sesión/semana:
 
-    - Cualquier API key creada a mano (Ajustes → API keys, uso externo o
-      programable): siempre créditos, sin importar el plan.
-    - Las keys que desktop/CLI se emiten a sí mismas (DESKTOP_CLI_KEY_NAMES):
-      créditos SOLO en el plan Free — decisión de negocio: el chat gratis sin
-      comprar créditos es de web y móvil, no de desktop/CLI. Pro/Advance en
-      esas mismas apps sí comparten el pool de sesión/semana.
-    - La key de la app móvil: siempre el pool de sesión/semana, en cualquier
-      plan (igual que la sesión web).
-
-    Las sesiones de dispositivo siguen la misma regla por `client`; las keys
-    con nombre de app solo existen hasta que caduquen las que emitía el login.
+    - Una API key: siempre créditos, sin importar el plan.
+    - La sesión de desktop o CLI: créditos SOLO en el plan Free — decisión de
+      negocio: el chat gratis sin comprar créditos es de web y móvil. Pro y
+      Advance en esas apps sí comparten el pool de sesión/semana.
+    - La web y el móvil: siempre el pool.
     """
-    if user_data.get("auth_via") == "session":
-        return user_data.get("client") in ("desktop", "cli") and plan.get("id") == "free"
-    if user_data.get("auth_via") != "api_key":
-        return False
-    key_name = user_data.get("key_name")
-    if key_name not in FIRST_PARTY_KEY_NAMES:
-        return True  # key externa genuina
-    if key_name in DESKTOP_CLI_KEY_NAMES:
-        return plan.get("id") == "free"
-    return False  # móvil: siempre el pool de sesión/semana
+    if user_data.get("auth_via") == "api_key":
+        return True
+    return user_data.get("client") in ("desktop", "cli") and plan.get("id") == "free"
 
 
 class ChatMessage(BaseModel):

@@ -149,13 +149,11 @@ def test_equipo_y_red_desconocidos_avisan_una_sola_vez(cliente, verificada):
 
 
 def test_la_app_movil_se_reconoce_aunque_cambie_de_version(cliente, verificada):
-    assert _entrar(cliente, "okhttp/4.12.0", ip="77.88.5.5",
-                   issue_api_key=True, key_name="Lixbon Mobile").status_code == 200
+    assert _entrar(cliente, "okhttp/4.12.0", ip="77.88.5.5", client="mobile").status_code == 200
     assert len(BUZON) == 1
     assert "La app móvil de lixbon" in BUZON[0]["html"]
 
-    assert _entrar(cliente, "okhttp/5.0.1", ip="91.12.3.4",
-                   issue_api_key=True, key_name="Lixbon Mobile").status_code == 200
+    assert _entrar(cliente, "okhttp/5.0.1", ip="91.12.3.4", client="mobile").status_code == 200
     assert BUZON == []
 
 

@@ -70,10 +70,10 @@ def cliente(_esquema):
 
 
 def _alta(correo: str) -> tuple[int, str]:
-    """Un usuario y su llave. Devuelve (id, api_key)."""
+    """Un usuario y la sesión de su IDE. Devuelve (id, access)."""
     u = q.create_user(correo, "contraseña-larga", correo.split("@")[0].title(), "Prueba")
     q.set_user_plan(u["id"], "free")
-    llave, _ = q.create_api_key("lixbon Desktop", u["id"], origin="login")
+    llave = q.create_device_session(u["id"], "desktop")["access_token"]
     return u["id"], llave
 
 
@@ -470,14 +470,13 @@ def _token_emitido(cliente, verificador: str) -> str:
 def test_regla3_el_token_es_de_un_solo_uso(cliente, gente):
     token = _token_emitido(cliente, "verificador-secreto")
     uno = cliente.post("/api/auth/ide/exchange",
-                       json={"token": token, "verifier": "verificador-secreto"})
+                       json={"token": token, "verifier": "verificador-secreto", "client": "desktop"})
     assert uno.status_code == 200
-    # Un cliente anterior sigue recibiendo `api_key`, pero ya es una sesión, no una key.
-    assert uno.json()["api_key"].startswith("lixbon_at_")
+    assert uno.json()["access_token"].startswith("lixbon_at_")
     assert uno.json()["user"]["id"] == gente["ana"]["id"]
     # El segundo canje no vale aunque el verificador sea correcto.
     dos = cliente.post("/api/auth/ide/exchange",
-                       json={"token": token, "verifier": "verificador-secreto"})
+                       json={"token": token, "verifier": "verificador-secreto", "client": "desktop"})
     assert dos.status_code == 400
 
 
@@ -499,7 +498,8 @@ def test_la_llave_del_canje_revalida_en_api_auth_me(cliente):
     sesión al arrancar (sección 1 del contrato)."""
     token = _token_emitido(cliente, "otro-verificador")
     llave = cliente.post("/api/auth/ide/exchange",
-                         json={"token": token, "verifier": "otro-verificador"}).json()["api_key"]
+                         json={"token": token, "verifier": "otro-verificador",
+                               "client": "desktop"}).json()["access_token"]
     r = cliente.get("/api/auth/me", headers={"Authorization": f"Bearer {llave}"})
     assert r.status_code == 200
     assert r.json()["user"]["email"] == "ana@lixbon.test"
@@ -514,27 +514,34 @@ def _params_cli(verificador: str = "verificador-cli") -> dict[str, str]:
             "challenge": _reto(verificador), "method": "S256", "client": "cli"}
 
 
-def test_el_cli_tiene_su_llave_y_no_rota_la_del_escritorio(cliente, gente):
-    """Cada cliente rota su propia credencial: iniciar sesión en el CLI no
-    puede cerrar la sesión de la app de escritorio."""
+def test_el_cli_tiene_su_sesion_y_no_cierra_la_del_escritorio(cliente, gente):
+    """Cada dispositivo tiene su sesión: iniciar sesión en el CLI no puede
+    cerrar la de la app de escritorio."""
     token = _token_emitido(cliente, "verificador-escritorio")
     escritorio = cliente.post("/api/auth/ide/exchange",
-                              json={"token": token, "verifier": "verificador-escritorio"}).json()["api_key"]
+                              json={"token": token, "verifier": "verificador-escritorio",
+                                    "client": "desktop"}).json()["access_token"]
     token = _token_emitido(cliente, "verificador-cli")
     r = cliente.post("/api/auth/ide/exchange",
-                     json={"token": token, "verifier": "verificador-cli", "key_name": "lixbon CLI"})
+                     json={"token": token, "verifier": "verificador-cli", "client": "cli"})
     assert r.status_code == 200
-    cli = r.json()["api_key"]
+    cli = r.json()["access_token"]
     assert cli != escritorio
     for llave in (escritorio, cli):
         assert cliente.get("/api/auth/me", headers={"Authorization": f"Bearer {llave}"}).status_code == 200
 
 
-def test_un_key_name_ajeno_se_rechaza(cliente):
+def test_un_client_ajeno_se_rechaza(cliente):
     token = _token_emitido(cliente, "verificador-ajeno")
     r = cliente.post("/api/auth/ide/exchange",
-                     json={"token": token, "verifier": "verificador-ajeno", "key_name": "otra cosa"})
+                     json={"token": token, "verifier": "verificador-ajeno", "client": "otra cosa"})
     assert r.status_code == 422
+
+
+def test_un_ide_anterior_sin_client_debe_actualizarse(cliente):
+    token = _token_emitido(cliente, "verificador-viejo")
+    r = cliente.post("/api/auth/ide/exchange", json={"token": token, "verifier": "verificador-viejo"})
+    assert r.status_code == 426 and r.json()["detail"]["error"] == "update_required"
 
 
 def test_client_cli_se_conserva_y_habla_de_la_terminal(cliente, gente):

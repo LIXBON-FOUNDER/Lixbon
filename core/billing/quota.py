@@ -1,7 +1,7 @@
 """
 F8 reemplaza a messages_per_day/tokens_per_month como GATE del chat de las 4
-apps de primera parte (web por cookie; desktop/CLI/móvil por su API key propia,
-ver FIRST_PARTY_KEY_NAMES en core.gateway.routers.auth). Esos dos campos viejos
+apps de primera parte (web por cookie; desktop/CLI/móvil por su sesión de
+dispositivo, ver _is_external_api en core.gateway.routers.chat). Esos dos campos viejos
 del plan siguen existiendo y contándose (bump_usage_quota/record_tokens) porque
 credits.ensure_can_use_api todavía los usa para decidir cuándo el tráfico de
 una API key EXTERNA pasa de "cubierto por el plan" a "prepago por créditos" —

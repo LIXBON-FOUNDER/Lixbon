@@ -120,27 +120,12 @@ def test_cliente_desconocido_se_rechaza(cliente, uid):
     assert _login(cliente, client="tostadora").status_code == 422
 
 
-@pytest.mark.parametrize("key_name", [None, "lixbon CLI", "Lixbon Mobile"])
-def test_cliente_anterior_recibe_api_key_que_es_una_sesion(cliente, uid, key_name):
+@pytest.mark.parametrize("extra", [{"issue_api_key": True}, {"issue_api_key": True, "key_name": "lixbon CLI"}])
+def test_una_app_anterior_debe_actualizarse(cliente, uid, extra):
     antes = _keys(uid)
-    extra = {"issue_api_key": True, **({"key_name": key_name} if key_name else {})}
     r = _login(cliente, **extra)
-    assert r.status_code == 200
-    llave = r.json()["api_key"]
-    assert llave.startswith("lixbon_at_") and "refresh_token" not in r.json()
-    assert _keys(uid) == antes
-    for ruta in ("/api/auth/me", "/api/key/info", "/api/keys", "/api/team/bootstrap"):
-        assert cliente.get(ruta, headers=_bearer(llave)).status_code == 200, ruta
-    with cliente.websocket_connect(f"/ws/team?token={llave}") as ws:
-        assert ws.receive_json() is not None
-
-
-def test_login_anterior_retira_la_key_que_tenia_esa_app(cliente, uid):
-    vieja, _ = q.create_api_key("lixbon CLI", uid, origin="login")
-    manual, _ = q.create_api_key("lixbon CLI", uid)  # manual con el mismo nombre: no se toca
-    assert _login(cliente, issue_api_key=True, key_name="lixbon CLI").status_code == 200
-    assert cliente.get("/api/auth/me", headers=_bearer(vieja)).status_code == 401
-    assert cliente.get("/api/auth/me", headers=_bearer(manual)).status_code == 200
+    assert r.status_code == 426 and r.json()["detail"]["error"] == "update_required"
+    assert "lixbon_session" not in r.cookies and _keys(uid) == antes
 
 
 def test_refresh_rota_el_par(cliente, uid):
@@ -212,24 +197,10 @@ def test_una_key_manual_no_ve_las_sesiones(cliente, uid):
     assert r.status_code == 403
 
 
-def test_regenerar_rota_solo_la_credencial_que_llama(cliente, uid):
-    manual, _ = q.create_api_key("no se toca", uid)
-    escritorio = _login(cliente, client="desktop").json()
-    movil = _login(cliente, issue_api_key=True, key_name="Lixbon Mobile").json()["api_key"]
-
-    r = cliente.post("/api/auth/api-key/regenerate", headers=_bearer(movil))
-    assert r.status_code == 200
-    nueva = r.json()["newApiKey"]
-    assert nueva.startswith("lixbon_at_")
-    assert cliente.get("/api/auth/me", headers=_bearer(movil)).status_code == 401
-    assert cliente.get("/api/auth/me", headers=_bearer(nueva)).status_code == 200
-    assert cliente.get("/api/key/info", headers=_bearer(manual)).status_code == 200
-    assert cliente.get("/api/auth/me", headers=_bearer(escritorio["access_token"])).status_code == 200
-
-
-def test_regenerar_desde_la_web_no_aplica(cliente, uid):
-    _login(cliente)
-    assert cliente.post("/api/auth/api-key/regenerate").status_code == 400
+def test_regenerar_ya_no_existe(cliente, uid):
+    t = _login(cliente, client="mobile").json()
+    r = cliente.post("/api/auth/api-key/regenerate", headers=_bearer(t["access_token"]))
+    assert r.status_code in (404, 405)
 
 
 def _reto(verificador: str) -> str:
@@ -272,3 +243,9 @@ def test_canje_oauth_de_app(cliente, uid):
     assert r.json()["access_token"].startswith("lixbon_at_")
     assert "lixbon_session" not in r.cookies
     assert _keys(uid) == antes
+
+    viejo = "codigo-de-prueba-oauth-654321"
+    oauth._login_codes[viejo] = (uid, _reto(verificador), time.time() + 60)
+    r = cliente.post("/api/auth/oauth/exchange",
+                     json={"code": viejo, "code_verifier": verificador, "issue_api_key": True})
+    assert r.status_code == 426
