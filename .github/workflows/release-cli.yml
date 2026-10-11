@@ -115,6 +115,20 @@ jobs:
         with:
           path: dist-cli
           merge-multiple: true
+      # El repo es privado: los binarios de la release de GitHub no se pueden
+      # descargar sin sesión, así que se sirven desde lixbon.com (R2).
+      - name: Subir los binarios y SHA256SUMS a lixbon.com
+        env:
+          ADMIN_TOKEN: ${{ secrets.LIXBON_ADMIN_TOKEN }}
+          SERVER: ${{ vars.LIXBON_SERVER_URL || 'https://lixbon.com' }}
+        working-directory: dist-cli
+        run: |
+          sha256sum lixbon-* > SHA256SUMS
+          for file in lixbon-*.tar.gz lixbon-*.zip SHA256SUMS; do
+            curl --fail-with-body --show-error -X POST -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+              -F "tag=${GITHUB_REF_NAME}" -F "file=@${file}" "${SERVER}/api/versions/cli-asset"
+            echo
+          done
       - name: Registrar la URL, el SHA-256 y las notas de cada binario
         env:
           ADMIN_TOKEN: ${{ secrets.LIXBON_ADMIN_TOKEN }}
@@ -128,7 +142,7 @@ jobs:
             platform="${file#lixbon-${version}-}"; platform="${platform%.tar.gz}"; platform="${platform%.zip}"
             digest=$(sha256sum "$file" | cut -d' ' -f1)
             jq -n --arg product "cli-${platform}" --arg version "$version" --arg title "Lixbon CLI ${version}" \
-               --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${file}" \
+               --arg url "${SERVER}/cli/releases/${GITHUB_REF_NAME}/${file}" \
                --arg sha "$digest" --arg channel "$CHANNEL" --argjson changelog "$changelog" \
                '{product: $product, version: $version, channel: $channel, title: $title, changelog: $changelog, download_url: $url, checksum_sha256: $sha}' |
               curl --fail-with-body --show-error -X POST -H "X-Admin-Token: ${ADMIN_TOKEN}" \
