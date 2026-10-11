@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconStop, IconX,
 } from './Icons';
+import { AvisoCuota, Razonamiento } from './Razonamiento';
 import { Select } from './Select';
 import { useDictado } from '../hooks/useDictado';
 import { useT } from '../i18n/useT';
@@ -53,7 +54,8 @@ function ContextRing({ uso }) {
   );
 }
 
-export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder, initialText = '', tools = null }) {
+export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder, initialText = '', tools = null,
+  nivelesRazonar = [], razonar = 'auto', onRazonar, avisoCuota = null, onCerrarAviso }) {
   const t = useT('chat');
   const ref = useRef(null);
   const fileRef = useRef(null);
@@ -247,6 +249,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
 
   return (
     <div className={arrastrando ? 'chat-input is-dropping' : 'chat-input'}>
+      <AvisoCuota aviso={avisoCuota} onCerrar={onCerrarAviso} />
       <div className="chat-input__box">
       {arrastrando && (
         <div className="chat-drop" role="status">
@@ -354,6 +357,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
             onChange={onModelChange}
             aria-label={t('modelAriaLabel')}
           />
+          {onRazonar && <Razonamiento niveles={nivelesRazonar} valor={razonar} onChange={onRazonar} />}
           <ContextRing uso={contextUso} />
         </div>
       )}

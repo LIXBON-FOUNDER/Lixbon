@@ -4,7 +4,7 @@
 import { FILE_PROMPT } from './archivos';
 
 export async function streamChatCompletion({
-  model, messages, conversationId, signal, onDelta, onReasoning, onSources, onFinish, webSearch = false,
+  model, messages, conversationId, signal, onDelta, onReasoning, onSources, onFinish, onQuota, webSearch = false,
   system = FILE_PROMPT, source = undefined, think = undefined,
 }) {
   // El chat web no manda system prompt propio; el de archivos es la única
@@ -28,13 +28,17 @@ export async function streamChatCompletion({
 
   if (!res.ok) {
     let detail = `Error del servidor (${res.status})`;
+    let quota = null;
     try {
       const body = await res.json();
       // Los 429/403 de cuota traen detail estructurado {code, message, ...}
       if (typeof body.detail === 'string') detail = body.detail;
       else if (body.detail?.message) detail = body.detail.message;
+      if (/_quota_exhausted$/.test(body.detail?.code || '')) {
+        quota = { state: 'exhausted', scope: body.detail.scope, reset_at: body.detail.reset_at, message: detail };
+      }
     } catch { /* cuerpo no-JSON */ }
-    throw new Error(detail);
+    throw Object.assign(new Error(detail), { quota });
   }
 
   const reader = res.body.getReader();
@@ -57,6 +61,7 @@ export async function streamChatCompletion({
       try {
         const chunk = JSON.parse(data);
         if (chunk.lixbon_sources && onSources) { onSources(chunk.lixbon_sources, chunk.lixbon_queries || []); continue; }
+        if (chunk.lixbon_quota && onQuota) onQuota(chunk.lixbon_quota);
         const choice = chunk.choices?.[0];
         const delta = choice?.delta?.content;
         if (delta) onDelta(delta);

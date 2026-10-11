@@ -12,6 +12,7 @@ import { streamChatCompletion } from '../lib/stream';
 import { Logo } from '../components/Logo';
 import { Sidebar } from '../components/Sidebar';
 import { ChatInput } from '../components/ChatInput';
+import { guardarRazonar, leerRazonar, nivelesDe, thinkDe } from '../lib/razonamiento';
 import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
@@ -84,6 +85,8 @@ export default function ChatPage() {
   const [showJump, setShowJump] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [webSearch, setWebSearch] = useState(false);
+  const [razonar, setRazonar] = useState(leerRazonar);
+  const [avisoCuota, setAvisoCuota] = useState(null);
   const [searching, setSearching] = useState(false);
   const [visual, setVisual] = useState(null);
   const [paginasVisual, setPaginasVisual] = useState([]);
@@ -127,6 +130,7 @@ export default function ChatPage() {
     setModels(ids);
     setModelInfo(Object.fromEntries(res.data.data.map((m) => [m.id, {
       num_ctx: m.num_ctx, context_length: m.context_length, capabilities: m.capabilities || [], name: m.name || m.id,
+      reasoning: m.reasoning, real: m.model || m.id,
     }])));
     setModel((current) => current || ids[0] || '');
     return ids;
@@ -278,6 +282,7 @@ export default function ChatPage() {
     setMessages([...history, { role: 'assistant', content: '' }]);
     setContextUso((prev) => ({ used: Math.max(prev?.used || 0, estimarTokens(history)), total: null, estimado: true }));
     setBusy(true);
+    setAvisoCuota(null);
     if (webSearch) setSearching(true);
     const abort = new AbortController();
     abortRef.current = abort;
@@ -296,6 +301,8 @@ export default function ChatPage() {
         conversationId: convId,
         system: conVisuals ? FILE_PROMPT + VISUAL_CHAT_PROMPT + contextoArchivos(base.paginas, base.visual?.version || 0) : FILE_PROMPT,
         webSearch,
+        think: thinkDe(razonar, nivelesDe(modelInfo[chosenModel])),
+        onQuota: setAvisoCuota,
         signal: abort.signal,
         onSources: (sources, queries) => {
           setSearching(false);
@@ -326,7 +333,7 @@ export default function ChatPage() {
           }
           if (event?.type === 'empty') {
             patchLast((last) => ({ ...last, content: t('emptyResponseNotice'), error: true }));
-          } else if (reason === 'length') {
+          } else if (reason === 'length' && !chunk?.lixbon_quota) {
             patchLast((last) => ({ ...last, aviso: t('cutResponseNotice') }));
           }
         },
@@ -355,6 +362,7 @@ export default function ChatPage() {
         });
         return;
       }
+      if (err.quota) setAvisoCuota(err.quota);
       setMessages((prev) => {
         const next = prev.slice();
         const last = next[next.length - 1];
@@ -373,6 +381,11 @@ export default function ChatPage() {
   };
 
   const stop = () => abortRef.current?.abort();
+
+  const elegirRazonar = (valor) => {
+    setRazonar(valor);
+    guardarRazonar(valor);
+  };
 
   const usoCtx = contextUso && { ...contextUso, total: contextUso.total || modelInfo[model]?.num_ctx || null };
 
@@ -503,7 +516,9 @@ export default function ChatPage() {
             <div className="chat-hero__input">
               {user && <MascotaChat ocupado={busy} escribiendo={escribiendo} />}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
-                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
+                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
+                nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
+                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} />
             </div>
           </div>
         ) : (
@@ -564,7 +579,9 @@ export default function ChatPage() {
               )}
               <MascotaChat ocupado={busy} escribiendo={escribiendo} />
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
-                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx} />
+                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
+                nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
+                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} />
               <p className="chat-disclaimer">
                 {t('disclaimer')}
               </p>
