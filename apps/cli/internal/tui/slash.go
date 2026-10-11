@@ -31,7 +31,7 @@ import (
 // cmdDoneMsg cierra un trabajo asíncrono de un comando: imprime sus líneas y
 // aplica los cambios de estado en la goroutine de la interfaz.
 type cmdDoneMsg struct {
-	lines []string
+	lines []block
 	apply func(*Model)
 	// then arranca lo que sigue al comando, p. ej. el turno que prepara /visual.
 	then func(*Model) tea.Cmd
@@ -42,19 +42,19 @@ type cmdDoneMsg struct {
 func (m *Model) async(label string, work func(ctx context.Context) cmdDoneMsg) tea.Cmd {
 	m.busy = label
 	m.notice = label + "…"
-	return func() tea.Msg {
+	return tea.Batch(func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return work(ctx)
-	}
+	}, m.startTick())
 }
 
 func (m *Model) busyNow() bool { return m.running || m.busy != "" }
 
 func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 	m.busy, m.notice = "", ""
-	for _, l := range msg.lines {
-		m.print(l)
+	for _, b := range msg.lines {
+		m.add(b)
 	}
 	if msg.apply != nil {
 		msg.apply(m)
@@ -73,7 +73,7 @@ func (m *Model) finishAsync(msg cmdDoneMsg) tea.Cmd {
 
 func (m *Model) runCommand(name, arg string) tea.Cmd {
 	if m.chat.Client.Generic && slices.Contains(gatewayOnly, name) {
-		m.print(note(fmt.Sprintf("«/%s» solo funciona con un gateway Lixbon (proveedor actual: %s). /provider cambia de proveedor.", name, m.chat.Cfg.ActiveProfile())))
+		m.add(note(fmt.Sprintf("«/%s» solo funciona con un gateway Lixbon (proveedor actual: %s). /provider cambia de proveedor.", name, m.chat.Cfg.ActiveProfile())))
 		return nil
 	}
 	switch name {
@@ -85,7 +85,7 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdMode(arg)
 	case "new":
 		m.newConversation("conversación nueva")
-		m.print(note("Conversación nueva: contexto vacío. La anterior queda en /history."))
+		m.add(note("Conversación nueva: contexto vacío. La anterior queda en /history."))
 	case "clear":
 		m.log.reset()
 		m.scroll, m.sel = 0, nil
@@ -148,7 +148,7 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 	case "key":
 		return m.cmdKey(arg)
 	case "login":
-		return m.cmdKey("")
+		return m.openLogin(loginCommand, stepMethod, "")
 	case "logout":
 		return m.cmdLogout()
 	case "mcp":
@@ -161,13 +161,15 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdUpdate()
 	case "config":
 		return m.cmdConfig()
+	case "theme":
+		return m.cmdTheme(arg)
 	case "bar":
-		m.print(note("La barra de estado de la versión Go va siempre al pie; /bar no hace falta."))
+		m.add(note("La barra de estado de la versión Go va siempre al pie; /bar no hace falta."))
 	case "exit":
-		m.print(note("Hasta pronto."))
+		m.add(note("Hasta pronto."))
 		return m.quit()
 	default:
-		m.print(warnLine("«/" + name + "» aún no está disponible en el CLI Go."))
+		m.add(warnLine("«/" + name + "» aún no está disponible en el CLI Go."))
 	}
 	return nil
 }
@@ -176,22 +178,17 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 
 func (m *Model) cmdHelp(arg string) tea.Cmd {
 	if arg == "plain" || arg == "list" {
-		var lines []string
-		lines = append(lines, "")
 		for _, group := range append(append([]string{}, Groups...), "propios") {
-			var rows []string
+			report := reportBlock{title: group, keys: true}
 			for _, s := range m.allSpecs() {
 				if s.Group == group {
-					cmd := strings.TrimSpace("/" + s.Name + " " + s.Args)
-					rows = append(rows, "    "+sAccent.Render(fmt.Sprintf("%-26s", cmd))+" "+sDim.Render(s.Desc))
+					report.rows = append(report.rows, [2]string{strings.TrimSpace("/" + s.Name + " " + s.Args), sDim.Render(s.Desc)})
 				}
 			}
-			if len(rows) > 0 {
-				lines = append(lines, "  "+sDim2.Render(group))
-				lines = append(lines, rows...)
+			if len(report.rows) > 0 {
+				m.add(report)
 			}
 		}
-		m.print(strings.Join(lines, "\n"))
 		return nil
 	}
 	var options []option
@@ -212,15 +209,14 @@ func (m *Model) cmdHelp(arg string) tea.Cmd {
 			return nil
 		}
 		spec, ok := lookup(value)
-		if ok && strings.HasPrefix(spec.Args, "<") {
-			m.print(note(fmt.Sprintf("Uso: /%s %s %s %s", spec.Name, spec.Args, glyphSep, spec.Desc)))
+		if ok && strings.HasPrefix(spec.Args, "<") && value != "key" {
+			m.add(note(fmt.Sprintf("Uso: /%s %s %s %s", spec.Name, spec.Args, glyphSep, spec.Desc)))
 			return nil
 		}
-		m.print(renderCommandEcho("/" + value))
 		return m.dispatch("/" + value)
 	})
 	p.search, p.maxShown = true, 14
-	p.hint = fmt.Sprintf("escribe para filtrar %s ↑↓ mover %s ↵ ejecutar %s esc salir", glyphSep, glyphSep, glyphSep)
+	p.keys = [][2]string{{"escribe", "filtra"}, {"↑↓", "mover"}, {"↵", "ejecutar"}, {"esc", "salir"}}
 	m.picker = p
 	return nil
 }
@@ -238,21 +234,24 @@ func (m *Model) modelLabel(id string) string {
 
 func (m *Model) cmdModel(arg string) tea.Cmd {
 	if m.chat.Cfg.KeyModel != "" {
-		m.print(errLine("Modelo fijo por la API key: " + m.chat.Cfg.KeyModel))
+		m.add(errLine("Modelo fijo por la API key: " + m.chat.Cfg.KeyModel))
 		return nil
 	}
 	models := m.opts.Account.Models
 	if arg == "" {
 		if len(models) == 0 {
-			m.print(errLine(m.opts.Account.NoModelsError().Error()))
+			m.add(errLine(m.opts.Account.NoModelsError().Error()))
 			return nil
 		}
 		options := make([]option, 0, len(models))
 		cursor := 0
 		for i, mod := range models {
-			o := option{Label: mod.Name, Value: mod.ID}
+			o := option{Label: mod.Name, Value: mod.ID, Extra: capabilityLabels(mod.Capabilities)}
 			if mod.Name != mod.ID {
 				o.Desc = mod.ID
+			}
+			if mod.NumCtx > 0 {
+				o.Meta = sDim.Render(fmtContext(mod.NumCtx))
 			}
 			if mod.ID == m.chat.Model {
 				o.Badge, cursor = "actual", i
@@ -265,6 +264,7 @@ func (m *Model) cmdModel(arg string) tea.Cmd {
 			}
 			return nil
 		})
+		p.search = len(options) > 9
 		p.cursor = cursor
 		m.picker = p
 		return nil
@@ -296,9 +296,44 @@ func (m *Model) cmdModel(arg string) tea.Cmd {
 	return nil
 }
 
+// capabilityLabels traduce las capacidades de Ollama que interesan al elegir.
+func capabilityLabels(caps []string) string {
+	names := map[string]string{"vision": "visión", "tools": "herramientas", "thinking": "razona"}
+	var parts []string
+	for _, c := range []string{"vision", "tools", "thinking"} {
+		for _, have := range caps {
+			if have != c {
+				continue
+			}
+			style := sDim
+			if c == "vision" {
+				style = sPlan
+			}
+			parts = append(parts, style.Render(names[c]))
+		}
+	}
+	return strings.Join(parts, sDim2.Render(" "+glyphSep+" "))
+}
+
+func fmtContext(n int) string {
+	if n >= 1024 && n%1024 == 0 {
+		return fmt.Sprintf("%dk", n/1024)
+	}
+	if n >= 1000 {
+		return fmt.Sprintf("%dk", (n+500)/1000)
+	}
+	return fmt.Sprint(n)
+}
+
 func (m *Model) chooseModel(id string) {
 	m.chat.SetModel(id)
-	m.print(okLine("Modelo: " + m.modelLabel(id)))
+	line := "Modelo: " + m.modelLabel(id)
+	for _, mod := range m.opts.Account.Models {
+		if mod.ID == id && mod.HasCapability("vision") {
+			line += " " + glyphSep + " ve imágenes"
+		}
+	}
+	m.add(okLine(line))
 }
 
 func (m *Model) setMode(mode string) {
@@ -315,7 +350,7 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 	apply := func(mode string) {
 		m.setMode(mode)
 		if mode == chat.ModeAgent {
-			m.print(note("Workspace del agente: " + shortPath(m.chat.Workspace)))
+			m.add(note("Workspace del agente: " + shortPath(m.chat.Workspace)))
 		}
 	}
 	if slices.Contains([]string{"ask", "agent", "delegate"}, arg) {
@@ -347,21 +382,22 @@ func (m *Model) newConversation(label string) {
 	m.refreshRemoteSnapshot()
 	m.lastAnswer = ""
 	m.todo = nil
-	m.print("\n" + sDim2.Render(strings.Repeat("─", 3)+" "+label+" "+strings.Repeat("─", max(3, m.width-len(label)-8))))
+	m.gap()
+	m.add(separator(label))
 }
 
 func (m *Model) cmdCompact() tea.Cmd {
 	if len(m.chat.History) < 4 {
-		m.print(note("La conversación aún es corta; nada que compactar."))
+		m.add(note("La conversación aún es corta; nada que compactar."))
 		return nil
 	}
 	before, _ := m.chat.ContextUsage()
 	return m.async("compactando conversación", func(ctx context.Context) cmdDoneMsg {
 		if err := m.chat.Compact(ctx, 2); err != nil {
-			return cmdDoneMsg{lines: []string{errLine("No se pudo generar el resumen: " + err.Error())}}
+			return cmdDoneMsg{lines: []block{errLine("No se pudo generar el resumen: " + err.Error())}}
 		}
 		after, _ := m.chat.ContextUsage()
-		return cmdDoneMsg{lines: []string{okLine(fmt.Sprintf("Conversación compactada: %s %s %s tokens", fmtTokens(before), glyphArrow, fmtTokens(after)))}}
+		return cmdDoneMsg{lines: []block{okLine(fmt.Sprintf("Conversación compactada: %s %s %s tokens", fmtTokens(before), glyphArrow, fmtTokens(after)))}}
 	})
 }
 
@@ -372,7 +408,7 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 	m.chat.Persist()
 	items := m.chat.Store.List(50)
 	if len(items) == 0 {
-		m.print(note("Todavía no hay conversaciones guardadas. Al primer mensaje empieza a guardarse sola."))
+		m.add(note("Todavía no hay conversaciones guardadas. Al primer mensaje empieza a guardarse sola."))
 		return nil
 	}
 	now := float64(time.Now().UnixNano()) / 1e9
@@ -398,18 +434,18 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 		switch {
 		case cancelled:
 		case value == m.chat.ConversationID:
-			m.print(note("Ya estás en esa conversación."))
+			m.add(note("Ya estás en esa conversación."))
 		case !m.chat.Open(value):
-			m.print(errLine("Esa conversación ya no está disponible."))
+			m.add(errLine("Esa conversación ya no está disponible."))
 		default:
 			m.replayTranscript()
-			m.print(okLine("Conversación reabierta: " + firstNonEmpty(m.chat.Title(), "sin título")))
+			m.add(okLine("Conversación reabierta: " + firstNonEmpty(m.chat.Title(), "sin título")))
 			m.refreshContext()
 		}
 		return nil
 	})
 	p.search = true
-	p.hint = fmt.Sprintf("escribe para filtrar  ↑↓ mover  ↵ abrir  esc salir")
+	p.keys = [][2]string{{"escribe", "filtra"}, {"↑↓", "mover"}, {"↵", "abrir"}, {"esc", "salir"}}
 	m.picker = p
 	return nil
 }
@@ -422,7 +458,7 @@ func (m *Model) historyMessages() tea.Cmd {
 		}
 	}
 	if len(mine) == 0 {
-		m.print(note("Todavía no has enviado ningún mensaje en esta conversación."))
+		m.add(note("Todavía no has enviado ningún mensaje en esta conversación."))
 		return nil
 	}
 	mine = mine[max(0, len(mine)-30):]
@@ -449,7 +485,8 @@ func (m *Model) historyMessages() tea.Cmd {
 // replayTranscript repinta una conversación reabierta: las herramientas se
 // resumen en una línea cada una.
 func (m *Model) replayTranscript() {
-	m.print("\n" + sDim2.Render("─── "+firstNonEmpty(m.chat.Title(), "conversación")+" ───"))
+	m.gap()
+	m.add(separator(firstNonEmpty(m.chat.Title(), "conversación")))
 	for _, msg := range m.chat.History {
 		content := strings.TrimSpace(msg.Content)
 		switch msg.Role {
@@ -457,24 +494,27 @@ func (m *Model) replayTranscript() {
 			if strings.HasPrefix(content, "TOOL_RESULT") {
 				continue
 			}
-			m.print("\n" + renderUserMessage(content, m.width))
+			m.gap()
+			m.add(userBlock{text: content})
+			m.print("")
 		case "assistant":
 			for _, raw := range msg.ToolCalls {
 				call := toolparse.Native(rawToMap(raw))
-				name := firstNonEmpty(call.Tool, "herramienta")
-				m.print("\n" + renderAction(agent.Event{Tool: name, ReadOnly: true}, m.width))
+				b := newToolBlock(agent.Event{Tool: firstNonEmpty(call.Tool, "herramienta")}, nil)
+				b.state = toolDone
+				m.add(b)
 			}
 			prose := content
 			if m.chat.Mode == chat.ModeAgent {
 				prose = toolparse.CleanProse(content)
 			}
 			if prose != "" {
-				m.print("\n" + renderSpeaker("", m.width))
-				m.print(m.markdown(prose))
+				m.printAnswer(prose)
 			}
 		}
 	}
-	m.print("\n" + sDim2.Render("─── continúa la conversación ───"))
+	m.gap()
+	m.add(separator("continúa la conversación"))
 }
 
 func (m *Model) cmdWeb(arg string) tea.Cmd {
@@ -483,7 +523,7 @@ func (m *Model) cmdWeb(arg string) tea.Cmd {
 		m.chat.Cfg.Extra["web_search"] = []byte(`"` + mode + `"`)
 		m.saveConfig()
 		m.refreshContext()
-		m.print(okLine("Búsqueda web: " + mode))
+		m.add(okLine("Búsqueda web: " + mode))
 	}
 	if slices.Contains([]string{"auto", "on", "off"}, arg) {
 		apply(arg)
@@ -518,14 +558,14 @@ func (m *Model) cmdCopy() {
 		}
 	}
 	if text == "" {
-		m.print(note("No hay una respuesta para copiar."))
+		m.add(note("No hay una respuesta para copiar."))
 		return
 	}
 	if err := copyToClipboard(text); err != nil {
-		m.print(errLine("No se pudo copiar: " + err.Error()))
+		m.add(errLine("No se pudo copiar: " + err.Error()))
 		return
 	}
-	m.print(okLine("Respuesta copiada al portapapeles"))
+	m.add(okLine("Respuesta copiada al portapapeles"))
 }
 
 func copyToClipboard(text string) error {
@@ -556,7 +596,7 @@ func copyToClipboard(text string) error {
 
 func (m *Model) cmdSave(arg string) {
 	if len(m.chat.History) == 0 {
-		m.print(note("La conversación está vacía."))
+		m.add(note("La conversación está vacía."))
 		return
 	}
 	var path string
@@ -594,14 +634,14 @@ func (m *Model) cmdSave(arg string) {
 		lines = append(lines, heading, "", content, "")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		m.print(errLine("No se pudo guardar: " + err.Error()))
+		m.add(errLine("No se pudo guardar: " + err.Error()))
 		return
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
-		m.print(errLine("No se pudo guardar: " + err.Error()))
+		m.add(errLine("No se pudo guardar: " + err.Error()))
 		return
 	}
-	m.print(okLine("Conversación guardada en " + shortPath(path)))
+	m.add(okLine("Conversación guardada en " + shortPath(path)))
 }
 
 // ── agente ───────────────────────────────────────────────────────────────
@@ -611,7 +651,7 @@ func (m *Model) cmdApprove(arg string) tea.Cmd {
 		m.chat.Session.AutoApprove = on
 		m.chat.Cfg.AutoApproveTools = on
 		m.saveConfig()
-		m.print(okLine("Auto-aprobar: " + onOff(on)))
+		m.add(okLine("Auto-aprobar: " + onOff(on)))
 	}
 	if arg == "on" || arg == "off" {
 		apply(arg == "on")
@@ -648,16 +688,16 @@ func (m *Model) cmdPlan(arg string) {
 		if m.chat.Mode != chat.ModeAgent {
 			m.setMode(chat.ModeAgent)
 		}
-		m.print(okLine("Modo plan: el agente explora y propone; no toca archivos ni ejecuta nada. /plan off para que ejecute el plan."))
+		m.add(okLine("Modo plan: el agente explora y propone; no toca archivos ni ejecuta nada. /plan off para que ejecute el plan."))
 	} else {
-		m.print(okLine("Modo plan desactivado: el agente vuelve a poder editar y ejecutar."))
+		m.add(okLine("Modo plan desactivado: el agente vuelve a poder editar y ejecutar."))
 	}
 	m.refreshContext()
 }
 
 func (m *Model) cmdTodo() {
 	if len(m.todo) == 0 {
-		m.print(note("El agente no tiene lista de pasos en este momento."))
+		m.add(note("El agente no tiene lista de pasos en este momento."))
 		return
 	}
 	m.printTodo(m.todo, nil)
@@ -672,30 +712,25 @@ func (m *Model) cmdTools() {
 	if s.AutoRunCommands {
 		commands = "sin preguntar"
 	}
-	lines := []string{"", "  " + sDim2.Render(fmt.Sprintf("herramientas del modo agent %s workspace %s", glyphSep, shortPath(m.chat.Workspace)))}
+	report := reportBlock{title: fmt.Sprintf("Herramientas del modo agent %s workspace %s", glyphSep, shortPath(m.chat.Workspace)), keys: true}
 	for _, spec := range toolspec.Specs() {
-		var left, permission string
-		if toolspec.IsReadOnly(spec.Name) {
-			left = "  " + sDim2.Render("○ ")
-			permission = sDim2.Render("solo lectura")
-		} else {
-			left = "  " + sAccent.Render(glyphDot+" ")
+		permission := sDim2.Render(glyphTodo + " solo lectura")
+		if !toolspec.IsReadOnly(spec.Name) {
+			permission = sBeige.Render(glyphDot + " " + approve)
 			if spec.Name == "run_command" {
-				permission = sWarn.Render(commands)
-			} else {
-				permission = sBeige.Render(approve)
+				permission = sWarn.Render(glyphDot + " " + commands)
 			}
 		}
-		left += sBold.Render(fmt.Sprintf("%-14s", spec.Name)) + sDim2.Render(spec.Args)
-		lines = append(lines, twoCol(left, permission, m.width), "      "+sDim.Render(spec.Description))
+		report.rows = append(report.rows, [2]string{spec.Name, permission + sDim2.Render(" "+glyphSep+" ") + sDim.Render(spec.Description)})
 	}
 	protocol := "nativo (el modelo recibe las funciones)"
 	if !s.NativeTools {
 		protocol = "texto (el modelo no soporta herramientas nativas)"
 	}
-	lines = append(lines, "", "  "+sDim2.Render("○ solo lectura   "+glyphDot+" modifica tu disco"),
-		"  "+sDim.Render("Protocolo:")+" "+sBeige.Render(protocol), "")
-	m.print(strings.Join(lines, "\n"))
+	report.foot = []string{"", sDim2.Render(glyphTodo + " solo lectura   " + glyphDot + " modifica tu disco"),
+		sDim.Render("Protocolo:") + " " + sBeige.Render(protocol)}
+	m.gap()
+	m.add(report)
 }
 
 func (m *Model) git(ctx context.Context, timeout time.Duration, args ...string) (int, string) {
@@ -722,7 +757,7 @@ func (m *Model) git(ctx context.Context, timeout time.Duration, args ...string) 
 func (m *Model) cmdDiff(arg string) tea.Cmd {
 	return m.async("leyendo cambios", func(ctx context.Context) cmdDoneMsg {
 		if code, _ := m.git(ctx, 10*time.Second, "rev-parse", "--is-inside-work-tree"); code != 0 {
-			return cmdDoneMsg{lines: []string{note(shortPath(m.chat.Workspace) + " no es un repositorio git.")}}
+			return cmdDoneMsg{lines: []block{note(shortPath(m.chat.Workspace) + " no es un repositorio git.")}}
 		}
 		target := []string{}
 		if arg = strings.TrimSpace(arg); arg != "" {
@@ -730,44 +765,35 @@ func (m *Model) cmdDiff(arg string) tea.Cmd {
 		}
 		_, status := m.git(ctx, 20*time.Second, "status", "--short")
 		if strings.TrimSpace(status) == "" {
-			return cmdDoneMsg{lines: []string{okLine("El workspace está limpio: no hay cambios sin confirmar.")}}
+			return cmdDoneMsg{lines: []block{okLine("El workspace está limpio: no hay cambios sin confirmar.")}}
 		}
 		_, stat := m.git(ctx, 20*time.Second, append([]string{"diff", "--stat", "--"}, target...)...)
 		_, body := m.git(ctx, 20*time.Second, append([]string{"diff", "--unified=2", "--"}, target...)...)
 
-		lines := []string{"", sDim2.Render("─── cambios sin confirmar ───")}
+		lines := []block{textBlock(""), separator("cambios sin confirmar")}
+		changed := reportBlock{}
 		for _, l := range firstLines(strings.TrimRight(status, "\n"), 40) {
-			lines = append(lines, "  "+sBeige.Render(l))
-		}
-		if strings.TrimSpace(body) != "" {
-			lines = append(lines, "")
-			for _, l := range firstLines(strings.TrimRight(body, "\n"), 220) {
-				style := sDim
-				switch {
-				case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
-					style = sDim2
-				case strings.HasPrefix(l, "+"):
-					style = sAddNum
-				case strings.HasPrefix(l, "-"):
-					style = sDelNum
-				case strings.HasPrefix(l, "@@"):
-					style = sPlan
-				}
-				lines = append(lines, "  "+style.Render(l))
+			if len(l) > 3 {
+				changed.rows = append(changed.rows, [2]string{strings.TrimSpace(l[:2]), sBeige.Render(l[3:])})
 			}
+		}
+		lines = append(lines, changed)
+		for _, f := range parseUnified(body) {
+			lines = append(lines, &toolBlock{verb: "Cambios", target: f.path, adds: f.adds, dels: f.dels, counts: true,
+				state: toolDone, diff: &diffView{rows: f.rows, path: f.path}})
 		}
 		if s := strings.TrimSpace(stat); s != "" {
 			rows := strings.Split(s, "\n")
-			lines = append(lines, "", "  "+sDim.Render(rows[len(rows)-1]))
+			lines = append(lines, note(strings.TrimSpace(rows[len(rows)-1])))
 		}
-		return cmdDoneMsg{lines: append(lines, "")}
+		return cmdDoneMsg{lines: append(lines, textBlock(""))}
 	})
 }
 
 func (m *Model) cmdUndo() tea.Cmd {
 	s := m.chat.Session
 	if len(s.UndoStack) == 0 {
-		m.print(note("No hay cambios del agente que revertir en esta sesión."))
+		m.add(note("No hay cambios del agente que revertir en esta sesión."))
 		return nil
 	}
 	entries := s.UndoStack[len(s.UndoStack)-1]
@@ -794,16 +820,16 @@ func (m *Model) cmdUndo() tea.Cmd {
 		}
 		done, err := s.Undo()
 		for _, l := range done {
-			m.print(note(l))
+			m.add(note(l))
 		}
 		if err != nil {
-			m.print(errLine("No se pudo revertir: " + err.Error()))
+			m.add(errLine("No se pudo revertir: " + err.Error()))
 			return nil
 		}
 		if s.UndoIncomplete {
-			m.print(warnLine("Ese turno también borró o movió carpetas enteras; eso no se revierte solo."))
+			m.add(warnLine("Ese turno también borró o movió carpetas enteras; eso no se revierte solo."))
 		}
-		m.print(okLine("Cambios revertidos. El modelo no lo sabe: díselo si quieres que continúe desde aquí."))
+		m.add(okLine("Cambios revertidos. El modelo no lo sabe: díselo si quieres que continúe desde aquí."))
 		m.chat.History = append(m.chat.History, history.User("[El usuario revirtió con /undo los archivos del último turno: "+
 			strings.Join(files, ", ")+". Vuelven a estar como antes de ese turno.]"))
 		m.refreshContext()
@@ -816,7 +842,7 @@ func (m *Model) cmdUndo() tea.Cmd {
 func (m *Model) cmdPs() tea.Cmd {
 	procs := m.chat.Toolbox.Procs.List()
 	if len(procs) == 0 {
-		m.print(note("No hay comandos en segundo plano."))
+		m.add(note("No hay comandos en segundo plano."))
 		return nil
 	}
 	options := make([]option, 0, len(procs)+1)
@@ -825,7 +851,7 @@ func (m *Model) cmdPs() tea.Cmd {
 		if p.Alive {
 			state = "en marcha"
 		}
-		m.print(note(fmt.Sprintf("%s  %s  %s", p.ID, state, truncateRunes(p.Command, 90))))
+		m.add(note(fmt.Sprintf("%s  %s  %s", p.ID, state, truncateRunes(p.Command, 90))))
 		options = append(options, option{Label: p.ID + "  " + truncateRunes(p.Command, 60), Value: p.ID, Desc: state})
 	}
 	options = append(options, option{Label: "Ninguno", Value: "none", Desc: "volver"})
@@ -833,7 +859,7 @@ func (m *Model) cmdPs() tea.Cmd {
 		if cancelled || value == "none" {
 			return nil
 		}
-		m.print(okLine(m.chat.Toolbox.Execute(context.Background(), "stop_command", map[string]any{"id": value})))
+		m.add(okLine(m.chat.Toolbox.Execute(context.Background(), "stop_command", map[string]any{"id": value})))
 		return nil
 	})
 	p.cursor = len(options) - 1
@@ -846,7 +872,7 @@ func (m *Model) cmdCheck(arg string) tea.Cmd {
 		m.chat.Session.AutoCheck = on
 		m.chat.Cfg.Extra["auto_check"] = []byte(fmt.Sprint(on))
 		m.saveConfig()
-		m.print(okLine("Verificación tras editar: " + onOff(on)))
+		m.add(okLine("Verificación tras editar: " + onOff(on)))
 	}
 	if arg == "on" || arg == "off" {
 		apply(arg == "on")
@@ -877,16 +903,16 @@ func (m *Model) cmdAllow(arg string) tea.Cmd {
 	if arg = strings.TrimSpace(arg); arg != "" {
 		if i := slices.Index(s.AllowedCommands, arg); i >= 0 {
 			s.AllowedCommands = slices.Delete(s.AllowedCommands, i, i+1)
-			m.print(okLine("«" + arg + "» vuelve a pedir confirmación."))
+			m.add(okLine("«" + arg + "» vuelve a pedir confirmación."))
 		} else {
 			s.AllowedCommands = append(s.AllowedCommands, arg)
-			m.print(okLine("«" + arg + "» se ejecutará sin preguntar (también en sesiones futuras)."))
+			m.add(okLine("«" + arg + "» se ejecutará sin preguntar (también en sesiones futuras)."))
 		}
 		save()
 		return nil
 	}
 	if len(s.AllowedCommands) == 0 {
-		m.print(note("Ningún comando permitido sin confirmación. Añade uno: /allow npm test"))
+		m.add(note("Ningún comando permitido sin confirmación. Añade uno: /allow npm test"))
 		return nil
 	}
 	options := make([]option, 0, len(s.AllowedCommands)+1)
@@ -901,7 +927,7 @@ func (m *Model) cmdAllow(arg string) tea.Cmd {
 		if i := slices.Index(s.AllowedCommands, value); i >= 0 {
 			s.AllowedCommands = slices.Delete(s.AllowedCommands, i, i+1)
 			save()
-			m.print(okLine("«" + value + "» vuelve a pedir confirmación."))
+			m.add(okLine("«" + value + "» vuelve a pedir confirmación."))
 		}
 		return nil
 	})
@@ -912,7 +938,7 @@ func (m *Model) cmdAllow(arg string) tea.Cmd {
 
 func (m *Model) cmdWorkspace(arg string) {
 	if arg == "" {
-		m.print(note("Workspace actual: " + m.chat.Workspace))
+		m.add(note("Workspace actual: " + m.chat.Workspace))
 		return
 	}
 	path := expandHome(arg)
@@ -921,36 +947,46 @@ func (m *Model) cmdWorkspace(arg string) {
 	}
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
-		m.print(errLine("Ruta inválida o no es una carpeta."))
+		m.add(errLine("Ruta inválida o no es una carpeta."))
 		return
 	}
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	}
 	m.chat.SetWorkspace(path)
-	m.print(okLine("Workspace: " + shortPath(path)))
+	m.refreshGit()
+	m.files = nil
+	m.add(okLine("Workspace: " + shortPath(path)))
 	if m.chat.ProjectContext != "" {
-		m.print(note("LIXBON.md encontrado: se usará como contexto del proyecto."))
+		m.add(note("LIXBON.md encontrado: se usará como contexto del proyecto."))
 	}
 }
 
 // execShell ejecuta un comando del usuario en el workspace y deja su salida en
 // el historial para que el modelo la vea en el siguiente turno.
 func (m *Model) execShell(command string) tea.Cmd {
+	m.gap()
+	shell := &toolBlock{shell: true, verb: "Ejecutar", gerund: "Ejecutando", target: command, command: true, spin: &m.spin}
+	m.openTool = m.add(shell)
+	started := time.Now()
 	return m.async("ejecutando "+truncateRunes(command, 40), func(ctx context.Context) cmdDoneMsg {
 		result := m.chat.Toolbox.Execute(ctx, "run_command", map[string]any{"command": command, "timeout": float64(300)})
+		elapsed := time.Since(started)
 		body, code := result, "?"
 		if rest, ok := strings.CutPrefix(result, "[EXIT "); ok {
 			if n, after, found := strings.Cut(rest, "] "); found {
 				code, body = n, after
 			}
 		}
-		lines := []string{"", renderAction(agent.Event{Tool: "run_command", Change: &agent.Change{Kind: "command", Detail: command}}, m.width)}
-		for _, l := range firstLines(body, 80) {
-			lines = append(lines, renderLogLine(l, sDim, "", m.width))
-		}
-		lines = append(lines, renderResult("salida "+code, code != "0", "", m.width), "")
-		return cmdDoneMsg{lines: lines, apply: func(m *Model) {
+		return cmdDoneMsg{apply: func(m *Model) {
+			shell.state = toolDone
+			shell.setOutput(result)
+			shell.meta = seconds(elapsed)
+			if m.openTool != nil && m.openTool.b == block(shell) {
+				m.refresh(m.openTool)
+				m.openTool = nil
+			}
+			m.print("")
 			text := body
 			if r := []rune(text); len(r) > 6000 {
 				text = string(r[:6000])
@@ -964,7 +1000,7 @@ func (m *Model) execShell(command string) tea.Cmd {
 func (m *Model) cmdRun(arg string) tea.Cmd {
 	command := strings.TrimSpace(arg)
 	if command == "" {
-		m.print(errLine("Uso: /run npm test"))
+		m.add(errLine("Uso: /run npm test"))
 		return nil
 	}
 	exec := func() tea.Cmd { return m.execShell(command) }
@@ -993,14 +1029,15 @@ func (m *Model) cmdCommit(arg string) tea.Cmd {
 	return m.async("preparando el commit", func(ctx context.Context) cmdDoneMsg {
 		code, status := m.git(ctx, 10*time.Second, "status", "--porcelain")
 		if code != 0 {
-			return cmdDoneMsg{lines: []string{errLine("El workspace no es un repositorio git.")}}
+			return cmdDoneMsg{lines: []block{errLine("El workspace no es un repositorio git.")}}
 		}
 		if strings.TrimSpace(status) == "" {
-			return cmdDoneMsg{lines: []string{note("No hay cambios que confirmar.")}}
+			return cmdDoneMsg{lines: []block{note("No hay cambios que confirmar.")}}
 		}
 		_, stat := m.git(ctx, 10*time.Second, "diff", "HEAD", "--stat")
 		_, body := m.git(ctx, 20*time.Second, "diff", "HEAD")
-		var untracked, lines []string
+		var untracked []string
+		var lines []block
 		for _, l := range strings.Split(status, "\n") {
 			if strings.HasPrefix(l, "??") && len(l) > 3 {
 				untracked = append(untracked, l[3:])
@@ -1044,7 +1081,7 @@ func (m *Model) cmdCommit(arg string) tea.Cmd {
 		if message == "" {
 			return cmdDoneMsg{lines: append(lines, errLine("No se pudo redactar el mensaje; pásalo tú: /commit tu mensaje"))}
 		}
-		lines = append(lines, "")
+		lines = append(lines, textBlock(""))
 		for _, l := range strings.Split(message, "\n") {
 			lines = append(lines, note(l))
 		}
@@ -1086,10 +1123,10 @@ func (m *Model) doCommit(message string) tea.Cmd {
 			if r := []rune(out); len(r) > 400 {
 				out = string(r[len(r)-400:])
 			}
-			return cmdDoneMsg{lines: []string{errLine(firstNonEmpty(out, "git commit falló"))}}
+			return cmdDoneMsg{lines: []block{errLine(firstNonEmpty(out, "git commit falló"))}}
 		}
 		first, _, _ := strings.Cut(out, "\n")
-		return cmdDoneMsg{lines: []string{okLine(firstNonEmpty(first, "Commit creado."))}}
+		return cmdDoneMsg{lines: []block{okLine(firstNonEmpty(first, "Commit creado."))}}
 	})
 }
 
@@ -1105,11 +1142,11 @@ func (m *Model) cmdInit() tea.Cmd {
 				"Carpeta: " + filepath.Base(m.chat.Workspace) + "\nÁrbol:\n" + tree
 			text, err := m.chat.AskQuiet(ctx, []history.Message{history.User(prompt)})
 			if err != nil {
-				return cmdDoneMsg{lines: []string{m.reportError(err)}}
+				return cmdDoneMsg{lines: []block{m.reportError(err)}}
 			}
 			content := strings.TrimSpace(text)
 			if content == "" {
-				return cmdDoneMsg{lines: []string{errLine("El modelo no devolvió contenido; inténtalo de nuevo.")}}
+				return cmdDoneMsg{lines: []block{errLine("El modelo no devolvió contenido; inténtalo de nuevo.")}}
 			}
 			if strings.HasPrefix(content, "```") {
 				_, rest, _ := strings.Cut(content, "\n")
@@ -1119,12 +1156,13 @@ func (m *Model) cmdInit() tea.Cmd {
 				content = strings.TrimSpace(rest)
 			}
 			if err := os.WriteFile(target, []byte(content+"\n"), 0o644); err != nil {
-				return cmdDoneMsg{lines: []string{errLine("No se pudo escribir LIXBON.md: " + err.Error())}}
+				return cmdDoneMsg{lines: []block{errLine("No se pudo escribir LIXBON.md: " + err.Error())}}
 			}
+			adds := strings.Count(content, "\n") + 1
 			return cmdDoneMsg{
-				lines: []string{renderAction(agent.Event{Tool: "write_file", Text: "LIXBON.md", Adds: strings.Count(content, "\n") + 1}, m.width),
-					okLine("LIXBON.md creado: se cargará como contexto en cada sesión de esta carpeta.")},
 				apply: func(m *Model) {
+					m.add(&toolBlock{verb: "Escribir", target: "LIXBON.md", adds: adds, counts: true, state: toolDone})
+					m.add(okLine("LIXBON.md creado: se cargará como contexto en cada sesión de esta carpeta."))
 					m.chat.ProjectContext = workspace.ProjectContext(m.chat.Workspace)
 					m.chat.Session.ProjectContext = m.chat.ProjectContext
 				},
@@ -1203,15 +1241,15 @@ func (m *Model) cmdStatus() tea.Cmd {
 			{"Ventana de contexto", fmt.Sprintf("%d tokens", m.chat.Cfg.ContextWindow), window},
 			{"Extras", "búsqueda web " + m.chat.WebMode, ""},
 		}
-		lines := []string{""}
+		report := reportBlock{title: "Estado de la sesión"}
 		for _, r := range rows {
-			line := "  " + sDim.Render(fmt.Sprintf("%-20s", r[0])) + " " + sPrimary.Render(r[1])
+			value := sPrimary.Render(r[1])
 			if r[2] != "" {
-				line += sDim2.Render("  " + glyphSep + "  " + r[2])
+				value += sDim2.Render("  " + glyphSep + "  " + r[2])
 			}
-			lines = append(lines, line)
+			report.rows = append(report.rows, [2]string{r[0], value})
 		}
-		return cmdDoneMsg{lines: append(lines, "")}
+		return cmdDoneMsg{lines: []block{report}}
 	})
 }
 
@@ -1237,49 +1275,39 @@ func (m *Model) cmdCost() {
 		{"Mensajes que se envían", sent},
 		{"Chars por token (medido)", fmt.Sprintf("%.2f", m.chat.Session.Estimator.CharsPerToken())},
 	}
-	lines := []string{""}
+	report := reportBlock{title: "Consumo de la sesión"}
 	for _, r := range rows {
-		lines = append(lines, "  "+sDim.Render(fmt.Sprintf("%-26s", r[0]))+" "+sPrimary.Render(r[1]))
+		report.rows = append(report.rows, [2]string{r[0], sPrimary.Render(r[1])})
 	}
+	m.gap()
+	m.add(report)
 	if pct > 75 {
-		lines = append(lines, warnLine("El contexto va lleno: /compact resume la conversación y libera espacio."))
+		m.add(warnLine("El contexto va lleno: /compact resume la conversación y libera espacio."))
 	}
-	m.print(strings.Join(append(lines, ""), "\n"))
 }
 
 func (m *Model) cmdUsage() tea.Cmd {
 	return m.async("consultando uso", func(ctx context.Context) cmdDoneMsg {
 		u, err := m.chat.Client.Usage(ctx)
 		if err != nil {
-			return cmdDoneMsg{lines: []string{errLine("No se pudo obtener el uso. Verifica tu sesión. Error: " + err.Error())}}
+			return cmdDoneMsg{lines: []block{errLine("No se pudo obtener el uso. Verifica tu sesión. Error: " + err.Error())}}
 		}
-		plan := firstNonEmpty(u.Plan.Name, "-")
-		lines := []string{"", sDim.Render("Plan") + " " + sPrimary.Render(plan), ""}
+		report := reportBlock{title: "Uso de la cuenta", rows: [][2]string{{"Plan", sPrimary.Render(firstNonEmpty(u.Plan.Name, "-"))}}}
 		for _, b := range []struct {
 			label  string
 			bucket api.Bucket
 		}{{"Sesión (4h)", u.Buckets.Session}, {"Semana (todos los modelos)", u.Buckets.Week}} {
-			lines = append(lines, sPrimary.Render(b.label))
 			if b.bucket.Unlimited {
-				lines = append(lines, "  "+sDim2.Render(strings.Repeat("▓", 24))+"  "+sOK.Render("ilimitado"), "")
+				report.rows = append(report.rows, [2]string{b.label, sDim2.Render(strings.Repeat(glyphMeterOn, 24)) + "  " + sOK.Render("ilimitado")})
 				continue
 			}
 			pct := min(100, int(b.bucket.Percent+0.5))
-			style := sAccent
-			switch {
-			case pct >= ctxFull:
-				style = sErr
-			case pct >= ctxWarn:
-				style = sWarn
-			}
-			filled := int(float64(24)*float64(pct)/100 + 0.5)
-			lines = append(lines, "  "+style.Render(strings.Repeat("▓", filled)+strings.Repeat("░", 24-filled))+fmt.Sprintf("  %d%% usado", pct))
+			report.rows = append(report.rows, [2]string{b.label, meter(float64(pct), 24) + sPrimary.Render(fmt.Sprintf("  %d%% usado", pct))})
 			if reset := api.ResetIn(b.bucket.ResetAt, time.Now()); reset != "" {
-				lines = append(lines, "  "+sDim2.Render("Se reinicia "+reset))
+				report.rows = append(report.rows, [2]string{"", sDim2.Render("Se reinicia " + reset)})
 			}
-			lines = append(lines, "")
 		}
-		return cmdDoneMsg{lines: lines}
+		return cmdDoneMsg{lines: []block{report}}
 	})
 }
 
@@ -1287,32 +1315,32 @@ func (m *Model) cmdNodes() tea.Cmd {
 	return m.async("consultando nodos", func(ctx context.Context) cmdDoneMsg {
 		nodes, err := m.chat.Client.Nodes(ctx)
 		if err != nil {
-			return cmdDoneMsg{lines: []string{m.reportError(err)}}
+			return cmdDoneMsg{lines: []block{m.reportError(err)}}
 		}
 		if len(nodes) == 0 {
-			return cmdDoneMsg{lines: []string{note("Sin nodos registrados; se usa el Ollama local del servidor.")}}
+			return cmdDoneMsg{lines: []block{note("Sin nodos registrados; se usa el Ollama local del servidor.")}}
 		}
-		var lines []string
+		report := reportBlock{title: "Nodos del clúster"}
 		for _, n := range nodes {
 			icon := sOK.Render(glyphDot)
 			if !n.Online {
-				icon = sErr.Render("○")
+				icon = sErr.Render(glyphTodo)
 			}
 			cb := ""
 			if n.CircuitBreaker {
 				cb = " " + sWarn.Render("[CB]")
 			}
-			lines = append(lines, fmt.Sprintf("  %s %s %s%s", icon, sPrimary.Render(firstNonEmpty(n.Name, n.ID)),
-				sDim.Render(fmt.Sprintf("score %v %s %d modelos", n.Score, glyphSep, len(n.Models))), cb))
+			report.rows = append(report.rows, [2]string{firstNonEmpty(n.Name, n.ID),
+				icon + " " + sDim.Render(fmt.Sprintf("score %v %s %d modelos", n.Score, glyphSep, len(n.Models))) + cb})
 		}
-		return cmdDoneMsg{lines: lines}
+		return cmdDoneMsg{lines: []block{report}}
 	})
 }
 
 func (m *Model) cmdContextWindow(arg string) {
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimSpace(arg), "%d", &n); err != nil {
-		m.print(errLine("Uso: /context-window 8192"))
+		m.add(errLine("Uso: /context-window 8192"))
 		return
 	}
 	n = max(1024, n)
@@ -1320,13 +1348,12 @@ func (m *Model) cmdContextWindow(arg string) {
 	m.chat.Session.ContextWindow = n
 	m.saveConfig()
 	m.refreshContext()
-	m.print(okLine(fmt.Sprintf("Ventana de contexto: %d tokens", n)))
+	m.add(okLine(fmt.Sprintf("Ventana de contexto: %d tokens", n)))
 }
 
 func (m *Model) cmdKey(arg string) tea.Cmd {
 	if arg == "" {
-		m.promptFor("Pega tu API key (lixbon_sk_…) — con correo y contraseña usa: lixbon setup", func(text string) tea.Cmd { return m.applyKey(strings.TrimSpace(text)) })
-		return nil
+		return m.openLogin(loginCommand, stepAPIKey, "")
 	}
 	return m.applyKey(arg)
 }
@@ -1335,22 +1362,31 @@ func (m *Model) applyKey(key string) tea.Cmd {
 	if key == "" {
 		return nil
 	}
-	previous := m.chat.Client.APIKey
-	m.chat.Client.APIKey = key
+	probe := *m.chat.Client
+	probe.APIKey = key
 	return m.async("verificando la clave", func(ctx context.Context) cmdDoneMsg {
-		info, err := m.chat.Client.KeyInfo(ctx)
+		info, err := probe.KeyInfo(ctx)
 		if err != nil {
-			m.chat.Client.APIKey = previous
-			return cmdDoneMsg{lines: []string{errLine("Clave inválida: " + err.Error())}}
+			return cmdDoneMsg{lines: []block{errLine("Clave inválida: " + err.Error())}}
 		}
-		m.chat.Cfg.APIKey = key
-		m.chat.Cfg.KeyModel = info.KeyModel
-		m.saveConfig()
-		return cmdDoneMsg{lines: []string{okLine("API key actualizada")}, apply: func(m *Model) {
+		return cmdDoneMsg{lines: []block{okLine("API key actualizada")}, apply: func(m *Model) {
+			m.chat.Client.APIKey = key
+			m.chat.Cfg.APIKey = key
+			m.chat.Cfg.KeyModel = info.KeyModel
+			m.saveConfig()
 			if info.KeyModel != "" {
 				m.chat.SetModel(info.KeyModel)
 			}
-			acc := m.chat.Probe(context.Background())
+		}, then: func(m *Model) tea.Cmd { return m.refreshAccount() }}
+	})
+}
+
+// refreshAccount vuelve a sondear la cuenta sin bloquear la interfaz.
+func (m *Model) refreshAccount() tea.Cmd {
+	return m.async("consultando la cuenta", func(ctx context.Context) cmdDoneMsg {
+		acc := m.chat.QueryAccount(ctx)
+		return cmdDoneMsg{apply: func(m *Model) {
+			m.chat.ApplyAccount(acc)
 			m.opts.Account = acc
 			m.online = acc.State != chat.AccountOffline
 		}}
@@ -1359,7 +1395,7 @@ func (m *Model) applyKey(key string) tea.Cmd {
 
 func (m *Model) cmdLogout() tea.Cmd {
 	if m.chat.Cfg.APIKey == "" {
-		m.print(note("No hay ninguna sesión activa."))
+		m.add(note("No hay ninguna sesión activa."))
 		return nil
 	}
 	who := m.sessionLabel()
@@ -1372,7 +1408,7 @@ func (m *Model) cmdLogout() tea.Cmd {
 		}
 		m.chat.ClearSession()
 		m.chat.Model = ""
-		m.print(okLine("Sesión cerrada. Usa /login para volver a entrar."))
+		m.add(okLine("Sesión cerrada. Usa /login para volver a entrar."))
 		return nil
 	})
 	return nil
@@ -1381,9 +1417,47 @@ func (m *Model) cmdLogout() tea.Cmd {
 // ── utilidades ───────────────────────────────────────────────────────────
 
 func (m *Model) promptFor(label string, onSubmit func(string) tea.Cmd) {
-	m.print(rail(true) + sBold.Render(label))
-	m.print(note("escribe y pulsa Enter (Esc cancela)"))
+	m.add(askLine(label))
 	m.prompt = &promptState{label: label, onSubmit: onSubmit}
+}
+
+// promptSecret pide una clave: lo escrito sale como • y no llega ni al
+// transcript ni al historial.
+func (m *Model) promptSecret(label string, onSubmit func(string) tea.Cmd) tea.Cmd {
+	m.add(askLine(label))
+	m.prompt = &promptState{label: label, onSubmit: onSubmit}
+	ti, cmd := newSecretInput(m.width)
+	m.secret = ti
+	return cmd
+}
+
+func (m *Model) handleSecretKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		value := strings.TrimSpace(m.secret.Value())
+		if value == "" {
+			return nil
+		}
+		p := m.prompt
+		m.secret, m.prompt = nil, nil
+		return p.onSubmit(value)
+	case "esc", "ctrl+c":
+		p := m.prompt
+		m.secret, m.prompt = nil, nil
+		if p != nil && p.onCancel != nil {
+			p.onCancel()
+		}
+		m.add(note("cancelado"))
+		return nil
+	}
+	var cmd tea.Cmd
+	*m.secret, cmd = m.secret.Update(msg)
+	return cmd
+}
+
+func maskKeyCommand(s string) string {
+	parts := keyArg.FindStringSubmatch(s)
+	return parts[1] + maskKey(parts[2])
 }
 
 func plural(n int, one, many string) string {

@@ -8,10 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/term"
 
 	"lixbon.com/cli/internal/api"
@@ -27,6 +26,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		return 1
 	}
 	cfg := config.Load(configPath)
+	setupAppearance(cfg)
 	opts.ConfigPath = configPath
 	opts.Autotitle = true
 	c, err := chat.New(cfg, api.FromConfig(cfg), opts)
@@ -36,6 +36,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 	}
 	defer c.Close()
 
+	hadKey := c.Cfg.APIKey != ""
 	acc, notes := startupAccount(ctx, c, stdout)
 	needsPick, warning := false, ""
 	if acc.State != chat.AccountAuth {
@@ -57,13 +58,24 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 
 		UpdateNotice: updateNotice(cfg, configPath),
 	})
+	// Sin sesión de lixbon.com se abre la pantalla de login; Esc la cierra y
+	// deja el chat sin sesión, desde donde /provider sigue funcionando.
+	if acc.State == chat.AccountAuth && !c.Client.Generic {
+		notice := ""
+		if hadKey {
+			notice = "Tu sesión de lixbon.com ya no es válida: vuelve a entrar."
+		}
+		m.login = newLoginView(loginStartup, *c.Client, config.Version, &m.spin)
+		m.login.copyText = m.copyText
+		m.login.notice = notice
+	}
 	if err := runProgram(ctx, m, needsPick, acc.State == chat.AccountOffline, nil, nil); err != nil &&
 		!errors.Is(err, tea.ErrInterrupted) && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(stderr, "Error:", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, m.log.text())
-	fmt.Fprintln(stdout, sDim2.Render("Hasta pronto."))
+	lipgloss.Fprintln(stdout, m.log.text())
+	lipgloss.Fprintln(stdout, sDim2.Render("Hasta pronto."))
 	return 0
 }
 
@@ -77,7 +89,7 @@ func startupAccount(ctx context.Context, c *chat.Chat, stdout io.Writer) (chat.A
 		return chat.Account{State: chat.AccountAuth}, []string{noSessionHint}
 	}
 	host := providerHost(c.Client.BaseURL)
-	fmt.Fprintln(stdout, sDim2.Render("conectando con "+host+"…"))
+	lipgloss.Fprintln(stdout, sDim2.Render("conectando con "+host+"…"))
 	acc := c.Probe(ctx)
 	if acc.State != chat.AccountAuth {
 		return acc, nil
@@ -105,13 +117,13 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 
 	m.printHeader()
 	if offline {
-		m.print(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
+		m.add(warnLine(serverProblem(m.opts.Account, providerHost(m.chat.Client.BaseURL)) + " Se trabajará con la configuración local."))
 	}
 	for _, n := range m.opts.Notes {
-		m.print(warnLine(n))
+		m.add(warnLine(n))
 	}
 	if m.opts.Warning != "" {
-		m.print(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
+		m.add(warnLine(m.opts.Warning + " Puedes explorar la interfaz; /model elegirá uno cuando haya."))
 	}
 	if pickModel {
 		m.queueModelPicker()
@@ -127,83 +139,6 @@ func reservedNames() []string {
 		names[i] = s.Name
 	}
 	return names
-}
-
-func dimAll(lines []string) []string {
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = sDim2.Render(l)
-	}
-	return out
-}
-
-const (
-	logoGap     = 3
-	logoMargin  = 1
-	minLogoRoom = logoSize + 2*logoMargin
-)
-
-// headerLayout pone el texto junto al logo si cabe y, si no, debajo; en una
-// terminal más estrecha que el logo lo omite. Nunca parte una fila del logo.
-func headerLayout(logo, text []string, width int) string {
-	var lines []string
-	pad := strings.Repeat(" ", logoMargin)
-	fit := func(s string, room int) string { return ansi.Truncate(s, max(room, 1), glyphEllipsis) }
-	switch {
-	case width >= minLogoRoom+logoGap+40:
-		for i, row := range logo {
-			line := pad + row
-			if i < len(text) && text[i] != "" {
-				line += strings.Repeat(" ", logoGap) + fit(text[i], width-minLogoRoom-logoGap)
-			}
-			lines = append(lines, line)
-		}
-	case width >= minLogoRoom:
-		for _, row := range logo {
-			lines = append(lines, pad+row)
-		}
-		for _, l := range text {
-			if l != "" {
-				lines = append(lines, pad+fit(l, width-2*logoMargin))
-			}
-		}
-	default:
-		for _, l := range text {
-			if l != "" {
-				lines = append(lines, fit(l, width))
-			}
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m *Model) printHeader() {
-	c := m.chat
-	title := sBold.Render("Lixbon CLI") + sDim.Render(" v"+m.opts.Version)
-	if plan := c.Cfg.ExtraString("plan_name"); plan != "" && !c.Client.Generic {
-		title += sDim2.Render("  " + glyphSep + "  plan " + plan)
-	}
-	parts := []string{firstNonEmpty(m.modelLabel(c.Model), "sin modelo"), c.Mode}
-	if profile := c.Cfg.ActiveProfile(); profile != config.DefaultProfile {
-		parts = slices.Insert(parts, 0, profile)
-	}
-	info := sDim.Render(strings.Join(parts, " "+glyphSep+" "))
-	folder := sBeige.Render(shortPath(c.Workspace))
-	tips := []string{
-		"/ comandos  " + glyphSep + "  ! shell  " + glyphSep + "  Enter envía",
-		"Alt+Enter nueva línea  " + glyphSep + "  Esc interrumpe",
-		"Mayús+Tab cambia de modo  " + glyphSep + "  Ctrl+T transcript  " + glyphSep + "  arrastra para copiar",
-	}
-	text := append([]string{"", title, info, folder, ""}, dimAll(tips)...)
-	m.print("")
-	m.printDynamic(func(width int) string { return headerLayout(renderLogo(), text, width) })
-	if c.Mode == chat.ModeAsk {
-		m.print(note("Modo ask: el modelo solo conversa. /mode agent para que cree y edite archivos."))
-	}
-	if c.ProjectContext != "" {
-		m.print(note("LIXBON.md encontrado: se usará como contexto del proyecto."))
-	}
-	m.print("")
 }
 
 // queueModelPicker abre el selector de modelo al arrancar cuando ni la

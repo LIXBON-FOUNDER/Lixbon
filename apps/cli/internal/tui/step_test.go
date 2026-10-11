@@ -17,7 +17,7 @@ func TestTextOfConsecutiveStepsIsNotGluedTogether(t *testing.T) {
 	contains(t, out, "Primera parte.")
 	contains(t, out, "Segunda parte.")
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "Segunda parte.") && strings.TrimSpace(line) != "Segunda parte." {
+		if strings.Contains(line, "Segunda parte.") && strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), glyphBrand)) != "Segunda parte." {
 			t.Fatalf("pasos fundidos en una línea: %q", line)
 		}
 	}

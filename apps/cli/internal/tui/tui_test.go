@@ -26,7 +26,7 @@ func TestSendingAMessageShowsItAndTheAnswer(t *testing.T) {
 	if len(h.chat.History) != 2 {
 		t.Fatalf("historial: %d", len(h.chat.History))
 	}
-	contains(t, h.view(), "qwen")
+	contains(t, h.view(), "Qwen")
 	contains(t, h.view(), "ask")
 }
 
@@ -249,9 +249,9 @@ func TestAgentTurnShowsActionsDiffAndSummary(t *testing.T) {
 	h.send("crea hola.txt")
 	h.settle()
 	out := h.out()
-	contains(t, out, "creó")
+	contains(t, out, "Crear")
 	contains(t, out, "hola.txt")
-	contains(t, out, "+2 -0")
+	contains(t, out, "+2 "+glyphMinus+"0")
 	contains(t, out, "uno")
 	contains(t, out, "8 chars")
 	contains(t, out, "Listo, creé el archivo.")

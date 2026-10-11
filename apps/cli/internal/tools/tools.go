@@ -298,6 +298,10 @@ func isBinary(path string) bool {
 	return false
 }
 
+// IgnoredDir dice si una carpeta se salta al recorrer el workspace
+// (node_modules, .git, dist…).
+func IgnoredDir(name string) bool { return ignoredTreeDirs[name] }
+
 func hasIgnoredPart(rel string) bool {
 	for _, part := range strings.Split(rel, "/") {
 		if ignoredTreeDirs[part] {

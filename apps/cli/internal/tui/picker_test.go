@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -58,7 +59,7 @@ func TestPickerNavigationFilterAndCancel(t *testing.T) {
 	if len(p.visible()) != 4 || p.cursor != 1 {
 		t.Fatalf("borrar el filtro restaura la lista: %d filas, cursor %d", len(p.visible()), p.cursor)
 	}
-	view := ansi.Strip(p.view(60))
+	view := ansi.Strip(strings.Join(p.view(60, 12), "\n"))
 	contains(t, view, "Elige")
 	contains(t, view, "▌ Alfa")
 	contains(t, view, "primera")
@@ -74,7 +75,34 @@ func TestPickerEnterIgnoresDisabledAndEmpty(t *testing.T) {
 	if _, closed := p.key(press(tea.KeyEnter)); closed || called {
 		t.Fatal("sin coincidencias no se elige nada")
 	}
-	contains(t, ansi.Strip(p.view(40)), "sin coincidencias")
+	contains(t, ansi.Strip(strings.Join(p.view(40, 12), "\n")), "sin coincidencias")
+}
+
+func TestPickerNumbersAndClicksChoose(t *testing.T) {
+	var chosen string
+	p := newPicker("¿Aplicar este cambio?", []option{
+		{Label: "Sí", Value: "yes"}, {Label: "Sí, y no preguntar más", Value: "always"}, {Label: "No", Value: "no"},
+	}, func(v string, _ bool) tea.Cmd { chosen = v; return nil })
+	p.body = []string{"a.go · el diff está justo encima"}
+	view := ansi.Strip(strings.Join(p.view(60, 12), "\n"))
+	contains(t, view, "¿Aplicar este cambio?")
+	contains(t, view, "1  Sí")
+	contains(t, view, "3  No")
+	contains(t, ansi.Strip(p.hints()), "1–3 elegir")
+	if _, closed := p.key(typed("2")); !closed || chosen != "always" {
+		t.Fatalf("el número elige: %q", chosen)
+	}
+	p.view(60, 12)
+	if _, closed := p.click(p.optionTop + 2); !closed || chosen != "no" {
+		t.Fatalf("el clic elige la fila: %q", chosen)
+	}
+	if _, closed := p.click(0); closed {
+		t.Fatal("un clic en el borde no elige nada")
+	}
+	p.search = true
+	if p.numbered() {
+		t.Fatal("con filtro los números se escriben, no eligen")
+	}
 }
 
 func TestInputHistoryUsesPromptToolkitFormat(t *testing.T) {

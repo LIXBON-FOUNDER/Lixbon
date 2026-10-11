@@ -1,0 +1,27 @@
+── 40 ──
+ ● Ejecutar  go test ./internal…  3.4 s
+   │ línea 1
+   │ línea 2
+   │ … 6 líneas · ctrl+o
+   │ línea 9
+   │ línea 10
+   │ línea 11
+   └ exit 0 · 11 líneas
+── 80 ──
+ ● Ejecutar  go test ./internal/...                                       3.4 s
+   │ línea 1
+   │ línea 2
+   │ … 6 líneas · ctrl+o
+   │ línea 9
+   │ línea 10
+   │ línea 11
+   └ exit 0 · 11 líneas
+── 120 ──
+ ● Ejecutar  go test ./internal/...                                                                               3.4 s
+   │ línea 1
+   │ línea 2
+   │ … 6 líneas · ctrl+o
+   │ línea 9
+   │ línea 10
+   │ línea 11
+   └ exit 0 · 11 líneas

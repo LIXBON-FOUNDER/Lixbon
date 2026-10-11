@@ -41,18 +41,18 @@ func TestEveryRowFitsTheTerminalAtAnyWidth(t *testing.T) {
 func TestHeaderLogoStaysWholeWhenTheWindowChanges(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.printHeader()
-	logo := renderLogo()
+	logo := renderLogo(cardLogoSize)
 	for _, width := range []int{120, 70, 40, 30, 18, 12, 90} {
 		h.update(tea.WindowSizeMsg{Width: width, Height: 30})
 		screen := h.view()
-		if width >= logoSize+4 {
+		if width >= cardLogoSize+4 {
 			for i, row := range logo {
 				if !strings.Contains(screen, ansi.Strip(row)) {
 					t.Fatalf("ancho %d: la fila %d del logo no aparece entera\n%s", width, i, screen)
 				}
 			}
 		}
-		if !strings.Contains(screen, "Lixbon CLI") {
+		if !strings.Contains(screen, "LIXBON CLI") {
 			t.Fatalf("ancho %d: falta el título\n%s", width, screen)
 		}
 	}
@@ -81,7 +81,7 @@ func TestLiveTextAndPickersFitTheTerminal(t *testing.T) {
 		{Label: "una-opción-con-nombre-largo", Desc: "descripción igualmente larga para forzar el recorte", Badge: "nuevo"},
 		{Label: "otra", Desc: "corta"},
 	}, nil)
-	h.m.picker.detail = "detalle"
+	h.m.picker.body = []string{"detalle del panel"}
 	for width := 4; width <= 100; width += 3 {
 		h.update(tea.WindowSizeMsg{Width: width, Height: 20})
 		assertFits(t, h, "selector", width, 20)
