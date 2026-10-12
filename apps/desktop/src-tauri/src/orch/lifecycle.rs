@@ -3,13 +3,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::json;
-use tauri::AppHandle;
+use super::host::Host;
 use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, data_dir, discovery_file, lxo_path, read_json, server, skill, state, write_json, write_private_json};
 use super::state::{Kind, State};
 
 impl Core {
-    pub fn init(self: &Arc<Self>, app: AppHandle) {
-        let _ = self.app.set(app);
+    pub fn init(self: &Arc<Self>, host: Arc<dyn Host>) {
+        self.set_host(host);
         let settings: Settings = read_json(&data_dir().join("settings.json")).unwrap_or_default();
         let mut st: State = read_json(&data_dir().join("state.json")).unwrap_or_default();
         st.orphan_all();

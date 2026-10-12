@@ -26,9 +26,7 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
         *s = settings;
     }
     if enabled { core.start_server()? } else { core.stop_server() }
-    if let Some(app) = core.app.get() {
-        let _ = app.emit("orch:changed", ());
-    }
+    core.emit_changed();
     Ok(roles::save_response(&warnings, core.snapshot()))
 }
 
