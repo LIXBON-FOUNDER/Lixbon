@@ -81,7 +81,7 @@ fn la_webview_envia_accept_moved_target_en_snake_case() {
         let cwd = dir.to_string_lossy().into_owned();
         let nt = |branch: Option<&str>| NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "x".into(),
             spec: String::new(), repo: cwd.clone(), cwd: cwd.clone(), branch: branch.map(String::from), base: None, worktree: None, external: false };
-        let mut st = orch.0.lock();
+        let mut st = orch.0.lock_unpersisted();
         let (_, root) = st.create_run("obj", nt(None));
         let id = st.add_child(&root, 2, nt(Some("lx/t"))).unwrap();
         st.done(&id, true, "ok", vec![], None).unwrap();
@@ -89,7 +89,7 @@ fn la_webview_envia_accept_moved_target_en_snake_case() {
         id
     };
     // Integrar exige la revisión aceptada sobre el HEAD de la rama (review.rs).
-    orch.0.lock().record_decision(&id, "review", "human", &json!({ "decision": "accepted", "head_commit": git(&dir, &["rev-parse", "lx/t"]) }));
+    orch.0.lock_unpersisted().record_decision(&id, "review", "human", &json!({ "decision": "accepted", "head_commit": git(&dir, &["rev-parse", "lx/t"]) }));
     let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_integrate, orch_publish_pr])
         .build(mock_context(noop_assets())).unwrap();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -148,7 +148,7 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     use tauri::webview::InvokeRequest;
     let (st, id, dir, _) = review::tests::setup("ipc");
     let orch = Orch::default();
-    *orch.0.lock() = st.into_inner().unwrap();
+    *orch.0.lock_unpersisted() = st.into_inner().unwrap();
     let core = orch.0.clone();
     let host = host::RecordingHost::new();
     core.set_host(host.clone());
@@ -194,7 +194,7 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
 fn la_snapshot_no_corre_git_con_el_lock_tomado() {
     let (st, id, dir, _) = review::tests::setup("lock-snapshot");
     let core = Orch::default().0;
-    *core.lock() = st.into_inner().unwrap();
+    *core.lock_unpersisted() = st.into_inner().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let barrier = Arc::new(std::sync::Barrier::new(2));
     *core.snapshot_git_hook.lock().unwrap() = Some((tx, barrier.clone()));
@@ -203,7 +203,7 @@ fn la_snapshot_no_corre_git_con_el_lock_tomado() {
         std::thread::spawn(move || core.snapshot())
     };
     rx.recv().expect("la snapshot no llegó a la fase git");
-    assert!(core.state.try_lock().is_ok(), "el lock del estado sigue tomado en la fase git");
+    assert!(core.state_is_free(), "el lock del estado sigue tomado en la fase git");
     barrier.wait();
     let snap = worker.join().unwrap();
     *core.snapshot_git_hook.lock().unwrap() = None;
@@ -218,17 +218,17 @@ fn la_snapshot_trae_la_ultima_integracion_de_cada_tarea() {
     let id = {
         let nt = || NewTask { agent: "claude".into(), model: None, effort: None, role: None, title: "x".into(), spec: String::new(),
             repo: ".".into(), cwd: ".".into(), branch: None, base: None, worktree: None, external: false };
-        let mut st = orch.0.lock();
+        let mut st = orch.0.lock_unpersisted();
         let (_, root) = st.create_run("obj", nt());
         st.add_child(&root, 2, nt()).unwrap()
     };
     let li = |o: &Orch| o.0.snapshot()["tasks"][&id]["last_integration"].clone();
     assert_eq!(li(&orch), Value::Null);
-    orch.0.lock().record_decision(&id, "merge", "human", &json!({ "outcome": "conflict", "conflict": ["a.txt"] }));
+    orch.0.lock_unpersisted().record_decision(&id, "merge", "human", &json!({ "outcome": "conflict", "conflict": ["a.txt"] }));
     assert_eq!((li(&orch)["outcome"].as_str(), li(&orch)["result_commit"].clone()), (Some("conflict"), Value::Null));
     std::thread::sleep(Duration::from_millis(5));
-    orch.0.lock().record_decision(&id, "merge", "human", &json!({ "outcome": "merged", "result_commit": "abc123" }));
-    orch.0.lock().record_decision(&id, "spawn", "human", &json!({ "outcome": "approved" }));
+    orch.0.lock_unpersisted().record_decision(&id, "merge", "human", &json!({ "outcome": "merged", "result_commit": "abc123" }));
+    orch.0.lock_unpersisted().record_decision(&id, "spawn", "human", &json!({ "outcome": "approved" }));
     let v = li(&orch);
     assert_eq!((v["outcome"].as_str(), v["result_commit"].as_str()), (Some("merged"), Some("abc123")));
     assert!(v["at"].as_u64().is_some());
@@ -314,7 +314,7 @@ fn dirs_c1() -> (LimpiaC1, std::path::PathBuf, std::path::PathBuf) {
 }
 
 fn nueva_tarea(core: &Core, external: bool) -> String {
-    core.lock()
+    core.lock_unpersisted()
         .create_run("obj", NewTask {
             agent: "coordinador".into(), model: None, effort: None, role: None, title: "t".into(), spec: "s".into(),
             repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external,
@@ -543,11 +543,15 @@ fn commit_sigue_escribiendo_state_json_y_no_toca_la_instantanea() {
     let (rev0, doc0, sha0) = snapshot_en_el_almacen(&core);
     assert_eq!(rev0, 1);
 
-    nueva_tarea(&core, false); // el estado cambia...
-    {
-        let st = core.lock();
-        core.commit(&st, &[]); // ...y commit() lo persiste como siempre.
-    }
+    // El estado cambia por la frontera de mutación (persiste en state.json como siempre).
+    core.mutate(|st| {
+        st.create_run("obj", NewTask {
+            agent: "coordinador".into(), model: None, effort: None, role: None, title: "t".into(), spec: "s".into(),
+            repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: false,
+        });
+        Ok(())
+    })
+    .unwrap();
     let en_disco: Value = serde_json::from_str(&std::fs::read_to_string(data.join("state.json")).unwrap()).unwrap();
     assert_eq!(en_disco, serde_json::to_value(&*core.lock()).unwrap(), "state.json refleja el estado nuevo");
     assert_eq!(en_disco["runs"].as_object().unwrap().len(), 2);
@@ -582,7 +586,7 @@ fn importa_un_state_json_real_en_solo_lectura() {
     st.orphan_all();
     write_json(&data.join("state.json"), &st).unwrap(); // lo que reescribiría `init`
     let core = Orch::default().0;
-    *core.lock() = st;
+    core.adopt_state(&super::lifecycle::BootProof::for_tests(), st);
     let t = std::time::Instant::now();
     let rep = core.open_store(&core_dir, &data.join("state.json")).unwrap();
     eprintln!("{} bytes de estado real ({tareas} tareas, {runs} runs) importados en {:?}: {:?}", std::fs::metadata(data.join("state.json")).unwrap().len(), t.elapsed(), rep);

@@ -24,6 +24,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::mutation::{Effect, StateAccess};
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
 
 pub const DEFAULT_TTL_SECS: u64 = 10 * 60;
@@ -204,8 +205,12 @@ impl Core {
     /// existe (run eliminado) no hay fila a la que colgarla: no se registra.
     fn finish(&self, p: &PendingSpawn, actor: &str, outcome: &str, task: Option<&Value>, reason: Option<&str>, launch_error: Option<&str>) -> Option<u64> {
         let decided_at = state::now_ms();
-        let id = {
-            let mut st = self.lock();
+        // El lanzamiento (o su rechazo) ya ocurrió: la decisión se registra con una
+        // mutación posterior y, si no se puede, queda anotada para reconciliar.
+        let effect = Effect::new("spawn_approval", "spawn_outcome").task(&p.parent_task)
+            .expected(json!({ "record": "decision spawn", "pending_id": p.pending_id, "outcome": outcome }))
+            .observed(json!({ "launched_task": task.and_then(|t| t["task"].as_str()), "launch_error": launch_error }));
+        self.mutate_after_effect(effect, |st| {
             let exists = st.tasks.contains_key(&p.parent_task);
             let dup = st.decisions.iter().any(|d| d.kind == "spawn"
                 && d.detail_json.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).is_some_and(|v| v["pending_id"] == p.pending_id.as_str()));
@@ -214,10 +219,10 @@ impl Core {
                 "policy_status": p.policy.status, "outcome": outcome, "created_at": p.created_at, "decided_at": decided_at,
                 "task": task.and_then(|t| t["task"].as_str()), "reason": reason, "launch_error": launch_error,
             })));
-            self.commit(&st, &[]);
-            id
-        };
-        id
+            Ok(id)
+        })
+        .ok()
+        .flatten()
     }
 
     fn resolved_payload(&self, pending_id: &str, outcome: &str, task: Option<&Value>, decision: Option<u64>, reason: Option<&str>) -> Value {
@@ -408,7 +413,10 @@ impl Core {
         let profile = t.profile.clone().unwrap_or_default();
         let policy = self.task_policy(&t.agent, &profile, t.role.as_deref(), &t.cwd, t.model.as_deref());
         let record = agents::authorize(&policy, t.requested_argv.as_deref(), t.ack_unverified)?;
-        self.lock().task_mut(id)?.policy = Some(record);
+        self.mutate(|st| {
+            st.task_mut(id)?.policy = Some(record);
+            Ok(())
+        })?;
         self.launched.lock().unwrap().push(id.to_string());
         Ok(())
     }
@@ -459,7 +467,7 @@ mod tests {
         core.settings.lock().unwrap().enabled = true;
         let cwd = dir.to_string_lossy().into_owned();
         let (run, root) = {
-            let mut st = core.lock();
+            let mut st = core.lock_unpersisted();
             let (run, root) = st.create_run("obj", NewTask { agent: "coordinador".into(), model: None, effort: None, role: None, title: "obj".into(),
                 spec: "obj".into(), repo: cwd.clone(), cwd: cwd.clone(), branch: Some("master".into()), base: None, worktree: None, external: true });
             st.mark_running(&root).unwrap();
@@ -607,7 +615,7 @@ mod tests {
         let p = pid(&e.spawn("claude"));
         let argv = e.argv(&p);
         e.host.clear_events();
-        e.core.lock().close(&e.root, Status::Exited, "se cerró").unwrap();
+        e.core.lock_unpersisted().close(&e.root, Status::Exited, "se cerró").unwrap();
         assert!(e.core.list_pending_spawns().is_empty());
         let ev: Vec<_> = e.host.events().into_iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).collect();
         assert_eq!(ev.len(), 1);

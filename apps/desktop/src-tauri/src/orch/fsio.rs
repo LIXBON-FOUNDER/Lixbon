@@ -22,10 +22,17 @@ pub(super) fn data_dir() -> PathBuf {
     // Las pruebas nunca tocan el state.json real del usuario.
     #[cfg(test)]
     {
-        if let Some(dir) = TEST_DATA_DIR.with(|d| d.borrow().clone()) {
-            return dir;
-        }
-        return std::env::temp_dir().join(format!("lixbon-orch-test-{}", std::process::id()));
+        // Cada hilo de prueba tiene su carpeta: un fallo al escribir `state.json` ya no
+        // se ignora, y dos pruebas en paralelo no deben pisarse el mismo archivo.
+        return TEST_DATA_DIR.with(|d| {
+            d.borrow_mut()
+                .get_or_insert_with(|| {
+                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    std::env::temp_dir().join(format!("lixbon-orch-test-{}-{n}", std::process::id()))
+                })
+                .clone()
+        });
     }
     #[cfg(not(test))]
     lixbon_dir().join("orch")
