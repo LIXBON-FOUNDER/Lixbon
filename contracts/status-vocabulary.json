@@ -1,0 +1,202 @@
+{
+  "_comment": "Vocabulario canonico de Lixbon (slice H de la Fase 1). Describe los ids de maquina que ya viajan por state.json, /rpc y los comandos orch_* (seccion `domain`) y, aparte, como los muestra cada cliente (seccion `presentation`). NO es una fuente de generacion de codigo: documenta y las pruebas de Rust (orch/vocab.rs) y de vitest (src/orch/vocabulary.test.js) fallan si el codigo se desvia. Ver docs/VOCABULARIO.md.",
+  "version": 1,
+
+  "domain": {
+    "_comment": "Solo ids de maquina, estables en disco y en HTTP. Ningun texto de interfaz va aqui. `estado`: vigente = existe hoy en el codigo; reservado = nombre acordado en el modelo del runtime, aun sin codigo ni API publica (no consolidar antes del corte Task/Attempt).",
+
+    "task_status": {
+      "estado": "vigente",
+      "origen": "apps/desktop/src-tauri/src/orch/state.rs::Status (serde snake_case); campo `status` de Task en state.json",
+      "items": [
+        { "id": "starting", "final": false, "attempt_state": "starting" },
+        { "id": "running", "final": false, "attempt_state": "running" },
+        { "id": "waiting", "final": false, "attempt_state": "waiting" },
+        { "id": "awaiting_terminal_approval", "final": false, "attempt_state": "awaiting_terminal_approval" },
+        { "id": "done", "final": true, "attempt_state": "done" },
+        { "id": "failed", "final": true, "attempt_state": "failed" },
+        { "id": "stopped", "final": true, "attempt_state": "stopped" },
+        { "id": "exited", "final": true, "attempt_state": "exited" }
+      ]
+    },
+
+    "task_derived_state": {
+      "estado": "reservado",
+      "origen": "LIXBON-modelo-runtime.md seccion 4: estado derivado de la Task tras el corte Task/Attempt",
+      "ids": ["open", "in_progress", "in_review", "integrated", "discarded"]
+    },
+
+    "attempt_state": {
+      "estado": "reservado",
+      "origen": "LIXBON-modelo-runtime.md seccion 4. Hoy el intento es la propia Task (un solo intento por tarea): sus estados son los de task_status mas `pending_approval`, que hoy vive fuera de la Task como pending_spawn_state `pending`. Los ids vigentes se reutilizan tal cual para que state.json no cambie al hacer el corte.",
+      "ids": ["pending_approval", "starting", "running", "waiting", "awaiting_terminal_approval", "done", "failed", "stopped", "exited"],
+      "final": ["done", "failed", "stopped", "exited"],
+      "pendiente_de_decidir": [
+        "`exited` (cerrada la terminal del agente) puede quedar como estado propio o fundirse en `stopped`; hasta decidirlo se conserva.",
+        "`waiting` cubre hoy solo la pregunta al coordinador; la espera de aprobacion en terminal es `awaiting_terminal_approval`."
+      ]
+    },
+
+    "pending_spawn_state": {
+      "estado": "vigente",
+      "origen": "orch/spawn_approval.rs::PendState (campo `status` de spawn_status y de orch-spawn-resolved). `launching` es interno y se informa como `pending`.",
+      "ids": ["pending", "approved", "rejected", "launch_failed", "expired"],
+      "ids_de_resultado_no_estado": ["already_resolved"]
+    },
+
+    "message_kind": {
+      "estado": "vigente",
+      "origen": "orch/state.rs::Kind (campo `kind` de los mensajes del buzon en state.json)",
+      "ids": ["phase", "done", "question", "reply", "note", "exited"]
+    },
+
+    "decision_kind": {
+      "estado": "vigente",
+      "origen": "orch/state.rs::Decision.kind (cadena libre en state.json); los emitidos por el codigo hoy",
+      "ids": ["merge", "pr", "review", "spawn"],
+      "reservados": ["release", "discard", "reopen", "stop"]
+    },
+
+    "failure_reason": {
+      "estado": "vigente",
+      "origen": "orch/approval.rs::Timeout::reason (campo `failure_reason` de Task)",
+      "ids": ["terminal_approval_timeout", "agent_idle_timeout"]
+    },
+
+    "delivery_channel": {
+      "estado": "vigente",
+      "origen": "orch/delivery.rs::Channel::id y rpc.rs (campo `delivery_channel` de Task)",
+      "ids": ["exec_o", "stream_json", "report_json", "stdout", "lxo_done"]
+    },
+
+    "policy_status": {
+      "estado": "vigente",
+      "origen": "orch/agents.rs::Status (NO es el estado de la tarea; campo `policy.status` / `policy_status`)",
+      "ids": ["ok", "blocked", "unverified"]
+    },
+
+    "review_decision": {
+      "estado": "vigente",
+      "origen": "orch/review.rs, decision `review` (campo `last_review.decision`)",
+      "ids": ["accepted", "rejected"]
+    },
+
+    "review_state": {
+      "estado": "vigente",
+      "origen": "derivado en el frontend por src/orch/attention.js::reviewStatus a partir de `last_review` y `head_commit`; no se guarda",
+      "ids": ["none", "stale", "accepted", "rejected"]
+    },
+
+    "integration_outcome": {
+      "estado": "vigente",
+      "origen": "orch/integration.rs, decision `merge` (campo `last_integration.outcome`); `target_moved` tambien se registra",
+      "ids": ["merged", "conflict", "error", "target_moved"],
+      "ids_de_resultado_no_registrados": ["already_merged", "review_required"]
+    },
+
+    "attention_kind": {
+      "estado": "vigente",
+      "origen": "src/orch/attention.js::ATTENTION, calculado hoy solo en el frontend (el slice G lo lleva al Core). El orden ES la prioridad de la lista (de mas a menos urgente).",
+      "ids": ["approve_in_terminal", "integrate", "review", "failed"],
+      "reservados": ["pending_spawn", "unanswered_question"],
+      "nota_reservados": "Hoy el frontend los cuenta aparte (useAttentionTotals: `pending` y `questions`), sin un `kind`. El slice G decide si pasan a ser kinds.",
+      "severidad": "sin definir: no existe hoy. Mientras no se decida, la prioridad es la posicion en `ids`."
+    },
+
+    "entity_kind": {
+      "estado": "reservado",
+      "origen": "events.entity_kind (migracion 003, slice E; referencia blanda) y prefijo de los eventos de dominio durables",
+      "ids": ["project", "task", "attempt", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "attention"]
+    },
+
+    "event": {
+      "_comment": "Tres familias distintas que hoy comparten la palabra «evento». No se renombra ninguna.",
+      "transporte_ui_vigente": {
+        "estado": "vigente",
+        "origen": "nombres de los eventos de Tauri hacia la interfaz; contrato del frontend, mezcla ':' y '-' por historia",
+        "ids": ["orch:changed", "orch:term:{id}", "orch:term-exit:{id}", "orch-task-reviewed", "orch-spawn-pending", "orch-spawn-resolved"]
+      },
+      "dominio_durable_reservado": {
+        "estado": "reservado",
+        "origen": "LIXBON-modelo-runtime.md seccion 5 (slice E); formato `entidad.verbo`",
+        "ids": [
+          "project.registered", "project.archived", "project.relocated",
+          "task.created", "task.updated", "task.closed",
+          "attempt.requested", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.completed", "attempt.failed", "attempt.stopped",
+          "thread.created", "worktree.created", "worktree.removed", "artifact.created",
+          "review.requested", "review.completed",
+          "integration.requested", "integration.completed", "integration.conflict",
+          "agent.question", "agent.answered", "decision.created", "policy.warning",
+          "attention.created", "attention.resolved"
+        ]
+      },
+      "efimeros_reservados": {
+        "estado": "reservado",
+        "origen": "LIXBON-modelo-runtime.md seccion 5: UI en vivo, sin registro durable; su prefijo NO es un entity_kind",
+        "ids": ["attempt.progress", "terminal.output", "agent.typing", "token.stream", "tool.progress"]
+      }
+    }
+  },
+
+  "presentation": {
+    "_comment": "Como cada cliente muestra el dominio. Es presentacion, no dominio: el Core (Rust) no la carga. Las pruebas de vitest comparan estos textos con los del codigo de cada cliente.",
+
+    "visual_group": {
+      "_comment": "Grupo semantico comun (que forma/color corresponde); cada cliente lo dibuja a su manera.",
+      "groups": ["active", "waiting", "needs_person", "ok", "error", "halted"],
+      "of_task_status": {
+        "starting": "active",
+        "running": "active",
+        "waiting": "waiting",
+        "awaiting_terminal_approval": "needs_person",
+        "done": "ok",
+        "failed": "error",
+        "stopped": "halted",
+        "exited": "error"
+      }
+    },
+
+    "desktop": {
+      "origen": "apps/desktop/src/store/orchStore.js::STATUS_LABELS y src/orch/terminalApprovalContract.js",
+      "task_status_label": {
+        "starting": "Arrancando",
+        "running": "Trabajando",
+        "waiting": "Esperando respuesta",
+        "awaiting_terminal_approval": "Esperando aprobación en la terminal",
+        "done": "Terminada",
+        "failed": "Fallida",
+        "stopped": "Detenida",
+        "exited": "Cerrada"
+      }
+    },
+
+    "mobile": {
+      "origen": "apps/mobile/src/screens/RemoteOrch.js::STATUS (minuscula, tras «Agente · »)",
+      "task_status_label": {
+        "starting": "arrancando",
+        "running": "trabajando",
+        "waiting": "esperando",
+        "done": "entregó",
+        "failed": "falló",
+        "stopped": "detenida",
+        "exited": "cerrada"
+      }
+    },
+
+    "cli_lxo": {
+      "origen": "apps/desktop/lxo/src/main.rs::task_line",
+      "task_status_label": "id de maquina tal cual, entre corchetes (`t3 [running] …`); sin etiqueta"
+    },
+
+    "cli_go_tui": {
+      "origen": "apps/cli/internal/tui/orquestador.go y apps/cli/internal/orch",
+      "task_status_label": "ninguna: hoy el TUI solo comprueba que `lxo` este disponible y no pinta estados de tareas"
+    },
+
+    "known_divergences": {
+      "_comment": "Diferencias que existen hoy y NO se corrigen en el slice H (cambiarian lo que ve la persona). Las pruebas exigen que esta lista coincida con la realidad: si una se arregla, se borra de aqui; si aparece otra, se anota.",
+      "mobile_status_missing": ["awaiting_terminal_approval"],
+      "mobile_status_wording_differs_from_desktop": ["done", "failed", "waiting"]
+    }
+  }
+}
