@@ -340,12 +340,14 @@ fn la_politica_de_reintentos_esta_en_un_solo_sitio() {
 fn el_almacen_la_promocion_y_win32_solo_se_tocan_desde_su_frontera() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // (símbolo, archivos donde puede aparecer)
-    let permitidos: [(&str, &[&str]); 14] = [
+    let permitidos: [(&str, &[&str]); 16] = [
         ("with_store(", &["store_boot.rs", "boot_authority.rs"]),
         ("save_legacy_state", &["store_boot.rs"]),
         ("commit_authoritative", &["store_boot.rs"]),
         ("promote_to_authoritative", &["boot_authority.rs"]),
         ("apply_fence", &["boot_authority.rs"]),
+        ("migrate_authoritative(", &["store_boot.rs", "boot_authority.rs"]),
+        ("apply_post_fence_migrations(", &["boot_authority.rs"]),
         ("ensure_db_id", &["boot_authority.rs"]),
         ("open_for_boot", &["store_boot.rs", "boot_authority.rs"]),
         ("verify_backup", &["boot_authority.rs"]),

@@ -16,6 +16,13 @@
 //! # La valla
 //! [`FENCE_VERSION`] es la versión de la migración `002_authority_fence`. Se aplica
 //! con [`Store::apply_fence`], nunca al abrir (ver [`Store::open_boot_under_lock`]).
+//!
+//! # Migraciones posteriores a la valla
+//! La apertura de arranque no las aplica nunca. Las aplica [`Store::migrate_authoritative`],
+//! que quien arranca (`orch`) llama SOLO cuando `decide_boot` ya vio el marcador externo y la
+//! instalación es inequívocamente apta para seguir como autoritativa. El almacén añade su propia
+//! comprobación interna (valla cruzada + registro de autoridad válido), pero no conoce el
+//! marcador: la dirección sigue siendo `orch -> store`.
 
 use rusqlite::{Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -189,20 +196,6 @@ fn meta_put(conn: &Connection, key: &str, value: &str) -> StoreResult<()> {
     Ok(())
 }
 
-/// ¿Tiene la base un registro interno de autoridad estructuralmente válido (no basta el modo)?
-/// Es lo que permite a `open_boot_under_lock` aplicar migraciones posteriores a la valla:
-/// con el modo `sqlite_authoritative` pero la metadata corrupta o incompleta, el arranque se
-/// queda en la 002, `decide_boot` detecta la incoherencia y BLOQUEA; nunca se migra primero
-/// y se descubre después que C2b estaba corrupto. Una base sin las tablas `meta` y
-/// `legacy_state` (de una versión futura u otra cosa) no lo es: `migrate` dará su error.
-pub(super) fn authority_record_valid(conn: &Connection) -> StoreResult<bool> {
-    let tables: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'legacy_state')", [], |r| r.get(0))?;
-    if tables < 2 {
-        return Ok(false);
-    }
-    Ok(facts_from_conn(conn)?.authority_valid())
-}
-
 fn parse_i64(v: Option<String>) -> Option<i64> {
     v.and_then(|s| s.parse().ok())
 }
@@ -254,6 +247,27 @@ impl Store {
         crash_point("before_fence");
         let report = migrate::migrate(&mut self.conn, &upto, app_version, &self.backup_dir)?;
         crash_point("after_fence");
+        Ok(report)
+    }
+
+    /// Aplica las migraciones posteriores a la valla (003 en adelante). Es la ÚNICA vía.
+    ///
+    /// Precondición interna: valla cruzada y registro de autoridad estructuralmente válido
+    /// ([`AuthorityFacts::authority_valid`]); si no, [`StoreError::NotAuthoritative`] y la base no
+    /// se toca. Eso NO basta para que quien arranca la llame: el marcador `authority.json` puede
+    /// contradecir a SQLite, y solo `orch` lo observa. Por eso la llama únicamente el arranque,
+    /// después de `decide_boot` y de la acción que corresponda sobre el marcador.
+    ///
+    /// Misma garantía que cualquier migración: una sola transacción, checksum, copia previa
+    /// (`pre-migracion-vN`) y rechazo de una base más nueva que el binario. Idempotente.
+    pub fn migrate_authoritative(&mut self, all: &[Migration], app_version: &str) -> StoreResult<MigrationReport> {
+        let facts = facts_from_conn(&self.conn)?;
+        if !facts.fenced || !facts.authority_valid() {
+            return Err(StoreError::NotAuthoritative);
+        }
+        crash_point("before_authoritative_migration");
+        let report = migrate::migrate(&mut self.conn, all, app_version, &self.backup_dir)?;
+        crash_point("after_authoritative_migration");
         Ok(report)
     }
 

@@ -11,6 +11,8 @@ mod boot_authority;
 mod boot_tests;
 #[cfg(test)]
 mod crash_tests;
+#[cfg(test)]
+mod migration_gate_tests;
 mod mirror;
 #[cfg(test)]
 mod authority_tests;
