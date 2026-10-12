@@ -33,6 +33,9 @@ mod commands;
 mod fsio;
 mod host;
 mod lifecycle;
+mod mutation;
+#[cfg(test)]
+mod mutation_tests;
 mod release;
 mod rpc;
 mod snapshot;
@@ -47,7 +50,7 @@ mod ui_calls;
 mod vocab;
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -92,7 +95,10 @@ pub struct Core {
     /// Almacén SQLite: instantánea de arranque en C1; `state.json` sigue siendo la
     /// fuente operativa. Único punto de contacto del Core con el `Store` (ver `store_boot.rs`).
     storage: store_boot::CoreStorage,
-    state: Mutex<State>,
+    /// El estado solo se lee con `lock()` y solo se escribe con `mutate()` (`mutation.rs`).
+    state: mutation::StateCell,
+    /// Dónde se confirma una mutación, reintentos y modo solo lectura (`mutation.rs`).
+    persister: mutation::Persister,
     cv: Condvar,
     terms: Mutex<HashMap<String, pty::AgentTerm>>,
     settings: Mutex<Settings>,
@@ -123,7 +129,8 @@ impl Default for Orch {
         Orch(Arc::new(Core {
             host: OnceLock::new(),
             storage: store_boot::CoreStorage::default(),
-            state: Mutex::new(State::default()),
+            state: mutation::StateCell::default(),
+            persister: mutation::Persister::default(),
             cv: Condvar::new(),
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
@@ -172,40 +179,8 @@ impl Core {
         policy
     }
 
-    fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
     pub fn settings(&self) -> Settings {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
-    }
-
-    /// Persiste, despierta a los que esperan en `wait`/`ask`, avisa a la UI y
-    /// notifica los mensajes nuevos.
-    fn commit(&self, st: &State, new: &[u64]) {
-        let _ = write_json(&data_dir().join("state.json"), st);
-        self.cv.notify_all();
-        let Some(host) = self.host.get() else { return };
-        host.emit("orch:changed", &Value::Null);
-        let cfg = self.settings();
-        for m in st.messages.iter().filter(|m| new.contains(&m.id)) {
-            let wanted = match m.kind {
-                Kind::Phase => cfg.notify_phases,
-                Kind::Done | Kind::Exited => cfg.notify_done,
-                Kind::Question => cfg.notify_questions,
-                Kind::Reply | Kind::Note => false,
-            };
-            if !wanted {
-                continue;
-            }
-            let who = st.tasks.get(&m.from).map(|t| format!("{} · {}", t.agent, t.title)).unwrap_or_default();
-            let title = match m.kind {
-                Kind::Question => format!("Pregunta de {who}"),
-                Kind::Exited => format!("Se cerró {who}"),
-                _ => format!("Orquestador · {who}"),
-            };
-            host.notify(&title, &m.body);
-        }
     }
 
     /// Entrega el host al Core (una sola vez). `init` lo hace al arrancar; las
@@ -255,15 +230,19 @@ impl Core {
             let found = st.unread(to, kinds, reply_to);
             if !found.is_empty() {
                 let ids: Vec<u64> = found.iter().map(|m| m.id).collect();
-                st.mark_read(&ids);
-                self.commit(&st, &[]);
+                // Si no se pudo persistir el «leído», los mensajes se entregan igualmente
+                // (peor una entrega repetida que perderlos); el Core ya avisó del fallo.
+                let _ = self.mutate_locked(&mut st, |tx| {
+                    tx.mark_read(&ids);
+                    Ok(())
+                });
                 return found;
             }
             let now = Instant::now();
             if now >= deadline {
                 return vec![];
             }
-            st = self.cv.wait_timeout(st, deadline - now).map(|(g, _)| g).unwrap_or_else(|e| e.into_inner().0);
+            st = st.wait(&self.cv, deadline - now);
         }
     }
 }

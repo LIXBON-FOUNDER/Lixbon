@@ -44,7 +44,17 @@ impl Core {
         let mut st: State = read_json(&data.join("state.json")).unwrap_or_default();
         st.orphan_all();
         let _ = write_json(&data.join("state.json"), &st);
-        *self.lock() = st;
+        self.adopt_state(st); // carga inicial: no es una mutación
+        // Acciones externas (merge, PR, worktree, proceso) que ocurrieron en una sesión
+        // anterior pero cuyo registro no se pudo guardar: se avisa, no se esconde.
+        let unrecorded = Self::unrecorded_effects(data);
+        if unrecorded > 0 {
+            let msg = format!("{unrecorded} acción(es) externa(s) se ejecutaron sin quedar registradas (ver unrecorded-effects.jsonl en {}): revísalas antes de repetirlas.", data.display());
+            eprintln!("[core] {msg}");
+            if let Some(host) = self.host.get() {
+                host.notify("Lixbon: acciones sin registrar", &msg);
+            }
+        }
         // 4. Instantánea de arranque del estado que acaba de adoptar el Core. No
         // interviene en las operaciones (C1).
         if !matches!(self.storage_status(), StorageStatus::Degraded(_)) {
@@ -103,12 +113,18 @@ impl Core {
         let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
         let idle = self.lock().idle_runs(state::now_ms(), IDLE_CLOSE_MS, &live);
         for run in idle {
-            {
-                let mut st = self.lock();
-                let Some(root) = st.runs.get(&run).map(|r| r.root.clone()) else { continue };
+            let noted = self.mutate(|st| {
+                let Some(root) = st.runs.get(&run).map(|r| r.root.clone()) else {
+                    st.no_change();
+                    return Ok(false);
+                };
                 if let Ok(id) = st.post(&root, &root, Kind::Note, "Run cerrado por inactividad (30 min sin actividad ni hijas en marcha)", None) {
                     st.mark_read(&[id]);
                 }
+                Ok(true)
+            });
+            if !matches!(noted, Ok(true)) {
+                continue;
             }
             let _ = self.close_run(&run, false);
         }

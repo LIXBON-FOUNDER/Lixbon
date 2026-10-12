@@ -17,7 +17,7 @@ impl Core {
             }
         }
         if let Caller::Agent(Some(id)) = &caller {
-            self.lock().touch_run(id);
+            self.touch_activity(id);
         }
         // Decisiones humanas (integrar, PR, revisar) y lecturas cerradas (diff de
         // revisión): ni orch_call ni el servidor de lxo llegan a ellas.
@@ -54,23 +54,25 @@ impl Core {
                 }
                 let repo = git::toplevel(cwd).ok_or("El orquestador necesita un repositorio git: ejecútalo dentro de uno")?;
                 let agent = Some(s(args, "agent")).filter(|a| !a.is_empty()).unwrap_or_else(|| "coordinador".into());
-                let mut st = self.lock();
-                let (run, task) = st.create_run(&objective, NewTask {
-                    agent,
-                    model: None,
-                    effort: None,
-                    role: None,
-                    title: objective.chars().take(60).collect(),
-                    spec: objective.clone(),
-                    repo,
-                    cwd: cwd.into(),
-                    branch: git::current_branch(cwd),
-                    base: None,
-                    worktree: None,
-                    external: true,
-                });
-                st.mark_running(&task)?;
-                self.commit(&st, &[]);
+                let branch = git::current_branch(cwd);
+                let (run, task) = self.mutate(|st| {
+                    let (run, task) = st.create_run(&objective, NewTask {
+                        agent,
+                        model: None,
+                        effort: None,
+                        role: None,
+                        title: objective.chars().take(60).collect(),
+                        spec: objective.clone(),
+                        repo,
+                        cwd: cwd.into(),
+                        branch,
+                        base: None,
+                        worktree: None,
+                        external: true,
+                    });
+                    st.mark_running(&task)?;
+                    Ok((run, task))
+                })?;
                 Ok(json!({ "run": run, "task": task }))
             }
             // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
@@ -94,9 +96,11 @@ impl Core {
                 if name.is_empty() {
                     return Err("Falta el nombre de la fase".into());
                 }
-                let mut st = self.lock();
-                let msg = st.phase(&me, &name, b(args, "done"), &s(args, "note"))?;
-                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
+                self.mutate(|st| {
+                    let msg = st.phase(&me, &name, b(args, "done"), &s(args, "note"))?;
+                    st.notify_opt(msg);
+                    Ok(())
+                })?;
                 Ok(json!({ "task": me, "phase": name }))
             }
             "done" => {
@@ -106,11 +110,13 @@ impl Core {
                     .unwrap_or_default();
                 let summary = s(args, "summary");
                 let report = self.store_report(&me, &s(args, "report"), &s(args, "report_text"), &summary)?;
-                let mut st = self.lock();
-                let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
-                st.task_mut(&me)?.delivery_channel = Some("lxo_done".into());
-                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
-                Ok(json!({ "task": me, "status": st.task(&me)?.status, "report": report }))
+                let status = self.mutate(|st| {
+                    let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
+                    st.task_mut(&me)?.delivery_channel = Some("lxo_done".into());
+                    st.notify_opt(msg);
+                    Ok(st.task(&me)?.status)
+                })?;
+                Ok(json!({ "task": me, "status": status, "report": report }))
             }
             "ask" => {
                 let me = Self::me(&caller)?;
@@ -118,9 +124,11 @@ impl Core {
                 if question.is_empty() {
                     return Err("Falta la pregunta".into());
                 }
-                let mut st = self.lock();
-                let id = st.ask(&me, &question)?;
-                self.commit(&st, &[id]);
+                let id = self.mutate(|st| {
+                    let id = st.ask(&me, &question)?;
+                    st.notify(&[id]);
+                    Ok(id)
+                })?;
                 Ok(json!({ "question": id }))
             }
             "await_reply" => {
@@ -136,26 +144,30 @@ impl Core {
             "reply" => {
                 let q = n(args, "question").ok_or("Falta el id de la pregunta")?;
                 let answer = s(args, "answer");
-                let mut st = self.lock();
-                let from = match &caller {
-                    Caller::User => st.messages.iter().find(|m| m.id == q).map(|m| m.to.clone()).ok_or_else(|| format!("No existe la pregunta {q}"))?,
-                    _ => Self::me(&caller)?,
-                };
-                let id = st.reply(&from, q, &answer)?;
-                self.commit(&st, &[id]);
+                let id = self.mutate(|st| {
+                    let from = match &caller {
+                        Caller::User => st.messages.iter().find(|m| m.id == q).map(|m| m.to.clone()).ok_or_else(|| format!("No existe la pregunta {q}"))?,
+                        _ => Self::me(&caller)?,
+                    };
+                    let id = st.reply(&from, q, &answer)?;
+                    st.notify(&[id]);
+                    Ok(id)
+                })?;
                 Ok(json!({ "reply": id }))
             }
             "send" => {
                 let to = s(args, "to");
                 let body = s(args, "body");
-                let mut st = self.lock();
-                Self::check_manages(&st, &caller, &to)?;
-                let from = match &caller {
-                    Caller::User => st.task(&to)?.parent.clone().unwrap_or_else(|| to.clone()),
-                    _ => Self::me(&caller)?,
-                };
-                let id = st.post(&from, &to, Kind::Note, &body, None)?;
-                self.commit(&st, &[id]);
+                let id = self.mutate(|st| {
+                    Self::check_manages(st, &caller, &to)?;
+                    let from = match &caller {
+                        Caller::User => st.task(&to)?.parent.clone().unwrap_or_else(|| to.clone()),
+                        _ => Self::me(&caller)?,
+                    };
+                    let id = st.post(&from, &to, Kind::Note, &body, None)?;
+                    st.notify(&[id]);
+                    Ok(id)
+                })?;
                 Ok(json!({ "message": id }))
             }
             "wait" => {
@@ -176,13 +188,16 @@ impl Core {
             }
             "check" | "inbox" => {
                 let me = Self::me(&caller)?;
-                let mut st = self.lock();
-                let found = st.unread(&me, &kinds(args), None);
-                if cmd == "check" {
-                    let ids: Vec<u64> = found.iter().map(|m| m.id).collect();
-                    st.mark_read(&ids);
-                    self.commit(&st, &[]);
-                }
+                let found = if cmd == "check" {
+                    self.mutate(|st| {
+                        let found = st.unread(&me, &kinds(args), None);
+                        let ids: Vec<u64> = found.iter().map(|m| m.id).collect();
+                        st.mark_read(&ids);
+                        Ok(found)
+                    })?
+                } else {
+                    self.lock().unread(&me, &kinds(args), None)
+                };
                 Ok(json!({ "messages": found }))
             }
             "list" => {
@@ -217,9 +232,11 @@ impl Core {
                     Self::check_manages(&st, &caller, &id)?;
                 }
                 self.kill_term(&id);
-                let mut st = self.lock();
-                let msg = st.close(&id, Status::Stopped, "detenida por su coordinador")?;
-                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
+                self.mutate(|st| {
+                    let msg = st.close(&id, Status::Stopped, "detenida por su coordinador")?;
+                    st.notify_opt(msg);
+                    Ok(())
+                })?;
                 Ok(json!({ "task": id, "status": "stopped" }))
             }
             "release" => self.release(&caller, &s(args, "task"), b(args, "force")),
@@ -246,9 +263,10 @@ impl Core {
                     self.kill_term(id);
                 }
                 let (_, kept) = self.free_worktrees(&run, false);
-                let mut st = self.lock();
-                st.remove_run(&run);
-                self.commit(&st, &[]);
+                self.mutate(|st| {
+                    st.remove_run(&run);
+                    Ok(())
+                })?;
                 Ok(json!({ "removed": run, "kept": kept }))
             }
             other => Err(format!("Comando desconocido: {other}")),

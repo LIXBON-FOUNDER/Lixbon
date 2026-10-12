@@ -6,25 +6,27 @@ use super::state::Status;
 
 impl Core {
     pub(super) fn on_approval_change(&self, id: &str, change: approval::Change) {
-        let mut st = self.lock();
-        let changed = match change {
-            approval::Change::Entered(deadline) => st.await_terminal_approval(id, deadline),
-            approval::Change::Left => st.resume_from_approval(id),
-        };
-        if changed.unwrap_or(false) {
-            self.commit(&st, &[]);
-        }
+        // Mutación de fondo: si falla, el Core ya avisó y entró en solo lectura.
+        let _ = self.mutate(|st| {
+            let changed = match change {
+                approval::Change::Entered(deadline) => st.await_terminal_approval(id, deadline),
+                approval::Change::Left => st.resume_from_approval(id),
+            };
+            if !changed.unwrap_or(false) {
+                st.no_change();
+            }
+            Ok(())
+        });
     }
 
     /// Venció la espera de aprobación o el agente lleva demasiado sin escribir: la
     /// tarea queda Failed con su motivo y se mata la PTY con todo su árbol.
     pub(super) fn on_guard_timeout(&self, id: &str, t: approval::Timeout) {
-        {
-            let mut st = self.lock();
-            if let Ok(msg) = st.fail_with(id, t.reason(), t.message()) {
-                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
-            }
-        }
+        let _ = self.mutate(|st| {
+            let msg = st.fail_with(id, t.reason(), t.message())?;
+            st.notify_opt(msg);
+            Ok(())
+        });
         self.kill_term(id);
     }
 
@@ -61,15 +63,18 @@ impl Core {
             }
             None => delivery::Found::Nothing,
         };
-        let mut st = self.lock();
-        match delivery::apply(&mut st, id, found, at_exit) {
-            Ok(msgs) => self.commit(&st, &msgs),
-            Err(e) if at_exit => {
-                let msg = st.close(id, Status::Failed, &format!("informe inválido: {e}")).ok().flatten();
-                self.commit(&st, &msg.into_iter().collect::<Vec<_>>());
+        let _ = self.mutate(|st| {
+            match delivery::apply(st, id, found, at_exit) {
+                Ok(msgs) => st.notify(&msgs),
+                Err(e) if at_exit => {
+                    let msg = st.close(id, Status::Failed, &format!("informe inválido: {e}")).ok().flatten();
+                    st.notify_opt(msg);
+                }
+                // Sin cambios que confirmar: se descarta lo que `apply` hubiera tocado a medias.
+                Err(_) => st.no_change(),
             }
-            Err(_) => {}
-        }
+            Ok(())
+        });
     }
 
     /// Codex: el modelo efectivo sale de `turn_context.model` de su archivo de
@@ -84,14 +89,15 @@ impl Core {
             return;
         }
         let r = codex_session::resolve(agents::codex_home().map(|h| h.join("sessions")).as_deref(), session_id, &cwd, since);
-        let mut st = self.lock();
-        if let Ok(t) = st.task_mut(id) {
-            delivery::set_model_effective(t, &r.model);
-            t.model_source = Some(r.source().into());
-            t.session_match = r.session_match().map(str::to_string);
-            t.session_ref = r.session_ref;
-        }
-        self.commit(&st, &[]);
+        let _ = self.mutate(|st| {
+            if let Ok(t) = st.task_mut(id) {
+                delivery::set_model_effective(t, &r.model);
+                t.model_source = Some(r.source().into());
+                t.session_match = r.session_match().map(str::to_string);
+                t.session_ref = r.session_ref;
+            }
+            Ok(())
+        });
     }
 
     pub(super) fn codex_model_pending(&self, id: &str) -> bool {
@@ -106,12 +112,12 @@ impl Core {
         let session_id = terminal.as_deref().and_then(codex_session::session_id_from_terminal);
         self.collect(id, terminal, true);
         self.record_codex_model(id, session_id.as_deref());
-        let mut st = self.lock();
-        if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
-            self.commit(&st, &[msg]);
-        } else {
-            self.commit(&st, &[]);
-        }
+        let _ = self.mutate(|st| {
+            if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
+                st.notify(&[msg]);
+            }
+            Ok(())
+        });
     }
 
     pub(super) fn kill_term(&self, id: &str) -> bool {
