@@ -24,7 +24,8 @@
 //!
 //! # Referencias blandas de `events`
 //! `events.project_id`, `client_id`, `entity_kind` y `entity_id` (migración
-//! 003, slice E) NO llevan clave foránea de SQLite: los eventos históricos
+//! 004, slice E; la 003 es el registro de proyectos) NO llevan clave foránea
+//! de SQLite: los eventos históricos
 //! deben sobrevivir al archivado de un Project o a revocar un Client. El
 //! dominio valida al emitir (el Project/Client existe si el evento lo
 //! referencia); la base no lo impone. El resto de relaciones del esquema SÍ
@@ -59,7 +60,7 @@ pub use error::{StoreError, StoreResult};
 #[allow(unused_imports)]
 pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
-pub use projects::{Fingerprint, LocationRow, NewLocation, ProjectRow};
+pub use projects::{Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 use migrate::now_ms;
 

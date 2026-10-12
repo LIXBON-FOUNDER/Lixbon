@@ -56,6 +56,15 @@ pub struct LocationRow {
     pub missing: bool,
 }
 
+/// Una transición de estado de una ubicación (`missing = true` → desaparecida), ya decidida.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocationMark {
+    pub machine: String,
+    /// Ruta normalizada (la clave de `project_locations`).
+    pub path: String,
+    pub missing: bool,
+}
+
 /// Una ubicación que se va a guardar. `path` ya viene normalizada por quien llama.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewLocation {
@@ -243,12 +252,24 @@ impl Store {
 
     /// Marca una ubicación como presente o desaparecida y anota cuándo se comprobó.
     pub fn location_mark(&mut self, machine: &str, path: &str, missing: bool) -> StoreResult<()> {
+        self.locations_mark(&[LocationMark { machine: machine.into(), path: path.into(), missing }])
+    }
+
+    /// Persiste varias transiciones `ok <-> missing` en UNA transacción. Quien llama las calcula
+    /// FUERA del almacén (mirar el disco puede tardar) y entra aquí solo para guardarlas. Si una
+    /// ubicación ya no existe en la base (se relocalizó entretanto) esa fila simplemente no cambia.
+    pub fn locations_mark(&mut self, marks: &[LocationMark]) -> StoreResult<()> {
+        if marks.is_empty() {
+            return Ok(());
+        }
         let now = now_ms();
         self.write(|tx| {
-            tx.execute(
-                "UPDATE project_locations SET state = ?3, last_seen = CASE WHEN ?3 = 'ok' THEN ?4 ELSE last_seen END WHERE machine = ?1 AND path = ?2",
-                params![machine, path, if missing { "missing" } else { "ok" }, now],
-            )?;
+            for m in marks {
+                tx.execute(
+                    "UPDATE project_locations SET state = ?3, last_seen = CASE WHEN ?3 = 'ok' THEN ?4 ELSE last_seen END WHERE machine = ?1 AND path = ?2",
+                    params![m.machine, m.path, if m.missing { "missing" } else { "ok" }, now],
+                )?;
+            }
             Ok(())
         })
     }

@@ -1,30 +1,28 @@
 import { invoke } from '@tauri-apps/api/core';
 
-const FLAG = 'lixbon_recents_imported';
-
 /**
- * Entrega al Core, UNA sola vez, las carpetas recientes de la interfaz (`lixbon_recents`) para que
- * las registre como proyectos (slice D).
+ * Entrega al Core las carpetas recientes de la interfaz (`lixbon_recents`) para que las registre
+ * como proyectos (slice D).
  *
- * El Core es quien manda: recuerda en SQLite que ya importó (`meta.projects_recents_imported`) y
- * repetir la llamada es inocuo. La marca de `localStorage` solo ahorra la llamada. No pregunta nada:
- * lo ambiguo (un clon de un proyecto ya registrado en otra ruta) lo omite el Core y se confirma
- * después con «Añadir proyecto». Sin backend (vite solo) o con el almacén degradado no hace nada y
- * se reintenta en el siguiente arranque.
+ * EL CORE ES LA ÚNICA AUTORIDAD de esta importación. Aquí NO hay ninguna marca de «ya importé»: se
+ * envían los recientes en cada arranque y es el Core quien decide, con `meta.projects_recents_imported`
+ * (en SQLite), si realmente hay que importar; si ya lo hizo responde `already_done: true` y no toca
+ * nada. Así una base nueva o restaurada, que no tiene esa marca, vuelve a importar aunque
+ * `localStorage` ya «recuerde» otra cosa. `localStorage` solo conserva `lixbon_recents`: la fuente de
+ * las rutas históricas de la interfaz, no una segunda decisión de migración.
  *
- * `call` y `storage` son inyectables para las pruebas.
+ * No pregunta nada: lo ambiguo (un clon de un proyecto ya registrado en otra ruta) lo omite el Core y
+ * se confirma después. Sin backend (vite solo) o con el almacén degradado no hace nada y se reintenta
+ * en el siguiente arranque.
+ *
+ * `call` es inyectable para las pruebas.
  */
-export async function importRecentProjects(paths, { call = invoke, storage = globalThis.localStorage } = {}) {
-  try {
-    if (storage?.getItem(FLAG)) return null;
-  } catch { /* sin almacenamiento: se llama igualmente */ }
+export async function importRecentProjects(paths, { call = invoke } = {}) {
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p.trim());
-  // Sin recientes no se marca nada: si más tarde los hay, se importarán.
+  // Sin recientes no hay nada que enviar (y el Core no marca nada: si luego los hay, se importan).
   if (list.length === 0) return null;
   try {
-    const res = await call('orch_projects_import_recents', { paths: list });
-    try { storage?.setItem(FLAG, '1'); } catch { /* no es grave */ }
-    return res;
+    return await call('orch_projects_import_recents', { paths: list });
   } catch {
     return null;
   }

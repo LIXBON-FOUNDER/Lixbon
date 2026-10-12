@@ -147,6 +147,56 @@ fn los_remotos_se_normalizan_y_nunca_conservan_credenciales() {
 }
 
 #[test]
+fn la_consulta_y_el_fragmento_de_una_url_de_red_no_se_guardan() {
+    let n = |u: &str| git::normalize_remote(u).unwrap();
+    assert_eq!(n("https://host/o/r.git?access_token=TOKEN-SECRETO"), "host/o/r");
+    assert_eq!(n("https://host/o/r.git#TOKEN-SECRETO"), "host/o/r");
+    assert_eq!(n("https://host/o/r?x=1&token=TOKEN-SECRETO#frag"), "host/o/r");
+    assert_eq!(n("https://host?token=TOKEN-SECRETO"), "host");
+    assert_eq!(n("https://host:8443/o/r/?token=TOKEN-SECRETO"), "host:8443/o/r");
+    assert_eq!(n("ssh://git@host:2222/o/r.git?x=TOKEN-SECRETO"), "host:2222/o/r");
+    assert_eq!(n("git@host:o/r.git?token=TOKEN-SECRETO"), "host/o/r");
+    assert_eq!(n("git@host:o/r.git#TOKEN-SECRETO"), "host/o/r");
+}
+
+#[test]
+fn ningun_secreto_sobrevive_a_la_normalizacion_ni_con_credenciales_raras() {
+    let entradas = [
+        "https://usuario:TOKEN-SECRETO@github.com/o/r.git",
+        "https://TOKEN-SECRETO@github.com/o/r.git",
+        // Clave con caracteres sin codificar: ante la duda se pierde identidad, nunca se filtra.
+        "https://u:p/TOKEN-SECRETO@h/o/r.git",
+        "https://u:p?TOKEN-SECRETO@h/o/r.git",
+        "https://u:p#TOKEN-SECRETO@h/o/r.git",
+        "https://u:TOKEN-SECRETO@h/o/r.git?access_token=TOKEN-SECRETO#TOKEN-SECRETO",
+        "ssh://u:TOKEN-SECRETO@h:22/o/r.git",
+        // formato scp con clave
+        "u:TOKEN-SECRETO@h:o/r.git",
+        "git@h:o/r.git?access_token=TOKEN-SECRETO",
+        "https://h/o/r.git?access_token=TOKEN-SECRETO",
+        "https://h/o/r.git#TOKEN-SECRETO",
+        "HTTPS://U:TOKEN-SECRETO@H/o/r",
+    ];
+    for u in entradas {
+        let salida = git::normalize_remote(u).unwrap();
+        assert!(!salida.contains("TOKEN-SECRETO"), "«{u}» dejó pasar el secreto: «{salida}»");
+    }
+    // La identidad de lo razonable se conserva.
+    assert_eq!(git::normalize_remote("https://u:TOKEN-SECRETO@h/o/r.git?access_token=TOKEN-SECRETO#x").unwrap(), "h/o/r");
+}
+
+#[test]
+fn en_una_ruta_local_la_consulta_el_fragmento_y_la_arroba_son_parte_del_nombre() {
+    let n = |u: &str| git::normalize_remote(u).unwrap();
+    assert_eq!(n("/srv/git/we?ird#na@me.git"), "/srv/git/we?ird#na@me");
+    assert_eq!(n(r"C:\repos\a#b?c\r.git"), "C:/repos/a#b?c/r");
+    assert_eq!(n("./relativa/r?x#y.git"), "./relativa/r?x#y");
+    assert_eq!(n("~/repos/yo@trabajo/r.git"), "~/repos/yo@trabajo/r");
+    assert_eq!(n("file:///srv/g/r?x#y.git"), "/srv/g/r?x#y");
+    assert_eq!(n(r"D:\a@b\r"), "D:/a@b/r");
+}
+
+#[test]
 fn la_regla_de_compatibilidad_distingue_clon_de_fork() {
     let fp = |c: &[&str], r: &[&str]| Fingerprint { root_commits: c.iter().map(|x| x.to_string()).collect(), remotes: r.iter().map(|x| x.to_string()).collect(), default_branch: None };
     // Mismo remoto: candidato.
@@ -577,4 +627,223 @@ fn las_tareas_anteriores_a_d_se_leen_sin_project_id() {
     assert_eq!(t.project_id, None);
     let con: Value = serde_json::to_value(&t).unwrap();
     assert!(con.get("project_id").is_some(), "se serializa explícito (null) en cuanto se guarda");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Guarda de lanzamiento: un error REAL del registro no se esconde
+// ---------------------------------------------------------------------------------------------
+
+/// Registra el repo, crea una tarea suya y le asigna el proyecto.
+fn con_proyecto(core: &Arc<Core>, repo: &Path) -> (String, String) {
+    let id = id_de(&registra(core, repo));
+    let t = tarea_en(core, &s(repo), "trabajo");
+    core.mutate(|st| {
+        st.tasks.get_mut(&t).unwrap().project_id = Some(id.clone());
+        Ok(())
+    })
+    .unwrap();
+    (id, t)
+}
+
+/// Deja el almacén ABIERTO pero con las tablas del registro rotas: toda consulta falla.
+fn rompe_el_registro(core: &Arc<Core>) {
+    core.storage
+        .with_store(|st| {
+            st.write(|tx| {
+                tx.execute_batch("DROP TABLE project_locations; DROP TABLE projects;")?;
+                Ok(())
+            })
+        })
+        .expect("el almacén debía estar abierto")
+        .unwrap();
+}
+
+fn spawn_de(core: &Arc<Core>, task: &str) -> Result<Value, String> {
+    core.rpc(Caller::Agent(Some(task.to_string())), "", "spawn", &json!({ "task": "x", "agent": "claude" }))
+}
+
+#[test]
+fn un_project_id_que_no_existe_en_el_registro_no_permite_lanzar_en_silencio() {
+    let (_l, data, _c, core) = core_listo();
+    core.settings.lock().unwrap().enabled = true;
+    let r = repo(&base_de(&data), "app", None);
+    let t = tarea_en(&core, &s(&r), "t");
+    core.mutate(|st| {
+        st.tasks.get_mut(&t).unwrap().project_id = Some("fantasma".into());
+        Ok(())
+    })
+    .unwrap();
+    let e = core.check_project_launchable(&t).unwrap_err();
+    assert!(e.contains("fantasma") && e.contains("no existe en el registro"), "{e}");
+    // Y el lanzamiento de verdad lo rechaza igual.
+    let e = spawn_de(&core, &t).unwrap_err();
+    assert!(e.contains("no existe en el registro"), "{e}");
+}
+
+#[test]
+fn un_error_del_registro_con_project_id_conocido_no_se_convierte_en_ok() {
+    let (_l, data, _c, core) = core_listo();
+    core.settings.lock().unwrap().enabled = true;
+    let base = base_de(&data);
+    let r = repo(&base, "app", None);
+    let (_id, t) = con_proyecto(&core, &r);
+    assert!(core.check_project_launchable(&t).is_ok(), "antes de romperlo se puede lanzar");
+    rompe_el_registro(&core);
+    let e = core.check_project_launchable(&t).unwrap_err();
+    assert!(e.contains("No se pudo comprobar el proyecto"), "{e}");
+    let e = spawn_de(&core, &t).unwrap_err();
+    assert!(e.contains("No se pudo comprobar el proyecto"), "el lanzamiento real tampoco lo salta: {e}");
+
+    // Compatibilidad: lo que NUNCA tuvo project_id no depende del registro.
+    let sin = tarea_en(&core, &s(&r), "sin proyecto");
+    assert!(core.check_project_launchable(&sin).is_ok());
+    // Y un run_create nuevo sigue funcionando con el registro roto: queda sin proyecto, como antes de D.
+    let out = core.rpc(Caller::Agent(None), &s(&r), "run_create", &json!({ "objective": "x" })).unwrap();
+    assert_eq!(project_id_de_tarea(&core, out["task"].as_str().unwrap()), None);
+}
+
+#[test]
+fn con_el_almacen_realmente_degradado_el_registro_sigue_siendo_aditivo() {
+    let (_l, data, _c, core) = core_listo();
+    let r = repo(&base_de(&data), "app", None);
+    let (_id, t) = con_proyecto(&core, &r);
+    assert!(core.check_project_launchable(&t).is_ok());
+    // Modo degradado de verdad: el almacén ya no está abierto (la política de bootstrap de C1).
+    core.storage.degrade("prueba".into());
+    assert!(core.check_project_launchable(&t).is_ok(), "sin almacén el registro no bloquea los flujos legacy");
+    // Leer el registro sí falla con un mensaje claro: no se inventa una lista vacía.
+    let e = rpc(&core, "projects", json!({})).unwrap_err();
+    assert!(e.contains("no está disponible"), "{e}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ninguna E/S externa bajo el mutex del almacén
+// ---------------------------------------------------------------------------------------------
+
+/// Texto (sin comentarios) de cada llamada `<llamada>…)`, desde el paréntesis de apertura hasta su
+/// cierre. Salta literales de cadena y comentarios de línea al contar paréntesis.
+fn regiones(src: &str, llamada: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let mut out = vec![];
+    let mut desde = 0;
+    while let Some(pos) = src[desde..].find(llamada) {
+        let inicio = desde + pos + llamada.len();
+        let (mut i, mut depth, mut texto) = (inicio, 1usize, String::new());
+        while i < b.len() && depth > 0 {
+            match b[i] {
+                b'"' => {
+                    texto.push('"');
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' {
+                        if b[i] == b'\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    texto.push('"');
+                }
+                b'/' if b.get(i + 1) == Some(&b'/') => {
+                    while i < b.len() && b[i] != b'\n' {
+                        i += 1;
+                    }
+                    continue;
+                }
+                b'(' => {
+                    depth += 1;
+                    texto.push('(');
+                }
+                b')' => {
+                    depth -= 1;
+                    if depth > 0 {
+                        texto.push(')');
+                    }
+                }
+                c => texto.push(c as char),
+            }
+            i += 1;
+        }
+        out.push(texto);
+        desde = inicio;
+    }
+    out
+}
+
+/// El almacén es UNO para todo el Core y su mutex lo usa también la persistencia del estado. Ningún
+/// closure de `registry` / `registry_opt` / `with_store` de `projects.rs` puede mirar el disco, ejecutar
+/// git o un proceso, dormir, ni tomar el bloqueo del estado (orden estado -> almacén). Si esta prueba
+/// falla, saca esa E/S del closure: léela antes (paso 1), compruébala fuera (paso 2) y persiste después (paso 3).
+#[test]
+fn el_registro_no_hace_io_externo_bajo_el_bloqueo_del_almacen() {
+    let src = include_str!("projects.rs");
+    let prohibido = [
+        "Path::new", ".exists()", "exists_on_disk", "is_dir()", "is_file()", "read_dir", ".metadata(", "canonicalize", "std::fs", "fs::",
+        "git::", "identify(", "std::process", "Command", "std::thread", "sleep(",
+        "self.lock()", "self.mutate(", "tasks_per_project", ".registry(", ".registry_opt(", "persist_marks", "resolve_or_create",
+    ];
+    let mut vistos = 0;
+    for llamada in [".registry(", ".registry_opt(", ".with_store("] {
+        for r in regiones(src, llamada) {
+            vistos += 1;
+            for p in prohibido {
+                assert!(!r.contains(p), "E/S o bloqueo externo («{p}») dentro de un closure del almacén ({llamada}):\n{r}");
+            }
+        }
+    }
+    assert!(vistos >= 10, "el escáner debe ver los closures del registro (vio {vistos}): ¿cambió su forma?");
+    // La prueba no es vacía: sabe detectar la violación que previene.
+    let mala = "self.registry(|st| { let ok = Path::new(&x).exists(); Ok(ok) })";
+    assert!(regiones(mala, ".registry(").iter().any(|r| r.contains(".exists()")));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Secretos, marca de relleno
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn ningun_secreto_del_remoto_llega_a_la_base_ni_a_lo_que_el_core_devuelve() {
+    let (_l, data, core_dir, core) = core_listo();
+    let base = base_de(&data);
+    let r = repo(&base, "app", Some("https://usuario:TOKEN-SECRETO@github.com/o/app.git?access_token=TOKEN-SECRETO#TOKEN-SECRETO"));
+    g(&r, &["remote", "add", "otro", "git@host:o/app.git?token=TOKEN-SECRETO"]);
+    let out = registra(&core, &r);
+    let listado = rpc(&core, "projects", json!({ "all": true })).unwrap();
+    for v in [&out, &listado] {
+        assert!(!v.to_string().contains("TOKEN-SECRETO"), "el Core devolvió el secreto: {v}");
+    }
+    assert_eq!(out["project"]["fingerprint"]["remotes"], json!(["github.com/o/app", "host/o/app"]));
+    // El archivo de la base (y su WAL) no contienen el secreto en ninguna página.
+    suelta(core, &core_dir);
+    for f in ["lixbon.db", "lixbon.db-wal"] {
+        if let Ok(bytes) = std::fs::read(core_dir.join(f)) {
+            assert!(!bytes.windows(b"TOKEN-SECRETO".len()).any(|w| w == b"TOKEN-SECRETO"), "{f} contiene el secreto");
+        }
+    }
+}
+
+#[test]
+fn la_marca_de_relleno_es_solo_diagnostica_y_no_salta_pasadas_futuras() {
+    let (_l, data, _c, core) = core_listo();
+    let base = base_de(&data);
+    let a = repo(&base, "a", None);
+    tarea_en(&core, &s(&a), "a1");
+    assert_eq!(core.backfill_projects(Duration::from_secs(60)).unwrap()["complete"], true);
+    assert!(core.storage.with_store(|st| st.meta("projects_backfilled").unwrap()).flatten().is_some(), "marca diagnóstica puesta");
+
+    // Con la marca ya puesta, una tarea nueva de un repo nuevo SÍ se rellena en la siguiente pasada.
+    let b = repo(&base, "b", None);
+    let t2 = tarea_en(&core, &s(&b), "b1");
+    assert_eq!(project_id_de_tarea(&core, &t2), None);
+    assert_eq!(core.backfill_projects(Duration::from_secs(60)).unwrap()["assigned"], 1);
+    assert!(project_id_de_tarea(&core, &t2).is_some());
+
+    // Y un repositorio que estaba ambiguo y deja de serlo (la persona confirmó el `join`) entra después.
+    let origen = repo(&base, "origen", None);
+    let id = id_de(&registra(&core, &origen));
+    let copia = clon(&base, &origen, "copia", None);
+    let t3 = tarea_en(&core, &s(&copia), "ambigua");
+    assert_eq!(core.backfill_projects(Duration::from_secs(60)).unwrap()["ambiguous"], 1);
+    assert_eq!(project_id_de_tarea(&core, &t3), None);
+    rpc(&core, "project_add", json!({ "path": s(&copia), "join": id })).unwrap();
+    assert_eq!(core.backfill_projects(Duration::from_secs(60)).unwrap()["assigned"], 1);
+    assert_eq!(project_id_de_tarea(&core, &t3), Some(id));
 }

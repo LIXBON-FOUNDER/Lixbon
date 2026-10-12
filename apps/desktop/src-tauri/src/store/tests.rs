@@ -57,8 +57,9 @@ const M003_EVENTOS: &str = "CREATE TABLE events (
 
 /// Las migraciones del esquema BASE (001). Estas pruebas son del framework de
 /// migraciones y asumen esa base; la valla (002, C2b) tiene sus propias pruebas en
-/// `authority_tests.rs`. Los extras numerados 002/003 simulan migraciones de otros
-/// slices SOBRE la 001, sin la valla.
+/// `authority_tests.rs`. Los extras numerados 002/003 son FIXTURES del framework: simulan
+/// migraciones de otros slices SOBRE la 001, sin la valla. NO son la numeración real (001 core,
+/// 002 authority_fence, 003 projects; ver `docs/core/MIGRACIONES.md`).
 fn embedded_001() -> Vec<Migration> {
     embedded().into_iter().filter(|m| m.version < FENCE_VERSION).collect()
 }
