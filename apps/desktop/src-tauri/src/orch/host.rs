@@ -23,6 +23,7 @@
 //!
 //! Lo que no figura en la tabla como «Sí» **no** tiene método aquí a propósito.
 
+#[cfg(test)]
 use std::sync::Arc;
 
 use serde_json::Value;
