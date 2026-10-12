@@ -85,8 +85,21 @@ cualquier otro cliente (p. ej. el CLI en Go) debe pasar los mismos casos.
   tiene Secret Service; usa un servicio `lixbon-test-<pid>-<nanos>-<n>` y borra
   lo que crea, aunque falle.
 
-Verificado: compilación y pruebas (incluidas las `--ignored`) en Windows. **Los
-adaptadores de macOS y Linux no se han compilado ni ejecutado** (no hay
-toolchain ni sesión para ello en esta máquina): solo se comprobó que la
-resolución de dependencias de `Cargo.lock` es válida para ambos destinos. Hay
-que pasar CI en esos SO antes de apoyarse en ellos (J2).
+## Estado de verificación por plataforma
+
+| Plataforma | Adaptador | Estado |
+|---|---|---|
+| Windows | Credential Manager (`keyring`, `windows-native`) | **Verificado**: compila y pasa las pruebas, incluidas las `--ignored` contra el almacén real. |
+| macOS | Keychain (`apple-native`) | **Pendiente de CI**: no se ha compilado ni ejecutado. |
+| Linux | Secret Service (`sync-secret-service` + `crypto-rust`) | **Pendiente de CI**: no se ha compilado ni ejecutado. |
+
+De macOS y Linux solo se comprobó que la resolución de dependencias de
+`Cargo.lock` es válida para ambos destinos (`cargo tree --locked --target`). Hay
+que pasar CI en esos SO, con las pruebas `--ignored` donde haya sesión de
+almacén, antes de que J2 dependa de ellos.
+
+## Alcance: J1 sin J2
+
+Este módulo no tiene consumidores. **No migra credenciales** (J2, bloqueado hasta
+que se roten las claves expuestas), los comandos `secret_*` de `lib.rs` y
+`config.json` siguen como estaban.
