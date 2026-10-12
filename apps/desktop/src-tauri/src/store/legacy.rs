@@ -5,6 +5,9 @@
 //! la dependencia es `orch → store` y no al revés.
 //!
 //! # Autoridad
+//! (Nota C2b: el arranque ya no llama a este módulo; promociona con
+//! `store::authority`. Queda para las pruebas y para un futuro slice de
+//! recuperación desde la instantánea.)
 //! Durante C1 la fuente operativa sigue siendo `state.json`; `commit()` no se ha
 //! tocado y NADIE actualiza esta instantánea. Por eso se marca
 //! `legacy_import_mode = bootstrap_snapshot`: SQLite contiene una fotografía de
@@ -41,7 +44,7 @@ const META_IMPORTED_AT: &str = "legacy_imported_at";
 const META_SHA256: &str = "legacy_import_sha256";
 const META_BYTES: &str = "legacy_import_bytes";
 const META_VERSION: &str = "legacy_import_version";
-const META_MODE: &str = "legacy_import_mode";
+pub(super) const META_MODE: &str = "legacy_import_mode";
 
 /// Qué pasó al intentar importar.
 #[derive(Debug, Clone, PartialEq, Eq)]

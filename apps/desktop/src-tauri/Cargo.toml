@@ -55,6 +55,8 @@ zeroize = "1"
 # de en claro en el JSON de settings. Solo Windows: en otros SO el frontend
 # cae al JSON de siempre.
 [target.'cfg(windows)'.dependencies]
+# Solo `orch/fsio.rs` la usa (publicación durable del marcador de autoridad y del espejo).
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 keyring = { version = "3", features = ["windows-native"] }
 
 # Almacén seguro multiplataforma (slice J1, módulo `secure_store`): el mismo

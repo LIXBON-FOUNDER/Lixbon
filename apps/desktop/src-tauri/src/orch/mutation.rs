@@ -190,9 +190,19 @@ impl PersistError {
     }
 }
 
-/// Dónde se confirma una mutación. C2a: `state.json`; C2b: SQLite.
+/// Dónde se confirma una mutación. Antes de promocionar (o degradado): `state.json`
+/// ([`StateJsonFile`]). Tras la promoción (C2b): SQLite (`SqlitePersistence`), con
+/// `state.json` como espejo.
 pub(super) trait Persistence: Send + Sync {
+    /// Confirma el candidato (en SQLite: `BEGIN IMMEDIATE .. COMMIT`). Si falla, la
+    /// memoria NO cambia.
     fn persist(&self, state: &State) -> Result<(), PersistError>;
+
+    /// Tras confirmar Y publicar en memoria: copia de compatibilidad (el espejo
+    /// `state.json`). Mejor esfuerzo: un fallo aquí NO invalida lo confirmado.
+    fn after_publish(&self, _state: &State) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// `state.json` en la carpeta de datos: los mismos bytes que escribía `commit()`.
@@ -272,11 +282,20 @@ impl RetryPolicy {
     }
 }
 
+/// Estado del espejo `state.json` (distinto de la salud del Core: un espejo caído
+/// no pone al Core en solo lectura).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum MirrorHealth {
+    Ok,
+    Failed(String),
+}
+
 /// Persistencia + política de reintentos + salud, juntas: un solo campo de `Core`.
 pub(super) struct Persister {
     backend: Mutex<Arc<dyn Persistence>>,
     retry: Mutex<RetryPolicy>,
     health: Mutex<Health>,
+    mirror: Mutex<MirrorHealth>,
 }
 
 impl Default for Persister {
@@ -285,6 +304,7 @@ impl Default for Persister {
             backend: Mutex::new(Arc::new(StateJsonFile)),
             retry: Mutex::new(RetryPolicy::default()),
             health: Mutex::new(Health::Normal),
+            mirror: Mutex::new(MirrorHealth::Ok),
         }
     }
 }
@@ -314,6 +334,25 @@ impl Persister {
                     }
                     None => return Err(e),
                 },
+            }
+        }
+    }
+
+    /// Escribe el espejo. Devuelve `Some(motivo)` solo la primera vez que falla
+    /// (para avisar una vez); cualquier éxito lo da por restablecido.
+    fn after_publish(&self, state: &State) -> Option<String> {
+        let backend = lock(&self.backend).clone();
+        let result = backend.after_publish(state);
+        let mut h = lock(&self.mirror);
+        match result {
+            Ok(()) => {
+                *h = MirrorHealth::Ok;
+                None
+            }
+            Err(e) => {
+                let first = matches!(*h, MirrorHealth::Ok);
+                *h = MirrorHealth::Failed(e.clone());
+                first.then_some(e)
             }
         }
     }
@@ -383,7 +422,31 @@ impl Core {
         let Tx { state, notify, .. } = tx;
         *st.0 = state;
         self.publish(&st.0, &notify);
+        // El espejo va DESPUÉS de confirmar y publicar: SQLite manda, el espejo es copia.
+        if let Some(reason) = self.persister.after_publish(&st.0) {
+            eprintln!("[core] el espejo state.json no se pudo escribir (SQLite sigue siendo la fuente): {reason}");
+            self.emit("orch:degraded", &json!({ "mode": "mirror_failed", "reason": reason }));
+        }
         Ok(value)
+    }
+
+    /// Instala la persistencia autoritativa de SQLite al terminar el arranque.
+    /// Exige un [`BootProof`]: ningún otro código cambia de persistencia en marcha.
+    pub(super) fn install_persistence(&self, _boot: &BootProof, p: Arc<dyn Persistence>) {
+        *lock(&self.persister.backend) = p;
+    }
+
+    /// El espejo no se pudo reconciliar en el arranque (solo el arranque lo llama).
+    pub(super) fn mirror_failed_at_boot(&self, _boot: &BootProof, reason: &str) {
+        *lock(&self.persister.mirror) = MirrorHealth::Failed(reason.to_string());
+        eprintln!("[core] el espejo state.json no se pudo escribir (SQLite sigue siendo la fuente): {reason}");
+        self.emit("orch:degraded", &json!({ "mode": "mirror_failed", "reason": reason }));
+    }
+
+    /// Estado del espejo `state.json` (diagnóstico).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn mirror_health(&self) -> MirrorHealth {
+        lock(&self.persister.mirror).clone()
     }
 
     /// Estado de salud del almacenamiento del Core (diagnóstico; la UI lo consumirá con el aviso `orch:degraded`).
@@ -506,6 +569,9 @@ pub(super) struct Effect {
     operation: &'static str,
     /// Efecto concreto («git_merge», «git_push_pr», «git_worktree», «pty_process»).
     kind: &'static str,
+    /// `task` y `run` pertenecen al **modelo legacy actual** (Run -> tarea raíz ->
+    /// hijas) y NO fijan el diseño futuro Task -> Attempt. El esquema del diario
+    /// lleva `v` justamente para poder evolucionar (p. ej. una `v: 2` con `attempt`).
     task: Option<String>,
     /// Si no se indica, el Core lo completa desde el estado por `task`.
     repo: Option<String>,

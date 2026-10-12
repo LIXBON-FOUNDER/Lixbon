@@ -6,12 +6,12 @@
 //! `BEGIN IMMEDIATE` ([`Store::write`]): el bloqueo de escritura se toma de
 //! entrada y no hay upgrades de lectura a escritura que fallen a mitad.
 //!
-//! Estado actual (C1): el Core SIGUE usando `state.json` como fuente operativa.
-//! El almacén existe, aplica su esquema inicial (migración 001) y guarda en
-//! `legacy_state` una instantánea inicial del `State` (un único documento JSON
-//! con `rev`), importada por [`legacy`] con `legacy_import_mode =
-//! bootstrap_snapshot`. Nadie la actualiza todavía: C2 cambiará la autoridad.
-//! No se normaliza Task/Attempt/Thread.
+//! Estado actual (C2b): tras la promoción, SQLite es la única fuente de verdad del
+//! estado legacy: la fila `legacy_state` (un documento JSON con `rev`) se escribe en
+//! cada mutación con concurrencia optimista ([`authority`]). Antes de promover, esa
+//! fila es la instantánea de C1 (`legacy_import_mode = bootstrap_snapshot`, que
+//! [`legacy`] importaba una vez y nadie actualizaba). La migración 002 es la **valla**
+//! de compatibilidad (ver [`authority`]). No se normaliza Task/Attempt/Thread.
 //!
 //! Distribución de la carpeta del almacén (`dir`):
 //! ```text
@@ -30,12 +30,16 @@
 //! referencia); la base no lo impone. El resto de relaciones del esquema SÍ
 //! son FK reales. Detalle en `migrations/001_core.sql`.
 
+mod authority;
 mod backup;
+mod crash;
 mod error;
 mod legacy;
 mod lock;
 mod migrate;
 mod private;
+#[cfg(test)]
+mod authority_tests;
 #[cfg(test)]
 mod tests;
 
@@ -43,8 +47,13 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
+pub use authority::{check_promotion_identity, new_uuid, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
+pub use crash::crash_point;
 pub use error::{StoreError, StoreResult};
+// El bootstrap de C1 ya no lo llama el arranque (ahora promociona); queda para las pruebas
+// y para el futuro slice de recuperación desde la instantánea.
+#[allow(unused_imports)]
 pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
 pub use migrate::{embedded, migrate, Migration, MigrationReport};
@@ -104,14 +113,55 @@ impl Store {
         Store::open_inner(dir, None, migrations, app_version)
     }
 
+    /// Apertura del ARRANQUE de C2b: abre y migra solo hasta donde permite el
+    /// protocolo de autoridad, también al recuperar tras una caída.
+    ///
+    /// * Base **sin cruzar** la valla: migraciones ANTERIORES a [`FENCE_VERSION`]. Abrirla
+    ///   no publica la valla antes de tiempo (la 002 se aplica después, con
+    ///   [`Store::apply_fence`], cuando el preflight y la copia `pre-authority` ya están hechos).
+    /// * Base **cruzada pero aún no autoritativa** (FENCED, o `promoting` sin COMMIT): como
+    ///   máximo hasta la 002. Las migraciones posteriores (D/E/F1/G) no se aplican hasta que
+    ///   C2b termine la promoción: el orden de slices se conserva durante la recuperación.
+    /// * Base **autoritativa** (modo `sqlite_authoritative` Y registro interno de autoridad
+    ///   estructuralmente válido, no solo el modo): la lista completa. Con el modo pero la
+    ///   metadata corrupta, máximo la 002 y el arranque bloquea.
+    ///
+    /// `all` es la lista completa del binario.
+    pub fn open_boot_under_lock(dir: &Path, lock: &InstanceLock, all: &[Migration], app_version: &str) -> StoreResult<Store> {
+        if lock.path() != lock_path(dir) {
+            return Err(StoreError::WrongLock { expected: lock_path(dir), got: lock.path().to_path_buf() });
+        }
+        Store::open_inner_pick(dir, None, |conn| {
+            let version = migrate::db_version(conn)?;
+            let upto = if version < FENCE_VERSION {
+                FENCE_VERSION - 1
+            } else if authority::authority_record_valid(conn)? {
+                i64::MAX
+            } else {
+                FENCE_VERSION
+            };
+            Ok(all.iter().filter(|m| m.version <= upto).copied().collect())
+        }, app_version)
+    }
+
     fn open_inner(dir: &Path, lock: Option<InstanceLock>, migrations: &[Migration], app_version: &str) -> StoreResult<Store> {
+        Store::open_inner_pick(dir, lock, |_| Ok(migrations.to_vec()), app_version)
+    }
+
+    fn open_inner_pick(
+        dir: &Path,
+        lock: Option<InstanceLock>,
+        pick: impl FnOnce(&Connection) -> StoreResult<Vec<Migration>>,
+        app_version: &str,
+    ) -> StoreResult<Store> {
         let db_path = dir.join(DB_FILE);
         let backup_dir = dir.join(BACKUP_DIR);
         // Permisos de propietario (ver `private`): la base y las copias llevan el
         // estado completo del Core. `backups/` se crea privada con la primera copia.
         private::create_private_file(&db_path);
         let mut conn = open_connection(&db_path)?;
-        let report = migrate(&mut conn, migrations, app_version, &backup_dir)?;
+        let migrations = pick(&conn)?;
+        let report = migrate(&mut conn, &migrations, app_version, &backup_dir)?;
         // `-wal` y `-shm` los crea SQLite con el primer acceso real (la migración):
         // se restringen ya existentes y siguen vivos mientras la conexión esté abierta.
         for ext in ["-wal", "-shm"] {

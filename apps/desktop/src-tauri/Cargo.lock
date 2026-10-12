@@ -2525,6 +2525,7 @@ dependencies = [
  "tauri-plugin-updater",
  "trash",
  "vt100",
+ "windows-sys 0.52.0",
  "zeroize",
  "zip",
 ]

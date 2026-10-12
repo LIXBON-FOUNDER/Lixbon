@@ -1,42 +1,44 @@
-//! Puente entre el Core y el almacén SQLite (slice C1 de la Fase 1).
+//! Puente entre el Core y el almacén SQLite (slices C1 y C2b de la Fase 1).
 //!
 //! Dirección de dependencias: `orch → store`. Aquí vive todo el contacto del
 //! Core con el almacén, detrás de [`CoreStorage`] (un único campo de `Core`);
-//! ningún otro módulo de `orch/` toca el `Store` directamente. C2 extenderá esta
-//! pieza (el `commit()` transaccional entrará por [`CoreStorage::with_store`]).
+//! ningún otro módulo de `orch/` toca el `Store` directamente (lo vigila una
+//! prueba de arquitectura). Las escrituras de estado entran por
+//! [`SqlitePersistence`], que es una `Persistence` de la frontera de mutación
+//! (`Core::mutate`): `candidato → transacción SQLite → COMMIT → memoria → espejo`.
 //!
-//! # Autoridad en C1
-//! `state.json` sigue siendo la fuente operativa. SQLite guarda una instantánea
-//! de arranque (`legacy_import_mode = bootstrap_snapshot`) que nadie actualiza.
+//! # Autoridad (C2b)
+//! Una instalación pasa de `state.json` a SQLite una sola vez, con el protocolo de
+//! `boot_authority.rs` (`LEGACY → FENCED → PROMOTING → COMMITTED → AUTHORITATIVE`).
+//! Desde entonces SQLite es la única fuente de verdad y `state.json` es un espejo
+//! (`mirror.rs`). Antes de promover, la política es la de bootstrap de C1.
 //!
 //! # Orden de apertura
-//! `core.lock` -> abrir y migrar la base (valida la compatibilidad) -> SOLO
-//! ENTONCES tocar `state.json` -> importar la instantánea -> verificarla. Un Core
-//! que no puede arrancar por el lock o por incompatibilidad del almacén no
-//! modifica `state.json` (ni `orphan_all()` ni reescritura).
+//! `core.lock` → abrir la base SOLO hasta donde permite la valla (migración 002 sin
+//! aplicar) → decidir con `decide_boot` → actuar. Un Core que no puede arrancar por
+//! el lock, por incompatibilidad del almacén o por el protocolo de autoridad no
+//! modifica `state.json`.
 //!
 //! # Errores: bloqueantes y recuperables
-//! [`OpenStoreError`] clasifica cada fallo y `init` decide con esa clasificación:
+//! [`OpenStoreError`] clasifica cada fallo:
 //!
-//! * **Bloqueantes** (el Core NO arranca): `AlreadyLocked` (otro Core es el
-//!   titular de `core.lock`), `LockUnavailable` (no se pudo crear o abrir
-//!   `core.lock`: sin él no hay garantía de un único escritor), `SchemaTooNew`,
-//!   `MigrationChecksumMismatch` y `MigrationsInconsistent` (la base y este
-//!   binario no se entienden). Seguir escribiendo `state.json` en esos casos
-//!   permitiría dos escritores o escribir con una versión desconocida.
-//! * **Recuperables** (el Core arranca *degradado*, con `state.json` como hoy):
-//!   disco lleno o permisos de la base, base corrupta, fallos de E/S o de SQLite.
-//!   Solo son aceptables DESPUÉS de haber adquirido `core.lock`, que se conserva
-//!   aunque la base no se pueda usar: la exclusión mutua se mantiene.
+//! * **Bloqueantes** (el Core NO arranca): `AlreadyLocked`, `LockUnavailable`,
+//!   `SchemaTooNew`, `MigrationChecksumMismatch`, `MigrationsInconsistent` y
+//!   `Authority` (el protocolo de autoridad no permite arrancar: nunca se resuelve
+//!   volviendo a `state.json`).
+//! * **Recuperables** (el Core arranca *degradado* con `state.json`): solo ANTES de
+//!   promover y con la valla sin aplicar. Con la valla cruzada o con evidencia de
+//!   promoción, un fallo del almacén bloquea.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use serde_json::Value;
-
+use super::mirror;
+use super::mutation::{PersistError, Persistence};
+use super::state::State;
 use super::Core;
-use crate::store::{self, ImportOutcome, InstanceLock, SnapshotCheck, Store, StoreError};
+use crate::store::{self, InstanceLock, Store, StoreError};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -53,6 +55,10 @@ pub(super) enum OpenStoreError {
     MigrationChecksumMismatch { detail: String },
     /// Migraciones fuera de orden o lista inválida.
     MigrationsInconsistent { detail: String },
+    /// El protocolo de autoridad (C2b) no permite arrancar: marcador inválido, base y
+    /// marcador contradictorios, legado ilegible o ausente, base inaccesible con
+    /// evidencia de promoción… Nunca se resuelve volviendo a `state.json`.
+    Authority { detail: String },
     // --- Recuperables (solo con `core.lock` ya adquirido) ---
     /// La base está dañada o no es SQLite.
     DatabaseCorrupt { detail: String },
@@ -74,6 +80,7 @@ impl OpenStoreError {
                 | OpenStoreError::SchemaTooNew { .. }
                 | OpenStoreError::MigrationChecksumMismatch { .. }
                 | OpenStoreError::MigrationsInconsistent { .. }
+                | OpenStoreError::Authority { .. }
         )
     }
 }
@@ -88,7 +95,8 @@ impl fmt::Display for OpenStoreError {
             ),
             OpenStoreError::SchemaTooNew { detail }
             | OpenStoreError::MigrationChecksumMismatch { detail }
-            | OpenStoreError::MigrationsInconsistent { detail } => f.write_str(detail),
+            | OpenStoreError::MigrationsInconsistent { detail }
+            | OpenStoreError::Authority { detail } => f.write_str(detail),
             OpenStoreError::LockUnavailable { detail } => write!(f, "no se pudo obtener el bloqueo del Core: {detail}"),
             OpenStoreError::DatabaseCorrupt { detail } | OpenStoreError::Io { detail } | OpenStoreError::Other { detail } => {
                 f.write_str(detail)
@@ -115,14 +123,17 @@ impl From<StoreError> for OpenStoreError {
     }
 }
 
-/// Lo que dejó una apertura correcta.
-#[derive(Debug, Clone, PartialEq)]
+/// Lo que dejó el arranque cuando SQLite es la autoridad.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct StorageReport {
-    pub import: ImportOutcome,
-    pub snapshot: SnapshotCheck,
-    /// Solo si se acaba de importar: ¿la instantánea es el mismo estado que el
-    /// Core adoptó tras `orphan_all()`? (`None` si no hubo importación.)
-    pub matches_adopted: Option<bool>,
+    /// `rev` de la fila de SQLite al terminar el arranque.
+    pub rev: i64,
+    pub promotion_id: String,
+    /// ¿Este arranque ha hecho la promoción (frente a un arranque ya promovido)?
+    pub promoted_now: bool,
+    /// ¿Quedó pendiente publicar `authority.json` confirmado? (el marcador `promoting`
+    /// ya impide el fallback; se reintenta en el siguiente arranque)
+    pub marker_pending: bool,
 }
 
 /// Estado del almacén dentro del Core.
@@ -130,24 +141,27 @@ pub(super) struct StorageReport {
 pub(super) enum StorageStatus {
     /// Antes de `init`, o `init` aún no llegó a abrirlo.
     NotOpened,
+    /// SQLite es la autoridad y el Core la usa.
     Ready(StorageReport),
-    /// Falló de forma recuperable: el Core sigue con `state.json`.
+    /// Falló de forma recuperable ANTES de promocionar: el Core sigue con
+    /// `state.json` (política de bootstrap de C1). Nunca ocurre con una instalación
+    /// promovida ni con la valla ya aplicada.
     Degraded(String),
 }
 
-struct Slot {
+pub(super) struct Slot {
     // Orden de campos = orden de Drop: la base se cierra antes de soltar el bloqueo.
-    store: Option<Store>,
+    pub(super) store: Option<Store>,
     lock: Option<InstanceLock>,
     status: StorageStatus,
 }
 
 /// Único punto de contacto del Core con el almacén.
-pub(super) struct CoreStorage(Mutex<Slot>);
+pub(super) struct CoreStorage(Arc<Mutex<Slot>>);
 
 impl Default for CoreStorage {
     fn default() -> Self {
-        CoreStorage(Mutex::new(Slot { store: None, lock: None, status: StorageStatus::NotOpened }))
+        CoreStorage(Arc::new(Mutex::new(Slot { store: None, lock: None, status: StorageStatus::NotOpened })))
     }
 }
 
@@ -156,6 +170,7 @@ impl CoreStorage {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn status(&self) -> StorageStatus {
         self.slot().status.clone()
     }
@@ -171,10 +186,10 @@ impl CoreStorage {
         Ok(())
     }
 
-    /// Fase 1: abre la base bajo el bloqueo y aplica las migraciones. Es la
-    /// comprobación de compatibilidad (esquema más nuevo, checksum, orden): se
-    /// hace ANTES de que el Core toque `state.json`.
-    pub(super) fn open_db(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
+    /// Abre la base para el ARRANQUE de C2b: solo hasta donde permite la valla (ver
+    /// [`Store::open_boot_under_lock`]). Un error se devuelve ya clasificado; quien
+    /// llama decide si es bloqueante o si equivale a «la base no se puede consultar».
+    pub(super) fn open_for_boot(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
         let mut guard = self.slot();
         let Slot { store: store_slot, lock: lock_slot, .. } = &mut *guard;
         if store_slot.is_some() {
@@ -184,29 +199,8 @@ impl CoreStorage {
             *lock_slot = Some(acquire(core_dir)?);
         }
         let lock = lock_slot.as_ref().expect("bloqueo adquirido arriba");
-        *store_slot = Some(Store::open_under_lock(core_dir, lock, &store::embedded(), env!("CARGO_PKG_VERSION"))?);
+        *store_slot = Some(Store::open_boot_under_lock(core_dir, lock, &store::embedded(), env!("CARGO_PKG_VERSION"))?);
         Ok(())
-    }
-
-    /// Fase 2: importa la instantánea de arranque y la verifica. `adopted` es el
-    /// estado que el Core acaba de adoptar (para comprobar que la instantánea lo
-    /// representa).
-    pub(super) fn bootstrap(&self, legacy_source: &Path, adopted: &Value) -> Result<StorageReport, OpenStoreError> {
-        let mut guard = self.slot();
-        let Slot { store: store_slot, status, .. } = &mut *guard;
-        let store = store_slot.as_mut().ok_or_else(|| OpenStoreError::Other { detail: "el almacén del Core no está abierto".into() })?;
-        let import = store::bootstrap_legacy_snapshot(store, legacy_source)?;
-        let snapshot = store::verify_snapshot(store)?;
-        let matches_adopted = match import {
-            ImportOutcome::Imported { .. } => {
-                let doc = store.legacy_state()?.map(|s| s.doc).unwrap_or_default();
-                Some(serde_json::from_str::<Value>(&doc).map(|v| &v == adopted).unwrap_or(false))
-            }
-            _ => None,
-        };
-        let report = StorageReport { import, snapshot, matches_adopted };
-        *status = StorageStatus::Ready(report.clone());
-        Ok(report)
     }
 
     /// Marca el almacén como degradado (decisión explícita de `init`): suelta la
@@ -217,11 +211,75 @@ impl CoreStorage {
         slot.status = StorageStatus::Degraded(reason);
     }
 
-    /// Acceso al `Store` abierto. Es el punto por el que entrará `commit()` en C2;
-    /// en C1 solo lo usan las pruebas.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Fija el estado `Ready` tras un arranque autoritativo.
+    pub(super) fn set_ready(&self, report: StorageReport) {
+        self.slot().status = StorageStatus::Ready(report);
+    }
+
+    /// La `rev` realmente confirmada en la fila de SQLite ahora mismo (no la cargada al abrir).
+    pub(super) fn confirmed_rev(&self) -> Result<Option<i64>, String> {
+        match self.slot().store.as_ref() {
+            Some(store) => store.row_rev().map_err(|e| e.to_string()),
+            None => Err("el almacén no está abierto".into()),
+        }
+    }
+
+    /// Acceso al `Store` abierto. Solo lo usan el arranque (`boot_authority`) y las
+    /// pruebas; las escrituras de estado entran por [`SqlitePersistence`].
     pub(super) fn with_store<R>(&self, f: impl FnOnce(&mut Store) -> R) -> Option<R> {
         self.slot().store.as_mut().map(f)
+    }
+
+    /// La persistencia autoritativa: escribe en SQLite (y, después de publicar, el espejo).
+    pub(super) fn sqlite_persistence(&self, data_dir: &Path, rev: i64) -> Arc<dyn Persistence> {
+        Arc::new(SqlitePersistence {
+            slot: Arc::clone(&self.0),
+            data_dir: data_dir.to_path_buf(),
+            committed: Mutex::new(Committed { rev, pending_mirror: None }),
+        })
+    }
+}
+
+struct Committed {
+    /// `rev` de la última fila confirmada (la siguiente escritura espera esta).
+    rev: i64,
+    /// (rev, documento) confirmados cuyo espejo falta por escribir.
+    pending_mirror: Option<(i64, String)>,
+}
+
+/// `Persistence` de SQLite: cada mutación es UNA transacción `BEGIN IMMEDIATE .. COMMIT`
+/// sobre `legacy_state`, con concurrencia optimista por `rev`. Tras publicar en
+/// memoria, escribe el espejo `state.json`.
+struct SqlitePersistence {
+    slot: Arc<Mutex<Slot>>,
+    data_dir: PathBuf,
+    committed: Mutex<Committed>,
+}
+
+impl Persistence for SqlitePersistence {
+    fn persist(&self, state: &State) -> Result<(), PersistError> {
+        let doc = serde_json::to_string(state).map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))?;
+        let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        match store.commit_authoritative(committed.rev, &doc) {
+            Ok(rev) => {
+                committed.rev = rev;
+                committed.pending_mirror = Some((rev, doc));
+                Ok(())
+            }
+            // La ÚNICA clasificación de transitorios vive en el almacén.
+            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string() }),
+        }
+    }
+
+    fn after_publish(&self, _state: &State) -> Result<(), String> {
+        let pending = self.committed.lock().unwrap_or_else(|e| e.into_inner()).pending_mirror.take();
+        let Some((rev, doc)) = pending else { return Ok(()) };
+        store::crash_point("mutate_after_commit");
+        mirror::write_mirror(&self.data_dir, &doc, rev).map_err(|e| e.to_string())
     }
 }
 
@@ -244,27 +302,7 @@ impl Core {
         self.storage.acquire_lock(core_dir)
     }
 
-    /// Segundo paso de `init`: abrir y migrar la base (compatibilidad), todavía
-    /// sin tocar `state.json`.
-    pub(super) fn open_store_db(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
-        self.storage.open_db(core_dir)
-    }
-
-    /// Cuarto paso de `init`: con el estado ya adoptado, importa la instantánea de
-    /// arranque desde `legacy_source` y la verifica.
-    pub(super) fn import_snapshot(&self, legacy_source: &Path) -> Result<StorageReport, OpenStoreError> {
-        let adopted = serde_json::to_value(&*self.lock()).unwrap_or(Value::Null);
-        self.storage.bootstrap(legacy_source, &adopted)
-    }
-
-    /// Las dos fases seguidas (para quien no necesita intercalar nada, p. ej. pruebas).
-    /// Devuelve errores tipados; la decisión de continuar o no es de quien llama.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn open_store(&self, core_dir: &Path, legacy_source: &Path) -> Result<StorageReport, OpenStoreError> {
-        self.open_store_db(core_dir)?;
-        self.import_snapshot(legacy_source)
-    }
-
     pub(super) fn storage_status(&self) -> StorageStatus {
         self.storage.status()
     }
