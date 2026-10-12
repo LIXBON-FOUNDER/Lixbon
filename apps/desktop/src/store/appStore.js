@@ -7,6 +7,7 @@ import { fetchModelRoles, normalizeModel } from '../lib/modelRoles';
 import { fetchMe } from '../lib/account';
 import { cerrarSesion, iniciarSesion, SesionCaducada, tokenVigente } from '../lib/session';
 import { useWorkbenchStore } from './workbenchStore';
+import { importRecentProjects } from '../lib/projectsImport';
 
 let vigilante = null;
 
@@ -76,6 +77,8 @@ export const useAppStore = create((set, get) => ({
       // relee siempre (también repara la sesión sin perfil guardado) sin
       // bloquear el arranque.
       if (token) get().refreshUser();
+      // Los recientes pasan una sola vez al registro de proyectos del Core (slice D); sin bloquear.
+      importRecentProjects(get().recentFolders);
     } catch (e) {
       console.error('[store] Error hidratando configuración:', e);
       set({ hydrated: true }); // no bloquear la app: quedará en pantalla de auth
