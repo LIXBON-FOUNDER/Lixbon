@@ -223,6 +223,12 @@ impl Core {
         }
     }
 
+    /// Espera mensajes sin leer para `to` y los marca como leídos.
+    ///
+    /// Semántica ante un fallo de persistencia: los mensajes SE ENTREGAN igualmente
+    /// aunque no se pueda persistir el «leído» (el Core pasa a solo lectura y avisa).
+    /// Como el «leído» no quedó guardado, un mensaje puede reaparecer en una llamada
+    /// posterior o tras reiniciar. Se prefiere duplicar temporalmente a perder información.
     fn wait_for(&self, to: &str, kinds: &[Kind], reply_to: Option<u64>, timeout: Duration) -> Vec<state::Message> {
         let deadline = Instant::now() + timeout.min(MAX_WAIT);
         let mut st = self.lock();

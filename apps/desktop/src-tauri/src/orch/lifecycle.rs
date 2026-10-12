@@ -9,6 +9,22 @@ use super::store_boot::{OpenStoreError, StorageStatus};
 use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, core_dir, data_dir, discovery_file, lxo_path, read_json, server, skill, state, write_json, write_private_json};
 use super::state::{Kind, State};
 
+/// Prueba de que se llama desde el arranque: `Core::adopt_state` la exige y solo
+/// este módulo puede crearla (el campo y el constructor son privados aquí).
+pub(super) struct BootProof(());
+
+impl BootProof {
+    fn new() -> Self {
+        BootProof(())
+    }
+
+    /// Las pruebas preparan el estado inicial como lo haría el arranque.
+    #[cfg(test)]
+    pub(super) fn for_tests() -> Self {
+        BootProof(())
+    }
+}
+
 impl Core {
     /// Arranca el Core. `Err` solo si hay un motivo BLOQUEANTE: `core.lock` tomado
     /// por otro Core o inaccesible (sin él no hay un único escritor garantizado) o
@@ -44,7 +60,7 @@ impl Core {
         let mut st: State = read_json(&data.join("state.json")).unwrap_or_default();
         st.orphan_all();
         let _ = write_json(&data.join("state.json"), &st);
-        self.adopt_state(st); // carga inicial: no es una mutación
+        self.adopt_state(&BootProof::new(), st); // carga inicial: no es una mutación
         // Acciones externas (merge, PR, worktree, proceso) que ocurrieron en una sesión
         // anterior pero cuyo registro no se pudo guardar: se avisa, no se esconde.
         let unrecorded = Self::unrecorded_effects(data);

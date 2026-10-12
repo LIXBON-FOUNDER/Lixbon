@@ -7,10 +7,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::host::RecordingHost;
-use super::mutation::{Health, MutateError, PersistError, Persistence, StateAccess};
+use super::lifecycle::BootProof;
+use super::mutation::{Effect, Health, MutateError, PersistError, Persistence, RetryPolicy, StateAccess};
 use super::state::{Kind, NewTask, State};
 use super::{fsio, review, Core, Orch};
 
@@ -82,7 +83,7 @@ fn core_con_host() -> (Arc<Core>, Arc<RecordingHost>) {
     let core = Orch::default().0;
     let host = RecordingHost::new();
     core.set_host(host.clone());
-    core.set_retry_backoffs(vec![Duration::from_millis(1); 3]);
+    core.set_retry_policy(RetryPolicy::with_backoffs(vec![Duration::from_millis(1); 3]));
     (core, host)
 }
 
@@ -224,7 +225,7 @@ fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
     // Una tarea con rama real y una revisión aceptada, como en el flujo de integración.
     let (st, id, dir, _) = review::tests::setup("c2a-efecto");
     let (core, _host) = core_con_host();
-    core.adopt_state(st.into_inner().unwrap());
+    core.adopt_state(&BootProof::for_tests(), st.into_inner().unwrap());
     let head = {
         let o = std::process::Command::new("git").args(["rev-parse", "lx/t"]).current_dir(&dir).output().unwrap();
         String::from_utf8_lossy(&o.stdout).trim().to_string()
@@ -242,8 +243,13 @@ fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
     // Queda constancia para reconciliar...
     let diario = std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap();
     let linea: Value = serde_json::from_str(diario.lines().next().unwrap()).unwrap();
-    assert_eq!((linea["effect"]["kind"].as_str(), linea["effect"]["task"].as_str()), (Some("merge"), Some(id.as_str())));
-    assert_eq!(linea["effect"]["outcome"], "merged");
+    assert_eq!((linea["operation"].as_str(), linea["kind"].as_str(), linea["task"].as_str()), (Some("integrate"), Some("git_merge"), Some(id.as_str())));
+    assert_eq!(linea["observed"]["outcome"], "merged");
+    assert_eq!(linea["expected"]["merged"], true);
+    // Diagnóstico completo: cuándo, dónde, de qué run y por qué falló el registro.
+    assert!(linea["at"].as_u64().is_some() && linea["v"] == 1);
+    assert!(linea["repo"].as_str().is_some_and(|r| !r.is_empty()) && linea["run"].as_str().is_some());
+    assert!(linea["error"].as_str().is_some_and(|e| !e.is_empty()));
     assert_eq!(Core::unrecorded_effects(&data), 1);
 
     // ...y el siguiente arranque lo avisa en vez de esconderlo.
@@ -258,7 +264,7 @@ fn un_rechazo_tras_el_efecto_no_se_confunde_con_un_efecto_sin_registrar() {
     let (_l, data, _) = carpetas();
     let (core, _host) = core_con_host();
     // La mutación se rechaza por sí misma (la tarea no existe): no hay nada que reconciliar.
-    let r: Result<(), String> = core.mutate_after_effect(json!({ "kind": "prueba" }), |st| {
+    let r: Result<(), String> = core.mutate_after_effect(Effect::new("prueba", "ninguno"), |st| {
         st.task_mut("t-no-existe")?;
         Ok(())
     });
@@ -313,4 +319,16 @@ fn la_escritura_del_estado_solo_ocurre_en_mutation_rs() {
         revisados += 1;
     }
     assert!(revisados >= 20, "la prueba debe revisar los módulos del dominio, revisó {revisados}");
+}
+
+#[test]
+fn la_politica_de_reintentos_esta_en_un_solo_sitio() {
+    let p = RetryPolicy::default();
+    let transitorio = PersistError::transient("busy");
+    let estructural = PersistError::structural("esquema incompatible");
+    // 50 / 150 / 500 ms y luego se rinde; lo estructural nunca se reintenta.
+    let esperas: Vec<_> = (0..4).map(|i| p.delay_for(&transitorio, i)).collect();
+    assert_eq!(esperas, vec![Some(Duration::from_millis(50)), Some(Duration::from_millis(150)), Some(Duration::from_millis(500)), None]);
+    assert_eq!(p.delay_for(&estructural, 0), None);
+    assert_eq!(RetryPolicy::none().delay_for(&transitorio, 0), None);
 }
