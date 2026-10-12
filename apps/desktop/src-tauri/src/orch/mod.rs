@@ -43,6 +43,7 @@ mod term_events;
 #[cfg(test)]
 mod tests;
 mod ui_calls;
+mod vocab;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
