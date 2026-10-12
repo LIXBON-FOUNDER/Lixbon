@@ -79,6 +79,7 @@ fn tras_mutar_y_caer_en(punto: &str) -> (Limpia, PathBuf, PathBuf, u64) {
         let (c, _h, r) = arranca(&data, &core);
         r.unwrap();
         let s = c.lock().seq;
+        suelta(c, &core);
         s
     };
     muere_en(&data, punto, "mutar");

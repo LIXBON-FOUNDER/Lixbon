@@ -21,6 +21,12 @@ use std::path::{Path, PathBuf};
 use super::error::{StoreError, StoreResult};
 
 /// Titular del bloqueo. Se libera al soltarlo (`Drop`) o al morir el proceso.
+///
+/// En Unix `Drop` hace un `flock(LOCK_UN)` EXPLÍCITO antes de cerrar el descriptor: un `flock`
+/// pertenece a la descripción de archivo abierta y no a este descriptor, así que si otro hilo del
+/// proceso hace `fork` mientras el bloqueo está tomado (para lanzar `git`, un agente...), el hijo
+/// hereda una copia y el bloqueo seguiría ocupado hasta su `exec` aunque este titular ya se haya
+/// soltado. Sin el `LOCK_UN`, «se libera al soltarlo» no se cumple.
 #[derive(Debug)]
 pub struct InstanceLock {
     // Se mantiene abierto mientras viva el bloqueo.
@@ -48,6 +54,27 @@ impl InstanceLock {
     }
 }
 
+#[cfg(unix)]
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // SAFETY: el descriptor es válido mientras `_file` viva (se cierra después de este `drop`).
+        unsafe { sys::flock(self._file.as_raw_fd(), sys::LOCK_UN) };
+    }
+}
+
+#[cfg(unix)]
+mod sys {
+    extern "C" {
+        // Declarada aquí para no añadir la dependencia `libc` solo por esto;
+        // `flock` ya está en la libc contra la que enlaza `std`.
+        pub fn flock(fd: i32, operation: i32) -> i32;
+    }
+    pub const LOCK_EX: i32 = 2;
+    pub const LOCK_NB: i32 = 4;
+    pub const LOCK_UN: i32 = 8;
+}
+
 #[cfg(windows)]
 fn open_exclusive(path: &Path) -> StoreResult<File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -64,13 +91,6 @@ fn open_exclusive(path: &Path) -> StoreResult<File> {
 #[cfg(unix)]
 fn open_exclusive(path: &Path) -> StoreResult<File> {
     use std::os::fd::AsRawFd;
-    extern "C" {
-        // Declarada aquí para no añadir la dependencia `libc` solo por esto;
-        // `flock` ya está en la libc contra la que enlaza `std`.
-        fn flock(fd: i32, operation: i32) -> i32;
-    }
-    const LOCK_EX: i32 = 2;
-    const LOCK_NB: i32 = 4;
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -79,7 +99,7 @@ fn open_exclusive(path: &Path) -> StoreResult<File> {
         .open(path)
         .map_err(|e| StoreError::io(format!("no se pudo abrir el bloqueo {}", path.display()), e))?;
     // SAFETY: el descriptor es válido mientras `file` viva.
-    let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
+    let rc = unsafe { sys::flock(file.as_raw_fd(), sys::LOCK_EX | sys::LOCK_NB) };
     if rc == 0 {
         return Ok(file);
     }
