@@ -33,6 +33,9 @@ mod env_path;
 mod orch;
 mod skills_catalog;
 mod secure_store;
+// Almacén SQLite del Core (slice B). Aún sin conectar: el Core sigue con state.json.
+#[allow(dead_code)]
+mod store;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1427,7 +1430,7 @@ pub fn run() {
             // Hilo que emite los lotes de cambios de disco al frontend.
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
-            app.state::<orch::Orch>().0.init(app.handle().clone());
+            app.state::<orch::Orch>().0.init(orch::TauriHost::arc(app.handle().clone()));
             team::al_arrancar(app.handle());
             Ok(())
         })

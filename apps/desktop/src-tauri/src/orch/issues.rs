@@ -2,70 +2,15 @@
 //! Habla con el gateway con la misma cuenta que el IDE (su sesión de
 //! dispositivo o, si se entró con una API key, esa llave), así que un agente
 //! solo ve las issues de los equipos de quien lo lanzó.
-
-use std::time::Duration;
+//! La cuenta y la petición HTTP las pone el host (`Host::gateway`): este módulo
+//! solo sabe qué pedir y cómo interpretar la respuesta.
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
-use tauri_plugin_http::reqwest::{self, Method};
 
-struct Sesion {
-    servidor: String,
-    llave: String,
-}
-
-fn sesion(app: &AppHandle) -> Result<Sesion, String> {
-    if let Some(s) = tauri::async_runtime::block_on(crate::auth_session::vigente(app, None))? {
-        return Ok(Sesion { servidor: s.servidor, llave: s.access });
-    }
-    let ruta = app.path().app_data_dir().map_err(|e| e.to_string())?.join("lixbon.settings.json");
-    let ajustes: Value = std::fs::read_to_string(&ruta)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or(Value::Null);
-    let servidor = ajustes
-        .get("serverUrl")
-        .and_then(Value::as_str)
-        .unwrap_or("https://lixbon.com")
-        .trim_end_matches('/')
-        .to_string();
-    let llave = crate::secret_get("apiKey".into())
-        .ok()
-        .flatten()
-        .or_else(|| ajustes.get("apiKey").and_then(Value::as_str).map(String::from))
-        .filter(|k| !k.is_empty())
-        .ok_or("No hay sesión de Lixbon: inicia sesión en el IDE")?;
-    Ok(Sesion { servidor, llave })
-}
-
-fn pedir(s: &Sesion, metodo: Method, ruta: &str, cuerpo: Option<Value>) -> Result<Value, String> {
-    let url = format!("{}{}", s.servidor, ruta);
-    let llave = s.llave.clone();
-    tauri::async_runtime::block_on(async move {
-        let mut req = reqwest::Client::new()
-            .request(metodo, url)
-            .header("Authorization", format!("Bearer {llave}"))
-            .timeout(Duration::from_secs(20));
-        if let Some(c) = cuerpo {
-            req = req.header("Content-Type", "application/json").body(c.to_string());
-        }
-        let res = req.send().await.map_err(|e| format!("No se pudo contactar con Lixbon: {e}"))?;
-        let estado = res.status();
-        let texto = res.text().await.unwrap_or_default();
-        let datos: Value = serde_json::from_str(&texto).unwrap_or(Value::Null);
-        if !estado.is_success() {
-            return Err(datos
-                .get("detail")
-                .and_then(Value::as_str)
-                .map(String::from)
-                .unwrap_or_else(|| format!("Lixbon respondió {estado}")));
-        }
-        Ok(datos)
-    })
-}
+use super::host::{Gateway, GatewayMethod as Method, Host};
 
 /// «LXB-12» → el detalle entero de la issue.
-fn buscar(s: &Sesion, clave: &str) -> Result<Value, String> {
+fn buscar(s: &Gateway, clave: &str) -> Result<Value, String> {
     let clave = clave.trim();
     let valida = clave.split_once('-').is_some_and(|(p, n)| {
         !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric()) && !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())
@@ -73,9 +18,9 @@ fn buscar(s: &Sesion, clave: &str) -> Result<Value, String> {
     if !valida {
         return Err(format!("«{clave}» no es una clave de issue (ejemplo: LXB-12)"));
     }
-    let r = pedir(s, Method::GET, &format!("/api/team/issues/buscar?clave={clave}"), None)?;
+    let r = s.request(Method::Get, &format!("/api/team/issues/buscar?clave={clave}"), None)?;
     let id = r["id"].as_str().ok_or("Respuesta inesperada del gateway")?;
-    pedir(s, Method::GET, &format!("/api/team/issues/{id}"), None)
+    s.request(Method::Get, &format!("/api/team/issues/{id}"), None)
 }
 
 fn plano(t: &str) -> String {
@@ -110,8 +55,8 @@ fn estado_de(issue: &Value, pedido: &str) -> Result<String, String> {
 
 /// `accion`: ver | comentar | mover | vincular. `rol` es el del agente que
 /// llama (si es una hija con rol): su comentario sale como informe de agente.
-pub fn ejecutar(app: &AppHandle, args: &Value, rol: Option<String>) -> Result<Value, String> {
-    let s = sesion(app)?;
+pub fn ejecutar(host: &dyn Host, args: &Value, rol: Option<String>) -> Result<Value, String> {
+    let s = host.gateway()?;
     let accion = args["accion"].as_str().unwrap_or("ver");
     let clave = args["clave"].as_str().unwrap_or("");
     let issue = buscar(&s, clave)?;
@@ -124,12 +69,12 @@ pub fn ejecutar(app: &AppHandle, args: &Value, rol: Option<String>) -> Result<Va
                 return Err("Falta el comentario: --texto \"...\" o --texto - con el texto por stdin".into());
             }
             let de_agente = rol.filter(|r| ["explorador", "implementador", "revisor", "escalado"].contains(&r.as_str()));
-            pedir(&s, Method::POST, &format!("/api/team/issues/{id}/comments"), Some(json!({ "texto": texto, "de_agente": de_agente })))?;
+            s.request(Method::Post, &format!("/api/team/issues/{id}/comments"), Some(json!({ "texto": texto, "de_agente": de_agente })))?;
             Ok(json!({ "accion": "comentar", "clave": issue["clave"] }))
         }
         "mover" => {
             let estado = estado_de(&issue, args["estado"].as_str().unwrap_or(""))?;
-            let r = pedir(&s, Method::PATCH, &format!("/api/team/issues/{id}"), Some(json!({ "estado_id": estado })))?;
+            let r = s.request(Method::Patch, &format!("/api/team/issues/{id}"), Some(json!({ "estado_id": estado })))?;
             let nombre = issue["estados"]
                 .as_array()
                 .and_then(|l| l.iter().find(|e| e["id"] == r["estado_id"]))
@@ -151,7 +96,7 @@ pub fn ejecutar(app: &AppHandle, args: &Value, rol: Option<String>) -> Result<Va
             if tipo == "pr" {
                 cuerpo["estado"] = json!(args["estado"].as_str().unwrap_or("abierto"));
             }
-            pedir(&s, Method::POST, &format!("/api/team/issues/{id}/links"), Some(cuerpo))?;
+            s.request(Method::Post, &format!("/api/team/issues/{id}/links"), Some(cuerpo))?;
             Ok(json!({ "accion": "vincular", "clave": issue["clave"], "tipo": tipo, "ref": referencia }))
         }
         otra => Err(format!("Acción desconocida: {otra}. Usa ver, comentar, mover o vincular.")),
@@ -174,5 +119,30 @@ mod tests {
         assert_eq!(estado_de(&issue, "hecho").unwrap(), "c");
         assert_eq!(estado_de(&issue, "en_curso").unwrap(), "a");
         assert!(estado_de(&issue, "bloqueada").unwrap_err().contains("En curso, En revisión, Hecho"));
+    }
+
+    /// El Core pide «ver» una issue por el host: no sabe de HTTP ni de cuentas, y
+    /// sin sesión recibe el motivo legible que el host decida.
+    #[test]
+    fn issue_por_el_gateway_del_host() {
+        use super::super::host::RecordingHost;
+        let host = RecordingHost::new();
+        let sin_sesion = ejecutar(host.as_ref(), &json!({ "accion": "ver", "clave": "LXB-12" }), None).unwrap_err();
+        assert!(sin_sesion.contains("No hay sesión"), "{sin_sesion}");
+        assert!(host.gateway_calls().is_empty());
+
+        host.set_gateway(|_, ruta, _| match ruta {
+            "/api/team/issues/buscar?clave=LXB-12" => Ok(json!({ "id": "abc" })),
+            "/api/team/issues/abc" => Ok(json!({ "id": "abc", "clave": "LXB-12", "titulo": "t", "estados": [] })),
+            otra => Err(format!("ruta inesperada {otra}")),
+        });
+        let r = ejecutar(host.as_ref(), &json!({ "accion": "ver", "clave": "LXB-12" }), None).unwrap();
+        assert_eq!(r["issue"]["clave"], "LXB-12");
+        let rutas: Vec<_> = host.gateway_calls().into_iter().map(|(m, r, _)| (m, r)).collect();
+        assert_eq!(rutas, vec![
+            (Method::Get, "/api/team/issues/buscar?clave=LXB-12".to_string()),
+            (Method::Get, "/api/team/issues/abc".to_string()),
+        ]);
+        assert!(ejecutar(host.as_ref(), &json!({ "accion": "ver", "clave": "no es clave" }), None).unwrap_err().contains("no es una clave"));
     }
 }

@@ -31,16 +31,19 @@ pub mod state;
 mod args;
 mod commands;
 mod fsio;
+mod host;
 mod lifecycle;
 mod release;
 mod rpc;
 mod snapshot;
 mod spawn;
 mod taskfile;
+mod tauri_host;
 mod term_events;
 #[cfg(test)]
 mod tests;
 mod ui_calls;
+mod vocab;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -48,9 +51,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_notification::NotificationExt;
 
+use host::Host;
 use state::{Kind, State};
 #[cfg(test)]
 use state::Status;
@@ -84,7 +86,8 @@ impl Default for Settings {
 }
 
 pub struct Core {
-    app: OnceLock<AppHandle>,
+    /// Quien aloja al Core (Desktop hoy): eventos, notificaciones y cuenta. Ver `host.rs`.
+    host: OnceLock<Arc<dyn Host>>,
     state: Mutex<State>,
     cv: Condvar,
     terms: Mutex<HashMap<String, pty::AgentTerm>>,
@@ -97,8 +100,6 @@ pub struct Core {
     ttl_ms: u64,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
-    #[cfg(test)]
-    events: Mutex<Vec<(String, Value)>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
     /// espera en la barrera, para que la prueba mire el lock en ese punto exacto.
     #[cfg(test)]
@@ -116,7 +117,7 @@ pub struct Orch(pub Arc<Core>);
 impl Default for Orch {
     fn default() -> Self {
         Orch(Arc::new(Core {
-            app: OnceLock::new(),
+            host: OnceLock::new(),
             state: Mutex::new(State::default()),
             cv: Condvar::new(),
             terms: Mutex::new(HashMap::new()),
@@ -128,8 +129,6 @@ impl Default for Orch {
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]
-            events: Mutex::new(Vec::new()),
-            #[cfg(test)]
             snapshot_git_hook: Mutex::new(None),
         }))
     }
@@ -138,6 +137,7 @@ impl Default for Orch {
 
 pub use commands::*;
 pub use fsio::{lxo_path, random_token};
+pub use tauri_host::TauriHost;
 use args::{b, kinds, n, s};
 use fsio::{data_dir, discovery_file, read_json, write_json, write_private_json};
 use taskfile::task_file;
@@ -180,8 +180,8 @@ impl Core {
     fn commit(&self, st: &State, new: &[u64]) {
         let _ = write_json(&data_dir().join("state.json"), st);
         self.cv.notify_all();
-        let Some(app) = self.app.get() else { return };
-        let _ = app.emit("orch:changed", ());
+        let Some(host) = self.host.get() else { return };
+        host.emit("orch:changed", &Value::Null);
         let cfg = self.settings();
         for m in st.messages.iter().filter(|m| new.contains(&m.id)) {
             let wanted = match m.kind {
@@ -199,8 +199,26 @@ impl Core {
                 Kind::Exited => format!("Se cerró {who}"),
                 _ => format!("Orquestador · {who}"),
             };
-            let _ = app.notification().builder().title(title).body(&m.body).show();
+            host.notify(&title, &m.body);
         }
+    }
+
+    /// Entrega el host al Core (una sola vez). `init` lo hace al arrancar; las
+    /// pruebas lo usan para dar un host falso sin tocar el disco.
+    pub(crate) fn set_host(&self, host: Arc<dyn Host>) {
+        let _ = self.host.set(host);
+    }
+
+    /// Avisa a los clientes de un evento. Sin host (antes de `init`) no hace nada.
+    pub(super) fn emit(&self, event: &str, payload: &Value) {
+        if let Some(host) = self.host.get() {
+            host.emit(event, payload);
+        }
+    }
+
+    /// Avisa de que el estado cambió (`orch:changed`, sin carga útil).
+    pub(super) fn emit_changed(&self) {
+        self.emit("orch:changed", &Value::Null);
     }
 
     fn me(caller: &Caller) -> Result<String, String> {
