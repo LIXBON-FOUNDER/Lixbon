@@ -33,7 +33,8 @@ mod env_path;
 mod orch;
 mod skills_catalog;
 mod secure_store;
-// Almacén SQLite del Core (slice B). Aún sin conectar: el Core sigue con state.json.
+// Almacén SQLite del Core (slice B). C1 lo abre en `Core::init` solo para guardar una
+// instantánea de arranque: el Core sigue operando con state.json hasta C2.
 #[allow(dead_code)]
 mod store;
 
@@ -1430,7 +1431,9 @@ pub fn run() {
             // Hilo que emite los lotes de cambios de disco al frontend.
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
-            app.state::<orch::Orch>().0.init(orch::TauriHost::arc(app.handle().clone()));
+            // Un fallo bloqueante (otro Core titular de core.lock, base incompatible)
+            // aborta el arranque: un segundo escritor de state.json derrotaría el bloqueo.
+            app.state::<orch::Orch>().0.init(orch::TauriHost::arc(app.handle().clone()))?;
             team::al_arrancar(app.handle());
             Ok(())
         })

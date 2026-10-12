@@ -6,19 +6,20 @@
 //! `BEGIN IMMEDIATE` ([`Store::write`]): el bloqueo de escritura se toma de
 //! entrada y no hay upgrades de lectura a escritura que fallen a mitad.
 //!
-//! Estado actual: el Core SIGUE usando `state.json`. Este módulo todavía no
-//! está conectado a la lógica del orquestador: solo existe el almacén, su
-//! esquema inicial (migración 001) y la tabla `legacy_state` (el `State`
-//! actual como un único documento JSON con `rev`), que usará la importación
-//! del legado (slice C). No se normaliza Task/Attempt/Thread.
+//! Estado actual (C1): el Core SIGUE usando `state.json` como fuente operativa.
+//! El almacén existe, aplica su esquema inicial (migración 001) y guarda en
+//! `legacy_state` una instantánea inicial del `State` (un único documento JSON
+//! con `rev`), importada por [`legacy`] con `legacy_import_mode =
+//! bootstrap_snapshot`. Nadie la actualiza todavía: C2 cambiará la autoridad.
+//! No se normaliza Task/Attempt/Thread.
 //!
 //! Distribución de la carpeta del almacén (`dir`):
 //! ```text
-//! dir/lixbon.lock     bloqueo de instancia
+//! dir/core.lock       bloqueo de instancia
 //! dir/lixbon.db       la base (+ -wal / -shm mientras está abierta)
 //! dir/backups/        copias VACUUM INTO (antes de migrar, o a petición)
 //! ```
-//! `lixbon.db`, `-wal`, `-shm` y `backups/` quedan accesibles solo por el
+//! El Core usa `~/.lixbon/core` como `dir`. `lixbon.db`, `-wal`, `-shm` y `backups/` quedan accesibles solo por el
 //! propietario ([`private`]); `dir` no se modifica porque lo comparte el Core.
 //!
 //! # Referencias blandas de `events`
@@ -31,6 +32,7 @@
 
 mod backup;
 mod error;
+mod legacy;
 mod lock;
 mod migrate;
 mod private;
@@ -43,11 +45,12 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, Transactio
 
 pub use backup::backup_to;
 pub use error::{StoreError, StoreResult};
+pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
 pub use migrate::{embedded, migrate, Migration, MigrationReport};
 use migrate::now_ms;
 
-const LOCK_FILE: &str = "lixbon.lock";
+const LOCK_FILE: &str = "core.lock";
 const DB_FILE: &str = "lixbon.db";
 const BACKUP_DIR: &str = "backups";
 const BUSY_TIMEOUT_MS: u64 = 5000;
@@ -69,7 +72,13 @@ pub struct Store {
     db_path: PathBuf,
     backup_dir: PathBuf,
     report: MigrationReport,
-    _lock: InstanceLock,
+    // `None` cuando quien abre ya tenía el bloqueo (ver `open_under_lock`).
+    _lock: Option<InstanceLock>,
+}
+
+/// Ruta del bloqueo de instancia dentro de la carpeta del almacén.
+pub fn lock_path(dir: &Path) -> PathBuf {
+    dir.join(LOCK_FILE)
 }
 
 impl Store {
@@ -80,9 +89,22 @@ impl Store {
 
     /// Como [`Store::open`] con una lista de migraciones explícita (pruebas).
     pub fn open_with(dir: &Path, migrations: &[Migration], app_version: &str) -> StoreResult<Store> {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| StoreError::io(format!("no se pudo crear {}", dir.display()), e))?;
-        let lock = InstanceLock::acquire(&dir.join(LOCK_FILE))?;
+        let lock = InstanceLock::acquire(&lock_path(dir))?;
+        Store::open_inner(dir, Some(lock), migrations, app_version)
+    }
+
+    /// Abre el almacén con el bloqueo de instancia ya adquirido por quien llama.
+    /// Quien llama conserva el bloqueo aunque esta apertura falle: así un Core
+    /// que no puede usar la base (corrupta, disco lleno…) sigue siendo el único
+    /// titular de la carpeta. `lock` debe ser el de `dir`.
+    pub fn open_under_lock(dir: &Path, lock: &InstanceLock, migrations: &[Migration], app_version: &str) -> StoreResult<Store> {
+        if lock.path() != lock_path(dir) {
+            return Err(StoreError::WrongLock { expected: lock_path(dir), got: lock.path().to_path_buf() });
+        }
+        Store::open_inner(dir, None, migrations, app_version)
+    }
+
+    fn open_inner(dir: &Path, lock: Option<InstanceLock>, migrations: &[Migration], app_version: &str) -> StoreResult<Store> {
         let db_path = dir.join(DB_FILE);
         let backup_dir = dir.join(BACKUP_DIR);
         // Permisos de propietario (ver `private`): la base y las copias llevan el
@@ -99,6 +121,14 @@ impl Store {
             }
         }
         Ok(Store { conn, db_path, backup_dir, report, _lock: lock })
+    }
+
+    /// Valor de una clave de `meta`, si existe.
+    pub fn meta(&self, key: &str) -> StoreResult<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+            .optional()?)
     }
 
     pub fn db_path(&self) -> &Path {

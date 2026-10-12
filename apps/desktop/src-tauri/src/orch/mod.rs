@@ -37,6 +37,7 @@ mod release;
 mod rpc;
 mod snapshot;
 mod spawn;
+mod store_boot;
 mod taskfile;
 mod tauri_host;
 mod term_events;
@@ -88,6 +89,9 @@ impl Default for Settings {
 pub struct Core {
     /// Quien aloja al Core (Desktop hoy): eventos, notificaciones y cuenta. Ver `host.rs`.
     host: OnceLock<Arc<dyn Host>>,
+    /// Almacén SQLite: instantánea de arranque en C1; `state.json` sigue siendo la
+    /// fuente operativa. Único punto de contacto del Core con el `Store` (ver `store_boot.rs`).
+    storage: store_boot::CoreStorage,
     state: Mutex<State>,
     cv: Condvar,
     terms: Mutex<HashMap<String, pty::AgentTerm>>,
@@ -118,6 +122,7 @@ impl Default for Orch {
     fn default() -> Self {
         Orch(Arc::new(Core {
             host: OnceLock::new(),
+            storage: store_boot::CoreStorage::default(),
             state: Mutex::new(State::default()),
             cv: Condvar::new(),
             terms: Mutex::new(HashMap::new()),
@@ -139,7 +144,7 @@ pub use commands::*;
 pub use fsio::{lxo_path, random_token};
 pub use tauri_host::TauriHost;
 use args::{b, kinds, n, s};
-use fsio::{data_dir, discovery_file, read_json, write_json, write_private_json};
+use fsio::{core_dir, data_dir, discovery_file, read_json, write_json, write_private_json};
 use taskfile::task_file;
 
 /// Destino de `orch_integrate` para las hijas de una tarea: su carpeta y la rama
