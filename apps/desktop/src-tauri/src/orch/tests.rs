@@ -439,16 +439,46 @@ fn una_base_de_version_futura_impide_arrancar_y_no_se_toca() {
         let c = rusqlite::Connection::open(core_dir.join("lixbon.db")).unwrap();
         c.execute_batch("CREATE TABLE futuro (x INTEGER); PRAGMA user_version = 99;").unwrap();
     }
+    // Una sesión anterior dejó una tarea en marcha: un Core incompatible no debe tocarla.
+    let previa = Orch::default().0;
+    nueva_tarea(&previa, false);
+    escribe_state_de(&previa, &data);
+    let antes = std::fs::read(data.join("state.json")).unwrap();
+
     let core = Orch::default().0;
     let host = RecordingHost::new();
     let err = core.init_in(host.clone(), &data, &core_dir).unwrap_err();
     assert!(err.contains("versión más nueva"), "{err}");
     assert!(host.notifications().iter().any(|(t, _)| t == "Lixbon no puede iniciar"));
+    assert!(std::fs::read(data.join("state.json")).unwrap() == antes, "un Core incompatible no modifica state.json");
+    assert!(core.lock().tasks.is_empty(), "ni siquiera adoptó el estado");
     assert_eq!(core.storage_status(), StorageStatus::NotOpened);
     let c = rusqlite::Connection::open_with_flags(core_dir.join("lixbon.db"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
     let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
     let tablas: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = 'schema_migrations'", [], |r| r.get(0)).unwrap();
     assert_eq!((v, tablas), (99, 0), "la base futura no se modificó");
+}
+
+#[test]
+fn una_migracion_editada_impide_arrancar_sin_tocar_state_json() {
+    let (_limpia, data, core_dir) = dirs_c1();
+    // Una base creada por este binario, con el texto de la migración 001 "cambiado" a posteriori.
+    drop(crate::store::Store::open(&core_dir, "t").unwrap());
+    {
+        let c = rusqlite::Connection::open(core_dir.join("lixbon.db")).unwrap();
+        c.execute("UPDATE schema_migrations SET checksum = 'otro' WHERE version = 1", []).unwrap();
+    }
+    let previa = Orch::default().0;
+    nueva_tarea(&previa, false);
+    escribe_state_de(&previa, &data);
+    let antes = std::fs::read(data.join("state.json")).unwrap();
+
+    let core = Orch::default().0;
+    let err = core.init_in(RecordingHost::new(), &data, &core_dir).unwrap_err();
+    assert!(err.contains("ha cambiado"), "{err}");
+    assert!(std::fs::read(data.join("state.json")).unwrap() == antes, "state.json intacto");
+    assert!(core.lock().tasks.is_empty());
+    assert_eq!(core.storage_status(), StorageStatus::NotOpened);
 }
 
 #[test]
@@ -472,22 +502,34 @@ fn los_errores_de_esquema_son_bloqueantes_y_los_de_disco_no() {
         let texto = format!("{e:?}");
         assert_eq!(OpenStoreError::from(e).is_blocking(), bloqueante, "{texto}");
     }
+    // Sin `core.lock` no hay garantía de un único escritor: también es bloqueante.
+    assert!(OpenStoreError::LockUnavailable { detail: "x".into() }.is_blocking());
+    assert!(!OpenStoreError::AlreadyOpened.is_blocking());
 }
 
 #[test]
-fn sin_poder_crear_core_lock_el_core_arranca_degradado() {
+fn sin_poder_crear_core_lock_el_core_no_arranca() {
     let (_limpia, data, core_dir) = dirs_c1();
+    // La «carpeta» del almacén es un archivo: core.lock no se puede crear.
     std::fs::write(&core_dir, b"soy un archivo, no una carpeta").unwrap();
     let previa = Orch::default().0;
     nueva_tarea(&previa, false);
     escribe_state_de(&previa, &data);
+    let antes = std::fs::read(data.join("state.json")).unwrap();
+
     let core = Orch::default().0;
-    core.init_in(RecordingHost::new(), &data, &core_dir).expect("recuperable");
-    match core.storage_status() {
-        StorageStatus::Degraded(m) => assert!(m.contains("bloqueo"), "{m}"),
-        otro => panic!("se esperaba Degraded y salió {otro:?}"),
+    let host = RecordingHost::new();
+    match core.acquire_instance_lock(&core_dir) {
+        Err(e @ OpenStoreError::LockUnavailable { .. }) => assert!(e.is_blocking()),
+        otro => panic!("se esperaba LockUnavailable y salió {otro:?}"),
     }
-    assert!(read_json::<State>(&data.join("state.json")).unwrap().tasks.values().all(|t| t.status.is_final()));
+    let err = core.init_in(host.clone(), &data, &core_dir).unwrap_err();
+    assert!(err.contains("bloqueo"), "{err}");
+    assert!(host.notifications().iter().any(|(t, _)| t == "Lixbon no puede iniciar"));
+    // Sin garantía de un único escritor, no se toca nada.
+    assert!(std::fs::read(data.join("state.json")).unwrap() == antes, "state.json intacto");
+    assert!(core.lock().tasks.is_empty());
+    assert_eq!(core.storage_status(), StorageStatus::NotOpened);
 }
 
 #[test]
