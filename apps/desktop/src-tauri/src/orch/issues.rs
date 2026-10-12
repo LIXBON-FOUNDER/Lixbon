@@ -120,4 +120,29 @@ mod tests {
         assert_eq!(estado_de(&issue, "en_curso").unwrap(), "a");
         assert!(estado_de(&issue, "bloqueada").unwrap_err().contains("En curso, En revisión, Hecho"));
     }
+
+    /// El Core pide «ver» una issue por el host: no sabe de HTTP ni de cuentas, y
+    /// sin sesión recibe el motivo legible que el host decida.
+    #[test]
+    fn issue_por_el_gateway_del_host() {
+        use super::super::host::RecordingHost;
+        let host = RecordingHost::new();
+        let sin_sesion = ejecutar(host.as_ref(), &json!({ "accion": "ver", "clave": "LXB-12" }), None).unwrap_err();
+        assert!(sin_sesion.contains("No hay sesión"), "{sin_sesion}");
+        assert!(host.gateway_calls().is_empty());
+
+        host.set_gateway(|_, ruta, _| match ruta {
+            "/api/team/issues/buscar?clave=LXB-12" => Ok(json!({ "id": "abc" })),
+            "/api/team/issues/abc" => Ok(json!({ "id": "abc", "clave": "LXB-12", "titulo": "t", "estados": [] })),
+            otra => Err(format!("ruta inesperada {otra}")),
+        });
+        let r = ejecutar(host.as_ref(), &json!({ "accion": "ver", "clave": "LXB-12" }), None).unwrap();
+        assert_eq!(r["issue"]["clave"], "LXB-12");
+        let rutas: Vec<_> = host.gateway_calls().into_iter().map(|(m, r, _)| (m, r)).collect();
+        assert_eq!(rutas, vec![
+            (Method::Get, "/api/team/issues/buscar?clave=LXB-12".to_string()),
+            (Method::Get, "/api/team/issues/abc".to_string()),
+        ]);
+        assert!(ejecutar(host.as_ref(), &json!({ "accion": "ver", "clave": "no es clave" }), None).unwrap_err().contains("no es una clave"));
+    }
 }
