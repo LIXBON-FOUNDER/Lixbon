@@ -586,7 +586,7 @@ fn importa_un_state_json_real_en_solo_lectura() {
     st.orphan_all();
     write_json(&data.join("state.json"), &st).unwrap(); // lo que reescribiría `init`
     let core = Orch::default().0;
-    core.adopt_state(st);
+    core.adopt_state(&super::lifecycle::BootProof::for_tests(), st);
     let t = std::time::Instant::now();
     let rep = core.open_store(&core_dir, &data.join("state.json")).unwrap();
     eprintln!("{} bytes de estado real ({tareas} tareas, {runs} runs) importados en {:?}: {:?}", std::fs::metadata(data.join("state.json")).unwrap().len(), t.elapsed(), rep);

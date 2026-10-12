@@ -33,12 +33,27 @@
 //!   nuevas se rechazan con [`MutateError::ReadOnly`] y se avisa a los clientes.
 //!   No se sigue trabajando sobre una memoria que el disco no tiene.
 //!
+//! # Reintentos
+//! La política vive en un solo sitio, [`RetryPolicy`]: ningún punto de llamada
+//! decide esperas ni reintentos. Cambiarla no toca ninguna mutación. Regla:
+//! errores estructurales -> sin reintento; transitorios -> reintento acotado.
+//!
 //! # Efectos externos
 //! `git merge`, crear un worktree o lanzar una PTY **no** forman parte de la
 //! transacción. El patrón es: validar (lectura) -> efecto -> UNA mutación que lo
 //! registra ([`StateAccess::mutate_after_effect`]). Si el efecto ocurrió y el
 //! registro falla, no se esconde: se deja constancia en
-//! `unrecorded-effects.jsonl` para reconciliar y se avisa al arrancar.
+//! `unrecorded-effects.jsonl` y se avisa al arrancar. Ese archivo es un **diario
+//! de recuperación temporal**, NO una segunda fuente de verdad: sirve para
+//! diagnosticar y reconciliar a mano. Cuando existan Events y Attention, cada
+//! línea debe converger en `Event(efecto externo sin registrar) -> Attention
+//! crítica`. La reconciliación automática queda fuera de esta fase.
+//!
+//! # Lo que NO es una mutación de dominio
+//! * [`Core::touch_activity`]: marca de actividad efímera (pista de liveness),
+//!   solo en memoria. Es la única excepción y NO abre la puerta a otras.
+//! * [`Core::adopt_state`]: carga del estado inicial en el arranque; exige un
+//!   [`BootProof`] que solo `lifecycle.rs` puede fabricar.
 
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -48,6 +63,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::fsio::data_dir;
+use super::lifecycle::BootProof;
 use super::state::{Kind, State};
 use super::Core;
 
@@ -216,10 +232,50 @@ pub(super) enum Health {
     DegradedReadOnly(String),
 }
 
+/// Política de reintentos de la persistencia: lo único que decide si se vuelve a
+/// intentar y cuánto se espera. Los puntos de llamada no conocen nada de esto.
+///
+/// * Error estructural (`transient == false`): nunca se reintenta. En C2b son
+///   `SchemaTooNew`, `MigrationChecksumMismatch`, base incompatible o invariantes rotas.
+/// * Error transitorio: se reintenta tras cada espera de `backoffs`, y se rinde al agotarlas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RetryPolicy {
+    backoffs: Vec<Duration>,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        // Esperas cortas y acotadas: a lo sumo ~0,7 s en el peor caso.
+        RetryPolicy { backoffs: vec![Duration::from_millis(50), Duration::from_millis(150), Duration::from_millis(500)] }
+    }
+}
+
+impl RetryPolicy {
+    /// Sin reintentos.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn none() -> Self {
+        RetryPolicy { backoffs: Vec::new() }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_backoffs(backoffs: Vec<Duration>) -> Self {
+        RetryPolicy { backoffs }
+    }
+
+    /// Espera antes del reintento número `attempt` (0 = primer reintento), o
+    /// `None` si el error no se reintenta o ya se agotaron.
+    pub(super) fn delay_for(&self, error: &PersistError, attempt: usize) -> Option<Duration> {
+        if !error.transient {
+            return None;
+        }
+        self.backoffs.get(attempt).copied()
+    }
+}
+
 /// Persistencia + política de reintentos + salud, juntas: un solo campo de `Core`.
 pub(super) struct Persister {
     backend: Mutex<Arc<dyn Persistence>>,
-    backoffs: Mutex<Vec<Duration>>,
+    retry: Mutex<RetryPolicy>,
     health: Mutex<Health>,
 }
 
@@ -227,8 +283,7 @@ impl Default for Persister {
     fn default() -> Self {
         Persister {
             backend: Mutex::new(Arc::new(StateJsonFile)),
-            // Esperas cortas y acotadas: a lo sumo ~0,7 s en el peor caso.
-            backoffs: Mutex::new(vec![Duration::from_millis(50), Duration::from_millis(150), Duration::from_millis(500)]),
+            retry: Mutex::new(RetryPolicy::default()),
             health: Mutex::new(Health::Normal),
         }
     }
@@ -247,16 +302,18 @@ impl Persister {
     /// mensaje definitivo; quien llama decide el paso a solo lectura.
     fn persist(&self, state: &State) -> Result<(), PersistError> {
         let backend = lock(&self.backend).clone();
-        let backoffs = lock(&self.backoffs).clone();
+        let retry = lock(&self.retry).clone();
         let mut attempt = 0;
         loop {
             match backend.persist(state) {
                 Ok(()) => return Ok(()),
-                Err(e) if e.transient && attempt < backoffs.len() => {
-                    std::thread::sleep(backoffs[attempt]);
-                    attempt += 1;
-                }
-                Err(e) => return Err(e),
+                Err(e) => match retry.delay_for(&e, attempt) {
+                    Some(wait) => {
+                        std::thread::sleep(wait);
+                        attempt += 1;
+                    }
+                    None => return Err(e),
+                },
             }
         }
     }
@@ -283,16 +340,21 @@ impl Core {
     }
 
     /// Carga inicial del estado en el arranque (`init`). No es una mutación: lo
-    /// que se adopta ya viene de la persistencia. Solo `lifecycle.rs` debe usarlo.
-    pub(super) fn adopt_state(&self, state: State) {
+    /// que se adopta ya viene de la persistencia. No sirve para reemplazar el
+    /// estado en ejecución normal: exige un [`BootProof`], que solo el arranque
+    /// (`lifecycle.rs`) puede crear.
+    pub(super) fn adopt_state(&self, _boot: &BootProof, state: State) {
         *self.state.raw() = state;
     }
 
-    /// ÚNICA excepción a «toda escritura pasa por `mutate`»: la marca de actividad
-    /// de un run (latido que decide cuándo un run lleva 30 min inactivo). Se aplica
-    /// en memoria y NO se persiste por sí sola, porque sucedería en cada llamada de
-    /// cada agente (`lxo check`, `list`…); viaja en la siguiente mutación, igual que
-    /// antes de C2a. Perder el latido en una caída es inocuo.
+    /// **Actividad efímera / pista de liveness**, NO una mutación de dominio
+    /// (`touch_activity != mutación`). Marca la última actividad de un run (decide
+    /// cuándo lleva 30 min inactivo). Se aplica en memoria y NO se persiste por sí
+    /// sola, porque sucedería en cada llamada de cada agente (`lxo check`,
+    /// `list`…); viaja en la siguiente mutación, igual que antes de C2a. Perder el
+    /// latido en una caída es inocuo. Es la única escritura permitida fuera de
+    /// `mutate` y no es precedente para otras. Pendiente (C2b / Events): decidir si
+    /// pasa a Event efímero, a otro estado no durable o sigue como caché en memoria.
     pub(super) fn touch_activity(&self, task_id: &str) {
         self.state.raw().touch_run(task_id);
     }
@@ -364,9 +426,27 @@ impl Core {
         }
     }
 
-    /// Anota un efecto externo ya ocurrido cuyo registro en el estado falló.
-    fn journal_unrecorded_effect(&self, effect: &Value, cause: &str) {
-        let line = json!({ "at": super::state::now_ms(), "effect": effect, "cause": cause });
+    /// Anota un efecto externo ya ocurrido cuyo registro en el estado falló. Una
+    /// línea JSON por efecto: `v`, `at`, `operation`, `kind`, `repo`, `task`,
+    /// `run`, `expected`, `observed`, `error`.
+    fn journal_unrecorded_effect(&self, effect: Effect, error: &str) {
+        let (repo, run) = effect.task.as_deref().map_or((None, None), |id| {
+            let st = self.lock();
+            let t = st.tasks.get(id);
+            (t.map(|t| t.repo.clone()), t.map(|t| t.run.clone()))
+        });
+        let line = json!({
+            "v": 1,
+            "at": super::state::now_ms(),
+            "operation": effect.operation,
+            "kind": effect.kind,
+            "repo": effect.repo.or(repo),
+            "task": effect.task,
+            "run": effect.run.or(run),
+            "expected": effect.expected,
+            "observed": effect.observed,
+            "error": error,
+        });
         let path = data_dir().join("unrecorded-effects.jsonl");
         let write = || -> std::io::Result<()> {
             use std::io::Write;
@@ -394,10 +474,10 @@ impl Core {
         *lock(&self.persister.backend) = p;
     }
 
-    /// Prueba: fija las esperas de reintento (vacío = sin reintentos).
+    /// Prueba: sustituye la política de reintentos.
     #[cfg(test)]
-    pub(super) fn set_retry_backoffs(&self, b: Vec<Duration>) {
-        *lock(&self.persister.backoffs) = b;
+    pub(super) fn set_retry_policy(&self, p: RetryPolicy) {
+        *lock(&self.persister.retry) = p;
     }
 
     /// Prueba: ¿el lock del estado está libre ahora mismo?
@@ -410,6 +490,51 @@ impl Core {
     #[cfg(test)]
     pub(super) fn lock_unpersisted(&self) -> MutexGuard<'_, State> {
         self.state.raw()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Efectos externos sin registrar: diario de recuperación temporal
+// ---------------------------------------------------------------------------
+
+/// Un efecto externo (git, PTY, filesystem) que YA ocurrió y cuyo registro en el
+/// estado se va a intentar. Si el registro falla, esto es lo que queda en
+/// `unrecorded-effects.jsonl`: lo justo para diagnosticar y reconciliar, sin
+/// secretos (nunca env, argv ni credenciales) ni datos de más.
+pub(super) struct Effect {
+    /// Operación de alto nivel («integrate», «publish_pr», «spawn»).
+    operation: &'static str,
+    /// Efecto concreto («git_merge», «git_push_pr», «git_worktree», «pty_process»).
+    kind: &'static str,
+    task: Option<String>,
+    /// Si no se indica, el Core lo completa desde el estado por `task`.
+    repo: Option<String>,
+    run: Option<String>,
+    /// Qué iba a anotar el registro que falló.
+    expected: Value,
+    /// Qué se observó al ejecutar el efecto.
+    observed: Value,
+}
+
+impl Effect {
+    pub(super) fn new(operation: &'static str, kind: &'static str) -> Self {
+        Effect { operation, kind, task: None, repo: None, run: None, expected: Value::Null, observed: Value::Null }
+    }
+    pub(super) fn task(mut self, id: &str) -> Self {
+        self.task = Some(id.to_string());
+        self
+    }
+    pub(super) fn repo(mut self, repo: &str) -> Self {
+        self.repo = Some(repo.to_string());
+        self
+    }
+    pub(super) fn expected(mut self, v: Value) -> Self {
+        self.expected = v;
+        self
+    }
+    pub(super) fn observed(mut self, v: Value) -> Self {
+        self.observed = v;
+        self
     }
 }
 
@@ -427,7 +552,7 @@ pub(super) trait StateAccess {
     /// Registra en el estado un efecto externo YA ocurrido (p. ej. un `git merge`).
     /// Si el registro falla no se esconde: el error lo dice con claridad y, en el
     /// `Core`, el efecto queda anotado para reconciliar.
-    fn mutate_after_effect<R>(&self, effect: Value, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
+    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
         let _ = &effect;
         self.mutate(f)
     }
@@ -442,13 +567,13 @@ impl StateAccess for Core {
         Core::mutate(self, |tx| f(tx)).map_err(String::from)
     }
 
-    fn mutate_after_effect<R>(&self, effect: Value, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
+    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
         match Core::mutate(self, |tx| f(tx)) {
             Ok(v) => Ok(v),
             // El efecto no ocurrió o la mutación lo rechazó por sí misma: nada que reconciliar.
             Err(MutateError::Rejected(m)) => Err(m),
             Err(e) => {
-                self.journal_unrecorded_effect(&effect, &e.to_string());
+                self.journal_unrecorded_effect(effect, &e.to_string());
                 Err(format!(
                     "La acción se ejecutó pero NO quedó registrada en Lixbon ({e}). Queda anotada en unrecorded-effects.jsonl para reconciliarla; no la repitas sin comprobarlo."
                 ))

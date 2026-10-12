@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 use super::{CLOSE_REMINDER, Caller, Core, git};
-use super::mutation::StateAccess;
+use super::mutation::{Effect, StateAccess};
 use super::state::{State, Status};
 
 impl Core {
@@ -22,7 +22,9 @@ impl Core {
         }
         let branch_deleted = merged && branch.as_ref().is_some_and(|br| git::delete_branch(&repo, br).is_ok());
         // El worktree y la rama ya se borraron: el registro es UNA mutación posterior.
-        let effect = json!({ "kind": "release", "task": id, "worktree": worktree, "branch": branch, "branch_deleted": branch_deleted });
+        let effect = Effect::new("release", "git_worktree_removed").task(id).repo(&repo)
+            .expected(json!({ "record": "tarea liberada (stopped) y worktree/rama anotados" }))
+            .observed(json!({ "worktree": worktree, "branch": branch, "branch_deleted": branch_deleted }));
         let hint = self.mutate_after_effect(effect, |st| {
             if open {
                 let _ = st.close(id, Status::Stopped, "liberada por su coordinador");
@@ -100,7 +102,9 @@ impl Core {
                 continue;
             }
             let branch_deleted = merged && t.branch.as_ref().is_some_and(|b| git::delete_branch(&t.repo, b).is_ok());
-            let effect = json!({ "kind": "free_worktree", "task": t.id, "worktree": wt, "branch": t.branch, "branch_deleted": branch_deleted });
+            let effect = Effect::new("close_idle_runs", "git_worktree_removed").task(&t.id).repo(&t.repo)
+                .expected(json!({ "record": "worktree liberado en la tarea" }))
+                .observed(json!({ "worktree": wt, "branch": t.branch, "branch_deleted": branch_deleted }));
             // El worktree ya no existe: si el registro falla queda anotado, y se sigue informando.
             let _ = self.mutate_after_effect(effect, |st| {
                 if let Ok(task) = st.task_mut(&t.id) {

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
-use super::mutation::StateAccess;
+use super::mutation::{Effect, StateAccess};
 use super::state::NewTask;
 
 impl Core {
@@ -79,6 +79,9 @@ impl Core {
         // La tarea se persiste ANTES de cualquier efecto (worktree, proceso): una
         // caída a mitad del lanzamiento deja rastro recuperable en vez de un
         // worktree huérfano sin tarea.
+        // Nota para Task/Attempt: este orden ya pide estados intermedios explícitos
+        // (`pending` -> `starting` -> `working`, y `failed_start`). Hoy la tarea nace
+        // sin ellos; C2a no introduce Attempt, solo deja constancia de la necesidad.
         let (id, parent) = self.mutate(|st| {
             let parent = st.task(&parent_id)?.clone();
             let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
@@ -107,7 +110,9 @@ impl Core {
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
             let env = worktree_env::apply(&parent.repo, &dir, &worktree_env::plan(&parent.repo).restricted_to(&p.env));
             // El worktree ya existe: su registro es UNA mutación posterior.
-            let effect = json!({ "kind": "worktree", "task": id, "worktree": dir, "branch": branch });
+            let effect = Effect::new("spawn", "git_worktree").task(&id).repo(&parent.repo)
+                .expected(json!({ "record": "task worktree, branch y cwd" }))
+                .observed(json!({ "worktree": dir, "branch": branch }));
             self.mutate_after_effect(effect, |st| {
                 let t = st.task_mut(&id)?;
                 t.env = Some(env).filter(|e| !e.is_empty());
@@ -133,7 +138,10 @@ impl Core {
         }
         // El proceso ya corre: su registro es UNA mutación posterior. Si el agente ya
         // murió al arrancar, la tarea quedó en `exited` y así se informa.
-        let t = self.mutate_after_effect(json!({ "kind": "spawn", "task": id }), |st| {
+        let effect = Effect::new("spawn", "pty_process").task(&id)
+            .expected(json!({ "record": "task en marcha (running)" }))
+            .observed(json!({ "launched": true }));
+        let t = self.mutate_after_effect(effect, |st| {
             let _ = st.mark_running(&id);
             Ok(st.task(&id)?.clone())
         })?;

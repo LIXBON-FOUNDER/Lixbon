@@ -24,7 +24,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::mutation::StateAccess;
+use super::mutation::{Effect, StateAccess};
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
 
 pub const DEFAULT_TTL_SECS: u64 = 10 * 60;
@@ -207,7 +207,9 @@ impl Core {
         let decided_at = state::now_ms();
         // El lanzamiento (o su rechazo) ya ocurrió: la decisión se registra con una
         // mutación posterior y, si no se puede, queda anotada para reconciliar.
-        let effect = json!({ "kind": "spawn_decision", "pending_id": p.pending_id, "outcome": outcome, "task": task.and_then(|t| t["task"].as_str()) });
+        let effect = Effect::new("spawn_approval", "spawn_outcome").task(&p.parent_task)
+            .expected(json!({ "record": "decision spawn", "pending_id": p.pending_id, "outcome": outcome }))
+            .observed(json!({ "launched_task": task.and_then(|t| t["task"].as_str()), "launch_error": launch_error }));
         self.mutate_after_effect(effect, |st| {
             let exists = st.tasks.contains_key(&p.parent_task);
             let dup = st.decisions.iter().any(|d| d.kind == "spawn"

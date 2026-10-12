@@ -15,7 +15,7 @@ static INTEGRATING: Mutex<()> = Mutex::new(());
 use serde_json::{json, Value};
 
 use super::git;
-use super::mutation::StateAccess;
+use super::mutation::{Effect, StateAccess};
 use super::state::{State, Task};
 
 pub const AGENT_REJECT: &str = "La integración la aprueba una persona desde Lixbon: los agentes no pueden fusionar ramas. \
@@ -130,7 +130,9 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
         detail["found_commit"] = json!(found);
     }
     // El git merge ya ocurrió: la decisión y la marca `merged` se registran juntas, en UNA mutación.
-    let effect = json!({ "kind": "merge", "task": id, "branch": branch, "into": into, "outcome": outcome, "base_commit": found, "result_commit": result });
+    let effect = Effect::new("integrate", "git_merge").task(&id).repo(&repo)
+        .expected(json!({ "record": "decision merge", "merged": outcome == "merged", "branch": branch, "into": into }))
+        .observed(json!({ "outcome": outcome, "base_commit": found, "result_commit": result }));
     let decision = state.mutate_after_effect(effect, |st| {
         let decision = st.record_decision(&id, "merge", "human", &detail);
         if outcome == "merged" {
@@ -210,7 +212,9 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
     };
     let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
     // El push y el PR ya ocurrieron: su registro es UNA mutación posterior.
-    let effect = json!({ "kind": "publish_pr", "task": id, "branch": branch, "outcome": outcome, "pr_url": url });
+    let effect = Effect::new("publish_pr", "git_push_pr").task(&id)
+        .expected(json!({ "record": "decision pr", "pr_url_set": url.is_some() }))
+        .observed(json!({ "outcome": outcome, "branch": branch, "pr_url": url }));
     let decision = state.mutate_after_effect(effect, |st| {
         let decision = st.record_decision(&id, "pr", "human", &detail);
         if url.is_some() {
