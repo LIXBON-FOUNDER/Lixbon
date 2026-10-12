@@ -13,7 +13,7 @@ export const SLICES = Object.freeze({
   CONTEXT_PACKAGE: 'ContextPackage',
   DAEMON: 'daemon',
   // No es un slice del Core: lo pone el shell del Desktop (cliente), no el Core.
-  PUENTE_IDE: 'puente IDE↔ADE (shell del Desktop)',
+  PUENTE_IDE: 'puente IDE↔ADE',
 });
 
 /** Disponibilidad de una capacidad. `simulated` solo lo emite el mock; el Core real emite available/unavailable. */
