@@ -44,12 +44,26 @@ tauri-plugin-single-instance = "2"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 base64 = "0.22"
+# Borra de memoria los secretos del almacén seguro al soltarlos (ya compilado
+# como dependencia de keyring).
+zeroize = "1"
 
 # Windows Credential Manager para guardar la API key cifrada (DPAPI) en vez
 # de en claro en el JSON de settings. Solo Windows: en otros SO el frontend
 # cae al JSON de siempre.
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+
+# Almacén seguro multiplataforma (slice J1, módulo `secure_store`): el mismo
+# crate `keyring` con el backend nativo de cada SO. Los comandos `secret_*` de
+# lib.rs siguen siendo solo-Windows y no cambian.
+# Linux usa Secret Service por libdbus: `tao` ya exige libdbus-1-dev, así que no
+# añade requisitos del sistema; `crypto-rust` evita depender de OpenSSL.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 
 [dev-dependencies]
