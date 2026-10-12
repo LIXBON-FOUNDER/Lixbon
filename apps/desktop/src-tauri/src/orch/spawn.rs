@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::Emitter;
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
 use super::state::NewTask;
@@ -201,7 +200,7 @@ impl Core {
         #[cfg(test)]
         return self.fake_launch(id);
         #[allow(unreachable_code)]
-        let app = self.app.get().ok_or("Lixbon aún no terminó de arrancar")?.clone();
+        let host = self.host.get().ok_or("Lixbon aún no terminó de arrancar")?.clone();
         let (task, parent, objective) = {
             let st = self.lock();
             let t = st.task(id)?.clone();
@@ -286,7 +285,7 @@ impl Core {
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
         let (out_event, exit_event) = (format!("orch:term:{id}"), format!("orch:term-exit:{id}"));
-        let app_exit = app.clone();
+        let host_exit = host.clone();
         // Espera de aprobación en la terminal y agente inactivo (orch/approval.rs).
         let guard = Arc::new(Mutex::new(approval::Guard::from_env(state::now_ms())));
         let (guard_out, weak_out, tid_out) = (guard.clone(), Arc::downgrade(self), id.to_string());
@@ -297,10 +296,10 @@ impl Core {
                 if let (Some(change), Some(core)) = (change, weak_out.upgrade()) {
                     core.on_approval_change(&tid_out, change);
                 }
-                let _ = app.emit(&out_event, text);
+                host.emit(&out_event, &Value::String(text));
             },
             move || {
-                let _ = app_exit.emit(&exit_event, ());
+                host_exit.emit(&exit_event, &Value::Null);
                 if let Some(core) = weak.upgrade() {
                     core.on_exit(&tid);
                 }

@@ -1426,7 +1426,7 @@ pub fn run() {
             // Hilo que emite los lotes de cambios de disco al frontend.
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);
-            app.state::<orch::Orch>().0.init(app.handle().clone());
+            app.state::<orch::Orch>().0.init(orch::TauriHost::arc(app.handle().clone()));
             team::al_arrancar(app.handle());
             Ok(())
         })
