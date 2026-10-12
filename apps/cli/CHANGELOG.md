@@ -8,6 +8,11 @@ La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (
 - Orquestador: `/orquestar <objetivo>` convierte al agente en coordinador de un equipo de agentes que corre en Lixbon Desktop. Cada lanzamiento y cada integración las aprueba una persona allí. `/orquestador` muestra los runs y las tareas, y explica qué falta si el orquestador no está disponible.
 - Nuevo `lixbon worker`: el orquestador de Lixbon Desktop puede lanzar al CLI como un agente hijo, con cualquier proveedor de `lixbon profile`. Solo corre dentro de una tarea del orquestador y entrega su respuesta como informe.
 - Nuevo `lixbon profile list --json`: lista los proveedores configurados (nunca las claves) para que Lixbon Desktop los ofrezca como modelos de un rol.
+- La respuesta se escribe en la terminal mientras llega, y los razonamientos largos ya no la dejan atascada para soltar todo de golpe al final.
+- Rama, plan, modelo, razonamiento, modo y procesos se pueden usar mientras el agente trabaja (lo que cambies vale desde su siguiente paso). Su panel se abre junto al botón que pulsaste y lo resalta.
+- El menú `@` ve los archivos que creas, borras o renombras fuera del CLI.
+- El agente ya no recibe avisos que lo hacían abandonar lo que hacía: si se queda pensando sin responder o se repite, contesta con lo que ya sabe.
+- Control remoto: el móvil ve lo que el agente piensa, la salida de los comandos mientras corren con su código de salida, el diff de cada edición con números de línea, los resultados de las búsquedas, cuánto contexto queda y el avance de `/compact`. Cuando el agente te pregunta algo, puedes responder desde el móvil eligiendo una opción o escribiendo tu respuesta.
 
 ## 2.6.1
 - Control remoto: desde el móvil puedes mandar fotos y documentos con el mensaje y citar archivos del proyecto; el modelo los recibe como si los adjuntaras en la terminal.
