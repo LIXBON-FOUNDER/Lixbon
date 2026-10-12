@@ -250,3 +250,35 @@ fn la_decision_persiste_en_state_json_y_sobrevive_recarga() {
     assert_eq!(raw["decisions"][0]["actor"], "human");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Frontera del host: el dominio de `orch/` no importa Tauri. Solo el adaptador
+/// (`tauri_host.rs`), los comandos IPC (`commands.rs`) y el código de pruebas lo
+/// conocen. Si esta prueba falla, la dependencia nueva debe pasar por `Host`
+/// (ver `host.rs`) en vez de importarse en el dominio.
+#[test]
+fn el_dominio_del_core_no_importa_tauri() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
+    let permitidos = ["tauri_host.rs", "commands.rs", "tests.rs"];
+    let mut revisados = 0;
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let ruta = entrada.unwrap().path();
+        let nombre = ruta.file_name().unwrap().to_string_lossy().into_owned();
+        if !nombre.ends_with(".rs") || nombre.ends_with("_tests.rs") || permitidos.contains(&nombre.as_str()) {
+            continue;
+        }
+        let texto = std::fs::read_to_string(&ruta).unwrap();
+        // El código de pruebas de cada archivo (módulo `tests` en línea) puede usar el mock de Tauri.
+        let dominio = texto.split("mod tests {").next().unwrap();
+        for (n, l) in dominio.lines().enumerate() {
+            let l = l.trim_start();
+            if l.starts_with("//") {
+                continue;
+            }
+            for prohibido in ["tauri::", "tauri_plugin", "AppHandle"] {
+                assert!(!l.contains(prohibido), "{nombre}:{}: el dominio no puede depender de Tauri ({prohibido}); usa `Host`", n + 1);
+            }
+        }
+        revisados += 1;
+    }
+    assert!(revisados >= 20, "la prueba debe revisar los módulos del dominio, revisó {revisados}");
+}
