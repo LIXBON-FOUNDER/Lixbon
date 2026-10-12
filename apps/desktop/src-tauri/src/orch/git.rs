@@ -188,3 +188,88 @@ pub fn is_dirty(dir: &str) -> bool {
 pub fn delete_branch(repo: &str, branch: &str) -> Result<(), String> {
     ok(repo, &["branch", "-d", branch]).map(|_| ())
 }
+
+// ---------------------------------------------------------------------------------------------
+// Identidad de un repositorio (registro de proyectos, slice D). Solo lectura: ningún comando de
+// aquí escribe nada en el repositorio.
+// ---------------------------------------------------------------------------------------------
+
+/// Tope de commits raíz que se guardan en la huella (un repo normal tiene 1; unos pocos si se
+/// fusionaron historias). Más allá no aporta identidad y solo engorda la fila.
+const MAX_ROOT_COMMITS: usize = 16;
+
+/// Raíz del checkout PRINCIPAL del repositorio al que pertenece `dir`, también cuando `dir` es un
+/// worktree enlazado (`<repo>.lixbon-wt/…`): `git worktree list` lista siempre primero el principal.
+/// `None` si `dir` no es un repositorio o es un repo `bare` (no tiene checkout).
+pub fn main_root(dir: &str) -> Option<String> {
+    let out = ok(dir, &["worktree", "list", "--porcelain"]).ok()?;
+    let mut lines = out.lines();
+    let first = lines.next()?.strip_prefix("worktree ")?.trim().to_string();
+    // El bloque del primer worktree acaba en la primera línea vacía; `bare` lo marca como sin checkout.
+    if lines.take_while(|l| !l.trim().is_empty()).any(|l| l.trim() == "bare") {
+        return None;
+    }
+    Some(if cfg!(windows) { first.replace('/', "\\") } else { first })
+}
+
+/// Commits raíz del historial de `HEAD` (`git rev-list --max-parents=0`), ordenados y acotados.
+/// Vacío si el repositorio aún no tiene commits. Recorre el historial: ver el tiempo medido en
+/// `docs/core/PROYECTOS.md`.
+pub fn root_commits(dir: &str) -> Vec<String> {
+    let Ok(out) = ok(dir, &["rev-list", "--max-parents=0", "HEAD"]) else { return vec![] };
+    let mut v: Vec<String> = out.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+    v.sort();
+    v.dedup();
+    v.truncate(MAX_ROOT_COMMITS);
+    v
+}
+
+/// Todas las URLs de remotos (`remote.<nombre>.url`), normalizadas por [`normalize_remote`]:
+/// sin credenciales, ordenadas y sin duplicados.
+pub fn remotes(dir: &str) -> Vec<String> {
+    let Ok(out) = ok(dir, &["config", "--get-regexp", r"^remote\..*\.url$"]) else { return vec![] };
+    let mut v: Vec<String> = out.lines().filter_map(|l| l.split_once(' ').map(|(_, url)| url)).filter_map(normalize_remote).collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Rama por defecto: la de `origin/HEAD` si hay remoto; si no, la rama actual.
+pub fn default_branch(dir: &str) -> Option<String> {
+    if let Ok(r) = ok(dir, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+        if let Some(b) = r.strip_prefix("origin/").filter(|b| !b.is_empty()) {
+            return Some(b.to_string());
+        }
+    }
+    current_branch(dir)
+}
+
+/// Forma canónica de la URL de un remoto para COMPARAR proyectos: `host[:puerto]/ruta`, con el
+/// host en minúsculas, sin esquema, sin `.git` final y **sin credenciales** (`usuario:token@`):
+/// la huella se guarda en la base y no debe llevar secretos. Una ruta local se deja como ruta.
+pub fn normalize_remote(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let (host_part, path) = if let Some((_, rest)) = url.split_once("://") {
+        // esquema://[usuario[:clave]@]host[:puerto]/ruta   (file:///ruta no tiene host)
+        let rest = rest.rsplit_once('@').filter(|(before, _)| !before.contains('/')).map(|(_, after)| after).unwrap_or(rest);
+        match rest.split_once('/') {
+            Some((h, p)) => (h.to_string(), p.to_string()),
+            None => (rest.to_string(), String::new()),
+        }
+    } else if let Some((before, after)) = url.split_once(':').filter(|(b, _)| b.contains('@') && !b.contains('/') && !b.contains('\\')) {
+        // formato scp: usuario@host:ruta
+        (before.rsplit_once('@').map(|(_, h)| h).unwrap_or(before).to_string(), after.to_string())
+    } else {
+        // ruta local (absoluta o relativa)
+        let p = url.replace('\\', "/");
+        return Some(p.trim_end_matches('/').trim_end_matches(".git").trim_end_matches('/').to_string());
+    };
+    let path = path.replace('\\', "/");
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path).trim_matches('/');
+    let host = host_part.to_ascii_lowercase();
+    Some(if path.is_empty() { host } else { format!("{host}/{path}") })
+}

@@ -19,6 +19,7 @@ impl Core {
     /// Valida lo que pide el agente (sin crear nada) y arma el pendiente.
     pub(super) fn plan_spawn(&self, caller: &Caller, args: &Value) -> Result<spawn_approval::PendingSpawn, String> {
         let parent_id = Self::me(caller)?;
+        self.check_project_launchable(&parent_id)?;
         let spec = s(args, "task");
         if spec.is_empty() {
             return Err("Falta --task con el encargo completo de la hija".into());

@@ -9,6 +9,9 @@ mod authority;
 mod boot_authority;
 #[cfg(test)]
 mod boot_tests;
+mod projects;
+#[cfg(test)]
+mod projects_tests;
 #[cfg(test)]
 mod crash_tests;
 #[cfg(test)]

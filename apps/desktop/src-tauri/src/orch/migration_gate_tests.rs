@@ -28,8 +28,15 @@ const SQL_003: &str = "CREATE TABLE gate_probe (id TEXT PRIMARY KEY) STRICT;";
 /// Una 003 que falla a mitad: la primera sentencia crea la tabla, la segunda no puede ejecutarse.
 const SQL_003_MALA: &str = "CREATE TABLE gate_probe (id TEXT PRIMARY KEY) STRICT; INSERT INTO tabla_que_no_existe VALUES (1);";
 
+/// Lo que conoce un binario anterior a D: solo hasta la valla.
+fn hasta_la_valla() -> Vec<Migration> {
+    store::embedded().into_iter().filter(|m| m.version <= store::FENCE_VERSION).collect()
+}
+
+/// «La primera migración posterior a la valla» de PRUEBA: ocupa la 003 en lugar de la real, para
+/// demostrar el protocolo sin depender de lo que haga D.
 fn con_003(sql: &'static str) -> Vec<Migration> {
-    let mut todas = store::embedded();
+    let mut todas = hasta_la_valla();
     todas.push(Migration::new(3, "gate_probe", sql));
     todas
 }
@@ -54,10 +61,15 @@ fn base(core: &Path) -> (i64, i64, bool) {
 const SIN_LA_003: (i64, i64, bool) = (2, 0, false);
 const CON_LA_003: (i64, i64, bool) = (3, 1, true);
 
-/// Una instalación ya promovida (SQLite autoritativa, marcador `authoritative`, base en la 002).
+/// Una instalación ya promovida (SQLite autoritativa, marcador `authoritative`, base en la 002):
+/// la deja un binario que solo conoce hasta la valla.
 fn promovida_en_la_002() -> (Limpia, PathBuf, PathBuf) {
     let (l, data, core) = dirs();
-    promovida(&data, &core, "propia");
+    legado_con(&data, "propia");
+    let (c, r) = arranca_con(hasta_la_valla(), &data, &core);
+    r.unwrap();
+    assert!(matches!(c.storage_status(), StorageStatus::Ready(_)));
+    suelta(c, &core);
     assert_eq!(base(&core), SIN_LA_003, "punto de partida: promovida y en la 002");
     (l, data, core)
 }
@@ -120,7 +132,7 @@ fn una_base_ya_migrada_no_se_abre_con_un_binario_que_no_conoce_la_003_ni_hay_baj
 
     // Un binario anterior (solo 001 y 002): versión futura -> bloqueante, y la base no se toca.
     let estado = std::fs::read(data.join("state.json")).unwrap();
-    let (c, r) = arranca_con(store::embedded(), &data, &core);
+    let (c, r) = arranca_con(hasta_la_valla(), &data, &core);
     let e = r.expect_err("la 003 es futura para ese binario");
     assert!(e.contains("más nueva"), "{e}");
     suelta(c, &core);
@@ -229,7 +241,7 @@ fn fenced_sin_promocion_completada_no_recibe_la_003() {
     legado_con(&data, "previa");
     instantanea_de_c1(&core, &data.join("state.json"), 1);
     // Cruza la valla (002) sin llegar a promover: justo lo que deja una caída entre la valla y `promoting`.
-    drop(Store::open_with(&core, &store::embedded(), "t").unwrap());
+    drop(Store::open_with(&core, &hasta_la_valla(), "t").unwrap());
     assert_eq!(base(&core), SIN_LA_003, "FENCED: en la 002");
     std::fs::write(data.join("state.json"), b"{{ esto no es un estado").unwrap();
 
@@ -398,6 +410,47 @@ fn la_publicacion_pendiente_no_relaja_un_bloqueo_por_contradiccion() {
     edita_marcador(&core, |v| v["promotion_id"] = json!("otra-promocion"));
     impide_publicar_el_marcador(&core);
     bloquea_sin_tocar(&data, &core, "se contradicen", "contradictorio con publicación imposible");
+}
+
+// ---------------------------------------------------------------------------------------------
+// 4c. La 003 REAL (registro de proyectos) por el mismo camino
+// ---------------------------------------------------------------------------------------------
+
+fn tablas_de_proyectos(core: &Path) -> (i64, i64) {
+    let c = rusqlite::Connection::open(core.join("lixbon.db")).unwrap();
+    let n = |t: &str| c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [t], |r| r.get(0)).unwrap();
+    (n("projects"), n("project_locations"))
+}
+
+/// Una instalación en la 002 (autoritativa) sube a la 003 real con el binario de D: conserva su
+/// estado, deja la copia previa, reiniciar no repite nada y un binario anterior ya no la abre.
+#[test]
+fn la_003_real_actualiza_desde_la_002_conserva_el_estado_y_bloquea_a_los_binarios_anteriores() {
+    let (_l, data, core) = promovida_en_la_002();
+    assert_eq!(tablas_de_proyectos(&core), (0, 0));
+    let marcador_antes = marcador(&core);
+
+    let (c, r) = arranca_con(store::embedded(), &data, &core);
+    r.unwrap();
+    assert_eq!(titulos(&c), vec!["propia".to_string()], "el estado se conserva");
+    suelta(c, &core);
+    assert_eq!(base(&core).0, store::embedded().last().unwrap().version, "sube a la última migración del binario");
+    assert_eq!(tablas_de_proyectos(&core), (1, 1), "y aparecen las dos tablas de D");
+    assert!(archivos(&core.join("backups")).iter().any(|n| n.contains("pre-migracion-v2")), "copia previa de la migración");
+    assert_eq!(marcador(&core).promotion_id, marcador_antes.promotion_id, "la autoridad no cambia");
+
+    // Reinicio: nada que migrar.
+    let (c, r) = arranca_con(store::embedded(), &data, &core);
+    r.unwrap();
+    suelta(c, &core);
+    assert_eq!(tablas_de_proyectos(&core), (1, 1));
+
+    // Un binario que solo llega a la valla se niega (versión futura) sin tocar la base.
+    let (c, r) = arranca_con(hasta_la_valla(), &data, &core);
+    let e = r.expect_err("la 003 es futura para ese binario");
+    assert!(e.contains("más nueva"), "{e}");
+    suelta(c, &core);
+    assert_eq!(tablas_de_proyectos(&core), (1, 1), "no hay bajada implícita");
 }
 
 // ---------------------------------------------------------------------------------------------

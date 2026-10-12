@@ -113,6 +113,19 @@ impl Core {
                 std::thread::sleep(Duration::from_secs(5));
             }
         });
+        // Relleno perezoso de `project_id` (slice D): fuera del camino crítico del arranque, con
+        // presupuesto de tiempo, idempotente. Sin registro (almacén degradado) no hace nada.
+        // En pruebas se llama a mano para que sea determinista.
+        if !cfg!(test) {
+            let weak = Arc::downgrade(self);
+            std::thread::spawn(move || {
+                if let Some(core) = weak.upgrade() {
+                    if let Err(e) = core.backfill_projects(super::projects::BACKFILL_BUDGET) {
+                        eprintln!("[core] relleno de proyectos: {e}");
+                    }
+                }
+            });
+        }
         Ok(())
     }
 

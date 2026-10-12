@@ -29,6 +29,11 @@ impl Drop for Tmp {
     }
 }
 
+/// Lo que conoce un binario anterior a D: hasta la valla (001 y 002).
+fn hasta_la_valla() -> Vec<Migration> {
+    embedded().into_iter().filter(|m| m.version <= FENCE_VERSION).collect()
+}
+
 /// Lo que ven C1 y C2a: solo la migración 001.
 fn lista_de_c1() -> Vec<Migration> {
     embedded().into_iter().filter(|m| m.version < FENCE_VERSION).collect()
@@ -70,7 +75,7 @@ fn bootstrap_con_fila(s: &mut Store, rev: i64, doc: &str) {
 #[test]
 fn la_valla_es_la_migracion_002_y_se_embebe() {
     let todas = embedded();
-    assert_eq!(todas.iter().map(|m| m.version).collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(&todas.iter().map(|m| m.version).collect::<Vec<_>>()[..2], &[1, 2], "la valla sigue siendo la 002");
     assert_eq!(todas[1].name, "authority_fence");
     assert_eq!(FENCE_VERSION, 2);
 }
@@ -158,7 +163,7 @@ fn si_falla_aplicar_la_valla_la_base_queda_sin_cruzar() {
 fn las_migraciones_posteriores_a_la_valla_solo_se_aplican_con_la_base_autoritativa() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut todas = embedded();
+    let mut todas = hasta_la_valla();
     todas.push(Migration::new(3, "proyectos", "CREATE TABLE projects (id TEXT PRIMARY KEY) STRICT;"));
     let abre = |lock: &InstanceLock| Store::open_boot_under_lock(tmp.path(), lock, &todas, "t").unwrap();
     let no_hay_003 = |s: &Store| s.read(|c| Ok(c.prepare("SELECT 1 FROM projects").is_err())).unwrap();
@@ -498,7 +503,7 @@ fn metadata_de_autoridad_con_identidad_invalida_no_es_autoridad() {
 
 /// La 003 ficticia de las pruebas de apertura.
 fn con_la_003() -> Vec<Migration> {
-    let mut todas = embedded();
+    let mut todas = hasta_la_valla();
     todas.push(Migration::new(3, "proyectos", "CREATE TABLE projects (id TEXT PRIMARY KEY) STRICT;"));
     todas
 }
@@ -562,7 +567,7 @@ fn migrate_authoritative_aplica_la_tanda_en_una_transaccion_y_si_falla_la_base_q
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
     drop(promovida(tmp.path(), &lock));
-    let mut mala = embedded();
+    let mut mala = hasta_la_valla();
     mala.push(Migration::new(3, "mala", "CREATE TABLE a (x); INSERT INTO tabla_inexistente VALUES (1);"));
     let mut s = Store::open_boot_under_lock(tmp.path(), &lock, &mala, "t").unwrap();
     let r = s.migrate_authoritative(&mala, "t");
