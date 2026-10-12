@@ -10,11 +10,13 @@ use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, core_dir, data_d
 use super::state::{Kind, State};
 
 impl Core {
-    /// Arranca el Core. `Err` solo si hay un motivo BLOQUEANTE (otro Core es el
-    /// titular de `core.lock`, o la base es incompatible con este binario): en ese
-    /// caso no se lee ni se reescribe `state.json` (lo primero) o no se arrancan
-    /// ni el servidor ni los hilos, y quien llama debe terminar. Los fallos
-    /// recuperables del almacén dejan el Core funcionando con `state.json`.
+    /// Arranca el Core. `Err` solo si hay un motivo BLOQUEANTE: `core.lock` tomado
+    /// por otro Core o inaccesible (sin él no hay un único escritor garantizado) o
+    /// una base incompatible con este binario. En ese caso NO se lee ni se
+    /// reescribe `state.json`, no se arrancan ni el servidor ni los hilos, y quien
+    /// llama debe terminar. Solo los fallos de la base posteriores a haber
+    /// adquirido el bloqueo (disco, permisos, base corrupta) dejan el Core
+    /// funcionando, degradado, con `state.json`.
     pub fn init(self: &Arc<Self>, host: Arc<dyn Host>) -> Result<(), String> {
         self.init_in(host, &data_dir(), &core_dir())
     }
@@ -24,22 +26,29 @@ impl Core {
     pub(super) fn init_in(self: &Arc<Self>, host: Arc<dyn Host>, data: &Path, core: &Path) -> Result<(), String> {
         self.set_host(host);
         // 1. El bloqueo de instancia va ANTES de leer o reescribir state.json: un
-        // segundo Core no puede llegar a hacer `orphan_all()` sobre el estado del primero.
-        match self.acquire_instance_lock(core) {
+        // segundo Core no puede llegar a hacer `orphan_all()` sobre el estado del
+        // primero. Si no se puede garantizar el único escritor (tomado, no creable,
+        // inaccesible), no se arranca: cualquier error aquí es bloqueante.
+        if let Err(e) = self.acquire_instance_lock(core) {
+            return Err(self.refuse_to_start(&e));
+        }
+        // 2. Abrir y migrar la base: comprueba que este binario y el almacén se
+        // entienden (esquema más nuevo, checksum, orden) antes de tocar state.json.
+        match self.open_store_db(core) {
             Ok(()) => {}
             Err(e) if e.is_blocking() => return Err(self.refuse_to_start(&e)),
-            Err(e) => self.degrade_storage(&e),
+            Err(e) => self.degrade_storage(&e), // con el bloqueo ya adquirido
         }
-        // 2. Estado operativo (legacy): leer, orphan_all y reescribir.
+        // 3. Estado operativo (legacy): leer, orphan_all y reescribir.
         let settings: Settings = read_json(&data.join("settings.json")).unwrap_or_default();
         let mut st: State = read_json(&data.join("state.json")).unwrap_or_default();
         st.orphan_all();
         let _ = write_json(&data.join("state.json"), &st);
         *self.lock() = st;
-        // 3. Almacén: migración 001 e instantánea de arranque del estado que acaba
-        // de adoptar el Core. No interviene en las operaciones (C1).
+        // 4. Instantánea de arranque del estado que acaba de adoptar el Core. No
+        // interviene en las operaciones (C1).
         if !matches!(self.storage_status(), StorageStatus::Degraded(_)) {
-            match self.open_store(core, &data.join("state.json")) {
+            match self.import_snapshot(&data.join("state.json")) {
                 Ok(report) => {
                     if report.matches_adopted == Some(false) {
                         eprintln!("[core] la instantánea importada no coincide con el estado que adoptó el Core");

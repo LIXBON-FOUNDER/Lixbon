@@ -9,20 +9,25 @@
 //! `state.json` sigue siendo la fuente operativa. SQLite guarda una instantánea
 //! de arranque (`legacy_import_mode = bootstrap_snapshot`) que nadie actualiza.
 //!
+//! # Orden de apertura
+//! `core.lock` -> abrir y migrar la base (valida la compatibilidad) -> SOLO
+//! ENTONCES tocar `state.json` -> importar la instantánea -> verificarla. Un Core
+//! que no puede arrancar por el lock o por incompatibilidad del almacén no
+//! modifica `state.json` (ni `orphan_all()` ni reescritura).
+//!
 //! # Errores: bloqueantes y recuperables
 //! [`OpenStoreError`] clasifica cada fallo y `init` decide con esa clasificación:
 //!
 //! * **Bloqueantes** (el Core NO arranca): `AlreadyLocked` (otro Core es el
-//!   titular de `core.lock`), `SchemaTooNew`, `MigrationChecksumMismatch` y
-//!   `MigrationsInconsistent` (la base y este binario no se entienden). Seguir
-//!   escribiendo `state.json` en esos casos permitiría dos escritores o escribir
-//!   con una versión desconocida.
+//!   titular de `core.lock`), `LockUnavailable` (no se pudo crear o abrir
+//!   `core.lock`: sin él no hay garantía de un único escritor), `SchemaTooNew`,
+//!   `MigrationChecksumMismatch` y `MigrationsInconsistent` (la base y este
+//!   binario no se entienden). Seguir escribiendo `state.json` en esos casos
+//!   permitiría dos escritores o escribir con una versión desconocida.
 //! * **Recuperables** (el Core arranca *degradado*, con `state.json` como hoy):
-//!   disco lleno o permisos, base corrupta, fallos de E/S o de SQLite. El
-//!   bloqueo de instancia se conserva aunque la base no se pueda usar, así que
-//!   la exclusión mutua se mantiene. La excepción es `LockUnavailable` (ni
-//!   siquiera se pudo crear `core.lock`): no se puede garantizar la exclusión,
-//!   igual que antes de C1; queda registrado como degradado.
+//!   disco lleno o permisos de la base, base corrupta, fallos de E/S o de SQLite.
+//!   Solo son aceptables DESPUÉS de haber adquirido `core.lock`, que se conserva
+//!   aunque la base no se pueda usar: la exclusión mutua se mantiene.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -39,15 +44,16 @@ pub(super) enum OpenStoreError {
     // --- Bloqueantes ---
     /// Otro Core es el titular de `core.lock`.
     AlreadyLocked { lock_path: PathBuf },
+    /// No se pudo crear o abrir `core.lock` (permisos, carpeta imposible…): sin
+    /// él no se puede garantizar un único escritor.
+    LockUnavailable { detail: String },
     /// La base es de una versión más nueva (o tiene migraciones que no conocemos).
     SchemaTooNew { detail: String },
     /// Una migración ya aplicada cambió de contenido.
     MigrationChecksumMismatch { detail: String },
     /// Migraciones fuera de orden o lista inválida.
     MigrationsInconsistent { detail: String },
-    // --- Recuperables ---
-    /// No se pudo crear o abrir `core.lock` (permisos, carpeta imposible…).
-    LockUnavailable { detail: String },
+    // --- Recuperables (solo con `core.lock` ya adquirido) ---
     /// La base está dañada o no es SQLite.
     DatabaseCorrupt { detail: String },
     /// Fallo de E/S (disco lleno, permisos…).
@@ -64,6 +70,7 @@ impl OpenStoreError {
         matches!(
             self,
             OpenStoreError::AlreadyLocked { .. }
+                | OpenStoreError::LockUnavailable { .. }
                 | OpenStoreError::SchemaTooNew { .. }
                 | OpenStoreError::MigrationChecksumMismatch { .. }
                 | OpenStoreError::MigrationsInconsistent { .. }
@@ -164,12 +171,12 @@ impl CoreStorage {
         Ok(())
     }
 
-    /// Abre la base bajo el bloqueo, aplica las migraciones, importa la
-    /// instantánea de arranque y la verifica. `adopted` es el estado que el Core
-    /// acaba de adoptar (para comprobar que la instantánea lo representa).
-    pub(super) fn open(&self, core_dir: &Path, legacy_source: &Path, adopted: &Value) -> Result<StorageReport, OpenStoreError> {
+    /// Fase 1: abre la base bajo el bloqueo y aplica las migraciones. Es la
+    /// comprobación de compatibilidad (esquema más nuevo, checksum, orden): se
+    /// hace ANTES de que el Core toque `state.json`.
+    pub(super) fn open_db(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
         let mut guard = self.slot();
-        let Slot { store: store_slot, lock: lock_slot, status } = &mut *guard;
+        let Slot { store: store_slot, lock: lock_slot, .. } = &mut *guard;
         if store_slot.is_some() {
             return Err(OpenStoreError::AlreadyOpened);
         }
@@ -177,9 +184,19 @@ impl CoreStorage {
             *lock_slot = Some(acquire(core_dir)?);
         }
         let lock = lock_slot.as_ref().expect("bloqueo adquirido arriba");
-        let mut store = Store::open_under_lock(core_dir, lock, &store::embedded(), env!("CARGO_PKG_VERSION"))?;
-        let import = store::bootstrap_legacy_snapshot(&mut store, legacy_source)?;
-        let snapshot = store::verify_snapshot(&store)?;
+        *store_slot = Some(Store::open_under_lock(core_dir, lock, &store::embedded(), env!("CARGO_PKG_VERSION"))?);
+        Ok(())
+    }
+
+    /// Fase 2: importa la instantánea de arranque y la verifica. `adopted` es el
+    /// estado que el Core acaba de adoptar (para comprobar que la instantánea lo
+    /// representa).
+    pub(super) fn bootstrap(&self, legacy_source: &Path, adopted: &Value) -> Result<StorageReport, OpenStoreError> {
+        let mut guard = self.slot();
+        let Slot { store: store_slot, status, .. } = &mut *guard;
+        let store = store_slot.as_mut().ok_or_else(|| OpenStoreError::Other { detail: "el almacén del Core no está abierto".into() })?;
+        let import = store::bootstrap_legacy_snapshot(store, legacy_source)?;
+        let snapshot = store::verify_snapshot(store)?;
         let matches_adopted = match import {
             ImportOutcome::Imported { .. } => {
                 let doc = store.legacy_state()?.map(|s| s.doc).unwrap_or_default();
@@ -188,14 +205,16 @@ impl CoreStorage {
             _ => None,
         };
         let report = StorageReport { import, snapshot, matches_adopted };
-        *store_slot = Some(store);
         *status = StorageStatus::Ready(report.clone());
         Ok(report)
     }
 
-    /// Marca el almacén como degradado (decisión explícita de `init`).
+    /// Marca el almacén como degradado (decisión explícita de `init`): suelta la
+    /// base pero CONSERVA `core.lock`, así que la exclusión mutua se mantiene.
     pub(super) fn degrade(&self, reason: String) {
-        self.slot().status = StorageStatus::Degraded(reason);
+        let mut slot = self.slot();
+        slot.store = None;
+        slot.status = StorageStatus::Degraded(reason);
     }
 
     /// Acceso al `Store` abierto. Es el punto por el que entrará `commit()` en C2;
@@ -219,16 +238,31 @@ fn acquire(core_dir: &Path) -> Result<InstanceLock, OpenStoreError> {
 
 impl Core {
     /// Primer paso de `init`: adquirir `core.lock` ANTES de leer o reescribir
-    /// `state.json`, para que un segundo Core no llegue a tocarlo.
+    /// `state.json`, para que un segundo Core no llegue a tocarlo. Todo fallo aquí
+    /// es bloqueante: sin el bloqueo no hay garantía de un único escritor.
     pub(super) fn acquire_instance_lock(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
         self.storage.acquire_lock(core_dir)
     }
 
-    /// Abre el almacén e importa la instantánea de arranque desde `legacy_source`.
-    /// Devuelve errores tipados; la decisión de continuar o no es de quien llama.
-    pub(super) fn open_store(&self, core_dir: &Path, legacy_source: &Path) -> Result<StorageReport, OpenStoreError> {
+    /// Segundo paso de `init`: abrir y migrar la base (compatibilidad), todavía
+    /// sin tocar `state.json`.
+    pub(super) fn open_store_db(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
+        self.storage.open_db(core_dir)
+    }
+
+    /// Cuarto paso de `init`: con el estado ya adoptado, importa la instantánea de
+    /// arranque desde `legacy_source` y la verifica.
+    pub(super) fn import_snapshot(&self, legacy_source: &Path) -> Result<StorageReport, OpenStoreError> {
         let adopted = serde_json::to_value(&*self.lock()).unwrap_or(Value::Null);
-        self.storage.open(core_dir, legacy_source, &adopted)
+        self.storage.bootstrap(legacy_source, &adopted)
+    }
+
+    /// Las dos fases seguidas (para quien no necesita intercalar nada, p. ej. pruebas).
+    /// Devuelve errores tipados; la decisión de continuar o no es de quien llama.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn open_store(&self, core_dir: &Path, legacy_source: &Path) -> Result<StorageReport, OpenStoreError> {
+        self.open_store_db(core_dir)?;
+        self.import_snapshot(legacy_source)
     }
 
     pub(super) fn storage_status(&self) -> StorageStatus {
