@@ -32,6 +32,8 @@ pub enum StoreError {
     InvalidDocument(String),
     /// Falló una copia de seguridad.
     Backup(String),
+    /// El bloqueo entregado no es el de la carpeta que se quiere abrir.
+    WrongLock { expected: PathBuf, got: PathBuf },
     /// Error de entrada/salida con contexto.
     Io { context: String, source: std::io::Error },
     /// Error de SQLite.
@@ -98,6 +100,12 @@ impl fmt::Display for StoreError {
             ),
             StoreError::InvalidDocument(m) => write!(f, "documento inválido: {m}"),
             StoreError::Backup(m) => write!(f, "falló la copia de seguridad: {m}"),
+            StoreError::WrongLock { expected, got } => write!(
+                f,
+                "el bloqueo {} no corresponde a la carpeta del almacén (se esperaba {})",
+                got.display(),
+                expected.display()
+            ),
             StoreError::Io { context, source } => write!(f, "{context}: {source}"),
             StoreError::Sqlite(e) => write!(f, "error de SQLite: {e}"),
         }
