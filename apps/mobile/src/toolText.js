@@ -91,6 +91,9 @@ const KIND_OF = {
   fetch_url: 'web', web_search: 'web', WebFetch: 'web', WebSearch: 'web',
 };
 
+/** Tipo de una herramienta: cmd, edit, read, search, web u other. */
+export const toolKind = (item) => KIND_OF[item.tool] || 'other';
+
 /** Comando ya terminado con su línea a la vista: en el detalle se muestra el
     comando tal cual (la descripción solo acompaña mientras está en curso). */
 export const shownCommand = (item) => (KIND_OF[item.tool] === 'cmd' && !item.running && item.summary ? item.summary : '');

@@ -106,13 +106,13 @@ type Chat struct {
 	// nextImages viajan con el próximo mensaje sin marcador [IMG#n]: las
 	// fotos que manda el control remoto.
 	nextImages []string
-	mu            sync.Mutex
-	persistMu     sync.Mutex
-	title         string
-	autotitle     bool
-	titling       bool
-	anchor        *anchor
-	overhead      map[string]overhead
+	mu         sync.Mutex
+	persistMu  sync.Mutex
+	title      string
+	autotitle  bool
+	titling    bool
+	anchor     *anchor
+	overhead   map[string]overhead
 }
 
 // anchor son los tokens reales de la conversación en la última petición:
@@ -120,6 +120,7 @@ type Chat struct {
 type anchor struct {
 	agent         bool
 	tokens, chars int
+	system        int
 }
 
 // overhead es lo que ocupan el prompt de sistema (también el que añade el
@@ -343,6 +344,15 @@ func (c *Chat) ClearSession() {
 	c.Client.SetKey("")
 }
 
+// current es el modelo y el razonamiento vigentes. Se pueden cambiar desde la
+// interfaz con un turno en marcha: valen desde el siguiente paso.
+func (c *Chat) current() (now struct{ model, effort string }) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now.model, now.effort = c.Model, c.Effort
+	return now
+}
+
 // ThinkValue traduce el esfuerzo al campo think del gateway, que lo pasa a
 // Ollama: los niveles solo los distingue gpt-oss; el resto de modelos con
 // razonamiento lo entienden como encendido. nil deja decidir al servidor.
@@ -363,15 +373,19 @@ func (c *Chat) SetEffort(effort string) {
 	if effort == "auto" {
 		effort = ""
 	}
+	c.mu.Lock()
 	c.Effort = effort
+	c.mu.Unlock()
 	c.Cfg.SetExtraString("effort", effort)
 	_ = c.SaveConfig()
 }
 
 // SetModel cambia de modelo y lo recuerda como predeterminado.
 func (c *Chat) SetModel(model string) {
+	c.mu.Lock()
 	c.Model = model
 	c.Session.Model = model
+	c.mu.Unlock()
 	c.Cfg.Model = model
 	_ = c.SaveConfig()
 }
@@ -417,7 +431,7 @@ func (c *Chat) Persist() {
 	c.persistMu.Lock()
 	defer c.persistMu.Unlock()
 	_ = c.Store.Save(c.ConversationID, c.History, session.SaveOptions{
-		Title: c.Title(), Model: c.Model, Mode: c.Mode, Workspace: c.Workspace, Tokens: c.SessionTokens,
+		Title: c.Title(), Model: c.current().model, Mode: c.Mode, Workspace: c.Workspace, Tokens: c.SessionTokens,
 	})
 }
 
@@ -561,6 +575,9 @@ func (c *Chat) agentTurn(ctx context.Context, sink Sink) (string, error) {
 	c.Session.BeginTurn()
 	turn := &agent.Turn{S: c.Session, Stream: c.streamer(sink, true), Emit: sink.Event}
 	answer, working, err := turn.Run(ctx, c.History)
+	for i := range working {
+		working[i].Thinking = ""
+	}
 	c.Session.Working = nil
 	c.Session.EndTurn()
 	if err != nil {
@@ -739,8 +756,9 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 	return func(ctx context.Context, messages []history.Message, toolList []map[string]any) (agent.StreamResult, error) {
 		title := c.Title()
 		id := c.ConversationID
+		now := c.current()
 		req := api.ChatRequest{
-			Model:          c.Model,
+			Model:          now.model,
 			Messages:       toMaps(messages),
 			ConversationID: &id,
 			ClientID:       c.ClientID,
@@ -748,15 +766,23 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 			WebSearch:      webSearchValue(c.WebMode),
 			NumCtx:         c.Cfg.ContextWindow,
 			Tools:          toolList,
-			Effort:         c.Effort,
+			Effort:         now.effort,
 		}
-		switch think := ThinkValue(c.Effort); {
+		step := agent.Step(ctx)
+		switch think := ThinkValue(now.effort); {
+		case step.NoThinking:
+			req.Think = false
 		case think != nil:
 			req.Think = think
 		case agentMode || c.Session.PlanMode:
 			req.Think = "high"
 		}
 		sink.Event(agent.Event{Kind: agent.EventStep})
+		show := func(kind sse.Kind, text string) {
+			if !step.Quiet {
+				sink.Delta(kind, text)
+			}
+		}
 
 		stream, err := c.Client.ChatStream(ctx, req)
 		if err != nil {
@@ -781,10 +807,10 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 			switch ev.Kind {
 			case sse.Content:
 				text.WriteString(ev.Text)
-				sink.Delta(sse.Content, ev.Text)
+				show(sse.Content, ev.Text)
 			case sse.Reasoning:
 				reasoning.WriteString(ev.Text)
-				sink.Delta(sse.Reasoning, ev.Text)
+				show(sse.Reasoning, ev.Text)
 			case sse.ToolCalls:
 				var batch []json.RawMessage
 				if json.Unmarshal(ev.Value, &batch) == nil {
@@ -845,7 +871,7 @@ func (c *Chat) registerUsage(agentMode bool, messages []history.Message, toolLis
 		o = overhead{tokens: max(0, prompt-est.EstimateTokens(conv)), convChars: convChars}
 		c.overhead[key] = o
 	}
-	c.anchor = &anchor{agent: agentMode, tokens: max(0, prompt-o.tokens), chars: convChars}
+	c.anchor = &anchor{agent: agentMode, tokens: max(0, prompt-o.tokens), chars: convChars, system: o.tokens}
 }
 
 func splitSystem(messages []history.Message) (system, conv []history.Message) {
@@ -890,4 +916,33 @@ func (c *Chat) ContextUsage() (tokens int, percent float64) {
 	}
 	window := max(c.Cfg.ContextWindow, 1)
 	return tokens, min(100.0, float64(tokens)*100.0/float64(window))
+}
+
+// ContextParts reparte ContextUsage: cuánto son resultados de herramientas
+// (archivos leídos, salidas) y cuánto ocupan sistema y herramientas, que no
+// cuentan para compactar. system es 0 hasta la primera respuesta del servidor.
+func (c *Chat) ContextParts() (tokens, files, system, window int) {
+	tokens, _ = c.ContextUsage()
+	sent := c.History
+	if c.Session.Working != nil {
+		sent = c.Session.Working
+	}
+	total, tools := 0, 0
+	for _, m := range sent {
+		if m.Role == "system" {
+			continue
+		}
+		n := len(m.Content)
+		total += n
+		if m.IsToolResult() {
+			tools += n
+		}
+	}
+	if total > 0 {
+		files = tokens * tools / total
+	}
+	if c.anchor != nil {
+		system = c.anchor.system
+	}
+	return tokens, files, system, max(c.Cfg.ContextWindow, 1)
 }

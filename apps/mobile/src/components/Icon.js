@@ -62,6 +62,16 @@ const ICONS = {
   image: { paths: ['m21 15-5-5L5 21'], rects: [{ x: 3, y: 3, width: 18, height: 18, rx: 2.5 }], circles: [{ cx: 8.5, cy: 8.5, r: 1.5 }] },
   camera: { paths: ['M3 8a2 2 0 0 1 2-2h2.5L9 4h6l1.5 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z'], circles: [{ cx: 12, cy: 13, r: 3.5 }] },
   file: { paths: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z', 'M14 3v5h5'] },
+  // Chat remoto (lienzo «Chat remoto»): cupo, razonamiento, compact, git,
+  // consola y edición de las filas de herramientas, y preguntas del agente.
+  gauge: { paths: ['M4 17a8 8 0 1 1 16 0', 'm12 17 4-5'] },
+  bulb: { paths: ['M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3z', 'M9.5 20.5h5'] },
+  compress: { paths: ['M8 4v5H3M16 4v5h5M8 20v-5H3M16 20v-5h5'] },
+  git: { paths: ['M3 12h5.5M15.5 12H21'], circles: [{ cx: 12, cy: 12, r: 3.5 }] },
+  console: { paths: ['m7 9.5 3 2.5-3 2.5', 'M12.5 15h4'], rects: [{ x: 3, y: 4.5, width: 18, height: 15, rx: 2 }] },
+  edit: { paths: ['M4 20h4L19 9l-4-4L4 16z', 'm13.5 6.5 4 4'] },
+  message: { paths: ['M4 5h16v11H9l-5 4z'] },
+  tick: { paths: ['m5 12.5 4.5 4.5L19 7'] },
 
   'arrow-left': { paths: ['M19 12H5M11 18l-6-6 6-6'] },
   'arrow-up': { paths: ['M12 19V5M6 11l6-6 6 6'] },

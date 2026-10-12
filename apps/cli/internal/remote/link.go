@@ -206,13 +206,17 @@ func (l *Link) finish() {
 
 func priority(eventType string) int {
 	switch eventType {
-	case "assistant_delta":
+	case "assistant_delta", "reasoning_delta", "tool_output", "compact":
 		return 0
 	case "tool_use", "tool_result", "notice":
 		return 1
 	}
 	return 2
 }
+
+// streamed son los eventos que llegan a trozos: dos seguidos del mismo tipo
+// (y de la misma herramienta) se funden en uno.
+var streamed = map[string]bool{"assistant_delta": true, "reasoning_delta": true, "tool_output": true}
 
 // Emit encola un evento. Los deltas consecutivos se funden en uno y, si la cola
 // se pasa del tope, se tiran primero los menos importantes.
@@ -225,9 +229,9 @@ func (l *Link) Emit(eventType string, fields map[string]any) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if eventType == "assistant_delta" && len(l.queue) > 0 {
+	if streamed[eventType] && len(l.queue) > 0 {
 		last := &l.queue[len(l.queue)-1]
-		if last.event["type"] == "assistant_delta" {
+		if last.event["type"] == eventType && last.event["id"] == event["id"] {
 			joined, _ := last.event["text"].(string)
 			extra, _ := event["text"].(string)
 			last.event["text"] = joined + extra

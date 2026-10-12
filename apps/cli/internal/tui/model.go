@@ -42,6 +42,12 @@ type liveState struct {
 	spoke            bool
 	lastProse        string
 	usedTools        bool
+	// prose es content ya limpio del JSON de las llamadas; answer, la
+	// respuesta que se va escribiendo en el transcript, y drawn, lo pintado.
+	prose  string
+	answer *entry
+	drawn  string
+	drawAt time.Time
 }
 
 // promptState captura el siguiente Enter como respuesta a una pregunta de
@@ -50,6 +56,7 @@ type promptState struct {
 	label    string
 	onSubmit func(text string) tea.Cmd
 	onCancel func()
+	token    any
 }
 
 // Model es el modelo de Bubble Tea del chat interactivo. Su estado solo lo
@@ -77,6 +84,12 @@ type Model struct {
 	// winY es la fila de pantalla donde empieza el transcript (tras la barra
 	// superior); panelY, donde empieza el panel abierto (-1 si no hay).
 	winY, panelY int
+	// Rectángulo del panel anclado a un botón y el botón recién pulsado.
+	panelX, panelW, panelH int
+	clickAnchor            *anchor
+	// turnMode es el modo con el que arrancó el turno en curso: el de la
+	// sesión se puede cambiar mientras el agente trabaja.
+	turnMode string
 	// Zonas clicables del último fotograma.
 	barShown          bool
 	barModel, barPlan span
@@ -274,6 +287,25 @@ func (m *Model) refresh(e *entry) {
 	if m.observe != nil {
 		m.observe(e.text)
 	}
+}
+
+// remove quita un bloque que ya no debe verse (una respuesta en curso que
+// resultó ser solo fontanería).
+func (m *Model) remove(e *entry) {
+	if e.detached {
+		return
+	}
+	rows := m.log.remove(e)
+	if m.scroll > 0 {
+		m.scroll = max(0, m.scroll-rows)
+	}
+	if m.answerEntry == e {
+		m.answerEntry = nil
+	}
+	if m.anchorTop == e {
+		m.anchorTop = nil
+	}
+	m.sel = nil
 }
 
 func (m *Model) toggleDetail() {

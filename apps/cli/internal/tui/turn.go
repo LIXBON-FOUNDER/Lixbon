@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -79,6 +80,7 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running = true
+	m.turnMode = m.chat.Mode
 	m.started = time.Now()
 	m.live = liveState{}
 	m.liveChars, m.liveReal, m.charsPerToken = 0, 0, m.chat.Session.Estimator.CharsPerToken()
@@ -96,16 +98,21 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 		m.add(userBlock{text: shown, chips: chips})
 		m.print("")
 	}
-	var sink chat.Sink = &uiSink{send: m.send, turn: id}
+	ui := &uiSink{send: m.send, turn: id}
+	var sink chat.Sink = ui
 	if m.remote != nil {
-		rs := &remoteSink{Sink: sink, host: m.remote, agent: m.chat.Mode == chat.ModeAgent}
+		c := m.chat
+		rs := &remoteSink{Sink: sink, host: m.remote, agent: m.chat.Mode == chat.ModeAgent, started: time.Now(),
+			context: func() map[string]any { return remoteContext(c) }}
 		m.remote.sink, sink = rs, rs
+		m.remote.live.Store(rs)
 		m.remoteTurnStarted(prompt, chips)
 	}
 	c := m.chat
 	send := m.send
 	go func() {
 		answer, err := c.Send(ctx, prompt, sink)
+		ui.flush()
 		send(doneMsg{turn: id, answer: answer, err: err})
 	}()
 	return m.startTick()
@@ -116,27 +123,70 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 // llamadas.
 func (m *Model) flushLive() {
 	live := &m.live
+	m.flushThinking()
+	prose := m.liveProse()
+	switch {
+	case live.answer != nil && prose == "":
+		m.remove(live.answer)
+	case live.answer != nil:
+		m.drawAnswer(prose)
+	case prose != "":
+		m.printAnswer(prose)
+	}
+	if prose != "" {
+		live.spoke = true
+		live.lastProse = prose
+	}
+	live.answer, live.prose, live.drawn = nil, "", ""
+	live.content.Reset()
+}
+
+func (m *Model) flushThinking() {
+	live := &m.live
 	if strings.TrimSpace(live.reasoning.String()) != "" {
 		m.closeReads()
 		m.add(thinkBlock{text: live.reasoning.String(), secs: live.reasoningSecs})
 	}
-	raw := live.content.String()
-	prose := strings.TrimSpace(raw)
-	if m.chat.Mode == chat.ModeAgent {
-		prose = toolparse.CleanProse(raw)
-		// El «OK» con el que contesta al recordatorio de aplicar código es fontanería.
-		if strings.EqualFold(strings.Trim(prose, ". "), "ok") {
-			prose = ""
-		}
-	}
-	if prose != "" {
-		m.printAnswer(prose)
-		live.spoke = true
-		live.lastProse = prose
-	}
-	live.content.Reset()
 	live.reasoning.Reset()
 	live.reasoningSecs = 0
+}
+
+// liveProse es lo que el modelo lleva escrito en el paso, sin el JSON de las
+// llamadas en modo agent.
+func (m *Model) liveProse() string {
+	raw := m.live.content.String()
+	if m.turnMode != chat.ModeAgent {
+		return strings.TrimSpace(raw)
+	}
+	return toolparse.CleanProse(raw)
+}
+
+// answerRedraw limita cuánto se repinta el markdown de la respuesta en curso.
+const answerRedraw = 80 * time.Millisecond
+
+// streamAnswer escribe la respuesta en el transcript según llega. Espera a
+// unas letras para no enseñar el arranque de una llamada en JSON.
+func (m *Model) streamAnswer(tick bool) {
+	live := &m.live
+	prose := live.prose
+	switch {
+	case live.answer == nil && utf8.RuneCountInString(prose) < 4:
+	case live.answer == nil:
+		m.flushThinking()
+		m.printAnswer(prose)
+		live.answer = m.answerEntry
+		live.drawn, live.drawAt = prose, time.Now()
+	case prose != live.drawn && (tick || time.Since(live.drawAt) >= answerRedraw):
+		m.drawAnswer(prose)
+	}
+}
+
+func (m *Model) drawAnswer(prose string) {
+	live := &m.live
+	live.answer.b = answerBlock{text: prose, md: m.renderMarkdown}
+	m.refresh(live.answer)
+	m.answerEntry = live.answer
+	live.drawn, live.drawAt = prose, time.Now()
 }
 
 func (m *Model) printAnswer(prose string) {
@@ -167,13 +217,13 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	default:
 		if answer := strings.TrimSpace(msg.answer); answer != "" {
 			shown := answer
-			if m.chat.Mode == chat.ModeAgent {
+			if m.turnMode == chat.ModeAgent {
 				shown = toolparse.CleanProse(answer)
 			}
 			if shown != "" && shown != m.live.lastProse && (!m.live.spoke || m.live.usedTools) {
 				m.printAnswer(shown)
 			}
-		} else if m.chat.Mode != chat.ModeAgent && !m.live.spoke {
+		} else if m.turnMode != chat.ModeAgent && !m.live.spoke {
 			m.add(note("(sin respuesta) " + glyphSep + " el modelo no devolvió texto; /doctor revisa la conexión"))
 		}
 	}
@@ -195,7 +245,7 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 		}
 		m.add(sourcesBlock(labels))
 	}
-	if m.chat.Mode == chat.ModeAgent {
+	if m.turnMode == chat.ModeAgent {
 		if st := m.chat.Session.Stats; st.Actions > 0 {
 			m.add(summaryBlock{actions: st.Actions, files: len(st.Files), adds: st.Adds, dels: st.Dels, secs: time.Since(m.started).Seconds()})
 		}
@@ -335,6 +385,7 @@ func (m *Model) openAsk(msg askMsg) tea.Cmd {
 			label:    msg.question,
 			onSubmit: func(text string) tea.Cmd { reply <- askReply{answer: text, ok: true}; return nil },
 			onCancel: func() { reply <- askReply{} },
+			token:    reply,
 		}
 	}
 	if len(msg.options) == 0 {
@@ -358,5 +409,6 @@ func (m *Model) openAsk(msg askMsg) tea.Cmd {
 		return nil
 	})
 	m.picker.tone = pal.warn
+	m.picker.token = reply
 	return nil
 }

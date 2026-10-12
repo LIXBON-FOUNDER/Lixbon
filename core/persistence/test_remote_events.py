@@ -62,6 +62,22 @@ def test_solo_persiste_los_eventos_del_transcript(session_id):
     assert tipos == ["hello", "user_msg", "assistant_done"]
 
 
+def test_el_razonamiento_las_preguntas_y_el_contexto_se_reproducen(session_id):
+    """Al volver a la sesión el móvil necesita lo pensado, lo preguntado, el
+    compact y el último contexto; los trozos en vivo siguen sin guardarse."""
+    q.save_remote_events(session_id, [
+        {"type": "reasoning_delta", "seq": 1, "text": "pien"},
+        {"type": "reasoning", "seq": 2, "text": "pienso", "ms": 900},
+        {"type": "tool_output", "seq": 3, "id": "a", "text": "uno\n"},
+        {"type": "question_answered", "seq": 4, "question": "¿Commit?", "answer": "Sí"},
+        {"type": "compact", "seq": 5, "phase": "start"},
+        {"type": "compacted", "seq": 6, "before": 82, "after": 12, "summary": "resumen"},
+        {"type": "context", "seq": 7, "pct": 12, "window": 16384},
+    ])
+    tipos = [ev["type"] for ev in q.list_remote_events(session_id)]
+    assert tipos == ["reasoning", "question_answered", "compacted", "context"]
+
+
 def test_el_transcript_sobrevive_al_fin_de_la_sesion(session_id, user_id):
     q.save_remote_events(session_id, [{"type": "user_msg", "seq": 1, "text": "hola"}])
     q.end_remote_session(session_id)

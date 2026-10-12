@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"lixbon.com/cli/internal/chat"
-	"lixbon.com/cli/internal/toolparse"
 )
 
 const (
@@ -37,7 +36,7 @@ func (m *Model) liveLabel() (string, bool) {
 		}
 	}
 	if m.live.content.Len() > 0 {
-		if m.chat.Mode == chat.ModeAgent && toolparse.CleanProse(m.live.content.String()) == "" {
+		if m.turnMode == chat.ModeAgent && m.live.prose == "" {
 			return "Preparando acciones…", false
 		}
 		return "Escribiendo la respuesta…", false
@@ -116,7 +115,13 @@ func (m *Model) liveView() []string {
 	lines = append(lines, row)
 
 	if m.live.reasoning.Len() > 0 && m.live.content.Len() == 0 {
-		tail := wrapText(strings.TrimSpace(m.live.reasoning.String()), max(10, width-6))
+		// Solo el final: envolver todo lo pensado en cada fotograma hacía que
+		// la pantalla fuera más lenta cuanto más razonaba el modelo.
+		thought := m.live.reasoning.String()
+		if keep := liveThinkRows * width * 2; len(thought) > keep {
+			thought = strings.ToValidUTF8(thought[len(thought)-keep:], "")
+		}
+		tail := wrapText(strings.TrimSpace(thought), max(10, width-6))
 		for _, l := range tail[max(0, len(tail)-liveThinkRows):] {
 			lines = append(lines, pad+sDim2.Render(glyphThinkRail)+" "+sDim.Italic(true).Render(l))
 		}

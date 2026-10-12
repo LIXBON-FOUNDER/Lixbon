@@ -121,6 +121,18 @@ func (t *transcript) start(e *entry) int {
 	return start
 }
 
+// remove saca e del transcript y devuelve cuántas filas ocupaba.
+func (t *transcript) remove(e *entry) int {
+	for i, x := range t.entries {
+		if x == e {
+			t.entries = append(t.entries[:i], t.entries[i+1:]...)
+			t.stale = true
+			return len(e.rows)
+		}
+	}
+	return 0
+}
+
 // refresh vuelve a pintar e y devuelve la fila donde empieza y cuántas filas
 // ganó o perdió.
 func (t *transcript) refresh(e *entry) (start, delta int) {

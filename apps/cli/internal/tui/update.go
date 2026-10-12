@@ -41,6 +41,7 @@ func (m *Model) startTick() tea.Cmd {
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
+	m.adoptAnchor()
 	m.syncRemote()
 	return model, cmd
 }
@@ -166,6 +167,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.openTool != nil {
 			m.log.refresh(m.openTool)
 		}
+		m.streamAnswer(true)
 		return m, tickCmd()
 
 	case deltaMsg:
@@ -176,6 +178,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case sse.Content:
 			m.liveChars += utf8.RuneCountInString(msg.text)
 			m.live.content.WriteString(msg.text)
+			m.live.prose = m.liveProse()
+			m.streamAnswer(false)
 		case sse.Reasoning:
 			if m.live.reasoning.Len() == 0 {
 				m.live.reasoningStarted = time.Now()
@@ -205,8 +209,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case compactProgressMsg:
-		if m.compacting != nil {
-			m.compacting.written = msg.written
+		if c := m.compacting; c != nil {
+			before := compactPct(c.written)
+			c.written = msg.written
+			if pct := compactPct(c.written); m.remote != nil && pct/5 != before/5 {
+				m.remote.link.Emit("compact", map[string]any{"phase": "progress", "pct": pct, "step": "summary"})
+			}
 		}
 		return m, nil
 
@@ -240,6 +248,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case askMsg:
 		return m, m.openAsk(msg)
+
+	case askClosedMsg:
+		if m.picker != nil && m.picker.token == any(msg.reply) {
+			m.picker = nil
+		}
+		if m.prompt != nil && m.prompt.token == any(msg.reply) {
+			m.prompt = nil
+		}
+		return m, nil
 
 	case cmdDoneMsg:
 		return m, m.finishAsync(msg)
@@ -345,9 +362,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "shift+tab":
-		if !m.busyNow() {
-			m.cycleMode()
-		}
+		m.cycleMode()
 		return m, nil
 	case "up":
 		if len(m.menu) > 0 {

@@ -67,8 +67,14 @@ func TestClickingTheModelOpensThePicker(t *testing.T) {
 	if h.m.picker == nil || h.m.picker.title != "Modelo" {
 		t.Fatal("un clic en el modelo abre el selector")
 	}
-	h.m.View()
-	h.update(tea.MouseClickMsg{X: 4, Y: h.m.panelY + h.m.picker.optionTop + 1, Button: tea.MouseLeft})
+	screen := ansi.Strip(h.m.View().Content)
+	if h.m.panelY != 1 || h.m.panelX+h.m.panelW < h.m.barModel.x0 || h.m.panelX > h.m.barModel.x1 {
+		t.Fatalf("el selector se despliega bajo el botón: panel x=%d y=%d w=%d, botón %+v", h.m.panelX, h.m.panelY, h.m.panelW, h.m.barModel)
+	}
+	if rows := strings.Split(screen, "\n"); !strings.Contains(rows[1], "Modelo") {
+		t.Fatalf("el borde del selector va justo bajo la barra: %q", rows[1])
+	}
+	h.update(tea.MouseClickMsg{X: h.m.panelX + 4, Y: h.m.panelY + h.m.picker.optionTop + 1, Button: tea.MouseLeft})
 	if h.m.picker != nil || h.chat.Model != "llama" {
 		t.Fatalf("un clic en una fila la elige: modelo %q", h.chat.Model)
 	}
@@ -76,6 +82,37 @@ func TestClickingTheModelOpensThePicker(t *testing.T) {
 	h.update(tea.MouseClickMsg{X: h.m.footMode.x0 + 1, Y: h.m.height - 1, Button: tea.MouseLeft})
 	if h.m.modeName() != "agent" {
 		t.Fatalf("un clic en el modo del pie lo cambia: %s", h.m.modeName())
+	}
+}
+
+func TestChromeButtonsWorkWhileTheAgentRuns(t *testing.T) {
+	h := newHarness(t, nil)
+	h.m.running = true
+	h.m.View()
+	h.update(tea.MouseClickMsg{X: h.m.barModel.x0, Y: 0, Button: tea.MouseLeft})
+	if h.m.picker == nil || h.m.picker.anchor == nil {
+		t.Fatal("con el agente trabajando el botón del modelo abre su selector, anclado")
+	}
+	h.m.View()
+	if !strings.Contains(h.m.topBar(h.m.width), "\x1b[") {
+		t.Fatal("la barra se pinta")
+	}
+	h.update(tea.MouseClickMsg{X: 0, Y: h.m.height / 2, Button: tea.MouseLeft})
+	if h.m.picker != nil {
+		t.Fatal("un clic fuera del panel lo cierra")
+	}
+	h.m.View()
+	h.update(tea.MouseClickMsg{X: h.m.footMode.x0 + 1, Y: h.m.height - 1, Button: tea.MouseLeft})
+	if h.m.modeName() != "agent" {
+		t.Fatalf("el modo cambia aunque el agente trabaje: %s", h.m.modeName())
+	}
+	h.update(tea.MouseClickMsg{X: h.m.footEffort.x0, Y: h.m.height - 1, Button: tea.MouseLeft})
+	if h.m.picker == nil || h.m.picker.anchor == nil {
+		t.Fatal("el razonamiento abre su selector anclado al pie")
+	}
+	h.m.View()
+	if h.m.panelY+h.m.panelH != h.m.height-1 {
+		t.Fatalf("el panel del pie termina justo encima: y=%d h=%d alto=%d", h.m.panelY, h.m.panelH, h.m.height)
 	}
 }
 

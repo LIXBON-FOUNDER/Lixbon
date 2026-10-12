@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -165,6 +166,28 @@ func TestConsecutiveDeltasAreMergedIntoOneEvent(t *testing.T) {
 	relay.mu.Unlock()
 	if len(deltas) != 1 || deltas[0] != "hola mundo" {
 		t.Fatalf("deltas: %q", deltas)
+	}
+}
+
+func TestOutputIsMergedOnlyWithinTheSameTool(t *testing.T) {
+	link, relay := started(t)
+	link.Emit("reasoning_delta", map[string]any{"text": "pien"})
+	link.Emit("reasoning_delta", map[string]any{"text": "so"})
+	link.Emit("tool_output", map[string]any{"id": "a", "text": "uno\n"})
+	link.Emit("tool_output", map[string]any{"id": "a", "text": "dos\n"})
+	link.Emit("tool_output", map[string]any{"id": "b", "text": "tres\n"})
+	link.Emit("assistant_done", map[string]any{"text": "fin", "interrupted": false})
+	eventually(t, "assistant_done", func() bool { return relay.find("assistant_done") != nil })
+	var got []string
+	relay.mu.Lock()
+	for _, e := range relay.events {
+		if e["type"] == "reasoning_delta" || e["type"] == "tool_output" {
+			got = append(got, fmt.Sprint(e["id"], ":", e["text"]))
+		}
+	}
+	relay.mu.Unlock()
+	if want := []string{"<nil>:pienso", "a:uno\ndos\n", "b:tres\n"}; !slices.Equal(got, want) {
+		t.Fatalf("eventos %q, esperaba %q", got, want)
 	}
 }
 

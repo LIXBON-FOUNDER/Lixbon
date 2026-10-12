@@ -172,19 +172,31 @@ export function keepStreamAlive(connect, { onResume } = {}) {
 }
 
 // ── Reducer del transcript remoto ───────────────────────────────────────────
-// items: [{ kind: 'user'|'assistant'|'tool'|'error', ... }]. La burbuja del
-// asistente en streaming es siempre la última con kind 'assistant' y open:true.
+// items: [{ kind: 'user'|'assistant'|'thinking'|'tool'|'qa'|'end'|'notice'|
+// 'command'|'compacted'|'error', ... }]. La burbuja del asistente en streaming
+// es siempre la última con kind 'assistant' y open:true; el razonamiento en
+// curso, el último 'thinking' con open:true. 'end' cierra un turno con lo que
+// duró y si se interrumpió.
 
 export const initialRemoteState = {
   items: [],
   approvals: [], // [{ id, tool, summary, risk, path, adds, dels, diff }]
   choices: [], // selectores del host: [{ id, title, body, options: [{ label, value, description, badge }] }]
   agentState: 'idle', // idle | thinking
-  activity: null, // 'compacting' mientras Claude Code compacta
+  // Qué hace el agente ahora: compacting (Claude Code), reasoning, writing,
+  // tool (con activityLabel) o working; busySince, cuándo empezó el turno.
+  activity: null,
+  activityLabel: '',
+  activityTool: '',
+  busySince: null,
   hostConnected: false,
   meta: null, // hello: { source, agent, title, workspace, machine, mode, model, commands, capabilities }
   background: [], // tareas que el agente dejó corriendo: [{ id, type, description, since }]
   files: null, // última búsqueda de @archivos: { query, items: [{ name, rel, path }] }
+  // Ventana de contexto del host: { pct, tokens, window, files, system, auto }.
+  context: null,
+  // Compactación en curso: { phase, pct, messages, before, estimate, since }.
+  compact: null,
   // Orquestador del host: último snapshot y respuestas a peticiones puntuales.
   orch: null,
   orchDiff: {},
@@ -204,14 +216,46 @@ function mapSnapshotMessages(messages) {
   for (const m of Array.isArray(messages) ? messages : []) {
     if (!m || typeof m !== 'object') continue;
     if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
-    else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
+    else if (m.role === 'assistant') {
+      items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
+      if (m.final) items.push(endItem(m));
+    } else if (m.role === 'thinking') items.push(withKey({ kind: 'thinking', text: m.content || '', ms: num(m.ms), open: false }));
     else if (m.role === 'tool') {
-      items.push(withKey({ kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', result: m.content || '', error: m.ok === false, running: !!m.pending, ...changeOf(m) }));
-    } else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
+      items.push(withKey({
+        kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', readonly: !!m.readonly,
+        result: m.content || '', error: m.ok === false, running: !!m.pending, ...changeOf(m), ...resultOf(m),
+      }));
+    } else if (m.role === 'qa') items.push(withKey({ kind: 'qa', question: m.question || '', answer: m.content || '' }));
+    else if (m.role === 'compacted') items.push(compactedItem({ ...m, summary: m.content }));
+    else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
     else if (m.role === 'notice') items.push(withKey({ kind: 'notice', text: m.content || '' }));
     else if (m.role === 'command') items.push(commandItem(m));
   }
   return items;
+}
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+const endItem = (ev) => withKey({ kind: 'end', ms: num(ev.ms), interrupted: !!ev.interrupted });
+
+const compactedItem = (ev) => withKey({ kind: 'compacted', before: num(ev.before), after: num(ev.after), summary: ev.summary || '' });
+
+// Lo que el host cuenta de una herramienta al terminar: duración, código de
+// salida, la medida («212 líneas») y las filas de una búsqueda.
+function resultOf(ev) {
+  const out = {};
+  if (num(ev.ms) !== null) out.ms = ev.ms;
+  if (num(ev.exit) !== null) out.exit = ev.exit;
+  if (typeof ev.meta === 'string' && ev.meta) out.meta = ev.meta;
+  if (Array.isArray(ev.lines)) out.lines = ev.lines.filter((l) => typeof l === 'string');
+  return out;
+}
+
+const OUTPUT_KEEP = 60;
+
+function appendOutput(prev, text) {
+  const lines = `${prev || ''}${text || ''}`.split('\n');
+  return lines.slice(-OUTPUT_KEEP - 1).join('\n');
 }
 
 function commandItem(ev) {
@@ -232,7 +276,14 @@ function changeOf(ev) {
   if (typeof ev.adds === 'number') out.adds = ev.adds;
   if (typeof ev.dels === 'number') out.dels = ev.dels;
   if (typeof ev.path === 'string' && ev.path) out.path = ev.path;
+  if (Array.isArray(ev.rows)) out.rows = ev.rows.filter((r) => Array.isArray(r) && r.length >= 3);
   return out;
+}
+
+function closeOpenThinking(items) {
+  const idx = items.findLastIndex((it) => it.kind === 'thinking' && it.open);
+  if (idx === -1) return items;
+  return items.map((it, i) => (i === idx ? { ...it, open: false, ms: it.ms ?? Date.now() - it.since } : it));
 }
 
 function closeOpenAssistant(items, finalText, keepIfEmpty = false) {
@@ -330,29 +381,50 @@ export function remoteReducer(state, ev) {
     case 'assistant_done': {
       // Al releer una sesión guardada no hay deltas (no se persisten), así que
       // no existe burbuja abierta que cerrar: el turno se crea aquí, ya cerrado.
-      const idx = s.items.findLastIndex((it) => it.kind === 'assistant' && it.open);
-      if (idx === -1) {
-        const text = ev.text || '';
-        return text.trim()
-          ? { ...s, items: [...s.items, withKey({ kind: 'assistant', text, open: false })] }
-          : s;
-      }
-      return { ...s, items: closeOpenAssistant(s.items, ev.text || '') };
+      const base = closeOpenThinking(s.items);
+      const idx = base.findLastIndex((it) => it.kind === 'assistant' && it.open);
+      const text = ev.text || '';
+      let items;
+      if (idx === -1) items = text.trim() ? [...base, withKey({ kind: 'assistant', text, open: false })] : base;
+      else items = closeOpenAssistant(base, text);
+      return { ...s, items: [...items, endItem(ev)] };
+    }
+    case 'reasoning_delta': {
+      const items = [...s.items];
+      const idx = items.findLastIndex((it) => it.kind === 'thinking' && it.open);
+      if (idx === -1) items.push(withKey({ kind: 'thinking', text: ev.text || '', open: true, since: Date.now(), ms: null }));
+      else items[idx] = { ...items[idx], text: items[idx].text + (ev.text || '') };
+      return { ...s, items };
+    }
+    case 'reasoning': {
+      const items = [...s.items];
+      const idx = items.findLastIndex((it) => it.kind === 'thinking' && it.open);
+      const done = { text: ev.text || '', ms: num(ev.ms), open: false };
+      if (idx === -1) items.push(withKey({ kind: 'thinking', ...done }));
+      else items[idx] = { ...items[idx], ...done };
+      return { ...s, items };
     }
     case 'tool_use':
       return {
         ...s,
-        items: [...closeOpenAssistant(s.items), withKey({
+        items: [...closeOpenAssistant(closeOpenThinking(s.items)), withKey({
           kind: 'tool', id: ev.id || '', tool: ev.tool || 'tool', summary: ev.summary || '', label: ev.label || '',
-          readonly: !!ev.readonly, running: true, result: '', error: false, ...changeOf(ev),
+          readonly: !!ev.readonly, running: true, result: '', error: false, since: Date.now(), ...changeOf(ev),
         })],
       };
+    case 'tool_output': {
+      const idx = s.items.findLastIndex((it) => it.kind === 'tool' && it.id === ev.id);
+      if (idx === -1) return s;
+      const items = [...s.items];
+      items[idx] = { ...items[idx], output: appendOutput(items[idx].output, ev.text) };
+      return { ...s, items };
+    }
     case 'tool_result': {
       const items = [...s.items];
       const idx = ev.id
         ? items.findLastIndex((it) => it.kind === 'tool' && it.id === ev.id)
         : items.findLastIndex((it) => it.kind === 'tool' && it.running && it.tool === ev.tool);
-      const patch = { running: false, result: ev.result || '', error: !!ev.error, ...changeOf(ev) };
+      const patch = { running: false, result: ev.result || '', error: !!ev.error, ...changeOf(ev), ...resultOf(ev) };
       if (idx === -1) {
         items.push(withKey({ kind: 'tool', tool: ev.tool || 'tool', summary: '', ...patch }));
       } else {
@@ -360,8 +432,32 @@ export function remoteReducer(state, ev) {
       }
       return { ...s, items };
     }
-    case 'status':
-      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle', activity: ev.state === 'thinking' ? ev.activity || null : null };
+    case 'question_answered':
+      return { ...s, items: [...s.items, withKey({ kind: 'qa', question: ev.question || '', answer: ev.answer || '' })] };
+    case 'context':
+      return num(ev.pct) === null ? s : { ...s, context: { pct: ev.pct, tokens: num(ev.tokens), window: num(ev.window), files: num(ev.files) || 0, system: num(ev.system) || 0, auto: num(ev.auto) } };
+    case 'compact':
+      if (ev.phase === 'start') {
+        return { ...s, compact: { pct: 10, messages: num(ev.messages), before: num(ev.before), estimate: num(ev.estimate), since: Date.now() } };
+      }
+      if (ev.phase === 'progress' && s.compact) return { ...s, compact: { ...s.compact, pct: num(ev.pct) ?? s.compact.pct } };
+      if (ev.phase === 'failed') {
+        return { ...s, compact: null, items: [...s.items, withKey({ kind: 'error', text: `No se pudo compactar: ${ev.message || 'el modelo no devolvió resumen'}` })] };
+      }
+      return s;
+    case 'compacted':
+      return { ...s, compact: null, items: [...closeOpenAssistant(s.items), compactedItem(ev)] };
+    case 'status': {
+      const busy = ev.state === 'thinking';
+      return {
+        ...s,
+        agentState: busy ? 'thinking' : 'idle',
+        activity: busy ? ev.activity || null : null,
+        activityLabel: busy ? ev.label || '' : '',
+        activityTool: busy ? ev.tool || '' : '',
+        busySince: busy ? s.busySince || Date.now() : null,
+      };
+    }
     case 'approval_request':
       if (s.approvals.some((a) => a.id === ev.id)) return s;
       return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit', ...changeOf(ev) }] };
@@ -371,7 +467,13 @@ export function remoteReducer(state, ev) {
       if (s.choices.some((x) => x.id === ev.id)) return s;
       return {
         ...s,
-        choices: [...s.choices, { id: ev.id, title: ev.title || 'Elige una opción', body: ev.body || '', options: Array.isArray(ev.options) ? ev.options : [] }],
+        choices: [
+          ...s.choices,
+          {
+            id: ev.id, title: ev.title || 'Elige una opción', body: ev.body || '', options: Array.isArray(ev.options) ? ev.options : [],
+            question: ev.kind === 'question', free: !!ev.free,
+          },
+        ],
       };
     case 'choice_resolved':
       return { ...s, choices: s.choices.filter((x) => x.id !== ev.id) };
@@ -382,12 +484,15 @@ export function remoteReducer(state, ev) {
     case 'background':
       return { ...s, background: Array.isArray(ev.tasks) ? ev.tasks : [] };
     case 'command_result':
+      // Un host que cuenta el compact por eventos deja constancia con el
+      // separador del hilo; la tarjeta del comando lo repetiría.
+      if (ev.name === 'compact' && s.meta?.capabilities?.includes('compact')) return s;
       return { ...s, items: [...closeOpenAssistant(s.items), commandItem(ev)] };
     case 'error':
-      return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
+      return { ...s, items: [...closeOpenThinking(s.items), withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':
     case 'session_ended':
-      return { ...s, ended: true, hostConnected: false, approvals: [], choices: [], background: [] };
+      return { ...s, ended: true, hostConnected: false, approvals: [], choices: [], background: [], compact: null };
     default:
       return s;
   }

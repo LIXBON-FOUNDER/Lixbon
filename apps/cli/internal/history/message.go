@@ -19,6 +19,10 @@ type Message struct {
 	Images     []string          `json:"images,omitempty"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
 	Name       string            `json:"name,omitempty"`
+	// Thinking es el razonamiento de un paso con llamadas: los modelos
+	// thinking (qwen3, gpt-oss) lo esperan de vuelta dentro del mismo turno y,
+	// sin él, repiten la llamada que acaban de hacer. No pasa de un turno a otro.
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // MarshalJSON conserva los campos que el gateway espera: content siempre
@@ -31,6 +35,9 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	}
 	if len(m.Images) > 0 {
 		out["images"] = m.Images
+	}
+	if m.Thinking != "" {
+		out["thinking"] = m.Thinking
 	}
 	if m.Role == "tool" {
 		out["tool_call_id"] = m.ToolCallID

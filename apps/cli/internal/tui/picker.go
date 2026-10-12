@@ -48,6 +48,8 @@ type picker struct {
 	quiet bool
 	// token identifica a quién responde el panel (la aprobación en curso).
 	token any
+	// anchor: el panel lo abrió un botón y se pinta pegado a él.
+	anchor *anchor
 
 	// Lo que pintó el último view, para traducir clics a filas.
 	start, optionTop, shown int

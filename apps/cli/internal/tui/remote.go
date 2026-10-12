@@ -9,8 +9,10 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,6 +21,7 @@ import (
 	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/history"
+	"lixbon.com/cli/internal/process"
 	"lixbon.com/cli/internal/remote"
 	"lixbon.com/cli/internal/sse"
 	"lixbon.com/cli/internal/textutil"
@@ -35,8 +38,10 @@ type (
 	remoteClosedMsg struct{ link *remote.Link }
 )
 
-// remoteCapabilities es lo que la app puede mandarle a este host.
-var remoteCapabilities = []string{"attachments", "images", "mentions", "files", "config"}
+// remoteCapabilities es lo que la app puede mandarle a este host y lo que
+// este host le cuenta además del transcript (razonamiento, contexto, compact,
+// preguntas del agente con respuesta libre).
+var remoteCapabilities = []string{"attachments", "images", "mentions", "files", "config", "reasoning", "context", "compact", "questions"}
 
 // remoteBlocked son los comandos que desde la app dejarían la sesión sin host
 // o actúan sobre cosas del equipo que el móvil no ve.
@@ -60,6 +65,9 @@ const (
 	remoteFileHits  = 30
 	remoteImageDir  = "lixbon-remote"
 	remoteImageTTL  = 24 * time.Hour
+	remoteThinkMax  = 6000
+	remoteListLines = 20
+	remoteDiffRows  = 240
 )
 
 // internalPrompts son mensajes de usuario que el agente se inyecta a sí mismo:
@@ -78,9 +86,15 @@ type remoteHost struct {
 	askUser  func(ctx context.Context, question string, options []string) (string, bool)
 	onTodo   func(items, previous []tools.TodoItem)
 
-	mu   sync.Mutex
-	base []map[string]any
-	log  []map[string]any
+	mu        sync.Mutex
+	base      []map[string]any
+	log       []map[string]any
+	questions map[string]chan string
+	lastCtx   string
+
+	// live es el sink del turno en curso: la salida de los comandos llega
+	// desde la goroutine del proceso.
+	live atomic.Pointer[remoteSink]
 
 	// Solo los toca la goroutine de la interfaz.
 	helloKey string
@@ -131,7 +145,16 @@ func (h *remoteHost) record(kind string, fields map[string]any) {
 	case "assistant_done", "assistant_prose":
 		if strings.TrimSpace(str("text")) != "" {
 			item = map[string]any{"role": "assistant", "content": str("text")}
+			if kind == "assistant_done" {
+				item["final"], item["ms"], item["interrupted"] = true, fields["ms"], fields["interrupted"]
+			}
 		}
+	case "reasoning":
+		item = map[string]any{"role": "thinking", "content": str("text"), "ms": fields["ms"]}
+	case "question_answered":
+		item = map[string]any{"role": "qa", "question": str("question"), "content": str("answer")}
+	case "compacted":
+		item = map[string]any{"role": "compacted", "content": str("summary"), "before": fields["before"], "after": fields["after"]}
 	case "notice":
 		item = map[string]any{"role": "notice", "content": str("text")}
 	case "error":
@@ -149,6 +172,11 @@ func (h *remoteHost) record(kind string, fields map[string]any) {
 				h.log[i]["pending"] = false
 				h.log[i]["content"] = fields["result"]
 				h.log[i]["ok"] = fields["error"] != true
+				for _, k := range []string{"ms", "exit", "lines", "meta"} {
+					if v, ok := fields[k]; ok {
+						h.log[i][k] = v
+					}
+				}
 				return
 			}
 		}
@@ -193,6 +221,81 @@ func (a *remoteApprover) Approve(ctx context.Context, req agent.Approval) (agent
 
 var errRemoteGone = errors.New("el control remoto se cerró")
 
+// ── preguntas del agente (ask_user) ──────────────────────────────────────
+
+// ask pregunta a la vez en la terminal y en el móvil, como las aprobaciones:
+// vale la primera respuesta y la otra pregunta se retira. En el hilo de la
+// app queda constancia de lo que se respondió.
+func (h *remoteHost) ask(ctx context.Context, question string, options []string) (string, bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type reply struct {
+		answer string
+		ok     bool
+	}
+	askers := []func(context.Context, string, []string) (string, bool){h.askRemote}
+	if h.askUser != nil {
+		askers = append(askers, h.askUser)
+	}
+	replies := make(chan reply, len(askers))
+	for _, ask := range askers {
+		go func() {
+			answer, ok := ask(ctx, question, options)
+			replies <- reply{answer, ok}
+		}()
+	}
+	r := <-replies
+	if r.ok {
+		h.emit("question_answered", map[string]any{"question": question, "answer": r.answer})
+	}
+	return r.answer, r.ok
+}
+
+// askRemote abre la pregunta en la app: elige una opción o escribe otra
+// respuesta. Vacío equivale a cancelar.
+func (h *remoteHost) askRemote(ctx context.Context, question string, options []string) (string, bool) {
+	id := remote.NewID()
+	waiter := make(chan string, 1)
+	h.mu.Lock()
+	h.questions[id] = waiter
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.questions, id)
+		h.mu.Unlock()
+	}()
+	choices := make([]map[string]string, 0, len(options))
+	for _, o := range options {
+		choices = append(choices, map[string]string{"label": o, "value": o})
+	}
+	h.link.Emit("choice_request", map[string]any{"id": id, "kind": "question", "title": question, "options": choices, "free": true})
+	select {
+	case answer := <-waiter:
+		h.link.Emit("choice_resolved", map[string]any{"id": id, "value": answer})
+		return answer, strings.TrimSpace(answer) != ""
+	case <-ctx.Done():
+		h.link.Emit("choice_resolved", map[string]any{"id": id})
+		return "", false
+	case <-h.link.Done():
+		return "", false
+	}
+}
+
+// answer entrega la respuesta del móvil a una pregunta abierta.
+func (h *remoteHost) answer(id, value string) bool {
+	h.mu.Lock()
+	waiter := h.questions[id]
+	h.mu.Unlock()
+	if waiter == nil {
+		return false
+	}
+	select {
+	case waiter <- value:
+	default:
+	}
+	return true
+}
+
 // sharedApprover pregunta a la vez en la terminal y en el móvil: vale la
 // primera respuesta y la otra pregunta se retira.
 type sharedApprover struct{ local, remote agent.Approver }
@@ -234,7 +337,35 @@ func changeFields(c agent.Change) map[string]any {
 			b.WriteString(" " + r.Text + "\n")
 		}
 	}
-	return map[string]any{"path": c.Path, "adds": adds, "dels": dels, "diff": textutil.Head(b.String(), remoteDiffChars)}
+	return map[string]any{"path": c.Path, "adds": adds, "dels": dels, "diff": textutil.Head(b.String(), remoteDiffChars), "rows": diffRows(c)}
+}
+
+// diffRows es el diff para la app: solo lo que cambia con una línea de
+// contexto a cada lado, cada fila [tipo, nº de línea, texto]. Un salto ("g")
+// lleva en el número cuántas líneas sin cambios se omiten.
+func diffRows(c agent.Change) [][]any {
+	rows := agent.DiffRows(c, 1)
+	out := make([][]any, 0, min(len(rows), remoteDiffRows))
+	for i, r := range rows {
+		if len(out) == remoteDiffRows {
+			break
+		}
+		switch r.Kind {
+		case "add":
+			out = append(out, []any{"a", r.NewNo, textutil.Head(r.Text, 240)})
+		case "del":
+			out = append(out, []any{"d", r.OldNo, textutil.Head(r.Text, 240)})
+		case "gap":
+			skipped := 0
+			if i > 0 && i+1 < len(rows) {
+				skipped = max(0, rows[i+1].OldNo-rows[i-1].OldNo-1)
+			}
+			out = append(out, []any{"g", skipped, ""})
+		default:
+			out = append(out, []any{"c", r.NewNo, textutil.Head(r.Text, 240)})
+		}
+	}
+	return out
 }
 
 // ── turno ────────────────────────────────────────────────────────────────
@@ -244,23 +375,40 @@ func changeFields(c agent.Change) map[string]any {
 // de las llamadas: se manda limpia, como la ve la terminal.
 type remoteSink struct {
 	chat.Sink
-	host  *remoteHost
-	agent bool
+	host    *remoteHost
+	agent   bool
+	started time.Time
+	// context mide la ventana ocupada; se llama desde la goroutine del turno.
+	context func() map[string]any
 
 	mu     sync.Mutex
 	raw    strings.Builder
 	base   string
 	sent   string
 	toolID string
+	// readID es la última lectura: llega ya hecha y solo recibe resultado si
+	// falla, así que no queda abierta como toolID.
+	readID, readTool string
+	activity         string
+	thinking         strings.Builder
+	thinkSince       time.Time
+	// output es la línea a medias de la salida del comando en curso.
+	output []byte
+}
+
+// setActivity le dice al móvil qué hace ahora el agente (pensando,
+// escribiendo, ejecutando algo); solo se manda cuando cambia.
+func (s *remoteSink) setActivity(activity, tool, label string) {
+	if key := activity + "|" + tool + "|" + label; key != s.activity {
+		s.activity = key
+		s.host.link.Emit("status", map[string]any{"state": "thinking", "activity": activity, "tool": tool, "label": label})
+	}
 }
 
 func (s *remoteSink) prose() string {
 	text := s.raw.String()
 	if s.agent {
 		text = toolparse.CleanProse(text)
-		if strings.EqualFold(strings.Trim(text, ". "), "ok") {
-			text = ""
-		}
 	}
 	if text == "" {
 		return strings.TrimSuffix(s.base, "\n\n")
@@ -270,27 +418,53 @@ func (s *remoteSink) prose() string {
 
 func (s *remoteSink) Delta(kind sse.Kind, text string) {
 	s.Sink.Delta(kind, text)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if kind == sse.Reasoning {
+		s.setActivity("reasoning", "", "")
+		if s.thinking.Len() == 0 {
+			s.thinkSince = time.Now()
+		}
+		if s.thinking.Len() < remoteThinkMax {
+			s.thinking.WriteString(text)
+			s.host.link.Emit("reasoning_delta", map[string]any{"text": text})
+		}
+		return
+	}
 	if kind != sse.Content {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.raw.WriteString(text)
 	prose := s.prose()
+	if prose == s.sent {
+		return
+	}
+	s.endThinking()
+	s.setActivity("writing", "", "")
 	if rest, ok := strings.CutPrefix(prose, s.sent); ok {
-		if rest != "" {
-			s.host.link.Emit("assistant_delta", map[string]any{"text": rest})
-		}
+		s.host.link.Emit("assistant_delta", map[string]any{"text": rest})
 	} else {
 		s.host.link.Emit("assistant_replace", map[string]any{"text": prose})
 	}
 	s.sent = prose
 }
 
+// endThinking cierra el razonamiento del paso con lo que duró: queda en el
+// hilo del móvil como «Pensó N s».
+func (s *remoteSink) endThinking() {
+	text := strings.TrimSpace(s.thinking.String())
+	s.thinking.Reset()
+	if text == "" {
+		return
+	}
+	s.host.emit("reasoning", map[string]any{"text": textutil.Head(text, remoteThinkMax), "ms": time.Since(s.thinkSince).Milliseconds()})
+}
+
 // closeStep cierra la prosa del paso. Antes de una herramienta, la burbuja del
 // móvil se cierra (y se apunta para el snapshot); entre pasos sin herramienta,
 // lo siguiente continúa la misma burbuja.
 func (s *remoteSink) closeStep(beforeTool bool) {
+	s.endThinking()
 	s.raw.Reset()
 	switch {
 	case beforeTool && s.sent != "":
@@ -315,13 +489,17 @@ func (s *remoteSink) Event(e agent.Event) {
 	switch e.Kind {
 	case agent.EventStep:
 		s.closeStep(false)
+		s.setActivity("working", "", "")
+		if s.context != nil {
+			s.host.emitContext(s.context())
+		}
 	case agent.EventNote:
 		s.closeStep(true)
 		s.host.notice(e.Text)
 	case agent.EventAction:
 		s.closeStep(true)
-		s.toolID = remote.NewID()
-		fields := map[string]any{"id": s.toolID, "tool": e.Tool, "summary": e.Text, "readonly": e.ReadOnly}
+		id := remote.NewID()
+		fields := map[string]any{"id": id, "tool": e.Tool, "summary": e.Text, "readonly": e.ReadOnly}
 		if e.Change != nil {
 			for k, v := range changeFields(*e.Change) {
 				fields[k] = v
@@ -330,33 +508,175 @@ func (s *remoteSink) Event(e agent.Event) {
 		s.host.emit("tool_use", fields)
 		// Las de solo lectura llegan ya hechas: solo traen resultado si fallan.
 		if e.ReadOnly {
-			s.host.emit("tool_result", map[string]any{"id": s.toolID, "tool": e.Tool, "result": e.Meta, "error": false})
+			result := map[string]any{"id": id, "tool": e.Tool, "result": e.Meta, "meta": e.Meta, "error": false}
+			if lines := listLines(e.Tool, e.Result); len(lines) > 0 {
+				result["lines"] = lines
+			}
+			s.host.emit("tool_result", result)
+			s.toolID, s.readID, s.readTool = "", id, e.Tool
+			s.setActivity("working", "", "")
+		} else {
+			s.toolID, s.readID, s.output = id, "", nil
+			s.setActivity("tool", e.Tool, textutil.Head(e.Text, 120))
 		}
 	case agent.EventActionResult:
 		id := s.toolID
+		if id == "" && s.readID != "" && e.Tool == s.readTool {
+			id = s.readID
+		}
 		if id == "" {
 			id = remote.NewID()
 		}
-		s.toolID = ""
-		s.host.emit("tool_result", map[string]any{
-			"id": id, "tool": e.Tool, "error": e.Failed,
-			"result": textutil.Head(firstNonEmpty(e.Result, e.Summary), remote.ResultChars),
-		})
+		s.flushOutput(true)
+		s.toolID, s.readID = "", ""
+		s.setActivity("working", "", "")
+		result := firstNonEmpty(e.Result, e.Summary)
+		fields := map[string]any{"id": id, "tool": e.Tool, "error": e.Failed}
+		if e.Elapsed > 0 {
+			fields["ms"] = e.Elapsed.Milliseconds()
+		}
+		if e.Tool == "run_command" {
+			if code, rest, ok := exitCode(result); ok {
+				fields["exit"], result = code, rest
+			}
+		}
+		fields["result"] = textutil.Head(result, remote.ResultChars)
+		s.host.emit("tool_result", fields)
 	case agent.EventReadGroup:
 		s.closeStep(true)
 		id := remote.NewID()
 		s.host.emit("tool_use", map[string]any{"id": id, "tool": "read_file", "summary": strings.Join(e.Names, ", "), "readonly": true})
-		s.host.emit("tool_result", map[string]any{"id": id, "tool": "read_file", "result": fmt.Sprintf("%d líneas", e.Lines), "error": false})
+		meta := fmt.Sprintf("%d líneas", e.Lines)
+		s.host.emit("tool_result", map[string]any{"id": id, "tool": "read_file", "result": meta, "meta": meta, "error": false})
 	}
 }
 
-// finish cierra la herramienta que el turno dejó a medias (cancelado o error).
+// exitCode separa el «[EXIT n]» con que run_command abre su resultado; un
+// timeout cuenta como -1.
+func exitCode(result string) (int, string, bool) {
+	if rest, ok := strings.CutPrefix(result, "[TIMEOUT]"); ok {
+		return -1, strings.TrimSpace(rest), true
+	}
+	rest, ok := strings.CutPrefix(result, "[EXIT ")
+	if !ok {
+		return 0, result, false
+	}
+	num, rest, ok := strings.Cut(rest, "]")
+	code, err := strconv.Atoi(num)
+	if !ok || err != nil {
+		return 0, result, false
+	}
+	return code, strings.TrimSpace(rest), true
+}
+
+// listLines son las primeras filas de una búsqueda o un listado, para
+// desplegarlas en la app (ruta:línea o el nombre de cada entrada).
+func listLines(tool, result string) []string {
+	switch tool {
+	case "search", "search_codebase", "find_files", "list_files", "grep", "glob":
+	default:
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(result, "\n") {
+		if line = strings.TrimRight(line, " \r"); strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(out) == remoteListLines {
+			break
+		}
+		out = append(out, textutil.Head(line, 200))
+	}
+	return out
+}
+
+// outputChunk recibe la salida cruda del comando en curso y manda a la app las
+// líneas completas (una barra de progreso con \r se queda con lo último).
+func (s *remoteSink) outputChunk(chunk []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.toolID == "" {
+		return
+	}
+	s.output = append(s.output, chunk...)
+	s.flushOutput(false)
+}
+
+func (s *remoteSink) flushOutput(all bool) {
+	data := s.output
+	cut := len(data)
+	if !all {
+		cut = strings.LastIndexByte(string(data), '\n') + 1
+	}
+	if cut <= 0 || s.toolID == "" {
+		if all {
+			s.output = nil
+		}
+		return
+	}
+	var lines []string
+	for line := range strings.SplitSeq(string(data[:cut]), "\n") {
+		if i := strings.LastIndexByte(line, '\r'); i >= 0 && i < len(line)-1 {
+			line = line[i+1:]
+		}
+		if text := process.DecodeOutput([]byte(line)); text != "" {
+			lines = append(lines, textutil.Head(text, 300))
+		}
+	}
+	s.output = append([]byte(nil), data[cut:]...)
+	if len(lines) > 0 {
+		s.host.link.Emit("tool_output", map[string]any{"id": s.toolID, "text": strings.Join(lines, "\n") + "\n"})
+	}
+}
+
+// bubble es el texto final de la última burbuja: lo que ya vio escribirse más
+// la respuesta, si esta no salió en vivo (un aviso del propio CLI).
+func (s *remoteSink) bubble(answer string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	text := s.sent
+	if answer = strings.TrimSpace(answer); answer != "" && !strings.Contains(text, answer) {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += answer
+	}
+	return text
+}
+
+// finish cierra el razonamiento y la herramienta que el turno dejó a medias
+// (cancelado o error).
 func (s *remoteSink) finish() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.endThinking()
 	if s.toolID != "" {
 		s.host.emit("tool_result", map[string]any{"id": s.toolID, "result": "interrumpido", "error": true})
 		s.toolID = ""
+	}
+}
+
+// emitContext manda la ventana ocupada si cambió el porcentaje entero.
+func (h *remoteHost) emitContext(fields map[string]any) {
+	key := fmt.Sprint(fields["pct"], "/", fields["window"])
+	h.mu.Lock()
+	changed := key != h.lastCtx
+	h.lastCtx = key
+	h.mu.Unlock()
+	if changed {
+		h.emit("context", fields)
+	}
+}
+
+// remoteContext es la ventana de contexto ocupada, repartida como la app la
+// enseña: conversación, resultados de herramientas y lo fijo (sistema y
+// herramientas, que no cuenta para compactar).
+func remoteContext(c *chat.Chat) map[string]any {
+	tokens, files, system, window := c.ContextParts()
+	pct := func(n int) int { return int(float64(n)*100/float64(window) + 0.5) }
+	return map[string]any{
+		"tokens": tokens, "window": window, "pct": min(100, pct(tokens)),
+		"files": files, "system": system, "auto": int(history.AutoCompactRatio * 100),
 	}
 }
 
@@ -377,20 +697,28 @@ func (m *Model) remoteTurnStarted(prompt string, chips []imageChip) {
 
 func (m *Model) remoteTurnDone(msg doneMsg, cancelled bool) {
 	h := m.remote
-	if h.sink != nil {
-		h.sink.finish()
-		h.sink = nil
+	sink := h.sink
+	h.sink = nil
+	h.live.Store(nil)
+	if sink != nil {
+		sink.finish()
 	}
 	switch {
 	case msg.err != nil && !cancelled:
 		h.emit("error", map[string]any{"message": msg.err.Error()})
 	default:
 		display := strings.TrimSpace(msg.answer)
-		if m.chat.Mode == chat.ModeAgent {
+		if m.turnMode == chat.ModeAgent {
 			display = toolparse.CleanProse(msg.answer)
 		}
-		h.emit("assistant_done", map[string]any{"text": display, "interrupted": cancelled})
+		done := map[string]any{"text": display, "interrupted": cancelled}
+		if sink != nil {
+			done["text"] = sink.bubble(display)
+			done["ms"] = time.Since(sink.started).Milliseconds()
+		}
+		h.emit("assistant_done", done)
 	}
+	h.emitContext(remoteContext(m.chat))
 	h.link.Emit("status", map[string]any{"state": "idle"})
 }
 
@@ -491,7 +819,13 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 	link.Snapshot = host.snapshotNow
 
 	m.chat.Session.Approver = sharedApprover{local: host.approver, remote: &remoteApprover{link: link}}
-	m.chat.Toolbox.AskUser = nil
+	host.questions = map[string]chan string{}
+	m.chat.Toolbox.AskUser = host.ask
+	m.chat.Toolbox.OnOutput = func(chunk []byte) {
+		if s := host.live.Load(); s != nil {
+			s.outputChunk(chunk)
+		}
+	}
 	m.chat.Toolbox.OnTodo = func(items, previous []tools.TodoItem) {
 		host.onTodo(items, previous)
 		done := 0
@@ -521,6 +855,7 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 	m.print("")
 
 	link.EmitSnapshot()
+	host.emitContext(remoteContext(m.chat))
 	link.Emit("status", map[string]any{"state": "idle"})
 	send := m.send
 	go func() {
@@ -579,6 +914,7 @@ func (m *Model) leaveRemote(endSession bool) {
 	m.chat.Session.Approver = host.approver
 	m.chat.Toolbox.AskUser = host.askUser
 	m.chat.Toolbox.OnTodo = host.onTodo
+	m.chat.Toolbox.OnOutput = nil
 	go host.link.Stop(endSession)
 	m.gap()
 	m.add(note("Control remoto terminado; la sesión vuelve a esta terminal."))
@@ -817,7 +1153,7 @@ func (m *Model) remoteRun(name, arg string, run func() tea.Cmd) tea.Cmd {
 	}
 	if !wasBusy && m.busy != "" {
 		h.carry, h.pending = entries, &[2]string{name, arg}
-		h.link.Emit("status", map[string]any{"state": "thinking"})
+		h.link.Emit("status", map[string]any{"state": "thinking", "activity": "command", "label": strings.TrimSpace("/" + name + " " + arg)})
 		return cmd
 	}
 
@@ -885,6 +1221,9 @@ func (m *Model) offerChoice(p *picker) {
 // abierto en la terminal.
 func (m *Model) remoteChoose(id, value string) tea.Cmd {
 	h := m.remote
+	if h.answer(id, value) {
+		return nil
+	}
 	p := h.choices[id]
 	delete(h.choices, id)
 	if p == nil || m.picker != p {

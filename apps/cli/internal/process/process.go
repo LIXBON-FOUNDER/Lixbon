@@ -6,6 +6,7 @@ package process
 import (
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"regexp"
 	"time"
@@ -108,6 +109,11 @@ func Trim(output string) string {
 // devuelve TimedOut con la última salida en Output; si se cancela ctx mata el
 // árbol y devuelve el error del contexto.
 func Run(ctx context.Context, dir, command string, timeout time.Duration) (Result, error) {
+	return RunLive(ctx, dir, command, timeout, nil)
+}
+
+// RunLive es Run copiando además la salida cruda a live según llega.
+func RunLive(ctx context.Context, dir, command string, timeout time.Duration, live io.Writer) (Result, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -115,7 +121,11 @@ func Run(ctx context.Context, dir, command string, timeout time.Duration) (Resul
 	cmd.Cancel = func() error { killTree(cmd.Process.Pid); return nil }
 	cmd.WaitDelay = waitDelay
 	out := &capture{}
-	cmd.Stdout, cmd.Stderr = out, out
+	var sink io.Writer = out
+	if live != nil {
+		sink = io.MultiWriter(out, live)
+	}
+	cmd.Stdout, cmd.Stderr = sink, sink
 
 	if err := cmd.Start(); err != nil {
 		return Result{}, err

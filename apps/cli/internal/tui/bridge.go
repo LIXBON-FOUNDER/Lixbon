@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -45,7 +47,9 @@ type (
 	// approvalClosedMsg retira el panel de una aprobación que ya no espera
 	// (se respondió en el móvil o se canceló el turno).
 	approvalClosedMsg struct{ reply chan agent.Decision }
-	tickMsg           struct{}
+	// askClosedMsg retira la pregunta que ya se respondió en el móvil.
+	askClosedMsg struct{ reply chan askReply }
+	tickMsg      struct{}
 )
 
 type askReply struct {
@@ -53,16 +57,73 @@ type askReply struct {
 	ok     bool
 }
 
+// deltaEvery agrupa los fragmentos del modelo: llegan de a un token y cada
+// mensaje repinta la pantalla entera, así que uno por token encolaba más de lo
+// que la interfaz pintaba y la salida aparecía de golpe al final.
+var deltaEvery = 40 * time.Millisecond
+
 // uiSink traslada lo que ocurre durante un turno a mensajes de Bubble Tea.
 type uiSink struct {
 	send func(tea.Msg)
 	turn int
+
+	// mu se mantiene durante los envíos para que un evento nunca adelante a
+	// los fragmentos que llegaron antes que él.
+	mu      sync.Mutex
+	pending []deltaMsg
+	timer   *time.Timer
 }
 
-func (s *uiSink) Delta(kind sse.Kind, text string) { s.send(deltaMsg{s.turn, kind, text}) }
-func (s *uiSink) Event(e agent.Event)              { s.send(eventMsg{s.turn, e}) }
-func (s *uiSink) Note(text string)                 { s.send(noteMsg{s.turn, text}) }
-func (s *uiSink) Title(title string)               { s.send(titleMsg{title}) }
+func (s *uiSink) Delta(kind sse.Kind, text string) {
+	if deltaEvery <= 0 {
+		s.send(deltaMsg{s.turn, kind, text})
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n := len(s.pending); n > 0 && s.pending[n-1].kind == kind && kind != sse.Usage {
+		s.pending[n-1].text += text
+	} else {
+		s.pending = append(s.pending, deltaMsg{s.turn, kind, text})
+	}
+	if s.timer == nil {
+		s.timer = time.AfterFunc(deltaEvery, s.flush)
+	}
+}
+
+func (s *uiSink) flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushLocked()
+}
+
+func (s *uiSink) flushLocked() {
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	batch := s.pending
+	s.pending = nil
+	for _, d := range batch {
+		s.send(d)
+	}
+}
+
+func (s *uiSink) Event(e agent.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushLocked()
+	s.send(eventMsg{s.turn, e})
+}
+
+func (s *uiSink) Note(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushLocked()
+	s.send(noteMsg{s.turn, text})
+}
+
+func (s *uiSink) Title(title string) { s.send(titleMsg{title}) }
 
 // uiApprover pide la aprobación a la interfaz y espera la respuesta.
 type uiApprover struct{ send func(tea.Msg) }
@@ -88,6 +149,7 @@ func askUser(send func(tea.Msg)) func(ctx context.Context, question string, opti
 		case r := <-reply:
 			return r.answer, r.ok
 		case <-ctx.Done():
+			send(askClosedMsg{reply})
 			return "", false
 		}
 	}

@@ -5,21 +5,18 @@ import (
 	"testing"
 )
 
-// Un paso sin acciones (el modelo contesta con código y el agente le recuerda
-// aplicarlo) no debe fundir su texto con el del paso siguiente.
-func TestTextOfConsecutiveStepsIsNotGluedTogether(t *testing.T) {
+// La comprobación de si había código por aplicar va en silencio: si el modelo
+// solo contesta con texto, queda la respuesta del primer paso.
+func TestQuietCheckDoesNotShowItsReply(t *testing.T) {
 	h := agentHarness(t, true,
-		textReply("Primera parte.\n```\nprint(1)\n```"),
+		textReply("Primera parte.\n```js\nconst a = 1;\n```"),
 		textReply("Segunda parte."))
 	h.send("revisa")
 	h.settle()
 	out := h.out()
 	contains(t, out, "Primera parte.")
-	contains(t, out, "Segunda parte.")
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "Segunda parte.") && strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), glyphBrand)) != "Segunda parte." {
-			t.Fatalf("pasos fundidos en una línea: %q", line)
-		}
+	if strings.Contains(out, "Segunda parte.") {
+		t.Fatalf("la respuesta a la comprobación no se enseña:\n%s", out)
 	}
 	if h.gw.count() != 2 {
 		t.Fatalf("pasos: %d", h.gw.count())
