@@ -56,9 +56,16 @@ pub struct Dacl {
 
 /// Abreviatura SDDL -> SID. Lo que no se conoce se devuelve igual: no estará en la lista
 /// permitida y hará fallar la comprobación, que es lo que se quiere.
-pub fn sid_normalizado(sid: &str) -> String {
+///
+/// `LA` es la cuenta Administrador LOCAL (RID 500), que SDDL abrevia en lugar de escribir su SID
+/// completo. Solo se resuelve cuando el usuario actual es esa misma cuenta (su SID termina en
+/// `-500`, como `runneradmin` en GitHub Actions): entonces `LA` ES el usuario y no concede nada
+/// a nadie más. Con cualquier otro usuario se deja sin resolver y falla como SID ajeno.
+pub fn sid_normalizado(sid: &str, usuario_sid: &str) -> String {
     let s = sid.trim();
+    let usuario = usuario_sid.trim().to_ascii_uppercase();
     match s.to_ascii_uppercase().as_str() {
+        "LA" if usuario.starts_with("S-1-5-21-") && usuario.ends_with("-500") => usuario,
         "SY" => SID_SYSTEM.into(),
         "BA" => SID_ADMINISTRADORES.into(),
         "WD" => "S-1-1-0".into(),
@@ -71,7 +78,7 @@ pub fn sid_normalizado(sid: &str) -> String {
 }
 
 /// Interpreta una DACL en SDDL (`D:PAI(A;OICI;FA;;;SY)(A;;FA;;;S-1-5-21-...)`).
-pub fn parse_dacl(sddl: &str) -> Result<Dacl, String> {
+pub fn parse_dacl(sddl: &str, usuario_sid: &str) -> Result<Dacl, String> {
     let s = sddl.trim();
     let resto = s.strip_prefix("D:").ok_or_else(|| format!("no empieza por «D:»: {s}"))?;
     let inicio = resto.find('(').unwrap_or(resto.len());
@@ -111,7 +118,7 @@ pub fn parse_dacl(sddl: &str) -> Result<Dacl, String> {
             otro => return Err(format!("tipo de ACE no contemplado «{otro}»: «{ace}»")),
         };
         let flags = campos[1].as_bytes().chunks(2).map(|c| String::from_utf8_lossy(c).into_owned()).collect();
-        aces.push(Ace { allow, flags, sid: sid_normalizado(campos[5]) });
+        aces.push(Ace { allow, flags, sid: sid_normalizado(campos[5], usuario_sid) });
     }
     Ok(Dacl { protegida, aces })
 }
@@ -120,13 +127,13 @@ pub fn parse_dacl(sddl: &str) -> Result<Dacl, String> {
 /// El error incluye el descriptor observado y las ACE interpretadas.
 pub fn verifica_privada(descriptor: &str, usuario_sid: &str, que: &str) -> Result<(), String> {
     let fallo = |motivo: String| -> Result<(), String> {
-        let detalle = match parse_dacl(descriptor) {
+        let detalle = match parse_dacl(descriptor, usuario_sid) {
             Ok(d) => format!("{d:#?}"),
             Err(e) => format!("(no interpretable: {e})"),
         };
         Err(format!("{que}: {motivo}\n  descriptor observado: {descriptor}\n  usuario actual: {usuario_sid}\n  ACE interpretadas: {detalle}"))
     };
-    let dacl = match parse_dacl(descriptor) {
+    let dacl = match parse_dacl(descriptor, usuario_sid) {
         Ok(d) => d,
         Err(e) => return fallo(format!("DACL no interpretable: {e}")),
     };
@@ -271,6 +278,27 @@ mod tests {
     }
 
     #[test]
+    fn la_cuenta_administrador_local_abreviada_la_solo_es_el_usuario_si_es_el_rid_500() {
+        // Descriptores EXACTOS observados en windows-latest (usuario `runneradmin`, RID 500):
+        // SDDL escribe `LA` en lugar del SID del usuario.
+        let runner = "S-1-5-21-1643835476-1616584234-1346609752-500";
+        for d in [
+            "D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LA)",
+            "D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LA)",
+        ] {
+            verifica_privada(d, runner, "runner").unwrap_or_else(|e| panic!("{e}"));
+        }
+        // La misma ACE con un usuario que NO es el RID 500: `LA` es otra cuenta y falla.
+        let e = verifica_privada("D:PAI(A;;FA;;;S-1-5-21-111-222-333-1001)(A;;FA;;;LA)", YO, "t").unwrap_err();
+        assert!(e.contains("fuera de la lista permitida: LA"), "{e}");
+        // Y no sustituye a la ACE del usuario: sin ella no se conserva el acceso.
+        let e = verifica_privada("D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;LA)", YO, "t").unwrap_err();
+        assert!(e.contains("fuera de la lista permitida: LA"), "{e}");
+        // Un SID de dominio con RID 500 distinto del usuario tampoco se acepta por llamarse igual.
+        assert_eq!(sid_normalizado("LA", "S-1-5-21-1-2-3-1001"), "LA");
+    }
+
+    #[test]
     fn un_deny_a_un_principal_amplio_no_cuenta_como_permiso() {
         ok("D:P(D;;FA;;;WD)(A;;FA;;;S-1-5-21-111-222-333-1001)");
     }
@@ -287,9 +315,9 @@ mod tests {
     #[test]
     fn interpreta_la_salida_real_de_icacls() {
         // Capturado con `icacls <archivo> /save` tras `/inheritance:r /grant:r`, y de su carpeta.
-        let archivo = parse_dacl("D:PAI(A;;FA;;;S-1-5-21-4214038676-3060931503-1057443485-1001)").unwrap();
+        let archivo = parse_dacl("D:PAI(A;;FA;;;S-1-5-21-4214038676-3060931503-1057443485-1001)", YO).unwrap();
         assert!(archivo.protegida && archivo.aces.len() == 1 && !archivo.aces[0].heredada());
-        let carpeta = parse_dacl("D:AI(A;OICIID;0x1301bf;;;S-1-5-21-1685149312-3597025893-3609881159-3525561410)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)").unwrap();
+        let carpeta = parse_dacl("D:AI(A;OICIID;0x1301bf;;;S-1-5-21-1685149312-3597025893-3609881159-3525561410)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)", YO).unwrap();
         assert!(!carpeta.protegida && carpeta.aces.iter().all(Ace::heredada));
         assert_eq!(carpeta.aces[1].sid, SID_SYSTEM);
         assert_eq!(carpeta.aces[2].sid, SID_ADMINISTRADORES);
