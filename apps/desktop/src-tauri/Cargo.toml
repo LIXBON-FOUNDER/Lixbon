@@ -38,6 +38,9 @@ regex = "1"
 ignore = "0.4"
 # Papelera del SO para delete_entry (borrar deja de ser irreversible).
 trash = "5"
+# Almacén SQLite del Core (módulo `store`, slice B). SQLite va incluido (3.46):
+# no depende de la del sistema y `STRICT` exige >= 3.37.
+rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-http = "~2.6"
 tauri-plugin-single-instance = "2"
 # Catálogo de skills: paquete zip verificado por sha256 (Ajustes › Skills).
