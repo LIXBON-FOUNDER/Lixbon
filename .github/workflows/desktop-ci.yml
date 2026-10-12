@@ -1,0 +1,98 @@
+name: Desktop CI
+
+# Valida el desktop (Core en Rust, CLI `lxo` y frontend) en cada pull request a
+# master. NO empaqueta ni publica nada: eso es `tauri.yml` (tags `desktop-v*`).
+#
+# Por qué dos sistemas operativos, ambos obligatorios:
+#   * windows-latest  -> rama `MoveFileExW(MOVEFILE_WRITE_THROUGH)` de
+#                        `orch/fsio.rs::publish_durable` y rutas/permisos de Windows.
+#   * ubuntu-latest   -> rama Unix de `publish_durable` (`rename` + `fsync` de la
+#                        carpeta) y la compilación con `keyring`/Secret Service.
+#
+# El filtro de rutas evita gastar minutos en PRs que no tocan el desktop. Si este
+# workflow pasa a ser una comprobación OBLIGATORIA de la rama protegida, quita el
+# bloque `paths` (una comprobación obligatoria que no se ejecuta queda «pendiente»).
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  desktop:
+    name: Desktop · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            apps/desktop/lxo -> target
+
+      # Dependencias del sistema de Tauri 2 (WebKitGTK, GTK, tray, D-Bus para keyring).
+      - name: Dependencias del sistema (Linux)
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config patchelf \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev
+
+      - name: Instalar dependencias de npm
+        run: npm ci
+
+      # `tauri-build` exige que existan el sidecar (`binaries/lxo-<triple>`) y
+      # `dist/` (frontendDist) para compilar el crate, aunque aquí no se empaquete.
+      - name: Compilar el sidecar lxo
+        run: npm run build:lxo
+
+      - name: Frontend · build
+        run: npm run build
+
+      - name: Frontend · vitest
+        run: npm test
+
+      - name: lxo · pruebas
+        run: cargo test --locked --manifest-path lxo/Cargo.toml
+
+      - name: Core (Rust) · pruebas de la biblioteca
+        run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml
