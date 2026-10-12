@@ -15,8 +15,9 @@
 //!
 //! # Orden de apertura
 //! `core.lock` → abrir la base SOLO hasta donde permite la valla (migración 002 sin
-//! aplicar) → decidir con `decide_boot` → actuar sobre el marcador → y SOLO ENTONCES
-//! migraciones posteriores a la valla (003+). Un Core que no puede arrancar por
+//! aplicar) → decidir con `decide_boot` → intentar la acción sobre el marcador → y SOLO ENTONCES
+//! migraciones posteriores a la valla (003+). Que la publicación del marcador quede pendiente
+//! (`marker_pending`) no impide migrar; que `decide_boot` encuentre una contradicción, sí. Un Core que no puede arrancar por
 //! el lock, por incompatibilidad del almacén o por el protocolo de autoridad no
 //! modifica `state.json` ni aplica ninguna migración de D en adelante.
 //!

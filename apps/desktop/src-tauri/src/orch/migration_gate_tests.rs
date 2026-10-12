@@ -3,8 +3,10 @@
 //! se inyecta en el catálogo del Core: el protocolo se demuestra antes de que exista ninguna
 //! migración real de D.
 //!
-//! Orden que se fija (ver la cabecera de `boot_authority.rs`):
-//! abrir con el techo en la valla → `decide_boot` → acción sobre el marcador → migraciones 003+.
+//! Orden que se fija (ver la cabecera de `boot_authority.rs`): abrir con el techo en la valla →
+//! `decide_boot` → intento de acción sobre el marcador → migraciones 003+. El invariante es que
+//! `decide_boot` haya demostrado que no hay contradicción; que el marcador quede PUBLICADO no es
+//! condición (semántica de C2b: `marker_pending` se reintenta en el arranque siguiente).
 //!
 //! Cada caso BLOQUEADO comprueba lo mismo: el arranque falla, la base sigue en la 002, no hay
 //! ninguna fila 003 en `schema_migrations`, la tabla de la 003 no existe, `state.json` y el
@@ -302,8 +304,8 @@ fn marcador_ausente_con_sqlite_autoritativo_se_reconstruye_y_despues_migra() {
     assert_eq!(base(&core), CON_LA_003);
 }
 
-/// El ORDEN, demostrado: si la migración falla con el marcador ausente, el marcador ya está
-/// reconstruido (paso 3 antes del 4) y la base sigue en la 002. Nunca queda una base migrada sin marcador.
+/// El ORDEN del intento, demostrado: si la migración falla con el marcador ausente, el marcador ya
+/// se había reconstruido (paso 3 antes del 4) y la base sigue en la 002.
 #[test]
 fn con_el_marcador_ausente_el_marcador_se_publica_antes_de_migrar() {
     let (_l, data, core) = promovida_en_la_002();
@@ -314,6 +316,88 @@ fn con_el_marcador_ausente_el_marcador_se_publica_antes_de_migrar() {
     suelta(c, &core);
     assert_eq!(base(&core), SIN_LA_003, "la transacción se deshizo entera");
     assert_eq!(marcador(&core).state, MarkerState::Authoritative, "el marcador, derivado de SQLite, ya estaba publicado");
+}
+
+// ---------------------------------------------------------------------------------------------
+// 4b. Publicación del marcador pendiente (`marker_pending`): migra igual y se reintenta
+// ---------------------------------------------------------------------------------------------
+
+/// Hace fallar de forma determinista la publicación del marcador: un DIRECTORIO donde iría el
+/// temporal (`authority.json.tmp`) impide crearlo, y `clean_staging` no puede borrarlo.
+fn impide_publicar_el_marcador(core: &Path) -> PathBuf {
+    let estorbo = super::fsio::staging_path(&marker_path(core));
+    std::fs::create_dir_all(&estorbo).unwrap();
+    estorbo
+}
+
+fn marker_pending(c: &Core) -> bool {
+    match c.storage_status() {
+        StorageStatus::Ready(r) => r.marker_pending,
+        otro => panic!("se esperaba Ready y es {otro:?}"),
+    }
+}
+
+/// Marcador AUSENTE y la reconstrucción no se puede publicar: SQLite manda, `decide_boot` no vio
+/// contradicción alguna, así que la 003 se aplica con `marker_pending`; el arranque siguiente
+/// (ya sin el estorbo) reconstruye el marcador.
+#[test]
+fn con_la_publicacion_pendiente_el_marcador_ausente_no_impide_migrar_y_se_reconstruye_despues() {
+    let (_l, data, core) = promovida_en_la_002();
+    std::fs::remove_file(marker_path(&core)).unwrap();
+    let estorbo = impide_publicar_el_marcador(&core);
+
+    let (c, r) = arranca_con(con_003(SQL_003), &data, &core);
+    r.unwrap();
+    assert!(marker_pending(&c), "la publicación quedó pendiente");
+    assert_eq!(titulos(&c), vec!["propia".to_string()]);
+    suelta(c, &core);
+    assert_eq!(base(&core), CON_LA_003, "SQLite es la autoridad: se migró aunque el marcador no se publicó");
+    assert!(matches!(read_marker(&core), MarkerRead::Absent), "y el marcador sigue ausente");
+
+    std::fs::remove_dir_all(&estorbo).unwrap();
+    let (c, r) = arranca_con(con_003(SQL_003), &data, &core);
+    r.unwrap();
+    assert!(!marker_pending(&c));
+    suelta(c, &core);
+    assert_eq!(marcador(&core).state, MarkerState::Authoritative, "el siguiente arranque reconstruye el marcador");
+    assert_eq!(base(&core), CON_LA_003);
+}
+
+/// `promoting` COHERENTE con un COMMIT ya hecho y la confirmación no se puede publicar: se migra con
+/// `marker_pending` y el marcador sigue en `promoting`; el arranque siguiente lo confirma (`Complete`).
+#[test]
+fn con_la_publicacion_pendiente_un_promoting_coherente_no_impide_migrar_y_se_confirma_despues() {
+    let (_l, data, core) = promovida_en_la_002();
+    edita_marcador(&core, |v| {
+        v["state"] = json!("promoting");
+        v.as_object_mut().unwrap().remove("confirmed_at");
+    });
+    let estorbo = impide_publicar_el_marcador(&core);
+
+    let (c, r) = arranca_con(con_003(SQL_003), &data, &core);
+    r.unwrap();
+    assert!(marker_pending(&c));
+    suelta(c, &core);
+    assert_eq!(base(&core), CON_LA_003);
+    assert_eq!(marcador(&core).state, MarkerState::Promoting, "la confirmación quedó pendiente");
+
+    std::fs::remove_dir_all(&estorbo).unwrap();
+    let (c, r) = arranca_con(con_003(SQL_003), &data, &core);
+    r.unwrap();
+    assert!(!marker_pending(&c));
+    suelta(c, &core);
+    assert_eq!(marcador(&core).state, MarkerState::Authoritative, "el siguiente arranque confirma el marcador");
+    assert_eq!(base(&core), CON_LA_003, "y reiniciar no repite la migración");
+}
+
+/// La publicación pendiente NO relaja ningún bloqueo: con un marcador contradictorio el estorbo es
+/// irrelevante, porque `decide_boot` bloquea antes de intentar publicar nada.
+#[test]
+fn la_publicacion_pendiente_no_relaja_un_bloqueo_por_contradiccion() {
+    let (_l, data, core) = promovida_en_la_002();
+    edita_marcador(&core, |v| v["promotion_id"] = json!("otra-promocion"));
+    impide_publicar_el_marcador(&core);
+    bloquea_sin_tocar(&data, &core, "se contradicen", "contradictorio con publicación imposible");
 }
 
 // ---------------------------------------------------------------------------------------------

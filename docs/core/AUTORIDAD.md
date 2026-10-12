@@ -80,11 +80,17 @@ AUTHORITATIVE
 
 ## Gate de las migraciones posteriores a la valla (003 en adelante)
 
-**Invariante:** una migración `> FENCE_VERSION` solo se ejecuta cuando la instalación ya es
-inequívocamente apta para seguir como autoritativa: SQLite con registro interno válido **y**
-`authority.json` coherente con él (o ausente y reconstruido desde SQLite). Un marcador inválido,
-futuro, malformado, `promoting` incompatible o contradictorio con SQLite bloquea el arranque
-**antes** de que ninguna migración de D en adelante toque la base.
+**Invariante:** una migración `> FENCE_VERSION` solo se ejecuta cuando `decide_boot` ha demostrado
+que **no hay contradicción** entre el protocolo externo (`authority.json`) y la autoridad interna
+(SQLite, con registro interno válido). Un marcador inválido, futuro, malformado, `promoting`
+incompatible o contradictorio con SQLite bloquea el arranque **antes** de que ninguna migración de
+D en adelante toque la base.
+
+El invariante **no** exige que el marcador quede publicado; se conserva la semántica de C2b: SQLite
+es la autoridad, un marcador ausente con SQLite autoritativo válido es reconstruible y un `promoting`
+coherente con un COMMIT ya hecho es recuperable. La acción sobre el marcador se intenta antes de
+levantar el techo, pero si su publicación falla queda `marker_pending` (visible en `StorageReport`) y
+se reintenta en el siguiente arranque, sin impedir la migración.
 
 Orden (único, en `boot_authority.rs`):
 
@@ -93,6 +99,7 @@ Orden (único, en `boot_authority.rs`):
 2. decide_boot  marcador + base + legado; cualquier contradicción BLOQUEA aquí
 3. marcador     reconstruir (ausente) / confirmar (promoting coherente) / nada
 4. 003+         Core::apply_post_fence_migrations -> Store::migrate_authoritative
+               (no depende de que el paso 3 haya podido publicar: `marker_pending`)
 ```
 
 * **Frontera `orch → store`:** el almacén no conoce `Marker`. Recibe la lista completa para
@@ -100,10 +107,12 @@ Orden (único, en `boot_authority.rs`):
   `migrate_authoritative`. El almacén añade su propia comprobación (valla cruzada +
   `authority_valid`, si no `NotAuthoritative` sin tocar la base). Una prueba de arquitectura
   fija que solo `store_boot.rs` y `boot_authority.rs` pueden llamarla.
-* **Marcador antes que migración:** el marcador se deriva solo de la metadata de autoridad, que una
-  migración posterior no toca. Una caída entre 3 y 4 deja una instalación coherente que el
-  siguiente arranque termina de migrar; una migración que falla deja la base en la 002 con el
-  marcador ya correcto, nunca una base migrada sin marcador.
+* **Intento de marcador antes que migración:** el marcador se deriva solo de la metadata de
+  autoridad, que una migración posterior no toca. Una caída entre 3 y 4 deja una instalación
+  coherente que el siguiente arranque termina de migrar; una migración que falla deja la base en la
+  002 y, si el marcador se pudo publicar, ya correcto. Si la publicación falla (`marker_pending`),
+  la base puede quedar migrada con el marcador ausente o en `promoting`: ambos estados los resuelve
+  C2b en el arranque siguiente (`RebuildMarker` / `Complete`), y las pruebas lo fijan.
 * **Una promoción que termina bien migra en el mismo arranque** (LEGACY/FENCED → AUTHORITATIVE →
   003+): el código de D nunca ve un esquema a medias. La promoción en sí deja la base en la 002.
 * **Un fallo de la migración BLOQUEA** (nunca vuelve a `state.json`): la transacción se deshace
