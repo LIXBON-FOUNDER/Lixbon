@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,9 @@ type Toolbox struct {
 	Remote bool
 	// OnTodo avisa a la interfaz de que la lista de pasos cambió.
 	OnTodo func(items, previous []TodoItem)
+	// OnOutput recibe la salida cruda de run_command mientras corre (desde
+	// otra goroutine).
+	OnOutput func(chunk []byte)
 
 	todo      []TodoItem
 	lastFetch *FetchInfo
@@ -128,7 +132,11 @@ func (tb *Toolbox) runCommand(ctx context.Context, command string, timeoutArg in
 		timeout = timeoutArg
 	}
 	timeout = max(1, min(timeout, process.MaxTimeout))
-	res, err := process.Run(ctx, realPath(tb.Root), command, time.Duration(timeout)*time.Second)
+	var live io.Writer
+	if tb.OnOutput != nil {
+		live = outputFunc(tb.OnOutput)
+	}
+	res, err := process.RunLive(ctx, realPath(tb.Root), command, time.Duration(timeout)*time.Second, live)
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -147,6 +155,13 @@ func (tb *Toolbox) runCommand(ctx context.Context, command string, timeoutArg in
 		output = "(sin salida)"
 	}
 	return fmt.Sprintf("[EXIT %d] %s", res.ExitCode, output), nil
+}
+
+type outputFunc func([]byte)
+
+func (f outputFunc) Write(p []byte) (int, error) {
+	f(append([]byte(nil), p...))
+	return len(p), nil
 }
 
 func (tb *Toolbox) runBackground(ctx context.Context, command string) (string, error) {

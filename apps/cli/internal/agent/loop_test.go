@@ -22,12 +22,14 @@ type fakeModel struct {
 	errs      map[int]error
 	calls     [][]history.Message
 	toolLists [][]map[string]any
+	opts      []StepOptions
 }
 
 func (f *fakeModel) stream(ctx context.Context, messages []history.Message, toolList []map[string]any) (StreamResult, error) {
 	n := len(f.calls)
 	f.calls = append(f.calls, append([]history.Message{}, messages...))
 	f.toolLists = append(f.toolLists, toolList)
+	f.opts = append(f.opts, Step(ctx))
 	if err := f.errs[n]; err != nil {
 		return StreamResult{}, err
 	}
@@ -198,16 +200,26 @@ func TestCallHiddenInReasoningIsRescued(t *testing.T) {
 	}
 }
 
-func TestReasoningWithoutAnswerAsksForTheConcreteStep(t *testing.T) {
+func TestReasoningWithoutAnswerRetriesWithoutThinking(t *testing.T) {
 	r := newRig(t, []StreamResult{
 		{Text: "", Reasoning: "Mmm, déjame pensar cómo abordarlo…"},
 		{Text: "Hecho."},
 	})
 	r.turn.S.NativeTools = false
-	answer, _ := r.run("arregla el css")
-	last := r.model.calls[1][len(r.model.calls[1])-1]
-	if last.Role != "user" || !strings.Contains(last.Content, "NO vuelvas a razonar") || answer != "Hecho." {
-		t.Fatalf("last=%+v answer=%q", last, answer)
+	answer, working := r.run("arregla el css")
+	if answer != "Hecho." || len(r.model.calls) != 2 {
+		t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
+	}
+	if len(r.model.calls[1]) != len(r.model.calls[0]) || r.model.opts[0].NoThinking || !r.model.opts[1].NoThinking {
+		t.Fatalf("el reintento repite el paso sin razonar y sin mensajes nuevos: %d→%d %+v", len(r.model.calls[0]), len(r.model.calls[1]), r.model.opts)
+	}
+	for _, m := range working {
+		if m.Role == "user" && m.Content != "arregla el css" {
+			t.Fatalf("no se le mete prisa al modelo: %q", m.Content)
+		}
+	}
+	if r.notes() != "" {
+		t.Fatalf("el reintento no se anuncia: %q", r.notes())
 	}
 }
 
@@ -389,15 +401,90 @@ func TestTextProtocolGroupsConsecutiveReads(t *testing.T) {
 	}
 }
 
-func TestCodeBlockGetsOneNudge(t *testing.T) {
-	r := newRig(t, say("```py\nprint(1)\n```", "```py\nprint(1)\n```"))
+func TestPastedCodeGetsOneQuietCheck(t *testing.T) {
+	code := "```py\nprint(1)\n```"
+	r := newRig(t, say(code, "OK"))
 	answer, working := r.run("haz x")
-	if !strings.Contains(answer, "print(1)") || len(r.model.calls) != 2 {
+	if answer != code || len(r.model.calls) != 2 {
 		t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
 	}
-	nudge := working[2]
-	if nudge.Role != "user" || nudge.Content != NativeNudgePrompt {
-		t.Fatalf("nudge: %+v", nudge)
+	if !r.model.opts[1].Quiet || r.model.calls[1][len(r.model.calls[1])-1].Content != NativeNudgePrompt {
+		t.Fatalf("la comprobación va en silencio: %+v", r.model.opts)
+	}
+	if len(working) != 2 || working[1].Role != "assistant" {
+		t.Fatalf("si no aplica nada, el recordatorio se retira: %+v", working)
+	}
+}
+
+func TestQuietCheckThatAppliesCodeKeepsWorking(t *testing.T) {
+	r := newRig(t, []StreamResult{{Text: "```py\nprint(1)\n```"}, writeCall("a.py", "print(1)\n"), {Text: "Creado a.py."}})
+	answer, _ := r.run("crea a.py")
+	if answer != "Creado a.py." || r.read("a.py") != "print(1)\n" || r.model.opts[2].Quiet {
+		t.Fatalf("answer=%q a.py=%q opts=%+v", answer, r.read("a.py"), r.model.opts)
+	}
+}
+
+func TestBlocksThatAreNotCodeAreNotChecked(t *testing.T) {
+	for _, text := range []string{
+		"Archivos:\n```\nwa-media/\n├── fondo.svg (6 kB)\n└── gato.svg\napp.js (84 kB)\n```",
+		"Salida:\n```text\nok\n```",
+	} {
+		r := newRig(t, say(text))
+		if answer, _ := r.run("¿qué hay?"); answer != text || len(r.model.calls) != 1 {
+			t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
+		}
+	}
+}
+
+func TestCodeAfterUsingToolsIsTheAnswer(t *testing.T) {
+	list := StreamResult{ToolCalls: []json.RawMessage{nativeCall("c", "list_files", map[string]any{"path": "."})}}
+	r := newRig(t, []StreamResult{list, {Text: "Esto hay:\n```js\nconst a = 1;\n```"}})
+	answer, _ := r.run("¿qué ves?")
+	if !strings.Contains(answer, "const a") || len(r.model.calls) != 2 {
+		t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
+	}
+}
+
+func TestStuckTurnAnswersWithWhatItHas(t *testing.T) {
+	call := nativeCall("c", "list_files", map[string]any{"path": "."})
+	replies := []StreamResult{}
+	for range MaxRepeatedCalls + 1 {
+		replies = append(replies, StreamResult{ToolCalls: []json.RawMessage{call}})
+	}
+	replies = append(replies, StreamResult{Text: "Veo a.txt."})
+	r := newRig(t, replies)
+	r.write("a.txt", "x")
+	answer, _ := r.run("¿qué archivos ves?")
+	last := len(r.model.calls) - 1
+	if answer != "Veo a.txt." || r.model.toolLists[last] != nil || !r.model.opts[last].NoThinking {
+		t.Fatalf("answer=%q tools=%v opts=%+v", answer, r.model.toolLists[last], r.model.opts[last])
+	}
+	for _, m := range r.model.calls[last] {
+		if m.Role == "tool" || len(m.ToolCalls) > 0 {
+			t.Fatalf("sin herramientas, el historial va en texto: %+v", m)
+		}
+	}
+	if !strings.Contains(r.model.calls[last][len(r.model.calls[last])-1].Content, "TOOL_RESULT list_files") {
+		t.Fatal("el modelo ve lo que ya obtuvo")
+	}
+}
+
+func TestReasoningGoesBackWithTheToolCall(t *testing.T) {
+	list := StreamResult{Reasoning: "miro la carpeta", ToolCalls: []json.RawMessage{nativeCall("c", "list_files", map[string]any{"path": "."})}}
+	r := newRig(t, []StreamResult{list, {Text: "Listo."}})
+	r.run("¿qué hay?")
+	var sent history.Message
+	for _, m := range r.model.calls[1] {
+		if len(m.ToolCalls) > 0 {
+			sent = m
+		}
+	}
+	if sent.Thinking != "miro la carpeta" {
+		t.Fatalf("el razonamiento vuelve con su llamada: %+v", sent)
+	}
+	raw, _ := json.Marshal(sent)
+	if !strings.Contains(string(raw), `"thinking":"miro la carpeta"`) {
+		t.Fatalf("y viaja al gateway: %s", raw)
 	}
 }
 

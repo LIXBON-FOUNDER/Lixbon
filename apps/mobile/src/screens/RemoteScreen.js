@@ -1,12 +1,15 @@
 // RemoteScreen.js — sección Remoto: sesiones /remote del IDE o del CLI, sea
 // cual sea su agente (Lixbon o Claude Code). Sin sesión abierta muestra la
-// lista; con una, el transcript a pantalla completa con las herramientas en
-// filas cortas, los permisos encima del compositor y los comandos "/" en una
-// hoja. Todo se ejecuta en la máquina host; esto es un mando.
+// lista; con una, el hilo por turnos del lienzo «Chat remoto»: lo que el
+// agente piensa, cada herramienta en su fila (con su diff, salida o lista) y
+// la respuesta; al terminar, todo se pliega en un resumen. Permisos,
+// preguntas y el compact van encima del compositor. Todo se ejecuta en la
+// máquina host; esto es un mando.
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, AppState, Easing, FlatList, Keyboard, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
 
 import { ApiException } from '../api';
 import { composeMessage, splitMessage } from '../attachments';
@@ -16,18 +19,25 @@ import RemoteSessionList, { LiveDot } from '../components/RemoteSessionList';
 import ShimmerText from '../components/ShimmerText';
 import { useDialogs } from '../components/dialogs';
 import { markdownRules, markdownStyles } from '../components/markdown';
-import { AgentMark, ChatHeader, FadeUp, IconButton, KeyboardAware, Segmented, SkeletonLines, agentStyle, useColors, useKeyboardOpen, useScale } from '../components/ui';
+import { AgentMark, ChatHeader, FadeUp, IconButton, KeyboardAware, Segmented, SkeletonLines, agentStyle, useColors, useKeyboardOpen, useReducedMotion, useScale } from '../components/ui';
 import { initialRemoteState, keepStreamAlive, openEventStream, remoteReducer } from '../remote';
 import { openRemoteSocket } from '../remoteSocket';
 import { agentOf } from '../remoteSessions';
+import { buildBlocks, contextLevels, diffLines, fmtSecs, fmtTokens, toolState } from '../remoteTurns';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
-import { describeRemoteTool, toolParts } from '../toolText';
+import { toolKind, toolParts } from '../toolText';
 import RemoteOrch from './RemoteOrch';
+import { GrowBar, Quota } from './UsageScreen';
 
 const GROUP_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' };
 const MENTION_AT_END = /(^|\s)@([^\s@]*)$/;
-const TOOL_ICON = { Ejecuta: 'terminal', Ejecutó: 'terminal', Edita: 'pencil', Editó: 'pencil', Lee: 'file', Leyó: 'file', Busca: 'search', Buscó: 'search', Consulta: 'globe', Consultó: 'globe' };
+const CARET = '⁣';
+const RING = 2 * Math.PI * 8;
+const EMPTY_TURN = { type: 'turn', key: 'live', work: [], qa: [], end: null, answer: null, actions: 0, adds: 0, dels: 0, files: [], tests: null, commit: '' };
+const BIG_RING = 2 * Math.PI * 18;
+// Las filas del hilo miden 34 como en el lienzo; el toque llega a 44.
+const ROW_SLOP = { top: 5, bottom: 5 };
 
 // Catálogo de reserva: si el host es de una versión anterior a que el `hello`
 // publicara sus comandos, la hoja sigue ofreciendo lo básico en vez de nada.
@@ -37,7 +47,7 @@ const FALLBACK_COMMANDS = [
   { name: 'status', args: '', description: 'Estado de la sesión y del host' },
 ];
 
-export default function RemoteScreen({ remote, session, onOpen, onClose, onMenu, initialToken = null }) {
+export default function RemoteScreen({ remote, session, onOpen, onClose, onMenu, onUsage, initialToken = null }) {
   const api = useApi();
   const [claiming, setClaiming] = useState(!!initialToken);
   const { toast } = useDialogs();
@@ -66,7 +76,7 @@ export default function RemoteScreen({ remote, session, onOpen, onClose, onMenu,
       </SafeAreaView>
     );
   }
-  if (session) return <RemoteSessionView key={session.id} session={session} onBack={onClose} />;
+  if (session) return <RemoteSessionView key={session.id} session={session} onBack={onClose} onUsage={onUsage} />;
   return <RemoteListView remote={remote} onOpen={onOpen} onMenu={onMenu} />;
 }
 
@@ -128,7 +138,37 @@ function EmptySessions({ base }) {
 
 // ── Detalle de sesión ───────────────────────────────────────────────────────
 
-function RemoteSessionView({ session, onBack }) {
+function useNow(active, every = 1000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), every);
+    return () => clearInterval(timer);
+  }, [active, every]);
+  return now;
+}
+
+// El cupo es de la cuenta (el mismo en web, IDE y móvil): se pide al abrir la
+// sesión y otra vez al terminar cada turno, que es cuando cambia.
+function useQuota(busy) {
+  const api = useApi();
+  const [usage, setUsage] = useState(null);
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get('/api/account/usage');
+      if (res && typeof res === 'object') setUsage(res);
+    } catch {
+      // sin cupo a la vista: la píldora no se pinta
+    }
+  }, [api]);
+  useEffect(() => {
+    if (!busy) load();
+  }, [busy, load]);
+  return usage;
+}
+
+function RemoteSessionView({ session, onBack, onUsage }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
@@ -137,6 +177,9 @@ function RemoteSessionView({ session, onBack }) {
   const [input, setInput] = useState('');
   const [mentions, setMentions] = useState([]);
   const [sending, setSending] = useState(false);
+  const [overlay, setOverlayState] = useState(null);
+  const [composerH, setComposerH] = useState(70);
+  const [open, setOpen] = useState({});
   const aliveRef = useRef(true);
   const seqRef = useRef(0);
   const inputRef = useRef(null);
@@ -147,6 +190,12 @@ function RemoteSessionView({ session, onBack }) {
 
   const caps = state.meta?.capabilities || [];
   const attachments = useAttachments({ describeImages: false, allowImages: caps.includes('images') });
+  const toggle = useCallback((key) => setOpen((cur) => ({ ...cur, [key]: !cur[key] })), []);
+  // Las capas se anclan al compositor: con el teclado abierto quedarían debajo.
+  const setOverlay = useCallback((next) => {
+    if (next) Keyboard.dismiss();
+    setOverlayState(next);
+  }, []);
 
   const onRemoteEvent = useCallback((ev) => {
     if (typeof ev.seq === 'number' && ev.type !== 'channel_status') seqRef.current = Math.max(seqRef.current, ev.seq);
@@ -269,10 +318,21 @@ function RemoteSessionView({ session, onBack }) {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
+  // El gateway solo releva approve: la opción elegida de un selector o la
+  // respuesta a una pregunta del agente viaja como su decisión ('' = cancelar).
+  const choose = (id, value) => sendCommand({ type: 'approve', id, decision: value });
+  const question = [...state.choices].reverse().find((x) => x.question) || null;
+
   const sendPrompt = async (override) => {
     const text = (override ?? input).trim();
     const ready = override ? [] : attachments.ready;
     if ((!text && ready.length === 0) || sending || attachments.reading) return;
+    // Con una pregunta del agente abierta, lo escrito es la respuesta.
+    if (question && !override && text && !text.startsWith('/') && ready.length === 0) {
+      setInput('');
+      if (!(await choose(question.id, text))) setInput((cur) => cur || text);
+      return;
+    }
     // Un host que no anuncia adjuntos solo entiende texto: los documentos van
     // dentro del mensaje, como en el chat.
     const command = caps.includes('attachments')
@@ -314,9 +374,6 @@ function RemoteSessionView({ session, onBack }) {
 
   const interrupt = () => sendCommand({ type: 'interrupt' });
   const approve = (id, decision) => sendCommand({ type: 'approve', id, decision });
-  // El gateway solo releva approve: la opción elegida de un selector del host
-  // viaja como su decisión ('' = cancelar).
-  const choose = (id, value) => sendCommand({ type: 'approve', id, decision: value });
 
   const endSession = async () => {
     const ok = await confirm({
@@ -336,7 +393,15 @@ function RemoteSessionView({ session, onBack }) {
 
   const agent = agentOf(session, state.meta);
   const commands = state.meta?.commands?.length ? state.meta.commands : FALLBACK_COMMANDS;
-  const thinking = state.agentState === 'thinking';
+  const busy = state.agentState === 'thinking';
+  const compacting = !!state.compact || (busy && state.activity === 'compacting');
+  const canCompact = commands.some((x) => x.name === 'compact');
+  const usage = useQuota(busy);
+
+  const runCommand = (name) => {
+    if (name === 'status' || name === 'compact') setOverlay(null);
+    sendPrompt(`/${name}`);
+  };
 
   // Comandos y acciones en una sola hoja: accesos grandes arriba y la lista de
   // comandos del host, filtrable, debajo.
@@ -345,12 +410,14 @@ function RemoteSessionView({ session, onBack }) {
       keyboard: true,
       render: (close) => (
         <CommandsSheet
+          agent={agent}
           commands={commands}
           tiles={[
             { value: 'attach', icon: 'clip', label: 'Adjuntar' },
             ...(canMention ? [{ value: 'mention', glyph: '@', label: 'Archivo' }] : []),
-            ...(thinking ? [{ value: 'interrupt', icon: 'stop', label: 'Interrumpir' }] : []),
+            ...(busy ? [{ value: 'interrupt', icon: 'stop', label: 'Interrumpir' }] : []),
             ...(commands.some((x) => x.name === 'status') ? [{ value: 'cmd:status', icon: 'activity', label: 'Estado' }] : []),
+            { value: 'usage', icon: 'gauge', label: 'Uso' },
             { value: 'end', icon: 'logout', label: 'Terminar', danger: true },
           ]}
           onPick={close}
@@ -361,6 +428,7 @@ function RemoteSessionView({ session, onBack }) {
     if (action === 'attach') attachments.pick();
     if (action === 'mention') startMention();
     if (action === 'interrupt') interrupt();
+    if (action === 'usage') setOverlay('quota');
     if (action === 'end') endSession();
     if (action.startsWith?.('cmd:')) {
       const cmd = commands.find((x) => x.name === action.slice(4)) || { name: action.slice(4) };
@@ -370,20 +438,41 @@ function RemoteSessionView({ session, onBack }) {
         setInput(`/${cmd.name} `);
         setTimeout(() => inputRef.current?.focus(), 50);
       } else {
-        sendPrompt(`/${cmd.name}`);
+        runCommand(cmd.name);
       }
     }
   };
 
-  const items = useMemo(() => groupItems(state.items).reverse(), [state.items]);
+  // Recién enviado, el turno aún no tiene nada que enseñar: «está pensando…».
+  const blocks = useMemo(() => {
+    const out = buildBlocks(state.items);
+    const last = out[out.length - 1];
+    // Un comando «/» que sigue en el equipo no es un turno del agente.
+    if (busy && compacting) return out.reverse();
+    if (busy && state.activity === 'command') out.push({ type: 'running', key: 'running', label: state.activityLabel });
+    else if (busy && !(last?.type === 'turn' && !last.end)) out.push(EMPTY_TURN);
+    return out.reverse();
+  }, [state.items, busy, compacting, state.activity, state.activityLabel]);
   const [tab, setTab] = useState('chat');
   const canOrch = !state.ended && caps.includes('orch');
   const orchBusy = !!state.orch?.tasks?.some((x) => !['done', 'failed', 'stopped', 'exited'].includes(x.status));
   const waitingTool = state.approvals[0]?.tool;
+  const live = { busy, activity: state.activity, since: state.busySince, waitingTool, context: state.context };
 
   return (
     <KeyboardAware>
-      <SessionHeader session={session} state={state} link={link} agent={agent} onBack={onBack} onOptions={state.ended ? null : openCommands} />
+      <SessionHeader
+        session={session}
+        state={state}
+        link={link}
+        agent={agent}
+        usage={usage}
+        question={!!question}
+        compacting={compacting}
+        onBack={onBack}
+        onQuota={state.ended ? null : () => setOverlay('quota')}
+        onOptions={state.ended ? null : openCommands}
+      />
 
       {canOrch && (
         <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
@@ -408,62 +497,105 @@ function RemoteSessionView({ session, onBack }) {
         ) : (
           <FlatList
             inverted
-            data={items}
-            keyExtractor={(item) => item.key}
+            data={blocks}
+            keyExtractor={(b) => b.key}
             contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
             keyboardShouldPersistTaps="handled"
-            renderItem={({ item, index }) => <TranscriptRow item={item} agent={agent} busy={thinking} waitingTool={index === 0 ? waitingTool : null} />}
-            extraData={thinking}
+            renderItem={({ item, index }) => <Block block={item} last={index === 0} agent={agent} live={live} open={open} toggle={toggle} />}
+            extraData={[busy, state.activity, waitingTool, open, state.context]}
           />
         )}
       </View>
 
-      {state.activity === 'compacting' && thinking && !state.ended && (
-        <View accessibilityRole="progressbar" style={{ paddingHorizontal: 20, paddingVertical: 6 }}>
-          <ShimmerText text="Compactando la conversación…" style={{ fontFamily: FONTS.ui, fontSize: 14 }} />
-        </View>
-      )}
+      {!state.ended && !busy && !compacting && state.background.length > 0 && <WaitingStrip tasks={state.background} agent={agent} />}
 
-      {!state.ended && !thinking && state.background.length > 0 && <WaitingStrip tasks={state.background} agent={agent} />}
+      {!state.ended && compacting && <CompactCard compact={state.compact} />}
 
       {state.approvals.map((a) => (
         <ApprovalCard key={a.id} approval={a} onDecide={approve} />
       ))}
 
-      {!state.ended && state.choices.slice(-1).map((x) => <ChoiceCard key={x.id} choice={x} onChoose={choose} />)}
+      {!state.ended &&
+        state.choices
+          .slice(-1)
+          .map((x) => (x.question ? <QuestionCard key={x.id} choice={x} agent={agent} onChoose={choose} /> : <ChoiceCard key={x.id} choice={x} onChoose={choose} />))}
 
       {!state.ended && (
-        <RemoteComposer
-          input={input}
-          inputRef={inputRef}
-          onChangeInput={setInput}
-          onSend={() => sendPrompt()}
-          onInterrupt={interrupt}
-          onCommands={openCommands}
-          onRunCommand={(text) => sendPrompt(text)}
-          commands={commands}
-          thinking={thinking}
-          disabled={!state.hostConnected}
-          sending={sending}
-          attachments={attachments}
-          mentions={mentions}
-          onRemoveMention={(path) => setMentions((cur) => cur.filter((m) => m.path !== path))}
-          mentionQuery={canMention ? mentionQuery : null}
-          files={state.files}
-          onPickMention={pickMention}
+        <View onLayout={(e) => setComposerH(e.nativeEvent.layout.height)}>
+          <RemoteComposer
+            input={input}
+            inputRef={inputRef}
+            onChangeInput={setInput}
+            onSend={() => sendPrompt()}
+            onInterrupt={interrupt}
+            onCommands={openCommands}
+            onRunCommand={(text) => sendPrompt(text)}
+            commands={commands}
+            thinking={busy}
+            answering={!!question}
+            disabled={!state.hostConnected}
+            sending={sending}
+            attachments={attachments}
+            mentions={mentions}
+            onRemoveMention={(path) => setMentions((cur) => cur.filter((m) => m.path !== path))}
+            mentionQuery={canMention ? mentionQuery : null}
+            files={state.files}
+            onPickMention={pickMention}
+            context={state.context}
+            compacting={compacting}
+            onContext={() => setOverlay('context')}
+          />
+        </View>
+      )}
+
+      {overlay === 'context' && state.context && (
+        <ContextPopover
+          context={state.context}
+          compacted={state.items.some((it) => it.kind === 'compacted')}
+          bottom={composerH + 4}
+          busy={busy}
+          compacting={compacting}
+          canCompact={canCompact}
+          onCompact={() => runCommand('compact')}
+          onClose={() => setOverlay(null)}
+        />
+      )}
+      {overlay === 'quota' && (
+        <QuotaModal
+          usage={usage}
+          onClose={() => setOverlay(null)}
+          onDaily={() => {
+            setOverlay(null);
+            onUsage?.();
+          }}
         />
       )}
     </KeyboardAware>
   );
 }
 
-function SessionHeader({ session, state, link, agent, onBack, onOptions }) {
+// La fase del agente en palabras: es lo que dice la cabecera bajo el título.
+function phaseOf(state, { question, compacting }) {
+  if (compacting) return 'compactando';
+  if (state.approvals.length) return 'espera tu permiso';
+  if (question) return 'espera tu respuesta';
+  if (state.agentState === 'thinking') {
+    if (state.activity === 'command') return 'ejecutando un comando';
+    if (state.activity === 'reasoning') return 'pensando';
+    if (state.activity === 'writing') return 'escribiendo';
+    return 'trabajando';
+  }
+  if (state.background.length) return 'esperando';
+  return 'en vivo';
+}
+
+function SessionHeader({ session, state, link, agent, usage, question, compacting, onBack, onQuota, onOptions }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const a = agentStyle(agent, c);
   const meta = state.meta || {};
-  const working = state.agentState === 'thinking';
-  const waiting = !working && state.background.length > 0;
+  const phase = phaseOf(state, { question, compacting });
+  const breathing = phase !== 'en vivo';
   // Una reconexión de un par de segundos no se anuncia: solo si se alarga.
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -480,23 +612,40 @@ function SessionHeader({ session, state, link, agent, onBack, onOptions }) {
       ? 'Reconectando…'
       : !state.hostConnected
         ? `${a.label} · host sin conexión`
-        : `${a.label} · ${working ? 'trabajando' : waiting ? 'esperando' : 'en vivo'}`;
+        : `${a.label} · ${phase}`;
+  const sessionQuota = usage?.buckets?.session;
+  const weekQuota = usage?.buckets?.week;
+  const pct = typeof sessionQuota?.percent === 'number' && !sessionQuota.unlimited ? Math.round(sessionQuota.percent) : null;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 8, height: insets.top + 64 }}>
       <IconButton onPress={onBack} label="Volver a las sesiones">
         <Icon name="arrow-left" size={20} color={c.inkBody} />
       </IconButton>
-      <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+      <View style={{ flex: 1, minWidth: 0, alignItems: 'center', gap: 2 }}>
         <Text numberOfLines={1} style={{ maxWidth: '100%', fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>
           {meta.title || session.title || 'Sesión remota'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {!state.ended && !slow && state.hostConnected && (working || waiting ? <LiveDot size={6} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent }} />)}
+          {!state.ended && !slow && state.hostConnected &&
+            (breathing ? <LiveDot size={6} color={a.dot} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: a.dot }} />)}
           <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
             {status}
           </Text>
         </View>
       </View>
+      {onQuota && pct !== null && (
+        <Pressable
+          onPress={onQuota}
+          accessibilityRole="button"
+          accessibilityLabel={`Cupo: sesión ${pct} %${typeof weekQuota?.percent === 'number' ? `, semana ${Math.round(weekQuota.percent)} %` : ''}. Ver uso`}
+          style={{ height: 44, paddingHorizontal: 2, justifyContent: 'center' }}
+        >
+          <View style={{ height: 30, paddingHorizontal: 8, borderRadius: RADIUS_SM, backgroundColor: c.surface2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="gauge" size={14} color={pct >= 80 ? c.warn : c.inkBody} strokeWidth={1.8} />
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: pct >= 80 ? c.warn : c.inkBody }}>{pct} %</Text>
+          </View>
+        </Pressable>
+      )}
       {onOptions ? (
         <IconButton onPress={onOptions} label="Opciones y comandos">
           <Icon name="dots" size={19} color={c.inkBody} />
@@ -520,57 +669,565 @@ function SessionEmpty({ state, agent }) {
         <AgentMark agent={agent} size={agent === 'claude' ? 22 : 26} />
       </View>
       <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
-        {`Conectado con ${a.label}. Pídele algo o toca los tres puntos para ver sus comandos.`}
+        {`Conectado con ${a.label}. Pídele algo o toca / para ver sus comandos.`}
       </Text>
     </FadeUp>
   );
 }
 
-function TranscriptRow({ item, agent, waitingTool, busy }) {
+// ── Hilo ────────────────────────────────────────────────────────────────────
+
+function Block({ block, last, agent, live, open, toggle }) {
+  const { s } = useScale();
+  switch (block.type) {
+    case 'user':
+      return <UserRow item={block.item} busy={live.busy} />;
+    case 'turn':
+      return <TurnBlock turn={block} live={last && live.busy && !block.end ? live : null} waitingTool={last ? live.waitingTool : null} agent={agent} open={open} toggle={toggle} />;
+    case 'command':
+      return <CommandCard item={block.item} agent={agent} context={live.context} />;
+    case 'compacted':
+      return <CompactedRow item={block.item} open={!!open[block.key]} onToggle={() => toggle(block.key)} />;
+    case 'notice':
+      return <NoticeBox text={block.item.text} />;
+    case 'running':
+      return <RunningCommand label={block.label} since={live.since} />;
+    case 'error':
+      return <ErrorBox text={block.item.text} style={{ marginVertical: s(9) }} />;
+    default:
+      return null;
+  }
+}
+
+function RunningCommand({ label, since }) {
+  const now = useNow(true);
+  return <ThinkLive label={label ? `Ejecutando ${label}…` : 'Ejecutando el comando…'} secs={since ? now - since : null} text="" />;
+}
+
+function NoticeBox({ text }) {
+  const c = useColors();
+  const { s } = useScale();
+  // Respuesta del host a un comando: monoespaciada, para que se lea como
+  // salida del equipo y no como algo que dijo el modelo.
+  return (
+    <FadeUp style={{ marginVertical: s(9) }}>
+      <Text selectable style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.surface1, fontFamily: FONTS.mono, fontSize: 12.5, lineHeight: 19, color: c.inkBody }}>
+        {text}
+      </Text>
+    </FadeUp>
+  );
+}
+
+function ErrorBox({ text, style }) {
+  const c = useColors();
+  return (
+    <View style={[{ padding: 12, borderRadius: RADIUS, backgroundColor: c.dangerSoft }, style]}>
+      <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+/** Un turno del agente. En marcha: lo que piensa, cada herramienta y la
+    respuesta según llega. Terminado: una fila resumen que despliega todo,
+    la respuesta, lo que preguntó y los cambios. */
+function TurnBlock({ turn, live, waitingTool, agent, open, toggle }) {
+  const c = useColors();
+  const { s } = useScale();
+  const now = useNow(!!live);
+  const label = agentStyle(agent, c).label;
+  const hasWork = turn.work.length > 0;
+  const answer = turn.answer;
+  const elapsed = live?.since ? now - live.since : null;
+
+  if (live && !turn.work.some((it) => it.kind !== 'thinking') && !answer?.text) {
+    const thinking = turn.work.filter((it) => it.kind === 'thinking');
+    const text = thinking.map((it) => it.text).join('\n\n');
+    return <ThinkLive label={`${label} está pensando…`} secs={elapsed} text={text} />;
+  }
+
+  // Mientras escribe la respuesta, el trabajo ya hecho se pliega en el resumen.
+  const writing = !!live && !!answer?.open && live.activity === 'writing';
+  const collapsed = !live || writing;
+  const summaryOpen = !!open[turn.key];
+  const interrupted = !!turn.end?.interrupted;
+  const ms = turn.end?.ms ?? (live ? elapsed : null);
+
+  return (
+    <View style={{ marginVertical: s(4) }}>
+      {collapsed && hasWork && (
+        <SummaryRow
+          label={summaryLabel({ interrupted, ms, actions: turn.actions })}
+          interrupted={interrupted}
+          adds={turn.adds}
+          dels={turn.dels}
+          open={summaryOpen}
+          onToggle={() => toggle(turn.key)}
+        />
+      )}
+      {(!collapsed || summaryOpen) && (
+        <WorkList work={turn.work} live={live} waitingTool={waitingTool} label={label} open={open} toggle={toggle} elapsed={elapsed} />
+      )}
+      {!!answer?.text && <AnswerBlock text={answer.text} streaming={!!live && answer.open} />}
+      {interrupted && <NoticeBox text="Interrumpiste al agente. Lo que ya hizo se queda en el equipo." />}
+      {turn.qa.map((qa) => (
+        <QaRecord key={qa.key} item={qa} label={label} />
+      ))}
+      {!live && turn.files.length > 0 && (
+        <ChangesCard turn={turn} open={open} toggle={toggle} />
+      )}
+    </View>
+  );
+}
+
+function summaryLabel({ interrupted, ms, actions }) {
+  const n = `${actions} ${actions === 1 ? 'acción' : 'acciones'}`;
+  if (interrupted) return `Interrumpido · ${n}`;
+  return typeof ms === 'number' ? `Trabajó ${fmtSecs(ms)} · ${n}` : `Trabajó · ${n}`;
+}
+
+function WorkList({ work, live, waitingTool, label, open, toggle, elapsed }) {
+  return (
+    <View>
+      {work.map((it, i) => {
+        if (it.kind === 'thinking') {
+          if (it.open && live) return <ThinkLive key={it.key} label={`${label} está pensando…`} secs={Date.now() - (it.since || Date.now())} text={it.text} compact />;
+          return <ThoughtRow key={it.key} item={it} open={!!open[it.key]} onToggle={() => toggle(it.key)} />;
+        }
+        if (it.kind === 'tool') {
+          const lastRunning = !!live && it.running && i === work.length - 1;
+          return <ToolRow key={it.key} it={it} waitingTool={lastRunning ? waitingTool : null} open={!!open[it.key]} onToggle={() => toggle(it.key)} />;
+        }
+        if (it.kind === 'notice') return <NoticeBox key={it.key} text={it.text} />;
+        if (it.kind === 'assistant' && it.text.trim()) return <ProseLine key={it.key} text={it.text} />;
+        return null;
+      })}
+      {!!live && elapsed !== null && live.activity === 'reasoning' && !work.some((it) => it.kind === 'thinking' && it.open) && (
+        <ThinkLive label={`${label} está pensando…`} secs={null} text="" compact />
+      )}
+    </View>
+  );
+}
+
+function ThinkLive({ label, secs, text, compact = false }) {
+  const c = useColors();
+  const { s } = useScale();
+  const tail = text.length > 700 ? `…${text.slice(-700)}` : text;
+  return (
+    <FadeUp style={{ marginVertical: compact ? s(4) : s(9), gap: 6 }} accessibilityRole="progressbar" accessibilityLabel={label}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+        <ShimmerText text={label} style={{ fontFamily: FONTS.uiMedium, fontSize: compact ? 13.5 : 15 }} />
+        {typeof secs === 'number' && secs >= 0 && <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkFaint }}>{`${Math.max(1, Math.round(secs / 1000))} s`}</Text>}
+      </View>
+      {!!tail.trim() && <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkMuted }}>{tail.trim()}</Text>}
+    </FadeUp>
+  );
+}
+
+function ThoughtRow({ item, open, onToggle }) {
+  const c = useColors();
+  const secs = typeof item.ms === 'number' ? Math.max(1, Math.round(item.ms / 1000)) : null;
+  return (
+    <View>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        hitSlop={ROW_SLOP}
+        style={{ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+      >
+        <Icon name="bulb" size={15} color={c.inkMuted} strokeWidth={1.7} />
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>{secs ? `Pensó ${secs} s` : 'Pensó'}</Text>
+        <View style={{ flex: 1 }} />
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />
+      </Pressable>
+      {open && (
+        <Text selectable style={{ paddingLeft: 25, paddingBottom: 8, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkMuted }}>
+          {item.text}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+function SummaryRow({ label, interrupted, adds, dels, open, onToggle }) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      style={({ pressed }) => ({
+        minHeight: 40,
+        marginTop: 6,
+        marginBottom: 2,
+        paddingHorizontal: 12,
+        borderRadius: RADIUS,
+        backgroundColor: pressed ? c.surface2 : c.surface1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+      })}
+    >
+      <Icon name={interrupted ? 'stop' : 'tick'} size={15} color={interrupted ? c.danger : c.good} strokeWidth={1.8} />
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkBody }}>{label}</Text>
+      {(adds > 0 || dels > 0) && <LineCounts adds={adds} dels={dels} />}
+      <View style={{ flex: 1 }} />
+      <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />
+    </Pressable>
+  );
+}
+
+function ProseLine({ text }) {
+  const c = useColors();
+  return (
+    <Text selectable style={{ paddingVertical: 4, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkBody }}>
+      {text.trim()}
+    </Text>
+  );
+}
+
+function LineCounts({ adds = 0, dels = 0 }) {
+  const c = useColors();
+  return (
+    <View style={{ flexDirection: 'row', gap: 5 }}>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.good }}>{`+${adds || 0}`}</Text>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.danger }}>{`−${dels || 0}`}</Text>
+    </View>
+  );
+}
+
+const ICON_OF = { read: 'file', search: 'search', web: 'globe', edit: 'edit', cmd: 'console' };
+
+function toolMeta(it, kind) {
+  if (it.running) return '';
+  if (kind === 'cmd') {
+    if (/^git\s+commit\b/.test(String(it.summary || '').trim())) {
+      const hash = /\[[^\]\n]*?\s([0-9a-f]{7,40})\]/.exec(String(it.result || ''))?.[1];
+      if (hash) return hash.slice(0, 7);
+    }
+    if (typeof it.exit === 'number' && it.exit > 0) return `código ${it.exit}`;
+    return fmtSecs(it.ms);
+  }
+  if (it.meta) return it.meta;
+  if (kind === 'search' && it.lines?.length) return `${it.lines.length} resultados`;
+  return '';
+}
+
+/** Una herramienta en una fila: icono por tipo, verbo, destino, líneas
+    cambiadas y su medida; se despliega a la lista, al diff o a la salida. */
+function ToolRow({ it, waitingTool, open, onToggle }) {
+  const c = useColors();
+  const kind = toolKind(it);
+  const st = toolState(it, waitingTool);
+  const { verb: baseVerb, target: baseTarget, mono } = toolParts(it, st.waiting);
+  const git = kind === 'cmd' && /^git\b/.test(String(it.summary || '').trim());
+  const verb = st.denied ? (kind === 'edit' ? 'No editó' : kind === 'cmd' ? 'No ejecutó' : 'Rechazado') : st.cut ? 'Cortado' : baseVerb;
+  const target = st.waiting ? `tu permiso · ${baseTarget}` : baseTarget;
+  const hasDiff = !!(it.rows?.length || it.diff);
+  const hasList = !!it.lines?.length;
+  const isCmd = kind === 'cmd';
+  const hasResult = !!it.result && it.result !== it.meta && !/^interrumpid|rechazad/i.test(it.result);
+  const expandable = !st.waiting && !st.denied && (hasDiff || hasList || (isCmd && (hasResult || !!it.output)) || (!isCmd && hasResult && !it.readonly));
+  const isOpen = expandable && open;
+  const showOut = isCmd && (it.running || isOpen) && !st.waiting;
+  const meta = st.bad && !(isCmd && typeof it.exit === 'number') ? '' : toolMeta(it, kind);
+  const icon = st.bad ? 'warning' : git ? 'git' : ICON_OF[kind] || 'layers';
+  const tone = st.bad ? c.danger : c.inkMuted;
+
+  return (
+    <View>
+      <Pressable
+        onPress={expandable ? onToggle : undefined}
+        disabled={!expandable}
+        accessibilityRole={expandable ? 'button' : undefined}
+        accessibilityState={expandable ? { expanded: isOpen } : undefined}
+        accessibilityLabel={`${verb} ${target}`}
+        hitSlop={ROW_SLOP}
+        style={({ pressed }) => ({ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1 })}
+      >
+        <Icon name={icon} size={15} color={tone} strokeWidth={1.7} />
+        {it.running && !st.waiting ? (
+          <View style={{ width: 60 }}>
+            <ShimmerText text={verb} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
+          </View>
+        ) : (
+          <Text numberOfLines={1} style={{ width: 60, fontFamily: FONTS.ui, fontSize: 13.5, color: tone }}>
+            {verb}
+          </Text>
+        )}
+        <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: mono ? FONTS.mono : FONTS.ui, fontSize: mono ? 12.5 : 13.5, color: c.inkBody }}>
+          {target}
+        </Text>
+        {hasDiff && !st.denied && <LineCounts adds={it.adds} dels={it.dels} />}
+        {!!meta && <Text style={{ fontFamily: FONTS.ui, fontSize: 11.5, color: c.inkFaint }}>{meta}</Text>}
+        {expandable && <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />}
+      </Pressable>
+
+      {isOpen && hasList && (
+        <View style={{ marginLeft: 25, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: RADIUS_SM, backgroundColor: c.surface1, gap: 4 }}>
+          {it.lines.map((line, i) => {
+            const m = /^(.+?)(:\d+)(?::|\s|$)/.exec(line);
+            return (
+              <Text key={i} numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>
+                {m ? m[1] : line}
+                {!!m && <Text style={{ color: c.inkFaint }}>{m[2]}</Text>}
+              </Text>
+            );
+          })}
+        </View>
+      )}
+      {isOpen && hasDiff && <DiffView item={it} style={{ marginTop: 2, marginBottom: 8, backgroundColor: c.surface1 }} />}
+      {showOut && <CommandBox it={it} state={st} />}
+      {isOpen && !hasDiff && !hasList && !isCmd && hasResult && (
+        <Text selectable style={{ marginLeft: 25, marginBottom: 8, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody }}>
+          {it.result}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+const outTone = (line, c) => (/^\s*(PASS|ok\b|✓)/.test(line) ? c.good : /^\s*(FAIL|✗|error\b)/i.test(line) ? c.danger : /^\s*>/.test(line) ? c.inkMuted : c.inkBody);
+
+/** «$ comando», las últimas líneas mientras corre y cómo terminó. */
+function CommandBox({ it, state }) {
+  const c = useColors();
+  const now = useNow(!!it.running);
+  const text = it.running ? it.output || '' : it.result || it.output || '';
+  const all = text.replace(/\n$/, '').split('\n').filter((l, i, arr) => l.length || i < arr.length - 1);
+  const lines = it.running ? all.slice(-4) : all.slice(-40);
+  const secs = it.running ? fmtSecs(now - (it.since || now)) : fmtSecs(it.ms);
+  const failed = state.cut || (typeof it.exit === 'number' ? it.exit !== 0 : it.error);
+  const footer = it.running
+    ? null
+    : state.cut
+      ? 'Cortado'
+      : it.exit === -1
+        ? `Se cortó por tiempo${secs ? ` · ${secs}` : ''}`
+        : typeof it.exit === 'number'
+          ? `Salió con código ${it.exit}${secs ? ` · ${secs}` : ''}`
+          : `${it.error ? 'Falló' : 'Terminó'}${secs ? ` · ${secs}` : ''}`;
+  return (
+    <View style={{ marginTop: 2, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1 }}>
+      <Text selectable style={{ fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.ink }}>{`$ ${it.summary || it.tool}`}</Text>
+      {lines.map((line, i) => (
+        <Text key={i} selectable style={{ fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: outTone(line, c) }}>
+          {line || ' '}
+        </Text>
+      ))}
+      {it.running ? (
+        <View style={{ marginTop: 6 }}>
+          <ShimmerText text={`Corriendo en el equipo · ${secs || '0,0 s'}`} style={{ fontFamily: FONTS.ui, fontSize: 12 }} />
+        </View>
+      ) : (
+        <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Icon name={failed ? 'warning' : 'tick'} size={13} color={failed ? c.danger : c.good} strokeWidth={2} />
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: failed ? c.danger : c.good }}>{footer}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** Solo las líneas cambiadas con una de contexto, numeradas: nunca el
+    archivo entero. Añadidas sobre verde, borradas sobre rojo. */
+function DiffView({ item, style, maxHeight }) {
+  const c = useColors();
+  const lines = useMemo(() => diffLines(item), [item]);
+  const body = (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
+      <View style={{ minWidth: '100%' }}>
+        {lines.map((ln, i) =>
+          ln.gap ? (
+            <Text key={i} style={{ paddingVertical: 3, paddingLeft: 12, paddingRight: 10, fontFamily: FONTS.ui, fontSize: 11.5, lineHeight: 17, color: c.inkFaint }}>
+              {ln.text}
+            </Text>
+          ) : (
+            <View key={i} style={{ flexDirection: 'row', backgroundColor: ln.kind === 'a' ? c.goodSoft : ln.kind === 'd' ? c.dangerSoft : 'transparent' }}>
+              <Text style={{ width: 34, paddingRight: 8, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 18, color: c.inkFaint }}>{ln.num}</Text>
+              <Text style={{ width: 14, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 18, color: ln.kind === 'a' ? c.good : ln.kind === 'd' ? c.danger : c.inkFaint }}>
+                {ln.kind === 'a' ? '+' : ln.kind === 'd' ? '−' : ' '}
+              </Text>
+              <Text selectable style={{ paddingRight: 14, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 18, color: ln.kind === 'c' ? c.inkMuted : c.ink }}>
+                {ln.text || ' '}
+              </Text>
+            </View>
+          ),
+        )}
+      </View>
+    </ScrollView>
+  );
+  return (
+    <View style={[{ paddingVertical: 6, borderRadius: RADIUS_SM, overflow: 'hidden' }, style]}>
+      {maxHeight ? (
+        <ScrollView style={{ maxHeight }} nestedScrollEnabled>
+          {body}
+        </ScrollView>
+      ) : (
+        body
+      )}
+    </View>
+  );
+}
+
+// El cursor de la respuesta en curso: un carácter dentro del propio texto del
+// Markdown (así queda pegado a la última palabra) que parpadea.
+function Caret() {
+  const c = useColors();
+  const reduced = useReducedMotion();
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    if (reduced) return undefined;
+    const timer = setInterval(() => setOn((v) => !v), 500);
+    return () => clearInterval(timer);
+  }, [reduced]);
+  return <Text style={{ color: on ? c.ink : 'transparent' }}>▍</Text>;
+}
+
+function AnswerBlock({ text, streaming }) {
   const c = useColors();
   const { t, s } = useScale();
   const { toast } = useDialogs();
   const mdStyles = useMemo(() => markdownStyles(c, t), [c, t]);
-  const mdRules = useMemo(() => markdownRules(c, t, () => toast('Código copiado', { icon: 'check' })), [c, t, toast]);
-  if (item.kind === 'user') return <UserRow item={item} busy={busy} />;
-  if (item.kind === 'tools') return <ToolCard items={item.items} waitingTool={waitingTool} />;
-  if (item.kind === 'command') return <CommandCard item={item} agent={agent} />;
-  if (item.kind === 'notice') {
-    // Respuesta del host a un comando: monoespaciada, para que se lea como
-    // salida del equipo y no como algo que dijo el modelo.
-    return (
-      <FadeUp style={{ marginVertical: s(9) }}>
-        <Text selectable style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.surface1, fontFamily: FONTS.mono, fontSize: 12.5, lineHeight: 19, color: c.inkBody }}>
-          {item.text}
-        </Text>
-      </FadeUp>
-    );
-  }
-  if (item.kind === 'error') {
-    return (
-      <View style={{ marginVertical: s(9), padding: 12, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
-        <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>
-          {item.text}
-        </Text>
-      </View>
-    );
-  }
+  const mdRules = useMemo(() => {
+    const base = markdownRules(c, t, () => toast('Código copiado', { icon: 'check' }));
+    return {
+      ...base,
+      text: (node, children, parent, styles, inherited = {}) => {
+        const content = String(node.content || '');
+        if (!content.includes(CARET)) {
+          return (
+            <Text key={node.key} style={[inherited, styles.text]}>
+              {content}
+            </Text>
+          );
+        }
+        return (
+          <Text key={node.key} style={[inherited, styles.text]}>
+            {content.replace(CARET, '')}
+            <Caret />
+          </Text>
+        );
+      },
+    };
+  }, [c, t, toast]);
   return (
     <FadeUp style={{ marginVertical: s(9) }}>
-      {item.text ? (
-        <Markdown style={mdStyles} rules={mdRules}>
-          {item.text}
-        </Markdown>
-      ) : item.open ? (
-        <ShimmerText text={`${agentStyle(agent, c).label} está pensando…`} style={{ fontFamily: FONTS.uiMedium, fontSize: 15 }} />
-      ) : null}
+      <Markdown style={mdStyles} rules={mdRules}>
+        {streaming ? `${text.replace(/\s+$/, '')}${CARET}` : text}
+      </Markdown>
+    </FadeUp>
+  );
+}
+
+function QaRecord({ item, label }) {
+  const c = useColors();
+  return (
+    <FadeUp style={{ marginVertical: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name="message" size={14} color={c.inkMuted} strokeWidth={1.7} />
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{`${label} preguntó`}</Text>
+      </View>
+      <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{item.question}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+        <View style={{ paddingTop: 3 }}>
+          <Icon name="tick" size={14} color={c.accentDeep} strokeWidth={1.9} />
+        </View>
+        <Text selectable style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13.5, color: c.accentDeep }}>{item.answer}</Text>
+      </View>
+    </FadeUp>
+  );
+}
+
+/** Lo que el turno dejó cambiado: cada archivo con sus líneas, desplegable a
+    su diff, y si pasaron los tests y en qué commit quedó. */
+function ChangesCard({ turn, open, toggle }) {
+  const c = useColors();
+  const { s } = useScale();
+  return (
+    <FadeUp style={{ marginVertical: s(9), borderRadius: RADIUS, backgroundColor: c.surface1, overflow: 'hidden' }}>
+      <Text style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Cambios de este turno</Text>
+      {turn.files.map((f) => {
+        const key = `${turn.key}:${f.path}`;
+        const isOpen = !!open[key];
+        return (
+          <View key={f.path}>
+            <Pressable
+              onPress={() => toggle(key)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: isOpen }}
+              style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1 })}
+            >
+              <Icon name="edit" size={15} color={c.inkMuted} strokeWidth={1.7} />
+              <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkBody }}>{f.path}</Text>
+              <LineCounts adds={f.adds} dels={f.dels} />
+              <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />
+            </Pressable>
+            {isOpen && f.edits.map((e) => <DiffView key={e.key} item={e} style={{ marginHorizontal: 12, marginBottom: 4, backgroundColor: c.bg }} />)}
+          </View>
+        );
+      })}
+      {(turn.tests || turn.commit) && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingTop: 6 }}>
+          {turn.tests && (
+            <View style={{ height: 26, paddingHorizontal: 9, borderRadius: RADIUS_SM, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: turn.tests.ok ? c.goodSoft : c.dangerSoft }}>
+              <Icon name={turn.tests.ok ? 'tick' : 'warning'} size={12} color={turn.tests.ok ? c.good : c.danger} strokeWidth={2.2} />
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: turn.tests.ok ? c.good : c.danger }}>{testsLabel(turn.tests)}</Text>
+            </View>
+          )}
+          {!!turn.commit && (
+            <View style={{ height: 26, paddingHorizontal: 9, borderRadius: RADIUS_SM, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.surface3 }}>
+              <Icon name="git" size={12} color={c.inkBody} strokeWidth={2} />
+              <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkBody }}>{turn.commit.slice(0, 7)}</Text>
+            </View>
+          )}
+        </View>
+      )}
+      <View style={{ height: 12 }} />
+    </FadeUp>
+  );
+}
+
+function testsLabel({ ok, count }) {
+  if (count === null) return ok ? 'Los tests pasan' : 'Los tests fallan';
+  if (ok) return `${count} ${count === 1 ? 'test pasa' : 'tests pasan'}`;
+  return `${count} ${count === 1 ? 'test falla' : 'tests fallan'}`;
+}
+
+function CompactedRow({ item, open, onToggle }) {
+  const c = useColors();
+  const label = item.before !== null && item.after !== null ? `Conversación compactada · ${item.before} % → ${item.after} %` : 'Conversación compactada';
+  return (
+    <FadeUp style={{ marginTop: 10, marginBottom: 6 }}>
+      <Pressable
+        onPress={item.summary ? onToggle : undefined}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        hitSlop={ROW_SLOP}
+        style={{ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+      >
+        <View style={{ flex: 1, height: 1, backgroundColor: c.surface5 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Icon name="compress" size={13} color={c.inkMuted} strokeWidth={1.8} />
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{label}</Text>
+        </View>
+        <View style={{ flex: 1, height: 1, backgroundColor: c.surface5 }} />
+      </Pressable>
+      {open && !!item.summary && (
+        <View style={{ marginTop: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 4 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Resumen que conserva el agente</Text>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkBody }}>{item.summary}</Text>
+        </View>
+      )}
     </FadeUp>
   );
 }
 
 const TASK_LABEL = { local_bash: 'comando', local_agent: 'subagente', remote_agent: 'agente remoto' };
 
-const elapsed = (ms) => {
+const ago = (ms) => {
   const sec = Math.max(0, Math.floor(ms / 1000));
   return sec < 60 ? `${sec} s` : `${Math.floor(sec / 60)} min`;
 };
@@ -580,11 +1237,7 @@ const elapsed = (ms) => {
 function WaitingStrip({ tasks, agent }) {
   const c = useColors();
   const a = agentStyle(agent, c);
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const now = useNow(true);
   return (
     <FadeUp style={{ marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: RADIUS, backgroundColor: a.soft, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -597,24 +1250,30 @@ function WaitingStrip({ tasks, agent }) {
         <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: a.ink }}>{TASK_LABEL[t.type] || 'tarea'}</Text>
           <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkBody }}>{t.description || t.id}</Text>
-          {!!t.since && <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkMuted }}>{elapsed(now - t.since)}</Text>}
+          {!!t.since && <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkMuted }}>{ago(now - t.since)}</Text>}
         </View>
       ))}
     </FadeUp>
   );
 }
 
-const TONE_COLOR = { ok: 'good', wait: 'accent', warn: 'accentDeep', bad: 'danger' };
+const TONE_COLOR = { ok: 'good', wait: 'accent', warn: 'warn', bad: 'danger' };
 const COMMAND_ROWS = 12;
 
 // Resultado de un «/» del IDE (/status, /cost, /doctor…): allí es una tarjeta
 // con controles, aquí llega resumido en filas o como texto de Claude Code.
-function CommandCard({ item, agent }) {
+function CommandCard({ item, agent, context }) {
   const c = useColors();
   const { s } = useScale();
   const a = agentStyle(agent, c);
   const [expanded, setExpanded] = useState(false);
-  const rows = expanded ? item.rows : item.rows.slice(0, COMMAND_ROWS);
+  const all = useMemo(() => {
+    if (item.name !== 'status' || !context || item.rows.some((r) => /^contexto/i.test(r.label || ''))) return item.rows;
+    const lv = contextLevels(context);
+    const tone = context.pct >= lv.danger ? 'bad' : context.pct >= lv.warn ? 'warn' : 'ok';
+    return [...item.rows, { label: 'Contexto', detail: `${context.pct} % usado · se compacta solo al ${lv.auto} %`, tone }];
+  }, [item, context]);
+  const rows = expanded ? all : all.slice(0, COMMAND_ROWS);
   return (
     <FadeUp style={{ marginVertical: s(9), borderRadius: RADIUS, backgroundColor: c.surface1, overflow: 'hidden' }}>
       <Text numberOfLines={1} style={{ paddingHorizontal: 12, paddingTop: 10, fontFamily: FONTS.monoMedium, fontSize: 12.5, color: a.ink }}>
@@ -630,19 +1289,19 @@ function CommandCard({ item, agent }) {
           </View>
         </View>
       ))}
-      {item.rows.length > COMMAND_ROWS && (
-        <Pressable onPress={() => setExpanded((v) => !v)} style={{ paddingHorizontal: 12, paddingTop: 8 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : `Ver ${item.rows.length - COMMAND_ROWS} más`}</Text>
+      {all.length > COMMAND_ROWS && (
+        <Pressable onPress={() => setExpanded((v) => !v)} style={{ minHeight: 36, justifyContent: 'center', paddingHorizontal: 12 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : `Ver ${all.length - COMMAND_ROWS} más`}</Text>
         </Pressable>
       )}
       {!!item.text &&
         (item.diff ? (
-          <DiffLines text={item.text} max={expanded ? 400 : 60} style={{ paddingHorizontal: 12, paddingTop: 8 }} />
+          <DiffView item={{ diff: expanded ? item.text : item.text.split('\n').slice(0, 60).join('\n') }} style={{ marginHorizontal: 12, marginTop: 8, backgroundColor: c.bg }} />
         ) : (
           <Text selectable style={{ paddingHorizontal: 12, paddingTop: 8, fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>{item.text}</Text>
         ))}
-      {item.diff && item.rows.length <= COMMAND_ROWS && item.text.split('\n').length > 60 && (
-        <Pressable onPress={() => setExpanded((v) => !v)} style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+      {item.diff && all.length <= COMMAND_ROWS && item.text.split('\n').length > 60 && (
+        <Pressable onPress={() => setExpanded((v) => !v)} style={{ minHeight: 36, justifyContent: 'center', paddingHorizontal: 12 }}>
           <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : 'Ver el diff completo'}</Text>
         </Pressable>
       )}
@@ -669,9 +1328,9 @@ function UserRow({ item, busy }) {
             {extras.map((x, i) => (
               <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 {x.glyph ? (
-                  <Text style={{ width: 14, textAlign: 'center', fontFamily: FONTS.monoMedium, fontSize: 12.5, color: c.inkSoft }}>@</Text>
+                  <Text style={{ width: 14, textAlign: 'center', fontFamily: FONTS.monoMedium, fontSize: 12.5, color: c.ink70 }}>@</Text>
                 ) : (
-                  <Icon name={x.icon} size={14} color={c.inkSoft} />
+                  <Icon name={x.icon} size={14} color={c.ink70} />
                 )}
                 <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: t(13), color: c.ink70 }}>
                   {x.label}
@@ -692,178 +1351,37 @@ function UserRow({ item, busy }) {
   );
 }
 
-/** Agrupa las herramientas consecutivas en una sola tarjeta. */
-function groupItems(items) {
-  const out = [];
-  for (const it of items) {
-    const last = out[out.length - 1];
-    if (it.kind === 'tool' && last?.kind === 'tools') last.items.push(it);
-    else if (it.kind === 'tool') out.push({ kind: 'tools', key: it.key, items: [it] });
-    else out.push(it);
-  }
-  return out;
-}
-
-// Líneas de un diff con su color: añadidas en verde, borradas en rojo.
-function DiffLines({ text, max = 80, style }) {
-  const c = useColors();
-  const lines = String(text || '').replace(/\n$/, '').split('\n');
-  const shown = lines.slice(0, max);
-  return (
-    <View style={style}>
-      {shown.map((line, i) => {
-        const add = line.startsWith('+');
-        const del = line.startsWith('-');
-        const gap = line.startsWith('@@');
-        return (
-          <Text
-            key={i}
-            selectable
-            numberOfLines={1}
-            style={{
-              fontFamily: FONTS.mono,
-              fontSize: 11.5,
-              lineHeight: 17,
-              color: add ? c.good : del ? c.danger : gap ? c.inkFaint : c.inkMuted,
-              backgroundColor: del ? c.dangerSoft : 'transparent',
-            }}
-          >
-            {gap ? '⋯' : line || ' '}
-          </Text>
-        );
-      })}
-      {lines.length > shown.length && (
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint, marginTop: 4 }}>{`… ${lines.length - shown.length} líneas más`}</Text>
-      )}
-    </View>
-  );
-}
-
-function LineCounts({ it }) {
-  const c = useColors();
-  if (typeof it.adds !== 'number' && typeof it.dels !== 'number') return null;
-  return (
-    <View style={{ flexDirection: 'row', gap: 5 }}>
-      <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.good }}>{`+${it.adds || 0}`}</Text>
-      <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.danger }}>{`−${it.dels || 0}`}</Text>
-    </View>
-  );
-}
-
-function ToolLine({ it, waitingTool, trailing, onPress }) {
-  const c = useColors();
-  const waiting = it.running && waitingTool && it.tool === waitingTool;
-  const { verb, target, mono } = toolParts(it, waiting);
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityLabel={describeRemoteTool(it)}
-      style={({ pressed }) => ({ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed && onPress ? 0.7 : 1 })}
-    >
-      <Icon name={it.error ? 'warning' : TOOL_ICON[verb] || 'layers'} size={15} color={it.error ? c.danger : c.inkMuted} />
-      {it.running ? (
-        <View style={{ width: 56 }}>
-          <ShimmerText text={verb} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
-        </View>
-      ) : (
-        <Text style={{ width: 56, fontFamily: FONTS.ui, fontSize: 13.5, color: it.error ? c.danger : c.inkMuted }}>{verb}</Text>
-      )}
-      <Text numberOfLines={1} style={{ flex: 1, fontFamily: mono ? FONTS.mono : FONTS.ui, fontSize: mono ? 12.5 : 13.5, color: c.inkBody }}>
-        {target}
-      </Text>
-      <LineCounts it={it} />
-      {trailing}
-    </Pressable>
-  );
-}
-
-/** Las herramientas de un tramo en una sola línea que va cambiando a la que
-    corre ahora; al tocarla se despliega el historial con la salida de cada una. */
-function ToolCard({ items, waitingTool }) {
-  const c = useColors();
-  const { s } = useScale();
-  const [expanded, setExpanded] = useState(false);
-  const [shown, setShown] = useState(null);
-  const last = items[items.length - 1];
-  const toggle = () => setExpanded((v) => !v);
-
-  if (!expanded) {
-    return (
-      <View style={{ marginVertical: s(4) }}>
-        <FadeUp key={last.key} distance={4}>
-          <ToolLine
-            it={last}
-            waitingTool={waitingTool}
-            onPress={toggle}
-            trailing={
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                {items.length > 1 && <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint }}>{items.length}</Text>}
-                <Icon name="chevron-right" size={13} color={c.inkFaint} />
-              </View>
-            }
-          />
-        </FadeUp>
-      </View>
-    );
-  }
-
-  return (
-    <FadeUp style={{ marginVertical: s(4) }}>
-      {items.map((it) => {
-        const open = shown === it.key;
-        return (
-          <View key={it.key}>
-            <ToolLine
-              it={it}
-              waitingTool={waitingTool}
-              onPress={it.result || it.diff ? () => setShown(open ? null : it.key) : undefined}
-              trailing={!!(it.result || it.diff) && <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} />}
-            />
-            {open && !!it.diff && (
-              <DiffLines text={it.diff} max={200} style={{ marginBottom: 6, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1 }} />
-            )}
-            {open && !!it.result && (
-              <Text selectable style={{ marginBottom: 6, padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface1, fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkBody }}>
-                {it.result}
-              </Text>
-            )}
-          </View>
-        );
-      })}
-      <Pressable onPress={toggle} style={{ height: 30, justifyContent: 'center' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Contraer</Text>
-      </Pressable>
-    </FadeUp>
-  );
-}
+// ── Encima del compositor ───────────────────────────────────────────────────
 
 function ApprovalCard({ approval, onDecide }) {
   const c = useColors();
   const isCommand = approval.risk === 'command';
+  const hasDiff = !!(approval.rows?.length || approval.diff);
   const btn = { flex: 1, height: 44, borderRadius: RADIUS, alignItems: 'center', justifyContent: 'center' };
   return (
     <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Icon name={isCommand ? 'terminal' : 'pencil'} size={16} color={c.accent} />
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{isCommand ? '¿Ejecutar este comando?' : '¿Aplicar este cambio?'}</Text>
+        <Icon name={isCommand ? 'console' : 'edit'} size={16} color={c.accent} strokeWidth={1.7} />
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{isCommand ? '¿Ejecutar este comando?' : '¿Aplicar este cambio?'}</Text>
+        {hasDiff && <LineCounts adds={approval.adds} dels={approval.dels} />}
       </View>
-      <Text selectable style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS_SM, backgroundColor: c.bg, fontFamily: FONTS.mono, fontSize: 13, color: c.ink }}>
-        {approval.summary || approval.tool}
-      </Text>
-      {!!approval.diff && (
-        <ScrollView style={{ maxHeight: 220, borderRadius: RADIUS_SM, backgroundColor: c.bg }} contentContainerStyle={{ padding: 10 }} nestedScrollEnabled>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 12, color: c.inkBody }}>{approval.path || ''}</Text>
-            <LineCounts it={approval} />
-          </View>
-          <DiffLines text={approval.diff} max={120} />
-        </ScrollView>
+      {hasDiff ? (
+        <View style={{ borderRadius: RADIUS_SM, backgroundColor: c.bg, overflow: 'hidden' }}>
+          <Text numberOfLines={1} style={{ paddingHorizontal: 12, paddingTop: 9, paddingBottom: 4, fontFamily: FONTS.mono, fontSize: 12, color: c.inkBody }}>
+            {approval.path || approval.summary || approval.tool}
+          </Text>
+          <DiffView item={approval} maxHeight={196} style={{ paddingTop: 4, paddingBottom: 8 }} />
+        </View>
+      ) : (
+        <Text selectable style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS_SM, backgroundColor: c.bg, fontFamily: FONTS.mono, fontSize: 13, color: c.ink }}>
+          {isCommand ? `$ ${approval.summary || approval.tool}` : approval.summary || approval.tool}
+        </Text>
       )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Pressable onPress={() => onDecide(approval.id, 'deny')} style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
+        <Pressable onPress={() => onDecide(approval.id, 'deny')} accessibilityRole="button" style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
           <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.onRaised }}>Rechazar</Text>
         </Pressable>
-        <Pressable onPress={() => onDecide(approval.id, 'allow')} style={({ pressed }) => [btn, { backgroundColor: c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+        <Pressable onPress={() => onDecide(approval.id, 'allow')} accessibilityRole="button" style={({ pressed }) => [btn, { backgroundColor: c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
           <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.onPrimary }}>Permitir</Text>
         </Pressable>
       </View>
@@ -871,8 +1389,45 @@ function ApprovalCard({ approval, onDecide }) {
   );
 }
 
-/// Hoja de comandos: accesos grandes (adjuntar, archivo, estado, terminar…) y
-/// los comandos "/" del host con un filtro.
+/** Pregunta del agente: opciones con su descripción o una respuesta propia
+    escrita en el compositor. */
+function QuestionCard({ choice, agent, onChoose }) {
+  const c = useColors();
+  const a = agentStyle(agent, c);
+  return (
+    <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name="message" size={14} color={a.ink} strokeWidth={1.7} />
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: a.ink }}>{`${a.label} pregunta`}</Text>
+      </View>
+      <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: 15, lineHeight: 21, color: c.ink }}>{choice.title}</Text>
+      {!!choice.body && <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkBody }}>{choice.body}</Text>}
+      {choice.options.length > 0 && (
+        <ScrollView style={{ maxHeight: 260 }} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
+          {choice.options.map((o) => (
+            <Pressable
+              key={o.value}
+              onPress={() => onChoose(choice.id, o.value)}
+              accessibilityRole="button"
+              style={({ pressed }) => ({ minHeight: 52, paddingHorizontal: 12, paddingVertical: 9, borderRadius: RADIUS_SM, backgroundColor: pressed ? c.surface3 : c.bg, flexDirection: 'row', alignItems: 'center', gap: 10 })}
+            >
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{o.label || o.value}</Text>
+                  {!!o.badge && <Text style={{ fontFamily: FONTS.ui, fontSize: 11.5, color: a.ink }}>{o.badge}</Text>}
+                </View>
+                {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted }}>{o.description}</Text>}
+              </View>
+              <Icon name="chevron-right" size={13} color={c.inkFaint} strokeWidth={2} />
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+      {choice.free && <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{choice.options.length ? 'O escribe otra respuesta abajo' : 'Escribe tu respuesta abajo'}</Text>}
+    </FadeUp>
+  );
+}
+
 // Selector abierto en el host por un comando (/model, /branch, confirmar un
 // commit…): sigue abierto también allí y vale la primera respuesta.
 function ChoiceCard({ choice, onChoose }) {
@@ -891,7 +1446,7 @@ function ChoiceCard({ choice, onChoose }) {
           <Pressable
             key={o.value}
             onPress={() => onChoose(choice.id, o.value)}
-            style={({ pressed }) => ({ paddingHorizontal: 12, paddingVertical: 10, marginBottom: 6, borderRadius: RADIUS_SM, backgroundColor: pressed ? c.surface3 : c.bg })}
+            style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 6, borderRadius: RADIUS_SM, backgroundColor: pressed ? c.surface3 : c.bg })}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{o.label || o.value}</Text>
@@ -901,20 +1456,250 @@ function ChoiceCard({ choice, onChoose }) {
           </Pressable>
         ))}
       </ScrollView>
-      <Pressable onPress={() => onChoose(choice.id, '')} style={{ height: 36, alignItems: 'center', justifyContent: 'center' }}>
+      <Pressable onPress={() => onChoose(choice.id, '')} style={{ height: 44, alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>Cancelar</Text>
       </Pressable>
     </FadeUp>
   );
 }
 
-function CommandsSheet({ commands, tiles, onPick }) {
+function Spinner({ size = 15 }) {
+  const c = useColors();
+  const reduced = useReducedMotion();
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (reduced) return undefined;
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [spin, reduced]);
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <Animated.View style={{ width: size, height: size, transform: [{ rotate }] }}>
+      <Svg width={size} height={size} viewBox="0 0 20 20">
+        <Circle cx="10" cy="10" r="7.5" fill="none" strokeWidth="2.2" stroke={c.surface5} />
+        <Circle cx="10" cy="10" r="7.5" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeDasharray="12 47.1" stroke={c.accent} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+const COMPACT_STEP = (pct, messages) => (pct < 35 ? (messages ? `Leyendo ${messages} mensajes` : 'Leyendo la conversación') : pct < 75 ? 'Resumiendo la conversación' : 'Guardando el resumen');
+
+/** Avance del compact: fase, porcentaje y cuánto contexto quedará. Con un
+    host que no da avance (Claude Code) la barra es indeterminada. */
+function CompactCard({ compact }) {
+  const c = useColors();
+  const pct = compact?.pct ?? null;
+  const reduced = useReducedMotion();
+  const fill = useRef(new Animated.Value(pct ?? 0)).current;
+  const sweep = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (pct === null) return undefined;
+    Animated.timing(fill, { toValue: pct, duration: reduced ? 0 : 600, easing: Easing.bezier(0.2, 0.8, 0.2, 1), useNativeDriver: false }).start();
+    return undefined;
+  }, [pct, fill, reduced]);
+  useEffect(() => {
+    if (pct !== null || reduced) return undefined;
+    const loop = Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.ease), useNativeDriver: false }));
+    loop.start();
+    return () => loop.stop();
+  }, [pct, sweep, reduced]);
+  const width = pct === null ? '30%' : fill.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
+  const left = pct === null ? sweep.interpolate({ inputRange: [0, 1], outputRange: ['-30%', '100%'] }) : 0;
+  return (
+    <FadeUp accessibilityRole="progressbar" accessibilityLabel="Compactando la conversación" style={{ marginHorizontal: 12, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 12, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Spinner />
+        <View style={{ flex: 1 }}>
+          <ShimmerText text="Compactando la conversación" style={{ fontFamily: FONTS.uiMedium, fontSize: 14 }} />
+        </View>
+        {pct !== null && <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{`${pct} %`}</Text>}
+      </View>
+      <View style={{ height: 4, borderRadius: 2, backgroundColor: c.surface4, overflow: 'hidden' }}>
+        <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, left, width, borderRadius: 2, backgroundColor: c.accent }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{pct === null ? 'Resumiendo la conversación' : COMPACT_STEP(pct, compact?.messages)}</Text>
+        {compact?.before != null && (
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>{`${compact.before} %${compact.estimate != null ? ` → ~${compact.estimate} %` : ''}`}</Text>
+        )}
+      </View>
+    </FadeUp>
+  );
+}
+
+function ringColor(ctx, c) {
+  const lv = contextLevels(ctx);
+  return ctx.pct >= lv.danger ? c.danger : ctx.pct >= lv.warn ? c.warn : c.inkMuted;
+}
+
+function ContextRing({ context, compacting, onPress }) {
+  const c = useColors();
+  const reduced = useReducedMotion();
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!compacting || reduced) {
+      spin.setValue(0);
+      return undefined;
+    }
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [compacting, spin, reduced]);
+  const color = ringColor(context, c);
+  const dash = compacting ? `${(RING * 0.25).toFixed(1)} ${RING.toFixed(1)}` : `${((RING * Math.min(100, context.pct)) / 100).toFixed(1)} ${RING.toFixed(1)}`;
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Contexto ${context.pct} % usado. Ver detalle`}
+      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+      style={({ pressed }) => ({ width: 36, height: 40, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? c.pressed : 'transparent' })}
+    >
+      <Animated.View style={{ transform: [{ rotate }] }}>
+        <Svg width={22} height={22} viewBox="0 0 20 20">
+          <Circle cx="10" cy="10" r="8" fill="none" strokeWidth="2.2" stroke={c.surface5} />
+          <Circle cx="10" cy="10" r="8" fill="none" strokeWidth="2.2" strokeLinecap="round" stroke={color} strokeDasharray={dash} rotation={-90} origin="10, 10" />
+        </Svg>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+// Capa sobre toda la sesión con velo: un toque fuera la cierra.
+function Overlay({ children, onClose, label, center = false }) {
+  const c = useColors();
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 20, elevation: 20, justifyContent: center ? 'center' : undefined, paddingHorizontal: center ? 16 : 0 }}>
+      <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel={label} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: c.scrim }} />
+      {children}
+    </View>
+  );
+}
+
+function ContextPopover({ context, compacted, bottom, busy, compacting, canCompact, onCompact, onClose }) {
+  const c = useColors();
+  const lv = contextLevels(context);
+  const size = context.window || 1;
+  const files = Math.min(context.files || 0, context.tokens || 0);
+  const parts = [
+    { label: compacted ? 'Resumen compactado' : 'Conversación', tokens: Math.max(0, (context.tokens || 0) - files), color: c.ink70 },
+    ...(files > 0 ? [{ label: 'Archivos leídos', tokens: files, color: c.inkMuted }] : []),
+    ...(context.system > 0 ? [{ label: 'Instrucciones y herramientas · fijo', tokens: context.system, color: c.inkFaint }] : []),
+  ].map((p) => ({ ...p, pct: Math.max(p.tokens > 0 ? 1 : 0, Math.round((p.tokens * 100) / size)) }));
+  const warn = context.pct >= lv.warn;
+  const color = ringColor(context, c);
+  const disabled = busy || compacting;
+  return (
+    <Overlay onClose={onClose} label="Cerrar contexto">
+      <FadeUp distance={6} accessibilityViewIsModal style={{ position: 'absolute', right: 12, bottom, width: 300, maxWidth: '92%', padding: 16, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 14 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Svg width={44} height={44} viewBox="0 0 44 44">
+            <Circle cx="22" cy="22" r="18" fill="none" strokeWidth="4" stroke={c.surface4} />
+            <Circle cx="22" cy="22" r="18" fill="none" strokeWidth="4" strokeLinecap="round" stroke={color} strokeDasharray={`${((BIG_RING * Math.min(100, context.pct)) / 100).toFixed(1)} ${BIG_RING.toFixed(1)}`} rotation={-90} origin="22, 22" />
+          </Svg>
+          <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Contexto de la sesión</Text>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 22, letterSpacing: -0.4, color: c.ink }}>{`${context.pct} % usado`}</Text>
+          </View>
+        </View>
+        <View style={{ gap: 8 }}>
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: c.surface4, overflow: 'hidden', flexDirection: 'row', gap: 2 }}>
+            {parts.map((p, i) => (
+              <View key={p.label} style={{ width: `${p.pct}%`, height: 6 }}>
+                <GrowBar ratio={1} color={p.color} delay={i * 60} style={{ height: 6 }} />
+              </View>
+            ))}
+          </View>
+          {parts.map((p) => (
+            <View key={p.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: p.color }} />
+              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkBody }}>{p.label}</Text>
+              <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{`${p.pct} %`}</Text>
+            </View>
+          ))}
+          {context.tokens != null && context.window != null && (
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkFaint }}>{`${fmtTokens(context.tokens)} de ${fmtTokens(context.window)} tokens`}</Text>
+          )}
+        </View>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 18, color: warn ? c.warn : c.inkMuted }}>
+          {warn ? `Queda poco espacio. Al ${lv.auto} % se compacta solo; compactar ahora resume la conversación sin perder el hilo.` : `Al ${lv.auto} % se compacta solo.`}
+        </Text>
+        {canCompact && (
+          <Pressable
+            onPress={disabled ? undefined : onCompact}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityState={{ disabled }}
+            style={({ pressed }) => ({ height: 44, borderRadius: RADIUS, alignItems: 'center', justifyContent: 'center', backgroundColor: disabled ? c.surface4 : c.primary, transform: [{ scale: pressed && !disabled ? 0.98 : 1 }] })}
+          >
+            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: disabled ? c.inkMuted : c.onPrimary }}>
+              {compacting ? 'Compactando…' : busy ? 'Disponible al terminar el turno' : 'Compactar ahora'}
+            </Text>
+          </Pressable>
+        )}
+      </FadeUp>
+    </Overlay>
+  );
+}
+
+function QuotaModal({ usage, onClose, onDaily }) {
+  const c = useColors();
+  const api = useApi();
+  const plan = usage?.plan && typeof usage.plan === 'object' ? usage.plan : null;
+  const buckets = usage?.buckets && typeof usage.buckets === 'object' ? usage.buckets : null;
+  return (
+    <Overlay onClose={onClose} label="Cerrar uso" center>
+      <FadeUp distance={6} accessibilityViewIsModal style={{ width: '100%', paddingTop: 18, paddingHorizontal: 16, paddingBottom: 10, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 18 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text accessibilityRole="header" style={{ flex: 1, fontFamily: FONTS.serif, fontSize: 24, lineHeight: 28, color: c.ink }}>Uso y límites</Text>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar" style={{ width: 44, height: 44, margin: -8, marginLeft: 0, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={18} color={c.inkMuted} strokeWidth={1.8} />
+          </Pressable>
+        </View>
+        {!usage && <SkeletonLines widths={['50%', '100%', '40%']} />}
+        {plan && (
+          <View style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.surface3, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>Plan {String(plan.name || plan.id || '')}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>El mismo cupo en web, IDE y móvil</Text>
+            </View>
+            <Pressable
+              onPress={() => Linking.openURL(`${api.base}/plans`)}
+              accessibilityRole="link"
+              style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: RADIUS_SM, justifyContent: 'center', backgroundColor: pressed ? c.surface5 : c.raised })}
+            >
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.onRaised }}>Mejorar</Text>
+            </Pressable>
+          </View>
+        )}
+        {buckets && (
+          <>
+            <Quota label="Sesión actual" bucket={buckets.session} accent />
+            <Quota label="Esta semana" bucket={buckets.week} delay={100} />
+          </>
+        )}
+        <Pressable onPress={onDaily} accessibilityRole="button" style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>Ver uso por día</Text>
+          <Icon name="chevron-right" size={13} color={c.inkMuted} strokeWidth={2} />
+        </Pressable>
+      </FadeUp>
+    </Overlay>
+  );
+}
+
+/// Hoja de comandos: accesos grandes (adjuntar, archivo, estado, uso,
+/// terminar…) y los comandos "/" del host con un filtro.
+function CommandsSheet({ agent, commands, tiles, onPick }) {
   const c = useColors();
   const [q, setQ] = useState('');
   const list = useMemo(() => {
     const needle = q.replace(/^\//, '').toLowerCase();
     return commands.filter((x) => !needle || x.name.toLowerCase().includes(needle) || String(x.description || '').toLowerCase().includes(needle)).slice(0, 80);
   }, [commands, q]);
+  const groupLabel = (g) => GROUP_LABEL[g] || g || agentStyle(agent, c).label;
   return (
     <View style={{ gap: 14 }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
@@ -922,6 +1707,7 @@ function CommandsSheet({ commands, tiles, onPick }) {
           <Pressable
             key={tile.value}
             onPress={() => onPick(tile.value)}
+            accessibilityRole="button"
             style={({ pressed }) => ({
               flexGrow: 1,
               flexBasis: '30%',
@@ -930,13 +1716,14 @@ function CommandsSheet({ commands, tiles, onPick }) {
               alignItems: 'center',
               justifyContent: 'center',
               gap: 6,
-              backgroundColor: tile.danger ? `rgba(240,140,124,${pressed ? 0.16 : 0.1})` : pressed ? c.surface4 : c.surface3,
+              backgroundColor: tile.danger ? c.dangerSoft : pressed ? c.surface4 : c.surface3,
+              opacity: pressed && tile.danger ? 0.85 : 1,
             })}
           >
             {tile.glyph ? (
               <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 18, lineHeight: 20, color: c.inkBody }}>{tile.glyph}</Text>
             ) : (
-              <Icon name={tile.icon} size={20} color={tile.danger ? c.danger : c.inkBody} />
+              <Icon name={tile.icon} size={20} color={tile.danger ? c.danger : c.inkBody} strokeWidth={1.7} />
             )}
             <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: tile.danger ? c.danger : c.inkBody }}>{tile.label}</Text>
           </Pressable>
@@ -959,13 +1746,14 @@ function CommandsSheet({ commands, tiles, onPick }) {
       <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled">
         {list.map((cmd, i) => (
           <View key={`${cmd.group || ''}${cmd.name}`}>
-            {cmd.group && cmd.group !== list[i - 1]?.group && (
-              <Text style={{ paddingHorizontal: 12, paddingTop: i ? 12 : 0, paddingBottom: 4, fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkMuted }}>
-                {GROUP_LABEL[cmd.group] || cmd.group}
+            {(i === 0 || cmd.group !== list[i - 1]?.group) && (
+              <Text style={{ paddingHorizontal: 12, paddingTop: i ? 10 : 0, paddingBottom: 4, fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkMuted }}>
+                {groupLabel(cmd.group)}
               </Text>
             )}
             <Pressable
               onPress={() => onPick(`cmd:${cmd.name}`)}
+              accessibilityRole="button"
               style={({ pressed }) => ({ minHeight: 52, paddingVertical: 6, paddingHorizontal: 12, borderRadius: RADIUS, justifyContent: 'center', backgroundColor: pressed ? c.pressed : 'transparent' })}
             >
               <Text style={{ fontFamily: FONTS.mono, fontSize: 14, color: c.ink }}>
@@ -996,6 +1784,7 @@ function RemoteComposer({
   onRunCommand,
   commands,
   thinking,
+  answering,
   disabled,
   sending,
   attachments,
@@ -1004,6 +1793,9 @@ function RemoteComposer({
   mentionQuery,
   files,
   onPickMention,
+  context,
+  compacting,
+  onContext,
 }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -1031,6 +1823,7 @@ function RemoteComposer({
   }, [mentionQuery, files, mentions]);
 
   const hasTray = attachments.items.length > 0 || mentions.length > 0;
+  const placeholder = disabled ? 'Host sin conexión…' : answering ? 'Responde con tus palabras…' : 'Pídele algo al agente…';
 
   return (
     <View style={{ paddingHorizontal: 12, paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 14) }}>
@@ -1082,26 +1875,31 @@ function RemoteComposer({
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2 }}>
           <Pressable
             onPress={onCommands}
+            accessibilityRole="button"
             accessibilityLabel="Comandos"
+            hitSlop={{ top: 4, bottom: 4, left: 2 }}
             style={({ pressed }) => ({ width: 40, height: 40, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? c.pressed : 'transparent' })}
           >
-            <Icon name="slash" size={18} color={c.ink70} />
+            <Icon name="slash" size={18} color={c.ink70} strokeWidth={1.7} />
           </Pressable>
           <TextInput
             ref={inputRef}
             value={input}
             onChangeText={onChangeInput}
-            placeholder={disabled ? 'Host sin conexión…' : 'Pídele algo al agente…'}
+            placeholder={placeholder}
             placeholderTextColor={c.inkMuted}
             selectionColor={c.accent}
             accessibilityLabel="Mensaje para el agente"
             multiline
             style={{ flex: 1, minHeight: 40, maxHeight: 140, paddingHorizontal: 4, paddingTop: 10, paddingBottom: 10, fontFamily: FONTS.ui, fontSize: 15, lineHeight: 20, color: c.ink }}
           />
+          {context && <ContextRing context={context} compacting={compacting} onPress={onContext} />}
           <Pressable
             onPress={showStop ? onInterrupt : onSend}
             disabled={showStop ? disabled : !canSend}
+            accessibilityRole="button"
             accessibilityLabel={showStop ? 'Interrumpir al agente' : 'Enviar'}
+            hitSlop={{ top: 4, bottom: 4, right: 2 }}
             style={({ pressed }) => ({
               width: 40,
               height: 40,
@@ -1148,3 +1946,4 @@ function SuggestionRow({ children, onPress }) {
     </Pressable>
   );
 }
+

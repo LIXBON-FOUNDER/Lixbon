@@ -122,14 +122,21 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 		est = &history.Estimator{}
 	}
 
-	nudged, prunedWarned := false, false
-	emptyRetries, repeated := 0, 0
+	nudged, prunedWarned, usedTools := false, false, false
+	emptyRetries, repeated, stalled := 0, 0, 0
 	lastSignature := ""
+	// nudgeAt es dónde va el recordatorio de aplicar código y nudgeAnswer, la
+	// respuesta que lo provocó: si el modelo no aplica nada, el recordatorio se
+	// retira y queda esa respuesta, no un «OK».
+	nudgeAt, nudgeAnswer := -1, ""
+	var next StepOptions
 
 	for step := 0; step < MaxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return "", working, err
 		}
+		opts := next
+		next = StepOptions{}
 		s.Working = working
 		if s.Ask != nil && est.NeedsCompaction(working, window) {
 			t.note("La conversación llena la ventana de contexto: compactando…")
@@ -161,14 +168,18 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 		}
 
 		messages := append([]history.Message{system}, body...)
-		res, err := t.stream(ctx, messages, toolList)
+		res, err := t.stream(WithStep(ctx, opts), messages, toolList)
 		if err != nil {
 			return "", working, err
 		}
 		assistant := toolparse.TruncateFabricated(res.Text)
 
+		if opts.Quiet && len(res.ToolCalls) == 0 && len(toolparse.ExtractAll(assistant)) == 0 {
+			return nudgeAnswer, working[:nudgeAt], nil
+		}
+
 		if len(res.ToolCalls) > 0 {
-			emptyRetries = 0
+			emptyRetries, stalled, usedTools = 0, 0, true
 			calls := make([]toolparse.Call, len(res.ToolCalls))
 			signatures := make([]string, len(res.ToolCalls))
 			for i, raw := range res.ToolCalls {
@@ -185,9 +196,9 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 			}
 			lastSignature = signature
 			if repeated >= MaxRepeatedCalls {
-				return repeatedMessage, working, nil
+				return t.wrapUp(ctx, working, repeatedMessage)
 			}
-			working = append(working, history.Message{Role: "assistant", Content: assistant, ToolCalls: res.ToolCalls})
+			working = append(working, history.Message{Role: "assistant", Content: assistant, ToolCalls: res.ToolCalls, Thinking: res.Reasoning})
 			for i, call := range calls {
 				result, err := t.approveAndRun(ctx, call.Tool, call.Args)
 				if err != nil {
@@ -232,23 +243,27 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 				// el modelo tiene que ver lo que pidió para leer bien el resultado.
 				assistant = strings.Join(lines, "\n")
 				t.emit(Event{Kind: EventRescued, Text: "llamada recuperada del razonamiento"})
+			} else if textutil.Strip(reasoning) != "" {
+				// Se quedó pensando sin responder: se repite el paso tal cual
+				// pero sin razonar, sin meterle prisa con un mensaje. Si vuelve
+				// a pasar, responde con lo que ya tiene.
+				if stalled++; stalled > 1 {
+					return t.wrapUp(ctx, working, noAnswerMessage)
+				}
+				next.NoThinking = true
+				continue
 			} else if emptyRetries < maxEmptyRetries {
 				emptyRetries++
-				if textutil.Strip(reasoning) != "" {
-					working = append(working, history.User(NoOutputPrompt))
-					t.note("El modelo se quedó pensando sin responder; le pido que ejecute el siguiente paso.")
-				} else {
-					// Nada en absoluto: huele a ventana desbordada. Se recorta lo
-					// que se ENVÍA, no el historial del usuario.
-					t.note("El modelo no devolvió nada; libero contexto y lo reintento.")
-					working = history.ShrinkOldResults(working, 2, history.MaxOldToolOutputChar)
-				}
+				// Nada en absoluto: huele a ventana desbordada. Se recorta lo
+				// que se ENVÍA, no el historial del usuario.
+				t.note("El modelo no devolvió nada; libero contexto y lo reintento.")
+				working = history.ShrinkOldResults(working, 2, history.MaxOldToolOutputChar)
 				continue
 			} else {
 				return noAnswerMessage, working, nil
 			}
 		}
-		emptyRetries = 0
+		emptyRetries, stalled = 0, 0
 
 		working = append(working, history.Assistant(assistant))
 
@@ -258,17 +273,22 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 				working = append(working, history.User(TruncatedPrompt))
 				continue
 			}
-			if !nudged && strings.Contains(assistant, fence) {
+			// Solo si respondió pegando código sin haber tocado nada: un árbol de
+			// carpetas o una salida en un bloque no es código por aplicar.
+			if !nudged && !usedTools && pastesCode(assistant) {
 				nudged = true
 				prompt := NudgePrompt
 				if native {
 					prompt = NativeNudgePrompt
 				}
+				nudgeAt, nudgeAnswer = len(working), assistant
 				working = append(working, history.User(prompt))
+				next.Quiet = true
 				continue
 			}
 			return assistant, working, nil
 		}
+		usedTools = true
 
 		signatures := make([]string, len(toolCalls))
 		for i, c := range toolCalls {
@@ -282,7 +302,7 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 		}
 		lastSignature = signature
 		if repeated >= MaxRepeatedCalls {
-			return repeatedMessage, working, nil
+			return t.wrapUp(ctx, working, repeatedMessage)
 		}
 
 		var combined []string
@@ -311,6 +331,76 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 	}
 	return fmt.Sprintf("He llegado al tope de %d pasos en un mismo turno y paro aquí para no seguir a ciegas. "+
 		"Dime «continúa» si quieres que siga desde donde iba.", MaxSteps), working, nil
+}
+
+// pastesCode dice si la respuesta trae código que parece para un archivo:
+// un bloque con lenguaje de programación, o sin lenguaje pero con sintaxis.
+func pastesCode(text string) bool {
+	parts := strings.Split(text, fence)
+	for i := 1; i < len(parts); i += 2 {
+		lang, body, _ := strings.Cut(parts[i], "\n")
+		switch strings.ToLower(strings.TrimSpace(lang)) {
+		case "text", "txt", "plaintext", "plain", "output", "console", "log", "tree", "md", "markdown", "diff":
+			continue
+		case "":
+			if strings.ContainsAny(body, "{;") || strings.Contains(body, "</") ||
+				strings.Contains(body, "def ") || strings.Contains(body, "import ") || strings.Contains(body, "=>") {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// wrapUp cierra un turno atascado (se repite o no llega a responder): le pide
+// al modelo, sin herramientas ni razonamiento, que conteste con lo que ya sabe.
+// fallback es lo que se dice si tampoco así responde.
+func (t *Turn) wrapUp(ctx context.Context, working []history.Message, fallback string) (string, []history.Message, error) {
+	system := history.Message{Role: "system", Content: "Eres un agente de código. Ya no quedan herramientas en este turno: " +
+		"responde al usuario con lo que ya sabes por los resultados anteriores, o dile qué te falta para seguir.\n\n" + StylePrompt}
+	est := t.S.Estimator
+	if est == nil {
+		est = &history.Estimator{}
+	}
+	window := t.S.ContextWindow
+	if window == 0 {
+		window = 8192
+	}
+	body, _ := est.FitHistory(PlainHistory(working), est.PromptBudget(window, nil, est.EstimateTokens([]history.Message{system})), history.KeepRecent)
+	res, err := t.Stream(WithStep(ctx, StepOptions{NoThinking: true}), append([]history.Message{system}, body...), nil)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", working, ctx.Err()
+		}
+		return fallback, working, nil
+	}
+	answer := toolparse.CleanProse(toolparse.TruncateFabricated(res.Text))
+	if answer == "" {
+		return fallback, working, nil
+	}
+	return answer, working, nil
+}
+
+// PlainHistory pasa el historial a texto: los resultados de las herramientas
+// como TOOL_RESULT y sin las llamadas, para pedir una respuesta sin tools.
+func PlainHistory(messages []history.Message) []history.Message {
+	var out []history.Message
+	for _, m := range messages {
+		switch {
+		case m.Role == "tool":
+			out = append(out, history.User(fmt.Sprintf("TOOL_RESULT %s: %s", m.Name, m.Content)))
+		case len(m.ToolCalls) > 0:
+			if textutil.Strip(m.Content) != "" {
+				out = append(out, history.Assistant(m.Content))
+			}
+		default:
+			m.Thinking = ""
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // groupReads junta las lecturas seguidas: tres read_file de golpe se cuentan
@@ -489,7 +579,7 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		if !failed {
 			meta = readMeta(tool, result)
 		}
-		t.emit(Event{Kind: EventAction, Tool: tool, Text: label, ReadOnly: true, Meta: meta})
+		t.emit(Event{Kind: EventAction, Tool: tool, Text: label, ReadOnly: true, Meta: meta, Result: result})
 		if failed {
 			t.emit(Event{Kind: EventActionResult, Tool: tool, Summary: textutil.Head(firstLine(result), 120), Failed: true})
 		}

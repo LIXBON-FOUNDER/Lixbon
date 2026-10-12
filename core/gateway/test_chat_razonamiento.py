@@ -123,3 +123,30 @@ def test_lo_que_pide_el_cliente_manda(cliente, sesion, llamadas):
 def test_un_modelo_sin_razonamiento_no_recibe_think_true(cliente, sesion, llamadas):
     _enviar(cliente, "explica por qué el cielo es azul", model="llama3:8b")
     assert llamadas["think"] == [None]
+
+
+def test_el_razonamiento_de_una_llamada_vuelve_al_modelo(cliente, sesion, llamadas, monkeypatch):
+    vistos = []
+
+    async def fake_stream(base, model, messages, collector=None, think=None, **kw):
+        vistos.extend(messages)
+        if collector is not None:
+            collector.update(parts=["ok"], content="ok", prompt_tokens=1, completion_tokens=1)
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(chat_mod, "stream_chat_openai", fake_stream)
+    llamada = {"id": "c1", "type": "function", "function": {"name": "list_files", "arguments": '{"path": "."}'}}
+    with cliente.stream("POST", "/v1/chat/completions", json={
+        "model": "gpt-oss:20b", "stream": True, "think": "high",
+        "tools": [{"type": "function", "function": {"name": "list_files", "parameters": {"type": "object"}}}],
+        "messages": [
+            {"role": "user", "content": "¿qué hay?"},
+            {"role": "assistant", "content": "", "tool_calls": [llamada], "thinking": "miro la carpeta"},
+            {"role": "tool", "content": "a.txt", "tool_call_id": "c1", "name": "list_files"},
+        ],
+    }) as r:
+        assert r.status_code == 200, r.read()
+        r.read()
+    paso = next(m for m in vistos if m.get("tool_calls"))
+    assert paso["thinking"] == "miro la carpeta"
+    assert paso["tool_calls"][0]["function"]["arguments"] == {"path": "."}

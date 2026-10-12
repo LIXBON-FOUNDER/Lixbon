@@ -415,6 +415,53 @@ func TestRemoteAgentToolsCarryTheirIDAndDiff(t *testing.T) {
 	h.m.remote.link.Stop(true)
 }
 
+func reasoningReply(thought, text string) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		think, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"reasoning_content": thought}}}})
+		say, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": text}}}})
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: "+string(think)+"\n\ndata: "+string(say)+"\n\ndata: [DONE]\n\n")
+	}
+}
+
+func TestRemoteReadsEndOkAndThePhoneSeesWhatTheAgentIsDoing(t *testing.T) {
+	h, relay := remoteHarness(t, func(c *config.Config) { c.Mode = "agent" },
+		toolReply("t1", "list_files", map[string]any{"path": "."}),
+		reasoningReply("miro lo que hay", "Hay un archivo: a.txt."))
+	writeTree(t, h.chat.Workspace, "a.txt")
+	startRemote(t, h, relay)
+	relay.push(prompt("¿qué archivos ves?"))
+	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
+	h.settle()
+
+	var results []map[string]any
+	activities := map[string]bool{}
+	for _, e := range relay.snapshotEvents() {
+		switch e["type"] {
+		case "tool_result":
+			results = append(results, e)
+		case "status":
+			if a, _ := e["activity"].(string); a != "" {
+				activities[a] = true
+			}
+		}
+	}
+	for _, r := range results {
+		if r["error"] == true {
+			t.Fatalf("una lectura que salió bien no acaba como interrumpida: %v", results)
+		}
+	}
+	for _, a := range []string{"working", "reasoning", "writing"} {
+		if !activities[a] {
+			t.Fatalf("el móvil sabe que el agente está %q: %v", a, activities)
+		}
+	}
+	if done := relay.find("assistant_done"); done["text"] != "Hay un archivo: a.txt." {
+		t.Fatalf("assistant_done: %v", done)
+	}
+	h.m.remote.link.Stop(true)
+}
+
 func TestCtrlCEndsRemoteAndGivesTheKeyboardBack(t *testing.T) {
 	h, relay := remoteHarness(t, nil)
 	before := h.chat.Session.Approver

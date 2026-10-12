@@ -17,7 +17,7 @@ const pad = (n) => String(n).padStart(2, '0');
 
 // La sesión dura 4 h: para resets cercanos importa "en cuánto", para los
 // lejanos el día y la hora.
-function fmtReset(iso) {
+export function fmtReset(iso) {
   if (typeof iso !== 'string') return 'Empieza con tu próximo mensaje';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -123,7 +123,7 @@ export default function UsageScreen({ onBack }) {
   );
 }
 
-function GrowBar({ ratio, color, delay = 0, vertical = false, style }) {
+export function GrowBar({ ratio, color, delay = 0, vertical = false, style }) {
   const reduced = useReducedMotion();
   const anim = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   useEffect(() => {
@@ -133,7 +133,7 @@ function GrowBar({ ratio, color, delay = 0, vertical = false, style }) {
   return <Animated.View style={[vertical ? { height: size } : { width: size }, { backgroundColor: color }, style]} />;
 }
 
-function Quota({ label, bucket, accent = false, delay = 0 }) {
+export function Quota({ label, bucket, accent = false, delay = 0 }) {
   const c = useColors();
   if (!bucket || typeof bucket !== 'object') return null;
   const unlimited = !!bucket.unlimited || typeof bucket.percent !== 'number';

@@ -100,6 +100,11 @@ func (m *Model) switchBranch(name string, create bool) tea.Cmd {
 	if name == "" {
 		return nil
 	}
+	if m.running {
+		// Cambiar los archivos bajo los pies del agente le haría editar otra rama.
+		m.add(note("El agente está trabajando en estos archivos: cambia a " + name + " cuando termine, o interrúmpelo con esc."))
+		return nil
+	}
 	args := []string{"switch", name}
 	if create {
 		args = []string{"switch", "-c", name}

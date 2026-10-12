@@ -2653,6 +2653,7 @@ REMOTE_MAX_EVENTS = 2000
 REMOTE_PERSISTED_EVENTS = frozenset({
     "hello", "snapshot", "user_msg", "assistant_done", "tool_use",
     "tool_result", "notice", "command_result", "error", "bye",
+    "reasoning", "question_answered", "compacted", "context",
 })
 # Recorte por texto y por evento: un tool_result puede traer un archivo entero
 # y un snapshot, la conversación completa del host.

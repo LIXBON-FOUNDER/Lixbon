@@ -26,6 +26,10 @@ const (
 	maxLinesSize   = 1 << 20
 )
 
+// La carpeta puede cambiar por fuera del CLI (explorador, editor, git): el
+// índice de «@» se rehace si tiene más de esto.
+var fileIndexTTL = 2 * time.Second
+
 // menuItem es una fila de los menús «/» y «@».
 type menuItem struct {
 	group  string
@@ -212,19 +216,29 @@ type fileIndex struct {
 	dirs     map[string]int
 	modified map[string]bool
 	lines    map[string]int
+	loaded   time.Time
 }
 
 // loadFiles lista el workspace respetando .gitignore (git ls-files) y, sin
 // git, recorriéndolo con la lista de carpetas que se saltan siempre.
 func loadFiles(root string) *fileIndex {
-	idx := &fileIndex{root: root, dirs: map[string]int{}, modified: map[string]bool{}, lines: map[string]int{}}
+	idx := &fileIndex{root: root, dirs: map[string]int{}, modified: map[string]bool{}, lines: map[string]int{}, loaded: time.Now()}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
 	cmd.Dir = root
 	if out, err := cmd.Output(); err == nil {
+		// --cached sigue listando lo borrado del disco hasta el próximo commit.
+		deleted := map[string]bool{}
+		gone := exec.CommandContext(ctx, "git", "ls-files", "--deleted")
+		gone.Dir = root
+		if out, err := gone.Output(); err == nil {
+			for _, l := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+				deleted[strings.TrimSpace(l)] = true
+			}
+		}
 		for _, l := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
-			if l = strings.TrimSpace(l); l != "" && len(idx.paths) < maxFileEntries {
+			if l = strings.TrimSpace(l); l != "" && !deleted[l] && len(idx.paths) < maxFileEntries {
 				idx.paths = append(idx.paths, l)
 			}
 		}
@@ -266,7 +280,7 @@ func loadFiles(root string) *fileIndex {
 }
 
 func (m *Model) fileItems(query string) []menuItem {
-	if m.files == nil || m.files.root != m.chat.Workspace {
+	if m.files == nil || m.files.root != m.chat.Workspace || time.Since(m.files.loaded) > fileIndexTTL {
 		m.files = loadFiles(m.chat.Workspace)
 	}
 	var out []menuItem

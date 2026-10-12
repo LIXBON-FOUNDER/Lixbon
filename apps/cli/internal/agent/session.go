@@ -23,6 +23,22 @@ type StreamResult struct {
 	Reasoning string
 }
 
+type stepKey struct{}
+
+// StepOptions ajustan una petición concreta del bucle: sin razonamiento (el
+// modelo se quedó pensando sin responder) o sin enseñar lo que escribe (una
+// comprobación interna cuya respuesta en texto se descarta).
+type StepOptions struct{ NoThinking, Quiet bool }
+
+func WithStep(ctx context.Context, o StepOptions) context.Context {
+	return context.WithValue(ctx, stepKey{}, o)
+}
+
+func Step(ctx context.Context) StepOptions {
+	o, _ := ctx.Value(stepKey{}).(StepOptions)
+	return o
+}
+
 // Streamer envía los mensajes al modelo y devuelve la respuesta completa. La
 // interfaz muestra el texto en vivo desde dentro de la implementación.
 type Streamer func(ctx context.Context, messages []history.Message, tools []map[string]any) (StreamResult, error)

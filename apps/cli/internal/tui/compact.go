@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"lixbon.com/cli/internal/history"
+	"lixbon.com/cli/internal/textutil"
 )
 
 // summaryChars es lo que suele ocupar un resumen (el prompt pide ≤ 500
@@ -32,18 +33,26 @@ func (m *Model) cmdCompact() tea.Cmd {
 		m.add(note("La conversación aún es corta; nada que compactar."))
 		return nil
 	}
-	before, _ := m.chat.ContextUsage()
+	before, beforePct := m.chat.ContextUsage()
 	state := &compactState{started: time.Now(), messages: len(m.chat.History), tokens: before}
 	m.compacting = state
+	if h := m.remote; h != nil {
+		h.link.Emit("compact", map[string]any{"phase": "start", "messages": state.messages, "before": int(beforePct + 0.5), "estimate": m.compactEstimate()})
+	}
 	send := m.send
 	return m.async("compactando", func(ctx context.Context) cmdDoneMsg {
 		err := m.chat.CompactWithProgress(ctx, 2, func(n int) { send(compactProgressMsg{n}) })
 		secs := time.Since(state.started).Seconds()
 		if err != nil {
 			return cmdDoneMsg{lines: []block{errLine("No se pudo generar el resumen: " + err.Error())},
-				apply: func(m *Model) { m.compacting = nil }}
+				apply: func(m *Model) {
+					m.compacting = nil
+					if m.remote != nil {
+						m.remote.link.Emit("compact", map[string]any{"phase": "failed", "message": err.Error()})
+					}
+				}}
 		}
-		after, _ := m.chat.ContextUsage()
+		after, afterPct := m.chat.ContextUsage()
 		summary := ""
 		if len(m.chat.History) > 0 && history.IsSummary(m.chat.History[0]) {
 			summary = history.SummaryText(m.chat.History[0])
@@ -51,11 +60,31 @@ func (m *Model) cmdCompact() tea.Cmd {
 		done := compactBlock{summary: summary, before: before, after: after, secs: secs}
 		return cmdDoneMsg{lines: []block{done}, apply: func(m *Model) {
 			m.compacting = nil
-			if m.remote != nil && !m.remoteOrigin {
-				m.remote.notice(done.headline())
+			if h := m.remote; h != nil {
+				h.emit("compacted", map[string]any{"before": int(beforePct + 0.5), "after": int(afterPct + 0.5), "summary": textutil.Head(summary, 4000), "secs": int(secs + 0.5)})
+				h.emitContext(remoteContext(m.chat))
 			}
 		}}
 	})
+}
+
+// compactPct es el avance que ve la app: leer la conversación es la primera
+// mitad (sin medida) y escribir el resumen, la segunda.
+func compactPct(written int) int {
+	if written == 0 {
+		return 10
+	}
+	return 40 + int(min(55, float64(written)*55/summaryChars))
+}
+
+// compactEstimate es el contexto que quedará: un resumen típico más los
+// mensajes recientes que se conservan.
+func (m *Model) compactEstimate() int {
+	hist := m.chat.History
+	keep := hist[max(0, len(hist)-2):]
+	est := m.chat.Session.Estimator
+	tokens := int(summaryChars/est.CharsPerToken()) + est.EstimateTokens(keep)
+	return min(100, int(float64(tokens)*100/float64(max(m.chat.Cfg.ContextWindow, 1))+0.5))
 }
 
 // compactView es el avance encima de la caja: qué fase va y cuánto lleva.

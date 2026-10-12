@@ -317,6 +317,7 @@ function HomeShell() {
             setRemoteSession(null);
           }}
           onMenu={openDrawer}
+          onUsage={() => pushScreen('usage')}
         />
       )}
 

@@ -94,6 +94,10 @@ class ChatMessage(BaseModel):
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+    # Razonamiento de un paso con tool_calls: los modelos thinking (qwen3,
+    # gpt-oss) lo esperan de vuelta dentro del mismo turno; sin él repiten la
+    # llamada que acaban de hacer. Passthrough a Ollama; no se persiste.
+    thinking: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):

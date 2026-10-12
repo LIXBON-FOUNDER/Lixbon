@@ -43,15 +43,9 @@ func (m *Model) View() tea.View {
 		bottom = append(bottom, "")
 	}
 	panelAt := -1
-	if m.picker != nil {
-		chrome := 2 + len(m.picker.body) + 1
-		if len(m.picker.body) > 0 {
-			chrome++
-		}
-		if m.picker.search {
-			chrome++
-		}
-		maxRows := height - len(top) - len(bottom) - 1 - chrome
+	anchored := m.picker != nil && m.picker.anchor != nil
+	if m.picker != nil && !anchored {
+		maxRows := height - len(top) - len(bottom) - 1 - m.picker.chrome()
 		panelAt = len(bottom)
 		bottom = append(bottom, m.picker.view(width, max(1, maxRows))...)
 	} else {
@@ -110,6 +104,9 @@ func (m *Model) View() tea.View {
 	}
 
 	screen := append(append(top, window...), bottom...)
+	if anchored {
+		m.popover(screen, width, height)
+	}
 	v := tea.NewView(strings.Join(screen, "\n"))
 	v.AltScreen = true
 	// AllMotion y no CellMotion: sin botón pulsado también llega el
@@ -132,6 +129,14 @@ func (m *Model) clickChrome(msg tea.MouseClickMsg) (tea.Cmd, bool) {
 	if msg.Button != tea.MouseLeft {
 		return nil, false
 	}
+	if p := m.picker; p != nil && p.anchor != nil {
+		if m.inPopover(msg.X, msg.Y) {
+			y := msg.Y - m.panelY
+			return m.pickerDo(func(p *picker) (tea.Cmd, bool) { return p.click(y) }), true
+		}
+		// Fuera del panel lo cierra, como un menú desplegable.
+		return m.pickerDo(func(p *picker) (tea.Cmd, bool) { return p.done(p.cancel, true), true }), true
+	}
 	switch {
 	case m.moreY >= 0 && msg.Y == m.moreY && m.moreBtn.has(msg.X):
 		m.scroll = 0
@@ -139,25 +144,26 @@ func (m *Model) clickChrome(msg tea.MouseClickMsg) (tea.Cmd, bool) {
 	case m.picker != nil && m.panelY >= 0 && msg.Y >= m.panelY:
 		y := msg.Y - m.panelY
 		return m.pickerDo(func(p *picker) (tea.Cmd, bool) { return p.click(y) }), true
-	case m.barShown && msg.Y == 0 && m.picker == nil && !m.busyNow():
+	// Los botones responden también con el agente trabajando: lo que cambian
+	// (modelo, razonamiento, modo) vale desde su siguiente paso.
+	case m.barShown && msg.Y == 0 && m.picker == nil:
 		switch {
 		case m.barModel.has(msg.X):
-			return m.dispatch("/model"), true
+			return m.openFrom(0, m.barModel, "/model"), true
 		case m.barPlan.has(msg.X) && !m.chat.Client.Generic:
-			return m.dispatch("/usage"), true
+			return m.openFrom(0, m.barPlan, "/usage"), true
 		case m.barBranch.has(msg.X):
-			return m.dispatch("/branch"), true
+			return m.openFrom(0, m.barBranch, "/branch"), true
 		}
 	case msg.Y == m.height-1 && m.picker == nil:
 		switch {
 		case m.footProcs.has(msg.X):
-			return m.dispatch("/ps"), true
-		case m.busyNow():
+			return m.openFrom(msg.Y, m.footProcs, "/ps"), true
 		case m.footMode.has(msg.X):
 			m.cycleMode()
 			return nil, true
 		case m.footEffort.has(msg.X):
-			return m.dispatch("/effort"), true
+			return m.openFrom(msg.Y, m.footEffort, "/effort"), true
 		}
 	}
 	return nil, false
@@ -181,6 +187,9 @@ func (m *Model) hot(y int, z span) bool { return m.hoverY == y && z.has(m.hoverX
 
 // lit pinta una zona clicable con el fondo de la fila elegida si el ratón está encima.
 func (m *Model) lit(text string, y int, z span) string {
+	if p := m.picker; p != nil && p.anchor != nil && p.anchor.y == y && p.anchor.zone == z {
+		return withBackground(text, pal.olive)
+	}
 	if !m.hot(y, z) {
 		return text
 	}
