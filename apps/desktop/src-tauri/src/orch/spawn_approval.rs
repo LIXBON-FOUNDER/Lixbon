@@ -23,8 +23,6 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::Emitter;
-use tauri_plugin_notification::NotificationExt;
 
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
 
@@ -107,14 +105,6 @@ impl Core {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub(super) fn emit(&self, ev: &str, payload: &Value) {
-        #[cfg(test)]
-        self.events.lock().unwrap().push((ev.to_string(), payload.clone()));
-        if let Some(app) = self.app.get() {
-            let _ = app.emit(ev, payload);
-        }
-    }
-
     /// `spawn` de un agente: valida, resuelve la política y deja el lanzamiento pendiente.
     pub(super) fn spawn_request(self: &Arc<Self>, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
@@ -141,13 +131,13 @@ impl Core {
 
     /// El pendiente vence solo: avisa aunque la persona esté en otro modo o ventana.
     fn notify_pending(&self, p: &PendingSpawn) {
-        let Some(app) = self.app.get() else { return };
+        let Some(host) = self.host.get() else { return };
         if !self.settings().notify_questions {
             return;
         }
         let who = p.role.as_deref().unwrap_or(&p.provider);
         let body = format!("{} · {}. Vence en {} min.", who, p.title, (self.ttl_ms / 60_000).max(1));
-        let _ = app.notification().builder().title("Orquestador · lanzamiento pendiente").body(body).show();
+        host.notify("Orquestador · lanzamiento pendiente", &body);
     }
 
     /// Esqueleto del pendiente: lo que el agente pidió, ya validado.
@@ -426,6 +416,7 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
+    use super::super::host::RecordingHost;
     use super::super::{Orch, Status};
     use super::*;
     use crate::orch::state::NewTask;
@@ -441,7 +432,7 @@ mod tests {
         assert!(o.status.success(), "{args:?} {}", String::from_utf8_lossy(&o.stderr));
     }
 
-    struct Env { core: Arc<Core>, root: String, run: String, dir: PathBuf }
+    struct Env { core: Arc<Core>, host: Arc<RecordingHost>, root: String, run: String, dir: PathBuf }
 
     impl Drop for Env {
         fn drop(&mut self) {
@@ -463,6 +454,8 @@ mod tests {
         let mut orch = Orch::default();
         Arc::get_mut(&mut orch.0).unwrap().resolver = fake;
         let core = orch.0;
+        let host = RecordingHost::new();
+        core.set_host(host.clone());
         core.settings.lock().unwrap().enabled = true;
         let cwd = dir.to_string_lossy().into_owned();
         let (run, root) = {
@@ -472,7 +465,7 @@ mod tests {
             st.mark_running(&root).unwrap();
             (run, root)
         };
-        Env { core, root, run, dir }
+        Env { core, host, root, run, dir }
     }
 
     impl Env {
@@ -613,10 +606,10 @@ mod tests {
         let e = setup("muerto");
         let p = pid(&e.spawn("claude"));
         let argv = e.argv(&p);
-        e.core.events.lock().unwrap().clear();
+        e.host.clear_events();
         e.core.lock().close(&e.root, Status::Exited, "se cerró").unwrap();
         assert!(e.core.list_pending_spawns().is_empty());
-        let ev: Vec<_> = e.core.events.lock().unwrap().iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).cloned().collect();
+        let ev: Vec<_> = e.host.events().into_iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).collect();
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].1["outcome"], "expired");
         assert_eq!(ev[0].1["decision"]["actor"], "system");
@@ -706,7 +699,7 @@ mod tests {
         let st = e.status(&p);
         assert_eq!(st["status"], "launch_failed");
         assert!(st["reason"].as_str().is_some());
-        let ev = e.core.events.lock().unwrap().iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).cloned().collect::<Vec<_>>();
+        let ev = e.host.events().into_iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == p.as_str()).collect::<Vec<_>>();
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].1["outcome"], "launch_failed");
         // Sin reintento automático: otra confirmación no lanza.
@@ -719,10 +712,10 @@ mod tests {
         let e = setup("borrado");
         let a = pid(&e.spawn("claude"));
         let b = pid(&e.spawn("codex"));
-        e.core.events.lock().unwrap().clear();
+        e.host.clear_events();
         e.core.rpc(Caller::User, "", "remove_run", &json!({ "run": e.run })).unwrap();
         assert!(e.core.list_pending_spawns().is_empty());
-        let ev = e.core.events.lock().unwrap().clone();
+        let ev = e.host.events();
         for id in [&a, &b] {
             let mine: Vec<_> = ev.iter().filter(|(n, v)| n == EV_RESOLVED && v["pending_id"] == id.as_str()).collect();
             assert_eq!(mine.len(), 1, "{ev:?}");

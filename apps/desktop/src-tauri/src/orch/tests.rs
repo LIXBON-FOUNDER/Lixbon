@@ -150,6 +150,8 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     let orch = Orch::default();
     *orch.0.lock() = st.into_inner().unwrap();
     let core = orch.0.clone();
+    let host = host::RecordingHost::new();
+    core.set_host(host.clone());
     let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_task_diff, orch_review_task])
         .build(mock_context(noop_assets())).unwrap();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -170,7 +172,7 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     assert!(invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h })).is_err(), "confirm obligatorio");
     let out = invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h, "comment": "ok", "confirm": true })).unwrap();
     assert_eq!(out["outcome"], "recorded");
-    let ev: Vec<_> = core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).cloned().collect();
+    let ev: Vec<_> = host.events().into_iter().filter(|(n, _)| n == review::EV_REVIEWED).collect();
     assert_eq!(ev.len(), 1);
     assert_eq!(ev[0].1, json!({ "task_id": id, "decision": "accepted", "head_commit": h, "at": out["at"] }));
     let snap = core.snapshot();
@@ -181,7 +183,7 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     assert_eq!(snap["tasks"][&root]["last_review"], Value::Null);
     let moved = invoke("orch_review_task", json!({ "task_id": id, "decision": "rejected", "head_commit": "0000", "confirm": true })).unwrap();
     assert_eq!((moved["outcome"].as_str(), moved["found_commit"].as_str()), (Some("head_moved"), Some(h.as_str())));
-    assert_eq!(core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).count(), 1);
+    assert_eq!(host.events_named(review::EV_REVIEWED).len(), 1);
     let _ = std::fs::remove_dir_all(dir);
 }
 
