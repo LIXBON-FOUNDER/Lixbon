@@ -94,6 +94,89 @@ pub(super) fn write_private_json(path: &Path, value: &impl Serialize) -> Result<
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Publicación atómica y durable (C2b): marcador de autoridad y espejo
+// ---------------------------------------------------------------------------
+//
+// Dos garantías DISTINTAS (ver `LIXBON-C2-diseno.md` §11.9):
+//
+// * **Atomicidad ante caída de proceso:** el destino es siempre el contenido
+//   anterior o el nuevo, nunca uno a medias (`rename` / `MoveFileExW`).
+// * **Durabilidad ante fallo del SO / pérdida de energía:** mitigación, no
+//   garantía absoluta. Unix: `fsync` del archivo, `rename` y `fsync` de la
+//   carpeta. Windows: `FlushFileBuffers` del archivo y `MoveFileExW` con
+//   `MOVEFILE_WRITE_THROUGH`. Depende de que el sistema de archivos y el disco
+//   honren el vaciado; ninguna prueba simula un corte de energía.
+//
+// Este es el ÚNICO archivo con código específico de plataforma para esto.
+
+/// Ruta del temporal de un destino: `<destino>.tmp` (conserva la extensión).
+pub(super) fn staging_path(dest: &Path) -> PathBuf {
+    let mut name = dest.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".tmp");
+    dest.with_file_name(name)
+}
+
+/// Escribe `bytes` en el temporal de `dest` y lo deja vaciado a disco
+/// (`fsync`). Con `private`, el temporal queda accesible solo por su propietario
+/// ANTES de recibir el contenido. Devuelve la ruta del temporal; falta publicarlo
+/// con [`publish_durable`].
+pub(super) fn stage_durable(dest: &Path, bytes: &[u8], private: bool) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = staging_path(dest);
+    let mut f = std::fs::File::create(&tmp)?;
+    if private {
+        restrict_to_owner(&tmp);
+    }
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    Ok(tmp)
+}
+
+/// Publica `tmp` como `dest` reemplazando el destino de forma atómica y, en la
+/// medida del SO, durable. Si falla, `tmp` queda donde estaba.
+pub(super) fn publish_durable(tmp: &Path, dest: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        move_file_write_through(tmp, dest)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(tmp, dest)?;
+        // Sin esto el `rename` puede perderse en un corte aunque el archivo esté en disco.
+        if let Some(dir) = dest.parent() {
+            std::fs::File::open(dir)?.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+/// Atajo: `stage_durable` + `publish_durable`.
+pub(super) fn write_atomic_durable(dest: &Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
+    let tmp = stage_durable(dest, bytes, private)?;
+    publish_durable(&tmp, dest).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+#[cfg(windows)]
+fn move_file_write_through(tmp: &Path, dest: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(std::iter::once(0)).collect() };
+    let (from, to) = (wide(tmp), wide(dest));
+    // SAFETY: ambos buffers son cadenas UTF-16 terminadas en 0 que viven durante la llamada.
+    let ok = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+    if ok == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 pub(super) fn restrict_to_owner(path: &Path) {
     #[cfg(unix)]
     {
@@ -118,4 +201,63 @@ pub(super) fn restrict_to_owner(path: &Path) {
 
 pub(super) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+#[cfg(test)]
+mod durable_tests {
+    use super::*;
+
+    fn dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("lixbon-fsio-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn publica_un_archivo_nuevo_y_no_deja_temporal() {
+        let d = dir("nuevo");
+        let dest = d.join("authority.json");
+        write_atomic_durable(&dest, b"{\"v\":1}", true).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"{\"v\":1}");
+        assert!(!staging_path(&dest).exists(), "el temporal no debe quedar");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn reemplaza_un_destino_existente() {
+        let d = dir("reemplazo");
+        let dest = d.join("state.json");
+        std::fs::write(&dest, b"viejo").unwrap();
+        write_atomic_durable(&dest, b"nuevo", false).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"nuevo");
+        assert!(!staging_path(&dest).exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn el_temporal_conserva_la_extension_del_destino() {
+        assert_eq!(staging_path(Path::new("/x/state.json")), PathBuf::from("/x/state.json.tmp"));
+        assert_eq!(staging_path(Path::new("/x/authority.json")), PathBuf::from("/x/authority.json.tmp"));
+    }
+
+    #[test]
+    fn si_falta_el_temporal_publicar_falla_y_deja_el_destino_intacto() {
+        let d = dir("falla");
+        let dest = d.join("x.json");
+        std::fs::write(&dest, b"intacto").unwrap();
+        assert!(publish_durable(&d.join("no-existe.tmp"), &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"intacto");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn un_temporal_huerfano_no_impide_la_siguiente_publicacion() {
+        let d = dir("huerfano");
+        let dest = d.join("authority.json");
+        std::fs::write(staging_path(&dest), b"basura de una caida").unwrap();
+        write_atomic_durable(&dest, b"limpio", true).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"limpio");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

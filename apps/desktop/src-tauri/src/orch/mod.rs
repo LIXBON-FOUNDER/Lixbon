@@ -5,6 +5,15 @@
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
 mod agents;
+mod authority;
+mod boot_authority;
+#[cfg(test)]
+mod boot_tests;
+#[cfg(test)]
+mod crash_tests;
+mod mirror;
+#[cfg(test)]
+mod authority_tests;
 mod approval;
 mod spawn_approval;
 mod providers;
