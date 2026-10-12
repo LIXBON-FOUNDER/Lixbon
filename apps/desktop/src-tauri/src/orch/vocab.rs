@@ -106,6 +106,26 @@ pub const INTEGRATION_OUTCOME: [&str; 4] = ["merged", "conflict", "error", "targ
 /// frontend (`src/orch/attention.js`); el slice G los lleva al Core.
 pub const ATTENTION_KIND: [&str; 4] = ["approve_in_terminal", "integrate", "review", "failed"];
 
+/// RESERVADO. `events.entity_kind` (slice E) y prefijo de los eventos durables.
+pub const ENTITY_KIND: [&str; 12] = [
+    "project", "task", "attempt", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "attention",
+];
+
+/// RESERVADO. Eventos de dominio durables (`entidad.verbo`), slice E.
+pub const DURABLE_EVENT: [&str; 29] = [
+    "project.registered", "project.archived", "project.relocated",
+    "task.created", "task.updated", "task.closed",
+    "attempt.requested", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.completed", "attempt.failed", "attempt.stopped",
+    "thread.created", "worktree.created", "worktree.removed", "artifact.created",
+    "review.requested", "review.completed",
+    "integration.requested", "integration.completed", "integration.conflict",
+    "agent.question", "agent.answered", "decision.created", "policy.warning",
+    "attention.created", "attention.resolved",
+];
+
+/// RESERVADO. Eventos efímeros (UI en vivo, sin registro durable).
+pub const EPHEMERAL_EVENT: [&str; 5] = ["attempt.progress", "terminal.output", "agent.typing", "token.stream", "tool.progress"];
+
 #[cfg(test)]
 mod tests {
     use super::super::{agents, approval, delivery, state};
@@ -202,7 +222,23 @@ mod tests {
     fn los_ids_reservados_cuadran_con_el_contrato_y_con_los_vigentes() {
         assert_ids("attention_kind", &ATTENTION_KIND);
         assert_ids("task_derived_state", &TASK_DERIVED_STATE);
+        assert_ids("entity_kind", &ENTITY_KIND);
         let json = contrato();
+        let durables: Vec<String> = json["domain"]["event"]["dominio_durable_reservado"]["ids"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        assert_eq!(durables, DURABLE_EVENT.map(String::from).to_vec());
+        let efimeros: Vec<String> = json["domain"]["event"]["efimeros_reservados"]["ids"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        assert_eq!(efimeros, EPHEMERAL_EVENT.map(String::from).to_vec());
+        // Todo evento durable es `entidad.verbo` con una entidad conocida, y toda entidad tiene eventos.
+        for e in DURABLE_EVENT {
+            let (entidad, verbo) = e.split_once('.').unwrap_or_else(|| panic!("{e}: falta el punto"));
+            assert!(ENTITY_KIND.contains(&entidad), "{e}: entidad desconocida");
+            assert!(!verbo.is_empty() && !verbo.contains('.'), "{e}: verbo mal formado");
+        }
+        for k in ENTITY_KIND {
+            assert!(DURABLE_EVENT.iter().any(|e| e.starts_with(&format!("{k}."))), "entity_kind {k} sin eventos");
+        }
+        // Los efímeros no son durables, y los durables del intento cubren sus estados.
+        assert!(EPHEMERAL_EVENT.iter().all(|e| !DURABLE_EVENT.contains(e)));
         let attempt = ids_de(&json, "attempt_state");
         assert_eq!(attempt, ATTEMPT_STATE.map(String::from).to_vec());
         // El intento reutiliza los ids de la tarea; solo `pending_approval` es nuevo.
@@ -229,7 +265,7 @@ mod tests {
         const PERMITIDAS: &[&str] = &[
             "_comment", "estado", "origen", "items", "ids", "final", "pendiente_de_decidir", "ids_de_resultado_no_estado",
             "reservados", "nota_reservados", "severidad", "ids_de_resultado_no_registrados", "transporte_ui_vigente",
-            "dominio_durable_reservado", "id", "attempt_state",
+            "dominio_durable_reservado", "efimeros_reservados", "id", "attempt_state",
         ];
         fn revisar(v: &Value, ruta: &str) {
             match v {
