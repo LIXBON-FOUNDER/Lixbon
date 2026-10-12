@@ -32,6 +32,9 @@ mod claude_code;
 mod env_path;
 mod orch;
 mod skills_catalog;
+// Almacén SQLite del Core (slice B). Aún sin conectar: el Core sigue con state.json.
+#[allow(dead_code)]
+mod store;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
