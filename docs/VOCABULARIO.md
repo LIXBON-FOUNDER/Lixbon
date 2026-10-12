@@ -85,6 +85,8 @@ Hoy se calcula **solo en el frontend** (`src/orch/attention.js`); el slice G lo 
 2. *Mensajes del buzón (vigente):* `Kind` (§4), guardados en `state.json`.
 3. *Eventos de dominio durables (reservado, slice E):* `entidad.verbo`, p. ej. `attempt.requested|approved|rejected|started|waiting|completed|failed|stopped`, `attention.created|resolved` (lista completa en el contrato). Los efímeros (`attempt.progress`, `terminal.output`…) no se registran.
 
+**`entity_kind`** (reservado; columna `events.entity_kind` del slice E y prefijo de cada evento durable): `project`, `task`, `attempt`, `thread`, `worktree`, `artifact`, `review`, `integration`, `agent`, `decision`, `policy`, `attention`. Los prefijos de los efímeros (`terminal`, `token`, `tool`) **no** son entidades.
+
 **Colisiones conocidas** (se resuelven al hablar, no en el código):
 
 | Palabra | Significados | Cómo decirlo |
@@ -106,6 +108,13 @@ Cambiarlas cambiaría lo que ve la persona. Están declaradas en `presentation.k
 3. **`lxo list` y la snapshot muestran el id de máquina** (`[running]`); el Desktop y el móvil muestran etiquetas. El plan menciona un campo `ui_state` en la snapshot: **no se añade en H** (cambiaría el formato HTTP) y queda para cuando se decida.
 4. **`state.rs` documenta `Decision.kind` como `merge|pr|release|discard|reopen|stop`**, pero el código solo emite `merge`, `pr`, `review` y `spawn`.
 
-## 8. Qué NO hace este slice
+## 8. Convenciones para los slices vecinos
+
+- **Ids de máquina** (estados, kinds, códigos de error, motivos): `snake_case` en inglés, estables. Los textos legibles (español) van aparte y no se usan como clave ni se comparan.
+- **Nombres de adaptadores/proveedores** (`claude`, `codex`, `lixbon-cli`, `windows-credential-manager`): minúsculas con guion, como los ids de agente ya existentes.
+- **Eventos durables** `entidad.verbo` con `entity_kind` de la lista de §6; los de transporte a la interfaz conservan sus nombres actuales.
+- **Tras el corte Task/Attempt** se aplica la correspondencia de §2/§3; antes, ningún código nuevo debe depender de los ids *reservados*.
+
+## 9. Qué NO hace este slice
 
 No renombra `Run`, `Task`, `Status` ni `Kind`; no añade enums ni campos al `State`; no añade `ui_state` a la snapshot; no genera copias de código (`gen-contracts.mjs` del plan original) ni toca el móvil, el TUI de Go o `lxo`; no define severidades de Attention ni estados de `Thread`/`Worktree`/`Artifact`.

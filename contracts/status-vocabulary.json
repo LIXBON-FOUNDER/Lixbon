@@ -103,6 +103,12 @@
       "severidad": "sin definir: no existe hoy. Mientras no se decida, la prioridad es la posicion en `ids`."
     },
 
+    "entity_kind": {
+      "estado": "reservado",
+      "origen": "events.entity_kind (migracion 003, slice E; referencia blanda) y prefijo de los eventos de dominio durables",
+      "ids": ["project", "task", "attempt", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "attention"]
+    },
+
     "event": {
       "_comment": "Tres familias distintas que hoy comparten la palabra «evento». No se renombra ninguna.",
       "transporte_ui_vigente": {
@@ -123,6 +129,11 @@
           "agent.question", "agent.answered", "decision.created", "policy.warning",
           "attention.created", "attention.resolved"
         ]
+      },
+      "efimeros_reservados": {
+        "estado": "reservado",
+        "origen": "LIXBON-modelo-runtime.md seccion 5: UI en vivo, sin registro durable; su prefijo NO es un entity_kind",
+        "ids": ["attempt.progress", "terminal.output", "agent.typing", "token.stream", "tool.progress"]
       }
     }
   },
