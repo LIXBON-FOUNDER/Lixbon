@@ -65,10 +65,46 @@ fn la_003_se_aplica_desde_cero_y_solo_crea_las_dos_tablas_de_d() {
     assert_eq!(tablas, vec!["legacy_state", "meta", "project_locations", "projects", "schema_migrations"], "nada de E, F1 ni G");
 }
 
+/// El checksum de una migración es el SHA-256 de TODO su texto (sin `\r`), COMENTARIOS INCLUIDOS: el
+/// almacén guarda ese valor al aplicarla y se niega a abrir una base cuya migración cambió. Por eso
+/// ni siquiera se «corrige» un comentario de una migración ya publicada (ver `docs/core/MIGRACIONES.md`).
 #[test]
-fn la_003_publicada_no_se_edita() {
-    // Si este checksum cambia, alguien editó una migración ya publicada: se crea una nueva.
-    assert_eq!(embedded()[2].checksum(), "ae5b5563ed06c996b45eb3e7d24e759b8799d2236cf882dd43621fa19bc5257e");
+fn un_comentario_cambia_el_checksum_asi_que_una_migracion_publicada_no_se_toca_ni_por_documentacion() {
+    let a = Migration::new(1, "x", "-- comentario viejo\nCREATE TABLE a (x INTEGER) STRICT;\n");
+    let b = Migration::new(1, "x", "-- comentario corregido\nCREATE TABLE a (x INTEGER) STRICT;\n");
+    assert_ne!(a.checksum(), b.checksum(), "un comentario distinto es otro checksum");
+    // Lo único que no cuenta es el fin de línea (core.autocrlf).
+    let crlf = Migration::new(1, "x", "-- comentario viejo\r\nCREATE TABLE a (x INTEGER) STRICT;\r\n");
+    assert_eq!(a.checksum(), crlf.checksum());
+    // El caso real: la 001 publicada con SOLO un comentario corregido ya no abre una base existente.
+    let original = embedded()[0];
+    let editado: &'static str = Box::leak(format!("-- comentario corregido\n{}", original.sql).into_boxed_str());
+    let editada = Migration::new(1, original.name, editado);
+    assert_ne!(original.checksum(), editada.checksum());
+    let tmp = Tmp::new();
+    drop(Store::open_with(tmp.path(), &[original], "t").unwrap());
+    match Store::open_with(tmp.path(), &[editada], "t") {
+        Err(StoreError::ChecksumMismatch { version: 1, .. }) => {}
+        otro => panic!("se esperaba ChecksumMismatch y salió {otro:?}"),
+    }
+}
+
+/// Las migraciones publicadas quedan CONGELADAS. Si un checksum cambia, alguien editó una migración ya
+/// publicada (aunque fuera un comentario): invalidaría las instalaciones existentes. Se crea una
+/// migración nueva; nunca se edita la anterior.
+#[test]
+fn las_migraciones_publicadas_no_se_editan() {
+    let esperado = [
+        (1, "core", "b4bfd527bb7f20e011b7435091dd84a4e5f9738484446a11032dfc7b1fe9248a"),
+        (2, "authority_fence", "85fff4a938f08b2b0f566d75e1d1eea6aca7d89586060b84ee303b39d340afbe"),
+        (3, "projects", "ae5b5563ed06c996b45eb3e7d24e759b8799d2236cf882dd43621fa19bc5257e"),
+    ];
+    let lista = embedded();
+    assert!(lista.len() >= esperado.len());
+    for (m, (v, n, c)) in lista.iter().zip(esperado) {
+        assert_eq!((m.version, m.name), (v, n));
+        assert_eq!(m.checksum(), c, "la migración {v:03}_{n} cambió: una migración publicada no se edita");
+    }
 }
 
 #[test]

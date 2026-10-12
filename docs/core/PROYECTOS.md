@@ -17,8 +17,11 @@ proyecto que su repositorio: la ubicación que se guarda es la del checkout *pri
 
 * `project_locations.project_id` es FK real; una ruta pertenece a un solo proyecto; como mucho una
   ubicación principal por proyecto y máquina (índice parcial).
-* La huella: commits raíz (`git rev-list --max-parents=0`, máx. 16), remotos normalizados **sin
-  credenciales** (`usuario:token@` se elimina antes de guardar) y rama por defecto.
+* La huella: commits raíz (`git rev-list --max-parents=0`, máx. 16), remotos normalizados y rama por
+  defecto. **Ningún secreto del remoto se persiste en `fingerprint`**: en una URL de red se descarta
+  todo hasta la última `@` (usuario y clave, aunque la clave lleve `/`, `?` o `#`), la consulta
+  (`?access_token=…`) y el fragmento (`#…`); en una ruta local, donde esos caracteres son parte del
+  nombre, no se toca. Hay pruebas hasta el archivo de la base.
 * **Nada se escribe dentro de un repositorio**: solo se ejecuta git de lectura (hay una prueba que
   compara archivo a archivo antes y después).
 
@@ -47,27 +50,59 @@ comparte commits raíz pide `confirm`. Una ruta que ya es de otro proyecto es un
 `active` → `archived` (oculto, historial intacto; se restaura con `archived=false`). Una ubicación
 cuya carpeta ya no existe pasa a `missing` al listar o al intentar lanzar, y vuelve a `ok` si
 reaparece. **No se lanza trabajo nuevo** en un proyecto archivado ni con todas sus ubicaciones
-`missing` (`spawn` y `run_create`); sin proyecto o sin registro disponible no se bloquea nada.
+`missing` (`spawn` y `run_create`).
 
-## Quién puede qué
-Leer (`projects`, `lxo projects`) es para cualquiera. Registrar, archivar, relocalizar e importar
-(`project_add`, `project_archive`, `project_locate`, `projects_import_recents`) solo desde la interfaz
-(`Caller::User`): lo decide una persona.
+Qué NO bloquea (compatibilidad): una tarea **sin** `project_id` (el registro no es requisito para lo
+que nunca lo tuvo) y el almacén **realmente cerrado/degradado** (el registro es aditivo y no rompe los
+flujos legacy). Qué SÍ bloquea, aunque no sea archivado ni `missing`: con un `project_id` conocido y el
+almacén abierto, **un error al consultar el proyecto** o un `project_id` que ya **no existe** en el
+registro. Un error de lectura nunca se convierte en «se puede lanzar»: las protecciones de archivado y
+de ubicación desaparecida no deben poder saltarse justo cuando el registro está en problemas.
+
+## Quién registra y quién decide
+**La garantía central: Lixbon nunca une dos identidades ambiguas en silencio.**
+
+| Automático (sin preguntar) | De la persona (`Caller::User`) |
+|---|---|
+| Un repositorio **inequívocamente nuevo** (ninguna coincidencia de huella) durante `run_create` | `join`: «es el mismo proyecto» |
+| El relleno de tareas existentes (`backfill_projects`), solo para repos inequívocos | Resolver una ambigüedad (`join` / `new`) |
+| Reconocer la **misma ruta** (o un worktree del mismo repo) | `project_locate` (y su `confirm` forzado) |
+| La hija hereda el proyecto de su padre | Archivar y restaurar |
+| | La importación explícita desde la interfaz (`projects_import_recents`) |
+
+Leer (`projects`, `lxo projects`) es para cualquiera. Los comandos de la columna derecha
+(`project_add`, `project_archive`, `project_locate`, `projects_import_recents`) los rechaza el Core a
+quien no sea la interfaz. Un repositorio ambiguo durante `run_create` o el relleno NO se registra ni se
+une: la tarea queda sin proyecto hasta que la persona decida.
 
 ## Asignación a tareas (`Task.project_id`, `serde(default)`)
 * `run_create` resuelve el proyecto del repositorio sin preguntar: misma ruta → ese; sin
   coincidencias → nuevo; **ambiguo → la tarea queda sin proyecto** (no se une en silencio).
 * La hija hereda el proyecto de su padre.
 * **Relleno perezoso** (`backfill_projects`): tras arrancar, en un hilo y con presupuesto de 4 s,
-  agrupa por repositorio las tareas sin proyecto. Idempotente; `meta.projects_backfilled` solo se
-  anota si la pasada terminó. Los repos ambiguos o inexistentes se dejan sin proyecto (`lxo projects`
-  los cuenta como «sin proyecto»). Pasa por `mutate`: es una mutación normal del estado.
-* **Importación de recientes** (`projects_import_recents`): una sola vez
-  (`meta.projects_recents_imported`); lo ambiguo se omite y se informa.
+  agrupa por repositorio las tareas sin proyecto. **Procesa siempre las tareas que sigan sin
+  proyecto**: es idempotente, no se salta pasadas. `meta.projects_backfilled` es solo una **marca
+  diagnóstica** («hubo una pasada completa»); el relleno no la consulta, porque un salto global dejaría
+  fuera las tareas ambiguas y los repositorios que reaparezcan después. Los repos ambiguos o
+  inexistentes se dejan sin proyecto (`lxo projects` los cuenta como «sin proyecto»). Pasa por
+  `mutate`: es una mutación normal del estado.
+* **Importación de recientes** (`projects_import_recents`): el **Core es la única autoridad**. La
+  interfaz envía `lixbon_recents` en cada arranque y el Core decide con
+  `meta.projects_recents_imported` (en SQLite): con la marca responde `already_done` sin tocar nada; una
+  base nueva o restaurada, sin la marca, vuelve a importar. `localStorage` solo conserva
+  `lixbon_recents` (las rutas históricas), no una segunda decisión de migración. Lo ambiguo se omite y
+  se informa.
 
-## Orden de bloqueos
-Estado → almacén (como `mutate`); el registro calcula lo que necesita del estado **antes** de entrar
-al almacén, y ningún subproceso git corre con el almacén tomado.
+## Bloqueos y E/S
+* Orden de bloqueo: estado → almacén (como `mutate`); el registro calcula lo que necesita del estado
+  **antes** de entrar al almacén.
+* **Ninguna E/S externa corre con el mutex del almacén tomado** (ni `git`, ni `Path::exists`, ni
+  nada del sistema de archivos, ni procesos): el almacén es uno para todo el Core y también lo usa la
+  persistencia del estado, así que una ruta de red lenta bloquearía el guardado. Toda comprobación de
+  disco sigue el ciclo **leer (SQL) → comprobar fuera → persistir solo las transiciones `ok ↔ missing`**
+  (`projects_list`, la guarda de lanzamiento). La prueba
+  `el_registro_no_hace_io_externo_bajo_el_bloqueo_del_almacen` escanea `orch/projects.rs` y falla si
+  algún closure de `registry` / `with_store` toca el disco, git, un proceso, duerme o toma otro bloqueo.
 
 ## Medidas
 `git rev-list --max-parents=0 HEAD` en el repositorio de Lixbon (507 commits en `HEAD`, 790 en

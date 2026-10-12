@@ -41,11 +41,13 @@ impl Core {
                     "agents": agents::AGENTS.iter().map(|a| a.id).collect::<Vec<_>>(),
                 }))
             }
-            // Registro de proyectos (slice D). Leer es para todos; cambiarlo es de la persona.
+            // Registro de proyectos (slice D). Leer es para todos. La gestión EXPLÍCITA (registrar, unir,
+            // relocalizar, archivar, importar) es de la persona; un repositorio inequívocamente nuevo se
+            // descubre solo (`run_create`, relleno) y lo ambiguo nunca se une en silencio.
             "projects" => self.projects_list(b(args, "all")),
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents" => {
                 if !matches!(caller, Caller::User) {
-                    return Err("Solo desde la interfaz: registrar, archivar o relocalizar proyectos lo decide una persona".into());
+                    return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
                 }
                 match cmd {
                     "project_add" => self.project_add(args),

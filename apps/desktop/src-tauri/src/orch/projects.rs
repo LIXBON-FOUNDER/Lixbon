@@ -9,6 +9,12 @@
 //!   `needs_confirmation`; solo una confirmación explícita (`join`) o la misma ruta unen. Un fork
 //!   comparte commits raíz con su origen: si ambos tienen remotos y no coinciden, son proyectos
 //!   distintos; un clon sin remoto siempre pregunta.
+//! * **Quién registra.** Un repositorio INEQUÍVOCAMENTE nuevo (ninguna coincidencia de huella) se
+//!   descubre y registra solo, sin preguntar: en `run_create`, en el relleno de tareas y al volver a
+//!   ver la misma ruta. Las decisiones de identidad ambiguas y las operaciones explícitas de gestión
+//!   son de la persona: `join`, resolver una ambigüedad, un `project_locate` forzado, archivar o
+//!   restaurar y la importación explícita desde la interfaz (`Caller::User`). La garantía central es
+//!   que Lixbon **nunca une dos identidades ambiguas en silencio**.
 //! * **No escribe en ningún repositorio.** Solo ejecuta git de lectura; el registro vive en SQLite
 //!   (migración 003).
 //! * **No decide el modelo definitivo de Task/Attempt:** solo añade `Task.project_id`
@@ -16,8 +22,10 @@
 //!
 //! # Fronteras
 //! La política (qué es «el mismo proyecto», cuándo se pregunta) vive aquí; el almacén
-//! (`store::projects`) solo guarda filas y no conoce git ni `orch`. Ningún subproceso git corre con
-//! el bloqueo del almacén tomado: primero se identifica, después una transacción corta.
+//! (`store::projects`) solo guarda filas y no conoce git ni `orch`. **Ninguna E/S externa corre con
+//! el mutex del almacén tomado** (ni `git`, ni `Path::exists`, ni nada del sistema de archivos): el
+//! almacén es uno para todo el Core y también lo usa la persistencia del estado. El ciclo es siempre
+//! leer (SQL) → comprobar fuera → persistir (SQL); una prueba escanea este archivo para impedirlo.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -26,13 +34,16 @@ use serde_json::{json, Value};
 
 use super::state::now_ms;
 use super::{b, git, s, Core};
-use crate::store::{new_uuid, Fingerprint, LocationRow, NewLocation, ProjectRow, Store, StoreResult};
+use crate::store::{new_uuid, Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow, Store, StoreResult};
 
 /// Presupuesto de tiempo del relleno de `project_id` al arrancar (se retoma en el siguiente arranque).
 pub(super) const BACKFILL_BUDGET: Duration = Duration::from_secs(4);
 /// Tope de rutas que acepta la importación de recientes.
 const MAX_RECENTS: usize = 32;
 
+/// MARCA DIAGNÓSTICA: «hubo al menos una pasada de relleno que llegó hasta el final». El relleno NO
+/// la consulta ni se salta pasadas por ella: cada arranque vuelve a procesar las tareas que sigan sin
+/// proyecto (las ambiguas y los repositorios que reaparezcan después entrarían si no).
 const META_BACKFILLED: &str = "projects_backfilled";
 const META_RECENTS: &str = "projects_recents_imported";
 const META_MACHINE: &str = "machine_id";
@@ -179,16 +190,70 @@ fn becomes_primary(existing: &[LocationRow]) -> bool {
     !existing.iter().any(|l| l.primary && !l.missing)
 }
 
+// ---------------------------------------------------------------------------------------------
+// Estado de las ubicaciones en disco: leer -> comprobar FUERA del almacén -> persistir
+// ---------------------------------------------------------------------------------------------
+//
+// Mirar el disco puede tardar (una ruta de red, un UNC, un volumen dormido). El almacén es UNO para
+// todo el Core: su mutex lo usa también `SqlitePersistence` para guardar el estado. Por eso ninguna
+// comprobación de disco, `git` ni proceso externo corre dentro de un closure de `registry`:
+//
+//   1. `registry`: se LEEN proyectos y ubicaciones (solo SQL) y se suelta el almacén;
+//   2. FUERA del almacén: `exists_on_disk` y la función pura `transitions`;
+//   3. `registry` de nuevo, solo para PERSISTIR las transiciones `ok <-> missing`.
+//
+// La prueba `el_registro_no_hace_io_externo_bajo_el_bloqueo_del_almacen` escanea este archivo y
+// falla si alguien mete I/O externo dentro de uno de esos closures.
+
+/// ÚNICO sitio donde se mira el disco para decidir si una ubicación existe. Nunca bajo el almacén.
+fn exists_on_disk(path: &str) -> bool {
+    Path::new(path).exists()
+}
+
+/// Transiciones `ok <-> missing` que hay que persistir. Pura: no toca el disco ni el almacén.
+fn transitions<'a>(locs: impl IntoIterator<Item = &'a LocationRow>, exists: impl Fn(&str) -> bool) -> Vec<LocationMark> {
+    locs.into_iter()
+        .filter_map(|l| {
+            let missing_now = !exists(&l.display_path);
+            (missing_now != l.missing).then(|| LocationMark { machine: l.machine.clone(), path: l.path.clone(), missing: missing_now })
+        })
+        .collect()
+}
+
+/// Refleja en memoria las transiciones ya calculadas (para devolver el estado real al llamador).
+fn apply_transitions(locs: &mut [LocationRow], marks: &[LocationMark]) {
+    for l in locs.iter_mut() {
+        if let Some(m) = marks.iter().find(|m| m.machine == l.machine && m.path == l.path) {
+            l.missing = m.missing;
+        }
+    }
+}
+
 type Counts = std::collections::HashMap<String, usize>;
 
 impl Core {
-    /// Acceso al registro. `Err` claro si el almacén no está abierto (p. ej. modo degradado).
-    fn registry<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<R, String> {
+    /// Acceso al registro. `Ok(None)` = el almacén no está abierto (modo degradado): el registro es
+    /// ADITIVO y quien llama decide si eso importa. `Err` = el almacén está abierto y la consulta
+    /// falló: eso NO se esconde. El closure corre con el mutex del almacén tomado: solo SQL.
+    fn registry_opt<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<Option<R>, String> {
         match self.storage.with_store(f) {
-            Some(Ok(r)) => Ok(r),
+            Some(Ok(r)) => Ok(Some(r)),
             Some(Err(e)) => Err(e.to_string()),
-            None => Err("El registro de proyectos no está disponible: el almacén del Core no está abierto".into()),
+            None => Ok(None),
         }
+    }
+
+    /// Como [`Core::registry_opt`], pero un almacén cerrado es un error claro.
+    fn registry<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<R, String> {
+        self.registry_opt(f)?.ok_or_else(|| "El registro de proyectos no está disponible: el almacén del Core no está abierto".to_string())
+    }
+
+    /// Paso 3 del ciclo leer -> comprobar -> persistir: guarda las transiciones, en una transacción.
+    fn persist_marks(&self, marks: &[LocationMark]) -> Result<(), String> {
+        if marks.is_empty() {
+            return Ok(());
+        }
+        self.registry(|st| st.locations_mark(marks))
     }
 
     fn tasks_per_project(&self) -> (Counts, usize) {
@@ -209,16 +274,12 @@ impl Core {
     // -----------------------------------------------------------------------------------------
 
     /// Lista de proyectos con sus ubicaciones. Al listar se COMPRUEBA el disco: una ubicación cuya
-    /// carpeta ya no existe pasa a `missing` (y vuelve a `ok` si reaparece).
+    /// carpeta ya no existe pasa a `missing` (y vuelve a `ok` si reaparece). Ciclo leer -> comprobar
+    /// FUERA del almacén -> persistir solo las transiciones.
     pub(super) fn projects_list(&self, include_archived: bool) -> Result<Value, String> {
         let (counts, unassigned) = self.tasks_per_project();
-        let rows = self.registry(|st| {
-            for l in st.project_locations(None)? {
-                let exists = Path::new(&l.display_path).exists();
-                if exists == l.missing {
-                    st.location_mark(&l.machine, &l.path, !exists)?;
-                }
-            }
+        // 1. Leer (solo SQL).
+        let mut rows = self.registry(|st| {
             let mut out = vec![];
             for p in st.projects(include_archived)? {
                 let locs = st.project_locations(Some(&p.id))?;
@@ -226,6 +287,13 @@ impl Core {
             }
             Ok(out)
         })?;
+        // 2. Comprobar el disco, con el almacén ya suelto.
+        let marks = transitions(rows.iter().flat_map(|(_, l)| l.iter()), exists_on_disk);
+        // 3. Persistir solo lo que cambió.
+        self.persist_marks(&marks)?;
+        for (_, locs) in rows.iter_mut() {
+            apply_transitions(locs, &marks);
+        }
         Ok(json!({
             "projects": rows.iter().map(|(p, l)| project_json(p, l, counts.get(&p.id).copied().unwrap_or(0))).collect::<Vec<_>>(),
             "unassigned_tasks": unassigned,
@@ -346,10 +414,12 @@ impl Core {
     // Asignación a tareas: implícita, relleno, importación
     // -----------------------------------------------------------------------------------------
 
-    /// Resuelve (y si hace falta crea) el proyecto de un repositorio SIN preguntar a nadie: misma
-    /// ruta → ese proyecto; sin coincidencias → proyecto nuevo; con candidatos → `None` (no se une
-    /// en silencio; la tarea queda sin proyecto hasta que la persona confirme). Nunca falla: sin
-    /// registro disponible devuelve `None`.
+    /// Descubrimiento automático: resuelve (y si hace falta crea) el proyecto de un repositorio SIN
+    /// preguntar a nadie. Misma ruta → ese proyecto; sin coincidencias (inequívocamente nuevo) →
+    /// proyecto nuevo; con candidatos → `None` (no se une en silencio; la tarea queda sin proyecto
+    /// hasta que la persona confirme). No falla: si el registro no responde devuelve `None`; eso solo
+    /// deja la tarea sin proyecto, igual que antes de D, y la guarda de lanzamiento no se activa para
+    /// lo que nunca tuvo `project_id`.
     pub(super) fn project_for_repo(&self, repo: &str) -> Option<String> {
         let ident = identify(repo).ok()?;
         self.resolve_or_create(&ident).ok().flatten()
@@ -370,8 +440,10 @@ impl Core {
     }
 
     /// Asigna `project_id` a las tareas existentes que no lo tienen (perezoso: se llama tras arrancar,
-    /// con presupuesto de tiempo). Idempotente. Los repositorios ambiguos o que ya no existen se
-    /// dejan sin proyecto. `meta.projects_backfilled` solo se anota si la pasada terminó.
+    /// con presupuesto de tiempo). Idempotente: procesa SIEMPRE las tareas que sigan sin proyecto. Los
+    /// repositorios ambiguos o que ya no existen se dejan sin proyecto. `meta.projects_backfilled` es
+    /// solo una marca diagnóstica (ver `META_BACKFILLED`): se anota si la pasada terminó y no se usa
+    /// para saltarse pasadas futuras.
     pub(super) fn backfill_projects(&self, budget: Duration) -> Result<Value, String> {
         let started = Instant::now();
         let mut pending: Vec<String> = vec![];
@@ -422,8 +494,10 @@ impl Core {
         Ok(json!({ "assigned": assigned, "ambiguous": ambiguous, "unresolved": unresolved, "complete": complete }))
     }
 
-    /// Importa una sola vez las carpetas recientes de la interfaz (`localStorage`). No pregunta: lo
-    /// ambiguo se omite y se informa. Las siguientes llamadas no hacen nada.
+    /// Importa las carpetas recientes de la interfaz (`lixbon_recents`). EL CORE ES LA ÚNICA AUTORIDAD
+    /// de esta importación: la interfaz puede llamar en cada arranque y es `meta.projects_recents_imported`
+    /// (en SQLite) quien decide; con la marca puesta devuelve `already_done` sin hacer nada. No
+    /// pregunta: lo ambiguo se omite y se informa.
     pub(super) fn projects_import_recents(&self, args: &Value) -> Result<Value, String> {
         if self.registry(|st| st.meta(META_RECENTS))?.is_some() {
             return Ok(json!({ "imported": 0, "existing": 0, "skipped": [], "already_done": true }));
@@ -462,31 +536,45 @@ impl Core {
     // -----------------------------------------------------------------------------------------
 
     /// ¿Se puede lanzar trabajo nuevo en el proyecto de esta tarea? No si está archivado, ni si
-    /// ninguna de sus ubicaciones en esta máquina existe ya (`missing`). Sin proyecto o sin registro
-    /// disponible NO bloquea (el registro es aditivo: no puede romper un flujo que funcionaba).
+    /// ninguna de sus ubicaciones en esta máquina existe ya (`missing`).
+    ///
+    /// Compatibilidad: una tarea SIN `project_id` no se bloquea (el registro no es requisito para lo
+    /// que nunca lo tuvo) y con el almacén realmente cerrado/degradado tampoco (el registro es
+    /// aditivo y no rompe los flujos legacy).
     pub(super) fn check_project_launchable(&self, task_id: &str) -> Result<(), String> {
         let Some(pid) = self.lock().tasks.get(task_id).and_then(|t| t.project_id.clone()) else { return Ok(()) };
         self.check_project_launchable_id(&pid)
     }
 
     /// Lo mismo a partir del id de proyecto (p. ej. el de un repositorio donde aún no hay tarea).
+    ///
+    /// Con un `project_id` conocido y el almacén disponible, **ningún error de lectura se convierte
+    /// en `Ok`**: una consulta que falla, o un `project_id` que ya no existe en el registro, rechazan
+    /// el lanzamiento. Si no, las protecciones de abajo (archivado, ubicación desaparecida) se
+    /// podrían saltar justo cuando el registro está en problemas.
     pub(super) fn check_project_launchable_id(&self, pid: &str) -> Result<(), String> {
-        let Some(res) = self.storage.with_store(|st| -> StoreResult<Option<(ProjectRow, Vec<LocationRow>)>> {
-            let machine = machine_id(st)?;
-            let Some(p) = st.project(pid)? else { return Ok(None) };
-            let mut locs: Vec<LocationRow> = st.project_locations(Some(pid))?.into_iter().filter(|l| l.machine == machine).collect();
-            for l in locs.iter_mut() {
-                let exists = Path::new(&l.display_path).exists();
-                if exists == l.missing {
-                    st.location_mark(&l.machine, &l.path, !exists)?;
-                    l.missing = !exists;
-                }
-            }
-            Ok(Some((p, locs)))
-        }) else {
-            return Ok(());
+        let fallo = |why: String| format!("No se pudo comprobar el proyecto {pid} antes de lanzar: {why}. No se lanza hasta poder comprobarlo.");
+        // 1. Leer (solo SQL).
+        let read = self
+            .registry_opt(|st| {
+                let machine = machine_id(st)?;
+                let Some(p) = st.project(pid)? else { return Ok((None, vec![])) };
+                let locs: Vec<LocationRow> = st.project_locations(Some(pid))?.into_iter().filter(|l| l.machine == machine).collect();
+                Ok((Some(p), locs))
+            })
+            .map_err(fallo)?;
+        // Almacén no abierto (modo degradado): el registro es aditivo.
+        let Some((p, mut locs)) = read else { return Ok(()) };
+        let Some(p) = p else {
+            return Err(format!(
+                "La tarea apunta al proyecto {pid}, que no existe en el registro de proyectos (¿se restauró una copia anterior?). No se lanza: registra el repositorio de nuevo o corrige el proyecto."
+            ));
         };
-        let Ok(Some((p, locs))) = res else { return Ok(()) };
+        // 2. Comprobar el disco, con el almacén ya suelto.
+        let marks = transitions(&locs, exists_on_disk);
+        // 3. Persistir solo lo que cambió.
+        self.persist_marks(&marks).map_err(fallo)?;
+        apply_transitions(&mut locs, &marks);
         if p.archived {
             return Err(format!("El proyecto «{}» está archivado: restáuralo (project_archive con archived=false) para lanzar trabajo nuevo.", p.name));
         }

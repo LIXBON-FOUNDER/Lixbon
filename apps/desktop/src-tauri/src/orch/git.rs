@@ -245,31 +245,55 @@ pub fn default_branch(dir: &str) -> Option<String> {
 }
 
 /// Forma canónica de la URL de un remoto para COMPARAR proyectos: `host[:puerto]/ruta`, con el
-/// host en minúsculas, sin esquema, sin `.git` final y **sin credenciales** (`usuario:token@`):
-/// la huella se guarda en la base y no debe llevar secretos. Una ruta local se deja como ruta.
+/// host en minúsculas, sin esquema y sin `.git` final.
+///
+/// **Garantía: ningún secreto del remoto sale de aquí**, porque el resultado se guarda en la base
+/// (`fingerprint`). En una URL de RED (`esquema://…` o formato scp `usuario@host:ruta`):
+/// * se descarta todo lo que hay hasta la ÚLTIMA `@` (usuario y clave, también si la clave lleva
+///   `/`, `?` o `#` sin codificar: ante la duda se pierde identidad, nunca se filtra un secreto);
+/// * se descartan la consulta (`?access_token=…`) y el fragmento (`#…`).
+///
+/// Una ruta local (`/srv/git/r.git`, `C:\repos\r`, `file://…`) se deja como ruta: ahí `?`, `#` y `@`
+/// pueden ser parte del nombre y no hay credenciales que quitar.
 pub fn normalize_remote(url: &str) -> Option<String> {
     let url = url.trim();
     if url.is_empty() {
         return None;
     }
-    let (host_part, path) = if let Some((_, rest)) = url.split_once("://") {
-        // esquema://[usuario[:clave]@]host[:puerto]/ruta   (file:///ruta no tiene host)
-        let rest = rest.rsplit_once('@').filter(|(before, _)| !before.contains('/')).map(|(_, after)| after).unwrap_or(rest);
+    let local = |p: &str| p.replace('\\', "/").trim_end_matches('/').trim_end_matches(".git").trim_end_matches('/').to_string();
+    let sin_consulta = |s: &str| s.split(['?', '#']).next().unwrap_or("").to_string();
+    let (host, path) = if let Some((scheme, rest)) = url.split_once("://") {
+        if scheme.eq_ignore_ascii_case("file") {
+            return Some(local(rest));
+        }
+        // esquema://[usuario[:clave]@]host[:puerto]/ruta[?consulta][#fragmento]
+        let rest = rest.rsplit_once('@').map(|(_, despues)| despues).unwrap_or(rest);
+        let rest = sin_consulta(rest);
         match rest.split_once('/') {
             Some((h, p)) => (h.to_string(), p.to_string()),
-            None => (rest.to_string(), String::new()),
+            None => (rest.clone(), String::new()),
         }
-    } else if let Some((before, after)) = url.split_once(':').filter(|(b, _)| b.contains('@') && !b.contains('/') && !b.contains('\\')) {
-        // formato scp: usuario@host:ruta
-        (before.rsplit_once('@').map(|(_, h)| h).unwrap_or(before).to_string(), after.to_string())
+    } else if es_scp(url) {
+        // formato scp: [usuario[:clave]@]host:ruta
+        let despues = url.rsplit_once('@').map(|(_, d)| d).unwrap_or(url);
+        let despues = sin_consulta(despues);
+        match despues.split_once(':') {
+            Some((h, p)) => (h.to_string(), p.to_string()),
+            None => (despues.clone(), String::new()),
+        }
     } else {
-        // ruta local (absoluta o relativa)
-        let p = url.replace('\\', "/");
-        return Some(p.trim_end_matches('/').trim_end_matches(".git").trim_end_matches('/').to_string());
+        return Some(local(url));
     };
     let path = path.replace('\\', "/");
     let path = path.trim_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path).trim_matches('/');
-    let host = host_part.to_ascii_lowercase();
+    let host = host.to_ascii_lowercase();
     Some(if path.is_empty() { host } else { format!("{host}/{path}") })
+}
+
+/// ¿Es el formato scp (`usuario@host:ruta`) y no una ruta local que contiene una `@`?
+fn es_scp(url: &str) -> bool {
+    let b = url.as_bytes();
+    let unidad_windows = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/');
+    url.contains('@') && !unidad_windows && !url.starts_with(['/', '.', '~', '\\'])
 }
