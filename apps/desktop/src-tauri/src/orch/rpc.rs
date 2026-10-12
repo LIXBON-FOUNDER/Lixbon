@@ -84,8 +84,8 @@ impl Core {
                     Caller::Agent(Some(id)) => self.lock().task(id).ok().and_then(|t| t.role.clone()),
                     _ => None,
                 };
-                let app = self.app.get().ok_or("La app todavía no ha arrancado")?;
-                issues::ejecutar(app, args, rol)
+                let host = self.host.get().ok_or("La app todavía no ha arrancado")?;
+                issues::ejecutar(host.as_ref(), args, rol)
             }
             "continue" => self.follow_up(&caller, args),
             "phase" => {
