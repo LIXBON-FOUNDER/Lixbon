@@ -248,23 +248,20 @@ La pantalla de Inicio es la misma en los tres: cambia la composición (CSS por `
 
 ### 6.2 Inventario
 
-| Componente | Responsabilidad |
+| Componente (archivo) | Responsabilidad |
 |---|---|
-| `StatusMark` / `StatusPill` | Marca y píldora de estado (de Attempt/Task) por grupo visual |
+| `StatusMark` / `StatusPill` (`StatusMark.jsx`) | Marca y píldora de estado (de Attempt o de Task) por grupo visual; un id desconocido se dibuja neutro, sin romper |
 | `AgentLabel` | Proveedor + modelo + esfuerzo + rol (envuelve `AgentChip` vigente) |
-| `ProjectBadge` | Nombre del proyecto con inicial y aviso de ruta ausente |
-| `AttentionCard` | Tarjeta de Attention: kind, título, pista, entidad, tiempo/caducidad y **acciones con capacidad** |
-| `ActionButton` | Botón de intent: consulta la capacidad; si no está disponible se deshabilita con tooltip y «slice»; si es simulada, lo rotula |
-| `SimBadge` | «Simulado» (acciones y barra) |
-| `TaskRow` | Fila de Task: título, estado derivado, último intento, agente, contador de intentos |
-| `AttemptLine` | Línea de intento: n.º, agente, estado, duración, resultado |
-| `ActivityLine` | Línea de evento: actor, verbo, entidad enlazada, tiempo |
-| `ProjectCard` | Resumen de proyecto con contadores por grupo visual |
-| `EmptyState` / `LoadingState` / `ErrorState` / `QueryBoundary` | Los tres estados + el envoltorio que los decide |
-| `NavLink` | Enlace a ruta (migas, tarjetas): siempre un `<a href="#/…">` |
-| `HostLink` | Atajo a diff/worktree/IDE/terminal: intent **de host**, no conectado en el preview |
-| `Breadcrumbs` | Cadena Inicio › Proyecto › Task › Intento |
-| `Section` / `Stat` / `Cluster` | Maquetación |
+| `ProjectHeader`, `GroupCounters`, `TaskRow`, `AttemptLine`, `ActivityLine` (`rows.jsx`) | Cabecera de proyecto con inicial y aviso de ruta ausente; contadores por grupo visual; fila de Task (estado derivado, último intento, agente, n.º de intentos); línea de intento; línea de evento con actor, verbo y entidad enlazada |
+| `ProjectCard` | Resumen de proyecto: cabecera, contadores, Attention pendiente y sus Tasks abiertas |
+| `AttentionCard` | Tarjeta de Attention: kind, asunto, pista, entidad, tiempo/caducidad y **acciones con capacidad** (respuesta en línea, política efectiva en los lanzamientos) |
+| `ActionButton` | Botón de intent: consulta la capacidad; si no está disponible se deshabilita con el slice escrito en el botón y el motivo en el tooltip; si es simulada, lleva la marca «sim.»; pide confirmación si el intent la exige |
+| `PolicySummary`, `InlineAnswer`, `LaunchPanel` | Política efectiva (comando, avisos, elevación), respuesta a una pregunta y formulario de lanzamiento (simulado) |
+| `HostShortcuts` | Atajos a diff, worktree, IDE y terminal: intents **del host**, no conectados en el preview |
+| `EmptyState` / `LoadingState` / `ErrorState` / `QueryBoundary` (`states.jsx`) | Los tres estados + el envoltorio que decide cuál mostrar (con datos previos, un fallo de recarga no los borra) |
+| `NavLink` / `NavButton` | Enlace o botón a una ruta: un `<a href="#/…">` real que navega sin recargar |
+| `Breadcrumbs`, `Section`, `Stat`, `SimBadge`, `AdeNotices` (`small.jsx`) | Migas de pan, maquetación, rótulo «Simulado» y avisos del resultado de una acción |
+| `AdeIcon` | Resuelve nombres de icono a `components/Icons.jsx` (importados, no modificados) |
 
 ### 6.3 Accesibilidad
 Roles de región con `aria-label`; tarjetas de Attention como `article` con encabezado; botones nativos; foco visible; `prefers-reduced-motion` desactiva pulsos; el estado nunca depende solo del color.
@@ -284,7 +281,7 @@ AdeClient
   ├─ listAttempts/getAttempt
   ├─ listThreads/getThread
   ├─ listWorktrees, listArtifacts, getReview, getIntegration
-  ├─ listAttention({projectId?})
+  ├─ listAttention({projectId?, attemptId?})
   ├─ listActivity({projectId?, taskId?, attemptId?, limit?})
   ├─ listAgents()               ─▶ catálogo de proveedores/modelos
   ├─ resolveLocation(ref)       ─▶ camino IDE → ADE
@@ -293,9 +290,9 @@ AdeClient
 ```
 
 - **Consultas** devuelven entidades en `camelCase` ya con los ids del vocabulario. La traducción desde `snake_case` y desde el modelo legado es del adaptador, no de las pantallas.
-- **`dispatch`** es el único punto de escritura. Un intent es `{ type, …args }`; el resultado es `{ ok, simulated, error?, effects? }`. Antes de ofrecer un botón, la interfaz consulta `getCapabilities()`.
+- **`dispatch`** es el único punto de escritura. Un intent es `{ type, …args }`; si sale bien devuelve `{ ok, simulated, intent, effects, message }` y si no **rechaza con `AdeError`** (`code`, `slice`, `simulated`). Antes de ofrecer un botón, la interfaz consulta `getCapabilities()`.
 - **`subscribe`** notifica *qué cambió* (`{ type:'changed', entities:[{kind,id}], seq? }`), no los datos: la interfaz invalida y vuelve a preguntar. Es compatible con `orch:changed` (hoy) y con `GET /events?since=` (slice E) sin cambiar pantallas.
-- **Capacidad** (`Capability`): `{ intent, availability: 'available'|'simulated'|'unavailable', slice, reason, requiresConfirmation, surfaces }`. `simulated` solo lo emite el mock; el Core real emite `available` o `unavailable`.
+- **Capacidad** (`Capability`): `{ intent, availability: 'available'|'simulated'|'unavailable', slice, reason, requiresConfirmation }`. `simulated` solo lo emite el mock; el Core real emite `available` o `unavailable`.
 
 ### 7.2 Catálogo de intents (son intents de **interfaz**, no la API definitiva del Core)
 
@@ -309,6 +306,7 @@ AdeClient
 | `stop_attempt` | detener | simulado | vigente (gateway `stop`) | — |
 | `mark_attention_seen` / `snooze_attention` | estado por persona y dispositivo | simulado | no existe | **G** (+ **F** identidad) |
 | `retry_attempt`, `resume_attempt` | reintento / reanudación | **no disponible** | no existe | **Task/Attempt** (ProviderSession) |
+| `register_project` | alta de un proyecto | **no disponible** | no existe | **D** |
 | `continue_with_other_agent` | continuar con otro proveedor | **no disponible** | no existe | **ContextPackage** (tras Task/Attempt) |
 | `race_attempts`, `compare_attempts` | competir N / comparar | **no disponible** | no existe | **Task/Attempt** (+ worktrees por intento) |
 
@@ -341,7 +339,8 @@ Intents **del host** (capacidades del cliente, no del Core): `open_diff`, `open_
 | `Review.state`, `decision`, `headCommit`, `at` | `last_review` + derivado `reviewStatus` | — (la derivación pasa al Core con **G**) |
 | `Review.by.client` | no existe | **F** |
 | `Integration.outcome`, `into`, `resultCommit`, `at` | `last_integration` | — |
-| `AttentionItem.kind`, `entity`, `title`, `hint`, `createdAt` | calculada en frontend (`attention.js`, 4 kinds) | **G** |
+| `AttentionItem.id`, `kind`, `entity`, `subject`, `createdAt` | calculada en frontend (`attention.js`, 4 kinds) | **G** |
+| `AttentionItem.reason` (`failure_reason`, o `review_state` en `review`) | implícito en `attention.js` | **G** |
 | `AttentionItem.severity` | no existe, **sin definir** | **G** (decisión pendiente) |
 | `AttentionItem.dueAt` | `expires_at` de lanzamiento pendiente | **G** |
 | `AttentionItem.person.{seen,snoozed}` | no existe | **G** + **F** |
@@ -357,7 +356,7 @@ Intents **del host** (capacidades del cliente, no del Core): `open_diff`, `open_
 El código lleva la misma tabla (`client/fieldSources.js`) y una prueba comprueba que **cada campo de las fixtures tiene slice declarado**: no se puede añadir un campo al mock sin decir quién lo hará real.
 
 ### 7.4 Latencia, fallos, vacío (lo que el mock simula)
-`createMockAdeClient({ latencyMs, now, fixtures, clientKind })` y `client.sim.*`: `setLatency`, `failNext(método, error)`, `failAlways`, `clearFailures`, `useEmptyData()`, `reset()`. Los errores usan los mismos códigos que usará el Core (`adeError`: `not_found`, `forbidden`, `unavailable`, `stale`, `core_not_implemented`).
+`createMockAdeClient({ latencyMs, now, fixtures, clientKind })` y `client.sim.*`: `setLatency`, `failNext(método, error)`, `failAlways`, `clearFailures`, `refresh()`, `useEmptyData()`, `reset()`. Los errores usan los mismos códigos que usará el Core (`adeError`: `not_found`, `forbidden`, `unavailable`, `stale`, `invalid`, `failed`, `core_not_implemented`). Las decisiones del mock respetan reglas de verdad que el Core también tendrá (aceptar una revisión solo vale sobre el commit mostrado; aprobar exige el comando confirmado; el móvil no aprueba políticas elevadas), implementadas en `mock/mockCore.js`, nunca en las pantallas.
 
 ### 7.5 Estrategia MockAdeClient → CoreAdeClient sin reescribir pantallas
 1. **Las pantallas solo conocen `AdeClient`** (por `AdeProvider`) y las formas de `types.d.ts`.
@@ -474,6 +473,28 @@ apps/desktop/src/ade/
                 Actividad, Agentes, Ajustes, panel de contexto del IDE
   styles/       tres hojas CSS con prefijo ade-
   preview/      entrada aislada (ade-preview.html en la raíz de apps/desktop)
+  testing/      utilidades solo de pruebas (cliente con reloj fijo, montaje de la app)
+  index.js      API pública (lo único que el Desktop importará al integrarlo)
+  boundary.test.js   guarda la frontera: nada real conectado, sin archivos calientes
 ```
 
 Desviaciones respecto a lo pedido, con motivo: **`vocab/`** (el contrato no se puede importar en ejecución, §9.4), **`host/`** y **`state/`** (separan las capacidades del cliente del estado del Core y evitan que las pantallas conozcan el transporte), **`navigation/`** (no existe router en el repo y `appStore.js` está protegido). Todo cuelga de `ade/`: eliminar el frente es borrar una carpeta y un html.
+
+---
+
+## 13. Cómo verlo y probarlo
+
+- **Ver:** `npm run dev` en `apps/desktop` y abrir `http://localhost:1420/ade-preview.html`. La barra superior de la vista previa fija el ancho del contenedor (1280 / 800 / 375 px), la superficie simulada (Desktop o móvil, que cambia las capacidades) y simula un archivo del IDE abierto. En Ajustes están los controles de latencia, fallos y datos vacíos. Es una entrada aislada: no monta `App`, no usa los stores y **no entra en el build** (`vite.config.js` no la lista).
+- **Probar:** `npm test` (vitest + jsdom). Las pruebas del ADE viven junto al código (`*.test.js[x]`): vocabulario contra el contrato, conformidad del `MockAdeClient`, fixtures, selectores, rutas, componentes, Inicio (cargando/vacío/error/móvil), cadena de navegación IDE↔ADE y frontera.
+- **Integrar (cuando toque, fuera de este frente):** montar `<AdeApp client host ideContext />` desde un modo nuevo o un panel del IDE; hoy ni `App.jsx` ni `main.jsx` lo conocen.
+
+## 14. Decisiones que este diseño deja abiertas a propósito
+
+1. **Severidad de Attention** (G): hoy el orden es la posición en el vocabulario; `AttentionItem.severity` existe como campo opcional que nadie usa.
+2. **Etiqueta canónica de `pending_approval`** y su grupo visual (propuesta: `needs_person`).
+3. **Si `pending_spawn` y `unanswered_question` son kinds** o siguen siendo contadores aparte (G).
+4. **Quién propone las acciones de cada Attention**: hoy `domain-view/attentionActions.js` (presentación); si G las entrega, se sustituye ese archivo.
+5. **Si `policy.elevated` existe como dato del Core** (hoy no confirmado en el código) y cómo lo expresa F.
+6. **Alcance del móvil sobre integrar y lanzar**: el mock los marca fuera de alcance; falta decisión de F.
+7. **Vocabulario de Artifact** (`kind`) y de Worktree: H no los define; el mock usa `report`, `diff`, `log`, `test_report` como texto libre.
+8. **Dónde vive la resolución ruta → intento** (`resolveLocation`) y con qué precisión (rama, ruta, huella).
