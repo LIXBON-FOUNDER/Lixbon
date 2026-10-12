@@ -149,6 +149,15 @@ fn plan(conn: &Connection, migrations: &[Migration]) -> StoreResult<Plan> {
     Ok(Plan { applied_max, pending, has_data })
 }
 
+/// Versión del esquema de la base: la mayor entre las migraciones aplicadas y
+/// `PRAGMA user_version`. Es la misma cuenta que usa `plan` para rechazar una base
+/// más nueva que el binario.
+pub(super) fn db_version(conn: &Connection) -> StoreResult<i64> {
+    let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let applied_max = applied_rows(conn)?.last().map(|r| r.0).unwrap_or(0);
+    Ok(applied_max.max(user_version))
+}
+
 pub(super) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

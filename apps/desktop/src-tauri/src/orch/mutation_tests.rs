@@ -332,3 +332,53 @@ fn la_politica_de_reintentos_esta_en_un_solo_sitio() {
     assert_eq!(p.delay_for(&estructural, 0), None);
     assert_eq!(RetryPolicy::none().delay_for(&transitorio, 0), None);
 }
+
+/// C2b: el almacén queda DETRÁS de la frontera de mutación. Ningún módulo de dominio
+/// toca el `Store`, la valla, la promoción ni Win32: cada símbolo solo puede aparecer
+/// en los archivos que lo poseen. Un uso nuevo fuera de la lista rompe esta prueba.
+#[test]
+fn el_almacen_la_promocion_y_win32_solo_se_tocan_desde_su_frontera() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
+    // (símbolo, archivos donde puede aparecer)
+    let permitidos: [(&str, &[&str]); 14] = [
+        ("with_store(", &["store_boot.rs", "boot_authority.rs"]),
+        ("save_legacy_state", &["store_boot.rs"]),
+        ("commit_authoritative", &["store_boot.rs"]),
+        ("promote_to_authoritative", &["boot_authority.rs"]),
+        ("apply_fence", &["boot_authority.rs"]),
+        ("ensure_db_id", &["boot_authority.rs"]),
+        ("open_for_boot", &["store_boot.rs", "boot_authority.rs"]),
+        ("verify_backup", &["boot_authority.rs"]),
+        ("write_marker(", &["authority.rs", "boot_authority.rs"]),
+        ("install_persistence(", &["mutation.rs", "lifecycle.rs"]),
+        ("mirror_failed_at_boot(", &["mutation.rs", "lifecycle.rs"]),
+        ("windows_sys", &["fsio.rs"]),
+        ("MoveFileExW", &["fsio.rs"]),
+        ("publish_durable(", &["fsio.rs", "authority.rs", "mirror.rs"]),
+    ];
+    let mut revisados = 0;
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let ruta = entrada.unwrap().path();
+        let nombre = ruta.file_name().unwrap().to_string_lossy().into_owned();
+        if !nombre.ends_with(".rs") || nombre == "tests.rs" || nombre.ends_with("_tests.rs") {
+            continue;
+        }
+        let texto = std::fs::read_to_string(&ruta).unwrap();
+        let produccion = texto.split("mod tests {").next().unwrap().split("mod durable_tests {").next().unwrap();
+        for (n, linea) in produccion.lines().enumerate() {
+            let l = linea.trim_start();
+            if l.starts_with("//") {
+                continue;
+            }
+            for (simbolo, donde) in permitidos {
+                assert!(
+                    !l.contains(simbolo) || donde.contains(&nombre.as_str()),
+                    "{nombre}:{}: «{simbolo}» solo puede usarse en {donde:?}: el almacén y la promoción van detrás de la frontera de mutación",
+                    n + 1
+                );
+            }
+        }
+        revisados += 1;
+    }
+    assert!(revisados >= 20, "la prueba debe revisar los módulos del dominio, revisó {revisados}");
+}

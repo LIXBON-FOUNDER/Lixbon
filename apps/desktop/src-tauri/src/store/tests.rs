@@ -55,8 +55,21 @@ const M003_EVENTOS: &str = "CREATE TABLE events (
   at INTEGER NOT NULL
 ) STRICT;";
 
+/// Las migraciones del esquema BASE (001). Estas pruebas son del framework de
+/// migraciones y asumen esa base; la valla (002, C2b) tiene sus propias pruebas en
+/// `authority_tests.rs`. Los extras numerados 002/003 simulan migraciones de otros
+/// slices SOBRE la 001, sin la valla.
+fn embedded_001() -> Vec<Migration> {
+    embedded().into_iter().filter(|m| m.version < FENCE_VERSION).collect()
+}
+
+/// Abre con la base 001 (sin la valla).
+fn abre(dir: &Path, app_version: &str) -> StoreResult<Store> {
+    Store::open_with(dir, &embedded_001(), app_version)
+}
+
 fn con_extras(extras: &[Migration]) -> Vec<Migration> {
-    let mut v = embedded();
+    let mut v = embedded_001();
     v.extend_from_slice(extras);
     v
 }
@@ -75,7 +88,7 @@ fn tabla_existe(store: &Store, name: &str) -> bool {
 
 #[test]
 fn migraciones_embebidas_empiezan_en_001_core_y_son_validas() {
-    let m = embedded();
+    let m = embedded_001();
     assert!(!m.is_empty());
     assert_eq!((m[0].version, m[0].name), (1, "core"));
     assert!(m.windows(2).all(|w| w[0].version < w[1].version));
@@ -84,7 +97,7 @@ fn migraciones_embebidas_empiezan_en_001_core_y_son_validas() {
 #[test]
 fn abrir_base_nueva_aplica_001_y_crea_el_esquema_core() {
     let tmp = Tmp::new();
-    let store = Store::open(tmp.path(), "9.9.9").unwrap();
+    let store = abre(tmp.path(), "9.9.9").unwrap();
     let r = store.migration_report();
     assert_eq!((r.from_version, r.to_version), (0, 1));
     assert_eq!(r.applied, vec![1]);
@@ -104,7 +117,7 @@ fn abrir_base_nueva_aplica_001_y_crea_el_esquema_core() {
 #[test]
 fn los_pragma_del_diseno_estan_activos() {
     let tmp = Tmp::new();
-    let store = Store::open(tmp.path(), "t").unwrap();
+    let store = abre(tmp.path(), "t").unwrap();
     store
         .read(|c| {
             let jm: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
@@ -121,14 +134,14 @@ fn los_pragma_del_diseno_estan_activos() {
 fn reabrir_es_idempotente_y_conserva_los_datos() {
     let tmp = Tmp::new();
     {
-        let mut s = Store::open(tmp.path(), "t").unwrap();
+        let mut s = abre(tmp.path(), "t").unwrap();
         s.write(|tx| {
             tx.execute("INSERT INTO meta (key, value) VALUES ('machine_id', 'abc')", [])?;
             Ok(())
         })
         .unwrap();
     }
-    let s = Store::open(tmp.path(), "t").unwrap();
+    let s = abre(tmp.path(), "t").unwrap();
     let r = s.migration_report();
     assert_eq!((r.from_version, r.to_version), (1, 1));
     assert!(r.applied.is_empty());
@@ -141,13 +154,13 @@ fn reabrir_es_idempotente_y_conserva_los_datos() {
 fn base_que_no_es_sqlite_se_informa_como_dañada() {
     let tmp = Tmp::new();
     std::fs::write(tmp.path().join("lixbon.db"), vec![b'x'; 4096]).unwrap();
-    match Store::open(tmp.path(), "t") {
+    match abre(tmp.path(), "t") {
         Err(StoreError::Corrupt { .. }) => {}
         other => panic!("se esperaba Corrupt, salió {other:?}"),
     }
     // El bloqueo se soltó al fallar: se puede reintentar.
     std::fs::remove_file(tmp.path().join("lixbon.db")).unwrap();
-    Store::open(tmp.path(), "t").unwrap();
+    abre(tmp.path(), "t").unwrap();
 }
 
 // ------------------------------------------------------------------ lock
@@ -155,13 +168,13 @@ fn base_que_no_es_sqlite_se_informa_como_dañada() {
 #[test]
 fn segunda_instancia_sobre_la_misma_carpeta_se_rechaza() {
     let tmp = Tmp::new();
-    let first = Store::open(tmp.path(), "t").unwrap();
-    match Store::open(tmp.path(), "t") {
+    let first = abre(tmp.path(), "t").unwrap();
+    match abre(tmp.path(), "t") {
         Err(StoreError::AlreadyRunning { .. }) => {}
         other => panic!("se esperaba AlreadyRunning, salió {other:?}"),
     }
     drop(first);
-    Store::open(tmp.path(), "t").expect("al soltar el primero se puede abrir");
+    abre(tmp.path(), "t").expect("al soltar el primero se puede abrir");
 }
 
 #[test]
@@ -186,7 +199,7 @@ fn base_mas_nueva_se_rechaza_sin_tocarla() {
         let c = Connection::open(&db).unwrap();
         c.execute_batch("CREATE TABLE futuro (x INTEGER); PRAGMA user_version = 99;").unwrap();
     }
-    match Store::open(tmp.path(), "t") {
+    match abre(tmp.path(), "t") {
         Err(StoreError::DatabaseNewer { db_version: 99, binary_version }) => assert!(binary_version < 99),
         other => panic!("se esperaba DatabaseNewer, salió {other:?}"),
     }
@@ -265,7 +278,7 @@ fn si_una_migracion_falla_se_deshace_toda_la_tanda() {
     assert_eq!(count(&c, "PRAGMA user_version"), 0);
     drop(c);
     // Corregida la lista, la base se migra con normalidad.
-    let s = Store::open(tmp.path(), "t").unwrap();
+    let s = abre(tmp.path(), "t").unwrap();
     assert_eq!(s.migration_report().applied, vec![1]);
 }
 
@@ -283,7 +296,7 @@ fn una_migracion_que_cierra_la_transaccion_se_detecta() {
 fn migrar_base_con_datos_hace_copia_previa_consistente() {
     let tmp = Tmp::new();
     {
-        let mut s = Store::open(tmp.path(), "t").unwrap();
+        let mut s = abre(tmp.path(), "t").unwrap();
         s.save_legacy_state(0, r#"{"tasks":[1,2,3]}"#).unwrap();
         s.write(|tx| {
             tx.execute("INSERT INTO meta (key, value) VALUES ('k', 'v')", [])?;
@@ -347,7 +360,7 @@ fn migracion_con_referencia_blanda_sin_fk() {
 #[test]
 fn write_hace_commit_si_ok_y_rollback_si_error() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     s.write(|tx| {
         tx.execute("INSERT INTO meta (key, value) VALUES ('a', '1')", [])?;
         Ok(())
@@ -378,7 +391,7 @@ fn write_hace_commit_si_ok_y_rollback_si_error() {
 #[test]
 fn write_toma_el_bloqueo_de_escritura_de_entrada_begin_immediate() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     let db = s.db_path().to_path_buf();
     s.write(|_tx| {
         // Desde otra conexión: leer sí se puede (WAL)…
@@ -401,7 +414,7 @@ fn write_toma_el_bloqueo_de_escritura_de_entrada_begin_immediate() {
 #[test]
 fn backup_a_peticion_es_completo_aunque_haya_datos_solo_en_el_wal() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     s.save_legacy_state(0, r#"{"x":1}"#).unwrap();
     // El WAL aún no se ha vuelto a volcar al .db: una copia del archivo no lo vería.
     assert!(tmp.path().join("lixbon.db-wal").exists());
@@ -421,7 +434,7 @@ fn backup_a_peticion_es_completo_aunque_haya_datos_solo_en_el_wal() {
 #[test]
 fn legacy_state_empieza_vacio_y_cada_guardado_sube_la_rev() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     assert_eq!(s.legacy_state().unwrap(), None);
     assert_eq!(s.save_legacy_state(0, r#"{"v":1}"#).unwrap(), 1);
     assert_eq!(s.save_legacy_state(1, r#"{"v":2}"#).unwrap(), 2);
@@ -433,7 +446,7 @@ fn legacy_state_empieza_vacio_y_cada_guardado_sube_la_rev() {
 #[test]
 fn legacy_state_detecta_conflictos_de_revision() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     // Actualizar algo que no existe.
     assert!(matches!(
         s.save_legacy_state(1, "{}"),
@@ -458,7 +471,7 @@ fn legacy_state_detecta_conflictos_de_revision() {
 #[test]
 fn legacy_state_rechaza_json_invalido_sin_perder_el_anterior() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     assert!(matches!(s.save_legacy_state(0, "{no es json"), Err(StoreError::InvalidDocument(_))));
     assert_eq!(s.legacy_state().unwrap(), None);
     s.save_legacy_state(0, r#"{"ok":true}"#).unwrap();
@@ -472,10 +485,10 @@ fn legacy_state_sobrevive_a_cerrar_y_reabrir() {
     let tmp = Tmp::new();
     let doc = r#"{"tasks":[{"id":"t1","título":"ñandú 🦤"}]}"#;
     {
-        let mut s = Store::open(tmp.path(), "t").unwrap();
+        let mut s = abre(tmp.path(), "t").unwrap();
         s.save_legacy_state(0, doc).unwrap();
     }
-    let s = Store::open(tmp.path(), "t").unwrap();
+    let s = abre(tmp.path(), "t").unwrap();
     let st = s.legacy_state().unwrap().unwrap();
     assert_eq!((st.rev, st.doc.as_str()), (1, doc));
 }
@@ -483,7 +496,7 @@ fn legacy_state_sobrevive_a_cerrar_y_reabrir() {
 #[test]
 fn solo_hay_una_fila_de_legacy_state() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     s.save_legacy_state(0, "{}").unwrap();
     let r = s.write(|tx| {
         tx.execute("INSERT INTO legacy_state (id, rev, doc, updated_at) VALUES (2, 1, '{}', 0)", [])?;
@@ -521,7 +534,7 @@ fn modo(path: &Path) -> u32 {
 #[test]
 fn la_base_y_sus_archivos_laterales_son_privados() {
     let tmp = Tmp::new();
-    let mut s = Store::open(tmp.path(), "t").unwrap();
+    let mut s = abre(tmp.path(), "t").unwrap();
     s.save_legacy_state(0, "{}").unwrap(); // fuerza -wal y -shm
     let db = s.db_path().to_path_buf();
     #[cfg(unix)]
@@ -547,7 +560,7 @@ fn la_base_y_sus_archivos_laterales_son_privados() {
 #[test]
 fn las_copias_y_su_carpeta_son_privadas() {
     let tmp = Tmp::new();
-    let s = Store::open(tmp.path(), "t").unwrap();
+    let s = abre(tmp.path(), "t").unwrap();
     let copia = s.backup("permisos").unwrap();
     #[cfg(unix)]
     {
@@ -566,7 +579,7 @@ fn restringir_la_base_no_toca_la_carpeta_compartida() {
     // La carpeta del almacén la comparte el resto del Core (state.json, orch.json...).
     let tmp = Tmp::new();
     let antes = std::fs::metadata(tmp.path()).unwrap().permissions();
-    let _s = Store::open(tmp.path(), "t").unwrap();
+    let _s = abre(tmp.path(), "t").unwrap();
     assert_eq!(std::fs::metadata(tmp.path()).unwrap().permissions(), antes);
     #[cfg(windows)]
     {
