@@ -166,6 +166,30 @@ fn un_marcador_defectuoso_es_invalido_nunca_ausente() {
 }
 
 #[test]
+fn el_marcador_valida_sus_coherencias_internas_y_no_desborda() {
+    let promoting = serde_json::to_value(marcador(1)).unwrap();
+    let authoritative = serde_json::to_value(confirmado(1)).unwrap();
+    let con = |base: &serde_json::Value, f: &dyn Fn(&mut serde_json::Value)| {
+        let mut v = base.clone();
+        f(&mut v);
+        parse_marker(v.to_string().as_bytes())
+    };
+    assert!(matches!(con(&promoting, &|_| {}), MarkerRead::Valid(_)) && matches!(con(&authoritative, &|_| {}), MarkerRead::Valid(_)));
+    // source_hash == "none" => source_bytes == 0 (y al revés: con legado, no vacío).
+    assert!(matches!(con(&promoting, &|v| { v["source_hash"] = json!("none"); v["source_bytes"] = json!(5); }), MarkerRead::Invalid(m) if m.contains("source_bytes")));
+    assert!(matches!(con(&promoting, &|v| v["source_bytes"] = json!(0)), MarkerRead::Invalid(_)), "hash real con 0 bytes");
+    // Revisiones: sin envolver con i64::MAX, ni negativas.
+    assert!(matches!(con(&promoting, &|v| { v["sqlite_bootstrap_rev"] = json!(i64::MAX); v["sqlite_target_rev"] = json!(i64::MIN); }), MarkerRead::Invalid(_)));
+    assert!(matches!(con(&promoting, &|v| { v["sqlite_bootstrap_rev"] = json!(i64::MAX); v["sqlite_target_rev"] = json!(i64::MAX); }), MarkerRead::Invalid(_)));
+    assert!(matches!(con(&promoting, &|v| { v["sqlite_bootstrap_rev"] = json!(-1); v["sqlite_target_rev"] = json!(0); }), MarkerRead::Invalid(_)));
+    assert!(matches!(con(&promoting, &|v| { v["sqlite_bootstrap_rev"] = json!(i64::MAX - 1); v["sqlite_target_rev"] = json!(i64::MAX); }), MarkerRead::Valid(_)), "el último par válido");
+    // El estado y `confirmed_at` deben concordar; la base es siempre lixbon.db.
+    assert!(matches!(con(&promoting, &|v| v["confirmed_at"] = json!(5)), MarkerRead::Invalid(m) if m.contains("confirmed_at")));
+    assert!(matches!(con(&authoritative, &|v| { v.as_object_mut().unwrap().remove("confirmed_at"); }), MarkerRead::Invalid(_)));
+    assert!(matches!(con(&promoting, &|v| v["db"] = json!("otra.db")), MarkerRead::Invalid(_)));
+}
+
+#[test]
 fn un_marcador_ilegible_en_disco_es_invalido() {
     let d = carpeta("ilegible");
     std::fs::write(marker_path(&d), b"{ truncado").unwrap();

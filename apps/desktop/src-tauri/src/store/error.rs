@@ -42,6 +42,10 @@ pub enum StoreError {
     NotAuthoritative,
     /// La promoción a autoritativa no puede aplicarse tal como se planeó.
     PromotionConflict(String),
+    /// Se intentó promocionar una base que no cruzó la valla de compatibilidad (migración 002).
+    NotFenced,
+    /// Una revisión persistida está fuera de rango (negativa, o `i64::MAX`: no se puede avanzar).
+    RevOutOfRange { rev: i64 },
 }
 
 impl StoreError {
@@ -56,7 +60,8 @@ impl StoreError {
     /// (interrupción, contención de archivo, antivirus; en Windows 5, 32 y 33).
     /// Estructurales (nunca se reintentan): esquema más nuevo, checksum, orden de
     /// migraciones, base corrupta, conflicto de `rev`, documento inválido,
-    /// bloqueo equivocado, base no autoritativa y promoción imposible.
+    /// bloqueo equivocado, base no autoritativa, promoción imposible, base sin la
+    /// valla y revisión fuera de rango.
     pub fn is_transient(&self) -> bool {
         use std::io::ErrorKind::*;
         match self {
@@ -134,6 +139,10 @@ impl fmt::Display for StoreError {
             StoreError::Sqlite(e) => write!(f, "error de SQLite: {e}"),
             StoreError::NotAuthoritative => f.write_str("la base de datos no es autoritativa todavía; no se puede escribir el estado en ella"),
             StoreError::PromotionConflict(m) => write!(f, "la promoción a autoritativa no se puede aplicar: {m}"),
+            StoreError::NotFenced => f.write_str(
+                "la base de datos no ha cruzado la valla de compatibilidad (migración 002); no se puede promocionar a autoritativa sin ella",
+            ),
+            StoreError::RevOutOfRange { rev } => write!(f, "la revisión {rev} está fuera de rango y no se puede avanzar; los datos de autoridad no se dan por buenos"),
         }
     }
 }

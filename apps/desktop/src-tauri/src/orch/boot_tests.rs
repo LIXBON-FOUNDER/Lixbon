@@ -124,6 +124,11 @@ pub(super) fn fila(core: &Core) -> (i64, String) {
 // Promoción
 // ---------------------------------------------------------------------------
 
+/// El `doc_sha256` del espejo: SHA-256 del contenido canónico del documento de SQLite.
+fn hash_canonico(doc: &str) -> String {
+    super::mirror::canonical_hash(&serde_json::from_str::<Value>(doc).unwrap())
+}
+
 #[test]
 fn el_primer_arranque_promociona_y_deja_todo_coherente() {
     let (_l, data, core_dir) = dirs();
@@ -151,7 +156,7 @@ fn el_primer_arranque_promociona_y_deja_todo_coherente() {
     // Espejo: state.json lleva la revisión de la fila.
     let espejo: Value = serde_json::from_slice(&std::fs::read(data.join("state.json")).unwrap()).unwrap();
     assert_eq!(espejo["_mirror"]["rev"], rev);
-    assert_eq!(espejo["_mirror"]["doc_sha256"], sha256_hex(doc.as_bytes()));
+    assert_eq!(espejo["_mirror"]["doc_sha256"], hash_canonico(&doc));
     // Copias previas: de la base y de state.json (con su hash).
     let copias = archivos(&core_dir.join("backups"));
     assert!(copias.iter().any(|n| n.contains("pre-authority") && n.ends_with(".db")), "{copias:?}");
@@ -251,7 +256,7 @@ fn mutate_escribe_en_sqlite_y_el_espejo_acompana() {
     assert_eq!(rev, 2);
     assert_eq!(serde_json::from_str::<Value>(&doc).unwrap(), serde_json::to_value(&*core.lock()).unwrap(), "la fila es el estado");
     let espejo: Value = serde_json::from_slice(&std::fs::read(data.join("state.json")).unwrap()).unwrap();
-    assert_eq!((espejo["_mirror"]["rev"].as_i64(), espejo["_mirror"]["doc_sha256"].as_str().map(String::from)), (Some(2), Some(sha256_hex(doc.as_bytes()))));
+    assert_eq!((espejo["_mirror"]["rev"].as_i64(), espejo["_mirror"]["doc_sha256"].as_str().map(String::from)), (Some(2), Some(hash_canonico(&doc))));
     // Una mutación que no cambia nada no consume `rev`.
     core.mutate(|st| {
         st.no_change();
@@ -684,6 +689,60 @@ fn las_pruebas_nunca_usan_la_carpeta_real_del_core() {
 /// Opt-in, no forma parte de la suite normal: `LIXBON_REAL_STATE_PATH=<ruta a un
 /// state.json> cargo test promociona_un_state_json_real -- --ignored --nocapture`.
 /// Solo LEE el archivo: la promoción se hace sobre una copia en carpetas temporales.
+#[test]
+fn el_informe_del_arranque_lleva_la_rev_tras_cerrar_las_huerfanas() {
+    let (_l, data, core_dir) = dirs();
+    // Primera sesión: promueve y deja una tarea abierta (rev 2).
+    let (primero, _h, r) = arranca(&data, &core_dir);
+    r.unwrap();
+    primero
+        .mutate(|st| {
+            st.create_run("obj", NewTask {
+                agent: "coordinador".into(), model: None, effort: None, role: None, title: "abierta".into(), spec: "s".into(),
+                repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: false,
+            });
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(fila(&primero).0, 2);
+    assert!(primero.lock().tasks.values().any(|t| !t.status.is_final()));
+    drop(primero);
+
+    // Segunda sesión: carga la rev N (2) y `close_orphans` la avanza a N+1 (3).
+    let (segundo, _h, r) = arranca(&data, &core_dir);
+    r.unwrap();
+    let (rev, doc) = fila(&segundo);
+    assert_eq!(rev, 3, "SQLite avanzó al cerrar las huérfanas");
+    let StorageStatus::Ready(informe) = segundo.storage_status() else { panic!("{:?}", segundo.storage_status()) };
+    assert_eq!(informe.rev, 3, "el informe lleva la revisión realmente confirmada, no la cargada");
+    // Memoria == SQLite == espejo.
+    assert!(segundo.lock().tasks.values().all(|t| t.status.is_final()));
+    assert_eq!(serde_json::from_str::<Value>(&doc).unwrap(), serde_json::to_value(&*segundo.lock()).unwrap());
+    let espejo: Value = serde_json::from_slice(&std::fs::read(data.join("state.json")).unwrap()).unwrap();
+    assert_eq!(espejo["_mirror"]["rev"], 3);
+    assert_eq!(espejo["_mirror"]["doc_sha256"], hash_canonico(&doc));
+    // Y la persistencia sigue desde N+1: la siguiente mutación es la 4, sin conflicto.
+    segundo.mutate(|st| { st.seq += 1; Ok(()) }).unwrap();
+    assert_eq!(fila(&segundo).0, 4);
+}
+
+#[test]
+fn una_rev_de_fila_en_el_limite_bloquea_la_promocion_sin_envolver() {
+    let (_l, data, core_dir) = dirs();
+    let original = legado_con(&data, "previa");
+    instantanea_de_c1(&core_dir, &data.join("state.json"), i64::MAX);
+    let (_core, _h, r) = arranca(&data, &core_dir);
+    let msg = r.unwrap_err();
+    assert!(msg.contains("fuera de rango"), "{msg}");
+    assert!(!marker_path(&core_dir).exists(), "no se publicó ninguna intención");
+    assert_eq!(std::fs::read(data.join("state.json")).unwrap(), original, "state.json intacto");
+    let c = rusqlite::Connection::open_with_flags(core_dir.join("lixbon.db"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(v, 1, "ni siquiera se aplicó la valla");
+    let rev: i64 = c.query_row("SELECT rev FROM legacy_state WHERE id = 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(rev, i64::MAX, "la fila no se tocó");
+}
+
 #[test]
 #[ignore = "opt-in: define LIXBON_REAL_STATE_PATH con la ruta de un state.json real"]
 fn promociona_un_state_json_real_en_solo_lectura() {

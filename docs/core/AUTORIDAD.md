@@ -20,7 +20,7 @@ sqlite_authoritative → un fallo de SQLite BLOQUEA el arranque; no hay fallback
 |---|---|---|
 | `core/lixbon.db` | SQLite | **Fuente de verdad** una vez promovida. La fila `legacy_state` es el estado. |
 | `core/authority.json` | Marcador externo | Registra **solo el estado del protocolo** (`promoting` / `authoritative`). No contiene estado de dominio ni se actualiza por mutación. Existe para el caso en que la base no se pueda consultar. |
-| `orch/state.json` | Espejo | Tras la promoción es un **espejo operativo, de diagnóstico y pieza de recuperación**. No es una garantía de compatibilidad descendente. Nunca se importa de vuelta. |
+| `orch/state.json` | Espejo | Tras la promoción es un **espejo operativo, de diagnóstico y pieza de recuperación**. No es una garantía de compatibilidad descendente. Nunca se importa de vuelta. Su `_mirror` no se cree: el contenido se comprueba (ver «El espejo»). |
 | `core/backups/*pre-authority*` | Copias | La base y `state.json` justo antes de promover (verificadas). Sin política de retención todavía. |
 | `orch/state.json.{invalido,cambiado,divergente}-<ms>` | Copias diagnósticas | Se conservan antes de bloquear o de sustituir algo ajeno. |
 
@@ -47,8 +47,37 @@ AUTHORITATIVE
   —no hay ventana en la que C1/C2a puedan arrancar e ignorar el marcador—.
 * **FENCED** es recuperable: `user_version = 2`, sin marcador y SQLite todavía de
   bootstrap. C2b repite las validaciones y continúa; **nunca degrada a C1**.
+* **La valla es un invariante del almacén**, no solo del orden de `boot_authority.rs`:
+  `Store::promote_to_authoritative` rechaza (`NotFenced`, sin cambiar nada) una base que
+  no cruzó la 002. `sqlite_authoritative ⇒ valla aplicada`.
+* **El orden de slices se conserva también al recuperar.** `Store::open_boot_under_lock`
+  migra: sin cruzar → solo lo anterior a la 002; FENCED o `promoting` sin COMMIT → como
+  máximo la 002; solo con la base ya **autoritativa** se aplican las migraciones
+  posteriores (D/E/F1/G: 003 en adelante).
+* **Revisiones.** `sqlite_target_rev = sqlite_bootstrap_rev + 1` se calcula con
+  `checked_add` en todas las fronteras (plan, marcador, metadata de la base y escritura
+  autoritativa). Una revisión negativa o `i64::MAX`, o un `target` que no cuadre, no se
+  promociona ni se da por buena: bloquea. El marcador también debe ser coherente consigo
+  mismo (`source_hash = "none"` ⇒ `source_bytes = 0`; con legado, no vacío; `confirmed_at`
+  solo en `authoritative`; `db = lixbon.db`).
 * Antes de la valla, un fallo de la copia o de la propia valla degrada a `state.json`
   y se reintenta en el siguiente arranque. Con la valla cruzada, bloquea.
+
+## El espejo: se comprueba, no se cree
+
+`state.json` lleva `_mirror {rev, doc_sha256, ...}`, pero eso es **metadata declarada
+dentro del propio archivo**. `doc_sha256` es el SHA-256 del contenido canónico (sin
+`_mirror`, claves ordenadas, sin espacios) y en cada arranque se **recalcula**:
+
+| `state.json` | Resultado |
+|---|---|
+| íntegro, `_mirror.rev == rev` y el contenido es el de SQLite | vigente; no se toca |
+| íntegro y `_mirror.rev < rev` (caída entre COMMIT y espejo) | se regenera, sin copia |
+| el contenido no corresponde a su `_mirror` (editado), aunque `rev` sea menor o igual | copia `state.json.divergente-<ms>` y se regenera desde SQLite |
+| mismo `rev` pero otro contenido, `rev` mayor, sin `_mirror`, ilegible | copia `state.json.divergente-<ms>` y se regenera |
+| ausente o vacío | se regenera |
+
+Un cambio solo de formato o de orden de claves no es una modificación. SQLite gana siempre.
 
 ## Qué bloquea el arranque (y qué hacer)
 
@@ -121,3 +150,10 @@ legado legible. No tiene interfaz, no está soportado y no ofrece garantías.
   `state.json` alrededor de la intención).
 * `mutation_tests.rs`: la frontera de mutación y la prueba de arquitectura que mantiene
   el almacén, la promoción y Win32 detrás de su frontera.
+* `store/authority_tests.rs`: la valla como invariante del almacén (promover sin valla →
+  error y cero cambios), las migraciones posteriores a la valla solo con la base
+  autoritativa y las revisiones en el límite.
+* **CI** (`.github/workflows/desktop-ci.yml`): en cada PR a `master` que toque
+  `apps/desktop/**` corre, en **Windows y Ubuntu**, `cargo test --lib` del Core, las
+  pruebas de `lxo`, vitest y el build del frontend. Windows ejercita la rama
+  `MoveFileExW` de `publish_durable`; Ubuntu, la de `rename` + `fsync` de carpeta.

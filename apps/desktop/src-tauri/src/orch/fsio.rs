@@ -147,9 +147,12 @@ pub(super) fn publish_durable(tmp: &Path, dest: &Path) -> std::io::Result<()> {
     {
         std::fs::rename(tmp, dest)?;
         // Sin esto el `rename` puede perderse en un corte aunque el archivo esté en disco.
-        if let Some(dir) = dest.parent() {
-            std::fs::File::open(dir)?.sync_all()?;
-        }
+        // Una ruta relativa sin carpeta (`x.json`) tiene por padre `""`: la carpeta es `.`.
+        let dir = match dest.parent() {
+            Some(d) if !d.as_os_str().is_empty() => d,
+            _ => Path::new("."),
+        };
+        std::fs::File::open(dir)?.sync_all()?;
         Ok(())
     }
 }
