@@ -38,7 +38,8 @@ pub enum StoreError {
     Io { context: String, source: std::io::Error },
     /// Error de SQLite.
     Sqlite(rusqlite::Error),
-    /// Se intentó una escritura autoritativa en una base que no lo es.
+    /// Se intentó una escritura autoritativa, o una migración posterior a la valla, en una base
+    /// que no es autoritativa (o cuyo registro de autoridad no es válido).
     NotAuthoritative,
     /// La promoción a autoritativa no puede aplicarse tal como se planeó.
     PromotionConflict(String),
@@ -137,7 +138,7 @@ impl fmt::Display for StoreError {
             ),
             StoreError::Io { context, source } => write!(f, "{context}: {source}"),
             StoreError::Sqlite(e) => write!(f, "error de SQLite: {e}"),
-            StoreError::NotAuthoritative => f.write_str("la base de datos no es autoritativa todavía; no se puede escribir el estado en ella"),
+            StoreError::NotAuthoritative => f.write_str("la base de datos no es autoritativa todavía (o su registro de autoridad no es válido); no se puede escribir el estado ni aplicar migraciones posteriores a la valla"),
             StoreError::PromotionConflict(m) => write!(f, "la promoción a autoritativa no se puede aplicar: {m}"),
             StoreError::NotFenced => f.write_str(
                 "la base de datos no ha cruzado la valla de compatibilidad (migración 002); no se puede promocionar a autoritativa sin ella",

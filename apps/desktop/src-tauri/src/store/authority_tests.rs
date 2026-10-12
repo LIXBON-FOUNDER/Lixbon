@@ -161,6 +161,7 @@ fn las_migraciones_posteriores_a_la_valla_solo_se_aplican_con_la_base_autoritati
     let mut todas = embedded();
     todas.push(Migration::new(3, "proyectos", "CREATE TABLE projects (id TEXT PRIMARY KEY) STRICT;"));
     let abre = |lock: &InstanceLock| Store::open_boot_under_lock(tmp.path(), lock, &todas, "t").unwrap();
+    let no_hay_003 = |s: &Store| s.read(|c| Ok(c.prepare("SELECT 1 FROM projects").is_err())).unwrap();
 
     // Antes de la valla: solo las anteriores a ella.
     let mut s = abre(&lock);
@@ -170,20 +171,34 @@ fn las_migraciones_posteriores_a_la_valla_solo_se_aplican_con_la_base_autoritati
     bootstrap_con_fila(&mut s, 1, "{}");
     drop(s);
 
-    // FENCED (caída antes de `promoting`, o `promoting` sin COMMIT): el reinicio NO aplica la 003.
+    // FENCED (caída antes de `promoting`, o `promoting` sin COMMIT): ni la apertura ni
+    // `migrate_authoritative` aplican la 003.
     for _ in 0..2 {
-        let s = abre(&lock);
+        let mut s = abre(&lock);
         assert_eq!(s.schema_version().unwrap(), 2, "FENCED todavía no es autoritativa: máximo la 002");
-        assert!(s.read(|c| Ok(c.prepare("SELECT 1 FROM projects").is_err())).unwrap(), "la tabla de la 003 no existe");
+        assert!(no_hay_003(&s), "la tabla de la 003 no existe");
+        assert!(matches!(s.migrate_authoritative(&todas, "t"), Err(StoreError::NotAuthoritative)), "FENCED no puede levantar el techo");
+        assert_eq!(s.schema_version().unwrap(), 2);
     }
 
-    // Ya autoritativa: la siguiente apertura aplica el resto.
+    // Ya autoritativa: la apertura SIGUE sin aplicar la 003 (el marcador aún no se ha mirado);
+    // solo `migrate_authoritative`, que pide quien ya decidió, la aplica.
     let mut s = abre(&lock);
     s.ensure_db_id().unwrap();
     s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}").unwrap();
     drop(s);
+    let mut s = abre(&lock);
+    assert_eq!(s.schema_version().unwrap(), 2, "autoritativa pero sin decisión de arranque: la apertura no pasa de la valla");
+    assert!(no_hay_003(&s));
+    let r = s.migrate_authoritative(&todas, "t").unwrap();
+    assert_eq!(r.applied, vec![3]);
+    assert_eq!(s.schema_version().unwrap(), 3, "autoritativa y decidida: se aplica lo posterior a la valla");
+    assert!(r.backup.is_some(), "con datos previos, la migración deja su copia previa");
+    // Idempotente, y una base que ya tiene la 003 se abre sin error aunque el techo sea la 002.
+    assert!(s.migrate_authoritative(&todas, "t").unwrap().applied.is_empty());
+    drop(s);
     let s = abre(&lock);
-    assert_eq!(s.schema_version().unwrap(), 3, "autoritativa: se aplica lo posterior a la valla");
+    assert_eq!(s.schema_version().unwrap(), 3, "una base ya migrada no es «más nueva que el binario»");
 }
 
 #[test]
@@ -505,10 +520,12 @@ fn con_el_modo_autoritativo_pero_la_metadata_corrupta_la_apertura_se_queda_en_la
             toca_meta(&mut s, rompe.0, rompe.1);
             assert_eq!(s.authority_facts().unwrap().mode.as_deref(), Some(MODE_SQLITE_AUTHORITATIVE), "{nombre}: el modo sigue siendo autoritativo");
         }
-        let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+        let mut s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
         assert_eq!(s.schema_version().unwrap(), 2, "{nombre}: máximo la 002");
         assert!(s.read(|c| Ok(c.prepare("SELECT 1 FROM projects").is_err())).unwrap(), "{nombre}: no se creó la tabla de la 003");
         assert!(!s.authority_facts().unwrap().authority_valid());
+        assert!(matches!(s.migrate_authoritative(&todas, "t"), Err(StoreError::NotAuthoritative)), "{nombre}: el almacén se niega a migrar");
+        assert_eq!(s.schema_version().unwrap(), 2, "{nombre}: y no toca la base");
     }
     // Metadata incompleta (falta una clave).
     let tmp = Tmp::new();
@@ -521,19 +538,38 @@ fn con_el_modo_autoritativo_pero_la_metadata_corrupta_la_apertura_se_queda_en_la
         })
         .unwrap();
     }
-    let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+    let mut s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
     assert_eq!(s.schema_version().unwrap(), 2, "metadata incompleta: máximo la 002");
+    assert!(matches!(s.migrate_authoritative(&todas, "t"), Err(StoreError::NotAuthoritative)));
+    assert_eq!(s.schema_version().unwrap(), 2);
 }
 
 #[test]
-fn una_base_autoritativa_completamente_valida_si_permite_la_003() {
+fn una_base_autoritativa_completamente_valida_permite_migrar_a_la_003_solo_con_migrate_authoritative() {
     let todas = con_la_003();
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
     drop(promovida(tmp.path(), &lock));
-    let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
-    assert_eq!(s.schema_version().unwrap(), 3, "registro válido: se aplica lo posterior a la valla");
+    let mut s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+    assert_eq!(s.schema_version().unwrap(), 2, "la apertura nunca pasa de la valla: falta la decisión del arranque (marcador)");
+    s.migrate_authoritative(&todas, "t").unwrap();
+    assert_eq!(s.schema_version().unwrap(), 3, "registro válido y decidido: se aplica lo posterior a la valla");
     assert!(s.authority_facts().unwrap().authority_valid(), "y la 003 no altera el registro de autoridad");
+}
+
+#[test]
+fn migrate_authoritative_aplica_la_tanda_en_una_transaccion_y_si_falla_la_base_queda_en_la_002() {
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    drop(promovida(tmp.path(), &lock));
+    let mut mala = embedded();
+    mala.push(Migration::new(3, "mala", "CREATE TABLE a (x); INSERT INTO tabla_inexistente VALUES (1);"));
+    let mut s = Store::open_boot_under_lock(tmp.path(), &lock, &mala, "t").unwrap();
+    let r = s.migrate_authoritative(&mala, "t");
+    assert!(matches!(r, Err(StoreError::MigrationFailed { version: 3, .. })), "{r:?}");
+    assert_eq!(s.schema_version().unwrap(), 2, "la tanda se deshizo entera");
+    assert!(s.read(|c| Ok(c.prepare("SELECT 1 FROM a").is_err())).unwrap(), "ni siquiera la primera sentencia de la 003 quedó");
+    assert!(s.authority_facts().unwrap().authority_valid(), "la autoridad sigue intacta");
 }
 
 #[test]
