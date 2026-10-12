@@ -1,0 +1,30 @@
+<!doctype html>
+<!--
+  Vista previa AISLADA del ADE (solo `npm run dev`; abre /ade-preview.html).
+  No está en la lista de entradas de vite.config.js, así que NO entra en el build de producción.
+  No monta App ni los stores existentes: usa datos simulados (MockAdeClient).
+-->
+<html lang="es" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        var t = 'dark';
+        try {
+          var p = localStorage.getItem('lixbon-theme');
+          if (p === 'light') t = 'light';
+          else if (p === 'system' && !window.matchMedia('(prefers-color-scheme: dark)').matches) t = 'light';
+        } catch (e) {}
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lixbon ADE (vista previa)</title>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/ade/preview/main.jsx"></script>
+  </body>
+</html>

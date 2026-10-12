@@ -1,0 +1,9 @@
+/* preview.css — marco de la vista previa (no forma parte del ADE). */
+.pv { height: 100%; display: flex; flex-direction: column; background: var(--surface-0); color: var(--ink); font-family: var(--font-ui); }
+.pv-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: var(--surface-1); font-size: 12px; }
+.pv-bar button { height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius); background: var(--surface-4); color: var(--ink-body); font: inherit; cursor: pointer; }
+.pv-bar button.is-on { background: var(--primary); color: var(--on-primary); }
+.pv-group { display: inline-flex; gap: 2px; }
+.pv-sep { width: 1px; height: 16px; background: var(--ink-faint); }
+.pv-stage { flex: 1; min-height: 0; display: flex; justify-content: center; padding: 0; overflow: auto; }
+.pv-frame { max-width: 100%; height: 100%; min-height: 0; background: var(--bg); }

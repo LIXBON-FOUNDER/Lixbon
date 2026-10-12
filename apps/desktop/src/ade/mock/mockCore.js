@@ -66,7 +66,7 @@ export function createMockCore(fixtures, { now = Date.now, clientKind = 'desktop
   function reglasAttention(a) {
     const t = tarea(a.taskId);
     if (!t || s.discardedTaskIds.includes(t.id)) return null;
-    if (a.state === 'awaiting_terminal_approval') return { kind: 'approve_in_terminal', reason: null };
+    if (a.state === 'awaiting_terminal_approval') return { kind: 'approve_in_terminal', reason: null, dueAt: a.approvalDeadline };
     if (a.state === 'failed') return { kind: 'failed', reason: a.failureReason };
     if (a.state === 'pending_approval') return { kind: 'pending_spawn', reason: null, dueAt: a.approvalDeadline };
     if (a.pendingQuestion) return { kind: 'unanswered_question', reason: null };

@@ -1,0 +1,89 @@
+/* ade-screens.css — tarjetas de Attention, proyectos, actividad y mensajes. */
+
+/* Bandeja de Attention */
+.ade-inbox__group { margin-bottom: 14px; }
+.ade-inbox__kind { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-70); display: flex; align-items: center; }
+.ade-inbox__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 10px; }
+.ade[data-ade-mode='mobile'] .ade-inbox__cards { grid-template-columns: minmax(0, 1fr); }
+
+.ade-attn { --kind: var(--ink-50); display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); box-shadow: inset 3px 0 0 var(--kind); min-width: 0; }
+.ade-attn--approve_in_terminal { --kind: var(--warn); }
+.ade-attn--integrate { --kind: var(--good); }
+.ade-attn--review { --kind: var(--info); }
+.ade-attn--failed { --kind: var(--danger); }
+.ade-attn--pending_spawn { --kind: var(--accent); }
+.ade-attn--unanswered_question { --kind: var(--warn); }
+.ade-attn.is-seen { opacity: 0.85; }
+.ade-attn__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ade-attn__kind { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--kind); }
+.ade-attn__time { font-size: 11px; color: var(--ink-35); white-space: nowrap; }
+.ade-attn__title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; }
+.ade-attn__where { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-50); }
+.ade-attn__project { font-weight: 600; color: var(--ink-70); }
+.ade-attn__hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-body); }
+.ade-attn__due { color: var(--warn); }
+.ade-attn__actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.ade-attn.is-compact { padding: 10px 12px; }
+
+/* Proyectos */
+.ade-projlist { display: flex; flex-direction: column; gap: 12px; }
+.ade-projcard { display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 10px; border-radius: var(--radius); background: var(--surface-2); min-width: 0; }
+.ade-projcard__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ade-projcard__tasks { display: flex; flex-direction: column; }
+.ade-projcard__none { margin: 0; font-size: 12px; }
+.ade-projcard__more { font-size: 12px; padding: 4px 10px; color: var(--ink-50); }
+.ade-projhead { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ade-projhead__name { display: flex; align-items: center; gap: 8px; }
+.ade-projhead__mark { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); flex-shrink: 0; }
+.ade-projhead__title { font-size: 14px; font-weight: 650; }
+.ade-projhead__path { font-size: 11px; color: var(--ink-35); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ade-badge-attn { display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 700; color: #1a1710; background: var(--warn); white-space: nowrap; }
+.ade-counters { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11.5px; }
+.ade-counter { display: inline-flex; align-items: center; gap: 5px; color: var(--tone); }
+.ade-counter span { color: var(--ink-50); }
+.ade-archived { margin-top: 18px; }
+.ade-archived summary { cursor: pointer; font-size: 12px; color: var(--ink-50); margin-bottom: 10px; }
+.ade-taskgroup { margin-bottom: 12px; }
+.ade-taskgroup__title { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-70); display: flex; align-items: center; }
+.ade-attemptlist { display: flex; flex-direction: column; }
+
+/* Actividad */
+.ade-activitylist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ade-activity { display: flex; align-items: flex-start; gap: 10px; padding: 7px 4px; }
+.ade-activity__dot { width: 7px; height: 7px; margin-top: 6px; border-radius: 4px; background: var(--ink-35); flex-shrink: 0; }
+.ade-activity__dot--human { background: var(--accent); }
+.ade-activity__dot--agent { background: var(--info); }
+.ade-activity__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ade-activity__text { font-size: 12.5px; line-height: 1.4; color: var(--ink-body); }
+.ade-activity__text b { color: var(--ink); font-weight: 600; }
+.ade-activity__meta { font-size: 10.5px; color: var(--ink-35); }
+.ade-activity__time { font-size: 11px; color: var(--ink-35); white-space: nowrap; }
+
+/* Hilo */
+.ade-msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ade-msg { display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; border-radius: var(--radius); background: var(--surface-3); }
+.ade-msg__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--ink-50); }
+.ade-msg__kind { padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-50); background: var(--surface-5); }
+.ade-msg--question { box-shadow: inset 2px 0 0 var(--warn); }
+.ade-msg--question .ade-msg__kind { color: var(--warn); background: var(--warn-soft); }
+.ade-msg--done { box-shadow: inset 2px 0 0 var(--good); }
+.ade-msg--done .ade-msg__kind { color: var(--good); background: var(--good-soft); }
+.ade-msg--exited { box-shadow: inset 2px 0 0 var(--danger); }
+.ade-msg--exited .ade-msg__kind { color: var(--danger); background: var(--danger-soft); }
+.ade-msg__text { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-body); }
+
+/* Revisión */
+.ade-diffstat { margin: 0 0 8px; font-size: 13px; }
+.ade-add { color: var(--diff-add-ink); }
+.ade-del { color: var(--diff-del-ink); }
+.ade-shortcuts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Agentes */
+.ade-agentgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.ade-agentcard { padding: 14px; border-radius: var(--radius); background: var(--surface-2); }
+.ade-agentcard.is-off { opacity: 0.65; }
+.ade-agentcard__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ade-agentcard__head h3 { margin: 0; font-size: 14px; }
+
+/* Panel de contexto del IDE */
+.ade-idepanel { margin-bottom: 18px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); display: flex; flex-direction: column; gap: 8px; }
