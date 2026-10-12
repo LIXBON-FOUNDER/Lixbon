@@ -61,8 +61,42 @@ impl PromotionPlan {
     /// hacer panic) si la revisión de partida es negativa o `i64::MAX`.
     pub fn new(promotion_id: String, source_hash: String, source_bytes: u64, sqlite_bootstrap_rev: i64) -> StoreResult<PromotionPlan> {
         let sqlite_target_rev = next_rev(sqlite_bootstrap_rev)?;
+        check_promotion_identity(&promotion_id, &source_hash, source_bytes, sqlite_bootstrap_rev, sqlite_target_rev)
+            .map_err(|why| StoreError::PromotionConflict(format!("identidad de la promoción inválida: {why}")))?;
         Ok(PromotionPlan { promotion_id, source_hash, source_bytes, sqlite_bootstrap_rev, sqlite_target_rev })
     }
+}
+
+/// LA validación de la identidad de una promoción. La comparten la metadata de autoridad de
+/// SQLite ([`Store::authority_facts`]), el plan que se escribe ([`PromotionPlan::new`],
+/// [`Store::promote_to_authoritative`]) y el marcador `authority.json` (`orch::authority`):
+/// el almacén no puede fabricar una autoridad que luego rechazaría al leerla, y un marcador
+/// y una base no discrepan sobre qué es una identidad válida.
+///
+/// * `promotion_id` no vacío;
+/// * sin legado (`source_hash = "none"`) => `source_bytes = 0`; con legado, un SHA-256
+///   hexadecimal de 64 caracteres y `source_bytes > 0` (un `state.json` vacío no se promociona);
+/// * `sqlite_bootstrap_rev >= 0` y `sqlite_target_rev == sqlite_bootstrap_rev + 1` (comprobado).
+pub fn check_promotion_identity(promotion_id: &str, source_hash: &str, source_bytes: u64, bootstrap_rev: i64, target_rev: i64) -> Result<(), String> {
+    if promotion_id.is_empty() {
+        return Err("promotion_id vacío".into());
+    }
+    if source_hash == NO_SOURCE {
+        if source_bytes != 0 {
+            return Err("source_hash = none exige source_bytes = 0".into());
+        }
+    } else {
+        if source_hash.len() != 64 || !source_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("source_hash no es un SHA-256 hexadecimal de 64 caracteres ni «none»".into());
+        }
+        if source_bytes == 0 {
+            return Err("source_bytes = 0 con un source_hash de legado".into());
+        }
+    }
+    if bootstrap_rev < 0 || next_rev(bootstrap_rev).ok() != Some(target_rev) {
+        return Err("revisiones: sqlite_target_rev debe ser sqlite_bootstrap_rev + 1, con sqlite_bootstrap_rev >= 0 y en rango".into());
+    }
+    Ok(())
 }
 
 /// La revisión siguiente. Los datos persistidos pueden venir corruptos: se falla cerrado.
@@ -84,6 +118,19 @@ pub struct AuthMeta {
     pub since: i64,
 }
 
+impl AuthorityFacts {
+    /// ¿Tiene la base un registro interno de autoridad estructuralmente válido? Solo
+    /// coherencia interna de SQLite (el marcador es otra cosa): `db_id` presente y no vacío,
+    /// `legacy_import_mode = sqlite_authoritative`, identidad de la promoción válida
+    /// ([`check_promotion_identity`], ya aplicada a `auth`), fila `legacy_state` presente y
+    /// `row_rev >= sqlite_target_rev`.
+    pub fn authority_valid(&self) -> bool {
+        self.db_id.as_deref().is_some_and(|id| !id.is_empty())
+            && self.mode.as_deref() == Some(MODE_SQLITE_AUTHORITATIVE)
+            && self.auth.as_ref().is_some_and(|a| self.row_rev.is_some_and(|r| r >= a.sqlite_target_rev))
+    }
+}
+
 /// Lo que dice la base sobre su propia autoridad. Es la entrada de `decide_boot`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorityFacts {
@@ -101,6 +148,38 @@ pub struct AuthorityFacts {
     pub has_import_meta: bool,
 }
 
+/// Lee los hechos de autoridad de una conexión. La metadata de promoción solo se acepta
+/// (`auth = Some`) si su identidad pasa [`check_promotion_identity`]; si no, es como si no
+/// existiera, y `decide_boot` bloquea por incoherente.
+fn facts_from_conn(c: &Connection) -> StoreResult<AuthorityFacts> {
+    let version = db_version(c)?;
+    let auth = match (
+        meta_get(c, META_PROMOTION_ID)?,
+        meta_get(c, META_SOURCE_HASH)?,
+        parse_i64(meta_get(c, META_SOURCE_BYTES)?),
+        parse_i64(meta_get(c, META_BOOTSTRAP_REV)?),
+        parse_i64(meta_get(c, META_TARGET_REV)?),
+        parse_i64(meta_get(c, META_SINCE)?),
+    ) {
+        (Some(promotion_id), Some(source_hash), Some(bytes), Some(boot), Some(target), Some(since))
+            if bytes >= 0 && check_promotion_identity(&promotion_id, &source_hash, bytes as u64, boot, target).is_ok() =>
+        {
+            Some(AuthMeta { promotion_id, source_hash, source_bytes: bytes as u64, sqlite_bootstrap_rev: boot, sqlite_target_rev: target, since })
+        }
+        _ => None,
+    };
+    let has_import_meta: i64 = c.query_row("SELECT COUNT(*) FROM meta WHERE key LIKE 'legacy_import_%'", [], |r| r.get(0))?;
+    Ok(AuthorityFacts {
+        db_version: version,
+        fenced: version >= FENCE_VERSION,
+        db_id: meta_get(c, META_DB_ID)?,
+        row_rev: current_rev(c)?,
+        mode: meta_get(c, META_MODE)?,
+        auth,
+        has_import_meta: has_import_meta > 0,
+    })
+}
+
 fn meta_get(conn: &Connection, key: &str) -> StoreResult<Option<String>> {
     Ok(conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional()?)
 }
@@ -110,16 +189,18 @@ fn meta_put(conn: &Connection, key: &str, value: &str) -> StoreResult<()> {
     Ok(())
 }
 
-/// ¿`legacy_import_mode` ya es `sqlite_authoritative`? Solo se consulta con la base cruzada
-/// (la tabla `meta` existe desde la 001).
-/// Una base sin tabla `meta` (de una versión futura u otra cosa) no es autoritativa: la
-/// apertura seguirá y `migrate` dará el error que corresponda (`DatabaseNewer`...).
-pub(super) fn is_authoritative(conn: &Connection) -> StoreResult<bool> {
-    let has_meta: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'", [], |r| r.get(0))?;
-    if has_meta == 0 {
+/// ¿Tiene la base un registro interno de autoridad estructuralmente válido (no basta el modo)?
+/// Es lo que permite a `open_boot_under_lock` aplicar migraciones posteriores a la valla:
+/// con el modo `sqlite_authoritative` pero la metadata corrupta o incompleta, el arranque se
+/// queda en la 002, `decide_boot` detecta la incoherencia y BLOQUEA; nunca se migra primero
+/// y se descubre después que C2b estaba corrupto. Una base sin las tablas `meta` y
+/// `legacy_state` (de una versión futura u otra cosa) no lo es: `migrate` dará su error.
+pub(super) fn authority_record_valid(conn: &Connection) -> StoreResult<bool> {
+    let tables: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'legacy_state')", [], |r| r.get(0))?;
+    if tables < 2 {
         return Ok(false);
     }
-    Ok(meta_get(conn, META_MODE)?.as_deref() == Some(MODE_SQLITE_AUTHORITATIVE))
+    Ok(facts_from_conn(conn)?.authority_valid())
 }
 
 fn parse_i64(v: Option<String>) -> Option<i64> {
@@ -149,37 +230,8 @@ impl Store {
 
     /// Todo lo que la base sabe sobre su autoridad, en una lectura.
     pub fn authority_facts(&self) -> StoreResult<AuthorityFacts> {
-        let version = self.schema_version()?;
-        let c = &self.conn;
-        let auth = match (
-            meta_get(c, META_PROMOTION_ID)?,
-            meta_get(c, META_SOURCE_HASH)?,
-            parse_i64(meta_get(c, META_SOURCE_BYTES)?),
-            parse_i64(meta_get(c, META_BOOTSTRAP_REV)?),
-            parse_i64(meta_get(c, META_TARGET_REV)?),
-            parse_i64(meta_get(c, META_SINCE)?),
-        ) {
-            // Solo se dan por buenos metadatos coherentes: revisiones en rango con
-            // target = bootstrap + 1, y «sin legado» implica cero bytes.
-            (Some(promotion_id), Some(source_hash), Some(bytes), Some(boot), Some(target), Some(since))
-                if bytes >= 0 && next_rev(boot).ok() == Some(target) && (source_hash != NO_SOURCE || bytes == 0) =>
-            {
-                Some(AuthMeta { promotion_id, source_hash, source_bytes: bytes as u64, sqlite_bootstrap_rev: boot, sqlite_target_rev: target, since })
-            }
-            _ => None,
-        };
-        let has_import_meta: i64 = c.query_row("SELECT COUNT(*) FROM meta WHERE key LIKE 'legacy_import_%'", [], |r| r.get(0))?;
-        Ok(AuthorityFacts {
-            db_version: version,
-            fenced: version >= FENCE_VERSION,
-            db_id: meta_get(c, META_DB_ID)?,
-            row_rev: current_rev(c)?,
-            mode: meta_get(c, META_MODE)?,
-            auth,
-            has_import_meta: has_import_meta > 0,
-        })
+        facts_from_conn(&self.conn)
     }
-
     /// Identidad estable de ESTA base (`meta.db_id`). La crea si no existe; si ya
     /// existe la devuelve sin cambiarla.
     pub fn ensure_db_id(&mut self) -> StoreResult<String> {
@@ -219,6 +271,8 @@ impl Store {
                 plan.sqlite_target_rev, plan.sqlite_bootstrap_rev
             )));
         }
+        check_promotion_identity(&plan.promotion_id, &plan.source_hash, plan.source_bytes, plan.sqlite_bootstrap_rev, plan.sqlite_target_rev)
+            .map_err(|why| StoreError::PromotionConflict(format!("identidad de la promoción inválida: {why}")))?;
         let plan = plan.clone();
         let doc = doc.to_string();
         let target = self.write(move |tx| {
@@ -226,6 +280,10 @@ impl Store {
             // de que quien orquesta se acuerde de aplicarla; se comprueba antes de escribir nada.
             if db_version(tx)? < FENCE_VERSION {
                 return Err(StoreError::NotFenced);
+            }
+            // La autoridad que se escribe debe ser la que `authority_valid` aceptará: exige `db_id`.
+            if meta_get(tx, META_DB_ID)?.is_none_or(|id| id.is_empty()) {
+                return Err(StoreError::PromotionConflict("la base no tiene db_id (falta ensure_db_id)".into()));
             }
             let now = now_ms();
             let row = current_rev(tx)?;

@@ -47,11 +47,15 @@ fn abre_arranque(dir: &Path, lock: &InstanceLock) -> Store {
 fn abre_cruzada(dir: &Path, lock: &InstanceLock) -> Store {
     let mut s = abre_arranque(dir, lock);
     s.apply_fence(&embedded(), "t").unwrap();
+    s.ensure_db_id().unwrap();
     s
 }
 
+/// Un plan válido: `hash` es una etiqueta de prueba que se convierte en un SHA-256 real
+/// (salvo `"none"`), y un legado real nunca tiene 0 bytes.
 fn plan(boot: i64, hash: &str, bytes: u64) -> PromotionPlan {
-    PromotionPlan::new(new_uuid(), hash.into(), bytes, boot).unwrap()
+    let (hash, bytes) = if hash == "none" { ("none".to_string(), 0) } else { (sha256_hex(hash.as_bytes()), bytes.max(1)) };
+    PromotionPlan::new(new_uuid(), hash, bytes, boot).unwrap()
 }
 
 fn bootstrap_con_fila(s: &mut Store, rev: i64, doc: &str) {
@@ -175,6 +179,7 @@ fn las_migraciones_posteriores_a_la_valla_solo_se_aplican_con_la_base_autoritati
 
     // Ya autoritativa: la siguiente apertura aplica el resto.
     let mut s = abre(&lock);
+    s.ensure_db_id().unwrap();
     s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}").unwrap();
     drop(s);
     let s = abre(&lock);
@@ -310,6 +315,7 @@ fn promote_to_authoritative_sin_valla_es_un_error_y_cero_cambios() {
     assert_eq!(n.meta("legacy_import_mode").unwrap(), None);
     // Con la valla puesta, la misma promoción sí procede.
     n.apply_fence(&embedded(), "t").unwrap();
+    n.ensure_db_id().unwrap();
     assert_eq!(n.promote_to_authoritative(&plan(0, "none", 0), "{}").unwrap(), 1);
 }
 
@@ -375,6 +381,159 @@ fn metadata_de_autoridad_incoherente_no_se_da_por_buena() {
     assert!(s.authority_facts().unwrap().auth.is_none(), "none => source_bytes == 0");
     toca(&mut s, "legacy_authority_source_bytes", "0");
     assert!(s.authority_facts().unwrap().auth.is_some());
+    toca(&mut s, "legacy_authority_promotion_id", "");
+    assert!(s.authority_facts().unwrap().auth.is_none(), "promotion_id vacío");
+}
+
+/// Una base cruzada, promovida de verdad (registro de autoridad completo y válido).
+fn promovida(dir: &Path, lock: &InstanceLock) -> Store {
+    let mut s = abre_cruzada(dir, lock);
+    bootstrap_con_fila(&mut s, 1, "{}");
+    s.promote_to_authoritative(&plan(1, "legado", 2), "{\"a\":1}").unwrap();
+    assert!(s.authority_facts().unwrap().authority_valid(), "la promoción normal deja un registro válido");
+    s
+}
+
+fn toca_meta(s: &mut Store, k: &str, v: &str) {
+    s.write(|tx| {
+        tx.execute("UPDATE meta SET value = ?2 WHERE key = ?1", rusqlite::params![k, v])?;
+        Ok(())
+    })
+    .unwrap()
+}
+
+#[test]
+fn la_identidad_de_la_promocion_tiene_una_unica_validacion() {
+    let hash = sha256_hex(b"x");
+    let ok = |id: &str, h: &str, b: u64, boot: i64, target: i64| check_promotion_identity(id, h, b, boot, target);
+    assert!(ok("p", &hash, 10, 0, 1).is_ok() && ok("p", "none", 0, 4, 5).is_ok());
+    assert!(ok("", &hash, 10, 0, 1).is_err(), "promotion_id vacío");
+    assert!(ok("p", "basura", 10, 0, 1).is_err(), "hash que no es SHA-256");
+    assert!(ok("p", &hash[..63], 10, 0, 1).is_err() && ok("p", &format!("{hash}0"), 10, 0, 1).is_err(), "longitud");
+    assert!(ok("p", &"g".repeat(64), 10, 0, 1).is_err(), "no hexadecimal");
+    assert!(ok("p", &hash, 0, 0, 1).is_err(), "hash real con 0 bytes");
+    assert!(ok("p", "none", 3, 0, 1).is_err(), "none con bytes");
+    assert!(ok("p", &hash, 10, -1, 0).is_err() && ok("p", &hash, 10, 0, 2).is_err() && ok("p", &hash, 10, i64::MAX, i64::MIN).is_err());
+}
+
+#[test]
+fn el_store_no_fabrica_una_autoridad_que_el_lector_rechazaria() {
+    // PromotionPlan::new
+    assert!(matches!(PromotionPlan::new("".into(), "none".into(), 0, 0), Err(StoreError::PromotionConflict(_))));
+    assert!(matches!(PromotionPlan::new("p".into(), "basura".into(), 5, 0), Err(StoreError::PromotionConflict(_))));
+    assert!(matches!(PromotionPlan::new("p".into(), sha256_hex(b"x"), 0, 0), Err(StoreError::PromotionConflict(_))));
+    // promote_to_authoritative con un plan armado a mano: cero cambios.
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    let mut s = abre_cruzada(tmp.path(), &lock);
+    bootstrap_con_fila(&mut s, 1, "{\"snap\":1}");
+    let antes = (s.authority_facts().unwrap(), s.legacy_state().unwrap().unwrap());
+    for (id, hash, bytes) in [("", sha256_hex(b"x"), 5), ("p", "basura".to_string(), 5), ("p", sha256_hex(b"x"), 0), ("p", "none".to_string(), 7)] {
+        let torcido = PromotionPlan { promotion_id: id.into(), source_hash: hash, source_bytes: bytes, sqlite_bootstrap_rev: 1, sqlite_target_rev: 2 };
+        let r = s.promote_to_authoritative(&torcido, "{\"a\":1}");
+        assert!(matches!(r, Err(StoreError::PromotionConflict(_))), "{torcido:?}: {r:?}");
+        assert_eq!((s.authority_facts().unwrap(), s.legacy_state().unwrap().unwrap()), antes, "cero cambios");
+    }
+    // Sin db_id tampoco: authority_valid lo exigiría después.
+    let nueva = Tmp::new();
+    let lock2 = lock_de(nueva.path());
+    let mut sin_id = abre_arranque(nueva.path(), &lock2);
+    sin_id.apply_fence(&embedded(), "t").unwrap();
+    bootstrap_con_fila(&mut sin_id, 1, "{}");
+    let r = sin_id.promote_to_authoritative(&plan(1, "x", 1), "{}");
+    assert!(matches!(r, Err(StoreError::PromotionConflict(m)) if m.contains("db_id")));
+    assert_eq!(sin_id.authority_facts().unwrap().mode.as_deref(), Some("bootstrap_snapshot"));
+}
+
+#[test]
+fn metadata_de_autoridad_con_identidad_invalida_no_es_autoridad() {
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    let mut s = promovida(tmp.path(), &lock);
+    let bueno = s.authority_facts().unwrap().auth.unwrap();
+    let restaura = |s: &mut Store| {
+        toca_meta(s, "legacy_authority_promotion_id", &bueno.promotion_id);
+        toca_meta(s, "legacy_authority_source_hash", &bueno.source_hash);
+        toca_meta(s, "legacy_authority_source_bytes", &bueno.source_bytes.to_string());
+        assert!(s.authority_facts().unwrap().authority_valid());
+    };
+    // 1. source_hash inválido
+    toca_meta(&mut s, "legacy_authority_source_hash", "basura");
+    let f = s.authority_facts().unwrap();
+    assert!(f.auth.is_none() && !f.authority_valid(), "hash inválido");
+    restaura(&mut s);
+    // 2. promotion_id vacío
+    toca_meta(&mut s, "legacy_authority_promotion_id", "");
+    assert!(!s.authority_facts().unwrap().authority_valid(), "promotion_id vacío");
+    restaura(&mut s);
+    // 3. hash real con source_bytes = 0
+    toca_meta(&mut s, "legacy_authority_source_bytes", "0");
+    assert!(!s.authority_facts().unwrap().authority_valid(), "hash real con 0 bytes");
+    restaura(&mut s);
+    // 4. db_id vacío o ausente; modo distinto; fila por debajo del target
+    toca_meta(&mut s, "db_id", "");
+    assert!(!s.authority_facts().unwrap().authority_valid(), "db_id vacío");
+    s.write(|tx| {
+        tx.execute("DELETE FROM meta WHERE key = 'db_id'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(!s.authority_facts().unwrap().authority_valid(), "db_id ausente");
+}
+
+/// La 003 ficticia de las pruebas de apertura.
+fn con_la_003() -> Vec<Migration> {
+    let mut todas = embedded();
+    todas.push(Migration::new(3, "proyectos", "CREATE TABLE projects (id TEXT PRIMARY KEY) STRICT;"));
+    todas
+}
+
+#[test]
+fn con_el_modo_autoritativo_pero_la_metadata_corrupta_la_apertura_se_queda_en_la_002() {
+    let todas = con_la_003();
+    for (nombre, rompe) in [
+        ("source_hash inválido", ("legacy_authority_source_hash", "basura")),
+        ("promotion_id vacío", ("legacy_authority_promotion_id", "")),
+        ("hash real con 0 bytes", ("legacy_authority_source_bytes", "0")),
+        ("target incoherente", ("legacy_authority_sqlite_target_rev", "9")),
+        ("db_id vacío", ("db_id", "")),
+    ] {
+        let tmp = Tmp::new();
+        let lock = lock_de(tmp.path());
+        {
+            let mut s = promovida(tmp.path(), &lock);
+            toca_meta(&mut s, rompe.0, rompe.1);
+            assert_eq!(s.authority_facts().unwrap().mode.as_deref(), Some(MODE_SQLITE_AUTHORITATIVE), "{nombre}: el modo sigue siendo autoritativo");
+        }
+        let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+        assert_eq!(s.schema_version().unwrap(), 2, "{nombre}: máximo la 002");
+        assert!(s.read(|c| Ok(c.prepare("SELECT 1 FROM projects").is_err())).unwrap(), "{nombre}: no se creó la tabla de la 003");
+        assert!(!s.authority_facts().unwrap().authority_valid());
+    }
+    // Metadata incompleta (falta una clave).
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    {
+        let mut s = promovida(tmp.path(), &lock);
+        s.write(|tx| {
+            tx.execute("DELETE FROM meta WHERE key = 'legacy_authority_since'", [])?;
+            Ok(())
+        })
+        .unwrap();
+    }
+    let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+    assert_eq!(s.schema_version().unwrap(), 2, "metadata incompleta: máximo la 002");
+}
+
+#[test]
+fn una_base_autoritativa_completamente_valida_si_permite_la_003() {
+    let todas = con_la_003();
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    drop(promovida(tmp.path(), &lock));
+    let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+    assert_eq!(s.schema_version().unwrap(), 3, "registro válido: se aplica lo posterior a la valla");
+    assert!(s.authority_facts().unwrap().authority_valid(), "y la 003 no altera el registro de autoridad");
 }
 
 #[test]

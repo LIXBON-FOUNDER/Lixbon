@@ -185,23 +185,16 @@ pub(super) fn parse_marker(bytes: &[u8]) -> MarkerRead {
     };
     // Coherencias que se pueden comprobar sin heurística. Todo lo que no cuadre falla
     // cerrado: un marcador así no se interpreta, se bloquea.
-    let hash_ok = m.source_hash == NO_SOURCE || (m.source_hash.len() == 64 && m.source_hash.chars().all(|c| c.is_ascii_hexdigit()));
-    // Sin legado => cero bytes; con legado => no vacío (un `state.json` vacío no es promocionable).
-    let bytes_ok = if m.source_hash == NO_SOURCE { m.source_bytes == 0 } else { m.source_bytes > 0 };
-    // `target = bootstrap + 1` en rango (sin desbordar con datos corruptos).
-    let revs_ok = m.sqlite_bootstrap_rev >= 0 && m.sqlite_bootstrap_rev.checked_add(1) == Some(m.sqlite_target_rev);
+    // La identidad de la promoción se valida con LA MISMA función que usa la metadata de SQLite.
+    if let Err(why) = store::check_promotion_identity(&m.promotion_id, &m.source_hash, m.source_bytes, m.sqlite_bootstrap_rev, m.sqlite_target_rev) {
+        return MarkerRead::Invalid(format!("{MARKER_FILE} tiene valores incoherentes: {why}"));
+    }
     let confirmed_ok = match m.state {
         MarkerState::Promoting => m.confirmed_at.is_none(),
         MarkerState::Authoritative => m.confirmed_at.is_some(),
     };
-    let ids_ok = !m.promotion_id.is_empty() && !m.db_id.is_empty() && m.db == "lixbon.db";
-    for (ok, what) in [
-        (ids_ok, "identificadores o base"),
-        (hash_ok, "source_hash"),
-        (bytes_ok, "source_bytes frente a source_hash"),
-        (revs_ok, "revisiones (sqlite_target_rev debe ser sqlite_bootstrap_rev + 1, en rango)"),
-        (confirmed_ok, "confirmed_at frente a state"),
-    ] {
+    let ids_ok = !m.db_id.is_empty() && m.db == "lixbon.db";
+    for (ok, what) in [(ids_ok, "db_id o base"), (confirmed_ok, "confirmed_at frente a state")] {
         if !ok {
             return MarkerRead::Invalid(format!("{MARKER_FILE} tiene valores incoherentes: {what}"));
         }
@@ -385,7 +378,7 @@ fn absent(i: &BootInputs<'_>) -> Boot {
         DbProbe::Opens(f) => match f.mode.as_deref() {
             // SQLite ya es autoritativa y el marcador se perdió: manda SQLite.
             Some(MODE_SQLITE_AUTHORITATIVE) => {
-                let complete = f.fenced && f.db_id.is_some() && f.auth.as_ref().is_some_and(|a| f.row_rev.is_some_and(|r| r >= a.sqlite_target_rev));
+                let complete = f.fenced && f.authority_valid();
                 if complete {
                     Boot::RebuildMarker
                 } else {

@@ -54,6 +54,18 @@ AUTHORITATIVE
   migra: sin cruzar → solo lo anterior a la 002; FENCED o `promoting` sin COMMIT → como
   máximo la 002; solo con la base ya **autoritativa** se aplican las migraciones
   posteriores (D/E/F1/G: 003 en adelante).
+* **Una sola validación de la identidad de la promoción** (`store::check_promotion_identity`),
+  compartida por el marcador, la metadata interna de SQLite y el plan que el Store escribe:
+  `promotion_id` no vacío; sin legado => `source_hash = "none"` y `source_bytes = 0`; con legado,
+  SHA-256 hexadecimal de 64 caracteres y `source_bytes > 0`; revisiones válidas con
+  `target = bootstrap + 1`. El Store no puede escribir una autoridad que luego rechazaría al leerla
+  (`PromotionPlan::new` y `promote_to_authoritative` la aplican, y exigen `db_id`).
+  Una base solo tiene registro de autoridad válido (`AuthorityFacts::authority_valid`) con
+  `db_id` no vacío, modo `sqlite_authoritative`, identidad válida, fila presente y
+  `row_rev >= sqlite_target_rev`. Ese registro —no solo el modo— es lo que permite aplicar
+  migraciones posteriores a la 002: con el modo pero la metadata corrupta, el arranque se queda
+  en la 002 y bloquea; no migra primero y descubre después que C2b estaba corrupto. Con el
+  marcador ausente y esa metadata inválida, **no** se reconstruye `authority.json`.
 * **Revisiones.** `sqlite_target_rev = sqlite_bootstrap_rev + 1` se calcula con
   `checked_add` en todas las fronteras (plan, marcador, metadata de la base y escritura
   autoritativa). Una revisión negativa o `i64::MAX`, o un `target` que no cuadre, no se
