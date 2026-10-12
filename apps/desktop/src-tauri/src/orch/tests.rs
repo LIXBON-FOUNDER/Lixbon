@@ -150,6 +150,8 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     let orch = Orch::default();
     *orch.0.lock() = st.into_inner().unwrap();
     let core = orch.0.clone();
+    let host = host::RecordingHost::new();
+    core.set_host(host.clone());
     let app = mock_builder().manage(orch).invoke_handler(tauri::generate_handler![orch_task_diff, orch_review_task])
         .build(mock_context(noop_assets())).unwrap();
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -170,7 +172,7 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     assert!(invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h })).is_err(), "confirm obligatorio");
     let out = invoke("orch_review_task", json!({ "task_id": id, "decision": "accepted", "head_commit": h, "comment": "ok", "confirm": true })).unwrap();
     assert_eq!(out["outcome"], "recorded");
-    let ev: Vec<_> = core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).cloned().collect();
+    let ev: Vec<_> = host.events().into_iter().filter(|(n, _)| n == review::EV_REVIEWED).collect();
     assert_eq!(ev.len(), 1);
     assert_eq!(ev[0].1, json!({ "task_id": id, "decision": "accepted", "head_commit": h, "at": out["at"] }));
     let snap = core.snapshot();
@@ -181,7 +183,7 @@ fn la_webview_envia_task_id_y_head_commit_en_snake_case() {
     assert_eq!(snap["tasks"][&root]["last_review"], Value::Null);
     let moved = invoke("orch_review_task", json!({ "task_id": id, "decision": "rejected", "head_commit": "0000", "confirm": true })).unwrap();
     assert_eq!((moved["outcome"].as_str(), moved["found_commit"].as_str()), (Some("head_moved"), Some(h.as_str())));
-    assert_eq!(core.events.lock().unwrap().iter().filter(|(n, _)| n == review::EV_REVIEWED).count(), 1);
+    assert_eq!(host.events_named(review::EV_REVIEWED).len(), 1);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -247,4 +249,36 @@ fn la_decision_persiste_en_state_json_y_sobrevive_recarga() {
     let raw: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(raw["decisions"][0]["actor"], "human");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Frontera del host: el dominio de `orch/` no importa Tauri. Solo el adaptador
+/// (`tauri_host.rs`), los comandos IPC (`commands.rs`) y el código de pruebas lo
+/// conocen. Si esta prueba falla, la dependencia nueva debe pasar por `Host`
+/// (ver `host.rs`) en vez de importarse en el dominio.
+#[test]
+fn el_dominio_del_core_no_importa_tauri() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
+    let permitidos = ["tauri_host.rs", "commands.rs", "tests.rs"];
+    let mut revisados = 0;
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let ruta = entrada.unwrap().path();
+        let nombre = ruta.file_name().unwrap().to_string_lossy().into_owned();
+        if !nombre.ends_with(".rs") || nombre.ends_with("_tests.rs") || permitidos.contains(&nombre.as_str()) {
+            continue;
+        }
+        let texto = std::fs::read_to_string(&ruta).unwrap();
+        // El código de pruebas de cada archivo (módulo `tests` en línea) puede usar el mock de Tauri.
+        let dominio = texto.split("mod tests {").next().unwrap();
+        for (n, l) in dominio.lines().enumerate() {
+            let l = l.trim_start();
+            if l.starts_with("//") {
+                continue;
+            }
+            for prohibido in ["tauri::", "tauri_plugin", "AppHandle"] {
+                assert!(!l.contains(prohibido), "{nombre}:{}: el dominio no puede depender de Tauri ({prohibido}); usa `Host`", n + 1);
+            }
+        }
+        revisados += 1;
+    }
+    assert!(revisados >= 20, "la prueba debe revisar los módulos del dominio, revisó {revisados}");
 }
