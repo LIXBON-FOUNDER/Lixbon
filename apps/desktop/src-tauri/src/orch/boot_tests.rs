@@ -67,6 +67,31 @@ pub(super) fn arranca(data: &Path, core: &Path) -> (Arc<Core>, Arc<RecordingHost
     (c, h, r)
 }
 
+/// Espera ACTIVAMENTE (sin pausas fijas) a que `core.lock` pueda adquirirse de nuevo.
+///
+/// Soltar el `Arc<Core>` de la prueba no basta para liberar el bloqueo: los hilos de barrido
+/// que lanza `init` retienen un `Arc` un instante (`weak.upgrade()`), y el `Core` (con su
+/// `core.lock`) solo se destruye cuando el último lo suelta. Un arranque inmediato puede ver
+/// entonces `AlreadyRunning` sin que nada esté mal. Esto es solo del arnés de pruebas: no
+/// cambia `arranca` ni el código de producción, y las pruebas que comprueban `AlreadyRunning`
+/// NO lo usan (conservan el comportamiento inmediato).
+pub(super) fn espera_lock_libre(core_dir: &Path) {
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        match store::InstanceLock::acquire(&store::lock_path(core_dir)) {
+            Ok(_lock) => return, // se suelta aquí mismo: solo se quería saber que ya se puede
+            Err(store::StoreError::AlreadyRunning { .. }) if std::time::Instant::now() < limite => std::thread::yield_now(),
+            Err(e) => panic!("core.lock no se liberó tras soltar el Core: {e}"),
+        }
+    }
+}
+
+/// Suelta un Core y espera a que su `core.lock` quede libre (ver [`espera_lock_libre`]).
+pub(super) fn suelta(core: Arc<Core>, core_dir: &Path) {
+    drop(core);
+    espera_lock_libre(core_dir);
+}
+
 pub(super) fn facts(core: &Core) -> AuthorityFacts {
     core.storage.with_store(|s| s.authority_facts().unwrap()).expect("el almacén debería estar abierto")
 }
@@ -96,6 +121,7 @@ pub(super) fn promovida(data: &Path, core_dir: &Path, titulo: &str) -> Vec<u8> {
     let (core, _h, r) = arranca(data, core_dir);
     r.unwrap();
     assert!(matches!(core.storage_status(), StorageStatus::Ready(_)));
+    suelta(core, core_dir);
     original
 }
 
@@ -352,7 +378,7 @@ fn si_no_se_puede_hacer_la_copia_se_degrada_antes_de_cruzar_la_valla() {
     assert!(matches!(read_marker(&core_dir), MarkerRead::Absent));
     assert!(core.lock().tasks.values().all(|t| t.status.is_final()), "sigue con state.json como antes");
     // La valla no se aplicó: lo comprueba una apertura al estilo de C1.
-    drop(core);
+    suelta(core, &core_dir);
     assert_eq!(Store::open_with(&core_dir, &db_version_c1(), "c1").unwrap().schema_version().unwrap(), 1);
     assert_ne!(original.len(), 0);
 }
@@ -376,7 +402,7 @@ fn si_falla_aplicar_la_valla_se_degrada_y_el_siguiente_arranque_continua() {
     assert!(matches!(read_marker(&core_dir), MarkerRead::Absent));
     // La preflight y la copia sí se hicieron; la valla no.
     assert!(archivos(&core_dir.join("backups")).iter().any(|n| n.contains("pre-authority")));
-    drop(core);
+    suelta(core, &core_dir);
     {
         let mut s = Store::open_with(&core_dir, &db_version_c1(), "c1").unwrap();
         assert_eq!(s.schema_version().unwrap(), 1);
@@ -485,6 +511,7 @@ fn un_marcador_invalido_bloquea_sin_tocar_nada() {
         assert!(err.contains("marcador de autoridad no es válido"), "{err}");
         assert!(core.lock().tasks.is_empty());
         assert_eq!(std::fs::read(marker_path(&core_dir)).unwrap(), malo, "el marcador inválido no se sobrescribe");
+        suelta(core, &core_dir); // la siguiente vuelta arranca otro Core sobre las mismas carpetas
     }
 }
 
@@ -706,7 +733,7 @@ fn el_informe_del_arranque_lleva_la_rev_tras_cerrar_las_huerfanas() {
         .unwrap();
     assert_eq!(fila(&primero).0, 2);
     assert!(primero.lock().tasks.values().any(|t| !t.status.is_final()));
-    drop(primero);
+    suelta(primero, &core_dir);
 
     // Segunda sesión: carga la rev N (2) y `close_orphans` la avanza a N+1 (3).
     let (segundo, _h, r) = arranca(&data, &core_dir);
@@ -724,6 +751,32 @@ fn el_informe_del_arranque_lleva_la_rev_tras_cerrar_las_huerfanas() {
     // Y la persistencia sigue desde N+1: la siguiente mutación es la 4, sin conflicto.
     segundo.mutate(|st| { st.seq += 1; Ok(()) }).unwrap();
     assert_eq!(fila(&segundo).0, 4);
+}
+
+#[test]
+fn soltar_el_arc_no_libera_core_lock_si_otro_hilo_lo_retiene_y_el_helper_espera_activamente() {
+    // Reproduce de forma DETERMINISTA la causa de los AlreadyRunning observados en CI: un hilo
+    // (como los de barrido de `init`) retiene un `Arc<Core>` cuando la prueba suelta el suyo.
+    let (_l, data, core_dir) = dirs();
+    let (core, _h, r) = arranca(&data, &core_dir);
+    r.unwrap();
+    let retenido = Arc::clone(&core);
+    let (liberar, esperar) = std::sync::mpsc::channel::<()>();
+    let hilo = std::thread::spawn(move || {
+        esperar.recv().unwrap();
+        drop(retenido); // el último Arc: aquí se destruye el Core y se libera core.lock
+    });
+    drop(core);
+    // Sin el helper: el bloqueo SIGUE ocupado aunque la prueba ya soltó su Core.
+    assert!(matches!(store::InstanceLock::acquire(&store::lock_path(&core_dir)), Err(store::StoreError::AlreadyRunning { .. })));
+    // Con el helper: espera hasta que se libera de verdad (no por tiempo).
+    let core_dir2 = core_dir.clone();
+    let espera = std::thread::spawn(move || espera_lock_libre(&core_dir2));
+    assert!(!espera.is_finished(), "mientras otro hilo retiene el Core, el helper no puede terminar");
+    liberar.send(()).unwrap();
+    hilo.join().unwrap();
+    espera.join().unwrap();
+    store::InstanceLock::acquire(&store::lock_path(&core_dir)).expect("ya libre");
 }
 
 #[test]

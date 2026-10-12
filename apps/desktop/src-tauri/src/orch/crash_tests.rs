@@ -361,7 +361,7 @@ fn d3_state_json_que_vuelve_a_los_bytes_exactos_permite_rehacer() {
     std::fs::write(data.join("state.json"), b"{ lo estropean }").unwrap();
     let (fallido, _h, r) = arranca(&data, &core);
     assert!(r.is_err());
-    drop(fallido); // un Core que no arrancó conserva core.lock hasta soltarse
+    suelta(fallido, &core); // un Core que no arrancó conserva core.lock hasta soltarse
     std::fs::write(data.join("state.json"), &original).unwrap();
     let (c, _h, r) = arranca(&data, &core);
     r.expect("mismos bytes: misma promoción");
@@ -398,7 +398,7 @@ fn d4_state_json_cambia_entre_la_intencion_y_el_commit_en_el_mismo_proceso() {
     assert_eq!(fila_opcional(&c), None);
     assert_eq!(std::fs::read(data.join("state.json")).unwrap(), cambiado);
     // ...y el siguiente arranque lo diagnostica como D1.
-    drop(c);
+    suelta(c, &core_dir);
     let (_c2, _h, r) = arranca(&data, &core_dir);
     assert!(r.unwrap_err().contains("cambió después de que Lixbon fijara la promoción"));
 }
@@ -466,6 +466,7 @@ fn d9_con_t3_pendiente_y_el_core_ya_mutado_mas_alla_del_target_se_completa() {
             .unwrap();
         }
         assert_eq!(fila(&c).0, 4);
+        suelta(c, &core_dir);
         seq0
     };
     let confirmado = marcador(&core_dir);
@@ -496,7 +497,7 @@ fn f5_copia_valida_y_valla_aplicada_pero_la_intencion_no_se_puede_publicar() {
     assert!(matches!(read_marker(&core), MarkerRead::Absent));
     assert_eq!(fila_opcional(&c), None);
     assert_eq!(std::fs::read(data.join("state.json")).unwrap(), original);
-    drop(c);
+    suelta(c, &core);
     c1_no_puede_abrir(&core);
     // Resuelto el problema, el siguiente arranque continúa sin más.
     std::fs::remove_dir_all(fsio::staging_path(&marker_path(&core))).unwrap();
@@ -518,7 +519,7 @@ fn e4_tras_el_bloqueo_por_falta_de_state_json_colocar_uno_legible_promueve_ese_a
     std::fs::remove_file(data.join("state.json")).unwrap();
     let (fallido, _h, r) = arranca(&data, &core);
     assert!(r.is_err());
-    drop(fallido);
+    suelta(fallido, &core);
     legado_con(&data, "recuperada-a-mano");
     let (c, _h, r) = arranca(&data, &core);
     r.unwrap();
