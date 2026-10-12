@@ -17,9 +17,8 @@ fn el_archivo_de_descubrimiento_solo_lo_lee_su_propietario() {
     }
     #[cfg(windows)]
     {
-        let out = std::process::Command::new("icacls").arg(&p).output().unwrap();
-        let acl = String::from_utf8_lossy(&out.stdout).to_string();
-        assert_eq!(acl.matches(":(").count(), 1, "solo el propietario debe figurar en la ACL:\n{acl}");
+        // ACL privada por SID (usuario actual, LocalSystem y Administrators; nada heredado ni amplio).
+        crate::acl_test_util::comprueba_privada(&p);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
