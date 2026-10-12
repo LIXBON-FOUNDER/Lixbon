@@ -2,6 +2,7 @@
 
 use serde_json::{json, Value};
 use super::{CLOSE_REMINDER, Caller, Core, git};
+use super::mutation::StateAccess;
 use super::state::{State, Status};
 
 impl Core {
@@ -20,15 +21,17 @@ impl Core {
             git::remove_worktree(&repo, wt, force).map_err(|e| format!("{e}\nSi hay cambios sin guardar que quieres descartar, usa --force"))?;
         }
         let branch_deleted = merged && branch.as_ref().is_some_and(|br| git::delete_branch(&repo, br).is_ok());
-        let mut st = self.lock();
-        if open {
-            let _ = st.close(id, Status::Stopped, "liberada por su coordinador");
-        }
-        let t = st.task_mut(id)?;
-        t.worktree = None;
-        t.cwd = repo;
-        self.commit(&st, &[]);
-        let hint = self.close_hint(&st, id);
+        // El worktree y la rama ya se borraron: el registro es UNA mutación posterior.
+        let effect = json!({ "kind": "release", "task": id, "worktree": worktree, "branch": branch, "branch_deleted": branch_deleted });
+        let hint = self.mutate_after_effect(effect, |st| {
+            if open {
+                let _ = st.close(id, Status::Stopped, "liberada por su coordinador");
+            }
+            let t = st.task_mut(id)?;
+            t.worktree = None;
+            t.cwd = repo;
+            Ok(self.close_hint(st, id))
+        })?;
         Ok(json!({ "task": id, "worktree_removed": worktree.is_some(), "branch_deleted": branch_deleted, "hint": hint }))
     }
 
@@ -57,15 +60,16 @@ impl Core {
     }
 
     pub(super) fn close_run(&self, run: &str, force: bool) -> Result<Value, String> {
-        let (stopped, msgs, ids) = {
-            let mut st = self.lock();
+        // Primero se persiste el cierre del run; después los efectos (matar terminales,
+        // liberar worktrees), que registran cada uno su resultado.
+        let (stopped, ids) = self.mutate(|st| {
             let (stopped, msgs) = st.close_run(run, force)?;
+            st.notify(&msgs);
             let ids: Vec<String> = st.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
-            (stopped, msgs, ids)
-        };
+            Ok((stopped, ids))
+        })?;
         let terminals: Vec<&String> = ids.iter().filter(|id| self.kill_term(id)).collect();
         let (released, kept) = self.free_worktrees(run, force);
-        self.commit(&self.lock(), &msgs);
         Ok(json!({ "run": run, "stopped": stopped, "terminals": terminals, "released": released, "kept": kept }))
     }
 
@@ -96,10 +100,15 @@ impl Core {
                 continue;
             }
             let branch_deleted = merged && t.branch.as_ref().is_some_and(|b| git::delete_branch(&t.repo, b).is_ok());
-            if let Ok(task) = self.lock().task_mut(&t.id) {
-                task.worktree = None;
-                task.cwd = t.repo.clone();
-            }
+            let effect = json!({ "kind": "free_worktree", "task": t.id, "worktree": wt, "branch": t.branch, "branch_deleted": branch_deleted });
+            // El worktree ya no existe: si el registro falla queda anotado, y se sigue informando.
+            let _ = self.mutate_after_effect(effect, |st| {
+                if let Ok(task) = st.task_mut(&t.id) {
+                    task.worktree = None;
+                    task.cwd = t.repo.clone();
+                }
+                Ok(())
+            });
             released.push(json!({ "task": t.id, "branch": t.branch, "branch_deleted": branch_deleted }));
         }
         (released, kept)

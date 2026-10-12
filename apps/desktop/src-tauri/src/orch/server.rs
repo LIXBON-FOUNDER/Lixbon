@@ -157,7 +157,7 @@ mod tests {
         let core = Orch::default().0;
         core.settings.lock().unwrap().enabled = true;
         let spec = "x".repeat(3 * 1024 * 1024);
-        core.lock().create_run("obj", NewTask {
+        core.lock_unpersisted().create_run("obj", NewTask {
             agent: "coordinador".into(), model: None, effort: None, role: None, title: "t".into(), spec: spec.clone(),
             repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: true,
         });

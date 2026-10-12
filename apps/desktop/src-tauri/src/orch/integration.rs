@@ -15,6 +15,7 @@ static INTEGRATING: Mutex<()> = Mutex::new(());
 use serde_json::{json, Value};
 
 use super::git;
+use super::mutation::StateAccess;
 use super::state::{State, Task};
 
 pub const AGENT_REJECT: &str = "La integración la aprueba una persona desde Lixbon: los agentes no pueden fusionar ramas. \
@@ -43,9 +44,11 @@ fn bool_arg(args: &Value, k: &str) -> bool {
 }
 
 /// Integra la rama de una tarea en el checkout de su padre. Registra la
-/// decisión aunque haya conflicto o error de git (y entonces devuelve Err). Quien
-/// llama hace `commit` del estado en ambos casos.
-pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<Value, String> {
+/// decisión aunque haya conflicto o error de git. El `git merge` no es parte de
+/// ninguna transacción: se valida leyendo, se ejecuta, y su resultado se registra
+/// con UNA mutación posterior (`mutate_after_effect`); si ese registro falla, el
+/// error lo dice y el merge queda anotado para reconciliar.
+pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Result<Value, String> {
     if !from_user {
         return Err(AGENT_REJECT.into());
     }
@@ -58,8 +61,9 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
     }
     let squash = bool_arg(args, "squash");
     let _one = INTEGRATING.lock().unwrap_or_else(|e| e.into_inner());
-    let (branch, into, title, expected, repo) = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+    // `Err(json)` dentro del `Ok` es una salida temprana con respuesta (ya integrada).
+    type Plan = (String, String, String, Option<String>, String);
+    let planned = state.read(|st| -> Result<Result<Plan, Value>, String> {
         let t = st.task(&id)?;
         let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que integrar"))?;
         // Ya integrada: por la marca de la tarea o por su última decisión `merge`
@@ -68,30 +72,29 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
         if t.merged || last_merge.is_some_and(|d| outcome_of(d) == "merged") {
             // Idempotente: no integra otra vez ni crea otra decisión.
             let prev = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge" && outcome_of(d) == "merged").map(|d| d.id);
-            return Ok(json!({ "task": id, "outcome": "already_merged", "decision": prev, "branch": branch }));
+            return Ok(Err(json!({ "task": id, "outcome": "already_merged", "decision": prev, "branch": branch })));
         }
         let parent = t.parent.as_ref().and_then(|p| st.tasks.get(p)).ok_or("La tarea raíz no se integra en nadie")?;
         if !t.status.is_final() && !bool_arg(args, "force") {
             return Err(format!("{id} aún está en marcha: espera a que entregue o usa force"));
         }
-        (branch, parent.cwd.clone(), t.title.clone(), expected_target(&st, t, &parent.cwd), t.repo.clone())
+        Ok(Ok((branch, parent.cwd.clone(), t.title.clone(), expected_target(st, t, &parent.cwd), t.repo.clone())))
+    })?;
+    let (branch, into, title, expected, repo) = match planned {
+        Ok(plan) => plan,
+        Err(ya_integrada) => return Ok(ya_integrada),
     };
     // Solo se integra lo que la persona revisó: la última revisión tiene que ser
     // `accepted` sobre el HEAD actual de la rama. Si no, ni git ni decisión.
     let head = super::review::branch_head(&repo, &branch);
-    let reviewed = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
-        head.as_deref().is_some_and(|h| super::review::accepted_for(&st, &id, h)).then_some(()).ok_or_else(|| super::review::last_review(&st, &id))
-    };
+    let reviewed = state.read(|st| {
+        head.as_deref().is_some_and(|h| super::review::accepted_for(st, &id, h)).then_some(()).ok_or_else(|| super::review::last_review(st, &id))
+    });
     if let Err(last_review) = reviewed {
         return Ok(json!({ "task": id, "outcome": "review_required", "branch": branch, "head_commit": head, "last_review": last_review,
             "message": "Antes de integrar, revisa el diff de la tarea y acéptalo sobre su commit actual." }));
     }
     let found = git::head(&into);
-    let st_rec = |detail: Value| {
-        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-        st.record_decision(&id, "merge", "human", &detail)
-    };
     // El destino solo puede haberse movido por orch_integrate: si no, se avisa y no
     // se integra, salvo que la persona acepte exactamente el commit que vio.
     let accept = args.get("accept_moved_target").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty());
@@ -100,7 +103,8 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
     if let Some(exp) = moved.as_ref().filter(|_| !accepted) {
         let detail = json!({ "outcome": "target_moved", "branch": branch, "into": into, "squash": squash,
             "expected_commit": exp, "found_commit": found });
-        let decision = st_rec(detail);
+        // No hubo merge: es un registro puro, sin efecto externo que reconciliar.
+        let decision = state.mutate(|st| Ok(st.record_decision(&id, "merge", "human", &detail)))?;
         return Ok(json!({ "task": id, "outcome": "target_moved", "decision": decision, "branch": branch, "into": into,
             "expected_commit": exp, "found_commit": found,
             "message": "La rama destino cambió fuera de Lixbon (commit, merge o reset manual): revisa el destino antes de integrar. No se integró." }));
@@ -125,10 +129,15 @@ pub fn integrate(state: &Mutex<State>, from_user: bool, args: &Value) -> Result<
         detail["expected_commit"] = json!(moved);
         detail["found_commit"] = json!(found);
     }
-    let decision = st_rec(detail);
-    if outcome == "merged" {
-        state.lock().unwrap_or_else(|e| e.into_inner()).task_mut(&id)?.merged = true;
-    }
+    // El git merge ya ocurrió: la decisión y la marca `merged` se registran juntas, en UNA mutación.
+    let effect = json!({ "kind": "merge", "task": id, "branch": branch, "into": into, "outcome": outcome, "base_commit": found, "result_commit": result });
+    let decision = state.mutate_after_effect(effect, |st| {
+        let decision = st.record_decision(&id, "merge", "human", &detail);
+        if outcome == "merged" {
+            st.task_mut(&id)?.merged = true;
+        }
+        Ok(decision)
+    })?;
     let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
         "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message });
     if accepted {
@@ -169,7 +178,7 @@ fn first_url(text: &str) -> Option<String> {
 /// Publica la rama de una tarea (`git push -u origin <rama>` + `gh pr create`),
 /// aprobado por la persona. Idempotente: si la tarea ya tiene PR, o gh dice que
 /// ya existe, no crea otro. Cada llamada confirmada deja una decisión `pr`.
-pub fn publish_pr(state: &Mutex<State>, from_user: bool, args: &Value, create: CreatePr) -> Result<Value, String> {
+pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, create: CreatePr) -> Result<Value, String> {
     if !from_user {
         return Err(PR_REJECT.into());
     }
@@ -181,12 +190,11 @@ pub fn publish_pr(state: &Mutex<State>, from_user: bool, args: &Value, create: C
         return Err(NEED_CONFIRM_PR.into());
     }
     let _one = INTEGRATING.lock().unwrap_or_else(|e| e.into_inner());
-    let (branch, base, dir, title, summary, existing) = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+    let (branch, base, dir, title, summary, existing) = state.read(|st| -> Result<_, String> {
         let t = st.task(&id)?;
         let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que publicar"))?;
-        (branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone(), t.title.clone(), t.summary.clone(), t.pr_url.clone())
-    };
+        Ok((branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone(), t.title.clone(), t.summary.clone(), t.pr_url.clone()))
+    })?;
     let remote = git::remote_url(&dir);
     let (outcome, url, err) = match existing {
         Some(u) => ("already_exists", Some(u), None),
@@ -201,11 +209,15 @@ pub fn publish_pr(state: &Mutex<State>, from_user: bool, args: &Value, create: C
         }
     };
     let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
-    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-    let decision = st.record_decision(&id, "pr", "human", &detail);
-    if url.is_some() {
-        st.task_mut(&id)?.pr_url = url.clone();
-    }
+    // El push y el PR ya ocurrieron: su registro es UNA mutación posterior.
+    let effect = json!({ "kind": "publish_pr", "task": id, "branch": branch, "outcome": outcome, "pr_url": url });
+    let decision = state.mutate_after_effect(effect, |st| {
+        let decision = st.record_decision(&id, "pr", "human", &detail);
+        if url.is_some() {
+            st.task_mut(&id)?.pr_url = url.clone();
+        }
+        Ok(decision)
+    })?;
     let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
     if let Some(e) = err {
         out["message"] = json!(e);
@@ -341,7 +353,7 @@ mod tests {
         let st = std::sync::Arc::new(st);
         let hs: Vec<_> = (0..2).map(|_| {
             let (st, id) = (st.clone(), id.clone());
-            std::thread::spawn(move || integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap())
+            std::thread::spawn(move || integrate(&*st, true, &json!({ "task": id, "confirm": true })).unwrap())
         }).collect();
         let outs: Vec<String> = hs.into_iter().map(|h| h.join().unwrap()["outcome"].as_str().unwrap().to_string()).collect();
         let mut sorted = outs.clone();
