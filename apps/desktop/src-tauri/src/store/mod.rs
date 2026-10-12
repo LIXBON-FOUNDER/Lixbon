@@ -18,6 +18,8 @@
 //! dir/lixbon.db       la base (+ -wal / -shm mientras está abierta)
 //! dir/backups/        copias VACUUM INTO (antes de migrar, o a petición)
 //! ```
+//! `lixbon.db`, `-wal`, `-shm` y `backups/` quedan accesibles solo por el
+//! propietario ([`private`]); `dir` no se modifica porque lo comparte el Core.
 //!
 //! # Referencias blandas de `events`
 //! `events.project_id`, `client_id`, `entity_kind` y `entity_id` (migración
@@ -31,6 +33,7 @@ mod backup;
 mod error;
 mod lock;
 mod migrate;
+mod private;
 #[cfg(test)]
 mod tests;
 
@@ -82,8 +85,19 @@ impl Store {
         let lock = InstanceLock::acquire(&dir.join(LOCK_FILE))?;
         let db_path = dir.join(DB_FILE);
         let backup_dir = dir.join(BACKUP_DIR);
+        // Permisos de propietario (ver `private`): la base y las copias llevan el
+        // estado completo del Core. `backups/` se crea privada con la primera copia.
+        private::create_private_file(&db_path);
         let mut conn = open_connection(&db_path)?;
         let report = migrate(&mut conn, migrations, app_version, &backup_dir)?;
+        // `-wal` y `-shm` los crea SQLite con el primer acceso real (la migración):
+        // se restringen ya existentes y siguen vivos mientras la conexión esté abierta.
+        for ext in ["-wal", "-shm"] {
+            let side = dir.join(format!("{DB_FILE}{ext}"));
+            if side.exists() {
+                private::restrict_file(&side);
+            }
+        }
         Ok(Store { conn, db_path, backup_dir, report, _lock: lock })
     }
 

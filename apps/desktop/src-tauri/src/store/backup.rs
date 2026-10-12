@@ -39,8 +39,12 @@ pub fn backup_to(conn: &Connection, dir: &Path, label: &str) -> StoreResult<Path
     if !conn.is_autocommit() {
         return Err(StoreError::Backup("no se puede copiar dentro de una transacción".into()));
     }
+    let nueva = !dir.exists();
     std::fs::create_dir_all(dir)
         .map_err(|e| StoreError::Backup(format!("no se pudo crear {}: {e}", dir.display())))?;
+    if nueva {
+        super::private::restrict_dir(dir);
+    }
     let ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -62,6 +66,7 @@ pub fn backup_to(conn: &Connection, dir: &Path, label: &str) -> StoreResult<Path
         verify(&tmp_path)?;
         std::fs::rename(&tmp_path, &final_path)
             .map_err(|e| StoreError::Backup(format!("no se pudo renombrar la copia: {e}")))?;
+        super::private::restrict_file(&final_path);
         Ok(())
     })();
     if let Err(e) = result {
