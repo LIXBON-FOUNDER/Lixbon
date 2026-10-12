@@ -1,20 +1,54 @@
 //! Arranque y parada del Core: hilos de barrido, servidor local y cierre de runs inactivos.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::json;
 use super::host::Host;
-use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, data_dir, discovery_file, lxo_path, read_json, server, skill, state, write_json, write_private_json};
+use super::store_boot::{OpenStoreError, StorageStatus};
+use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, core_dir, data_dir, discovery_file, lxo_path, read_json, server, skill, state, write_json, write_private_json};
 use super::state::{Kind, State};
 
 impl Core {
-    pub fn init(self: &Arc<Self>, host: Arc<dyn Host>) {
+    /// Arranca el Core. `Err` solo si hay un motivo BLOQUEANTE (otro Core es el
+    /// titular de `core.lock`, o la base es incompatible con este binario): en ese
+    /// caso no se lee ni se reescribe `state.json` (lo primero) o no se arrancan
+    /// ni el servidor ni los hilos, y quien llama debe terminar. Los fallos
+    /// recuperables del almacén dejan el Core funcionando con `state.json`.
+    pub fn init(self: &Arc<Self>, host: Arc<dyn Host>) -> Result<(), String> {
+        self.init_in(host, &data_dir(), &core_dir())
+    }
+
+    /// `init` con las carpetas explícitas: `data` (`settings.json` y `state.json`
+    /// legacy) y `core` (`lixbon.db`, `core.lock`, `backups/`).
+    pub(super) fn init_in(self: &Arc<Self>, host: Arc<dyn Host>, data: &Path, core: &Path) -> Result<(), String> {
         self.set_host(host);
-        let settings: Settings = read_json(&data_dir().join("settings.json")).unwrap_or_default();
-        let mut st: State = read_json(&data_dir().join("state.json")).unwrap_or_default();
+        // 1. El bloqueo de instancia va ANTES de leer o reescribir state.json: un
+        // segundo Core no puede llegar a hacer `orphan_all()` sobre el estado del primero.
+        match self.acquire_instance_lock(core) {
+            Ok(()) => {}
+            Err(e) if e.is_blocking() => return Err(self.refuse_to_start(&e)),
+            Err(e) => self.degrade_storage(&e),
+        }
+        // 2. Estado operativo (legacy): leer, orphan_all y reescribir.
+        let settings: Settings = read_json(&data.join("settings.json")).unwrap_or_default();
+        let mut st: State = read_json(&data.join("state.json")).unwrap_or_default();
         st.orphan_all();
-        let _ = write_json(&data_dir().join("state.json"), &st);
+        let _ = write_json(&data.join("state.json"), &st);
         *self.lock() = st;
+        // 3. Almacén: migración 001 e instantánea de arranque del estado que acaba
+        // de adoptar el Core. No interviene en las operaciones (C1).
+        if !matches!(self.storage_status(), StorageStatus::Degraded(_)) {
+            match self.open_store(core, &data.join("state.json")) {
+                Ok(report) => {
+                    if report.matches_adopted == Some(false) {
+                        eprintln!("[core] la instantánea importada no coincide con el estado que adoptó el Core");
+                    }
+                }
+                Err(e) if e.is_blocking() => return Err(self.refuse_to_start(&e)),
+                Err(e) => self.degrade_storage(&e),
+            }
+        }
         let enabled = settings.enabled;
         if let Ok(mut s) = self.settings.lock() {
             *s = settings;
@@ -43,6 +77,17 @@ impl Core {
                 std::thread::sleep(Duration::from_secs(5));
             }
         });
+        Ok(())
+    }
+
+    /// El Core no puede arrancar: lo dice por `stderr` y avisa a la persona.
+    fn refuse_to_start(&self, e: &OpenStoreError) -> String {
+        let msg = format!("Lixbon no puede iniciar el Core: {e}");
+        eprintln!("[core] {msg}");
+        if let Some(host) = self.host.get() {
+            host.notify("Lixbon no puede iniciar", &msg);
+        }
+        msg
     }
 
     pub(super) fn close_idle_runs(&self) {

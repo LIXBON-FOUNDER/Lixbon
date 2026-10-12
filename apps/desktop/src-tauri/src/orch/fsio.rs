@@ -20,10 +20,39 @@ pub(super) fn lixbon_dir() -> PathBuf {
 
 pub(super) fn data_dir() -> PathBuf {
     // Las pruebas nunca tocan el state.json real del usuario.
-    if cfg!(test) {
+    #[cfg(test)]
+    {
+        if let Some(dir) = TEST_DATA_DIR.with(|d| d.borrow().clone()) {
+            return dir;
+        }
         return std::env::temp_dir().join(format!("lixbon-orch-test-{}", std::process::id()));
     }
+    #[cfg(not(test))]
     lixbon_dir().join("orch")
+}
+
+/// `~/.lixbon/core`: el almacén SQLite del Core (`lixbon.db`, `core.lock`,
+/// `backups/`). Aparte de `orch/`, donde siguen `state.json` y `settings.json`.
+pub(super) fn core_dir() -> PathBuf {
+    #[cfg(test)]
+    {
+        return std::env::temp_dir().join(format!("lixbon-core-test-{}", std::process::id()));
+    }
+    #[cfg(not(test))]
+    lixbon_dir().join("core")
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_DATA_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Solo pruebas: fija la carpeta de datos del hilo actual (cada prueba corre en
+/// su propio hilo), para que `commit()` escriba en una carpeta propia en vez de
+/// la compartida del proceso.
+#[cfg(test)]
+pub(super) fn set_test_data_dir(dir: &Path) {
+    TEST_DATA_DIR.with(|d| *d.borrow_mut() = Some(dir.to_path_buf()));
 }
 
 pub(super) fn discovery_file() -> PathBuf {
