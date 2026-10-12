@@ -491,3 +491,87 @@ fn solo_hay_una_fila_de_legacy_state() {
     });
     assert!(r.is_err(), "CHECK (id = 1)");
 }
+
+// ---- permisos de propietario (base y copias llevan el estado completo) ----
+
+/// Quién puede acceder a `path` según el sistema; `None` si no se pudo consultar.
+#[cfg(windows)]
+fn acl(path: &Path) -> Option<String> {
+    let out = std::process::Command::new("icacls").arg(path).output().ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[cfg(windows)]
+fn solo_el_propietario(path: &Path) {
+    // Sin depender del idioma de Windows: debe quedar una única entrada (`cuenta:(permisos)`),
+    // la del propietario, y ninguna heredada.
+    let acl = acl(path).expect("icacls");
+    assert_eq!(acl.matches(":(").count(), 1, "{} debe tener un solo acceso:\n{acl}", path.display());
+    assert!(!acl.contains("(I)"), "{} no debe heredar permisos:\n{acl}", path.display());
+    let user = std::env::var("USERNAME").unwrap();
+    assert!(acl.to_lowercase().contains(&user.to_lowercase()), "el propietario conserva el acceso:\n{acl}");
+}
+
+#[cfg(unix)]
+fn modo(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[test]
+fn la_base_y_sus_archivos_laterales_son_privados() {
+    let tmp = Tmp::new();
+    let mut s = Store::open(tmp.path(), "t").unwrap();
+    s.save_legacy_state(0, "{}").unwrap(); // fuerza -wal y -shm
+    let db = s.db_path().to_path_buf();
+    #[cfg(unix)]
+    {
+        assert_eq!(modo(&db), 0o600);
+        for ext in ["-wal", "-shm"] {
+            let side = tmp.path().join(format!("lixbon.db{ext}"));
+            assert!(side.exists(), "{ext} existe con la base abierta");
+            assert_eq!(modo(&side), 0o600, "{ext}");
+        }
+    }
+    #[cfg(windows)]
+    {
+        solo_el_propietario(&db);
+        for ext in ["-wal", "-shm"] {
+            let side = tmp.path().join(format!("lixbon.db{ext}"));
+            assert!(side.exists(), "{ext} existe con la base abierta");
+            solo_el_propietario(&side);
+        }
+    }
+}
+
+#[test]
+fn las_copias_y_su_carpeta_son_privadas() {
+    let tmp = Tmp::new();
+    let s = Store::open(tmp.path(), "t").unwrap();
+    let copia = s.backup("permisos").unwrap();
+    #[cfg(unix)]
+    {
+        assert_eq!(modo(s.backup_dir()), 0o700);
+        assert_eq!(modo(&copia), 0o600);
+    }
+    #[cfg(windows)]
+    {
+        solo_el_propietario(s.backup_dir());
+        solo_el_propietario(&copia);
+    }
+}
+
+#[test]
+fn restringir_la_base_no_toca_la_carpeta_compartida() {
+    // La carpeta del almacén la comparte el resto del Core (state.json, orch.json...).
+    let tmp = Tmp::new();
+    let antes = std::fs::metadata(tmp.path()).unwrap().permissions();
+    let _s = Store::open(tmp.path(), "t").unwrap();
+    assert_eq!(std::fs::metadata(tmp.path()).unwrap().permissions(), antes);
+    #[cfg(windows)]
+    {
+        let acl = acl(tmp.path()).expect("icacls");
+        assert!(!acl.is_empty());
+        assert!(acl.contains("(I)"), "la carpeta sigue heredando permisos:\n{acl}");
+    }
+}
