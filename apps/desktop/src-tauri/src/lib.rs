@@ -37,6 +37,9 @@ mod secure_store;
 // instantánea de arranque: el Core sigue operando con state.json hasta C2.
 #[allow(dead_code)]
 mod store;
+// Inspeccion de ACL de Windows para las pruebas de permisos (no existe fuera de `cargo test`).
+#[cfg(test)]
+mod acl_test_util;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};

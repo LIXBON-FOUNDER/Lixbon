@@ -507,22 +507,13 @@ fn solo_hay_una_fila_de_legacy_state() {
 
 // ---- permisos de propietario (base y copias llevan el estado completo) ----
 
-/// Quién puede acceder a `path` según el sistema; `None` si no se pudo consultar.
-#[cfg(windows)]
-fn acl(path: &Path) -> Option<String> {
-    let out = std::process::Command::new("icacls").arg(path).output().ok()?;
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
+/// La ACL de `path` es privada: protegida, sin ACE heredadas y con `Allow` solo para el usuario
+/// actual, LocalSystem y Builtin Administrators (por SID, sin depender del idioma). Un runner
+/// elevado conserva esas dos cuentas privilegiadas además del usuario: no es «una sola ACE».
+/// Ver `acl_test_util`.
 #[cfg(windows)]
 fn solo_el_propietario(path: &Path) {
-    // Sin depender del idioma de Windows: debe quedar una única entrada (`cuenta:(permisos)`),
-    // la del propietario, y ninguna heredada.
-    let acl = acl(path).expect("icacls");
-    assert_eq!(acl.matches(":(").count(), 1, "{} debe tener un solo acceso:\n{acl}", path.display());
-    assert!(!acl.contains("(I)"), "{} no debe heredar permisos:\n{acl}", path.display());
-    let user = std::env::var("USERNAME").unwrap();
-    assert!(acl.to_lowercase().contains(&user.to_lowercase()), "el propietario conserva el acceso:\n{acl}");
+    crate::acl_test_util::comprueba_privada(path);
 }
 
 #[cfg(unix)]
@@ -579,14 +570,15 @@ fn restringir_la_base_no_toca_la_carpeta_compartida() {
     // La carpeta del almacén la comparte el resto del Core (state.json, orch.json...).
     let tmp = Tmp::new();
     let antes = std::fs::metadata(tmp.path()).unwrap().permissions();
+    // La propiedad es «abrir el almacén no cambia la ACL de la carpeta», no «la carpeta hereda»:
+    // cómo nace la carpeta depende del entorno (un proceso elevado la crea con la DACL por
+    // defecto de su token, con ACE explícitas), y lo que importa es que no se toque.
+    #[cfg(windows)]
+    let acl_antes = crate::acl_test_util::descriptor(tmp.path());
     let _s = abre(tmp.path(), "t").unwrap();
     assert_eq!(std::fs::metadata(tmp.path()).unwrap().permissions(), antes);
     #[cfg(windows)]
-    {
-        let acl = acl(tmp.path()).expect("icacls");
-        assert!(!acl.is_empty());
-        assert!(acl.contains("(I)"), "la carpeta sigue heredando permisos:\n{acl}");
-    }
+    assert_eq!(crate::acl_test_util::descriptor(tmp.path()), acl_antes, "la ACL de la carpeta compartida cambió");
 }
 
 // ---- C1: instantánea de arranque del estado legacy y core.lock ----
