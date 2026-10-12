@@ -27,22 +27,32 @@
 //!   en la intención; antes del COMMIT se vuelve a leer solo para detectar cambios.
 //!
 //! # Migraciones posteriores a la valla (003+)
-//! Se aplican en UN solo sitio ([`Core::apply_post_fence_migrations`]) y solo cuando la
-//! instalación ya es inequívocamente autoritativa: `decide_boot` observó el marcador junto con
-//! SQLite y la acción sobre el marcador ya se hizo. El orden seguro es:
+//! Se aplican en UN solo sitio ([`Core::apply_post_fence_migrations`]).
+//!
+//! **Invariante.** 003+ exige que `decide_boot` haya DEMOSTRADO que no hay contradicción entre el
+//! protocolo externo (`authority.json`) y la autoridad interna (SQLite). No exige que el marcador
+//! quede publicado: es la semántica de C2b y se conserva. SQLite es la autoridad; un marcador
+//! inválido, futuro o contradictorio BLOQUEA; un marcador ausente con SQLite autoritativo válido es
+//! reconstruible, y un `promoting` coherente con un COMMIT ya hecho es recuperable. La acción sobre
+//! el marcador (reconstruir / confirmar) se INTENTA antes de levantar el techo, pero si su
+//! publicación falla queda `marker_pending` y se reintenta en el siguiente arranque, sin impedir la
+//! migración.
 //!
 //! ```text
 //! 1. abrir (techo = valla)      el registro interno de SQLite NO basta para migrar
 //! 2. decide_boot                marcador + base + legado; cualquier contradicción BLOQUEA aquí
-//! 3. acción sobre el marcador   reconstruir (ausente) / confirmar (promoting coherente) / nada
-//! 4. migraciones 003+           ya con marcador coherente publicado
+//! 3. acción sobre el marcador   reconstruir (ausente) / confirmar (promoting coherente) / nada;
+//!                               si la publicación falla -> `marker_pending`, no bloquea
+//! 4. migraciones 003+           ya demostrada la coherencia; publicado o pendiente
 //! ```
 //!
-//! El marcador va antes que la migración: se deriva solo de la metadata de autoridad (que una
-//! migración posterior no toca), así que una caída entre 3 y 4 deja una instalación coherente que
-//! el siguiente arranque termina de migrar; y una migración que falla deja la base en la 002 con
-//! el marcador ya correcto, nunca una base migrada sin marcador. Ninguna ruta que BLOQUEA o
-//! DEGRADA llega al paso 4.
+//! Por qué el intento va antes que la migración: el marcador se deriva solo de la metadata de
+//! autoridad (que una migración posterior no toca), así que no hay interacción entre ambos pasos.
+//! Una caída entre 3 y 4 deja una instalación coherente que el siguiente arranque termina de
+//! migrar; una migración que falla deja la base en la 002 y, si el marcador se pudo publicar, ya
+//! correcto. Con la publicación pendiente la base puede quedar migrada con el marcador ausente o
+//! en `promoting`: ambos son estados que C2b ya sabe resolver (`RebuildMarker` / `Complete`).
+//! Ninguna ruta que BLOQUEA o DEGRADA llega al paso 4.
 
 use std::path::{Path, PathBuf};
 
@@ -255,8 +265,9 @@ impl Core {
     }
 
     /// Aplica las migraciones posteriores a la valla (003+). El ÚNICO sitio que lo hace, y solo se
-    /// llega aquí desde las ramas autoritativas de [`Core::boot_authority`] (ver la cabecera del
-    /// módulo). Un fallo es siempre BLOQUEANTE: la instalación ya es autoritativa, así que nunca se
+    /// llega aquí desde las ramas autoritativas de [`Core::boot_authority`], es decir, con
+    /// `decide_boot` ya habiendo demostrado que no hay contradicción (ver la cabecera del módulo);
+    /// NO depende de que el marcador haya quedado publicado (`marker_pending`). Un fallo es siempre BLOQUEANTE: la instalación ya es autoritativa, así que nunca se
     /// vuelve a `state.json`, y la transacción deshecha deja la base como estaba (v2).
     fn apply_post_fence_migrations(&self) -> Result<(), OpenStoreError> {
         let outcome = self.storage.migrate_authoritative().ok_or_else(|| authority_error("el almacén no está abierto"))?;
