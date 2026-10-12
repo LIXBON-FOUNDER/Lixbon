@@ -1,0 +1,68 @@
+{
+  "_comment": "Vectores dorados del almacén seguro de Lixbon (slice J1). Los leen las pruebas de Rust (apps/desktop/src-tauri/src/secure_store) y de Go (apps/cli/internal/secrets): si una de las dos implementaciones cambia una regla, la otra deja de pasar. Los valores son ficticios.",
+  "version": 1,
+  "default_service": "lixbon",
+  "test_service_prefix": "lixbon-test-",
+  "max_secret_bytes": 2560,
+  "valid_keys": [
+    { "service": "lixbon", "account": "device/core-1a2b" },
+    { "service": "lixbon", "account": "provider/openai/api-key" },
+    { "service": "lixbon", "account": "user@example.com" },
+    { "service": "lixbon-test-123-ab", "account": "interop/rust-to-go" },
+    { "service": "svc.v2_x-y", "account": "a" }
+  ],
+  "invalid_services": [
+    { "service": "", "why": "vacío" },
+    { "service": "Lixbon", "why": "mayúsculas" },
+    { "service": "lixbon:x", "why": "los dos puntos separan servicio y cuenta" },
+    { "service": "lix bon", "why": "espacio" },
+    { "service": "-lixbon", "why": "empieza por guion" },
+    { "service": ".lixbon", "why": "empieza por punto" },
+    { "service": "líxbon", "why": "no ASCII" },
+    { "service": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "why": "65 caracteres (máximo 64)" }
+  ],
+  "invalid_accounts": [
+    { "account": "", "why": "vacía" },
+    { "account": "/a", "why": "empieza por barra" },
+    { "account": "a/", "why": "termina en barra" },
+    { "account": "a//b", "why": "segmento vacío" },
+    { "account": "a b", "why": "espacio" },
+    { "account": "a:b", "why": "dos puntos" },
+    { "account": "ñ", "why": "no ASCII" },
+    { "account": "../x", "why": "segmento que empieza por punto" },
+    { "account": "a/../b", "why": "segmento que empieza por punto" },
+    { "account": "-x", "why": "segmento que empieza por guion" },
+    { "account": "a\nb", "why": "salto de línea" },
+    { "account": "a\\b", "why": "barra invertida" }
+  ],
+  "account_too_long": { "len": 129 },
+  "account_max_ok": { "len": 128 },
+  "windows_target": [
+    { "service": "lixbon", "account": "device/core-1a2b", "target": "lixbon:device/core-1a2b" },
+    { "service": "lixbon-test-123-ab", "account": "user@example.com", "target": "lixbon-test-123-ab:user@example.com" }
+  ],
+  "macos_payload": [
+    { "secret": "abc", "payload": "go-keyring-base64:YWJj" },
+    { "secret": "ñandú ✓", "payload": "go-keyring-base64:w7FhbmTDuiDinJM=" }
+  ],
+  "macos_decode_only": [
+    { "payload": "go-keyring-encoded:616263", "secret": "abc" },
+    { "payload": "abc", "secret": "abc" },
+    { "payload": "go-keyring-encoded:c3b1616e64c3ba20e29c93", "secret": "ñandú ✓" }
+  ],
+  "macos_decode_invalid": [
+    "go-keyring-base64:!!!no-es-base64",
+    "go-keyring-encoded:zz"
+  ],
+  "invalid_secrets": [
+    { "secret": "", "why": "vacío" },
+    { "secret": "a\u0000b", "why": "contiene NUL" }
+  ],
+  "interop": {
+    "rust_to_go": { "account": "interop/rust-to-go", "secret": "rust→go ñandú 日本語 ✓ 🔐" },
+    "go_to_rust": { "account": "interop/go-to-rust", "secret": "go→rust ñandú 日本語 ✓ 🔐" },
+    "max_ascii": { "account": "interop/max-ascii", "byte": "k", "count": 2560 },
+    "max_multibyte": { "account": "interop/max-multibyte", "char": "é", "count": 1280 },
+    "multiline": { "account": "interop/multiline", "secret": "línea 1\nlínea 2\r\n  con espacios  " }
+  }
+}
