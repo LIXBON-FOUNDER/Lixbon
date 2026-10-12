@@ -9,12 +9,14 @@
 //! decisiones humanas y lecturas cerradas por ahora.
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
 use super::git;
 use super::integration::{AGENT_REJECT, PR_REJECT};
+use super::mutation::StateAccess;
 use super::state::{Decision, State};
 
 /// Decisiones que solo toma una persona desde la interfaz.
@@ -83,14 +85,13 @@ struct Target {
     into_branch: Option<String>,
 }
 
-fn target(state: &Mutex<State>, id: &str) -> Result<Target, String> {
-    let (repo, branch, base_commit, parent_dir, base) = {
-        let st = state.lock().unwrap_or_else(|e| e.into_inner());
+fn target(state: &impl StateAccess, id: &str) -> Result<Target, String> {
+    let (repo, branch, base_commit, parent_dir, base) = state.read(|st| -> Result<_, String> {
         let t = st.tasks.get(id).ok_or_else(|| format!("not_found: no existe la tarea {id}"))?;
         let branch = t.branch.clone().ok_or_else(|| format!("no_branch: {id} no tiene rama propia (se lanzó sin worktree)"))?;
         let parent_dir = t.parent.as_ref().and_then(|p| st.tasks.get(p)).map(|p| p.cwd.clone());
-        (t.repo.clone(), branch, t.base_commit.clone(), parent_dir, t.base.clone())
-    };
+        Ok((t.repo.clone(), branch, t.base_commit.clone(), parent_dir, t.base.clone()))
+    })?;
     let into_branch = parent_dir.as_deref().and_then(git::current_branch).or(base);
     Ok(Target { repo, branch, base_commit, into_branch })
 }
@@ -116,7 +117,7 @@ fn git_ok(repo: &str, args: &[&str]) -> Result<String, String> {
 
 /// Diff de la rama de la tarea contra su base, archivo por archivo. Los parches
 /// se cortan al llegar a `limit` bytes en total y se marca `truncated`.
-pub fn task_diff(state: &Mutex<State>, id: &str, limit: usize) -> Result<Value, String> {
+pub fn task_diff(state: &impl StateAccess, id: &str, limit: usize) -> Result<Value, String> {
     let t = target(state, id)?;
     let head = branch_head(&t.repo, &t.branch).ok_or_else(|| format!("La rama {} ya no existe", t.branch))?;
     let (base, source) = resolve_base(&t)?;
@@ -160,7 +161,7 @@ pub fn task_diff(state: &Mutex<State>, id: &str, limit: usize) -> Result<Value, 
 
 /// Revisión de la persona sobre `head_commit`. Si la rama ya no está en ese
 /// commit devuelve `head_moved` y no registra nada.
-pub fn review_task(state: &Mutex<State>, id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
+pub fn review_task(state: &impl StateAccess, id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
     if !confirm {
         return Err(NEED_CONFIRM_REVIEW.into());
     }
@@ -179,11 +180,13 @@ pub fn review_task(state: &Mutex<State>, id: &str, decision: &str, head_commit: 
         Err(_) => (None, None),
     };
     let comment = comment.map(str::trim).filter(|c| !c.is_empty());
-    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-    let did = st.record_decision(id, "review", "human", &json!({
-        "decision": decision, "base_commit": base, "base_source": source, "head_commit": head_commit, "comment": comment,
-    }));
-    let at = st.decisions.iter().find(|d| d.id == did).map(|d| d.at).unwrap_or_default();
+    let (did, at) = state.mutate(|st| {
+        let did = st.record_decision(id, "review", "human", &json!({
+            "decision": decision, "base_commit": base, "base_source": source, "head_commit": head_commit, "comment": comment,
+        }));
+        let at = st.decisions.iter().find(|d| d.id == did).map(|d| d.at).unwrap_or_default();
+        Ok((did, at))
+    })?;
     Ok(json!({ "task_id": id, "outcome": "recorded", "decision": decision, "decision_id": did, "head_commit": head_commit,
         "base_commit": base, "base_source": source, "comment": comment, "at": at }))
 }

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
+use super::mutation::{Effect, StateAccess};
 use super::state::NewTask;
 
 impl Core {
@@ -75,8 +76,13 @@ impl Core {
     /// resolvió el host (nunca el que llega de la UI).
     pub(super) fn create_child(self: &Arc<Self>, p: &spawn_approval::PendingSpawn, argv: Vec<String>, ack_unverified: bool) -> Result<Value, String> {
         let parent_id = p.parent_task.clone();
-        let (id, parent) = {
-            let mut st = self.lock();
+        // La tarea se persiste ANTES de cualquier efecto (worktree, proceso): una
+        // caída a mitad del lanzamiento deja rastro recuperable en vez de un
+        // worktree huérfano sin tarea.
+        // Nota para Task/Attempt: este orden ya pide estados intermedios explícitos
+        // (`pending` -> `starting` -> `working`, y `failed_start`). Hoy la tarea nace
+        // sin ellos; C2a no introduce Attempt, solo deja constancia de la necesidad.
+        let (id, parent) = self.mutate(|st| {
             let parent = st.task(&parent_id)?.clone();
             let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
                 agent: p.provider.clone(), model: p.model.clone(), effort: p.effort.clone(), role: p.role.clone(), title: p.title.clone(), spec: p.spec.clone(),
@@ -86,8 +92,8 @@ impl Core {
             t.profile = Some(p.profile.clone());
             t.ack_unverified = ack_unverified;
             t.requested_argv = Some(argv);
-            (id, parent)
-        };
+            Ok((id, parent))
+        })?;
 
         let prepared = (|| -> Result<(), String> {
             if p.shared {
@@ -103,31 +109,42 @@ impl Core {
             let start = git::head(&parent.cwd);
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
             let env = worktree_env::apply(&parent.repo, &dir, &worktree_env::plan(&parent.repo).restricted_to(&p.env));
-            let mut st = self.lock();
-            let t = st.task_mut(&id)?;
-            t.env = Some(env).filter(|e| !e.is_empty());
-            t.base_commit = start;
-            t.cwd = dir.to_string_lossy().into_owned();
-            t.worktree = Some(t.cwd.clone());
-            t.branch = Some(branch);
-            t.base = Some(base);
-            Ok(())
+            // El worktree ya existe: su registro es UNA mutación posterior.
+            let effect = Effect::new("spawn", "git_worktree").task(&id).repo(&parent.repo)
+                .expected(json!({ "record": "task worktree, branch y cwd" }))
+                .observed(json!({ "worktree": dir, "branch": branch }));
+            self.mutate_after_effect(effect, |st| {
+                let t = st.task_mut(&id)?;
+                t.env = Some(env).filter(|e| !e.is_empty());
+                t.base_commit = start;
+                t.cwd = dir.to_string_lossy().into_owned();
+                t.worktree = Some(t.cwd.clone());
+                t.branch = Some(branch.clone());
+                t.base = Some(base);
+                Ok(())
+            })
         })()
         .and_then(|_| self.ensure_launchable(&id))
         .and_then(|_| self.launch(&id));
 
         if let Err(e) = prepared {
             self.discard_worktree(&id);
-            let mut st = self.lock();
-            st.tasks.remove(&id);
-            self.commit(&st, &[]);
+            // Se devuelve el error original aunque la limpieza no se pueda persistir.
+            let _ = self.mutate(|st| {
+                st.tasks.remove(&id);
+                Ok(())
+            });
             return Err(e);
         }
-        let mut st = self.lock();
-        // Si el agente ya murió al arrancar, la tarea quedó en `exited` y así se informa.
-        let _ = st.mark_running(&id);
-        let t = st.task(&id)?.clone();
-        self.commit(&st, &[]);
+        // El proceso ya corre: su registro es UNA mutación posterior. Si el agente ya
+        // murió al arrancar, la tarea quedó en `exited` y así se informa.
+        let effect = Effect::new("spawn", "pty_process").task(&id)
+            .expected(json!({ "record": "task en marcha (running)" }))
+            .observed(json!({ "launched": true }));
+        let t = self.mutate_after_effect(effect, |st| {
+            let _ = st.mark_running(&id);
+            Ok(st.task(&id)?.clone())
+        })?;
         Ok(json!({ "task": t.id, "agent": t.agent, "model": t.model, "effort": t.effort, "role": t.role, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
     }
 
@@ -146,16 +163,16 @@ impl Core {
         if !self.terms.lock().map(|t| t.contains_key(&id)).unwrap_or(false) {
             return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn"));
         }
-        let task = {
-            let mut st = self.lock();
+        let task = self.mutate(|st| {
             st.reopen(&id, &spec)?;
             let t = st.task(&id)?.clone();
             // n = 1 hasta que haya intentos: se borra lo del intento anterior para no
             // recogerlo otra vez (lo que siga en la terminal lo descarta su idem_key).
+            // Va dentro de la mutación a propósito: el recolector necesita el estado, y
+            // así no ve la tarea reabierta con el informe viejo todavía en disco.
             let _ = delivery::prepare(&t.cwd, &id, delivery::ATTEMPT);
-            self.commit(&st, &[]);
-            t
-        };
+            Ok(t)
+        })?;
         let file = Path::new(&task.cwd).join(".lixbon").join("tasks").join(format!("{id}.md"));
         let _ = std::fs::OpenOptions::new().append(true).open(&file).and_then(|mut f| {
             use std::io::Write;
@@ -214,12 +231,12 @@ impl Core {
         // limpia y nonce nuevo, antes de lanzar.
         let report_path = delivery::prepare(&task.cwd, id, delivery::ATTEMPT)?;
         let nonce = random_token();
-        {
-            let mut st = self.lock();
+        self.mutate(|st| {
             let t = st.task_mut(id)?;
             t.report_nonce = Some(nonce.clone());
             t.delivered.clear();
-        }
+            Ok(())
+        })?;
         let mut task = task;
         task.report_nonce = Some(nonce.clone());
 
@@ -244,24 +261,27 @@ impl Core {
         let launch = agents::launch_task(&policy, task.model.as_deref(), task.effort.as_deref(), &prompt, last_message.as_deref())?;
         task.last_message_path = last_message.clone();
         task.stream_json = stream_json;
-        if let Ok(t) = self.lock().task_mut(id) {
-            t.policy = Some(record);
-            t.last_message_path = last_message;
-            t.stream_json = stream_json;
-            t.delivery_channel = None;
-            t.model_effective = None;
-            t.model_mismatch = false;
-            t.model_mismatch_reason = None;
-            t.plan_mode = plan_mode;
-            t.failure_reason = None;
-            t.session_ref = None;
-            t.model_source = None;
-            t.session_match = None;
-            t.attempt_started = Some(state::now_ms());
-            t.approval_deadline = None;
-            // launch_task ya rechazó un modelo pedido que no entra en el argv.
-            t.model_requested = t.model.clone();
-        }
+        self.mutate(|st| {
+            if let Ok(t) = st.task_mut(id) {
+                t.policy = Some(record);
+                t.last_message_path = last_message;
+                t.stream_json = stream_json;
+                t.delivery_channel = None;
+                t.model_effective = None;
+                t.model_mismatch = false;
+                t.model_mismatch_reason = None;
+                t.plan_mode = plan_mode;
+                t.failure_reason = None;
+                t.session_ref = None;
+                t.model_source = None;
+                t.session_match = None;
+                t.attempt_started = Some(state::now_ms());
+                t.approval_deadline = None;
+                // launch_task ya rechazó un modelo pedido que no entra en el argv.
+                t.model_requested = t.model.clone();
+            }
+            Ok(())
+        })?;
         std::fs::write(dir.join(format!("{id}.md")), task_file(&task, parent.as_ref(), &objective))
             .map_err(|e| format!("No se pudo escribir la tarea: {e}"))?;
         git::exclude_lixbon_dir(&task.cwd);
