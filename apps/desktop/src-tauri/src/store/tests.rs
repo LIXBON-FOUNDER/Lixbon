@@ -575,3 +575,334 @@ fn restringir_la_base_no_toca_la_carpeta_compartida() {
         assert!(acl.contains("(I)"), "la carpeta sigue heredando permisos:\n{acl}");
     }
 }
+
+// ---- C1: instantánea de arranque del estado legacy y core.lock ----
+
+use super::legacy::MODE_BOOTSTRAP_SNAPSHOT;
+use sha2::{Digest, Sha256};
+
+/// Carpetas de una prueba: el almacén en `core/` y el origen en `orch/state.json`.
+fn core_y_fuente(tmp: &Tmp) -> (PathBuf, PathBuf) {
+    (tmp.path().join("core"), tmp.path().join("orch").join("state.json"))
+}
+
+fn escribe_fuente(fuente: &Path, bytes: &[u8]) {
+    std::fs::create_dir_all(fuente.parent().unwrap()).unwrap();
+    std::fs::write(fuente, bytes).unwrap();
+}
+
+/// Un `state.json` con acentos y símbolos, para comprobar que se guarda tal cual.
+fn estado_de_ejemplo() -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "seq": 3,
+        "tasks": { "t1": { "id": "t1", "title": "Ñandú ✓", "status": "running" } },
+        "messages": [],
+        "decisions": []
+    }))
+    .unwrap()
+}
+
+fn sha(text: &str) -> String {
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
+fn todos_los_meta(store: &Store) -> Vec<(String, String)> {
+    store
+        .read(|c| {
+            let mut st = c.prepare("SELECT key, value FROM meta ORDER BY key")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .unwrap()
+}
+
+fn sin_metadatos_de_importacion(store: &Store) -> bool {
+    !todos_los_meta(store).iter().any(|(k, _)| k.starts_with("legacy_import"))
+}
+
+fn updated_at(store: &Store) -> i64 {
+    store.read(|c| Ok(c.query_row("SELECT updated_at FROM legacy_state WHERE id = 1", [], |r| r.get(0))?)).unwrap()
+}
+
+fn ahora_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64
+}
+
+#[test]
+fn la_primera_importacion_guarda_la_instantanea_y_sus_metadatos() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    // Con CRLF y sangrías propias: el documento se guarda byte a byte, no reserializado.
+    let texto = format!("{{\r\n  \"estado\": {},\r\n  \"nota\": \"Ñandú ✓\"\r\n}}\r\n", estado_de_ejemplo());
+    escribe_fuente(&fuente, texto.as_bytes());
+    let t0 = ahora_ms();
+    let mut s = Store::open(&core, "t").unwrap();
+    let r = bootstrap_legacy_snapshot(&mut s, &fuente).unwrap();
+    let t1 = ahora_ms();
+
+    assert_eq!(r, ImportOutcome::Imported { sha256: sha(&texto), bytes: texto.len() as u64 });
+    let fila = s.legacy_state().unwrap().unwrap();
+    assert_eq!((fila.rev, fila.doc_schema), (1, 0));
+    assert_eq!(fila.doc, texto, "se conserva el JSON original como documento");
+    assert_eq!(s.meta("legacy_import_sha256").unwrap(), Some(sha(&texto)));
+    assert_eq!(s.meta("legacy_import_bytes").unwrap(), Some(texto.len().to_string()));
+    assert_eq!(s.meta("legacy_import_version").unwrap(), Some("1".to_string()));
+    assert_eq!(s.meta("legacy_import_mode").unwrap(), Some(MODE_BOOTSTRAP_SNAPSHOT.to_string()));
+    assert_eq!(MODE_BOOTSTRAP_SNAPSHOT, "bootstrap_snapshot");
+    let en: i64 = s.meta("legacy_imported_at").unwrap().unwrap().parse().unwrap();
+    assert!((t0..=t1).contains(&en), "legacy_imported_at en ms epoch: {en} no está en {t0}..{t1}");
+    assert_eq!(
+        verify_snapshot(&s).unwrap(),
+        SnapshotCheck::Verified { rev: 1, bytes: texto.len() as u64, sha256: sha(&texto) }
+    );
+}
+
+#[test]
+fn importar_deja_el_origen_byte_a_byte_intacto() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    escribe_fuente(&fuente, estado_de_ejemplo().as_bytes());
+    let antes = std::fs::read(&fuente).unwrap();
+    let mtime = std::fs::metadata(&fuente).unwrap().modified().unwrap();
+    let mut s = Store::open(&core, "t").unwrap();
+    assert!(matches!(bootstrap_legacy_snapshot(&mut s, &fuente).unwrap(), ImportOutcome::Imported { .. }));
+    assert_eq!(std::fs::read(&fuente).unwrap(), antes);
+    assert_eq!(std::fs::metadata(&fuente).unwrap().modified().unwrap(), mtime, "ni siquiera se reescribió");
+    assert!(!fuente.with_extension("tmp").exists());
+}
+
+#[test]
+fn reabrir_no_reimporta_ni_toca_los_metadatos() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    escribe_fuente(&fuente, estado_de_ejemplo().as_bytes());
+    let (meta, cuando) = {
+        let mut s = Store::open(&core, "t").unwrap();
+        bootstrap_legacy_snapshot(&mut s, &fuente).unwrap();
+        (todos_los_meta(&s), updated_at(&s))
+    };
+    let mut s = Store::open(&core, "t").unwrap();
+    assert_eq!(bootstrap_legacy_snapshot(&mut s, &fuente).unwrap(), ImportOutcome::AlreadyPresent);
+    assert_eq!(s.legacy_state().unwrap().unwrap().rev, 1);
+    assert_eq!(todos_los_meta(&s), meta, "metadatos idénticos");
+    assert_eq!(updated_at(&s), cuando);
+}
+
+#[test]
+fn un_state_json_modificado_despues_no_sobrescribe_la_instantanea() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    let original = estado_de_ejemplo();
+    escribe_fuente(&fuente, original.as_bytes());
+    {
+        let mut s = Store::open(&core, "t").unwrap();
+        bootstrap_legacy_snapshot(&mut s, &fuente).unwrap();
+    }
+    // Durante C1 el Core sigue escribiendo state.json: la divergencia es esperada.
+    escribe_fuente(&fuente, br#"{"seq": 99, "tasks": {}}"#);
+    let mut s = Store::open(&core, "t").unwrap();
+    assert_eq!(bootstrap_legacy_snapshot(&mut s, &fuente).unwrap(), ImportOutcome::AlreadyPresent);
+    let fila = s.legacy_state().unwrap().unwrap();
+    assert_eq!((fila.rev, fila.doc), (1, original.clone()));
+    assert_eq!(s.meta("legacy_import_sha256").unwrap(), Some(sha(&original)));
+    assert!(matches!(verify_snapshot(&s).unwrap(), SnapshotCheck::Verified { .. }), "la instantánea sigue íntegra");
+}
+
+#[test]
+fn sin_state_json_no_hay_fila_y_un_arranque_posterior_importa() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    {
+        let mut s = Store::open(&core, "t").unwrap();
+        assert_eq!(bootstrap_legacy_snapshot(&mut s, &fuente).unwrap(), ImportOutcome::NoSource);
+        assert!(s.legacy_state().unwrap().is_none(), "no hay fila falsa");
+        assert!(sin_metadatos_de_importacion(&s));
+        assert_eq!(verify_snapshot(&s).unwrap(), SnapshotCheck::Absent);
+    }
+    // La base ya existe, pero aún no tiene instantánea: aparece state.json y se importa.
+    escribe_fuente(&fuente, estado_de_ejemplo().as_bytes());
+    let mut s = Store::open(&core, "t").unwrap();
+    assert!(matches!(bootstrap_legacy_snapshot(&mut s, &fuente).unwrap(), ImportOutcome::Imported { .. }));
+    assert_eq!(s.legacy_state().unwrap().unwrap().rev, 1);
+}
+
+#[test]
+fn un_state_json_invalido_no_inserta_nada() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    let mut s = Store::open(&core, "t").unwrap();
+    let casos: Vec<(&str, Vec<u8>)> = vec![
+        ("no es JSON", b"esto no es json".to_vec()),
+        ("vacío", Vec::new()),
+        ("truncado", br#"{"tasks": {"#.to_vec()),
+        ("no UTF-8", vec![0xff, 0xfe, 0x00, 0x41]),
+        ("con BOM", b"\xEF\xBB\xBF{}".to_vec()),
+        ("dos documentos", b"{} {}".to_vec()),
+    ];
+    for (nombre, bytes) in casos {
+        escribe_fuente(&fuente, &bytes);
+        match bootstrap_legacy_snapshot(&mut s, &fuente).unwrap() {
+            ImportOutcome::SourceInvalid { reason } => assert!(!reason.is_empty(), "{nombre}: sin diagnóstico"),
+            otro => panic!("{nombre}: se esperaba SourceInvalid y salió {otro:?}"),
+        }
+        assert!(s.legacy_state().unwrap().is_none(), "{nombre}: no debe haber fila");
+        assert!(sin_metadatos_de_importacion(&s), "{nombre}: no debe haber metadatos");
+    }
+    // Y tras corregirlo, se importa sin rastro de los intentos fallidos.
+    escribe_fuente(&fuente, estado_de_ejemplo().as_bytes());
+    assert!(matches!(bootstrap_legacy_snapshot(&mut s, &fuente).unwrap(), ImportOutcome::Imported { .. }));
+}
+
+#[test]
+fn un_estado_grande_se_importa_completo() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    let tareas: serde_json::Map<String, serde_json::Value> = (0..4000)
+        .map(|i| {
+            let id = format!("t{i}");
+            let spec = format!("especificación de la tarea {i}: {}", "x".repeat(380));
+            (id.clone(), serde_json::json!({ "id": id, "title": format!("tarea {i}"), "spec": spec, "status": "done" }))
+        })
+        .collect();
+    let texto = serde_json::to_string_pretty(&serde_json::json!({ "seq": 4000, "tasks": tareas })).unwrap();
+    assert!(texto.len() > 1_000_000, "el estado sintético debe pesar ~1-2 MB: {}", texto.len());
+    escribe_fuente(&fuente, texto.as_bytes());
+    let mut s = Store::open(&core, "t").unwrap();
+    let t = std::time::Instant::now();
+    let r = bootstrap_legacy_snapshot(&mut s, &fuente).unwrap();
+    // Solo informativo: sin límite temporal para no volver la prueba intermitente.
+    eprintln!("importación de {} bytes: {:?}", texto.len(), t.elapsed());
+    assert_eq!(r, ImportOutcome::Imported { sha256: sha(&texto), bytes: texto.len() as u64 });
+    assert_eq!(s.legacy_state().unwrap().unwrap().doc.len(), texto.len());
+    assert!(matches!(verify_snapshot(&s).unwrap(), SnapshotCheck::Verified { .. }));
+}
+
+#[test]
+fn una_importacion_que_falla_a_medias_no_deja_nada() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    escribe_fuente(&fuente, estado_de_ejemplo().as_bytes());
+    let mut s = Store::open(&core, "t").unwrap();
+    // Una clave ya ocupada hace fallar el ÚLTIMO insert de metadatos, cuando la fila
+    // de legacy_state y otros cuatro metadatos ya se han escrito en la transacción.
+    s.write(|tx| {
+        tx.execute("INSERT INTO meta (key, value) VALUES ('legacy_import_mode', 'ocupada')", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let meta_antes = todos_los_meta(&s);
+    match bootstrap_legacy_snapshot(&mut s, &fuente) {
+        Err(StoreError::Sqlite(_)) => {}
+        otro => panic!("se esperaba un error de SQLite y salió {otro:?}"),
+    }
+    assert!(s.legacy_state().unwrap().is_none(), "legacy_state sin cambios");
+    assert_eq!(todos_los_meta(&s), meta_antes, "meta sin cambios");
+}
+
+#[test]
+fn verificar_detecta_una_instantanea_manipulada() {
+    let tmp = Tmp::new();
+    let (core, fuente) = core_y_fuente(&tmp);
+    escribe_fuente(&fuente, estado_de_ejemplo().as_bytes());
+    for manipulacion in [
+        "UPDATE legacy_state SET doc = '{}' WHERE id = 1",
+        "UPDATE legacy_state SET rev = 2 WHERE id = 1",
+        "UPDATE meta SET value = 'authoritative' WHERE key = 'legacy_import_mode'",
+    ] {
+        let mut s = Store::open(&tmp.path().join(format!("core-{}", manipulacion.len())), "t").unwrap();
+        bootstrap_legacy_snapshot(&mut s, &fuente).unwrap();
+        assert!(matches!(verify_snapshot(&s).unwrap(), SnapshotCheck::Verified { .. }));
+        s.write(|tx| {
+            tx.execute(manipulacion, [])?;
+            Ok(())
+        })
+        .unwrap();
+        match verify_snapshot(&s) {
+            Err(StoreError::InvalidDocument(m)) => assert!(!m.is_empty()),
+            otro => panic!("{manipulacion}: se esperaba InvalidDocument y salió {otro:?}"),
+        }
+    }
+    let _ = core;
+}
+
+#[test]
+fn el_bloqueo_del_core_es_core_lock_y_se_adquiere_conflicta_y_libera() {
+    let tmp = Tmp::new();
+    let (core, _) = core_y_fuente(&tmp);
+    assert_eq!(lock_path(&core).file_name().unwrap(), "core.lock");
+    // 1. el primer Store lo adquiere
+    let primero = Store::open(&core, "t").unwrap();
+    assert!(core.join("core.lock").exists());
+    assert!(!core.join("lixbon.lock").exists(), "ya no se usa el nombre antiguo");
+    // 2. un segundo Store sobre la misma carpeta falla
+    match Store::open(&core, "t") {
+        Err(StoreError::AlreadyRunning { lock_path }) => assert!(lock_path.ends_with("core.lock")),
+        otro => panic!("se esperaba AlreadyRunning y salió {otro:?}"),
+    }
+    assert!(matches!(InstanceLock::acquire(&lock_path(&core)), Err(StoreError::AlreadyRunning { .. })));
+    // 3. al soltar el primero, otro puede adquirirlo
+    drop(primero);
+    let _segundo = Store::open(&core, "t").unwrap();
+}
+
+/// Ayudante de `el_bloqueo_se_respeta_entre_procesos`: corre en OTRO proceso (el
+/// mismo binario de pruebas) e intenta adquirir `core.lock`. No es una prueba por sí
+/// solo: sin la variable de entorno no hace nada.
+#[test]
+#[ignore = "ayudante de la prueba entre procesos"]
+fn ayudante_adquirir_core_lock() {
+    let Ok(dir) = std::env::var("LIXBON_TEST_LOCK_DIR") else { return };
+    match InstanceLock::acquire(&lock_path(Path::new(&dir))) {
+        Ok(_) => println!("ADQUIRIDO"),
+        Err(StoreError::AlreadyRunning { .. }) => panic!("OCUPADO"),
+        Err(e) => panic!("ERROR {e}"),
+    }
+}
+
+#[test]
+fn el_bloqueo_se_respeta_entre_procesos() {
+    let tmp = Tmp::new();
+    let (core, _) = core_y_fuente(&tmp);
+    let hijo = |dir: &Path| {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "store::tests::ayudante_adquirir_core_lock", "--nocapture", "--test-threads=1"])
+            .env("LIXBON_TEST_LOCK_DIR", dir)
+            .output()
+            .unwrap()
+    };
+    let titular = Store::open(&core, "t").unwrap();
+    let con_titular = hijo(&core);
+    let salida = String::from_utf8_lossy(&con_titular.stdout).to_string() + &String::from_utf8_lossy(&con_titular.stderr);
+    assert!(!con_titular.status.success(), "otro proceso no debe poder adquirir core.lock:\n{salida}");
+    assert!(salida.contains("OCUPADO"), "debe fallar por estar ocupado, no por otra cosa:\n{salida}");
+    drop(titular);
+    let sin_titular = hijo(&core);
+    let salida = String::from_utf8_lossy(&sin_titular.stdout).to_string() + &String::from_utf8_lossy(&sin_titular.stderr);
+    assert!(sin_titular.status.success(), "liberado el bloqueo, otro proceso sí puede adquirirlo:\n{salida}");
+    assert!(salida.contains("ADQUIRIDO"), "{salida}");
+}
+
+#[test]
+fn abrir_bajo_un_bloqueo_ya_adquirido_no_lo_pierde_si_falla() {
+    let tmp = Tmp::new();
+    let (core, _) = core_y_fuente(&tmp);
+    let lock = InstanceLock::acquire(&lock_path(&core)).unwrap();
+    // Un bloqueo de otra carpeta no vale como prueba de titularidad.
+    let otra = tmp.path().join("otra");
+    let ajeno = InstanceLock::acquire(&lock_path(&otra)).unwrap();
+    assert!(matches!(
+        Store::open_under_lock(&core, &ajeno, &embedded(), "t"),
+        Err(StoreError::WrongLock { .. })
+    ));
+    // Con el bloqueo correcto abre, y mientras tanto nadie más puede abrirla.
+    let s = Store::open_under_lock(&core, &lock, &embedded(), "t").unwrap();
+    assert!(matches!(Store::open(&core, "t"), Err(StoreError::AlreadyRunning { .. })));
+    drop(s);
+    // Si la apertura falla (base corrupta), quien llama sigue siendo el titular.
+    std::fs::write(core.join("lixbon.db"), vec![b'x'; 4096]).unwrap();
+    assert!(matches!(
+        Store::open_under_lock(&core, &lock, &embedded(), "t"),
+        Err(StoreError::Corrupt { .. })
+    ));
+    assert!(matches!(InstanceLock::acquire(&lock_path(&core)), Err(StoreError::AlreadyRunning { .. })));
+}
