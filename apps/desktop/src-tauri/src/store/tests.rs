@@ -581,6 +581,45 @@ fn restringir_la_base_no_toca_la_carpeta_compartida() {
     assert_eq!(crate::acl_test_util::descriptor(tmp.path()), acl_antes, "la ACL de la carpeta compartida cambió");
 }
 
+/// Regresión determinista de la CI de Ubuntu tras el merge de #66 (`AlreadyRunning` al reabrir
+/// justo después de soltar). Un `flock` pertenece a la descripción de archivo abierta, no al
+/// descriptor: si otro hilo del proceso hace `fork` mientras el bloqueo está tomado, el hijo hereda
+/// una copia hasta su `exec`. Aquí el hijo se queda parado ANTES del `exec`, con la copia en su
+/// poder, hasta que el padre le avisa por un socket: la situación es siempre la misma y no depende
+/// de tiempos. Soltar el titular debe liberar el bloqueo de todos modos («se libera al soltarlo»).
+#[cfg(unix)]
+#[test]
+fn soltar_el_bloqueo_lo_libera_aunque_un_hijo_recien_bifurcado_conserve_el_descriptor() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::os::unix::process::CommandExt;
+
+    let tmp = Tmp::new();
+    let path = lock_path(tmp.path());
+    let titular = InstanceLock::acquire(&path).unwrap();
+
+    let (mut padre, mut hijo) = UnixStream::pair().unwrap();
+    let mut cmd = std::process::Command::new("true");
+    // SAFETY: entre el fork y el exec el hijo solo hace llamadas al sistema sobre un socket.
+    unsafe {
+        cmd.pre_exec(move || {
+            hijo.write_all(b"x")?; // «ya existo y tengo una copia del descriptor»
+            hijo.read_exact(&mut [0u8; 1]) // espera la señal del padre antes del exec
+        });
+    }
+    let lanzador = std::thread::spawn(move || cmd.status());
+    padre.read_exact(&mut [0u8; 1]).unwrap();
+
+    // El hijo está vivo, sin `exec`, con una copia del descriptor del bloqueo.
+    drop(titular);
+    let segundo = InstanceLock::acquire(&path);
+
+    // Se libera al hijo ANTES de afirmar: si la aserción fallara, no debe quedar un hijo parado.
+    padre.write_all(b"y").unwrap(); // deja que el hijo siga hasta el `exec`
+    lanzador.join().unwrap().unwrap();
+    assert!(segundo.is_ok(), "soltar el titular debe liberar el bloqueo aunque un hijo conserve el descriptor: {segundo:?}");
+}
+
 // ---- C1: instantánea de arranque del estado legacy y core.lock ----
 
 use super::legacy::MODE_BOOTSTRAP_SNAPSHOT;

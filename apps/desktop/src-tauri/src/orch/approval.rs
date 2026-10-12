@@ -260,6 +260,8 @@ mod falso_agente {
         timeout: Option<Timeout>,
         exited: bool,
         dir: std::path::PathBuf,
+        /// ¿Existía `hijo.pid` cuando el vigilante vio el aviso, es decir, cuando empezó a contar el TTL?
+        pid_al_entrar: Option<bool>,
     }
 
     fn run(name: &str, command: &str, approval: u64, idle: u64) -> Run {
@@ -270,10 +272,16 @@ mod falso_agente {
         let changes = Arc::new(Mutex::new(vec![]));
         let done = Arc::new(AtomicBool::new(false));
         let (g, c, d) = (guard.clone(), changes.clone(), done.clone());
+        let pid_file = dir.join("hijo.pid");
+        let pid_al_entrar = Arc::new(Mutex::new(None::<bool>));
+        let p2 = pid_al_entrar.clone();
         let mut term = super::super::pty::spawn(
             super::super::pty::Launch { cwd: &dir.to_string_lossy(), script_dir: &dir.join("s"), command: command.into(), env: vec![], inject: None, piped: false },
             move |t| {
                 if let Some(ch) = g.lock().unwrap().on_output(&t, now_ms()) {
+                    if matches!(ch, Change::Entered(_)) {
+                        *p2.lock().unwrap() = Some(pid_file.exists());
+                    }
                     c.lock().unwrap().push(ch);
                 }
             },
@@ -292,7 +300,8 @@ mod falso_agente {
             std::thread::sleep(Duration::from_millis(200));
         }
         let changes = changes.lock().unwrap().clone();
-        Run { changes, timeout, exited: done.load(Ordering::SeqCst), dir }
+        let pid_al_entrar = *pid_al_entrar.lock().unwrap();
+        Run { changes, timeout, exited: done.load(Ordering::SeqCst), dir, pid_al_entrar }
     }
 
     fn alive(pid: &str) -> bool {
@@ -300,27 +309,50 @@ mod falso_agente {
         String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
     }
 
-    #[test]
-    fn colgado_en_la_aprobacion_vence_y_mata_el_arbol() {
+    /// Un agente colgado en el aviso de aprobación: al vencer el TTL se mata el árbol completo.
+    ///
+    /// El nieto (PowerShell) escribe su pid y SOLO DESPUÉS imprime el aviso. Así el TTL empieza a
+    /// contar cuando el nieto ya existe: lo garantiza el orden del programa del propio nieto, no
+    /// una carrera de tiempos. Antes imprimía el aviso `cmd` y PowerShell arrancaba a la vez; en un
+    /// runner cargado PowerShell tardaba más que el TTL, se mataba el árbol antes de que existiera
+    /// el nieto y la prueba fallaba sin haber comprobado nada («no se escribió el pid del nieto»).
+    /// `arranque_lento_s` retrasa a propósito el arranque del nieto para demostrarlo.
+    fn colgado_y_se_mata_el_arbol(nombre: &str, arranque_lento_s: u64, ttl_s: u64) {
+        let lento = if arranque_lento_s > 0 { format!("Start-Sleep {arranque_lento_s}; ") } else { String::new() };
         let r = run(
-            "colgado",
-            "echo This command requires approval & echo Do you want to proceed? & powershell -NoProfile -Command \"$PID | Set-Content -Encoding ascii hijo.pid; Start-Sleep 120\"",
-            4,
+            nombre,
+            &format!(
+                "powershell -NoProfile -Command \"{lento}$PID | Set-Content -Encoding ascii hijo.pid; 'This command requires approval'; 'Do you want to proceed?'; Start-Sleep 120\""
+            ),
+            ttl_s,
             60,
         );
         assert!(matches!(r.changes.as_slice(), [Change::Entered(_)]), "{:?}", r.changes);
         assert_eq!(r.timeout, Some(Timeout::Approval));
         assert!(r.exited, "la PTY no terminó tras matarla");
-        // El nieto (powershell) también murió: sin zombis.
+        // Precondición: el TTL empezó con el nieto ya vivo y con su pid escrito.
+        assert_eq!(r.pid_al_entrar, Some(true), "se vio el aviso antes de que el nieto escribiera su pid: el TTL empezó sin nieto que matar");
+        let pid = std::fs::read_to_string(r.dir.join("hijo.pid")).expect("hijo.pid").trim().to_string();
+        // El nieto (powershell) también murió: sin zombis. Se espera a la condición observable.
         let start = Instant::now();
-        let pid = loop {
-            if let Ok(p) = std::fs::read_to_string(r.dir.join("hijo.pid")) { break p.trim().to_string(); }
-            assert!(start.elapsed() < Duration::from_secs(5), "no se escribió el pid del nieto");
-            std::thread::sleep(Duration::from_millis(200));
-        };
-        std::thread::sleep(Duration::from_secs(1));
-        assert!(!alive(&pid), "sigue vivo el proceso {pid}");
+        while alive(&pid) {
+            assert!(start.elapsed() < Duration::from_secs(10), "sigue vivo el proceso {pid}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
         let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn colgado_en_la_aprobacion_vence_y_mata_el_arbol() {
+        colgado_y_se_mata_el_arbol("colgado", 0, 4);
+    }
+
+    /// Regresión determinista del fallo de CI: el nieto tarda MÁS que el TTL en arrancar (4 s frente
+    /// a 2 s). Con el aviso impreso por `cmd` antes de que PowerShell escribiera su pid, esta
+    /// misma situación hacía fallar la prueba siempre; ahora el TTL solo empieza tras el nieto.
+    #[test]
+    fn colgado_en_la_aprobacion_aunque_el_nieto_tarde_mas_que_el_ttl() {
+        colgado_y_se_mata_el_arbol("colgado-lento", 4, 2);
     }
 
     #[test]
