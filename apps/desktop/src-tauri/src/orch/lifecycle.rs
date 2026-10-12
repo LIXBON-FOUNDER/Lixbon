@@ -136,6 +136,15 @@ impl Core {
         if needs_orphan {
             self.close_orphans();
         }
+        // `close_orphans` puede haber avanzado la fila: el informe lleva la revisión
+        // realmente confirmada al terminar el arranque, no la que se cargó.
+        let rev = match self.storage.confirmed_rev() {
+            Ok(Some(confirmed)) => confirmed,
+            other => {
+                eprintln!("[core] no se pudo releer la revisión confirmada tras el arranque ({other:?}); se informa la cargada");
+                rev
+            }
+        };
         self.storage.set_ready(StorageReport { rev, promotion_id, promoted_now, marker_pending });
     }
 

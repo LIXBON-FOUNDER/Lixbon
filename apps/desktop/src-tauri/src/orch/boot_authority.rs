@@ -272,7 +272,8 @@ pub(super) fn promote_in_store(store: &mut Store, ctx: &PromoteCtx<'_>) -> Resul
                 None => (NO_SOURCE.to_string(), 0),
             };
             let bootstrap = store.legacy_state().map_err(|e| fail(store, e.to_string()))?.map(|r| r.rev).unwrap_or(0);
-            PromotionPlan { promotion_id: new_uuid(), source_hash, source_bytes, sqlite_bootstrap_rev: bootstrap, sqlite_target_rev: bootstrap + 1 }
+            // Una revisión corrupta (negativa, `i64::MAX`) no se promociona: bloquea, no desborda.
+            PromotionPlan::new(new_uuid(), source_hash, source_bytes, bootstrap).map_err(|e| PromoteError::Blocking(e.to_string()))?
         }
     };
 

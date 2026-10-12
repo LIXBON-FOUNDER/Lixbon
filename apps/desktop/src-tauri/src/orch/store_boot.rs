@@ -216,6 +216,14 @@ impl CoreStorage {
         self.slot().status = StorageStatus::Ready(report);
     }
 
+    /// La `rev` realmente confirmada en la fila de SQLite ahora mismo (no la cargada al abrir).
+    pub(super) fn confirmed_rev(&self) -> Result<Option<i64>, String> {
+        match self.slot().store.as_ref() {
+            Some(store) => store.row_rev().map_err(|e| e.to_string()),
+            None => Err("el almacén no está abierto".into()),
+        }
+    }
+
     /// Acceso al `Store` abierto. Solo lo usan el arranque (`boot_authority`) y las
     /// pruebas; las escrituras de estado entran por [`SqlitePersistence`].
     pub(super) fn with_store<R>(&self, f: impl FnOnce(&mut Store) -> R) -> Option<R> {

@@ -29,6 +29,9 @@ use super::{current_rev, now_ms, Store};
 /// Versión de la migración que sirve de valla de compatibilidad.
 pub const FENCE_VERSION: i64 = 2;
 
+/// `source_hash` de una instalación sin legado (no había `state.json` que promocionar).
+pub const NO_SOURCE: &str = "none";
+
 /// Valor de `legacy_import_mode` cuando SQLite es la autoridad.
 pub const MODE_SQLITE_AUTHORITATIVE: &str = "sqlite_authoritative";
 
@@ -51,6 +54,23 @@ pub struct PromotionPlan {
     pub sqlite_bootstrap_rev: i64,
     /// `sqlite_bootstrap_rev + 1`.
     pub sqlite_target_rev: i64,
+}
+
+impl PromotionPlan {
+    /// Plan con `sqlite_target_rev = sqlite_bootstrap_rev + 1`. Falla (sin envolver ni
+    /// hacer panic) si la revisión de partida es negativa o `i64::MAX`.
+    pub fn new(promotion_id: String, source_hash: String, source_bytes: u64, sqlite_bootstrap_rev: i64) -> StoreResult<PromotionPlan> {
+        let sqlite_target_rev = next_rev(sqlite_bootstrap_rev)?;
+        Ok(PromotionPlan { promotion_id, source_hash, source_bytes, sqlite_bootstrap_rev, sqlite_target_rev })
+    }
+}
+
+/// La revisión siguiente. Los datos persistidos pueden venir corruptos: se falla cerrado.
+pub fn next_rev(rev: i64) -> StoreResult<i64> {
+    if rev < 0 {
+        return Err(StoreError::RevOutOfRange { rev });
+    }
+    rev.checked_add(1).ok_or(StoreError::RevOutOfRange { rev })
 }
 
 /// Metadatos de autoridad guardados en SQLite por la promoción (los cinco a la vez).
@@ -90,6 +110,18 @@ fn meta_put(conn: &Connection, key: &str, value: &str) -> StoreResult<()> {
     Ok(())
 }
 
+/// ¿`legacy_import_mode` ya es `sqlite_authoritative`? Solo se consulta con la base cruzada
+/// (la tabla `meta` existe desde la 001).
+/// Una base sin tabla `meta` (de una versión futura u otra cosa) no es autoritativa: la
+/// apertura seguirá y `migrate` dará el error que corresponda (`DatabaseNewer`...).
+pub(super) fn is_authoritative(conn: &Connection) -> StoreResult<bool> {
+    let has_meta: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'", [], |r| r.get(0))?;
+    if has_meta == 0 {
+        return Ok(false);
+    }
+    Ok(meta_get(conn, META_MODE)?.as_deref() == Some(MODE_SQLITE_AUTHORITATIVE))
+}
+
 fn parse_i64(v: Option<String>) -> Option<i64> {
     v.and_then(|s| s.parse().ok())
 }
@@ -110,6 +142,11 @@ impl Store {
         Ok(self.schema_version()? >= FENCE_VERSION)
     }
 
+    /// `rev` actual de la fila `legacy_state` (la revisión realmente confirmada), si hay fila.
+    pub fn row_rev(&self) -> StoreResult<Option<i64>> {
+        current_rev(&self.conn)
+    }
+
     /// Todo lo que la base sabe sobre su autoridad, en una lectura.
     pub fn authority_facts(&self) -> StoreResult<AuthorityFacts> {
         let version = self.schema_version()?;
@@ -122,7 +159,11 @@ impl Store {
             parse_i64(meta_get(c, META_TARGET_REV)?),
             parse_i64(meta_get(c, META_SINCE)?),
         ) {
-            (Some(promotion_id), Some(source_hash), Some(bytes), Some(boot), Some(target), Some(since)) if bytes >= 0 => {
+            // Solo se dan por buenos metadatos coherentes: revisiones en rango con
+            // target = bootstrap + 1, y «sin legado» implica cero bytes.
+            (Some(promotion_id), Some(source_hash), Some(bytes), Some(boot), Some(target), Some(since))
+                if bytes >= 0 && next_rev(boot).ok() == Some(target) && (source_hash != NO_SOURCE || bytes == 0) =>
+            {
                 Some(AuthMeta { promotion_id, source_hash, source_bytes: bytes as u64, sqlite_bootstrap_rev: boot, sqlite_target_rev: target, since })
             }
             _ => None,
@@ -172,7 +213,7 @@ impl Store {
     /// vez: si la fila no está exactamente en `sqlite_bootstrap_rev` o el modo no es
     /// el de bootstrap, se deshace todo con [`StoreError::PromotionConflict`].
     pub fn promote_to_authoritative(&mut self, plan: &PromotionPlan, doc: &str) -> StoreResult<i64> {
-        if plan.sqlite_target_rev != plan.sqlite_bootstrap_rev + 1 {
+        if next_rev(plan.sqlite_bootstrap_rev)? != plan.sqlite_target_rev {
             return Err(StoreError::PromotionConflict(format!(
                 "sqlite_target_rev ({}) debe ser sqlite_bootstrap_rev + 1 ({})",
                 plan.sqlite_target_rev, plan.sqlite_bootstrap_rev
@@ -181,6 +222,11 @@ impl Store {
         let plan = plan.clone();
         let doc = doc.to_string();
         let target = self.write(move |tx| {
+            // Invariante del almacén: `sqlite_authoritative ⇒ valla 002 aplicada`. No depende
+            // de que quien orquesta se acuerde de aplicarla; se comprueba antes de escribir nada.
+            if db_version(tx)? < FENCE_VERSION {
+                return Err(StoreError::NotFenced);
+            }
             let now = now_ms();
             let row = current_rev(tx)?;
             let mode = meta_get(tx, META_MODE)?;
@@ -231,23 +277,24 @@ impl Store {
 
     /// Escritura autoritativa del estado (una por `Core::mutate`): sube la fila de
     /// `expected_rev` a `expected_rev + 1` en una transacción, solo si la base ya es
-    /// autoritativa. Devuelve la nueva `rev`.
+    /// autoritativa. Devuelve la nueva `rev`. Una `rev` fuera de rango falla sin escribir.
     pub fn commit_authoritative(&mut self, expected_rev: i64, doc: &str) -> StoreResult<i64> {
+        let next = next_rev(expected_rev)?;
         self.write(|tx| {
             if meta_get(tx, META_MODE)?.as_deref() != Some(MODE_SQLITE_AUTHORITATIVE) {
                 return Err(StoreError::NotAuthoritative);
             }
             let changed = tx
                 .execute(
-                    "UPDATE legacy_state SET rev = rev + 1, doc = ?1, updated_at = ?2 WHERE id = 1 AND rev = ?3",
-                    rusqlite::params![doc, now_ms(), expected_rev],
+                    "UPDATE legacy_state SET rev = ?4, doc = ?1, updated_at = ?2 WHERE id = 1 AND rev = ?3",
+                    rusqlite::params![doc, now_ms(), expected_rev, next],
                 )
                 .map_err(invalid_doc)?;
             if changed != 1 {
                 return Err(StoreError::RevConflict { expected: expected_rev, actual: current_rev(tx)? });
             }
             crash_point("mutate_in_tx");
-            Ok(expected_rev + 1)
+            Ok(next)
         })
     }
 

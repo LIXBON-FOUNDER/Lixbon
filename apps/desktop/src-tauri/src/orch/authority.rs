@@ -40,7 +40,7 @@ pub(super) const MARKER_FILE: &str = "authority.json";
 /// Versión del esquema del marcador que entiende este binario.
 pub(super) const MARKER_VERSION: u32 = 1;
 /// `source_hash` de una instalación sin legado.
-pub(super) const NO_SOURCE: &str = "none";
+pub(super) const NO_SOURCE: &str = store::NO_SOURCE;
 const MODE_BOOTSTRAP: &str = "bootstrap_snapshot";
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -183,9 +183,28 @@ pub(super) fn parse_marker(bytes: &[u8]) -> MarkerRead {
         Ok(m) => m,
         Err(e) => return MarkerRead::Invalid(format!("{MARKER_FILE} está incompleto o tiene un valor desconocido: {e}")),
     };
+    // Coherencias que se pueden comprobar sin heurística. Todo lo que no cuadre falla
+    // cerrado: un marcador así no se interpreta, se bloquea.
     let hash_ok = m.source_hash == NO_SOURCE || (m.source_hash.len() == 64 && m.source_hash.chars().all(|c| c.is_ascii_hexdigit()));
-    if m.promotion_id.is_empty() || m.db_id.is_empty() || !hash_ok || m.sqlite_bootstrap_rev < 0 || m.sqlite_target_rev != m.sqlite_bootstrap_rev + 1 {
-        return MarkerRead::Invalid(format!("{MARKER_FILE} tiene valores incoherentes (identificadores, hash o revisiones)"));
+    // Sin legado => cero bytes; con legado => no vacío (un `state.json` vacío no es promocionable).
+    let bytes_ok = if m.source_hash == NO_SOURCE { m.source_bytes == 0 } else { m.source_bytes > 0 };
+    // `target = bootstrap + 1` en rango (sin desbordar con datos corruptos).
+    let revs_ok = m.sqlite_bootstrap_rev >= 0 && m.sqlite_bootstrap_rev.checked_add(1) == Some(m.sqlite_target_rev);
+    let confirmed_ok = match m.state {
+        MarkerState::Promoting => m.confirmed_at.is_none(),
+        MarkerState::Authoritative => m.confirmed_at.is_some(),
+    };
+    let ids_ok = !m.promotion_id.is_empty() && !m.db_id.is_empty() && m.db == "lixbon.db";
+    for (ok, what) in [
+        (ids_ok, "identificadores o base"),
+        (hash_ok, "source_hash"),
+        (bytes_ok, "source_bytes frente a source_hash"),
+        (revs_ok, "revisiones (sqlite_target_rev debe ser sqlite_bootstrap_rev + 1, en rango)"),
+        (confirmed_ok, "confirmed_at frente a state"),
+    ] {
+        if !ok {
+            return MarkerRead::Invalid(format!("{MARKER_FILE} tiene valores incoherentes: {what}"));
+        }
     }
     MarkerRead::Valid(m)
 }

@@ -47,7 +47,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
-pub use authority::{new_uuid, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE};
+pub use authority::{new_uuid, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
 pub use crash::crash_point;
 pub use error::{StoreError, StoreResult};
@@ -113,23 +113,32 @@ impl Store {
         Store::open_inner(dir, None, migrations, app_version)
     }
 
-    /// Apertura del ARRANQUE de C2b: abre y migra solo hasta donde permite la valla.
+    /// Apertura del ARRANQUE de C2b: abre y migra solo hasta donde permite el
+    /// protocolo de autoridad, también al recuperar tras una caída.
     ///
-    /// Una base **sin cruzar** la valla se migra con las migraciones ANTERIORES a
-    /// [`FENCE_VERSION`]: así abrirla no publica la valla antes de tiempo (la 002 se
-    /// aplica después, con [`Store::apply_fence`], cuando el preflight y la copia
-    /// `pre-authority` ya están hechos). Una base **ya cruzada** se migra con la
-    /// lista completa. `all` es la lista completa del binario.
+    /// * Base **sin cruzar** la valla: migraciones ANTERIORES a [`FENCE_VERSION`]. Abrirla
+    ///   no publica la valla antes de tiempo (la 002 se aplica después, con
+    ///   [`Store::apply_fence`], cuando el preflight y la copia `pre-authority` ya están hechos).
+    /// * Base **cruzada pero aún no autoritativa** (FENCED, o `promoting` sin COMMIT): como
+    ///   máximo hasta la 002. Las migraciones posteriores (D/E/F1/G) no se aplican hasta que
+    ///   C2b termine la promoción: el orden de slices se conserva durante la recuperación.
+    /// * Base **autoritativa**: la lista completa.
+    ///
+    /// `all` es la lista completa del binario.
     pub fn open_boot_under_lock(dir: &Path, lock: &InstanceLock, all: &[Migration], app_version: &str) -> StoreResult<Store> {
         if lock.path() != lock_path(dir) {
             return Err(StoreError::WrongLock { expected: lock_path(dir), got: lock.path().to_path_buf() });
         }
         Store::open_inner_pick(dir, None, |conn| {
-            if migrate::db_version(conn)? >= FENCE_VERSION {
-                Ok(all.to_vec())
+            let version = migrate::db_version(conn)?;
+            let upto = if version < FENCE_VERSION {
+                FENCE_VERSION - 1
+            } else if authority::is_authoritative(conn)? {
+                i64::MAX
             } else {
-                Ok(all.iter().filter(|m| m.version < FENCE_VERSION).copied().collect())
-            }
+                FENCE_VERSION
+            };
+            Ok(all.iter().filter(|m| m.version <= upto).copied().collect())
         }, app_version)
     }
 

@@ -43,8 +43,15 @@ fn abre_arranque(dir: &Path, lock: &InstanceLock) -> Store {
     Store::open_boot_under_lock(dir, lock, &embedded(), "t").unwrap()
 }
 
+/// Como `abre_arranque` y con la valla ya aplicada: lo que el arranque tiene justo antes de promocionar.
+fn abre_cruzada(dir: &Path, lock: &InstanceLock) -> Store {
+    let mut s = abre_arranque(dir, lock);
+    s.apply_fence(&embedded(), "t").unwrap();
+    s
+}
+
 fn plan(boot: i64, hash: &str, bytes: u64) -> PromotionPlan {
-    PromotionPlan { promotion_id: new_uuid(), source_hash: hash.into(), source_bytes: bytes, sqlite_bootstrap_rev: boot, sqlite_target_rev: boot + 1 }
+    PromotionPlan::new(new_uuid(), hash.into(), bytes, boot).unwrap()
 }
 
 fn bootstrap_con_fila(s: &mut Store, rev: i64, doc: &str) {
@@ -144,18 +151,34 @@ fn si_falla_aplicar_la_valla_la_base_queda_sin_cruzar() {
 }
 
 #[test]
-fn las_migraciones_posteriores_a_la_valla_no_se_aplican_antes_de_cruzarla() {
+fn las_migraciones_posteriores_a_la_valla_solo_se_aplican_con_la_base_autoritativa() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
     let mut todas = embedded();
     todas.push(Migration::new(3, "proyectos", "CREATE TABLE projects (id TEXT PRIMARY KEY) STRICT;"));
-    let mut s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
+    let abre = |lock: &InstanceLock| Store::open_boot_under_lock(tmp.path(), lock, &todas, "t").unwrap();
+
+    // Antes de la valla: solo las anteriores a ella.
+    let mut s = abre(&lock);
     assert_eq!(s.schema_version().unwrap(), 1);
     s.apply_fence(&todas, "t").unwrap();
     assert_eq!(s.schema_version().unwrap(), 2, "apply_fence llega hasta la valla y no más");
+    bootstrap_con_fila(&mut s, 1, "{}");
     drop(s);
-    let s = Store::open_boot_under_lock(tmp.path(), &lock, &todas, "t").unwrap();
-    assert_eq!(s.schema_version().unwrap(), 3, "ya cruzada, la siguiente apertura aplica el resto");
+
+    // FENCED (caída antes de `promoting`, o `promoting` sin COMMIT): el reinicio NO aplica la 003.
+    for _ in 0..2 {
+        let s = abre(&lock);
+        assert_eq!(s.schema_version().unwrap(), 2, "FENCED todavía no es autoritativa: máximo la 002");
+        assert!(s.read(|c| Ok(c.prepare("SELECT 1 FROM projects").is_err())).unwrap(), "la tabla de la 003 no existe");
+    }
+
+    // Ya autoritativa: la siguiente apertura aplica el resto.
+    let mut s = abre(&lock);
+    s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}").unwrap();
+    drop(s);
+    let s = abre(&lock);
+    assert_eq!(s.schema_version().unwrap(), 3, "autoritativa: se aplica lo posterior a la valla");
 }
 
 #[test]
@@ -174,7 +197,7 @@ fn ensure_db_id_crea_una_vez_y_no_cambia() {
 fn promocionar_con_bootstrap_rev_10_produce_rev_11_sin_relacion_con_el_legado() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     bootstrap_con_fila(&mut s, 10, "{\"snapshot\":true}");
     let nuevo = "{\"seq\":99,\"mucho_mas_reciente\":true}";
     let p = plan(10, &sha256_hex(nuevo.as_bytes()), nuevo.len() as u64);
@@ -192,7 +215,7 @@ fn promocionar_con_bootstrap_rev_10_produce_rev_11_sin_relacion_con_el_legado() 
 fn promocionar_una_instalacion_nueva_crea_la_fila_autoritativa() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     assert_eq!(s.promote_to_authoritative(&plan(0, "none", 0), "{}").unwrap(), 1);
     let f = s.authority_facts().unwrap();
     assert_eq!((f.row_rev, f.mode.as_deref()), (Some(1), Some(MODE_SQLITE_AUTHORITATIVE)));
@@ -202,7 +225,7 @@ fn promocionar_una_instalacion_nueva_crea_la_fila_autoritativa() {
 fn la_promocion_solo_ocurre_una_vez() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     bootstrap_con_fila(&mut s, 1, "{}");
     s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}").unwrap();
     let antes = s.legacy_state().unwrap().unwrap();
@@ -215,7 +238,7 @@ fn la_promocion_solo_ocurre_una_vez() {
 fn promocionar_con_rev_equivocada_deshace_todo() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     bootstrap_con_fila(&mut s, 10, "{\"snap\":1}");
     let r = s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}");
     assert!(matches!(r, Err(StoreError::RevConflict { expected: 1, actual: Some(10) })), "{r:?}");
@@ -228,7 +251,7 @@ fn promocionar_con_rev_equivocada_deshace_todo() {
 fn promocionar_con_documento_invalido_o_target_incoherente_no_toca_nada() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     bootstrap_con_fila(&mut s, 1, "{\"snap\":1}");
     assert!(matches!(s.promote_to_authoritative(&plan(1, "h", 1), "esto no es json"), Err(StoreError::InvalidDocument(_))));
     let mut mala = plan(1, "h", 1);
@@ -243,7 +266,7 @@ fn promocionar_con_documento_invalido_o_target_incoherente_no_toca_nada() {
 fn sin_fila_pero_con_rev_previa_distinta_de_cero_es_un_conflicto() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     let r = s.promote_to_authoritative(&plan(3, "h", 1), "{}");
     assert!(matches!(r, Err(StoreError::RevConflict { expected: 3, actual: None })), "{r:?}");
 }
@@ -252,7 +275,7 @@ fn sin_fila_pero_con_rev_previa_distinta_de_cero_es_un_conflicto() {
 fn commit_autoritativo_exige_modo_autoritativo_y_rev_exacta() {
     let tmp = Tmp::new();
     let lock = lock_de(tmp.path());
-    let mut s = abre_arranque(tmp.path(), &lock);
+    let mut s = abre_cruzada(tmp.path(), &lock);
     bootstrap_con_fila(&mut s, 1, "{}");
     assert!(matches!(s.commit_authoritative(1, "{\"a\":1}"), Err(StoreError::NotAuthoritative)));
     s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}").unwrap();
@@ -263,6 +286,95 @@ fn commit_autoritativo_exige_modo_autoritativo_y_rev_exacta() {
     assert_eq!(s.legacy_state().unwrap().unwrap().doc, "{\"a\":3}");
     assert!(matches!(s.commit_authoritative(4, "no json"), Err(StoreError::InvalidDocument(_))));
     assert_eq!(s.legacy_state().unwrap().unwrap().rev, 4, "el rollback no consume rev");
+}
+
+#[test]
+fn promote_to_authoritative_sin_valla_es_un_error_y_cero_cambios() {
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    // Con fila de bootstrap...
+    let mut s = abre_arranque(tmp.path(), &lock);
+    bootstrap_con_fila(&mut s, 10, "{\"snap\":1}");
+    let antes = (s.authority_facts().unwrap(), s.legacy_state().unwrap().unwrap(), s.schema_version().unwrap());
+    let r = s.promote_to_authoritative(&plan(10, "h", 2), "{\"a\":1}");
+    assert!(matches!(r, Err(StoreError::NotFenced)), "{r:?}");
+    assert_eq!((s.authority_facts().unwrap(), s.legacy_state().unwrap().unwrap(), s.schema_version().unwrap()), antes, "cero cambios");
+    assert_eq!(s.meta("legacy_authority_promotion_id").unwrap(), None);
+    assert!(!s.is_fenced().unwrap(), "y la promoción no aplica la valla por su cuenta");
+    // ...y en una instalación nueva (sin fila): no se crea nada.
+    let nueva = Tmp::new();
+    let lock2 = lock_de(nueva.path());
+    let mut n = abre_arranque(nueva.path(), &lock2);
+    assert!(matches!(n.promote_to_authoritative(&plan(0, "none", 0), "{}"), Err(StoreError::NotFenced)));
+    assert_eq!(n.legacy_state().unwrap(), None, "no se creó la fila");
+    assert_eq!(n.meta("legacy_import_mode").unwrap(), None);
+    // Con la valla puesta, la misma promoción sí procede.
+    n.apply_fence(&embedded(), "t").unwrap();
+    assert_eq!(n.promote_to_authoritative(&plan(0, "none", 0), "{}").unwrap(), 1);
+}
+
+#[test]
+fn las_revisiones_fuera_de_rango_fallan_cerrado_sin_overflow() {
+    // PromotionPlan::new
+    assert!(matches!(PromotionPlan::new("p".into(), "none".into(), 0, i64::MAX), Err(StoreError::RevOutOfRange { rev: i64::MAX })));
+    assert!(matches!(PromotionPlan::new("p".into(), "none".into(), 0, -1), Err(StoreError::RevOutOfRange { rev: -1 })));
+    assert_eq!(PromotionPlan::new("p".into(), "none".into(), 0, i64::MAX - 1).unwrap().sqlite_target_rev, i64::MAX);
+
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    let mut s = abre_cruzada(tmp.path(), &lock);
+    bootstrap_con_fila(&mut s, 1, "{}");
+    // Un plan escrito a mano con target envuelto no se acepta.
+    let torcido = PromotionPlan { promotion_id: "p".into(), source_hash: "none".into(), source_bytes: 0, sqlite_bootstrap_rev: i64::MAX, sqlite_target_rev: i64::MIN };
+    assert!(matches!(s.promote_to_authoritative(&torcido, "{}"), Err(StoreError::RevOutOfRange { .. })));
+    assert_eq!(s.legacy_state().unwrap().unwrap().rev, 1);
+
+    // commit_authoritative con la fila en i64::MAX: no se envuelve ni hace panic ni escribe.
+    s.promote_to_authoritative(&plan(1, "h", 2), "{\"a\":1}").unwrap();
+    s.write(|tx| {
+        tx.execute("UPDATE legacy_state SET rev = ?1", [i64::MAX])?;
+        Ok(())
+    })
+    .unwrap();
+    let r = s.commit_authoritative(i64::MAX, "{\"a\":2}");
+    assert!(matches!(r, Err(StoreError::RevOutOfRange { rev: i64::MAX })), "{r:?}");
+    let fila = s.legacy_state().unwrap().unwrap();
+    assert_eq!((fila.rev, fila.doc.as_str()), (i64::MAX, "{\"a\":1}"));
+    assert!(!StoreError::RevOutOfRange { rev: 1 }.is_transient() && !StoreError::NotFenced.is_transient());
+}
+
+#[test]
+fn metadata_de_autoridad_incoherente_no_se_da_por_buena() {
+    let tmp = Tmp::new();
+    let lock = lock_de(tmp.path());
+    let mut s = abre_cruzada(tmp.path(), &lock);
+    bootstrap_con_fila(&mut s, 1, "{}");
+    s.promote_to_authoritative(&plan(1, &sha256_hex(b"{}"), 2), "{}").unwrap();
+    assert!(s.authority_facts().unwrap().auth.is_some(), "la promoción normal es coherente");
+    let toca = |s: &mut Store, k: &str, v: &str| {
+        s.write(|tx| {
+            tx.execute("UPDATE meta SET value = ?2 WHERE key = ?1", rusqlite::params![k, v])?;
+            Ok(())
+        })
+        .unwrap()
+    };
+    let bueno = s.authority_facts().unwrap().auth.unwrap();
+    // target != bootstrap + 1
+    toca(&mut s, "legacy_authority_sqlite_target_rev", "9");
+    assert!(s.authority_facts().unwrap().auth.is_none());
+    toca(&mut s, "legacy_authority_sqlite_target_rev", &bueno.sqlite_target_rev.to_string());
+    assert!(s.authority_facts().unwrap().auth.is_some());
+    // bootstrap = i64::MAX (envolvería)
+    toca(&mut s, "legacy_authority_sqlite_bootstrap_rev", &i64::MAX.to_string());
+    toca(&mut s, "legacy_authority_sqlite_target_rev", &i64::MIN.to_string());
+    assert!(s.authority_facts().unwrap().auth.is_none());
+    toca(&mut s, "legacy_authority_sqlite_bootstrap_rev", &bueno.sqlite_bootstrap_rev.to_string());
+    toca(&mut s, "legacy_authority_sqlite_target_rev", &bueno.sqlite_target_rev.to_string());
+    // «sin legado» con bytes
+    toca(&mut s, "legacy_authority_source_hash", "none");
+    assert!(s.authority_facts().unwrap().auth.is_none(), "none => source_bytes == 0");
+    toca(&mut s, "legacy_authority_source_bytes", "0");
+    assert!(s.authority_facts().unwrap().auth.is_some());
 }
 
 #[test]
@@ -332,6 +444,8 @@ fn clasificacion_central_de_errores_transitorios_y_estructurales() {
         StoreError::InvalidDocument("x".into()),
         StoreError::NotAuthoritative,
         StoreError::PromotionConflict("x".into()),
+        StoreError::NotFenced,
+        StoreError::RevOutOfRange { rev: i64::MAX },
     ] {
         assert!(!estructural.is_transient(), "{estructural:?} no se reintenta");
     }
