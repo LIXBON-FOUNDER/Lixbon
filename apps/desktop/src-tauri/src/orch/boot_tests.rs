@@ -727,6 +727,33 @@ fn el_informe_del_arranque_lleva_la_rev_tras_cerrar_las_huerfanas() {
 }
 
 #[test]
+fn sin_marcador_y_con_la_identidad_de_sqlite_invalida_bloquea_y_no_reconstruye_authority_json() {
+    for (nombre, clave, valor) in [
+        ("source_hash inválido", "legacy_authority_source_hash", "basura"),
+        ("promotion_id vacío", "legacy_authority_promotion_id", ""),
+        ("hash real con 0 bytes", "legacy_authority_source_bytes", "0"),
+    ] {
+        let (_l, data, core_dir) = dirs();
+        promovida(&data, &core_dir, "previa");
+        // Se pierde el marcador y la metadata interna queda corrupta, con el modo aún autoritativo.
+        std::fs::remove_file(marker_path(&core_dir)).unwrap();
+        {
+            let c = rusqlite::Connection::open(core_dir.join("lixbon.db")).unwrap();
+            c.execute("UPDATE meta SET value = ?2 WHERE key = ?1", rusqlite::params![clave, valor]).unwrap();
+            let modo: String = c.query_row("SELECT value FROM meta WHERE key = 'legacy_import_mode'", [], |r| r.get(0)).unwrap();
+            assert_eq!(modo, MODE_SQLITE_AUTHORITATIVE);
+        }
+        let espejo_antes = std::fs::read(data.join("state.json")).unwrap();
+        let (core, _h, r) = arranca(&data, &core_dir);
+        let msg = r.expect_err(nombre);
+        assert!(msg.contains("contradicen") || msg.contains("incompleta"), "{nombre}: {msg}");
+        assert!(!marker_path(&core_dir).exists(), "{nombre}: NO se reconstruye authority.json desde metadata inválida");
+        assert_eq!(std::fs::read(data.join("state.json")).unwrap(), espejo_antes, "{nombre}: no se toca el espejo");
+        assert!(core.lock().tasks.is_empty(), "{nombre}: el Core no arrancó con estado");
+    }
+}
+
+#[test]
 fn una_rev_de_fila_en_el_limite_bloquea_la_promocion_sin_envolver() {
     let (_l, data, core_dir) = dirs();
     let original = legado_con(&data, "previa");

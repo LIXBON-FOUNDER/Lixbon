@@ -47,7 +47,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
-pub use authority::{new_uuid, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
+pub use authority::{check_promotion_identity, new_uuid, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
 pub use crash::crash_point;
 pub use error::{StoreError, StoreResult};
@@ -122,7 +122,9 @@ impl Store {
     /// * Base **cruzada pero aún no autoritativa** (FENCED, o `promoting` sin COMMIT): como
     ///   máximo hasta la 002. Las migraciones posteriores (D/E/F1/G) no se aplican hasta que
     ///   C2b termine la promoción: el orden de slices se conserva durante la recuperación.
-    /// * Base **autoritativa**: la lista completa.
+    /// * Base **autoritativa** (modo `sqlite_authoritative` Y registro interno de autoridad
+    ///   estructuralmente válido, no solo el modo): la lista completa. Con el modo pero la
+    ///   metadata corrupta, máximo la 002 y el arranque bloquea.
     ///
     /// `all` es la lista completa del binario.
     pub fn open_boot_under_lock(dir: &Path, lock: &InstanceLock, all: &[Migration], app_version: &str) -> StoreResult<Store> {
@@ -133,7 +135,7 @@ impl Store {
             let version = migrate::db_version(conn)?;
             let upto = if version < FENCE_VERSION {
                 FENCE_VERSION - 1
-            } else if authority::is_authoritative(conn)? {
+            } else if authority::authority_record_valid(conn)? {
                 i64::MAX
             } else {
                 FENCE_VERSION
