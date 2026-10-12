@@ -47,6 +47,8 @@ pub enum StoreError {
     NotFenced,
     /// Una revisión persistida está fuera de rango (negativa, o `i64::MAX`: no se puede avanzar).
     RevOutOfRange { rev: i64 },
+    /// El registro de proyectos no puede aplicar la operación (ruta ya de otro proyecto, proyecto inexistente).
+    ProjectConflict(String),
 }
 
 impl StoreError {
@@ -144,6 +146,7 @@ impl fmt::Display for StoreError {
                 "la base de datos no ha cruzado la valla de compatibilidad (migración 002); no se puede promocionar a autoritativa sin ella",
             ),
             StoreError::RevOutOfRange { rev } => write!(f, "la revisión {rev} está fuera de rango y no se puede avanzar; los datos de autoridad no se dan por buenos"),
+            StoreError::ProjectConflict(m) => write!(f, "registro de proyectos: {m}"),
         }
     }
 }

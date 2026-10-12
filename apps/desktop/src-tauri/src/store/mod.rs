@@ -38,8 +38,11 @@ mod legacy;
 mod lock;
 mod migrate;
 mod private;
+mod projects;
 #[cfg(test)]
 mod authority_tests;
+#[cfg(test)]
+mod projects_tests;
 #[cfg(test)]
 mod tests;
 
@@ -56,6 +59,7 @@ pub use error::{StoreError, StoreResult};
 #[allow(unused_imports)]
 pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
+pub use projects::{Fingerprint, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 use migrate::now_ms;
 

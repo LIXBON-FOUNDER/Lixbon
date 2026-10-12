@@ -1,7 +1,7 @@
 //! Comandos Tauri del orquestador (IPC de la interfaz).
 
 use std::path::Path;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State as TauriState};
 use super::{Caller, CodexTerms, Orch, Settings, agents, codex_session, codex_term, data_dir, lxo_path, providers, roles, skill, spawn_approval, write_json};
 
@@ -33,6 +33,37 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
 #[tauri::command(async)]
 pub fn orch_call(orch: TauriState<'_, Orch>, cmd: String, args: Value) -> Result<Value, String> {
     orch.0.rpc(Caller::User, "", &cmd, &args)
+}
+
+/// Proyectos registrados (slice D), con sus ubicaciones. `include_archived`: también los archivados.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_projects(orch: TauriState<'_, Orch>, include_archived: Option<bool>) -> Result<Value, String> {
+    orch.0.rpc(Caller::User, "", "projects", &json!({ "all": include_archived.unwrap_or(false) }))
+}
+
+/// Registra el repositorio de `path` como proyecto. Si se parece a uno ya registrado en otra ruta
+/// devuelve `needs_confirmation`; se resuelve repitiendo con `join` (mismo proyecto) o `new`.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_project_add(orch: TauriState<'_, Orch>, path: String, name: Option<String>, join: Option<String>, new: Option<bool>) -> Result<Value, String> {
+    orch.0.rpc(Caller::User, "", "project_add", &json!({ "path": path, "name": name, "join": join, "new": new }))
+}
+
+/// Archiva (oculta, sin borrar) o restaura un proyecto.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_project_archive(orch: TauriState<'_, Orch>, project_id: String, archived: Option<bool>) -> Result<Value, String> {
+    orch.0.rpc(Caller::User, "", "project_archive", &json!({ "project_id": project_id, "archived": archived.unwrap_or(true) }))
+}
+
+/// Dice dónde está ahora un proyecto (mismo id, otra ruta).
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_project_locate(orch: TauriState<'_, Orch>, project_id: String, path: String, confirm: Option<bool>) -> Result<Value, String> {
+    orch.0.rpc(Caller::User, "", "project_locate", &json!({ "project_id": project_id, "path": path, "confirm": confirm.unwrap_or(false) }))
+}
+
+/// Importa una sola vez las carpetas recientes de la interfaz (`lixbon_recents`).
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_projects_import_recents(orch: TauriState<'_, Orch>, paths: Vec<String>) -> Result<Value, String> {
+    orch.0.rpc(Caller::User, "", "projects_import_recents", &json!({ "paths": paths }))
 }
 
 #[tauri::command]
