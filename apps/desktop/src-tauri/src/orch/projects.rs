@@ -415,28 +415,40 @@ impl Core {
     // -----------------------------------------------------------------------------------------
 
     /// Descubrimiento automático: resuelve (y si hace falta crea) el proyecto de un repositorio SIN
-    /// preguntar a nadie. Misma ruta → ese proyecto; sin coincidencias (inequívocamente nuevo) →
-    /// proyecto nuevo; con candidatos → `None` (no se une en silencio; la tarea queda sin proyecto
-    /// hasta que la persona confirme). No falla: si el registro no responde devuelve `None`; eso solo
-    /// deja la tarea sin proyecto, igual que antes de D, y la guarda de lanzamiento no se activa para
-    /// lo que nunca tuvo `project_id`.
-    pub(super) fn project_for_repo(&self, repo: &str) -> Option<String> {
-        let ident = identify(repo).ok()?;
-        self.resolve_or_create(&ident).ok().flatten()
+    /// preguntar a nadie. Tres resultados que NO se mezclan:
+    ///
+    /// * `Ok(Some(id))` — proyecto resuelto: misma ruta, o inequívocamente nuevo (se crea);
+    /// * `Ok(None)` — no hay proyecto que asignar, y es legítimo: el repositorio es AMBIGUO (se parece
+    ///   a uno registrado en otra ruta: no se une en silencio, la tarea queda sin proyecto hasta que la
+    ///   persona confirme), `git` no lo puede identificar, o el registro es opcional y NO está
+    ///   disponible (almacén cerrado/degradado: D no es requisito de los flujos legacy);
+    /// * `Err(..)` — el registro está ACTIVO y falló de verdad. Se propaga: quien lanza no debe crear
+    ///   una tarea sin proyecto como si nada, porque entonces ni el archivado ni la ubicación
+    ///   desaparecida podrían protegerla.
+    pub(super) fn project_for_repo(&self, repo: &str) -> Result<Option<String>, String> {
+        let Ok(ident) = identify(repo) else { return Ok(None) };
+        self.registry_opt(|st| Self::resolve_in(st, &ident))
+            .map(Option::flatten)
+            .map_err(|why| format!("No se pudo comprobar el registro de proyectos para {repo}: {why}. No se crea nada hasta poder comprobarlo."))
     }
 
-    fn resolve_or_create(&self, ident: &Identity) -> Result<Option<String>, String> {
-        self.registry(|st| {
-            let machine = machine_id(st)?;
-            Ok(match lookup(st, &machine, ident)? {
-                Lookup::ByPath(id) => Some(id),
-                Lookup::Candidates(_) => None,
-                Lookup::None => {
-                    let loc = NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true };
-                    Some(st.project_create(&ident.name, &ident.fingerprint, &loc)?.id)
-                }
-            })
+    /// Solo SQL: se llama con el mutex del almacén tomado.
+    fn resolve_in(st: &mut Store, ident: &Identity) -> StoreResult<Option<String>> {
+        let machine = machine_id(st)?;
+        Ok(match lookup(st, &machine, ident)? {
+            Lookup::ByPath(id) => Some(id),
+            Lookup::Candidates(_) => None,
+            Lookup::None => {
+                let loc = NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true };
+                Some(st.project_create(&ident.name, &ident.fingerprint, &loc)?.id)
+            }
         })
+    }
+
+    /// Como [`Core::project_for_repo`], pero un registro no disponible es un error (relleno e
+    /// importación lo necesitan abierto).
+    fn resolve_or_create(&self, ident: &Identity) -> Result<Option<String>, String> {
+        self.registry(|st| Self::resolve_in(st, ident))
     }
 
     /// Asigna `project_id` a las tareas existentes que no lo tienen (perezoso: se llama tras arrancar,

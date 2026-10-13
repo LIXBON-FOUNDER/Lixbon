@@ -697,9 +697,164 @@ fn un_error_del_registro_con_project_id_conocido_no_se_convierte_en_ok() {
     // Compatibilidad: lo que NUNCA tuvo project_id no depende del registro.
     let sin = tarea_en(&core, &s(&r), "sin proyecto");
     assert!(core.check_project_launchable(&sin).is_ok());
-    // Y un run_create nuevo sigue funcionando con el registro roto: queda sin proyecto, como antes de D.
-    let out = core.rpc(Caller::Agent(None), &s(&r), "run_create", &json!({ "objective": "x" })).unwrap();
-    assert_eq!(project_id_de_tarea(&core, out["task"].as_str().unwrap()), None);
+}
+
+#[test]
+fn un_fallo_real_del_registro_activo_no_crea_en_silencio_una_tarea_sin_proyecto() {
+    let (_l, data, _c, core) = core_listo();
+    core.settings.lock().unwrap().enabled = true;
+    let r = repo(&base_de(&data), "app", None);
+    // Con el registro sano, run_create asigna proyecto.
+    let sano = core.rpc(Caller::Agent(None), &s(&r), "run_create", &json!({ "objective": "a" })).unwrap();
+    assert!(project_id_de_tarea(&core, sano["task"].as_str().unwrap()).is_some());
+    let antes = conteo(&core);
+
+    // Almacén ABIERTO pero con el registro roto: error real -> se propaga y no se crea nada.
+    rompe_el_registro(&core);
+    let e = core.rpc(Caller::Agent(None), &s(&r), "run_create", &json!({ "objective": "b" })).unwrap_err();
+    assert!(e.contains("No se pudo comprobar el registro de proyectos"), "{e}");
+    assert_eq!(conteo(&core), antes, "no queda ni run ni tarea a medias");
+}
+
+#[test]
+fn ambiguo_o_registro_no_disponible_siguen_creando_la_tarea_sin_proyecto() {
+    let (_l, data, _c, core) = core_listo();
+    core.settings.lock().unwrap().enabled = true;
+    let base = base_de(&data);
+    // Ambigüedad de identidad -> Ok(None) legítimo (ver también el test del repositorio ambiguo).
+    let origen = repo(&base, "origen", None);
+    registra(&core, &origen);
+    let copia = clon(&base, &origen, "copia", None);
+    assert_eq!(core.project_for_repo(&s(&copia)), Ok(None));
+    // Lo que git no puede identificar tampoco es un error del registro.
+    assert_eq!(core.project_for_repo(&s(&base.join("no-existe"))), Ok(None));
+    // Registro opcional NO disponible (almacén cerrado): no es un error, es compatibilidad.
+    let otro = repo(&base, "otro", None);
+    core.storage.degrade("prueba".into());
+    assert_eq!(core.project_for_repo(&s(&otro)), Ok(None));
+}
+
+#[test]
+fn en_un_arranque_legacy_degradado_run_create_sigue_funcionando_sin_proyecto() {
+    // El caso real del modo degradado: la base no se puede abrir y el Core arranca con `state.json` (C1).
+    let (_l, data, core_dir) = dirs();
+    std::fs::create_dir_all(&core_dir).unwrap();
+    std::fs::write(core_dir.join("lixbon.db"), vec![b'x'; 4096]).unwrap();
+    legado_con(&data, "previa");
+    let (core, _h, r) = arranca(&data, &core_dir);
+    r.expect("un fallo recuperable no impide arrancar");
+    assert!(matches!(core.storage_status(), StorageStatus::Degraded(_)));
+    core.settings.lock().unwrap().enabled = true;
+    let repo_legacy = repo(&base_de(&data), "legacy", None);
+    let out = core.rpc(Caller::Agent(None), &s(&repo_legacy), "run_create", &json!({ "objective": "x" })).unwrap();
+    assert_eq!(project_id_de_tarea(&core, out["task"].as_str().unwrap()), None, "D no es requisito de los flujos legacy");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revalidación tras la aprobación humana: plan -> aprobación -> revalidación -> efectos
+// ---------------------------------------------------------------------------------------------
+
+/// Resolución de política de las pruebas: sin CLI instalada (igual que en `spawn_approval`).
+fn politica_de_prueba(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> super::agents::Policy {
+    let prof = super::agents::Profile::parse(profile).expect("perfil");
+    super::agents::evaluate_for(provider, prof, role, worktree, super::agents::Detected::Skip, false, super::agents::Delivery::FileOrMarkers)
+}
+
+/// Un Core con almacén REAL y lanzamientos simulados (no se abre ninguna terminal ni CLI).
+fn core_que_lanza() -> (Limpia, PathBuf, Arc<Core>) {
+    let (l, data, core_dir) = dirs();
+    let mut orch = super::Orch::default();
+    Arc::get_mut(&mut orch.0).expect("Core sin compartir todavía").resolver = politica_de_prueba;
+    let core = orch.0;
+    core.init_in(super::host::RecordingHost::new(), &data, &core_dir).unwrap();
+    assert!(matches!(core.storage_status(), StorageStatus::Ready(_)));
+    core.settings.lock().unwrap().enabled = true;
+    (l, data, core)
+}
+
+/// El coordinador de un run en `repo`, con su proyecto asignado por `run_create`.
+fn coordinador_en(core: &Arc<Core>, repo: &Path) -> (String, String) {
+    let out = core.rpc(Caller::Agent(None), &s(repo), "run_create", &json!({ "objective": "obj" })).unwrap();
+    let root = out["task"].as_str().unwrap().to_string();
+    let pid = project_id_de_tarea(core, &root).expect("run_create asigna el proyecto");
+    (root, pid)
+}
+
+/// Pide una hija y devuelve `(pending_id, argv del host, carpeta del worktree propuesto)`.
+fn pide_hija(core: &Arc<Core>, root: &str, agente: &str) -> (String, Vec<String>, String) {
+    let args = json!({ "agent": agente, "task": format!("Encargo para {agente}. Detalle"), "name": format!("Hija {agente}") });
+    let p = core.rpc(Caller::Agent(Some(root.to_string())), "", "spawn", &args).unwrap();
+    let id = p["pending_id"].as_str().unwrap().to_string();
+    let pend = core.list_pending_spawns().into_iter().find(|x| x.pending_id == id).expect("pendiente listado");
+    (id, pend.policy.argv, pend.cwd)
+}
+
+/// `(runs, tareas)` con UN solo bloqueo del estado (dos `lock()` en la misma expresión se bloquean).
+fn conteo(core: &Arc<Core>) -> (usize, usize) {
+    let st = core.lock();
+    (st.runs.len(), st.tasks.len())
+}
+
+fn hijas(core: &Arc<Core>) -> usize {
+    core.lock().tasks.values().filter(|t| t.parent.is_some()).count()
+}
+
+fn lanzados(core: &Arc<Core>) -> usize {
+    core.launched.lock().unwrap().len()
+}
+
+#[test]
+fn archivar_entre_el_pendiente_y_la_aprobacion_rechaza_sin_efectos() {
+    let (_l, data, core) = core_que_lanza();
+    let r = repo(&base_de(&data), "app", None);
+    let (root, pid) = coordinador_en(&core, &r);
+    let (a, argv_a, cwd_a) = pide_hija(&core, &root, "claude");
+    let (b, argv_b, _) = pide_hija(&core, &root, "codex");
+
+    // Control: con el proyecto ACTIVO la aprobación sí lanza (el arnés lanza de verdad).
+    let ok = core.approve_spawn(&b, true, &argv_b, true).unwrap();
+    assert_eq!(ok["outcome"], "approved", "{ok}");
+    assert_eq!((hijas(&core), lanzados(&core)), (1, 1));
+    let worktrees = g(&r, &["worktree", "list"]).lines().count();
+    let ramas = g(&r, &["branch", "--list", "lx/*"]);
+    assert_eq!(worktrees, 2);
+
+    // Entre el pendiente y el «sí» de la persona se archiva el proyecto.
+    rpc(&core, "project_archive", json!({ "project_id": pid })).unwrap();
+    let out = core.approve_spawn(&a, true, &argv_a, true).unwrap();
+    assert_eq!(out["outcome"], "launch_failed", "{out}");
+    assert!(out["reason"].as_str().unwrap().contains("archivado"), "{out}");
+
+    // Sin efectos: ni Task hija nueva, ni worktree, ni rama, ni proceso.
+    assert_eq!(hijas(&core), 1, "no queda una Task hija de la aprobación rechazada");
+    assert_eq!(lanzados(&core), 1, "no se lanzó ningún proceso");
+    assert_eq!(g(&r, &["worktree", "list"]).lines().count(), worktrees, "no se creó ningún worktree");
+    assert_eq!(g(&r, &["branch", "--list", "lx/*"]), ramas, "no se creó ninguna rama");
+    assert!(!Path::new(&cwd_a).exists(), "la carpeta propuesta no existe");
+    // Y pedir otra hija nueva sigue fallando temprano, en `plan_spawn`.
+    let e = spawn_de(&core, &root).unwrap_err();
+    assert!(e.contains("archivado"), "{e}");
+}
+
+#[test]
+fn desaparecer_la_ubicacion_entre_el_pendiente_y_la_aprobacion_rechaza_sin_efectos() {
+    let (_l, data, core) = core_que_lanza();
+    let r = repo(&base_de(&data), "app", None);
+    let (root, _pid) = coordinador_en(&core, &r);
+    let (a, argv_a, cwd_a) = pide_hija(&core, &root, "claude");
+    let (antes_hijas, antes_lanzados) = (hijas(&core), lanzados(&core));
+
+    // La carpeta del proyecto desaparece mientras el pendiente espera.
+    std::fs::remove_dir_all(r.join(".git")).unwrap();
+    std::fs::remove_dir_all(&r).unwrap();
+    let out = core.approve_spawn(&a, true, &argv_a, true).unwrap();
+    assert_eq!(out["outcome"], "launch_failed", "{out}");
+    assert!(out["reason"].as_str().unwrap().contains("project_locate"), "{out}");
+
+    assert_eq!((hijas(&core), lanzados(&core)), (antes_hijas, antes_lanzados), "ni Task hija ni proceso");
+    assert!(!Path::new(&cwd_a).exists(), "no se creó el worktree");
+    let hermano = r.parent().unwrap().join(format!("{}.lixbon-wt", r.file_name().unwrap().to_string_lossy()));
+    assert!(!hermano.exists(), "no se creó la carpeta de worktrees del repositorio");
 }
 
 #[test]
