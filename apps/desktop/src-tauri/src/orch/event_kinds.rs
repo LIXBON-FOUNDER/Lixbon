@@ -42,7 +42,6 @@ const MAX_LISTED: usize = 20;
 #[derive(Serialize)]
 pub(super) struct RunCreated {
     root_task: String,
-    objective: String,
 }
 
 impl EventPayload for RunCreated {
@@ -51,8 +50,9 @@ impl EventPayload for RunCreated {
     const CLASS: EventClass = EventClass::State;
 }
 
-pub(super) fn run_created(run: &str, root_task: &str, objective: &str) -> Result<EventDraft, EventError> {
-    let p = RunCreated { root_task: root_task.into(), objective: clip(objective, 120) };
+/// El objetivo (texto libre del usuario) se queda en `Run.objective`: el evento no lo copia.
+pub(super) fn run_created(run: &str, root_task: &str) -> Result<EventDraft, EventError> {
+    let p = RunCreated { root_task: root_task.into() };
     Ok(EventDraft::new(EntityKind::Run, run, &p)?.run(Some(run.into())).project_from_task(root_task))
 }
 
@@ -148,8 +148,6 @@ pub(super) fn task_status_changed(task: &str, run: &str, from: Status, to: Statu
 pub(super) struct TaskPhase {
     name: String,
     done: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    note: Option<String>,
 }
 
 impl EventPayload for TaskPhase {
@@ -158,8 +156,9 @@ impl EventPayload for TaskPhase {
     const CLASS: EventClass = EventClass::State;
 }
 
-pub(super) fn task_phase(task: &str, run: &str, name: &str, done: bool, note: &str) -> Result<EventDraft, EventError> {
-    let p = TaskPhase { name: clip(name, 80), done, note: Some(note).filter(|n| !n.trim().is_empty()).map(|n| clip(n, 200)) };
+/// Solo el hecho estructural (`name`, `done`). La nota es texto libre y vive en el estado/mensaje de fase.
+pub(super) fn task_phase(task: &str, run: &str, name: &str, done: bool) -> Result<EventDraft, EventError> {
+    let p = TaskPhase { name: clip(name, 80), done };
     Ok(EventDraft::new(EntityKind::Task, task, &p)?.run(Some(run.into())).project_from_task(task))
 }
 
@@ -187,7 +186,6 @@ pub(super) fn task_question(task: &str, run: &str, message_id: u64, to: &str) ->
 pub(super) struct TaskReply {
     question_id: u64,
     message_id: u64,
-    answered_by: String,
 }
 
 impl EventPayload for TaskReply {
@@ -197,7 +195,8 @@ impl EventPayload for TaskReply {
 }
 
 /// La entidad es la tarea que PREGUNTÓ (el hilo de la pregunta); quien responde es el actor.
-pub(super) fn task_reply(asker_task: &str, run: &str, question_id: u64, message_id: u64, answered_by: &str) -> Result<EventDraft, EventError> {
-    let p = TaskReply { question_id, message_id, answered_by: answered_by.into() };
+/// Quien respondió es el ACTOR del evento (columnas), no un campo del payload.
+pub(super) fn task_reply(asker_task: &str, run: &str, question_id: u64, message_id: u64) -> Result<EventDraft, EventError> {
+    let p = TaskReply { question_id, message_id };
     Ok(EventDraft::new(EntityKind::Task, asker_task, &p)?.run(Some(run.into())).project_from_task(asker_task).correlated(format!("q{question_id}")))
 }

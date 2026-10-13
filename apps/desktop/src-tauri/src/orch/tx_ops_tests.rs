@@ -109,7 +109,7 @@ fn create_run_emite_run_created_y_task_created_de_la_raiz_y_nada_mas() {
     assert_eq!(kinds(&evs), vec!["run.created", "task.created"], "la existencia del run y la de su raíz son dos hechos");
     assert_eq!((evs[0].entity_kind.as_str(), evs[0].entity_id.as_str()), ("run", run.as_str()));
     assert_eq!((evs[1].entity_kind.as_str(), evs[1].entity_id.as_str()), ("task", root.as_str()));
-    assert_eq!(pl(&evs[0]), json!({ "root_task": root, "objective": "hacer algo importante" }));
+    assert_eq!(pl(&evs[0]), json!({ "root_task": root }), "el objetivo (texto libre) no se copia al log");
     assert_eq!(pl(&evs[1]), json!({ "parent": null, "depth": 0, "agent": "claude", "role": null, "model": null, "title": "raiz", "external": false }));
     assert!(evs.iter().all(|e| e.run_id.as_deref() == Some(run.as_str()) && e.class == EventClass::State));
     assert_eq!(evs[0].state_rev, evs[1].state_rev, "salen del mismo commit");
@@ -251,8 +251,8 @@ fn phase_emite_task_phase_y_status_changed_solo_si_el_estado_cambio() {
     r.unwrap();
     assert_eq!(kinds(&evs), vec!["task.phase"]);
     assert_eq!(pl(&evs[0])["name"], "análisis");
-    assert_eq!(pl(&evs[0])["done"], false);
-    assert_eq!(pl(&evs[0])["note"].as_str().unwrap().chars().count(), 200, "la nota se recorta: nunca se acerca a 8 KiB");
+    assert_eq!(pl(&evs[0]), json!({ "name": "análisis", "done": false }), "solo el hecho estructural: la nota (texto libre) se queda en el estado");
+    assert!(!evs[0].payload.contains("nnnn"), "la nota no aparece en ningún sitio del payload");
     // En espera: la fase la devuelve a `running` -> dos hechos distintos.
     core.mutate(|tx| tx.ask(&b, "¿seguimos?").map(|_| ())).unwrap();
     let (_r, evs) = paso(&core, |tx| tx.phase(&b, "pruebas", true, "").map(|_| ()));
@@ -280,7 +280,7 @@ fn ask_y_reply_emiten_contenido_y_la_transicion_real() {
     let reply = r.unwrap();
     assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed"]);
     assert_eq!((evs[0].entity_id.as_str(), evs[0].actor_id.as_deref()), (a.as_str(), Some(root.as_str())));
-    assert_eq!(pl(&evs[0]), json!({ "question_id": q, "message_id": reply, "answered_by": root }));
+    assert_eq!(pl(&evs[0]), json!({ "question_id": q, "message_id": reply }), "quien responde es el actor del evento, no un campo");
     assert_eq!(evs[0].correlation_id, Some(format!("q{q}")), "la respuesta se correlaciona con la pregunta");
     assert_eq!(pl(&evs[1]), json!({ "from": "waiting", "to": "running", "cause": "answered" }));
 }
@@ -559,6 +559,144 @@ fn el_adaptador_de_pruebas_valida_los_borradores_igual_que_produccion_y_descarta
     });
     assert!(matches!(&r, Err(m) if m.contains("idem_key")), "{r:?}");
     assert_eq!(st.read(|s| s.runs.len()), 1, "el estado no se publicó");
+}
+
+#[test]
+fn el_adaptador_de_pruebas_respeta_no_change_igual_que_produccion() {
+    let st = Mutex::new(State::default());
+    st.mutate(|tx| {
+        tx.create_run("obj", nt("raiz"));
+        Ok(())
+    })
+    .unwrap();
+    let antes = serde_json::to_string(&st.read(|s| s.clone())).unwrap();
+    // Se modifica el candidato, se llama a `no_change` y se devuelve Ok: el candidato se descarta.
+    let r = st.mutate(|tx| {
+        tx.create_run("descartado", nt("otra"));
+        tx.no_change();
+        Ok(7)
+    });
+    assert_eq!(r, Ok(7), "el valor del cierre se devuelve igualmente");
+    assert_eq!(serde_json::to_string(&st.read(|s| s.clone())).unwrap(), antes, "no_change: el estado queda idéntico");
+    // `no_change` descarta también los borradores: no se validan (como en `mutate_locked`).
+    let r = st.mutate(|tx| {
+        tx.create_run("descartado", nt("otra"));
+        tx.push_event(EventDraft::new(EntityKind::Core, "core", &Prueba { n: 1 }).unwrap().idempotent(""));
+        tx.no_change();
+        Ok(())
+    });
+    assert!(r.is_ok(), "{r:?}");
+    assert_eq!(serde_json::to_string(&st.read(|s| s.clone())).unwrap(), antes);
+    // Un cierre que devuelve Err tampoco publica.
+    let r: Result<(), String> = st.mutate(|tx| {
+        tx.create_run("descartado", nt("otra"));
+        Err("no".into())
+    });
+    assert_eq!(r, Err("no".into()));
+    assert_eq!(serde_json::to_string(&st.read(|s| s.clone())).unwrap(), antes, "Err: no se publica");
+    // Solo un Tx válido y cambiado sustituye el estado.
+    st.mutate(|tx| {
+        tx.create_run("otro", nt("otra"));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(st.read(|s| s.runs.len()), 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// collect: el agente produce (o no) el informe; el Core diagnostica y decide el cierre
+// ---------------------------------------------------------------------------------------------
+
+fn informe(summary: &str) -> delivery::Report {
+    delivery::Report {
+        ok: true,
+        summary: summary.into(),
+        files: vec![],
+        report: None,
+        sha256: "ab".repeat(32),
+        channel: delivery::Channel::Stdout,
+        model: None,
+        session_id: None,
+    }
+}
+
+/// `(a, b, c)`: tres hijas corriendo en un repositorio real (el informe válido escribe un archivo).
+fn tres_en_repo(core: &Core, data: &Path) -> (String, String, String) {
+    let r = repo(data);
+    core.mutate(|tx| {
+        let (_run, root) = tx.create_run("obj", NewTask { external: true, ..nt_en(&r, "raiz") });
+        tx.mark_running(&root)?;
+        let mut hijas = Vec::new();
+        for t in ["a", "b", "c"] {
+            let h = tx.add_child(&root, 2, nt_en(&r, t))?;
+            tx.mark_running(&h)?;
+            hijas.push(h);
+        }
+        Ok((hijas[0].clone(), hijas[1].clone(), hijas[2].clone()))
+    })
+    .unwrap()
+}
+
+fn actor_y_canal(e: &EventRow) -> (&str, Option<&str>, Option<&str>) {
+    (e.actor_kind.as_str(), e.actor_id.as_deref(), e.channel.as_deref())
+}
+
+#[test]
+fn collect_atribuye_el_informe_valido_al_agente_y_el_resto_al_core() {
+    let (_l, data, core) = core_listo();
+    let (a, b, c) = tres_en_repo(&core, &data);
+
+    // Informe válido aceptado: lo produjo el agente (Agent(task) / Core).
+    let antes = head(&core);
+    core.apply_found(&a, Found::Valid(informe("hecho")), true);
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "done" }));
+    assert_eq!(actor_y_canal(&evs[0]), ("agent", Some(a.as_str()), Some("core")));
+
+    // Informe inválido al salir: el agente no produjo nada utilizable; el Core cierra `failed` (System / Core).
+    let antes = head(&core);
+    core.apply_found(&b, Found::Invalid("roto".into()), true);
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "failed" }));
+    assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")), "informe inválido: lo decide el Core");
+
+    // Proceso que sale sin informe: el Core lo deja `exited` (System / Core).
+    let antes = head(&core);
+    core.apply_found(&c, Found::Nothing, true);
+    let evs = desde(&core, antes);
+    assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "exited" }));
+    assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")), "sin informe: lo decide el Core");
+}
+
+#[test]
+fn collect_no_entregado_y_el_fallback_de_aplicacion_son_del_core() {
+    let (_l, data, core) = core_listo();
+    let (a, b, _c) = tres_en_repo(&core, &data);
+
+    // Informe no entregado por ninguna vía válida: Failed decidido por el Core.
+    let antes = head(&core);
+    core.apply_found(&a, Found::Undelivered("demasiado grande".into()), true);
+    let evs = desde(&core, antes);
+    assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "failed" }));
+    assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")));
+
+    // Informe «válido» que no se puede aplicar (el run ya no tiene coordinador): el Core cierra Failed,
+    // aunque el contexto inicial fuera el del agente.
+    core.mutate(|tx| {
+        let run = tx.task(&b)?.run.clone();
+        let root = tx.runs.get(&run).map(|r| r.root.clone()).unwrap();
+        tx.tasks.remove(&root);
+        Ok(())
+    })
+    .unwrap();
+    let antes = head(&core);
+    core.apply_found(&b, Found::Valid(informe("hecho")), true);
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "failed" }));
+    assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")), "fallback del Core tras fallar la aplicación");
 }
 
 fn produccion(texto: &str) -> Vec<(usize, String)> {

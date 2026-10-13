@@ -64,11 +64,25 @@ impl Core {
             }
             None => delivery::Found::Nothing,
         };
-        // El informe lo entregó el propio agente (su salida, su archivo o su stream): él es el actor.
-        let _ = self.mutate_as(&MutationContext::agent(id, Channel::Core), |st| {
+        self.apply_found(id, found, at_exit);
+    }
+
+    /// Aplica lo encontrado con la atribución correcta (`delivery::apply` no decide actores):
+    /// * informe VÁLIDO aceptado → el agente lo produjo: `Agent(id) / Core`;
+    /// * informe inválido, no entregado o proceso terminado sin informe → el agente no produjo nada
+    ///   utilizable y es el Core quien diagnostica y decide `Failed`/`Exited`: `System / Core`;
+    /// * cualquier fallback posterior donde el Core cierra por un fallo al aplicar → `System / Core`.
+    pub(super) fn apply_found(&self, id: &str, found: delivery::Found, at_exit: bool) {
+        let ctx = match &found {
+            delivery::Found::Valid(_) => MutationContext::agent(id, Channel::Core),
+            _ => MutationContext::core(),
+        };
+        let _ = self.mutate_as(&ctx, |st| {
             match delivery::apply(st, id, found, at_exit) {
                 Ok(msgs) => st.notify(&msgs),
                 Err(e) if at_exit => {
+                    // El informe «válido» no se pudo aplicar: el cierre lo decide el Core.
+                    st.set_context(MutationContext::core());
                     let msg = st.close(id, Status::Failed, &format!("informe inválido: {e}")).ok().flatten();
                     st.notify_opt(msg);
                 }

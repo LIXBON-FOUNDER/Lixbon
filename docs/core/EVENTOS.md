@@ -103,7 +103,8 @@ deduce del actor**: lo fija la superficie que recibe la orden.
 |---|---|---|
 | Comandos de Tauri (`rpc_via(Channel::Ui, ..)`, `*_from_ui`, aprobar un lanzamiento) | `ui` | persona |
 | Servidor local de `lxo` (`rpc_via(Channel::Lxo, ..)`) | `lxo` | agente con identidad |
-| Arranque, vigilantes de terminal, temporizadores | `core` | sistema (o el agente que entregó el informe) |
+| Arranque, vigilantes de terminal, temporizadores | `core` | sistema |
+| Recogida de informes (`collect`) | `core` | agente (informe válido aceptado) · sistema (inválido, no entregado, sin informe, fallback) |
 
 * `Caller::Agent(None)` **no** tiene alcance ni autoría general: solo `run_create` lo admite, y dentro de
   esa mutación el actor pasa a ser la tarea raíz recién creada (bootstrap de identidad).
@@ -118,12 +119,12 @@ Son el **único** sitio que emite estos eventos; `delivery::apply` recibe `&mut 
 
 | Mutador | Eventos (en orden) |
 |---|---|
-| `create_run` | `run.created`, `task.created` (raíz) |
+| `create_run` | `run.created {root_task}`, `task.created` (raíz) |
 | `add_child` | `task.created` |
 | `mark_running`, `done`, `close`, `reopen`, `await_terminal_approval`, `resume_from_approval`, `fail_with` | `task.status_changed` **solo si el estado cambió** |
-| `phase` | `task.phase`, y `task.status_changed` si cambió (p. ej. `waiting → running`) |
+| `phase` | `task.phase {name, done}`, y `task.status_changed` si cambió (p. ej. `waiting → running`) |
 | `ask` | `task.question`, y `task.status_changed` (`→ waiting`) |
-| `reply` | `task.reply` (entidad: la tarea que preguntó), y `task.status_changed` de ésta si volvió a correr |
+| `reply` | `task.reply {question_id, message_id}` (entidad: la tarea que preguntó; actor: quien responde), y `task.status_changed` de ésta si volvió a correr |
 | `orphan_all` | un `task.status_changed` por tarea abierta no externa (`cause = orphaned`) |
 | `close_run` | un `task.status_changed` por tarea que cambió (`cause = run_closed`) y, al final, `run.closed` |
 | `remove_run` | `run.removed` (si el run existía) |
@@ -133,8 +134,23 @@ Son el **único** sitio que emite estos eventos; `delivery::apply` recibe `&mut 
 * `cause` (opcional): `question`, `answered`, `phase`, `reopened`, `terminal_approval`, `orphaned`,
   `run_closed`, o el motivo máquina de un fallo por vigilancia (`terminal_approval_timeout`,
   `agent_idle_timeout`).
-* Los payloads llevan identificadores y hechos pequeños; los textos (título, objetivo, nombre y nota de
-  una fase) se recortan. Nunca el cuerpo de una pregunta (queda en `messages`), informes ni `argv`.
+* Los payloads llevan identificadores y hechos pequeños. **Los textos libres no se copian**: ni el
+  objetivo del run (`Run.objective`), ni la nota de una fase, ni el cuerpo de una pregunta o respuesta
+  (`messages`), ni informes ni `argv`. El Event Log no es otra copia del estado. Solo el título de una
+  tarea (etiqueta corta de la entidad) y el nombre de la fase (recortado) viajan como texto.
+* Quién respondió a una pregunta es el **actor** del evento, no un campo: `task.reply` no lleva
+  `answered_by`. Si algún día hace falta el remitente del `Message` heredado, será `message_from_task`.
+
+### Atribución de `collect`
+La decisión del contexto vive en `term_events` (`apply_found`); `delivery::apply` sigue sin construir
+eventos ni elegir actores. El agente produce —o no— el informe; el Core diagnostica su ausencia o
+invalidez y decide el cierre:
+
+| Resultado | Actor / canal |
+|---|---|
+| Informe válido aceptado | `agent(<tarea>)` / `core` |
+| Informe inválido al salir, no entregado, o proceso sin informe (`failed`/`exited`) | `system` / `core` |
+| Fallback del Core cuando un informe válido no se puede aplicar | `system` / `core` |
 
 ### `project_id`
 Se resuelve **al finalizar** el evento, con una fuente explícita del borrador: `project` explícito →
