@@ -77,7 +77,7 @@ impl Tx {
     /// completa después de crear el run).
     pub(super) fn create_run(&mut self, objective: &str, root: NewTask) -> (String, String) {
         let (run, task) = self.state_mut().create_run(objective, root);
-        self.try_push_event(ev::run_created(&run, &task, objective));
+        self.try_push_event(ev::run_created(&run, &task));
         if let Some(t) = self.tasks.get(&task).cloned() {
             self.try_push_event(ev::task_created(&t));
         }
@@ -105,7 +105,7 @@ impl Tx {
         let before = self.snapshot_run_of(id);
         let msg = self.state_mut().phase(id, name, done, note)?;
         let run = self.run_of(id);
-        self.try_push_event(ev::task_phase(id, &run, name, done, note));
+        self.try_push_event(ev::task_phase(id, &run, name, done));
         self.push_status_changes(before, Some("phase"));
         Ok(msg)
     }
@@ -135,7 +135,7 @@ impl Tx {
         let before = self.snapshot_run_of(&asker);
         let message = self.state_mut().reply(from, question, answer)?;
         let run = self.run_of(&asker);
-        self.try_push_event(ev::task_reply(&asker, &run, question, message, from));
+        self.try_push_event(ev::task_reply(&asker, &run, question, message));
         self.push_status_changes(before, Some("answered"));
         Ok(message)
     }

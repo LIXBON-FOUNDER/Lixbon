@@ -800,9 +800,11 @@ impl StateAccess for Acting<'_> {
     }
 }
 
-/// SOLO pruebas: un `Mutex<State>` sin persistencia. Construye un `Tx` detached, ejecuta el cierre,
-/// valida y finaliza los borradores IGUAL que producción (una instrumentación inválida también falla
-/// aquí), descarta los eventos (no hay SQLite) y solo entonces publica el estado en el `Mutex`.
+/// SOLO pruebas: un `Mutex<State>` sin persistencia. Replica la semántica de `mutate_locked`: construye
+/// un `Tx` detached y ejecuta el cierre. NO publica si el cierre devuelve `Err`, ni si llamó a
+/// `Tx::no_change` (se descarta el candidato, sin validar nada), ni si los borradores son inválidos
+/// (una instrumentación inválida también falla aquí). Solo un `Tx` válido y cambiado sustituye el
+/// estado; sus eventos se descartan (no hay SQLite).
 #[cfg(test)]
 impl StateAccess for Mutex<State> {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
@@ -813,6 +815,9 @@ impl StateAccess for Mutex<State> {
         let mut guard = self.lock().unwrap_or_else(|e| e.into_inner());
         let mut tx = Tx::detached((*guard).clone());
         let value = f(&mut tx)?;
+        if tx.unchanged {
+            return Ok(value);
+        }
         tx.validate_events()?;
         *guard = tx.into_state();
         Ok(value)
