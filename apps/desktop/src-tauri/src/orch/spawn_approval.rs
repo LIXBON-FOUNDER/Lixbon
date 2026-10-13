@@ -24,6 +24,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::events::{Channel, MutationContext};
 use super::mutation::{Effect, StateAccess};
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
 
@@ -210,7 +211,9 @@ impl Core {
         let effect = Effect::new("spawn_approval", "spawn_outcome").task(&p.parent_task)
             .expected(json!({ "record": "decision spawn", "pending_id": p.pending_id, "outcome": outcome }))
             .observed(json!({ "launched_task": task.and_then(|t| t["task"].as_str()), "launch_error": launch_error }));
-        self.mutate_after_effect(effect, |st| {
+        // Quién resuelve: la persona desde la interfaz, o el propio Core al vencer el pendiente.
+        let ctx = if actor == "system" { MutationContext::core() } else { MutationContext::person(Channel::Ui) };
+        self.acting(ctx).mutate_after_effect(effect, |st| {
             let exists = st.tasks.contains_key(&p.parent_task);
             let dup = st.decisions.iter().any(|d| d.kind == "spawn"
                 && d.detail_json.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).is_some_and(|v| v["pending_id"] == p.pending_id.as_str()));

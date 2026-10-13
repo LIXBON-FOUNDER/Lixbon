@@ -88,10 +88,69 @@ arquitectura (`orch/events_tests.rs`) fallan si otra capa los usa. En E1b los mu
 `Tx` (`Tx::done`, `Tx::ask`…) delegarán en los mutadores puros de `State` y acumularán **exactamente un**
 borrador; los internos (`touch`, `post`) no emiten.
 
+## E1b · bloque 1: mutadores de `State`
+La instrumentación llega por bloques sobre la infraestructura de E1a (decisiones → efectos → Projects →
+lanzamientos pendientes → diario v2 → lectura/`lxo events`). Este bloque instrumenta los mutadores de
+`State`.
+
+### Quién actúa: `MutationContext`
+Cada mutación lleva un contexto **explícito**: `{ actor, channel, client_id }` (`client_id` siempre `None`
+hasta F1). Se pasa con `Core::mutate_as(&ctx, ..)`; `Core::mutate(..)` es el contexto del propio Core
+(arranque, vigilantes, temporizadores). No hay hilo local ni «caller actual» global, y el canal **no se
+deduce del actor**: lo fija la superficie que recibe la orden.
+
+| Superficie | Canal | Quién entra |
+|---|---|---|
+| Comandos de Tauri (`rpc_via(Channel::Ui, ..)`, `*_from_ui`, aprobar un lanzamiento) | `ui` | persona |
+| Servidor local de `lxo` (`rpc_via(Channel::Lxo, ..)`) | `lxo` | agente con identidad |
+| Arranque, vigilantes de terminal, temporizadores | `core` | sistema (o el agente que entregó el informe) |
+
+* `Caller::Agent(None)` **no** tiene alcance ni autoría general: solo `run_create` lo admite, y dentro de
+  esa mutación el actor pasa a ser la tarea raíz recién creada (bootstrap de identidad).
+* `StateAccess` ya no se implementa para `Core` sino para `Acting` (el `Core` con un contexto explícito),
+  y sus cierres reciben `&mut Tx`. `impl StateAccess for Mutex<State>` es **solo de pruebas**: construye un
+  `Tx` detached, valida los borradores como producción y descarta los eventos.
+
+### Mutadores de `Tx` (un hecho, un evento)
+`orch/tx_ops.rs` define, sobre `Tx`, los mismos mutadores que `State` (mismo nombre y firma, delegan en él).
+Son el **único** sitio que emite estos eventos; `delivery::apply` recibe `&mut Tx` y cierra con
+`tx.done`/`tx.close`, sin construir borradores. `post`, `touch`, `mark_read` no emiten.
+
+| Mutador | Eventos (en orden) |
+|---|---|
+| `create_run` | `run.created`, `task.created` (raíz) |
+| `add_child` | `task.created` |
+| `mark_running`, `done`, `close`, `reopen`, `await_terminal_approval`, `resume_from_approval`, `fail_with` | `task.status_changed` **solo si el estado cambió** |
+| `phase` | `task.phase`, y `task.status_changed` si cambió (p. ej. `waiting → running`) |
+| `ask` | `task.question`, y `task.status_changed` (`→ waiting`) |
+| `reply` | `task.reply` (entidad: la tarea que preguntó), y `task.status_changed` de ésta si volvió a correr |
+| `orphan_all` | un `task.status_changed` por tarea abierta no externa (`cause = orphaned`) |
+| `close_run` | un `task.status_changed` por tarea que cambió (`cause = run_closed`) y, al final, `run.closed` |
+| `remove_run` | `run.removed` (si el run existía) |
+
+* `task.status_changed` compara el estado de las tareas del run **antes y después**: nunca se emite con
+  `from == to`.
+* `cause` (opcional): `question`, `answered`, `phase`, `reopened`, `terminal_approval`, `orphaned`,
+  `run_closed`, o el motivo máquina de un fallo por vigilancia (`terminal_approval_timeout`,
+  `agent_idle_timeout`).
+* Los payloads llevan identificadores y hechos pequeños; los textos (título, objetivo, nombre y nota de
+  una fase) se recortan. Nunca el cuerpo de una pregunta (queda en `messages`), informes ni `argv`.
+
+### `project_id`
+Se resuelve **al finalizar** el evento, con una fuente explícita del borrador: `project` explícito →
+`project_from_task` (lee `Task.project_id` del candidato) → `NULL`. Sin git y sin consultar el registro.
+Por eso `run_create` puede completar `project_id` después de crear el run y antes del commit.
+
+### No retroactivo
+El Event Log **empieza cuando la infraestructura ya es autoritativa**. No se rellenan `messages` ni
+`decisions` históricos, ni lo ocurrido antes de la 004, ni las tareas huérfanas que se cierran durante la
+**primera promoción** a SQLite (ocurren dentro de la transacción de promoción, no de `mutate`). En
+arranques posteriores las huérfanas sí emiten.
+
 ## Hoja de ruta
-* **E1a (esta):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
+* **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
-* **E1b:** mutadores de `State`, decisiones, efectos, registro de proyectos, solicitudes de lanzamiento,
+* **E1b (en curso; bloque 1 hecho = mutadores de `State`):** mutadores de `State`, decisiones, efectos, registro de proyectos, solicitudes de lanzamiento,
   API completa, `lxo events`, diario `unrecorded-effects` v2 e importación segura.
 * **E2:** HTTP `GET /events` y SSE (`server.rs`).
 

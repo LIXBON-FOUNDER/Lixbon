@@ -1,6 +1,7 @@
 //! Eventos del proceso de una tarea: salida, informe, cierre y cambios de aprobación.
 
 use std::path::Path;
+use super::events::{Channel, MutationContext};
 use super::{Core, agents, approval, codex_session, delivery};
 use super::state::Status;
 
@@ -63,7 +64,8 @@ impl Core {
             }
             None => delivery::Found::Nothing,
         };
-        let _ = self.mutate(|st| {
+        // El informe lo entregó el propio agente (su salida, su archivo o su stream): él es el actor.
+        let _ = self.mutate_as(&MutationContext::agent(id, Channel::Core), |st| {
             match delivery::apply(st, id, found, at_exit) {
                 Ok(msgs) => st.notify(&msgs),
                 Err(e) if at_exit => {

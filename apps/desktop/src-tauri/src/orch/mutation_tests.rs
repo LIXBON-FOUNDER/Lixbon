@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::events::MutationContext;
 use super::host::RecordingHost;
 use super::lifecycle::BootProof;
 use super::mutation::{Effect, Health, MutateError, PersistError, Persistence, RetryPolicy, StateAccess};
@@ -230,7 +231,7 @@ fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
         let o = std::process::Command::new("git").args(["rev-parse", "lx/t"]).current_dir(&dir).output().unwrap();
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     };
-    review::review_task(&*core, &id, "accepted", &head, None, true).unwrap();
+    review::review_task(&core.acting(MutationContext::person(super::events::Channel::Ui)), &id, "accepted", &head, None, true).unwrap();
 
     // A partir de aquí no se puede persistir: el git merge ocurre, su registro falla.
     core.set_persistence(Falla::siempre(false));
@@ -264,7 +265,7 @@ fn un_rechazo_tras_el_efecto_no_se_confunde_con_un_efecto_sin_registrar() {
     let (_l, data, _) = carpetas();
     let (core, _host) = core_con_host();
     // La mutación se rechaza por sí misma (la tarea no existe): no hay nada que reconciliar.
-    let r: Result<(), String> = core.mutate_after_effect(Effect::new("prueba", "ninguno"), |st| {
+    let r: Result<(), String> = core.acting(MutationContext::core()).mutate_after_effect(Effect::new("prueba", "ninguno"), |st| {
         st.task_mut("t-no-existe")?;
         Ok(())
     });

@@ -12,7 +12,7 @@ use serde::Serialize;
 use super::boot_tests::*;
 use super::events::{Actor, Channel, EntityKind, EventDraft, EventError, EventPayload};
 use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolicy, Tx};
-use super::state::{NewTask, State};
+use super::state::{Run, State};
 use super::store_boot::StorageStatus;
 use super::{Core, Orch};
 use crate::store::{EventClass, EventQuery, EventRow, NewEvent, MAX_PAYLOAD_BYTES};
@@ -76,11 +76,12 @@ fn rev(core: &Core) -> i64 {
     core.storage.confirmed_rev().unwrap().expect("rev confirmada")
 }
 
-fn nt() -> NewTask {
-    NewTask {
-        agent: "coordinador".into(), model: None, effort: None, role: None, title: "t".into(), spec: "s".into(),
-        repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: false,
-    }
+
+/// Un cambio REAL del estado sin pasar por los mutadores semánticos de `Tx` (que ya emiten eventos):
+/// las pruebas de esta infraestructura (E1a) cuentan solo los eventos que ellas mismas emiten.
+fn run_sin_eventos(tx: &mut Tx, objetivo: &str) {
+    let id = format!("x{}", tx.runs.len() + 1);
+    tx.runs.insert(id.clone(), Run { id, objective: objetivo.into(), root: String::new(), created: 1, closed: false, last_activity: 1 });
 }
 
 /// Persistencia de prueba delante de la real: falla `quedan` veces y siempre anota los eventos que recibe.
@@ -155,7 +156,7 @@ fn un_evento_emitido_en_mutate_se_confirma_con_la_mutacion() {
     assert!(eventos(&core).is_empty(), "sin relleno histórico");
     let antes = rev(&core);
     core.mutate(|tx| {
-        tx.create_run("obj", nt());
+        run_sin_eventos(tx, "obj");
         tx.push_event(hecho(1).project(Some("p1".into())).run(Some("r1".into())).correlated("c1").idempotent("k1"));
         Ok(())
     })
@@ -177,7 +178,7 @@ fn un_evento_emitido_en_mutate_se_confirma_con_la_mutacion() {
 fn varios_eventos_de_una_mutacion_comparten_state_rev_y_cada_commit_tiene_el_suyo() {
     let (_l, _d, _c, core) = core_listo();
     core.mutate(|tx| {
-        tx.create_run("a", nt());
+        run_sin_eventos(tx, "a");
         tx.push_event(hecho(1));
         tx.push_event(hecho(2).by(Actor::Agent("t7".into()), Channel::Lxo));
         tx.push_event(hecho(3).by(Actor::Person, Channel::Ui));
@@ -185,7 +186,7 @@ fn varios_eventos_de_una_mutacion_comparten_state_rev_y_cada_commit_tiene_el_suy
     })
     .unwrap();
     core.mutate(|tx| {
-        tx.create_run("b", nt());
+        run_sin_eventos(tx, "b");
         tx.push_event(hecho(4));
         Ok(())
     })
@@ -207,7 +208,7 @@ fn varios_eventos_de_una_mutacion_comparten_state_rev_y_cada_commit_tiene_el_suy
 fn el_actor_por_defecto_de_la_mutacion_se_puede_fijar() {
     let (_l, _d, _c, core) = core_listo();
     core.mutate(|tx| {
-        tx.create_run("a", nt());
+        run_sin_eventos(tx, "a");
         tx.acting_as(Actor::Person, Channel::Ui);
         tx.push_event(hecho(1));
         Ok(())
@@ -221,7 +222,7 @@ fn el_actor_por_defecto_de_la_mutacion_se_puede_fijar() {
 fn el_tx_publicado_no_conserva_borradores_y_el_estado_no_transporta_eventos() {
     let (_l, _d, _c, core) = core_listo();
     core.mutate(|tx| {
-        tx.create_run("a", nt());
+        run_sin_eventos(tx, "a");
         tx.push_event(hecho(1));
         assert_eq!(tx.pending_events().len(), 1);
         Ok(())
@@ -254,7 +255,7 @@ fn sin_cambio_o_con_rechazo_los_eventos_se_descartan() {
     })
     .unwrap();
     let r: Result<(), MutateError> = core.mutate(|tx| {
-        tx.create_run("x", nt());
+        run_sin_eventos(tx, "x");
         tx.push_event(hecho(2));
         Err("precondición".into())
     });
@@ -270,7 +271,7 @@ fn un_evento_invalido_rechaza_la_mutacion_entera_sin_degradar_el_core() {
     let antes = rev(&core);
     // Una clave de idempotencia vacía pasa el constructor pero no el contrato final.
     let r = core.mutate(|tx| {
-        tx.create_run("x", nt());
+        run_sin_eventos(tx, "x");
         tx.push_event(hecho(1));
         tx.push_event(hecho(2).idempotent(""));
         Ok(())
@@ -292,7 +293,7 @@ fn si_la_persistencia_falla_no_hay_mutacion_ni_evento_visible() {
     let antes = (rev(&core), fila(&core));
     let w = Inyecta::instala(&core, usize::MAX / 2, false);
     let r = core.mutate(|tx| {
-        tx.create_run("x", nt());
+        run_sin_eventos(tx, "x");
         tx.push_event(hecho(1));
         tx.push_event(hecho(2));
         Ok(())
@@ -311,7 +312,7 @@ fn un_reintento_persiste_los_mismos_eventos_con_el_mismo_id_y_la_misma_hora() {
     core.set_retry_policy(RetryPolicy::with_backoffs(vec![Duration::from_millis(15); 3]));
     let w = Inyecta::instala(&core, 2, true);
     core.mutate(|tx| {
-        tx.create_run("x", nt());
+        run_sin_eventos(tx, "x");
         tx.push_event(hecho(1));
         tx.push_event(hecho(2));
         Ok(())
@@ -338,7 +339,7 @@ fn con_state_json_no_hay_event_log_y_no_se_crea_ningun_archivo_paralelo() {
     let (_l, data, _core_dir) = dirs();
     let core = Orch::default().0;
     core.mutate(|tx| {
-        tx.create_run("a", nt());
+        run_sin_eventos(tx, "a");
         tx.push_event(hecho(1));
         Ok(())
     })
@@ -352,7 +353,7 @@ fn con_state_json_no_hay_event_log_y_no_se_crea_ningun_archivo_paralelo() {
     let w = Inyecta::instala(&core, 0, false);
     // (sin SQLite, el `inner` es StateJsonFile: records_events = false)
     core.mutate(|tx| {
-        tx.create_run("b", nt());
+        run_sin_eventos(tx, "b");
         tx.push_event(hecho(2));
         Ok(())
     })
@@ -363,7 +364,7 @@ fn con_state_json_no_hay_event_log_y_no_se_crea_ningun_archivo_paralelo() {
 /// Mutación que cambia de verdad el estado y emite un borrador válido seguido de uno inválido
 /// (clave de idempotencia vacía: solo la frontera final, `NewEvent::check`, la detecta).
 fn con_un_borrador_invalido(tx: &mut Tx) -> Result<(), String> {
-    tx.create_run("x", nt());
+    run_sin_eventos(tx, "x");
     tx.push_event(hecho(1));
     tx.push_event(hecho(2).idempotent(""));
     Ok(())
@@ -374,7 +375,7 @@ fn un_borrador_invalido_es_rechazado_tambien_con_state_json_sin_cambiar_nada() {
     let (_l, data, _core_dir) = dirs();
     let core = Orch::default().0; // persistencia state.json (legacy/degradado)
     core.mutate(|tx| {
-        tx.create_run("previo", nt());
+        run_sin_eventos(tx, "previo");
         tx.push_event(hecho(0));
         Ok(())
     })
@@ -416,7 +417,7 @@ fn la_004_se_aplica_en_el_arranque_tras_decidir_la_autoridad() {
 fn reiniciar_conserva_los_eventos_y_el_orden_continua() {
     let (_l, data, core_dir, core) = core_listo();
     core.mutate(|tx| {
-        tx.create_run("a", nt());
+        run_sin_eventos(tx, "a");
         tx.push_event(hecho(1));
         Ok(())
     })
@@ -428,7 +429,7 @@ fn reiniciar_conserva_los_eventos_y_el_orden_continua() {
     assert_eq!(eventos(&core2), antes, "los mismos eventos, con los mismos ids y seq");
     core2
         .mutate(|tx| {
-            tx.create_run("b", nt());
+            run_sin_eventos(tx, "b");
             tx.push_event(hecho(2));
             Ok(())
         })
@@ -449,7 +450,7 @@ fn un_estado_legacy_se_promueve_y_sigue_funcionando_sin_eventos_previos() {
     assert!(eventos(&core).is_empty(), "no se inventa historia");
     let runs_antes = core.lock().runs.len();
     core.mutate(|tx| {
-        tx.create_run("nueva", nt());
+        run_sin_eventos(tx, "nueva");
         tx.push_event(hecho(1));
         Ok(())
     })
@@ -499,14 +500,16 @@ fn fuentes(dir: &Path) -> Vec<(String, String)> {
 fn solo_store_events_escribe_en_la_tabla_y_solo_la_frontera_de_mutacion_emite() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     // (símbolo, archivos de `orch/` donde puede aparecer)
-    let orch_permitido: [(&str, &[&str]); 7] = [
-        // El único punto de emisión es Tx::push_event; hoy nadie más lo llama (E1b añadirá los mutadores semánticos).
+    let orch_permitido: [(&str, &[&str]); 8] = [
+        // El único punto de emisión de estado son los mutadores semánticos de `Tx` (`tx_ops.rs`), que
+        // llaman a `try_push_event`; nadie más empuja borradores a una transacción.
         (".push_event(", &[]),
+        (".try_push_event(", &["tx_ops.rs"]),
         ("fn push_event(", &["mutation.rs"]),
         ("finalize_all(", &["mutation.rs", "events.rs"]),
-        // Solo `events.rs` define contratos y construye borradores.
-        ("impl EventPayload for", &[]),
-        ("EventDraft::new", &["events.rs"]),
+        // Solo el catálogo (`event_kinds.rs`) define contratos y construye borradores de dominio.
+        ("impl EventPayload for", &["event_kinds.rs"]),
+        ("EventDraft::new", &["events.rs", "event_kinds.rs"]),
         // Solo la persistencia de SQLite escribe eventos; nadie más de `orch/` toca el INSERT ni la inserción suelta.
         ("commit_authoritative_with_events", &["store_boot.rs"]),
         ("append_events(", &[]),
