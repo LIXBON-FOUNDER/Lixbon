@@ -162,14 +162,18 @@ def _search_sync(query: str, limit: int) -> list[dict]:
     return []
 
 
-_TAG_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+# Menús, cabeceras y pies se van con su contenido: si no, los primeros cientos
+# de caracteres de la página son navegación y un modelo pequeño la copia tal cual.
+_TAG_RE = re.compile(
+    r"<(script|style|noscript|svg|nav|header|footer|aside|form|iframe)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
+)
 _HTML_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\r\f\v]+")
 _NL_RE = re.compile(r"\n\s*\n+")
 
 
 def _html_to_text(html: str) -> str:
-    html = _TAG_RE.sub(" ", html)          # fuera <script>/<style>
+    html = _TAG_RE.sub(" ", html)
     text = _HTML_RE.sub(" ", html)          # fuera etiquetas
     text = re.sub(r"&nbsp;", " ", text)
     text = re.sub(r"&amp;", "&", text)
@@ -233,10 +237,13 @@ def _fetch_page_text(url: str) -> str:
 
 
 def _enrich_sync(results: list[dict], n: int) -> None:
+    # El snippet del buscador va primero: es lo que responde a la consulta y
+    # build_context recorta el texto por el final.
     for r in results[:n]:
         page = _fetch_page_text(r.get("url", ""))
-        if page and len(page) > len(r.get("snippet", "")):
-            r["snippet"] = page
+        snippet = (r.get("snippet") or "").strip()
+        if page and len(page) > len(snippet):
+            r["snippet"] = f"{snippet}\n{page}" if snippet else page
 
 
 async def _search_one(query: str, limit: int) -> list[dict]:
@@ -397,6 +404,8 @@ def build_context(query: str, results: list[dict], queries: list[str] | None = N
         "- Responde DIRECTAMENTE con lo que se pidió (p. ej. la cotización y la fecha de la "
         "fuente), en texto. No te limites a explicar cómo calcularlo ni respondas con un diseño, "
         "un archivo o código que nadie pidió.",
+        "- Escribe la respuesta con tus palabras: NUNCA copies el texto de los resultados "
+        "(menús, publicidad, listas de enlaces o de países).",
         "- Cita las fuentes relevantes con su número [n].",
         "",
         "=== RESULTADOS ===",
