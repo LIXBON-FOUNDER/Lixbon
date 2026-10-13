@@ -71,7 +71,8 @@ impl Core {
                 let agent = Some(s(args, "agent")).filter(|a| !a.is_empty()).unwrap_or_else(|| "coordinador".into());
                 let branch = git::current_branch(cwd);
                 // Proyecto del repositorio: misma ruta -> ese; sin coincidencias -> nuevo; ambiguo -> ninguno.
-                let project_id = self.project_for_repo(&repo);
+                // Un error real del registro activo se propaga: no se crea ni el run ni la tarea.
+                let project_id = self.project_for_repo(&repo)?;
                 if let Some(pid) = &project_id {
                     self.check_project_launchable_id(pid)?;
                 }

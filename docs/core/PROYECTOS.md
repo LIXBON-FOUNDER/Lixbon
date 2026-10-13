@@ -59,6 +59,21 @@ almacén abierto, **un error al consultar el proyecto** o un `project_id` que ya
 registro. Un error de lectura nunca se convierte en «se puede lanzar»: las protecciones de archivado y
 de ubicación desaparecida no deben poder saltarse justo cuando el registro está en problemas.
 
+**La launchability se revalida tras la aprobación humana.** `plan → aprobación humana → revalidación →
+efectos`. `plan_spawn` comprueba pronto (falla rápido), pero entre el pendiente y el «sí» de la persona
+pueden pasar minutos: el proyecto puede archivarse, su carpeta desaparecer o relocalizarse. Por eso
+`create_child` repite la comprobación AL PRINCIPIO, antes de crear la Task hija, el worktree o ningún
+proceso: si falla, el lanzamiento queda `launch_failed` y no hay nada que limpiar. La aprobación no
+congela una decisión antigua.
+
+**`project_for_repo` no se traga errores.** Tres resultados que no se mezclan:
+
+| Situación | Resultado |
+|---|---|
+| Identidad ambigua (se parece a un proyecto de otra ruta), o git no puede identificar el repo | `Ok(None)`: la tarea nace sin proyecto |
+| Registro opcional no disponible (almacén cerrado/degradado: arranque legacy) | `Ok(None)`: compatibilidad, D no es requisito de los flujos legacy |
+| Error real de un registro activo (almacén abierto y la consulta falla) | `Err`: `run_create` no crea ni el run ni la tarea |
+
 ## Quién registra y quién decide
 **La garantía central: Lixbon nunca une dos identidades ambiguas en silencio.**
 
@@ -114,3 +129,9 @@ presupuesto y se hace fuera del camino crítico del arranque.
 Eventos (E), clientes (F1), Attention (G), el corte Task/Attempt, raíz de worktrees administrada
 (`projects.settings` la usará el slice I), y toda interfaz de proyectos más allá de la importación de
 recientes.
+
+## Optimizaciones futuras (no bloquean D)
+* **`backfill_projects` en modo degradado.** Hoy, con el almacén cerrado y tareas pendientes, identifica
+  cada repositorio con git y solo falla al intentar resolverlo (deja un aviso en el log en cada
+  arranque). Debería salir ANTES de ejecutar git si el registro no está disponible. Es trabajo inútil,
+  no un fallo de corrección: no cambia ningún dato.
