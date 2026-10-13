@@ -4,6 +4,12 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.7.1
+- El modo ask ve tu proyecto: lista, busca y lee archivos, busca en internet y te pregunta, pero no edita, borra ni ejecuta nada (para eso, `/mode agent`).
+- El agente borra varios archivos o carpetas en una sola acción, con una sola aprobación, y `/undo` los recupera todos.
+- Cuando algo no está claro, el agente te pregunta en un panel (opciones o respuesta libre) en vez de suponer. Solo pregunta lo que únicamente tú puedes decidir: lo que puede averiguar leyendo o buscando, lo averigua él.
+- El agente sabe la fecha de hoy y busca en internet los precios, noticias y demás datos que cambian, en vez de responder con datos viejos o con el método para calcularlos.
+
 ## 2.7.0
 - Orquestador: `/orquestar <objetivo>` convierte al agente en coordinador de un equipo de agentes que corre en Lixbon Desktop. Cada lanzamiento y cada integración las aprueba una persona allí. `/orquestador` muestra los runs y las tareas, y explica qué falta si el orquestador no está disponible.
 - Nuevo `lixbon worker`: el orquestador de Lixbon Desktop puede lanzar al CLI como un agente hijo, con cualquier proveedor de `lixbon profile`. Solo corre dentro de una tarea del orquestador y entrega su respuesta como informe.
