@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use serde_json::json;
 use super::host::Host;
+use super::events::MutationContext;
 use super::boot_authority::{Authoritative, BootResult};
 use super::mirror::{self, Reconciled};
 use super::store_boot::{OpenStoreError, StorageReport};
@@ -204,7 +205,7 @@ impl Core {
             if !matches!(noted, Ok(true)) {
                 continue;
             }
-            let _ = self.close_run(&run, false);
+            let _ = self.close_run(&MutationContext::core(), &run, false);
         }
     }
 

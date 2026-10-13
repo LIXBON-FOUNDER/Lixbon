@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
+use super::events::{Channel, MutationContext};
 use super::mutation::{Effect, StateAccess};
 use super::state::NewTask;
 
@@ -77,6 +78,10 @@ impl Core {
     /// resolvió el host (nunca el que llega de la UI).
     pub(super) fn create_child(self: &Arc<Self>, p: &spawn_approval::PendingSpawn, argv: Vec<String>, ack_unverified: bool) -> Result<Value, String> {
         let parent_id = p.parent_task.clone();
+        // Quien actúa: la PERSONA que aprobó el lanzamiento, desde la interfaz (`approve_spawn` solo
+        // existe como comando de Tauri: los agentes no pueden aprobar). El agente que lo pidió consta en
+        // `spawn.requested` (bloque de Pending Spawn).
+        let ctx = MutationContext::person(Channel::Ui);
         // REVALIDACIÓN tras la aprobación humana: plan -> aprobación -> revalidación -> efectos.
         // Entre `plan_spawn` y el «sí» de la persona pueden pasar minutos: el proyecto pudo archivarse,
         // su carpeta desaparecer o relocalizarse. La aprobación no congela una launchability antigua.
@@ -88,7 +93,7 @@ impl Core {
         // Nota para Task/Attempt: este orden ya pide estados intermedios explícitos
         // (`pending` -> `starting` -> `working`, y `failed_start`). Hoy la tarea nace
         // sin ellos; C2a no introduce Attempt, solo deja constancia de la necesidad.
-        let (id, parent) = self.mutate(|st| {
+        let (id, parent) = self.mutate_as(&ctx, |st| {
             let parent = st.task(&parent_id)?.clone();
             let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
                 agent: p.provider.clone(), model: p.model.clone(), effort: p.effort.clone(), role: p.role.clone(), title: p.title.clone(), spec: p.spec.clone(),
@@ -119,7 +124,7 @@ impl Core {
             let effect = Effect::new("spawn", "git_worktree").task(&id).repo(&parent.repo)
                 .expected(json!({ "record": "task worktree, branch y cwd" }))
                 .observed(json!({ "worktree": dir, "branch": branch }));
-            self.mutate_after_effect(effect, |st| {
+            self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
                 let t = st.task_mut(&id)?;
                 t.env = Some(env).filter(|e| !e.is_empty());
                 t.base_commit = start;
@@ -147,7 +152,7 @@ impl Core {
         let effect = Effect::new("spawn", "pty_process").task(&id)
             .expected(json!({ "record": "task en marcha (running)" }))
             .observed(json!({ "launched": true }));
-        let t = self.mutate_after_effect(effect, |st| {
+        let t = self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
             let _ = st.mark_running(&id);
             Ok(st.task(&id)?.clone())
         })?;
@@ -156,7 +161,7 @@ impl Core {
 
     /// Trabajo nuevo para una hija que ya entregó, en su misma terminal: conserva
     /// su contexto (como reutilizar la terminal de un worker en Orca).
-    pub(super) fn follow_up(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
+    pub(super) fn follow_up(&self, ctx: &MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let id = s(args, "task");
         let spec = s(args, "spec");
         if spec.is_empty() {
@@ -169,7 +174,7 @@ impl Core {
         if !self.terms.lock().map(|t| t.contains_key(&id)).unwrap_or(false) {
             return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn"));
         }
-        let task = self.mutate(|st| {
+        let task = self.mutate_as(ctx, |st| {
             st.reopen(&id, &spec)?;
             let t = st.task(&id)?.clone();
             // n = 1 hasta que haya intentos: se borra lo del intento anterior para no

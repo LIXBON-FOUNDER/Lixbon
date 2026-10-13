@@ -9,11 +9,16 @@ mod authority;
 mod boot_authority;
 #[cfg(test)]
 mod boot_tests;
-// E1a: el Event Log todavía no se instrumenta (llega en E1b); hasta entonces solo lo usan las pruebas.
+// E1b se entrega por bloques: parte del vocabulario (`project`, `idempotent`, `by`, entidades de
+// proyecto y lanzamiento…) la estrenan los bloques siguientes (decisiones, efectos, Projects, spawn).
 #[cfg_attr(not(test), allow(dead_code))]
 mod events;
+mod event_kinds;
+mod tx_ops;
 #[cfg(test)]
 mod events_tests;
+#[cfg(test)]
+mod tx_ops_tests;
 mod projects;
 #[cfg(test)]
 mod projects_tests;

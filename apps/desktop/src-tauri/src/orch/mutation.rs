@@ -56,6 +56,12 @@
 //! `legacy_state`. Si algo falla, ni mutación ni eventos; los reintentos pasan siempre los mismos
 //! eventos. El estado (`State`) no transporta nada de esto. Ver `events.rs`.
 //!
+//! # Quién actúa
+//! Cada mutación lleva un [`MutationContext`] EXPLÍCITO (actor + canal + `client_id` reservado):
+//! [`Core::mutate_as`] para lo que desencadena una persona o un agente, [`Core::mutate`] (contexto
+//! del propio Core) para arranque, vigilantes y temporizadores. No hay contexto implícito por hilo ni
+//! un «caller actual» global.
+//!
 //! # Lo que NO es una mutación de dominio
 //! * [`Core::touch_activity`]: marca de actividad efímera (pista de liveness),
 //!   solo en memoria. Es la única excepción y NO abre la puerta a otras.
@@ -69,7 +75,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::events::{finalize_all, Actor, Channel, EventDraft};
+use super::events::{finalize_all, Actor, Channel, EventDraft, EventError, MutationContext};
 use super::fsio::data_dir;
 use super::lifecycle::BootProof;
 use super::state::{Kind, State};
@@ -120,8 +126,11 @@ pub(super) struct Tx {
     /// Outbox de eventos del candidato. Vive aquí y no en `State`: el estado autoritativo no
     /// transporta metadatos de una transacción. Se descarta con el candidato si algo falla.
     events: Vec<EventDraft>,
-    /// Actor y canal por defecto de los eventos de esta mutación (un borrador puede traer el suyo).
-    actor: (Actor, Channel),
+    /// Un borrador que no se pudo construir (contrato roto): se convierte en `Rejected` al confirmar.
+    event_error: Option<String>,
+    /// Quién actúa y por dónde llegó la orden: valor por defecto de los eventos de esta mutación (un
+    /// borrador puede traer el suyo).
+    ctx: MutationContext,
 }
 
 impl Deref for Tx {
@@ -153,6 +162,7 @@ impl Tx {
     pub(super) fn no_change(&mut self) {
         self.unchanged = true;
         self.events.clear();
+        self.event_error = None;
     }
 
     /// ÚNICO punto de entrada de un evento a la transacción: lo emite quien describe el hecho (los
@@ -163,10 +173,60 @@ impl Tx {
         self.events.push(draft);
     }
 
+    /// Como [`Tx::push_event`], a partir del resultado de un constructor del catálogo. Si el borrador
+    /// no se pudo construir se recuerda el error y la mutación se rechaza al confirmar (con SQLite y
+    /// con state.json por igual): un error de instrumentación nunca se pierde en silencio.
+    pub(super) fn try_push_event(&mut self, draft: Result<EventDraft, EventError>) {
+        match draft {
+            Ok(d) => self.events.push(d),
+            Err(e) => {
+                self.event_error.get_or_insert_with(|| e.to_string());
+            }
+        }
+    }
+
     /// Fija el actor y el canal por defecto de los eventos de esta mutación.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn acting_as(&mut self, actor: Actor, channel: Channel) {
-        self.actor = (actor, channel);
+        self.ctx.actor = actor;
+        self.ctx.channel = channel;
+    }
+
+    /// Fija el contexto completo (lo usa `mutate_as`).
+    pub(super) fn set_context(&mut self, ctx: MutationContext) {
+        self.ctx = ctx;
+    }
+
+    /// Finaliza y VALIDA los borradores de esta mutación (una sola vez). El `project_id` de un
+    /// borrador con `project_from_task` sale del candidato, sin git ni registro.
+    fn finalize_events(&mut self) -> Result<Vec<NewEvent>, String> {
+        if let Some(e) = self.event_error.take() {
+            return Err(e);
+        }
+        let drafts = std::mem::take(&mut self.events);
+        if drafts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let state = &self.state;
+        finalize_all(drafts, &self.ctx, super::state::now_ms() as i64, &|task| state.tasks.get(task).and_then(|t| t.project_id.clone()))
+    }
+
+    /// Prueba: un `Tx` sin `Core` (los adaptadores de prueba de `review` e `integration`).
+    #[cfg(test)]
+    pub(super) fn detached(state: State) -> Tx {
+        Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core() }
+    }
+
+    /// Prueba: devuelve el estado del `Tx` detached.
+    #[cfg(test)]
+    pub(super) fn into_state(self) -> State {
+        self.state
+    }
+
+    /// Prueba: valida los borradores igual que producción y descarta el resultado (no hay SQLite).
+    #[cfg(test)]
+    pub(super) fn validate_events(&mut self) -> Result<(), String> {
+        self.finalize_events().map(|_| ())
     }
 
     /// Prueba: borradores pendientes en el candidato.
@@ -449,10 +509,20 @@ impl Core {
         self.state.raw().touch_run(task_id);
     }
 
-    /// Única vía de escritura del estado. Ver la documentación del módulo.
+    /// Única vía de escritura del estado. Ver la documentación del módulo. Los eventos de esta
+    /// mutación se atribuyen al propio Core (arranque, vigilantes, temporizadores); lo que provoca una
+    /// persona o un agente usa [`Core::mutate_as`].
     pub(super) fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, MutateError> {
         let mut guard = self.lock();
         self.mutate_locked(&mut guard, f)
+    }
+
+    /// Como [`Core::mutate`], con el contexto EXPLÍCITO de quien actúa (actor + canal).
+    pub(super) fn mutate_as<R>(&self, ctx: &MutationContext, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, MutateError> {
+        self.mutate(|tx| {
+            tx.set_context(ctx.clone());
+            f(tx)
+        })
     }
 
     /// Como [`Core::mutate`] sobre un guard ya tomado (la espera con `Condvar`
@@ -461,7 +531,7 @@ impl Core {
         if let Health::DegradedReadOnly(reason) = self.persister.health() {
             return Err(MutateError::ReadOnly(reason));
         }
-        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), actor: (Actor::System, Channel::Core) };
+        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core() };
         let value = f(&mut tx).map_err(MutateError::Rejected)?;
         if tx.unchanged {
             return Ok(value);
@@ -470,12 +540,7 @@ impl Core {
         // un evento inválido rechaza la mutación entera (`Rejected`) con SQLite y con state.json por
         // igual. Solo DESPUÉS se decide si hay Event Log donde persistirlos; si no (state.json), el
         // resultado materializado se descarta y el backend recibe una lista vacía.
-        let drafts = std::mem::take(&mut tx.events);
-        let finalized = if drafts.is_empty() {
-            Vec::new()
-        } else {
-            finalize_all(drafts, &tx.actor, super::state::now_ms() as i64).map_err(MutateError::Rejected)?
-        };
+        let finalized = tx.finalize_events().map_err(MutateError::Rejected)?;
         let events = if self.persister.records_events() { finalized } else { Vec::new() };
         if let Err(e) = self.persister.persist(&tx.state, &events) {
             self.enter_read_only(&e.message);
@@ -676,41 +741,57 @@ impl Effect {
 }
 
 // ---------------------------------------------------------------------------
-// StateAccess: lo mínimo que necesitan `review` e `integration`
+// StateAccess: lo mínimo que necesitan `review`, `integration`, `release` y `spawn`
 // ---------------------------------------------------------------------------
 
-/// Lectura y mutación del estado, sin que el llamador conozca el `Mutex`.
-/// Implementado por [`Core`] (persistente) y por `Mutex<State>` (sin persistir:
-/// las pruebas de `review`/`integration`).
+/// Lectura y mutación del estado, sin que el llamador conozca el `Mutex`. Los cierres mutadores
+/// reciben un [`Tx`] (no un `State`): así usan los mismos mutadores semánticos y producen eventos.
+///
+/// Implementado por [`Acting`] (el `Core` con el contexto EXPLÍCITO de quien actúa: no hay una
+/// versión «sin contexto») y, solo en pruebas, por `Mutex<State>` con un `Tx` detached.
 pub(super) trait StateAccess {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R;
-    fn mutate<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String>;
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String>;
 
     /// Registra en el estado un efecto externo YA ocurrido (p. ej. un `git merge`).
     /// Si el registro falla no se esconde: el error lo dice con claridad y, en el
     /// `Core`, el efecto queda anotado para reconciliar.
-    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
+    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
         let _ = &effect;
         self.mutate(f)
     }
 }
 
-impl StateAccess for Core {
+/// El `Core` actuando con un contexto explícito (quién y por dónde). Lo construye
+/// [`Core::acting`] quien conoce la superficie real.
+pub(super) struct Acting<'a> {
+    core: &'a Core,
+    ctx: MutationContext,
+}
+
+impl Core {
+    pub(super) fn acting(&self, ctx: MutationContext) -> Acting<'_> {
+        Acting { core: self, ctx }
+    }
+}
+
+impl StateAccess for Acting<'_> {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
-        f(&self.lock())
+        f(&self.core.lock())
     }
 
-    fn mutate<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        Core::mutate(self, |tx| f(tx)).map_err(String::from)
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        self.core.mutate_as(&self.ctx, f).map_err(String::from)
     }
 
-    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        match Core::mutate(self, |tx| f(tx)) {
+    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        let core = self.core;
+        match core.mutate_as(&self.ctx, f) {
             Ok(v) => Ok(v),
             // El efecto no ocurrió o la mutación lo rechazó por sí misma: nada que reconciliar.
             Err(MutateError::Rejected(m)) => Err(m),
             Err(e) => {
-                self.journal_unrecorded_effect(effect, &e.to_string());
+                core.journal_unrecorded_effect(effect, &e.to_string());
                 Err(format!(
                     "La acción se ejecutó pero NO quedó registrada en Lixbon ({e}). Queda anotada en unrecorded-effects.jsonl para reconciliarla; no la repitas sin comprobarlo."
                 ))
@@ -719,12 +800,21 @@ impl StateAccess for Core {
     }
 }
 
+/// SOLO pruebas: un `Mutex<State>` sin persistencia. Construye un `Tx` detached, ejecuta el cierre,
+/// valida y finaliza los borradores IGUAL que producción (una instrumentación inválida también falla
+/// aquí), descarta los eventos (no hay SQLite) y solo entonces publica el estado en el `Mutex`.
+#[cfg(test)]
 impl StateAccess for Mutex<State> {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
         f(&self.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
-    fn mutate<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        f(&mut self.lock().unwrap_or_else(|e| e.into_inner()))
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        let mut guard = self.lock().unwrap_or_else(|e| e.into_inner());
+        let mut tx = Tx::detached((*guard).clone());
+        let value = f(&mut tx)?;
+        tx.validate_events()?;
+        *guard = tx.into_state();
+        Ok(value)
     }
 }

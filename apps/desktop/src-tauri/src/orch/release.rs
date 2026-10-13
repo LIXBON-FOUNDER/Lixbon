@@ -2,11 +2,12 @@
 
 use serde_json::{json, Value};
 use super::{CLOSE_REMINDER, Caller, Core, git};
+use super::events::MutationContext;
 use super::mutation::{Effect, StateAccess};
 use super::state::{State, Status};
 
 impl Core {
-    pub(super) fn release(&self, caller: &Caller, id: &str, force: bool) -> Result<Value, String> {
+    pub(super) fn release(&self, ctx: &MutationContext, caller: &Caller, id: &str, force: bool) -> Result<Value, String> {
         let (repo, worktree, branch, merged, open) = {
             let st = self.lock();
             Self::check_manages(&st, caller, id)?;
@@ -25,7 +26,7 @@ impl Core {
         let effect = Effect::new("release", "git_worktree_removed").task(id).repo(&repo)
             .expected(json!({ "record": "tarea liberada (stopped) y worktree/rama anotados" }))
             .observed(json!({ "worktree": worktree, "branch": branch, "branch_deleted": branch_deleted }));
-        let hint = self.mutate_after_effect(effect, |st| {
+        let hint = self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
             if open {
                 let _ = st.close(id, Status::Stopped, "liberada por su coordinador");
             }
@@ -61,24 +62,24 @@ impl Core {
         }
     }
 
-    pub(super) fn close_run(&self, run: &str, force: bool) -> Result<Value, String> {
+    pub(super) fn close_run(&self, ctx: &MutationContext, run: &str, force: bool) -> Result<Value, String> {
         // Primero se persiste el cierre del run; después los efectos (matar terminales,
         // liberar worktrees), que registran cada uno su resultado.
-        let (stopped, ids) = self.mutate(|st| {
+        let (stopped, ids) = self.mutate_as(ctx, |st| {
             let (stopped, msgs) = st.close_run(run, force)?;
             st.notify(&msgs);
             let ids: Vec<String> = st.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
             Ok((stopped, ids))
         })?;
         let terminals: Vec<&String> = ids.iter().filter(|id| self.kill_term(id)).collect();
-        let (released, kept) = self.free_worktrees(run, force);
+        let (released, kept) = self.free_worktrees(ctx, run, force);
         Ok(json!({ "run": run, "stopped": stopped, "terminals": terminals, "released": released, "kept": kept }))
     }
 
     /// Libera los worktrees del run cuyas ramas ya están en la del coordinador; las
     /// demás se conservan. Con `force` también se liberan los limpios sin fusionar; los
     /// worktrees con cambios sin commit se conservan siempre y nunca se borra una rama sin fusionar.
-    pub(super) fn free_worktrees(&self, run: &str, force: bool) -> (Vec<Value>, Vec<Value>) {
+    pub(super) fn free_worktrees(&self, ctx: &MutationContext, run: &str, force: bool) -> (Vec<Value>, Vec<Value>) {
         let (tasks, into) = {
             let st = self.lock();
             let root = st.runs.get(run).and_then(|r| st.tasks.get(&r.root));
@@ -106,7 +107,7 @@ impl Core {
                 .expected(json!({ "record": "worktree liberado en la tarea" }))
                 .observed(json!({ "worktree": wt, "branch": t.branch, "branch_deleted": branch_deleted }));
             // El worktree ya no existe: si el registro falla queda anotado, y se sigue informando.
-            let _ = self.mutate_after_effect(effect, |st| {
+            let _ = self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
                 if let Ok(task) = st.task_mut(&t.id) {
                     task.worktree = None;
                     task.cwd = t.repo.clone();

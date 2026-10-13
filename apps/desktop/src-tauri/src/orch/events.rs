@@ -70,6 +70,38 @@ impl Actor {
     }
 }
 
+/// Quién actúa y por dónde llegó la orden, de forma EXPLÍCITA: no hay contexto implícito (ni hilo local
+/// ni «caller actual» global). Lo construye quien conoce la superficie real:
+/// * Tauri -> `Channel::Ui` · servidor local de `lxo` -> `Channel::Lxo` · vigilantes, arranque y
+///   temporizadores -> `Channel::Core`.
+/// El canal NO se deduce del actor. `client_id` queda vacío hasta F1 (identidad por credencial).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MutationContext {
+    pub actor: Actor,
+    pub channel: Channel,
+    /// Reservado para F1; siempre `None` en E.
+    pub client_id: Option<String>,
+}
+
+impl MutationContext {
+    pub(super) fn new(actor: Actor, channel: Channel) -> MutationContext {
+        MutationContext { actor, channel, client_id: None }
+    }
+
+    /// El propio Core (arranque, vigilantes, temporizadores).
+    pub(super) fn core() -> MutationContext {
+        MutationContext::new(Actor::System, Channel::Core)
+    }
+
+    pub(super) fn person(channel: Channel) -> MutationContext {
+        MutationContext::new(Actor::Person, channel)
+    }
+
+    pub(super) fn agent(task: impl Into<String>, channel: Channel) -> MutationContext {
+        MutationContext::new(Actor::Agent(task.into()), channel)
+    }
+}
+
 /// Por dónde llegó la orden (transporte), no quién es el cliente.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Channel {
@@ -153,6 +185,10 @@ pub(super) struct EventDraft {
     /// `None` = el actor por defecto del `Tx`.
     actor: Option<(Actor, Channel)>,
     project_id: Option<String>,
+    /// Fuente EXPLÍCITA del proyecto cuando todavía no se conoce al emitir: la tarea cuyo
+    /// `Task.project_id` se leerá del candidato AL FINALIZAR (p. ej. `run_create` lo completa después
+    /// de crear el run). Nunca se adivina a partir de `entity_kind`.
+    project_task: Option<String>,
     run_id: Option<String>,
     entity_kind: EntityKind,
     entity_id: String,
@@ -177,6 +213,7 @@ impl EventDraft {
             class: P::CLASS,
             actor: None,
             project_id: None,
+            project_task: None,
             run_id: None,
             entity_kind,
             entity_id: entity_id.into(),
@@ -189,6 +226,13 @@ impl EventDraft {
     /// Proyecto al que pertenece el hecho, si ya se conoce (nunca se resuelve con git aquí).
     pub(super) fn project(mut self, project_id: Option<String>) -> EventDraft {
         self.project_id = project_id;
+        self
+    }
+
+    /// Proyecto = el de esta tarea, leído del candidato al finalizar (sin git ni consultas al
+    /// registro). Orden de resolución: `project` explícito -> `project_from_task` -> NULL.
+    pub(super) fn project_from_task(mut self, task_id: impl Into<String>) -> EventDraft {
+        self.project_task = Some(task_id.into());
         self
     }
 
@@ -221,9 +265,13 @@ impl EventDraft {
 
     /// Materializa el borrador: fija `id` (UUID v7), hora, actor y canal. Se llama UNA vez por evento,
     /// antes del bucle de reintentos de la persistencia.
-    fn finalize(self, default_actor: &(Actor, Channel), at: i64) -> NewEvent {
-        let (actor, channel) = self.actor.as_ref().unwrap_or(default_actor);
+    fn finalize(self, ctx: &MutationContext, at: i64, project_of: &dyn Fn(&str) -> Option<String>) -> NewEvent {
+        let (actor, channel) = match &self.actor {
+            Some((a, c)) => (a, c),
+            None => (&ctx.actor, &ctx.channel),
+        };
         let (actor_kind, actor_id) = actor.parts();
+        let project_id = self.project_id.or_else(|| self.project_task.as_deref().and_then(project_of));
         NewEvent {
             id: new_uuid_v7(),
             at,
@@ -233,8 +281,8 @@ impl EventDraft {
             actor_kind,
             actor_id,
             channel: Some(channel.as_str().to_string()),
-            client_id: None,
-            project_id: self.project_id,
+            client_id: ctx.client_id.clone(),
+            project_id,
             run_id: self.run_id,
             entity_kind: self.entity_kind.as_str().to_string(),
             entity_id: self.entity_id,
@@ -248,11 +296,13 @@ impl EventDraft {
 /// Finaliza y valida los borradores de UNA mutación: misma hora para todos, un `id` nuevo cada uno.
 /// Un evento que no cumple el contrato rechaza la mutación entera (nada cambia): es un error de
 /// programación que debe verse, no un hecho que se pierda en silencio.
-pub(super) fn finalize_all(drafts: Vec<EventDraft>, default_actor: &(Actor, Channel), at: i64) -> Result<Vec<NewEvent>, String> {
+///
+/// `project_of(task)` da el `project_id` de una tarea del CANDIDATO (solo lectura de memoria).
+pub(super) fn finalize_all(drafts: Vec<EventDraft>, ctx: &MutationContext, at: i64, project_of: &dyn Fn(&str) -> Option<String>) -> Result<Vec<NewEvent>, String> {
     let mut out = Vec::with_capacity(drafts.len());
     for d in drafts {
         let kind = d.kind();
-        let e = d.finalize(default_actor, at);
+        let e = d.finalize(ctx, at, project_of);
         e.check().map_err(|err| format!("{kind}: {err}"))?;
         out.push(e);
     }
