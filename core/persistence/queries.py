@@ -2131,13 +2131,18 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
     }
 
 
+# El chat de la web y el de la app móvil son el mismo producto: la misma
+# conversación se sigue en cualquiera de los dos. IDE y CLI tienen la suya.
+CHAT_SOURCES = ("web", "mobile")
+
+
 def list_conversations(
     user_id: int, limit: int = 50, offset: int = 0, q: str | None = None,
     source: str | None = None, archived: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Conversaciones del usuario, más recientes primero. `q` busca en el título.
-    `source` filtra por superficie (web/ide/cli); 'web' incluye las legacy (NULL).
-    `archived` None = todas."""
+    `source` filtra por superficie (web/mobile/ide/cli); web y mobile comparten
+    historial e incluyen las legacy (NULL). `archived` None = todas."""
     with get_session() as s:
         stmt = (
             select(Conversation)
@@ -2146,8 +2151,8 @@ def list_conversations(
             .limit(limit)
             .offset(offset)
         )
-        if source == "web":
-            stmt = stmt.where(or_(Conversation.source == "web", Conversation.source.is_(None)))
+        if source in CHAT_SOURCES:
+            stmt = stmt.where(or_(Conversation.source.in_(CHAT_SOURCES), Conversation.source.is_(None)))
         elif source:
             stmt = stmt.where(Conversation.source == source)
         if q:

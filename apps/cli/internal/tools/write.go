@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -134,6 +137,55 @@ func DeleteFile(ctx context.Context, root, relPath string) (string, error) {
 		return "", err
 	}
 	return "Archivo eliminado: " + relPath, nil
+}
+
+// DeletePaths junta las rutas de delete_file: path y/o paths. Los modelos
+// pequeños a veces mandan paths como un string con el array JSON dentro.
+func DeletePaths(args map[string]any) []string {
+	var raw []any
+	switch v := args["paths"].(type) {
+	case []any:
+		raw = v
+	case string:
+		if json.Unmarshal([]byte(v), &raw) != nil {
+			raw = []any{v}
+		}
+	}
+	raw = append(raw, args["path"])
+	var out []string
+	for _, item := range raw {
+		p, ok := item.(string)
+		if p = strings.TrimSpace(p); ok && p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// DeleteFiles borra cada ruta por separado: un fallo no impide borrar el resto
+// y el resultado dice qué pasó con cada una.
+func DeleteFiles(ctx context.Context, root string, paths []string) (string, error) {
+	switch len(paths) {
+	case 0:
+		return "", errors.New("falta path (o paths con varias rutas)")
+	case 1:
+		return DeleteFile(ctx, root, paths[0])
+	}
+	lines := make([]string, 0, len(paths)+1)
+	deleted := 0
+	for _, p := range paths {
+		result, err := DeleteFile(ctx, root, p)
+		switch {
+		case err != nil:
+			result = "[ERROR] " + p + ": " + err.Error()
+		case !strings.HasPrefix(result, "No encontrado"):
+			deleted++
+		}
+		lines = append(lines, result)
+	}
+	// La primera línea es el resumen que se ve en la terminal y en el móvil.
+	header := fmt.Sprintf("Eliminados %d de %d", deleted, len(paths))
+	return header + "\n" + strings.Join(lines, "\n"), nil
 }
 
 func RenameFile(ctx context.Context, root, src, dst string) (string, error) {

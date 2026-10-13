@@ -593,21 +593,24 @@ func (c *Chat) agentTurn(ctx context.Context, sink Sink) (string, error) {
 	return answer, nil
 }
 
-// askTurn conversa sin tocar el workspace, pero puede leer páginas web con
-// fetch_url. Lo descargado queda en el historial como TOOL_RESULT para que las
-// preguntas siguientes sobre la página tengan el texto delante.
+// askTurn conversa sin cambiar nada: lee el proyecto, busca en internet y
+// pregunta. Lo descargado de la web queda en el historial como TOOL_RESULT
+// para que las preguntas siguientes tengan el texto delante; los archivos no,
+// porque se pueden volver a leer y llenarían el contexto.
 func (c *Chat) askTurn(ctx context.Context, sink Sink) (string, error) {
 	c.autoCompact(ctx, sink)
-	messages := c.contextMessages()
 	var toolList []map[string]any
 	if c.Session.NativeTools {
-		toolList = []map[string]any{toolspec.Schema("fetch_url")}
+		for _, name := range agent.AskTools {
+			toolList = append(toolList, toolspec.Schema(name))
+		}
 	}
+	messages := c.contextMessages(toolList != nil)
 	stream := c.streamer(sink, false)
 	turn := &agent.Turn{S: c.Session, Emit: sink.Event}
 	var fetched []history.Message
 	for step := 0; ; step++ {
-		if step == maxAskFetches {
+		if step == maxAskSteps {
 			toolList = nil
 		}
 		res, err := stream(ctx, messages, toolList)
@@ -618,33 +621,49 @@ func (c *Chat) askTurn(ctx context.Context, sink Sink) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if len(res.ToolCalls) == 0 && textutil.Strip(res.Text) == "" && textutil.Strip(res.Reasoning) != "" && ctx.Err() == nil {
+			// Tras leer archivos los modelos thinking a veces responden solo en
+			// el razonamiento: se repite el paso sin razonar, como en agent.
+			if res, err = stream(agent.WithStep(ctx, agent.StepOptions{NoThinking: true}), messages, toolList); err != nil {
+				return "", err
+			}
+		}
 		if len(res.ToolCalls) == 0 {
 			c.History = append(c.History, fetched...)
 			c.History = append(c.History, history.Assistant(res.Text))
 			return res.Text, nil
 		}
 		messages = append(messages, history.Message{Role: "assistant", Content: res.Text, ToolCalls: res.ToolCalls})
+		var images []string
 		for _, raw := range res.ToolCalls {
 			var call map[string]any
 			_ = json.Unmarshal(raw, &call)
 			parsed := toolparse.Native(call)
 			id, _ := call["id"].(string)
-			result := "[ERROR] En el modo ask solo está fetch_url; para el resto, /mode agent."
-			if parsed.Tool == "fetch_url" {
-				if result, err = turn.Fetch(ctx, parsed.Args); err != nil {
-					return "", err
+			result, attached, err := turn.RunReadOnly(ctx, parsed.Tool, parsed.Args)
+			if err != nil {
+				return "", err
+			}
+			images = append(images, attached...)
+			switch parsed.Tool {
+			case "fetch_url", "web_search":
+				label, _ := parsed.Args["url"].(string)
+				if parsed.Tool == "web_search" {
+					label, _ = parsed.Args["query"].(string)
 				}
-				url, _ := parsed.Args["url"].(string)
-				fetched = append(fetched, history.User(fmt.Sprintf("TOOL_RESULT fetch_url %s:\n%s", url,
+				fetched = append(fetched, history.User(fmt.Sprintf("TOOL_RESULT %s %s:\n%s", parsed.Tool, label,
 					history.ClipToolOutput(result, history.MaxToolOutputChars))))
 			}
 			messages = append(messages, history.Message{Role: "tool", Name: parsed.Tool, ToolCallID: id,
 				Content: history.ClipToolOutput(result, history.MaxToolOutputChars)})
 		}
+		if len(images) > 0 {
+			messages = append(messages, history.Message{Role: "user", Content: agent.ToolImagesPrompt, Images: images})
+		}
 	}
 }
 
-const maxAskFetches = 3
+const maxAskSteps = 12
 
 // rejectsTools: el servidor (o el modelo) no admite herramientas nativas.
 func rejectsTools(err error) bool {
@@ -655,30 +674,42 @@ func rejectsTools(err error) bool {
 // contextMessages son los últimos max_context_messages del historial, sin el
 // round-trip de herramientas (recortado quedaría descolgado y rompería el
 // template del modelo), más el LIXBON.md del proyecto.
-func (c *Chat) contextMessages() []history.Message {
+func (c *Chat) contextMessages(withTools bool) []history.Message {
 	messages := agent.SanitizeForPlainChat(c.History)
 	if limit := c.Cfg.MaxContextMessages; limit > 0 && len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}
-	system := []history.Message{{Role: "system", Content: agent.StylePrompt}}
-	if c.Client.Generic {
-		system[0].Content = askSystemPrompt + " " + agent.StylePrompt
-	}
+	system := []history.Message{{Role: "system", Content: askSystemPrompt(c.Workspace, withTools, time.Now()) + "\n\n" + agent.StylePrompt}}
 	if c.ProjectContext != "" {
 		system = append(system, history.Message{Role: "system", Content: "Contexto del proyecto (LIXBON.md):\n" + c.ProjectContext})
 	}
 	return append(system, messages...)
 }
 
-// askSystemPrompt evita que un modelo externo conteste «no tengo acceso a tu
-// equipo» sin más. Solo va a proveedores genéricos: el gateway Lixbon pone su
-// propio prompt y el contrato con él no lleva mensaje de sistema.
-const askSystemPrompt = "Eres el asistente de Lixbon CLI, una terminal de programación. Ahora está en modo ask: " +
-	"conversas y solo puedes leer páginas web con fetch_url (úsala cuando el usuario nombre una URL o un " +
-	"dominio); no puedes leer, crear ni editar archivos ni ejecutar comandos. Si el usuario te pide algo que requiere el equipo o el proyecto, dile que escriba /mode agent " +
-	"(o pulse Mayús+Tab) para que trabajes sobre su workspace; no digas que es imposible. " +
-	"El usuario puede ejecutar un comando él mismo con !comando (p. ej. !git status); su salida te llega " +
-	"como mensaje en la conversación. Responde en el idioma del usuario."
+const askTreeEntries = 80
+
+// askSystemPrompt le dice al modelo que ve el proyecto pero no lo cambia; sin
+// él contesta «no tengo acceso a tu equipo» o inventa el contenido.
+func askSystemPrompt(workspace string, withTools bool, now time.Time) string {
+	intro := "Eres el asistente de Lixbon CLI, una terminal de programación, en modo ask (solo lectura). " +
+		"Workspace: " + workspace + "\n"
+	if !withTools {
+		return intro + "Este modelo no admite herramientas: conversas con lo que el usuario te cuente o adjunte. " +
+			"Si necesita que trabajes sobre sus archivos, dile que escriba /mode agent (o pulse Mayús+Tab). " +
+			"El usuario puede ejecutar un comando él mismo con !comando (p. ej. !git status); su salida te llega " +
+			"como mensaje. Hoy es " + now.Format("02/01/2006") + ". Responde en el idioma del usuario."
+	}
+	return intro +
+		"Puedes VER el proyecto con list_files, find_files, read_file, outline y search (rutas relativas al " +
+		"workspace), buscar en internet con web_search, leer páginas con fetch_url y preguntar al usuario con ask_user. " +
+		"No puedes crear, editar ni borrar archivos ni ejecutar comandos: si te lo piden, explica qué cambiarías y " +
+		"dile que escriba /mode agent (o pulse Mayús+Tab) para aplicarlo; no digas que es imposible.\n" +
+		"Cuando la pregunta trate del proyecto o de una carpeta, mira los archivos con las herramientas antes de " +
+		"responder y básate en lo que leas. El usuario puede ejecutar un comando él mismo con !comando " +
+		"(p. ej. !git status); su salida te llega como mensaje. Responde en el idioma del usuario." +
+		agent.AskFirstPrompt + agent.CurrentDataPrompt(now) +
+		"\n\n=== ARCHIVOS DEL WORKSPACE ===\n" + tools.WorkspaceTree(workspace, askTreeEntries)
+}
 
 // autoCompact, en modo ask, resume la conversación cuando se acerca a la
 // ventana (en agent lo hace el propio bucle, paso a paso).

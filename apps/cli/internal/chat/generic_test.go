@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/api"
@@ -178,15 +179,21 @@ func TestAskModeTellsAGenericModelHowToGetTools(t *testing.T) {
 	}
 }
 
-func TestAskModeSendsOnlyTheStylePromptToTheLixbonGateway(t *testing.T) {
+func TestAskModeTellsTheLixbonModelItCanReadTheProject(t *testing.T) {
 	g, client := newGateway(t)
 	c := newChat(t, client, nil, Options{})
 	if _, err := c.Send(context.Background(), "hola", nil); err != nil {
 		t.Fatal(err)
 	}
 	messages := g.bodyAt(0)["messages"].([]any)
-	system := messages[0].(map[string]any)
-	if len(messages) != 2 || system["content"] != agent.StylePrompt {
-		t.Fatalf("al gateway solo va el estilo, no el prompt de proveedores externos: %v", messages)
+	system := messages[0].(map[string]any)["content"].(string)
+	for _, want := range []string{"read_file", "ask_user", "web_search", "/mode agent", "Hoy es " + time.Now().Format("02/01/2006"), c.Workspace} {
+		if !strings.Contains(system, want) {
+			t.Errorf("el prompt del modo ask no menciona %q", want)
+		}
+	}
+	if len(messages) != 2 || !strings.HasSuffix(system, agent.StylePrompt) {
+		t.Fatalf("prompt del modo ask + estilo y el mensaje: %v", messages)
 	}
 }
+

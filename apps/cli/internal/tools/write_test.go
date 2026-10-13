@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -133,13 +134,59 @@ func TestEditRefusesInvalidUTF8(t *testing.T) {
 func TestDeleteRefusesWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "a.txt"), []byte("x"))
-	for _, path := range []string{".", "", "sub/.."} {
+	for _, path := range []string{".", "sub/.."} {
 		if got := run(t, root, "delete_file", map[string]any{"path": path}); !strings.Contains(got, "raíz del workspace") {
 			t.Errorf("delete_file(%q) = %q", path, got)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "a.txt")); err != nil {
-		t.Fatalf("se borró contenido del workspace: %v", err)
+	if got := run(t, root, "delete_file", map[string]any{"path": ""}); !strings.Contains(got, "falta path") {
+		t.Errorf("delete_file sin ruta = %q", got)
+	}
+	if got := run(t, root, "delete_file", map[string]any{"paths": []any{"a.txt", "."}}); !strings.Contains(got, "raíz del workspace") {
+		t.Errorf("delete_file con la raíz entre varias = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); err == nil {
+		t.Fatal("la raíz entre varias rutas no debe impedir borrar las demás")
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("se borró la raíz del workspace: %v", err)
+	}
+}
+
+func TestDeleteSeveralPaths(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "dir/c.txt", "keep.txt"} {
+		writeFile(t, filepath.Join(root, name), []byte("x"))
+	}
+	got := run(t, root, "delete_file", map[string]any{"paths": []any{"a.txt", "b.txt", "dir", "missing.txt"}})
+	for _, want := range []string{"Eliminados 3 de 4", "Archivo eliminado: a.txt", "Archivo eliminado: b.txt", "Directorio eliminado: dir", "No encontrado: missing.txt"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("falta %q en %q", want, got)
+		}
+	}
+	for _, gone := range []string{"a.txt", "b.txt", "dir"} {
+		if _, err := os.Stat(filepath.Join(root, gone)); err == nil {
+			t.Errorf("%s sigue existiendo", gone)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "keep.txt")); err != nil {
+		t.Fatal("borró un archivo que no estaba en la lista")
+	}
+}
+
+func TestDeletePathsAcceptsEveryShape(t *testing.T) {
+	for _, c := range []struct {
+		args map[string]any
+		want []string
+	}{
+		{map[string]any{"path": "a"}, []string{"a"}},
+		{map[string]any{"paths": []any{"a", "b", "a", " "}}, []string{"a", "b"}},
+		{map[string]any{"paths": `["a","b"]`}, []string{"a", "b"}},
+		{map[string]any{"paths": []any{"a"}, "path": "c"}, []string{"a", "c"}},
+	} {
+		if got := DeletePaths(c.args); !slices.Equal(got, c.want) {
+			t.Errorf("DeletePaths(%v) = %v, want %v", c.args, got, c.want)
+		}
 	}
 }
 

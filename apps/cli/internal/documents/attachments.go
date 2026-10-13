@@ -15,8 +15,8 @@ import (
 type File struct{ Name, Content string }
 
 // Attachments es lo que un mensaje arrastra con sus @ruta: las imágenes viajan
-// aparte y los archivos de texto se anexan, para que el modelo los tenga aunque
-// esté en modo ask y no pueda leerlos.
+// aparte y los archivos de texto se anexan, para que el modelo los tenga sin
+// gastar un paso en leerlos.
 type Attachments struct {
 	Clean  string
 	Images []string

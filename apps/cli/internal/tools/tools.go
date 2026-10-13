@@ -144,15 +144,14 @@ func dispatch(ctx context.Context, root, name string, args map[string]any) (stri
 			return "", err
 		}
 		return InsertAtLine(ctx, root, path, line, content)
-	case "mkdir", "delete_file":
+	case "mkdir":
 		path, err := textArg(args, "path", "")
 		if err != nil {
 			return "", err
 		}
-		if name == "mkdir" {
-			return Mkdir(ctx, root, path)
-		}
-		return DeleteFile(ctx, root, path)
+		return Mkdir(ctx, root, path)
+	case "delete_file":
+		return DeleteFiles(ctx, root, DeletePaths(args))
 	case "rename_file":
 		src, err := textArg(args, "src", "")
 		if err != nil {

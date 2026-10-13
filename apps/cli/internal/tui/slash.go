@@ -376,7 +376,7 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 		return nil
 	}
 	options := []option{
-		{Label: "ask", Value: "ask", Desc: "chat normal con el modelo"},
+		{Label: "ask", Value: "ask", Desc: "conversa y lee tu proyecto sin modificarlo"},
 		{Label: "agent", Value: "agent", Desc: "el modelo edita código en tu workspace"},
 		{Label: "delegate", Value: "delegate", Desc: "auto-routing inteligente del servidor"},
 	}

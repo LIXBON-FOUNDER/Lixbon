@@ -23,7 +23,7 @@ import { AgentMark, ChatHeader, FadeUp, IconButton, KeyboardAware, Segmented, Sk
 import { initialRemoteState, keepStreamAlive, openEventStream, remoteReducer } from '../remote';
 import { openRemoteSocket } from '../remoteSocket';
 import { agentOf } from '../remoteSessions';
-import { buildBlocks, contextLevels, diffLines, fmtSecs, fmtTokens, toolState } from '../remoteTurns';
+import { buildBlocks, changedTurns, contextLevels, diffLines, fmtSecs, fmtTokens, toolState } from '../remoteTurns';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
 import { toolKind, toolParts } from '../toolText';
@@ -443,17 +443,23 @@ function RemoteSessionView({ session, onBack, onUsage }) {
     }
   };
 
+  const turnBlocks = useMemo(() => buildBlocks(state.items), [state.items]);
+  const changes = useMemo(() => changedTurns(turnBlocks), [turnBlocks]);
   // Recién enviado, el turno aún no tiene nada que enseñar: «está pensando…».
   const blocks = useMemo(() => {
-    const out = buildBlocks(state.items);
+    const out = [...turnBlocks];
     const last = out[out.length - 1];
     // Un comando «/» que sigue en el equipo no es un turno del agente.
     if (busy && compacting) return out.reverse();
     if (busy && state.activity === 'command') out.push({ type: 'running', key: 'running', label: state.activityLabel });
     else if (busy && !(last?.type === 'turn' && !last.end)) out.push(EMPTY_TURN);
     return out.reverse();
-  }, [state.items, busy, compacting, state.activity, state.activityLabel]);
+  }, [turnBlocks, busy, compacting, state.activity, state.activityLabel]);
   const [tab, setTab] = useState('chat');
+  const [seenChanges, setSeenChanges] = useState(0);
+  useEffect(() => {
+    if (tab === 'changes') setSeenChanges(changes.length);
+  }, [tab, changes.length]);
   const canOrch = !state.ended && caps.includes('orch');
   const orchBusy = !!state.orch?.tasks?.some((x) => !['done', 'failed', 'stopped', 'exited'].includes(x.status));
   const waitingTool = state.approvals[0]?.tool;
@@ -474,7 +480,7 @@ function RemoteSessionView({ session, onBack, onUsage }) {
         onOptions={state.ended ? null : openCommands}
       />
 
-      {canOrch && (
+      {!state.ended && (
         <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
           <Segmented
             stretch
@@ -483,7 +489,8 @@ function RemoteSessionView({ session, onBack, onUsage }) {
             bg={c.surface2}
             options={[
               { value: 'chat', label: 'Conversación' },
-              { value: 'orch', label: 'Orquestar', dot: orchBusy && tab !== 'orch' },
+              { value: 'changes', label: changes.length ? `Cambios · ${changes.length}` : 'Cambios', dot: changes.length > seenChanges && tab !== 'changes' },
+              ...(canOrch ? [{ value: 'orch', label: 'Orquestar', dot: orchBusy && tab !== 'orch' }] : []),
             ]}
           />
         </View>
@@ -492,6 +499,8 @@ function RemoteSessionView({ session, onBack, onUsage }) {
       <View style={{ flex: 1 }}>
         {canOrch && tab === 'orch' ? (
           <RemoteOrch state={state} sendCommand={sendCommand} />
+        ) : tab === 'changes' ? (
+          <ChangesView changes={changes} open={open} toggle={toggle} />
         ) : state.items.length === 0 ? (
           <SessionEmpty state={state} agent={agent} />
         ) : (
@@ -771,12 +780,6 @@ function TurnBlock({ turn, live, waitingTool, agent, open, toggle }) {
       )}
       {!!answer?.text && <AnswerBlock text={answer.text} streaming={!!live && answer.open} />}
       {interrupted && <NoticeBox text="Interrumpiste al agente. Lo que ya hizo se queda en el equipo." />}
-      {turn.qa.map((qa) => (
-        <QaRecord key={qa.key} item={qa} label={label} />
-      ))}
-      {!live && turn.files.length > 0 && (
-        <ChangesCard turn={turn} open={open} toggle={toggle} />
-      )}
     </View>
   );
 }
@@ -800,6 +803,7 @@ function WorkList({ work, live, waitingTool, label, open, toggle, elapsed }) {
           return <ToolRow key={it.key} it={it} waitingTool={lastRunning ? waitingTool : null} open={!!open[it.key]} onToggle={() => toggle(it.key)} />;
         }
         if (it.kind === 'notice') return <NoticeBox key={it.key} text={it.text} />;
+        if (it.kind === 'qa') return <QaRecord key={it.key} item={it} label={label} />;
         if (it.kind === 'assistant' && it.text.trim()) return <ProseLine key={it.key} text={it.text} />;
         return null;
       })}
@@ -1141,14 +1145,52 @@ function QaRecord({ item, label }) {
   );
 }
 
+/** Pestaña «Cambios»: lo que dejó cada turno, del más reciente al primero,
+    para que el hilo de la conversación no cargue con las listas de archivos. */
+function ChangesView({ changes, open, toggle }) {
+  const c = useColors();
+  if (changes.length === 0) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 8 }}>
+        <Icon name="edit" size={22} color={c.inkFaint} strokeWidth={1.6} />
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>Aún no hay cambios</Text>
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: c.inkMuted }}>
+          Cuando el agente edite, cree o borre archivos, cada turno aparece aquí con su diff.
+        </Text>
+      </View>
+    );
+  }
+  const files = new Set(changes.flatMap((x) => x.turn.files.map((f) => f.path))).size;
+  const adds = changes.reduce((n, x) => n + x.turn.adds, 0);
+  const dels = changes.reduce((n, x) => n + x.turn.dels, 0);
+  return (
+    <FlatList
+      data={changes}
+      keyExtractor={(x) => x.turn.key}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 }}
+      ListHeaderComponent={
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, paddingBottom: 4 }}>
+          <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+            {`${files} ${files === 1 ? 'archivo' : 'archivos'} en esta sesión`}
+          </Text>
+          <LineCounts adds={adds} dels={dels} />
+        </View>
+      }
+      renderItem={({ item }) => <ChangesCard turn={item.turn} title={splitMessage(item.prompt).text} open={open} toggle={toggle} />}
+    />
+  );
+}
+
 /** Lo que el turno dejó cambiado: cada archivo con sus líneas, desplegable a
     su diff, y si pasaron los tests y en qué commit quedó. */
-function ChangesCard({ turn, open, toggle }) {
+function ChangesCard({ turn, title, open, toggle }) {
   const c = useColors();
   const { s } = useScale();
   return (
-    <FadeUp style={{ marginVertical: s(9), borderRadius: RADIUS, backgroundColor: c.surface1, overflow: 'hidden' }}>
-      <Text style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Cambios de este turno</Text>
+    <FadeUp style={{ marginVertical: s(6), borderRadius: RADIUS, backgroundColor: c.surface1, overflow: 'hidden' }}>
+      <Text numberOfLines={2} style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2, fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted }}>
+        {title.trim() || 'Cambios del turno'}
+      </Text>
       {turn.files.map((f) => {
         const key = `${turn.key}:${f.path}`;
         const isOpen = !!open[key];

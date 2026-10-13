@@ -1,6 +1,9 @@
 export default {
   es: {
     visualChip: 'Diseño en Visuals',
+    commandsAria: 'Comandos',
+    visualCommand: 'Crear o cambiar un diseño en Visuals',
+    visualCommandEmpty: 'Escribe qué diseño quieres después de /visual.',
     visualShow: 'Ver diseño',
     visualWriting: 'Escribiendo {{name}}…',
     visualPanelTitle: 'Visual',
@@ -107,6 +110,9 @@ export default {
   },
   en: {
     visualChip: 'Design in Visuals',
+    commandsAria: 'Commands',
+    visualCommand: 'Create or change a design in Visuals',
+    visualCommandEmpty: 'Type the design you want after /visual.',
     visualShow: 'View design',
     visualWriting: 'Writing {{name}}…',
     visualPanelTitle: 'Visual',

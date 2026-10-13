@@ -26,8 +26,11 @@ func (s *Session) SnapshotBefore(tool string, args map[string]any) {
 		return
 	}
 	paths := []string{stringArg(args, "path")}
-	if tool == "rename_file" {
+	switch tool {
+	case "rename_file":
 		paths = []string{stringArg(args, "src"), stringArg(args, "dst")}
+	case "delete_file":
+		paths = tools.DeletePaths(args)
 	}
 	for _, rel := range paths {
 		if !truthy(rel) {

@@ -61,3 +61,13 @@ def test_conversacion_ajena():
 
     assert q.rewind_last_turn("conv-c", otro) is None
     assert _roles("conv-c", dueno) == [("user", "privado")]
+
+
+def test_web_y_movil_comparten_historial():
+    uid = _usuario("compartido@test.local")
+    for conv, origen in [("c-web", "web"), ("c-movil", "mobile"), ("c-cli", "cli"), ("c-vieja", None)]:
+        assert q.ensure_conversation(conv, uid, conv, None, source=origen)
+    for origen in ("web", "mobile"):
+        ids = {c["id"] for c in q.list_conversations(uid, source=origen)}
+        assert ids == {"c-web", "c-movil", "c-vieja"}, origen
+    assert {c["id"] for c in q.list_conversations(uid, source="cli")} == {"c-cli"}

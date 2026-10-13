@@ -394,6 +394,9 @@ def build_context(query: str, results: list[dict], queries: list[str] | None = N
         "actualizada: SÍ puedes, está aquí abajo.",
         "- Si el dato exacto (una cifra, un precio, una fecha) aparece en los resultados, "
         "cítalo tal cual. Si no aparece, dilo con honestidad.",
+        "- Responde DIRECTAMENTE con lo que se pidió (p. ej. la cotización y la fecha de la "
+        "fuente), en texto. No te limites a explicar cómo calcularlo ni respondas con un diseño, "
+        "un archivo o código que nadie pidió.",
         "- Cita las fuentes relevantes con su número [n].",
         "",
         "=== RESULTADOS ===",

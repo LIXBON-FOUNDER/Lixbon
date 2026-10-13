@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"lixbon.com/cli/internal/textutil"
@@ -264,8 +265,22 @@ func ComputeChange(root, tool string, args map[string]any) *Change {
 		return &Change{Kind: "update", Path: rel, OldText: display, NewText: textutil.UniversalNewlines(updated)}
 
 	case "delete_file":
-		old, _ := readOld(root, rel, false)
-		return &Change{Kind: "delete", Path: rel, OldText: old}
+		paths := tools.DeletePaths(args)
+		if len(paths) <= 1 {
+			rel = strings.Join(paths, "")
+			old, _ := readOld(root, rel, false)
+			return &Change{Kind: "delete", Path: rel, OldText: old}
+		}
+		var old strings.Builder
+		for _, p := range paths {
+			if text, ok := readOld(root, p, false); ok && text != "" {
+				old.WriteString(text)
+				if !strings.HasSuffix(text, "\n") {
+					old.WriteByte('\n')
+				}
+			}
+		}
+		return &Change{Kind: "delete", Path: strings.Join(paths, ", "), OldText: old.String()}
 	case "rename_file":
 		return &Change{Kind: "rename", Path: stringArg(args, "src"), Detail: stringArg(args, "dst")}
 	case "mkdir":

@@ -296,18 +296,22 @@
       "type": "function",
       "function": {
         "name": "delete_file",
-        "description": "Elimina un archivo o carpeta.",
+        "description": "Elimina uno o varios archivos o carpetas. Para borrar varios, pásalos todos en paths en una sola llamada.",
         "parameters": {
           "type": "object",
           "properties": {
             "path": {
               "type": "string",
-              "description": "Ruta relativa"
+              "description": "Ruta relativa (un solo archivo o carpeta)"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Rutas relativas para borrar varios de una vez"
             }
-          },
-          "required": [
-            "path"
-          ]
+          }
         }
       }
     },
@@ -490,7 +494,7 @@
       "type": "function",
       "function": {
         "name": "ask_user",
-        "description": "Pregunta al usuario cuando la petición es ambigua o hay que elegir entre alternativas que cambian el resultado. No la uses para confirmar cada paso.",
+        "description": "Pregunta al usuario y espera su respuesta (se le abre un panel para elegir o escribir). Úsala ANTES de actuar cuando falte un dato que cambia el resultado (qué tecnología, qué archivo, qué alcance) en vez de suponerlo, y siempre que quieras preguntarle algo en lugar de escribir la pregunta en el chat. Solo para lo que únicamente el usuario puede decidir: lo que puedas averiguar leyendo o buscando, averígualo tú. No la uses para confirmar cada paso.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -571,8 +575,8 @@
     },
     {
       "name": "delete_file",
-      "args": "path",
-      "description": "Eliminar un archivo"
+      "args": "path | paths",
+      "description": "Eliminar uno o varios archivos o carpetas"
     },
     {
       "name": "rename_file",
@@ -697,7 +701,8 @@
       "regex"
     ],
     "delete_file": [
-      "path"
+      "path",
+      "paths"
     ],
     "rename_file": [
       "src",

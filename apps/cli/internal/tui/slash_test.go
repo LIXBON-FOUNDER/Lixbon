@@ -77,7 +77,7 @@ func TestModeCommand(t *testing.T) {
 	}
 	contains(t, h.out(), "Workspace del agente:")
 	h.send("/mode")
-	contains(t, h.view(), "chat normal con el modelo")
+	contains(t, h.view(), "lee tu proyecto sin modificarlo")
 	h.key("esc")
 	if h.chat.Mode != "agent" {
 		t.Fatal("Esc no cambia el modo")

@@ -67,6 +67,24 @@ def podria_necesitar_internet(messages: list[dict]) -> bool:
     return not (_CALCULO.search(plano) and len(plano.split()) <= 12)
 
 
+_DATO_ACTUAL = re.compile(
+    r"\b(hoy|actual\w*|ultim[oa]s?|reciente\w*|esta semana|este mes|este ano|precio\w*|cotiza\w*|"
+    r"tasa de cambio|tipo de cambio|dolar\w*|euro\w*|bitcoin|btc|noticia\w*|clima|"
+    r"temperatura|resultado\w* del|marcador|quien gano|elecciones|202\d|"
+    r"today|current\w*|latest|recent\w*|price\w*|exchange rate|news|weather)\b"
+)
+
+
+def pide_datos_actuales(messages: list[dict]) -> bool:
+    """La pregunta depende del momento (precios, noticias, «hoy»): se busca
+    aunque el planificador opine que no, porque los modelos pequeños creen
+    saberlo y contestan con datos de su fecha de corte."""
+    pregunta = _ultima_pregunta(messages)
+    if pregunta is None or _CODIGO.search(pregunta[0]):
+        return False
+    return bool(_DATO_ACTUAL.search(_plano(pregunta[0])))
+
+
 def nivel_de_razonamiento(messages: list[dict]) -> Nivel:
     pregunta = _ultima_pregunta(messages)
     if pregunta is None:
