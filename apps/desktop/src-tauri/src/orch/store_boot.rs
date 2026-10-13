@@ -44,7 +44,7 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, InstanceLock, Migration, MigrationReport, Store, StoreError};
+use crate::store::{self, InstanceLock, Migration, MigrationReport, NewEvent, Store, StoreError};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -281,14 +281,19 @@ struct SqlitePersistence {
 }
 
 impl Persistence for SqlitePersistence {
-    fn persist(&self, state: &State) -> Result<(), PersistError> {
+    fn records_events(&self) -> bool {
+        true
+    }
+
+    fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let doc = serde_json::to_string(state).map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))?;
         let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
         let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
         let Some(store) = slot.store.as_mut() else {
             return Err(PersistError::structural("el almacén SQLite no está abierto"));
         };
-        match store.commit_authoritative(committed.rev, &doc) {
+        // UPDATE legacy_state + INSERT events: UNA transacción, o ninguna de las dos cosas.
+        match store.commit_authoritative_with_events(committed.rev, &doc, events) {
             Ok(rev) => {
                 committed.rev = rev;
                 committed.pending_mirror = Some((rev, doc));

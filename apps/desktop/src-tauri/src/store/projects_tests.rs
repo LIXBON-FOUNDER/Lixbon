@@ -51,8 +51,9 @@ fn raw_err(s: &mut Store, sql: &str) -> bool {
 #[test]
 fn la_003_se_aplica_desde_cero_y_solo_crea_las_dos_tablas_de_d() {
     let tmp = Tmp::new();
-    let s = abre(tmp.path());
-    let lista = embedded();
+    // Lo que conoce un binario de D: hasta la 003 (la 004 es de E y tiene sus propias pruebas).
+    let lista: Vec<Migration> = embedded().into_iter().filter(|m| m.version <= 3).collect();
+    let s = Store::open_with(tmp.path(), &lista, "t").unwrap();
     assert_eq!(lista.iter().map(|m| (m.version, m.name)).collect::<Vec<_>>(), vec![(1, "core"), (2, "authority_fence"), (3, "projects")]);
     assert_eq!(s.migration_report().to_version, 3);
     let tablas: Vec<String> = s
