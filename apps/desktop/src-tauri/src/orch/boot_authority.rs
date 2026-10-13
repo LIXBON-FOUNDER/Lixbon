@@ -25,6 +25,34 @@
 //!   (degradar a `state.json` y reintentar en el siguiente arranque).
 //! * El documento promovido sale de la ÚNICA lectura de `state.json` que se hasheó
 //!   en la intención; antes del COMMIT se vuelve a leer solo para detectar cambios.
+//!
+//! # Migraciones posteriores a la valla (003+)
+//! Se aplican en UN solo sitio ([`Core::apply_post_fence_migrations`]).
+//!
+//! **Invariante.** 003+ exige que `decide_boot` haya DEMOSTRADO que no hay contradicción entre el
+//! protocolo externo (`authority.json`) y la autoridad interna (SQLite). No exige que el marcador
+//! quede publicado: es la semántica de C2b y se conserva. SQLite es la autoridad; un marcador
+//! inválido, futuro o contradictorio BLOQUEA; un marcador ausente con SQLite autoritativo válido es
+//! reconstruible, y un `promoting` coherente con un COMMIT ya hecho es recuperable. La acción sobre
+//! el marcador (reconstruir / confirmar) se INTENTA antes de levantar el techo, pero si su
+//! publicación falla queda `marker_pending` y se reintenta en el siguiente arranque, sin impedir la
+//! migración.
+//!
+//! ```text
+//! 1. abrir (techo = valla)      el registro interno de SQLite NO basta para migrar
+//! 2. decide_boot                marcador + base + legado; cualquier contradicción BLOQUEA aquí
+//! 3. acción sobre el marcador   reconstruir (ausente) / confirmar (promoting coherente) / nada;
+//!                               si la publicación falla -> `marker_pending`, no bloquea
+//! 4. migraciones 003+           ya demostrada la coherencia; publicado o pendiente
+//! ```
+//!
+//! Por qué el intento va antes que la migración: el marcador se deriva solo de la metadata de
+//! autoridad (que una migración posterior no toca), así que no hay interacción entre ambos pasos.
+//! Una caída entre 3 y 4 deja una instalación coherente que el siguiente arranque termina de
+//! migrar; una migración que falla deja la base en la 002 y, si el marcador se pudo publicar, ya
+//! correcto. Con la publicación pendiente la base puede quedar migrada con el marcador ausente o
+//! en `promoting`: ambos son estados que C2b ya sabe resolver (`RebuildMarker` / `Complete`).
+//! Ninguna ruta que BLOQUEA o DEGRADA llega al paso 4.
 
 use std::path::{Path, PathBuf};
 
@@ -159,16 +187,21 @@ impl Core {
                 self.degrade_storage(&OpenStoreError::Other { detail: why });
                 Ok(BootResult::Legacy)
             }
-            Boot::Normal => self.load_authoritative(&probe, false, false),
+            Boot::Normal => {
+                self.apply_post_fence_migrations()?;
+                self.load_authoritative(&probe, false, false)
+            }
             Boot::RebuildMarker => {
                 let DbProbe::Opens(f) = &probe else { unreachable!() };
                 let rebuilt = f.auth.as_ref().and_then(|a| Marker::from_database(f, a)).ok_or_else(|| authority_error("no se pudo reconstruir el marcador de autoridad desde la base"))?;
                 let pending = write_marker(core, &rebuilt, ("marker_final_tmp", "marker_final_published")).is_err();
+                self.apply_post_fence_migrations()?;
                 self.load_authoritative(&probe, false, pending)
             }
             Boot::Complete => {
                 let MarkerRead::Valid(m) = &marker else { unreachable!() };
                 let pending = write_marker(core, &m.confirmed(), ("marker_final_tmp", "marker_final_published")).is_err();
+                self.apply_post_fence_migrations()?;
                 self.load_authoritative(&probe, false, pending)
             }
             Boot::Redo => {
@@ -208,22 +241,48 @@ impl Core {
         let ctx = PromoteCtx { core, data, legacy_bytes, resume };
         let outcome = self.storage.with_store(|store| promote_in_store(store, &ctx)).ok_or_else(|| authority_error("el almacén no está abierto"))?;
         match outcome {
-            Ok(p) => Ok(BootResult::Authoritative(Box::new(Authoritative {
-                known_legacy_hash: Some(p.plan.source_hash.clone()).filter(|h| h != NO_SOURCE),
-                rev: p.plan.sqlite_target_rev,
-                promotion_id: p.plan.promotion_id,
-                state: p.state,
-                doc: p.doc,
-                promoted_now: true,
-                marker_pending: p.marker_pending,
-                needs_orphan: false,
-            }))),
+            Ok(p) => {
+                // La promoción terminó (COMMIT y marcador): desde aquí la instalación es autoritativa.
+                self.apply_post_fence_migrations()?;
+                Ok(BootResult::Authoritative(Box::new(Authoritative {
+                    known_legacy_hash: Some(p.plan.source_hash.clone()).filter(|h| h != NO_SOURCE),
+                    rev: p.plan.sqlite_target_rev,
+                    promotion_id: p.plan.promotion_id,
+                    state: p.state,
+                    doc: p.doc,
+                    promoted_now: true,
+                    marker_pending: p.marker_pending,
+                    needs_orphan: false,
+                })))
+            }
             Err(PromoteError::Recoverable(why)) => {
                 self.degrade_storage(&OpenStoreError::Other { detail: format!("no se pudo preparar la promoción a SQLite ({why}); se reintentará en el siguiente arranque") });
                 Ok(BootResult::Legacy)
             }
             Err(PromoteError::Blocking(why)) => Err(authority_error(format!("la promoción a SQLite no se pudo completar: {why}. Nada se ha perdido: state.json y la copia pre-authority siguen donde estaban"))),
             Err(PromoteError::LegacyChanged) => Err(self.block(&BlockReason::LegacyChangedAfterIntent, data, core)),
+        }
+    }
+
+    /// Aplica las migraciones posteriores a la valla (003+). El ÚNICO sitio que lo hace, y solo se
+    /// llega aquí desde las ramas autoritativas de [`Core::boot_authority`], es decir, con
+    /// `decide_boot` ya habiendo demostrado que no hay contradicción (ver la cabecera del módulo);
+    /// NO depende de que el marcador haya quedado publicado (`marker_pending`). Un fallo es siempre BLOQUEANTE: la instalación ya es autoritativa, así que nunca se
+    /// vuelve a `state.json`, y la transacción deshecha deja la base como estaba (v2).
+    fn apply_post_fence_migrations(&self) -> Result<(), OpenStoreError> {
+        let outcome = self.storage.migrate_authoritative().ok_or_else(|| authority_error("el almacén no está abierto"))?;
+        match outcome {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let e = OpenStoreError::from(e);
+                if e.is_blocking() {
+                    Err(e)
+                } else {
+                    Err(authority_error(format!(
+                        "no se pudieron aplicar las migraciones del almacén: {e}. La instalación es autoritativa en SQLite: no se vuelve a state.json. La base quedó como estaba"
+                    )))
+                }
+            }
         }
     }
 

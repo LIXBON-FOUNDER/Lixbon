@@ -24,7 +24,8 @@
 //!
 //! # Referencias blandas de `events`
 //! `events.project_id`, `client_id`, `entity_kind` y `entity_id` (migración
-//! 003, slice E) NO llevan clave foránea de SQLite: los eventos históricos
+//! 004, slice E; la 003 es el registro de proyectos) NO llevan clave foránea
+//! de SQLite: los eventos históricos
 //! deben sobrevivir al archivado de un Project o a revocar un Client. El
 //! dominio valida al emitir (el Project/Client existe si el evento lo
 //! referencia); la base no lo impone. El resto de relaciones del esquema SÍ
@@ -38,8 +39,11 @@ mod legacy;
 mod lock;
 mod migrate;
 mod private;
+mod projects;
 #[cfg(test)]
 mod authority_tests;
+#[cfg(test)]
+mod projects_tests;
 #[cfg(test)]
 mod tests;
 
@@ -56,7 +60,8 @@ pub use error::{StoreError, StoreResult};
 #[allow(unused_imports)]
 pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
-pub use migrate::{embedded, migrate, Migration, MigrationReport};
+pub use projects::{Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow};
+pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 use migrate::now_ms;
 
 const LOCK_FILE: &str = "core.lock";
@@ -113,18 +118,23 @@ impl Store {
         Store::open_inner(dir, None, migrations, app_version)
     }
 
-    /// Apertura del ARRANQUE de C2b: abre y migra solo hasta donde permite el
-    /// protocolo de autoridad, también al recuperar tras una caída.
+    /// Apertura del ARRANQUE de C2b: valida la base contra la lista completa del binario y
+    /// migra SOLO hasta donde el protocolo de autoridad aún no ha decidido nada. También al
+    /// recuperar tras una caída.
     ///
-    /// * Base **sin cruzar** la valla: migraciones ANTERIORES a [`FENCE_VERSION`]. Abrirla
+    /// * Base **sin cruzar** la valla: aplica migraciones ANTERIORES a [`FENCE_VERSION`]. Abrirla
     ///   no publica la valla antes de tiempo (la 002 se aplica después, con
     ///   [`Store::apply_fence`], cuando el preflight y la copia `pre-authority` ya están hechos).
-    /// * Base **cruzada pero aún no autoritativa** (FENCED, o `promoting` sin COMMIT): como
-    ///   máximo hasta la 002. Las migraciones posteriores (D/E/F1/G) no se aplican hasta que
-    ///   C2b termine la promoción: el orden de slices se conserva durante la recuperación.
-    /// * Base **autoritativa** (modo `sqlite_authoritative` Y registro interno de autoridad
-    ///   estructuralmente válido, no solo el modo): la lista completa. Con el modo pero la
-    ///   metadata corrupta, máximo la 002 y el arranque bloquea.
+    /// * Base **cruzada** (FENCED, `promoting`, o ya autoritativa): como máximo la 002.
+    ///
+    /// **Nunca** aplica nada posterior a la valla, ni siquiera con un registro interno de
+    /// autoridad válido: el registro de SQLite por sí solo no basta, porque `authority.json`
+    /// puede contradecirlo y quien lo observa es `decide_boot` (en `orch`), DESPUÉS de esta
+    /// apertura. Las migraciones posteriores (D/E/F1/G) las pide quien ya decidió que la
+    /// instalación es coherente, con [`Store::migrate_authoritative`].
+    ///
+    /// La lista COMPLETA se usa para validar: una base que ya tiene la 003 se abre igual
+    /// (no es «más nueva que el binario»); solo se limita lo que se aplica.
     ///
     /// `all` es la lista completa del binario.
     pub fn open_boot_under_lock(dir: &Path, lock: &InstanceLock, all: &[Migration], app_version: &str) -> StoreResult<Store> {
@@ -132,26 +142,20 @@ impl Store {
             return Err(StoreError::WrongLock { expected: lock_path(dir), got: lock.path().to_path_buf() });
         }
         Store::open_inner_pick(dir, None, |conn| {
-            let version = migrate::db_version(conn)?;
-            let upto = if version < FENCE_VERSION {
-                FENCE_VERSION - 1
-            } else if authority::authority_record_valid(conn)? {
-                i64::MAX
-            } else {
-                FENCE_VERSION
-            };
-            Ok(all.iter().filter(|m| m.version <= upto).copied().collect())
+            let ceiling = if migrate::db_version(conn)? < FENCE_VERSION { FENCE_VERSION - 1 } else { FENCE_VERSION };
+            Ok((all.to_vec(), ceiling))
         }, app_version)
     }
 
     fn open_inner(dir: &Path, lock: Option<InstanceLock>, migrations: &[Migration], app_version: &str) -> StoreResult<Store> {
-        Store::open_inner_pick(dir, lock, |_| Ok(migrations.to_vec()), app_version)
+        Store::open_inner_pick(dir, lock, |_| Ok((migrations.to_vec(), i64::MAX)), app_version)
     }
 
+    /// `pick` devuelve la lista completa y el techo de aplicación (ver [`migrate_capped`]).
     fn open_inner_pick(
         dir: &Path,
         lock: Option<InstanceLock>,
-        pick: impl FnOnce(&Connection) -> StoreResult<Vec<Migration>>,
+        pick: impl FnOnce(&Connection) -> StoreResult<(Vec<Migration>, i64)>,
         app_version: &str,
     ) -> StoreResult<Store> {
         let db_path = dir.join(DB_FILE);
@@ -160,8 +164,8 @@ impl Store {
         // estado completo del Core. `backups/` se crea privada con la primera copia.
         private::create_private_file(&db_path);
         let mut conn = open_connection(&db_path)?;
-        let migrations = pick(&conn)?;
-        let report = migrate(&mut conn, &migrations, app_version, &backup_dir)?;
+        let (migrations, ceiling) = pick(&conn)?;
+        let report = migrate_capped(&mut conn, &migrations, ceiling, app_version, &backup_dir)?;
         // `-wal` y `-shm` los crea SQLite con el primer acceso real (la migración):
         // se restringen ya existentes y siguen vivos mientras la conexión esté abierta.
         for ext in ["-wal", "-shm"] {

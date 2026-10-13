@@ -51,9 +51,11 @@ AUTHORITATIVE
   `Store::promote_to_authoritative` rechaza (`NotFenced`, sin cambiar nada) una base que
   no cruzó la 002. `sqlite_authoritative ⇒ valla aplicada`.
 * **El orden de slices se conserva también al recuperar.** `Store::open_boot_under_lock`
-  migra: sin cruzar → solo lo anterior a la 002; FENCED o `promoting` sin COMMIT → como
-  máximo la 002; solo con la base ya **autoritativa** se aplican las migraciones
-  posteriores (D/E/F1/G: 003 en adelante).
+  valida contra la lista COMPLETA del binario pero solo APLICA hasta un techo: sin cruzar →
+  solo lo anterior a la 002; cruzada (FENCED, `promoting` o ya autoritativa) → como máximo la
+  002. **Nunca** aplica nada posterior a la valla, ni siquiera con un registro interno de
+  autoridad válido: ese registro no basta si `authority.json` lo contradice, y el marcador lo
+  observa `orch` después de abrir (ver «Gate de las migraciones posteriores a la valla»).
 * **Una sola validación de la identidad de la promoción** (`store::check_promotion_identity`),
   compartida por el marcador, la metadata interna de SQLite y el plan que el Store escribe:
   `promotion_id` no vacío; sin legado => `source_hash = "none"` y `source_bytes = 0`; con legado,
@@ -62,8 +64,9 @@ AUTHORITATIVE
   (`PromotionPlan::new` y `promote_to_authoritative` la aplican, y exigen `db_id`).
   Una base solo tiene registro de autoridad válido (`AuthorityFacts::authority_valid`) con
   `db_id` no vacío, modo `sqlite_authoritative`, identidad válida, fila presente y
-  `row_rev >= sqlite_target_rev`. Ese registro —no solo el modo— es lo que permite aplicar
-  migraciones posteriores a la 002: con el modo pero la metadata corrupta, el arranque se queda
+  `row_rev >= sqlite_target_rev`. Ese registro —no solo el modo— es una condición INTERNA
+  necesaria (y la comprueba `Store::migrate_authoritative`) para aplicar migraciones posteriores
+  a la 002, pero no es suficiente. Con el modo pero la metadata corrupta, el arranque se queda
   en la 002 y bloquea; no migra primero y descubre después que C2b estaba corrupto. Con el
   marcador ausente y esa metadata inválida, **no** se reconstruye `authority.json`.
 * **Revisiones.** `sqlite_target_rev = sqlite_bootstrap_rev + 1` se calcula con
@@ -74,6 +77,50 @@ AUTHORITATIVE
   solo en `authoritative`; `db = lixbon.db`).
 * Antes de la valla, un fallo de la copia o de la propia valla degrada a `state.json`
   y se reintenta en el siguiente arranque. Con la valla cruzada, bloquea.
+
+## Gate de las migraciones posteriores a la valla (003 en adelante)
+
+**Invariante:** una migración `> FENCE_VERSION` solo se ejecuta cuando `decide_boot` ha demostrado
+que **no hay contradicción** entre el protocolo externo (`authority.json`) y la autoridad interna
+(SQLite, con registro interno válido). Un marcador inválido, futuro, malformado, `promoting`
+incompatible o contradictorio con SQLite bloquea el arranque **antes** de que ninguna migración de
+D en adelante toque la base.
+
+El invariante **no** exige que el marcador quede publicado; se conserva la semántica de C2b: SQLite
+es la autoridad, un marcador ausente con SQLite autoritativo válido es reconstruible y un `promoting`
+coherente con un COMMIT ya hecho es recuperable. La acción sobre el marcador se intenta antes de
+levantar el techo, pero si su publicación falla queda `marker_pending` (visible en `StorageReport`) y
+se reintenta en el siguiente arranque, sin impedir la migración.
+
+Orden (único, en `boot_authority.rs`):
+
+```text
+1. abrir        techo = valla; el registro interno de SQLite NO basta para migrar
+2. decide_boot  marcador + base + legado; cualquier contradicción BLOQUEA aquí
+3. marcador     reconstruir (ausente) / confirmar (promoting coherente) / nada
+4. 003+         Core::apply_post_fence_migrations -> Store::migrate_authoritative
+               (no depende de que el paso 3 haya podido publicar: `marker_pending`)
+```
+
+* **Frontera `orch → store`:** el almacén no conoce `Marker`. Recibe la lista completa para
+  validar y se queda en la valla; `orch` es quien, tras `decide_boot`, pide
+  `migrate_authoritative`. El almacén añade su propia comprobación (valla cruzada +
+  `authority_valid`, si no `NotAuthoritative` sin tocar la base). Una prueba de arquitectura
+  fija que solo `store_boot.rs` y `boot_authority.rs` pueden llamarla.
+* **Intento de marcador antes que migración:** el marcador se deriva solo de la metadata de
+  autoridad, que una migración posterior no toca. Una caída entre 3 y 4 deja una instalación
+  coherente que el siguiente arranque termina de migrar; una migración que falla deja la base en la
+  002 y, si el marcador se pudo publicar, ya correcto. Si la publicación falla (`marker_pending`),
+  la base puede quedar migrada con el marcador ausente o en `promoting`: ambos estados los resuelve
+  C2b en el arranque siguiente (`RebuildMarker` / `Complete`), y las pruebas lo fijan.
+* **Una promoción que termina bien migra en el mismo arranque** (LEGACY/FENCED → AUTHORITATIVE →
+  003+): el código de D nunca ve un esquema a medias. La promoción en sí deja la base en la 002.
+* **Un fallo de la migración BLOQUEA** (nunca vuelve a `state.json`): la transacción se deshace
+  entera, la copia previa `pre-migracion-vN` ya está hecha y el arranque siguiente reintenta.
+* **Sin bajada implícita:** una base que ya tiene la 003 se abre con la lista completa; con un
+  binario que no la conoce, `DatabaseNewer` (bloqueante) sin modificar nada.
+* Pruebas: `orch/migration_gate_tests.rs` (con una 003 ficticia inyectada en el catálogo del
+  Core) y `store/authority_tests.rs`.
 
 ## El espejo: se comprueba, no se cree
 
@@ -163,8 +210,9 @@ legado legible. No tiene interfaz, no está soportado y no ofrece garantías.
 * `mutation_tests.rs`: la frontera de mutación y la prueba de arquitectura que mantiene
   el almacén, la promoción y Win32 detrás de su frontera.
 * `store/authority_tests.rs`: la valla como invariante del almacén (promover sin valla →
-  error y cero cambios), las migraciones posteriores a la valla solo con la base
-  autoritativa y las revisiones en el límite.
+  error y cero cambios), `migrate_authoritative` (solo con la base autoritativa; la apertura
+  nunca pasa de la valla) y las revisiones en el límite.
+* `migration_gate_tests.rs`: el gate de la 003 (ver arriba), con mutaciones comprobadas.
 * **CI** (`.github/workflows/desktop-ci.yml`): en cada PR a `master` que toque
   `apps/desktop/**` corre, en **Windows y Ubuntu**, `cargo test --lib` del Core, las
   pruebas de `lxo`, vitest y el build del frontend. Windows ejercita la rama

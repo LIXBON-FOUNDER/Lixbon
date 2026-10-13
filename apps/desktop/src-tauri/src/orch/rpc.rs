@@ -41,6 +41,21 @@ impl Core {
                     "agents": agents::AGENTS.iter().map(|a| a.id).collect::<Vec<_>>(),
                 }))
             }
+            // Registro de proyectos (slice D). Leer es para todos. La gestión EXPLÍCITA (registrar, unir,
+            // relocalizar, archivar, importar) es de la persona; un repositorio inequívocamente nuevo se
+            // descubre solo (`run_create`, relleno) y lo ambiguo nunca se une en silencio.
+            "projects" => self.projects_list(b(args, "all")),
+            "project_add" | "project_archive" | "project_locate" | "projects_import_recents" => {
+                if !matches!(caller, Caller::User) {
+                    return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
+                }
+                match cmd {
+                    "project_add" => self.project_add(args),
+                    "project_archive" => self.project_archive(args),
+                    "project_locate" => self.project_locate(args),
+                    _ => self.projects_import_recents(args),
+                }
+            }
             "run_create" => {
                 if let Caller::Agent(Some(id)) = &caller {
                     if !b(args, "session") {
@@ -55,6 +70,12 @@ impl Core {
                 let repo = git::toplevel(cwd).ok_or("El orquestador necesita un repositorio git: ejecútalo dentro de uno")?;
                 let agent = Some(s(args, "agent")).filter(|a| !a.is_empty()).unwrap_or_else(|| "coordinador".into());
                 let branch = git::current_branch(cwd);
+                // Proyecto del repositorio: misma ruta -> ese; sin coincidencias -> nuevo; ambiguo -> ninguno.
+                // Un error real del registro activo se propaga: no se crea ni el run ni la tarea.
+                let project_id = self.project_for_repo(&repo)?;
+                if let Some(pid) = &project_id {
+                    self.check_project_launchable_id(pid)?;
+                }
                 let (run, task) = self.mutate(|st| {
                     let (run, task) = st.create_run(&objective, NewTask {
                         agent,
@@ -71,6 +92,9 @@ impl Core {
                         external: true,
                     });
                     st.mark_running(&task)?;
+                    if let Some(t) = st.tasks.get_mut(&task) {
+                        t.project_id = project_id.clone();
+                    }
                     Ok((run, task))
                 })?;
                 Ok(json!({ "run": run, "task": task }))

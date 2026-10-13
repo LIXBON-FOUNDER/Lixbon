@@ -57,6 +57,10 @@ pub struct Task {
     #[serde(default)]
     pub spec: String,
     pub repo: String,
+    /// Proyecto del registro (`orch/projects.rs`) al que pertenece el repositorio de la tarea.
+    /// `None` hasta que se asigna: las tareas anteriores a D no lo tienen y el código viejo lo ignora.
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub cwd: String,
     pub branch: Option<String>,
     pub base: Option<String>,
@@ -317,7 +321,12 @@ impl State {
     pub fn add_child(&mut self, parent: &str, max_depth: u32, t: NewTask) -> Result<String, String> {
         let depth = self.check_child(parent, max_depth)?;
         let run = self.task(parent)?.run.clone();
-        Ok(self.insert_task(&run, Some(parent.into()), depth, t))
+        let project_id = self.task(parent)?.project_id.clone();
+        let id = self.insert_task(&run, Some(parent.into()), depth, t);
+        if let Some(task) = self.tasks.get_mut(&id) {
+            task.project_id = project_id;
+        }
+        Ok(id)
     }
 
     fn insert_task(&mut self, run: &str, parent: Option<String>, depth: u32, t: NewTask) -> String {
@@ -335,6 +344,7 @@ impl State {
             title: t.title,
             spec: t.spec,
             repo: t.repo,
+            project_id: None,
             cwd: t.cwd,
             branch: t.branch,
             base: t.base,
