@@ -119,3 +119,20 @@ def test_request_acepta_auto():
     req = ChatCompletionRequest(messages=[{"role": "user", "content": "x"}], web_search="auto")
     assert req.web_search == "auto"
     assert ChatCompletionRequest(messages=[], web_search=True).web_search is True
+
+
+def test_texto_de_pagina_sin_menus_ni_pies():
+    html = (
+        "<html><header><a>Ingresar</a></header><nav><a>EEUU</a><a>México</a></nav>"
+        "<main><h1>Dólar hoy</h1><p>La TRM es $3.194,44</p></main><footer>Newsletters</footer></html>"
+    )
+    texto = websearch._html_to_text(html)
+    assert "TRM es $3.194,44" in texto
+    assert not any(x in texto for x in ("Ingresar", "México", "Newsletters"))
+
+
+def test_enriquecer_deja_el_snippet_del_buscador_primero(monkeypatch):
+    monkeypatch.setattr(websearch, "_fetch_page_text", lambda url: "texto largo de la página " * 10)
+    resultados = [{"url": "u", "title": "t", "snippet": "1 USD = 3.194 COP"}]
+    websearch._enrich_sync(resultados, 1)
+    assert resultados[0]["snippet"].startswith("1 USD = 3.194 COP\ntexto largo")
