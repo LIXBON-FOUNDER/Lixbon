@@ -351,7 +351,22 @@ impl Store {
     /// `expected_rev` a `expected_rev + 1` en una transacción, solo si la base ya es
     /// autoritativa. Devuelve la nueva `rev`. Una `rev` fuera de rango falla sin escribir.
     pub fn commit_authoritative(&mut self, expected_rev: i64, doc: &str) -> StoreResult<i64> {
+        self.commit_authoritative_with_events(expected_rev, doc, &[])
+    }
+
+    /// Como [`Store::commit_authoritative`], y además inserta `events` en la MISMA transacción
+    /// (`BEGIN IMMEDIATE`): `UPDATE legacy_state` rev N -> N+1 y `INSERT events` con `state_rev = N+1`
+    /// se confirman juntos o se deshacen juntos. Si falla cualquier cosa (la `rev`, el documento, el
+    /// primer o el segundo evento, el COMMIT) no queda ni la nueva `rev` ni ningún evento.
+    ///
+    /// Los eventos llegan ya materializados ([`super::NewEvent`]): un reintento de quien llama los
+    /// vuelve a pasar tal cual, sin regenerar `id` ni hora. Se comprueban antes de abrir la
+    /// transacción.
+    pub fn commit_authoritative_with_events(&mut self, expected_rev: i64, doc: &str, events: &[super::NewEvent]) -> StoreResult<i64> {
         let next = next_rev(expected_rev)?;
+        for e in events {
+            e.check()?;
+        }
         self.write(|tx| {
             if meta_get(tx, META_MODE)?.as_deref() != Some(MODE_SQLITE_AUTHORITATIVE) {
                 return Err(StoreError::NotAuthoritative);
@@ -366,6 +381,8 @@ impl Store {
                 return Err(StoreError::RevConflict { expected: expected_rev, actual: current_rev(tx)? });
             }
             crash_point("mutate_in_tx");
+            super::events::insert_events(tx, events, Some(next))?;
+            crash_point("mutate_events_in_tx");
             Ok(next)
         })
     }
@@ -425,6 +442,14 @@ fn invalid_doc(e: rusqlite::Error) -> StoreError {
         }
         _ => StoreError::Sqlite(e),
     }
+}
+
+/// UUID v7: 48 bits de milisegundos + aleatorio. Ordenable por creación. Lo usan los proyectos y los
+/// eventos (identidad global y estable, aparte del orden local que da `seq`).
+pub fn new_uuid_v7() -> String {
+    let v4 = new_uuid();
+    let ts = now_ms().max(0) as u64;
+    format!("{:08x}-{:04x}-7{}-{}-{}", (ts >> 16) & 0xffff_ffff, ts & 0xffff, &v4[15..18], &v4[19..23], &v4[24..])
 }
 
 /// UUID v4 (aleatorio) sin dependencias nuevas: 16 bytes del generador del SO.

@@ -11,7 +11,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::authority::new_uuid;
+use super::authority::new_uuid_v7;
 use super::error::{StoreError, StoreResult};
 use super::migrate::now_ms;
 use super::Store;
@@ -76,9 +76,7 @@ pub struct NewLocation {
 
 /// UUID v7: 48 bits de milisegundos + aleatorio. Ordenable por creación.
 pub fn new_project_id() -> String {
-    let v4 = new_uuid();
-    let ts = now_ms().max(0) as u64;
-    format!("{:08x}-{:04x}-7{}-{}-{}", (ts >> 16) & 0xffff_ffff, ts & 0xffff, &v4[15..18], &v4[19..23], &v4[24..])
+    new_uuid_v7()
 }
 
 fn fingerprint_from(text: &str) -> StoreResult<Fingerprint> {

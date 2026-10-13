@@ -95,7 +95,10 @@ fn el_marcador_promoting_tiene_el_esquema_exacto() {
 
 #[test]
 fn el_marcador_authoritative_conserva_la_identidad_y_anade_confirmed_at() {
-    let (p, a) = (marcador(1), confirmado(1));
+    // El confirmado sale del MISMO marcador: dos marcadores creados por separado tienen `created_at`
+    // distinto si cambia el milisegundo entre ambos (el test fallaba ~7 % de las veces).
+    let p = marcador(1);
+    let a = p.confirmed();
     assert_eq!(a.state, MarkerState::Authoritative);
     assert!(a.confirmed_at.is_some());
     for (x, y) in [

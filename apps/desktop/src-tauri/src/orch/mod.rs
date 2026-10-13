@@ -9,6 +9,11 @@ mod authority;
 mod boot_authority;
 #[cfg(test)]
 mod boot_tests;
+// E1a: el Event Log todavía no se instrumenta (llega en E1b); hasta entonces solo lo usan las pruebas.
+#[cfg_attr(not(test), allow(dead_code))]
+mod events;
+#[cfg(test)]
+mod events_tests;
 mod projects;
 #[cfg(test)]
 mod projects_tests;

@@ -11,7 +11,7 @@ Las migraciones viven en `apps/desktop/src-tauri/src/store/migrations/NNN_nombre
 | 001 | `core` | B (SQLite + marco) | publicada |
 | 002 | `authority_fence` | C2b (valla de autoridad) | publicada |
 | 003 | `projects` | D (registro de proyectos) | en revisión (PR de D) |
-| 004 | eventos | E | reservada, sin escribir |
+| 004 | `events` | E (Event Log; E1a) | en revisión (PR de E1a). Ver `EVENTOS.md` |
 | 005 | clientes | F1 | reservada, sin escribir |
 | 006 | attention | G | reservada, sin escribir |
 
