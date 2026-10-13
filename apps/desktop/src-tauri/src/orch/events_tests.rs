@@ -79,9 +79,32 @@ fn rev(core: &Core) -> i64 {
 
 /// Un cambio REAL del estado sin pasar por los mutadores semánticos de `Tx` (que ya emiten eventos):
 /// las pruebas de esta infraestructura (E1a) cuentan solo los eventos que ellas mismas emiten.
+///
+/// El Run sintético nace AHORA (no en el epoch): con `created = 1` ya cumpliría la regla de inactividad y
+/// el barrido de fondo (`close_idle_runs`) lo trataría como trabajo elegible, confirmando una mutación
+/// ajena a la prueba (`rev` una unidad por delante, según el planificador).
 fn run_sin_eventos(tx: &mut Tx, objetivo: &str) {
     let id = format!("x{}", tx.runs.len() + 1);
-    tx.runs.insert(id.clone(), Run { id, objective: objetivo.into(), root: String::new(), created: 1, closed: false, last_activity: 1 });
+    let ahora = super::state::now_ms();
+    tx.runs.insert(id.clone(), Run { id, objective: objetivo.into(), root: String::new(), created: ahora, closed: false, last_activity: ahora });
+}
+
+/// El helper de infraestructura no crea trabajo elegible para un vigilante de fondo: el Run sintético
+/// no es inactivo y un barrido explícito no confirma nada (ni `rev`, ni eventos).
+#[test]
+fn el_run_sintetico_de_las_pruebas_no_es_elegible_para_el_barrido_de_inactividad() {
+    let (_l, data, core_dir) = dirs();
+    let (core, _h, r) = arranca(&data, &core_dir);
+    r.unwrap();
+    core.mutate(|tx| {
+        run_sin_eventos(tx, "sintetico");
+        Ok(())
+    })
+    .unwrap();
+    assert!(core.lock().idle_runs(super::state::now_ms(), super::IDLE_CLOSE_MS, &[]).is_empty(), "no debe nacer inactivo");
+    let (rev_antes, eventos_antes) = (rev(&core), eventos(&core).len());
+    core.close_idle_runs();
+    assert_eq!((rev(&core), eventos(&core).len()), (rev_antes, eventos_antes), "el barrido no confirma ninguna mutación");
 }
 
 /// Persistencia de prueba delante de la real: falla `quedan` veces y siempre anota los eventos que recibe.
